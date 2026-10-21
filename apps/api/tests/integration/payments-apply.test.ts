@@ -5,7 +5,8 @@ import type {
 } from '@rede-social/contracts/payments';
 import { subscribe } from '@rede-social/core/server/events/bus';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { rootLogger } from '@rede-social/core/server/logging';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   bootstrapCode,
   deliver,
@@ -56,6 +57,30 @@ let integration: SeededPaymentIntegration;
 
 const cuts: MembershipAccessCut[] = [];
 let unsubscribe: () => void = () => {};
+
+/** Everything the API process writes through the root logger's destination while `run` executes. */
+async function captureLogs(run: () => Promise<void>): Promise<string[]> {
+  const streamKey = Object.getOwnPropertySymbols(rootLogger).find(
+    (symbol) => symbol.description === 'pino.stream',
+  );
+  if (!streamKey) throw new Error('pino stream symbol not found');
+  const stream = (rootLogger as unknown as Record<symbol, { write: (chunk: string) => unknown }>)[
+    streamKey
+  ];
+  if (!stream) throw new Error('pino stream not found');
+  const lines: string[] = [];
+  const original = stream.write.bind(stream);
+  const spy = vi.spyOn(stream, 'write').mockImplementation((chunk: string) => {
+    lines.push(String(chunk));
+    return original(chunk);
+  });
+  try {
+    await run();
+  } finally {
+    spy.mockRestore();
+  }
+  return lines;
+}
 
 /** An access mapping of rede-lab with a unique gateway product id. */
 const accessProduct = (name = 'Plano') =>
@@ -429,6 +454,63 @@ describe('09.1 job', () => {
     await runApply(eventId);
     expect(await eventRow(eventId)).toMatchObject({ state: 'applied', outcome: 'access_granted' });
     expect(await gatewayRowsOf(email)).toHaveLength(1);
+  });
+
+  it('WR-02: a failed statement logs and rethrows no e-mail, amount or bound parameter', async () => {
+    integration = await seedPaymentIntegration(labTenantId);
+    const mapping = await accessProduct();
+    const productId = await productIdOf(mapping.id);
+    const email = `ana.${crypto.randomUUID().slice(0, 8)}@exemplo.com.br`;
+    const amount = 8_467_135;
+    const ref = `boom-${crypto.randomUUID()}`;
+    const eventId = await deliver(
+      integration,
+      sale('purchase_approved', { ref, productId, email, amountCents: amount }),
+    );
+
+    await adminSql.unsafe(`
+      create or replace function public.payapply_boom() returns trigger language plpgsql as $$
+      begin
+        if new.external_ref like 'boom-%' then raise exception 'payapply boom'; end if;
+        return new;
+      end $$`);
+    await adminSql.unsafe(`
+      create trigger payapply_boom before insert on public.access_grants
+      for each row execute function public.payapply_boom()`);
+    let thrown: unknown;
+    let lines: string[] = [];
+    try {
+      lines = await captureLogs(async () => {
+        try {
+          await runApply(eventId);
+        } catch (error) {
+          thrown = error;
+        }
+      });
+    } finally {
+      await adminSql.unsafe('drop trigger if exists payapply_boom on public.access_grants');
+      await adminSql.unsafe('drop function if exists public.payapply_boom()');
+    }
+
+    // Non-vacuous: the failure was logged, as a structured line that names the event.
+    const failed = lines.filter((line) => line.includes('payments.apply.failed'));
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain(eventId);
+    expect(thrown).toBeInstanceOf(Error);
+
+    const surfaces = [
+      lines.join(''),
+      String((thrown as Error).message),
+      String((thrown as Error).stack),
+    ];
+    for (const text of surfaces) {
+      expect(text).not.toContain(email);
+      expect(text).not.toContain(String(amount));
+      expect(text).not.toContain('params:');
+      expect(text).not.toContain('Failed query');
+    }
+    // The cause is not attached either: a serialiser walking it would print the statement again.
+    expect((thrown as Error).cause).toBeUndefined();
   });
 
   it('an event whose state is already settled is an idempotent no-op even for a different outcome', async () => {

@@ -452,6 +452,47 @@ describe('09.1 secrecy', () => {
     }
   });
 
+  it('WR-02: a failed insert answers 500 and logs neither the buyer e-mail nor the amount', async () => {
+    const integration = await seed(labTenantId);
+    const email = `ana.${crypto.randomUUID().slice(0, 8)}@exemplo.com.br`;
+    const amount = 8_467_135;
+    const ref = `pii-${crypto.randomUUID()}`;
+    const body = JSON.stringify(approved({ externalRef: ref, email, amountCents: amount }));
+
+    await adminSql.unsafe(`
+      create or replace function public.paywh_boom() returns trigger language plpgsql as $$
+      begin
+        if new.external_ref like 'pii-%' then raise exception 'paywh boom'; end if;
+        return new;
+      end $$`);
+    await adminSql.unsafe(`
+      create trigger paywh_boom before insert on public.payment_events
+      for each row execute function public.paywh_boom()`);
+    let status = 0;
+    let answer = '';
+    let lines: string[] = [];
+    try {
+      lines = await captureLogs(async () => {
+        const res = await signedWebhook(integration, body);
+        status = res.status;
+        answer = await res.text();
+      });
+    } finally {
+      await adminSql.unsafe('drop trigger if exists paywh_boom on public.payment_events');
+      await adminSql.unsafe('drop function if exists public.paywh_boom()');
+    }
+
+    expect(status).toBe(500);
+    // Non-vacuous: the failure reached the error log.
+    expect(lines.some((line) => line.includes('"severity":"ERROR"'))).toBe(true);
+    for (const text of [lines.join(''), answer]) {
+      expect(text).not.toContain(email);
+      expect(text).not.toContain(String(amount));
+      expect(text).not.toContain('Failed query');
+      expect(text).not.toContain('params:');
+    }
+  });
+
   it('the 403 and 404 answers carry no message or detail', async () => {
     const integration = await seed(labTenantId);
     const body = JSON.stringify(approved());

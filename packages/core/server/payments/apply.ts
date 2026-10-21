@@ -9,7 +9,7 @@ import { withAdminTx } from '../../db/admin-tx';
 import type { Tx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { emit, flush } from '../events/bus';
-import { moduleLogger } from '../logging';
+import { moduleLogger, type RedactedDbError, redactDbError } from '../logging';
 import { type AccessEffect, decideAccessWrite, decideStoreWrite } from './policy';
 
 /**
@@ -401,6 +401,24 @@ async function markFailed(eventId: string, tenantId: string): Promise<void> {
   );
 }
 
+/** A failed statement of the apply transaction, stripped of its SQL, parameters and cause (WR-02). */
+export class PaymentApplyError extends Error {
+  readonly sqlstate: string | null;
+
+  constructor(sqlstate: string | null) {
+    super(`payment event apply failed${sqlstate ? ` (sqlstate ${sqlstate})` : ''}`);
+    this.name = 'PaymentApplyError';
+    this.sqlstate = sqlstate;
+  }
+}
+
+/** What a log line may say about a failure: the message of an ordinary error, the identifiers of a statement. */
+function describeFailure(error: unknown): string | RedactedDbError {
+  const redacted = redactDbError(error);
+  if (redacted !== error) return redacted as RedactedDbError;
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Applies one recorded event. Returns null when no such event exists (logged, never thrown); throws after
  * marking the event `failed` when the apply itself failed, so pg-boss retries.
@@ -420,22 +438,27 @@ export async function applyPaymentEvent(eventId: string): Promise<ApplyResult | 
             event: 'payments.apply.mark_failed_failed',
             eventId,
             tenantId: seen.tenantId,
-            err: markError instanceof Error ? markError.message : String(markError),
+            err: describeFailure(markError),
           },
           'could not mark the payment event failed',
         );
       }
     }
-    // Ids and the error message only: never the e-mail, the amount or any payload (T-09.1-36, PR-9).
+    // Ids, and for a failed statement its SQLSTATE and constraint: never the e-mail, the amount or any
+    // payload (T-09.1-36, PR-9). drizzle's message embeds every bound parameter (WR-02).
     log.error(
       {
         event: 'payments.apply.failed',
         eventId,
         tenantId: seen.tenantId,
-        err: error instanceof Error ? error.message : String(error),
+        err: describeFailure(error),
       },
       'applying a payment event failed; pg-boss retries',
     );
+    // pg-boss stores the thrown error's message and stack in the job row, so a failed statement is
+    // rethrown without its SQL, parameters and cause; any other error propagates unchanged.
+    const redacted = redactDbError(error);
+    if (redacted !== error) throw new PaymentApplyError((redacted as RedactedDbError).sqlstate);
     throw error;
   }
 

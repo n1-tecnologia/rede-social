@@ -2,6 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { flushEventsAfterHandler } from '@rede-social/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@rede-social/core/server/http/api-error';
+import { redactDbError } from '@rede-social/core/server/logging';
 import { chatRoutes } from '@rede-social/module-chat/server';
 import { communitiesRoutes } from '@rede-social/module-communities/server';
 import { coursesRoutes } from '@rede-social/module-courses/server';
@@ -41,7 +42,12 @@ app.onError((err, c) => {
   const requestId = c.get('requestId');
   const { body, status } = errorEnvelope(err, requestId);
   if (!(err instanceof ApiError) || status >= 500) {
-    c.get('logger').error({ err, requestId, code: body.error.code }, 'unhandled');
+    // A failed statement is logged as its SQLSTATE and constraint only: drizzle's message carries every bound
+    // parameter (a buyer e-mail, an amount), and the log is not the place for them (WR-02, PR-9).
+    c.get('logger').error(
+      { err: redactDbError(err), requestId, code: body.error.code },
+      'unhandled',
+    );
   }
   return c.json(body, status);
 });
