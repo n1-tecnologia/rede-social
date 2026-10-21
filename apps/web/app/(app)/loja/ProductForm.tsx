@@ -6,6 +6,11 @@ import { MediaImage } from '@rede-social/core/ui';
 import { CommunityPickerSheet } from '@rede-social/module-communities/ui';
 import { CoursePickerSheet } from '@rede-social/module-courses/ui';
 import {
+  isCheckoutLink,
+  PAYMENTS_MAX_LINK,
+  PAYMENTS_MAX_PRODUCT_ID,
+} from '@rede-social/module-payments/contracts';
+import {
   type ProductInput,
   type ProductPatch,
   STORE_MAX_DESCRIPTION,
@@ -27,6 +32,7 @@ import {
   Archive,
   ArchiveRestore,
   Check,
+  CircleAlert,
   Image as ImageIcon,
   Lock,
   Plus,
@@ -47,9 +53,11 @@ import {
   type ProductFormDefaults,
   type ProductFormLinkList,
   type ProductFormLive,
+  type ProductFormPayment,
   priceInputText,
   type StoreTranslator,
 } from '@/lib/store-view';
+import { savePaymentMappingAction } from './payment-actions';
 import {
   createProductAction,
   lockPreviewAction,
@@ -97,6 +105,18 @@ import {
  * of members losing access. A failed preview saves NOTHING; "Voltar" returns with the selection
  * kept. A community another product already gates comes back from the preview as no row, so it
  * saves without the dialog.
+ *
+ * **The "Pagamento" block** (09.1-17, PAY-20, D-502, D-508, UI-D-524): right after the price, the
+ * gateway's product id and the checkout link the "Comprar" button opens. It exists only while the
+ * `payment` prop is not `null` (the `payments` module on, `payments.manage` held, the store on: the
+ * `courses` prop's rule), and then both fields are optional, with ONE coupling: a link needs the ID
+ * (a purchase through a link with no ID would never be recognised and the buyer would pay for
+ * nothing), refused BEFORE any request. The mapping is a SECOND write after the store save
+ * (`savePaymentMappingAction`; the two modules cannot share a transaction, MOD-02). A failure of the
+ * second leaves the product saved: its field error shows (or the shipped save toast for anything
+ * else), the typed values stay, and a create is NEVER repeated (`createdId` makes the next Salvar an
+ * update with the full body that retries only the mapping, A-P12). `savedMapping` is the last pair the
+ * server accepted, so only a real change calls the second endpoint.
  */
 export type ProductFormMode = 'create' | 'edit';
 
@@ -124,6 +144,12 @@ export interface ProductFormProps {
    * past, under the SAME gate as `courses`: `null` = block absent, `liveIds` never sent.
    */
   lives: ProductFormLinkList<ProductFormLive> | null;
+  /**
+   * The "Pagamento" block's data (09.1-17, UI-D-524), or `null`/absent while the `payments` module is
+   * off or the viewer lacks `payments.manage`: then the block is absent from the DOM and the save
+   * never calls the mapping endpoint.
+   */
+  payment?: ProductFormPayment | null;
 }
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -198,6 +224,7 @@ export function ProductForm({
   communities,
   courses,
   lives,
+  payment = null,
 }: ProductFormProps) {
   const t = useTranslations('store');
   /** Full-key translator for the shared `lib/store-view` builders (`store.lockWarning.…`). */
@@ -222,6 +249,12 @@ export function ProductForm({
     start.lives.map((live) => live.id),
   );
 
+  const [gatewayId, setGatewayId] = useState(payment?.externalProductId ?? '');
+  const [checkoutUrl, setCheckoutUrl] = useState(payment?.checkoutUrl ?? '');
+  /** UI-D-524: drawn under their own field until that field is edited. */
+  const [gatewayIdError, setGatewayIdError] = useState<string | undefined>(undefined);
+  const [checkoutUrlError, setCheckoutUrlError] = useState<string | undefined>(undefined);
+
   const [nameError, setNameError] = useState<string | undefined>(undefined);
   const [imageError, setImageError] = useState<string | null>(null);
   const [serverPriceError, setServerPriceError] = useState<string | undefined>(undefined);
@@ -244,6 +277,13 @@ export function ProductForm({
   const [pending, startTransition] = useTransition();
 
   const inputRef = useRef<HTMLInputElement>(null);
+  /** A create that succeeded while its mapping did not: the next Salvar updates THIS product (A-P12). */
+  const createdId = useRef<string | null>(null);
+  /** The last mapping pair the server accepted (trimmed); only a difference calls the second endpoint. */
+  const savedMapping = useRef({
+    id: (payment?.externalProductId ?? '').trim(),
+    link: (payment?.checkoutUrl ?? '').trim(),
+  });
 
   // The picked file stands in for the image while the worker derives its ladder.
   const imagePreview = useCoverPreview(imageAssetId);
@@ -309,6 +349,10 @@ export function ProductForm({
   const coursesChanged = courses !== null && !sameSet(selectedCourses, startCourseIds);
   const livesChanged = lives !== null && !sameSet(selectedLives, startLiveIds);
   const priceChanged = price.kind !== 'ok' || price.cents !== start.priceCents;
+  const paymentChanged =
+    payment !== null &&
+    (gatewayId.trim() !== payment.externalProductId.trim() ||
+      checkoutUrl.trim() !== payment.checkoutUrl.trim());
   const dirty =
     name !== start.name ||
     description !== start.description ||
@@ -316,7 +360,8 @@ export function ProductForm({
     (mode === 'create' ? priceText !== start.priceText : priceChanged) ||
     linksChanged ||
     coursesChanged ||
-    livesChanged;
+    livesChanged ||
+    paymentChanged;
 
   /** UI-D-377: valid (a name and a price within the cap) and, on edit, dirty. */
   const valid = name.trim().length > 0 && price.kind === 'ok';
@@ -386,35 +431,94 @@ export function ProductForm({
     }
   };
 
-  /** Runs the write; resolves once the outcome has been shown (or the page left). */
+  /** A field issue of the mapping lands under its field; anything else is the save toast (values kept). */
+  const showMappingRefusal = (issue: 'id_required' | 'id_taken' | 'link_invalid' | 'generic') => {
+    switch (issue) {
+      case 'id_required':
+        setGatewayIdError(t('form.payment.errors.idRequired'));
+        return;
+      case 'id_taken':
+        setGatewayIdError(
+          t('form.payment.errors.idTaken', { gateway: payment?.gatewayName ?? '' }),
+        );
+        return;
+      case 'link_invalid':
+        setCheckoutUrlError(t('form.payment.errors.linkInvalid'));
+        return;
+      default:
+        toast.show({ tone: 'error', message: t('form.errors.save') });
+    }
+  };
+
+  /**
+   * Runs the writes in order, the store first and the mapping second (A-P12); resolves once the
+   * outcome has been shown (or the page left).
+   */
   const save = async (cents: number): Promise<void> => {
     const body = payload(cents);
-    let result: ProductWriteResult;
-    try {
-      result =
-        mode === 'edit' && productId
-          ? await updateProductAction(productId, body)
+    // The product this save writes to: the edited one, or the one an earlier Salvar already created.
+    const targetId = mode === 'edit' ? (productId ?? null) : createdId.current;
+    // An edit that changed only the mapping has an empty patch (the API refuses it): skip the store call.
+    const storeWrite = !(mode === 'edit' && Object.keys(body).length === 0);
+
+    let savedId = targetId;
+    if (storeWrite) {
+      let result: ProductWriteResult;
+      try {
+        result = targetId
+          ? await updateProductAction(targetId, body)
           : await createProductAction(body);
-    } catch (error) {
-      // Shape only: never a product name.
-      console.error('store.save_failed', { error: String(error) });
-      toast.show({ tone: 'error', message: t('form.errors.save') });
-      return;
+      } catch (error) {
+        // Shape only: never a product name.
+        console.error('store.save_failed', { error: String(error) });
+        toast.show({ tone: 'error', message: t('form.errors.save') });
+        return;
+      }
+      if (!result.ok) {
+        showRefusal(result.code);
+        return;
+      }
+      savedId = result.productId;
+      // Remember a create at once: from here on a retry updates this product, never creates another.
+      if (mode !== 'edit') createdId.current = result.productId;
     }
-    if (result.ok) {
-      const done = {
-        tone: 'success',
-        message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
-      } as const;
-      toast.show(done);
-      // 2026-10-09: an edit returns to the product it changed and a create replaces the form with
-      // the new product, so the form is never left behind that product's "Voltar".
-      const landing = `/loja/${result.productId}`;
-      if (mode !== 'edit') replaceFormWith(router, landing);
-      else if (!returnAfterSave(router, landing, done)) router.push(landing);
-      return;
+
+    const mappingId = gatewayId.trim();
+    const mappingLink = checkoutUrl.trim();
+    if (
+      payment !== null &&
+      savedId !== null &&
+      (mappingId !== savedMapping.current.id || mappingLink !== savedMapping.current.link)
+    ) {
+      let outcome: Awaited<ReturnType<typeof savePaymentMappingAction>>;
+      try {
+        outcome = await savePaymentMappingAction(savedId, {
+          externalProductId: mappingId,
+          checkoutUrl: mappingLink,
+        });
+      } catch (error) {
+        // The product IS saved; only the mapping failed. Shape only.
+        console.error('store.mapping_save_failed', { error: String(error) });
+        toast.show({ tone: 'error', message: t('form.errors.save') });
+        return;
+      }
+      if (!outcome.ok) {
+        showMappingRefusal(outcome.issue);
+        return;
+      }
+      savedMapping.current = { id: mappingId, link: mappingLink };
     }
-    showRefusal(result.code);
+
+    const done = {
+      tone: 'success',
+      message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
+    } as const;
+    toast.show(done);
+    // 2026-10-09: an edit returns to the product it changed and a create replaces the form with
+    // the new product, so the form is never left behind that product's "Voltar".
+    const landing = `/loja/${savedId}`;
+    if (mode !== 'edit') replaceFormWith(router, landing);
+    else if (!returnAfterSave(router, landing, done)) router.push(landing);
   };
 
   const submit = () => {
@@ -428,8 +532,29 @@ export function ProductForm({
     if (price.kind !== 'ok') return;
     const cents = price.cents;
 
-    // D-364: only communities that are not among the SAVED links can newly lock anything.
-    const added = communities === null ? [] : selected.filter((id) => !startIds.includes(id));
+    // UI-D-524: a link needs the ID, and a link must be a checkout link; both before any request.
+    if (payment !== null) {
+      setGatewayIdError(undefined);
+      setCheckoutUrlError(undefined);
+      const link = checkoutUrl.trim();
+      let refused = false;
+      if (link !== '' && gatewayId.trim() === '') {
+        setGatewayIdError(t('form.payment.errors.idRequired'));
+        refused = true;
+      }
+      if (link !== '' && !isCheckoutLink(link)) {
+        setCheckoutUrlError(t('form.payment.errors.linkInvalid'));
+        refused = true;
+      }
+      if (refused) return;
+    }
+
+    // D-364: only communities that are not among the SAVED links can newly lock anything. After a
+    // create the links are already saved, so a retry never asks again.
+    const added =
+      communities === null || createdId.current !== null
+        ? []
+        : selected.filter((id) => !startIds.includes(id));
     if (added.length === 0) {
       startTransition(async () => {
         await save(cents);
@@ -736,6 +861,82 @@ export function ProductForm({
           />
           <p className="text-xs font-normal text-text-tertiary">{t('form.price.helper')}</p>
         </div>
+
+        {/* ── (4b) Pagamento: only while `payment` is not null (UI-D-524, D-502). ── */}
+        {payment !== null ? (
+          <div data-product-payment className="flex flex-col gap-2">
+            <span className="text-sm font-normal text-text-secondary">
+              {t('form.payment.label')}
+            </span>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Input
+                  id="product-gateway-id"
+                  name="gatewayProductId"
+                  label={t('form.payment.idLabel', { gateway: payment.gatewayName })}
+                  className="tabular-nums"
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={PAYMENTS_MAX_PRODUCT_ID}
+                  value={gatewayId}
+                  error={gatewayIdError}
+                  disabled={pending}
+                  onChange={(event) => {
+                    setGatewayId(event.target.value);
+                    setGatewayIdError(undefined);
+                  }}
+                />
+                <p className="text-xs font-normal text-text-tertiary">
+                  {t('form.payment.idHelper', { gateway: payment.gatewayName })}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Input
+                  id="product-checkout-url"
+                  name="checkoutUrl"
+                  type="url"
+                  label={t('form.payment.linkLabel')}
+                  placeholder={t('form.payment.linkHint')}
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={PAYMENTS_MAX_LINK}
+                  value={checkoutUrl}
+                  error={checkoutUrlError}
+                  disabled={pending}
+                  onChange={(event) => {
+                    setCheckoutUrl(event.target.value);
+                    setCheckoutUrlError(undefined);
+                  }}
+                />
+                <p className="text-xs font-normal text-text-tertiary">
+                  {t('form.payment.linkHelper')}
+                </p>
+              </div>
+              {payment.connected && checkoutUrl.trim() === '' ? (
+                <div
+                  data-product-payment-warning
+                  className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-3"
+                >
+                  <CircleAlert aria-hidden size={16} className="shrink-0 text-warning" />
+                  <p className="text-xs font-normal text-text">{t('form.payment.warningNoLink')}</p>
+                </div>
+              ) : null}
+              {!payment.connected ? (
+                <p data-product-payment-note className="text-xs font-normal text-text-tertiary">
+                  {t('form.payment.notConnected')}{' '}
+                  <a
+                    href="/configuracoes/pagamentos"
+                    className="font-bold text-brand underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    {t('form.payment.openPayments')}
+                  </a>
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {/* ── (5) Comunidades liberadas: only while the communities module is on (D-363). ── */}
         {communities !== null ? (

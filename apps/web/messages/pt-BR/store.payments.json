@@ -1,5 +1,23 @@
 {
   "store": {
+    "form": {
+      "payment": {
+        "label": "Pagamento",
+        "idLabel": "ID do produto no {gateway}",
+        "idHelper": "Copie o ID no painel do {gateway}. É por ele que reconhecemos a compra.",
+        "linkLabel": "Link de compra",
+        "linkHint": "https://",
+        "linkHelper": "O botão Comprar abre este link.",
+        "warningNoLink": "Sem link de pagamento. Os membros não conseguem comprar este produto.",
+        "notConnected": "Conecte a integração em Pagamentos para receber as compras.",
+        "openPayments": "Abrir Pagamentos",
+        "errors": {
+          "idRequired": "Informe o ID do produto para usar o link de compra.",
+          "idTaken": "Este ID já está em uso. Confira o ID no {gateway}.",
+          "linkInvalid": "Informe um link que comece com https://."
+        }
+      }
+    },
     "purchase": {
       "gateway": {
         "buy": "Comprar",

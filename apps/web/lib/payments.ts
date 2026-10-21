@@ -25,7 +25,9 @@ import {
   removeAccessProductResultSchema,
   type SaveIntegrationBody,
   type SaveIntegrationResult,
+  type StoreMapping,
   saveIntegrationResultSchema,
+  storeMappingResponseSchema,
 } from '@rede-social/module-payments/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
@@ -195,4 +197,100 @@ export async function getEvents(): Promise<EventsResponse> {
 export async function grantEvent(id: string): Promise<EventItem> {
   const res = await send(`/events/${encodeURIComponent(id)}/grant`, 'POST');
   return eventItemSchema.parse(await res.json());
+}
+
+/**
+ * Why a store-mapping call did not do its job (09.1-17, D-502, A-P12): the three field issues of the
+ * product form's "Pagamento" block, the bare 404 and 403, a refusal the bootstrap knows (the caller
+ * navigates) and everything else.
+ */
+export type StoreMappingReason =
+  | 'id_required'
+  | 'id_taken'
+  | 'link_invalid'
+  | 'not_found'
+  | 'forbidden'
+  | 'generic';
+
+/**
+ * The closed outcome of the three store-mapping calls. They NEVER throw: the product form maps each
+ * reason to a field error or the shipped save toast, and `redirect` carries the path the server
+ * action navigates to OUTSIDE its try/catch. `connected` is `null` when the answer carried none (an
+ * empty 204).
+ */
+export type StoreMappingOutcome =
+  | { ok: true; connected: boolean | null; mapping: StoreMapping | null }
+  | { ok: false; reason: StoreMappingReason }
+  | { ok: false; reason: 'redirect'; path: string };
+
+/** The `details.payments` issues the form has a field for; every other issue reads as `generic`. */
+const MAPPING_ISSUES: Partial<Record<string, StoreMappingReason>> = {
+  gateway_product_id_required: 'id_required',
+  product_id_required: 'id_required',
+  gateway_product_taken: 'id_taken',
+  link_invalid: 'link_invalid',
+};
+
+function mappingReasonOf(error: unknown): StoreMappingOutcome {
+  if (error instanceof ApiClientError) {
+    const path = bootstrapRedirectPath(error);
+    if (path) return { ok: false, reason: 'redirect', path };
+  }
+  if (error instanceof PaymentsApiError) {
+    const issue = MAPPING_ISSUES[error.issue ?? ''];
+    if (issue) return { ok: false, reason: issue };
+    if (error.status === 404) return { ok: false, reason: 'not_found' };
+    if (error.status === 403 && error.code === 'FORBIDDEN')
+      return { ok: false, reason: 'forbidden' };
+  }
+  // Shape only: never the product id, the gateway id, the link or the body (UI-D-532).
+  console.error('payments.store_mapping_failed', {
+    ...(error instanceof PaymentsApiError || error instanceof ApiClientError
+      ? { status: error.status, code: error.code }
+      : { error: error instanceof Error ? error.name : 'unknown' }),
+  });
+  return { ok: false, reason: 'generic' };
+}
+
+async function storeMappingCall(
+  method: 'GET' | 'PUT' | 'DELETE',
+  productId: string,
+  body?: unknown,
+): Promise<StoreMappingOutcome> {
+  try {
+    const res = await send(`/store-products/${encodeURIComponent(productId)}`, method, body);
+    // A 204 carries no body: the mapping is gone and the connection is not known.
+    if (res.status === 204) return { ok: true, connected: null, mapping: null };
+    const parsed = storeMappingResponseSchema.parse(await res.json());
+    return { ok: true, connected: parsed.connected, mapping: parsed.mapping };
+  } catch (error) {
+    return mappingReasonOf(error);
+  }
+}
+
+/** The fields the product form writes: a mapping needs the gateway's id, the link is optional. */
+export interface StoreMappingInput {
+  externalProductId: string;
+  checkoutUrl?: string | null;
+}
+
+/** `GET /v1/payments/store-products/{id}` (09.1-09): the saved mapping and whether the tenant is connected. */
+export function getStoreMapping(productId: string): Promise<StoreMappingOutcome> {
+  return storeMappingCall('GET', productId);
+}
+
+/**
+ * `PUT /v1/payments/store-products/{id}` (A-P12): upserts the mapping, SEPARATE from and AFTER the
+ * store save. The same body twice leaves the same row, so a retry is safe.
+ */
+export function putStoreMapping(
+  productId: string,
+  body: StoreMappingInput,
+): Promise<StoreMappingOutcome> {
+  return storeMappingCall('PUT', productId, body);
+}
+
+/** `DELETE /v1/payments/store-products/{id}`: removing a product that is not mapped answers the same. */
+export function deleteStoreMapping(productId: string): Promise<StoreMappingOutcome> {
+  return storeMappingCall('DELETE', productId);
 }

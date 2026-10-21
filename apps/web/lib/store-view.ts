@@ -1162,6 +1162,33 @@ export function productFormDefaults(
   };
 }
 
+/**
+ * The product form's "Pagamento" block (09.1-17, UI-D-524, D-502): the tenant's gateway name for the
+ * copy, whether the integration is connected (the warning row versus the "Abrir Pagamentos" note) and
+ * the saved mapping as the two input texts. Empty strings, never `null`, are the unmapped state. The
+ * form gets `null` instead of this object while the `payments` module is off or the viewer lacks
+ * `payments.manage`: then the block is absent from the DOM and nothing is sent.
+ */
+export interface ProductFormPayment {
+  gatewayName: string;
+  connected: boolean;
+  externalProductId: string;
+  checkoutUrl: string;
+}
+
+/** The block's starting values from the overview's integration and the saved mapping (`null` = unmapped). */
+export function productFormPayment(
+  integration: { gatewayName: string; connected: boolean },
+  mapping: { externalProductId: string; checkoutUrl: string | null } | null,
+): ProductFormPayment {
+  return {
+    gatewayName: integration.gatewayName,
+    connected: integration.connected,
+    externalProductId: mapping?.externalProductId ?? '',
+    checkoutUrl: mapping?.checkoutUrl ?? '',
+  };
+}
+
 /* ── 08.2-10: the lock warning (D-364, UI-D-378) ─────────────────────────────────────────────── */
 
 /** The danger confirmation's words, finished. */

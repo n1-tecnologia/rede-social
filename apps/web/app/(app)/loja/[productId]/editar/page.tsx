@@ -1,4 +1,5 @@
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
+import { PAYMENTS_PERMISSIONS } from '@rede-social/module-payments/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -6,6 +7,7 @@ import { ProductForm } from '@/app/(app)/loja/ProductForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { listAllCommunities } from '@/lib/communities';
 import { listProductFormCourses, listProductFormLives } from '@/lib/courses';
+import { loadProductFormPayment } from '@/lib/product-payment';
 import { getProduct } from '@/lib/store';
 import {
   type ProductFormCommunity,
@@ -33,6 +35,10 @@ import {
  * come from the product detail (manager-only `courses` / `lives`), so a linked course outside the
  * walked picker pages, or a failed list read, still shows as a selected row (UI-D-415, UI-D-419).
  * Every meta line is finished here, on the server, in the tenant's timezone (UI-D-288).
+ *
+ * **The "Pagamento" block** (09.1-17, UI-D-524, D-502) follows the same rule: its data (the saved mapping
+ * included) is read only while the `payments` module is on AND the viewer holds `payments.manage`;
+ * otherwise (or when a read fails) the form gets `null` and the block is absent from the DOM.
  */
 export default async function EditProductPage({
   params,
@@ -48,11 +54,16 @@ export default async function EditProductPage({
   const coursesOn =
     bootstrap.modules.some((module) => module.key === 'courses') &&
     bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
-  const [result, all, courseLoad, liveLoad, t] = await Promise.all([
+  // 09.1-17: the "Pagamento" block exists only with the module on AND `payments.manage` (the courses rule).
+  const paymentsOn =
+    bootstrap.modules.some((module) => module.key === 'payments') &&
+    bootstrap.permissions.includes(PAYMENTS_PERMISSIONS.manage);
+  const [result, all, courseLoad, liveLoad, payment, t] = await Promise.all([
     getProduct(productId),
     communitiesOn ? listAllCommunities() : Promise.resolve(null),
     coursesOn ? listProductFormCourses() : Promise.resolve(null),
     coursesOn ? listProductFormLives() : Promise.resolve(null),
+    paymentsOn ? loadProductFormPayment(productId) : Promise.resolve(null),
     getTranslations(),
   ]);
   if (result.status === 'redirect') redirect(result.path);
@@ -96,6 +107,7 @@ export default async function EditProductPage({
       communities={communities}
       courses={courses}
       lives={lives}
+      payment={payment}
     />
   );
 }
