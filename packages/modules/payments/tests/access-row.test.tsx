@@ -18,7 +18,7 @@ function row(over: Partial<Parameters<typeof AccessRow>[0]> = {}) {
       email="ana@exemplo.com.br"
       state="active"
       stateLabel="Ativo"
-      sourceLabel="Kiwify"
+      sourceLabel="Gateway de teste"
       noAccountLabel="Ainda sem conta"
       validityLabel="Válido até 12 de nov. de 2026"
       onOpen={onOpen}
@@ -77,7 +77,7 @@ describe('AccessRow (UI-D-517)', () => {
     const pills = Array.from(button.querySelectorAll('[data-access-pills] > span')).map(
       (el) => el.textContent,
     );
-    expect(pills).toEqual(['Ativo', 'Kiwify', 'Ainda sem conta']);
+    expect(pills).toEqual(['Ativo', 'Gateway de teste', 'Ainda sem conta']);
     const validity = screen.getByText('Válido até 12 de nov. de 2026');
     expect(validity.className).toContain('tabular-nums');
     expect(validity.className).toContain('text-text-tertiary');
