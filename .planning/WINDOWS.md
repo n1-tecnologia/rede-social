@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 70
 waived_count: 0
-fixed_count: 55
-total_count: 125
-last_updated: 2026-10-21T09:03:26.051Z
+fixed_count: 56
+total_count: 126
+last_updated: 2026-10-21T09:43:03.811Z
 ---
 
 # Broken Windows Ledger
@@ -139,7 +139,8 @@ last_updated: 2026-10-21T09:03:26.051Z
 | 122 | 09 | deviation | apps/web/e2e/profile.spec.ts | 648 | 09-13 gate: five profile.spec dashboard cases (Sua atividade, a community without Comunidades, owner Membros, Conteudo, Financeiro) fail on a database reset and seeded the same calendar day: seeded memberships join today, after the tenant-local midnight the nightly builder counts up to, so dashboard_member_snapshots has 0 rows. With joined_at moved back 2 days four of the five pass on both projects; Conteudo also needs older posts and likes (backdating them was not allowed). Not a Phase 09 defect; re-run on a seed older than a day (WINDOWS 116) | open |  | 2026-10-20T11:04:53.745Z |  |
 | 123 | 09 | unrun-verify | package.json |  | 09-13 gate: pnpm verify is not one clean exit. Everything through db:reset and db:seed passed (pgTAP 2057, integration 1538); the web dev server then hit ENOSPC at e2e test 244 (mobile), so e2e ran in chunks per project with the cache cleaned between them, plus e2e:pwa (64 passed). Out-of-phase e2e failures: admin-branding:303, platform-branding:223, signup:331, admin-members role tracer, profile.spec x5 | open |  | 2026-10-20T11:04:53.819Z |  |
 | 124 | 09.1 | stub | apps/web/app/(auth)/participar/page.tsx |  | access_required maps to the refused card until plan 09.1-15 renders the AccessNotice (exhaustiveness only, UI-D-522) | open |  | 2026-10-21T02:05:33.153Z |  |
-| 125 | 09.1 | stub | apps/web/app/(app)/configuracoes/pagamentos/page.tsx |  | 09.1-13: the Acessos and Eventos tab bodies (payments-access, payments-events) are empty containers by design; plan 09.1-14 builds them | open |  | 2026-10-21T09:03:26.051Z |  |
+| 125 | 09.1 | stub | apps/web/app/(app)/configuracoes/pagamentos/page.tsx |  | 09.1-13: the Acessos and Eventos tab bodies (payments-access, payments-events) are empty containers by design; plan 09.1-14 builds them | fixed |  | 2026-10-21T09:03:26.051Z | 2026-10-21T09:43:03.740Z |
+| 126 | 09.1 | deviation | apps/web/messages/pt-BR/payments.json |  | 09.1-14: two catalog lines are not in the approved Copywriting Contract or sketch 013 and await the design team: access.sheet.blockOffNote (A-P10, the block note while the gate is off) and events.types.other (word for the neutral type 'other'); the outcome currency_unsupported is mapped to the existing 'Evento sem efeito no acesso' | open |  | 2026-10-21T09:43:03.811Z |  |
 
 ````json
 [
@@ -1638,9 +1639,21 @@ last_updated: 2026-10-21T09:03:26.051Z
     "file": "apps/web/app/(app)/configuracoes/pagamentos/page.tsx",
     "line": null,
     "description": "09.1-13: the Acessos and Eventos tab bodies (payments-access, payments-events) are empty containers by design; plan 09.1-14 builds them",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-21T09:03:26.051Z",
+    "resolved_at": "2026-10-21T09:43:03.740Z"
+  },
+  {
+    "id": 126,
+    "kind": "deviation",
+    "phase": "09.1",
+    "file": "apps/web/messages/pt-BR/payments.json",
+    "line": null,
+    "description": "09.1-14: two catalog lines are not in the approved Copywriting Contract or sketch 013 and await the design team: access.sheet.blockOffNote (A-P10, the block note while the gate is off) and events.types.other (word for the neutral type 'other'); the outcome currency_unsupported is mapped to the existing 'Evento sem efeito no acesso'",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-21T09:43:03.811Z",
     "resolved_at": null
   }
 ]
