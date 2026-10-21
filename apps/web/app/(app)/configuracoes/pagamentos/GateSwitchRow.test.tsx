@@ -188,7 +188,7 @@ describe('GateSwitchRow: nobody to cut (count 0)', () => {
       message: 'Assinatura exigida para entrar.',
     });
     expect(onRequiredChange).toHaveBeenCalledWith(true);
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
 

@@ -247,7 +247,9 @@ describe('AccessProductsCard: the new-product sheet (D-502)', () => {
     expect(screen.getAllByText('Usado no botão Assinar')).toHaveLength(1);
     expect(rows()[0]?.textContent).toContain('Usado no botão Assinar');
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Produto adicionado.' });
-    expect(screen.queryByRole('dialog', { name: 'Novo produto de acesso' })).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Novo produto de acesso' })).toBeNull(),
+    );
   });
 
   it.each([
@@ -328,7 +330,9 @@ describe('AccessProductsCard: editing', () => {
     expect(update).toHaveBeenCalledWith(A, { name: 'Mensal Plus' });
     expect(rows()[0]?.textContent).toContain('Mensal Plus');
     expect(rows()).toHaveLength(2);
-    expect(screen.queryByRole('dialog', { name: 'Editar produto de acesso' })).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Editar produto de acesso' })).toBeNull(),
+    );
   });
 
   it('moves the mark to the next product with a link when the marked one loses its link', async () => {
@@ -380,7 +384,9 @@ describe('AccessProductsCard: removal (UI-D-515, E03 error)', () => {
     expect(remove).toHaveBeenCalledWith(A);
     expect(rows()[0]?.textContent).toContain('Assinatura anual');
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Produto removido.' });
-    expect(screen.queryByRole('dialog', { name: 'Editar produto de acesso' })).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Editar produto de acesso' })).toBeNull(),
+    );
   });
 
   it('shows the inline alert when the server refuses the last product, and keeps the product and the sheet', async () => {
