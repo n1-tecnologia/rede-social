@@ -716,3 +716,72 @@ describe('AccessList: the gate flag reaches the sheet (assumption A-P10)', () =>
     expect(screen.queryByText(NOTE)).toBeNull();
   });
 });
+
+describe('AccessList: releasing an address the gateway has cut (G-09.1-1, A-G1)', () => {
+  const toolbarButton = () =>
+    document.querySelector('[data-access-toolbar] button[data-access-release]') as HTMLElement;
+
+  async function release(address: string) {
+    fireEvent.click(toolbarButton());
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('E-mail'), {
+      target: { value: address },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Liberar acesso' }));
+    });
+  }
+
+  it('says the address stays without access while the subscription is pending, never "Acesso liberado"', async () => {
+    actions.release.mockResolvedValue({
+      ok: true,
+      access: item(9, { source: 'manual', state: 'subscription_pending', validUntil: null }),
+      serverNow: NOW,
+    });
+    mount({ initialItems: [item(1), item(2)] });
+    await release('pessoa9@exemplo.com.br');
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    expect(rows()[0]?.getAttribute('data-access-row')).toBe('pessoa9@exemplo.com.br');
+    expect(rowOf('pessoa9@exemplo.com.br').textContent).toContain('Assinatura pendente');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'info',
+      message:
+        'Liberação registrada para pessoa9@exemplo.com.br, mas a assinatura está pendente: a pessoa continua sem acesso até o pagamento ser confirmado.',
+      durationMs: 6000,
+    });
+    const messages = toast.show.mock.calls.map((call) => (call[0] as { message: string }).message);
+    expect(messages.some((message) => message.includes('Acesso liberado para'))).toBe(false);
+  });
+
+  it('shows the block when one landed between the check and the read (P55), and still places the row', async () => {
+    actions.release.mockResolvedValue({
+      ok: true,
+      access: item(9, { source: 'manual', state: 'blocked', validUntil: null }),
+      serverNow: NOW,
+    });
+    mount({ initialItems: [item(1)] });
+    await release('pessoa9@exemplo.com.br');
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(rows()[0]?.getAttribute('data-access-row')).toBe('pessoa9@exemplo.com.br');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Este e-mail está bloqueado. Desbloqueie antes de liberar.',
+    });
+    const messages = toast.show.mock.calls.map((call) => (call[0] as { message: string }).message);
+    expect(messages.some((message) => message.includes('Acesso liberado para'))).toBe(false);
+  });
+
+  it('keeps the success toast, with no duration, for an admitted address', async () => {
+    actions.release.mockResolvedValue({
+      ok: true,
+      access: item(9, { source: 'manual', state: 'active', validUntil: null, hasAccount: false }),
+      serverNow: NOW,
+    });
+    mount({ initialItems: [item(1)] });
+    await release('pessoa9@exemplo.com.br');
+    await waitFor(() => expect(toast.show).toHaveBeenCalledTimes(1));
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Acesso liberado para pessoa9@exemplo.com.br.',
+    });
+  });
+});

@@ -68,6 +68,7 @@ const EXPECTED: Record<string, string[]> = {
   'toasts.gateOnCut': ['cut'],
   'toasts.gateOnReleasedCut': ['cut', 'released'],
   'toasts.released': ['email'],
+  'toasts.releasedStaysCut': ['email'],
   'toasts.blocked': ['email'],
   'toasts.unblocked': ['email'],
   'toasts.releaseRemoved': ['email'],
@@ -153,6 +154,9 @@ describe('payments.json (UI-D-531)', () => {
     );
     expect(fmt('gate.dialog.cutNote', { cut: 3 })).toBe(
       '3 membros estão com a assinatura pendente e continuam sem acesso. Liberar manualmente não reabre esse acesso: ele volta sozinho quando o pagamento é confirmado.',
+    );
+    expect(fmt('toasts.releasedStaysCut', { email: 'pessoa9@exemplo.com.br' })).toBe(
+      'Liberação registrada para pessoa9@exemplo.com.br, mas a assinatura está pendente: a pessoa continua sem acesso até o pagamento ser confirmado.',
     );
   });
 

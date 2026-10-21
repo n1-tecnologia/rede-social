@@ -238,6 +238,7 @@
       "gateOnReleasedCut": "Assinatura exigida. Acesso liberado para {released, plural, one {# membro} other {# membros}}. {cut, plural, one {# membro com assinatura pendente continua sem acesso.} other {# membros com assinatura pendente continuam sem acesso.}}",
       "gateOff": "Assinatura não é mais exigida.",
       "released": "Acesso liberado para {email}.",
+      "releasedStaysCut": "Liberação registrada para {email}, mas a assinatura está pendente: a pessoa continua sem acesso até o pagamento ser confirmado.",
       "blocked": "Acesso de {email} bloqueado.",
       "unblocked": "Acesso de {email} desbloqueado.",
       "releaseRemoved": "Liberação de {email} removida.",

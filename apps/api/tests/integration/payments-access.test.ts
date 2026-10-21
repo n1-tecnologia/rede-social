@@ -552,3 +552,64 @@ describe('09.1 edges', () => {
     });
   });
 });
+
+describe('G-09.1-1 release of an address the gateway has cut (PAY-31, PAY-22, A-G1)', () => {
+  it('answers 200 with subscription_pending, writes the manual row as before, leaves the member cut, and keeps releasing before the account exists', async () => {
+    await gated(async () => {
+      // a lapsed member with an account: the gateway has cut the address
+      const lapsed = freshEmail(PREFIX, 'lapsed');
+      const member = await personWithEmail(lapsed, 'lab');
+      await insertGateway(lapsed, 'inactive');
+      expect(await bootstrapCode(member)).toBe('SUBSCRIPTION_PENDING');
+
+      // the release still answers 200 and still writes the manual row (D-489, A-G1): the answer's
+      // state is the honest signal the web reads
+      const first = await act('release', lapsed);
+      expect(first.status).toBe(200);
+      expect(accessOf(first)).toMatchObject({
+        id: lapsed,
+        source: 'fake',
+        state: 'subscription_pending',
+        hasAccount: true,
+      });
+      const expectedRows = [
+        { source: 'gateway', status: 'inactive', provider: 'fake' },
+        { source: 'manual', status: 'active', provider: null },
+      ];
+      expect(await rowsOf(lapsed)).toEqual(expectedRows);
+      expect(await effective(lapsed)).toBe('inactive');
+      expect(await bootstrapCode(member)).toBe('SUBSCRIPTION_PENDING');
+
+      // P54: the same release twice answers the same row and leaves the same rows
+      const second = await act('release', lapsed);
+      expect(second.status).toBe(200);
+      expect(accessOf(second)).toEqual(accessOf(first));
+      expect(await rowsOf(lapsed)).toEqual(expectedRows);
+
+      // a gateway-cut address with NO account: still 200 (PAY-22, D-490), still cut, and its
+      // sign-up is refused (the gateway cut outranks, D-495)
+      const ghost = freshEmail(PREFIX, 'lapsedghost');
+      await insertGateway(ghost, 'inactive');
+      const released = await act('release', ghost);
+      expect(released.status).toBe(200);
+      expect(accessOf(released)).toMatchObject({
+        id: ghost,
+        state: 'subscription_pending',
+        hasAccount: false,
+      });
+      expect((await signupTo(ghost)).status).toBe(403);
+
+      // positive control: a clean address with no row at all is admitted and its sign-up succeeds
+      const clean = freshEmail(PREFIX, 'clean');
+      const admitted = await act('release', clean);
+      expect(admitted.status).toBe(200);
+      expect(accessOf(admitted)).toMatchObject({
+        id: clean,
+        source: 'manual',
+        state: 'active',
+        hasAccount: false,
+      });
+      expect((await signupTo(clean)).status).toBe(201);
+    });
+  }, 60_000);
+});

@@ -77,6 +77,12 @@ const CHANGE_TOAST = {
 } as const;
 
 /**
+ * How long the info toast of a release the gateway has cut stays up. The line is longer than the
+ * default duration and nothing was admitted, so the admin needs time to read it (A-G4).
+ */
+const NOTICE_TOAST_MS = 6000;
+
+/**
  * The Acessos list (09.1-14, PAY-22, UI-D-517, D-487, D-489, D-504): one row per e-mail, each opening
  * the access sheet. It is the `AdminMembersList` machine copied for a different row, not shared with it
  * (planning decision 1): the two screens change for different reasons.
@@ -288,10 +294,24 @@ export function AccessList({
           setItems((rows) => [created, ...rows.filter((row) => row.id !== created.id)]);
           setFirstLoadFailed(false);
         }
-        toast.show({
-          tone: 'success',
-          message: t('payments.toasts.released', { email: outcome.email }),
-        });
+        // The toast follows the state the SERVER gave back, never the fact that the request answered
+        // 200 (D-489, A-P9 confirmed, A-G1): a gateway cut outranks a manual release, so the address
+        // may still be without access, and a block that landed first must not read as a success.
+        const state = outcome.access?.state;
+        if (state === 'subscription_pending') {
+          toast.show({
+            tone: 'info',
+            message: t('payments.toasts.releasedStaysCut', { email: outcome.email }),
+            durationMs: NOTICE_TOAST_MS,
+          });
+        } else if (state === 'blocked') {
+          toast.show({ tone: 'error', message: t('payments.errors.emailBlocked') });
+        } else {
+          toast.show({
+            tone: 'success',
+            message: t('payments.toasts.released', { email: outcome.email }),
+          });
+        }
         if (created === null) router.refresh();
         return;
       }
