@@ -93,6 +93,7 @@ jobs:
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
           VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          API_PUBLIC_URL: ${{ vars.API_PUBLIC_URL }}
         run: |
           fail() { echo "::error::$1"; exit 1; }
 
@@ -104,7 +105,7 @@ jobs:
           esac
 
           # (a) Every homolog value is present.
-          names="WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL VERCEL_PROJECT_ID VERCEL_TEAM_ID SUPABASE_PROJECT_REF"
+          names="WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL VERCEL_PROJECT_ID VERCEL_TEAM_ID SUPABASE_PROJECT_REF API_PUBLIC_URL"
           if [ "$HML_SUPABASE" = "isolated" ]; then names="$names SUPABASE_PROJECT_ID"; fi
           for name in $names; do
             if [ -z "${!name:-}" ]; then
@@ -131,6 +132,12 @@ jobs:
           if [ "$VERCEL_PROJECT_ID" = "prj_oPNJ2NKXw4j2RkAN4gtC8vbmqyZa" ]; then
             fail "VERCEL_PROJECT_ID is the production Vercel project; set the rede-social-hml project on environment 'homolog'."
           fi
+
+          # The hml API's public origin is not production's (a webhook URL pointing at production would
+          # send a tenant's gateway deliveries to the wrong environment).
+          case "$API_PUBLIC_URL" in
+            *api-253040968821.southamerica-east1.run.app*) fail "API_PUBLIC_URL is the production API origin; set the hml API origin on environment 'homolog'." ;;
+          esac
 
           # (c) and (e) apply only to an isolated hml Supabase project.
           if [ "$HML_SUPABASE" = "shared-with-production" ]; then
@@ -253,6 +260,13 @@ jobs:
         # psql substitutes :'pw' only in stdin/-f input, never in -c.
         run: echo "alter role api_user with login password :'pw';" | psql "$PGPASSWORD_URL" -v ON_ERROR_STOP=1 -v pw="$API_DB_PASSWORD"
 
+      # 09.1-18 (PAY-28, WR-02, T-09.1-85): unconditional, so it also runs while the push below is skipped
+      # (shared-with-production). A [remotes.*] table inherits the base hook blocks (enabled locally); the
+      # guard fails the run when a remote lacks its two explicit hook blocks or when an enabled hook points
+      # at a function no migration defines. It reads the repo only and enables nothing.
+      - name: Auth hook guard
+        run: bash scripts/guard-auth-hooks.sh
+
       - name: Push auth configuration (Send Email Hook -> API)
         if: vars.HML_SUPABASE == 'isolated'
         env:
@@ -274,6 +288,14 @@ jobs:
       # validates subscription endpoints and boots the same assertProductionEnv. Every `-hml` secret
       # must exist in `rede-social-hml` BEFORE the first run: a missing one fails the deploy
       # (docs/DEPLOY.md "GCP Secret Manager secrets — `homolog`").
+      #
+      # Payments (09.1-05, 09.1-18, D-486): both services list ONE real gateway adapter in PAYMENTS_PROVIDERS
+      # (the test adapter is NEVER listed: its signature is a plain HMAC anyone could forge) and mount
+      # PAYMENTS_SECRET_KEY from `payments-secret-key-hml`, which must exist BEFORE the push that triggers
+      # this deploy. While hml shares production's database (HML_SUPABASE=shared-with-production) that secret
+      # holds the SAME value as production's `payments-secret-key-prod`: a sealed webhook token written by
+      # one environment must open in the other. API_PUBLIC_URL (environment variable, checked by the
+      # preflight) is the hml API's public origin for the webhook URL the Pagamentos screen shows.
       - uses: google-github-actions/deploy-cloudrun@v3
         id: api
         with:
@@ -293,6 +315,8 @@ jobs:
             VERCEL_TEAM_ID=${{ vars.VERCEL_TEAM_ID }}
             AUTH_ALLOW_LIST=supabase
             SUPABASE_PROJECT_REF=${{ vars.SUPABASE_PROJECT_REF }}
+            PAYMENTS_PROVIDERS=kiwify
+            API_PUBLIC_URL=${{ vars.API_PUBLIC_URL }}
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-hml:latest
@@ -309,6 +333,7 @@ jobs:
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-hml:latest
             VERCEL_TOKEN=vercel-token-hml:latest
             SUPABASE_PAT=supabase-pat-hml:latest
+            PAYMENTS_SECRET_KEY=payments-secret-key-hml:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
           # --min-instances=0: hml tolerates a cold start; the deep health check below retries.
@@ -336,6 +361,7 @@ jobs:
             VERCEL_TEAM_ID=${{ vars.VERCEL_TEAM_ID }}
             AUTH_ALLOW_LIST=supabase
             SUPABASE_PROJECT_REF=${{ vars.SUPABASE_PROJECT_REF }}
+            PAYMENTS_PROVIDERS=kiwify
             DATABASE_POOL_MAX=10
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
@@ -354,6 +380,7 @@ jobs:
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-hml:latest
             VERCEL_TOKEN=vercel-token-hml:latest
             SUPABASE_PAT=supabase-pat-hml:latest
+            PAYMENTS_SECRET_KEY=payments-secret-key-hml:latest
           # pg-boss needs a warm worker: min 1 and CPU always allocated, as in production.
           # --max-instances=1 and DATABASE_POOL_MAX=10 mirror production (docs/DEPLOY.md "Connection
           # budget (Pro)").

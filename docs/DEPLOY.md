@@ -222,6 +222,7 @@ any value that resolves to production.
 | `VERCEL_TEAM_ID` | `team_Nf4Qex49TkN0pmqTt4iuKNGU` (team `n1-tecnologia`) | `deploy-hml.yml` — `env_vars` on `api` and `worker` |
 | `SUPABASE_PROJECT_REF` | the Supabase project hml logs in against: `qjjhtduxquvlfppybpqq` while `HML_SUPABASE=shared-with-production`, the hml ref once isolated (the preflight enforces it) | `deploy-hml.yml` — `env_vars` on `api` and `worker` with `AUTH_ALLOW_LIST=supabase`: verifying a domain on the hml panel adds `https://<host>/auth/confirm**` to that project's redirect allow-list, so the first admin's invite link is not refused (`redirect_host_not_tenant`) |
 | `WEB_URL` | `https://rede-social-hml.vercel.app` | `deploy-hml.yml` — the `homolog` environment URL, and a preflight check |
+| `API_PUBLIC_URL` | the hml API's public origin (the Cloud Run URL of the hml `api`, `https://…run.app`) | `deploy-hml.yml` — `env_vars` on `api`, so the webhook URL the Pagamentos screen shows is not an internal host (09.1-09). The preflight refuses an empty value and production's origin |
 
 Environment settings: **no required reviewer** (Decisions 2026-10-02), and **Deployment branches and
 tags** limited to the `homolog` branch — a third guard, so no other ref can run a job on this
@@ -261,6 +262,7 @@ Readable by `RUNTIME_SA` only. Names are referenced literally in `deploy-api.yml
 | `vapid-public-key-prod` | `VAPID_PUBLIC_KEY` | `api`, `worker` (Web Push, NOTIF-03 — see "Phase 7 release"; the same value is Vercel's `NEXT_PUBLIC_VAPID_PUBLIC_KEY`) |
 | `vapid-private-key-prod` | `VAPID_PRIVATE_KEY` | `api`, `worker` (signs every push; never leaves Secret Manager) |
 | `vapid-subject-prod` | `VAPID_SUBJECT` | `api`, `worker` (a `mailto:` contact, never `localhost`) |
+| `payments-secret-key-prod` | `PAYMENTS_SECRET_KEY` | `api`, `worker` (seals each tenant's gateway webhook token, AES-256-GCM; 32 random bytes in base64 — see "Phase 09.1 release"; must exist before the push that deploys it) |
 
 `DATABASE_URL` is always the **`api_user`** connection through the Supavisor **transaction** pooler
 (port 6543); `BOSS_DATABASE_URL` is the same role through the **session** pooler (port 5432) because
@@ -291,6 +293,7 @@ ones `deploy-hml.yml` mounts — the production list with `-prod` replaced by `-
 | `send-email-hook-secrets-hml` | `SEND_EMAIL_HOOK_SECRETS` | `api`, `worker` | a new hook secret; the same value as the `homolog` GitHub environment secret |
 | `vercel-token-hml` | `VERCEL_TOKEN` | `api`, `worker` | a Vercel token scoped to team `n1-tecnologia` (the domain adapter's `POST/GET/DELETE /v*/projects/{VERCEL_PROJECT_ID}/domains` calls) |
 | `supabase-pat-hml` | `SUPABASE_PAT` | `api`, `worker` | a Supabase personal access token with access to the project in `SUPABASE_PROJECT_REF` (only `GET`/`PATCH /v1/projects/{ref}/config/auth`, `uri_allow_list` only) |
+| `payments-secret-key-hml` | `PAYMENTS_SECRET_KEY` | `api`, `worker` | 32 random bytes in base64. **While hml shares production's database it holds the SAME value as `payments-secret-key-prod`** (a sealed webhook token written by one environment must open in the other); a new value only once hml is isolated |
 
 ## Vercel environment variables (web)
 
@@ -2274,6 +2277,273 @@ Record each line in the Phase 09 UAT (`/gsd-verify-work 09`). A line that is not
 - A member uploads a video longer than the tenant's cap and the asset ends `rejected` (the local runs
   use the fake provider).
 - The "Ativar a Rede social" go-live item below, settled with the user before any tenant is enabled.
+
+## Phase 09.1 release (access by payment gateway)
+
+**No step below is performed by an automated run, and every command is a command for the developer to
+run by hand, in this order.** No plan has run any of them: production is live, and an agent run of this
+phase may not enable a production Auth hook, push a migration or an auth configuration to a hosted
+project, deploy a service or create a cloud secret (PR-8). The repository only makes the human steps
+safe: `scripts/guard-auth-hooks.sh` checks the hook blocks, `docs/deploy/payments-hooks-lockout.sql`
+proves who the hooks would refuse, and the two deploy workflows carry the new env and secret. No command
+here prints a secret; do not paste a key into a terminal that records history, a chat or an issue.
+
+This release adds the toggleable **Pagamentos** module (key `payments`, off for every tenant until the
+`super_admin` turns it on): a tenant admin connects a payment gateway with a webhook token, registers the
+access products and the store products that map to the gateway's products, and may turn on a **gate** so
+that only people with an active access (paid, or released by hand) may use the community. A cancelled,
+late, refunded or charged-back subscription cuts the member's access at the next request, without
+touching their membership, profile or content; a renewal returns them.
+
+### What ships
+
+- **Twelve migrations, all expand-only, applied in timestamp order** (the order `ls supabase/migrations`
+  prints, all after `20261020123859_social_can_read_for.sql`):
+  1. `20261020225247_access_grants.sql` (generated): `public.access_grants`, the per-tenant, per-e-mail
+     access record (source `manual` or `gateway`), row-level security on with zero policies. It also
+     re-creates `tenant_modules_key_chk` one value wider (`payments` last, no row inserted: the module is
+     off for every existing tenant).
+  2. `20261020225255_access_gate_functions.sql` (hand-written): `app.access_gate_on`,
+     `app.access_effective`, `app.access_state`, `app.membership_access_cut`, `app.access_cut_user_ids` and
+     the `_gated` twins of the two 08.1 membership lookups. The old lookups are untouched, so the revision
+     still serving during the push keeps working.
+  3. `20261020230436_memberships_user_idx.sql` (generated): `memberships_user_idx` on `(user_id)`, the
+     index the coarse token hook uses.
+  4. `20261020230440_access_hooks.sql` (hand-written): the bodies of the two Auth hook functions replaced
+     with `create or replace` **under the same names** (`hook_custom_access_token_allowlist`,
+     `hook_before_user_created_allowlist`), ACLs repeated. The production hooks stay `enabled = false`.
+  5. `20261020230441_access_allowlist_migrate.sql` (hand-written): `public.migrate_email_allowlist_to_access_grants()`
+     and its single call. It copies the rows of the retiring global `email_allowlist` once, as manual
+     accesses per tenant (a `liberado` row becomes an active release in each tenant where the e-mail has a
+     live membership, a `bloqueado` row a manual block there; rows with no membership are counted and
+     dropped). The table is left in place and nothing reads it afterwards.
+  6. `20261020234833_payments_tables.sql` (generated): `payment_integrations` (the webhook token, stored
+     only AES-256-GCM sealed), `payment_products` (the gateway-product to tenant/kind/target map) and
+     `payment_events` (the inbox and replay memory, no payload column).
+  7. `20261020234844_payments_functions.sql` (hand-written): `app.payments_gateway_mode()`,
+     `app.payments_checkout_url(uuid)`, `app.payment_events_prune(int)` (180 days, `service_role` only) and
+     the foreign key from `access_grants` to `payment_products`.
+  8. `20261021001032_store_gateway_orders.sql` (generated) and
+  9. `20261021001035_store_gateway_functions.sql` (hand-written): the store side. `store_orders.provider`
+     is re-created as a lower-case format check (`none` or `^[a-z][a-z0-9_]{1,30}$`, wider than before), one live order per
+     gateway reference, `app.store_gateway_purchase` / `app.store_gateway_revoke` (`service_role` only),
+     `payment_products_target_fk`, and `app.store_purchase` now refuses a non-holder of a tenant that has a
+     gateway (the simulated free unlock is closed in the database for such a tenant).
+  10. `20261021004250_payment_events_recurring.sql` (generated): `payment_events.recurring boolean not null
+      default false`. **The new API records it on every event, so this file must be applied before the new
+      API revision serves.**
+  11. `20261021012916_dashboard_exclude_cut.sql` (hand-written): four dashboard member-population functions
+      re-created (same signatures, same owner-only ACL) so a cut member leaves the active-member figures at
+      the next nightly build.
+  12. `20261021020907_push_devices_cut_members.sql` (hand-written): `app.push_subscriptions_delete_dead`
+      re-created (same signature) so a cut member's push devices count as dead.
+
+  The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`) prints
+  nothing for these twelve files (re-run for this release; run it again before the push). The only `DROP`
+  statements are two `DROP CONSTRAINT` lines, files 1 and 8, each followed by the same constraint re-added
+  wider.
+- **The API and the worker** (same image, `ROLE=worker`). The public webhook `POST /v1/webhooks/{provider}/{integrationId}`
+  (HMAC over the received bytes against the sealed token, recorded once, queued once; 256 KiB cap); the
+  module `@rede-social/module-payments` mounted at `/v1/payments` (ten admin routes, plus the Acessos and
+  Eventos lists), all behind `requireAuth`, `requireModule('payments')` and the admin-only
+  `payments.manage`; `GET /v1/me/subscription` (reachable while the member is cut); `requireAuth` answers
+  `403 SUBSCRIPTION_PENDING` for a cut member and `403 MEMBERSHIP_BLOCKED` for a manual block of a gated
+  tenant; sign-up and join ask the tenant's own gate (`403 EMAIL_NOT_ALLOWED` only when the tenant's gate is
+  on and the e-mail has no active access). **One new worker queue, `kernel.payment-event`** (the apply job,
+  payload `{ eventId }` only); the sweep function `payment_events_prune` rides the existing prune job. The
+  kernel code is `packages/core/server/payments/`; the one real adapter is `kiwify` (the `fake` adapter is
+  registered for local and test use only).
+- **The web:** `/configuracoes/pagamentos` (tabs Configuração, Acessos, Eventos), the cut screen
+  `/assinatura-pendente`, the no-access notice on sign-up, login and Participar, the **Assinatura pendente**
+  pill and filter on Membros, the Pagamento block of the Loja product form, the gateway checkout link on the
+  product page, the "Compra confirmada" bell row and push, and the Pagamentos row of the platform Módulos
+  page. Both new authenticated routes are under the build-output gate (`scripts/check-static-routes.sh`).
+- **New secret and env on the API and the worker:** the secret `payments-secret-key-prod` mounted as
+  `PAYMENTS_SECRET_KEY`, and `PAYMENTS_PROVIDERS=kiwify`. On the API only, `API_PUBLIC_URL` (its public
+  origin, so the webhook URL shown to admins is not an internal Cloud Run host). `PAYMENTS_SECRET_KEY_ID`
+  defaults to `1`; set it only when the key is rotated. `assertProductionEnv` refuses to boot when
+  `PAYMENTS_PROVIDERS` lists a real gateway and `PAYMENTS_SECRET_KEY` is missing or does not decode from
+  base64 to exactly 32 bytes. The hosted `PAYMENTS_PROVIDERS` names only the real gateway, never `fake`:
+  its signature is a plain HMAC anyone could forge.
+
+### Order: migrations, then the API and the worker, then the web
+
+1. **Create the secret first** (project `api-dere-social`). A secret that `deploy-api.yml` references but
+   that does not exist fails the deploy loudly, which is why this comes before the push that triggers it.
+   Generate 32 random bytes in base64 and store them without echoing the value:
+   `openssl rand -base64 32 | gcloud secrets create payments-secret-key-prod --data-file=- --project=api-dere-social`
+   Then give the runtime service account access, as for the VAPID secrets:
+   `gcloud secrets add-iam-policy-binding payments-secret-key-prod --member=serviceAccount:<RUNTIME_SA> --role=roles/secretmanager.secretAccessor --project=api-dere-social`
+   **Do not rotate this key casually:** every stored webhook token is sealed with it, and a rotation needs
+   a re-seal (a new `PAYMENTS_SECRET_KEY_ID`); losing it means every tenant must paste its token again.
+   **Homolog.** Create `payments-secret-key-hml` in `rede-social-hml` before the next push to `homolog`
+   (the deploy mounts it on both services). **While hml shares production's database
+   (`HML_SUPABASE=shared-with-production`) its secret holds the SAME value as production's**, because a
+   webhook token sealed by one environment must open in the other. Copy it without printing it:
+   `gcloud secrets versions access latest --secret=payments-secret-key-prod --project=api-dere-social | gcloud secrets create payments-secret-key-hml --data-file=- --project=rede-social-hml`
+   Also define the GitHub environment variable `API_PUBLIC_URL` on `homolog` (the hml API's public
+   origin); the hml preflight refuses an empty value and production's origin. Once hml is isolated its key
+   may differ, because the databases differ.
+2. **Migrations first, cumulative.** `supabase migration list --linked` must list as pending only the
+   files of earlier releases that have not shipped yet and these twelve. Anything else means stop and ask.
+   Check the old list before the push so you know what file 5 of the list above will copy:
+   `select count(*) from public.email_allowlist;`
+   `deploy-api.yml` pushes the database (`supabase db push --include-roles`) before it pushes the auth
+   configuration and before it deploys any service. If the list shows older pending files, use the
+   by-hand exception of "Phase 8 release" step 1 (`--include-all`, brew CLI, token in the shell only).
+   **Why the new API must not go first.** It calls `app.access_state` and the `_gated` lookups on every
+   request and inserts `payment_events.recurring` on every delivery, so an API in front of a database
+   without these files answers 500. Only file 10 is strictly ordered before the API (the others are
+   `create or replace` with identical signatures or new objects the older API never calls), but the
+   pipeline applies all twelve first, which satisfies every ordering.
+   **Why the running API keeps working during the push.** Everything is additive: new tables, new functions,
+   two re-created function bodies with identical signatures, one constraint widened, one column with a
+   default. The older revision ignores all of it. The hook functions are replaced even though the
+   production hooks stay disabled, which changes nothing for a login.
+3. **The API and the worker together**, as in "Phase 8 release" step 3. The worker must ship in the same
+   step: it consumes `kernel.payment-event` and the push of the "Compra confirmada" notice. Until it
+   serves, a recorded delivery waits in state `received` and is applied when it does. The new revision
+   emits only optional contract keys (`subscriptionPending`, a purchase block on the product, a join state),
+   so the web still serving keeps parsing every answer.
+4. **The web last.** Vercel builds it from the same push. Release it right after the API.
+5. **Check the API is serving:**
+   `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/me/subscription`
+   prints `401` (the route exists and asks for a Bearer). `404` means the Phase 09.1 revision is not
+   serving. Then confirm the variables landed:
+   `gcloud run services describe api --region=southamerica-east1 --project=api-dere-social --format='value(spec.template.spec.containers[0].env)'`
+   shows `PAYMENTS_PROVIDERS` and `API_PUBLIC_URL` and no secret value.
+
+### Webhook registration
+
+Per tenant, after the `super_admin` has switched the module on and the tenant admin opens
+Configurações → Pagamentos:
+
+1. The Integração card shows the **webhook URL**: `<API origin>/v1/webhooks/<provider>/<integration id>`
+   (for example `https://api-253040968821.southamerica-east1.run.app/v1/webhooks/kiwify/<id>`). The id is
+   derived from the tenant and the provider, so the URL is known before any token exists and never
+   changes. It is not a secret; the signature is the authentication.
+2. In the gateway's vendor panel create a webhook with that URL for all products and select **all ten
+   triggers**: `compra_aprovada`, `compra_reembolsada`, `chargeback`, `subscription_late`,
+   `subscription_canceled`, `subscription_renewed`, `compra_recusada`, `boleto_gerado`, `pix_gerado`,
+   `carrinho_abandonado`.
+3. Paste the **token** the vendor panel shows into the Pagamentos screen and save. It is write-only: it is
+   stored sealed, never shown again, and replaced by saving a new one (the old one stops verifying at
+   once).
+4. Use the vendor's **"Testar Webhook"** once. The delivery must show up in the Eventos tab as an event
+   whose product is unknown (the test deliveries carry product ids no tenant has mapped), never as a
+   rejection. A delivery the vendor panel reports as failed (HTTP 403) means the token or the URL is
+   wrong; HTTP 404 means a wrong integration id.
+5. Register the access product(s) and map the store products (Produtos de acesso; the Pagamento block of
+   the product form), with the gateway's product id exactly as the vendor shows it. Only then turn the
+   gate on (see "Enabling the production Auth hooks" for the login side).
+
+The adapter was written from the vendor's public documentation and synthetic data. No real delivery has
+been observed yet: `packages/core/tests/fixtures/payments/kiwify/CAPTURE.md` is the runbook (plan 09.1-20)
+that replaces the fixtures with redacted real captures and settles which signature variant is real and what a
+mid-period cancel sends. **Do not turn the gate on for a tenant that charges real money before that capture
+is done.**
+
+### Switches and defaults
+
+- The `payments` module is **off for every tenant** after the deploy: no migration writes a `tenant_modules`
+  row. A `super_admin` turns it on per tenant from Plataforma → the tenant → Módulos (the row notes when the
+  Loja is off, and turning it off asks for a confirmation that names the tenant).
+- The **gate is off by default** (`settings.gate` absent). Nothing changes for any member of any tenant
+  until a tenant admin connects a gateway, registers an access product and turns the gate on in
+  Pagamentos (it refuses with `gate_requires_setup` before an integration and a product exist; the switch
+  offers to release the members who already exist as manual accesses, so turning it on cuts nobody
+  unintentionally).
+- The **store keeps its simulated purchase** for a tenant with no gateway integration. The moment a tenant
+  connects a gateway, `app.store_purchase` refuses a non-holder in the database and the product page shows
+  the gateway checkout link (or a disabled "Indisponível" button when the product has none).
+- Staff (`admin_tenant`, `support_tenant`) and platform admins are never cut. A manual block outranks a cut.
+  A cut changes no post, comment, like, profile, progress or membership row and writes no moderation-log row.
+
+### Enabling the production Auth hooks (human only)
+
+The two access hooks are shipped `enabled = false` in `[remotes.production.auth.hook.*]` and **no agent
+run of this phase changes that value**. The sign-up and join checks (WR-01) no longer depend on them. The
+hooks add one thing: GoTrue itself refuses a token to an account that has no door open, which also closes
+GoTrue's own creation paths (`inviteUserByEmail`, `generateLink`, OAuth) for an e-mail with no active access.
+
+**WR-01 is closed by construction.** The gate is off per tenant by default, and the coarse token hook
+admits any person with a live membership in an ungated tenant (assumption A-P1), so enabling the production
+hooks locks out nobody while every tenant is ungated. The report below proves it on real data. The sign-up
+and join pre-checks no longer read the retired global list: an ungated tenant admits any e-mail again, which
+re-opens sign-up that the empty global list of quick 261018-owq had closed.
+
+**WR-02 is closed by the guard.** A `[remotes.<name>]` table inherits the base hook blocks (enabled locally),
+so a hosted environment without its own two explicit blocks would turn the hooks on at the next
+`supabase config push`. `scripts/guard-auth-hooks.sh` (run as `pnpm guard:hooks` in the CI `static` job and as
+a step before `config push` in both deploy workflows) fails with the remote and the hook named when a remote
+lacks `[remotes.<name>.auth.hook.before_user_created]` or `[remotes.<name>.auth.hook.custom_access_token]`,
+when one has no explicit `enabled = true|false` or no `uri = "pg-functions://postgres/<schema>/<function>"`,
+and when any enabled hook points at a function no migration defines (GoTrue would answer 500 on every login
+of every community, and the identity is shared across them). Table names match exactly (`remotes.prod` never
+satisfies `remotes.production`). It reads files and enables nothing.
+
+Preconditions, then the six steps:
+
+- The twelve Phase 09.1 migrations are in production and the API and the worker serve this release (the
+  hook functions of file 4 are the ones GoTrue will call).
+- `pnpm guard:hooks` is green locally.
+
+1. **Confirm the migrations are in production.** In the SQL editor of the hosted project:
+   `select to_regprocedure('app.access_gate_on(uuid)') is not null as gate, to_regprocedure('public.hook_custom_access_token_allowlist(jsonb)') is not null as hook;`
+   must return `true | true`, and `select count(*) from supabase_migrations.schema_migrations where version >= '20261020225247';`
+   must return 12 (more when later releases are in).
+2. **Run the lockout report** `docs/deploy/payments-hooks-lockout.sql` in the same SQL editor. It is one
+   read-only SELECT that calls the real token hook once per account. **An empty `locked_out` list is the go
+   signal**; every row that is listed must be someone you intend to refuse. The e-mails in it are internal:
+   do not paste the result into a ticket.
+3. **Review the `gate_on` rows.** Those are the only tenants where the hook can refuse a member at all.
+4. **Flip both values in one commit**, by hand: in `supabase/config.toml` change `enabled = false` to
+   `enabled = true` in `[remotes.production.auth.hook.before_user_created]` and
+   `[remotes.production.auth.hook.custom_access_token]`. Order rule: the migrations that create the functions
+   are pushed before any hook is enabled, and the enable is its own commit, never bundled with code.
+5. **Let the deploy do it.** Merging that commit to `master` runs `deploy-api.yml` (reviewer approval): the
+   guard step, then `supabase config push`. Alternatively, with your own token in the shell:
+   `supabase config push --project-ref qjjhtduxquvlfppybpqq --yes`.
+6. **Smoke**, with the hooks on: (a) the `super_admin` logs in; (b) a member of an ungated tenant logs in;
+   (c) a member of a gated tenant with no access is refused at sign-in with the login notice, and one with
+   access logs in; (d) a throwaway sign-up on an ungated tenant works and on a gated tenant with no access
+   shows "Seu acesso ainda não foi liberado."
+
+**Rollback.** Set both values back to `false` and push (or switch the hooks off in Dashboard →
+Authentication → Hooks). It applies at the next token refresh (about 1 h or less).
+
+**The limit the user accepted on 2026-10-20 (assumption A-P26).** With the hooks on, a member who is cut in
+their ONLY tenant meets the login notice after the access token lapses (the token hook refuses the refresh),
+not the "Assinatura pendente" screen; a member who is cut in one tenant but has active access in another keeps
+the session, because the identity is shared. With the hooks off (today's production) the cut member lands on
+the cut screen at their next request. Adding one disjunct "any live membership" to the token hook reverses it.
+
+### Rollback limit
+
+Roll back the web first, then the API and the worker, as in "Phase 8 release". The migrations stay and are
+expand-only. The old `email_allowlist` table is left in place and no code reads it; dropping it belongs to a
+later contract release. The widened `store_orders.provider` check stays. **Turn the gate off for every tenant
+that has it on before rolling the API back:** an older revision does not know the gate (it asks the 08.1
+lookups, which do not read it), so while the gate is on it would admit the cut members again, and the store
+stays closed in the database for a tenant with a gateway. Rolling the API back also removes the webhook
+route: a tenant with a gateway integration then receives no events (the vendor retries and reports failures
+in its own panel) until the revision returns, and the events already recorded wait in `received`.
+
+### Manual UAT (hosted)
+
+Record each line in the Phase 09.1 UAT (`/gsd-verify-work 09.1`); a line that is not run stays
+`blocked — not run`. Each depends on a deployed environment, and the first four on the real captures of plan
+09.1-20:
+- The real delivery of each of the ten triggers reaches the Eventos tab with the right state and no
+  rejection, and "Testar Webhook" lands as an unknown product.
+- The cut and the return of a real subscriber: a real cancel (and a late payment) cuts the member at their
+  next request, a renewal returns them, with no notification to the admin and no change to the member's
+  content.
+- A real store purchase unlocks the community for the buyer at the amount paid, and a real refund locks it.
+- The "Compra confirmada" notice on a real device: one bell row and one push, opening `/loja/<id>`.
+- The designed screens (Pagamentos tabs, the cut screen, the no-access notice, the Membros pill) on a real
+  phone, light and dark, under a tenant brand, and the designer's review of sketch 013.
+- The hooks enabled on production per the six steps above, with the smoke list.
 
 ## Event schedule (quick 261007-n1g)
 

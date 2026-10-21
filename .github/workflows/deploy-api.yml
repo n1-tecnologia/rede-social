@@ -129,6 +129,14 @@ jobs:
         # psql substitutes :'pw' only in stdin/-f input, never in -c.
         run: echo "alter role api_user with login password :'pw';" | psql "$PGPASSWORD_URL" -v ON_ERROR_STOP=1 -v pw="$API_DB_PASSWORD"
 
+      # 09.1-18 (PAY-28, WR-02, T-09.1-85): `config push` sends every [auth] value of a [remotes.*] table,
+      # and a remote inherits the base hook blocks (enabled locally). The guard fails the deploy, before
+      # anything is pushed, when a remote lacks its two explicit hook blocks or when an enabled hook points
+      # at a function no migration defines (GoTrue would answer 500 on every login). It reads the repo
+      # only; enabling a production hook stays a human commit (docs/DEPLOY.md "Phase 09.1 release").
+      - name: Auth hook guard
+        run: bash scripts/guard-auth-hooks.sh
+
       - name: Push auth configuration (Send Email Hook -> API)
         env:
           SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
@@ -150,6 +158,13 @@ jobs:
       # (the fake push host is refused only under webpush) and boots the same assertProductionEnv.
       # The secrets must exist BEFORE this runs: a missing one fails the deploy (docs/DEPLOY.md
       # "Phase 7 release", step 2).
+      #
+      # Payments (09.1-05, 09.1-18, D-486): both services list ONE real gateway adapter in PAYMENTS_PROVIDERS
+      # and mount PAYMENTS_SECRET_KEY (32 random bytes, base64) from Secret Manager; assertProductionEnv
+      # refuses to boot without the key once a real gateway is listed. The secret `payments-secret-key-prod`
+      # must exist BEFORE the push that triggers this deploy (docs/DEPLOY.md "Phase 09.1 release"). The test
+      # adapter is NEVER listed here: its signature is a plain HMAC anyone could forge. API_PUBLIC_URL is the
+      # API's public origin, so the webhook URL the Pagamentos screen shows is not an internal Cloud Run host.
       - uses: google-github-actions/deploy-cloudrun@v3
         id: api
         with:
@@ -164,6 +179,8 @@ jobs:
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
             PUSH_TRANSPORT=webpush
+            PAYMENTS_PROVIDERS=kiwify
+            API_PUBLIC_URL=https://api-253040968821.southamerica-east1.run.app
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-prod:latest
@@ -178,6 +195,7 @@ jobs:
             VAPID_SUBJECT=vapid-subject-prod:latest
             RESEND_API_KEY=resend-api-key-prod:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
+            PAYMENTS_SECRET_KEY=payments-secret-key-prod:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
           # --max-instances=20: the regional CPU quota of api-dere-social in southamerica-east1
@@ -200,6 +218,7 @@ jobs:
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
             PUSH_TRANSPORT=webpush
+            PAYMENTS_PROVIDERS=kiwify
             DATABASE_POOL_MAX=10
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
@@ -216,6 +235,7 @@ jobs:
             VAPID_SUBJECT=vapid-subject-prod:latest
             RESEND_API_KEY=resend-api-key-prod:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
+            PAYMENTS_SECRET_KEY=payments-secret-key-prod:latest
           # --max-instances=1 and DATABASE_POOL_MAX=10 (worker only): docs/DEPLOY.md "Connection budget
           # (Pro)" (4 push-send jobs at a time plus every other queue); recompute there before changing.
           flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --max-instances=1 --no-cpu-throttling --no-allow-unauthenticated

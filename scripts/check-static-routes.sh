@@ -148,6 +148,12 @@ const REQUIRED_KEYS = [
   // a prerendered copy would freeze one instant's "Agendada" into every visitor's HTML.
   '/(app)/cursos/lives/nova/page',
   '/(app)/cursos/lives/[liveId]/page',
+  // 09.1-13/15 (PAY-28): the Pagamentos admin hub reads the session, the host and the tenant's payment state
+  // (token connected or not, the gate, the products) per request, and the "Assinatura pendente" screen
+  // is a per-member authenticated surface. A prerendered copy of either would serve one tenant's payment
+  // state to every host, so a moved or prerendered route must fail this gate.
+  '/(app)/configuracoes/pagamentos/page',
+  '/(auth)/assinatura-pendente/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',
