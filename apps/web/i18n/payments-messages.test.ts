@@ -152,6 +152,12 @@ describe('payments.json (UI-D-531)', () => {
     }
   });
 
+  it('pins the A-P10 delta: the block note says the block only counts while the gate is on', () => {
+    expect(all['access.sheet.blockOffNote']).toBe(
+      'O bloqueio só vale enquanto “Exigir assinatura para entrar” está ligado.',
+    );
+  });
+
   it('writes the typographic quotes of the contract, not straight ones', () => {
     expect(all['errors.lastProduct']).toBe(
       'Desative “Exigir assinatura para entrar” antes de remover o último produto de acesso.',

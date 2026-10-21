@@ -42,11 +42,15 @@ const actions = vi.hoisted(() => ({
   loadMore: vi.fn(),
   block: vi.fn(),
   unblock: vi.fn(),
+  release: vi.fn(),
+  removeRelease: vi.fn(),
 }));
 vi.mock('./actions', () => ({
   loadMoreAccessesAction: (...args: unknown[]) => actions.loadMore(...args),
   blockAccessAction: (...args: unknown[]) => actions.block(...args),
   unblockAccessAction: (...args: unknown[]) => actions.unblock(...args),
+  releaseEmailAction: (...args: unknown[]) => actions.release(...args),
+  removeReleaseAction: (...args: unknown[]) => actions.removeRelease(...args),
 }));
 
 const toast = vi.hoisted(() => ({ show: vi.fn(), dismiss: vi.fn() }));
@@ -142,6 +146,8 @@ beforeEach(() => {
   actions.loadMore.mockReset();
   actions.block.mockReset();
   actions.unblock.mockReset();
+  actions.release.mockReset();
+  actions.removeRelease.mockReset();
   toast.show.mockReset();
 });
 
@@ -498,5 +504,215 @@ describe('AccessList: the sheet and the block flow settle the row IN PLACE from 
       expect(document.querySelector('[data-access-row="pessoa1@exemplo.com.br"]')).toBeNull(),
     );
     expect(rowOf('pessoa2@exemplo.com.br')).toBeTruthy();
+  });
+});
+
+describe('AccessList: "Liberar e-mail" (UI-D-517, UI-D-518, D-490)', () => {
+  const toolbarButton = () =>
+    document.querySelector('[data-access-toolbar] button[data-access-release]') as HTMLElement;
+
+  it('draws the outline button beside the field from 360px up and below it on narrower screens', () => {
+    mount();
+    expect(toolbarButton().textContent).toBe('Liberar e-mail');
+    expect(toolbarButton().className).toContain('w-full');
+    expect(toolbarButton().className).toContain('min-[360px]:w-auto');
+    expect(toolbarButton().className).toContain('min-[360px]:shrink-0');
+    const field = screen.getByRole('searchbox', { name: 'Buscar por e-mail' });
+    expect(field.parentElement?.className).toContain('basis-full');
+    expect(field.parentElement?.className).toContain('min-[360px]:flex-1');
+    expect(toolbarButton().parentElement?.className).toContain('flex-wrap');
+  });
+
+  it('opens the release sheet from the toolbar, with an empty field', () => {
+    mount();
+    fireEvent.click(toolbarButton());
+    const sheet = screen.getByRole('dialog');
+    expect(within(sheet).getByRole('heading', { name: 'Liberar e-mail' })).toBeTruthy();
+    expect((within(sheet).getByLabelText('E-mail') as HTMLInputElement).value).toBe('');
+  });
+
+  it('puts the same action on the "Nenhum acesso por aqui" empty state, and on no other', () => {
+    mount({ initialItems: [] });
+    const empty = document.querySelector('[data-access-empty="empty"]') as HTMLElement;
+    const action = within(empty).getByRole('button', { name: 'Liberar e-mail' });
+    expect(action.className).toContain('border');
+    fireEvent.click(action);
+    expect(within(screen.getByRole('dialog')).getByLabelText('E-mail')).toBeTruthy();
+    cleanup();
+    mount({ initialItems: [], q: 'zzz' });
+    expect(
+      within(document.querySelector('[data-access-empty]') as HTMLElement).queryByRole('button'),
+    ).toBeNull();
+    cleanup();
+    mount({ initialItems: [], status: 'blocked' });
+    expect(
+      within(document.querySelector('[data-access-empty]') as HTMLElement).queryByRole('button'),
+    ).toBeNull();
+  });
+
+  it('puts the released row at the TOP from the server answer, closes the sheet and toasts', async () => {
+    actions.release.mockResolvedValue({
+      ok: true,
+      access: item(9, { source: 'manual', validUntil: null, hasAccount: false }),
+      serverNow: NOW,
+    });
+    mount({ initialItems: [item(1), item(2)] });
+    fireEvent.click(toolbarButton());
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('E-mail'), {
+      target: { value: 'pessoa9@exemplo.com.br' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Liberar acesso' }));
+    });
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    expect(rows().map((row) => row.getAttribute('data-access-row'))).toEqual([
+      'pessoa9@exemplo.com.br',
+      'pessoa1@exemplo.com.br',
+      'pessoa2@exemplo.com.br',
+    ]);
+    expect(rowOf('pessoa9@exemplo.com.br').textContent).toContain('Ainda sem conta');
+    expect(actions.release).toHaveBeenCalledWith('pessoa9@exemplo.com.br');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Acesso liberado para pessoa9@exemplo.com.br.',
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('moves an e-mail the list already holds to the top instead of repeating it', async () => {
+    actions.release.mockResolvedValue({
+      ok: true,
+      access: item(2, { source: 'manual', validUntil: null }),
+      serverNow: NOW,
+    });
+    mount({ initialItems: [item(1), item(2), item(3)] });
+    fireEvent.click(toolbarButton());
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('E-mail'), {
+      target: { value: 'pessoa2@exemplo.com.br' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Liberar acesso' }));
+    });
+    await waitFor(() =>
+      expect(rows().map((row) => row.getAttribute('data-access-row'))).toEqual([
+        'pessoa2@exemplo.com.br',
+        'pessoa1@exemplo.com.br',
+        'pessoa3@exemplo.com.br',
+      ]),
+    );
+  });
+
+  it('the first row of an empty list appears in place of the empty state', async () => {
+    actions.release.mockResolvedValue({
+      ok: true,
+      access: item(4, { source: 'manual', validUntil: null, hasAccount: false }),
+      serverNow: NOW,
+    });
+    mount({ initialItems: [] });
+    fireEvent.click(toolbarButton());
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('E-mail'), {
+      target: { value: 'pessoa4@exemplo.com.br' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Liberar acesso' }));
+    });
+    await waitFor(() => expect(rowOf('pessoa4@exemplo.com.br')).toBeTruthy());
+    expect(screen.queryByText('Nenhum acesso por aqui')).toBeNull();
+  });
+
+  it('a vanished row or a lost permission toasts and refreshes', async () => {
+    actions.release.mockResolvedValueOnce({ ok: false, code: 'gone' });
+    mount();
+    fireEvent.click(toolbarButton());
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('E-mail'), {
+      target: { value: 'pessoa5@exemplo.com.br' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Liberar acesso' }));
+    });
+    await waitFor(() => expect(nav.refresh).toHaveBeenCalledTimes(1));
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Este acesso não existe mais.',
+    });
+  });
+});
+
+describe('AccessList: "Remover liberação" settles the row from the server', () => {
+  const manual = (n: number) => item(n, { source: 'manual', validUntil: null, hasAccount: false });
+  const openRemove = (email: string) => {
+    fireEvent.click(rowOf(email));
+    fireEvent.click(screen.getByRole('button', { name: 'Remover liberação' }));
+  };
+  const confirm = async () =>
+    act(async () => {
+      fireEvent.click(
+        within(screen.getAllByRole('dialog').at(-1) as HTMLElement).getByRole('button', {
+          name: 'Remover',
+        }),
+      );
+    });
+
+  it('the row leaves the list when no row remains, with the toast naming the e-mail', async () => {
+    actions.removeRelease.mockResolvedValue({ ok: true, access: null, serverNow: NOW });
+    mount({ initialItems: [manual(1), item(2)] });
+    openRemove('pessoa1@exemplo.com.br');
+    await confirm();
+    await waitFor(() =>
+      expect(document.querySelector('[data-access-row="pessoa1@exemplo.com.br"]')).toBeNull(),
+    );
+    expect(rowOf('pessoa2@exemplo.com.br')).toBeTruthy();
+    expect(actions.removeRelease).toHaveBeenCalledWith('pessoa1@exemplo.com.br');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Liberação de pessoa1@exemplo.com.br removida.',
+    });
+  });
+
+  it('settles the remaining row in place when the server still has one', async () => {
+    actions.removeRelease.mockResolvedValue({
+      ok: true,
+      access: item(1, { state: 'subscription_pending' }),
+      serverNow: NOW,
+    });
+    mount({ initialItems: [manual(1)] });
+    openRemove('pessoa1@exemplo.com.br');
+    await confirm();
+    await waitFor(() =>
+      expect(rowOf('pessoa1@exemplo.com.br').textContent).toContain('Assinatura pendente'),
+    );
+    expect(rowOf('pessoa1@exemplo.com.br').textContent).toContain('Kiwify');
+  });
+
+  it('a vanished row (404) toasts "Este acesso não existe mais." and refreshes', async () => {
+    actions.removeRelease.mockResolvedValue({ ok: false, code: 'gone' });
+    mount({ initialItems: [manual(1), item(2)] });
+    openRemove('pessoa1@exemplo.com.br');
+    await confirm();
+    await waitFor(() =>
+      expect(document.querySelector('[data-access-row="pessoa1@exemplo.com.br"]')).toBeNull(),
+    );
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Este acesso não existe mais.',
+    });
+    expect(nav.refresh).toHaveBeenCalled();
+  });
+});
+
+describe('AccessList: the gate flag reaches the sheet (assumption A-P10)', () => {
+  const NOTE = 'O bloqueio só vale enquanto “Exigir assinatura para entrar” está ligado.';
+  const blocked = item(1, { state: 'blocked', source: 'manual', validUntil: null });
+
+  it('says a block only counts while the gate is on, when it is off', () => {
+    mount({ initialItems: [blocked], gateRequired: false });
+    fireEvent.click(rowOf('pessoa1@exemplo.com.br'));
+    expect(screen.getByText(NOTE)).toBeTruthy();
+  });
+
+  it('says nothing about it while the gate is on', () => {
+    mount({ initialItems: [blocked], gateRequired: true });
+    fireEvent.click(rowOf('pessoa1@exemplo.com.br'));
+    expect(screen.queryByText(NOTE)).toBeNull();
   });
 });

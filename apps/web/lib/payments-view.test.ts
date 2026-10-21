@@ -332,3 +332,22 @@ describe('the Acessos URL (UI-D-517): ?q= and ?status= are read defensively and 
     );
   });
 });
+
+describe('accessSheetView: the block note while the gate is off (assumption A-P10)', () => {
+  it('adds the line after the blocked note only when the gate is off', () => {
+    const blocked = access({ source: 'manual', state: 'blocked', validUntil: null });
+    expect(accessSheetView(blocked, t, { ...ACCESS_CTX, gateRequired: false }).notes).toEqual([
+      'Um bloqueio manual vale mais que a assinatura.',
+      'O bloqueio só vale enquanto “Exigir assinatura para entrar” está ligado.',
+    ]);
+    expect(accessSheetView(blocked, t, { ...ACCESS_CTX, gateRequired: true }).notes).toEqual([
+      'Um bloqueio manual vale mais que a assinatura.',
+    ]);
+  });
+
+  it('never adds it to a row that is not blocked', () => {
+    expect(accessSheetView(access(), t, { ...ACCESS_CTX, gateRequired: false }).notes).toEqual([
+      'Este acesso vem do Kiwify e muda sozinho com a assinatura.',
+    ]);
+  });
+});

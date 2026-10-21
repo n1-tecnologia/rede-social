@@ -14,10 +14,11 @@ import { accessSheetView, type PaymentsTranslator } from '@/lib/payments-view';
  * server's answer. The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { toast, block, unblock } = vi.hoisted(() => ({
+const { toast, block, unblock, removeRelease } = vi.hoisted(() => ({
   toast: { show: vi.fn(), dismiss: vi.fn() },
   block: vi.fn(),
   unblock: vi.fn(),
+  removeRelease: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -45,6 +46,7 @@ vi.mock('@rede-social/ui', async (orig) => ({
 vi.mock('./actions', () => ({
   blockAccessAction: block,
   unblockAccessAction: unblock,
+  removeReleaseAction: removeRelease,
 }));
 
 const { AccessSheet } = await import('./AccessSheet');
@@ -75,13 +77,13 @@ function item(patch: Partial<AccessItem> = {}): AccessItem {
 const MANUAL = item({ source: 'manual', validUntil: null, hasAccount: false });
 const BLOCKED = item({ source: 'manual', state: 'blocked', validUntil: null });
 
-function mount(access: AccessItem) {
+function mount(access: AccessItem, ctx: Partial<typeof CTX> = {}) {
   const onSettled = vi.fn();
   const onClose = vi.fn();
   render(
     <AccessSheet
       open
-      view={accessSheetView(access, t, CTX)}
+      view={accessSheetView(access, t, { ...CTX, ...ctx })}
       tenantName="Rede Demo"
       onClose={onClose}
       onSettled={onSettled}
@@ -97,6 +99,7 @@ beforeEach(() => {
   toast.show.mockReset();
   block.mockReset();
   unblock.mockReset();
+  removeRelease.mockReset();
 });
 
 afterEach(cleanup);
@@ -285,5 +288,122 @@ describe('AccessSheet: unblock (no dialog, it only restores the previous state)'
     await waitFor(() =>
       expect(onSettled).toHaveBeenCalledWith({ kind: 'gone', email: 'ana@exemplo.com.br' }),
     );
+  });
+});
+
+describe('AccessSheet: remove a manual release (D-504: removing is not blocking)', () => {
+  it('offers "Remover liberação" as a ghost danger action under "Bloquear acesso", on a manual release only', () => {
+    mount(MANUAL);
+    const remove = button('Remover liberação');
+    expect(remove.className).toContain('text-danger');
+    expect(remove.className).toContain('w-full');
+    const labels = Array.from(remove.parentElement?.querySelectorAll('button') ?? []).map(
+      (b) => b.textContent,
+    );
+    expect(labels).toEqual(['Bloquear acesso', 'Remover liberação']);
+  });
+
+  it('opens the danger dialog with the contract words and sends only the e-mail', async () => {
+    removeRelease.mockResolvedValue({ ok: true, access: null, serverNow: NOW });
+    const { onSettled } = mount(MANUAL);
+    fireEvent.click(button('Remover liberação'));
+    const confirm = dialog();
+    expect(
+      within(confirm).getByRole('heading', { name: 'Remover a liberação de ana@exemplo.com.br?' }),
+    ).toBeTruthy();
+    expect(
+      within(confirm).getByText(
+        'Sem uma assinatura ativa, esta pessoa deixa de conseguir entrar em Rede Demo. Perfil e publicações continuam guardados.',
+      ),
+    ).toBeTruthy();
+    expect(removeRelease).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Remover' }));
+    });
+    await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+    expect(removeRelease).toHaveBeenCalledWith('ana@exemplo.com.br');
+    expect(onSettled.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'changed',
+      change: 'removeRelease',
+      access: null,
+    });
+  });
+
+  it('reports the remaining row when the server still has one for the e-mail', async () => {
+    removeRelease.mockResolvedValue({ ok: true, access: item(), serverNow: NOW });
+    const { onSettled } = mount(MANUAL);
+    fireEvent.click(button('Remover liberação'));
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Remover' }));
+    });
+    await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+    expect(onSettled.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'changed',
+      change: 'removeRelease',
+      access: { state: 'active', source: 'kiwify' },
+    });
+  });
+
+  it('cancel writes nothing', () => {
+    const { onSettled } = mount(MANUAL);
+    fireEvent.click(button('Remover liberação'));
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancelar' }));
+    expect(removeRelease).not.toHaveBeenCalled();
+    expect(onSettled).not.toHaveBeenCalled();
+  });
+
+  it('a vanished row (404) is gone, a lost permission is forbidden, anything else toasts the generic line', async () => {
+    const { onSettled } = mount(MANUAL);
+    removeRelease.mockResolvedValueOnce({ ok: false, code: 'gone' });
+    fireEvent.click(button('Remover liberação'));
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Remover' }));
+    });
+    await waitFor(() =>
+      expect(onSettled).toHaveBeenCalledWith({ kind: 'gone', email: 'ana@exemplo.com.br' }),
+    );
+
+    removeRelease.mockResolvedValueOnce({ ok: false, code: 'forbidden' });
+    fireEvent.click(button('Remover liberação'));
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Remover' }));
+    });
+    await waitFor(() => expect(onSettled).toHaveBeenCalledWith({ kind: 'forbidden' }));
+
+    removeRelease.mockResolvedValueOnce({ ok: false, code: 'generic' });
+    fireEvent.click(button('Remover liberação'));
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Remover' }));
+    });
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message: 'Algo deu errado. Tente novamente.',
+      }),
+    );
+    expect(onSettled).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('AccessSheet: the block note while the gate is off (assumption A-P10)', () => {
+  const BLOCK_OFF = 'O bloqueio só vale enquanto “Exigir assinatura para entrar” está ligado.';
+
+  it('adds the line under the blocked note ONLY when the gate is off', () => {
+    mount(BLOCKED, { gateRequired: false });
+    const notes = Array.from(screen.getByRole('dialog').querySelectorAll('p')).map(
+      (p) => p.textContent,
+    );
+    const blockedAt = notes.indexOf('Um bloqueio manual vale mais que a assinatura.');
+    expect(blockedAt).toBeGreaterThanOrEqual(0);
+    expect(notes[blockedAt + 1]).toBe(BLOCK_OFF);
+  });
+
+  it('draws no such line while the gate is on, nor on a row that is not blocked', () => {
+    mount(BLOCKED, { gateRequired: true });
+    expect(screen.queryByText(BLOCK_OFF)).toBeNull();
+    cleanup();
+    mount(item(), { gateRequired: false });
+    expect(screen.queryByText(BLOCK_OFF)).toBeNull();
   });
 });
