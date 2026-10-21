@@ -23,13 +23,20 @@ import {
   PageHeader,
   useToast,
 } from '@rede-social/ui';
-import { ChevronRight, Image as ImageIcon, Loader, Video, X } from 'lucide-react';
+import { ChevronRight, Image as ImageIcon, Loader, Video, Volume2, VolumeX, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { publishStoryAction } from '@/app/(app)/stories/story-actions';
 import { useAssetReadiness } from '@/components/media/useAssetReadiness';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import {
+  forgetVideo,
+  playVideo,
+  setVideoSoundWanted,
+  useVideoSoundAudible,
+  videoSoundAudible,
+} from '@/components/media/video-sound';
 import { leaveForm, returnAfterSave } from '@/lib/form-exit';
 
 /**
@@ -40,7 +47,10 @@ import { leaveForm, returnAfterSave } from '@/lib/form-exit';
  * the story** — the same frame a member will see, with the caption as a transparent field overlaid
  * at the bottom. That is not decoration: composing inside the real frame is the only affordance that
  * prevents a cropped or unreadable story, and a story is NOT editable after publishing (D-81), so
- * the caption is part of the publish step rather than something to fix later.
+ * the caption is part of the publish step rather than something to fix later. Since 2026-10-20 (the
+ * client's FRONT.pdf) a video preview plays like the viewer's: no player bar, WITH sound by the rule
+ * every video of the app follows (`video-sound`), and the viewer's sound button in the top-right
+ * corner ("Silenciar" / "Ativar som").
  *
  * **Each state declares the shell chrome it hides** (`data-shell-hide` on the form, read by the
  * shell's own stylesheet). Before a pick it is a task screen with its own X, so the floating
@@ -184,6 +194,9 @@ export function StoryComposer({
   const [refused, setRefused] = useState<ReadonlySet<string>>(() => new Set());
   /** The object URL currently held, so it is revoked exactly once when it is replaced or dropped. */
   const preview = useRef<string | null>(null);
+  /** The video preview's element, played through `video-sound` (2026-10-20). */
+  const previewVideo = useRef<HTMLVideoElement | null>(null);
+  const audible = useVideoSoundAudible();
 
   useEffect(
     () => () => {
@@ -231,6 +244,21 @@ export function StoryComposer({
   const readiness = useAssetReadiness(
     picked?.kind === 'video' && picked.assetId ? picked.assetId : null,
   );
+
+  // 2026-10-20 (the client's FRONT.pdf): the video preview plays WITH sound, by the rule every video
+  // of the app follows (`video-sound`). A browser that refuses the sound keeps it playing muted until
+  // a touch on it; one that refuses even that plays it at the next touch (`retryOnGesture`).
+  const previewSrc = picked?.kind === 'video' ? picked.previewUrl : null;
+  useEffect(() => {
+    const element = previewVideo.current;
+    if (!element || !previewSrc) return;
+    let current = true;
+    playVideo(element, { stillWanted: () => current, retryOnGesture: true });
+    return () => {
+      current = false;
+      forgetVideo(element);
+    };
+  }, [previewSrc]);
 
   const active = picked?.kind === 'video' ? video : photo;
   const uploading = active.state === 'progress' || active.state === 'preparing';
@@ -589,12 +617,15 @@ export function StoryComposer({
                 className="absolute inset-0 h-full w-full object-contain"
               />
             ) : picked.previewUrl ? (
+              // No `controls` (no player bar) and no `muted`/`autoPlay`: the effect above plays it
+              // with sound, and a touch on it turns the sound on when the browser held it back.
+              /* biome-ignore lint/a11y/useMediaCaption: the admin's own file, previewed before it is published; there is no caption track to offer for it */
               <video
+                ref={previewVideo}
                 data-testid="story-preview"
+                data-video-surface=""
                 src={picked.previewUrl}
-                muted
                 playsInline
-                autoPlay
                 loop
                 className="absolute inset-0 h-full w-full object-contain"
               />
@@ -617,6 +648,23 @@ export function StoryComposer({
                 className="bg-black/35 text-white"
               />
             </div>
+
+            {/* The preview's sound, the viewer's own control (the visit's choice, `video-sound`). */}
+            {previewSrc ? (
+              <div
+                className="absolute right-3 z-10"
+                style={{ top: 'calc(var(--safe-top) + 0.5rem)' }}
+              >
+                <IconButton
+                  icon={audible ? Volume2 : VolumeX}
+                  label={audible ? t('viewer.mute') : t('viewer.unmute')}
+                  onClick={() => setVideoSoundWanted(!videoSoundAudible())}
+                  data-video-sound=""
+                  data-testid="story-preview-sound"
+                  className="bg-black/35 text-white"
+                />
+              </div>
+            ) : null}
 
             {formError ? (
               <p

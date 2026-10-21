@@ -486,3 +486,128 @@ describe('the photo disc — a face with the tenant identity behind it (#2b, UI-
     });
   });
 });
+
+/* ── 2026-10-20: the desktop arrows (UI-D-47 as amended, the client's FRONT.pdf) ──────────────────
+ *
+ * happy-dom does no layout, so the row's three numbers (`scrollWidth`, `clientWidth`, `scrollLeft`)
+ * are stubbed on the list and its `scrollBy` is a spy that moves `scrollLeft` and fires the `scroll`
+ * the browser would. What is real: the measure, the two buttons and their states.
+ */
+describe('StoriesStrip — the desktop arrows (UI-D-47 amended, 2026-10-20)', () => {
+  const LABELS = { previous: 'previous-label', next: 'next-label' };
+  const ten = () => Array.from({ length: 10 }, (_, k) => asset(k + 1));
+
+  /** Stubs the row's widths on every `ul` for one case; the returned function restores them. */
+  function rowWidths(scrollWidth: number, clientWidth: number): () => void {
+    const saved = (['scrollWidth', 'clientWidth'] as const).map(
+      (key) => [key, Object.getOwnPropertyDescriptor(HTMLUListElement.prototype, key)] as const,
+    );
+    Object.defineProperty(HTMLUListElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get: () => scrollWidth,
+    });
+    Object.defineProperty(HTMLUListElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => clientWidth,
+    });
+    return () => {
+      for (const [key, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(HTMLUListElement.prototype, key, descriptor);
+        else delete (HTMLUListElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    };
+  }
+
+  it('A1. without scrollLabels the row is exactly the list it always was: no wrapper, no arrow', () => {
+    const restore = rowWidths(1000, 400);
+    try {
+      const { container } = strip({ circles: ten() });
+      expect(container.firstElementChild?.tagName).toBe('UL');
+      expect(container.querySelector('[data-stories-scroll]')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('A2. a row that fits draws no arrow, even with the labels', () => {
+    const restore = rowWidths(400, 400);
+    try {
+      strip({ circles: [asset(1), asset(2)], scrollLabels: LABELS });
+      expect(screen.getByRole('list', { name: 'strip-region' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: LABELS.previous })).toBeNull();
+      expect(screen.queryByRole('button', { name: LABELS.next })).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('A3. an overflowing row gets two desktop-only arrows: previous disabled at the start, a page per press, next disabled at the end', () => {
+    const restore = rowWidths(1000, 400);
+    try {
+      strip({ circles: ten(), scrollLabels: LABELS });
+      const list = screen.getByRole('list', { name: 'strip-region' });
+      const previous = screen.getByRole('button', { name: LABELS.previous });
+      const next = screen.getByRole('button', { name: LABELS.next });
+
+      // Desktop only, out of the Tab order, and naming the list they move.
+      for (const arrow of [previous, next]) {
+        expect(arrow.className).toContain('hidden');
+        expect(arrow.className).toContain('md:flex');
+        expect(arrow).toHaveAttribute('tabindex', '-1');
+        expect(arrow).toHaveAttribute('aria-controls', list.id);
+      }
+      expect(previous).toHaveAttribute('data-stories-scroll', 'previous');
+      expect(next).toHaveAttribute('data-stories-scroll', 'next');
+      expect(previous).toBeDisabled();
+      expect(next).toBeEnabled();
+
+      let left = 0;
+      Object.defineProperty(list, 'scrollLeft', {
+        configurable: true,
+        get: () => left,
+        set: (value: number) => {
+          left = value;
+        },
+      });
+      const scrollBy = vi.fn((options: ScrollToOptions) => {
+        left = Math.max(0, Math.min(600, left + (options.left ?? 0)));
+        list.dispatchEvent(new Event('scroll'));
+      });
+      list.scrollBy = scrollBy as unknown as typeof list.scrollBy;
+
+      // One page is the visible width less one circle's worth: 400 − 80.
+      fireEvent.click(next);
+      expect(scrollBy).toHaveBeenLastCalledWith({ left: 320, behavior: 'smooth' });
+      expect(previous).toBeEnabled();
+      expect(next).toBeEnabled();
+
+      fireEvent.click(next);
+      expect(left).toBe(600);
+      expect(next).toBeDisabled();
+
+      fireEvent.click(previous);
+      expect(scrollBy).toHaveBeenLastCalledWith({ left: -320, behavior: 'smooth' });
+      expect(next).toBeEnabled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('A4. the circles keep their order and their own buttons inside the scrollable row', () => {
+    const restore = rowWidths(1000, 400);
+    try {
+      const onOpen = vi.fn();
+      strip({ circles: [OWN, asset(1), asset(2)], scrollLabels: LABELS, onOpen });
+      const row = screen.getByRole('list', { name: 'strip-region' });
+      expect(
+        within(row)
+          .getAllByRole('listitem')
+          .map((item) => item.textContent),
+      ).toEqual(['own-label', 'label-1', 'label-2']);
+      fireEvent.click(within(row).getByRole('button', { name: 'open-2' }));
+      expect(onOpen).toHaveBeenCalledExactlyOnceWith(0, 1);
+    } finally {
+      restore();
+    }
+  });
+});

@@ -27,6 +27,11 @@
       "note": "Esta comunidade foi arquivada. Você ainda pode ler as publicações.",
       "reactivate": "Reativar comunidade"
     },
+    "delete": {
+      "action": "Excluir comunidade",
+      "soon": "Em breve",
+      "hint": "A exclusão de comunidades ainda não está disponível."
+    },
     "emptyPosts": {
       "title": "Nada publicado ainda",
       "body": "As publicações desta comunidade vão aparecer aqui."

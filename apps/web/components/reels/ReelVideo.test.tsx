@@ -8,6 +8,12 @@ import {
   rememberVideoRatio,
   resetVideoRatios,
 } from '@/components/media/video-ratio';
+import {
+  resetVideoSound,
+  setVideoSoundWanted,
+  videoSoundAudible,
+  videoSoundWanted,
+} from '@/components/media/video-sound';
 
 /**
  * The Reels VIDEO element, on its own (REELS-06, UI-D-83, UI-D-85, UI-D-86, D-125, D-126).
@@ -23,6 +29,10 @@ import {
  *    preload per page and the fit variable.
  *  - **Its `play` is a `vi.fn` each case configures**: resolving, refusing with `NotAllowedError`,
  *    aborting with `AbortError`, or refusing twice.
+ *  - **2026-10-20 (the client's FRONT.pdf):** every play goes through `video-sound`, REAL and reset
+ *    before each case: a Reel plays WITH the visit's sound, a refused sound keeps it playing muted
+ *    (never a report of its own: `onSoundRefused` is gone), and the host's controller takes no
+ *    sound argument.
  *
  * What is stubbed: the VENDOR PACKAGE (a third party's custom element, which cannot register under
  * happy-dom). What is real: the element, its observer, its listeners, its controller and its timer.
@@ -92,7 +102,6 @@ function makeHandlers() {
     onWaiting: vi.fn<(postId: string) => void>(),
     onError: vi.fn<(postId: string) => void>(),
     onBlocked: vi.fn<(postId: string) => void>(),
-    onSoundRefused: vi.fn<() => void>(),
   };
 }
 
@@ -201,6 +210,7 @@ beforeEach(() => {
   standIn.videoWidth = 0;
   standIn.videoHeight = 0;
   resetVideoRatios();
+  resetVideoSound();
   play.mockResolvedValue(undefined);
 });
 
@@ -212,7 +222,7 @@ afterEach(() => {
 });
 
 describe('ReelVideo — props handed to the vendor element (D-125, D-126, UI-D-83)', () => {
-  it('passes both muted-preference opt-outs, loop, nohotkeys, playsInline and on-demand, with no autoPlay and no vendor chrome', async () => {
+  it('passes both muted-preference opt-outs, loop, nohotkeys, playsInline and on-demand, with no autoPlay, no muted and no vendor chrome', async () => {
     renderReel(makeHandlers());
     const props = await lastProps();
 
@@ -228,12 +238,14 @@ describe('ReelVideo — props handed to the vendor element (D-125, D-126, UI-D-8
       nohotkeys: true,
       loop: true,
       playsInline: true,
-      muted: true,
       streamType: 'on-demand',
     });
     expect(props && 'autoPlay' in props).toBe(false);
+    // 2026-10-20: the sound is `video-sound`'s, set on the element at every play.
+    expect(props && 'muted' in props).toBe(false);
     expect(props?.className).toBeUndefined();
     expect((props?.style as Record<string, string> | undefined)?.['--controls']).toBe('none');
+    expect((props?.style as Record<string, string> | undefined)?.['--dialog']).toBe('none');
   });
 
   it('preload is auto on the current page and metadata on a neighbour', async () => {
@@ -408,48 +420,51 @@ describe('ReelVideo — the controller the gesture calls (UI-D-85, RESEARCH Patt
     expect(typeof handlers.onController.mock.calls.at(-1)?.[1]?.start).toBe('function');
   });
 
-  it('start(false) rewinds to 0, mutes and calls play once', async () => {
+  it('start() rewinds to 0 and calls play once, WITH the visit’s sound (2026-10-20)', async () => {
+    const handlers = makeHandlers();
+    renderReel(handlers);
+    const player = await mountedPlayer();
+    await flush();
+
+    controllerOf(handlers).start();
+    await flush();
+
+    expect(player.currentTime).toBe(0);
+    expect(player.muted).toBe(false);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('with the visit muted, start() plays muted', async () => {
+    setVideoSoundWanted(false);
     const handlers = makeHandlers();
     renderReel(handlers);
     const player = await mountedPlayer();
     await flush();
 
     player.muted = false;
-    controllerOf(handlers).start(false);
+    controllerOf(handlers).start();
     await flush();
 
-    expect(player.currentTime).toBe(0);
     expect(player.muted).toBe(true);
     expect(play).toHaveBeenCalledTimes(1);
   });
 
-  it('start(true) unmutes', async () => {
-    const handlers = makeHandlers();
-    renderReel(handlers);
-    const player = await mountedPlayer();
-    await flush();
-
-    controllerOf(handlers).start(true);
-    await flush();
-
-    expect(player.muted).toBe(false);
-    expect(play).toHaveBeenCalledTimes(1);
-  });
-
-  it('a NotAllowedError with sound falls back to muted, reports the refusal and plays again', async () => {
+  it('a NotAllowedError with sound keeps the Reel PLAYING muted: no report, the visit’s sound still on', async () => {
     play.mockRejectedValueOnce(refusal('NotAllowedError')).mockResolvedValueOnce(undefined);
     const handlers = makeHandlers();
     renderReel(handlers);
     const player = await mountedPlayer();
     await flush();
 
-    controllerOf(handlers).start(true);
+    controllerOf(handlers).start();
     await flush();
 
     expect(player.muted).toBe(true);
-    expect(handlers.onSoundRefused).toHaveBeenCalledTimes(1);
     expect(play).toHaveBeenCalledTimes(2);
     expect(handlers.onBlocked).not.toHaveBeenCalled();
+    // Held back by the browser, not muted by the member: the host's button reads "Ativar som".
+    expect(videoSoundWanted()).toBe(true);
+    expect(videoSoundAudible()).toBe(false);
   });
 
   it('a muted retry that is also refused reports blocked once', async () => {
@@ -461,15 +476,14 @@ describe('ReelVideo — the controller the gesture calls (UI-D-85, RESEARCH Patt
     await mountedPlayer();
     await flush();
 
-    controllerOf(handlers).start(true);
+    controllerOf(handlers).start();
     await flush();
 
-    expect(handlers.onSoundRefused).toHaveBeenCalledTimes(1);
     expect(handlers.onBlocked).toHaveBeenCalledTimes(1);
     expect(handlers.onBlocked).toHaveBeenCalledWith(POST_ID);
   });
 
-  it('an AbortError after the host paused (a fast swipe interrupting play) is final: not blocked, not a sound refusal, not retried', async () => {
+  it('an AbortError after the host paused (a fast swipe interrupting play) is final: not blocked, not retried', async () => {
     play.mockRejectedValueOnce(refusal('AbortError'));
     const handlers = makeHandlers();
     renderReel(handlers);
@@ -477,17 +491,17 @@ describe('ReelVideo — the controller the gesture calls (UI-D-85, RESEARCH Patt
     await flush();
 
     const controller = controllerOf(handlers);
-    controller.start(true);
+    controller.start();
     // The swipe leaves the page in the same gesture: the host pauses before the rejection lands.
     controller.pause();
     await flush();
 
     expect(handlers.onBlocked).not.toHaveBeenCalled();
-    expect(handlers.onSoundRefused).not.toHaveBeenCalled();
     expect(play).toHaveBeenCalledTimes(1);
+    expect(pause).toHaveBeenCalledTimes(1);
   });
 
-  it('05.3-09: an AbortError from the vendor attaching its source re-issues play with the element’s current sound state', async () => {
+  it('05.3-09: an AbortError from the vendor attaching its source re-issues play with the visit’s sound', async () => {
     // The browser's order on a page's first mount: play() with no source, the vendor sets its
     // source, the media load algorithm rejects the pending play with AbortError.
     play.mockRejectedValueOnce(refusal('AbortError'));
@@ -496,13 +510,12 @@ describe('ReelVideo — the controller the gesture calls (UI-D-85, RESEARCH Patt
     const element = await mountedPlayer();
     await flush();
 
-    controllerOf(handlers).start(false);
+    controllerOf(handlers).start();
     await flush();
 
     expect(play).toHaveBeenCalledTimes(2);
-    expect(element.muted).toBe(true);
+    expect(element.muted).toBe(false);
     expect(handlers.onBlocked).not.toHaveBeenCalled();
-    expect(handlers.onSoundRefused).not.toHaveBeenCalled();
   });
 
   it('05.3-09: a source that keeps aborting is retried at most twice, then left alone', async () => {
@@ -512,7 +525,7 @@ describe('ReelVideo — the controller the gesture calls (UI-D-85, RESEARCH Patt
     await mountedPlayer();
     await flush();
 
-    controllerOf(handlers).start(false);
+    controllerOf(handlers).start();
     await flush(12);
 
     expect(play).toHaveBeenCalledTimes(3);
@@ -526,14 +539,13 @@ describe('ReelVideo — the controller the gesture calls (UI-D-85, RESEARCH Patt
     await mountedPlayer();
     await flush();
 
-    controllerOf(handlers).start(false);
+    controllerOf(handlers).start();
     await flush();
 
     expect(handlers.onBlocked).toHaveBeenCalledTimes(1);
-    expect(handlers.onSoundRefused).not.toHaveBeenCalled();
   });
 
-  it('resume keeps the position; pause and setMuted reach the element', async () => {
+  it('resume keeps the position; muting the visit reaches the playing Reel; pause reaches the element', async () => {
     const handlers = makeHandlers();
     renderReel(handlers);
     const player = await mountedPlayer();
@@ -541,17 +553,17 @@ describe('ReelVideo — the controller the gesture calls (UI-D-85, RESEARCH Patt
     const controller = controllerOf(handlers);
 
     player.currentTime = 3;
-    controller.resume(true);
+    controller.resume();
     await flush();
     expect(player.currentTime).toBe(3);
     expect(player.muted).toBe(false);
     expect(play).toHaveBeenCalledTimes(1);
 
+    setVideoSoundWanted(false);
+    expect(player.muted).toBe(true);
+
     controller.pause();
     expect(pause).toHaveBeenCalledTimes(1);
-
-    controller.setMuted(true);
-    expect(player.muted).toBe(true);
   });
 });
 
@@ -622,7 +634,7 @@ describe('ReelVideo — the autoplay check (UI-D-86)', () => {
     expect(handlers.onBlocked).not.toHaveBeenCalled();
   });
 
-  it('resume on an element that is already playing (the sound toggle) is not reported blocked', async () => {
+  it('resume on an element that is already playing (a resume that only re-asserts it) is not reported blocked', async () => {
     const handlers = makeHandlers();
     renderReel(handlers, { current: true });
     const player = (await mountedPlayer()) as MediaLikeElement & { paused?: boolean };
@@ -634,7 +646,7 @@ describe('ReelVideo — the autoplay check (UI-D-86)', () => {
     player.paused = false;
     vi.useFakeTimers();
     act(() => {
-      controllerOf(handlers).resume(true);
+      controllerOf(handlers).resume();
     });
     act(() => {
       vi.advanceTimersByTime(1000);
@@ -797,7 +809,7 @@ describe('ReelVideo — a re-minted credential (WR-02, D-44, D-125)', () => {
     );
 
     second.currentTime = 12;
-    secondController?.start(false);
+    secondController?.start();
     await flush();
     expect(second.currentTime).toBe(0);
     expect(play).toHaveBeenCalled();

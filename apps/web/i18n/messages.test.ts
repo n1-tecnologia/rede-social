@@ -4698,3 +4698,55 @@ describe('09.2-21 - the member held-out catalogs', () => {
     }
   });
 });
+
+/**
+ * 2026-10-20 — the client's FRONT.pdf, the stories half: the desktop arrows of the row, the viewer's
+ * share and "Mais opções", and the not-found screen of a story link. The share's toast is the post's
+ * own sentence ("Link copiado."), and the not-found body names the tenant like the post's does.
+ * None of them carries an em dash (the copy rule).
+ */
+describe('2026-10-20 — the stories strings of the FRONT.pdf corrections', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['stories.scroll.previous', 'Voltar na fileira'],
+    ['stories.scroll.next', 'Avançar na fileira'],
+    ['stories.viewer.share', 'Compartilhar'],
+    ['stories.viewer.linkCopied', 'Link copiado.'],
+    ['stories.viewer.more', 'Mais opções'],
+    ['stories.notFound.title', 'Story não encontrado'],
+    ['stories.notFound.body', 'Este link não existe mais ou não é de {tenant}.'],
+    ['stories.notFound.cta', 'Ir para o início'],
+  ])('%s is the agreed string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('the share toast and the not-found screen say what the post’s do', () => {
+    expect(lookup('stories.viewer.linkCopied')).toBe(lookup('feed.share.copied'));
+    expect(lookup('stories.viewer.share')).toBe(lookup('feed.actions.share'));
+    expect(lookup('stories.viewer.more')).toBe(lookup('feed.actions.more'));
+    expect(lookup('stories.notFound.body')).toBe(lookup('feed.notFound.body'));
+    expect(lookup('stories.notFound.cta')).toBe(lookup('feed.notFound.cta'));
+  });
+
+  it('no new string carries an em dash', () => {
+    for (const key of [
+      'stories.scroll.previous',
+      'stories.scroll.next',
+      'stories.viewer.share',
+      'stories.viewer.linkCopied',
+      'stories.viewer.more',
+      'stories.notFound.title',
+      'stories.notFound.body',
+      'stories.notFound.cta',
+    ]) {
+      expect(String(lookup(key)), key).not.toContain('—');
+    }
+  });
+});

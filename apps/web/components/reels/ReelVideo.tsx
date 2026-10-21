@@ -8,6 +8,7 @@ import {
 import dynamic from 'next/dynamic';
 import { type MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { loadPoster, rememberVideoRatio, useKnownVideoRatio } from '@/components/media/video-ratio';
+import { forgetVideo, pauseVideo, playVideo } from '@/components/media/video-sound';
 
 /**
  * `<mux-player>` is a CUSTOM ELEMENT that registers itself against `window.customElements` at import
@@ -19,14 +20,14 @@ const MuxPlayer = dynamic(() => import('@mux/mux-player-react'), { ssr: false })
 /**
  * What the host drives. The pager's gesture calls `start` SYNCHRONOUSLY for the page it activates,
  * so a `play()` with sound runs inside the user's own touch or key event (WebKit, RESEARCH Pitfall 1).
+ * The sound is the visit's (`video-sound`, 2026-10-20): every play takes it, so the host passes none.
  */
 export interface ReelVideoController {
-  /** Rewind to 0 (UI-D-92: a page returned to restarts), apply the sound state, play. */
-  start(wantSound: boolean): void;
+  /** Rewind to 0 (UI-D-92: a page returned to restarts) and play, with the visit's sound. */
+  start(): void;
   pause(): void;
-  /** Apply the sound state and play from where the element stopped. */
-  resume(wantSound: boolean): void;
-  setMuted(muted: boolean): void;
+  /** Play from where the element stopped, with the visit's sound. */
+  resume(): void;
 }
 
 export interface ReelVideoProps {
@@ -45,14 +46,7 @@ export interface ReelVideoProps {
   onWaiting(postId: string): void;
   onError(postId: string): void;
   onBlocked(postId: string): void;
-  onSoundRefused(): void;
 }
-
-/**
- * How many times one start/resume re-issues a `play()` that a SOURCE LOAD aborted (see `play`). The
- * vendor sets its source at most twice on mount, so two is enough and a looping source still ends.
- */
-const PLAY_ABORT_RETRIES = 2;
 
 /** The standard media-element surface this element uses on the vendor node. */
 type PlayableElement = HTMLElement & {
@@ -100,12 +94,6 @@ function paintBackdrop(canvas: HTMLCanvasElement, image: HTMLImageElement): void
   canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
 }
 
-function errorName(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null) return undefined;
-  const name = (error as { name?: unknown }).name;
-  return typeof name === 'string' ? name : undefined;
-}
-
 /** media-chrome may toggle play on a MOUSE click of the video by itself; the host decides here. */
 function stopVendorClick(event: MouseEvent<HTMLDivElement>) {
   event.stopPropagation();
@@ -114,33 +102,38 @@ function stopVendorClick(event: MouseEvent<HTMLDivElement>) {
 /**
  * One Reel's VIDEO, full-bleed on the black stage (REELS-06, UI-D-83, UI-D-85, UI-D-86).
  *
- * **Why not `VideoPlayer` or `StoryVideo`.** `VideoPlayer` is the feed's 16:9 card with vendor
- * controls, a status pill and its own token mint. `StoryVideo` is a segment clock: it plays once and
+ * **Why not `VideoPlayer` or `StoryVideo`.** `VideoPlayer` is the media library's 16:9 card with a
+ * status pill and its own token mint. `StoryVideo` is a segment clock: it plays once and
  * hands over at the end. A Reel LOOPS (D-125: no `ended` handler, never asks the host to advance),
  * has no clock, and must be started by the pager's gesture through a controller. This element keeps
  * `StoryVideo`'s proven bridge (a `MutationObserver` that attaches to the late-mounted `mux-player`,
  * because `next/dynamic` does not forward refs) and nothing else.
  *
  * **The two muted-preference opt-outs** (RESEARCH Pitfall 2, D-126). media-chrome stores
- * `media-chrome-pref-muted` when a member mutes any player (the feed card's controls do), and forces
- * an unmuted element back to that stored value unless the element opts out. Without both opt-outs
- * (the muted and the volume preference props below), a member who once muted a feed card would see
- * every Reel re-muted after they turned sound on. The hotkeys opt-out keeps the controller's own
- * Space/`m`/arrow handling from racing the route's keyboard map.
+ * `media-chrome-pref-muted` when a member mutes any player, and forces an unmuted element back to
+ * that stored value unless the element opts out. The muted and the volume preference props below
+ * stay, and since 2026-10-20 `video-sound` also drops both stored keys once per page, because in
+ * mux-player 3.13.4 the opt-out does not reach media-chrome's controller. The hotkeys opt-out keeps
+ * the controller's own Space/`m`/arrow handling from racing the route's keyboard map.
  *
  * **Play is imperative, from the gesture** (RESEARCH Pattern 4). There is no `autoPlay`: the host
  * calls `start` inside the pager's `onActivate`, which runs synchronously in the swipe, key or click
- * handler. An `AbortError` after the host paused (a fast swipe) is ignored; one caused by the
- * vendor attaching its source is re-issued (see `play`). A `NotAllowedError`
- * with sound falls back to muted, reports `onSoundRefused` and plays again, reporting `onBlocked`
- * only if that also fails. Anything else is `onBlocked`. Low Power Mode can leave `play()` pending
- * rather than rejecting, so a second detector runs: after `canplay` on the current page, no
- * `playing` within `REELS_AUTOPLAY_CHECK_MS` reports `onBlocked` (UI-D-86, from `StoryViewer`).
+ * handler. Every play goes through `video-sound` (2026-10-20, the client's FRONT.pdf), the rule the
+ * app's videos share: WITH the visit's sound (on unless the member muted a video), a refusal of the
+ * sound outside a gesture keeps the Reel PLAYING muted (the sound button then reads "Ativar som";
+ * it, or the next swipe's `touchend` in the host, turns the sound on), a refusal even muted is
+ * `onBlocked`, and an `AbortError` is re-issued (at most twice) while the host still wants the page
+ * playing, never after it paused (a fast swipe). The frame is NOT a `data-video-surface`: a tap
+ * here pauses (UI-D-86), and a tap that also unmuted would pause the sound it just turned on. Low
+ * Power Mode can leave `play()` pending rather than rejecting, so a second detector runs: after
+ * `canplay` on the current page, no `playing` within `REELS_AUTOPLAY_CHECK_MS` reports `onBlocked`
+ * (UI-D-86, from `StoryViewer`).
  *
  * **The fit rides `--media-object-fit`** (UI-D-83). The custom media element reads
  * `object-fit: var(--media-object-fit, contain)` for its inner video and its poster; a `className`
  * on the player has no effect there because `object-fit` is not inherited. `--controls: none` hides
- * every piece of vendor chrome.
+ * every piece of vendor chrome and `--dialog: none` its error dialog (2026-10-20: the host shows the
+ * catalog's own block instead).
  *
  * **The proportion is learned here (2026-10-09).** The stored size is the first source, but a
  * video never has one, so the element learns it from the poster probe (below) and from
@@ -157,7 +150,7 @@ function stopVendorClick(event: MouseEvent<HTMLDivElement>) {
  * **The credential arrives from the host** (D-43, D-44). This element never mints: it receives the
  * playback from the host's visit-scoped in-memory map, filled by one batched server action. It never
  * renders an error message (a player `error` is reported as `onError(postId)` and the host shows
- * catalog copy) and holds no sound state (the visit-long sound state is the host's).
+ * catalog copy) and holds no sound state (the sound is `video-sound`'s, one for the whole visit).
  *
  * **Credential swaps (WR-02).** A re-minted token is never written into a mounted element in place:
  * the vendor reloads its source when its playback token changes, and a video that was already
@@ -246,51 +239,30 @@ export function ReelVideo(props: ReelVideoProps) {
     };
 
     /**
-     * `play()` with RESEARCH Pattern 4's rejection handling, on the element it was asked of.
+     * `play()` through `video-sound` (RESEARCH Pattern 4's rejection handling lives there now), on
+     * the element it was asked of.
      *
      * **Two kinds of `AbortError`** (05.3-09, found in the browser). A `pause()` interrupting the
      * play — a swipe leaving the page, the viewer's tap, the comment sheet — is final: the host
-     * paused, so nothing is retried. A SOURCE LOAD interrupting it is not. The host starts a page
-     * the moment its element appears (the first video of a visit, a lane's first video, a retried
-     * video), and the vendor attaches its media source a moment later; the media load algorithm
-     * then resets `paused` and rejects the pending play with `AbortError`. Ignoring that left the
-     * first video of every visit paused, and on a real stream the autoplay check would then have
-     * shown "tap to play" instead of the muted autoplay UI E04 promises. So while the host still
-     * wants the page playing, the play is re-issued (bounded), with the element's CURRENT mute
-     * state so a `setMuted` in between is kept.
+     * paused (`stillWanted` turns false and `pauseVideo` forgets the element), so nothing is
+     * retried. A SOURCE LOAD interrupting it is not. The host starts a page the moment its element
+     * appears (the first video of a visit, a lane's first video, a retried video), and the vendor
+     * attaches its media source a moment later; the media load algorithm then resets `paused` and
+     * rejects the pending play with `AbortError`. Ignoring that left the first video of every visit
+     * paused. So while the host still wants the page playing, the module re-issues the play
+     * (bounded), with the visit's CURRENT sound, so a mute in between is kept.
      */
-    const play = (target: PlayableElement, wantSound: boolean, aborted = 0) => {
+    const play = (target: PlayableElement) => {
       hostPaused = false;
-      // An element that is ALREADY playing (the host's sound toggle resumes it to catch a refusal)
-      // fires no second `playing`, so resetting here would arm a check that can only report a
-      // false "blocked". Only a paused element (or one that does not say) starts a new check.
+      // An element that is ALREADY playing (a resume that only re-asserts it) fires no second
+      // `playing`, so resetting here would arm a check that can only report a false "blocked".
+      // Only a paused element (or one that does not say) starts a new check.
       if (target.paused !== false) played = false;
-      target.muted = !wantSound;
-      const attempt = target.play?.();
-      armCheck();
-      if (!attempt || typeof attempt.catch !== 'function') return;
-      attempt.catch((error: unknown) => {
-        if (element !== target) return;
-        const name = errorName(error);
-        if (name === 'AbortError') {
-          if (!hostPaused && aborted < PLAY_ABORT_RETRIES) {
-            play(target, target.muted === false, aborted + 1);
-          }
-          return;
-        }
-        if (name === 'NotAllowedError' && !target.muted) {
-          target.muted = true;
-          propsRef.current.onSoundRefused();
-          const retry = target.play?.();
-          if (!retry || typeof retry.catch !== 'function') return;
-          retry.catch((retryError: unknown) => {
-            if (element !== target || errorName(retryError) === 'AbortError') return;
-            propsRef.current.onBlocked(postId);
-          });
-          return;
-        }
-        propsRef.current.onBlocked(postId);
+      playVideo(target, {
+        stillWanted: () => element === target && !hostPaused,
+        onBlocked: () => propsRef.current.onBlocked(postId),
       });
+      armCheck();
     };
 
     const onCanPlay = () => {
@@ -350,20 +322,17 @@ export function ReelVideo(props: ReelVideoProps) {
       probePoster(found);
 
       const controller: ReelVideoController = {
-        start(wantSound) {
+        start() {
           found.currentTime = 0;
-          play(found, wantSound);
+          play(found);
         },
         pause() {
           hostPaused = true;
           clearCheck();
-          found.pause?.();
+          pauseVideo(found);
         },
-        resume(wantSound) {
-          play(found, wantSound);
-        },
-        setMuted(muted) {
-          found.muted = muted;
+        resume() {
+          play(found);
         },
       };
       propsRef.current.onController(postId, controller);
@@ -378,6 +347,7 @@ export function ReelVideo(props: ReelVideoProps) {
       attached.removeEventListener('error', onError);
       attached.removeEventListener('loadedmetadata', onMetadata);
       clearCheck();
+      forgetVideo(attached);
       element = null;
       propsRef.current.onController(postId, null);
     };
@@ -443,11 +413,11 @@ export function ReelVideo(props: ReelVideoProps) {
           nohotkeys
           noMutedPref
           noVolumePref
-          muted
           preload={current ? 'auto' : 'metadata'}
           poster={poster}
           style={{
             '--controls': 'none',
+            '--dialog': 'none',
             '--media-object-fit': fit,
             // No black of the vendor's own: the frame (cover) or the backdrop (contain) shows.
             '--media-background-color': 'transparent',

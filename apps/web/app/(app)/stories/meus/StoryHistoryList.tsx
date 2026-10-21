@@ -25,6 +25,7 @@ import {
   removeStoryFromHighlightAction,
 } from '@/app/(app)/stories/highlight-actions';
 import { deleteStoryAction, loadMoreOwnStoriesAction } from '@/app/(app)/stories/story-actions';
+import { StoryMenuRow } from '@/components/stories/StoryMenuRow';
 import type { HighlightPlaceView, StoryHistoryItemView } from '@/lib/story-view';
 
 /**
@@ -93,48 +94,6 @@ function HistorySkeleton({ rows = SKELETON_ROWS }: { rows?: number[] }) {
         </div>
       ))}
     </div>
-  );
-}
-
-/** One 44px-minimum sheet row — the `PostMenu` shape, which is the product's one menu geometry. */
-function MenuRow({
-  icon: Icon,
-  label,
-  destructive,
-  onClick,
-  href,
-}: {
-  icon: typeof Bookmark;
-  label: string;
-  destructive?: boolean;
-  onClick?: () => void;
-  href?: string;
-}): ReactNode {
-  const shape = [
-    'flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-bold',
-    'transition-colors hover:bg-bg-hover active:bg-bg-tertiary',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset',
-    destructive ? 'text-danger' : 'text-text',
-  ].join(' ');
-
-  const inner = (
-    <>
-      <Icon aria-hidden size={20} className={destructive ? undefined : 'text-text-secondary'} />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-    </>
-  );
-
-  if (href) {
-    return (
-      <a href={href} className={shape}>
-        {inner}
-      </a>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} className={shape}>
-      {inner}
-    </button>
   );
 }
 
@@ -389,19 +348,19 @@ export function StoryHistoryList({
         title={t('history.menu.title')}
       >
         <div className="flex flex-col gap-1">
-          <MenuRow
+          <StoryMenuRow
             icon={Bookmark}
             label={t('history.menu.highlight')}
             onClick={() => {
               if (menuStory) void openHighlightSheet(menuStory);
             }}
           />
-          <MenuRow
+          <StoryMenuRow
             icon={Eye}
             label={t('history.menu.view')}
             href={menuStory?.viewHref ?? undefined}
           />
-          <MenuRow
+          <StoryMenuRow
             icon={Trash2}
             label={t('history.menu.delete')}
             destructive

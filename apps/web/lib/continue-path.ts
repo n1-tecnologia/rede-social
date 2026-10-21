@@ -22,6 +22,11 @@
  * The event shapes are EXACT: a lowercase uuid, optionally followed by `/entrar` and nothing else
  * (`/eventos/novo`, `…/editar`, `…/entrar/aviso` and an uppercase id are all refused).
  *
+ * **2026-10-20 (the client's FRONT.pdf): `/stories/{id}` joins them.** A story is now shared the way
+ * a post is (`storyShareUrl`), so its deep link travels outside the app too, and a member who opens
+ * it logged out must land back on the story after the login. EXACT as well: a lowercase uuid and
+ * nothing after it (`/stories/publicar`, `/stories/meus`, `/stories/destaques` are refused).
+ *
  * **The open-redirect rule.** The value is validated at USE, never at write: it must be a path on
  * THIS origin — one leading slash, no second slash or backslash (`//evil.com` and `/\evil.com` are
  * both protocol-relative URLs in a browser), no scheme, no control characters. Anything else is
@@ -33,11 +38,15 @@ export const CONTINUE_COOKIE = 'rede_continue';
 export const CONTINUE_MAX_AGE_S = 600;
 
 /**
- * Which private paths are worth remembering — the shareable post link (D-56) and the two calendar
- * link shapes of an event (D-211), and nothing else.
+ * Which private paths are worth remembering — the shareable post link (D-56), the two calendar
+ * link shapes of an event (D-211) and the shareable story link (2026-10-20), and nothing else.
  */
 export function isContinuablePath(path: string): boolean {
-  return /^\/post\/[^/]+$/.test(path) || /^\/eventos\/[0-9a-f-]{36}(\/entrar)?$/.test(path);
+  return (
+    /^\/post\/[^/]+$/.test(path) ||
+    /^\/eventos\/[0-9a-f-]{36}(\/entrar)?$/.test(path) ||
+    /^\/stories\/[0-9a-f-]{36}$/.test(path)
+  );
 }
 
 /**

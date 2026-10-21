@@ -52,11 +52,30 @@ import { useStoryClock } from './useStoryClock';
  *    the story AND fail to like it, silently. Holding every advance for a ~300 ms disambiguation
  *    window is perceptible on the one gesture this screen exists for. Liking is the explicit 44×44
  *    heart the host puts in `actions`. The feed keeps double-tap because its card does not navigate.
- * 2. **There is no share control** (UI-D-32) — sharing is not in STORY-05 and the bottom row has
- *    exactly two actions.
+ * 2. **The viewer owns no share control** (UI-D-32, amended on 2026-10-20). The client's FRONT.pdf
+ *    asked to share a story the way a post is shared, and that control is the HOST's, inside the
+ *    action row it hands over (`actions`): the link is built from the tenant's verified host, which
+ *    a module neither knows nor resolves (MOD-02).
  * 3. **The clock survives `prefers-reduced-motion`** (UI-D-30). Only the pager's TRANSITION
  *    collapses to an instant swap. Auto-advance is content pacing, not decoration; removing it
  *    would leave a viewer that does nothing on its own.
+ *
+ * **2026-10-20, the client's FRONT.pdf: a story never starts paused, and it plays with sound.**
+ * - Only a HOLD pauses. A tap moves (left third back, the rest forward), as before; a Space pause
+ *   ends with its story, so the next one never opens paused.
+ * - The 400 ms "did it start?" check is GONE: it paused every video that was merely slow to start,
+ *   which is what the client saw as "the story starts paused". The play badge (UI-D-34) now renders
+ *   only when the host reports a real refusal (`onBlocked`: the browser would not play even muted),
+ *   and it pauses nothing.
+ * - The sound starts ON. A host that shares one sound choice across the app controls it (`muted`,
+ *   `soundAudible`, `onToggleSound`); without one the viewer keeps its own.
+ * - Two DOM attributes are the contract with the app's playback rule, as `data-shell-hide` is with
+ *   the shell: the stage is `data-video-surface` (a touch there may start a held-back sound) and the
+ *   sound toggle is `data-video-sound` (a touch there is the toggle's own). The stage also opens no
+ *   context menu and no iOS touch callout, either of which would cancel a hold mid-press.
+ * - A host may hand each story a MENU (`menu`), drawn in the header before the sound toggle: the
+ *   curator's "Mais opções", where a post keeps its own "…". In the bottom row it would not fit a
+ *   390px screen beside the share and "Destacar".
  *
  * **It ships no words (PWA-03) and resolves no route (MOD-02).** Every string is a `labels` prop,
  * the media is a node the HOST builds — the shipped video player binds an app-scoped server action
@@ -70,16 +89,24 @@ export interface StoryMediaControls {
   active: boolean;
   /** The single OR-ed pause boolean — the host pauses its own element on it. */
   paused: boolean;
-  /** Starts `true`: iOS autoplays muted inline video and nothing else (Pitfall 6). */
+  /**
+   * The member's sound choice, `false` (sound ON) until they mute (2026-10-20, FRONT.pdf). A browser
+   * that refuses the sound is the host's to absorb: the video keeps playing muted, never paused.
+   */
   muted: boolean;
   /** The media can be shown. **The clock does not start until this fires** (UI loading/E03). */
   onLoad: () => void;
   /** The media cannot be shown: the error copy renders and the clock stays where it stopped. */
   onError: () => void;
-  /** Video only. Arms the UI-D-34 autoplay check and counts as `onLoad`. */
+  /** Video only. Counts as `onLoad`. */
   onCanPlay: () => void;
-  /** Video only. Playback is really running, so the autoplay badge is not needed. */
+  /** Video only. Playback is really running, so a play badge shown for this story goes away. */
   onPlaying: () => void;
+  /**
+   * Video only. The browser refused to play even MUTED (iOS Low Power Mode, a data saver): the play
+   * badge renders (UI-D-34). It pauses nothing; one tap on the badge plays inside the gesture.
+   */
+  onBlocked: () => void;
   /** Video only. The asset's OWN time drives its segment — never a fixed timer. */
   onTimeUpdate: (currentSeconds: number, durationSeconds: number) => void;
 }
@@ -96,6 +123,11 @@ export interface StoryViewerItem {
   media: (controls: StoryMediaControls) => ReactNode;
   /** The host's like/comment row, built whole (the `LikeButton` lives in the app tier, MOD-02). */
   actions: ReactNode;
+  /**
+   * 2026-10-20 (FRONT.pdf): the host's story menu, drawn in the HEADER before the sound toggle,
+   * where a post keeps its own "…" (`PostHeader`). Absent: nothing there (a member's viewer).
+   */
+  menu?: ReactNode;
   /**
    * Called SYNCHRONOUSLY inside the play badge's click handler, so the host's `play()` still runs
    * inside the user gesture iOS requires. An effect after the fact would be one task too late.
@@ -174,6 +206,16 @@ export interface StoryViewerProps {
    */
   externallyPaused?: boolean;
   /**
+   * 2026-10-20 (FRONT.pdf): the sound, CONTROLLED by a host that keeps one choice for every video of
+   * the visit. `muted` is the member's choice (absent: the viewer keeps its own, sound on at first).
+   * `soundAudible` is what the toggle shows (absent: `!muted`), so a sound the browser held back
+   * reads "Ativar som" while the member still wants it. `onToggleSound` runs INSIDE the toggle's
+   * click, the one place a phone lets a host start a sound.
+   */
+  muted?: boolean;
+  soundAudible?: boolean;
+  onToggleSound?: () => void;
+  /**
    * A node rendered INSIDE the dialog, above everything else — 05-07's `CommentSheet`.
    *
    * It is INJECTED rather than imported for the reason the action row is: `CommentSheet` lives in
@@ -195,8 +237,6 @@ export interface StoryViewerProps {
   now?: () => number;
   requestFrame?: (callback: (timestamp: number) => void) => number;
   cancelFrame?: (handle: number) => void;
-  /** UI-D-34's window between "can play" and "is playing". */
-  autoplayCheckMs?: number;
 }
 
 /** The prototype's drag threshold (`LIMIAR`), for BOTH axes — one number, one feel. */
@@ -270,11 +310,13 @@ export function StoryViewer({
   labels,
   onClose,
   externallyPaused = false,
+  muted: mutedProp,
+  soundAudible,
+  onToggleSound,
   overlay,
   now,
   requestFrame,
   cancelFrame,
-  autoplayCheckMs = 400,
 }: StoryViewerProps) {
   const [pos, setPos] = useState<Position>(() => {
     const g = Math.min(Math.max(initialGroup, 0), Math.max(groups.length - 1, 0));
@@ -287,11 +329,12 @@ export function StoryViewer({
   const [keyboardPaused, setKeyboardPaused] = useState(false);
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const [documentHidden, setDocumentHidden] = useState(false);
-  const [muted, setMuted] = useState(true);
+  // 2026-10-20 (FRONT.pdf): sound ON from the first story, unless a host controls it.
+  const [ownMuted, setOwnMuted] = useState(false);
+  const muted = mutedProp ?? ownMuted;
+  const audible = soundAudible ?? !muted;
   // Every map below is keyed by `segmentKey(group, item)` — never by the story id (Pitfall 4).
   const [mediaState, setMediaState] = useState<Record<string, MediaState>>({});
-  const [canPlay, setCanPlay] = useState<Record<string, boolean>>({});
-  const [playing, setPlaying] = useState<Record<string, boolean>>({});
   const [blocked, setBlocked] = useState<Record<string, boolean>>({});
   const [videoProgress, setVideoProgress] = useState<Record<string, number>>({});
   const [attempt, setAttempt] = useState<Record<string, number>>({});
@@ -339,15 +382,12 @@ export function StoryViewer({
    * ONE boolean, three sources plus the two the surface owns: the hold gesture, the host's external
    * flag (05-07's comment sheet), document visibility — so backgrounding the PWA never burns a
    * story — the space key, and an expanded caption, because reading is the reason to stop.
-   * A video that will not start joins them (UI-D-34): the bar must never fill over a frozen frame.
+   *
+   * A video the browser would not start is NOT one of them since 2026-10-20 (FRONT.pdf): pausing it
+   * would also stop the host from starting it at the member's next touch. Its bar cannot fill over
+   * a frozen frame anyway, because a video's segment is the element's own time (UI-D-30).
    */
-  const paused =
-    holding ||
-    externallyPaused ||
-    documentHidden ||
-    keyboardPaused ||
-    captionExpanded ||
-    autoplayBlocked;
+  const paused = holding || externallyPaused || documentHidden || keyboardPaused || captionExpanded;
 
   /**
    * NEXT (UI-D-65): the next story of the group; at the group's last story (or from a loading or
@@ -515,10 +555,14 @@ export function StoryViewer({
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
-  /** A skip closes an expanded caption; otherwise the next story would open already paused. */
+  /**
+   * A skip closes an expanded caption and ends a Space pause; otherwise the next story would open
+   * already paused (2026-10-20, FRONT.pdf: a story never starts paused).
+   */
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reset is keyed on the SEGMENT change
   useEffect(() => {
     setCaptionExpanded(false);
+    setKeyboardPaused(false);
   }, [currentKey]);
 
   useFocusTrap(rootRef, true, onClose);
@@ -533,20 +577,6 @@ export function StoryViewer({
       ?.querySelector<HTMLElement>('[data-story-close]')
       ?.focus({ preventScroll: true });
   }, []);
-
-  /**
-   * UI-D-34. "Did not start" is a STATE: `canplay` arms a short check, and if playback has not
-   * begun by then the clock STAYS PAUSED and the badge renders. One tap starts both.
-   */
-  useEffect(() => {
-    if (current?.mediaKind !== 'video') return;
-    if (!canPlay[currentKey] || playing[currentKey]) return;
-    const key = currentKey;
-    const timer = setTimeout(() => {
-      setBlocked((state) => ({ ...state, [key]: true }));
-    }, autoplayCheckMs);
-    return () => clearTimeout(timer);
-  }, [current, currentKey, canPlay, playing, autoplayCheckMs]);
 
   /* ── The neighbour window ──────────────────────────────────────────────────────────────────────
    *
@@ -620,14 +650,10 @@ export function StoryViewer({
     const created: MediaHandlers = {
       onLoad: () => setMediaState((state) => ({ ...state, [key]: 'ready' })),
       onError: () => setMediaState((state) => ({ ...state, [key]: 'error' })),
-      onCanPlay: () => {
-        setMediaState((state) => ({ ...state, [key]: 'ready' }));
-        setCanPlay((state) => ({ ...state, [key]: true }));
-      },
-      onPlaying: () => {
-        setPlaying((state) => ({ ...state, [key]: true }));
-        setBlocked((state) => ({ ...state, [key]: false }));
-      },
+      onCanPlay: () => setMediaState((state) => ({ ...state, [key]: 'ready' })),
+      onPlaying: () => setBlocked((state) => ({ ...state, [key]: false })),
+      // UI-D-34 since 2026-10-20: a REAL refusal, reported by the host, never a timer's guess.
+      onBlocked: () => setBlocked((state) => ({ ...state, [key]: true })),
       onTimeUpdate: (currentSeconds: number, durationSeconds: number) => {
         if (durationSeconds <= 0) return;
         const ratio = currentSeconds / durationSeconds;
@@ -717,6 +743,17 @@ export function StoryViewer({
     setHolding(false);
   };
 
+  /** A long press opens no context menu over the story: it would cancel the hold mid-press. */
+  const onContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+  };
+
+  /** Inside the toggle's own click, so a host can start the sound within the member's gesture. */
+  const toggleSound = () => {
+    if (onToggleSound) onToggleSound();
+    else setOwnMuted((value) => !value);
+  };
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     // A key that starts inside a dialog this one HOSTS (the comment sheet in `overlay`) is that
@@ -784,14 +821,18 @@ export function StoryViewer({
       className={`fixed inset-0 ${VIEWER_Z} overflow-hidden bg-black text-white select-none`}
       style={{ touchAction: 'none' }}
     >
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the stage's gestures have their keyboard twins on the dialog (arrows, Space, Escape); the context menu is only cancelled, so a long press is never cut short */}
       <div
         ref={stageRef}
         data-testid="story-stage"
-        className="absolute inset-0"
+        // The app's playback rule: a touch here may start a sound the browser held back (2026-10-20).
+        data-video-surface=""
+        className="absolute inset-0 [-webkit-touch-callout:none]"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onContextMenu={onContextMenu}
       >
         <div
           data-testid="story-pager"
@@ -902,6 +943,7 @@ export function StoryViewer({
 
       {isVideo && autoplayBlocked ? (
         // The badge occupies only its own box, so the area around it stays tappable by the stage.
+        // It renders only after the host reported a refusal (`onBlocked`), and it pauses nothing.
         <button
           type="button"
           data-testid="story-autoplay-badge"
@@ -973,11 +1015,14 @@ export function StoryViewer({
             <span className="block text-xs text-white/75">{current.timeLabel}</span>
           ) : null}
         </span>
+        {current?.menu}
         <IconButton
-          icon={muted ? VolumeX : Volume2}
+          // The toggle's own touch: the app's playback rule leaves it to this click (2026-10-20).
+          data-video-sound=""
+          icon={audible ? Volume2 : VolumeX}
           size={20}
-          label={muted ? labels.unmute : labels.mute}
-          onClick={() => setMuted((value) => !value)}
+          label={audible ? labels.mute : labels.unmute}
+          onClick={toggleSound}
           className="bg-black/35 text-white"
         />
         <IconButton
@@ -1008,7 +1053,9 @@ export function StoryViewer({
             {current.caption}
           </button>
         ) : null}
-        <div className="-ml-2.5 mt-2 flex items-center gap-1">{current?.actions}</div>
+        {/* `flex-wrap`: with the share and the curator's "more" beside the like, the comment and
+            "Destacar", the row would run off a 390px screen; it breaks onto a second line instead. */}
+        <div className="-ml-2.5 mt-2 flex flex-wrap items-center gap-1">{current?.actions}</div>
       </div>
 
       {/* Last, so it paints over the veil, the caption and the action row; `BottomSheet` is

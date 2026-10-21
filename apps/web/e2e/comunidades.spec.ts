@@ -516,12 +516,23 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
     await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
     await expect(page.locator('[data-community-edit]')).toHaveCount(0);
+    // 2026-10-20 (FRONT.pdf): the delete placeholder is the managers' only.
+    await expect(page.getByText(C.archived.note)).toBeVisible();
+    await expect(page.locator('[data-pending-delete]')).toHaveCount(0);
 
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
     const edit = page.locator('[data-community-edit]');
     await expect(edit).toBeVisible();
     await expect(edit).toHaveAttribute('href', `/comunidades/${SEEDED.archivedId}/editar`);
+
+    // …and the archived note carries "Excluir comunidade" under Reativar: disabled, "Em breve".
+    await expect(page.locator('[data-community-page-reactivate]')).toBeVisible();
+    const pendingDelete = page.locator('[data-pending-delete="community"]');
+    const deleteButton = pendingDelete.getByRole('button', { name: C.delete.action });
+    await expect(deleteButton).toBeVisible();
+    await expect(deleteButton).toHaveAttribute('aria-disabled', 'true');
+    await expect(pendingDelete).toContainText(C.delete.soon);
   });
 
   test('an archived community offers Reativar where an active one offers Arquivar', async ({
@@ -535,13 +546,31 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
     await expect(page.locator('[data-community-reactivate]')).toContainText(C.archived.reactivate);
     await expect(page.locator('[data-community-archive]')).toHaveCount(0);
 
-    // Its ACTIVE positive control, in the same case: the danger archive row, and no reactivate row.
+    // 2026-10-20 (FRONT.pdf): beside it, "Excluir comunidade" with "Em breve", a placeholder until
+    // the API can delete: aria-disabled, and a click changes nothing.
+    const pendingDelete = page.locator('[data-pending-delete="community"]');
+    const deleteButton = pendingDelete.getByRole('button', { name: C.delete.action });
+    await expect(deleteButton).toBeVisible();
+    await expect(deleteButton).toHaveAttribute('aria-disabled', 'true');
+    await expect(deleteButton).toHaveAccessibleDescription(C.delete.hint);
+    await expect(pendingDelete).toContainText(C.delete.soon);
+    // `force`: Playwright waits for an aria-disabled control to enable, and this one never does.
+    await deleteButton.click({ force: true });
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${SEEDED.archivedId}/editar$`));
+    // No confirmation opens (the dev overlay's own dialog is not ours).
+    await expect(
+      page.locator('[role="dialog"][aria-modal="true"]:not([data-nextjs-dialog])'),
+    ).toHaveCount(0);
+
+    // Its ACTIVE positive control, in the same case: the danger archive row, and no reactivate row
+    // (and no delete placeholder: only an archived community offers it).
     await page.goto(`${hosts.demo}/comunidades`);
     await cardWith(page, SEEDED.first).click();
     const activeId = page.url().split('/').pop() ?? '';
     await page.goto(`${hosts.demo}/comunidades/${activeId}/editar`);
     await expect(page.locator('[data-community-archive]')).toBeVisible();
     await expect(page.locator('[data-community-reactivate]')).toHaveCount(0);
+    await expect(page.locator('[data-pending-delete]')).toHaveCount(0);
   });
 
   test('archive → reactivate → archive is a round trip the list follows each way', async ({

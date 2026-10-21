@@ -1,6 +1,15 @@
 {
   "stories": {
     "region": "Stories",
+    "scroll": {
+      "previous": "Voltar na fileira",
+      "next": "Avançar na fileira"
+    },
+    "notFound": {
+      "title": "Story não encontrado",
+      "body": "Este link não existe mais ou não é de {tenant}.",
+      "cta": "Ir para o início"
+    },
     "own": {
       "label": "Seu story",
       "action": "Publicar um story",
@@ -143,6 +152,9 @@
       "unlike": "Descurtir",
       "comment": "Comentar",
       "highlight": "Destacar",
+      "share": "Compartilhar",
+      "linkCopied": "Link copiado.",
+      "more": "Mais opções",
       "likes": {
         "one": "{count} curtida",
         "other": "{count} curtidas"

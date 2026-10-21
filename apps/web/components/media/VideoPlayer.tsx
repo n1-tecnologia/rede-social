@@ -1,12 +1,30 @@
 'use client';
 
 import type { MediaStatus } from '@rede-social/contracts/media';
-import { Button, Card, cn, StatusPill, useToast } from '@rede-social/ui';
-import { Loader2 } from 'lucide-react';
+import { Button, Card, cn, IconButton, StatusPill, useMediaQuery, useToast } from '@rede-social/ui';
+import { Loader2, Play, Volume2, VolumeX } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { fetchPlaybackTokenAction } from '@/app/(app)/configuracoes/midia/actions';
+import {
+  forgetVideo,
+  pauseVideo,
+  playVideo,
+  type SoundPlayable,
+  setVideoSoundWanted,
+  useVideoSoundAudible,
+  useVideoSoundWanted,
+  videoSoundAudible,
+  videoSoundWanted,
+} from './video-sound';
 
 /**
  * `<mux-player>` is a CUSTOM ELEMENT: it registers itself against `window.customElements` at import
@@ -62,9 +80,26 @@ function wholeSeconds(value: number | undefined): number {
 /** What the element type exposes that this component reads — its OWN derived poster URL. */
 type PosterReadable = { poster?: string };
 
+/** The vendor node as this component drives it: the media surface `video-sound` plays. */
+type PlayerElement = SoundPlayable & PosterReadable;
+
 /** How often, and for how long, the poster probe waits for the custom element to upgrade. */
 const POSTER_PROBE_STEP_MS = 120;
 const POSTER_PROBE_TIMEOUT_MS = 3000;
+/** How much of the frame must be on screen before it plays by itself. */
+const IN_VIEW_RATIO = 0.5;
+
+function subscribeHidden(listener: () => void) {
+  document.addEventListener('visibilitychange', listener);
+  return () => document.removeEventListener('visibilitychange', listener);
+}
+const readHidden = () => document.visibilityState === 'hidden';
+const readHiddenOnServer = () => false;
+
+/** media-chrome toggles play on a mouse click of the video by itself; the cover button decides. */
+function stopVendorClick(event: MouseEvent<HTMLDivElement>) {
+  event.stopPropagation();
+}
 
 /**
  * The three states of UI-SPEC §Video contract (D-43/D-44, E10). There is no fourth and no "empty":
@@ -80,6 +115,22 @@ const POSTER_PROBE_TIMEOUT_MS = 3000;
  * outlives the session. A failed mint and a mid-session expiry both surface the GENERIC toast plus a
  * ghost "Tentar novamente" that mints a fresh one — a raw player error, a provider status or a token
  * fragment never reaches the screen (T-03-51).
+ *
+ * **No player bar (2026-10-20, the client's FRONT.pdf: no video of the app shows one).** The vendor's
+ * controls and its error dialog are hidden (`--controls: none`, `--dialog: none`, no hotkeys), and
+ * the video plays the way the feed's does:
+ *  - by itself once half of it is on screen, looping, and paused when it leaves or the tab hides;
+ *    under reduced motion it waits for a tap. Every play goes through `video-sound`: WITH sound
+ *    unless the member muted a video this visit, and a browser that refuses the sound outside a
+ *    gesture keeps it PLAYING muted;
+ *  - a transparent button over the whole frame pauses and resumes it (so no click ever reaches the
+ *    vendor, which would toggle play by itself), with the play badge in the centre while it is
+ *    stopped; on a video the browser kept muted that click turns the sound on instead, inside the
+ *    gesture (its name then says so). The frame is NOT a `data-video-surface`: the module would
+ *    unmute before this click and the click would then pause;
+ *  - the sound button in the corner turns the visit's sound on or off inside its click;
+ *  - a player error is this component's own catalog line over the frame (`feedVideo.error`) with
+ *    "Tentar novamente" below it, which mints afresh and remounts the player (`mints` is its key).
  *
  * **`failed`** — the danger pill and the catalog line, with NO player frame rendered at all.
  *
@@ -117,6 +168,8 @@ export function VideoPlayer({
     thumbnail: string;
     storyboard: string;
   } | null>(null);
+  /** Bumped on every mint, and the player's key: a retry always remounts the element. */
+  const [mints, setMints] = useState(0);
   const [minting, setMinting] = useState(false);
   const [refused, setRefused] = useState(false);
   /** `undefined` = let the player derive its own poster; `''` = no poster at all (see the docblock). */
@@ -124,9 +177,26 @@ export function VideoPlayer({
   /** Which of the three poster cases this render is in — observable, so the backstop is testable. */
   const [posterState, setPosterState] = useState<'pending' | 'none' | 'derived'>('pending');
 
+  const [element, setElement] = useState<PlayerElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  /** The player raised an error: the catalog line and the retry show. */
+  const [failed, setFailed] = useState(false);
+  /** The browser refused even a muted play: the badge shows until a click plays it. */
+  const [blocked, setBlocked] = useState(false);
+  const [visible, setVisible] = useState(false);
+  /** The member's own choice: `null` none yet (autoplay decides), else play or pause. */
+  const [choice, setChoice] = useState<'play' | 'pause' | null>(null);
+
+  const hidden = useSyncExternalStore(subscribeHidden, readHidden, readHiddenOnServer);
+  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const audible = useVideoSoundAudible();
+  const wanted = useVideoSoundWanted();
+
   const mint = useCallback(async () => {
     setMinting(true);
     setRefused(false);
+    setFailed(false);
+    setBlocked(false);
     setPoster(undefined);
     setPosterState('pending');
     try {
@@ -144,6 +214,7 @@ export function VideoPlayer({
         thumbnail: result.playback.tokens.thumbnail,
         storyboard: result.playback.tokens.storyboard,
       });
+      setMints((count) => count + 1);
     } catch (unexpected) {
       // The raw value goes to the console only (T-02-147 / T-03-51).
       console.error('media.playback_token_failed', { error: String(unexpected) });
@@ -173,8 +244,8 @@ export function VideoPlayer({
     const timer = setInterval(() => {
       if (cancelled) return;
       elapsed += POSTER_PROBE_STEP_MS;
-      const element = frameRef.current?.querySelector('mux-player') as PosterReadable | null;
-      const url = element?.poster;
+      const found = frameRef.current?.querySelector('mux-player') as PosterReadable | null;
+      const url = found?.poster;
       if (!url) {
         // Case 1: the player declined to build a still. It stays declined — there is nothing to
         // probe and nothing that could draw a broken glyph.
@@ -227,6 +298,116 @@ export function VideoPlayer({
       ? { startTime: Math.floor(startTime) }
       : {};
 
+  // The vendor node mounts late (`next/dynamic` forwards no ref), so it is found through the frame,
+  // the bridge `FeedVideo` and `ReelVideo` use. The frame exists in the `ready` state only.
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (status !== 'ready' || !frame) return;
+    let attached: PlayerElement | null = null;
+
+    const onPlaying = () => {
+      setPlaying(true);
+      setBlocked(false);
+    };
+    const onPause = () => setPlaying(false);
+    const onError = () => {
+      setPlaying(false);
+      setFailed(true);
+    };
+
+    const detach = () => {
+      const current = attached;
+      if (!current) return;
+      current.removeEventListener('playing', onPlaying);
+      current.removeEventListener('pause', onPause);
+      current.removeEventListener('error', onError);
+      forgetVideo(current);
+      attached = null;
+      setElement(null);
+      setPlaying(false);
+    };
+
+    const reconcile = () => {
+      const found = frame.querySelector<PlayerElement>('mux-player');
+      if (found === attached) return;
+      detach();
+      if (!found) return;
+      attached = found;
+      found.addEventListener('playing', onPlaying);
+      found.addEventListener('pause', onPause);
+      found.addEventListener('error', onError);
+      setElement(found);
+    };
+
+    reconcile();
+    const observer = new MutationObserver(reconcile);
+    observer.observe(frame, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      detach();
+    };
+  }, [status]);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (status !== 'ready' || !frame) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry) setVisible(entry.isIntersecting && entry.intersectionRatio >= IN_VIEW_RATIO);
+      },
+      { threshold: [0, IN_VIEW_RATIO, 1] },
+    );
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [status]);
+
+  const wants =
+    element !== null &&
+    !failed &&
+    visible &&
+    (choice === 'play' || (choice === null && !reduceMotion));
+  const shouldPlay = wants && !hidden;
+  const shouldPlayRef = useRef(shouldPlay);
+  shouldPlayRef.current = shouldPlay;
+
+  useEffect(() => {
+    if (!element) return;
+    if (shouldPlay) {
+      playVideo(element, {
+        stillWanted: () => shouldPlayRef.current,
+        onBlocked: () => setBlocked(true),
+      });
+    } else {
+      pauseVideo(element);
+    }
+  }, [element, shouldPlay]);
+
+  /** The cover button: pause or resume, inside the click (WebKit only starts sound in a gesture). */
+  const toggle = () => {
+    if (!element || failed) return;
+    // The browser kept it muted although the sound is on: this click is the gesture that turns it on.
+    if (videoSoundWanted() && element.muted === true && element.paused === false) {
+      setVideoSoundWanted(true);
+      return;
+    }
+    if (element.paused === false) {
+      setChoice('pause');
+      pauseVideo(element);
+      return;
+    }
+    setChoice('play');
+    setBlocked(false);
+    playVideo(element, {
+      stillWanted: () => shouldPlayRef.current,
+      onBlocked: () => setBlocked(true),
+    });
+  };
+
   if (status === 'failed' || status === 'rejected') {
     // NO player frame at all — there is nothing to play, and an empty 16:9 box would suggest there is.
     return (
@@ -268,42 +449,109 @@ export function VideoPlayer({
     );
   }
 
-  const retry = refused ? (
-    <Button type="button" variant="ghost" size="sm" loading={minting} onClick={() => void mint()}>
-      {t('retry')}
-    </Button>
-  ) : null;
+  const live = element !== null && !failed;
+  // Stopped by the member, waiting for a tap (reduced motion) or refused by the browser; never
+  // while the first frames are still loading.
+  const badge = live && !playing && (!shouldPlay || blocked);
+  // Playing muted with the sound on: the browser held it back, and a click turns the sound on.
+  const heldBack = playing && wanted && !audible;
+  const toggleLabel = heldBack
+    ? t('feedVideo.unmute')
+    : playing
+      ? t('feedVideo.pause')
+      : t('feedVideo.play');
+
+  const retry =
+    refused || failed ? (
+      <Button type="button" variant="ghost" size="sm" loading={minting} onClick={() => void mint()}>
+        {t('retry')}
+      </Button>
+    ) : null;
 
   return (
     <div
       className={cn('flex flex-col gap-3', !bleed && 'p-4')}
       data-testid="video-ready"
+      data-playing={playing}
       // The backstop is OBSERVABLE rather than merely "nothing visibly broke" — a shadow-DOM poster
       // would hide the difference from a test.
       data-poster={posterState}
     >
       <div
-        ref={frameRef}
-        className={cn('aspect-video w-full overflow-hidden bg-bg-tertiary', !bleed && 'rounded-xl')}
+        className={cn(
+          'relative aspect-video w-full overflow-hidden bg-bg-tertiary',
+          !bleed && 'rounded-xl',
+        )}
       >
-        {tokens ? (
-          <MuxPlayer
-            playbackId={tokens.playbackId}
-            tokens={{
-              playback: tokens.playback,
-              thumbnail: tokens.thumbnail,
-              storyboard: tokens.storyboard,
-            }}
-            streamType="on-demand"
-            playsInline
-            poster={poster}
-            // The player's own controls carry the community's brand and are otherwise untouched:
-            // they are keyboard-operable out of the box (UI-SPEC §Motion & Accessibility).
-            accentColor="var(--brand-accent)"
-            className="h-full w-full"
-            {...resumeAt}
-            {...progressHandlers}
+        <div ref={frameRef} className="h-full w-full" onClickCapture={stopVendorClick}>
+          {tokens ? (
+            <MuxPlayer
+              key={mints}
+              playbackId={tokens.playbackId}
+              tokens={{
+                playback: tokens.playback,
+                thumbnail: tokens.thumbnail,
+                storyboard: tokens.storyboard,
+              }}
+              streamType="on-demand"
+              playsInline
+              loop={onProgress ? undefined : true}
+              nohotkeys
+              noMutedPref
+              noVolumePref
+              poster={poster}
+              style={{
+                '--controls': 'none',
+                '--dialog': 'none',
+                '--media-background-color': 'transparent',
+                height: '100%',
+                width: '100%',
+              }}
+              {...resumeAt}
+              {...progressHandlers}
+            />
+          ) : null}
+        </div>
+
+        {live ? (
+          <button
+            type="button"
+            data-testid="video-player-toggle"
+            aria-label={toggleLabel}
+            onClick={toggle}
+            className="absolute inset-0 z-[1] grid cursor-pointer place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
+          >
+            {badge ? (
+              <span
+                aria-hidden
+                data-testid="video-player-badge"
+                className="grid h-14 w-14 place-items-center rounded-full bg-black/60 text-white"
+              >
+                <Play size={24} className="fill-current" />
+              </span>
+            ) : null}
+          </button>
+        ) : null}
+
+        {live ? (
+          <IconButton
+            icon={audible ? Volume2 : VolumeX}
+            size={18}
+            label={audible ? t('feedVideo.mute') : t('feedVideo.unmute')}
+            onClick={() => setVideoSoundWanted(!videoSoundAudible())}
+            data-testid="video-player-sound"
+            data-video-sound=""
+            className="absolute right-3 bottom-3 z-[2] bg-black/60 text-white hover:bg-black/70 active:bg-black/75 focus-visible:ring-white focus-visible:ring-offset-0"
           />
+        ) : null}
+
+        {failed ? (
+          <p
+            role="status"
+            className="pointer-events-none absolute inset-0 z-[2] grid place-items-center bg-black/60 px-6 text-center text-sm text-white"
+          >
+            {t('feedVideo.error')}
+          </p>
         ) : null}
       </div>
 

@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 
 import type { StoryMediaControls } from '@rede-social/module-stories/ui';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetVideoSound, videoSoundAudible } from '@/components/media/video-sound';
 
 /**
  * The story viewer's VIDEO bridge, on its own (STORY-02, UI-D-30, UI-D-34, 05-11).
@@ -20,24 +21,39 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * a stand-in that defers its own element one further tick, so the condition holds no matter how
  * the bundler resolves the dynamic import under vitest.
  *
+ * **2026-10-20 (the client's FRONT.pdf): no player bar, never paused, sound on.** The stand-in
+ * records the props it is handed (the vendor chrome is switched off there) and its `play` answers
+ * from a queue of browser outcomes, recording the mute it was asked with — so "a refusal keeps the
+ * video playing muted" and "a touch on the stage turns the sound on" read as the browser's answers.
+ * The playback rule itself (`video-sound.ts`) is REAL, and reset before every case.
+ *
  * What is stubbed: the playback-token SERVER ACTION (a credential minted on the server) and the
  * VENDOR PACKAGE (a third party's custom element, which cannot register under happy-dom). What is
- * real: the bridge, its observer, its four listeners and both of its effects.
- *
- * The `StoryComposer.test.tsx` conventions are followed rather than a second style invented: the
- * happy-dom directive, hoisted spies, the server action mocked at its module path, and `act`
- * around everything that flushes an effect.
+ * real: the bridge, its observer, its four listeners, both of its effects and the playback rule.
  */
 
-const { playbackToken, play, pause } = vi.hoisted(() => ({
+type Outcome = 'ok' | 'NotAllowedError';
+
+const { playbackToken, play, pause, recorded, outcomes } = vi.hoisted(() => ({
   playbackToken: vi.fn(),
   play: vi.fn(),
   pause: vi.fn(),
+  /** Every props object the stand-in rendered with, in order. */
+  recorded: [] as Record<string, unknown>[],
+  /** What the next `play()` calls answer, in order; empty means "it plays". */
+  outcomes: [] as Outcome[],
 }));
 
 vi.mock('@/app/(app)/configuracoes/midia/actions', () => ({
   fetchPlaybackTokenAction: playbackToken,
 }));
+
+type StandIn = HTMLElement & {
+  currentTime?: number;
+  duration?: number;
+  muted?: boolean;
+  paused?: boolean;
+};
 
 /**
  * The vendor player, replaced by a stand-in that mounts its `mux-player` element ONE TICK LATE and
@@ -45,13 +61,14 @@ vi.mock('@/app/(app)/configuracoes/midia/actions', () => ({
  *
  * The surface is attached in a REF CALLBACK rather than an effect: a ref callback runs during the
  * commit, before the bridge's `MutationObserver` can be delivered, so `play`/`pause` are already
- * on the node the first time the pause/mute effect touches it. `createElement` rather than JSX —
+ * on the node the first time the play/pause effect touches it. `createElement` rather than JSX —
  * `mux-player` is not in `JSX.IntrinsicElements` and a test double is no reason to widen it.
  */
 vi.mock('@mux/mux-player-react', async () => {
   const { createElement, useEffect, useState } = await import('react');
   return {
-    default: function MuxPlayerStandIn() {
+    default: function MuxPlayerStandIn(props: Record<string, unknown>) {
+      recorded.push(props);
       const [mounted, setMounted] = useState(false);
       useEffect(() => {
         setMounted(true);
@@ -59,13 +76,26 @@ vi.mock('@mux/mux-player-react', async () => {
       if (!mounted) return null;
       return createElement('mux-player', {
         'data-testid': 'mux-player',
-        ref: (node: (HTMLElement & Record<string, unknown>) | null) => {
-          if (!node) return;
+        ref: (node: (StandIn & Record<string, unknown>) | null) => {
+          if (!node || node.dataset.wired) return;
+          node.dataset.wired = 'yes';
           node.currentTime = 0;
           node.duration = 0;
           node.muted = false;
-          node.play = play;
-          node.pause = pause;
+          node.paused = true;
+          node.play = () => {
+            play(node.muted === true);
+            const outcome = outcomes.shift() ?? 'ok';
+            if (outcome === 'ok') {
+              node.paused = false;
+              return Promise.resolve();
+            }
+            return Promise.reject(Object.assign(new Error(outcome), { name: outcome }));
+          };
+          node.pause = () => {
+            pause();
+            node.paused = true;
+          };
         },
       });
     },
@@ -89,13 +119,12 @@ const TOKEN = {
   },
 };
 
-type MediaLikeElement = HTMLElement & { currentTime?: number; duration?: number; muted?: boolean };
-
 /**
  * The control double covers EVERY member of `StoryMediaControls` — `satisfies` is what keeps it
  * that way, so a handler added to the viewer's contract cannot be called into thin air from here.
+ * The sound is ON by default (2026-10-20).
  */
-function makeControls(paused = false, muted = true) {
+function makeControls(paused = false, muted = false) {
   return {
     active: true,
     paused,
@@ -104,6 +133,7 @@ function makeControls(paused = false, muted = true) {
     onError: vi.fn(),
     onCanPlay: vi.fn(),
     onPlaying: vi.fn(),
+    onBlocked: vi.fn(),
     onTimeUpdate: vi.fn(),
   } satisfies StoryMediaControls;
 }
@@ -111,10 +141,13 @@ function makeControls(paused = false, muted = true) {
 type Controls = ReturnType<typeof makeControls>;
 
 /** Flush until the deferred vendor element exists — the dynamic import and the stand-in each defer. */
-async function mountedPlayer(): Promise<MediaLikeElement> {
+async function mountedPlayer(): Promise<StandIn> {
   for (let tick = 0; tick < 20; tick += 1) {
     const element = document.querySelector('mux-player');
-    if (element) return element as MediaLikeElement;
+    if (element) {
+      await flush();
+      return element as StandIn;
+    }
     await act(async () => {
       await Promise.resolve();
     });
@@ -130,16 +163,21 @@ async function flush(times = 4) {
   }
 }
 
-async function dispatch(element: MediaLikeElement, type: string) {
+async function dispatch(element: StandIn, type: string) {
   await act(async () => {
     element.dispatchEvent(new Event(type));
   });
 }
 
+/** The mute each `play()` was asked with, in order (`true` = muted). */
+const mutedAtPlay = () => play.mock.calls.map(([muted]) => muted as boolean);
+
 beforeEach(() => {
   vi.clearAllMocks();
+  recorded.length = 0;
+  outcomes.length = 0;
+  resetVideoSound();
   playbackToken.mockResolvedValue(TOKEN);
-  play.mockResolvedValue(undefined);
 });
 afterEach(cleanup);
 
@@ -182,28 +220,24 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
     expect(controls.onTimeUpdate).toHaveBeenCalledTimes(0);
   });
 
-  it('3. applies the paused and muted flags it is ALREADY HOLDING the moment the element appears', async () => {
-    const controls: Controls = makeControls(true, true);
+  it('3. applies the paused flag it is ALREADY HOLDING the moment the element appears', async () => {
+    const controls: Controls = makeControls(true);
     render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />);
 
-    const player = await mountedPlayer();
+    await mountedPlayer();
     // No prop change between the render and this assertion — that is the whole claim. The shipped
     // bridge queried once on the token commit, found nothing, and left the flags unapplied until
     // some later toggle happened to re-run the effect.
-    await flush();
-
     expect(pause).toHaveBeenCalledTimes(1);
-    expect(player.muted).toBe(true);
     expect(play).toHaveBeenCalledTimes(0);
   });
 
-  it('4. flipping paused to false calls the element’s play', async () => {
-    const controls: Controls = makeControls(true, true);
+  it('4. flipping paused to false plays the element, WITH sound (2026-10-20)', async () => {
+    const controls: Controls = makeControls(true);
     const { rerender } = render(
       <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />,
     );
     await mountedPlayer();
-    await flush();
 
     rerender(
       <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={{ ...controls, paused: false }} />,
@@ -211,6 +245,7 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
     await flush();
 
     expect(play).toHaveBeenCalledTimes(1);
+    expect(mutedAtPlay()).toEqual([false]);
   });
 
   it('5. hands the host a callable on attach, null on unmount, and leaves no live listener', async () => {
@@ -221,7 +256,6 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
     );
 
     const player = await mountedPlayer();
-    await flush();
     // Two arguments now: the STORY ID the component was given, then the callable. The id is what
     // lets the host keep one registration per story instead of one shared slot (CR-02).
     expect(bindPlay.mock.calls.at(-1)?.[0]).toBe(STORY_ID);
@@ -251,5 +285,139 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
     expect(controls.onError).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('mux-player')).toBeNull();
     expect(document.querySelector('mux-player')).toBeNull();
+  });
+});
+
+describe('StoryVideo — no player bar, never paused, sound on (2026-10-20, FRONT.pdf)', () => {
+  it('7. the vendor gets NO chrome: no bar, no dialog, no hotkeys, no stored mute, no autoplay of its own', async () => {
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={makeControls()} />);
+    await mountedPlayer();
+
+    const props = recorded.at(-1) ?? {};
+    expect(props).toMatchObject({
+      playsInline: true,
+      nohotkeys: true,
+      noMutedPref: true,
+      noVolumePref: true,
+      streamType: 'on-demand',
+    });
+    expect(props.style).toMatchObject({ '--controls': 'none', '--dialog': 'none' });
+    // The playback is the bridge's: the vendor neither autoplays nor holds a mute of its own.
+    expect(props.autoPlay).toBeUndefined();
+    expect(props.muted).toBeUndefined();
+  });
+
+  it('8. a click never reaches the player (its own handler would pause the story)', async () => {
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={makeControls()} />);
+    const player = await mountedPlayer();
+    const vendorClick = vi.fn();
+    player.addEventListener('click', vendorClick);
+
+    fireEvent.click(player);
+    expect(vendorClick).not.toHaveBeenCalled();
+  });
+
+  it('9. it starts playing WITH sound the moment the element appears', async () => {
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={makeControls()} />);
+    const player = await mountedPlayer();
+
+    expect(mutedAtPlay()).toEqual([false]);
+    expect(player.muted).toBe(false);
+    expect(player.paused).toBe(false);
+  });
+
+  it('10. a member who muted gets the video playing muted', async () => {
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={makeControls(false, true)} />);
+    const player = await mountedPlayer();
+
+    expect(mutedAtPlay()).toEqual([true]);
+    expect(player.paused).toBe(false);
+  });
+
+  it('11. a browser that refuses the sound gets the video playing MUTED, never paused and never blocked', async () => {
+    outcomes.push('NotAllowedError');
+    const controls = makeControls();
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />);
+    const player = await mountedPlayer();
+
+    expect(mutedAtPlay()).toEqual([false, true]);
+    expect(player.paused).toBe(false);
+    expect(pause).not.toHaveBeenCalled();
+    expect(controls.onBlocked).not.toHaveBeenCalled();
+    // The controls honestly read "Ativar som": the browser held the sound back.
+    expect(videoSoundAudible()).toBe(false);
+  });
+
+  it('12. the next touch on the story stage turns the sound on, inside that touch', async () => {
+    outcomes.push('NotAllowedError');
+    render(
+      <div data-video-surface="">
+        <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={makeControls()} />
+      </div>,
+    );
+    const player = await mountedPlayer();
+    expect(player.muted).toBe(true);
+
+    await act(async () => {
+      screen.getByTestId('story-video').dispatchEvent(new Event('touchend', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(mutedAtPlay()).toEqual([false, true, false]);
+    expect(player.muted).toBe(false);
+    expect(videoSoundAudible()).toBe(true);
+  });
+
+  it('13. a refusal even MUTED is reported up (the viewer’s badge), and the badge’s callable plays inside the tap', async () => {
+    outcomes.push('NotAllowedError', 'NotAllowedError');
+    const controls = makeControls();
+    const bindPlay = vi.fn();
+    render(
+      <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} onPlayRef={bindPlay} />,
+    );
+    const player = await mountedPlayer();
+
+    expect(controls.onBlocked).toHaveBeenCalledTimes(1);
+    expect(player.paused).toBe(true);
+
+    const playNow = bindPlay.mock.calls.at(-1)?.[1] as () => void;
+    await act(async () => {
+      playNow();
+      await Promise.resolve();
+    });
+    expect(mutedAtPlay().at(-1)).toBe(false);
+    expect(player.paused).toBe(false);
+  });
+
+  it('14. a story that should be playing and is not is started again at its first canplay', async () => {
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={makeControls()} />);
+    const player = await mountedPlayer();
+    expect(play).toHaveBeenCalledTimes(1);
+
+    // The vendor had no source yet when it was asked: nothing started.
+    player.paused = true;
+    await dispatch(player, 'canplay');
+    expect(play).toHaveBeenCalledTimes(2);
+
+    // Already playing: a later canplay (a seek, a rebuffer) starts nothing twice.
+    await dispatch(player, 'canplay');
+    expect(play).toHaveBeenCalledTimes(2);
+  });
+
+  it('15. a paused story no longer counts as a video the browser held the sound back from', async () => {
+    outcomes.push('NotAllowedError');
+    const controls = makeControls();
+    const { rerender } = render(
+      <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />,
+    );
+    await mountedPlayer();
+    expect(videoSoundAudible()).toBe(false);
+
+    rerender(
+      <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={{ ...controls, paused: true }} />,
+    );
+    await flush();
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(videoSoundAudible()).toBe(true);
   });
 });

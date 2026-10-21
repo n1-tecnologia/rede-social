@@ -4,8 +4,9 @@ import { isContinuablePath, safeContinuePath } from './continue-path';
 /**
  * The continue cookie's two predicates (FEED-07, widened by 06-06 for calendar links, D-211, T-06-41).
  *
- *  1. `isContinuablePath` accepts EXACTLY the shareable post link and the two event calendar shapes
- *     (a lowercase uuid, optionally followed by `/entrar`), and nothing else;
+ *  1. `isContinuablePath` accepts EXACTLY the shareable post link, the two event calendar shapes
+ *     (a lowercase uuid, optionally followed by `/entrar`) and, since 2026-10-20, the shareable
+ *     story link (a lowercase uuid and nothing after it), and nothing else;
  *  2. `safeContinuePath` keeps every open-redirect guard it had: protocol-relative paths, control
  *     characters, over-length values and anything outside the accepted shapes are refused.
  */
@@ -18,6 +19,7 @@ describe('isContinuablePath — the shareable paths, and only those', () => {
     ['/post/11111111-1111-4111-8111-111111111111'],
     [`/eventos/${UUID}`],
     [`/eventos/${UUID}/entrar`],
+    [`/stories/${UUID}`],
   ])('accepts %s', (path) => {
     expect(isContinuablePath(path)).toBe(true);
   });
@@ -34,6 +36,13 @@ describe('isContinuablePath — the shareable paths, and only those', () => {
     ['/configuracoes'],
     ['/inicio'],
     ['/post/x/y'],
+    ['/stories'],
+    ['/stories/publicar'],
+    ['/stories/meus'],
+    ['/stories/destaques'],
+    [`/stories/${UUID.toUpperCase()}`],
+    [`/stories/${UUID}/`],
+    [`/stories/${UUID}/editar`],
   ])('rejects %s', (path) => {
     expect(isContinuablePath(path)).toBe(false);
   });
@@ -44,6 +53,7 @@ describe('safeContinuePath — the open-redirect rules are unchanged', () => {
     expect(safeContinuePath('/post/x')).toBe('/post/x');
     expect(safeContinuePath(`/eventos/${UUID}`)).toBe(`/eventos/${UUID}`);
     expect(safeContinuePath(`/eventos/${UUID}/entrar`)).toBe(`/eventos/${UUID}/entrar`);
+    expect(safeContinuePath(`/stories/${UUID}`)).toBe(`/stories/${UUID}`);
   });
 
   it.each([
@@ -58,6 +68,8 @@ describe('safeContinuePath — the open-redirect rules are unchanged', () => {
     [`/eventos/${UUID}/entrar\r\nSet-Cookie: x=1`],
     [`/post/${'a'.repeat(600)}`],
     ['/configuracoes'],
+    [`//evil.com/stories/${UUID}`],
+    [`https://evil.com/stories/${UUID}`],
     [''],
   ])('refuses %j', (raw) => {
     expect(safeContinuePath(raw)).toBeNull();

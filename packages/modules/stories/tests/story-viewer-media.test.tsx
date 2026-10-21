@@ -259,8 +259,9 @@ describe('StoryViewer over the REAL MediaImage — the image path settles (STORY
     const settled = renderCount;
     const readyBefore = reports.ready;
 
+    // The sound starts ON since 2026-10-20 (FRONT.pdf), so the toggle offers "mute".
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: LABELS.unmute }));
+      fireEvent.click(screen.getByRole('button', { name: LABELS.mute }));
     });
 
     expect(reports.ready).toBe(readyBefore);

@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
-import { markStoriesSeenAction } from './story-actions';
+import { deleteStoryAction, markStoriesSeenAction } from './story-actions';
 
 /**
  * 05.2-10 — the seen-state write behind the tenant circle's ring (HIGHLIGHT-06, D-105, R-P5).
@@ -123,5 +123,56 @@ describe('markStoriesSeenAction — the silent, batched seen write (05.2-10)', (
     expect(apiFetch).toHaveBeenCalledTimes(3);
     expect(redirect).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 2026-10-20 (the client's FRONT.pdf): a story is deleted from the VIEWER too, which passes
+ * `{ revalidate: false }`: while it is open the URL is the deleted story's own `/stories/{id}`, and a
+ * revalidation would re-render that page into its not-found screen. "Seus stories" keeps the default.
+ * The option is untrusted like the id: anything but `{ revalidate?: boolean }` sends no request.
+ */
+describe('deleteStoryAction — the viewer opts out of the revalidation (2026-10-20)', () => {
+  it('D1. by default one DELETE /v1/stories/{id}, then Início and the history are revalidated', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(204));
+    await expect(deleteStoryAction(A)).resolves.toEqual({ ok: true });
+
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? [];
+    expect(path).toBe(`/v1/stories/${A}`);
+    expect(init?.method).toBe('DELETE');
+    expect(vi.mocked(revalidatePath).mock.calls.map(([target]) => target)).toEqual([
+      '/inicio',
+      '/stories/meus',
+    ]);
+  });
+
+  it('D2. { revalidate: false } deletes the same way and revalidates nothing', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(204));
+    await expect(deleteStoryAction(A, { revalidate: false })).resolves.toEqual({ ok: true });
+
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('D3. a malformed id or option sends NO request', async () => {
+    await expect(deleteStoryAction('nao-e-um-uuid')).resolves.toEqual({
+      ok: false,
+      code: 'generic',
+    });
+    await expect(
+      deleteStoryAction(A, { revalidate: 'nao' } as unknown as { revalidate: boolean }),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+    await expect(
+      deleteStoryAction(A, { revalidate: false, path: '/x' } as unknown as { revalidate: boolean }),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('D4. a miss is the generic answer and revalidates nothing', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(404, { error: { code: 'NOT_FOUND' } }));
+    await expect(deleteStoryAction(A)).resolves.toEqual({ ok: false, code: 'generic' });
+    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
   });
 });

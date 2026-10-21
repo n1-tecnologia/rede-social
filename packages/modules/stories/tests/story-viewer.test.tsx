@@ -32,7 +32,9 @@ import {
  *  4. **Pitfall 4: every per-segment key is `${group.key}:${item.id}`.** The same story in two groups
  *     never shares media, blocked or progress state and never collides as a React key.
  *  5. **UI-D-31: there is no double-tap.** A tap already means advance.
- *  6. **UI-D-34: "did not start" is a STATE.** The bar never fills over a frozen video.
+ *  6. **UI-D-34 since 2026-10-20 (the client's FRONT.pdf): a story never starts paused.** A slow
+ *     start is NOT a refusal (the 400 ms check that paused it is gone); the play badge renders only
+ *     when the host reports a real refusal (`onBlocked`), and it pauses nothing. The sound starts ON.
  *
  * Every string is sentinel ASCII: the module ships no words (PWA-03), so a copy change in the
  * catalog cannot turn this file red.
@@ -445,23 +447,38 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     expect(node).toHaveAttribute('data-paused', 'true');
   });
 
-  it('11. UI-D-34: canplay without playback leaves the clock PAUSED and renders the play badge', () => {
+  it('11. a video that is only SLOW to start is never paused and shows no badge (2026-10-20)', () => {
     vi.useFakeTimers();
     const clock = manualClock();
     row([group('A', [item(0, { mediaKind: 'video' }), item(1)])], {}, clock);
 
     act(() => controls.get('story-0')?.onCanPlay());
-    expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
-
-    // iOS Low Power Mode: the player said it could play and then did not.
+    // The old 400 ms check paused exactly this: a player that could play and had not begun yet.
     act(() => {
-      vi.advanceTimersByTime(400);
+      vi.advanceTimersByTime(5_000);
     });
 
-    expect(screen.getByTestId('story-autoplay-badge')).toBeInTheDocument();
-    expect(dialog()).toHaveAttribute('data-paused', 'true');
-    // The bar never fills over a video that is not moving.
+    expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
+    expect(dialog()).toHaveAttribute('data-paused', 'false');
+    // The video is still asked to play: its controls are not paused.
+    expect(controls.get('story-0')?.paused).toBe(false);
+    // The bar is the element's own time, so it does not fill before the video moves.
     expect(fillOf(0)).toBe('0%');
+  });
+
+  it('11a. a REAL refusal (onBlocked) renders the play badge and pauses nothing; playback clears it', () => {
+    const clock = manualClock();
+    row([group('A', [item(0, { mediaKind: 'video' }), item(1)])], {}, clock);
+
+    // iOS Low Power Mode: the browser refused to play even muted, and the host says so.
+    act(() => controls.get('story-0')?.onBlocked());
+
+    expect(screen.getByTestId('story-autoplay-badge')).toBeInTheDocument();
+    expect(dialog()).toHaveAttribute('data-paused', 'false');
+    expect(controls.get('story-0')?.paused).toBe(false);
+
+    act(() => controls.get('story-0')?.onPlaying());
+    expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
   });
 
   it('12. media that FAILS shows the error copy, keeps the segment where it was and stays paused', () => {
@@ -505,15 +522,12 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
    */
 
   it('12a. CR-04: tapping the play badge starts playback and does NOT advance the story', () => {
-    vi.useFakeTimers();
     const clock = manualClock();
     const onRequestPlay = vi.fn();
     row([group('A', [item(0, { mediaKind: 'video', onRequestPlay }), item(1)])], {}, clock);
 
     act(() => controls.get('story-0')?.onCanPlay());
-    act(() => {
-      vi.advanceTimersByTime(400);
-    });
+    act(() => controls.get('story-0')?.onBlocked());
 
     const badge = screen.getByTestId('story-autoplay-badge');
     expect(badge).toHaveAttribute('data-play-attempt', '0');
@@ -558,7 +572,7 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     expect(currentIndex()).toBe(0);
   });
 
-  it('13. UI-D-31 / UI-D-32: no double-tap gesture and no share control anywhere in the viewer', () => {
+  it('13. UI-D-31 / UI-D-32: no double-tap gesture, and the like and the share are the HOST’s', () => {
     viewer(3);
 
     // Two taps inside any plausible double-tap window are two ADVANCES, never a like.
@@ -566,8 +580,9 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     tapAt(RIGHT_TWO_THIRDS());
     expect(currentIndex()).toBe(2);
 
-    // The like control is the host's, in the action row of whichever story is being watched — the
-    // viewer owns no like of its own, and mounts no gesture that could fire one.
+    // The like control (and, since 2026-10-20, the share) is the host's, in the action row of
+    // whichever story is being watched: the viewer owns neither, and mounts no gesture that could
+    // fire one.
     expect(screen.getByTestId('actions-2')).toBeInTheDocument();
     expect(dialog().querySelector('[data-double-tap-burst]')).toBeNull();
   });
@@ -746,7 +761,6 @@ describe('StoryViewer — a row of groups (D-107, UI-D-65, R-D-M)', () => {
   });
 
   it('G8. Pitfall 4: the SAME story in two groups shares no state and no React key', () => {
-    vi.useFakeTimers();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const dup = (groupKey: string) =>
       item(0, {
@@ -767,18 +781,14 @@ describe('StoryViewer — a row of groups (D-107, UI-D-65, R-D-M)', () => {
 
     // A's copy is autoplay-blocked…
     act(() => controls.get('A:dup')?.onCanPlay());
-    act(() => {
-      vi.advanceTimersByTime(400);
-    });
+    act(() => controls.get('A:dup')?.onBlocked());
     expect(screen.getByTestId('story-autoplay-badge')).toBeInTheDocument();
 
     // …and B's copy, a different segment of the same story, is not.
     fireEvent.keyDown(dialog(), { key: 'ArrowRight' });
     expect(position()).toEqual([1, 0]);
     expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
-    act(() => {
-      vi.advanceTimersByTime(400);
-    });
+    act(() => controls.get('B:dup')?.onCanPlay());
     expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
 
     expect(keyWarnings(errors)).toBe(0);
@@ -798,8 +808,8 @@ describe('StoryViewer — a row of groups (D-107, UI-D-65, R-D-M)', () => {
     expect(onSegmentShown).toHaveBeenCalledTimes(1);
     expect(onSegmentShown).toHaveBeenLastCalledWith('story-0', 'A');
 
-    // An unrelated re-render (a mute toggle) reports nothing new.
-    fireEvent.click(screen.getByRole('button', { name: LABELS.unmute }));
+    // An unrelated re-render (a mute toggle: the sound starts on, so the toggle reads "mute").
+    fireEvent.click(screen.getByRole('button', { name: LABELS.mute }));
     expect(onSegmentShown).toHaveBeenCalledTimes(1);
 
     // Story 1 is already decoded: it is reported the moment it BECOMES current.
@@ -837,6 +847,124 @@ describe('StoryViewer — a row of groups (D-107, UI-D-65, R-D-M)', () => {
     expect(screen.getAllByTestId('story-position')).toHaveLength(1);
 
     expect(keyWarnings(errors)).toBe(0);
+  });
+});
+
+/* ── 2026-10-20: the client's FRONT.pdf (never starts paused, sound on, hold-only pause) ───────── */
+describe('StoryViewer — a story never starts paused, and it starts with sound (2026-10-20)', () => {
+  it('S1. the sound starts ON: the media is not muted and the toggle offers "mute"', () => {
+    row([group('A', [item(0, { mediaKind: 'video' }), item(1)])]);
+
+    expect(controls.get('story-0')?.muted).toBe(false);
+    const toggle = screen.getByRole('button', { name: LABELS.mute });
+    // The toggle's own touch is the toggle's (the app's playback rule reads this attribute).
+    expect(toggle).toHaveAttribute('data-video-sound');
+
+    fireEvent.click(toggle);
+    expect(controls.get('story-0')?.muted).toBe(true);
+    expect(screen.getByRole('button', { name: LABELS.unmute })).toBeInTheDocument();
+  });
+
+  it('S2. a host CONTROLS the sound: its choice reaches the media, its state names the toggle, the click is its', () => {
+    const onToggleSound = vi.fn();
+    const { rerender } = render(
+      <StoryViewer
+        groups={[group('A', [item(0, { mediaKind: 'video' })])]}
+        labels={LABELS}
+        onClose={vi.fn()}
+        muted={false}
+        soundAudible={false}
+        onToggleSound={onToggleSound}
+      />,
+    );
+
+    // The member wants sound and the browser held it back: the media is unmuted for the host to
+    // handle, and the toggle honestly offers to turn the sound on.
+    expect(controls.get('story-0')?.muted).toBe(false);
+    const toggle = screen.getByRole('button', { name: LABELS.unmute });
+    fireEvent.click(toggle);
+    expect(onToggleSound).toHaveBeenCalledTimes(1);
+    // A controlled viewer never flips its own state.
+    expect(controls.get('story-0')?.muted).toBe(false);
+
+    rerender(
+      <StoryViewer
+        groups={[group('A', [item(0, { mediaKind: 'video' })])]}
+        labels={LABELS}
+        onClose={vi.fn()}
+        muted={true}
+        onToggleSound={onToggleSound}
+      />,
+    );
+    expect(controls.get('story-0')?.muted).toBe(true);
+    expect(screen.getByRole('button', { name: LABELS.unmute })).toBeInTheDocument();
+  });
+
+  it('S3. a Space pause ends with its story: the next one opens playing', () => {
+    viewer(3);
+    const node = dialog();
+
+    fireEvent.keyDown(node, { key: ' ' });
+    expect(node).toHaveAttribute('data-paused', 'true');
+
+    fireEvent.keyDown(node, { key: 'ArrowRight' });
+    expect(currentIndex()).toBe(1);
+    expect(node).toHaveAttribute('data-paused', 'false');
+  });
+
+  it('S4. only a HOLD pauses: a tap moves and leaves the story playing', () => {
+    viewer(3);
+    tapAt(RIGHT_TWO_THIRDS());
+    expect(currentIndex()).toBe(1);
+    expect(dialog()).toHaveAttribute('data-paused', 'false');
+    tapAt(LEFT_THIRD());
+    expect(currentIndex()).toBe(0);
+    expect(dialog()).toHaveAttribute('data-paused', 'false');
+  });
+
+  it('S5. the stage is a video surface that opens no context menu and no iOS touch callout', () => {
+    viewer(2);
+    const node = stage();
+    expect(node).toHaveAttribute('data-video-surface');
+    expect(node.className).toContain('[-webkit-touch-callout:none]');
+
+    // A long press raises `contextmenu`, which would cancel the hold mid-press.
+    const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    node.dispatchEvent(menu);
+    expect(menu.defaultPrevented).toBe(true);
+  });
+
+  it('S6. the action row wraps instead of running off a narrow screen', () => {
+    viewer(1);
+    expect(screen.getByTestId('actions-0').parentElement?.className).toContain('flex-wrap');
+  });
+
+  it('S7. a story MENU renders in the header, right before the sound toggle, for that story only', () => {
+    row([
+      group('A', [
+        item(0, {
+          menu: (
+            <button type="button" data-testid="menu-0">
+              {'menu-0'}
+            </button>
+          ),
+        }),
+        item(1),
+      ]),
+    ]);
+    const menu = screen.getByTestId('menu-0');
+    const header = [...(menu.parentElement?.querySelectorAll('button') ?? [])];
+    const sound = header.find((node) => node.hasAttribute('data-video-sound'));
+    expect(sound).toBeTruthy();
+    expect(header.indexOf(menu as HTMLButtonElement)).toBe(
+      header.indexOf(sound as HTMLButtonElement) - 1,
+    );
+    // Never in the action row.
+    expect(screen.getByTestId('actions-0').parentElement?.contains(menu)).toBe(false);
+
+    tapAt(RIGHT_TWO_THIRDS());
+    expect(currentIndex()).toBe(1);
+    expect(screen.queryByTestId('menu-0')).toBeNull();
   });
 });
 

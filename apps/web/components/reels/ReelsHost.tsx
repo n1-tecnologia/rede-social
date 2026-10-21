@@ -48,6 +48,11 @@ import {
   useFollowRequiredRefusal,
 } from '@/components/feed/community-locked';
 import { useSharePost } from '@/components/feed/useSharePost';
+import {
+  setVideoSoundWanted,
+  useVideoSoundAudible,
+  videoSoundAudible,
+} from '@/components/media/video-sound';
 import type { ReelView } from '@/lib/reels';
 import { type ReelBinder, ReelOverlay, type ReelOverlayLabels } from './ReelOverlay';
 import { ReelVideo, type ReelVideoController } from './ReelVideo';
@@ -62,19 +67,23 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  * (pages, credentials, likes, comments) and `useToast` are app-tier too. So this file owns the ONE
  * state machine, the way `StoryViewerHost` does for the story viewer.
  *
- * **Sound (D-126, UI-D-85).** `soundOn` starts `false` on every visit and dies with this component.
- * It is never written to storage, a cookie or the server. `soundOnRef` mirrors it so a `start()`
- * issued inside a gesture reads the value of THAT instant, never a stale closure (REELS-06
- * adjacency): a page that becomes current in the same instant the viewer muted plays muted. A
- * refused unmuted `play()` flips it back (`onSoundRefused`); the button is the only on-screen
- * control and is not rendered in the empty and full-stage error states.
+ * **Sound (D-126, UI-D-85, revised 2026-10-20 by the client's FRONT.pdf).** Reels arrive WITH sound:
+ * the choice is no longer this host's but the visit's, shared by every video of the app
+ * (`video-sound`: on until the member mutes one, wherever, and back on with any sound button; it
+ * lives in memory for the page's life, so leaving Reels and coming back keeps it, and it is never
+ * written to storage, a cookie or the server). Every `play()` reads it at that instant, so a page
+ * that becomes current in the same instant the viewer muted plays muted. A browser that refuses the
+ * sound outside a gesture keeps the Reel PLAYING muted and the button reads "Ativar som" until it,
+ * or the next swipe, turns it on; the button is the only on-screen control and is not rendered in
+ * the empty and full-stage error states.
  *
  * **The WebKit gesture rule.** The pager calls `onActivate(next)` synchronously inside the swipe,
- * key or click, BEFORE `onIndexChange`. Here that pauses the page being left and calls
- * `start(soundOnRef.current)` on the next page's already-mounted controller, so a sound-on
- * `play()` runs inside the user's gesture. WebKit counts `touchend`, not `pointerup`, as the
- * activation for unmuted playback, so the stage wrapper's `onTouchEnd` re-issues `resume` once for
- * the page that gesture activated (RESEARCH A3; idempotent — see `ReelVideo`'s `play`).
+ * key or click, BEFORE `onIndexChange`. Here that pauses the page being left and calls `start()` on
+ * the next page's already-mounted controller, so a sound-on `play()` runs inside the user's
+ * gesture. WebKit counts `touchend`, not `pointerup`, as the activation for unmuted playback, so the
+ * stage wrapper's `onTouchEnd` re-issues `resume` once for the page that gesture activated (RESEARCH
+ * A3; idempotent — see `ReelVideo`'s `play`), which is also where a Reel the browser kept muted gets
+ * its sound.
  *
  * **Pause sources are OR-ed (UI-D-86).** The viewer's own pause (tap, Space, the badge), the open
  * comment sheet (UI-D-90, D-82) and `document.visibilityState === 'hidden'`. Coming back from the
@@ -376,8 +385,8 @@ export function ReelsHost({
 
   /**
    * CR-01: each post's settled like pair and comment count for THIS visit, keyed by the post id
-   * string exactly as the feed API returns it, so one post in two lanes is one entry. Like `soundOn`,
-   * it dies with the host and is never persisted.
+   * string exactly as the feed API returns it, so one post in two lanes is one entry. It dies with
+   * the host and is never persisted.
    */
   const [interactions, setInteractions] = useState<Record<string, ReelInteraction>>({});
   /**
@@ -397,10 +406,10 @@ export function ReelsHost({
   const current = items[index] ?? null;
   const currentId = current?.id ?? null;
 
-  /* ── Sound (D-126) and the pause sources (UI-D-86) ───────────────────────────────────────── */
+  /* ── Sound (D-126, `video-sound` since 2026-10-20) and the pause sources (UI-D-86) ─────────── */
 
-  const [soundOn, setSoundOn] = useState(false);
-  const soundOnRef = useRef(false);
+  /** What the button shows: the visit's sound is on and no Reel is held back by the browser. */
+  const audible = useVideoSoundAudible();
 
   const [viewerPaused, setViewerPaused] = useState(false);
   const [documentHidden, setDocumentHidden] = useState(false);
@@ -474,10 +483,10 @@ export function ReelsHost({
     controllers.current.set(postId, controller);
     const state = latest.current;
     // The page is current when its element appears (the first video, a lane's first video, a
-    // video whose credential arrived after it became current): it starts here, outside a gesture,
-    // which browsers allow muted. With sound on, a refusal falls back to muted (UI-D-85).
+    // video whose credential arrived after it became current): it starts here, outside a gesture.
+    // With sound, a browser that refuses it keeps the Reel playing muted (`video-sound`).
     if (postId === state.currentId && !state.effectivePaused) {
-      controller.start(soundOnRef.current);
+      controller.start();
     }
   }, []);
 
@@ -503,7 +512,7 @@ export function ReelsHost({
       suppressResume.current = false;
       return;
     }
-    controller?.resume(soundOnRef.current);
+    controller?.resume();
   }, [effectivePaused]);
 
   /* ── Credentials: one batched mint per window change (REELS-05) ───────────────────────────── */
@@ -704,12 +713,6 @@ export function ReelsHost({
     setFailed((record) => withKeys(record, [postId]));
   }, []);
 
-  /** UI-D-85: the browser refused sound; the video already re-muted itself and played again. */
-  const onSoundRefused = useCallback(() => {
-    soundOnRef.current = false;
-    setSoundOn(false);
-  }, []);
-
   /* ── Gestures ─────────────────────────────────────────────────────────────────────────────── */
 
   /**
@@ -735,7 +738,7 @@ export function ReelsHost({
       if (state.viewerPaused) setViewerPaused(false);
       setBlocked((record) => without(record, target.id));
       // Inside the gesture, with the sound value of THIS instant.
-      controllerIn(controllers.current, target.id)?.start(soundOnRef.current);
+      controllerIn(controllers.current, target.id)?.start();
       pendingResume.current = target.id;
     },
     [dropHold],
@@ -761,7 +764,7 @@ export function ReelsHost({
     if (state.viewerPaused || state.documentHidden || state.sheetOpen) return;
     if (state.effectivePaused) suppressResume.current = true;
     if (state.blockedCurrent) return;
-    controllerIn(controllers.current, state.currentId)?.resume(soundOnRef.current);
+    controllerIn(controllers.current, state.currentId)?.resume();
     // WebKit: the stage's `touchend` re-issues it once, inside the activation it counts.
     pendingResume.current = state.currentId;
   }, []);
@@ -772,7 +775,7 @@ export function ReelsHost({
     if (postId === null) return;
     pendingResume.current = null;
     if (latest.current.effectivePaused) return;
-    controllerIn(controllers.current, postId)?.resume(soundOnRef.current);
+    controllerIn(controllers.current, postId)?.resume();
   };
 
   const onTogglePause = useCallback(() => {
@@ -787,22 +790,20 @@ export function ReelsHost({
       // holds it: then the pause effect resumes when that source clears.
       if (!state.otherPaused) {
         if (state.viewerPaused) suppressResume.current = true;
-        controllerIn(controllers.current, postId)?.resume(soundOnRef.current);
+        controllerIn(controllers.current, postId)?.resume();
       }
       return;
     }
     setViewerPaused(true);
   }, []);
 
+  /**
+   * Inside the click (or the `m` key): turning the sound ON replays the playing Reel with sound in
+   * this gesture, a held-back one included; OFF mutes it. A paused page is untouched and takes the
+   * choice at its next play. The choice is the visit's, every video's (`video-sound`).
+   */
   const toggleSound = useCallback(() => {
-    const next = !soundOnRef.current;
-    soundOnRef.current = next;
-    setSoundOn(next);
-    const state = latest.current;
-    const controller = controllerIn(controllers.current, state.currentId);
-    controller?.setMuted(!next);
-    // Turning sound ON plays inside the click, so a refusal surfaces (and re-mutes, UI-D-85).
-    if (next && !state.effectivePaused && !state.blockedCurrent) controller?.resume(true);
+    setVideoSoundWanted(!videoSoundAudible());
   }, []);
 
   /** Per-page binders, registered by each page's overlay. */
@@ -833,7 +834,7 @@ export function ReelsHost({
     setSheetFor(null);
     if (!state.viewerPaused && !state.documentHidden && !holdingRef.current) {
       suppressResume.current = true;
-      controllerIn(controllers.current, state.currentId)?.resume(soundOnRef.current);
+      controllerIn(controllers.current, state.currentId)?.resume();
     }
   }, []);
 
@@ -1005,7 +1006,7 @@ export function ReelsHost({
       setBlocked((record) => without(record, first.id));
       // A loaded lane opens at its newest video, started inside the tap or swipe when its element
       // is already mounted; otherwise it starts when its element appears (`onController`).
-      controllerIn(controllers.current, first.id)?.start(soundOnRef.current);
+      controllerIn(controllers.current, first.id)?.start();
     },
     [loadLane, dropHold],
   );
@@ -1067,7 +1068,6 @@ export function ReelsHost({
         onWaiting={onWaiting}
         onError={onVideoError}
         onBlocked={onBlocked}
-        onSoundRefused={onSoundRefused}
       />
     );
   };
@@ -1105,10 +1105,11 @@ export function ReelsHost({
 
   const soundButton = (
     <IconButton
-      icon={soundOn ? Volume2 : VolumeX}
+      icon={audible ? Volume2 : VolumeX}
       size={20}
-      label={soundOn ? labels.soundMute : labels.soundUnmute}
+      label={audible ? labels.soundMute : labels.soundUnmute}
       onClick={toggleSound}
+      data-video-sound=""
       className={cn(
         'absolute top-[calc(var(--safe-top)+8px)] z-[3] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4',
         // In the overlay the return arrow takes the corner and this sits to its left; from md the

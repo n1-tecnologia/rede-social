@@ -23,13 +23,20 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
 
 /**
  * Phase 05.3 — Reels, end to end. Plan 05.3-08 shipped the first case (e1); plan 05.3-09 adds the
- * rest of the phase's walk: lanes, paging on both input models, the visit-long sound state and the
+ * rest of the phase's walk: lanes, paging on both input models, the sound state and the
  * desktop breakpoint (e2..e5, e16), then like parity, comments, share, links, the two long-text
  * backstops, the empty state and the requires-feed rule on throwaway tenants, and every error state
  * by routing the network (e6..e15, e17). 2026-10-09 adds the fit of a video whose size was never
  * stored, which is every real upload (e18), the press-and-hold that pauses on a frame (e19), and
  * the feed's single tap that opens Reels over Início at that video, whose return arrow brings the
  * member back to the same post at the same scroll position (e20, reversing D-124).
+ *
+ * **Sound (2026-10-20, the client's FRONT.pdf).** Reels arrive WITH sound, and the choice is the
+ * session's, every video's (`video-sound`). Chrome only allows that after the page had a user
+ * activation: through the tab (a real tap in the same document) the button reads "Silenciar"; after
+ * a bare `page.goto` the browser holds the sound back and it reads "Ativar som" while the video
+ * still plays. So the cases that do not test sound find the button by `[data-video-sound]`,
+ * whatever its name (e2, e11, e12).
  *
  * **What the seed provides.** `scripts/seed.ts` writes ONE ready video post per seed tenant through
  * the `fake` provider (demo: post `0d000000-0000-4000-8000-000000000004`, asset `…0000000000a4`), in
@@ -115,6 +122,11 @@ function reelsDoor(page: Page, mobile: boolean): Locator {
 
 function stage(page: Page): Locator {
   return page.getByRole('region', { name: R.region });
+}
+
+/** The stage's sound button, whatever it reads ("Silenciar" or "Ativar som"). */
+function soundButton(page: Page): Locator {
+  return stage(page).locator('[data-video-sound]');
 }
 
 /** The CURRENT page of the pager: its neighbours are `inert` (and `aria-hidden`). */
@@ -296,8 +308,10 @@ test.describe('05.3 Reels', () => {
     // The first page's element exists and carries a minted credential.
     await expectPlaybackToken(stage(page));
 
-    // Every visit starts muted (D-126).
-    await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toBeVisible();
+    // 2026-10-20 (FRONT.pdf): the visit arrives WITH sound. The tap on the tab is the page's user
+    // activation, so the browser lets the first video play unmuted.
+    await expect(stage(page).getByRole('button', { name: R.sound.mute })).toBeVisible();
+    await expect.poll(() => playerProperty(page, 'muted')).toBe(false);
 
     // Dispatched AT the tab: under `next dev` the dev overlay's `<nextjs-portal>` sits over the
     // phone BottomNav's first tab and intercepts a coordinate click (06-01 deviation 8, 06-09).
@@ -383,7 +397,7 @@ test.describe('05.3 Reels', () => {
     await expect(stage(page)).toBeVisible();
     await expectVideo(page, 1);
     await expect(page.getByRole('tablist')).toHaveCount(0);
-    await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toBeVisible();
+    await expect(soundButton(page)).toBeVisible();
   });
 
   test('e3 touch paging: a 100 px upward drag pages, a 40 px drag does not, nothing before the first', async ({
@@ -448,24 +462,26 @@ test.describe('05.3 Reels', () => {
     await expectVideo(page, 2);
   });
 
-  test('e5 sound: muted on arrival, sound on carries to the next video, a new visit starts muted at the top of Todos', async ({
+  test('e5 sound: Reels arrive with sound, and muting carries to the next video and to a new visit in the session', async ({
     page,
   }, testInfo) => {
     const mobile = isMobile(testInfo.project.name);
     await hangStreams(page);
     await openReels(page, mobile);
 
+    // 2026-10-20 (FRONT.pdf): with sound from the start (the tab's tap is the page's activation).
+    await expect.poll(() => playerProperty(page, 'muted')).toBe(false);
+    await stage(page).getByRole('button', { name: R.sound.mute }).click();
+    await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toBeVisible();
     await expect.poll(() => playerProperty(page, 'muted')).toBe(true);
-    await stage(page).getByRole('button', { name: R.sound.unmute }).click();
-    await expect(stage(page).getByRole('button', { name: R.sound.mute })).toBeVisible();
 
     await drag(page, -100);
     await expectVideo(page, 2);
     await expectPlaybackToken(currentPage(page));
-    await expect.poll(() => playerProperty(page, 'muted')).toBe(false);
+    await expect.poll(() => playerProperty(page, 'muted')).toBe(true);
 
-    // D-126: the sound state lives for the visit. Leaving through the tab and coming back is a new
-    // visit — muted, at video 1 of "Todos" (the guard against a route kept alive, RESEARCH A8).
+    // The choice is the session's (`video-sound`), no longer the visit's: leaving through the tab
+    // and coming back is a new visit at video 1 of "Todos" (RESEARCH A8), still muted.
     // Dispatched AT the tab: under `next dev` the dev overlay's `<nextjs-portal>` sits over the
     // phone BottomNav's first tab and intercepts a coordinate click (06-01 deviation 8, 06-09).
     await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
@@ -477,6 +493,11 @@ test.describe('05.3 Reels', () => {
     await expect(laneTab(page, R.lanes.all)).toHaveAttribute('aria-selected', 'true');
     await expectPlaybackToken(currentPage(page));
     await expect.poll(() => playerProperty(page, 'muted')).toBe(true);
+
+    // The button brings the sound back, inside its click, for every video again.
+    await stage(page).getByRole('button', { name: R.sound.unmute }).click();
+    await expect(stage(page).getByRole('button', { name: R.sound.mute })).toBeVisible();
+    await expect.poll(() => playerProperty(page, 'muted')).toBe(false);
   });
 
   test('e6 like parity: a double tap likes once and never unlikes, and Início shows the same like', async ({
@@ -741,7 +762,7 @@ test.describe('05.3 Reels', () => {
         .toBe(true);
 
       // No tab's VISIBLE part (its box clipped to the row) intersects the sound button's box.
-      const sound = await stage(page).getByRole('button', { name: R.sound.unmute }).boundingBox();
+      const sound = await soundButton(page).boundingBox();
       const row = await scroller.boundingBox();
       if (!sound || !row) throw new Error('the sound button or the lane row has no box');
       for (const tab of await tabs.all()) {
@@ -784,7 +805,7 @@ test.describe('05.3 Reels', () => {
     ).toBeVisible();
     await expect(stage(page).getByRole('link', { name: F.empty.cta })).toHaveCount(0);
     // UI-D-94: no sound button and no pager, so no ↑/↓ either.
-    await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toHaveCount(0);
+    await expect(soundButton(page)).toHaveCount(0);
     await expect(page.getByRole('button', { name: R.previous })).toHaveCount(0);
     await expect(page.getByRole('button', { name: R.next })).toHaveCount(0);
 
@@ -796,7 +817,7 @@ test.describe('05.3 Reels', () => {
       'href',
       '/criar',
     );
-    await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toHaveCount(0);
+    await expect(soundButton(page)).toHaveCount(0);
     await expect(page.getByRole('button', { name: R.next })).toHaveCount(0);
   });
 

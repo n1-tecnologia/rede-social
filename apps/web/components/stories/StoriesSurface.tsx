@@ -6,6 +6,7 @@ import {
   type StoryStripCircle,
 } from '@rede-social/module-stories/ui';
 import { Pencil } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadHighlightItemsAction } from '@/app/(app)/stories/highlight-actions';
 import {
@@ -79,6 +80,14 @@ import { createStoryInteractions } from './story-interactions';
  * and hands it to every host it mounts, so the settled like pair and the comment count survive a
  * close and a reopen, and the same story in the tenant group, in a highlight and in the `loaded`
  * cache shows one state. It is memory only, like the seen set: the next server render is the truth.
+ *
+ * **2026-10-20, the client's FRONT.pdf.** The row's strip takes the host's desktop arrows
+ * (`scrollLabels`, passed straight through), and the viewer gets the share (`viewer.share`, the
+ * tenant's verified origin and name, composed on the server). When a curator deletes a story from
+ * the viewer, the action skips its revalidation (the deleted story's own URL is on screen while
+ * the viewer is open), so this shell drops that story from every group at once and, once the viewer
+ * has closed and the page's URL is back, refreshes the route ONCE (`router.refresh()`): the server
+ * then draws the row without it.
  */
 export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
   /**
@@ -111,6 +120,11 @@ export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
      * the catalog on the server; present only where a tenant circle exists (Início).
      */
     seenRing?: { seenLabel: string; unseenLabel: string };
+    /**
+     * 2026-10-20: the viewer's share control — the tenant's VERIFIED primary origin and its display
+     * name, both resolved on the server. Absent: no share control.
+     */
+    share?: { origin: string; title: string };
   };
 };
 
@@ -126,6 +140,7 @@ function toStripCircle(circle: RowCircleView): StoryStripCircle {
 }
 
 export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: StoriesSurfaceProps) {
+  const router = useRouter();
   const seenRing = viewer?.seenRing;
   /** Every story the viewer SHOWED in this page's life (R-P5) — the optimistic half of the ring. */
   const sessionSeen = useRef(new Set<string>());
@@ -167,6 +182,21 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
 
+  /** 2026-10-20: the stories a curator deleted from the viewer, out of every group from then on. */
+  const [deleted, setDeleted] = useState<ReadonlySet<string>>(() => new Set());
+  /** A deletion the server's row does not reflect yet: the route is refreshed once the viewer closes. */
+  const refreshPending = useRef(false);
+  /**
+   * The filtered copy of an items array, cached per array AND per deleted set: re-filtering on every
+   * memo pass would hand the host a new group object each time and re-mount its media.
+   */
+  const withoutDeleted = useRef(
+    new WeakMap<
+      StoryViewerItemView[],
+      { deleted: ReadonlySet<string>; items: StoryViewerItemView[] }
+    >(),
+  );
+
   /** The circle that opened the viewer: focus returns to it on close (UI-SPEC §Accessibility). */
   const originRef = useRef<HTMLElement | null>(null);
   /** True while THIS component owns the pushed entry, so a close can pop exactly the one it added. */
@@ -191,7 +221,17 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
   const groups = useMemo<StoryGroupState[]>(
     () =>
       (viewer?.groups ?? []).map((source) => {
-        const items = source.items ?? loaded[source.key] ?? null;
+        const read = source.items ?? loaded[source.key] ?? null;
+        let items = read;
+        if (read !== null && deleted.size > 0 && read.some((item) => deleted.has(item.id))) {
+          const hit = withoutDeleted.current.get(read);
+          if (hit && hit.deleted === deleted) {
+            items = hit.items;
+          } else {
+            items = read.filter((item) => !deleted.has(item.id));
+            withoutDeleted.current.set(read, { deleted, items });
+          }
+        }
         const isFailed = items === null && failed[source.key] === true;
         const cached = mergedRef.current.get(source.key);
         if (
@@ -206,7 +246,7 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
         mergedRef.current.set(source.key, { source, items, failed: isFailed, merged });
         return merged;
       }),
-    [viewer?.groups, loaded, failed],
+    [viewer?.groups, loaded, failed, deleted],
   );
 
   /**
@@ -375,6 +415,21 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
     return () => window.removeEventListener('popstate', onPopState);
   }, [onViewerClosed]);
 
+  /** 2026-10-20: a curator deleted `storyId` from the viewer (which closes right after). */
+  const onStoryDeleted = useCallback((storyId: string) => {
+    refreshPending.current = true;
+    setDeleted((previous) => new Set(previous).add(storyId));
+  }, []);
+
+  // Once the viewer has closed after a deletion — the page's own URL back in place (the popstate
+  // above ran after Next's own restore) — the route is read again ONCE, so the row the server draws
+  // no longer carries the deleted story.
+  useEffect(() => {
+    if (opened !== null || !refreshPending.current) return;
+    refreshPending.current = false;
+    router.refresh();
+  }, [opened, router]);
+
   return (
     <>
       <StoriesStrip
@@ -397,6 +452,8 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
           canCurate={viewer.canCurate}
           originCommunityId={viewer.originCommunityId ?? null}
           interactions={interactions}
+          share={viewer.share}
+          onStoryDeleted={onStoryDeleted}
           onClose={close}
         />
       ) : null}

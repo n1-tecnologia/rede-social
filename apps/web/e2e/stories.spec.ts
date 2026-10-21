@@ -3,22 +3,26 @@ import { expect, type Page, test } from '@playwright/test';
 import { STORY_MAX_PAGE_SIZE } from '@rede-social/module-stories/contracts';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
+import loginMessages from '../messages/pt-BR/login.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
   activeReadyStoryCount,
   cloneActiveStories,
   closeAdmin,
+  createStoryLike,
+  createVideoStoryAs,
   deleteHighlightsByTitlePrefix,
   deleteStoriesByCaptionPrefix,
   deleteStoryCommentsByBodyPrefix,
   envValue,
   hasStoryView,
+  insertHighlightFixture,
   memberProfileForEmail,
   resetMemberProfile,
   setStoryViews,
   stubUnfetchableAvatar,
 } from './admin';
-import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { baseURL, hosts, login, SEED_PASSWORD, users } from './fixtures';
 import { untilHydrated } from './hydration';
 import { ensureWorker } from './worker';
 
@@ -264,7 +268,7 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
     await expect(tenantCircle(page)).toHaveCount(1);
   });
 
-  test('the row keeps IDENTICAL geometry on desktop — no arrows, no fade mask (UI-D-47)', async ({
+  test('the row keeps the circles’ geometry on desktop — no fade mask, and no arrow while it fits (UI-D-47 as amended)', async ({
     page,
     isMobile,
   }) => {
@@ -275,6 +279,8 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
     await expect(row).toBeVisible();
     // `+`, tenant, Bastidores, the dashed `Aulas` and the dashed "Gerenciar" (05.2-09).
     await expect(row.getByRole('listitem')).toHaveCount(5);
+    // 2026-10-20: the desktop arrows exist only while the row overflows, and five circles fit.
+    await expect(page.locator('[data-stories-scroll]')).toHaveCount(0);
     // The row is the only horizontal scroller, and its overscroll is contained so a trackpad swipe
     // never triggers the browser back-gesture.
     const overflow = await row.evaluate((node) => getComputedStyle(node).overflowX);
@@ -924,6 +930,12 @@ test.describe('the story viewer — tap, hold, swipe (STORY-02, UI-D-30, mobile)
     await page.goto('/stories/00000000-0000-4000-8000-000000000000');
     await expect(page.getByRole('dialog', { name: V.dialog })).toHaveCount(0);
     await expect(page.getByTestId('story-progress-bars')).toHaveCount(0);
+    // 2026-10-20: the route's OWN not-found screen, in pt-BR, never Next's English 404.
+    await expect(page.getByText(S.notFound.title, { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: S.notFound.cta })).toHaveAttribute(
+      'href',
+      '/inicio',
+    );
   });
 
   test('tapping the heart moves the count, and the server’s value is what is shown', async ({
@@ -2155,5 +2167,320 @@ test.describe('the seen ring (D-105, UI-D-61, HIGHLIGHT-06)', () => {
       '0',
     );
     await expect(page).toHaveURL(new RegExp(`/stories/${SEEDED.oldestActiveStoryId}$`));
+  });
+});
+
+/**
+ * 2026-10-20 — the client's FRONT.pdf, the stories half, in a real browser:
+ *
+ *  - the Início row is a rounded card on desktop (the edge-to-edge band on the phone), and an
+ *    overflowing row gets two arrows on desktop that page it and stop at its ends;
+ *  - the viewer shares a story like a post (the tenant's VERIFIED origin, never the tab's), and a
+ *    logged-out visitor who opens the link lands back on the story after the login;
+ *  - a curator deletes a story from the viewer ("Mais opções", the history's own confirmation), by
+ *    the deep link (back to Início with the toast; the link is then the not-found screen) and by the
+ *    tenant circle (the viewer closes and the row no longer plays it); a member has no such door;
+ *  - a story never starts paused: a Space pause ends with its story, and a story VIDEO plays with no
+ *    vendor bar, is never left paused, and has its sound after a touch.
+ *
+ * Every story it writes carries `STORY_PREFIX` and every highlight `HIGHLIGHT_PREFIX` (a highlight
+ * title is capped at 15 characters by the database), and `afterAll` removes them, so the seed is
+ * found exactly as it was. The streams of the video case never answer (`reels.spec.ts`'s
+ * technique): the element stays loading and never errors, so the case asserts what the page asked
+ * of it rather than a decode no local stack can do.
+ */
+test.describe('2026-10-20 — the client’s FRONT.pdf corrections to stories', () => {
+  const V = S.viewer;
+  const H = S.history;
+  const STORY_PREFIX = 'Story frontpdf e2e';
+  const HIGHLIGHT_PREFIX = 'Seta e2e';
+  /** `https://{primaryHost}` — what `primaryHostOrigin()` composes for rede-demo (FEED-07). */
+  const DEMO_SHARE_ORIGIN = 'https://rede-demo.localhost';
+
+  test.afterAll(async () => {
+    await deleteStoriesByCaptionPrefix(STORY_PREFIX);
+    await deleteHighlightsByTitlePrefix('rede-demo', HIGHLIGHT_PREFIX);
+  });
+
+  const viewer = (page: Page) => page.getByRole('dialog', { name: V.dialog });
+
+  /** Pauses the open story from the keyboard (the dialog itself has the focus, never a control). */
+  async function pauseByKeyboard(page: Page) {
+    const dialog = viewer(page);
+    await dialog.focus();
+    await page.keyboard.press('Space');
+    await expect(dialog).toHaveAttribute('data-paused', 'true');
+  }
+
+  /** "Mais opções" → "Excluir story" → the history's confirmation, confirmed. */
+  async function deleteFromViewer(page: Page) {
+    await viewer(page).getByRole('button', { name: V.more, exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: H.menu.title });
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: H.menu.delete }).click();
+    const confirm = page.getByRole('dialog', { name: H.confirmDelete.title });
+    await expect(confirm).toContainText(H.confirmDelete.body);
+    await confirm.getByRole('button', { name: H.confirmDelete.confirm }).click();
+  }
+
+  test('the Início row is a rounded card on desktop and the edge-to-edge band on the phone', async ({
+    page,
+    isMobile,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD);
+    const band = page.locator('[data-stories-band]');
+    await expect(band).toBeVisible();
+    const radius = await band.evaluate((node) => getComputedStyle(node).borderTopLeftRadius);
+    if (isMobile) expect(radius).toBe('0px');
+    else expect(Number.parseFloat(radius)).toBeGreaterThan(0);
+  });
+
+  test('on desktop an overflowing row gets two arrows that page it and stop at its ends', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, 'the arrows are the desktop’s (md and up)');
+    // Five EMPTY Início highlights: a curator's row draws each one as a dashed circle (UI-D-63b), so
+    // the admin's row grows from five circles to ten and no longer fits the 680px column.
+    for (let n = 1; n <= 5; n += 1) {
+      await insertHighlightFixture('rede-demo', null, `${HIGHLIGHT_PREFIX} ${n}`);
+    }
+    try {
+      await login(page, users.demoAdmin, SEED_PASSWORD);
+      const row = strip(page);
+      await expect(row.getByRole('listitem')).toHaveCount(10);
+
+      const previous = page.locator('[data-stories-scroll="previous"]');
+      const next = page.locator('[data-stories-scroll="next"]');
+      await expect(next).toBeVisible();
+      await expect(next).toHaveAttribute('aria-label', S.scroll.next);
+      await expect(previous).toHaveAttribute('aria-label', S.scroll.previous);
+      // At the start the row can only go forward.
+      await expect(previous).toBeDisabled();
+      await expect(next).toBeEnabled();
+
+      const scrollLeft = () => row.evaluate((node) => node.scrollLeft);
+      await next.click();
+      await expect.poll(scrollLeft).toBeGreaterThan(0);
+      await expect(previous).toBeEnabled();
+
+      // Paged to the end, "next" turns off there. One page may already have reached it, and a
+      // smooth scroll settles over a few frames, so the arrow is pressed only while it is live.
+      await expect
+        .poll(
+          async () => {
+            if (await next.isEnabled()) await next.click({ timeout: 2_000 }).catch(() => {});
+            return next.isDisabled();
+          },
+          { timeout: 15_000, intervals: [700] },
+        )
+        .toBe(true);
+
+      await previous.click();
+      await expect(next).toBeEnabled();
+    } finally {
+      await deleteHighlightsByTitlePrefix('rede-demo', HIGHLIGHT_PREFIX);
+    }
+  });
+
+  test('the share copies the story’s link on the tenant’s verified host, and toasts', async ({
+    page,
+    context,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'clipboard permissions are a Chromium grant');
+    // Real permissions rather than a stubbed write (feed-share.spec's posture).
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: hosts.demo });
+    // The OS share sheet is outside the automation boundary (feed-share.spec's posture), and a
+    // system Chrome on a developer's machine exposes `navigator.share` (CI's Chromium does not):
+    // there the sheet never settles and the clipboard arm never runs. Removed before the first
+    // navigation, so every Chrome build takes the clipboard arm this case asserts.
+    await page.addInitScript(() => {
+      Reflect.deleteProperty(Navigator.prototype, 'share');
+    });
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    await tenantCircle(page).click();
+    await expect(viewer(page)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/stories/${SEEDED.oldestActiveStoryId}$`));
+    // Held on its story, so the clock cannot move on before the share.
+    await pauseByKeyboard(page);
+
+    // Dispatched AT the element, for the dev-overlay reason the heart test documents: the issues
+    // pill sits over the left end of the action row, where the share control is.
+    const shareButton = viewer(page).getByRole('button', { name: V.share, exact: true });
+    await expect(shareButton).toBeVisible();
+    await shareButton.dispatchEvent('click');
+    await expect(page.getByText(V.linkCopied, { exact: true })).toBeVisible();
+
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    // The tenant's VERIFIED primary origin, not the `http://…:3000` the tab happens to be on.
+    expect(copied).toBe(`${DEMO_SHARE_ORIGIN}/stories/${SEEDED.oldestActiveStoryId}`);
+  });
+
+  test('a logged-out visitor opening a story link is routed through login and lands on the story', async ({
+    browser,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'one project is enough for a routing claim');
+    // A fresh context: no session, exactly as a member opening a link from a message has.
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseURL}/stories/${SEEDED.oldestActiveStoryId}`);
+      await expect(page).toHaveURL(/\/entrar$/);
+
+      await page.locator('#email').fill(users.demoMember);
+      await page.locator('#password').fill(SEED_PASSWORD);
+      await page.getByRole('button', { name: loginMessages.login.submit, exact: true }).click();
+
+      // The link survived the round trip: the same story, in its viewer.
+      await expect(page).toHaveURL(new RegExp(`/stories/${SEEDED.oldestActiveStoryId}$`));
+      await expect(page.getByRole('dialog', { name: V.dialog })).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('a MEMBER’s viewer offers the share but no "Mais opções"', async ({ page, isMobile }) => {
+    test.skip(!isMobile, 'the overlay is the phone’s');
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await tenantCircle(page).click();
+    const dialog = viewer(page);
+    await expect(dialog).toBeVisible();
+
+    await expect(dialog.getByRole('button', { name: V.share, exact: true })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: V.more, exact: true })).toHaveCount(0);
+  });
+
+  test('an ADMIN deletes a story from its deep link: back on Início with the toast, then the link is the not-found screen', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'one project is enough for a write');
+    const storyId = await createStoryLike('rede-demo', `${STORY_PREFIX} link`);
+    await login(page, users.demoAdmin, SEED_PASSWORD);
+
+    await page.goto(`/stories/${storyId}`);
+    await expect(viewer(page)).toBeVisible();
+    // A deep link is a one-story sequence that closes when it ends: hold it first.
+    await pauseByKeyboard(page);
+    await deleteFromViewer(page);
+
+    // The page WAS the story: the curator leaves for Início, and the toast goes with them.
+    await expect(page).toHaveURL(/\/inicio$/);
+    await expect(page.getByText(H.toasts.deleted, { exact: true })).toBeVisible();
+
+    // The shared link now lands on the route's own not-found screen.
+    await page.goto(`/stories/${storyId}`);
+    await expect(page.getByText(S.notFound.title, { exact: true })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: V.dialog })).toHaveCount(0);
+  });
+
+  test('an ADMIN deletes the story the tenant circle is playing: the viewer closes on Início with the toast, and the row no longer plays it', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'one project is enough for a write');
+    const storyId = await createStoryLike('rede-demo', `${STORY_PREFIX} circulo`);
+    // Every OTHER live story is already seen, so the tenant circle resumes on the new one (D-105).
+    const token = await adminToken();
+    const list = await storiesApi(token, `/v1/stories?limit=${STORY_MAX_PAGE_SIZE}`);
+    const { items } = (await list.json()) as { items: { id: string }[] };
+    const ids = items.map((entry) => entry.id);
+    expect(ids, 'the new story is on the strip').toContain(storyId);
+    await setStoryViews(
+      users.demoAdmin,
+      'rede-demo',
+      ids.filter((id) => id !== storyId),
+    );
+
+    await login(page, users.demoAdmin, SEED_PASSWORD);
+    await tenantCircle(page).click();
+    await expect(viewer(page)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/stories/${storyId}$`));
+    await pauseByKeyboard(page);
+    await deleteFromViewer(page);
+
+    // The viewer closed the way the back gesture closes it, back on Início, with the toast.
+    await expect(viewer(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inicio$/);
+    await expect(page.getByText(H.toasts.deleted, { exact: true })).toBeVisible();
+
+    // With no reload, the tenant circle's sequence is one story shorter again.
+    await tenantCircle(page).click();
+    await expect(page.getByTestId('story-progress-bars')).toHaveAttribute(
+      'data-story-count',
+      String(Math.min(ids.length - 1, STORY_MAX_PAGE_SIZE)),
+    );
+  });
+
+  test('a Space pause belongs to its story: the next one opens playing', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    test.skip(activeStories < 2, 'advancing needs a sequence of at least two');
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await tenantCircle(page).click();
+    const dialog = viewer(page);
+    await expect(dialog).toBeVisible();
+
+    await pauseByKeyboard(page);
+    await page.keyboard.press('ArrowRight');
+    await expect(dialog).toHaveAttribute('data-story-index', '1');
+    // The client's "the story starts paused": the next story never inherits the pause.
+    await expect(dialog).toHaveAttribute('data-paused', 'false');
+  });
+
+  test('a story VIDEO plays with no player bar, is never left paused, and has its sound after a touch', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    const { storyId } = await createVideoStoryAs(
+      users.demoAdmin,
+      'rede-demo',
+      `${STORY_PREFIX} video`,
+    );
+    // The stream never answers: the element stays loading and never raises an error.
+    await page.route('**/stream.mux.com/**', () => undefined);
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await page.goto(`/stories/${storyId}`);
+
+    const dialog = viewer(page);
+    await expect(dialog).toBeVisible();
+    const player = dialog.locator('mux-player').first();
+    await expect(player).toBeAttached({ timeout: 20_000 });
+    const property = (name: 'muted' | 'paused') =>
+      player.evaluate((node, key) => (node as unknown as Record<string, unknown>)[key], name);
+
+    // No vendor chrome on a story: neither the control bar nor the vendor's own dialog.
+    const chrome = await player.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [
+        style.getPropertyValue('--controls').trim(),
+        style.getPropertyValue('--dialog').trim(),
+      ];
+    });
+    expect(chrome).toEqual(['none', 'none']);
+
+    // Never paused: not the viewer, no play badge, and the element itself was asked to play.
+    await expect(dialog).toHaveAttribute('data-paused', 'false');
+    await expect(page.getByTestId('story-autoplay-badge')).toHaveCount(0);
+    await expect.poll(() => property('paused'), { timeout: 15_000 }).toBe(false);
+
+    // A press-and-hold on the story (it neither moves nor advances) is the touch a browser needs to
+    // allow the sound; from then on the video plays with it.
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    await page.mouse.move(Math.round(size.width * 0.5), Math.round(size.height * 0.5));
+    await page.mouse.down();
+    await page.waitForTimeout(400);
+    await page.mouse.up();
+
+    await expect.poll(() => property('muted')).toBe(false);
+    await expect.poll(() => property('paused')).toBe(false);
+    await expect(dialog).toHaveAttribute('data-story-index', '0');
+    await expect(dialog).toHaveAttribute('data-paused', 'false');
   });
 });

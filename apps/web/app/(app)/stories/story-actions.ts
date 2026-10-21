@@ -324,12 +324,24 @@ export async function refuseStoryCommentLikeAction(): Promise<{ ok: false }> {
  *
  * A miss is the API's single bare 404 (unknown, another tenant's, already removed), so the screen
  * says ONE thing for all of them and the dialog closes on the generic error toast either way.
+ *
+ * **`revalidate` is the caller's** (2026-10-20, the client's FRONT.pdf: delete a story from the
+ * viewer). "Seus stories" keeps the default (`true`): it is a list screen. The VIEWER passes `false`:
+ * while it is open the URL is the deleted story's own `/stories/{id}`, and a revalidation would
+ * re-render that page into its not-found screen under the admin's finger; it refreshes the place
+ * it returns to once it has closed instead. The option is untrusted like every argument here.
  */
 export type StoryDeleteResult = { ok: true } | { ok: false; code: 'generic' };
 
-export async function deleteStoryAction(storyId: string): Promise<StoryDeleteResult> {
+const deleteStoryOptions = z.object({ revalidate: z.boolean().optional() }).strict();
+
+export async function deleteStoryAction(
+  storyId: string,
+  options: { revalidate?: boolean } = {},
+): Promise<StoryDeleteResult> {
   const id = z.uuid().safeParse(storyId);
-  if (!id.success) return { ok: false, code: 'generic' };
+  const opts = deleteStoryOptions.safeParse(options ?? {});
+  if (!id.success || !opts.success) return { ok: false, code: 'generic' };
 
   let refusal: string | null = null;
   let result: StoryDeleteResult = { ok: false, code: 'generic' };
@@ -342,7 +354,7 @@ export async function deleteStoryAction(storyId: string): Promise<StoryDeleteRes
   }
 
   // The story leaves the strip, the history and every community's Destaques at once (T-05-52).
-  if (result.ok) {
+  if (result.ok && opts.data.revalidate !== false) {
     revalidatePath('/inicio');
     revalidatePath('/stories/meus');
   }

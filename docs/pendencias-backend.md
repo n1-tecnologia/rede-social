@@ -1,6 +1,6 @@
 # Pendências de backend
 
-Ajustes de 09/10, de 12/10 e de 15/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-16.
+Ajustes de 09/10, de 12/10, de 15/10 e de 20/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-20.
 
 ## Feed e perfil
 
@@ -26,9 +26,12 @@ Ajustes de 09/10, de 12/10 e de 15/10 (branch `FRONT-AJUSTES`). Atualizado em 20
 
 ### 3. Ícone do app no Android sem moldura
 
-- **O que mudou:** o editor "Ícone do app" (Marca da plataforma, Marca do admin e assistente de novo tenant) monta o ícone no navegador, já com o fundo, e envia um PNG quadrado de 1024 px (JPEG só se o PNG passar de 2 MB) pelo upload de ícone que já existe (`kind: 'icon'`).
-- **Back:** no worker (`deriveIconSet`), gerar o `maskable512` ocupando o quadrado inteiro quando a fonte for o ícone do app, em vez de colocá-lo em 80% sobre a cor principal. Precisa de um marcador vindo do upload (um tipo de upload próprio ou o campo do item 4), porque um ícone enviado de outro jeito continua precisando dessa margem.
-- **Por quê:** com um fundo diferente da cor principal, aparece uma moldura no Android: a faixa da cor principal em volta do ícone.
+- **O que mudou:** o editor "Ícone do app" (Marca da plataforma, Marca do admin e assistente de novo tenant) monta o ícone no navegador, já com o fundo, e envia um PNG quadrado de 1024 px (JPEG só se o PNG passar de 2 MB) pelo upload de ícone que já existe (`kind: 'icon'`). Desde 20/10 (pedido do cliente: "a arte tem que tomar o círculo inteiro"), a prévia do Android nesses editores mostra a arte ocupando o círculo inteiro, sem a faixa da cor principal: sempre no rascunho do editor e, no ícone salvo, quando o tenant tem um ícone próprio. O ícone derivado do logo continua com a margem na prévia. **O app instalado ainda mostra a moldura** até a mudança abaixo.
+- **Back:**
+  - no worker (`deriveIconSet` em `packages/core/server/branding/icons.ts`), gerar o `maskable512` ocupando o quadrado inteiro quando a fonte for um ícone enviado e opaco, em vez de colocá-lo em 80% sobre a cor principal; um ícone com transparência (ou derivado do logo) mantém a margem. Precisa de um marcador vindo do upload (um tipo de upload próprio ou o campo do item 4), porque um ícone enviado de outro jeito continua precisando dessa margem;
+  - depois do deploy, refazer os ícones dos tenants que já têm um ícone próprio;
+  - opcional: a marca pública do host (`toHostBranding`) dizer se o ícone é próprio, para o manifest e o front saberem sem outra leitura.
+- **Por quê:** com um fundo diferente da cor principal, aparece uma moldura no Android: a faixa da cor principal em volta do ícone. Aviso para o cliente: no Android de quem já instalou o app, o ícone novo não aparece na hora; ele troca quando o Chrome atualizar o app instalado.
 
 ### 4. Guardar as escolhas do editor de ícone
 
@@ -81,3 +84,38 @@ Ajustes de 09/10, de 12/10 e de 15/10 (branch `FRONT-AJUSTES`). Atualizado em 20
   - o que falta na loja: uma tabela de ofertas e o `offer_id` no pedido (a mesma oferta de entrada e de adicional hoje não se distingue), preencher `expires_at` quando um acesso com prazo é concedido (os "acessos que vencem em 7 dias" dependem disso), rever o `store_orders_live_uq` (impede renovar o mesmo produto sem revogar o pedido anterior) e decidir se um acesso que vence sem renovação encerra a participação;
   - as listas com nomes (membros de cada faixa, quem curtiu ou comentou, quem compra e quanto) só para a equipe do tenant, e todo total de grupo abaixo de 5 pedidos ou pessoas aparece como "menos de 5", sem o número.
 - **Por quê:** hoje o painel não é do tenant: todo admin vê a mesma empresa fictícia. Riscos do lado do back: o registro de visualizações, tempo de vídeo e toques gera muita escrita (lote, índices e prazo de retenção); o painel mostra o comportamento individual de cada membro, o que ele curtiu, comentou e comprou, e o texto dos comentários sem resposta (precisa estar na política de privacidade, com retenção definida, e nunca sair da equipe do tenant); e qualquer migration roda em produção no merge da master, e a homolog usa o mesmo Supabase.
+
+## Correções do FRONT.pdf (20/10)
+
+Os outros itens do PDF ficaram só no front: vídeos sem a barra do player e com som desde a abertura, story que só pausa segurando, setas e cantos arredondados na barra de stories, excluir e compartilhar story. Os itens abaixo dependem do back. Riscos comuns: qualquer migration roda em produção no merge da master, e a homolog usa o mesmo Supabase; nos itens 13 e 14, o banco e a API sobem antes (ou junto) do web, porque o formulário passa a aceitar mais assim que a constante do contrato muda.
+
+### 11. Excluir evento
+
+- **O que mudou:** o formulário de edição do evento (junto de cancelar e reativar) e o aviso de evento cancelado ganharam o botão "Excluir evento", desativado e com "Em breve", só para quem gerencia eventos. O botão não faz nada: não existe rota de exclusão de evento.
+- **Back:**
+  - `DELETE /v1/events/{id}`, com a mesma permissão de editar o evento, fazendo exclusão suave: preencher `events.deleted_at` (a coluna existe, e o serviço, os lembretes, as notificações e as fotos já filtram `deleted_at is null`);
+  - decidir o que acontece com as confirmações e os check-ins: a D-214 diz que respostas e check-ins nunca são apagados, então na exclusão suave eles ficam no banco e só o evento some das telas;
+  - lembretes já agendados: o job de lembretes já lê se o evento foi excluído, conferir que ele pula o envio;
+  - decidir se dá para excluir evento que já tem check-in, ou só cancelado ou sem confirmações.
+- **Por quê:** hoje o evento só pode ser cancelado (e reativado); não há como tirá-lo do app.
+
+### 12. Excluir comunidade arquivada
+
+- **O que mudou:** o formulário da comunidade arquivada e a página dela (junto de "Reativar") ganharam o botão "Excluir comunidade", desativado e com "Em breve", só para quem gerencia comunidades. O botão não faz nada: não existe rota de exclusão de comunidade.
+- **Back:**
+  - `DELETE /v1/communities/{id}`, aceito só para comunidade arquivada, fazendo exclusão suave em `communities.deleted_at` (a coluna existe);
+  - publicações: a chave de `feed_posts.community_id` não tem `on delete`, então uma exclusão definitiva falha; na suave, o feed, o Reels e a página do post precisam esconder as publicações da comunidade excluída;
+  - o que hoje cai em cascata numa exclusão definitiva e precisa de decisão na suave: membros (`community_members`), destaques e fixações de story (`story_highlights`, `story_community_pins`) e os vínculos com produtos da Loja (`store_product_communities`); para a Loja, decidir o que acontece com quem comprou acesso a ela.
+- **Por quê:** hoje a comunidade arquivada só pode ser reativada; não há como removê-la.
+
+### 13. Cronograma do evento sem o limite de 30 momentos
+
+- **O que mudou:** nada no front, por decisão de 20/10. O limite de 30 está no contrato (`EVENT_SCHEDULE_MAX_ITEMS` em `packages/modules/events/contracts/index.ts`, usado pelo schema da API e lido pelo formulário em `apps/web/lib/event-extras.ts`) e numa CHECK do banco (`events_schedule_chk`, `jsonb_array_length(schedule) <= 30`). Mudar só o front faria o formulário aceitar mais momentos e a API recusar o salvamento.
+- **Back:** migration trocando a CHECK `events_schedule_chk` e a constante no contrato (o formulário acompanha sozinho). Proposta: 200 momentos, mantendo um teto para proteger a linha do evento e a página.
+- **Por quê:** o cliente pediu cronogramas com mais de 30 momentos.
+
+### 14. Nome do destaque sem o limite de 15 caracteres
+
+- **O que mudou:** nada no front, por decisão de 20/10. O limite de 15 está no contrato (`STORY_HIGHLIGHT_MAX_TITLE` em `packages/modules/stories/contracts/index.ts`, lido pelo publicar story e pelo gerenciador de destaques), na checagem do serviço (`packages/modules/stories/server/service.ts`) e numa CHECK do banco (`story_highlights_title_chk`, de 1 a 15 caracteres).
+- **Back:** migration trocando a CHECK `story_highlights_title_chk` e a constante no contrato (os formulários acompanham sozinhos). Proposta: 50 caracteres. O nome aparece numa linha embaixo do círculo do destaque, então nomes longos vão aparecer cortados com reticências.
+- **Por quê:** o cliente pediu nomes de destaque maiores.

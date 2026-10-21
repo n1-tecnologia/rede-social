@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { expect, type Page, type Request, test } from '@playwright/test';
+import { expect, type Locator, type Page, type Request, test } from '@playwright/test';
+import mediaMessages from '../messages/pt-BR/media.json' with { type: 'json' };
 import {
   closeAdmin,
   createMember,
@@ -24,7 +25,15 @@ import { ensureWorker } from './worker';
  *
  * Everything runs against `VIDEO_PROVIDER=fake`; the real Mux transcode and the real-device HLS
  * playback stay the two known-blocked Phase 01.1 UAT lines recorded in `docs/DEPLOY.md`.
+ *
+ * 2026-10-20 (the client's FRONT.pdf): the player shows no bar of the vendor's. It plays by itself
+ * in view, with sound unless the browser holds it back (then it plays muted, never paused), a
+ * click on the frame pauses it under the play badge, the sound button sits in its corner, and a
+ * player error is the catalog's own line with "Tentar novamente" instead of the vendor's dialog.
  */
+
+/** The catalog is the source of copy, never a literal in a spec. */
+const M = mediaMessages.media;
 
 const DEMO_SLUG = 'rede-demo';
 /** A throwaway `support_tenant`: the seeded set has no support user, and E7 needs all three roles. */
@@ -39,6 +48,11 @@ function adminGroup(page: Page) {
 
 function mediaRow(page: Page) {
   return page.locator('main a[href="/configuracoes/midia"]');
+}
+
+/** A property of the player's vendor element (`muted`, `paused`). */
+async function playerProperty(player: Locator, name: 'muted' | 'paused'): Promise<unknown> {
+  return player.evaluate((node, key) => (node as unknown as Record<string, unknown>)[key], name);
 }
 
 /**
@@ -370,6 +384,84 @@ test.describe('MEDIA-03 — the upload and the player', () => {
     expect(token).not.toBe('');
     // No raw player error, no provider status, no token fragment on screen (T-03-51).
     await expect(page.locator('[data-testid="video-ready"]')).not.toContainText(/error|401|403/i);
+  });
+
+  test('2026-10-20: the player has no bar, plays by itself never paused, and a click pauses it under the badge', async ({
+    page,
+    context,
+  }) => {
+    await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'ready',
+      filename: 'sem-barra.mp4',
+      playbackId: 'fake-playback-chromeless',
+    });
+    // The stream stays loading (no local stack decodes it): the element never errors. On the
+    // CONTEXT: this spec keeps the dev service worker, which fetches the stream itself (NetworkOnly),
+    // and only a context route sees its requests (a page route let the real 400 through).
+    await context.route('**/stream.mux.com/**', () => undefined);
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes/midia');
+    await page.locator('[data-testid="media-row"][data-status="ready"]').click();
+
+    const ready = page.locator('[data-testid="video-ready"]');
+    const player = ready.locator('mux-player');
+    await expect(player).toBeAttached({ timeout: 20_000 });
+    // No bar: the vendor's controls are hidden by `--controls: none`, and none is visible.
+    expect(
+      await player.evaluate((node) => getComputedStyle(node).getPropertyValue('--controls').trim()),
+    ).toBe('none');
+    await expect(ready.locator('media-control-bar').filter({ visible: true })).toHaveCount(0);
+
+    // It plays by itself, never left paused: with sound, or muted when the browser holds the
+    // sound back, and the sound button says which.
+    const sound = ready.locator('[data-video-sound]');
+    await expect(sound).toBeVisible();
+    await expect.poll(() => playerProperty(player, 'paused')).toBe(false);
+    const muted = await playerProperty(player, 'muted');
+    await expect(sound).toHaveAccessibleName(muted ? M.feedVideo.unmute : M.feedVideo.mute);
+
+    // A click on the frame pauses it under the badge (on a held-back video the first click turns
+    // the sound on instead); another resumes it.
+    const toggle = ready.getByTestId('video-player-toggle');
+    if (muted) {
+      await toggle.click();
+      await expect(sound).toHaveAccessibleName(M.feedVideo.mute);
+    }
+    await toggle.click();
+    await expect.poll(() => playerProperty(player, 'paused')).toBe(true);
+    await expect(ready.getByTestId('video-player-badge')).toBeVisible();
+    await toggle.click();
+    await expect.poll(() => playerProperty(player, 'paused')).toBe(false);
+    await expect(ready.getByTestId('video-player-badge')).toHaveCount(0);
+  });
+
+  test('2026-10-20: a player error is the catalog line and "Tentar novamente", never the vendor dialog', async ({
+    page,
+    context,
+  }) => {
+    await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'ready',
+      filename: 'com-erro.mp4',
+      playbackId: 'fake-playback-error',
+    });
+    // Every stream request FAILS: the element raises its error. On the context, for the service
+    // worker reason above.
+    await context.route('**/stream.mux.com/**', (route) => route.abort());
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes/midia');
+    await page.locator('[data-testid="media-row"][data-status="ready"]').click();
+
+    const ready = page.locator('[data-testid="video-ready"]');
+    await expect(ready.getByText(M.feedVideo.error, { exact: true })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(ready.getByRole('button', { name: M.retry })).toBeVisible();
+    await expect(ready.locator('media-error-dialog').filter({ visible: true })).toHaveCount(0);
+    // No sound button and no click target over a video that will not play.
+    await expect(ready.locator('[data-video-sound]')).toHaveCount(0);
+    await expect(ready.getByTestId('video-player-toggle')).toHaveCount(0);
   });
 
   test('a playback token refused mid-session becomes the generic toast plus a retry that re-mints', async ({

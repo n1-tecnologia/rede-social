@@ -217,6 +217,11 @@
     "reactivate": {
       "action": "Reativar evento"
     },
+    "delete": {
+      "action": "Excluir evento",
+      "soon": "Em breve",
+      "hint": "A exclusão de eventos ainda não está disponível."
+    },
     "form": {
       "titleCreate": "Novo evento",
       "titleEdit": "Editar evento",

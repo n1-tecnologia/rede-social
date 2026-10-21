@@ -2,8 +2,14 @@
 
 import type { StoryMediaControls } from '@rede-social/module-stories/ui';
 import dynamic from 'next/dynamic';
-import { useEffect, useRef, useState } from 'react';
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { fetchPlaybackTokenAction } from '@/app/(app)/configuracoes/midia/actions';
+import {
+  forgetVideo,
+  pauseVideo,
+  playVideo,
+  type SoundPlayable,
+} from '@/components/media/video-sound';
 
 /**
  * `<mux-player>` is a CUSTOM ELEMENT: it registers itself against `window.customElements` at import
@@ -28,9 +34,17 @@ const MuxPlayer = dynamic(() => import('@mux/mux-player-react'), { ssr: false })
  * never embedded in the strip's payload, written to a cookie, put in the router cache or logged.
  * There is deliberately no `"use cache"`, no `unstable_cache` and no `revalidate` anywhere near it.
  *
- * **Muted and inline, always to start** (Pitfall 6): iOS autoplays muted inline video and nothing
- * else, and even then Low Power Mode refuses. That refusal is reported UP — the viewer decides what
- * to do about it — which is how "did not start" becomes a state rather than an impossibility.
+ * **2026-10-20 (the client's FRONT.pdf): no player bar, never paused, sound on.**
+ * - The vendor's chrome is gone: no control bar and no dialog (`--controls`/`--dialog: none`), no
+ *   hotkeys, no stored mute or volume, no `autoPlay` of its own, and a click never reaches the
+ *   player (`onClickCapture`): a mouse click on a story used to pause it through the vendor.
+ * - It plays through the app's ONE playback rule (`components/media/video-sound.ts`): with sound
+ *   unless the member muted (`controls.muted`); a browser that refuses the sound gets the video
+ *   playing MUTED, never paused, and the member's next touch on the stage turns the sound on inside
+ *   that touch; a browser that refuses even muted (iOS Low Power Mode) is reported UP
+ *   (`controls.onBlocked`) and the viewer draws its play badge, whose tap plays here in the gesture.
+ * - A play asked for before the vendor had its source may find nothing to start, so the first
+ *   `canplay` of a story that should be playing and is not starts it again.
  */
 export interface StoryVideoProps {
   assetId: string;
@@ -48,12 +62,9 @@ export interface StoryVideoProps {
 }
 
 /** What the custom element exposes that this bridge uses — standard media-element surface. */
-type PlayableElement = HTMLElement & {
-  play?: () => Promise<void> | void;
-  pause?: () => void;
+type PlayableElement = SoundPlayable & {
   currentTime?: number;
   duration?: number;
-  muted?: boolean;
 };
 
 export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideoProps) {
@@ -68,7 +79,7 @@ export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideo
   /** The vendor element the listeners below are currently attached to, or null. */
   const playerRef = useRef<PlayableElement | null>(null);
   /**
-   * How many times an element has been attached. Its ONLY job is to re-run the pause/mute effect
+   * How many times an element has been attached. Its ONLY job is to re-run the play/pause effect
    * at the moment the element appears, so the flags the bridge is already holding are applied then
    * rather than at the next toggle.
    */
@@ -80,6 +91,28 @@ export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideo
    */
   const controlsRef = useRef(controls);
   controlsRef.current = controls;
+
+  /** This story is the one on screen and nothing pauses it: its video should be playing. */
+  const wantsPlay = controls.active && !controls.paused;
+  const wantsPlayRef = useRef(wantsPlay);
+  wantsPlayRef.current = wantsPlay;
+
+  /**
+   * The ONE way this bridge starts its element: the app's playback rule, with the member's sound
+   * choice (read at call time unless given). A refusal it cannot absorb (not even muted) is the
+   * viewer's badge, and the element is tried again at the member's next touch on the stage.
+   */
+  const start = useCallback(
+    (element: PlayableElement, sound: boolean = !controlsRef.current.muted) => {
+      playVideo(element, {
+        sound,
+        stillWanted: () => playerRef.current === element && wantsPlayRef.current,
+        onBlocked: () => controlsRef.current.onBlocked(),
+        retryOnGesture: true,
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -122,13 +155,19 @@ export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideo
    *
    * It keeps observing for the whole mount rather than disconnecting on first success — the
    * element is REPLACED when the asset changes, and a one-shot observer would reproduce the same
-   * class of defect one level up.
+   * class of defect one level up. An element it lets go of is forgotten by the playback rule too.
    */
   useEffect(() => {
     const frame = frameRef.current;
     if (!frame) return;
 
-    const onCanPlay = () => controlsRef.current.onCanPlay();
+    const onCanPlay = () => {
+      controlsRef.current.onCanPlay();
+      // A play asked for before the vendor had its source can find nothing to start: the story
+      // would sit paused. The first moment it surely can play, it is started again.
+      const element = playerRef.current;
+      if (element && wantsPlayRef.current && element.paused !== false) start(element);
+    };
     const onPlaying = () => controlsRef.current.onPlaying();
     const onError = () => controlsRef.current.onError();
     const onTimeUpdate = () => {
@@ -147,9 +186,9 @@ export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideo
       element.addEventListener('playing', onPlaying);
       element.addEventListener('timeupdate', onTimeUpdate);
       element.addEventListener('error', onError);
-      onPlayRef?.(storyId, () => {
-        void element.play?.();
-      });
+      // The badge's tap: called synchronously inside the member's gesture, which is what a phone
+      // needs to let the video start (with its sound).
+      onPlayRef?.(storyId, () => start(element));
       setAttachments((count) => count + 1);
     };
 
@@ -161,6 +200,7 @@ export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideo
       element.removeEventListener('timeupdate', onTimeUpdate);
       element.removeEventListener('error', onError);
       playerRef.current = null;
+      forgetVideo(element);
       onPlayRef?.(storyId, null);
     };
 
@@ -179,27 +219,37 @@ export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideo
       observer.disconnect();
       detach();
     };
-  }, [onPlayRef, storyId]);
+  }, [onPlayRef, storyId, start]);
 
   /**
-   * The viewer's ONE pause boolean reaches the element here, and nowhere else.
+   * The viewer's ONE pause boolean and the member's sound choice reach the element here, and
+   * nowhere else: playing through the app's rule, or paused (and no longer counted as a video the
+   * browser held the sound back from).
    *
    * `attachments` is a real dependency and a real read: before the first attachment there is no
    * element to apply anything to, and the moment there IS one, the flags this bridge is already
-   * holding must be applied to it — without waiting for a later toggle. That second half of the
-   * same defect is why `muted` and `paused` were silently ignored on arrival.
+   * holding must be applied to it — without waiting for a later toggle.
    */
   useEffect(() => {
     if (attachments === 0) return;
     const element = playerRef.current;
     if (!element) return;
-    element.muted = controls.muted;
-    if (controls.paused) element.pause?.();
-    else void element.play?.();
-  }, [controls.paused, controls.muted, attachments]);
+    if (wantsPlay) start(element, !controls.muted);
+    else pauseVideo(element);
+  }, [wantsPlay, controls.muted, attachments, start]);
+
+  /** No click reaches the vendor element: its own handler would toggle the playback (2026-10-20). */
+  const stopVendorClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+  }, []);
 
   return (
-    <div ref={frameRef} className="absolute inset-0" data-testid="story-video">
+    <div
+      ref={frameRef}
+      className="absolute inset-0"
+      data-testid="story-video"
+      onClickCapture={stopVendorClick}
+    >
       {tokens ? (
         <MuxPlayer
           playbackId={tokens.playbackId}
@@ -210,10 +260,17 @@ export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideo
           }}
           streamType="on-demand"
           playsInline
-          muted={controls.muted}
-          autoPlay={controls.active && !controls.paused}
-          // UI-D-33: a story is never cropped. The black ground is the surface.
-          style={{ height: '100%', width: '100%' }}
+          nohotkeys
+          noMutedPref
+          noVolumePref
+          style={{
+            // 2026-10-20: no control bar and no vendor dialog on a story (the viewer has its own).
+            '--controls': 'none',
+            '--dialog': 'none',
+            // UI-D-33: a story is never cropped. The black ground is the surface.
+            height: '100%',
+            width: '100%',
+          }}
           className="h-full w-full object-contain"
         />
       ) : null}

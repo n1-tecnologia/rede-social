@@ -5,6 +5,7 @@ import type { CommentsListLabels, CommentView } from '@rede-social/module-feed/u
 import type { ReelsPagerProps } from '@rede-social/module-reels/ui';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { playVideo, resetVideoSound, videoSoundWanted } from '@/components/media/video-sound';
 import type { ReelView } from '@/lib/reels';
 import type { ReelsHostLabels, ReelsHostProps } from './ReelsHost';
 import type { ReelVideoProps } from './ReelVideo';
@@ -22,13 +23,16 @@ import type { ReelVideoProps } from './ReelVideo';
  * 2026-10-09: the same host drawn as the overlay a feed video opens (`onBack`) — the start page and
  * index, the return arrow in every state, the overlay's own retry, the reports of what the viewer
  * did, and the lock reaction that no longer refreshes the route under it.
+ *
+ * 2026-10-20 (the client's FRONT.pdf): the sound is `video-sound`'s, REAL and reset before each
+ * case. Reels arrive with sound, the button reads the visit's choice (and a Reel the browser keeps
+ * muted), and the controllers take no sound argument.
  */
 
 type FakeController = {
-  start: Mock<(wantSound: boolean) => void>;
+  start: Mock<() => void>;
   pause: Mock<() => void>;
-  resume: Mock<(wantSound: boolean) => void>;
-  setMuted: Mock<(muted: boolean) => void>;
+  resume: Mock<() => void>;
 };
 
 const {
@@ -155,10 +159,9 @@ vi.mock('./ReelVideo', async () => {
       useEffect(() => {
         if (token === null) return;
         const controller: FakeController = {
-          start: vi.fn<(wantSound: boolean) => void>(),
+          start: vi.fn<() => void>(),
           pause: vi.fn<() => void>(),
-          resume: vi.fn<(wantSound: boolean) => void>(),
-          setMuted: vi.fn<(muted: boolean) => void>(),
+          resume: vi.fn<() => void>(),
         };
         controllers.set(postId, controller);
         onController(postId, controller);
@@ -375,6 +378,7 @@ beforeEach(() => {
     configurable: true,
     get: () => visibility,
   });
+  resetVideoSound();
   mint.mockImplementation(async (ids: string[]) => minted(ids));
   loadPage.mockResolvedValue({ ok: true, items: [], nextCursor: null });
   loadComments.mockResolvedValue({ ok: true, items: [], nextCursor: null });
@@ -388,7 +392,7 @@ afterEach(() => {
 /* ── Credentials and the gesture (REELS-05, WebKit) ───────────────────────────────────────────── */
 
 describe('ReelsHost — credentials and the gesture (REELS-05, RESEARCH Pattern 5)', () => {
-  it('the first render mints pages 0 and 1 in ONE call, and the first video starts muted', async () => {
+  it('the first render mints pages 0 and 1 in ONE call, and the first video starts', async () => {
     renderHost();
     await flush();
 
@@ -396,12 +400,12 @@ describe('ReelsHost — credentials and the gesture (REELS-05, RESEARCH Pattern 
     expect(mint).toHaveBeenCalledWith(['asset-1', 'asset-2']);
     expect(screen.getByTestId(`reel-video-${postId(1)}`).dataset.playback).toBe('pb-asset-1');
     expect(controllerOf(1).start).toHaveBeenCalledTimes(1);
-    expect(controllerOf(1).start).toHaveBeenCalledWith(false);
+    expect(controllerOf(1).start).toHaveBeenCalledWith();
     // A neighbour is mounted with its credential but never started.
     expect(controllerOf(2).start).not.toHaveBeenCalled();
   });
 
-  it('onActivate(1) starts page 1 with start(false) BEFORE the index changes, and pauses page 0', async () => {
+  it('onActivate(1) starts page 1 BEFORE the index changes, and pauses page 0', async () => {
     renderHost();
     await flush();
     let positionAtStart: string | null = null;
@@ -412,7 +416,7 @@ describe('ReelsHost — credentials and the gesture (REELS-05, RESEARCH Pattern 
     await press('ArrowDown');
 
     expect(controllerOf(1).pause).toHaveBeenCalledTimes(1);
-    expect(controllerOf(2).start).toHaveBeenCalledWith(false);
+    expect(controllerOf(2).start).toHaveBeenCalledWith();
     expect(positionAtStart).toBe('Vídeo 1, de Autora 1');
     expect(position()).toBe('Vídeo 2, de Autora 2');
     // The window moved: page 2 (index 2) is minted on its own, in one more call.
@@ -512,7 +516,7 @@ describe('ReelsHost — credentials and the gesture (REELS-05, RESEARCH Pattern 
     const after = controllerOf(2);
     expect(after).not.toBe(before);
     expect(after.start).toHaveBeenCalledTimes(1);
-    expect(after.start).toHaveBeenCalledWith(false);
+    expect(after.start).toHaveBeenCalledWith();
     // The neighbour got its fresh element too, and is registered but never started.
     expect(controllerOf(1).start).not.toHaveBeenCalled();
     expect(screen.getByTestId(`reel-video-${postId(2)}`).dataset.token).toBe('tok2-asset-2');
@@ -550,49 +554,79 @@ describe('ReelsHost — credentials and the gesture (REELS-05, RESEARCH Pattern 
 
 /* ── Sound (D-126, UI-D-85) ───────────────────────────────────────────────────────────────────── */
 
-describe('ReelsHost — sound for the visit (D-126, UI-D-85)', () => {
-  it('turning sound on unmutes and plays the current video; later pages start with sound', async () => {
+describe('ReelsHost — the visit’s sound (D-126, revised 2026-10-20 by the FRONT.pdf)', () => {
+  it('arrives with sound; the button and the m key mute the visit, which the next page takes', async () => {
     renderHost();
     await flush();
 
-    fireEvent.click(screen.getByRole('button', { name: r('sound.unmute') }));
-    expect(controllerOf(1).setMuted).toHaveBeenCalledWith(false);
-    expect(controllerOf(1).resume).toHaveBeenCalledWith(true);
-    expect(screen.getByRole('button', { name: r('sound.mute') })).toBeTruthy();
+    const button = screen.getByRole('button', { name: r('sound.mute') });
+    expect(button.hasAttribute('data-video-sound')).toBe(true);
+    fireEvent.click(button);
+    expect(videoSoundWanted()).toBe(false);
+    expect(screen.getByRole('button', { name: r('sound.unmute') })).toBeTruthy();
 
+    // The pages take the visit's sound at their next play: the host hands them none.
     await press('ArrowDown');
-    expect(controllerOf(2).start).toHaveBeenCalledWith(true);
-    await press('ArrowDown');
-    expect(controllerOf(3).start).toHaveBeenCalledWith(true);
+    expect(controllerOf(2).start).toHaveBeenCalledWith();
+
+    await press('m');
+    expect(videoSoundWanted()).toBe(true);
+    expect(screen.getByRole('button', { name: r('sound.mute') })).toBeTruthy();
   });
 
-  it('a refused unmuted play flips the button back to "Ativar som" with no toast', async () => {
+  it('a Reel the browser keeps muted turns the button to "Ativar som", with no toast and no pause', async () => {
     renderHost();
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: r('sound.unmute') }));
 
+    // What ReelVideo's play does through `video-sound` when the browser refuses the sound.
+    const gesture = { open: false };
+    const reel = document.createElement('div') as unknown as HTMLElement & {
+      muted: boolean;
+      paused: boolean;
+      play: () => Promise<void>;
+      pause: () => void;
+    };
+    reel.muted = false;
+    reel.paused = true;
+    reel.pause = vi.fn();
+    reel.play = () => {
+      if (!reel.muted && !gesture.open) {
+        return Promise.reject(Object.assign(new Error('refused'), { name: 'NotAllowedError' }));
+      }
+      reel.paused = false;
+      return Promise.resolve();
+    };
     await act(async () => {
-      videoProps.get(postId(1))?.onSoundRefused();
+      playVideo(reel, { stillWanted: () => true });
     });
+    await flush();
+
+    expect(reel.muted).toBe(true);
+    expect(reel.paused).toBe(false);
     expect(screen.getByRole('button', { name: r('sound.unmute') })).toBeTruthy();
     expect(toast.show).not.toHaveBeenCalled();
+    expect(controllerOf(1).pause).not.toHaveBeenCalled();
 
-    await press('ArrowDown');
-    expect(controllerOf(2).start).toHaveBeenCalledWith(false);
+    // The button's click is the gesture: the Reel replays with sound inside it.
+    gesture.open = true;
+    fireEvent.click(screen.getByRole('button', { name: r('sound.unmute') }));
+    expect(reel.muted).toBe(false);
+    await flush();
+    expect(screen.getByRole('button', { name: r('sound.mute') })).toBeTruthy();
   });
 
-  it('unmount forgets the choice: a remount starts muted, and nothing was stored', async () => {
+  it('the choice outlives the host (a new visit keeps it) and nothing is stored', async () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
     const { unmount } = renderHost();
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: r('sound.unmute') }));
+    fireEvent.click(screen.getByRole('button', { name: r('sound.mute') }));
     unmount();
     controllers.clear();
 
     renderHost();
     await flush();
     expect(screen.getByRole('button', { name: r('sound.unmute') })).toBeTruthy();
-    expect(controllerOf(1).start).toHaveBeenCalledWith(false);
+    expect(controllerOf(1).start).toHaveBeenCalledWith();
     expect(setItem).not.toHaveBeenCalled();
     expect(document.cookie).toBe('');
   });
@@ -637,7 +671,7 @@ describe('ReelsHost — the OR-ed pause sources (UI-D-86)', () => {
       videoProps.get(postId(1))?.onBlocked(postId(1));
     });
     fireEvent.click(screen.getByTestId('reels-play-badge'));
-    expect(controllerOf(1).resume).toHaveBeenCalledWith(false);
+    expect(controllerOf(1).resume).toHaveBeenCalledWith();
     await flush();
     expect(screen.queryByTestId('reels-play-badge')).toBeNull();
   });
@@ -676,7 +710,7 @@ describe('ReelsHost — holding the video pauses it on that frame (item 12)', ()
 
     await letGo();
     expect(controllerOf(1).resume).toHaveBeenCalledTimes(1);
-    expect(controllerOf(1).resume).toHaveBeenCalledWith(false);
+    expect(controllerOf(1).resume).toHaveBeenCalledWith();
     expect(screen.queryByTestId('reels-play-badge')).toBeNull();
   });
 
@@ -813,7 +847,7 @@ describe('ReelsHost — the empty state and the lane row (UI-D-94, D-120)', () =
     expect(screen.getByText(`Os vídeos publicados por ${TENANT} vão aparecer aqui.`)).toBeTruthy();
     expect(screen.queryByRole('link', { name: f('empty.cta') })).toBeNull();
     expect(screen.queryByRole('tablist')).toBeNull();
-    expect(screen.queryByRole('button', { name: r('sound.unmute') })).toBeNull();
+    expect(document.querySelector('[data-video-sound]')).toBeNull();
     expect(screen.queryByTestId('reels-pager')).toBeNull();
     expect(mint).not.toHaveBeenCalled();
   });
@@ -1034,7 +1068,7 @@ describe('ReelsHost — the comment sheet over Reels (UI-D-90, D-59, D-82)', () 
     await closeSheet();
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(controllerOf(1).resume).toHaveBeenCalledTimes(1);
-    expect(controllerOf(1).resume).toHaveBeenCalledWith(false);
+    expect(controllerOf(1).resume).toHaveBeenCalledWith();
     expect(pagerProps.at(-1)?.gesturesDisabled).toBe(false);
   });
 
@@ -1480,7 +1514,7 @@ describe('ReelsHost — the overlay a feed video opens (2026-10-09)', () => {
     expect(position()).toBe('Vídeo 3, de Autora 3');
     expect(mint).toHaveBeenCalledTimes(1);
     expect(mint).toHaveBeenCalledWith(['asset-2', 'asset-3', 'asset-4']);
-    expect(controllerOf(3).start).toHaveBeenCalledWith(false);
+    expect(controllerOf(3).start).toHaveBeenCalledWith();
     expect(controllerOf(2).start).not.toHaveBeenCalled();
     expect(controllerOf(4).start).not.toHaveBeenCalled();
   });
@@ -1548,7 +1582,7 @@ describe('ReelsHost — the overlay a feed video opens (2026-10-09)', () => {
     const back = arrow() as HTMLElement;
     expect(back.classList.contains('right-4')).toBe(true);
     expect(back.className).toContain('top-[calc(var(--safe-top)+8px)]');
-    const sound = screen.getByRole('button', { name: r('sound.unmute') });
+    const sound = screen.getByRole('button', { name: r('sound.mute') });
     expect(sound.classList.contains('right-16')).toBe(true);
     expect(sound.classList.contains('right-4')).toBe(false);
     // From md the arrow is the screen's corner and the sound button keeps the column's.
@@ -1561,7 +1595,7 @@ describe('ReelsHost — the overlay a feed video opens (2026-10-09)', () => {
     renderHost();
     await flush();
     expect(arrow()).toBeNull();
-    const sound = screen.getByRole('button', { name: r('sound.unmute') });
+    const sound = screen.getByRole('button', { name: r('sound.mute') });
     expect(sound.classList.contains('right-4')).toBe(true);
     expect(sound.classList.contains('right-16')).toBe(false);
     expect(screen.getByRole('region', { name: r('region') }).dataset.reelsStage).toBe('tab');

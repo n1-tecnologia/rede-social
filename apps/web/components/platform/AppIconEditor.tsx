@@ -186,6 +186,12 @@ function availableSource(
  *   a cor principal" back to it, the button colours' own field) or an image covering the square;
  * - the art: one image covering the whole square, cropped in its centre.
  *
+ * 2026-10-20 (the client's request): on Android the art takes the WHOLE circle (`androidFill`), with
+ * no smaller square on a ring of the primary. The draft always fills (`drawAppIcon` paints an opaque
+ * square in both modes), and so does an icon of its own; a logo-derived icon keeps the safe zone
+ * and its note. Only the preview: the installed icon follows once the worker renders an opaque
+ * override full-bleed (`docs/pendencias-backend.md` item 3).
+ *
  * "Usar como ícone do app" composes the 1024 px square (`composeAppIconFile`, a PNG, or a JPEG when
  * the PNG passes the 2 MiB branding limit) and hands it over; the editor closes once `onApply`
  * resolves `true` and remembers the choices for the next opening, while "Cancelar" drops them. While
@@ -423,6 +429,8 @@ export function AppIconEditor({
     const shown = current ?? derivedIconUrl;
     // A square icon (its own, or the derived set's) covers the tile; a logo is fitted whole.
     const square = iconUrl !== null || current === null;
+    // 2026-10-20: an icon of its own fills Android's whole circle; the logo's keeps the safe zone.
+    const fill = iconUrl !== null;
     return (
       <div
         {...marker}
@@ -436,6 +444,7 @@ export function AppIconEditor({
           className="w-full max-w-sm"
           displayName={displayName}
           primary={primary}
+          androidFill={fill}
           labels={previewLabels}
           renderIcon={() =>
             shown ? (
@@ -450,7 +459,11 @@ export function AppIconEditor({
           }
         />
         <p className="text-xs text-text-tertiary">
-          {shown ? t('appIcon.preview.androidNote') : t('appIcon.preview.noSource')}
+          {!shown
+            ? t('appIcon.preview.noSource')
+            : fill
+              ? t('appIcon.preview.androidFill')
+              : t('appIcon.preview.androidNote')}
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button type="button" variant="secondary" size="sm" data-app-icon-open onClick={start}>
@@ -524,10 +537,13 @@ export function AppIconEditor({
         onChange={(mode) => update({ mode: mode as AppIconMode })}
       />
       <div className="flex flex-col gap-2">
+        {/* The editor always composes an opaque square (a ground or an art under every logo), so
+            the draft fills Android's circle (2026-10-20). */}
         <HomeScreenPreview
           className="w-full max-w-sm"
           displayName={displayName}
           primary={primary}
+          androidFill
           labels={previewLabels}
           renderIcon={(tile) => (
             <canvas
@@ -538,7 +554,7 @@ export function AppIconEditor({
             />
           )}
         />
-        <p className="text-xs text-text-tertiary">{t('appIcon.preview.androidNote')}</p>
+        <p className="text-xs text-text-tertiary">{t('appIcon.preview.androidFill')}</p>
       </div>
 
       {/* While the icon is prepared or sent, the sources and settings wait with the mode and the

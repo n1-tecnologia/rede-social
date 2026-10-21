@@ -605,13 +605,18 @@ export function storyCommentsProps(
  *
  * Every relative-time label is formatted HERE from the page's single `now` (UI-D-14): the viewer
  * never calls a clock in render, so there is no hydration mismatch and no per-second re-render.
+ *
+ * **2026-10-20 (the client's FRONT.pdf).** The band is a rounded card on desktop (`desktopCard`) and
+ * the row gets the desktop arrows (`scrollLabels`, `stories.scroll.*`). The viewer gets the share
+ * (`share`: the tenant's verified origin from `primaryHostOrigin()` and its display name, both read
+ * here, so the link a member sends never carries an alias host).
  */
 const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
   // D-108 / D-109 / UI-D-63: a CURATOR reads the curator row (`scope: 'all'`, empty highlights
   // included) and gets the dashed admin circles; everyone else keeps the member read, so an empty
   // highlight never reaches a member's HTML (T-05.2-20).
   const curates = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
-  const [page, highlights, tf, tfeed, locale] = await Promise.all([
+  const [page, highlights, tf, tfeed, locale, shareOrigin] = await Promise.all([
     loadStories({ limit: STORY_MAX_PAGE_SIZE }),
     loadHighlights(curates ? { scope: 'all' } : {}),
     getTranslations('stories'),
@@ -619,6 +624,9 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
     // into the stories one.
     getTranslations('feed'),
     getLocale(),
+    // 2026-10-20: the viewer's share link is built on the tenant's VERIFIED primary host, resolved
+    // here on the server (FEED-07's rule), never on the browser's current origin.
+    primaryHostOrigin(),
   ]);
   const now = Date.now();
   const tenant = {
@@ -668,10 +676,12 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
   if (circles.length === 0) return null;
 
   return (
-    // The REINE timeline (2026-10-02): the row sits in its own full-bleed white band.
-    <StoriesBand>
+    // The REINE timeline (2026-10-02): the row sits in its own full-bleed white band. Since
+    // 2026-10-20 (the client's FRONT.pdf) it is a rounded card on desktop, with the row's arrows.
+    <StoriesBand desktopCard>
       <StoriesSurface
         circles={circles}
+        scrollLabels={{ previous: tf('scroll.previous'), next: tf('scroll.next') }}
         // D-107 / UI-D-65: the viewer plays the row — one group per openable circle, in the same
         // order `inicioRow` numbers them. The tenant group carries its sequence, built from the same
         // page in the same request (no second round trip); each highlight group carries NO items
@@ -698,6 +708,11 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
                 canCurate: curates,
                 // UI-D-61: the tenant circle's two names, so the surface can re-derive it on close.
                 seenRing: tenantSeenLabels(tenant, tf),
+                // 2026-10-20: share a story like a post, on the verified host and under the tenant's
+                // name. No verified host (a generic shell) means no share control, as on a post.
+                ...(shareOrigin === null
+                  ? {}
+                  : { share: { origin: shareOrigin, title: bootstrap.tenant.displayName } }),
               }
         }
         regionLabel={tf('region')}

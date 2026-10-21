@@ -1088,7 +1088,7 @@ test.describe('events admin', () => {
     });
   });
 
-  test('3. cancel from the form, the member still sees it cancelled, and Reativar brings it back', async ({
+  test('3. cancel from the form (beside the "Excluir evento" placeholder), the member still sees it cancelled, and Reativar brings it back', async ({
     page,
     browser,
   }, testInfo) => {
@@ -1098,6 +1098,22 @@ test.describe('events admin', () => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos/${inPersonId}/editar`);
     await expect(segment(page, E.form.format.inPerson)).toHaveAttribute('aria-pressed', 'true');
+
+    // 2026-10-20 (FRONT.pdf): the row ends with "Excluir evento" and "Em breve", a placeholder
+    // until the API can delete: aria-disabled, and a click changes nothing.
+    const pendingDelete = page.locator('[data-pending-delete="event"]');
+    const deleteButton = pendingDelete.getByRole('button', { name: E.delete.action });
+    await expect(deleteButton).toBeVisible();
+    await expect(deleteButton).toHaveAttribute('aria-disabled', 'true');
+    await expect(deleteButton).toHaveAccessibleDescription(E.delete.hint);
+    await expect(pendingDelete).toContainText(E.delete.soon);
+    // `force`: Playwright waits for an aria-disabled control to enable, and this one never does.
+    await deleteButton.click({ force: true });
+    await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}/editar$`));
+    // No confirmation opens (the dev overlay's own dialog is not ours).
+    await expect(
+      page.locator('[role="dialog"][aria-modal="true"]:not([data-nextjs-dialog])'),
+    ).toHaveCount(0);
 
     // The bottom row, confirmed first (UI-D-211).
     await page.locator('[data-event-cancel]').dispatchEvent('click');
@@ -1109,6 +1125,12 @@ test.describe('events admin', () => {
     const banner = page.getByTestId('event-banner');
     await expect(banner).toHaveAttribute('data-kind', 'cancelled');
     await expect(banner.locator('[data-event-reactivate]')).toHaveText(E.reactivate.action);
+    // The cancelled banner offers the same placeholder to the manager.
+    await expect(
+      banner
+        .locator('[data-pending-delete="event"]')
+        .getByRole('button', { name: E.delete.action }),
+    ).toHaveAttribute('aria-disabled', 'true');
 
     // D-201, on the member's own session: still listed, with the pill; the detail disabled.
     const memberContext = await browser.newContext({
@@ -1132,6 +1154,7 @@ test.describe('events admin', () => {
       await expect(member.getByTestId('event-banner')).toHaveAttribute('data-kind', 'cancelled');
       await expect(member.getByRole('button', { name: E.reine.cta.register })).toBeDisabled();
       await expect(member.locator('[data-event-reactivate]')).toHaveCount(0);
+      await expect(member.locator('[data-pending-delete]')).toHaveCount(0);
       await expect(member.locator('[data-event-manage]')).toHaveCount(0);
 
       // Back as the admin: Reativar from the banner, confirmed.

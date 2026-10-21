@@ -19,8 +19,15 @@ import {
   type StoryViewerGroup,
   type StoryViewerItem,
 } from '@rede-social/module-stories/ui';
-import { Avatar, IconButton, useToast } from '@rede-social/ui';
-import { BookmarkPlus, MessageCircle } from 'lucide-react';
+import {
+  Avatar,
+  BottomSheet,
+  ConfirmDialog,
+  flashToast,
+  IconButton,
+  useToast,
+} from '@rede-social/ui';
+import { BookmarkPlus, MessageCircle, MoreHorizontal, Send, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import {
@@ -29,6 +36,7 @@ import {
   type RefObject,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -40,13 +48,26 @@ import {
   loadHighlightSheetAction,
   removeStoryFromHighlightAction,
 } from '@/app/(app)/stories/highlight-actions';
-import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
-import type {
-  HighlightPlaceView,
-  StoryGroupView,
-  StoryViewerItemView,
-  StoryViewerLabelsView,
+import {
+  deleteStoryAction,
+  type likeStoryAction,
+  type unlikeStoryAction,
+} from '@/app/(app)/stories/story-actions';
+import { useSharePost } from '@/components/feed/useSharePost';
+import { suspendFeedVideos } from '@/components/media/FeedVideo';
+import {
+  setVideoSoundWanted,
+  useVideoSoundAudible,
+  useVideoSoundWanted,
+} from '@/components/media/video-sound';
+import {
+  type HighlightPlaceView,
+  type StoryGroupView,
+  type StoryViewerItemView,
+  type StoryViewerLabelsView,
+  storyShareUrl,
 } from '@/lib/story-view';
+import { StoryMenuRow } from './StoryMenuRow';
 import { StoryVideo } from './StoryVideo';
 import {
   createStoryInteractions,
@@ -113,6 +134,25 @@ import {
  * update re-renders the one row it concerns and never the groups, the items or the media below.
  * Its entries are keyed by the STORY on purpose, unlike the per-segment registries above: the two
  * copies of one story at a group boundary are one like and one count.
+ *
+ * **2026-10-20, the client's FRONT.pdf.**
+ * - **Sound.** The viewer's sound is the VISIT's (`video-sound.ts`): on from the start, one choice
+ *   shared with the feed, Reels and every other video, never stored. The toggle runs inside its own
+ *   click (`setVideoSoundWanted`), so turning the sound on starts it within the member's gesture,
+ *   and it reads "Ativar som" while a browser holds the sound back (the video keeps playing muted).
+ *   While the viewer is open the feed's videos are suspended (`suspendFeedVideos`): one under the
+ *   viewer used to keep playing, and with sound it would play over the story.
+ * - **Share, for everyone.** A `Send` control after the comment one shares the story the way a post
+ *   is shared (`useSharePost`): `{origin}/stories/{id}` on the tenant's verified host, the tenant's
+ *   name as the title. The story waits while the OS sheet is open (the comment sheet's rule).
+ * - **Delete, for a curator.** "Mais opções" (`canCurate`, the permission "Destacar" uses), the "…"
+ *   in the viewer's header (the item's `menu`, where a post keeps its own), opens a sheet with
+ *   "Excluir story" and the history's own confirmation. The write passes
+ *   `revalidate: false` (the URL is the deleted story's own page while the viewer is open); on
+ *   success the toast confirms, the caller drops the story (`onStoryDeleted`) and the viewer closes.
+ *   A deep link has nothing to drop: the member leaves for `closeHref`, the toast with them. A
+ *   failure keeps the story on screen with the generic toast. The API's `requirePermission` is the
+ *   boundary; this gate is UX.
  */
 
 /**
@@ -185,10 +225,24 @@ export type StoryViewerHostProps = {
    * life; absent (the deep link), the host keeps its own for as long as it is mounted.
    */
   interactions?: StoryInteractions;
+  /**
+   * 2026-10-20 (FRONT.pdf): the share control, for every member. `origin` is the tenant's VERIFIED
+   * primary host (`primaryHostOrigin()`, composed on the server, never the browser's current one)
+   * and `title` the tenant's display name: the share sheet names the tenant, never a caption
+   * (T-04-52). Absent: no share control.
+   */
+  share?: { origin: string; title: string };
+  /**
+   * 2026-10-20: a curator deleted this story from the viewer. `StoriesSurface` drops it from its
+   * groups and refreshes its page once the viewer has closed. Page mode passes none.
+   */
+  onStoryDeleted?: (storyId: string) => void;
 };
 
-/** The row's three controls, as their `data-story-action` names them (the focus handoff). */
-type StoryActionName = 'like' | 'comment' | 'highlight';
+/** The row's controls, as their `data-story-action` names them (the focus handoff). */
+type StoryActionName = 'like' | 'comment' | 'share' | 'highlight';
+
+const STORY_ACTION_NAMES: readonly string[] = ['like', 'comment', 'share', 'highlight'];
 
 /**
  * The page's `StoryInteractions`, provided around the viewer. A context rather than a prop through
@@ -280,9 +334,23 @@ export function StoryViewerHost({
   canCurate = false,
   originCommunityId = null,
   interactions,
+  share,
+  onStoryDeleted,
 }: StoryViewerHostProps) {
   const toast = useToast();
   const t = useTranslations('stories');
+
+  /**
+   * 2026-10-20: the visit's ONE sound choice (`video-sound.ts`), on from the start. The toggle asks
+   * for what it does NOT hear: a sound the browser held back is started (inside this click), a sound
+   * on is muted, and a muted visit gets its sound back.
+   */
+  const soundWanted = useVideoSoundWanted();
+  const soundAudible = useVideoSoundAudible();
+  const toggleSound = useCallback(() => setVideoSoundWanted(!soundAudible), [soundAudible]);
+
+  // The feed under the viewer stops while a story plays: with the sound on it would play over it.
+  useEffect(() => suspendFeedVideos(), []);
 
   /**
    * CR-01: the store every action row reads its story's like pair and comment count from — the
@@ -458,6 +526,71 @@ export function StoryViewerHost({
     window.location.assign(closeHref);
   }, [onClose, closeHref]);
 
+  /**
+   * 2026-10-20 (FRONT.pdf): the share, the post's engine verbatim. `sharing` is true while the OS
+   * sheet is open (the promise settles when it closes), and the story waits under it.
+   */
+  const shareOrigin = share?.origin ?? null;
+  const shareLinks = useSharePost(share?.title ?? '', {
+    copied: t('viewer.linkCopied'),
+    error: genericError,
+  });
+  const [sharing, setSharing] = useState(false);
+  const shareStory = useCallback(
+    (storyId: string) => {
+      if (shareOrigin === null) return;
+      setSharing(true);
+      void shareLinks({ postId: storyId, url: storyShareUrl(shareOrigin, storyId) }).finally(() =>
+        setSharing(false),
+      );
+    },
+    [shareLinks, shareOrigin],
+  );
+  /** Plain strings, for the same reason as `highlightLabel`. */
+  const shareLabel = shareOrigin === null ? null : t('viewer.share');
+  const moreLabel = canCurate ? t('viewer.more') : null;
+
+  /**
+   * 2026-10-20: a curator's "Mais opções". `menuFor` is the story whose sheet is open, `confirmFor`
+   * the one the confirmation asks about; both pause the story, like every sheet over it.
+   */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [confirmFor, setConfirmFor] = useState<string | null>(null);
+  // Stable by habit: `BottomSheet`'s focus trap reads `onClose` through a ref and arms once per
+  // opening, so a new identity would no longer move the focus.
+  const closeMenu = useCallback(() => setMenuFor(null), []);
+  const closeConfirm = useCallback(() => setConfirmFor(null), []);
+  const deletedMessage = t('history.toasts.deleted');
+
+  const confirmDelete = useCallback(async () => {
+    const storyId = confirmFor;
+    if (storyId === null) return;
+    let result: Awaited<ReturnType<typeof deleteStoryAction>>;
+    try {
+      // `revalidate: false`: while the viewer is open the URL is this story's own `/stories/{id}`,
+      // and a revalidation would turn it into the not-found screen under the curator's finger.
+      result = await deleteStoryAction(storyId, { revalidate: false });
+    } catch {
+      result = { ok: false, code: 'generic' };
+    }
+    if (!result.ok) {
+      // The confirmation closes and the story stays: nothing was removed.
+      toast.show({ tone: 'error', message: genericError });
+      return;
+    }
+    const done = { tone: 'success' as const, message: deletedMessage };
+    if (onClose) {
+      toast.show(done);
+      onStoryDeleted?.(storyId);
+      onClose();
+      return;
+    }
+    // Page mode: this page IS the story that is gone. The member leaves for `closeHref` and the
+    // toast is kept for the screen it lands on (a full navigation, `close`'s own reason).
+    flashToast(done, new URL(closeHref, window.location.href).pathname);
+    window.location.assign(closeHref);
+  }, [confirmFor, toast, genericError, deletedMessage, onClose, onStoryDeleted, closeHref]);
+
   /** One story of one group, as the viewer plays it. Every registry key is the SEGMENT's. */
   const buildItem = useCallback(
     (group: StoryGroupState, header: ReactNode, item: StoryViewerItemView): StoryViewerItem => {
@@ -520,14 +653,43 @@ export function StoryViewerHost({
                 : undefined
             }
             focusCarry={focusCarry}
+            // 2026-10-20: the share, for everyone wherever the caller gave the tenant's origin.
+            shareLabel={shareLabel ?? undefined}
+            onShare={shareLabel === null ? undefined : () => shareStory(item.id)}
             // UI-D-66: the node exists only for a curator. Members never get it.
             highlightLabel={highlightLabel ?? undefined}
             onHighlight={highlightLabel === null ? undefined : () => void openHighlight(item.id)}
           />
         ),
+        // 2026-10-20: "Mais opções" (delete) under the same permission as "Destacar", in the
+        // viewer's HEADER, where a post keeps its own "…": in the bottom row it would not fit a
+        // 390px screen beside the share and "Destacar".
+        menu:
+          moreLabel === null ? undefined : (
+            <IconButton
+              icon={MoreHorizontal}
+              size={20}
+              label={moreLabel}
+              data-story-action="more"
+              className="text-white"
+              onClick={() => setMenuFor(item.id)}
+            />
+          ),
       };
     },
-    [labels, onLike, onUnlike, toast, bindPlayFor, comments, highlightLabel, openHighlight],
+    [
+      labels,
+      onLike,
+      onUnlike,
+      toast,
+      bindPlayFor,
+      comments,
+      highlightLabel,
+      openHighlight,
+      shareLabel,
+      shareStory,
+      moreLabel,
+    ],
   );
 
   /**
@@ -568,8 +730,18 @@ export function StoryViewerHost({
         // The third source of the viewer's single pause boolean, beside the hold gesture and
         // document visibility. Closing it resumes from the STORED elapsed, because the clock never
         // restarted. D-82, twice: the comment sheet and the highlight sheet (from the tap until it
-        // closes).
-        externallyPaused={commentsFor !== null || highlightFor !== null}
+        // closes); since 2026-10-20 also the OS share sheet, "Mais opções" and its confirmation.
+        externallyPaused={
+          commentsFor !== null ||
+          highlightFor !== null ||
+          sharing ||
+          menuFor !== null ||
+          confirmFor !== null
+        }
+        // 2026-10-20: the visit's sound, on from the start (`video-sound.ts`).
+        muted={!soundWanted}
+        soundAudible={soundAudible}
+        onToggleSound={toggleSound}
         overlay={
           <>
             {comments ? (
@@ -633,6 +805,39 @@ export function StoryViewerHost({
                 }
               />
             ) : null}
+            {moreLabel !== null ? (
+              <>
+                {/* 2026-10-20: the history's own row and confirmation, reworded nowhere. */}
+                <BottomSheet
+                  open={menuFor !== null}
+                  onClose={closeMenu}
+                  title={t('history.menu.title')}
+                >
+                  <div className="flex flex-col gap-1">
+                    <StoryMenuRow
+                      icon={Trash2}
+                      label={t('history.menu.delete')}
+                      destructive
+                      onClick={() => {
+                        setConfirmFor(menuFor);
+                        setMenuFor(null);
+                      }}
+                    />
+                  </div>
+                </BottomSheet>
+                <ConfirmDialog
+                  open={confirmFor !== null}
+                  title={t('history.confirmDelete.title')}
+                  body={t('history.confirmDelete.body')}
+                  confirmLabel={t('history.confirmDelete.confirm')}
+                  cancelLabel={t('history.confirmDelete.cancel')}
+                  tone="danger"
+                  onConfirm={confirmDelete}
+                  onClose={closeConfirm}
+                  onError={() => toast.show({ tone: 'error', message: genericError })}
+                />
+              </>
+            ) : null}
           </>
         }
         labels={{
@@ -656,8 +861,9 @@ export function StoryViewerHost({
 }
 
 /**
- * UI-D-32's bottom row: the SHIPPED `LikeButton` in its over-media variant, its count, and the
- * comment affordance — and **no share control** (STORY-05 does not include one).
+ * UI-D-32's bottom row: the SHIPPED `LikeButton` in its over-media variant, its count, the comment
+ * affordance and, since 2026-10-20 (the client's FRONT.pdf), the share (`Send`, the post's glyph)
+ * for everyone. The curator's "Mais opções" is NOT here: it is the item's `menu`, in the header.
  *
  * The like is the feed's engine verbatim, so the two like controls in the product reconcile the
  * same way: the value flips immediately, the server's authoritative `{ liked, likeCount }` replaces
@@ -689,6 +895,8 @@ function StoryActions({
   onError,
   onOpenComments,
   focusCarry,
+  shareLabel,
+  onShare,
   highlightLabel,
   onHighlight,
 }: {
@@ -701,6 +909,9 @@ function StoryActions({
   onOpenComments?: (shownCount: number) => void;
   /** The host's focus handoff between the leaving row and the arriving one. */
   focusCarry: RefObject<StoryActionName | null>;
+  /** 2026-10-20: present wherever the caller gave the tenant's origin, for every member. */
+  shareLabel?: string;
+  onShare?: () => void;
   /** UI-D-66: present only for a curator. */
   highlightLabel?: string;
   onHighlight?: () => void;
@@ -760,7 +971,9 @@ function StoryActions({
       const active = document.activeElement;
       if (!row || !(active instanceof HTMLElement) || !row.contains(active)) return;
       const name = active.closest<HTMLElement>('[data-story-action]')?.dataset.storyAction;
-      if (name === 'like' || name === 'comment' || name === 'highlight') focusCarry.current = name;
+      if (name !== undefined && STORY_ACTION_NAMES.includes(name)) {
+        focusCarry.current = name as StoryActionName;
+      }
     };
   }, [focusCarry]);
 
@@ -812,6 +1025,17 @@ function StoryActions({
           {commentLabel}
         </span>
       )}
+      {/* 2026-10-20: the post's share, in the post's place: right after the comment control. */}
+      {onShare && shareLabel ? (
+        <IconButton
+          icon={Send}
+          size={20}
+          label={shareLabel}
+          data-story-action="share"
+          className="text-white"
+          onClick={onShare}
+        />
+      ) : null}
       {/* UI-D-66: a LABELLED pill at the right end of the row, out of the like/comment grammar. Its
           ground is the mute toggle's `bg-black/35`, so no brand ink enters the viewer (UI-D-39). */}
       {onHighlight && highlightLabel ? (

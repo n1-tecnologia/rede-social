@@ -19,6 +19,7 @@ import {
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
+import { PendingDeleteButton } from '@/components/pending/PendingDeleteButton';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { loadAuthorInstagrams, withAuthorInstagrams } from '@/lib/author-instagram';
@@ -71,6 +72,11 @@ import { ReactivateCommunity } from './ReactivateCommunity';
  * is ABSENT rather than disabled — the project-wide rule for a control the viewer may not use. A 404
  * here would break both a shared link and every post of that community already in the feed, which is
  * exactly what archiving must not do.
+ *
+ * **2026-10-20 (the client's FRONT.pdf):** a manager's archived note also carries "Excluir
+ * comunidade" under Reativar, a placeholder by the owner's decision (`PendingDeleteButton`: disabled,
+ * "Em breve", no action) until the API can delete a community (`docs/pendencias-backend.md` item 12).
+ * A member never sees it.
  *
  * **The compose entry is the shipped `ComposeFab`, unchanged** (D-70, UI-D-44), rendered by
  * `FeedList` from the `createHref` and `canPost` this page passes: mobile gets the floating control,
@@ -380,9 +386,15 @@ export default async function CommunityPage({
                 canCurate: bootstrap.permissions.includes(STORY_PERMISSIONS.manage),
                 // The empty highlight sheet's "Criar destaque" opens THIS community's manage screen.
                 originCommunityId: community.id,
+                // 2026-10-20 (FRONT.pdf): share a story like a post, on the verified host.
+                ...(shareOrigin === null
+                  ? {}
+                  : { share: { origin: shareOrigin, title: bootstrap.tenant.displayName } }),
               }
         }
         regionLabel={tc('page.highlights')}
+        // 2026-10-20 (FRONT.pdf): the row's desktop arrows, the same as Início's.
+        scrollLabels={{ previous: ts('scroll.previous'), next: ts('scroll.next') }}
       />
     );
 
@@ -423,6 +435,13 @@ export default async function CommunityPage({
               <>
                 {tc('archived.note')}
                 <ReactivateCommunity communityId={community.id} />
+                <PendingDeleteButton
+                  kind="community"
+                  label={tc('delete.action')}
+                  soon={tc('delete.soon')}
+                  hint={tc('delete.hint')}
+                  className="mt-2"
+                />
               </>
             ) : (
               tc('archived.note')

@@ -14,6 +14,7 @@ import {
   monogramOf,
   type StoryViewerItemView,
   storyHistoryView,
+  storyShareUrl,
   storyViewerItem,
   storyViewerLabels,
   tenantCircleFace,
@@ -784,5 +785,19 @@ describe('#2b — the tenant circle wears the face of the newest story’s autho
     const now = Date.parse('2026-09-20T13:00:00.000Z');
     expect(storyViewerItem(summary, now).authorAvatarUrl).toBe(FACE);
     expect(storyViewerItem({ ...summary, authorAvatarUrl: null }, now).authorAvatarUrl).toBeNull();
+  });
+});
+
+describe('2026-10-20 — storyShareUrl (the client’s FRONT.pdf: share a story like a post)', () => {
+  it('is the deep link on the origin it is given, never on the browser’s current one', () => {
+    expect(
+      storyShareUrl('https://rede-demo.localhost', '0d000000-0000-4000-8000-0000000000d1'),
+    ).toBe('https://rede-demo.localhost/stories/0d000000-0000-4000-8000-0000000000d1');
+  });
+
+  it('encodes the id, so data never becomes a different path', () => {
+    expect(storyShareUrl('https://x.test', 'a/../b?c')).toBe(
+      'https://x.test/stories/a%2F..%2Fb%3Fc',
+    );
   });
 });
