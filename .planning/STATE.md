@@ -4,16 +4,16 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 1
 status: executing
-stopped_at: Completed 09.1-10-PLAN.md (09.1-01 still paused at its blocking-human design gate)
-last_updated: "2026-10-21T02:05:19.475Z"
+stopped_at: Completed 09.1-12-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+last_updated: "2026-10-21T02:24:37.229Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 09.1 execution started
-state_head: 7be154914b8833546d93cb1d866951aa8f801061
+state_head: a24500c59f3806248cbd5431742fdbdeaa621e22
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 223
+  completed_plans: 224
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 20
-Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06, 09.1-07, 09.1-08, 09.1-09, 09.1-10 and 09.1-11 complete)
+Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06, 09.1-07, 09.1-08, 09.1-09, 09.1-10, 09.1-11 and 09.1-12 complete)
 Status: Executing Phase 09.1
 Last activity: 2026-10-20 — Phase 09.1 execution started
 
@@ -281,6 +281,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P09 | 21 min | 3 tasks | 26 files |
 | Phase 09.1 P11 | 17 min | 2 tasks | 12 files |
 | Phase 09.1 P10 | 22 min | 3 tasks | 24 files |
+| Phase 09.1 P12 | 38 min | 2 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -942,6 +943,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-11: the subscription_pending flag and filter require status active and blocked_at null themselves, because app.access_cut_user_ids also holds a status-blocked membership with no access row — That is what makes a manual block outrank a cut and show alone (D-489)
 - [Phase 09.1]: 09.1-10: the e-mail is the key of an Acessos row; every action takes { email } in the body and the state comes from app.access_effective in SQL, never TypeScript — Planning decisions 1-3: no encoding trap, one implementation of D-489, block and release are independent rows so unblock is a restore
 - [Phase 09.1]: 09.1-10: Liberar manualmente is three short steps (validate, existing app.store_grant in the admin's tenant lane, guarded update); the checkout link has ONE reader (accessCheckoutUrl) and is omitted, not null, on the public tenant and join state — Planning decisions 4-5 and executor decisions: crash-safe idempotent re-click; ungated tenants' answers stay byte-identical
+- [Phase 09.1]: 09.1-12: the dead-device definer app.push_subscriptions_delete_dead also treats a CUT subscription as dead (migration 20261021020907), because a cut never writes the membership and the eager cleanup would otherwise delete nothing — D-498: a cut member receives no push; one widened definer also covers the send job's pre-send sweep
+- [Phase 09.1]: 09.1-12: no archive retraction on the Compra confirmada notice (A-P30): an archived product stays readable to its holder, so blanking the notice would be wrong; the user may overturn with one line plus a store event on archive — STORE-06, D-359
 
 ### Pending Todos
 
@@ -1047,6 +1050,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T02:05:19.253Z
-Stopped at: Completed 09.1-10-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+Last session: 2026-10-21T02:24:37.026Z
+Stopped at: Completed 09.1-12-PLAN.md (09.1-01 still paused at its blocking-human design gate)
 Resume file: None

@@ -295,7 +295,7 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [ ] **PAY-14**: requireAuth answers a cut member with a new error code SUBSCRIPTION_PENDING (the identifier is confirmed by the one-way checkpoint of Phase 09.1 plan 02; added to ERROR_CODES, with the tenant name in details), a sibling of MEMBERSHIP_BLOCKED, and memberships.status is never changed by a payment cut; the cut check is part of the same single membership lookup of the request *(D-497)*
 - [ ] **PAY-15**: The assinatura-pendente screen shows the tenant brand, the title, Regularizar (only for a stored https checkout link fetched from the API, never from the URL), Verificar de novo and Sair, and does not clear the session; an endpoint that stays reachable while the member is cut returns the tenant name and the checkout link *(D-497, D-499)*
 - [ ] **PAY-16**: A cut member keeps all content, appears in the admin members list with an Assinatura pendente badge and a filter, is excluded from the dashboard active-member count and receives no push; a member who is both manually blocked and cut shows Bloqueado only *(D-498, D-489)*
-- [ ] **PAY-17**: When a member is cut the membership's push subscriptions are deleted and the open app is nudged over the existing Realtime user topic (event membership.access_cut), and the Supabase session is not revoked *(D-499)*
+- [x] **PAY-17**: When a member is cut the membership's push subscriptions are deleted and the open app is nudged over the existing Realtime user topic (event membership.access_cut), and the Supabase session is not revoked *(D-499)*
 - [ ] **PAY-18**: A cut or a return creates no notification for the admin and no message of its own to the buyer; the only admin-side surface is the members list *(D-500)*
 - [ ] **PAY-19**: A payments module exists as its own package, off by default and absent from the default module list of a new tenant, switched per tenant by super_admin and configured by admin_tenant through a composed payments.manage permission; with the module off the gate is open and the store keeps its simulated purchase *(D-501)*
 - [ ] **PAY-20**: Access products are created, edited and removed on the Pagamentos screen with a name, a gateway product id and an optional https checkout link, and a store product carries its gateway product id and checkout link in the product form (saved by a separate call after the store save); a link without an id is refused and removing the last access product while the gate is on is refused *(D-502)*
@@ -626,7 +626,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-14 | Phase 09.1 (plans 02, 15) | Pending |
 | PAY-15 | Phase 09.1 (plans 10, 15, 19) | Pending |
 | PAY-16 | Phase 09.1 (plans 11, 16) | Pending |
-| PAY-17 | Phase 09.1 (plans 07, 12) | Pending |
+| PAY-17 | Phase 09.1 (plans 07, 12) | Complete |
 | PAY-18 | Phase 09.1 (plans 07, 11, 12, 16) | Pending |
 | PAY-19 | Phase 09.1 (plans 02, 09, 13) | Pending |
 | PAY-20 | Phase 09.1 (plans 09, 13, 17) | Pending |
