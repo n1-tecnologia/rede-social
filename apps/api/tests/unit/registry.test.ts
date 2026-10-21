@@ -615,4 +615,35 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     expect(on[0]).not.toHaveProperty('nav');
     expect(enabledModulesForBootstrap(new Set<ModuleKey>(), new Map())).toEqual([]);
   });
+
+  it('21. 09.1-09: adding the payments entry changes no other module’s composed permissions or bootstrap entry', () => {
+    // The permission map for each role, and the bootstrap list, with and without the `payments` manifest.
+    // The only difference the new entry may make is `payments.manage` for admin_tenant and its own
+    // (nav-less) bootstrap entry; a snapshot per role fails if the registration ever leaks into another
+    // module's grants.
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    const withoutManifest = Object.fromEntries(
+      Object.entries(MODULE_REGISTRY).filter(([key]) => key !== 'payments'),
+    ) as Partial<Record<ModuleKey, ModuleManifest>>;
+    for (const role of TENANT_ROLES) {
+      const before = withRegistry(withoutManifest, () => permissionsFor(role, everything));
+      const after = permissionsFor(role, everything);
+      expect(
+        after.filter((permission) => permission !== PAYMENTS_PERMISSIONS.manage),
+        role,
+      ).toEqual(before);
+      expect(after.length - before.length, role).toBe(role === 'admin_tenant' ? 1 : 0);
+    }
+    const settings = new Map<ModuleKey, Record<string, unknown>>();
+    const bootstrapBefore = withRegistry(withoutManifest, () =>
+      enabledModulesForBootstrap(everything, settings),
+    );
+    const bootstrapAfter = enabledModulesForBootstrap(everything, settings);
+    expect(bootstrapAfter.filter((entry) => entry.key !== 'payments')).toEqual(
+      bootstrapBefore.filter((entry) => entry.key !== 'payments'),
+    );
+    expect(bootstrapAfter.filter((entry) => entry.key === 'payments')).toEqual([
+      { key: 'payments', settings: {} },
+    ]);
+  });
 });
