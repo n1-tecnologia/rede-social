@@ -549,7 +549,13 @@ describe('store gateway purchase info (09.1-06, D-506, D-508)', () => {
     status: 'active',
     owned: false,
   };
-  const detail = { ...card, communities: [], unlockedCourses: [], unlockedLives: [] };
+  const detail = {
+    ...card,
+    description: '',
+    communities: [],
+    unlockedCourses: [],
+    unlockedLives: [],
+  };
 
   it('pins the two modes', () => {
     expect(PURCHASE_MODES).toEqual(['gateway', 'simulated']);

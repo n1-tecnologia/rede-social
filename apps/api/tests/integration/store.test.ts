@@ -496,6 +496,7 @@ describe('catalogue', () => {
       imageAssetId: null,
       status: 'active',
       owned: true,
+      purchase: { mode: 'simulated', checkoutUrl: null },
     });
     const expectedAll = await adminSql<{ id: string }[]>`
       select id::text as id from public.store_products
@@ -586,6 +587,7 @@ describe('catalogue', () => {
       communities: [],
       unlockedCourses: [],
       unlockedLives: [],
+      purchase: { mode: 'simulated', checkoutUrl: null },
     });
   });
 

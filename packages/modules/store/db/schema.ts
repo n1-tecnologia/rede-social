@@ -203,9 +203,15 @@ export const storeProductLives = pgTable(
 const OWN_OR_ADMIN = sql`tenant_id = app.tenant_id() and (user_id = app.user_id() or app.tenant_role() = 'admin_tenant')`;
 
 /**
- * One purchase. `amount_cents` and `currency` are a SNAPSHOT of the product at purchase time (D-361):
- * a later price edit changes only NEW orders. `provider` is `'none'` until a gateway exists; the
- * status vocabulary is what that gateway will plug into (ROADMAP 08.2 SC 3).
+ * One purchase. A SIMULATED order (`provider = 'none'`, written by `app.store_purchase`) snapshots the
+ * product's price in `amount_cents` and `currency` at purchase time (D-361): a later price edit changes
+ * only NEW orders. A GATEWAY order (09.1-06, written by `app.store_gateway_purchase` for the signed
+ * webhook) carries the gateway's name in `provider` (a FORMAT, never an enum, D-486) and the gateway's
+ * reference of the sale in `provider_ref` (the subscription id for a recurring sale, the order id
+ * otherwise, so a revoke by subscription finds the order), and `amount_cents` is what the gateway says
+ * it charged, coupon and instalments already resolved (D-507): the product's `price_cents` is then only
+ * a storefront reference. `store_orders_provider_ref_uq` allows ONE live order per gateway reference; a
+ * revoked order frees the key for a later renewal. The status vocabulary is shared by both paths.
  */
 export const storeOrders = pgTable(
   'store_orders',
@@ -243,7 +249,16 @@ export const storeOrders = pgTable(
     check('store_orders_status_chk', sql`${t.status} in ('pending','paid','revoked')`),
     check('store_orders_amount_chk', sql`${t.amountCents} >= 0`),
     check('store_orders_currency_chk', sql`${t.currency} in ('BRL')`),
-    check('store_orders_provider_chk', sql`${t.provider} in ('none')`),
+    // 'none' is a simulated sale; anything else is a gateway's name, as a FORMAT (D-486, D-509).
+    check(
+      'store_orders_provider_chk',
+      sql`${t.provider} = 'none' or ${t.provider} ~ '^[a-z][a-z0-9_]{1,30}$'`,
+    ),
+    // One live order per gateway reference (D-509): a replay or a concurrent delivery cannot create a
+    // second one; a revoked order frees the key.
+    uniqueIndex('store_orders_provider_ref_uq')
+      .on(t.tenantId, t.provider, t.providerRef)
+      .where(sql`provider_ref is not null and status in ('pending','paid')`),
     // Fact 1: read-only from every tenant lane. No insert, update or delete policy.
     pgPolicy('store_orders_select_own_or_admin', {
       for: 'select',

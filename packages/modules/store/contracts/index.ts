@@ -254,6 +254,24 @@ export const lockPreviewSchema = z
 export type LockPreview = z.infer<typeof lockPreviewSchema>;
 
 /**
+ * How a product is bought in the caller's tenant (09.1-06, D-506, D-508): `gateway` when the tenant has a
+ * payment integration (a purchase leaves the app through `checkoutUrl`, the stored `https:` link of the
+ * product, or `null` when none is stored: such a product is not buyable), `simulated` otherwise (the
+ * 08.2 purchase, `checkoutUrl` always null). The store reads the mode from the database by SQL name and
+ * knows no gateway. OPTIONAL on the card and the detail on purpose (the 08.2 Pitfall 10 rule: an older
+ * web never meets a new required key); an absent `purchase` means simulated.
+ */
+export const PURCHASE_MODES = ['gateway', 'simulated'] as const;
+export type PurchaseMode = (typeof PURCHASE_MODES)[number];
+export const purchaseInfoSchema = z
+  .object({
+    mode: z.enum(PURCHASE_MODES),
+    checkoutUrl: z.url({ protocol: /^https$/ }).nullable(),
+  })
+  .strict();
+export type PurchaseInfo = z.infer<typeof purchaseInfoSchema>;
+
+/**
  * One product. `owned` is the CALLER's active entitlement; `communities` are its ACTIVE, live
  * linked communities in the Comunidades list order (`[]` when it opens none, D-353).
  * `holderCount` (08.2-05) is present only for a caller holding `store.product.manage`: the number
@@ -284,6 +302,7 @@ export const productDetailSchema = z
     lives: z.array(productLiveSchema).optional(),
     unlockedCourses: z.array(productUnlockCourseSchema),
     unlockedLives: z.array(productUnlockLiveSchema),
+    purchase: purchaseInfoSchema.optional(),
   })
   .strict();
 export type ProductDetail = z.infer<typeof productDetailSchema>;
@@ -329,6 +348,7 @@ export const productCardSchema = z
     imageAssetId: z.uuid().nullable(),
     status: z.enum(PRODUCT_STATUSES),
     owned: z.boolean(),
+    purchase: purchaseInfoSchema.optional(),
   })
   .strict();
 export type ProductCard = z.infer<typeof productCardSchema>;

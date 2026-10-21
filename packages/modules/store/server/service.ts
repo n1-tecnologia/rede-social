@@ -35,6 +35,7 @@ import type {
   ProductUnlockCourse,
   ProductUnlockLive,
   PurchaseBody,
+  PurchaseInfo,
   PurchaseResult,
   RevokeResult,
 } from '../contracts/index';
@@ -544,7 +545,24 @@ function decodeListCursor(raw: string | undefined): { n: string; id: string } | 
   return decoded;
 }
 
-type CardRow = {
+/**
+ * 09.1-06 (D-506, D-508): the two columns every product read adds. The store reads the payments seam by
+ * SQL NAME (`app.payments_gateway_mode()` and `app.payments_checkout_url(uuid)`, tenant-pinned
+ * definers) and imports no payments code (MOD-02). The mode is an InitPlan (one evaluation per
+ * statement); the link is per product and is null unless the mode is on and a mapping stores one.
+ */
+const PURCHASE_COLUMNS = sql`(select app.payments_gateway_mode()) as gateway_mode,
+               app.payments_checkout_url(p.id) as checkout_url`;
+
+type PurchaseColumns = { gateway_mode: boolean; checkout_url: string | null };
+
+/** The `purchase` object of a card or a detail (absent would mean simulated; always sent here). */
+const toPurchaseInfo = (row: PurchaseColumns): PurchaseInfo => ({
+  mode: row.gateway_mode ? 'gateway' : 'simulated',
+  checkoutUrl: row.checkout_url ?? null,
+});
+
+type CardRow = PurchaseColumns & {
   id: string;
   name: string;
   price_cents: number;
@@ -563,6 +581,7 @@ const toCard = (row: CardRow): ProductCard => ({
   imageAssetId: row.image_asset_id,
   status: row.status as ProductStatus,
   owned: row.owned,
+  purchase: toPurchaseInfo(row),
 });
 
 /**
@@ -594,6 +613,7 @@ export async function listProducts(
     if (query.filter === 'owned') {
       return tx.execute<CardRow>(sql`
         select p.id, p.name, p.price_cents, p.image_asset_id, p.status, true as owned,
+               ${PURCHASE_COLUMNS},
                to_char(e.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at,
                e.id as cursor_id
           from store_entitlements e
@@ -611,6 +631,7 @@ export async function listProducts(
     if (query.filter === 'archived') {
       return tx.execute<CardRow>(sql`
         select p.id, p.name, p.price_cents, p.image_asset_id, p.status, ${ownedExists} as owned,
+               ${PURCHASE_COLUMNS},
                to_char(p.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at,
                p.id as cursor_id
           from store_products p
@@ -625,6 +646,7 @@ export async function listProducts(
     }
     return tx.execute<CardRow>(sql`
         select p.id, p.name, p.price_cents, p.image_asset_id, p.status, ${ownedExists} as owned,
+               ${PURCHASE_COLUMNS},
                to_char(p.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at,
                p.id as cursor_id
           from store_products p
@@ -659,7 +681,7 @@ export async function listProducts(
   return { items: page.map(toCard), nextCursor };
 }
 
-type DetailRow = ProductRow & { owned: boolean };
+type DetailRow = ProductRow & PurchaseColumns & { owned: boolean };
 
 /**
  * One product as the product page reads it, inside the caller's transaction, or null when the
@@ -680,7 +702,8 @@ async function readDetail(
            exists (
              select 1 from store_entitlements e
               where e.tenant_id = p.tenant_id and e.product_id = p.id
-                and e.user_id = ${ctx.userId}::uuid and e.status = 'active') as owned
+                and e.user_id = ${ctx.userId}::uuid and e.status = 'active') as owned,
+           ${PURCHASE_COLUMNS}
       from store_products p
      where p.id = ${productId}::uuid
        and p.tenant_id = ${ctx.tenantId}::uuid`);
@@ -700,6 +723,7 @@ async function readDetail(
     communities: await linkedCommunities(tx, ctx, product.id),
     unlockedCourses: await unlockedCourses(tx, ctx, product.id, coursesOn),
     unlockedLives: await unlockedLives(tx, ctx, product.id, coursesOn),
+    purchase: toPurchaseInfo(product),
   };
   if (canManage) {
     const counted = await tx.execute<{ n: number }>(sql`

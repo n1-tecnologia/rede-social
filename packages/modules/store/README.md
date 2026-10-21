@@ -108,6 +108,39 @@ SQL the module implements (migration `supabase/migrations/*_store_functions.sql`
   `store` row missing or disabled answers `'{}'`; a null or unknown `tenant_role` claim takes the
   member branch. The courses module imports nothing from this package; the seam is the only tie.
 
+## Gateway mode (09.1-06)
+
+A tenant with a payment gateway (the `payments` module enabled AND a `payment_integrations` row) sells
+through it; the simulated purchase unlocks for free and so does not exist for such a tenant. Everything
+below is in Postgres, so a stale page, a hand-made request or a future route cannot get around it.
+
+- **The guard (D-508).** `app.store_purchase` answers `unavailable` (409 `{ store: 'unavailable' }`) to a
+  non-holder when `app.payments_gateway_mode()` is true. The step sits after the "already held" check, so a
+  holder replaying still gets `owned`; a tenant without a gateway keeps the simulated purchase unchanged.
+- **The `purchase` field (D-506).** `GET /products` cards and `GET /products/{id}` carry the optional
+  `purchase: { mode: 'gateway' | 'simulated', checkoutUrl: string | null }`, read in the same statement
+  from `app.payments_gateway_mode()` and `app.payments_checkout_url(p.id)` BY SQL NAME: this package
+  imports nothing from the payments package (MOD-02). Absent means simulated.
+- **Buyable (D-508).** In gateway mode a product WITHOUT a stored checkout link is not offered by
+  `buyableProducts` of the community, course and live access reads, so the "not for sale at the moment"
+  paths cover it; in simulated mode every active product stays buyable. `locked`, `gated` and
+  `archivedTag` are unchanged, and the manager's `products` list keeps every linked product.
+- **The two definers (D-509, D-505).** `app.store_gateway_purchase(tenant, membership, product, provider,
+  provider_ref, amount, paid_at)` and `app.store_gateway_revoke(tenant, provider, provider_ref)` are the
+  only writers of a gateway sale and of its refund. They take the tenant and the membership as ARGUMENTS
+  (a webhook has no JWT), pin every statement to that tenant, and are EXECUTE-able by `service_role` only.
+  No write policy exists on `store_orders` or `store_entitlements` (STORE-20 holds). Outcomes are
+  returned: `purchased`, `already_active`, `not_found` / `revoked`, `not_found`.
+- **Orders (D-507).** `store_orders.provider` is `'none'` (simulated) or a lower-case gateway name (a
+  format, never an enum); `provider_ref` is the gateway's reference of the sale (the subscription id for
+  a recurring sale); `amount_cents` is what the gateway reports as charged, so the product's
+  `price_cents` is only a storefront reference for a gateway order. One live order per gateway
+  reference (`store_orders_provider_ref_uq`); a revoked order frees the key.
+- **The seam for the payments service.** `app.store_product_exists(uuid)` (tenant lane) and
+  `app.store_product_name_for(tenant, uuid)` (admin lane) let the payments service confirm and name a
+  product without reading a store table, and `payment_products_target_fk` removes a product's mapping
+  with the product.
+
 ## Events emitted
 
 None.

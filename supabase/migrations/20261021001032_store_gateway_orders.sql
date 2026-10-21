@@ -1,0 +1,3 @@
+ALTER TABLE "store_orders" DROP CONSTRAINT "store_orders_provider_chk";--> statement-breakpoint
+CREATE UNIQUE INDEX "store_orders_provider_ref_uq" ON "store_orders" USING btree ("tenant_id","provider","provider_ref") WHERE provider_ref is not null and status in ('pending','paid');--> statement-breakpoint
+ALTER TABLE "store_orders" ADD CONSTRAINT "store_orders_provider_chk" CHECK ("store_orders"."provider" = 'none' or "store_orders"."provider" ~ '^[a-z][a-z0-9_]{1,30}$');
