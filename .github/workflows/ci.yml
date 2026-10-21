@@ -102,6 +102,11 @@ jobs:
         run: pnpm boundaries:negative
       - name: Lane guard (no non-LOCAL role switch or session-scoped claims)
         run: pnpm guard:lanes
+      # 09.1-18 (PAY-28, WR-02): a [remotes.*] table inherits the base hook blocks (enabled locally), so a
+      # hosted environment without its own explicit blocks would turn the Auth hooks on at the next
+      # `supabase config push`; an enabled hook whose function no migration defines answers 500 on every login.
+      - name: Auth hook guard (no hosted environment inherits enabled hooks)
+        run: pnpm guard:hooks
 
   db:
     name: pgTAP, seed, API integration, pooler spike

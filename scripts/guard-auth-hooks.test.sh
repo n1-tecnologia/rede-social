@@ -128,7 +128,7 @@ new_case
   printf '\n[remotes.homolog]\nproject_id = "abc"\n\n[remotes.homolog.auth.hook.before_user_created]\nuri = "pg-functions://postgres/public/hook_before_user_created_allowlist"\n\n[remotes.homolog.auth.hook.custom_access_token]\nenabled = false\nuri = "pg-functions://postgres/public/hook_custom_access_token_allowlist"\n'
 } > "$CASE/config.toml"
 run_case "a hook table without enabled fails naming the remote, the hook and the key" 1 \
-  'remote homolog hook before_user_created: .*enabled' '!hook custom_access_token'
+  'remote homolog hook before_user_created: .*enabled' '!remote homolog hook custom_access_token'
 
 # 5. A hook table without uri.
 new_case
@@ -137,7 +137,7 @@ new_case
   printf '\n[remotes.homolog]\nproject_id = "abc"\n\n[remotes.homolog.auth.hook.before_user_created]\nenabled = false\nuri = "pg-functions://postgres/public/hook_before_user_created_allowlist"\n\n[remotes.homolog.auth.hook.custom_access_token]\nenabled = false\n'
 } > "$CASE/config.toml"
 run_case "a hook table without uri fails naming the remote, the hook and the key" 1 \
-  'remote homolog hook custom_access_token: .*uri' '!hook before_user_created'
+  'remote homolog hook custom_access_token: .*uri' '!remote homolog hook before_user_created'
 
 # 6. A uri that is not pg-functions for a required hook.
 new_case
@@ -204,7 +204,7 @@ new_case
   printf '\n[remotes.homolog]\nproject_id = "abc"\n\n[remotes.homolog.auth.hook.before_user_created]\nenabled = false\nuri = "pg-functions://postgres/public/hook_before_user_created_allowlist"\n\n# [remotes.homolog.auth.hook.custom_access_token]\n# enabled = false\n# uri = "pg-functions://postgres/public/hook_custom_access_token_allowlist"\n'
 } > "$CASE/config.toml"
 run_case "a commented-out hook header does not count as a block" 1 \
-  'remote homolog hook custom_access_token' '!hook before_user_created'
+  'remote homolog hook custom_access_token' '!remote homolog hook before_user_created'
 
 new_case
 { printf '%s' "$BASE_CONFIG"; printf '\n# [remotes.future]\n# project_id = "x"\n'; } > "$CASE/config.toml"
