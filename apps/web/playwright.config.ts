@@ -67,6 +67,17 @@ process.env.CSP_MODE ??= 'enforce';
 process.env.INSTALL_GATE ??= 'off';
 
 /**
+ * PAYMENTS_PROVIDERS for the servers this run launches (09.1-19, planning decision 1): every spec runs
+ * against the test gateway only, the one whose signature (HMAC-SHA256 hex of the body) a helper can
+ * compute, so the Pagamentos screen connects it through its normal button and `defaultProvider()` picks
+ * it. The API, the web app and the worker `ensureWorker()` spawns all inherit it. An exported value
+ * still wins; an API or web server you started yourself keeps its own environment (the payments specs
+ * detect that through the Integração card's gateway label and fail naming this variable). This file is
+ * a test harness: the hosted workflows list only the real adapter, and production refuses the test one.
+ */
+process.env.PAYMENTS_PROVIDERS ??= 'fake';
+
+/**
  * `baseURL` is the rede-demo TENANT host (D-20). Chromium resolves every `*.localhost` name to loopback
  * (RFC 6761), so no `/etc/hosts` entry is needed and the two seed tenants plus the platform host are
  * distinct origins with separate cookies. Readiness is probed on plain `localhost` (a generic host that
