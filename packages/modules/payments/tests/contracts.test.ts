@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  accessEmailBodySchema,
+  accessListQuerySchema,
   accessProductBodySchema,
   accessProductPatchSchema,
   gateBodySchema,
@@ -277,5 +279,59 @@ describe('storeMappingBodySchema (A-P12, UI-D-524)', () => {
     expect(
       storeMappingBodySchema.parse({ externalProductId: 'p', checkoutUrl: '' }).checkoutUrl,
     ).toBeNull();
+  });
+});
+
+describe('accessEmailBodySchema (D-504, PAY-22)', () => {
+  it('trims and lower-cases a valid address', () => {
+    expect(accessEmailBodySchema.parse({ email: '  Ana@Example.COM ' })).toEqual({
+      email: 'ana@example.com',
+    });
+    expect(accessEmailBodySchema.parse({ email: 'ana+x@example.com' }).email).toBe(
+      'ana+x@example.com',
+    );
+  });
+
+  it('refuses an empty, a short, a half address, a 255-character address and a non-string with email_invalid', () => {
+    const tooLong = `${'a'.repeat(243)}@example.com`;
+    expect(tooLong.length).toBe(255);
+    for (const email of ['', 'a', 'a@', '   ', tooLong, 42, null, undefined]) {
+      const result = accessEmailBodySchema.safeParse({ email });
+      expect(result.success, JSON.stringify(email)).toBe(false);
+      expect(issuesOf(result), JSON.stringify(email)).toContain('email_invalid');
+    }
+    expect(issuesOf(accessEmailBodySchema.safeParse({}))).toContain('email_invalid');
+  });
+
+  it('refuses an unknown key', () => {
+    expect(accessEmailBodySchema.safeParse({ email: 'a@example.com', extra: 1 }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('accessListQuerySchema (D-504, PAY-22)', () => {
+  it('defaults the limit to 20 and keeps every filter optional', () => {
+    expect(accessListQuerySchema.parse({})).toEqual({ limit: 20 });
+  });
+
+  it('coerces the limit from a query string and refuses 0, 51 and a fraction', () => {
+    expect(accessListQuerySchema.parse({ limit: '50' }).limit).toBe(50);
+    expect(accessListQuerySchema.parse({ limit: '1' }).limit).toBe(1);
+    for (const limit of ['0', '51', '-1', '1.5', 'abc']) {
+      expect(accessListQuerySchema.safeParse({ limit }).success, limit).toBe(false);
+    }
+  });
+
+  it('trims q and accepts the three computed states only', () => {
+    expect(accessListQuerySchema.parse({ q: '  ana  ' }).q).toBe('ana');
+    expect(accessListQuerySchema.parse({ q: '   ' }).q).toBe('');
+    for (const status of ['active', 'subscription_pending', 'blocked']) {
+      expect(accessListQuerySchema.safeParse({ status }).success, status).toBe(true);
+    }
+    for (const status of ['inactive', 'none', 'all', '']) {
+      expect(accessListQuerySchema.safeParse({ status }).success, status).toBe(false);
+    }
+    expect(accessListQuerySchema.safeParse({ q: 'x'.repeat(201) }).success).toBe(false);
   });
 });
