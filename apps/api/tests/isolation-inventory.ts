@@ -406,6 +406,14 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/social/me/followers': { case: 'phase 09 sweep: social follows' },
   'GET /v1/social/me/following': { case: 'phase 09 sweep: social follows' },
   'GET /v1/social/members/:membershipId': { case: 'phase 09 sweep: social follows' },
+  // ── /v1/payments (09.1, the Pagamentos admin API) ────────────────────────────────────────────
+  // 09.1-09 (PAY-01, PAY-29, T-09.1-40): the overview names nothing of the other tenant, the preview
+  // counts only this tenant's members and a session of the other tenant on this host is refused with
+  // TENANT_HOST_MISMATCH. Every route takes the tenant from the session, never from the path or body.
+  'GET /v1/payments/overview': { case: 'phase 09.1 sweep: payments admin' },
+  'PUT /v1/payments/integration': { case: 'phase 09.1 sweep: payments admin' },
+  'GET /v1/payments/gate/preview': { case: 'phase 09.1 sweep: payments admin' },
+  'PUT /v1/payments/gate': { case: 'phase 09.1 sweep: payments admin' },
 };
 
 /**

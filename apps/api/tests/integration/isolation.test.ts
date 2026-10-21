@@ -22,7 +22,12 @@ import {
   createSharedIdentity,
   HOSTS,
   removeIdentitiesByPrefix,
+  removePaymentIntegrations,
+  removePaymentMappings,
   SEED_PASSWORD,
+  seedPaymentIntegration,
+  seedPaymentMapping,
+  setPaymentsRow,
   signInAs,
   uploadAvatar,
   withModuleEnabled,
@@ -5414,6 +5419,133 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       await sweepFixtures();
       await restoreLab();
       await restoreDemo();
+    }
+  });
+
+  it('phase 09.1 sweep: payments admin — a rede-lab admin’s overview names no rede-demo product id, webhook URL or integration, the gate preview counts only rede-lab members, and a rede-lab admin on the rede-demo host is refused with TENANT_HOST_MISMATCH on all four routes, each beside the rede-lab admin’s own call (09.1-09, PAY-01, PAY-29, T-09.1-40)', async () => {
+    // | Route                          | Negative asserted here                                                        |
+    // |--------------------------------|-------------------------------------------------------------------------------|
+    // | GET /v1/payments/overview      | no rede-demo access product id, integration id, gateway product id or webhook handle |
+    // | GET /v1/payments/gate/preview  | the count is the rede-lab figure (computed here from rows), not the rede-demo one |
+    // | PUT /v1/payments/integration   | on the demo host with a lab admin: 403 TENANT_HOST_MISMATCH, nothing written  |
+    // | PUT /v1/payments/gate          | on the demo host with a lab admin: 403 TENANT_HOST_MISMATCH, nothing written  |
+    // | the four routes                | the lab admin's own call answers 200 beside each refusal                      |
+    //
+    // `payments` is ON for BOTH tenants for the case and both rows go back in `finally`. The demo side
+    // carries an integration and an access product of its own; the lab side starts empty.
+    const prior = new Map<string, { enabled: boolean; settings: Record<string, unknown> } | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean; settings: Record<string, unknown> }[]>`
+        select enabled, settings from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+      prior.set(tenantId, row ?? null);
+      await setPaymentsRow(tenantId, { enabled: true, settings: {} });
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweepFixtures = async () => {
+      for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+        await removePaymentMappings(tenantId);
+        await removePaymentIntegrations(tenantId);
+      }
+    };
+    await sweepFixtures();
+    try {
+      const demoIntegration = await seedPaymentIntegration(tenantIds.demo);
+      const demoProduct = await seedPaymentMapping(tenantIds.demo, {
+        kind: 'access',
+        name: 'Acesso da demo',
+        externalProductId: `iso0919-demo-${RUN}`,
+        checkoutUrl: 'https://pay.example.com/demo-checkout',
+      });
+      const [demoRow] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.payment_products
+         where tenant_id = ${tenantIds.demo}::uuid and kind = 'access'`;
+      expect(demoRow?.id).toBe(demoProduct.id);
+
+      // Positive control first: the lab admin's own overview answers 200 and describes the lab.
+      const own = await send('GET', '/v1/payments/overview', tokens.labAdmin, HOSTS.lab);
+      expect(own.status).toBe(200);
+      const ownRaw = await own.text();
+      const ownBody = JSON.parse(ownRaw) as {
+        integration: { connected: boolean };
+        accessProducts: { id: string }[];
+      };
+      expect(ownBody.integration.connected).toBe(false);
+      expect(ownBody.accessProducts).toEqual([]);
+      expect(ownRaw).not.toContain(demoProduct.id);
+      expect(ownRaw).not.toContain(demoIntegration.id);
+      expect(ownRaw).not.toContain(`iso0919-demo-${RUN}`);
+      expect(ownRaw).not.toContain('demo-checkout');
+
+      // …and the demo admin's overview is the demo's (the control on the other side).
+      const demoOwn = await send('GET', '/v1/payments/overview', tokens.demoAdmin, HOSTS.demo);
+      expect(demoOwn.status).toBe(200);
+      const demoRaw = await demoOwn.text();
+      expect(demoRaw).toContain(demoProduct.id);
+      expect(demoRaw).toContain(demoIntegration.id);
+
+      // The preview is the lab figure: members of rede-lab with no access row of any kind.
+      const [labExpected] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n
+          from public.memberships m join public.users u on u.id = m.user_id
+         where m.tenant_id = ${tenantIds.lab}::uuid
+           and m.role = 'member' and m.status = 'active'
+           and m.blocked_at is null and m.deleted_at is null
+           and not exists (select 1 from public.access_grants g
+                            where g.tenant_id = m.tenant_id and g.email = lower(btrim(u.email)))`;
+      const labPreview = await send('GET', '/v1/payments/gate/preview', tokens.labAdmin, HOSTS.lab);
+      expect(labPreview.status).toBe(200);
+      expect(await labPreview.json()).toEqual({ count: labExpected?.n });
+
+      // The lab admin on the DEMO host is refused on all four routes; the lab admin's own calls
+      // (the controls) answer beside each refusal, and the refusals write nothing.
+      const wrongHost = [
+        ['GET', '/v1/payments/overview', undefined],
+        ['PUT', '/v1/payments/integration', { token: 'must-not-be-saved' }],
+        ['GET', '/v1/payments/gate/preview', undefined],
+        ['PUT', '/v1/payments/gate', { required: false }],
+      ] as const;
+      for (const [method, path, body] of wrongHost) {
+        const refused = await send(method, path, tokens.labAdmin, HOSTS.demo, body);
+        expect(refused.status, `${method} ${path} on the demo host`).toBe(403);
+        expect(((await refused.json()) as Envelope).error.code).toBe('TENANT_HOST_MISMATCH');
+      }
+      const [demoIntegrations] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.payment_integrations
+         where tenant_id = ${tenantIds.demo}::uuid`;
+      expect(demoIntegrations?.n).toBe(1);
+      const controls = [
+        ['GET', '/v1/payments/overview', undefined],
+        ['PUT', '/v1/payments/integration', { token: 'lab-own-token' }],
+        ['GET', '/v1/payments/gate/preview', undefined],
+        ['PUT', '/v1/payments/gate', { required: false }],
+      ] as const;
+      for (const [method, path, body] of controls) {
+        const ok = await send(method, path, tokens.labAdmin, HOSTS.lab, body);
+        expect(ok.status, `${method} ${path} on its own host`).toBe(200);
+      }
+      // The save wrote the LAB integration and left the demo's untouched.
+      const [labIntegrations] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.payment_integrations
+         where tenant_id = ${tenantIds.lab}::uuid`;
+      expect(labIntegrations?.n).toBe(1);
+      const [demoUntouched] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.payment_integrations
+         where tenant_id = ${tenantIds.demo}::uuid`;
+      expect(demoUntouched?.id).toBe(demoIntegration.id);
+    } finally {
+      await sweepFixtures();
+      for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+        const before = prior.get(tenantId);
+        if (before) {
+          await setPaymentsRow(tenantId, { enabled: before.enabled, settings: before.settings });
+        } else {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
     }
   });
 

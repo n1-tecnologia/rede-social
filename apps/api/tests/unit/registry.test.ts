@@ -12,6 +12,7 @@ import {
   NOTIFICATIONS_QUEUES,
   PUSH_SEND_JOB_CONCURRENCY,
 } from '@rede-social/module-notifications/contracts';
+import { PAYMENTS_PERMISSIONS } from '@rede-social/module-payments/contracts';
 import { SOCIAL_MAX_PHOTOS_PER_POST } from '@rede-social/module-social/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { describe, expect, it } from 'vitest';
@@ -573,5 +574,44 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // The social settings schema cannot import the feed contract (module to module), so the number is
     // written twice; this is the only place that reads both and fails the day they drift.
     expect(SOCIAL_MAX_PHOTOS_PER_POST).toBe(FEED_MAX_IMAGES);
+  });
+
+  it('20. 09.1-09 D-338/D-501: payments.manage is composed for admin_tenant ONLY while the module is on', () => {
+    // The database authorises the setup tables by the `admin_tenant` CLAIM (the `payment_products`
+    // policies, the settings write and the integration through the kernel lane); the routes authorise
+    // by this permission. They agree only while it is admin-only by construction (the store case 14
+    // shape, mirrored): widen the SQL with it, or never compose it elsewhere.
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    const withoutPayments = new Set<ModuleKey>(
+      TOGGLEABLE_MODULES.filter((key) => key !== 'payments'),
+    );
+    const generous = settingsFor([
+      ['feed', { postingPolicy: 'members' }],
+      ['payments', { managers: ['support_tenant', 'member'] }],
+    ]);
+    for (const role of TENANT_ROLES) {
+      for (const settings of [new Map<ModuleKey, Record<string, unknown>>(), generous]) {
+        expect(
+          permissionsFor(role, everything, settings).includes(PAYMENTS_PERMISSIONS.manage),
+          `${role}: payments.manage`,
+        ).toBe(role === 'admin_tenant');
+      }
+      // Turning the module off revokes it, even for the admin.
+      expect(permissionsFor(role, withoutPayments).includes(PAYMENTS_PERMISSIONS.manage)).toBe(
+        false,
+      );
+    }
+    const manifest = MODULE_REGISTRY.payments;
+    expect(manifest?.key).toBe('payments');
+    // UI-D-513 / UI-D-527: no nav (its door is a Configuracoes row) and no `requires` (it works with
+    // the store off).
+    expect(manifest).not.toHaveProperty('nav');
+    expect(manifest?.requires).toBeUndefined();
+    expect(manifest?.sweepFunctions).toEqual(['payment_events_prune']);
+    // A tenant with the module on lists it in the bootstrap without a nav entry; off, it is absent.
+    const on = enabledModulesForBootstrap(new Set<ModuleKey>(['payments']), new Map());
+    expect(on.map((entry) => entry.key)).toEqual(['payments']);
+    expect(on[0]).not.toHaveProperty('nav');
+    expect(enabledModulesForBootstrap(new Set<ModuleKey>(), new Map())).toEqual([]);
   });
 });
