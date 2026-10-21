@@ -9,6 +9,7 @@ import { dashboardRoutes } from '@rede-social/module-dashboard/server';
 import { eventsRoutes } from '@rede-social/module-events/server';
 import { feedRoutes } from '@rede-social/module-feed/server';
 import { notificationsRoutes } from '@rede-social/module-notifications/server';
+import { paymentsRoutes } from '@rede-social/module-payments/server';
 import { socialRoutes } from '@rede-social/module-social/server';
 import { storeRoutes } from '@rede-social/module-store/server';
 import { storiesRoutes } from '@rede-social/module-stories/server';
@@ -127,6 +128,10 @@ const routes = app
   // chain plus `requirePermission('store.product.manage')` on the product writes; buying takes none.
   // `store` is OFF by default (STORE-01), so every route below 404s until a tenant turns it on.
   .route('/v1/store', storeRoutes)
+  // 09.1-09 (D-501): the payments module carries its own `requireAuth` + `requireModule('payments')`
+  // chain and `requirePermission('payments.manage')` on every route. `payments` is OFF by default, so
+  // every route below 404s until a tenant turns it on.
+  .route('/v1/payments', paymentsRoutes)
   // Same shape (08.3-01): the courses module carries its own `requireAuth` + `requireModule('courses')`
   // chain plus `requirePermission('courses.manage')` on EVERY route (admin-first, D-403: no member
   // route exists yet). `courses` is OFF by default (COURSE-01) and declares no nav (D-401), so every

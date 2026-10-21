@@ -5422,14 +5422,15 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 09.1 sweep: payments admin — a rede-lab admin’s overview names no rede-demo product id, webhook URL or integration, the gate preview counts only rede-lab members, and a rede-lab admin on the rede-demo host is refused with TENANT_HOST_MISMATCH on all four routes, each beside the rede-lab admin’s own call (09.1-09, PAY-01, PAY-29, T-09.1-40)', async () => {
+  it('phase 09.1 sweep: payments admin — a rede-lab admin’s overview names no rede-demo product id, webhook URL or integration, the gate preview counts only rede-lab members, and a rede-lab admin on the rede-demo host is refused with TENANT_HOST_MISMATCH on every payments route, each beside the rede-lab admin’s own call (09.1-09, PAY-01, PAY-29, T-09.1-40)', async () => {
     // | Route                          | Negative asserted here                                                        |
     // |--------------------------------|-------------------------------------------------------------------------------|
     // | GET /v1/payments/overview      | no rede-demo access product id, integration id, gateway product id or webhook handle |
     // | GET /v1/payments/gate/preview  | the count is the rede-lab figure (computed here from rows), not the rede-demo one |
     // | PUT /v1/payments/integration   | on the demo host with a lab admin: 403 TENANT_HOST_MISMATCH, nothing written  |
     // | PUT /v1/payments/gate          | on the demo host with a lab admin: 403 TENANT_HOST_MISMATCH, nothing written  |
-    // | the four routes                | the lab admin's own call answers 200 beside each refusal                      |
+    // | POST /v1/payments/access-products | on the demo host with a lab admin: 403, nothing written; the lab admin's own registration answers 201 |
+    // | the routes                     | the lab admin's own call answers 200 beside each refusal                      |
     //
     // `payments` is ON for BOTH tenants for the case and both rows go back in `finally`. The demo side
     // carries an integration and an access product of its own; the lab side starts empty.
@@ -5504,6 +5505,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         ['PUT', '/v1/payments/integration', { token: 'must-not-be-saved' }],
         ['GET', '/v1/payments/gate/preview', undefined],
         ['PUT', '/v1/payments/gate', { required: false }],
+        ['POST', '/v1/payments/access-products', { name: 'Nao', externalProductId: 'iso-no' }],
       ] as const;
       for (const [method, path, body] of wrongHost) {
         const refused = await send(method, path, tokens.labAdmin, HOSTS.demo, body);
@@ -5524,6 +5526,18 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         const ok = await send(method, path, tokens.labAdmin, HOSTS.lab, body);
         expect(ok.status, `${method} ${path} on its own host`).toBe(200);
       }
+      const labProduct = await send(
+        'POST',
+        '/v1/payments/access-products',
+        tokens.labAdmin,
+        HOSTS.lab,
+        { name: 'Acesso do lab', externalProductId: `iso0919-lab-${RUN}` },
+      );
+      expect(labProduct.status).toBe(201);
+      const demoProducts = await adminSql<{ id: string }[]>`
+        select id::text as id from public.payment_products
+         where tenant_id = ${tenantIds.demo}::uuid and kind = 'access'`;
+      expect(demoProducts.map((row) => row.id)).toEqual([demoProduct.id]);
       // The save wrote the LAB integration and left the demo's untouched.
       const [labIntegrations] = await adminSql<{ n: number }[]>`
         select count(*)::int as n from public.payment_integrations

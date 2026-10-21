@@ -73,7 +73,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
     // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
     // `stories`, 05.3-01 added `reels`, 06-01 added `events`, 07-01 `notifications`, 07-08 `chat`,
-    // 08.2-01 `store`, 08.3-01 `courses` and 09-01 `social`. The list is sorted so a new entry is one line, and this
+    // 08.2-01 `store`, 08.3-01 `courses`, 09-01 `social` and 09.1-09 `payments`. The list is sorted so a new entry is one line, and this
     // assertion is what makes a silently-dropped registration fail rather than pass.
     expect(keys.sort()).toEqual([
       'chat',
@@ -82,6 +82,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       'events',
       'feed',
       'notifications',
+      'payments',
       'reels',
       'social',
       'store',

@@ -1,0 +1,259 @@
+import type {
+  AccessProduct,
+  AccessProductBody,
+  PaymentsOverview,
+  SaveIntegrationBody,
+} from '@rede-social/contracts/payments';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { withAdminTx } from '../../db/admin-tx';
+import { paymentIntegrations, paymentProducts } from '../../db/schema';
+import { type Tx, withTenantTx } from '../../db/tenant-tx';
+import type { RequestContext } from '../auth/context';
+import { env } from '../env';
+import { ApiError } from '../http/api-error';
+import { moduleLogger } from '../logging';
+import { moduleFlags } from '../modules/flags-cache';
+import { readGate } from './gate';
+import { deterministicIntegrationId } from './ids';
+import { enabledProviders, gatewayAdapter } from './index';
+import { paymentsKey, sealSecret } from './secret';
+
+/**
+ * The admin setup of the Pagamentos module (09.1-09, D-491, D-494, D-501, D-502): the overview, the
+ * integration save and the access-product CRUD. The routes in `packages/modules/payments` are thin
+ * wrappers over this file, so the rule that THE TENANT COMES ONLY FROM `ctx.tenantId` (never from a body
+ * or a path) and that every admin-lane statement names it stays in one place the Biome lane rule can see.
+ *
+ * Lanes. `payment_integrations` has ZERO policies (the sealed token is never readable from a tenant
+ * lane), so it is read and written here through `withAdminTx` with an explicit `tenant_id` predicate.
+ * `payment_products` has `admin_tenant` policies (defence in depth), so it goes through `withTenantTx`
+ * and ALSO carries an explicit `tenant_id` predicate.
+ */
+
+const log = moduleLogger('payments-setup');
+
+type Rows<T> = T[];
+const rowsOf = <T>(result: unknown): Rows<T> => result as Rows<T>;
+
+/**
+ * The provider a NEW integration or mapping uses when the body names none (planning decision 7): the
+ * first non-test adapter this process accepts, falling back to the test adapter only when it is the only
+ * one enabled. A local stack with every adapter picks the real one; a CI stack with only `fake` works.
+ */
+export function defaultProvider(): string {
+  const enabled = enabledProviders();
+  const chosen = enabled.find((name) => name !== 'fake') ?? enabled[0];
+  if (!chosen) throw new ApiError(400, 'VALIDATION_FAILED', { payments: 'provider_unavailable' });
+  return chosen;
+}
+
+type IntegrationRow = { id: string; provider: string; lastEventAt: Date | null };
+
+/** The tenant's integration: the oldest row when it has more than one provider. Admin lane, tenant pinned. */
+async function readIntegration(tenantId: string): Promise<IntegrationRow | null> {
+  return withAdminTx(async (tx) => {
+    const [row] = await tx
+      .select({
+        id: paymentIntegrations.id,
+        provider: paymentIntegrations.provider,
+        lastEventAt: paymentIntegrations.lastEventAt,
+      })
+      .from(paymentIntegrations)
+      .where(eq(paymentIntegrations.tenantId, tenantId))
+      .orderBy(asc(paymentIntegrations.createdAt), asc(paymentIntegrations.id))
+      .limit(1);
+    return row ?? null;
+  });
+}
+
+/** The provider the tenant's products are registered under: its integration's, else the default. */
+export async function tenantProvider(tenantId: string): Promise<string> {
+  return (await readIntegration(tenantId))?.provider ?? defaultProvider();
+}
+
+/** SQLSTATE 23505 on the GLOBAL `(provider, external_product_id)` index, possibly wrapped by drizzle. */
+export function isProductTaken(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const e = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (e.code === '23505') {
+      const name = typeof e.constraint_name === 'string' ? e.constraint_name : '';
+      return name === '' || name === 'payment_products_provider_ext_uq';
+    }
+    current = e.cause;
+  }
+  return false;
+}
+
+/** The 409 for a gateway product id someone already holds. Names no tenant and no constraint (T-09.1-41). */
+export const gatewayProductTaken = () =>
+  new ApiError(409, 'CONFLICT', { payments: 'gateway_product_taken' });
+
+type AccessRow = {
+  id: string;
+  name: string | null;
+  externalProductId: string;
+  checkoutUrl: string | null;
+  createdAt: Date;
+};
+
+const accessColumns = {
+  id: paymentProducts.id,
+  name: paymentProducts.name,
+  externalProductId: paymentProducts.externalProductId,
+  checkoutUrl: paymentProducts.checkoutUrl,
+  createdAt: paymentProducts.createdAt,
+};
+
+/** The tenant's access products in creation order `(created_at, id)`, oldest first. */
+async function listAccessRows(tx: Tx, tenantId: string): Promise<AccessRow[]> {
+  return tx
+    .select(accessColumns)
+    .from(paymentProducts)
+    .where(and(eq(paymentProducts.tenantId, tenantId), eq(paymentProducts.kind, 'access')))
+    .orderBy(asc(paymentProducts.createdAt), asc(paymentProducts.id));
+}
+
+/** A-UI-7: the id of the OLDEST access product that has a link, the one "Assinar" opens. */
+const feedsId = (rows: AccessRow[]): string | null =>
+  rows.find((row) => row.checkoutUrl !== null)?.id ?? null;
+
+const toAccessProduct = (row: AccessRow, feeds: string | null): AccessProduct => ({
+  id: row.id,
+  name: row.name ?? '',
+  externalProductId: row.externalProductId,
+  checkoutUrl: row.checkoutUrl,
+  feedsSubscribeButton: row.id === feeds,
+  createdAt: row.createdAt.toISOString(),
+});
+
+/** One access product as the API answers it, with the `feedsSubscribeButton` of the current set. */
+async function answerFor(tx: Tx, tenantId: string, id: string): Promise<AccessProduct> {
+  const rows = await listAccessRows(tx, tenantId);
+  const row = rows.find((candidate) => candidate.id === id);
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return toAccessProduct(row, feedsId(rows));
+}
+
+/**
+ * The webhook URL base: `API_PUBLIC_URL` when the deploy sets it (A-P19), else the request's own origin.
+ * Trailing slashes are dropped so the path is always exactly one slash from the base.
+ */
+const baseUrl = (origin: string) => (env.API_PUBLIC_URL ?? origin).replace(/\/+$/, '');
+
+/**
+ * `GET /v1/payments/overview`: what the Pagamentos screen needs in one read. `webhookUrl` carries the id
+ * of the row when one exists and the DERIVED id (`deterministicIntegrationId`) otherwise, so the admin
+ * can copy the URL before saving the token and the row, once created, has exactly that id. The token is
+ * never part of this answer (D-486). The optional `storeProductsWithoutLink` of the UI-SPEC is NOT sent:
+ * computing it would make the kernel read the store's tables (planning decision 6).
+ */
+export async function getOverview(
+  ctx: RequestContext,
+  input: { origin: string },
+): Promise<PaymentsOverview> {
+  const integration = await readIntegration(ctx.tenantId);
+  const provider = integration?.provider ?? defaultProvider();
+  const id = integration?.id ?? deterministicIntegrationId(ctx.tenantId, provider);
+
+  const { rows, required } = await withTenantTx(ctx, async (tx) => ({
+    rows: await listAccessRows(tx, ctx.tenantId),
+    required: await readGate(tx, ctx.tenantId),
+  }));
+  const feeds = feedsId(rows);
+
+  return {
+    integration: {
+      provider,
+      gatewayName: gatewayAdapter(provider)?.displayName ?? provider,
+      connected: integration !== null,
+      webhookUrl: `${baseUrl(input.origin)}/v1/webhooks/${provider}/${id}`,
+      lastEventAt: integration?.lastEventAt?.toISOString() ?? null,
+    },
+    accessProducts: rows.map((row) => toAccessProduct(row, feeds)),
+    gate: { required, canEnable: integration !== null && rows.length >= 1 },
+    serverNow: new Date().toISOString(),
+  };
+}
+
+/**
+ * `PUT /v1/payments/integration`: saves the webhook token (D-486, PAY-04). It is sealed with
+ * `sealSecret(token, id)` BOUND to the row's id and replaced atomically with a fresh IV on every save
+ * (`secret_set_at` advances); the token is never returned, logged or put in an error. The row id is the
+ * derived one on first save and the EXISTING row's id afterwards (a sealed value opens only for the id it
+ * was sealed with). A saved integration cannot be removed in this phase.
+ */
+export async function saveIntegration(
+  ctx: RequestContext,
+  body: SaveIntegrationBody,
+): Promise<{ connected: true }> {
+  const provider = body.provider ?? defaultProvider();
+  if (!enabledProviders().includes(provider)) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { payments: 'provider_unavailable' });
+  }
+
+  await withAdminTx(async (tx) => {
+    const [existing] = rowsOf<{ id: string }>(
+      await tx.execute(sql`
+        select id::text as id from public.payment_integrations
+         where tenant_id = ${ctx.tenantId}::uuid and provider = ${provider}
+           for update`),
+    );
+    const id = existing?.id ?? deterministicIntegrationId(ctx.tenantId, provider);
+    const sealed = sealSecret(body.token, id);
+    await tx.execute(sql`
+      insert into public.payment_integrations
+             (id, tenant_id, provider, secret_sealed, secret_key_id, secret_set_at)
+      values (${id}::uuid, ${ctx.tenantId}::uuid, ${provider}, ${sealed},
+              ${paymentsKey().keyId}::smallint, now())
+      on conflict (tenant_id, provider) do update
+         set secret_sealed = excluded.secret_sealed,
+             secret_key_id = excluded.secret_key_id,
+             secret_set_at = now(),
+             updated_at = now()`);
+  });
+
+  moduleFlags.invalidate(ctx.tenantId);
+  // Ids and the provider name only: the token and the sealed string never reach a log line.
+  log.info(
+    { event: 'payments.integration.saved', tenantId: ctx.tenantId, userId: ctx.userId, provider },
+    'payments integration saved',
+  );
+  return { connected: true };
+}
+
+/**
+ * `POST /v1/payments/access-products` (D-494, D-502): registers a gateway product that opens the door.
+ * Tenant lane (`payment_products` has `admin_tenant` policies) with the explicit predicate too. A gateway
+ * id any tenant already holds is `409 gateway_product_taken` (the unique index arbitrates, so two tenants
+ * racing one id leave one row), naming nobody.
+ */
+export async function createAccessProduct(
+  ctx: RequestContext,
+  body: AccessProductBody,
+): Promise<AccessProduct> {
+  const provider = await tenantProvider(ctx.tenantId);
+  try {
+    return await withTenantTx(ctx, async (tx) => {
+      const [created] = await tx
+        .insert(paymentProducts)
+        .values({
+          tenantId: ctx.tenantId,
+          provider,
+          kind: 'access',
+          name: body.name,
+          externalProductId: body.externalProductId,
+          checkoutUrl: body.checkoutUrl ?? null,
+          createdByUserId: ctx.userId,
+        })
+        .returning({ id: paymentProducts.id });
+      if (!created) throw new ApiError(500, 'INTERNAL');
+      return answerFor(tx, ctx.tenantId, created.id);
+    });
+  } catch (error) {
+    if (isProductTaken(error)) throw gatewayProductTaken();
+    throw error;
+  }
+}

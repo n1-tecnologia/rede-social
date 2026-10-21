@@ -412,6 +412,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // TENANT_HOST_MISMATCH. Every route takes the tenant from the session, never from the path or body.
   'GET /v1/payments/overview': { case: 'phase 09.1 sweep: payments admin' },
   'PUT /v1/payments/integration': { case: 'phase 09.1 sweep: payments admin' },
+  'POST /v1/payments/access-products': { case: 'phase 09.1 sweep: payments admin' },
   'GET /v1/payments/gate/preview': { case: 'phase 09.1 sweep: payments admin' },
   'PUT /v1/payments/gate': { case: 'phase 09.1 sweep: payments admin' },
 };

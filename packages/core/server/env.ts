@@ -112,6 +112,13 @@ export const env = createEnv({
     PAYMENTS_SECRET_KEY: z.string().min(1).optional(),
     /** Which key sealed a value (rotation): written into every sealed string and compared on open. */
     PAYMENTS_SECRET_KEY_ID: z.coerce.number().int().min(1).max(32767).default(1),
+    /**
+     * The API's own PUBLIC origin (09.1-09, A-P19), e.g. `https://api.exemplo.com.br`. The Pagamentos
+     * screen shows the webhook URL the admin pastes into the gateway; behind Cloud Run the request's own
+     * origin can be an internal one, so a deploy sets this and the URL is built from it. Unset (local
+     * development, tests) the origin of the request is used.
+     */
+    API_PUBLIC_URL: z.url().optional(),
 
     /** Send Email Hook transport (RESEARCH Pattern 6). `local` posts to Mailpit's HTTP API. */
     MAIL_TRANSPORT: z.enum(['local', 'resend']).default('local'),
