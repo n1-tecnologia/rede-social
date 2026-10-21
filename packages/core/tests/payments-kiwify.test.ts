@@ -815,6 +815,26 @@ describe('P76 PAY-33 empty and hostile bodies never throw', () => {
     }
   });
 
+  it('reads an access_until that carries its own zone as given (the vendor Subscription dates are ISO-8601 UTC)', () => {
+    const untilOf = (value: unknown) =>
+      kiwifyGateway.normalise(
+        mutated('trigger-subscription_renewed', (b) => {
+          (
+            (b.Subscription as Record<string, unknown>).customer_access as Record<string, unknown>
+          ).access_until = value;
+        }),
+      ).validUntil;
+    expect(untilOf('2026-11-20T17:32:00.000Z')).toEqual(new Date('2026-11-20T17:32:00.000Z'));
+    expect(untilOf('2026-11-20T17:32Z')).toEqual(new Date('2026-11-20T17:32:00.000Z'));
+    expect(untilOf('2026-11-20T14:32:00-03:00')).toEqual(new Date('2026-11-20T17:32:00.000Z'));
+    expect(untilOf('2026-11-20T14:32:00.250-03:00')).toEqual(new Date('2026-11-20T17:32:00.250Z'));
+    // no zone and fractional seconds: not placeable, so absent (never guessed)
+    expect(untilOf('2026-11-20T14:32:00.250')).toBeNull();
+    for (const bad of ['2026-11-20T25:00:00Z', '2026-02-31T10:00:00Z', '2026-11-20T10:00:00+25:00']) {
+      expect(untilOf(bad)).toBeNull();
+    }
+  });
+
   it('a body with a byte order mark is read, and a non-UTF-8 body is other', () => {
     const bom = Buffer.concat([
       Buffer.from([0xef, 0xbb, 0xbf]),

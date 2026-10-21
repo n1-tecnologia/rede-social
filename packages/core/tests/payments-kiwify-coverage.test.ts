@@ -94,6 +94,47 @@ describe('every trigger and payload row has a fixture and the adapter honours it
     });
   }
 
+  it('every fixture says whether it was observed or is only documented, and when (PAY-33)', () => {
+    for (const row of adapterRows) {
+      const file = fixtureFile(row.capability);
+      const header = String(
+        (JSON.parse(readFileSync(join(FIXTURES, file), 'utf8')) as { _fixture?: unknown })._fixture,
+      );
+      expect(header, file).toMatch(
+        /^(real-capture \(redacted\) \d{4}-\d{2}-\d{2}|documented-example \(synthetic\))/,
+      );
+    }
+  });
+
+  it('exactly the six triggers of the 2026-10-21 capture are real-capture; every other fixture stays documented-example', () => {
+    const real = adapterRows
+      .map((row) => fixtureFile(row.capability))
+      .filter((file) =>
+        String(
+          (JSON.parse(readFileSync(join(FIXTURES, file), 'utf8')) as { _fixture?: unknown })
+            ._fixture,
+        ).startsWith('real-capture (redacted)'),
+      )
+      .sort();
+    expect(real).toEqual(
+      [
+        'trigger-chargeback.json',
+        'trigger-compra_aprovada.json',
+        'trigger-compra_recusada.json',
+        'trigger-compra_reembolsada.json',
+        'trigger-subscription_canceled.json',
+        'trigger-subscription_late.json',
+      ].sort(),
+    );
+  });
+
+  it('CAPTURE.md records the results of the capture, answered, not answerable and owed', () => {
+    const capture = readFileSync(join(FIXTURES, 'CAPTURE.md'), 'utf8');
+    expect(capture).toMatch(/^## Results/m);
+    expect(capture).toMatch(/Not answerable/i);
+    expect(capture).toMatch(/Owed/i);
+  });
+
   it('no fixture file is left without a row in the matrix', () => {
     const named = new Set(adapterRows.map((row) => fixtureFile(row.capability)));
     const onDisk = readdirSync(FIXTURES).filter((name) => name.endsWith('.json'));
