@@ -129,7 +129,10 @@ export function ConfirmDialog({
                   <Icon aria-hidden size={26} />
                 </span>
               ) : null}
-              <h2 id={titleId} className="break-words text-base font-bold leading-snug text-text">
+              <h2
+                id={titleId}
+                className="max-w-full break-words text-base font-bold leading-snug text-text"
+              >
                 {title}
               </h2>
               {children ? (
@@ -143,7 +146,7 @@ export function ConfirmDialog({
                   {body ? (
                     <p
                       id={bodyId}
-                      className="mt-2 break-words text-sm leading-relaxed text-text-secondary"
+                      className="mt-2 max-w-full break-words text-sm leading-relaxed text-text-secondary"
                     >
                       {body}
                     </p>
@@ -155,7 +158,7 @@ export function ConfirmDialog({
                   id={bodyId}
                   data-confirm-body-scroll={scrollBody || undefined}
                   className={cn(
-                    'mt-1.5 break-words text-sm leading-relaxed text-text-secondary',
+                    'mt-1.5 max-w-full break-words text-sm leading-relaxed text-text-secondary',
                     scrollBody && 'max-h-60 w-full overflow-y-auto overscroll-contain',
                   )}
                 >
