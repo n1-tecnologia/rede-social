@@ -22,7 +22,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `paymentsModule`, the manifest |
 | `./contracts` | the admin API's Zod schemas and constants shared with the web app (a re-export of `@rede-social/contracts/payments` plus the permission constant) |
-| `./server` | `paymentsRoutes` |
+| `./server` | `paymentsRoutes`, `paymentsNotificationSources`, `paymentsPushCopy`, `PAYMENTS_PUSH_BODY_MAX` |
 | `./ui` | empty until plans 13-14 port the Pagamentos screens |
 
 Main contract names (`./contracts`): `saveIntegrationBodySchema`, `accessProductBodySchema`,
@@ -31,7 +31,7 @@ Main contract names (`./contracts`): `saveIntegrationBodySchema`, `accessProduct
 `gateResultSchema`, the Acessos and Eventos contracts `accessListQuerySchema`, `accessEmailBodySchema`,
 `accessPageSchema`, `accessResultSchema`, `eventsResponseSchema` and `eventItemSchema`, the caps `PAYMENTS_MAX_TOKEN`, `PAYMENTS_MAX_NAME`, `PAYMENTS_MAX_PRODUCT_ID` and
 `PAYMENTS_MAX_LINK`, the link rule `isCheckoutLink`, the permission names `PAYMENTS_PERMISSIONS`
-(`payments.manage`), and the refusal vocabulary `PAYMENTS_ISSUES` / `PAYMENTS_ISSUE_SET`.
+(`payments.manage`), the notification kind `PAYMENTS_NOTIFICATION_KINDS`, and the refusal vocabulary `PAYMENTS_ISSUES` / `PAYMENTS_ISSUE_SET`.
 
 Routes (`/v1/payments`), every one behind `requireAuth`, `requireModule('payments')` and
 `requirePermission('payments.manage')` (`admin_tenant` only, by construction, see `module.ts`):
@@ -63,8 +63,11 @@ None.
 ## Events consumed
 
 - Manifest subscriptions: none.
-- Notification sources: none.
-- Notification retractions: none.
+- Notification sources: `payments.purchase_confirmed` (kernel, 09.1-12, D-506): the buyer's one
+  "Compra confirmada" in-app notice and push. Nothing else the webhook does notifies anyone (D-500:
+  a revocation, a cut, a return, a refund and an event waiting for an account are silent).
+- Notification retractions: none, on purpose (A-P30): an archived product stays readable to its
+  holder, so archiving must not blank the notice.
 
 ## Flag key
 
@@ -82,6 +85,7 @@ lag by up to 30 s).
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
+- `@rede-social/core/server/notifications/source`
 - `@rede-social/core/server/payments/access`
 - `@rede-social/core/server/payments/events`
 - `@rede-social/core/server/payments/gate`

@@ -1,4 +1,3 @@
-import type { Tx } from '@rede-social/core/db/tenant-tx';
 import { describe, expect, it } from 'vitest';
 import { PAYMENTS_NOTIFICATION_KINDS } from '../contracts/index';
 import { paymentsModule } from '../module';
@@ -17,19 +16,20 @@ const U = '22222222-2222-4222-8222-222222222222';
 const P = '1d000000-0000-4000-8000-000000000001';
 const meta = { sinkAt: '2026-10-21T12:00:00.123456Z' };
 
+const source = paymentsNotificationSources[0];
+if (!source) throw new Error('payments declares no notification source');
+
 const refusingTx = {
   execute: async () => {
     throw new Error('the source must not read any table');
   },
-} as unknown as Tx;
+} as unknown as Parameters<typeof source.resolve>[0];
 
 // The kernel's push hint rules (`notificationPushHintSchema`), restated: a hint that breaks one is dropped.
 const PUSH_TAG = /^[A-Za-z0-9_-]{1,64}$/;
 const PUSH_TOPIC = /^[A-Za-z0-9_-]{1,32}$/;
 const PUSH_PATH = /^\/(?![/\\])[^\\\s]*$/;
 
-const source = paymentsNotificationSources[0];
-if (!source) throw new Error('payments declares no notification source');
 const payload = { tenantId: T, userId: U, productId: P, productName: 'Curso A' };
 
 describe('payments notification source', () => {
@@ -95,6 +95,7 @@ describe('payments notification source', () => {
   it('cuts the push body of a 120-character product name at 100 graphemes with an ellipsis', async () => {
     const productName = Array.from({ length: 20 }, (_, i) => `curso${i}`)
       .join(' ')
+      .slice(0, 120)
       .padEnd(120, 'x');
     const [intent] = await source.resolve(refusingTx, { ...payload, productName }, meta);
     const body = intent?.push?.body ?? '';

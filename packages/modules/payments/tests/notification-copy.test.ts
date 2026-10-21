@@ -23,6 +23,7 @@ describe('paymentsPushCopy.purchaseConfirmed', () => {
   it('cuts a 120-character name on a word to at most 100 graphemes with a trailing ellipsis', () => {
     const name = Array.from({ length: 15 }, (_, i) => `palavra${i}`)
       .join(' ')
+      .slice(0, 120)
       .padEnd(120, 'x');
     expect(name).toHaveLength(120);
     const body = paymentsPushCopy.purchaseConfirmed(name);

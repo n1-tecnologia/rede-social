@@ -1,5 +1,6 @@
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { PAYMENTS_PERMISSIONS } from './contracts/index';
+import { paymentsNotificationSources } from './server/notifications';
 
 /**
  * The manifest: everything the kernel needs to know about this module, as data (MOD-01).
@@ -22,6 +23,10 @@ import { PAYMENTS_PERMISSIONS } from './contracts/index';
  * nobody else; composing it for another role (through settings or any other path) would make that
  * role's reads and writes fail under RLS. Widen the SQL in the same change, or do not compose it
  * elsewhere: `apps/api/tests/unit/registry.test.ts` (case 20) fails first.
+ *
+ * `notificationSources` (09.1-12, D-506): the buyer's "Compra confirmada" only. **No
+ * `notificationRetractions`** (A-P30): an archived product stays readable to its holder, so archiving
+ * must not blank the notice; see `server/notifications.ts`.
  */
 export const paymentsModule = defineModule({
   key: 'payments',
@@ -30,4 +35,5 @@ export const paymentsModule = defineModule({
     admin_tenant: [PAYMENTS_PERMISSIONS.manage],
   },
   sweepFunctions: ['payment_events_prune'],
+  notificationSources: paymentsNotificationSources,
 });

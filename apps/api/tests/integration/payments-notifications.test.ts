@@ -1,5 +1,6 @@
 import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   bootstrap,
@@ -57,6 +58,35 @@ const FAKE_PUSH = 'https://push.fake.test/sub';
 let labTenantId = '';
 let demoTenantId = '';
 let integration: SeededPaymentIntegration;
+let restoreNotifications: () => Promise<void> = async () => {};
+
+/**
+ * rede-lab ships with the `notifications` module OFF, and a fan-out answers nothing while it is off, so
+ * the cases that read notice rows (and the silence cases, which would otherwise pass for the wrong
+ * reason) turn it on for the file and put the previous row back afterwards.
+ */
+async function enableNotifications(tenantId: string): Promise<() => Promise<void>> {
+  const [previous] = await adminSql<{ enabled: boolean }[]>`
+    select enabled from public.tenant_modules
+     where tenant_id = ${tenantId}::uuid and module_key = 'notifications'`;
+  await adminSql`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    values (${tenantId}::uuid, 'notifications', true)
+    on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+  moduleFlags.invalidate(tenantId);
+  return async () => {
+    if (previous) {
+      await adminSql`
+        update public.tenant_modules set enabled = ${previous.enabled}, updated_at = now()
+         where tenant_id = ${tenantId}::uuid and module_key = 'notifications'`;
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'notifications'`;
+    }
+    moduleFlags.invalidate(tenantId);
+  };
+}
 
 const accessProduct = (name = 'Plano') =>
   seedPaymentMapping(labTenantId, {
@@ -145,6 +175,7 @@ beforeAll(async () => {
   await removePaymentIntegrations(demoTenantId);
   await removePaymentMappings(labTenantId);
   await removePaymentMappings(demoTenantId);
+  restoreNotifications = await enableNotifications(labTenantId);
 }, 60_000);
 
 afterEach(async () => {
@@ -162,6 +193,7 @@ afterAll(async () => {
   await removePaymentMappings(labTenantId);
   await removePaymentMappings(demoTenantId);
   await removeIdentitiesByPrefix(PREFIX);
+  await restoreNotifications();
   await stopBoss();
 }, 60_000);
 
