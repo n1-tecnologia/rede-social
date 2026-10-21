@@ -6,6 +6,7 @@ import { loadMessages } from '@/i18n/messages';
 import {
   type AccessProductView,
   accessProductView,
+  gateView,
   overviewView,
   type PaymentsTranslator,
   withFeedsMark,
@@ -155,5 +156,18 @@ describe('withFeedsMark (A-UI-7: the oldest product with a link feeds the button
     const after = withFeedsMark([{ ...before[0], checkoutUrl: null, hasLink: false }, before[1]]);
     expect(after.map((p) => p.feedsButton)).toEqual([false, true]);
     expect(before.map((p) => p.feedsButton)).toEqual([false, false]);
+  });
+});
+
+describe('gateView (UI-D-516, A-UI-2)', () => {
+  it("hands the server's flags through untouched: the web never decides who can enable the gate", () => {
+    expect(gateView({ required: false, canEnable: false })).toEqual({
+      required: false,
+      canEnable: false,
+    });
+    expect(gateView({ required: true, canEnable: true })).toEqual({
+      required: true,
+      canEnable: true,
+    });
   });
 });
