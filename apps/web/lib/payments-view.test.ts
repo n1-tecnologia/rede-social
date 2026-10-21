@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { AccessItem, PaymentsOverview } from '@rede-social/contracts/payments';
+import type { AccessItem, EventItem, PaymentsOverview } from '@rede-social/contracts/payments';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
@@ -11,6 +11,8 @@ import {
   accessQueryFromParam,
   accessRowView,
   accessSheetView,
+  eventRowView,
+  eventsHeaderView,
   gateView,
   overviewView,
   type PaymentsTranslator,
@@ -349,5 +351,137 @@ describe('accessSheetView: the block note while the gate is off (assumption A-P1
     expect(accessSheetView(access(), t, { ...ACCESS_CTX, gateRequired: false }).notes).toEqual([
       'Este acesso vem do Kiwify e muda sozinho com a assinatura.',
     ]);
+  });
+});
+
+/* ── 09.1-14: the Eventos rows (UI-D-519, UI-D-520, D-503) ─────────────────────────────────────── */
+
+function event(patch: Partial<EventItem> = {}): EventItem {
+  return {
+    id: '11111111-1111-4111-8111-111111111111',
+    type: 'purchase_approved',
+    state: 'applied',
+    email: 'ana@exemplo.com.br',
+    productName: 'Assinatura mensal',
+    externalProductId: 'a1b2c3',
+    outcome: 'access_granted',
+    receivedAt: THREE_MINUTES_AGO,
+    ...patch,
+  };
+}
+
+describe('eventRowView (UI-D-519): finished strings from the neutral event', () => {
+  it('words an applied access purchase from the neutral type, never the gateway trigger', () => {
+    expect(eventRowView(event(), t, { serverNow: NOW })).toEqual({
+      id: '11111111-1111-4111-8111-111111111111',
+      state: 'applied',
+      stateLabel: 'Aplicado',
+      name: 'Compra aprovada',
+      email: 'ana@exemplo.com.br',
+      product: 'Assinatura mensal',
+      effect: 'Acesso liberado',
+      received: 'recebido há 3 min',
+      canGrant: false,
+      canRegister: false,
+    });
+  });
+
+  it.each([
+    ['purchase_approved', 'Compra aprovada'],
+    ['purchase_refused', 'Compra recusada'],
+    ['purchase_refunded', 'Compra reembolsada'],
+    ['chargeback', 'Chargeback'],
+    ['subscription_renewed', 'Assinatura renovada'],
+    ['subscription_late', 'Assinatura atrasada'],
+    ['subscription_canceled', 'Assinatura cancelada'],
+    ['boleto_generated', 'Boleto gerado'],
+    ['pix_generated', 'Pix gerado'],
+    ['cart_abandoned', 'Carrinho abandonado'],
+  ] as const)('names %s "%s"', (type, name) => {
+    expect(eventRowView(event({ type }), t, { serverNow: NOW }).name).toBe(name);
+  });
+
+  it('gives the type `other` a word too, so no row can ever crash on a missing message', () => {
+    expect(eventRowView(event({ type: 'other' }), t, { serverNow: NOW }).name).toBe('Outro evento');
+  });
+
+  it.each([
+    ['applied', 'Aplicado'],
+    ['no_account', 'Sem conta'],
+    ['unknown_product', 'Produto desconhecido'],
+    ['ignored', 'Ignorado'],
+  ] as const)('words the state %s "%s"', (state, label) => {
+    expect(eventRowView(event({ state }), t, { serverNow: NOW }).stateLabel).toBe(label);
+  });
+
+  it('offers "Liberar manualmente" on a no-account row only and "Cadastrar produto" on an unknown-product row only', () => {
+    const flags = (state: EventItem['state']) => {
+      const view = eventRowView(event({ state }), t, { serverNow: NOW });
+      return [view.canGrant, view.canRegister];
+    };
+    expect(flags('no_account')).toEqual([true, false]);
+    expect(flags('unknown_product')).toEqual([false, true]);
+    expect(flags('applied')).toEqual([false, false]);
+    expect(flags('ignored')).toEqual([false, false]);
+  });
+
+  it('says "E-mail não informado" when the delivery carried no address', () => {
+    expect(eventRowView(event({ email: null }), t, { serverNow: NOW }).email).toBe(
+      'E-mail não informado',
+    );
+  });
+
+  it('names an unmapped product by its gateway id, and omits the product line with neither', () => {
+    const unknown = eventRowView(
+      event({ state: 'unknown_product', productName: null, externalProductId: 'z9y8x7' }),
+      t,
+      { serverNow: NOW },
+    );
+    expect(unknown.product).toBe('ID z9y8x7');
+    const none = eventRowView(event({ productName: null, externalProductId: null }), t, {
+      serverNow: NOW,
+    });
+    expect(none.product).toBeNull();
+  });
+
+  it('sends no effect line when the server sends no outcome', () => {
+    expect(eventRowView(event({ outcome: null }), t, { serverNow: NOW }).effect).toBeNull();
+  });
+
+  it.each([
+    ['access_granted', 'Acesso liberado'],
+    ['access_cut', 'Acesso cortado'],
+    ['product_granted', 'Produto liberado'],
+    ['product_revoked', 'Produto revogado'],
+    ['stale', 'Evento mais antigo que o último recebido'],
+    ['no_effect', 'Evento sem efeito no acesso'],
+  ] as const)('words the outcome %s "%s"', (outcome, line) => {
+    expect(eventRowView(event({ outcome }), t, { serverNow: NOW }).effect).toBe(line);
+  });
+
+  it('reads the outcome `currency_unsupported`, which has no approved wording, as "sem efeito"', () => {
+    expect(
+      eventRowView(event({ state: 'ignored', outcome: 'currency_unsupported' }), t, {
+        serverNow: NOW,
+      }).effect,
+    ).toBe('Evento sem efeito no acesso');
+  });
+
+  it('words "recebido {when}" from the SERVER clock', () => {
+    expect(eventRowView(event({ receivedAt: NOW }), t, { serverNow: NOW }).received).toBe(
+      'recebido agora',
+    );
+    expect(
+      eventRowView(event({ receivedAt: '2026-10-18T12:00:00.000Z' }), t, { serverNow: NOW })
+        .received,
+    ).toBe('recebido há 3 dias');
+  });
+});
+
+describe('eventsHeaderView (UI-D-519): "Mostrando os últimos {count}"', () => {
+  it('uses the plural for many events and the approved singular form for one', () => {
+    expect(eventsHeaderView(12, t)).toBe('Mostrando os últimos 12 eventos.');
+    expect(eventsHeaderView(50, t)).toBe('Mostrando os últimos 50 eventos.');
+    expect(eventsHeaderView(1, t)).toBe('Mostrando os últimos 1 evento.');
   });
 });

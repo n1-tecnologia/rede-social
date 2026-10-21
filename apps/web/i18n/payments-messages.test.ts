@@ -158,6 +158,10 @@ describe('payments.json (UI-D-531)', () => {
     );
   });
 
+  it('gives the neutral type `other` a word, a delta not drawn in sketch 013', () => {
+    expect(all['events.types.other']).toBe('Outro evento');
+  });
+
   it('writes the typographic quotes of the contract, not straight ones', () => {
     expect(all['errors.lastProduct']).toBe(
       'Desative “Exigir assinatura para entrar” antes de remover o último produto de acesso.',
