@@ -206,6 +206,16 @@ export async function joinFromSignup(formData: FormData): Promise<void> {
         // through the router's fetch and its cookie clear does not stick, so the action signs out.
         signOutLocally = true;
         target = `/auth/blocked?t=${encodeURIComponent(String(apiError.details?.tenantName ?? ''))}`;
+      } else if (res.status === 403 && apiError?.code === 'SUBSCRIPTION_PENDING') {
+        // 09.1-15 (D-497, D-499): a payment cut is not a block — the session is kept, only "Sair" on the
+        // pending screen ends it (the identity is shared across communities).
+        target = `/assinatura-pendente?t=${encodeURIComponent(String(apiError.details?.tenantName ?? ''))}`;
+      } else if (res.status === 403 && apiError?.code === 'EMAIL_NOT_ALLOWED') {
+        // 09.1-15 (D-493, D-302): the host's payment gate refuses this e-mail. The password was right, but
+        // the fresh session belongs to a community this identity cannot enter, so it is signed out here
+        // and the person reads the same one-sentence notice as every other refusal.
+        signOutLocally = true;
+        target = `${state}&erro=nao-liberado`;
       } else if (res.status === 409 && apiError?.details?.reason === 'invite_pending') {
         target = '/aceitar-convite';
       } else if (res.status === 403 && apiError?.code === 'TENANT_SUSPENDED') {

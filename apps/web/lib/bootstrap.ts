@@ -82,6 +82,11 @@ export async function loadOrRedirect<T>(
  * - 401: expired/invalid session between proxy.ts and the API — back to login.
  * - `MEMBERSHIP_BLOCKED` (AUTH-06 / D-09): the block takes effect on the very next request. The tenant
  *   display name is the only detail the 403 carries and the only one the screen shows.
+ * - `SUBSCRIPTION_PENDING` (09.1-15, D-497, D-499): the member's payment access is cut. They land on
+ *   `/assinatura-pendente`, a page in the `(auth)` group with the host brand, and — UNLIKE the blocked
+ *   flow — nothing clears the session: the Supabase identity is shared across communities, so only "Sair"
+ *   signs out. The tenant name rides along only as the fallback text for a failed read of the screen's own
+ *   data; the checkout link is never carried in the URL.
  * - `TENANT_SUSPENDED` (D-32): the TENANT, not the member, is unavailable; the device is signed out
  *   like D-09 and lands on the branded public screen `/comunidade-indisponivel`. No query — the brand
  *   comes from the host and the copy names no tenant, reason or timestamp.
@@ -103,6 +108,8 @@ export function bootstrapRedirectPath(error: ApiClientError): string | null {
       return '/aceitar-convite';
     case 'MEMBERSHIP_BLOCKED':
       return `/auth/blocked?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
+    case 'SUBSCRIPTION_PENDING':
+      return `/assinatura-pendente?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
     case 'TENANT_SUSPENDED':
       return '/auth/suspended';
     case 'TENANT_HOST_MISMATCH':

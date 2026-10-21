@@ -21,20 +21,36 @@ import { createClient } from '@/lib/supabase/server';
  * `{ error: { code }, location }`, where `location` is the shipped blocked flow
  * (`/auth/blocked?t=<tenant>`, the `bootstrapRedirectPath` mapping). `LiveShell` navigates there, so
  * the open app lands on "Acesso suspenso" without a reload. The body never carries anything else.
+ *
+ * 09.1-15 (PAY-14, PAY-15, D-497, D-499, T-09.1-73): the SECOND refusal that carries a body. A 403
+ * `SUBSCRIPTION_PENDING` — the member's payment access was cut while the app was open, and the cut nudged
+ * this refetch (09.1-12) — answers `{ error: { code }, location }` with `location` the pending screen
+ * (`/assinatura-pendente?t=<tenant>`, again the `bootstrapRedirectPath` mapping, never a path taken from
+ * the API's body). `LiveShell` navigates there; unlike the blocked flow nothing signs the device out.
  */
 export const dynamic = 'force-dynamic';
 
 const empty = (status: number) =>
   new Response(null, { status, headers: { 'cache-control': 'no-store' } });
 
-/** The blocked flow's path for a 403 `MEMBERSHIP_BLOCKED` envelope, or `null` for any other answer. */
-async function blockedLocation(res: Response): Promise<string | null> {
+/** The refusals whose envelope carries a body: the code the shell reads and the flow it lands on. */
+const REFUSAL_FLOWS = ['MEMBERSHIP_BLOCKED', 'SUBSCRIPTION_PENDING'] as const;
+type RefusalFlow = (typeof REFUSAL_FLOWS)[number];
+
+/**
+ * The flow a 403 envelope sends the open app to (the blocked flow, or the pending screen), as
+ * `{ code, location }`, or `null` for any other answer. The location is the `bootstrapRedirectPath`
+ * mapping of the code and the tenant name: it is never taken from the API's body.
+ */
+async function refusalFlow(res: Response): Promise<{ code: RefusalFlow; location: string } | null> {
   try {
     const body = (await res.json()) as {
       error?: { code?: string; details?: Record<string, unknown> };
     };
-    if (body?.error?.code !== 'MEMBERSHIP_BLOCKED') return null;
-    return bootstrapRedirectPath(new ApiClientError(403, 'MEMBERSHIP_BLOCKED', body.error.details));
+    const code = REFUSAL_FLOWS.find((flow) => flow === body?.error?.code);
+    if (!code) return null;
+    const location = bootstrapRedirectPath(new ApiClientError(403, code, body.error?.details));
+    return location ? { code, location } : null;
   } catch {
     return null;
   }
@@ -50,10 +66,10 @@ export async function GET(request: Request): Promise<Response> {
     const res = await apiFetch('/v1/me/counters');
     if (!res.ok) {
       if (res.status === 403) {
-        const blocked = await blockedLocation(res);
-        if (blocked) {
+        const flow = await refusalFlow(res);
+        if (flow) {
           return Response.json(
-            { error: { code: 'MEMBERSHIP_BLOCKED' }, location: blocked },
+            { error: { code: flow.code }, location: flow.location },
             { status: 403, headers: { 'cache-control': 'no-store' } },
           );
         }

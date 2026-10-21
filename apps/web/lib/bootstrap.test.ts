@@ -16,13 +16,13 @@ describe('bootstrapRedirectPath: SUBSCRIPTION_PENDING (09.1-15)', () => {
     expect(bootstrapRedirectPath(error)).toBe('/assinatura-pendente?t=Cl%C3%ADnica%20Ana');
   });
 
-  it('reads a missing or non-string name as an empty fallback, never as "undefined"', () => {
+  it('reads a missing or null name as an empty fallback, never as "undefined" or "null"', () => {
     expect(bootstrapRedirectPath(new ApiClientError(403, 'SUBSCRIPTION_PENDING'))).toBe(
       '/assinatura-pendente?t=',
     );
     expect(
       bootstrapRedirectPath(new ApiClientError(403, 'SUBSCRIPTION_PENDING', { tenantName: null })),
-    ).toBe('/assinatura-pendente?t=null');
+    ).toBe('/assinatura-pendente?t=');
   });
 
   it('encodes a name that tries to smuggle a second parameter or a path', () => {

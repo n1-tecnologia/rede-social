@@ -79,6 +79,14 @@ export async function join(formData: FormData): Promise<void> {
       if (res.status === 403 && error?.code === 'MEMBERSHIP_BLOCKED') {
         signOutLocally = true;
         target = `/auth/blocked?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
+      } else if (res.status === 403 && error?.code === 'SUBSCRIPTION_PENDING') {
+        // 09.1-15 (D-497, D-499): a payment cut is NOT a block. The session stays — the Supabase
+        // identity is shared across communities, so only "Sair" on the pending screen ends it.
+        target = `/assinatura-pendente?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
+      } else if (res.status === 403 && error?.code === 'EMAIL_NOT_ALLOWED') {
+        // 09.1-15 (D-493, D-305): the gate closed between the page and the submit. The page re-reads the
+        // join state and shows the no-access notice instead of the form; nothing is signed out.
+        target = '/participar';
       } else if (res.status === 403 && error?.code === 'TENANT_SUSPENDED') {
         signOutLocally = true; // Same reason as the block.
         target = '/auth/suspended';

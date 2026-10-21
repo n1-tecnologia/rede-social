@@ -120,6 +120,16 @@ describe('participar join: every other outcome keeps the session', () => {
       '/participar?erro=consentimento',
     ],
     ['refused', answer(403, envelope('FORBIDDEN')), '/participar?erro=recusado'],
+    [
+      'a payment cut (09.1-15: the session is kept)',
+      answer(403, envelope('SUBSCRIPTION_PENDING', { tenantName: 'Rede Lab' })),
+      '/assinatura-pendente?t=Rede%20Lab',
+    ],
+    [
+      'the access gate closed after the page rendered (09.1-15)',
+      answer(403, envelope('EMAIL_NOT_ALLOWED')),
+      '/participar',
+    ],
     ['a server failure', answer(500, envelope('INTERNAL')), '/participar?erro=falha'],
   ])('%s', async (_label, res, target) => {
     expect(await run(res)).toEqual([`redirect:${target}`]);

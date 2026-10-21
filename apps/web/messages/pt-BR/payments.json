@@ -185,6 +185,7 @@
       }
     },
     "pending": {
+      "tenantFallback": "sua comunidade",
       "title": "Sua assinatura não está ativa",
       "body": "Assim que o pagamento for confirmado, seu acesso volta sozinho. Seu perfil e suas publicações continuam guardados.",
       "bodyNoLink": "Em caso de dúvida, fale com a equipe de {tenant}.",

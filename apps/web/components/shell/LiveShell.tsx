@@ -73,9 +73,41 @@ export async function landOnBlockedFlow(
   return true;
 }
 
+/**
+ * 09.1-15 (PAY-14, PAY-15, D-497, D-499, T-09.1-73): a counters refetch REFUSED with 403
+ * `SUBSCRIPTION_PENDING` (the member's payment access was cut with the app open, and the cut nudged this
+ * refetch, 09.1-12) takes the open app to the pending screen — the same `/assinatura-pendente` page
+ * `requireBootstrap` maps the code to. A full navigation, like the blocked flow, but NOTHING is signed
+ * out: the shared identity stays alive and only "Sair" ends the session. Only that one code, and only a
+ * same-origin `/assinatura-pendente` path, ever navigates (a protocol-relative `//host/…` or an absolute
+ * URL does not start with that path); every other refusal keeps the last counters. Calling it twice with
+ * the same refusal navigates twice and never throws.
+ */
+export async function landOnPendingFlow(
+  response: Response,
+  navigate: (path: string) => void,
+): Promise<boolean> {
+  if (response.status !== 403) return false;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return false;
+  }
+  const refusal = body as { error?: { code?: unknown }; location?: unknown };
+  if (refusal?.error?.code !== 'SUBSCRIPTION_PENDING') return false;
+  const location = refusal.location;
+  if (typeof location !== 'string' || !location.startsWith('/assinatura-pendente')) return false;
+  navigate(location);
+  return true;
+}
+
 const assignLocation = (path: string) => window.location.assign(path);
-const onCountersRefused = (response: Response) =>
-  landOnBlockedFlow(response, assignLocation).then(() => undefined);
+const onCountersRefused = async (response: Response): Promise<void> => {
+  // The body is read once per helper: each gets its own clone, and at most one of them matches.
+  if (await landOnBlockedFlow(response.clone(), assignLocation)) return;
+  await landOnPendingFlow(response, assignLocation);
+};
 
 /** Every signal that can move a badge: the bell, the member's dot and the staff count. */
 const COUNTER_EVENTS = [
@@ -106,7 +138,9 @@ const COUNTER_EVENTS = [
  *
  * Blocked with the app open (08-04): an admin's block nudges `notifications.changed` on the member's
  * user topic; the refetch answers 403 `MEMBERSHIP_BLOCKED` and `landOnBlockedFlow` navigates to the
- * shipped blocked flow, with no manual reload.
+ * shipped blocked flow, with no manual reload. The payment cut does the same (09.1-15): the cut nudges the
+ * refetch, it answers 403 `SUBSCRIPTION_PENDING` and `landOnPendingFlow` lands the open app on
+ * `/assinatura-pendente`, keeping the session.
  *
  * Mounted by `app/(app)/layout.tsx` on the tenant branch only. Leaving the `(app)` segment (logout,
  * the blocked flow's `/acesso-suspenso`) unmounts it, and the provider disconnects on unmount.
