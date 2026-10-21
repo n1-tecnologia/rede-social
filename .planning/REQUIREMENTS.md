@@ -288,21 +288,21 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [x] **PAY-07**: A paid access-product event whose e-mail has no account yet still creates the access keyed by e-mail; a store-product event whose e-mail matches no live membership of the tenant is kept as an event in state no_membership with nothing granted, never dropped and never matched by guessing *(D-490)*
 - [x] **PAY-08**: Exigir assinatura para entrar can be turned on by admin_tenant only while the integration is connected and at least one access product is mapped; while it is off, or the payments module is off, sign-up, join and every authenticated request behave exactly as before this phase *(D-491)*
 - [x] **PAY-09**: admin_tenant, support_tenant and platform admins never depend on an access record; the first admin invited to a new tenant can create the account and log in with no subscription, and creating or accepting an invite writes a manual access for the invited e-mail (listed and revocable) *(D-492)*
-- [ ] **PAY-10**: When the gate is on and an e-mail has no usable access in the host's tenant, sign-up, login and the join screen answer the same sentence with an Assinar link only when the tenant registered a checkout link of an access product, and no answer names another community *(D-493, D-302)*
+- [x] **PAY-10**: When the gate is on and an e-mail has no usable access in the host's tenant, sign-up, login and the join screen answer the same sentence with an Assinar link only when the tenant registered a checkout link of an access product, and no answer names another community *(D-493, D-302)*
 - [x] **PAY-11**: A tenant can map several access products and an e-mail passes the gate while any one of its gateway accesses is active *(D-494)*
 - [x] **PAY-12**: The token hook and the before_user_created hook answer only whether this e-mail has any usable access anywhere (an active access in any tenant, a staff membership, a membership in a tenant whose gate is off, a platform admin; the creation hook passes only an e-mail with an active access, because a first admin's invite writes a manual access before the invite mail is sent) in indexed lookups with 4xx errors only; the per-tenant decision is made in signupMember, joinTenant, the first-admin and invite paths and requireAuth *(D-495)*
 - [ ] **PAY-13**: On a late, canceled, refunded or charged-back subscription event the member's next API request is refused, and on the next approved or renewed event it succeeds again with no admin action, while the membership row, profile and content stay unchanged *(D-496)*
 - [x] **PAY-14**: requireAuth answers a cut member with a new error code SUBSCRIPTION_PENDING (the identifier is confirmed by the one-way checkpoint of Phase 09.1 plan 02; added to ERROR_CODES, with the tenant name in details), a sibling of MEMBERSHIP_BLOCKED, and memberships.status is never changed by a payment cut; the cut check is part of the same single membership lookup of the request *(D-497)*
-- [ ] **PAY-15**: The assinatura-pendente screen shows the tenant brand, the title, Regularizar (only for a stored https checkout link fetched from the API, never from the URL), Verificar de novo and Sair, and does not clear the session; an endpoint that stays reachable while the member is cut returns the tenant name and the checkout link *(D-497, D-499)*
+- [x] **PAY-15**: The assinatura-pendente screen shows the tenant brand, the title, Regularizar (only for a stored https checkout link fetched from the API, never from the URL), Verificar de novo and Sair, and does not clear the session; an endpoint that stays reachable while the member is cut returns the tenant name and the checkout link *(D-497, D-499)*
 - [x] **PAY-16**: A cut member keeps all content, appears in the admin members list with an Assinatura pendente badge and a filter, is excluded from the dashboard active-member count and receives no push; a member who is both manually blocked and cut shows Bloqueado only *(D-498, D-489)*
 - [x] **PAY-17**: When a member is cut the membership's push subscriptions are deleted and the open app is nudged over the existing Realtime user topic (event membership.access_cut), and the Supabase session is not revoked *(D-499)*
 - [x] **PAY-18**: A cut or a return creates no notification for the admin and no message of its own to the buyer; the only admin-side surface is the members list *(D-500)*
 - [x] **PAY-19**: A payments module exists as its own package, off by default and absent from the default module list of a new tenant, switched per tenant by super_admin and configured by admin_tenant through a composed payments.manage permission; with the module off the gate is open and the store keeps its simulated purchase *(D-501)*
 - [x] **PAY-20**: Access products are created, edited and removed on the Pagamentos screen with a name, a gateway product id and an optional https checkout link, and a store product carries its gateway product id and checkout link in the product form (saved by a separate call after the store save); a link without an id is refused and removing the last access product while the gate is on is refused *(D-502)*
-- [ ] **PAY-21**: The Eventos tab lists the latest 50 events of the tenant with a neutral type, state (applied, no account, unknown product, ignored), received time and effect, never shows a payload, and offers Liberar manualmente only on a store-product event in state no account, which uses the existing store grant *(D-503, D-490)*
-- [ ] **PAY-22**: The Acessos tab lists one row per e-mail with source, state and validity, searchable by e-mail, and lets admin_tenant release an e-mail before it has an account, block, unblock and remove a manual release, and never remove a gateway row by hand *(D-504)*
+- [x] **PAY-21**: The Eventos tab lists the latest 50 events of the tenant with a neutral type, state (applied, no account, unknown product, ignored), received time and effect, never shows a payload, and offers Liberar manualmente only on a store-product event in state no account, which uses the existing store grant *(D-503, D-490)*
+- [x] **PAY-22**: The Acessos tab lists one row per e-mail with source, state and validity, searchable by e-mail, and lets admin_tenant release an e-mail before it has an account, block, unblock and remove a manual release, and never remove a gateway row by hand *(D-504)*
 - [x] **PAY-23**: A refund or chargeback revokes the buyer's store entitlement and marks the order revoked; for a subscription product a late or canceled event revokes it and a later paid event restores it with a new order; the member can buy again *(D-505, D-359)*
-- [ ] **PAY-24**: With a connected gateway, Comprar opens the tenant's checkout link and creates nothing locally; the order and entitlement exist only after the signed webhook arrives, and the member then receives the in-app Compra confirmada notification *(D-506)*
+- [x] **PAY-24**: With a connected gateway, Comprar opens the tenant's checkout link and creates nothing locally; the order and entitlement exist only after the signed webhook arrives, and the member then receives the in-app Compra confirmada notification *(D-506)*
 - [x] **PAY-25**: A gateway order stores the amount the gateway reports as charged, in BRL cents, in store_orders.amount_cents (an event in another currency is ignored), and the Financeiro dashboard sums it unchanged *(D-507)*
 - [x] **PAY-26**: For a tenant with a connected gateway the simulated purchase function refuses at the database (not only in the UI), a product without a checkout link shows Indisponível, the product form warns sem link de pagamento, and a tenant with no gateway keeps the simulated purchase unchanged *(D-508)*
 - [x] **PAY-27**: The webhook creates and revokes orders and entitlements only through definer functions that take the tenant and membership as arguments and are executable by service_role alone; no tenant-lane write policy is added to store_orders or store_entitlements; store_orders.provider accepts the gateway name and provider_ref holds the gateway's order id *(D-509)*
@@ -312,7 +312,7 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [x] **PAY-31**: Turning the gate on shows how many current members (staff and manually blocked e-mails excluded) have no usable access and, when the admin keeps the release box checked (the default), writes a manual release for them in the same transaction and reports the number released by the server; a cleared box releases nobody *(D-491, UI-D-516)*
 - [x] **PAY-32**: The platform panel shows a Pagamentos module row that requires nothing and asks for confirmation before disabling it for a tenant *(D-501, UI-D-527)*
 - [ ] **PAY-33**: Every one of the ten Kiwify triggers is accepted and recorded; the ones that change access or orders map to a neutral effect, and the four that do not (boleto, pix, abandoned cart, refused purchase) are recorded as ignored with no state change, and every other payload shape is recorded as ignored without failing the delivery *(D-486)*
-- [ ] **PAY-34**: When the webhook creates the order of a product the member has open, the product page refreshes into its owned state without a reload, through the existing Realtime user signal *(D-506, UI-D-525)*
+- [x] **PAY-34**: When the webhook creates the order of a product the member has open, the product page refreshes into its owned state without a reload, through the existing Realtime user signal *(D-506, UI-D-525)*
 
 ### Media
 
@@ -619,21 +619,21 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-07 | Phase 09.1 (plan 07) | Complete |
 | PAY-08 | Phase 09.1 (plans 02, 03, 09, 13) | Complete |
 | PAY-09 | Phase 09.1 (plan 04) | Complete |
-| PAY-10 | Phase 09.1 (plans 03, 10, 15, 19) | Pending |
+| PAY-10 | Phase 09.1 (plans 03, 10, 15, 19) | Complete |
 | PAY-11 | Phase 09.1 (plans 02, 03, 07, 09) | Complete |
 | PAY-12 | Phase 09.1 (plan 03) | Complete |
 | PAY-13 | Phase 09.1 (plans 02, 07, 19, 20) | Pending |
 | PAY-14 | Phase 09.1 (plans 02, 15) | Complete |
-| PAY-15 | Phase 09.1 (plans 10, 15, 19) | Pending |
+| PAY-15 | Phase 09.1 (plans 10, 15, 19) | Complete |
 | PAY-16 | Phase 09.1 (plans 11, 16) | Complete |
 | PAY-17 | Phase 09.1 (plans 07, 12) | Complete |
 | PAY-18 | Phase 09.1 (plans 07, 11, 12, 16) | Complete |
 | PAY-19 | Phase 09.1 (plans 02, 09, 13) | Complete |
 | PAY-20 | Phase 09.1 (plans 09, 13, 17) | Complete |
-| PAY-21 | Phase 09.1 (plans 10, 14, 19) | Pending |
-| PAY-22 | Phase 09.1 (plans 10, 14, 19) | Pending |
+| PAY-21 | Phase 09.1 (plans 10, 14, 19) | Complete |
+| PAY-22 | Phase 09.1 (plans 10, 14, 19) | Complete |
 | PAY-23 | Phase 09.1 (plans 06, 07) | Complete |
-| PAY-24 | Phase 09.1 (plans 06, 07, 12, 17, 19) | Pending |
+| PAY-24 | Phase 09.1 (plans 06, 07, 12, 17, 19) | Complete |
 | PAY-25 | Phase 09.1 (plan 06) | Complete |
 | PAY-26 | Phase 09.1 (plans 06, 17) | Complete |
 | PAY-27 | Phase 09.1 (plans 06, 07) | Complete |
@@ -643,7 +643,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-31 | Phase 09.1 (plans 09, 13) | Complete |
 | PAY-32 | Phase 09.1 (plan 16) | Complete |
 | PAY-33 | Phase 09.1 (plans 08, 20) | Pending |
-| PAY-34 | Phase 09.1 (plans 17, 19) | Pending |
+| PAY-34 | Phase 09.1 (plans 17, 19) | Complete |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |

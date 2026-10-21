@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 19
+current_plan: 20
 status: executing
-stopped_at: Completed 09.1-18-PLAN.md (rollout safety: hook guard, lockout report, deploy wiring, runbook); next 09.1-19
-last_updated: "2026-10-21T10:38:01.473Z"
+stopped_at: "Completed 09.1-19-PLAN.md (browser proof of the access story, the Pagamentos hub and the store purchase; module README; payments-web CI group); next 09.1-20 (human action: capture real gateway deliveries)"
+last_updated: "2026-10-21T11:35:01.601Z"
 last_activity: 2026-10-21
-last_activity_desc: Completed 09.1-18 (auth hook guard, lockout report, deploy wiring, static-route keys, Phase 09.1 release runbook)
-state_head: 5273dea8707e9caf0ce921be081e36bc745869e5
+last_activity_desc: Completed 09.1-19 (browser proof: access story, Pagamentos hub with 320px backstops, store purchase; module README; payments-web CI group)
+state_head: 55791f63ebede049e21f80bcc7b8c9bcdfae8076
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 231
+  completed_plans: 232
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
-Current Plan: 19
+Current Plan: 20
 Total Plans in Phase: 20
-Plan: 18 of 20 complete (09.1-01 through 09.1-18; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-19 (browser proof); 09.1-20 follows
+Plan: 19 of 20 complete (09.1-01 through 09.1-19; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-20 (human action: capture real gateway deliveries; pauses for the user)
 Status: Executing Phase 09.1
-Last activity: 2026-10-21 — Completed 09.1-18 (rollout safety for the Auth hooks, deploy wiring, release runbook)
+Last activity: 2026-10-21 — Completed 09.1-19 (browser proof of the phase, module README, payments-web group)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -289,6 +289,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.1 P15 | 20 min | 3 tasks | 29 files |
 | Phase 09.1 P17 | 17 min | 3 tasks | 28 files |
 | Phase 09.1 P18 | 16 min | 3 tasks | 10 files |
+| Phase 09.1 P19 | 55 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -970,6 +971,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-18: the lockout report passes the account's e-mail in the claims (the plan's '{}' would list every account that relies on an e-mail access row) and reads the gate as the JSON boolean true, like app.access_gate_on — It must say what the real hook says; the integration suite pins both and was shown to fail with empty claims.
 - [Phase 09.1]: 09.1-18: scripts/guard-auth-hooks.sh (pnpm guard:hooks) runs in the CI static job and before supabase config push in deploy-api.yml and deploy-hml.yml; enabling a production hook stays a human commit gated by docs/deploy/payments-hooks-lockout.sql (PR-8, WR-01, WR-02) — A remote table inherits the base hook blocks (enabled locally); an enabled hook with no defining migration answers 500 on every login.
 - [Phase 09.1]: 09.1-18: API_PUBLIC_URL is wired (production literal, hml from the homolog environment variable checked by the hml preflight); the next hml deploy fails its preflight until a human defines that variable — Without it the webhook URL shown on the Pagamentos screen is an internal Cloud Run host (A-P19).
+- [Phase 09.1]: 09.1-19: the payments e2e run against the test gateway only (PAYMENTS_PROVIDERS=fake in the Playwright config), touch only rows carrying the e2epay- namespace and put the rede-lab and rede-demo module rows back from a recorded baseline file; a killed run is repaired by the next run's beforeAll (gate off first) — A gate or integration left on a seeded tenant breaks every later sign-up in the suite for a reason that has nothing to do with the spec that failed (T-09.1-91).
+- [Phase 09.1]: 09.1-19: the shared ConfirmDialog title and body get max-w-full so a long unbroken e-mail wraps inside the panel (found at 320px in a browser; fix(09.1-14)); the outline sm hitArea is 42px not 44 and is logged in deferred-items.md, not changed — overflow-wrap does not shrink a flex item below min-content; the hit-area inset is measured inside the 1px border of an outline button.
 
 ### Pending Todos
 
@@ -1075,6 +1078,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T10:37:54.242Z
-Stopped at: Completed 09.1-18-PLAN.md; next 09.1-19
+Last session: 2026-10-21T11:34:36.277Z
+Stopped at: Completed 09.1-19-PLAN.md (browser proof of the access story, the Pagamentos hub and the store purchase; module README; payments-web CI group); next 09.1-20 (human action: capture real gateway deliveries)
 Resume file: None
