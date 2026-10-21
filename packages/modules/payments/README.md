@@ -23,7 +23,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 | `./module` | `paymentsModule`, the manifest |
 | `./contracts` | the admin API's Zod schemas and constants shared with the web app (a re-export of `@rede-social/contracts/payments` plus the permission constant) |
 | `./server` | `paymentsRoutes`, `paymentsNotificationSources`, `paymentsPushCopy`, `PAYMENTS_PUSH_BODY_MAX` |
-| `./ui` | empty until plans 13-14 port the Pagamentos screens |
+| `./ui` | props-only (MOD-02): `PaymentsSkeleton`, `AccessStatePill` (the one status pill and its tone mapping), `AccessRow`, `AccessRowSkeleton`, `EventRow`, `EventRowSkeleton`; every word, flag, clock and handler arrives from `apps/web` |
 
 Main contract names (`./contracts`): `saveIntegrationBodySchema`, `accessProductBodySchema`,
 `accessProductPatchSchema`, `storeMappingBodySchema`, `gateBodySchema`, the answers
