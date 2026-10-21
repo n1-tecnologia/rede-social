@@ -46,11 +46,28 @@ describe('join contract', () => {
     expect(joinBodySchema.safeParse({ ...body, slug: 'Rede-Lab' }).success).toBe(false);
   });
 
-  it('4. the state schema answers one of the seven states and rejects extra keys', () => {
+  it('4. the state schema answers one of the eight states and rejects extra keys', () => {
     for (const state of JOIN_STATES) expect(joinStateSchema.parse({ state })).toEqual({ state });
-    expect(JOIN_STATES).toHaveLength(7);
+    expect(JOIN_STATES).toHaveLength(8);
+    expect(JOIN_STATES).toContain('access_required');
     expect(joinStateSchema.safeParse({ state: 'other' }).success).toBe(false);
     expect(joinStateSchema.safeParse({ state: 'member', tenant: 'rede-demo' }).success).toBe(false);
+  });
+
+  it('4b. 09.1-10 (D-493): the state may carry the stored checkout link and nothing else besides', () => {
+    expect(
+      joinStateSchema.parse({
+        state: 'access_required',
+        accessCheckoutUrl: 'https://pay.example.com/x',
+      }),
+    ).toEqual({ state: 'access_required', accessCheckoutUrl: 'https://pay.example.com/x' });
+    expect(joinStateSchema.parse({ state: 'access_required', accessCheckoutUrl: null })).toEqual({
+      state: 'access_required',
+      accessCheckoutUrl: null,
+    });
+    expect(
+      joinStateSchema.safeParse({ state: 'access_required', communityName: 'Rede Demo' }).success,
+    ).toBe(false);
   });
 
   it('5. the form needs both boxes explicitly ticked and carries no slug', () => {

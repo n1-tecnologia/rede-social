@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ERROR_CODES, REAL_TENANT_DEFAULT_MODULES, TOGGLEABLE_MODULES } from '../src';
+import { publicTenantSchema } from '../src/auth';
 import type { DomainEventName, EventMap } from '../src/events';
 import {
   ACCESS_EFFECTIVE_STATES,
   ACCESS_ROW_STATUSES,
   ACCESS_SOURCES,
   ACCESS_STATES,
+  subscriptionStatusSchema,
 } from '../src/payments';
 
 /**
@@ -61,5 +63,39 @@ describe('09.1 - the payment domain events', () => {
     };
     expect(name).toBe('payments.purchase_confirmed');
     expect(Object.keys(payload).sort()).toEqual(['productId', 'productName', 'tenantId', 'userId']);
+  });
+});
+
+describe('09.1-10 - the member-facing reads (D-493, D-497, UI-D-532)', () => {
+  it('the subscription status is exactly the tenant name and one nullable link', () => {
+    expect(
+      subscriptionStatusSchema.parse({
+        tenantName: 'Rede Lab',
+        checkoutUrl: 'https://pay.example.com',
+      }),
+    ).toEqual({ tenantName: 'Rede Lab', checkoutUrl: 'https://pay.example.com' });
+    expect(subscriptionStatusSchema.parse({ tenantName: 'Rede Lab', checkoutUrl: null })).toEqual({
+      tenantName: 'Rede Lab',
+      checkoutUrl: null,
+    });
+    expect(subscriptionStatusSchema.safeParse({ tenantName: 'Rede Lab' }).success).toBe(false);
+    expect(
+      subscriptionStatusSchema.safeParse({ tenantName: 'x', checkoutUrl: null, extra: 1 }).success,
+    ).toBe(false);
+  });
+
+  it('the public tenant record gains one optional link and still parses an old answer', () => {
+    const base = {
+      slug: 'rede-lab',
+      displayName: 'Rede Lab',
+      rulesText: 'r',
+      rulesVersion: 1,
+      termsVersion: 1,
+    };
+    expect(publicTenantSchema.parse(base)).toEqual(base);
+    expect(
+      publicTenantSchema.parse({ ...base, accessCheckoutUrl: 'https://pay.example.com' }),
+    ).toEqual({ ...base, accessCheckoutUrl: 'https://pay.example.com' });
+    expect(publicTenantSchema.safeParse({ ...base, accessCheckoutUrl: 42 }).success).toBe(false);
   });
 });
