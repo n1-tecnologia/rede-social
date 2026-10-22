@@ -114,5 +114,11 @@ if [ "$(target -c "select to_regnamespace('auth') is null")" = "t" ]; then
   echo "platform schemas restored into ${TARGET_DB}"
 fi
 
+# A hosted/local Supabase project grants USAGE on its platform schemas to the three API roles; the
+# `pg_dump --no-privileges` restore above does not carry that over. Without it a policy or a function that
+# calls `auth.jwt()` / `auth.uid()` fails for `authenticated` with 42501 (09.2-03, the first request served
+# from this database). Idempotent, so it also repairs a database built before this line existed.
+target -c 'grant usage on schema auth, storage, realtime, extensions to anon, authenticated, service_role'
+
 cd "$ROOT"
 pnpm exec tsx scripts/migrate-set.ts --set tenant --url "$TARGET_URL"

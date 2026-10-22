@@ -2,6 +2,8 @@ import { TENANT_ROLES, type TenantRole } from '@rede-social/contracts';
 import { ACCESS_STATES, type AccessState } from '@rede-social/contracts/payments';
 import { sql } from 'drizzle-orm';
 import { db } from '../../db/client';
+import { withHandle } from '../../db/project-pools';
+import { resolveProject } from './project-registry';
 
 /**
  * The two membership lookups — one tenant (`membershipInTenant`, a verified tenant host) or every
@@ -84,9 +86,14 @@ export async function membershipInTenant(
   userId: string,
   tenantId: string,
 ): Promise<Membership | null> {
-  const rows = await db.execute<Row>(
-    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state
-        from app.membership_in_tenant_gated(${userId}::uuid, ${tenantId}::uuid)`,
+  // 09.2-03 (D-538): the project comes from the tenant id argument through the registry. The lookup runs on
+  // that project's bare `api_user` connection; a tenant with no binding fails closed, nothing falls back.
+  const project = await resolveProject(tenantId);
+  const rows = await withHandle(project, (handle) =>
+    handle.db.execute<Row>(
+      sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state
+          from app.membership_in_tenant_gated(${userId}::uuid, ${tenantId}::uuid)`,
+    ),
   );
   const row = rows[0];
   return row ? toMembership(row, 'membership_in_tenant', userId) : null;
@@ -96,6 +103,9 @@ export async function membershipInTenant(
  * D-308 / D-06: every non-deleted membership of the caller, for a request whose host is NOT a tenant
  * host (localhost, Vercel Preview, the platform host, a missing header). Ordered by slug for display
  * only; which row the request uses is `pickGenericMembership`'s decision.
+ *
+ * 09.2-03: this one has no tenant argument to route by, so it stays on the central handle until the 08.1
+ * removal of the generic host (the plan-04..07 classification decides what replaces it).
  */
 export async function membershipsOfUser(userId: string): Promise<Membership[]> {
   const rows = await db.execute<Row>(

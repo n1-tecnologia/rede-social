@@ -120,6 +120,29 @@ export const env = createEnv({
      */
     API_PUBLIC_URL: z.url().optional(),
 
+    /**
+     * 09.2-03 (D-539): the keyring that seals the credentials in `platform.projects`. A JSON map of key id to
+     * base64 of exactly 32 bytes, e.g. `{"1":"<b64>","2":"<b64>"}`; any id present opens a value sealed under
+     * it, and `PLATFORM_MASTER_KEY_ID` names the id that SEALS (rotation: add the new key, move the id,
+     * run `pnpm platform:reseal`, drop the old key). Mounted from GCP Secret Manager on the API, the worker
+     * and the operator command; never in git. Unset outside production a fixed development key stands in
+     * (`server/secrets/sealed.ts`). Deliberately NOT required by `assertProductionEnv`: project 0 never needs
+     * it, so the expand release boots before the secret exists (plan 12 requires it with
+     * `PROJECT_PROVIDER=supabase`). Separate from `PAYMENTS_SECRET_KEY`, which keeps its own variable.
+     */
+    PLATFORM_MASTER_KEYS: z.string().min(1).optional(),
+    PLATFORM_MASTER_KEY_ID: z.coerce.number().int().min(1).max(32767).default(1),
+    /**
+     * 09.2-03 (DBT-09): the per-project pool cache. `PROJECT_POOL_MAX` connections per tenant project (project
+     * 0 keeps `DATABASE_POOL_MAX`), `PROJECT_POOL_CACHE_MAX` projects held open at once (least recently used
+     * idle pool is closed past it), `PROJECT_POOL_IDLE_S` seconds before an idle connection closes (integer
+     * seconds: postgres.js takes no fraction). Any change must be recomputed in docs/DEPLOY.md "Connection
+     * budget".
+     */
+    PROJECT_POOL_MAX: z.coerce.number().int().min(1).max(10).default(3),
+    PROJECT_POOL_CACHE_MAX: z.coerce.number().int().min(1).max(200).default(24),
+    PROJECT_POOL_IDLE_S: z.coerce.number().int().min(1).max(3600).default(20),
+
     /** Send Email Hook transport (RESEARCH Pattern 6). `local` posts to Mailpit's HTTP API. */
     MAIL_TRANSPORT: z.enum(['local', 'resend']).default('local'),
     RESEND_API_KEY: z.string().min(1).optional(),

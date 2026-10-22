@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
 import postgres from 'postgres';
@@ -818,4 +820,130 @@ export async function signedWebhook(
       body: new Uint8Array(bytes),
     },
   );
+}
+
+/**
+ * 09.2-03 (DBT-38): the second local database, `rede_tenant_b`, inside the local stack's Postgres. Built
+ * by `scripts/db-two-databases.sh` (the real runner applies the 146-file tenant set); the script is
+ * idempotent, so it runs once per process and a database that already exists is only checked.
+ */
+let secondDatabase: Promise<void> | undefined;
+
+export function ensureSecondDatabase(): Promise<void> {
+  secondDatabase ??= Promise.resolve().then(() => {
+    const root = fileURLToPath(new URL('../../../../', import.meta.url));
+    execFileSync('bash', ['scripts/db-two-databases.sh'], {
+      cwd: root,
+      timeout: 120_000,
+      stdio: 'pipe',
+    });
+  });
+  return secondDatabase;
+}
+
+/** Superuser-ish connection to `rede_tenant_b` for fixtures only (the `adminSql` of the second database). */
+export const adminSqlB = postgres('postgres://postgres:postgres@127.0.0.1:54322/rede_tenant_b', {
+  prepare: false,
+  max: 1,
+});
+
+/** The connection string the registry holds, SEALED, for `rede_tenant_b` (the API's own `api_user`). */
+export const TENANT_B_URL = 'postgres://api_user:postgres@127.0.0.1:54322/rede_tenant_b';
+
+export type TenantOnB = {
+  tenantId: string;
+  projectId: string;
+  host: string;
+  userId: string;
+  email: string;
+  token: string;
+  /** Removes everything this fixture created, in both databases and in GoTrue. Idempotent. */
+  cleanup: () => Promise<void>;
+};
+
+/**
+ * 09.2-03: a throwaway tenant that lives ONLY in `rede_tenant_b`. The central project holds the tenant row
+ * (a mirror with a DIFFERENT display name, so a read that wrongly lands centrally is visible), its verified
+ * primary host, a `platform.projects` row whose `database_url_tx` is sealed with the real keyring, and the
+ * explicit `platform.tenant_projects` binding. Database B holds the tenant's real row, its modules, the
+ * user and the user's membership; the membership exists in NO central table. The user is a real GoTrue
+ * identity, signed in, so the token is the one the API verifies.
+ */
+export async function provisionTenantOnB(opts: {
+  slug: string;
+  role?: 'member' | 'admin_tenant' | 'support_tenant';
+}): Promise<TenantOnB> {
+  await ensureSecondDatabase();
+  const { seal } = await import('@rede-social/core/server/secrets/sealed');
+  const { invalidateProject } = await import('@rede-social/core/server/tenancy/project-registry');
+  const { invalidateTenantHost } = await import('@rede-social/core/server/tenancy/tenant-host');
+
+  const tenantId = crypto.randomUUID();
+  const projectId = crypto.randomUUID();
+  const host = `${opts.slug}.localhost`;
+  const ref = `fk-${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+  const email = `${opts.slug}-${crypto.randomUUID().slice(0, 8)}@rede-demo.local`;
+
+  await adminSql.begin(async (tx) => {
+    await tx`
+      insert into platform.projects
+             (id, ref, provider, credential_source, state, api_url, secret_key_id,
+              database_url_tx_sealed)
+      values (${projectId}::uuid, ${ref}, 'fake', 'sealed', 'ready', ${required('SUPABASE_URL')}, 1,
+              ${seal(TENANT_B_URL, `${projectId}:database_url_tx`)})`;
+    await tx`
+      insert into public.tenants (id, slug, display_name, rules_text, rules_version)
+      values (${tenantId}::uuid, ${opts.slug}, 'Tenant B (central mirror)', 'Regras.', 1)`;
+    await tx`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+      values (${tenantId}::uuid, ${host}, true, now())`;
+    await tx`
+      insert into platform.tenant_projects (tenant_id, project_id)
+      values (${tenantId}::uuid, ${projectId}::uuid)`;
+  });
+
+  await adminSqlB`
+    insert into public.tenants (id, slug, display_name, rules_text, rules_version)
+    values (${tenantId}::uuid, ${opts.slug}, 'Tenant B (database B)', 'Regras.', 1)`;
+  await adminSqlB`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    values (${tenantId}::uuid, 'feed', true)`;
+
+  const created = await authAdmin().createUser({
+    email,
+    password: SEED_PASSWORD,
+    email_confirm: true,
+  });
+  if (created.error || !created.data.user) {
+    throw new Error(`createUser failed for ${email}: ${created.error?.message}`);
+  }
+  const userId = created.data.user.id;
+  // The same identity id in B's own auth schema (the second project's GoTrue is plan 04+'s concern);
+  // `on_auth_user_created` mirrors it into B's `public.users`.
+  await adminSqlB`
+    insert into auth.users (id, email, aud, role, email_confirmed_at)
+    values (${userId}::uuid, ${email}, 'authenticated', 'authenticated', now())`;
+  await adminSqlB`
+    insert into public.memberships (tenant_id, user_id, role, status)
+    values (${tenantId}::uuid, ${userId}::uuid, ${opts.role ?? 'member'}, 'active')`;
+
+  const token = await signInAs(email, SEED_PASSWORD);
+  invalidateProject(tenantId);
+  invalidateTenantHost(host);
+
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    invalidateProject(tenantId);
+    invalidateTenantHost(host);
+    await adminSqlB`delete from public.memberships where tenant_id = ${tenantId}::uuid`;
+    await adminSqlB`delete from public.tenants where id = ${tenantId}::uuid`;
+    await adminSqlB`delete from auth.users where id = ${userId}::uuid`;
+    await authAdmin().deleteUser(userId);
+    await adminSql`delete from public.tenants where id = ${tenantId}::uuid`;
+    await adminSql`delete from platform.projects where id = ${projectId}::uuid`;
+    await adminSql`delete from public.access_grants where email = ${email}`;
+  };
+  return { tenantId, projectId, host, userId, email, token, cleanup };
 }

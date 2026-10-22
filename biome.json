@@ -50,6 +50,7 @@
                   {
                     "group": [
                       "@rede-social/core/db/admin-tx",
+                      "@rede-social/core/db/platform-tx",
                       "@rede-social/core/server/supabase-admin"
                     ],
                     "message": "Admin lane is kernel-only"
@@ -85,6 +86,7 @@
                   {
                     "group": [
                       "@rede-social/core/db/admin-tx",
+                      "@rede-social/core/db/platform-tx",
                       "@rede-social/core/server/supabase-admin"
                     ],
                     "message": "Admin lane is kernel-only"
@@ -125,6 +127,7 @@
                   {
                     "group": [
                       "@rede-social/core/db/admin-tx",
+                      "@rede-social/core/db/platform-tx",
                       "@rede-social/core/server/supabase-admin"
                     ],
                     "message": "Admin lane is kernel-only"

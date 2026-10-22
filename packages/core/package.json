@@ -9,6 +9,7 @@
     "./db/schema": "./db/schema/index.ts",
     "./db/tenant-tx": "./db/tenant-tx.ts",
     "./db/admin-tx": "./db/admin-tx.ts",
+    "./db/platform-tx": "./db/platform-tx.ts",
     "./db/rls": "./db/rls.ts",
     "./db/community-gate": "./db/community-gate.ts",
     "./db/course-gate": "./db/course-gate.ts",
