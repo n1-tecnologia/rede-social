@@ -4,16 +4,16 @@ current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
 current_plan: 1
 status: executing
-stopped_at: Completed 09.1-22-PLAN.md (single-address release says the address stays cut, A-G1); 22 of 22 plans executed; G-09.1-1 closed by plans 21 and 22; no browser walk done
-last_updated: "2026-10-22T21:04:34.769Z"
+stopped_at: "Completed 09.2-02-PLAN.md; 09.2-01 still paused at its Task 3 D-417 checkpoint (user pastes approved: true in sketch 014 README)"
+last_updated: "2026-10-22T21:30:28.417Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 09.2 execution started
-state_head: 3c2f77a4bc536575d35081c911ebc45c3ad53c6b
+state_head: ce0271db28e7b7408f9f59b71c3dacfb2795128e
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 235
+  completed_plans: 236
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 28
-Plan: 1 of 28
+Plan: 1 of 28 (09.2-02 done out of order; 09.2-01 awaits its D-417 gate)
 Status: Executing Phase 09.2
 Last activity: 2026-10-22 — Phase 09.2 execution started
 
@@ -293,6 +293,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.1 P20 | 10 min | 3 tasks | 21 files |
 | Phase 09.1 P21 | 8 min | 3 tasks | 16 files |
 | Phase 09.1 P22 | 3 min | 2 tasks | 11 files |
+| Phase 09.2 P02 | 13 min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -981,6 +982,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-21: the bulk release writes manual active rows for effective none members only; a gateway-cut member stays cut (D-489 kept, A-P9 confirmed 2026-10-21) and is reported as gatewayCut in the preview and the gate result — One liveMembers fragment feeds the count(*) filter tally and the release insert, so preview, write and toast cannot drift; the toast is chosen from the server's figures
 - [Phase 09.1]: 09.1-21: A-G2..A-G5 recorded (count none only; tone follows the release box; cut toasts last six seconds; preview is a snapshot with no lock to confirm) — Engineering defaults taken for gap G-09.1-1; the new copy deviates from sketch 013 (WINDOWS 132) and the browser walk is owed (WINDOWS 133)
 - [Phase 09.1]: 09.1-22 A-G1: Liberar e-mail on a gateway-cut address keeps answering 200 and writing the idempotent manual row; the Acessos host toasts from the server's returned state (subscription_pending info toast, six seconds). Alternative: skip the write in releaseEmail. — Keep D-489, fix the notice; PAY-22 pre-account release untouched
+- [Phase 09.2]: 09.2-02: migration runner imports no kernel module and requires a single-connection client (advisory lock is session-scoped); errors carry code and version only — Lets the operator command, CI and the bootstrap Job reuse it with only a database URL
+- [Phase 09.2]: 09.2-02: tenants_bind_default is a deferred constraint trigger; production must clear projects.is_default after the last move (plan 25 runbook) so an unbound tenant insert fails at commit — Fail closed (D-538, DBT-46) without breaking raw SQL tenant inserts of the existing suites
 
 ### Pending Todos
 
@@ -1089,6 +1092,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T15:47:24.608Z
-Stopped at: Completed 09.1-22-PLAN.md (single-address release says the address stays cut, A-G1); 22 of 22 plans executed; G-09.1-1 closed by plans 21 and 22; no browser walk done
-Resume file: None
+Last session: 2026-10-22T21:30:27.202Z
+Stopped at: Completed 09.2-02-PLAN.md; 09.2-01 still paused at its Task 3 D-417 checkpoint (user pastes approved: true in sketch 014 README)
+Resume file: .planning/phases/09.2-banco-por-tenant-projeto-supabase-dedicado-por-tenant/09.2-01-PLAN.md

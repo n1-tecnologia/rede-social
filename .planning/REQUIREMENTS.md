@@ -339,7 +339,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-19**: A tenant whose bootstrap is incomplete answers the by-host status `preparing`, accepts no login and the API refuses with a dedicated code. *(D-542, D-545)*
 - [ ] **DBT-20**: The Management API client (real and fake behind one interface) honours the 120 requests/min limit with backoff on 429 using `X-RateLimit-Reset`, waits for a project in `COMING_UP`, and maps every failure to a catalog reason code. *(D-541)*
 - [ ] **DBT-21**: The manual access fields (database password, service key, publishable key) are required only when the pre-check answers `manualAccess` and are validated against the project before anything is stored. *(D-541)*
-- [ ] **DBT-22**: The migration runner applies a directory of SQL files to a database, one transaction per file with its ledger row, skips files already in the ledger, refuses a file whose recorded checksum changed, and is idempotent on re-run. *(D-545, D-547)*
+- [x] **DBT-22**: The migration runner applies a directory of SQL files to a database, one transaction per file with its ledger row, skips files already in the ledger, refuses a file whose recorded checksum changed, and is idempotent on re-run. *(D-545, D-547)*
 - [ ] **DBT-23**: "Migrar todos" runs the central set then every tenant project with bounded concurrency, isolates a failing tenant, and supports `--dry-run` and `--tenant <slug>`. *(D-544)*
 - [ ] **DBT-24**: Each tenant's applied-versus-required schema state is stored in the central project after every run and shown as "applied of required". *(D-545)*
 - [ ] **DBT-25**: A tenant whose applied state lacks any version the running image requires is answered `updating` from the cached mirror with zero extra queries, others keep running, and a self-re-arming job retries. *(D-545)*
@@ -349,7 +349,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-29**: `enqueueInTx` writes into the pg-boss schema of the database that owns the transaction, and refuses to enqueue a platform queue from a tenant transaction (and the reverse). *(D-546)*
 - [ ] **DBT-30**: The worker supervisor starts one pg-boss instance per ready tenant project plus the central one, adds and removes projects at runtime, and backs off on an unreachable or paused project. *(D-546)*
 - [ ] **DBT-31**: The daily dispatcher runs inside each tenant database queue and enqueues only for tenants of that database. *(D-546)*
-- [ ] **DBT-32**: Tenant set stays in `supabase/migrations`, central set lives in its own directory with its own drizzle config and ledger; local and CI apply both to one stack and no tenant project ever holds the `platform` schema. *(D-547)*
+- [x] **DBT-32**: Tenant set stays in `supabase/migrations`, central set lives in its own directory with its own drizzle config and ledger; local and CI apply both to one stack and no tenant project ever holds the `platform` schema. *(D-547)*
 - [ ] **DBT-33**: The move tool copies a tenant's rows in a catalog-derived foreign-key order, its `auth.users`/`auth.identities` with ids and password hashes, its Storage objects, and rewrites bucket URLs inside `tenants.branding`, then verifies row counts and checksums. *(D-534, D-536)*
 - [ ] **DBT-34**: The move suspends the tenant, waits for cache expiry and quiescence, flips the registry pointer, reactivates, keeps the old rows and can roll back by repointing; `--dry-run` writes nothing and an audit row is always written. *(D-535, D-536)*
 - [ ] **DBT-35**: The Phase 08.1 shared-identity flows are removed, sign-up of an existing e-mail answers the Phase 1 duplicate response, and per-tenant recovery works. *(D-533)*
@@ -723,7 +723,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-19 | Phase 09.2 (plans 08, 13, 21) | Pending |
 | DBT-20 | Phase 09.2 (plans 12, 25) | Pending |
 | DBT-21 | Phase 09.2 (plans 14, 18, 25) | Pending |
-| DBT-22 | Phase 09.2 (plan 02) | Pending |
+| DBT-22 | Phase 09.2 (plan 02) | Complete |
 | DBT-23 | Phase 09.2 (plan 15) | Pending |
 | DBT-24 | Phase 09.2 (plans 15, 19) | Pending |
 | DBT-25 | Phase 09.2 (plans 08, 15, 21) | Pending |
@@ -733,7 +733,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-29 | Phase 09.2 (plan 09) | Pending |
 | DBT-30 | Phase 09.2 (plan 09) | Pending |
 | DBT-31 | Phase 09.2 (plan 09) | Pending |
-| DBT-32 | Phase 09.2 (plan 02) | Pending |
+| DBT-32 | Phase 09.2 (plan 02) | Complete |
 | DBT-33 | Phase 09.2 (plans 22, 25) | Pending |
 | DBT-34 | Phase 09.2 (plans 23, 25) | Pending |
 | DBT-35 | Phase 09.2 (plans 26, 27) | Pending |
