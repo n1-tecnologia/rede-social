@@ -55,7 +55,7 @@ type IntegrationRow = { id: string; provider: string; lastEventAt: Date | null }
 
 /** The tenant's integration: the oldest row when it has more than one provider. Admin lane, tenant pinned. */
 async function readIntegration(tenantId: string): Promise<IntegrationRow | null> {
-  return withAdminTx(async (tx) => {
+  return withAdminTx({ tenantId }, async (tx) => {
     const [row] = await tx
       .select({
         id: paymentIntegrations.id,
@@ -198,7 +198,7 @@ export async function saveIntegration(
     throw new ApiError(400, 'VALIDATION_FAILED', { payments: 'provider_unavailable' });
   }
 
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const [existing] = rowsOf<{ id: string }>(
       await tx.execute(sql`
         select id::text as id from public.payment_integrations

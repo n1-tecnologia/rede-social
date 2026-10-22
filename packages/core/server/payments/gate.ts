@@ -90,7 +90,7 @@ async function tallyMembers(
  * blocked e-mails are in neither number.
  */
 export async function previewGate(ctx: RequestContext): Promise<GatePreview> {
-  return withAdminTx(async (tx) => {
+  return withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const { releasable, gatewayCut } = await tallyMembers(tx, ctx.tenantId);
     return { count: releasable, gatewayCut };
   });
@@ -117,7 +117,7 @@ export async function setGate(
   body: { required: boolean; releaseExisting?: boolean | undefined },
 ): Promise<GateResult> {
   const tenantId = ctx.tenantId;
-  const result = await withAdminTx(async (tx): Promise<GateResult> => {
+  const result = await withAdminTx({ tenantId }, async (tx): Promise<GateResult> => {
     await tx.execute(setupLock(tenantId));
     const [row] = await tx
       .select({ enabled: tenantModules.enabled })

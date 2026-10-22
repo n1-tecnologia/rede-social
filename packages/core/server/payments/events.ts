@@ -94,7 +94,7 @@ const columns = sql`
 
 /** `GET /v1/payments/events`: the latest 50 settled events of the tenant, no payload, no paging. */
 export async function listEvents(ctx: RequestContext): Promise<EventsResponse> {
-  const rows = await withAdminTx((tx) =>
+  const rows = await withAdminTx({ tenantId: ctx.tenantId }, (tx) =>
     tx.execute<EventRow>(sql`
       select ${columns}
         from public.payment_events e
@@ -132,7 +132,7 @@ type GrantRow = {
 };
 
 async function readItem(tenantId: string, eventId: string): Promise<EventItem> {
-  const rows = await withAdminTx((tx) =>
+  const rows = await withAdminTx({ tenantId }, (tx) =>
     tx.execute<EventRow>(sql`
       select ${columns}
         from public.payment_events e
@@ -160,7 +160,7 @@ export async function grantEventManually(ctx: RequestContext, eventId: string): 
   if (!UUID.test(eventId)) throw new ApiError(404, 'NOT_FOUND');
 
   // 1. Read and validate (admin lane, tenant pinned).
-  const { facts, membershipId } = await withAdminTx(async (tx) => {
+  const { facts, membershipId } = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const found = await tx.execute<GrantFacts>(sql`
       select e.state, e.outcome, e.email, p.kind, p.target_id::text as target_id
         from public.payment_events e
@@ -219,7 +219,7 @@ export async function grantEventManually(ctx: RequestContext, eventId: string): 
   //    nothing was written, which is the job's `no_effect`.
   const outcome: PaymentEventOutcome =
     granted.outcome === 'granted' ? 'product_granted' : 'no_effect';
-  await withAdminTx((tx) =>
+  await withAdminTx({ tenantId: ctx.tenantId }, (tx) =>
     tx.execute(sql`
       update public.payment_events
          set state = 'applied', outcome = ${outcome}, applied_at = now()

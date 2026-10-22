@@ -17,7 +17,7 @@ import { accessCheckoutUrl } from '../tenancy/access';
  * has an `admin_tenant` policy only; the explicit `tenant_id` predicates are the isolation.
  */
 export async function getSubscriptionStatus(ctx: RequestContext): Promise<SubscriptionStatus> {
-  return withAdminTx(async (tx) => {
+  return withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const [tenant] = await tx
       .select({ displayName: tenants.displayName })
       .from(tenants)

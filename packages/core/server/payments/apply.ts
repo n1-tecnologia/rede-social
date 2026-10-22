@@ -391,7 +391,7 @@ async function applyInTx(
 
 /** Marks an event `failed` in its OWN transaction, after the apply transaction rolled back. */
 async function markFailed(eventId: string, tenantId: string): Promise<void> {
-  await withAdminTx((tx) =>
+  await withAdminTx({ tenantId }, (tx) =>
     tx.execute(sql`
       update public.payment_events
          set state = 'failed'
@@ -427,6 +427,9 @@ export async function applyPaymentEvent(eventId: string): Promise<ApplyResult | 
   const seen: { tenantId: string | null } = { tenantId: null };
   let result: Awaited<ReturnType<typeof applyInTx>>;
   try {
+    // 09.2-05: class N, plan 10. The job payload is the event id ALONE, so the tenant is only known after this
+    // very transaction reads the event row; the site cannot name a tenant (and must never default to project
+    // 0 for a tenant on another project). Plan 10 resolves the event id through the central index first.
     result = await withAdminTx((tx) => applyInTx(tx, eventId, seen));
   } catch (error) {
     if (seen.tenantId) {

@@ -704,3 +704,83 @@ describe('the admin lane addresses the tenant database (D-538)', () => {
     expect(emails).not.toContain(centralEmail);
   });
 });
+
+/**
+ * 09.2-05 (D-538), payments: the admin overview, the integration save and an access product of a tenant on
+ * database B read and write B. The central project holds a payment integration for the same tenant id, so an
+ * admin-lane statement that wrongly lands centrally shows (the overview would say "connected" before anything
+ * was saved).
+ */
+describe('payments admin on B (D-538)', () => {
+  const PAY_SLUG = `pay-b-${RUN}`.slice(0, 40);
+  let pay: TenantOnB;
+
+  const payCall = (method: string, path: string, body?: unknown) =>
+    api.request(`/v1/payments${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${pay.token}`,
+        'x-tenant-host': pay.host,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  const countIn = async (db: typeof adminSql | typeof adminSqlB, table: string) => {
+    const [row] = await db<{ n: number }[]>`
+      select count(*)::int as n from ${db(table)} where tenant_id = ${pay.tenantId}::uuid`;
+    return row?.n;
+  };
+
+  beforeAll(async () => {
+    pay = await provisionTenantOnB({ slug: PAY_SLUG, role: 'admin_tenant' });
+    await adminSqlB`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${pay.tenantId}::uuid, 'payments', true)`;
+    // A gateway connection of the same tenant id that exists ONLY in the central project.
+    await adminSql`
+      insert into public.payment_integrations (tenant_id, provider, secret_sealed)
+      values (${pay.tenantId}::uuid, 'fake', 'central-only')`;
+  });
+
+  afterAll(async () => {
+    await adminSqlB`delete from public.payment_products where tenant_id = ${pay.tenantId}::uuid`;
+    await adminSqlB`delete from public.payment_integrations where tenant_id = ${pay.tenantId}::uuid`;
+    await adminSql`delete from public.payment_integrations where tenant_id = ${pay.tenantId}::uuid`;
+    await pay?.cleanup();
+  });
+
+  it('payments admin on B: the overview answers from B, the token and the access product are written in B only', async () => {
+    const before = await payCall('GET', '/overview');
+    expect(before.status).toBe(200);
+    const beforeBody = (await before.json()) as { integration: { connected: boolean } };
+    // The central row would make this true; B has none.
+    expect(beforeBody.integration.connected).toBe(false);
+
+    const saved = await payCall('PUT', '/integration', { token: `tok-${RUN}`, provider: 'fake' });
+    expect(saved.status).toBe(200);
+    expect(await countIn(adminSqlB, 'payment_integrations')).toBe(1);
+    expect(await countIn(adminSql, 'payment_integrations')).toBe(1); // the central-only row, untouched
+    const [central] = await adminSql<{ secret_sealed: string }[]>`
+      select secret_sealed from public.payment_integrations where tenant_id = ${pay.tenantId}::uuid`;
+    expect(central?.secret_sealed).toBe('central-only');
+
+    const created = await payCall('POST', '/access-products', {
+      name: 'Assinatura B',
+      externalProductId: `ext-${crypto.randomUUID()}`,
+    });
+    expect(created.status).toBe(201);
+    expect(await countIn(adminSqlB, 'payment_products')).toBe(1);
+    expect(await countIn(adminSql, 'payment_products')).toBe(0);
+
+    const after = await payCall('GET', '/overview');
+    const afterBody = (await after.json()) as {
+      integration: { connected: boolean };
+      accessProducts: unknown[];
+      gate: { canEnable: boolean };
+    };
+    expect(afterBody.integration.connected).toBe(true);
+    expect(afterBody.accessProducts).toHaveLength(1);
+    expect(afterBody.gate.canEnable).toBe(true);
+  });
+});

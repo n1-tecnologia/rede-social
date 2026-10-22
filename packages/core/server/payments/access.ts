@@ -161,7 +161,7 @@ export async function listAccesses(
   const after = decodeKeys(query.cursor);
   const wanted = query.status ? effectiveOf(query.status) : null;
 
-  const rows = await withAdminTx((tx) =>
+  const rows = await withAdminTx({ tenantId: ctx.tenantId }, (tx) =>
     tx.execute<AccessRow>(sql`
       ${projection(ctx.tenantId, { needle, only: null })}
       ${selectList}
@@ -229,7 +229,7 @@ function logged(ctx: RequestContext, action: Action): void {
  * with `409 { payments: 'blocked' }` while a manual block exists: the admin must unblock first. Idempotent.
  */
 export async function releaseEmail(ctx: RequestContext, email: string): Promise<AccessResult> {
-  const access = await withAdminTx(async (tx) => {
+  const access = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const blocked = await tx.execute<{ id: string }>(sql`
       select id from public.access_grants
        where tenant_id = ${ctx.tenantId}::uuid
@@ -250,7 +250,7 @@ export async function releaseEmail(ctx: RequestContext, email: string): Promise<
  * gate, so blocking a staff address has no effect on the staff member.
  */
 export async function blockEmail(ctx: RequestContext, email: string): Promise<AccessResult> {
-  const access = await withAdminTx(async (tx) => {
+  const access = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     await tx.execute(sql`
       insert into public.access_grants (tenant_id, email, source, status, created_by_user_id)
       values (${ctx.tenantId}::uuid, lower(btrim(${email})), 'manual', 'blocked', ${ctx.userId}::uuid)
@@ -266,7 +266,7 @@ export async function blockEmail(ctx: RequestContext, email: string): Promise<Ac
  * An address with no row at all is the bare 404; one with rows but no block answers its current row.
  */
 export async function unblockEmail(ctx: RequestContext, email: string): Promise<AccessResult> {
-  const access = await withAdminTx(async (tx) => {
+  const access = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const removed = await tx.execute<{ id: string }>(sql`
       delete from public.access_grants
        where tenant_id = ${ctx.tenantId}::uuid
@@ -286,7 +286,7 @@ export async function unblockEmail(ctx: RequestContext, email: string): Promise<
  * gateway owns it), so an address with no manual release is the bare 404.
  */
 export async function removeRelease(ctx: RequestContext, email: string): Promise<AccessResult> {
-  const access = await withAdminTx(async (tx) => {
+  const access = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const removed = await tx.execute<{ id: string }>(sql`
       delete from public.access_grants
        where tenant_id = ${ctx.tenantId}::uuid
