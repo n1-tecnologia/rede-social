@@ -1,0 +1,137 @@
+import type { AdminLaneEntry, SiteClass } from './index';
+
+/** The platform area (`packages/core/server/platform/*`): domains, invites, branding, tenants, modules, the allow list. One row per site, in site order. */
+const group = (
+  file: string,
+  rows: readonly (readonly [fn: string, cls: SiteClass, plan: number, note?: string])[],
+): AdminLaneEntry[] =>
+  rows.map(([fn, cls, plan, note]) => ({
+    file,
+    fn,
+    class: cls,
+    status: 'pending',
+    plan,
+    ...(note ? { note } : {}),
+  }));
+
+export const platform: readonly AdminLaneEntry[] = [
+  ...group('packages/core/server/platform/allow-list-lock.ts', [['withAllowListLock', 'P', 6]]),
+  ...group('packages/core/server/platform/branding.ts', [
+    ['tenantExists', 'T', 7],
+    ['invalidateAllTenantHosts', 'P', 7, 'reads tenant_domains of every tenant, all central'],
+    [
+      'completeBrandingUpload',
+      'T',
+      7,
+      'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+    ],
+    ['writeIconsIfCurrent', 'T', 7],
+    ['deriveTenantIcons', 'T', 7],
+    ['requeueIconDerivation', 'T', 7],
+    [
+      'setBrandingColors',
+      'T',
+      7,
+      'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+    ],
+    [
+      'setBrandingLook',
+      'T',
+      7,
+      'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+    ],
+    [
+      'removeIconOverride',
+      'T',
+      7,
+      'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+    ],
+  ]),
+  ...group('packages/core/server/platform/domains.ts', [
+    ['listTenantDomains', 'P', 6],
+    ['attachDomain', 'P', 6],
+    ['attachDomain', 'P', 6],
+    ['attachDomain', 'P', 6],
+    ['recordError', 'P', 6],
+    ['clearLastErrorIfSettled', 'P', 6],
+    [
+      'recordInviteSendOutcome',
+      'S',
+      7,
+      'the central write of an invite outcome; the invite step that triggers it runs on the tenant project',
+    ],
+    ['checkDomain', 'P', 6],
+    ['checkDomain', 'P', 6],
+    ['checkDomain', 'P', 6],
+    ['checkDomain', 'P', 6],
+    ['checkDomain', 'P', 6],
+    ['checkDomain', 'P', 6],
+    ['checkDomain', 'P', 6],
+    ['checkDomain', 'P', 6],
+    ['rearmDomainVerification', 'P', 6],
+    ['invalidateTenantHosts', 'P', 6],
+    ['setPrimaryDomain', 'P', 6],
+    ['setPrimaryDomain', 'P', 6],
+    ['removeDomain', 'P', 6],
+    ['removeDomain', 'P', 6],
+    ['restartDomainVerification', 'P', 6],
+    ['restartDomainVerification', 'P', 6],
+  ]),
+  ...group('packages/core/server/platform/invite-send.ts', [
+    [
+      'scheduleInviteSends',
+      'T',
+      6,
+      'also reads the verified primary tenant_domains row: a P read inside the T transaction, split when migrated',
+    ],
+    ['runScheduledInviteSend', 'T', 6],
+  ]),
+  ...group('packages/core/server/platform/invites.ts', [
+    ['deliverExistingIdentityInvite', 'T', 6],
+    ['refuseInvite', 'T', 6],
+    [
+      'sendPendingInvites',
+      'T',
+      6,
+      'also reads the verified primary tenant_domains row: a P read inside the T transaction, split when migrated',
+    ],
+    ['sendPendingInvites', 'T', 6],
+    ['sendPendingInvites', 'T', 6],
+    ['sendPendingInvites', 'T', 6],
+    ['sendPendingInvites', 'T', 6],
+    ['listTenantInvites', 'T', 6],
+    [
+      'resendInvite',
+      'T',
+      6,
+      'also reads the verified primary tenant_domains row: a P read inside the T transaction, split when migrated',
+    ],
+    ['resendInvite', 'T', 6],
+    ['resendInvite', 'T', 6],
+    ['resendInvite', 'T', 6],
+    ['resendInvite', 'T', 6],
+    ['resendInvite', 'T', 6],
+  ]),
+  ...group('packages/core/server/platform/modules.ts', [
+    ['setModuleEnabled', 'S', 7],
+    ['readModuleSettings', 'S', 7],
+    ['patchModuleSettings', 'S', 7],
+  ]),
+  ...group('packages/core/server/platform/platform-admins.ts', [['isPlatformAdmin', 'P', 6]]),
+  ...group('packages/core/server/platform/reconcile-allow-list.ts', [
+    ['reconcileAuthAllowList', 'P', 6],
+  ]),
+  ...group('packages/core/server/platform/tenants.ts', [
+    [
+      'listPlatformTenants',
+      'P',
+      7,
+      'the platform tenant list is read from the central tables (D-537)',
+    ],
+    ['createTenant', 'S', 7],
+    ['getTenantDetail', 'S', 7],
+    ['invalidateTenantHosts', 'P', 7, 'reads tenant_domains, central'],
+    ['updateTenant', 'S', 7],
+    ['setTenantStatus', 'S', 7],
+  ]),
+];

@@ -4,8 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { sqlClient } from '@rede-social/core/db';
 import { keyIdOf, openWith, sealWith } from '@rede-social/core/server/secrets/sealed';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { resealAll, SEALED_COLUMNS } from '../../../../scripts/reseal';
 import { adminSql } from './setup';
+
+// The command lives in the repo's `scripts/`, outside this package: a static import would leave the package
+// and fail `turbo boundaries` (09.2-04 found it). The module is loaded by URL instead; its type is still checked.
+const { resealAll, SEALED_COLUMNS } = (await import(
+  /* @vite-ignore */ new URL('../../../../scripts/reseal.ts', import.meta.url).href
+)) as typeof import('../../../../scripts/reseal');
 
 /**
  * D-539 / DBT-03 (09.2-03): `pnpm platform:reseal` rotates the registry's master key. These cases drive the

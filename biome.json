@@ -38,6 +38,9 @@
         "!packages/core/server/platform/**",
         "!packages/core/server/media/**",
         "!packages/core/server/payments/**",
+        "!packages/core/server/projects/**",
+        "!packages/core/server/migrations/**",
+        "!packages/core/server/secrets/**",
         "!scripts/**"
       ],
       "linter": {

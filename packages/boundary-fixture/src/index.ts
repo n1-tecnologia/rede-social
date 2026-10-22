@@ -11,6 +11,11 @@
  *                                            is here so that a re-export creeping back into
  *                                            `tenant-tx.ts` shows up as a boundary that Biome cannot
  *                                            see — the reviewer of this file is the last line
+ *   1d. `@rede-social/core/db/platform-tx` and `withPlatformTx` via `@rede-social/core/db/tenant-tx`
+ *                                          — the PLATFORM lane (09.2-04, D-538), the central project under
+ *                                            `service_role`, through both entry points, for the same reason
+ *                                            as 1 and 1b: it is import-restricted to the kernel and
+ *                                            `tenant-tx` must never define or re-export it
  *   1c. `@rede-social/core/db` (raw `db` / `sqlClient`)
  *                                          — a module may only reach data through `withTenantTx`;
  *                                            with the raw client it could `set_config('role', …)`
@@ -32,8 +37,19 @@
 import type { AppType } from '@rede-social/api/types';
 import { db } from '@rede-social/core/db';
 import { withAdminTx } from '@rede-social/core/db/admin-tx';
-import { withAdminTx as leakedAdminTx } from '@rede-social/core/db/tenant-tx';
+import { withPlatformTx } from '@rede-social/core/db/platform-tx';
+import {
+  withAdminTx as leakedAdminTx,
+  withPlatformTx as leakedPlatformTx,
+} from '@rede-social/core/db/tenant-tx';
 import { listFeed } from '@rede-social/module-feed/server/service';
 
-export const violations = { withAdminTx, leakedAdminTx, db, listFeed };
+export const violations = {
+  withAdminTx,
+  leakedAdminTx,
+  withPlatformTx,
+  leakedPlatformTx,
+  db,
+  listFeed,
+};
 export type FixtureAppType = AppType;
