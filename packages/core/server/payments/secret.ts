@@ -1,9 +1,13 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { env } from '../env';
+import { openWith, sealWith } from '../secrets/sealed';
 
 /**
  * Secret custody for a tenant's webhook token (09.1-05, PAY-04, D-486). AES-256-GCM with `node:crypto`
- * only, never a hand-rolled scheme.
+ * only, never a hand-rolled scheme. Since 09.2-03 (D-539) the primitives live ONCE in
+ * `../secrets/sealed.ts` (the project registry's keyring uses the same wire format); this file keeps the
+ * payments key (`PAYMENTS_SECRET_KEY`, its own variable: rotating it is out of scope), its development-key
+ * rule and its public API, and calls the shared functions with a ONE-key ring.
  *
  * A sealed value is ONE text column: `v1:<keyId>:<iv>:<tag>:<ciphertext>`, the three binary parts
  * base64url, a 12-byte random IV, and the INTEGRATION ROW'S ID as additional authenticated data. So:
@@ -22,8 +26,6 @@ import { env } from '../env';
  * configuration; `assertProductionEnv` refuses a production boot without a real key (WR-01).
  */
 
-const VERSION = 'v1';
-const IV_BYTES = 12;
 const KEY_BYTES = 32;
 
 /** The key and the id it is known by. */
@@ -77,22 +79,19 @@ export function paymentsKey(): PaymentsKeyMaterial {
   return cached;
 }
 
+/** The shared helper works over a keyring; a payments key is a ring of exactly one. */
+const oneKeyRing = (material: PaymentsKeyMaterial) => new Map([[material.keyId, material.key]]);
+
 export function sealSecretWith(
   material: PaymentsKeyMaterial,
   plain: string,
   integrationId: string,
 ): string {
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv('aes-256-gcm', material.key, iv);
-  cipher.setAAD(Buffer.from(integrationId, 'utf8'));
-  const ciphertext = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
-  return [
-    VERSION,
-    String(material.keyId),
-    iv.toString('base64url'),
-    cipher.getAuthTag().toString('base64url'),
-    ciphertext.toString('base64url'),
-  ].join(':');
+  try {
+    return sealWith(oneKeyRing(material), material.keyId, plain, integrationId);
+  } catch {
+    throw unreadable();
+  }
 }
 
 export function openSecretWith(
@@ -100,23 +99,11 @@ export function openSecretWith(
   sealed: string,
   integrationId: string,
 ): string {
-  const parts = sealed.split(':');
-  if (parts.length !== 5) throw unreadable();
-  const [version, keyId, iv, tag, ciphertext] = parts as [string, string, string, string, string];
-  if (version !== VERSION || keyId !== String(material.keyId)) throw unreadable();
   try {
-    const ivBytes = Buffer.from(iv, 'base64url');
-    const tagBytes = Buffer.from(tag, 'base64url');
-    if (ivBytes.length !== IV_BYTES || tagBytes.length !== 16) throw unreadable();
-    const decipher = createDecipheriv('aes-256-gcm', material.key, ivBytes);
-    decipher.setAAD(Buffer.from(integrationId, 'utf8'));
-    decipher.setAuthTag(tagBytes);
-    return Buffer.concat([
-      decipher.update(Buffer.from(ciphertext, 'base64url')),
-      decipher.final(),
-    ]).toString('utf8');
+    return openWith(oneKeyRing(material), sealed, integrationId);
   } catch {
-    // Never rethrow the node error: its message can name the failing step, and callers log it.
+    // The shared helper's own error is content-free too; this keeps the payments wording the callers and
+    // their tests already match on.
     throw unreadable();
   }
 }
