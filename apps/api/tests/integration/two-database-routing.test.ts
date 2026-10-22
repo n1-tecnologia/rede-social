@@ -589,3 +589,118 @@ describe('project 0 describes the environment (D-539, T-09.2-22)', () => {
     }
   });
 });
+
+/**
+ * 09.2-05, the tracer of the tenant-scoped admin lane (DBT-06, DBT-08, D-538): an `admin_tenant` of a tenant
+ * that lives ONLY in database B edits the community rules and lists the members. `withAdminTx({ tenantId })`
+ * opens `service_role` on B, so the write and the read happen there and nowhere else. The central project
+ * holds a mirror row of the same tenant id with another text and another version, and one central-only
+ * membership, so a statement that wrongly lands centrally shows in the assertion.
+ */
+describe('the admin lane addresses the tenant database (D-538)', () => {
+  const ADMIN_SLUG = `admin-b-${RUN}`.slice(0, 40);
+  let admin: TenantOnB;
+  const memberIdsInB: string[] = [];
+  const memberEmails: string[] = [];
+  let centralUserId = '';
+  let centralEmail = '';
+
+  const call = (
+    path: string,
+    token: string,
+    host: string,
+    init: { method?: string; body?: unknown } = {},
+  ) =>
+    api.request(path, {
+      method: init.method ?? 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-tenant-host': host,
+        ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    });
+
+  const rulesIn = async (db: typeof adminSql | typeof adminSqlB) => {
+    const [row] = await db<{ rules_text: string; rules_version: number }[]>`
+      select rules_text, rules_version from public.tenants where id = ${admin.tenantId}::uuid`;
+    return row;
+  };
+
+  beforeAll(async () => {
+    admin = await provisionTenantOnB({ slug: ADMIN_SLUG, role: 'admin_tenant' });
+    await adminSqlB`
+      update public.tenants set rules_text = 'Regras de B', rules_version = 4
+       where id = ${admin.tenantId}::uuid`;
+    await adminSql`
+      update public.tenants set rules_text = 'Regras centrais', rules_version = 1
+       where id = ${admin.tenantId}::uuid`;
+
+    for (const n of [1, 2]) {
+      const email = `${ADMIN_SLUG}-m${n}-${crypto.randomUUID().slice(0, 6)}@rede-demo.local`;
+      const id = crypto.randomUUID();
+      await adminSqlB`
+        insert into auth.users (id, email, aud, role, email_confirmed_at)
+        values (${id}::uuid, ${email}, 'authenticated', 'authenticated', now())`;
+      await adminSqlB`
+        insert into public.memberships (tenant_id, user_id, role, status)
+        values (${admin.tenantId}::uuid, ${id}::uuid, 'member', 'active')`;
+      memberIdsInB.push(id);
+      memberEmails.push(email);
+    }
+
+    // A membership of the same tenant id that exists ONLY in the central project.
+    centralEmail = `${ADMIN_SLUG}-central-${crypto.randomUUID().slice(0, 6)}@rede-demo.local`;
+    const created = await authAdmin().createUser({
+      email: centralEmail,
+      password: SEED_PASSWORD,
+      email_confirm: true,
+    });
+    if (created.error || !created.data.user) throw new Error('central fixture user not created');
+    centralUserId = created.data.user.id;
+    await adminSql`
+      insert into public.memberships (tenant_id, user_id, role, status)
+      values (${admin.tenantId}::uuid, ${centralUserId}::uuid, 'member', 'active')`;
+  });
+
+  afterAll(async () => {
+    await adminSql`delete from public.memberships where user_id = ${centralUserId}::uuid`;
+    await admin?.cleanup();
+    for (const id of memberIdsInB) await adminSqlB`delete from auth.users where id = ${id}::uuid`;
+    if (centralUserId) await authAdmin().deleteUser(centralUserId);
+  });
+
+  it('admin rules on B: GET reads, PUT bumps rules_version in B only, the same text again changes nothing', async () => {
+    const read = await call('/v1/admin/rules', admin.token, admin.host);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual({ rulesText: 'Regras de B', rulesVersion: 4 });
+
+    const put = await call('/v1/admin/rules', admin.token, admin.host, {
+      method: 'PUT',
+      body: { rulesText: 'Novas regras de B' },
+    });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toEqual({ rulesText: 'Novas regras de B', rulesVersion: 5 });
+    expect(await rulesIn(adminSqlB)).toEqual({ rules_text: 'Novas regras de B', rules_version: 5 });
+    // The central row of the same tenant id keeps its old text and version.
+    expect(await rulesIn(adminSql)).toEqual({ rules_text: 'Regras centrais', rules_version: 1 });
+
+    const again = await call('/v1/admin/rules', admin.token, admin.host, {
+      method: 'PUT',
+      body: { rulesText: 'Novas regras de B' },
+    });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ rulesText: 'Novas regras de B', rulesVersion: 5 });
+    expect(await rulesIn(adminSqlB)).toEqual({ rules_text: 'Novas regras de B', rules_version: 5 });
+    expect(await rulesIn(adminSql)).toEqual({ rules_text: 'Regras centrais', rules_version: 1 });
+  });
+
+  it('admin members on B: the list is the members of B and none of the central tenant', async () => {
+    const res = await call('/v1/admin/members?limit=50', admin.token, admin.host);
+    expect(res.status).toBe(200);
+    const page = (await res.json()) as { items: { email: string; role: string }[] };
+    const emails = page.items.map((item) => item.email).sort();
+    expect(emails).toEqual([admin.email, ...memberEmails].sort());
+    expect(emails).not.toContain(centralEmail);
+  });
+});

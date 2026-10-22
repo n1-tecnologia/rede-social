@@ -11,8 +11,9 @@ import { consentRecords, memberProfiles, memberships, users } from '../../db/sch
 import type { Tx } from '../../db/tenant-tx';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
-import { supabaseAdmin } from '../supabase-admin';
+import { supabaseAdminFor } from '../supabase-admin';
 import { hasTenantAccess, isAccessGateOn } from './access';
+import { resolveProject } from './project-registry';
 import { getPublicTenant, getTenantIdBySlug } from './public-tenant';
 
 /** Fallback when no request logger is passed (scripts, tests); routes pass `c.get('logger')`. */
@@ -84,7 +85,7 @@ export const signupInternals = {
     userAgent: string | null;
   }): Promise<void> {
     const { tenantId, userId, name, rulesVersion, ip, userAgent } = args;
-    await withAdminTx(async (tx) => {
+    await withAdminTx({ tenantId }, async (tx) => {
       // The `on_auth_user_created` trigger mirrors auth.users -> public.users; assert it before the FK.
       const mirrored = await tx
         .select({ id: users.id })
@@ -143,7 +144,7 @@ export async function existingIdentityForEmail(
   tenantId: string,
 ): Promise<ExistingIdentity | null> {
   try {
-    return await withAdminTx(async (tx) => {
+    return await withAdminTx({ tenantId }, async (tx) => {
       const rows = await tx
         .select({
           userId: users.id,
@@ -208,7 +209,7 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
     throw new ApiError(400, 'VALIDATION_FAILED', { consents: 'stale' });
   }
 
-  const allowed = await withAdminTx(async (tx) => {
+  const allowed = await withAdminTx({ tenantId }, async (tx) => {
     if (!(await isAccessGateOn(tx, tenantId))) return true;
     return (await hasTenantAccess(tx, tenantId, body.email)) === 'active';
   });
@@ -221,7 +222,12 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
     throw new ApiError(403, 'EMAIL_NOT_ALLOWED');
   }
 
-  const created = await supabaseAdmin.auth.admin.createUser({
+  // D-539 (T-09.2-24): the Auth user lives in the SAME project as the membership. One project is taken from
+  // the tenant here and used for create AND for the compensating delete, so a membership written in project B
+  // can never pair with an identity created in project A.
+  const authAdmin = supabaseAdminFor(await resolveProject(tenantId)).auth.admin;
+
+  const created = await authAdmin.createUser({
     email: body.email,
     password: body.password,
     email_confirm: false,
@@ -274,7 +280,7 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
     });
   } catch (error) {
     // Compensation (Pitfall 7): an identity without a membership could log in and reach NO_MEMBERSHIP.
-    const deleted = await supabaseAdmin.auth.admin.deleteUser(userId);
+    const deleted = await authAdmin.deleteUser(userId);
     log.error(
       {
         event: 'signup.compensated',

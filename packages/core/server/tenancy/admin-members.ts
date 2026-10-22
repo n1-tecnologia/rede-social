@@ -176,7 +176,7 @@ export async function getMemberForAdmin(
   ctx: RequestContext,
   membershipId: string,
 ): Promise<AdminMember> {
-  return withAdminTx((tx) => readMemberForAdmin(tx, ctx, membershipId));
+  return withAdminTx({ tenantId: ctx.tenantId }, (tx) => readMemberForAdmin(tx, ctx, membershipId));
 }
 
 /**
@@ -197,7 +197,7 @@ export async function listMembersForAdmin(
   const needle = term === null ? null : likeEscape(term);
   const after = decodeKeys(query.cursor);
 
-  const rows = await withAdminTx((tx) =>
+  const rows = await withAdminTx({ tenantId: ctx.tenantId }, (tx) =>
     tx.execute<AdminMemberRow>(sql`
       ${projection(ctx)}
        where m.tenant_id = ${ctx.tenantId}::uuid

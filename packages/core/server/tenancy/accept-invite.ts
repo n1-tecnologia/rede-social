@@ -68,7 +68,7 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<AcceptInvi
     ? input.logger.child({ name: 'accept-invite' })
     : moduleLogger('accept-invite');
 
-  const result = await withAdminTx(async (tx) => {
+  const result = await withAdminTx({ tenantId }, async (tx) => {
     // (a)
     const [tenant] = await tx
       .select({ slug: tenants.slug, rulesVersion: tenants.rulesVersion })

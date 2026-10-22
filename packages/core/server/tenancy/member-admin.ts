@@ -190,36 +190,39 @@ async function changeAccess(
   kind: AccessChangeKind,
   reason: string | undefined,
 ): Promise<AdminMember> {
-  const result = await withAdminTx(async (tx): Promise<AccessChangeResult> => {
-    const { target, activeAdminIds } = await lockAdminsAndTarget(tx, ctx, membershipId);
-    const decision = decideAccessChange(target, activeAdminIds, ctx.userId, kind);
-    if (decision.outcome === 'refuse') {
-      throw new ApiError(409, 'CONFLICT', { member: decision.refusal });
-    }
-    if (decision.outcome === 'write') {
-      if (kind === 'block') {
-        await tx.execute(sql`
+  const result = await withAdminTx(
+    { tenantId: ctx.tenantId },
+    async (tx): Promise<AccessChangeResult> => {
+      const { target, activeAdminIds } = await lockAdminsAndTarget(tx, ctx, membershipId);
+      const decision = decideAccessChange(target, activeAdminIds, ctx.userId, kind);
+      if (decision.outcome === 'refuse') {
+        throw new ApiError(409, 'CONFLICT', { member: decision.refusal });
+      }
+      if (decision.outcome === 'write') {
+        if (kind === 'block') {
+          await tx.execute(sql`
           update memberships set status = 'blocked', blocked_at = now()
            where id = ${target.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-      } else {
-        await tx.execute(sql`
+        } else {
+          await tx.execute(sql`
           update memberships set status = 'active', blocked_at = null
            where id = ${target.id}::uuid and tenant_id = ${ctx.tenantId}::uuid
              and (status = 'blocked' or blocked_at is not null)`);
+        }
+        await recordModerationAction(tx, ctx, {
+          action: kind === 'block' ? 'member_blocked' : 'member_unblocked',
+          targetUserId: target.userId,
+          targetMembershipId: target.id,
+          reason: reason ?? null,
+        });
       }
-      await recordModerationAction(tx, ctx, {
-        action: kind === 'block' ? 'member_blocked' : 'member_unblocked',
-        targetUserId: target.userId,
-        targetMembershipId: target.id,
-        reason: reason ?? null,
-      });
-    }
-    return {
-      member: await readMemberForAdmin(tx, ctx, target.id),
-      changed: decision.outcome === 'write',
-      userId: target.userId,
-    };
-  });
+      return {
+        member: await readMemberForAdmin(tx, ctx, target.id),
+        changed: decision.outcome === 'write',
+        userId: target.userId,
+      };
+    },
+  );
 
   // After commit only: `withAdminTx` has returned, so the row is durable before anyone hears of it.
   if (result.changed && kind === 'block') {
@@ -285,6 +288,7 @@ export async function setMembershipRole(
   role: TenantRole,
 ): Promise<AdminMember> {
   const result = await withAdminTx(
+    { tenantId: ctx.tenantId },
     async (tx): Promise<{ member: AdminMember; changed: boolean; from: TenantRole }> => {
       const { target, activeAdminIds } = await lockAdminsAndTarget(tx, ctx, membershipId);
       const decision = decideRoleChange(target, activeAdminIds, ctx.userId, role);

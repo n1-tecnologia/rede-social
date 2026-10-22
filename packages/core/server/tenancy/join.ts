@@ -69,53 +69,56 @@ export async function joinState(
   if (hostTenant.kind !== 'tenant') throw new ApiError(404, 'NOT_FOUND');
   const tenantId = hostTenant.tenantId;
 
-  const answer = await withAdminTx<{ state: JoinState; accessCheckoutUrl?: string }>(async (tx) => {
-    const [tenant] = await tx
-      .select({ status: tenants.status })
-      .from(tenants)
-      .where(eq(tenants.id, tenantId))
-      .limit(1);
-    if (!tenant) throw new ApiError(404, 'NOT_FOUND');
-    if (tenant.status === 'suspended') return { state: 'suspended' };
+  const answer = await withAdminTx<{ state: JoinState; accessCheckoutUrl?: string }>(
+    { tenantId },
+    async (tx) => {
+      const [tenant] = await tx
+        .select({ status: tenants.status })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId))
+        .limit(1);
+      if (!tenant) throw new ApiError(404, 'NOT_FOUND');
+      if (tenant.status === 'suspended') return { state: 'suspended' };
 
-    const [admin] = await tx
-      .select({ userId: platformAdmins.userId })
-      .from(platformAdmins)
-      .where(eq(platformAdmins.userId, userId))
-      .limit(1);
-    if (admin) return { state: 'platform_admin' };
+      const [admin] = await tx
+        .select({ userId: platformAdmins.userId })
+        .from(platformAdmins)
+        .where(eq(platformAdmins.userId, userId))
+        .limit(1);
+      if (admin) return { state: 'platform_admin' };
 
-    const [row] = await tx
-      .select({
-        status: memberships.status,
-        blockedAt: memberships.blockedAt,
-        deletedAt: memberships.deletedAt,
-      })
-      .from(memberships)
-      .where(and(eq(memberships.tenantId, tenantId), eq(memberships.userId, userId)))
-      .limit(1);
-    if (!row) {
-      // 09.1-10 (D-493, D-302): a person with no membership here asks the host's gate. ONE answer for
-      // every cause, read from the host tenant only: the caller's e-mail comes from the verified Bearer's
-      // own `users` row, never from a body, and no other community is consulted.
-      if (await isAccessGateOn(tx, tenantId)) {
-        const email = await emailOfUser(tx, userId);
-        const access = email === null ? 'none' : await hasTenantAccess(tx, tenantId, email);
-        if (access !== 'active') {
-          const link = await accessCheckoutUrl(tx, tenantId);
-          return {
-            state: 'access_required',
-            ...(link === null ? {} : { accessCheckoutUrl: link }),
-          };
+      const [row] = await tx
+        .select({
+          status: memberships.status,
+          blockedAt: memberships.blockedAt,
+          deletedAt: memberships.deletedAt,
+        })
+        .from(memberships)
+        .where(and(eq(memberships.tenantId, tenantId), eq(memberships.userId, userId)))
+        .limit(1);
+      if (!row) {
+        // 09.1-10 (D-493, D-302): a person with no membership here asks the host's gate. ONE answer for
+        // every cause, read from the host tenant only: the caller's e-mail comes from the verified Bearer's
+        // own `users` row, never from a body, and no other community is consulted.
+        if (await isAccessGateOn(tx, tenantId)) {
+          const email = await emailOfUser(tx, userId);
+          const access = email === null ? 'none' : await hasTenantAccess(tx, tenantId, email);
+          if (access !== 'active') {
+            const link = await accessCheckoutUrl(tx, tenantId);
+            return {
+              state: 'access_required',
+              ...(link === null ? {} : { accessCheckoutUrl: link }),
+            };
+          }
         }
+        return { state: 'joinable' };
       }
-      return { state: 'joinable' };
-    }
-    if (row.deletedAt) return { state: 'removed' };
-    if (row.blockedAt || row.status === 'blocked') return { state: 'blocked' };
-    if (row.status === 'invited') return { state: 'invited' };
-    return { state: 'member' };
-  });
+      if (row.deletedAt) return { state: 'removed' };
+      if (row.blockedAt || row.status === 'blocked') return { state: 'blocked' };
+      if (row.status === 'invited') return { state: 'invited' };
+      return { state: 'member' };
+    },
+  );
 
   return answer;
 }
@@ -176,7 +179,7 @@ export async function joinTenant(input: JoinTenantInput): Promise<JoinResponse> 
     tenantId = await getTenantIdBySlug(body.slug);
   }
 
-  const result = await withAdminTx<JoinResponse>(async (tx) => {
+  const result = await withAdminTx<JoinResponse>({ tenantId }, async (tx) => {
     // (a)
     const [tenant] = await tx
       .select({

@@ -38,7 +38,7 @@ function toAdminRules(row: RulesRow): AdminRules {
 
 /** `GET /v1/admin/rules`: the caller's tenant's stored rules and the version in force. */
 export async function getTenantRules(ctx: Pick<RequestContext, 'tenantId'>): Promise<AdminRules> {
-  const row = await withAdminTx(async (tx) => {
+  const row = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const rows = await tx.execute<RulesRow>(sql`
       select rules_text, rules_version from tenants where id = ${ctx.tenantId}::uuid`);
     return rows[0] ?? null;
@@ -55,7 +55,7 @@ export async function saveTenantRules(
   ctx: Pick<RequestContext, 'tenantId' | 'userId' | 'requestId'>,
   rulesText: string,
 ): Promise<AdminRules & { changed: boolean }> {
-  const result = await withAdminTx(async (tx) => {
+  const result = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const updated = await tx.execute<RulesRow>(sql`
       update tenants
          set rules_text = ${rulesText},
