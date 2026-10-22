@@ -208,6 +208,9 @@ export function assertProductionEnv(
     | 'VAPID_SUBJECT'
     | 'PAYMENTS_PROVIDERS'
     | 'PAYMENTS_SECRET_KEY'
+    | 'PROJECT_PROVIDER'
+    | 'SUPABASE_ORG_SLUG'
+    | 'PLATFORM_MASTER_KEYS'
     | 'NODE_ENV'
   > = env,
 ): void {
@@ -281,6 +284,18 @@ export function assertProductionEnv(
       missing.push('PAYMENTS_SECRET_KEY (required when PAYMENTS_PROVIDERS lists a real gateway)');
     } else if (!validKey(key)) {
       missing.push('PAYMENTS_SECRET_KEY (must decode from base64 to exactly 32 bytes)');
+    }
+  }
+  // 09.2-12 (D-540, T-09.2-59): the fake project provider (fake keys, no real project) must never be what
+  // runs in production, and the real one needs its token, its organisation and the key that seals what it
+  // returns. Only an EXPLICIT `fake` is refused here: an unset value (the expand release names none) boots,
+  // and `projects/index.ts` refuses to hand out the fake in production when a module first needs a provider.
+  if (e.PROJECT_PROVIDER === 'fake' && e.NODE_ENV === 'production') {
+    missing.push('PROJECT_PROVIDER (must not be "fake" in production: use "supabase")');
+  }
+  if (e.PROJECT_PROVIDER === 'supabase') {
+    for (const key of ['SUPABASE_PAT', 'SUPABASE_ORG_SLUG', 'PLATFORM_MASTER_KEYS'] as const) {
+      if (!e[key]) missing.push(`${key} (required when PROJECT_PROVIDER=supabase)`);
     }
   }
   if (missing.length > 0) {
