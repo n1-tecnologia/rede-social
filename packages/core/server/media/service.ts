@@ -17,6 +17,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from '
 import { withAdminTx } from '../../db/admin-tx';
 import { mediaAssetHidden } from '../../db/community-gate';
 import { courseAssetHidden } from '../../db/course-gate';
+import { withPlatformTx } from '../../db/platform-tx';
 import { mediaAssets, tenantDomains } from '../../db/schema';
 import { withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
@@ -194,6 +195,27 @@ export type StartUploadOptions = { corsOrigin?: string | null };
 type MemberVideoStart = { maxBytes: number; durationCapSeconds: number };
 
 /**
+ * The tenant's verified primary host as a browser origin, or `null` (09.2-05, class P). `tenant_domains` is
+ * the central host mirror, so it is read in the platform lane, not in the tenant's own project.
+ */
+async function primaryOriginOf(tenantId: string): Promise<string | null> {
+  const [primary] = await withPlatformTx((tx) =>
+    tx
+      .select({ host: tenantDomains.host })
+      .from(tenantDomains)
+      .where(
+        and(
+          eq(tenantDomains.tenantId, tenantId),
+          eq(tenantDomains.isPrimary, true),
+          isNotNull(tenantDomains.verifiedAt),
+        ),
+      )
+      .limit(1),
+  );
+  return primary ? publicWebOrigin(primary.host) : null;
+}
+
+/**
  * `POST /v1/media/uploads { kind: 'video' }` (MEDIA-03) — the branch that replaced 03-01's named
  * `501 { media: 'video_provider_missing' }` seam.
  *
@@ -231,7 +253,13 @@ async function startVideoUpload(
     ? eq(mediaAssets.purpose, 'lesson')
     : ne(mediaAssets.purpose, 'lesson');
 
-  const decision = await withAdminTx(async (tx) => {
+  // The browser origin the upload will run from. The host table is CENTRAL (09.2-05, D-538, class P), so it is
+  // read through the platform lane BEFORE the tenant transaction opens, never inside it: a tenant on another
+  // project has no `tenant_domains` row in its own database. Only when the route could not derive it: one
+  // indexed read on a rare, admin-only path.
+  const corsOrigin = opts.corsOrigin ?? (await primaryOriginOf(ctx.tenantId));
+
+  const decision = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const [totals] = await tx
       .select({ total: sql<string>`coalesce(sum(${mediaAssets.durationSeconds}), 0)` })
       .from(mediaAssets)
@@ -262,23 +290,6 @@ async function startVideoUpload(
       return { accepted: false as const };
     }
 
-    // Only when the route could not derive it: one indexed read on a rare, admin-only path.
-    let corsOrigin = opts.corsOrigin ?? null;
-    if (!corsOrigin) {
-      const [primary] = await tx
-        .select({ host: tenantDomains.host })
-        .from(tenantDomains)
-        .where(
-          and(
-            eq(tenantDomains.tenantId, ctx.tenantId),
-            eq(tenantDomains.isPrimary, true),
-            isNotNull(tenantDomains.verifiedAt),
-          ),
-        )
-        .limit(1);
-      corsOrigin = primary ? publicWebOrigin(primary.host) : null;
-    }
-
     await tx.insert(mediaAssets).values({
       id: assetId,
       tenantId: ctx.tenantId,
@@ -293,7 +304,7 @@ async function startVideoUpload(
       // D-474: the cap this upload will be judged against at the ready event, frozen now.
       durationCapSeconds: member?.durationCapSeconds ?? null,
     });
-    return { accepted: true as const, corsOrigin };
+    return { accepted: true as const };
   });
 
   if (!decision.accepted) {
@@ -314,7 +325,7 @@ async function startVideoUpload(
     throw new ApiError(413, 'VALIDATION_FAILED', { media: 'quota_exceeded' });
   }
 
-  if (!decision.corsOrigin) {
+  if (!corsOrigin) {
     // A community with no verified domain has no origin a browser could upload from. Never reached
     // through the web app, which always sends `x-tenant-host`.
     log.error(
@@ -329,7 +340,7 @@ async function startVideoUpload(
     upload = await videoProvider.createDirectUpload({
       assetId,
       tenantId: ctx.tenantId,
-      corsOrigin: decision.corsOrigin,
+      corsOrigin,
       test: env.NODE_ENV !== 'production',
     });
   } catch (error) {
@@ -348,7 +359,7 @@ async function startVideoUpload(
     throw new ApiError(500, 'INTERNAL');
   }
 
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     await tx
       .update(mediaAssets)
       .set({ providerAssetId: upload.providerUploadId })
@@ -457,7 +468,7 @@ export async function startUpload(
 
   // R-16 / T-03-06: the ceiling is charged BEFORE a row exists, in the same transaction as the
   // insert, with the tenant predicate explicit (the admin lane bypasses RLS).
-  const accepted = await withAdminTx(async (tx) => {
+  const accepted = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     const [totals] = await tx
       .select({ total: sql<string>`coalesce(sum(${mediaAssets.bytes}), 0)` })
       .from(mediaAssets)
@@ -689,7 +700,7 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
     // The row survives as status='rejected' with failure_reason = the machine code the member was
     // given: a refused upload stays auditable and the 03-08 sweeper has something definite to
     // collect, instead of a `pending` row that merely looks abandoned.
-    await withAdminTx(async (tx) => {
+    await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
       await tx
         .update(mediaAssets)
         .set({ status: 'rejected', failureReason: reason })
@@ -761,7 +772,7 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
   const isFile = row.kind === 'file';
   const bytes = typeof info.size === 'number' ? info.size : buf.length;
 
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
     await tx
       .update(mediaAssets)
       .set({
@@ -859,7 +870,7 @@ export async function deleteAsset(ctx: Ctx, assetId: string): Promise<MediaAsset
   if (!row) throw new ApiError(404, 'NOT_FOUND');
   assertMayRetire(ctx, row);
 
-  const updated = await withAdminTx(async (tx) =>
+  const updated = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) =>
     tx
       .update(mediaAssets)
       .set({ status: 'deleted', deletedAt: new Date() })
@@ -1075,7 +1086,7 @@ export async function deriveAssetVariants(
   tenantId: string,
   assetId: string,
 ): Promise<DeriveOutcome> {
-  const row = await withAdminTx(async (tx) => {
+  const row = await withAdminTx({ tenantId }, async (tx) => {
     const [found] = await tx
       .select(ASSET_COLUMNS)
       .from(mediaAssets)
@@ -1113,7 +1124,7 @@ export async function deriveAssetVariants(
   }
 
   const producedWidths = derived.map((variant) => variant.width);
-  const updated = await withAdminTx(async (tx) =>
+  const updated = await withAdminTx({ tenantId }, async (tx) =>
     tx
       .update(mediaAssets)
       .set({
@@ -1264,7 +1275,7 @@ export async function purgeAsset(row: PurgeableAsset): Promise<PurgeOutcome> {
     }
   }
 
-  await withAdminTx(async (tx) =>
+  await withAdminTx({ tenantId: row.tenantId }, async (tx) =>
     tx
       .delete(mediaAssets)
       .where(and(eq(mediaAssets.id, row.id), eq(mediaAssets.tenantId, row.tenantId))),

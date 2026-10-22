@@ -77,6 +77,8 @@ type Resolved = {
  * the only handle a `video.upload.errored` delivery gives us.
  */
 async function resolveAsset(event: VideoProviderEvent): Promise<Resolved | undefined> {
+  // 09.2-05: class N, plan 10. The provider event names an asset, not a tenant, so this lookup is what FINDS
+  // the tenant; it cannot be given one (and must never default to project 0 for a tenant elsewhere).
   return withAdminTx(async (tx) => {
     const columns = {
       id: mediaAssets.id,
@@ -137,7 +139,7 @@ async function applyReady(event: VideoProviderEvent, row: Resolved): Promise<Out
   if (verdict === 'too_long') {
     const providerAssetId = event.providerAssetId ?? row.providerAssetId;
     if (providerAssetId) await deleteProviderAsset(providerAssetId);
-    const updated = await withAdminTx(async (tx) =>
+    const updated = await withAdminTx({ tenantId: row.tenantId }, async (tx) =>
       tx
         .update(mediaAssets)
         .set({ status: 'rejected', failureReason: DURATION_TOO_LONG, durationSeconds: duration })
@@ -158,7 +160,7 @@ async function applyReady(event: VideoProviderEvent, row: Resolved): Promise<Out
     // WR-06: fail closed. The duration stays null and the provider asset is deleted best effort.
     const providerAssetId = event.providerAssetId ?? row.providerAssetId;
     if (providerAssetId) await deleteProviderAsset(providerAssetId);
-    const updated = await withAdminTx(async (tx) =>
+    const updated = await withAdminTx({ tenantId: row.tenantId }, async (tx) =>
       tx
         .update(mediaAssets)
         .set({ status: 'failed', failureReason: DURATION_UNMEASURABLE })
@@ -175,7 +177,7 @@ async function applyReady(event: VideoProviderEvent, row: Resolved): Promise<Out
     return updated.length === 0 ? 'stale' : 'failed';
   }
 
-  const updated = await withAdminTx(async (tx) =>
+  const updated = await withAdminTx({ tenantId: row.tenantId }, async (tx) =>
     tx
       .update(mediaAssets)
       .set({
@@ -202,7 +204,7 @@ async function applyReady(event: VideoProviderEvent, row: Resolved): Promise<Out
 }
 
 async function applyErrored(event: VideoProviderEvent, row: Resolved): Promise<Outcome> {
-  const updated = await withAdminTx(async (tx) =>
+  const updated = await withAdminTx({ tenantId: row.tenantId }, async (tx) =>
     tx
       .update(mediaAssets)
       .set({ status: 'failed', failureReason: event.failureReason ?? event.rawType })

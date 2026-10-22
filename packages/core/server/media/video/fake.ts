@@ -85,7 +85,8 @@ export const fakeVideoInternals = {
   deletedAssetIds: [] as string[],
   failDeleteAsset: false,
   signUpload: (key: string): Promise<{ signedUrl: string }> => signUpload(key),
-  scheduleReady: (event: VideoProviderEvent): Promise<void> => enqueueSyntheticReady(event),
+  scheduleReady: (event: VideoProviderEvent, tenantId: string): Promise<void> =>
+    enqueueSyntheticReady(event, tenantId),
   uploadState: waitingUpload as (providerUploadId: string) => Promise<VideoUploadState>,
   uploadStateCalls: [] as string[],
 };
@@ -97,7 +98,7 @@ export function resetFakeVideoInternals(): void {
   fakeVideoInternals.deletedAssetIds = [];
   fakeVideoInternals.failDeleteAsset = false;
   fakeVideoInternals.signUpload = (key) => signUpload(key);
-  fakeVideoInternals.scheduleReady = (event) => enqueueSyntheticReady(event);
+  fakeVideoInternals.scheduleReady = (event, tenantId) => enqueueSyntheticReady(event, tenantId);
   fakeVideoInternals.uploadState = waitingUpload;
   fakeVideoInternals.uploadStateCalls = [];
 }
@@ -107,8 +108,8 @@ export function resetFakeVideoInternals(): void {
  * cannot collide with a real delivery of the same asset) — `short` policy makes a second schedule of
  * the same asset a no-op while the first is still waiting.
  */
-async function enqueueSyntheticReady(event: VideoProviderEvent): Promise<void> {
-  await withAdminTx(async (tx) => {
+async function enqueueSyntheticReady(event: VideoProviderEvent, tenantId: string): Promise<void> {
+  await withAdminTx({ tenantId }, async (tx) => {
     await enqueueInTx(tx, MEDIA_PROVIDER_EVENT_QUEUE, event, {
       singletonKey: `fake-ready-${event.assetId ?? event.id}`,
       startAfter: FAKE_TRANSCODE_DELAY_S,
@@ -141,7 +142,10 @@ export function createFakeVideoProvider(): VideoProvider {
       assertTenantKey(key, input.tenantId);
       const { signedUrl } = await fakeVideoInternals.signUpload(key);
       const providerUploadId = `fake-${input.assetId}`;
-      await fakeVideoInternals.scheduleReady(syntheticReadyEvent(input.assetId, providerUploadId));
+      await fakeVideoInternals.scheduleReady(
+        syntheticReadyEvent(input.assetId, providerUploadId),
+        input.tenantId,
+      );
       return { providerUploadId, uploadUrl: signedUrl };
     },
 

@@ -14,20 +14,67 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *    sign calls per instance per fifty minutes and not one per render.
  */
 
-const { createSignedUrl } = vi.hoisted(() => ({ createSignedUrl: vi.fn() }));
+/**
+ * 09.2-05 (D-539, T-09.2-23): every call picks the Supabase project that owns the key from the key's first path
+ * segment (the tenant uuid). The registry and the admin clients are replaced by recorders: one Storage double
+ * per project, so a test can say WHICH project a call reached.
+ */
+const h = vi.hoisted(() => {
+  const makeStore = () => ({
+    createSignedUrl: vi.fn(),
+    createSignedUploadUrl: vi.fn(),
+    info: vi.fn(),
+    download: vi.fn(),
+    upload: vi.fn(),
+    list: vi.fn(),
+    remove: vi.fn(),
+  });
+  return {
+    stores: { p0: makeStore(), pb: makeStore() } as Record<string, ReturnType<typeof makeStore>>,
+    makeStore,
+    resolveProject: vi.fn(),
+  };
+});
+const createSignedUrl = h.stores.p0?.createSignedUrl as ReturnType<typeof vi.fn>;
 
 vi.mock('../server/supabase-admin', () => ({
-  supabaseAdmin: { storage: { from: () => ({ createSignedUrl }) } },
+  supabaseAdminFor: (project: { id: string }) => ({
+    storage: { from: () => h.stores[project.id] },
+  }),
 }));
 
-const { downloadObjectPrefix, MEDIA_SIGNED_READ_TTL_S, signRead, signReadFor } = await import(
-  '../server/media/storage'
-);
+vi.mock('../server/tenancy/project-registry', () => ({
+  resolveProject: h.resolveProject,
+}));
+
+const {
+  downloadObject,
+  downloadObjectPrefix,
+  listObjects,
+  MEDIA_SIGNED_READ_TTL_S,
+  objectInfo,
+  putObject,
+  removeObjects,
+  signRead,
+  signReadFor,
+  signUpload,
+} = await import('../server/media/storage');
+const keys = await import('../server/media/keys');
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
+const TENANT_B = '22222222-2222-4222-8222-222222222222';
 const KEY = `${TENANT}/media/0a1b2c3d-4e5f-4a6b-8c7d-9e8f7a6b5c4d/original`;
 
 beforeEach(() => {
+  for (const store of Object.values(h.stores))
+    for (const fn of Object.values(store)) fn.mockReset();
+  // TENANT lives in project 0; TENANT_B in project B. Anything else is unbound (never a default).
+  h.resolveProject.mockReset();
+  h.resolveProject.mockImplementation(async (tenantId: string) => {
+    if (tenantId === TENANT) return { id: 'p0' };
+    if (tenantId === TENANT_B) return { id: 'pb' };
+    throw new Error('unbound');
+  });
   createSignedUrl.mockReset();
   createSignedUrl.mockImplementation(async (key: string, ttl: number) => ({
     data: {
@@ -154,5 +201,115 @@ describe('downloadObjectPrefix — only the signature bytes reach API memory (WR
       vi.fn(async () => new Response(null, { status: 416 })),
     );
     expect((await downloadObjectPrefix(KEY, 16))?.length).toBe(0);
+  });
+});
+
+describe('routes by the key — Storage follows the tenant (D-539, T-09.2-23)', () => {
+  const KEY_B = `${TENANT_B}/media/0a1b2c3d-4e5f-4a6b-8c7d-9e8f7a6b5c4d/original`;
+  const p0 = h.stores.p0 as (typeof h.stores)[string];
+  const pb = h.stores.pb as (typeof h.stores)[string];
+  const calls = (store: typeof p0) =>
+    Object.values(store).reduce((n, fn) => n + fn.mock.calls.length, 0);
+
+  beforeEach(() => {
+    for (const store of [p0, pb]) {
+      store.createSignedUrl.mockResolvedValue({
+        data: { signedUrl: 'https://s.test/x' },
+        error: null,
+      });
+      store.createSignedUploadUrl.mockResolvedValue({
+        data: { signedUrl: 'https://s.test/up', token: 't', path: 'p' },
+        error: null,
+      });
+      store.info.mockResolvedValue({ data: { size: 3, contentType: 'image/png' }, error: null });
+      store.download.mockResolvedValue({
+        data: { bytes: async () => new Uint8Array([1]) },
+        error: null,
+      });
+      store.upload.mockResolvedValue({ error: null });
+      store.list.mockResolvedValue({ data: [{ id: 'a', name: 'original' }], error: null });
+      store.remove.mockResolvedValue({ error: null });
+    }
+  });
+
+  it('a key of the project-0 tenant reaches project 0 and a key of the tenant on B reaches B, for every function', async () => {
+    const exercise = async (key: string, prefix: string) => {
+      await signUpload(key);
+      await signRead(`${key}-memo-${Math.random()}`);
+      await signReadFor(key, 60);
+      await objectInfo(key);
+      await downloadObject(key);
+      await putObject(key, Buffer.from('x'), { contentType: 'image/png' });
+      await listObjects(prefix);
+      await removeObjects([key]);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(new Uint8Array([1]), { status: 206 })),
+      );
+      await downloadObjectPrefix(key, 1);
+      vi.unstubAllGlobals();
+    };
+    await exercise(KEY, `${TENANT}/media/asset/`);
+    expect(calls(p0)).toBeGreaterThanOrEqual(9);
+    expect(calls(pb)).toBe(0);
+
+    for (const store of [p0, pb]) for (const fn of Object.values(store)) fn.mockClear();
+    await exercise(KEY_B, `${TENANT_B}/media/asset/`);
+    expect(calls(pb)).toBeGreaterThanOrEqual(9);
+    expect(calls(p0)).toBe(0);
+    expect(h.resolveProject).toHaveBeenCalledWith(TENANT_B);
+  });
+
+  it('a key whose first segment is not a uuid is refused before the resolver is called', async () => {
+    for (const bad of [
+      'not a uuid/media/x/original',
+      '../x',
+      '',
+      '/media/x',
+      'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA/media/x/original',
+    ]) {
+      await expect(signRead(bad)).rejects.toThrow('invalid media key');
+      await expect(signUpload(bad)).rejects.toThrow('invalid media key');
+      await expect(objectInfo(bad)).rejects.toThrow('invalid media key');
+      await expect(listObjects(bad)).rejects.toThrow('invalid media key');
+      await expect(removeObjects([bad])).rejects.toThrow('invalid media key');
+    }
+    expect(h.resolveProject).not.toHaveBeenCalled();
+    expect(calls(p0) + calls(pb)).toBe(0);
+  });
+
+  it('removeObjects of keys naming two tenants is refused before anything is resolved or removed', async () => {
+    await expect(removeObjects([KEY, KEY_B])).rejects.toThrow(
+      'media keys span more than one tenant',
+    );
+    expect(h.resolveProject).not.toHaveBeenCalled();
+    expect(p0.remove).not.toHaveBeenCalled();
+    expect(pb.remove).not.toHaveBeenCalled();
+    // The same tenant twice is one batch to one project; an empty batch touches nothing.
+    await removeObjects([KEY, `${TENANT}/media/other/original`]);
+    expect(p0.remove).toHaveBeenCalledTimes(1);
+    await removeObjects([]);
+    expect(p0.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unbound tenant never falls back to project 0: the call fails and no Storage is touched', async () => {
+    const stranger = '33333333-3333-4333-8333-333333333333';
+    await expect(signReadFor(`${stranger}/media/x/original`, 60)).rejects.toThrow('unbound');
+    expect(calls(p0) + calls(pb)).toBe(0);
+  });
+
+  it('every builder of keys.ts returns a string whose first segment is the tenant id passed in', () => {
+    const asset = '0a1b2c3d-4e5f-4a6b-8c7d-9e8f7a6b5c4d';
+    const built = [
+      keys.mediaAssetPrefix(TENANT_B, asset),
+      keys.mediaOriginalKey(TENANT_B, asset),
+      keys.mediaVariantKey(TENANT_B, asset, 320),
+      keys.mediaKeyFor(TENANT_B, asset, 'original'),
+      keys.mediaKeyFor(TENANT_B, asset, 'w320'),
+    ];
+    for (const key of built) {
+      expect(key).not.toBeNull();
+      expect((key as string).split('/', 1)[0]).toBe(TENANT_B);
+    }
   });
 });

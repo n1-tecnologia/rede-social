@@ -2,9 +2,11 @@ import { createServer, type Server } from 'node:net';
 import { sqlClient } from '@rede-social/core/db';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { env } from '@rede-social/core/server/env';
+import { seal } from '@rede-social/core/server/secrets/sealed';
 import {
   closeAllPools,
   invalidateProject,
+  resolveProject,
 } from '@rede-social/core/server/tenancy/project-registry';
 import { ensureProjectZero } from '@rede-social/core/server/tenancy/project-zero';
 import {
@@ -782,5 +784,60 @@ describe('payments admin on B (D-538)', () => {
     expect(afterBody.integration.connected).toBe(true);
     expect(afterBody.accessProducts).toHaveLength(1);
     expect(afterBody.gate.canEnable).toBe(true);
+  });
+});
+
+/**
+ * 09.2-05 (D-538, D-539), media: the upload a tenant admin starts on database B records its `media_assets` row
+ * in B only, and the Storage call it makes is routed by the tenant segment of the key to the project the
+ * registry holds for that tenant. The project's service key is sealed here from the local stack's own key, so
+ * the sealed client path (credential_source 'sealed') is the one that signs the upload; a real second Storage
+ * is not needed, the resolver is what is asserted.
+ */
+describe('media row on B (D-538, D-539)', () => {
+  const MEDIA_SLUG = `media-b-${RUN}`.slice(0, 40);
+  let media: TenantOnB;
+
+  beforeAll(async () => {
+    media = await provisionTenantOnB({ slug: MEDIA_SLUG, role: 'admin_tenant' });
+    await adminSql`
+      update platform.projects
+         set service_key_sealed = ${seal(env.SUPABASE_SERVICE_KEY, `${media.projectId}:service_key`)}
+       where id = ${media.projectId}::uuid`;
+    invalidateProject(media.tenantId);
+  });
+
+  afterAll(async () => {
+    await adminSqlB`delete from public.media_assets where tenant_id = ${media.tenantId}::uuid`;
+    await media?.cleanup();
+  });
+
+  it('media row on B: the pending row exists only in B and its key routes to the project of that tenant', async () => {
+    const res = await api.request('/v1/media/uploads', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${media.token}`,
+        'x-tenant-host': media.host,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ kind: 'image', purpose: 'avatar', mime: 'image/jpeg', size: 1024 }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { assetId: string; path: string; signedUrl: string };
+    expect(body.path).toBe(`${media.tenantId}/media/${body.assetId}/original`);
+    expect(body.signedUrl).toContain(`/object/upload/sign/media/${media.tenantId}/media/`);
+
+    const count = async (db: typeof adminSql | typeof adminSqlB) => {
+      const [row] = await db<{ n: number }[]>`
+        select count(*)::int as n from public.media_assets where id = ${body.assetId}::uuid`;
+      return row?.n;
+    };
+    expect(await count(adminSqlB)).toBe(1);
+    expect(await count(adminSql)).toBe(0);
+
+    // The tenant segment of the key resolves to the tenant's own project, never the central one.
+    const project = await resolveProject(body.path.split('/', 1)[0] ?? '');
+    expect(project.id).toBe(media.projectId);
+    expect(project.isCentral).toBe(false);
   });
 });

@@ -1,15 +1,21 @@
 import { MEDIA_BUCKET } from '@rede-social/contracts/media';
 import type { Logger } from 'pino';
-import { supabaseAdmin } from '../supabase-admin';
+import { supabaseAdminFor } from '../supabase-admin';
+import { resolveProject } from '../tenancy/project-registry';
 
 /**
- * The ONLY file of the media area that imports `supabaseAdmin` (grep-pinned by this plan's
+ * The ONLY file of the media area that imports the Supabase admin client (grep-pinned by this plan's
  * acceptance criteria; Biome widens the admin lane to `packages/core/server/media/**`, this keeps it
- * confined WITHIN the area). Nothing here knows about tenants, rows or HTTP.
+ * confined WITHIN the area). Nothing here knows about rows or HTTP.
  *
  * CONTRACT: every exported function takes an ALREADY-ASSERTED key. The caller — always
  * `./service.ts` or `./derive-job.ts` — runs `assertTenantKey(key, ctx.tenantId)` first, so this
  * file never has to decide which prefix it is allowed to touch (T-03-01/T-03-02).
+ *
+ * STORAGE FOLLOWS THE TENANT (09.2-05, D-539): a tenant's objects live in the Storage of the Supabase project
+ * that holds the tenant. Every key begins with the tenant uuid (`keys.ts`), so each call below derives the
+ * project from that first segment (`bucketFor`) and talks to THAT project's admin client. A key whose first
+ * segment is not a uuid is refused before anything is resolved (T-09.2-23).
  *
  * The bucket is PRIVATE and carries ZERO `storage.objects` policies (R-15, pinned by
  * `supabase/tests/070-media-bucket.sql`): the browser never holds a Supabase JWT for Storage, so a
@@ -23,7 +29,20 @@ const MEDIA_SIGNED_READ_MEMO_MS = 3000 * 1000;
 /** Variant keys are immutable by construction, so a year is the correct lifetime. */
 export const MEDIA_VARIANT_CACHE_CONTROL = '31536000';
 
-const bucket = () => supabaseAdmin.storage.from(MEDIA_BUCKET);
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The tenant uuid a key (or a prefix) starts with. The message names no key, so a log line cannot leak one. */
+function tenantOfKey(key: string): string {
+  const first = key.split('/', 1)[0] ?? '';
+  if (!UUID_SEGMENT.test(first)) throw new Error('invalid media key');
+  return first;
+}
+
+/** The media bucket of the project that owns `key`: tenant segment -> registered project -> its admin client. */
+async function bucketFor(key: string) {
+  const project = await resolveProject(tenantOfKey(key));
+  return supabaseAdminFor(project).storage.from(MEDIA_BUCKET);
+}
 
 /**
  * The Phase 1/2 host-cache shape: a module `Map` whose TTL IS the invalidation. A feed of 20 images
@@ -37,7 +56,7 @@ export type SignedUpload = { signedUrl: string; token: string; path: string };
 
 /** A signed PUT/TUS target for `key`. `token` is what `tus-js-client` needs in `x-signature`. */
 export async function signUpload(key: string): Promise<SignedUpload> {
-  const { data, error } = await bucket().createSignedUploadUrl(key);
+  const { data, error } = await (await bucketFor(key)).createSignedUploadUrl(key);
   if (error || !data) {
     throw new Error(`could not mint a signed upload url: ${error?.message ?? 'no data'}`);
   }
@@ -49,7 +68,10 @@ export async function signRead(key: string): Promise<string> {
   const hit = signedReads.get(key);
   const now = Date.now();
   if (hit && hit.expiresAt > now) return hit.url;
-  const { data, error } = await bucket().createSignedUrl(key, MEDIA_SIGNED_READ_TTL_S);
+  const { data, error } = await (await bucketFor(key)).createSignedUrl(
+    key,
+    MEDIA_SIGNED_READ_TTL_S,
+  );
   if (error || !data) {
     throw new Error(`could not sign a read url: ${error?.message ?? 'no data'}`);
   }
@@ -66,7 +88,7 @@ export async function signRead(key: string): Promise<string> {
  * contract above. Throws with the same shape as `signRead` when Storage has no such object.
  */
 export async function signReadFor(key: string, ttlSeconds: number): Promise<string> {
-  const { data, error } = await bucket().createSignedUrl(key, ttlSeconds);
+  const { data, error } = await (await bucketFor(key)).createSignedUrl(key, ttlSeconds);
   if (error || !data) {
     throw new Error(`could not sign a read url: ${error?.message ?? 'no data'}`);
   }
@@ -86,7 +108,7 @@ export function invalidateSignedUrl(key: string): void {
 
 /** Storage's own record of the object — the size and content type `complete` re-reads. */
 export async function objectInfo(key: string): Promise<ObjectInfo | null> {
-  const { data, error } = await bucket().info(key);
+  const { data, error } = await (await bucketFor(key)).info(key);
   if (error || !data) return null;
   return {
     size: typeof data.size === 'number' ? data.size : null,
@@ -100,7 +122,7 @@ export async function objectInfo(key: string): Promise<ObjectInfo | null> {
  * the one property that keeps member uploads from ever transiting Cloud Run (CLAUDE.md §4).
  */
 export async function downloadObject(key: string): Promise<Buffer | null> {
-  const { data, error } = await bucket().download(key);
+  const { data, error } = await (await bucketFor(key)).download(key);
   if (error || !data) return null;
   return Buffer.from(await data.bytes());
 }
@@ -120,7 +142,7 @@ const PREFIX_READ_TTL_S = 60;
  * empty buffer, which then fails its signature check by name.
  */
 export async function downloadObjectPrefix(key: string, length: number): Promise<Buffer | null> {
-  const { data, error } = await bucket().createSignedUrl(key, PREFIX_READ_TTL_S);
+  const { data, error } = await (await bucketFor(key)).createSignedUrl(key, PREFIX_READ_TTL_S);
   if (error || !data) return null;
   const res = await fetch(data.signedUrl, { headers: { Range: `bytes=0-${length - 1}` } });
   if (res.status === 416) {
@@ -152,7 +174,7 @@ export type PutOptions = { contentType: string; cacheControl?: string };
 
 /** Upsert: a re-derivation writes the same immutable key with the same content. */
 export async function putObject(key: string, body: Buffer, opts: PutOptions): Promise<void> {
-  const { error } = await bucket().upload(key, new Uint8Array(body), {
+  const { error } = await (await bucketFor(key)).upload(key, new Uint8Array(body), {
     contentType: opts.contentType,
     cacheControl: opts.cacheControl ?? MEDIA_VARIANT_CACHE_CONTROL,
     upsert: true,
@@ -175,7 +197,7 @@ export async function listObjects(prefix: string, limit = 100): Promise<string[]
   // Supabase lists a FOLDER: `a/b` and `a/b/` are the same folder, but the trailing slash would be
   // echoed into the search prefix, so it is stripped before the call and re-added when rebuilding.
   const folder = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
-  const { data, error } = await bucket().list(folder, { limit });
+  const { data, error } = await (await bucketFor(folder)).list(folder, { limit });
   if (error) throw new Error(`could not list ${folder}: ${error.message}`);
   return (data ?? [])
     .filter((entry) => entry.id !== null)
@@ -183,8 +205,14 @@ export async function listObjects(prefix: string, limit = 100): Promise<string[]
 }
 
 export async function removeObjects(keys: readonly string[]): Promise<void> {
-  if (keys.length === 0) return;
-  const { error } = await bucket().remove([...keys]);
+  const [first] = keys;
+  if (first === undefined) return;
+  // One batch, one project: a batch whose keys name more than one tenant is refused before any call.
+  const tenant = tenantOfKey(first);
+  if (keys.some((key) => tenantOfKey(key) !== tenant)) {
+    throw new Error('media keys span more than one tenant');
+  }
+  const { error } = await (await bucketFor(first)).remove([...keys]);
   if (error) throw new Error(`could not remove media objects: ${error.message}`);
 }
 

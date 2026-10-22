@@ -36,7 +36,7 @@ export const SYSTEM_ACTOR = 'system:media-derive-variants';
 
 /** Terminal state after the bounded re-arm. Conditional, so a deleted or rejected row is untouched. */
 async function markDerivationFailed(tenantId: string, assetId: string): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await tx
       .update(mediaAssets)
       .set({ status: 'failed', failureReason: 'derive_failed' })
@@ -56,7 +56,7 @@ async function requeueVariantDerivation(
   assetId: string,
   attempt: number,
 ): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await enqueueInTx(
       tx,
       MEDIA_DERIVE_QUEUE,
