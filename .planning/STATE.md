@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 5
+current_plan: 6
 status: executing
-stopped_at: "Completed 09.2-12-PLAN.md (plans 01, 02, 03, 04, 12 done); next is 09.2-05 (wave 4: 05, 06, 08)"
-last_updated: "2026-10-22T23:37:40.956Z"
+stopped_at: Completed 09.2-05-PLAN.md (plans 01, 02, 03, 04, 12, 05 done); next is 09.2-06 (wave 4, then 08)
+last_updated: "2026-10-22T23:55:36.552Z"
 last_activity: 2026-10-22
-last_activity_desc: Completed 09.2-12 (Management API client behind a provider seam, fake, limiter, reason catalog, probe)
-state_head: 5041f5883a8b7daae6935cbf20d811111cf16678
+last_activity_desc: Completed 09.2-05 (tenant-scoped admin-lane sites of tenancy, payments and media, key-routed Storage, per-project sign-up)
+state_head: ec580e3acb829a737fc4c8954d61fefaab20d4a8
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 240
+  completed_plans: 241
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 5
+Current Plan: 6
 Total Plans in Phase: 28
-Plan: 05 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client done; wave 4 follows: 05, 06, 08 in that order)
+Plan: 06 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites done; wave 4 continues: 06, then 08)
 Status: Ready to execute
-Last activity: 2026-10-22 — Completed 09.2-12 (Management API client behind a provider seam, fake, limiter, reason catalog, probe)
+Last activity: 2026-10-22 — Completed 09.2-05 (tenant-scoped admin-lane sites of tenancy, payments and media, key-routed Storage, per-project sign-up)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -298,6 +298,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P03 | 21 min | 3 tasks | 23 files |
 | Phase 09.2 P04 | 22 min | 3 tasks | 23 files |
 | Phase 09.2 P12 | 24min | 3 tasks | 14 files |
+| Phase 09.2 P05 | 22 min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -993,6 +994,8 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-04: ensureProjectZero renames project 0 from the placeholder project-0 to SUPABASE_PROJECT_REF or local and fills api_url; tests and pgTAP identify project 0 by is_central, never by ref; production's central row keeps the placeholder until plans 09/15 call it.
 - [Phase 09.2]: 09.2-12: PROJECT_PROVIDER has no zod default so unset stays distinguishable from an explicit fake: the expand release boots, assertProductionEnv refuses an explicit fake in production, projects/index.ts throws when production resolves to the fake
 - [Phase 09.2]: 09.2-12: the Management API organisation pin covers every adapter method except describe and health (one cached describe per ref); getPostgrestConfig drops jwt_secret inside the adapter
+- [Phase 09.2]: 09.2-05: applyPaymentEvent (payments/apply.ts) is class N, plan 10 (the job payload is the event id alone, so the tenant is only known after the row is read); only its markFailed step migrated. resolveAsset stays N as planned. — A tenant-less site is re-classed in the inventory with the reason instead of defaulting to project 0 (PR-3, planning decision 2).
+- [Phase 09.2]: 09.2-05: Storage routes by the tenant uuid in the first segment of the object key (bucketFor), refusing a non-uuid segment and a multi-tenant removal batch before any call; signupMember creates and compensates the Auth user through the tenant's project (D-539). — Keeps exported Storage signatures unchanged (planning decision 1) and pairs the Auth user with the membership's project (T-09.2-23, T-09.2-24).
 
 ### Pending Todos
 
@@ -1101,6 +1104,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-22T23:37:40.729Z
-Stopped at: Completed 09.2-12-PLAN.md (plans 01, 02, 03, 04, 12 done); next is 09.2-05 (wave 4: 05, 06, 08)
+Last session: 2026-10-22T23:55:30.404Z
+Stopped at: Completed 09.2-05-PLAN.md (plans 01, 02, 03, 04, 12, 05 done); next is 09.2-06 (wave 4, then 08)
 Resume file: None
