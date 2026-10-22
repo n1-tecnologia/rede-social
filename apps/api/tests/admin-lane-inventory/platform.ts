@@ -1,6 +1,8 @@
 import type { AdminLaneEntry, SiteClass } from './index';
 
-/** The platform area (`packages/core/server/platform/*`): domains, invites, branding, tenants, modules, the allow list. One row per site, in site order. */
+/** The platform area (`packages/core/server/platform/*`): domains, invites, branding, tenants, modules, the allow list. One row per site, in site order.
+ *
+ * 09.2-06: the P files (`domains.ts`, `platform-admins.ts`, `allow-list-lock.ts`, `reconcile-allow-list.ts`, `recordInviteSendOutcome`) now call `withPlatformTx` and so are no `withAdminTx` site at all: their rows left this list (the guard scans `withAdminTx(` only, and a row for a file with no site is a stale entry), the same way `tenant-host.ts` left it in 09.2-04. The grep in plan 06's acceptance criteria is what keeps them out. */
 const group = (
   file: string,
   rows: readonly (readonly [fn: string, cls: SiteClass, plan: number, note?: string])[],
@@ -15,7 +17,6 @@ const group = (
   }));
 
 export const platform: readonly AdminLaneEntry[] = [
-  ...group('packages/core/server/platform/allow-list-lock.ts', [['withAllowListLock', 'P', 6]]),
   ...group('packages/core/server/platform/branding.ts', [
     ['tenantExists', 'T', 7],
     ['invalidateAllTenantHosts', 'P', 7, 'reads tenant_domains of every tenant, all central'],
@@ -46,36 +47,6 @@ export const platform: readonly AdminLaneEntry[] = [
       7,
       'writes the tenant row on the tenant project and pushes the central mirror afterwards',
     ],
-  ]),
-  ...group('packages/core/server/platform/domains.ts', [
-    ['listTenantDomains', 'P', 6],
-    ['attachDomain', 'P', 6],
-    ['attachDomain', 'P', 6],
-    ['attachDomain', 'P', 6],
-    ['recordError', 'P', 6],
-    ['clearLastErrorIfSettled', 'P', 6],
-    [
-      'recordInviteSendOutcome',
-      'S',
-      7,
-      'the central write of an invite outcome; the invite step that triggers it runs on the tenant project',
-    ],
-    ['checkDomain', 'P', 6],
-    ['checkDomain', 'P', 6],
-    ['checkDomain', 'P', 6],
-    ['checkDomain', 'P', 6],
-    ['checkDomain', 'P', 6],
-    ['checkDomain', 'P', 6],
-    ['checkDomain', 'P', 6],
-    ['checkDomain', 'P', 6],
-    ['rearmDomainVerification', 'P', 6],
-    ['invalidateTenantHosts', 'P', 6],
-    ['setPrimaryDomain', 'P', 6],
-    ['setPrimaryDomain', 'P', 6],
-    ['removeDomain', 'P', 6],
-    ['removeDomain', 'P', 6],
-    ['restartDomainVerification', 'P', 6],
-    ['restartDomainVerification', 'P', 6],
   ]),
   ...group('packages/core/server/platform/invite-send.ts', [
     [
@@ -116,10 +87,6 @@ export const platform: readonly AdminLaneEntry[] = [
     ['setModuleEnabled', 'S', 7],
     ['readModuleSettings', 'S', 7],
     ['patchModuleSettings', 'S', 7],
-  ]),
-  ...group('packages/core/server/platform/platform-admins.ts', [['isPlatformAdmin', 'P', 6]]),
-  ...group('packages/core/server/platform/reconcile-allow-list.ts', [
-    ['reconcileAuthAllowList', 'P', 6],
   ]),
   ...group('packages/core/server/platform/tenants.ts', [
     [

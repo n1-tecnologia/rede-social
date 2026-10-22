@@ -7,7 +7,7 @@ import {
   type TenantDomainsList,
 } from '@rede-social/contracts';
 import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
-import { withAdminTx } from '../../db/admin-tx';
+import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenants } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
 import {
@@ -27,7 +27,7 @@ import { scheduleInviteSends } from './invite-send';
 import { logFor, type PlatformActor } from './invites';
 
 /**
- * Custom domains of a tenant (TENANT-07, D-34/D-35/D-36) — the admin-lane service behind
+ * Custom domains of a tenant (TENANT-07, D-34/D-35/D-36) — the platform-lane (central project, 09.2-06, D-537) service behind
  * `/v1/platform/tenants/{id}/domains*` AND the `kernel.domain-verify` poller. Everything that
  * touches `tenant_domains` at runtime lives here, so the route and the job share ONE
  * `checkDomain` and the verified transition has exactly one writer.
@@ -155,7 +155,7 @@ const toList = (rows: DomainRow[]): TenantDomainsList => ({
 
 /** `GET …/domains` — every host of the tenant, primary first; `primaryHost` is the VERIFIED primary or null. */
 export async function listTenantDomains(tenantId: string): Promise<TenantDomainsList> {
-  return withAdminTx(async (tx) => {
+  return withPlatformTx(async (tx) => {
     if (!(await tenantExists(tx, tenantId))) throw new ApiError(404, 'NOT_FOUND');
     return toList(await listRows(tx, tenantId));
   });
@@ -225,7 +225,7 @@ export async function attachDomain(
     throw new ApiError(400, 'VALIDATION_FAILED', { host: 'not_registrable' });
   }
 
-  const existing = await withAdminTx(async (tx) => {
+  const existing = await withPlatformTx(async (tx) => {
     if (!(await tenantExists(tx, tenantId))) throw new ApiError(404, 'NOT_FOUND');
     const rows = await tx.select().from(tenantDomains).where(eq(tenantDomains.host, host)).limit(1);
     return rows[0];
@@ -245,7 +245,7 @@ export async function attachDomain(
   }
 
   const insert = async (forceNonPrimary: boolean): Promise<DomainRow> =>
-    withAdminTx(async (tx) => {
+    withPlatformTx(async (tx) => {
       const [{ n } = { n: 0 }] = await tx
         .select({ n: sql<number>`count(*)::int` })
         .from(tenantDomains)
@@ -284,7 +284,7 @@ export async function attachDomain(
   } catch (error) {
     const constraint = uniqueViolationConstraint(error);
     if (constraint !== null && (constraint === '' || constraint.includes('host'))) {
-      const winner = await withAdminTx(async (tx) => {
+      const winner = await withPlatformTx(async (tx) => {
         const rows = await tx
           .select()
           .from(tenantDomains)
@@ -337,7 +337,7 @@ export type CheckDomainOutcome = 'verified' | 'already_verified' | 'pending' | '
 export type CheckDomainResult = { outcome: CheckDomainOutcome; domain: TenantDomain | null };
 
 async function recordError(domainId: string, lastError: string): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     await tx.update(tenantDomains).set({ lastError }).where(eq(tenantDomains.id, domainId));
   });
 }
@@ -348,7 +348,7 @@ async function recordError(domainId: string, lastError: string): Promise<void> {
  * "Verificar agora" offer on a verified host disappears once the retry succeeded (WR-01).
  */
 async function clearLastErrorIfSettled(domainId: string): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     await tx
       .update(tenantDomains)
       .set({ lastError: null })
@@ -430,7 +430,7 @@ export async function recordInviteSendOutcome(
   tenantId: string,
   lastError: string | null,
 ): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     await tx
       .update(tenantDomains)
       .set({ lastError })
@@ -470,13 +470,13 @@ export async function checkDomain(
 ): Promise<CheckDomainResult> {
   const log = logFor(actor, 'platform-domains');
 
-  const row = await withAdminTx((tx) => loadRow(tx, domainId, opts.tenantId));
+  const row = await withPlatformTx((tx) => loadRow(tx, domainId, opts.tenantId));
   if (!row) return { outcome: 'gone', domain: null };
 
   if (row.verifiedAt !== null) {
     const ok = await ensureVerifiedSideEffects(row, actor);
     if (ok) await clearLastErrorIfSettled(domainId);
-    const fresh = await withAdminTx((tx) => loadRow(tx, domainId));
+    const fresh = await withPlatformTx((tx) => loadRow(tx, domainId));
     return { outcome: 'already_verified', domain: toTenantDomain(fresh ?? row) };
   }
   if (row.verificationStatus === 'expired') {
@@ -494,7 +494,7 @@ export async function checkDomain(
     const status = error instanceof DomainProviderError ? error.status : undefined;
     const now = new Date();
     const expired = row.verifyDeadlineAt !== null && row.verifyDeadlineAt.getTime() < now.getTime();
-    const [updated] = await withAdminTx(async (tx) => {
+    const [updated] = await withPlatformTx(async (tx) => {
       const rows = await tx
         .update(tenantDomains)
         .set({
@@ -532,7 +532,7 @@ export async function checkDomain(
   const now = new Date();
 
   if (check.ownershipVerified && check.configured) {
-    const [winner] = await withAdminTx((tx) =>
+    const [winner] = await withPlatformTx((tx) =>
       tx
         .update(tenantDomains)
         .set({
@@ -547,7 +547,7 @@ export async function checkDomain(
         .returning(),
     );
     if (!winner) {
-      const fresh = await withAdminTx((tx) => loadRow(tx, domainId));
+      const fresh = await withPlatformTx((tx) => loadRow(tx, domainId));
       return { outcome: 'already_verified', domain: toTenantDomain(fresh ?? row) };
     }
     // The `lastError: null` written by the winning update precedes the side effects, and a
@@ -565,12 +565,12 @@ export async function checkDomain(
       },
       'domain verified',
     );
-    const fresh = await withAdminTx((tx) => loadRow(tx, domainId));
+    const fresh = await withPlatformTx((tx) => loadRow(tx, domainId));
     return { outcome: 'verified', domain: toTenantDomain(fresh ?? winner) };
   }
 
   if (row.verifyDeadlineAt && row.verifyDeadlineAt.getTime() < now.getTime()) {
-    const [expired] = await withAdminTx((tx) =>
+    const [expired] = await withPlatformTx((tx) =>
       tx
         .update(tenantDomains)
         .set({ verificationStatus: 'expired', dnsRecords: records, lastCheckedAt: now })
@@ -590,7 +590,7 @@ export async function checkDomain(
     return { outcome: 'expired', domain: toTenantDomain(expired ?? row) };
   }
 
-  const [pending] = await withAdminTx(async (tx) => {
+  const [pending] = await withPlatformTx(async (tx) => {
     const updated = await tx
       .update(tenantDomains)
       .set({ dnsRecords: records, lastCheckedAt: now, lastError: null })
@@ -622,7 +622,7 @@ export async function checkDomain(
  * no-op.
  */
 export async function rearmDomainVerification(domainId: string): Promise<boolean> {
-  return withAdminTx(async (tx) => {
+  return withPlatformTx(async (tx) => {
     const row = await loadRow(tx, domainId);
     if (!row || row.verifiedAt !== null || row.verificationStatus !== 'pending') return false;
     await enqueueVerify(tx, domainId);
@@ -632,7 +632,7 @@ export async function rearmDomainVerification(domainId: string): Promise<boolean
 
 /** Every host of the tenant leaves the in-process host cache (their `isPrimary`/`primaryHost` facts changed). */
 async function invalidateTenantHosts(tenantId: string): Promise<void> {
-  const rows = await withAdminTx((tx) => listRows(tx, tenantId));
+  const rows = await withPlatformTx((tx) => listRows(tx, tenantId));
   for (const row of rows) invalidateTenantHost(row.host);
 }
 
@@ -653,14 +653,14 @@ export async function setPrimaryDomain(
   actor: PlatformActor,
 ): Promise<TenantDomainsList> {
   const log = logFor(actor, 'platform-domains');
-  const row = await withAdminTx((tx) => loadRow(tx, domainId, tenantId));
+  const row = await withPlatformTx((tx) => loadRow(tx, domainId, tenantId));
   if (!row) throw new ApiError(404, 'NOT_FOUND');
   if (row.verifiedAt === null) {
     throw new ApiError(409, 'DOMAIN_STATE_INVALID', { reason: 'not_verified' });
   }
   if (row.isPrimary) return listTenantDomains(tenantId);
 
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     await tx
       .update(tenantDomains)
       .set({ isPrimary: false })
@@ -712,7 +712,7 @@ export async function removeDomain(
   actor: PlatformActor,
 ): Promise<void> {
   const log = logFor(actor, 'platform-domains');
-  const { row, others } = await withAdminTx(async (tx) => {
+  const { row, others } = await withPlatformTx(async (tx) => {
     const row = await loadRow(tx, domainId, tenantId);
     const others = row ? (await listRows(tx, tenantId)).filter((r) => r.id !== domainId) : [];
     return { row, others };
@@ -756,7 +756,7 @@ export async function removeDomain(
     );
   }
 
-  await withAdminTx((tx) =>
+  await withPlatformTx((tx) =>
     tx
       .delete(tenantDomains)
       .where(and(eq(tenantDomains.id, domainId), eq(tenantDomains.tenantId, tenantId))),
@@ -781,13 +781,13 @@ export async function restartDomainVerification(
   actor: PlatformActor,
 ): Promise<TenantDomain> {
   const log = logFor(actor, 'platform-domains');
-  const row = await withAdminTx((tx) => loadRow(tx, domainId, tenantId));
+  const row = await withPlatformTx((tx) => loadRow(tx, domainId, tenantId));
   if (!row) throw new ApiError(404, 'NOT_FOUND');
   if (row.verificationStatus !== 'expired') {
     throw new ApiError(409, 'DOMAIN_STATE_INVALID', { reason: 'not_expired' });
   }
 
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     await tx
       .update(tenantDomains)
       .set({

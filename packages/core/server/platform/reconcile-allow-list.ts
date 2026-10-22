@@ -1,5 +1,5 @@
 import { asc, isNotNull } from 'drizzle-orm';
-import { withAdminTx } from '../../db/admin-tx';
+import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains } from '../../db/schema';
 import { authAllowList } from '../domains/index';
 import { moduleLogger } from '../logging';
@@ -27,7 +27,7 @@ export type AllowListReconcileResult = { hosts: number; added: number; failed: n
  * thrown; only the initial select may throw, and the worker catches that.
  */
 export async function reconcileAuthAllowList(): Promise<AllowListReconcileResult> {
-  const rows = await withAdminTx((tx) =>
+  const rows = await withPlatformTx((tx) =>
     tx
       .select({ host: tenantDomains.host })
       .from(tenantDomains)
