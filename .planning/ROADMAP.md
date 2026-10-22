@@ -45,6 +45,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 08.7: Dados Reais do Perfil (INSERTED)** - The profile's report panels show the tenant's own data instead of the FRONT-AJUSTES sample numbers: the member's "Sua atividade" and the tenant admin's "Visão do dono", from what the database already records; metrics with no source yet get a decided treatment, never fake numbers (completed 2026-10-19)
 - [x] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers (completed 2026-10-20)
 - [ ] **Phase 09.1: Acesso por gateway de pagamento (INSERTED)** - Per-tenant payment-gateway webhook (Kiwify first, provider-neutral seam) that grants and cuts platform access per tenant and e-mail (replaces the global email_allowlist) and unlocks store products on purchase
+- [ ] **Phase 09.2: Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)** - One Supabase project per tenant: the super_admin registers the project access at tenant creation, the system loads the schema and baseline configuration into it, migrations fan out to every tenant database, and the API and worker route each request and job to the tenant's own database
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 
@@ -1261,6 +1262,113 @@ Plans:
 
 - [x] 09.1-22-PLAN.md — Single-address "Liberar e-mail": a gateway-cut address keeps answering 200 and the Acessos tab says it stays cut instead of reporting a release (PAY-31, PAY-22)
 
+### Phase 09.2: Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)
+
+**Goal**: Each tenant runs on its own Supabase project (its own Postgres, Auth, Storage and Realtime) instead of the shared database: the platform operator registers a tenant's project access in the platform panel, the system loads the full schema and baseline configuration into that project, every later migration reaches every tenant project from one command, and the API and worker send each request and job to the tenant's own database.
+**Requirements**: DBT-01, DBT-02, DBT-03, DBT-04, DBT-05, DBT-06, DBT-07, DBT-08, DBT-09, DBT-10, DBT-11, DBT-12, DBT-13, DBT-14, DBT-15, DBT-16, DBT-17, DBT-18, DBT-19, DBT-20, DBT-21, DBT-22, DBT-23, DBT-24, DBT-25, DBT-26, DBT-27, DBT-28, DBT-29, DBT-30, DBT-31, DBT-32, DBT-33, DBT-34, DBT-35, DBT-36, DBT-37, DBT-38, DBT-39, DBT-40, DBT-41, DBT-42, DBT-43, DBT-44, DBT-45, DBT-46, DBT-47, DBT-48, DBT-49, DBT-50, DBT-51, DBT-52, DBT-53 (written at planning, 2026-10-22); UI-04 for the design gate; amends the Free-plan constraint and the Architecture constraint of PROJECT.md and retires V2-PLAT-07
+**Depends on:** Phase 09.1 (runs before Phase 10; builds on Phase 1 tenancy and the RLS lane, Phase 2 platform panel and tenant provisioning, Phase 7 realtime and pg-boss, Phase 08.1 identity, which this phase has to revisit, and Phase 09.1 access grants)
+**Plans:** 28 plans
+
+**Notes**: User decision 2026-10-22: physical isolation, one Supabase project per tenant. Today every tenant shares one project: one `DATABASE_URL`, one `SUPABASE_URL` and service key, one JWKS, one pg-boss queue (process-wide singletons in `packages/core/server`, `apps/api/src/env.ts` and `apps/web/lib/supabase/server.ts`), and one `supabase db push` in `deploy-api.yml`. Intended flow: when the super_admin creates a tenant, they fill in the access information of that tenant's project and the system loads everything into it (schema, roles, Auth configuration, buckets, baseline rows); and a migration must reach every tenant database without per-project manual work.
+
+Open decisions for `/gsd-discuss-phase` (found mapping the coupling on 2026-10-22; none is decided yet):
+
+1. **Identity.** Phase 08.1 made one `auth.users` identity hold memberships in several tenants. With one Auth per project that cannot hold: the same e-mail in two tenants becomes two independent accounts. Decide what happens to 08.1's join-with-existing-identity flows, per-tenant recovery and the shared-identity isolation fixture.
+2. **Control plane.** What stays in today's database: `tenants`, `tenant_domains` (host to tenant to project, resolved before any tenant database is reachable, including the gateway webhook and public sign-up by slug), `platform_admins` and the super_admin session, the tenant project registry, the migration ledger.
+3. **Existing tenants.** New tenants only, or also move `rede-demo`, `rede-lab` and the production tenants out of the shared database (data, `auth.users` with password hashes, storage objects, cutover and rollback).
+4. **Schema.** Recommended: the same schema in every project, `tenant_id` and RLS kept as defense in depth, so there is one migration set and the fan-out stays simple; the alternative is a single-tenant schema.
+5. **Migrations.** A fan-out runner replacing the single `supabase db push`: per-tenant applied-version ledger, order (databases before API and worker), failure isolation, an N-1 compatibility window or a hard stop, dry-run, retries.
+6. **Credentials.** Where each tenant's database URL, service key and project ref live (Secret Manager or an encrypted column with KMS), rotation, never logged.
+7. **Runtime routing.** Per-request tenant pool resolution with a bounded pool cache against Supavisor and the Cloud Run connection budget in `docs/DEPLOY.md`; `supabaseAdmin`, JWKS and issuer per project; the web's `@supabase/ssr` and Realtime clients receive the tenant's own URL and publishable key.
+8. **Worker.** pg-boss polls one database today: one queue per tenant database (the worker walks N databases) or one central queue with tenant routing. Mux, Resend and Vercel stay shared.
+9. **Provisioning.** What the bootstrap does (`roles.sql` and the `api_user` role without `BYPASSRLS`, migrations, the Custom Access Token Hook, SMTP, redirect allow-list, signing keys, buckets, Realtime policies, tenant row, modules, first admin), idempotence and resume after a partial failure, and whether creating the project itself stays manual (the Management API through the existing `SUPABASE_PAT` is the later automation).
+10. **Cost and quotas.** Supabase bills per project and the Free plan caps active projects; decide the plan of each tenant project.
+
+The ten open questions above were decided in `09.2-CONTEXT.md` (D-533..D-547); the plans below follow those decisions. Hosted proofs (H1..H8) need Igor's accounts and are tracked in `09.2-HOSTED-PROOFS.md`; the contract release (plans 26-27) waits for the production moves of plan 25.
+
+
+Plans:
+
+
+**Wave 1** *(the design gate and the migration runner are independent; the API plans never wait for the design gate)*
+
+- [ ] 09.2-01-PLAN.md — The D-417 design gate: sketch 014 for the prototype-less database-per-tenant surfaces, its README with the design questions, the MANIFEST row and the blocking-human approval checkpoint (UI-04)
+- [ ] 09.2-02-PLAN.md — The migration runner and the second local database: the ledgered, checksummed, locked runner, the central set with the registry tables, project 0 and the fail-closed default binding, pgTAP 210 (tracer)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 09.2-03-PLAN.md — Routing foundations: the sealed credential helper and the re-seal command, the bounded pool cache, the registry resolver with its stale window and fail-closed refusal, the routed tenant lane proved by one request on a second database (tracer)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 09.2-04-PLAN.md — The explicit lanes: `withAdminTx` with a target, `withPlatformTx`, the classified admin-lane inventory and its guard, the Biome and boundary restriction, `supabaseAdminFor` and project 0
+- [ ] 09.2-12-PLAN.md — The Management API client behind a provider seam with a fake, the rate limiter, the closed reason catalog and the read-only probe
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 09.2-05-PLAN.md — The tenant-scoped admin sites (tenancy, payments, media) on `{ tenantId }` and the key-routed Storage client
+- [ ] 09.2-06-PLAN.md — The platform-scoped sites on the platform lane (domains, invites, platform admins) and the seed
+- [ ] 09.2-08-PLAN.md — Per-project token verification, the host status gate (`preparing`, `updating`, `unavailable`) and the hold-out contracts
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 09.2-07-PLAN.md — The mirror: central and tenant ownership, `pushToTenant` and `pushToCentral`, the create/status/branding sagas and the reconcile job
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 09.2-09-PLAN.md — The jobs: platform and tenant queue scopes, the enqueue routing guard, the worker supervisor with one pg-boss instance per ready project, the per-project daily dispatcher, pgTAP 213
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 09.2-13-PLAN.md — The bootstrap engine: eight idempotent steps with a recorded status, resume, the Auth configuration template, the nullable first-admin creator, pgTAP 212
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 09.2-10-PLAN.md — The routes with no tenant host: the central integration, product and video indexes, the gateway webhook and Mux through them, reserve-then-write, the legacy lane form removed, pgTAP 214
+- [ ] 09.2-11-PLAN.md — The Send Email Hook per project, public sign-up by slug through the mirror, and the allow-list adapter and reconcile per project
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 09.2-14-PLAN.md — The panel API: pre-check, create with a project ref, the database overview, verify, resume, replace credentials, the health job and the break-glass reissue
+- [ ] 09.2-17-PLAN.md — The web side: per-host Supabase coordinates for the SSR client, Realtime, CSP, icons and uploads, and the last-good host cache
+
+**Wave 10** *(blocked on Wave 9 completion; web plans follow the API plans so a pending design gate never blocks them)*
+
+- [ ] 09.2-15-PLAN.md — The migration fan-out ("migrar todos") with a version per tenant, the image manifest, the schema gate and its retry job
+- [ ] 09.2-18-PLAN.md — Web: the "Novo tenant" wizard gains the Projeto Supabase field, the pre-check, the manual access fields and the database task (behind the design gate)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [ ] 09.2-16-PLAN.md — The deploy workflows around the fan-out: the Job-or-revision decision, the migrate Job, the release preflight, the isolated homolog and the repository guards
+- [ ] 09.2-19-PLAN.md — Web: the Banco tab (overview, preparation steps, credentials and the replace sheet) and the tenant frame (behind the design gate)
+- [ ] 09.2-22-PLAN.md — The move tool's copy engine: catalog-derived order, accounts with their hashes, Storage, the origin rewrite, queued jobs and verification on two local databases
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [ ] 09.2-20-PLAN.md — Web: the tenant list's Banco column, filter and header pill, and the Status tab guard (behind the design gate)
+- [ ] 09.2-23-PLAN.md — The move state machine: suspension, quiescence, cutover, rollback, recopy, the single deleting path and the central-clean check, the server-side refusal for a moving tenant, pgTAP 215
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [ ] 09.2-21-PLAN.md — Web: the "Comunidade em atualização" and "em preparação" screens and the matching login and sign-up cards (behind the design gate)
+- [ ] 09.2-24-PLAN.md — Documentation: the PROJECT.md amendment, the per-project connection budget, the release and move runbooks and the hosted-proofs checklist
+
+**Wave 14** *(human gates; blocked on Wave 13 completion)*
+
+- [ ] 09.2-25-PLAN.md — Human gates: the hosted prerequisites, the homolog rehearsal, the production release and each production move, and the contract gate (human-only; no agent performs a hosted act)
+
+**Wave 15** *(contract release; blocked on the contract gate opened in Wave 14)*
+
+- [ ] 09.2-26-PLAN.md — Contract A: the Phase 08.1 shared-identity flows leave the API and the kernel, the guard, and the SQL contract migration shipped on its own
+
+**Wave 16** *(blocked on Wave 15 completion)*
+
+- [ ] 09.2-27-PLAN.md — Contract B: the retired screens, the restored Phase 1 sign-up line, the shared contracts and the e2e cases
+
+**Wave 17** *(blocked on Wave 16 completion)*
+
+- [ ] 09.2-28-PLAN.md — Exit gate: the structural isolation invariants on both databases, the 320px layout measurements, the mechanical coverage check and the full `pnpm verify`
+
 ### Phase 10: Rede Social - Member Stories and Communities
 
 **Goal**: With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from whoever created it.
@@ -1328,6 +1436,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
 | 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
 | 09.1. Acesso por gateway de pagamento | 22/22 | In Progress|  |
+| 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 0/28 | Planned | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 

@@ -314,6 +314,64 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [x] **PAY-33**: Every one of the ten Kiwify triggers is accepted and recorded; the ones that change access or orders map to a neutral effect, and the four that do not (boleto, pix, abandoned cart, refused purchase) are recorded as ignored with no state change, and every other payload shape is recorded as ignored without failing the delivery *(D-486)*
 - [x] **PAY-34**: When the webhook creates the order of a product the member has open, the product page refreshes into its owned state without a reload, through the existing Realtime user signal *(D-506, UI-D-525)*
 
+### Database per tenant
+
+Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase project (its own Postgres, Auth, Storage and Realtime), the current project becomes the control plane that mirrors each tenant, and the operator creates a tenant by pasting only the project ref. The registry, the routing seam, the credential custody, the bootstrap steps, the migration fan-out with a version per tenant, the per-project queues and the "move tenant" tool are the platform side; the held-out screens and the Banco tab are the panel and member side. Source: the 2026-10-22 discussion (D-533..D-547), the Phase 09.2 research and the Phase 09.2 UI-SPEC (UI-D-533..UI-D-548).
+
+- [ ] **DBT-01**: The central project holds a registry row per tenant-to-project binding (ref, API URL, publishable key, plan as information, state, credential version); several tenants may bind one project outside production and the production panel refuses a project already bound. *(D-537, D-540)*
+- [ ] **DBT-02**: Database URL, service key, publishable key, pooler URL and the `postgres` password of a project are stored only sealed (AES-256-GCM, key id, row id as AAD) and no API response, log line or error body contains them. *(D-539)*
+- [ ] **DBT-03**: The sealing helper opens values sealed under any key id still present in the keyring and a re-seal job moves every row to the current key id without downtime. *(D-539)*
+- [ ] **DBT-04**: `GET /v1/public/tenants/by-host` and the platform list are answered from the central mirror (name, brand, status, enabled modules, primary host, project coordinates) without opening the tenant's database, so they work while that project is down. *(D-537)*
+- [ ] **DBT-05**: Brand and rules text are owned by the tenant project, status/modules/domains/registry by the central project; a reconcile job detects and heals drift in both directions. *(D-537)*
+- [ ] **DBT-06**: `withTenantTx(ctx, fn)` opens the transaction on the project registered for `ctx.tenantId`, and on no other. *(D-538)*
+- [ ] **DBT-07**: `withAdminTx` requires a tenant (or project) target and `withPlatformTx` opens the central project; both stay import-restricted to the kernel by Biome and `pnpm boundaries:negative` proves it. *(D-538)*
+- [ ] **DBT-08**: Every one of the 119 `withAdminTx` call sites is classified platform or tenant (or split) in a checked-in inventory and a unit test fails when a call site has no entry. *(D-538)*
+- [ ] **DBT-09**: Connection pools are held in a bounded LRU keyed by project and credential version, with a small per-pool `max`, an idle timeout, graceful eviction that never ends an in-flight transaction, and a circuit breaker for an unreachable project. *(D-538)*
+- [ ] **DBT-10**: A bearer token is verified against the JWKS and issuer of the project selected by the request host (platform host selects the central project) and never against the token's own `iss`; a token of project A presented on a host of project B answers 401. *(D-23, D-538)*
+- [ ] **DBT-11**: A `super_admin` session verifies only against the central project and is refused on a tenant host; a tenant member session is refused on the platform host. *(D-23, D-538)*
+- [ ] **DBT-12**: A payment-gateway delivery on the unchanged URL `/v1/webhooks/{provider}/{integrationId}` resolves its tenant and project through a central integration index before any tenant database is opened, then records and enqueues inside that tenant's database. *(D-488, D-538)*
+- [ ] **DBT-13**: A Mux delivery resolves its tenant from the `passthrough` the platform wrote at upload creation (`<tenantId>:<assetId>`), with a documented fallback for assets created before the move. *(D-488, D-538)*
+- [ ] **DBT-14**: Each project's Send Email Hook URL carries an opaque hook reference and verifies with that project's own secret; the legacy URL keeps serving project 0. *(D-37, D-542)*
+- [ ] **DBT-15**: Public sign-up by slug on a generic host resolves the project through the central mirror and the web client is told that project's public URL and publishable key. *(D-537, D-538)*
+- [ ] **DBT-16**: A gateway product id (provider + external id) maps to exactly one tenant, enforced by a central unique index written before the tenant row (reserve-then-write). *(D-488)*
+- [ ] **DBT-17**: The bootstrap is an ordered list of idempotent steps (verify project, roles, tenant schema, Data API closure and Auth/Storage/Realtime configuration, bucket check, tenant row and modules, invite schedule), each persisting status and a reason code. *(D-542)*
+- [ ] **DBT-18**: "Tentar de novo" resumes at the first step that is not done and never redoes a done step. *(D-542)*
+- [ ] **DBT-19**: A tenant whose bootstrap is incomplete answers the by-host status `preparing`, accepts no login and the API refuses with a dedicated code. *(D-542, D-545)*
+- [ ] **DBT-20**: The Management API client (real and fake behind one interface) honours the 120 requests/min limit with backoff on 429 using `X-RateLimit-Reset`, waits for a project in `COMING_UP`, and maps every failure to a catalog reason code. *(D-541)*
+- [ ] **DBT-21**: The manual access fields (database password, service key, publishable key) are required only when the pre-check answers `manualAccess` and are validated against the project before anything is stored. *(D-541)*
+- [ ] **DBT-22**: The migration runner applies a directory of SQL files to a database, one transaction per file with its ledger row, skips files already in the ledger, refuses a file whose recorded checksum changed, and is idempotent on re-run. *(D-545, D-547)*
+- [ ] **DBT-23**: "Migrar todos" runs the central set then every tenant project with bounded concurrency, isolates a failing tenant, and supports `--dry-run` and `--tenant <slug>`. *(D-544)*
+- [ ] **DBT-24**: Each tenant's applied-versus-required schema state is stored in the central project after every run and shown as "applied of required". *(D-545)*
+- [ ] **DBT-25**: A tenant whose applied state lacks any version the running image requires is answered `updating` from the cached mirror with zero extra queries, others keep running, and a self-re-arming job retries. *(D-545)*
+- [ ] **DBT-26**: The production workflow runs the central set and the fan-out before deploying the API and worker (D-12 order); a central failure stops the deploy, a tenant failure does not. *(D-544)*
+- [ ] **DBT-27**: A self-re-arming health job records reachable / paused / behind per project and the panel badge states of UI-D-539 derive from it. *(D-543)*
+- [ ] **DBT-28**: `docs/DEPLOY.md` "Connection budget (Pro)" is restated per project with the pool-cache arithmetic. *(D-543)*
+- [ ] **DBT-29**: `enqueueInTx` writes into the pg-boss schema of the database that owns the transaction, and refuses to enqueue a platform queue from a tenant transaction (and the reverse). *(D-546)*
+- [ ] **DBT-30**: The worker supervisor starts one pg-boss instance per ready tenant project plus the central one, adds and removes projects at runtime, and backs off on an unreachable or paused project. *(D-546)*
+- [ ] **DBT-31**: The daily dispatcher runs inside each tenant database queue and enqueues only for tenants of that database. *(D-546)*
+- [ ] **DBT-32**: Tenant set stays in `supabase/migrations`, central set lives in its own directory with its own drizzle config and ledger; local and CI apply both to one stack and no tenant project ever holds the `platform` schema. *(D-547)*
+- [ ] **DBT-33**: The move tool copies a tenant's rows in a catalog-derived foreign-key order, its `auth.users`/`auth.identities` with ids and password hashes, its Storage objects, and rewrites bucket URLs inside `tenants.branding`, then verifies row counts and checksums. *(D-534, D-536)*
+- [ ] **DBT-34**: The move suspends the tenant, waits for cache expiry and quiescence, flips the registry pointer, reactivates, keeps the old rows and can roll back by repointing; `--dry-run` writes nothing and an audit row is always written. *(D-535, D-536)*
+- [ ] **DBT-35**: The Phase 08.1 shared-identity flows are removed, sign-up of an existing e-mail answers the Phase 1 duplicate response, and per-tenant recovery works. *(D-533)*
+- [ ] **DBT-36**: `tenant_invites.created_by` no longer requires a row in the tenant project's `users` (the creator is a central `super_admin`). *(D-533, D-542)*
+- [ ] **DBT-37**: A fake project provider (no network) backs local, CI and test runs and cannot be selected by a production environment. *(D-540)*
+- [ ] **DBT-38**: A small suite over two databases proves routing: tenant A's rows exist only in database A, a lane for A cannot read B, a job enqueued for A lands only in A's pg-boss schema. *(D-540)*
+- [ ] **DBT-39**: The web tier receives the tenant project's own public URL and publishable key from the by-host answer for `@supabase/ssr`, the Realtime client, CSP, manifest icons and the TUS endpoint, and clears stale `sb-*` cookies of another project. *(D-537, D-541)*
+- [ ] **DBT-40**: Credentials are write-only in the panel; "Substituir credenciais" validates new values against the project before replacing anything. *(D-539)*
+- [ ] **DBT-41**: The existing two-tenant isolation suites (pgTAP and `isolation.test.ts`) stay green and `tenant_id` plus RLS remain on every table. *(D-540)*
+- [ ] **DBT-42**: The allow-list adapter and reconcile job act per project (host to tenant to project), serialised per project. *(D-538, D-542)*
+- [ ] **DBT-43**: PROJECT.md is amended (tenant projects are physically separate and Pro; `tenant_id` + RLS stay as defense in depth; Free-plan line superseded). *(D-540, D-543)*
+- [ ] **DBT-44**: The API image carries both migration sets, `supabase/roles.sql` and a deterministic manifest, so the running API knows the schema version it requires without a database call; a production boot whose manifest is missing or lists no tenant file stops with a named error. *(D-544, D-545, D-547)*
+- [ ] **DBT-45**: A tenant's project binding is cached for 15 seconds and the last good binding is served for at most 10 minutes, only when the central read fails; past that window, or with no last-good value, resolution fails closed with `TENANT_UNAVAILABLE`. *(D-537, D-538)*
+- [ ] **DBT-46**: A tenant with no binding fails closed: resolution raises `TENANT_PROJECT_UNBOUND`, and a deferred constraint trigger binds a new tenant to the project flagged default at commit or raises when none is flagged, so no code path falls back to the central project. *(D-538, D-540)*
+- [ ] **DBT-47**: A break-glass command re-derives a project's whole credential set through the platform token alone (never from the stored values), re-seals every column under the current key, bumps the credential version and refuses while a bootstrap step is running. *(D-539, D-541)*
+- [ ] **DBT-48**: While a tenant has an open move, no panel route or script can reactivate, edit, re-invite or re-bootstrap it (409 `TENANT_MOVING`), the mirror reconcile skips it, and two concurrent moves of one tenant cannot both start. *(D-535, D-536)*
+- [ ] **DBT-49**: After the last move the central project holds platform data only: `--confirm-delete` removes the moved tenant's rows, files and exclusive accounts from the source, and `platform:central-clean` lists any residue and, with `--strict-empty`, requires every non-mirror table to be empty before the default-project flag is cleared. *(D-534)*
+- [ ] **DBT-50**: The "Novo tenant" form's Projeto Supabase field accepts only a 20-letter project ref (a pasted dashboard or API address is normalised to it), pre-checks the project through the API before the wizard continues, shows the six documented ref errors, and asks for the manual access fields only when the pre-check says the API cannot reveal them. *(D-541, UI-D-533, UI-D-534, UI-D-535)*
+- [ ] **DBT-51**: The tenant's Banco tab shows the database state, the eight preparation steps in their fixed order with a catalog reason per failed step and a "Tentar de novo" that resumes at the first step not done, the applied-of-required schema version, and the write-only Credenciais card with "Verificar agora" and "Substituir credenciais". *(D-542, D-543, D-539, UI-D-536, UI-D-537, UI-D-538)*
+- [ ] **DBT-52**: The tenant list gains a Banco column with the database pill and the schema line and a "Banco com problema" filter that keeps the list order, the tenant header carries the pill, and the Status tab disables "Reativar tenant" while a move is open. *(D-543, D-535, UI-D-539, UI-D-540, UI-D-541)*
+- [ ] **DBT-53**: A member of a tenant whose project is behind on migrations or still being prepared meets a branded static screen ("Comunidade em atualização", "Comunidade em preparação") that reveals no reason, name or project fact, and the login and sign-up cards show the matching notice. *(D-545, D-542, UI-D-542)*
+
 ### Media
 
 - [x] **MEDIA-01**: Uploads go directly from the browser to Supabase Storage using signed upload URLs brokered by the API (files never transit Cloud Run); the API confirms the upload and records the asset with tenant scope
@@ -377,7 +435,7 @@ Deferred to future release. Tracked but not in current roadmap.
 - **V2-PLAT-04**: Tenant analytics dashboard (members, active 7d/30d, engagement, RSVP/check-in rates) — partly promoted by Phase 08.7 (INSIGHT-01..21: the member's own report and the tenant admin's panel from a nightly snapshot); new event tracking (sessions, views, reach, playback) stays here
 - **V2-PLAT-05**: Tenant impersonation for `super_admin` (logged)
 - **V2-PLAT-06**: Supabase Pro plan, staging + prod projects, native image transforms
-- **V2-PLAT-07**: Users belonging to multiple tenants (relax ROLE-02 constraint)
+- **V2-PLAT-07**: Users belonging to multiple tenants (relax ROLE-02 constraint) — retired by Phase 09.2 (D-533): one account per tenant; the Phase 08.1 flows that served it are removed in 09.2
 - **V2-PLAT-08**: First-login profile completion nudge
 
 ## Out of Scope
@@ -644,6 +702,59 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-32 | Phase 09.1 (plan 16) | Complete |
 | PAY-33 | Phase 09.1 (plans 08, 20) | Complete |
 | PAY-34 | Phase 09.1 (plans 17, 19) | Complete |
+| DBT-01 | Phase 09.2 (plans 02, 14) | Pending |
+| DBT-02 | Phase 09.2 (plans 03, 14) | Pending |
+| DBT-03 | Phase 09.2 (plan 03) | Pending |
+| DBT-04 | Phase 09.2 (plans 04, 07) | Pending |
+| DBT-05 | Phase 09.2 (plans 07, 09) | Pending |
+| DBT-06 | Phase 09.2 (plans 03, 04, 05, 06) | Pending |
+| DBT-07 | Phase 09.2 (plan 04) | Pending |
+| DBT-08 | Phase 09.2 (plans 04, 05, 06, 07, 10) | Pending |
+| DBT-09 | Phase 09.2 (plan 03) | Pending |
+| DBT-10 | Phase 09.2 (plans 08, 25) | Pending |
+| DBT-11 | Phase 09.2 (plans 08, 25) | Pending |
+| DBT-12 | Phase 09.2 (plans 10, 25) | Pending |
+| DBT-13 | Phase 09.2 (plans 10, 25) | Pending |
+| DBT-14 | Phase 09.2 (plan 11) | Pending |
+| DBT-15 | Phase 09.2 (plans 11, 25) | Pending |
+| DBT-16 | Phase 09.2 (plan 10) | Pending |
+| DBT-17 | Phase 09.2 (plans 13, 25) | Pending |
+| DBT-18 | Phase 09.2 (plans 13, 25) | Pending |
+| DBT-19 | Phase 09.2 (plans 08, 13, 21) | Pending |
+| DBT-20 | Phase 09.2 (plans 12, 25) | Pending |
+| DBT-21 | Phase 09.2 (plans 14, 18, 25) | Pending |
+| DBT-22 | Phase 09.2 (plan 02) | Pending |
+| DBT-23 | Phase 09.2 (plan 15) | Pending |
+| DBT-24 | Phase 09.2 (plans 15, 19) | Pending |
+| DBT-25 | Phase 09.2 (plans 08, 15, 21) | Pending |
+| DBT-26 | Phase 09.2 (plans 16, 25) | Pending |
+| DBT-27 | Phase 09.2 (plans 14, 19) | Pending |
+| DBT-28 | Phase 09.2 (plan 24) | Pending |
+| DBT-29 | Phase 09.2 (plan 09) | Pending |
+| DBT-30 | Phase 09.2 (plan 09) | Pending |
+| DBT-31 | Phase 09.2 (plan 09) | Pending |
+| DBT-32 | Phase 09.2 (plan 02) | Pending |
+| DBT-33 | Phase 09.2 (plans 22, 25) | Pending |
+| DBT-34 | Phase 09.2 (plans 23, 25) | Pending |
+| DBT-35 | Phase 09.2 (plans 26, 27) | Pending |
+| DBT-36 | Phase 09.2 (plan 13) | Pending |
+| DBT-37 | Phase 09.2 (plan 12) | Pending |
+| DBT-38 | Phase 09.2 (plans 03, 04, 09, 28) | Pending |
+| DBT-39 | Phase 09.2 (plans 17, 25) | Pending |
+| DBT-40 | Phase 09.2 (plans 14, 19) | Pending |
+| DBT-41 | Phase 09.2 (plan 28) | Pending |
+| DBT-42 | Phase 09.2 (plan 11) | Pending |
+| DBT-43 | Phase 09.2 (plan 24) | Pending |
+| DBT-44 | Phase 09.2 (plans 15, 25) | Pending |
+| DBT-45 | Phase 09.2 (plan 03) | Pending |
+| DBT-46 | Phase 09.2 (plans 02, 03) | Pending |
+| DBT-47 | Phase 09.2 (plan 14) | Pending |
+| DBT-48 | Phase 09.2 (plan 23) | Pending |
+| DBT-49 | Phase 09.2 (plans 23, 25) | Pending |
+| DBT-50 | Phase 09.2 (plans 14, 18) | Pending |
+| DBT-51 | Phase 09.2 (plans 14, 19) | Pending |
+| DBT-52 | Phase 09.2 (plans 14, 20) | Pending |
+| DBT-53 | Phase 09.2 (plan 21) | Pending |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |
@@ -659,10 +770,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 249 total (215 after Phase 09 planning, plus PAY-01..34 from Phase 09.1 planning on 2026-10-20; 193 after Phase 08.7 planning, plus SOCIAL-01..10, FOLLOW-01..06 and EXPL-01..06 from Phase 09 planning on 2026-10-19; 172 after Phase 08.6 planning, plus INSIGHT-01..21 from Phase 08.7 planning on 2026-10-18; previously 89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26, plus STORE-01..21 from Phase 08.2 planning on 2026-10-08, plus COURSE-01..15 from Phase 08.3 planning on 2026-10-13, plus STORE-22 from Phase 08.4 planning on 2026-10-14, plus COURSE-16..27 and STORE-23 from Phase 08.5 planning on 2026-10-15, plus COURSE-28..52 from Phase 08.6 planning on 2026-10-16; STORE-06 and STORE-07 amended by Phase 08.5)
-- Mapped to phases: 249
+- v1 requirements: 302 total (249 after Phase 09.1 planning, plus DBT-01..53 from Phase 09.2 planning on 2026-10-22; 215 after Phase 09 planning, plus PAY-01..34 from Phase 09.1 planning on 2026-10-20; 193 after Phase 08.7 planning, plus SOCIAL-01..10, FOLLOW-01..06 and EXPL-01..06 from Phase 09 planning on 2026-10-19; 172 after Phase 08.6 planning, plus INSIGHT-01..21 from Phase 08.7 planning on 2026-10-18; previously 89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26, plus STORE-01..21 from Phase 08.2 planning on 2026-10-08, plus COURSE-01..15 from Phase 08.3 planning on 2026-10-13, plus STORE-22 from Phase 08.4 planning on 2026-10-14, plus COURSE-16..27 and STORE-23 from Phase 08.5 planning on 2026-10-15, plus COURSE-28..52 from Phase 08.6 planning on 2026-10-16; STORE-06 and STORE-07 amended by Phase 08.5)
+- Mapped to phases: 302
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-11*
-*Last updated: 2026-10-20 — Phase 09.1 planning: PAY-01..34 added (### Payments: per-tenant payment-gateway access through a signed webhook behind a provider-neutral seam, the `access_grants` table replacing the global `email_allowlist`, the cut and return of a lapsed subscription with its own error code, the Pagamentos admin screens and the gateway-driven store purchase and revocation; D-485..D-509, UI-D-513..UI-D-532); the Out of Scope billing row and the Store intro and STORE-07 annotated. Previously 2026-10-19 — Phase 09 planning: SOCIAL-01..10, FOLLOW-01..06 and EXPL-01..06 added (### Rede Social: the toggleable `social` module with the follow graph, member posts shown only to followers in Explorar, bounded member media and the minimum moderation path; D-466..D-484, UI-D-491..UI-D-512); PROF-03 reworded (members browse the directory only while `social` is on) and set Pending until the phase delivers; MODER-04 split (member posts moved to SOCIAL-07); V2-CONT-01 annotated as specified. Previously 2026-10-18 — Phase 08.7 planning: INSIGHT-01..21 added (### Tenant Insights: the member's "Sua atividade" and the tenant admin's "Visão do dono" on a nightly per-tenant snapshot, "Em breve" for metrics with no source; D-455..D-465, UI-D-466..UI-D-490); V2-PLAT-04 annotated as partly promoted. Previously 2026-10-16 — Phase 08.6 planning: COURSE-28..52 added (### Courses, the member area: Início, Trilhas, Meu progresso, the streak, the live reminder, the new-content notices and the live reactivation; D-435..D-454). Previously 2026-10-14 — Phase 08.4: STORE-22 added; STORE-03, COURSE-08 and COURSE-11 reworded to the product-side write path (D-418). Previously 2026-10-13 — Phase 08.3 planning: COURSE-01..15 added (### Courses), the "Courses / LMS" and "Prototype extras" Out of Scope rows amended. Previously 2026-10-08 — Phase 08.2 planning: STORE-01..21 added (### Store), COMM-02 and COMM-03 amended (Pending until 08.2 delivers), Out of Scope billing row reworded.*
+*Last updated: 2026-10-22 — Phase 09.2 planning: DBT-01..53 added (### Database per tenant: one Supabase project per tenant, the control-plane mirror and registry, the explicit routing lanes, sealed credentials, the idempotent bootstrap with a step status, the migration fan-out with a version per tenant, the per-project queues, the move tool, the held-out screens and the panel Banco surfaces; D-533..D-547, UI-D-533..UI-D-548); V2-PLAT-07 annotated as retired by D-533. Previously 2026-10-20 — Phase 09.1 planning: PAY-01..34 added (### Payments: per-tenant payment-gateway access through a signed webhook behind a provider-neutral seam, the `access_grants` table replacing the global `email_allowlist`, the cut and return of a lapsed subscription with its own error code, the Pagamentos admin screens and the gateway-driven store purchase and revocation; D-485..D-509, UI-D-513..UI-D-532); the Out of Scope billing row and the Store intro and STORE-07 annotated. Previously 2026-10-19 — Phase 09 planning: SOCIAL-01..10, FOLLOW-01..06 and EXPL-01..06 added (### Rede Social: the toggleable `social` module with the follow graph, member posts shown only to followers in Explorar, bounded member media and the minimum moderation path; D-466..D-484, UI-D-491..UI-D-512); PROF-03 reworded (members browse the directory only while `social` is on) and set Pending until the phase delivers; MODER-04 split (member posts moved to SOCIAL-07); V2-CONT-01 annotated as specified. Previously 2026-10-18 — Phase 08.7 planning: INSIGHT-01..21 added (### Tenant Insights: the member's "Sua atividade" and the tenant admin's "Visão do dono" on a nightly per-tenant snapshot, "Em breve" for metrics with no source; D-455..D-465, UI-D-466..UI-D-490); V2-PLAT-04 annotated as partly promoted. Previously 2026-10-16 — Phase 08.6 planning: COURSE-28..52 added (### Courses, the member area: Início, Trilhas, Meu progresso, the streak, the live reminder, the new-content notices and the live reactivation; D-435..D-454). Previously 2026-10-14 — Phase 08.4: STORE-22 added; STORE-03, COURSE-08 and COURSE-11 reworded to the product-side write path (D-418). Previously 2026-10-13 — Phase 08.3 planning: COURSE-01..15 added (### Courses), the "Courses / LMS" and "Prototype extras" Out of Scope rows amended. Previously 2026-10-08 — Phase 08.2 planning: STORE-01..21 added (### Store), COMM-02 and COMM-03 amended (Pending until 08.2 delivers), Out of Scope billing row reworded.*
