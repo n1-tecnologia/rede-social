@@ -320,13 +320,13 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 
 - [ ] **DBT-01**: The central project holds a registry row per tenant-to-project binding (ref, API URL, publishable key, plan as information, state, credential version); several tenants may bind one project outside production and the production panel refuses a project already bound. *(D-537, D-540)*
 - [ ] **DBT-02**: Database URL, service key, publishable key, pooler URL and the `postgres` password of a project are stored only sealed (AES-256-GCM, key id, row id as AAD) and no API response, log line or error body contains them. *(D-539)*
-- [ ] **DBT-03**: The sealing helper opens values sealed under any key id still present in the keyring and a re-seal job moves every row to the current key id without downtime. *(D-539)*
+- [x] **DBT-03**: The sealing helper opens values sealed under any key id still present in the keyring and a re-seal job moves every row to the current key id without downtime. *(D-539)*
 - [ ] **DBT-04**: `GET /v1/public/tenants/by-host` and the platform list are answered from the central mirror (name, brand, status, enabled modules, primary host, project coordinates) without opening the tenant's database, so they work while that project is down. *(D-537)*
 - [ ] **DBT-05**: Brand and rules text are owned by the tenant project, status/modules/domains/registry by the central project; a reconcile job detects and heals drift in both directions. *(D-537)*
 - [ ] **DBT-06**: `withTenantTx(ctx, fn)` opens the transaction on the project registered for `ctx.tenantId`, and on no other. *(D-538)*
 - [ ] **DBT-07**: `withAdminTx` requires a tenant (or project) target and `withPlatformTx` opens the central project; both stay import-restricted to the kernel by Biome and `pnpm boundaries:negative` proves it. *(D-538)*
 - [ ] **DBT-08**: Every one of the 119 `withAdminTx` call sites is classified platform or tenant (or split) in a checked-in inventory and a unit test fails when a call site has no entry. *(D-538)*
-- [ ] **DBT-09**: Connection pools are held in a bounded LRU keyed by project and credential version, with a small per-pool `max`, an idle timeout, graceful eviction that never ends an in-flight transaction, and a circuit breaker for an unreachable project. *(D-538)*
+- [x] **DBT-09**: Connection pools are held in a bounded LRU keyed by project and credential version, with a small per-pool `max`, an idle timeout, graceful eviction that never ends an in-flight transaction, and a circuit breaker for an unreachable project. *(D-538)*
 - [ ] **DBT-10**: A bearer token is verified against the JWKS and issuer of the project selected by the request host (platform host selects the central project) and never against the token's own `iss`; a token of project A presented on a host of project B answers 401. *(D-23, D-538)*
 - [ ] **DBT-11**: A `super_admin` session verifies only against the central project and is refused on a tenant host; a tenant member session is refused on the platform host. *(D-23, D-538)*
 - [ ] **DBT-12**: A payment-gateway delivery on the unchanged URL `/v1/webhooks/{provider}/{integrationId}` resolves its tenant and project through a central integration index before any tenant database is opened, then records and enqueues inside that tenant's database. *(D-488, D-538)*
@@ -362,8 +362,8 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-42**: The allow-list adapter and reconcile job act per project (host to tenant to project), serialised per project. *(D-538, D-542)*
 - [ ] **DBT-43**: PROJECT.md is amended (tenant projects are physically separate and Pro; `tenant_id` + RLS stay as defense in depth; Free-plan line superseded). *(D-540, D-543)*
 - [ ] **DBT-44**: The API image carries both migration sets, `supabase/roles.sql` and a deterministic manifest, so the running API knows the schema version it requires without a database call; a production boot whose manifest is missing or lists no tenant file stops with a named error. *(D-544, D-545, D-547)*
-- [ ] **DBT-45**: A tenant's project binding is cached for 15 seconds and the last good binding is served for at most 10 minutes, only when the central read fails; past that window, or with no last-good value, resolution fails closed with `TENANT_UNAVAILABLE`. *(D-537, D-538)*
-- [ ] **DBT-46**: A tenant with no binding fails closed: resolution raises `TENANT_PROJECT_UNBOUND`, and a deferred constraint trigger binds a new tenant to the project flagged default at commit or raises when none is flagged, so no code path falls back to the central project. *(D-538, D-540)*
+- [x] **DBT-45**: A tenant's project binding is cached for 15 seconds and the last good binding is served for at most 10 minutes, only when the central read fails; past that window, or with no last-good value, resolution fails closed with `TENANT_UNAVAILABLE`. *(D-537, D-538)*
+- [x] **DBT-46**: A tenant with no binding fails closed: resolution raises `TENANT_PROJECT_UNBOUND`, and a deferred constraint trigger binds a new tenant to the project flagged default at commit or raises when none is flagged, so no code path falls back to the central project. *(D-538, D-540)*
 - [ ] **DBT-47**: A break-glass command re-derives a project's whole credential set through the platform token alone (never from the stored values), re-seals every column under the current key, bumps the credential version and refuses while a bootstrap step is running. *(D-539, D-541)*
 - [ ] **DBT-48**: While a tenant has an open move, no panel route or script can reactivate, edit, re-invite or re-bootstrap it (409 `TENANT_MOVING`), the mirror reconcile skips it, and two concurrent moves of one tenant cannot both start. *(D-535, D-536)*
 - [ ] **DBT-49**: After the last move the central project holds platform data only: `--confirm-delete` removes the moved tenant's rows, files and exclusive accounts from the source, and `platform:central-clean` lists any residue and, with `--strict-empty`, requires every non-mirror table to be empty before the default-project flag is cleared. *(D-534)*
@@ -704,13 +704,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-34 | Phase 09.1 (plans 17, 19) | Complete |
 | DBT-01 | Phase 09.2 (plans 02, 14) | Pending |
 | DBT-02 | Phase 09.2 (plans 03, 14) | Pending |
-| DBT-03 | Phase 09.2 (plan 03) | Pending |
+| DBT-03 | Phase 09.2 (plan 03) | Complete |
 | DBT-04 | Phase 09.2 (plans 04, 07) | Pending |
 | DBT-05 | Phase 09.2 (plans 07, 09) | Pending |
 | DBT-06 | Phase 09.2 (plans 03, 04, 05, 06) | Pending |
 | DBT-07 | Phase 09.2 (plan 04) | Pending |
 | DBT-08 | Phase 09.2 (plans 04, 05, 06, 07, 10) | Pending |
-| DBT-09 | Phase 09.2 (plan 03) | Pending |
+| DBT-09 | Phase 09.2 (plan 03) | Complete |
 | DBT-10 | Phase 09.2 (plans 08, 25) | Pending |
 | DBT-11 | Phase 09.2 (plans 08, 25) | Pending |
 | DBT-12 | Phase 09.2 (plans 10, 25) | Pending |
@@ -746,8 +746,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-42 | Phase 09.2 (plan 11) | Pending |
 | DBT-43 | Phase 09.2 (plan 24) | Pending |
 | DBT-44 | Phase 09.2 (plans 15, 25) | Pending |
-| DBT-45 | Phase 09.2 (plan 03) | Pending |
-| DBT-46 | Phase 09.2 (plans 02, 03) | Pending |
+| DBT-45 | Phase 09.2 (plan 03) | Complete |
+| DBT-46 | Phase 09.2 (plans 02, 03) | Complete |
 | DBT-47 | Phase 09.2 (plan 14) | Pending |
 | DBT-48 | Phase 09.2 (plan 23) | Pending |
 | DBT-49 | Phase 09.2 (plans 23, 25) | Pending |

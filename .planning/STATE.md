@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 3
+current_plan: 4
 status: executing
-stopped_at: Completed 09.2-01-PLAN.md (sketch 014 approved provisionally); 09.2-02 also done; next is 09.2-03 (wave 2)
-last_updated: "2026-10-22T21:32:43.672Z"
+stopped_at: Completed 09.2-03-PLAN.md (sealed registry, bounded pools, routed lanes; plans 01-03 done); next is 09.2-04 (wave 3)
+last_updated: "2026-10-22T21:56:53.644Z"
 last_activity: 2026-10-22
-last_activity_desc: Phase 09.2 execution started
-state_head: e752909bc0a32929491c1ebc2d3ede000b1d0287
+last_activity_desc: Completed 09.2-03 (sealed registry, bounded pools, routed lanes)
+state_head: 4d201fd5ff0d2a6f3c7b224f374c07aec41906d8
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 237
+  completed_plans: 238
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 3
+Current Plan: 4
 Total Plans in Phase: 28
-Plan: 2 of 28 done (01 design gate approved provisionally, 02 tracer); next is plan 03 (wave 2)
+Plan: 4 of 28 next (01 design gate approved provisionally, 02 tracer and 03 routing done)
 Status: Ready to execute
-Last activity: 2026-10-22 — Phase 09.2 execution started
+Last activity: 2026-10-22 — Completed 09.2-03 (sealed registry, bounded pools, routed lanes)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -295,6 +295,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.1 P22 | 3 min | 2 tasks | 11 files |
 | Phase 09.2 P02 | 13 min | 3 tasks | 23 files |
 | Phase 09.2 P01 | 30 min | 3 tasks | 3 files |
+| Phase 09.2 P03 | 21 min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -985,6 +986,7 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-22 A-G1: Liberar e-mail on a gateway-cut address keeps answering 200 and writing the idempotent manual row; the Acessos host toasts from the server's returned state (subscription_pending info toast, six seconds). Alternative: skip the write in releaseEmail. — Keep D-489, fix the notice; PAY-22 pre-account release untouched
 - [Phase 09.2]: 09.2-02: migration runner imports no kernel module and requires a single-connection client (advisory lock is session-scoped); errors carry code and version only — Lets the operator command, CI and the bootstrap Job reuse it with only a database URL
 - [Phase 09.2]: 09.2-02: tenants_bind_default is a deferred constraint trigger; production must clear projects.is_default after the last move (plan 25 runbook) so an unbound tenant insert fails at commit — Fail closed (D-538, DBT-46) without breaking raw SQL tenant inserts of the existing suites
+- [Phase 09.2]: 09.2-03: routing refusals (TENANT_PROJECT_UNBOUND, TENANT_UNAVAILABLE) are mapped once in errorEnvelope as 503; the resolver never caches a negative answer and backs off 5 s after a failed refresh; withPlatformTx joins the Biome admin-lane restriction and project-pools stays unexported — Fail closed with no fallback to project 0 (D-538); a module must not reach a raw handle or a service_role lane
 
 ### Pending Todos
 
@@ -1093,6 +1095,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-22T21:32:43.447Z
-Stopped at: Completed 09.2-01-PLAN.md (sketch 014 approved provisionally); 09.2-02 also done; next is 09.2-03 (wave 2)
+Last session: 2026-10-22T21:56:53.427Z
+Stopped at: Completed 09.2-03-PLAN.md (sealed registry, bounded pools, routed lanes; plans 01-03 done); next is 09.2-04 (wave 3)
 Resume file: None
