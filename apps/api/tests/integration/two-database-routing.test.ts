@@ -1,9 +1,14 @@
+import { createServer, type Server } from 'node:net';
 import { sqlClient } from '@rede-social/core/db';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import {
   closeAllPools,
   invalidateProject,
 } from '@rede-social/core/server/tenancy/project-registry';
+import {
+  cachedTenantHostCount,
+  resolveTenantHost,
+} from '@rede-social/core/server/tenancy/tenant-host';
 import { sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -306,5 +311,199 @@ describe('fail closed: an unbound or unreachable tenant is never served from ano
     } finally {
       await down.cleanup();
     }
+  });
+});
+
+/**
+ * 09.2-04, the tracer (DBT-04, D-537): the shell's by-host answer is read from the CENTRAL mirror through the
+ * platform lane, never from the tenant's own database, so it survives an unreachable tenant project. Every
+ * tenant project in this block points at a port nothing answers on (closed, or a listener that drops the
+ * connection and counts it), so a read that wrongly reached the tenant database could not succeed.
+ */
+describe('by-host is served from the mirror while the tenant database is down (DBT-04, D-537)', () => {
+  const CLOSED_PORT_URL = 'postgres://api_user:postgres@127.0.0.1:1/none';
+  type ByHostBody = {
+    slug: string;
+    displayName: string;
+    isPrimary: boolean;
+    primaryHost: string;
+    status: string;
+  };
+  const byHost = (host: string) =>
+    api.request(`/v1/public/tenants/by-host?host=${encodeURIComponent(host)}`);
+
+  /** A listener that accepts a TCP connection and drops it at once: an unreachable Postgres that counts. */
+  const listen = (): Promise<{ server: Server; port: number; attempts: () => number }> =>
+    new Promise((resolve) => {
+      let attempts = 0;
+      const server = createServer((socket) => {
+        attempts += 1;
+        socket.destroy();
+      });
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        resolve({
+          server,
+          port: typeof address === 'object' && address ? address.port : 0,
+          attempts: () => attempts,
+        });
+      });
+    });
+
+  let down: TenantOnB;
+  const alias = `alias-${RUN}.localhost`;
+  const unverified = `unverified-${RUN}.localhost`;
+
+  beforeAll(async () => {
+    down = await provisionTenantOnB({
+      slug: `mirror-down-${RUN}`.slice(0, 40),
+      databaseUrl: CLOSED_PORT_URL,
+    });
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+      values (${down.tenantId}::uuid, ${alias}, false, now()),
+             (${down.tenantId}::uuid, ${unverified}, false, null)`;
+  });
+
+  afterAll(async () => {
+    await adminSql`delete from public.tenant_domains where host in (${alias}, ${unverified})`;
+    await down?.cleanup();
+  });
+
+  it('tracer: the primary host answers 200 from the mirror, and the same tenant answers 503 TENANT_UNAVAILABLE on bootstrap', async () => {
+    const res = await byHost(down.host);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ByHostBody;
+    // The central mirror carries the tenant row: the answer names ITS slug, and no database B row exists
+    // behind a closed port to contradict it.
+    expect(body.slug).toBe(`mirror-down-${RUN}`.slice(0, 40));
+    expect(body.displayName).toBe('Tenant B (central mirror)');
+    expect(body.isPrimary).toBe(true);
+    expect(body.primaryHost).toBe(down.host);
+    expect(body.status).toBe('active');
+
+    // The data plane of the same tenant is down: 503 once the breaker has opened (and before it, too).
+    let last: Envelope | undefined;
+    let status = 0;
+    for (let i = 0; i < 4; i += 1) {
+      const res2 = await bootstrap(down.token, down.host);
+      status = res2.status;
+      last = (await res2.json()) as Envelope;
+      expect(status).toBe(503);
+    }
+    expect(last?.error.code).toBe('TENANT_UNAVAILABLE');
+
+    // ...and the shell's answer is unchanged with the breaker open.
+    expect((await byHost(down.host)).status).toBe(200);
+  });
+
+  it('P8 adjacency: a verified alias answers from the mirror and names the primary; an unverified one is unknown', async () => {
+    const res = await byHost(alias);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ByHostBody;
+    expect(body.isPrimary).toBe(false);
+    expect(body.primaryHost).toBe(down.host);
+
+    const unknown = await byHost(unverified);
+    expect(unknown.status).toBe(404);
+    expect(((await unknown.json()) as Envelope).error.code).toBe('TENANT_NOT_FOUND');
+  });
+
+  it('P8 adjacency: hosts of two tenants that differ by one label never cross-resolve', async () => {
+    const other = `${down.host.replace(/^[^.]+/, (label) => `${label}x`)}`;
+    const near = await byHost(other);
+    expect(near.status).toBe(404);
+    // ...while the exact host of the first tenant still answers its own tenant.
+    const own = (await (await byHost(down.host)).json()) as ByHostBody;
+    expect(own.slug).toBe(`mirror-down-${RUN}`.slice(0, 40));
+  });
+
+  it('P9 empty: unknown, unverified, whitespace and no-row hosts answer 404 with no tenant database opened', async () => {
+    const probe = await listen();
+    const counted = await provisionTenantOnB({
+      slug: `mirror-count-${RUN}`.slice(0, 40),
+      databaseUrl: `postgres://api_user:postgres@127.0.0.1:${probe.port}/none`,
+    });
+    try {
+      const noRow = `no-row-${RUN}.example.com`;
+      const cases = [noRow, unverified, '  ', ' '];
+      for (const host of cases) {
+        const res = await byHost(host);
+        expect(res.status).toBe(404);
+        expect(((await res.json()) as Envelope).error.code).toBe('TENANT_NOT_FOUND');
+      }
+      // The query-level empty string fails validation before any lookup (no resolver, no database).
+      const empty = await api.request('/v1/public/tenants/by-host?host=');
+      expect(empty.status).toBe(400);
+      // The resolver itself treats empty and whitespace as unknown.
+      expect(await resolveTenantHost('')).toEqual({ kind: 'unknown' });
+      expect(await resolveTenantHost('   ')).toEqual({ kind: 'unknown' });
+
+      // A host that exists for the tenant bound to the probe port is served from the mirror too...
+      expect((await byHost(counted.host)).status).toBe(200);
+      // ...and none of this opened a connection to a tenant database.
+      expect(probe.attempts()).toBe(0);
+
+      // One central read per registrable no-row host: it is cached once, a second request adds no entry.
+      const before = cachedTenantHostCount();
+      expect((await byHost(noRow)).status).toBe(404);
+      expect(cachedTenantHostCount()).toBe(before);
+    } finally {
+      await counted.cleanup();
+      await new Promise((resolve) => probe.server.close(resolve));
+    }
+  });
+
+  it('the breaker of a tenant project opens at the third failed connection: the 4th request touches no socket', async () => {
+    const probe = await listen();
+    const counted = await provisionTenantOnB({
+      slug: `breaker-${RUN}`.slice(0, 40),
+      databaseUrl: `postgres://api_user:postgres@127.0.0.1:${probe.port}/none`,
+    });
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        expect((await bootstrap(counted.token, counted.host)).status).toBe(503);
+      }
+      const afterThree = probe.attempts();
+      expect(afterThree).toBeGreaterThanOrEqual(3);
+      const res = await bootstrap(counted.token, counted.host);
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as Envelope).error.code).toBe('TENANT_UNAVAILABLE');
+      expect(probe.attempts()).toBe(afterThree);
+      // The by-host answer of that tenant is unaffected.
+      expect((await byHost(counted.host)).status).toBe(200);
+    } finally {
+      await counted.cleanup();
+      await new Promise((resolve) => probe.server.close(resolve));
+    }
+  });
+
+  it('P10 encoding: case, port and a trailing dot share one answer; an underscore, an IDN label and 300 characters are unknown before the cache', async () => {
+    const upper = down.host.toUpperCase();
+    const variants = [`${upper}:3000`, `${down.host}.`, `${down.host}:8080`, upper];
+    for (const variant of variants) {
+      const res = await byHost(variant);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as ByHostBody).primaryHost).toBe(down.host);
+    }
+
+    const before = cachedTenantHostCount();
+    const malformed = [
+      `under_score-${RUN}.localhost`,
+      `münchen-${RUN}.localhost`,
+      `${'a'.repeat(300)}.localhost`,
+    ];
+    for (const host of malformed) {
+      const res = await byHost(host);
+      expect([400, 404]).toContain(res.status);
+      if (res.status === 404) {
+        expect(((await res.json()) as Envelope).error.code).toBe('TENANT_NOT_FOUND');
+      }
+    }
+    // None of them was ever admitted as a cache key (the registrable-host predicate runs first).
+    expect(cachedTenantHostCount()).toBe(before);
+    expect(await resolveTenantHost('under_score.localhost')).toEqual({ kind: 'unknown' });
+    expect(await resolveTenantHost('münchen.localhost')).toEqual({ kind: 'unknown' });
+    expect(await resolveTenantHost(`${'a'.repeat(300)}.localhost`)).toEqual({ kind: 'unknown' });
   });
 });

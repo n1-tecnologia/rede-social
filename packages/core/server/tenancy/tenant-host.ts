@@ -7,7 +7,7 @@ import {
   type TenantStatus,
 } from '@rede-social/contracts';
 import { and, eq, isNotNull } from 'drizzle-orm';
-import { withAdminTx } from '../../db/admin-tx';
+import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenants } from '../../db/schema';
 
 /**
@@ -50,7 +50,11 @@ const cache = createBoundedTtlCache<TenantHostResolution>(MAX_ENTRIES);
  * refuses members of a suspended tenant on its own.
  *
  * A host that cannot possibly be registered (`isRegistrableHost`, the `tenant_domains_host_chk`
- * predicate) is answered `unknown` before the cache and before the admin-lane query.
+ * predicate) is answered `unknown` before the cache and before the platform-lane query.
+ *
+ * 09.2-04 (D-537): `tenant_domains` and `tenants` are read from the CENTRAL project through the platform
+ * lane, never from the tenant's own database, so the shell resolves a host, brand and status even while the
+ * tenant's project is down.
  */
 export async function resolveTenantHost(rawHost: string): Promise<TenantHostResolution> {
   const host = normalizeHost(rawHost);
@@ -59,7 +63,7 @@ export async function resolveTenantHost(rawHost: string): Promise<TenantHostReso
   const hit = cache.get(host);
   if (hit) return hit;
 
-  const value = await withAdminTx<TenantHostResolution>(async (tx) => {
+  const value = await withPlatformTx<TenantHostResolution>(async (tx) => {
     const rows = await tx
       .select({
         tenantId: tenants.id,
