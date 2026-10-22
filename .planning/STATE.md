@@ -10,7 +10,7 @@ last_activity: 2026-10-21
 last_activity_desc: Phase 09.1 gap-closure execution started (plans 21 and 22)
 state_head: 032dcf721623e512e87c46dd5c6f18f9183026e2
 progress:
-  total_phases: 23
+  total_phases: 24
   completed_phases: 0
   total_plans: 240
   completed_plans: 235
@@ -1077,6 +1077,7 @@ None yet.
 - Phase 08.6 inserted after Phase 08.5: Área de Membros: overview, member tracks, Meu progresso with study streak, live reminders and new-content notices; certificates deferred
 - Phase 08.7 inserted after Phase 08.6: Dados Reais do Perfil: Sua atividade and Visão do dono on the tenant's own data (pendências 8-10 from FRONT-AJUSTES); planned ahead, executes after 08.6
 - Phase 09.1 inserted after Phase 9: Acesso por gateway de pagamento: webhook per-tenant (Kiwify first, provider-neutral) replaces the global email_allowlist and unlocks store products; runs before Phase 10 (URGENT)
+- Phase 09.2 inserted after Phase 9: Banco por Tenant: one Supabase project per tenant (provisioning, migration fan-out, per-tenant routing); runs after 09.1, before 10; 10 open decisions listed in the ROADMAP notes
 
 ## Deferred Items
 
