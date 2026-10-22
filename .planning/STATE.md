@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 12
+current_plan: 5
 status: executing
-stopped_at: Completed 09.2-04-PLAN.md (plans 01-04 done); next is 09.2-12
-last_updated: "2026-10-22T23:21:55.974Z"
+stopped_at: "Completed 09.2-12-PLAN.md (plans 01, 02, 03, 04, 12 done); next is 09.2-05 (wave 4: 05, 06, 08)"
+last_updated: "2026-10-22T23:37:40.956Z"
 last_activity: 2026-10-22
-last_activity_desc: Completed 09.2-04 (explicit lanes, host mirror, admin-lane inventory)
-state_head: 73beb6599ca7beccb91fd4719bddb822fafd7deb
+last_activity_desc: Completed 09.2-12 (Management API client behind a provider seam, fake, limiter, reason catalog, probe)
+state_head: 5041f5883a8b7daae6935cbf20d811111cf16678
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 239
+  completed_plans: 240
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 12
+Current Plan: 5
 Total Plans in Phase: 28
-Plan: 12 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes done; 12 runs right after 04, not 05)
+Plan: 05 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client done; wave 4 follows: 05, 06, 08 in that order)
 Status: Ready to execute
-Last activity: 2026-10-22 — Completed 09.2-04 (explicit lanes, host mirror, admin-lane inventory)
+Last activity: 2026-10-22 — Completed 09.2-12 (Management API client behind a provider seam, fake, limiter, reason catalog, probe)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -297,6 +297,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P01 | 30 min | 3 tasks | 3 files |
 | Phase 09.2 P03 | 21 min | 3 tasks | 23 files |
 | Phase 09.2 P04 | 22 min | 3 tasks | 23 files |
+| Phase 09.2 P12 | 24min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -990,6 +991,8 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-03: routing refusals (TENANT_PROJECT_UNBOUND, TENANT_UNAVAILABLE) are mapped once in errorEnvelope as 503; the resolver never caches a negative answer and backs off 5 s after a failed refresh; withPlatformTx joins the Biome admin-lane restriction and project-pools stays unexported — Fail closed with no fallback to project 0 (D-538); a module must not reach a raw handle or a service_role lane
 - [Phase 09.2]: 09.2-04: platform lane built from the central handle alone (createPlatformLane) because the registry reads through it; the deprecated withAdminTx(fn) overload stays until plan 10, declared last so Parameters<typeof withAdminTx>[0] still yields the transaction callback.
 - [Phase 09.2]: 09.2-04: ensureProjectZero renames project 0 from the placeholder project-0 to SUPABASE_PROJECT_REF or local and fills api_url; tests and pgTAP identify project 0 by is_central, never by ref; production's central row keeps the placeholder until plans 09/15 call it.
+- [Phase 09.2]: 09.2-12: PROJECT_PROVIDER has no zod default so unset stays distinguishable from an explicit fake: the expand release boots, assertProductionEnv refuses an explicit fake in production, projects/index.ts throws when production resolves to the fake
+- [Phase 09.2]: 09.2-12: the Management API organisation pin covers every adapter method except describe and health (one cached describe per ref); getPostgrestConfig drops jwt_secret inside the adapter
 
 ### Pending Todos
 
@@ -1098,6 +1101,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-22T23:21:50.588Z
-Stopped at: Completed 09.2-04-PLAN.md (plans 01-04 done); next is 09.2-12
+Last session: 2026-10-22T23:37:40.729Z
+Stopped at: Completed 09.2-12-PLAN.md (plans 01, 02, 03, 04, 12 done); next is 09.2-05 (wave 4: 05, 06, 08)
 Resume file: None

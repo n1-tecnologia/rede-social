@@ -337,7 +337,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-17**: The bootstrap is an ordered list of idempotent steps (verify project, roles, tenant schema, Data API closure and Auth/Storage/Realtime configuration, bucket check, tenant row and modules, invite schedule), each persisting status and a reason code. *(D-542)*
 - [ ] **DBT-18**: "Tentar de novo" resumes at the first step that is not done and never redoes a done step. *(D-542)*
 - [ ] **DBT-19**: A tenant whose bootstrap is incomplete answers the by-host status `preparing`, accepts no login and the API refuses with a dedicated code. *(D-542, D-545)*
-- [ ] **DBT-20**: The Management API client (real and fake behind one interface) honours the 120 requests/min limit with backoff on 429 using `X-RateLimit-Reset`, waits for a project in `COMING_UP`, and maps every failure to a catalog reason code. *(D-541)*
+- [x] **DBT-20**: The Management API client (real and fake behind one interface) honours the 120 requests/min limit with backoff on 429 using `X-RateLimit-Reset`, waits for a project in `COMING_UP`, and maps every failure to a catalog reason code. *(D-541)*
 - [ ] **DBT-21**: The manual access fields (database password, service key, publishable key) are required only when the pre-check answers `manualAccess` and are validated against the project before anything is stored. *(D-541)*
 - [x] **DBT-22**: The migration runner applies a directory of SQL files to a database, one transaction per file with its ledger row, skips files already in the ledger, refuses a file whose recorded checksum changed, and is idempotent on re-run. *(D-545, D-547)*
 - [ ] **DBT-23**: "Migrar todos" runs the central set then every tenant project with bounded concurrency, isolates a failing tenant, and supports `--dry-run` and `--tenant <slug>`. *(D-544)*
@@ -354,7 +354,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-34**: The move suspends the tenant, waits for cache expiry and quiescence, flips the registry pointer, reactivates, keeps the old rows and can roll back by repointing; `--dry-run` writes nothing and an audit row is always written. *(D-535, D-536)*
 - [ ] **DBT-35**: The Phase 08.1 shared-identity flows are removed, sign-up of an existing e-mail answers the Phase 1 duplicate response, and per-tenant recovery works. *(D-533)*
 - [ ] **DBT-36**: `tenant_invites.created_by` no longer requires a row in the tenant project's `users` (the creator is a central `super_admin`). *(D-533, D-542)*
-- [ ] **DBT-37**: A fake project provider (no network) backs local, CI and test runs and cannot be selected by a production environment. *(D-540)*
+- [x] **DBT-37**: A fake project provider (no network) backs local, CI and test runs and cannot be selected by a production environment. *(D-540)*
 - [ ] **DBT-38**: A small suite over two databases proves routing: tenant A's rows exist only in database A, a lane for A cannot read B, a job enqueued for A lands only in A's pg-boss schema. *(D-540)*
 - [ ] **DBT-39**: The web tier receives the tenant project's own public URL and publishable key from the by-host answer for `@supabase/ssr`, the Realtime client, CSP, manifest icons and the TUS endpoint, and clears stale `sb-*` cookies of another project. *(D-537, D-541)*
 - [ ] **DBT-40**: Credentials are write-only in the panel; "Substituir credenciais" validates new values against the project before replacing anything. *(D-539)*
@@ -721,7 +721,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-17 | Phase 09.2 (plans 13, 25) | Pending |
 | DBT-18 | Phase 09.2 (plans 13, 25) | Pending |
 | DBT-19 | Phase 09.2 (plans 08, 13, 21) | Pending |
-| DBT-20 | Phase 09.2 (plans 12, 25) | Pending |
+| DBT-20 | Phase 09.2 (plans 12, 25) | Complete |
 | DBT-21 | Phase 09.2 (plans 14, 18, 25) | Pending |
 | DBT-22 | Phase 09.2 (plan 02) | Complete |
 | DBT-23 | Phase 09.2 (plan 15) | Pending |
@@ -738,7 +738,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-34 | Phase 09.2 (plans 23, 25) | Pending |
 | DBT-35 | Phase 09.2 (plans 26, 27) | Pending |
 | DBT-36 | Phase 09.2 (plan 13) | Pending |
-| DBT-37 | Phase 09.2 (plan 12) | Pending |
+| DBT-37 | Phase 09.2 (plan 12) | Complete |
 | DBT-38 | Phase 09.2 (plans 03, 04, 09, 28) | Pending |
 | DBT-39 | Phase 09.2 (plans 17, 25) | Pending |
 | DBT-40 | Phase 09.2 (plans 14, 19) | Pending |
