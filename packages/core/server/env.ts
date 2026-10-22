@@ -143,6 +143,20 @@ export const env = createEnv({
     PROJECT_POOL_CACHE_MAX: z.coerce.number().int().min(1).max(200).default(24),
     PROJECT_POOL_IDLE_S: z.coerce.number().int().min(1).max(3600).default(20),
 
+    /**
+     * 09.2-12 (D-541, D-540): which `ProjectProvider` the bootstrap, the health job and the move tool use.
+     * `fake` (the effective default) needs no network and cannot run in production; `supabase` is the
+     * Management API adapter and needs `SUPABASE_PAT`, `SUPABASE_ORG_SLUG` and `PLATFORM_MASTER_KEYS`.
+     * Deliberately NOT given a zod default: an unset value must stay distinguishable from an explicit
+     * `fake`, so `assertProductionEnv` can refuse the explicit one while the expand release (which names
+     * neither) still boots; `projects/index.ts` resolves unset to `fake` and refuses it in production.
+     */
+    PROJECT_PROVIDER: z.enum(['fake', 'supabase']).optional(),
+    /** The Supabase organisation that owns the tenant projects; a project of any other one is refused. */
+    SUPABASE_ORG_SLUG: z.string().min(1).optional(),
+    /** SMTP password the bootstrap writes into a tenant project's Auth configuration (plan 13). */
+    PROJECT_AUTH_SMTP_PASS: z.string().min(1).optional(),
+
     /** Send Email Hook transport (RESEARCH Pattern 6). `local` posts to Mailpit's HTTP API. */
     MAIL_TRANSPORT: z.enum(['local', 'resend']).default('local'),
     RESEND_API_KEY: z.string().min(1).optional(),
