@@ -564,6 +564,37 @@ uri = "pg-functions://postgres/public/hook_before_user_created_allowlist"
 enabled = false
 uri = "pg-functions://postgres/public/hook_custom_access_token_allowlist"
 
+# Custom SMTP for the hosted project (quick 261022-fku). The Send Email Hook above stays the ONLY
+# sender: while it is enabled GoTrue never opens an SMTP connection, and every mail is still rendered
+# and delivered by the API through the Resend HTTP API. This block exists for one reason: Supabase
+# lets a project change `[auth.rate_limit] email_sent` only when it has its own SMTP server. Without
+# it the whole project is capped at 2 auth e-mails per hour (signup, recover, invite and resend are
+# one shared sum, and a request counts even when the hook then answers 500), which is the
+# 429 over_email_send_rate_limit seen on /recover and /invite.
+# Resend SMTP: implicit TLS on 465, the user is the literal `resend`, the password is a Resend API
+# key (sending access, restricted to the verified domain) that lives ONLY in the GitHub environment
+# secret RESEND_SMTP_PASS and reaches the CLI through env(): it is never written in this file.
+# `admin_email` is the sender the hook already uses (`no-reply@` + MAIL_DOMAIN in deploy-api.yml);
+# change both together (apps/api/tests/unit/production-auth-config.test.ts compares them).
+# The pinned `auth.email.template.recovery` below stays: the hook renders every mail, so GoTrue's own
+# template is never used and dropping the pin would only push a template diff for nothing.
+[remotes.production.auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 465
+user = "resend"
+pass = "env(RESEND_SMTP_PASS)"
+admin_email = "no-reply@n1marketingdigital.com.br"
+sender_name = "Rede Social"
+
+# Project-wide ceiling on auth e-mails per hour, summed over every tenant (docs/deploy/auth-mail.md
+# "Production e-mail rate limit"). 100 instead of the inherited 2: room for a launch-hour burst of
+# sign-up confirmations plus invites and recoveries across the pilot tenants, still a hard cap on a
+# flood. Too low is itself a denial of service for recovery, so read that section before lowering it.
+# The per-person floor stays `max_frequency = "60s"` in `[remotes.production.auth.email]`.
+[remotes.production.auth.rate_limit]
+email_sent = 100
+
 # Free plan + default e-mail provider: the Management API answers 400 ("Email template modification
 # is not available for free tier projects using the default email provider") to any template change,
 # and that rejects the WHOLE auth push. Pin the hosted defaults (subject = the project's current
