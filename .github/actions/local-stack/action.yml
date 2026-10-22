@@ -56,6 +56,12 @@ runs:
       shell: bash
       run: supabase db reset
 
+    - name: Apply the central migration set
+      # Phase 09.2-02 (D-547): the platform registry (schema `platform`) is a second set with its own
+      # directory and ledger; the Supabase CLI cannot see it, so the in-house runner applies it here.
+      shell: bash
+      run: pnpm db:central
+
     - name: Give api_user a local login password
       shell: bash
       run: bash scripts/db-local-role.sh
