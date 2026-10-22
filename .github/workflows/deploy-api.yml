@@ -110,11 +110,25 @@ jobs:
       - name: Empty signing-keys file for the CLI (config.toml references it)
         run: echo '[]' > supabase/signing_keys.json
 
+      # quick 261022-fku: [remotes.production.auth.email.smtp] in supabase/config.toml reads its password
+      # through env(RESEND_SMTP_PASS). A GitHub secret that does not exist resolves to an empty string, which
+      # would push an enabled SMTP block with no password, so fail here, before the migrations, instead.
+      - name: Require the auth SMTP password
+        env:
+          RESEND_SMTP_PASS: ${{ secrets.RESEND_SMTP_PASS }}
+        run: |
+          if [ -z "$RESEND_SMTP_PASS" ]; then
+            echo "::error::GitHub environment secret RESEND_SMTP_PASS is not set on the production environment. Create it, then re-run this job (docs/deploy/auth-mail.md, Production e-mail rate limit)."
+            exit 1
+          fi
+
       # Every Supabase CLI command validates config.toml's `[auth.hook.send_email]` block, so each
       # step that runs the CLI needs SEND_EMAIL_HOOK_SECRETS (same value as Secret Manager).
       - name: Migrations (roles included)
         env:
           SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
+          # The production remote table reads its SMTP password through env() (quick 261022-fku).
+          RESEND_SMTP_PASS: ${{ secrets.RESEND_SMTP_PASS }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
@@ -140,6 +154,8 @@ jobs:
       - name: Push auth configuration (Send Email Hook -> API)
         env:
           SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
+          # The production remote table reads its SMTP password through env() (quick 261022-fku).
+          RESEND_SMTP_PASS: ${{ secrets.RESEND_SMTP_PASS }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
         run: supabase config push --project-ref "$SUPABASE_PROJECT_ID" --yes

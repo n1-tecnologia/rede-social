@@ -105,3 +105,58 @@ describe('production hosted auth e-mail config (quick 261022-fku)', () => {
     expect(unquote(smtp().admin_email ?? '')).toBe(`no-reply@${domains[0]}`);
   });
 });
+
+/**
+ * The step bodies of the job `migrate-and-deploy-prod`: a step starts at a line made of six spaces, a
+ * dash, a space and `name:` or `uses:`, and runs to the next such line. Comment lines directly above a
+ * step fall into the previous slice, so assertions look at step bodies only.
+ */
+function productionSteps(): { name: string; body: string }[] {
+  const lines = WORKFLOW.split('\n');
+  const jobStart = lines.findIndex((line) => /^ {2}migrate-and-deploy-prod:\s*$/.test(line));
+  if (jobStart === -1) throw new Error('deploy-api.yml has no migrate-and-deploy-prod job');
+  const steps: { name: string; lines: string[] }[] = [];
+  for (const line of lines.slice(jobStart + 1)) {
+    if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(line)) break;
+    const start = line.match(/^ {6}- (?:name|uses):\s*(.*)$/);
+    if (start) {
+      steps.push({ name: line.includes('name:') ? (start[1] ?? '').trim() : '', lines: [line] });
+    } else {
+      steps[steps.length - 1]?.lines.push(line);
+    }
+  }
+  return steps.map((s) => ({ name: s.name, body: s.lines.join('\n') }));
+}
+
+describe('production deploy wiring of the SMTP password (quick 261022-fku)', () => {
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal GitHub Actions expression
+  const SECRET = '${{ secrets.RESEND_SMTP_PASS }}';
+  const find = (prefix: string) => {
+    const steps = productionSteps();
+    const index = steps.findIndex((s) => s.name.startsWith(prefix));
+    if (index === -1) throw new Error(`no production step named ${prefix}...`);
+    return { index, step: steps[index] as { name: string; body: string } };
+  };
+
+  it('fails the job before the migrations when the secret is empty', () => {
+    const guard = find('Require the auth SMTP password');
+    const migrations = find('Migrations');
+    expect(guard.index).toBeLessThan(migrations.index);
+    expect(guard.step.body).toContain(SECRET);
+    expect(guard.step.body).toContain('exit 1');
+  });
+
+  it('hands the secret to both Supabase CLI steps that read config.toml', () => {
+    for (const prefix of ['Migrations', 'Push auth configuration']) {
+      expect(find(prefix).step.body).toContain(`RESEND_SMTP_PASS: ${SECRET}`);
+    }
+  });
+
+  it('references the secret exactly three times, so it cannot spread to another step', () => {
+    expect(WORKFLOW.split('secrets.RESEND_SMTP_PASS').length - 1).toBe(3);
+  });
+
+  it('keeps the SMTP password out of the Cloud Run env and secret mappings', () => {
+    expect(WORKFLOW).not.toMatch(/RESEND_SMTP_PASS\s*=/);
+  });
+});
