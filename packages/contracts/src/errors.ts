@@ -41,6 +41,13 @@ export const ERROR_CODES = [
   // member's profile, content or session is touched. `details.tenantName` only (the host's tenant,
   // D-302). One-way: the web app branches on this literal.
   'SUBSCRIPTION_PENDING',
+  // 09.2-03 (D-538, D-537): the routing seam failed CLOSED. `TENANT_PROJECT_UNBOUND`: the tenant has no
+  // `platform.tenant_projects` row; `TENANT_UNAVAILABLE`: the tenant's project cannot be reached right now
+  // (breaker open, connection refused, or the registry unreadable with no fresh enough binding). Both are
+  // 503 and carry no details: the body never names a project, a ref or a tenant. Costly to rename once
+  // released, not a one-way door (the web branches on the literal).
+  'TENANT_PROJECT_UNBOUND',
+  'TENANT_UNAVAILABLE',
   'VALIDATION_FAILED',
   'NOT_FOUND',
   // 03-07: the ONE distinguishable refusal of `GET /v1/media/{id}/playback` — the CALLER'S OWN

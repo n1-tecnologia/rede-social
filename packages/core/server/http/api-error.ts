@@ -1,6 +1,7 @@
 import type { ApiErrorEnvelope, ErrorCode } from '@rede-social/contracts';
 import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { ProjectUnavailableError, ProjectUnboundError } from '../tenancy/project-errors';
 
 /** pt-BR messages per stable code. Bodies never name tenants unless `details` is set on purpose. */
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -21,6 +22,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   EMAIL_NOT_ALLOWED: 'Seu acesso ainda não foi liberado.',
   TENANT_NOT_FOUND: 'Comunidade não encontrada.',
   SUBSCRIPTION_PENDING: 'Sua assinatura não está ativa.',
+  TENANT_PROJECT_UNBOUND: 'Esta comunidade não está disponível agora.',
+  TENANT_UNAVAILABLE: 'Esta comunidade não está disponível agora.',
   VALIDATION_FAILED: 'Dados inválidos.',
   NOT_FOUND: 'Não encontrado.',
   CONFLICT: 'Este recurso ainda não está pronto.',
@@ -44,6 +47,17 @@ export function errorEnvelope(
   err: unknown,
   requestId: string,
 ): { body: ApiErrorEnvelope; status: ContentfulStatusCode } {
+  // 09.2-03 (D-538): the routing seam's two refusals are thrown by the lanes and the membership lookup, deep
+  // under any route or middleware, so they are mapped here, once, instead of at every call site. 503 and no
+  // details: nothing names the project or the tenant.
+  if (err instanceof ProjectUnboundError || err instanceof ProjectUnavailableError) {
+    const code =
+      err instanceof ProjectUnboundError ? 'TENANT_PROJECT_UNBOUND' : 'TENANT_UNAVAILABLE';
+    return {
+      body: { error: { code, message: ERROR_MESSAGES[code], requestId } },
+      status: 503,
+    };
+  }
   if (err instanceof ApiError) {
     return {
       body: {

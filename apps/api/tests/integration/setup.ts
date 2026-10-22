@@ -872,6 +872,8 @@ export type TenantOnB = {
 export async function provisionTenantOnB(opts: {
   slug: string;
   role?: 'member' | 'admin_tenant' | 'support_tenant';
+  /** The URL the registry seals for this project. Default: the real `rede_tenant_b` (see `TENANT_B_URL`). */
+  databaseUrl?: string;
 }): Promise<TenantOnB> {
   await ensureSecondDatabase();
   const { seal } = await import('@rede-social/core/server/secrets/sealed');
@@ -890,7 +892,7 @@ export async function provisionTenantOnB(opts: {
              (id, ref, provider, credential_source, state, api_url, secret_key_id,
               database_url_tx_sealed)
       values (${projectId}::uuid, ${ref}, 'fake', 'sealed', 'ready', ${required('SUPABASE_URL')}, 1,
-              ${seal(TENANT_B_URL, `${projectId}:database_url_tx`)})`;
+              ${seal(opts.databaseUrl ?? TENANT_B_URL, `${projectId}:database_url_tx`)})`;
     await tx`
       insert into public.tenants (id, slug, display_name, rules_text, rules_version)
       values (${tenantId}::uuid, ${opts.slug}, 'Tenant B (central mirror)', 'Regras.', 1)`;
