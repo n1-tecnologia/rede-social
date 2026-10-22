@@ -266,14 +266,155 @@ must come AFTER the web release that ships `/verifique-seu-email`, otherwise a s
 a page that does not exist yet.
 
 The deploy workflow runs `supabase config push` with a GitHub environment secret named
-`SEND_EMAIL_HOOK_SECRETS` holding the SAME value as Secret Manager for that environment. The
+`SEND_EMAIL_HOOK_SECRETS` holding the SAME value as Secret Manager for that environment. Since
+quick 261022-fku it also needs a second environment secret, `RESEND_SMTP_PASS` (next section). The
 hosted `additional_redirect_urls` allow-list (02-09) is what bounds `redirect_to` upstream.
+
+### Production e-mail rate limit (quick 261022-fku)
+
+**Symptom and cause.** Production allowed only 2 auth e-mails per hour for the WHOLE Supabase
+project: sign-up confirmation, recovery, invite and resend share one sum, across every tenant, and
+a request counts even when the Send Email Hook then answers 500. The auth logs show it on
+2026-10-20 22:14-22:43 (`/invite`: two 500s from the hook, then ten 429s) and on 2026-10-22
+12:52-13:58 (`/recover`: two 500s, three 429s, one more 500): `429 over_email_send_rate_limit` on
+password recovery, invites and confirmation resends. The value came from the base
+`[auth.rate_limit] email_sent = 2` in `supabase/config.toml`, which `[remotes.production]`
+inherited, so every `supabase config push` re-asserted it. Supabase lets a project change that
+field only when it has its own SMTP server, even with the Send Email Hook enabled.
+
+**What ships.** Two additive tables in `[remotes.production]`:
+
+```toml
+[remotes.production.auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 465
+user = "resend"
+pass = "env(RESEND_SMTP_PASS)"
+admin_email = "no-reply@n1marketingdigital.com.br"
+sender_name = "Rede Social"
+
+[remotes.production.auth.rate_limit]
+email_sent = 100
+```
+
+The Send Email Hook is still the ONLY sender. While it is enabled GoTrue never opens an SMTP
+connection; every mail is still rendered and delivered by the API through the Resend HTTP API.
+GoTrue would use the SMTP block only if the hook were ever disabled. The block exists solely so the
+`email_sent` field becomes writable. The pinned `[remotes.production.auth.email.template.recovery]`
+stays for the same reason: the hook renders every mail, so GoTrue's own template is never used.
+
+**Why 100.** 30 is Supabase's own default once custom SMTP exists, and it is the floor: a lower
+value is itself a denial of service for recovery, because one shared bucket serves every pilot
+tenant and a single tenant inviting a batch, or a launch-hour burst of sign-up confirmations
+(`enable_confirmations = true` makes every new member one mail), would use it up. A much higher
+value removes the flood cap. 100 is about three times the floor and still a hard bound (at most
+2,400 mails a day if sustained, visible in Resend usage and in `over_email_send_rate_limit` long
+before it matters). Each address stays limited to one mail a minute by the per-user
+`max_frequency = "60s"` in `[remotes.production.auth.email]`, which this change keeps. To change
+the value, edit `email_sent` and push; the unit test
+`apps/api/tests/unit/production-auth-config.test.ts` accepts 30 to 500. Confirm the Resend plan's
+daily and monthly quota first: 100 per hour only makes sense on a plan that can carry it.
+
+**The secret.** GitHub environment `production`, secret `RESEND_SMTP_PASS`: a dedicated Resend API
+key (name `supabase-auth-smtp-prod`, Sending access, restricted to `n1marketingdigital.com.br`),
+distinct from `resend-api-key-prod` so it can be revoked on its own. The password is never a
+literal in git: `config.toml` holds only the `env()` reference and the workflow only
+`secrets.RESEND_SMTP_PASS`. The first step of the production job, "Require the auth SMTP password",
+fails the run before the migrations when the secret is empty (a secret that does not exist resolves
+to an empty string). Rotation: create a new key, update the secret, run the deploy or the manual
+push below, then revoke the old key in Resend.
+
+**Sender identity.** `admin_email` is `no-reply@` + `MAIL_DOMAIN` (`n1marketingdigital.com.br` in
+production), the mailbox the hook already uses. The unit test compares it with `MAIL_DOMAIN` in
+`deploy-api.yml`, so change both together.
+
+**Homolog.** A remote inherits the base `email_sent = 2`. A future `[remotes.homolog]` table must
+repeat both tables above, and the `homolog` GitHub environment needs its own `RESEND_SMTP_PASS`.
+
+**Rollback.** `config push` leaves properties the file does not declare unchanged. Removing
+`[remotes.production.auth.rate_limit]` makes `email_sent` inherit the base 2 again at the next
+push, but removing the SMTP table does NOT switch the remote SMTP off: set `enabled = false` in
+`[remotes.production.auth.email.smtp]`, push, then revoke `supabase-auth-smtp-prod` in Resend.
+
+**Offline validation limit.** The Supabase CLI loads the file with the new tables (and with
+`RESEND_SMTP_PASS` unset, so no local, CI or homolog command needs it) and rejects a wrong value
+type, but it silently accepts an unknown key or a missing `host` in a remote table; key names are
+therefore checked against a fresh `supabase init` template and by the unit test. The remote
+semantics are only validated by `supabase config diff` and `config push` against the project.
+
+**Runbook for Igor.** The change itself never runs any of this; nothing below has been executed
+against production.
+
+```
+1. Create the Resend key. Resend dashboard -> API Keys -> Create API Key. Name: supabase-auth-smtp-prod.
+   Permission: Sending access. Domain: n1marketingdigital.com.br. Copy the key (it starts with re_) once.
+   While there, note the account plan's daily and monthly quota: email_sent = 100 per hour only makes
+   sense on a plan that can carry it.
+
+2. Store it as the GitHub environment secret of the production environment (not a repository secret),
+   from the repository directory:
+     gh secret set RESEND_SMTP_PASS --env production
+   Paste the key at the prompt, then check that the name is listed:
+     gh secret list --env production
+
+3. Preview the Supabase side (read-only). Use the brew CLI (the repo-pinned binary hangs on the macOS
+   keychain). The hook secret must be the REAL production value so the hook block shows no diff, never the
+   local throwaway:
+     export SUPABASE_ACCESS_TOKEN="$(gcloud secrets versions access latest --secret=supabase-pat-prod --project=api-dere-social)"
+     export SEND_EMAIL_HOOK_SECRETS="$(gcloud secrets versions access latest --secret=send-email-hook-secrets-prod --project=api-dere-social)"
+     export RESEND_SMTP_PASS='<the key from step 1>'
+     supabase config diff --project-ref qjjhtduxquvlfppybpqq
+   Expected: only the SMTP keys (host, port, user, password, admin email, sender name, enabled) and the
+   e-mail rate limit (2 -> 100). Anything else, above all the hook uri or hook secret: stop and compare
+   before going on. A difference in the redirect URL list (uri_allow_list) means the push would drop
+   runtime per-domain entries: read step 5 before shipping. Do not paste the diff output anywhere: it can
+   carry secret-derived values.
+
+4. Ship it, one of:
+   a. Normal path: push master. Deploy API runs checks and build, then waits for the production
+      environment's reviewer; approve it. The new first step fails fast if the secret is missing (create
+      it, then "Re-run failed jobs"); then migrations, hook guard, config push, API, worker.
+   b. Auth config only, without a release: with the same exports as step 3 run
+        supabase config push --project-ref qjjhtduxquvlfppybpqq
+      and answer yes to the SMTP and rate-limit changes only. Push master afterwards as in (a).
+
+5. Re-check the redirect allow-list. supabase config push re-applies [remotes.production.auth]
+   additional_redirect_urls from the file and drops the runtime per-domain entries that the API and the
+   worker add (docs/DEPLOY.md, WR-09). Production's list was found holding ONLY the platform host's
+   https://rede-social-woad.vercel.app/auth/confirm** on 2026-10-22 (none of the 5 verified tenant hosts;
+   the cause is being investigated separately), and with a tenant host missing its redirect_to falls back
+   to site_url, so the Send Email Hook refuses the mail with redirect_host_not_tenant (D-23) and answers
+   500. After the push: open Dashboard -> Authentication -> URL Configuration -> Redirect URLs, confirm one
+   https://<host>/auth/confirm** entry per verified tenant host, and re-add any that is missing; or roll
+   the worker so reconcileAuthAllowList runs at boot. Do this before the smoke test in step 6. This
+   change adds no tenant host to config.toml.
+
+6. Verify:
+     supabase config diff --project-ref qjjhtduxquvlfppybpqq --exit-code
+   Exit 0 means production matches the file; after step 5 a difference that lists only the redirect URL
+   list is expected (the runtime per-domain entries are not in the file). Dashboard -> Authentication ->
+   Rate Limits shows 100 e-mails per hour. Smoke test on a TENANT host whose entry is in the allow-list
+   (not the platform host: that is the separate redirect_host_not_tenant case): request a password
+   recovery for a mailbox you own three times, 60+ seconds apart. No request answers 429, three mails
+   arrive in the tenant's brand, the API logs show mail.sent three times, and Supabase Logs (auth) show no
+   over_email_send_rate_limit.
+
+7. Rollback: revert the commit and push; the remote rate-limit table is gone, so email_sent inherits 2
+   again. The SMTP block is NOT removed by that push (config push leaves properties the file does not
+   declare unchanged): to switch it off set enabled = false in the SMTP table and push, then revoke
+   supabase-auth-smtp-prod in Resend.
+```
 
 ### Resend
 
 - Verify `mail.<platform-domain>` (SPF + DKIM records from the Resend dashboard) before switching
   `MAIL_TRANSPORT` to `resend`; the `From` address is `no-reply@` that subdomain.
-- Custom SMTP (D-13) may keep pointing at the same domain — it is only used when the hook is off.
+- Production's `[remotes.production.auth.email.smtp]` points at `smtp.resend.com` port 465 (user
+  `resend`; the password is a Resend API key held in the GitHub environment secret
+  `RESEND_SMTP_PASS`) and exists only to unlock `[auth.rate_limit] email_sent`. While the hook is
+  enabled every mail still leaves through the API and the Resend HTTP API; GoTrue would use the
+  SMTP only if the hook were disabled.
 
 ## Rotation
 
@@ -301,7 +442,10 @@ and dies with the machine or the job.
 | An unconfirmed identity from community A tries to join community B and gets no mail; `mail.refused` reason `redirect_host_not_member` | API logs (500) | The hook refuses a `signup` mail on a host where the identity has no membership (row 5). The person confirms from community A's original mail, or uses **Esqueci a senha**, whose link also confirms the e-mail |
 | An account that existed before reports `email_not_confirmed` at sign-in after the config push | GoTrue / web | The backfill (`20261007153044_confirm_existing_auth_emails.sql`) was not applied, or the account is newer than its cutoff, or it is a pending invite. Apply the migration, or confirm that single account with a one-off targeted update; never remove the cutoff |
 | `over_email_send_rate_limit` locally | GoTrue / web logs | `[auth.rate_limit] email_sent` (per hour) was exhausted by repeated sign-ups or resends in e2e; raise that key in `supabase/config.toml` and restart the stack |
-| No mail at all, GoTrue template arrives instead | Mailbox | The hook block is disabled → GoTrue's SMTP fallback (`supabase/templates/recovery.html`, neutral platform). Enable the block and restart / `config push` |
+| `429 over_email_send_rate_limit` in production on `/recover`, `/invite`, `/resend` or sign-up confirmation | Supabase auth logs / web | The project-wide hourly sum reached `[remotes.production.auth.rate_limit] email_sent`. The counter adds every tenant and every action type, and a request counts even when the hook then answers 500, so a burst of failing calls drains it too (a 500 `redirect_host_not_tenant` and a 429 often appear together, and the 500 still consumes quota). Wait for the hour to roll over, find what burned it in the auth logs (path and status per request), and raise the value only if the load is legitimate. At the old value 2 the whole project allowed two mails an hour |
+| Dashboard still shows 2 e-mails an hour after a deploy, or `supabase config diff` still lists the SMTP and rate-limit keys | Dashboard / CLI | The push did not apply: the job stopped at "Require the auth SMTP password" because the secret is missing, or the production run was never approved. Create `RESEND_SMTP_PASS` and re-run the failed job |
+| GoTrue logs an SMTP error (authentication failed or sender rejected) | Supabase auth logs | Possible only when the hook is disabled or bypassed: `RESEND_SMTP_PASS` was revoked, or `admin_email` is not on the verified Resend domain. The hook path is unaffected |
+| No mail at all, GoTrue template arrives instead | Mailbox | The hook block is disabled → GoTrue's SMTP fallback (`supabase/templates/recovery.html`, neutral platform). Enable the block and restart / `config push`. In production the fallback sender is now the custom SMTP block with the pinned hosted default template, not the local neutral file |
 
 Log lines (`event`): `mail.sent`, `mail.duplicate_suppressed`, `mail.refused`,
 `mail.signature_rejected`, `mail.send_failed` — each carries `webhookId`, `actionType`, `tenantId`

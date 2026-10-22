@@ -198,7 +198,7 @@ read them, and fork pull requests get none (`ci.yml` uses `pull_request`, never
 | `SUPABASE_DB_PASSWORD` | `supabase db push` (the project's `postgres` password) |
 | `SUPABASE_SESSION_POOLER_URL` | `psql` URL (session pooler, port 5432) for the `alter role` step |
 | `API_DB_PASSWORD` | password set on `api_user` after `db push --include-roles`; the same value is inside the `api-database-url-prod` Secret Manager secret |
-| `RESEND_API_KEY` | `supabase config push` (Custom SMTP, D-13) — not needed while e-mail is deferred |
+| `RESEND_SMTP_PASS` | the "Require the auth SMTP password" step and the two Supabase CLI steps of `deploy-api.yml`; the password of `[remotes.production.auth.email.smtp]`, a Resend API key with sending access on `n1marketingdigital.com.br`, separate from `resend-api-key-prod`; it only unlocks `email_sent`, mail still leaves through the Send Email Hook; see `docs/deploy/auth-mail.md` (quick 261022-fku) |
 | `SEND_EMAIL_HOOK_SECRETS` | every Supabase CLI step (the CLI validates `[auth.hook.send_email]` on every command); same value as the Secret Manager secret `send-email-hook-secrets-prod` |
 
 `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATABASE_URL`, `SEED_PASSWORD`, `SUPER_ADMIN_EMAIL` and
