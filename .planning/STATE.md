@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 4
+current_plan: 12
 status: executing
-stopped_at: Completed 09.2-03-PLAN.md (sealed registry, bounded pools, routed lanes; plans 01-03 done); next is 09.2-04 (wave 3)
-last_updated: "2026-10-22T21:56:53.644Z"
+stopped_at: Completed 09.2-04-PLAN.md (plans 01-04 done); next is 09.2-12
+last_updated: "2026-10-22T23:21:55.974Z"
 last_activity: 2026-10-22
-last_activity_desc: Completed 09.2-03 (sealed registry, bounded pools, routed lanes)
-state_head: 4d201fd5ff0d2a6f3c7b224f374c07aec41906d8
+last_activity_desc: Completed 09.2-04 (explicit lanes, host mirror, admin-lane inventory)
+state_head: 73beb6599ca7beccb91fd4719bddb822fafd7deb
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 238
+  completed_plans: 239
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 4
+Current Plan: 12
 Total Plans in Phase: 28
-Plan: 4 of 28 next (01 design gate approved provisionally, 02 tracer and 03 routing done)
+Plan: 12 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes done; 12 runs right after 04, not 05)
 Status: Ready to execute
-Last activity: 2026-10-22 — Completed 09.2-03 (sealed registry, bounded pools, routed lanes)
+Last activity: 2026-10-22 — Completed 09.2-04 (explicit lanes, host mirror, admin-lane inventory)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -296,6 +296,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P02 | 13 min | 3 tasks | 23 files |
 | Phase 09.2 P01 | 30 min | 3 tasks | 3 files |
 | Phase 09.2 P03 | 21 min | 3 tasks | 23 files |
+| Phase 09.2 P04 | 22 min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -987,6 +988,8 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-02: migration runner imports no kernel module and requires a single-connection client (advisory lock is session-scoped); errors carry code and version only — Lets the operator command, CI and the bootstrap Job reuse it with only a database URL
 - [Phase 09.2]: 09.2-02: tenants_bind_default is a deferred constraint trigger; production must clear projects.is_default after the last move (plan 25 runbook) so an unbound tenant insert fails at commit — Fail closed (D-538, DBT-46) without breaking raw SQL tenant inserts of the existing suites
 - [Phase 09.2]: 09.2-03: routing refusals (TENANT_PROJECT_UNBOUND, TENANT_UNAVAILABLE) are mapped once in errorEnvelope as 503; the resolver never caches a negative answer and backs off 5 s after a failed refresh; withPlatformTx joins the Biome admin-lane restriction and project-pools stays unexported — Fail closed with no fallback to project 0 (D-538); a module must not reach a raw handle or a service_role lane
+- [Phase 09.2]: 09.2-04: platform lane built from the central handle alone (createPlatformLane) because the registry reads through it; the deprecated withAdminTx(fn) overload stays until plan 10, declared last so Parameters<typeof withAdminTx>[0] still yields the transaction callback.
+- [Phase 09.2]: 09.2-04: ensureProjectZero renames project 0 from the placeholder project-0 to SUPABASE_PROJECT_REF or local and fills api_url; tests and pgTAP identify project 0 by is_central, never by ref; production's central row keeps the placeholder until plans 09/15 call it.
 
 ### Pending Todos
 
@@ -1095,6 +1098,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-22T21:56:53.427Z
-Stopped at: Completed 09.2-03-PLAN.md (sealed registry, bounded pools, routed lanes; plans 01-03 done); next is 09.2-04 (wave 3)
+Last session: 2026-10-22T23:21:50.588Z
+Stopped at: Completed 09.2-04-PLAN.md (plans 01-04 done); next is 09.2-12
 Resume file: None

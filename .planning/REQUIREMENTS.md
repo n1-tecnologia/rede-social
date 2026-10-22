@@ -324,7 +324,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-04**: `GET /v1/public/tenants/by-host` and the platform list are answered from the central mirror (name, brand, status, enabled modules, primary host, project coordinates) without opening the tenant's database, so they work while that project is down. *(D-537)*
 - [ ] **DBT-05**: Brand and rules text are owned by the tenant project, status/modules/domains/registry by the central project; a reconcile job detects and heals drift in both directions. *(D-537)*
 - [ ] **DBT-06**: `withTenantTx(ctx, fn)` opens the transaction on the project registered for `ctx.tenantId`, and on no other. *(D-538)*
-- [ ] **DBT-07**: `withAdminTx` requires a tenant (or project) target and `withPlatformTx` opens the central project; both stay import-restricted to the kernel by Biome and `pnpm boundaries:negative` proves it. *(D-538)*
+- [x] **DBT-07**: `withAdminTx` requires a tenant (or project) target and `withPlatformTx` opens the central project; both stay import-restricted to the kernel by Biome and `pnpm boundaries:negative` proves it. *(D-538)*
 - [ ] **DBT-08**: Every one of the 119 `withAdminTx` call sites is classified platform or tenant (or split) in a checked-in inventory and a unit test fails when a call site has no entry. *(D-538)*
 - [x] **DBT-09**: Connection pools are held in a bounded LRU keyed by project and credential version, with a small per-pool `max`, an idle timeout, graceful eviction that never ends an in-flight transaction, and a circuit breaker for an unreachable project. *(D-538)*
 - [ ] **DBT-10**: A bearer token is verified against the JWKS and issuer of the project selected by the request host (platform host selects the central project) and never against the token's own `iss`; a token of project A presented on a host of project B answers 401. *(D-23, D-538)*
@@ -708,7 +708,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-04 | Phase 09.2 (plans 04, 07) | Pending |
 | DBT-05 | Phase 09.2 (plans 07, 09) | Pending |
 | DBT-06 | Phase 09.2 (plans 03, 04, 05, 06) | Pending |
-| DBT-07 | Phase 09.2 (plan 04) | Pending |
+| DBT-07 | Phase 09.2 (plan 04) | Complete |
 | DBT-08 | Phase 09.2 (plans 04, 05, 06, 07, 10) | Pending |
 | DBT-09 | Phase 09.2 (plan 03) | Complete |
 | DBT-10 | Phase 09.2 (plans 08, 25) | Pending |
