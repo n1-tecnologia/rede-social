@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "09.1"
-current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 22
-status: verifying
+current_phase: "09.2"
+current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
+current_plan: 1
+status: executing
 stopped_at: Completed 09.1-22-PLAN.md (single-address release says the address stays cut, A-G1); 22 of 22 plans executed; G-09.1-1 closed by plans 21 and 22; no browser walk done
-last_updated: "2026-10-21T15:47:24.987Z"
-last_activity: 2026-10-21
-last_activity_desc: Phase 09.1 gap-closure execution started (plans 21 and 22)
-state_head: 032dcf721623e512e87c46dd5c6f18f9183026e2
+last_updated: "2026-10-22T21:04:34.769Z"
+last_activity: 2026-10-22
+last_activity_desc: Phase 09.2 execution started
+state_head: 3c2f77a4bc536575d35081c911ebc45c3ad53c6b
 progress:
   total_phases: 24
   completed_phases: 0
-  total_plans: 240
+  total_plans: 268
   completed_plans: 235
   percent: 0
 ---
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 09.1 — Acesso por gateway de pagamento (INSERTED)
+**Current focus:** Phase 09.2 — Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)
 
 ## Current Position
 
-Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
-Current Plan: 22
-Total Plans in Phase: 22
-Plan: 22 of 22 (gap closure: 09.1-01..20 executed; 09.1-21 and 09.1-22 close G-09.1-1)
-Status: Phase complete — ready for verification
-Last activity: 2026-10-22 - Completed quick task 261022-fku: production auth e-mail ceiling (custom SMTP + email_sent = 100); not pushed or applied
+Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
+Current Plan: 1
+Total Plans in Phase: 28
+Plan: 1 of 28
+Status: Executing Phase 09.2
+Last activity: 2026-10-22 — Phase 09.2 execution started
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
