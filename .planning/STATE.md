@@ -33,7 +33,7 @@ Current Plan: 22
 Total Plans in Phase: 22
 Plan: 22 of 22 (gap closure: 09.1-01..20 executed; 09.1-21 and 09.1-22 close G-09.1-1)
 Status: Phase complete — ready for verification
-Last activity: 2026-10-21 — Phase 09.1 gap-closure execution started (plans 21 and 22)
+Last activity: 2026-10-22 - Completed quick task 261022-fku: production auth e-mail ceiling (custom SMTP + email_sent = 100); not pushed or applied
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1046,6 +1046,7 @@ None yet.
 | 261019-jia | Make the 3 time-dependent 08.7 dashboard integration tests build their own aged fixtures (CI gate was red on a same-day seed); push of e00a5bfe..9e35db8b then ran the production deploy: 37 migrations, API and worker live, allowlist hooks still off | 2026-10-19 | 9e35db8 | Verified | [261019-jia-fix-3-time-dependent-08-7-dashboard-inte](./quick/261019-jia-fix-3-time-dependent-08-7-dashboard-inte/) |
 | 261019-k7x | Move the member school area from /cursos to /area-membros (admin keeps /cursos; /cursos redirects members; bottom-bar tab reads "Membros" for members via kernel `withTabOverrides`); unit, type, lint, build and static-routes gates green, Playwright specs updated but NOT executed (stack down), D-435/D-400 route prefix reversed in code only | 2026-10-19 | 7c3140e | complete | [261019-k7x-move-the-member-area-from-cursos-to-area](./quick/261019-k7x-move-the-member-area-from-cursos-to-area/) |
 | 261021-eks | Wire DOMAIN_PROVIDER=vercel, AUTH_ALLOW_LIST=supabase and the Vercel/Supabase credentials into the production deploy-api workflow (api + worker); do not push before vercel-token-prod and supabase-pat-prod exist in Secret Manager | 2026-10-21 | 85b5dd4b | complete | [261021-eks-wire-domain-provider-vercel-and-vercel-s](./quick/261021-eks-wire-domain-provider-vercel-and-vercel-s/) |
+| 261022-fku | Raise the production auth e-mail ceiling from 2 to 100 per hour: custom Resend SMTP block + `email_sent` override in `[remotes.production]`, `RESEND_SMTP_PASS` wired into deploy-api.yml with a fail-fast guard, hermetic config pin, docs/deploy/auth-mail.md runbook (nothing pushed or applied to production) | 2026-10-22 | f23bb7d | complete | [261022-fku-prod-auth-e-mail-limited-to-2-h-custom-s](./quick/261022-fku-prod-auth-e-mail-limited-to-2-h-custom-s/) |
 
 ### Roadmap Evolution
 
