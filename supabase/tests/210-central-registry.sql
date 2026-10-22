@@ -92,7 +92,7 @@ select throws_ok(
   $$ insert into platform.projects (ref, api_url, is_default) values ('pgtap-second-default', '', true) $$,
   '23505', null, 'a second default project is refused (projects_one_default_uq)');
 select throws_ok(
-  $$ insert into platform.projects (ref, api_url) values ('project-0', '') $$,
+  $$ insert into platform.projects (ref, api_url) values ((select ref from platform.projects where is_central), '') $$,
   '23505', null, 'a duplicate ref is refused (projects_ref_uq)');
 select lives_ok(
   $$ insert into platform.projects (ref, api_url, hook_ref) values ('pgtap-hook-a', '', 'hook-ref-a') $$,
@@ -132,7 +132,7 @@ select lives_ok(
 select is((select count(*)::int from platform.tenant_projects where project_id = '21000000-0000-4000-8000-0000000000b1'), 2,
   'D-540: the project holds both bindings');
 select throws_ok(
-  $$ insert into platform.tenant_projects (tenant_id, project_id) values ('21000000-0000-4000-8000-000000000001', (select id from platform.projects where ref = 'project-0')) $$,
+  $$ insert into platform.tenant_projects (tenant_id, project_id) values ('21000000-0000-4000-8000-000000000001', (select id from platform.projects where is_central)) $$,
   '23505', null, 'a tenant has ONE binding (tenant_id is the primary key)');
 
 -- ── 3. exposure ────────────────────────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ select is((select count(*)::int from platform.tenant_projects where tenant_id = 
   'a tenant inserted and deleted in one transaction is not bound and does not raise');
 select is(
   (select tp.project_id from platform.tenant_projects tp where tp.tenant_id = '21000000-0000-4000-8000-000000000003'),
-  (select id from platform.projects where ref = 'project-0'),
+  (select id from platform.projects where is_central),
   'tenant C (unbound before the trigger first fired) was bound to project 0');
 
 -- With no project flagged as the default the commit RAISES instead of leaving the tenant unbound.
@@ -219,10 +219,13 @@ select throws_ok(
 
 -- ── 5. project 0 ───────────────────────────────────────────────────────────────────────────────
 select is(
-  (select count(*)::int from platform.projects where is_central and credential_source = 'env' and state = 'ready' and ref = 'project-0'), 1,
+  (select count(*)::int from platform.projects where is_central and credential_source = 'env' and state = 'ready'), 1,
   'project 0 is registered: central, env credentials, ready');
-select is((select api_url from platform.projects where ref = 'project-0'), '',
-  'project 0 public coordinates are placeholders until ensureProjectZero fills them');
+-- ensureProjectZero (the seed, the worker boot) renames it and fills the url from the environment, so the row is
+-- either the migration's placeholder or a described environment: both satisfy the table's check.
+select ok(
+  (select api_url = '' or api_url ~ '^https?://' from platform.projects where is_central),
+  'project 0 public coordinates are the placeholder until ensureProjectZero fills them, then the environment url');
 select is((select count(*)::int from platform.projects where is_central), 1, 'exactly one central project');
 
 select * from finish();

@@ -36,6 +36,7 @@ const {
 } = await import('@rede-social/core/db/schema');
 const { sqlClient } = await import('@rede-social/core/db');
 const { supabaseAdmin } = await import('@rede-social/core/server/supabase-admin');
+const { ensureProjectZero } = await import('@rede-social/core/server/tenancy/project-zero');
 const { deriveIconSet } = await import('@rede-social/core/server/branding/icons');
 const { uploadIconSet } = await import('@rede-social/core/server/platform/branding');
 const { deriveVariants } = await import('@rede-social/core/server/media/variants');
@@ -2453,6 +2454,14 @@ await withAdminTx(async (tx) => {
   await tx.insert(platformAdmins).values({ userId: superAdminId }).onConflictDoNothing();
 });
 console.log(`seed: platform admin ${SUPER_ADMIN_EMAIL} ready (no membership, by design)`);
+
+// 09.2-04 (D-539): the seed tenants exist and are bound to project 0; make the central registry row describe
+// this environment (ref, api_url) so every local and CI stack carries a correct project 0. No best effort:
+// a registry that does not match the environment fails the seed.
+const projectZero = await ensureProjectZero();
+console.log(
+  `seed: project 0 registry row ${projectZero.changed ? 'updated from the environment' : 'already current'}`,
+);
 
 /**
  * 09.1-03 (D-487, D-495): one manual `active` access per seed identity in the seed tenant `rede-demo`,

@@ -1,10 +1,12 @@
 import { createServer, type Server } from 'node:net';
 import { sqlClient } from '@rede-social/core/db';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import { env } from '@rede-social/core/server/env';
 import {
   closeAllPools,
   invalidateProject,
 } from '@rede-social/core/server/tenancy/project-registry';
+import { ensureProjectZero } from '@rede-social/core/server/tenancy/project-zero';
 import {
   cachedTenantHostCount,
   resolveTenantHost,
@@ -148,7 +150,7 @@ describe('every tenant is bound exactly once (DBT-46, P92)', () => {
     } finally {
       await adminSql`
         update platform.projects set is_default = true
-         where ref = 'project-0' and not exists (select 1 from platform.projects where is_default)`;
+         where is_central and not exists (select 1 from platform.projects where is_default)`;
       await adminSql`delete from public.tenants where slug = ${slug}`;
     }
     expect(failure?.code).toBe('P0001');
@@ -234,7 +236,7 @@ describe('every tenant is bound exactly once (DBT-46, P92)', () => {
     } finally {
       await par`
         update platform.projects set is_default = true
-         where ref = 'project-0' and not exists (select 1 from platform.projects where is_default)`;
+         where is_central and not exists (select 1 from platform.projects where is_default)`;
       await par`delete from public.tenants where slug = any(${slugs})`;
       await par.end();
     }
@@ -505,5 +507,85 @@ describe('by-host is served from the mirror while the tenant database is down (D
     expect(await resolveTenantHost('under_score.localhost')).toEqual({ kind: 'unknown' });
     expect(await resolveTenantHost('münchen.localhost')).toEqual({ kind: 'unknown' });
     expect(await resolveTenantHost(`${'a'.repeat(300)}.localhost`)).toEqual({ kind: 'unknown' });
+  });
+});
+
+/**
+ * 09.2-04, D-539 / T-09.2-22: `ensureProjectZero()` makes the central registry row describe the running
+ * environment, idempotently, and touches nothing else. The seed already called it (`pnpm db:seed`), so the
+ * first assertion is the state every local and CI stack is left in.
+ */
+describe('project 0 describes the environment (D-539, T-09.2-22)', () => {
+  type Row = {
+    id: string;
+    ref: string;
+    api_url: string;
+    is_central: boolean;
+    is_default: boolean;
+    state: string;
+    credential_source: string;
+    credential_version: number;
+    secret_key_id: number | null;
+    service_key_sealed: string | null;
+    database_url_tx_sealed: string | null;
+    updated_at: Date;
+  };
+  const central = async () => {
+    const [row] = await adminSql<Row[]>`
+      select id, ref, api_url, is_central, is_default, state, credential_source, credential_version,
+             secret_key_id, service_key_sealed, database_url_tx_sealed, updated_at
+        from platform.projects where is_central`;
+    return row as Row;
+  };
+
+  it('after the seed the central row carries the ref and api_url of the environment', async () => {
+    const row = await central();
+    expect(row.ref).toBe(env.SUPABASE_PROJECT_REF ?? 'local');
+    expect(row.api_url).toBe(env.SUPABASE_URL);
+    expect(row.api_url).toMatch(/^https?:\/\//);
+    expect(row).toMatchObject({ is_central: true, credential_source: 'env', state: 'ready' });
+  });
+
+  it('twice in a row reports changed:false the second time', async () => {
+    await ensureProjectZero();
+    expect(await ensureProjectZero()).toEqual({ changed: false });
+  });
+
+  it('a drifted row is restored (changed:true) without touching any other column', async () => {
+    const before = await central();
+    await adminSql`update platform.projects set api_url = '' where is_central`;
+    try {
+      expect(await ensureProjectZero()).toEqual({ changed: true });
+    } finally {
+      await adminSql`update platform.projects set api_url = ${before.api_url} where is_central`;
+    }
+    const after = await central();
+    expect({ ...after, updated_at: undefined }).toEqual({ ...before, updated_at: undefined });
+    expect(await ensureProjectZero()).toEqual({ changed: false });
+  });
+
+  it('a registry row for another project is not changed by it', async () => {
+    const other = await provisionTenantOnB({ slug: `zero-${RUN}`.slice(0, 40) });
+    try {
+      const snapshot = async () => {
+        const [row] = await adminSql<Row[]>`
+          select id, ref, api_url, is_central, is_default, state, credential_source, credential_version,
+                 secret_key_id, service_key_sealed, database_url_tx_sealed, updated_at
+            from platform.projects where id = ${other.projectId}::uuid`;
+        return row;
+      };
+      const before = await snapshot();
+      await adminSql`update platform.projects set api_url = '' where is_central`;
+      try {
+        await ensureProjectZero();
+      } finally {
+        await adminSql`
+          update platform.projects set api_url = ${env.SUPABASE_URL}
+           where is_central and api_url = ''`;
+      }
+      expect(await snapshot()).toEqual(before);
+    } finally {
+      await other.cleanup();
+    }
   });
 });
