@@ -25,6 +25,7 @@
       "!**/.turbo",
       "!**/coverage",
       "!supabase/migrations",
+      "!supabase/central/migrations",
       "!supabase/.temp",
       "!reference"
     ]
