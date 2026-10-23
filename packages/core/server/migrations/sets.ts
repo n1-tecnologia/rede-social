@@ -78,3 +78,16 @@ export async function readMigrationDir(
   if (set === 'tenant' && files.length === 0) throw new MigrationError('empty_set');
   return files;
 }
+
+/**
+ * The repository's runtime-role block (`supabase/roles.sql`), the same idempotent statements the
+ * `app_helpers` migration repeats: creates `api_user` when absent and grants it `authenticated` and
+ * `service_role`. The bootstrap's `roles` step (09.2-13) runs it as `postgres` BEFORE the tenant set, so the
+ * set's `alter default privileges` already sees the role. It carries no password. `root` is the repository
+ * root (a Job image passes its own).
+ */
+export async function readRolesSql(root: string = REPO_ROOT): Promise<string> {
+  const text = await readFile(join(root, 'supabase', 'roles.sql'), 'utf8');
+  if (text.trim().length === 0) throw new MigrationError('empty_set');
+  return text;
+}

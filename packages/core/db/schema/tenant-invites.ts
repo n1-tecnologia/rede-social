@@ -20,6 +20,12 @@ import { users } from './users';
  * the invite flow, is always a bug (SCHEMA-CONVENTIONS (i)); `supabase/tests/010` and `040` pin the
  * zero-policy count and `020` proves a lane reads nothing.
  *
+ * `created_by` is nullable and carries NO foreign key (09.2-13, DBT-36, D-533/D-542): the creator of a
+ * first-admin invite is a CENTRAL `super_admin`, and a tenant project's own `users` has no row for that
+ * person. The column is information only (who asked for the invite); nothing joins through it. Dropping the
+ * constraint and the not-null is expand-only: no data is rewritten and every writer that supplied an id still
+ * works (`supabase/migrations/*_tenant_invites_created_by_nullable.sql`).
+ *
  * `email` is citext and unique per tenant, so `Admin@Cliente.com.br` cannot be invited twice under
  * a different casing (edge ROLE-03/encoding).
  */
@@ -36,9 +42,7 @@ export const tenantInvites = pgTable(
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
-    createdBy: uuid('created_by')
-      .notNull()
-      .references(() => users.id),
+    createdBy: uuid('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

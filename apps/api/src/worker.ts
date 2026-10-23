@@ -15,6 +15,7 @@ import type { AnyJobDefinition } from '@rede-social/core/server/modules/manifest
 import { paymentEventJob } from '@rede-social/core/server/payments/event-job';
 import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { reconcileAuthAllowList } from '@rede-social/core/server/platform/reconcile-allow-list';
+import { projectBootstrapJob } from '@rede-social/core/server/projects/bootstrap-job';
 import {
   armDailyTenantDispatch,
   dailyTenantDispatchJob,
@@ -43,7 +44,7 @@ import { createSupervisor, type SupervisedBoss } from './worker-supervisor';
  * **One consumer per ready project plus one for the platform (09.2-09, D-546).** A pg-boss instance polls
  * ONE database, so the worker no longer starts one instance: `createSupervisor` (`worker-supervisor.ts`)
  * keeps a PLATFORM instance (`pgboss_platform` of the central project: `kernel.domain-verify`,
- * `kernel.invite-send`, `platform.mirror-reconcile`) and one TENANT-scope instance per `ready` project
+ * `kernel.invite-send`, `platform.mirror-reconcile`, `platform.project-bootstrap`) and one TENANT-scope instance per `ready` project
  * (the `pgboss` schema of that project's database: the other jobs), reconciled against the registry every
  * 60 s. A tenant job's handler receives `{ projectId }` as its second argument; the daily dispatcher and the
  * orphan sweeper use it, they run once per project. A job's `scope` (default tenant) decides which list it
@@ -99,6 +100,8 @@ export async function startWorker(): Promise<void> {
     inviteSendJob,
     // 09.2-09 (D-537, D-546): heals the central mirror of tenants that live in another project.
     mirrorReconcileJob,
+    // 09.2-13 (D-542): drives a new tenant project through the eight bootstrap steps. A platform queue.
+    projectBootstrapJob,
     deriveIconsJob,
     deriveVariantsJob,
     mediaProviderEventJob,

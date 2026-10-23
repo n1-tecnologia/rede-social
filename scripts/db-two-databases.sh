@@ -9,6 +9,10 @@
 #
 #   bash scripts/db-two-databases.sh                       create if absent, prepare, apply the tenant set
 #   bash scripts/db-two-databases.sh --reset               drop, then as above
+#   bash scripts/db-two-databases.sh --bare                with --reset: leave the database EMPTY (the Supabase
+#                                                          platform schemas only, no tenant set), like a freshly
+#                                                          created hosted project. The bootstrap tests (09.2-13)
+#                                                          start from this.
 #   bash scripts/db-two-databases.sh --down                drop and exit
 #   bash scripts/db-two-databases.sh --assert-no-platform  exit non-zero when `platform` or the central
 #                                                          ledger exists in rede_tenant_b
@@ -34,12 +38,14 @@ readonly KNOWN_ERRORS=(
 
 MODE="up"
 RESET="no"
+BARE="no"
 for arg in "$@"; do
   case "$arg" in
     --reset) RESET="yes" ;;
+    --bare) BARE="yes" ;;
     --down) MODE="down" ;;
     --assert-no-platform) MODE="assert" ;;
-    *) echo "unknown flag: $arg (allowed: --reset, --down, --assert-no-platform)" >&2; exit 2 ;;
+    *) echo "unknown flag: $arg (allowed: --reset, --bare, --down, --assert-no-platform)" >&2; exit 2 ;;
   esac
 done
 
@@ -119,6 +125,11 @@ fi
 # calls `auth.jwt()` / `auth.uid()` fails for `authenticated` with 42501 (09.2-03, the first request served
 # from this database). Idempotent, so it also repairs a database built before this line existed.
 target -c 'grant usage on schema auth, storage, realtime, extensions to anon, authenticated, service_role'
+
+if [ "$BARE" = "yes" ]; then
+  echo "${TARGET_DB} left bare: platform schemas only, no tenant set"
+  exit 0
+fi
 
 cd "$ROOT"
 pnpm exec tsx scripts/migrate-set.ts --set tenant --url "$TARGET_URL"

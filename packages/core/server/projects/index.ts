@@ -55,6 +55,17 @@ export function createProjectProviderFor(e: ProjectProviderEnv = env): ProjectPr
 export const projectProvider: ProjectProvider = createProjectProviderFor(env);
 
 export {
+  type BootstrapDeps,
+  claimStep,
+  listSteps,
+  type RunOutcome,
+  resumeBootstrap,
+  runBootstrap,
+  type StepRow,
+  startBootstrap,
+} from './bootstrap';
+export { PROJECT_BOOTSTRAP_QUEUE, projectBootstrapJob } from './bootstrap-job';
+export {
   BOOTSTRAP_REASONS,
   BOOTSTRAP_STEPS,
   type BootstrapReason,

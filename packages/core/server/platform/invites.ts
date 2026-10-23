@@ -100,10 +100,14 @@ const EXISTING_IDENTITY_PATH = '/entrar';
  * SENT (assumption A-P3) and passes only an e-mail with an active access row. Tenant, invite and
  * access commit or roll back together. Staff never depend on the row (the gate exempts them), so
  * deleting it later in Acessos revokes nothing of the admin's panel.
+ *
+ * `createdBy` is a user id or `null` (09.2-13, DBT-36): the creator of a first-admin invite is a CENTRAL
+ * `super_admin` who has no row in a tenant project's own `users`, and the bootstrap's `invite` step creates
+ * the invite inside that project with `null`. `tenant_invites.created_by` has no foreign key for this reason.
  */
 export async function createPendingInvite(
   tx: Tx,
-  input: { tenantId: string; email: string; createdBy: string },
+  input: { tenantId: string; email: string; createdBy: string | null },
 ): Promise<string> {
   const email = input.email.trim().toLowerCase();
   const [row] = await tx

@@ -1,4 +1,4 @@
-import { index, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { index, jsonb, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { tenants } from '../schema/tenants';
 import { platform, projects } from './projects';
 
@@ -24,6 +24,12 @@ export const tenantProjects = platform
         .references(() => projects.id),
       previousProjectId: uuid('previous_project_id').references(() => projects.id),
       boundAt: timestamp('bound_at', { withTimezone: true }).notNull().defaultNow(),
+      /**
+       * 09.2-13 (D-542): the first admin's `{ email, createdBy }` between the create call (plan 14) and the
+       * `invite` step of the bootstrap, which creates the invite in the tenant's project and clears this
+       * column. Personal data in the control plane for the length of a bootstrap only.
+       */
+      pendingInvite: jsonb('pending_invite').$type<{ email: string; createdBy?: string | null }>(),
     },
     (t) => [index('tenant_projects_project_idx').on(t.projectId)],
   )

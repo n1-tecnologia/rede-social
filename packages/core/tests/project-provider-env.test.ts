@@ -29,6 +29,7 @@ const complete = {
   SUPABASE_PAT: 'sbp_token',
   SUPABASE_ORG_SLUG: 'acme-org',
   PLATFORM_MASTER_KEYS: JSON.stringify({ 1: KEY }),
+  API_PUBLIC_URL: 'https://api.example.com',
 };
 
 describe('assertProductionEnv: PROJECT_PROVIDER (DBT-37)', () => {
@@ -36,14 +37,19 @@ describe('assertProductionEnv: PROJECT_PROVIDER (DBT-37)', () => {
     expect(() => check({ PROJECT_PROVIDER: 'fake' })).toThrow(/PROJECT_PROVIDER/);
   });
 
-  it('refuses supabase without the PAT, the organisation slug or the master keys, naming each', () => {
-    for (const missing of ['SUPABASE_PAT', 'SUPABASE_ORG_SLUG', 'PLATFORM_MASTER_KEYS']) {
+  it('refuses supabase without the PAT, the organisation slug, the master keys or the API origin, naming each', () => {
+    for (const missing of [
+      'SUPABASE_PAT',
+      'SUPABASE_ORG_SLUG',
+      'PLATFORM_MASTER_KEYS',
+      'API_PUBLIC_URL',
+    ]) {
       expect(() => check({ ...complete, [missing]: undefined })).toThrow(
         new RegExp(`${missing} \\(required when PROJECT_PROVIDER=supabase\\)`),
       );
     }
     expect(() => check({ PROJECT_PROVIDER: 'supabase' })).toThrow(
-      /SUPABASE_PAT[\s\S]*SUPABASE_ORG_SLUG[\s\S]*PLATFORM_MASTER_KEYS/,
+      /SUPABASE_PAT[\s\S]*SUPABASE_ORG_SLUG[\s\S]*PLATFORM_MASTER_KEYS[\s\S]*API_PUBLIC_URL/,
     );
   });
 

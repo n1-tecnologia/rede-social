@@ -286,6 +286,8 @@ export async function enqueueInTx(
     retryDelay?: number;
     retryBackoff?: boolean;
     retryDelayMax?: number;
+    /** pg-boss `expireInSeconds`: how long an ACTIVE job may run before it is failed (default 15 minutes). */
+    expireInSeconds?: number;
     deleteAfterSeconds?: number;
     retentionSeconds?: number;
   } = {},

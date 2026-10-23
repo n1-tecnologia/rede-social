@@ -1009,6 +1009,13 @@
       "when": 1792548547529,
       "tag": "20261021020907_push_devices_cut_members",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1792718912569,
+      "tag": "20261023012832_tenant_invites_created_by_nullable",
+      "breakpoints": true
     }
   ]
 }

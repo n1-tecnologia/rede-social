@@ -209,6 +209,7 @@ export function assertProductionEnv(
     | 'PAYMENTS_PROVIDERS'
     | 'PAYMENTS_SECRET_KEY'
     | 'PROJECT_PROVIDER'
+    | 'API_PUBLIC_URL'
     | 'SUPABASE_ORG_SLUG'
     | 'PLATFORM_MASTER_KEYS'
     | 'NODE_ENV'
@@ -294,7 +295,14 @@ export function assertProductionEnv(
     missing.push('PROJECT_PROVIDER (must not be "fake" in production: use "supabase")');
   }
   if (e.PROJECT_PROVIDER === 'supabase') {
-    for (const key of ['SUPABASE_PAT', 'SUPABASE_ORG_SLUG', 'PLATFORM_MASTER_KEYS'] as const) {
+    // `API_PUBLIC_URL` (09.2-13): the bootstrap's `auth` step points a tenant project's Send Email Hook at
+    // `${API_PUBLIC_URL}/v1/hooks/auth/send-email/<hookRef>`; behind Cloud Run the request's own origin is not it.
+    for (const key of [
+      'SUPABASE_PAT',
+      'SUPABASE_ORG_SLUG',
+      'PLATFORM_MASTER_KEYS',
+      'API_PUBLIC_URL',
+    ] as const) {
       if (!e[key]) missing.push(`${key} (required when PROJECT_PROVIDER=supabase)`);
     }
   }
