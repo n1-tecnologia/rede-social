@@ -16,7 +16,11 @@ import {
   type UpdateTenantBody,
   withDarkPrimary,
 } from '@rede-social/contracts';
-import { ACCESS_FIELDS, isProjectRef } from '@rede-social/contracts/projects';
+import {
+  ACCESS_FIELDS,
+  isProjectRef,
+  type TenantDatabaseSummary,
+} from '@rede-social/contracts/projects';
 import {
   and,
   asc,
@@ -32,7 +36,13 @@ import {
   sql,
 } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
-import { projectBootstrapSteps, projects, tenantProjects } from '../../db/central';
+import {
+  projectBootstrapSteps,
+  projectHealth,
+  projectSchemaState,
+  projects,
+  tenantProjects,
+} from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import {
   memberProfiles,
@@ -46,6 +56,7 @@ import {
 import type { Tx } from '../../db/tenant-tx';
 import { env } from '../env';
 import { ApiError } from '../http/api-error';
+import { getRequiredTenantSchema } from '../migrations/required';
 import {
   type AccessDeps,
   type AccessValues,
@@ -55,6 +66,8 @@ import {
   validateAccess,
 } from '../projects/access';
 import { startBootstrapInTx } from '../projects/bootstrap';
+import { tenantsMoving } from '../projects/moving';
+import { summarizeDatabase } from '../projects/overview';
 import { precheckProject } from '../projects/precheck';
 import { getProjectProvider } from '../projects/provider-access';
 import type { ProjectProvider } from '../projects/types';
@@ -83,6 +96,8 @@ export type PlatformTenantRow = {
   enabledModules: ModuleKey[];
   /** The VERIFIED primary host (what the list's "Sem domínio" pill and the invite sender agree on); null otherwise. */
   primaryHost: string | null;
+  /** 09.2-14 (D-543, D-545, UI-D-540): the derived database state and the applied-of-required schema counts. */
+  database: TenantDatabaseSummary;
 };
 
 export type PlatformTenantsPage = { rows: PlatformTenantRow[]; nextCursor: string | null };
@@ -134,7 +149,23 @@ export async function listPlatformTenants(
   if (query.status) conditions.push(eq(tenants.status, query.status));
   if (query.cursor) conditions.push(gt(tenants.slug, query.cursor));
 
-  const { tenantRows, moduleRows, hostRows } = await withPlatformTx(async (tx) => {
+  // `banco=problema` (UI-D-540): Preparação falhou, Atrasado, Pausado or Inacessível, decided in SQL from the
+  // same facts `summarizeDatabase` reads, so the filter and the pill cannot disagree. A move (plan 23) is a
+  // fifth fact; until then nothing is moving.
+  if (query.banco === 'problema') {
+    const required = getRequiredTenantSchema();
+    const behind = required
+      ? sql`(${projectSchemaState.appliedCount} is not null and ${projectSchemaState.appliedCount} < ${required.count})`
+      : sql`false`;
+    conditions.push(sql`(
+      exists (select 1 from ${projectBootstrapSteps} s
+               where s.project_id = ${projects.id} and s.status = 'failed')
+      or (${projects.state} = 'ready'
+          and (coalesce(${projectHealth.status}, 'unknown') in ('unreachable', 'paused') or ${behind}))
+    )`);
+  }
+
+  const { tenantRows, moduleRows, hostRows, databaseRows } = await withPlatformTx(async (tx) => {
     const tenantRows = await tx
       .select({
         id: tenants.id,
@@ -144,12 +175,19 @@ export async function listPlatformTenants(
         createdAt: tenants.createdAt,
       })
       .from(tenants)
+      // At most one row per tenant: `tenant_projects` is keyed by tenant, the health and schema rows by project.
+      .leftJoin(tenantProjects, eq(tenantProjects.tenantId, tenants.id))
+      .leftJoin(projects, eq(projects.id, tenantProjects.projectId))
+      .leftJoin(projectHealth, eq(projectHealth.projectId, projects.id))
+      .leftJoin(projectSchemaState, eq(projectSchemaState.projectId, projects.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(asc(tenants.slug))
       .limit(limit + 1);
 
     const pageIds = tenantRows.slice(0, limit).map((t) => t.id);
-    if (pageIds.length === 0) return { tenantRows, moduleRows: [], hostRows: [] };
+    if (pageIds.length === 0) {
+      return { tenantRows, moduleRows: [], hostRows: [], databaseRows: [] };
+    }
 
     const moduleRows = await tx
       .select({ tenantId: tenantModules.tenantId, moduleKey: tenantModules.moduleKey })
@@ -168,8 +206,39 @@ export async function listPlatformTenants(
         ),
       );
 
-    return { tenantRows, moduleRows, hostRows };
+    const databaseRows = await tx
+      .select({
+        tenantId: tenantProjects.tenantId,
+        projectState: projects.state,
+        healthStatus: projectHealth.status,
+        appliedCount: projectSchemaState.appliedCount,
+        failed: sql<boolean>`exists (
+          select 1 from ${projectBootstrapSteps} s
+           where s.project_id = ${projects.id} and s.status = 'failed')`,
+      })
+      .from(tenantProjects)
+      .innerJoin(projects, eq(projects.id, tenantProjects.projectId))
+      .leftJoin(projectHealth, eq(projectHealth.projectId, projects.id))
+      .leftJoin(projectSchemaState, eq(projectSchemaState.projectId, projects.id))
+      .where(inArray(tenantProjects.tenantId, pageIds));
+
+    return { tenantRows, moduleRows, hostRows, databaseRows };
   });
+
+  const page = tenantRows.slice(0, limit);
+  const moving = await tenantsMoving(page.map((t) => t.id));
+  const databases = new Map(
+    databaseRows.map((row) => [
+      row.tenantId,
+      summarizeDatabase({
+        projectState: row.projectState,
+        steps: row.failed ? [{ status: 'failed' }] : [],
+        healthStatus: row.healthStatus,
+        appliedCount: row.appliedCount,
+        moving: moving.has(row.tenantId),
+      }),
+    ]),
+  );
 
   const byTenant = new Map<string, ModuleKey[]>();
   for (const row of moduleRows) {
@@ -178,12 +247,20 @@ export async function listPlatformTenants(
     byTenant.set(row.tenantId, list);
   }
   const primaryHosts = new Map(hostRows.map((row) => [row.tenantId, row.host]));
-
-  const page = tenantRows.slice(0, limit);
   const rows = page.map((t) => ({
     ...t,
     enabledModules: byTenant.get(t.id) ?? [],
     primaryHost: primaryHosts.get(t.id) ?? null,
+    // A tenant with no binding cannot exist (the deferred trigger refuses it); read as preparing if it ever did.
+    database:
+      databases.get(t.id) ??
+      summarizeDatabase({
+        projectState: 'preparing',
+        steps: [],
+        healthStatus: null,
+        appliedCount: null,
+        moving: false,
+      }),
   }));
   const last = page[page.length - 1];
   const nextCursor = tenantRows.length > limit && last ? last.slug : null;

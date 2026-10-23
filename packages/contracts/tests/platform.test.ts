@@ -272,12 +272,44 @@ describe('platformTenantsQuerySchema (GET /v1/platform/tenants)', () => {
           createdAt: ISO,
           enabledModules: ['feed'],
           primaryHost: null,
+          database: { state: 'behind', schema: { applied: 144, required: 147 } },
         },
       ],
       nextCursor: null,
     });
     expect(parsed.tenants[0]?.primaryHost).toBeNull();
+    expect(parsed.tenants[0]?.database).toEqual({
+      state: 'behind',
+      schema: { applied: 144, required: 147 },
+    });
     expect(parsed.nextCursor).toBeNull();
+  });
+
+  it('09.2-14: every row carries a database block with a known state, and nothing else in it', () => {
+    const row = {
+      id: UUID,
+      slug: 'sao-jose',
+      displayName: 'Associação São José',
+      status: 'active',
+      createdAt: ISO,
+      enabledModules: ['feed'],
+      primaryHost: null,
+    };
+    const withDatabase = (database: unknown) =>
+      platformTenantsSchema.safeParse({ tenants: [{ ...row, database }], nextCursor: null });
+    expect(platformTenantsSchema.safeParse({ tenants: [row], nextCursor: null }).success).toBe(
+      false,
+    );
+    expect(
+      withDatabase({ state: 'ready', schema: { applied: null, required: null } }).success,
+    ).toBe(true);
+    expect(withDatabase({ state: 'ruined', schema: { applied: 1, required: 2 } }).success).toBe(
+      false,
+    );
+    expect(
+      withDatabase({ state: 'ready', schema: { applied: 1, required: 2 }, databaseUrl: 'x' })
+        .success,
+    ).toBe(false);
   });
 });
 

@@ -7,3 +7,8 @@
 export async function isTenantMoving(_tenantId: string): Promise<boolean> {
   return false;
 }
+
+/** The subset of `tenantIds` being moved: one read for a whole page of the list. Empty until plan 23. */
+export async function tenantsMoving(_tenantIds: readonly string[]): Promise<ReadonlySet<string>> {
+  return new Set();
+}

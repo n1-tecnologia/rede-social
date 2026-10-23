@@ -258,6 +258,7 @@ export const tenantsRoutes = tenants
         createdAt: t.createdAt.toISOString(),
         enabledModules: t.enabledModules,
         primaryHost: t.primaryHost,
+        database: t.database,
       })),
       nextCursor: page.nextCursor,
     };

@@ -8,6 +8,7 @@ import {
 } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { ApiError } from '@rede-social/core/server/http/api-error';
+import { setRequiredTenantSchemaForTests } from '@rede-social/core/server/migrations/required';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { sendPendingInvites } from '@rede-social/core/server/platform/invites';
 import { setModuleEnabled } from '@rede-social/core/server/platform/modules';
@@ -1050,5 +1051,217 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(inB).toHaveLength(1);
     expect(inB[0]).toMatchObject({ userId, email, name: 'Ana em B' });
     for (const admin of [...inA, ...inB]) expect(admin.name).not.toBe('Nome Global');
+  });
+});
+
+/**
+ * 09.2-14 (D-543, D-545, UI-D-540): the list carries each tenant's derived database state and the
+ * applied-of-required schema counts, and `?banco=problema` isolates the four states that need a person. Fixtures
+ * are central rows only (the list reads the mirror and the registry, never a tenant's project), one tenant per
+ * state, each in a throwaway project.
+ */
+describe('GET /v1/platform/tenants — the database column and the Banco filter (UI-D-540)', () => {
+  const TAG = Date.now().toString(36);
+  const prefix = `pt-db-${TAG}-`;
+  const REQUIRED = 147;
+
+  type Scenario = {
+    key: string;
+    state: string;
+    projectState: 'ready' | 'preparing';
+    health?: 'healthy' | 'paused' | 'unreachable';
+    applied?: number;
+    step?: 'running' | 'failed';
+    problem: boolean;
+  };
+  const scenarios: Scenario[] = [
+    {
+      key: 'a-ready',
+      state: 'ready',
+      projectState: 'ready',
+      health: 'healthy',
+      applied: 147,
+      problem: false,
+    },
+    {
+      key: 'b-preparing',
+      state: 'preparing',
+      projectState: 'preparing',
+      step: 'running',
+      problem: false,
+    },
+    {
+      key: 'c-failed',
+      state: 'preparation_failed',
+      projectState: 'preparing',
+      step: 'failed',
+      problem: true,
+    },
+    {
+      key: 'd-behind',
+      state: 'behind',
+      projectState: 'ready',
+      health: 'healthy',
+      applied: 144,
+      problem: true,
+    },
+    {
+      key: 'e-paused',
+      state: 'paused',
+      projectState: 'ready',
+      health: 'paused',
+      applied: 147,
+      problem: true,
+    },
+    {
+      key: 'f-unreachable',
+      state: 'unreachable',
+      projectState: 'ready',
+      health: 'unreachable',
+      problem: true,
+    },
+    { key: 'g-unchecked', state: 'unchecked', projectState: 'ready', problem: false },
+  ];
+  const slugOf = (key: string) => `${prefix}${key}`;
+  let token = '';
+
+  const list = async (query: string) => {
+    const res = await platform(`/tenants?${query}`, { token });
+    return { res, body: res.status === 200 ? platformTenantsSchema.parse(await res.json()) : null };
+  };
+
+  async function cleanup() {
+    await adminSql`delete from public.tenants where slug like ${`${prefix}%`}`;
+    await adminSql`delete from platform.projects where ref like ${`pt-db-${TAG}-%`}`;
+  }
+
+  beforeAll(async () => {
+    token = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    await cleanup();
+    for (const sc of scenarios) {
+      const projectId = crypto.randomUUID();
+      const tenantId = crypto.randomUUID();
+      await adminSql.begin(async (tx) => {
+        await tx`
+          insert into platform.projects (id, ref, provider, credential_source, state, api_url)
+          values (${projectId}::uuid, ${`pt-db-${TAG}-${sc.key}`}, 'fake', 'sealed', ${sc.projectState}, '')`;
+        await tx`
+          insert into public.tenants (id, slug, display_name, rules_text, rules_version)
+          values (${tenantId}::uuid, ${slugOf(sc.key)}, ${`Banco ${sc.key}`}, 'Regras.', 1)`;
+        await tx`
+          insert into platform.tenant_projects (tenant_id, project_id)
+          values (${tenantId}::uuid, ${projectId}::uuid)`;
+        if (sc.health) {
+          await tx`
+            insert into platform.project_health (project_id, status, checked_at)
+            values (${projectId}::uuid, ${sc.health}, now())`;
+        }
+        if (sc.applied !== undefined) {
+          await tx`
+            insert into platform.project_schema_state (project_id, applied_count, status)
+            values (${projectId}::uuid, ${sc.applied}, 'current')`;
+        }
+        if (sc.step) {
+          await tx`
+            insert into platform.project_bootstrap_steps (project_id, step, status, attempt)
+            values (${projectId}::uuid, 'verify', ${sc.step}, 1)`;
+        }
+      });
+    }
+    setRequiredTenantSchemaForTests({ count: REQUIRED, head: '20261022000000' });
+  });
+
+  afterAll(async () => {
+    setRequiredTenantSchemaForTests(undefined);
+    await cleanup();
+  });
+
+  it('every row carries its derived state and the applied-of-required counts', async () => {
+    const { res, body } = await list(`q=${prefix}&limit=100`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const rows = new Map(body?.tenants.map((t) => [t.slug, t.database]));
+    for (const sc of scenarios) {
+      expect(rows.get(slugOf(sc.key)), sc.key).toMatchObject({ state: sc.state });
+    }
+    expect(rows.get(slugOf('d-behind'))?.schema).toEqual({ applied: 144, required: REQUIRED });
+    expect(rows.get(slugOf('a-ready'))?.schema).toEqual({ applied: 147, required: REQUIRED });
+    // A project that was never probed has no applied count.
+    expect(rows.get(slugOf('g-unchecked'))?.schema).toEqual({ applied: null, required: REQUIRED });
+  });
+
+  it('with the required schema unknown (the gate off) nothing is behind', async () => {
+    setRequiredTenantSchemaForTests(null);
+    try {
+      const { body } = await list(`q=${prefix}&limit=100`);
+      const behind = body?.tenants.find((t) => t.slug === slugOf('d-behind'));
+      expect(behind?.database).toEqual({
+        state: 'ready',
+        schema: { applied: 144, required: null },
+      });
+    } finally {
+      setRequiredTenantSchemaForTests({ count: REQUIRED, head: '20261022000000' });
+    }
+  });
+
+  it('banco=problema keeps exactly the four states that need a person, and the pill agrees with the filter', async () => {
+    const { res, body } = await list(`q=${prefix}&banco=problema&limit=100`);
+    expect(res.status).toBe(200);
+    const slugs = body?.tenants.map((t) => t.slug);
+    expect(slugs).toEqual(scenarios.filter((sc) => sc.problem).map((sc) => slugOf(sc.key)));
+    for (const row of body?.tenants ?? []) {
+      expect(['preparation_failed', 'behind', 'paused', 'unreachable']).toContain(
+        row.database.state,
+      );
+    }
+    // Every state the filter dropped is one the pill says is not a problem.
+    const all = (await list(`q=${prefix}&limit=100`)).body;
+    for (const row of all?.tenants ?? []) {
+      const inFilter = slugs?.includes(row.slug) ?? false;
+      expect(inFilter, row.slug).toBe(
+        ['preparation_failed', 'behind', 'paused', 'unreachable'].includes(row.database.state),
+      );
+    }
+  });
+
+  it('banco=problema and status together are a 400 VALIDATION_FAILED; an unknown banco value is too', async () => {
+    for (const query of [
+      'banco=problema&status=active',
+      'banco=problema&status=suspended',
+      'banco=tudo',
+    ]) {
+      const { res } = await list(query);
+      expect(res.status, query).toBe(400);
+      expect(((await res.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+    }
+    expect((await list('status=active&q=zzz')).res.status).toBe(200);
+  });
+
+  it('the order stays the slug order and the cursor walks the filtered list with no repeat and no skip', async () => {
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page += 1) {
+      const query: string = `q=${prefix}&banco=problema&limit=2${cursor ? `&cursor=${cursor}` : ''}`;
+      const { body } = await list(query);
+      expect(body?.tenants.length).toBeLessThanOrEqual(2);
+      seen.push(...(body?.tenants.map((t) => t.slug) ?? []));
+      cursor = body?.nextCursor ?? null;
+      if (!cursor) break;
+    }
+    expect(seen).toEqual(scenarios.filter((sc) => sc.problem).map((sc) => slugOf(sc.key)));
+    expect(new Set(seen).size).toBe(seen.length);
+    // The unfiltered list keeps its order too.
+    const { body } = await list(`q=${prefix}&limit=100`);
+    const slugs = body?.tenants.map((t) => t.slug) ?? [];
+    expect(slugs).toEqual([...slugs].sort());
+  });
+
+  it('the seeded tenants of project 0 are listed with a database state of their own', async () => {
+    const { body } = await list('q=rede-&limit=100');
+    const demo = body?.tenants.find((t) => t.slug === 'rede-demo');
+    expect(demo?.database.state).toMatch(/^(ready|unchecked)$/);
+    expect(
+      demo?.database.schema.applied === null || typeof demo?.database.schema.applied === 'number',
+    ).toBe(true);
   });
 });

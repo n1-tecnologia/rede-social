@@ -12,6 +12,37 @@ const SEVERITY: Record<string, string> = {
 };
 
 /**
+ * The names under which a credential can sit in a log object (09.2-14, T-09.2-67). A key is matched at the top
+ * level and one level down (`*.key`), which is how every call in the kernel nests its fields. pino's redaction
+ * takes whole path segments, not prefixes, so the family `secret*` is spelled out.
+ */
+const CREDENTIAL_KEYS = [
+  'databaseUrl',
+  'ddlUrl',
+  'connectionString',
+  'serviceKey',
+  'publishableKey',
+  'databasePassword',
+  'password',
+  'smtpPass',
+  'secret',
+  'secrets',
+  'secretKey',
+  'hookSecret',
+  'hookSecrets',
+  'token',
+  'accessToken',
+  'refreshToken',
+  'authorization',
+] as const;
+
+/** The pino `redact` option of the root logger; exported so a test can build a logger with the same one. */
+export const LOG_REDACT = {
+  paths: CREDENTIAL_KEYS.flatMap((key) => [key, `*.${key}`]),
+  censor: '[redacted]',
+} as const;
+
+/**
  * The ONE root logger (phase-1 review WR-12). Every logger in the kernel, the apps and the modules
  * is a child of this instance, so all of them carry the `severity` formatter and honour
  * `LOG_LEVEL`. A bare `pino()` elsewhere would emit `"level":50` lines that Cloud Logging files as
@@ -25,6 +56,7 @@ const SEVERITY: Record<string, string> = {
 export const rootLogger: Logger = pino({
   level: env.LOG_LEVEL,
   messageKey: 'message',
+  redact: { paths: [...LOG_REDACT.paths], censor: LOG_REDACT.censor },
   timestamp: pino.stdTimeFunctions.isoTime,
   formatters: {
     level: (label) => ({ severity: SEVERITY[label] ?? label.toUpperCase() }),
@@ -60,6 +92,37 @@ function isStatementFailure(error: unknown): error is Error {
   return ('query' in error && 'params' in error) || ('query' in error && 'parameters' in error);
 }
 
+const CONNECTION_STRING_SOURCE = 'postgres(?:ql)?:\\/\\/[^\\s\'"`)>]+';
+const HAS_CONNECTION_STRING = new RegExp(CONNECTION_STRING_SOURCE, 'i');
+const scrub = (text: string): string =>
+  text.replace(new RegExp(CONNECTION_STRING_SOURCE, 'gi'), 'postgres://[redacted]');
+
+/**
+ * A driver or URL-parsing failure can quote the connection string it was handed (user, password, host). The
+ * error is returned untouched when it carries none; otherwise a COPY with the string replaced, so the credential
+ * never reaches a log even when the caller logs the whole error (09.2-14, T-09.2-67).
+ */
+function scrubConnectionStrings<T>(error: T, depth = 0): T {
+  if (typeof error === 'string') {
+    return (HAS_CONNECTION_STRING.test(error) ? scrub(error) : error) as T;
+  }
+  if (!(error instanceof Error) || depth > 3) return error;
+  const cause = (error as { cause?: unknown }).cause;
+  const cleanCause = cause === undefined ? undefined : scrubConnectionStrings(cause, depth + 1);
+  const dirty =
+    HAS_CONNECTION_STRING.test(error.message) ||
+    HAS_CONNECTION_STRING.test(error.stack ?? '') ||
+    cleanCause !== cause;
+  if (!dirty) return error;
+  const copy = new Error(
+    scrub(error.message),
+    cleanCause === undefined ? undefined : { cause: cleanCause },
+  );
+  copy.name = error.name;
+  if (error.stack) copy.stack = scrub(error.stack);
+  return copy as unknown as T;
+}
+
 /**
  * Returns `error` itself unless it is a failed database statement; then returns a plain object holding
  * the SQLSTATE and the constraint, table and column names (identifiers, never values: not the message,
@@ -67,7 +130,7 @@ function isStatementFailure(error: unknown): error is Error {
  * call. The driver error sits in `cause`, so the chain is walked for the first SQLSTATE.
  */
 export function redactDbError<T>(error: T): T | RedactedDbError {
-  if (!isStatementFailure(error)) return error;
+  if (!isStatementFailure(error)) return scrubConnectionStrings(error);
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
     const code = (current as { code?: unknown }).code;

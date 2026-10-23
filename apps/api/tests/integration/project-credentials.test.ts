@@ -86,6 +86,7 @@ const REF_A = `pc-a-${RUN}`;
 const REF_B = `pc-b-${RUN}`;
 const SLUG_A = `pc-a-${RUN}`;
 const SLUG_B = `pc-b-${RUN}`;
+const SLUG_SCAN = `pc-scan-${RUN}`;
 
 const provider: FakeProjectProvider = fakeProvider({
   [REF_A]: fakeTarget(),
@@ -135,7 +136,7 @@ const unchanged = (before: Registry, after: Registry, columns: readonly string[]
 };
 
 async function cleanup(): Promise<void> {
-  await adminSql`delete from public.tenants where slug in (${SLUG_A}, ${SLUG_B})`;
+  await adminSql`delete from public.tenants where slug in (${SLUG_A}, ${SLUG_B}, ${SLUG_SCAN})`;
   await adminSql`
     delete from pgboss_platform.job
      where name = ${QUEUE}
@@ -622,11 +623,126 @@ describe('reissueCredentials: the whole set from the platform token alone (DBT-4
 });
 
 // ---------------------------------------------------------------------------------------------------------
+// The whole platform surface (P77, T-09.2-67)
+// ---------------------------------------------------------------------------------------------------------
+
+describe('the full platform surface never holds a credential (P77)', () => {
+  it('no platform answer holds a credential, nor does any log line written while they were produced', async () => {
+    // Every credential column of the project is filled (the reissue above filled them all).
+    const row = await registryOf(projectId);
+    const plain = [
+      open(row.ddl_url_sealed as string, `${projectId}:ddl_url`),
+      open(row.database_url_tx_sealed as string, `${projectId}:database_url_tx`),
+      open(row.database_url_session_sealed as string, `${projectId}:database_url_session`),
+      open(row.service_key_sealed as string, `${projectId}:service_key`),
+      open(row.hook_secret_sealed as string, `${projectId}:hook_secret`),
+      String(row.publishable_key),
+      REAL.serviceKey,
+      REAL.publishableKey,
+    ];
+    const sealedStrings = SEALED.map((column) => String(row[column]));
+    for (const secret of [...plain, ...sealedStrings]) expect(secret.length).toBeGreaterThan(8);
+
+    captured.lines.length = 0;
+    const answers: { what: string; text: string }[] = [];
+    const fill = (path: string) =>
+      path
+        .replace(':id', tenantId)
+        .replace(':key', 'feed')
+        .replace(':inviteId', crypto.randomUUID())
+        .replace(':domainId', crypto.randomUUID())
+        .replace(':uploadId', crypto.randomUUID());
+    // The mutations that carry a body worth sending; every other mutation is called with an empty one.
+    const bodies: Record<string, unknown> = {
+      'PATCH /v1/platform/tenants/:id': { displayName: 'Comunidade Projeto' },
+      'POST /v1/platform/tenants/:id/status': { status: 'active' },
+      'PUT /v1/platform/tenants/:id/modules/:key': { enabled: true },
+      'POST /v1/platform/projects/precheck': { projectRef: REF_A },
+      'PUT /v1/platform/tenants/:id/database/credentials': { ...REAL },
+      'POST /v1/platform/tenants': {
+        displayName: 'Comunidade Scan',
+        slug: SLUG_SCAN,
+        colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+        modules: ['feed'],
+        adminEmail: `admin-${SLUG_SCAN}@rede-social-test.local`,
+        projectRef: REF_A,
+        access: { ...REAL },
+      },
+    };
+
+    const routes = api.routes.filter(
+      (route) => route.method !== 'ALL' && route.path.startsWith('/v1/platform'),
+    );
+    expect(routes.length).toBeGreaterThanOrEqual(25);
+    for (const route of routes) {
+      const key = `${route.method} ${route.path}`;
+      const body = route.method === 'GET' ? undefined : (bodies[key] ?? {});
+      const res = await api.request(fill(route.path), {
+        method: route.method,
+        headers: {
+          authorization: `Bearer ${tokens.superAdmin}`,
+          ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+      answers.push({ what: `${key} -> ${res.status}`, text: await res.text() });
+    }
+    // A caller that is refused, and a body the schema refuses, are answers too.
+    answers.push({
+      what: 'PUT credentials, wrong value',
+      text: (await put(tenantId, { serviceKey: 'wrong' })).text,
+    });
+    answers.push({
+      what: 'PUT credentials, no auth',
+      text: (await put(tenantId, REAL, null)).text,
+    });
+    expect(answers.length).toBeGreaterThanOrEqual(routes.length + 2);
+    // The scan reached the interesting routes for real, not only their refusals.
+    expect(
+      answers.some((a) => a.what.startsWith('GET /v1/platform/tenants/:id/database -> 200')),
+    ).toBe(true);
+    expect(
+      answers.some((a) =>
+        a.what.startsWith('PUT /v1/platform/tenants/:id/database/credentials -> 200'),
+      ),
+    ).toBe(true);
+    expect(answers.some((a) => a.what.startsWith('POST /v1/platform/tenants -> 201'))).toBe(true);
+
+    const forbidden: Array<[string, RegExp | string]> = [
+      ...plain.map((secret): [string, string] => ['a plaintext credential', secret]),
+      ...sealedStrings.map((secret): [string, string] => ['a sealed value', secret]),
+      ['a connection string', /postgres(ql)?:\/\//i],
+      ['a secret key', /sb_secret_/],
+      ['a JWT', /eyJ/],
+      ['a sealed prefix', /v1:\d+:/],
+      [
+        'a registry column',
+        /(database_url_tx|database_url_session|ddl_url|service_key|hook_secret)_sealed/,
+      ],
+    ];
+    const haystacks = [
+      ...answers.map((a) => [a.what, a.text] as const),
+      ...captured.lines.map((line) => ['log', line] as const),
+    ];
+    for (const [what, text] of haystacks) {
+      for (const [label, needle] of forbidden) {
+        const found = typeof needle === 'string' ? text.includes(needle) : needle.test(text);
+        expect(found, `${label} in ${what}`).toBe(false);
+      }
+    }
+  }, 180_000);
+});
+
+// ---------------------------------------------------------------------------------------------------------
 // A bootstrap claimed after a finished reissue uses the new credentials (P94)
 // ---------------------------------------------------------------------------------------------------------
 
 describe('a bootstrap that resumes after a reissue uses the NEW credentials (P94)', () => {
   it('the DDL URL a resumed step opens is the one the reissue stored, not the one it replaced', async () => {
+    // The routes above start a background health check after each replacement; let those settle and close
+    // every pool that points at the database we are about to drop.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await closeAllPools();
     // A bare database again: this project goes through verify and roles, fails at schema, is reissued, resumed.
     resetB();
     const made = await createReadyTenant(provider, REF_B, SLUG_B, { run: false });

@@ -15,6 +15,7 @@ import { paymentEventJob } from '@rede-social/core/server/payments/event-job';
 import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { reconcileAuthAllowList } from '@rede-social/core/server/platform/reconcile-allow-list';
 import { projectBootstrapJob } from '@rede-social/core/server/projects/bootstrap-job';
+import { armProjectHealth, projectHealthJob } from '@rede-social/core/server/projects/health-job';
 import {
   armDailyTenantDispatch,
   dailyTenantDispatchJob,
@@ -43,7 +44,8 @@ import { createSupervisor, type SupervisedBoss } from './worker-supervisor';
  * **One consumer per ready project plus one for the platform (09.2-09, D-546).** A pg-boss instance polls
  * ONE database, so the worker no longer starts one instance: `createSupervisor` (`worker-supervisor.ts`)
  * keeps a PLATFORM instance (`pgboss_platform` of the central project: `kernel.domain-verify`,
- * `kernel.invite-send`, `platform.mirror-reconcile`, `platform.project-bootstrap`) and one TENANT-scope instance per `ready` project
+ * `kernel.invite-send`, `platform.mirror-reconcile`, `platform.project-bootstrap`,
+ * `platform.project-health`) and one TENANT-scope instance per `ready` project
  * (the `pgboss` schema of that project's database: the other jobs), reconciled against the registry every
  * 60 s. A tenant job's handler receives `{ projectId }` as its second argument; the daily dispatcher and the
  * orphan sweeper use it, they run once per project. A job's `scope` (default tenant) decides which list it
@@ -69,10 +71,10 @@ import { createSupervisor, type SupervisedBoss } from './worker-supervisor';
  * exists". `tests/integration/worker.test.ts` boots this branch in a fresh process and asserts it.
  *
  * The orphan sweeper (`kernel.media-sweep-orphans`, 03-08), the daily per-tenant dispatcher
- * (`kernel.daily-tenant-dispatch`, 08.7-01) and the mirror reconcile (`platform.mirror-reconcile`,
- * 09.2-09) have NO scheduler: each re-arms itself with a deferred job after every run, the
- * `kernel.domain-verify` pattern, so the worker only has to open the cadence once. The first two are opened
- * once per project each time its instance starts (`onProjectStarted`), the third once at boot. Every arm is
+ * (`kernel.daily-tenant-dispatch`, 08.7-01), the mirror reconcile (`platform.mirror-reconcile`, 09.2-09)
+ * and the project health sweep (`platform.project-health`, 09.2-14, every 300 s) have NO scheduler:
+ * each re-arms itself with a deferred job after every run, the `kernel.domain-verify` pattern, so the worker only has to open the cadence once. The first two are opened
+ * once per project each time its instance starts (`onProjectStarted`), the other two once at boot. Every arm is
  * best-effort — a worker must boot even if the first enqueue fails, and the next successful run re-opens it.
  * At boot the worker also aligns project 0's registry row with the environment (`ensureProjectZero`), and
  * each time a project's instance starts it reconciles THAT project's auth redirect allow-list for the verified
@@ -101,6 +103,8 @@ export async function startWorker(): Promise<void> {
     mirrorReconcileJob,
     // 09.2-13 (D-542): drives a new tenant project through the eight bootstrap steps. A platform queue.
     projectBootstrapJob,
+    // 09.2-14 (D-543): checks every ready project every 300 s and re-arms itself. A platform queue.
+    projectHealthJob,
     deriveIconsJob,
     deriveVariantsJob,
     mediaProviderEventJob,
@@ -173,6 +177,12 @@ export async function startWorker(): Promise<void> {
         'could not arm the mirror reconcile; the next boot re-opens it',
         'platform.mirror_reconcile.armed',
         () => armMirrorReconcile(),
+      );
+      // 09.2-14 (D-543): open the project health cadence under the BOOT singleton.
+      await bestEffort(
+        'could not arm the project health; the next boot re-opens it',
+        'platform.project_health.armed',
+        () => armProjectHealth(),
       );
     },
     // The per-project cadences, once per project each time its instance (re)starts.

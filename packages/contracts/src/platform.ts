@@ -10,7 +10,7 @@ import {
 import { tenantDomainSchema } from './domains';
 import { tenantInviteSchema } from './invites';
 import { REAL_TENANT_DEFAULT_MODULES, TOGGLEABLE_MODULES } from './modules';
-import { bancoFilterSchema, projectAccessSchema } from './projects';
+import { bancoFilterSchema, projectAccessSchema, tenantDatabaseSummarySchema } from './projects';
 
 /**
  * `GET /v1/platform/tenants` (ROLE-01, D-21). The ONE shape shared by the route, the platform-host
@@ -31,6 +31,8 @@ export const platformTenantsSchema = z.object({
       createdAt: z.string(),
       enabledModules: z.array(z.enum(TOGGLEABLE_MODULES)),
       primaryHost: z.string().nullable(),
+      /** 09.2-14 (D-543, D-545, UI-D-540): the derived database state and the applied-of-required schema counts. */
+      database: tenantDatabaseSummarySchema,
     }),
   ),
   nextCursor: z.string().nullable(),
