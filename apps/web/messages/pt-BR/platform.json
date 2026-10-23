@@ -115,6 +115,7 @@
         "modules": "Módulos",
         "domains": "Domínios",
         "admins": "Admins",
+        "database": "Banco",
         "status": "Status"
       },
       "noHost": "Sem domínio",

@@ -5,6 +5,7 @@ import {
   platformTenantDetailSchema,
   platformTenantsSchema,
 } from '@rede-social/contracts';
+import { type DatabaseOverview, databaseOverviewSchema } from '@rede-social/contracts/projects';
 import {
   SOCIAL_SETTINGS_DEFAULTS,
   type SocialSettings,
@@ -42,6 +43,21 @@ export function formatPanelDate(iso: string, style: 'date' | 'dateTime' = 'date'
     month: '2-digit',
     year: 'numeric',
     ...(style === 'dateTime' ? { hour: '2-digit', minute: '2-digit' } : {}),
+  }).format(date);
+}
+
+/**
+ * "12 de outubro de 2026" in the platform's zone (09.2-19, UI-D-537): the long date of "Preparação
+ * concluída em {date}.". Server-computed like every panel date; an unparsable value reads as "".
+ */
+export function formatPanelLongDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: PANEL_TIME_ZONE,
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
   }).format(date);
 }
 
@@ -101,6 +117,29 @@ export const getPlatformTenantDetail = cache(async (id: string): Promise<Platfor
   if (!res.ok) await throwEnvelope(res);
   return platformTenantDetailSchema.parse(await res.json());
 });
+
+/**
+ * `GET /v1/platform/tenants/{id}/database` (09.2-14, UI-D-536): the Banco tab's one read - the derived
+ * state, the bootstrap steps, the schema counts, the last check and whether credentials are HELD (never
+ * their values). The answer is parsed with the contract's strict schema, so a field that could carry a
+ * credential would fail here rather than reach a screen. A refusal or a failed read throws
+ * `ApiClientError`; the page goes through `requirePlatformTenantDatabase`, the segment's `error.tsx`
+ * renders anything else.
+ */
+export async function getTenantDatabase(id: string): Promise<DatabaseOverview> {
+  const res = await apiFetch(`/v1/platform/tenants/${encodeURIComponent(id)}/database`);
+  if (!res.ok) await throwEnvelope(res);
+  return databaseOverviewSchema.parse(await res.json());
+}
+
+/**
+ * The overview the Banco tab renders, or a navigation: 401/403 redirect like every platform read.
+ * Any other failure (a 5xx, a body the strict schema refuses) is rethrown so the segment's
+ * `error.tsx` shows the card "Algo deu errado" inside the unchanged tenant frame (UI-D-544).
+ */
+export async function requirePlatformTenantDatabase(id: string): Promise<DatabaseOverview> {
+  return loadOrRedirect(() => getTenantDatabase(id), platformRedirectPath);
+}
 
 /**
  * `GET /v1/platform/tenants/{id}/modules/social/settings` (09-06, D-474): the EFFECTIVE member media

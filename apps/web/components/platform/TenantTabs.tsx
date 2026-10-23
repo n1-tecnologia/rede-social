@@ -4,15 +4,19 @@ import { Tabs } from '@rede-social/ui';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
-/** The five tab segments in their FIXED order (UI-SPEC tenant page). */
-const TAB_KEYS = ['marca', 'modulos', 'dominios', 'admins', 'status'] as const;
+/** The six tab segments in their FIXED order (UI-SPEC tenant page; `banco` joined in 09.2-19, UI-D-536). */
+const TAB_KEYS = ['marca', 'modulos', 'dominios', 'admins', 'banco', 'status'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
-const TAB_LABEL_KEY: Record<TabKey, 'brand' | 'modules' | 'domains' | 'admins' | 'status'> = {
+const TAB_LABEL_KEY: Record<
+  TabKey,
+  'brand' | 'modules' | 'domains' | 'admins' | 'database' | 'status'
+> = {
   marca: 'brand',
   modulos: 'modules',
   dominios: 'domains',
   admins: 'admins',
+  banco: 'database',
   status: 'status',
 };
 
@@ -22,7 +26,7 @@ export interface TenantTabsProps {
 }
 
 /**
- * Marca · Módulos · Domínios · Admins · Status as links to the tab sub-routes; the active tab is the
+ * Marca · Módulos · Domínios · Admins · Banco · Status as links to the tab sub-routes; the active tab is the
  * segment after `/plataforma/tenants/{id}/` (the tenant root redirects to `marca`). Arrow keys move
  * through `@rede-social/ui` `Tabs`' roving tabindex and navigate.
  */

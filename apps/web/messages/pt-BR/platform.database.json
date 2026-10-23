@@ -1,7 +1,47 @@
 {
   "platform": {
     "database": {
+      "overview": {
+        "title": "Banco de dados",
+        "verifiedAt": "Verificado {when}.",
+        "neverChecked": "Ainda não verificado.",
+        "project": "Projeto",
+        "schema": "Esquema",
+        "schemaOf": "{applied} de {required}",
+        "schemaUnknown": "Não informado",
+        "plan": "Plano",
+        "planPro": "Pro",
+        "planFree": "Free",
+        "planUnknown": "Não informado",
+        "shared": "Compartilhado",
+        "sharedBody": "Este projeto também atende {n, plural, one {outro tenant} other {# outros tenants}}. Isso só é permitido fora de produção.",
+        "openInSupabase": "Abrir no Supabase",
+        "newTab": " (abre em uma nova aba)",
+        "check": "Verificar agora",
+        "checking": "Verificando…",
+        "checked": "Verificação concluída."
+      },
+      "states": {
+        "ready": "Pronto",
+        "preparing": "Em preparação",
+        "preparationFailed": "Preparação falhou",
+        "behind": "Atrasado",
+        "paused": "Pausado",
+        "unreachable": "Inacessível",
+        "moving": "Em mudança",
+        "unchecked": "Não verificado"
+      },
+      "notices": {
+        "behind": "O esquema deste tenant está atrás da versão exigida. Os membros veem “Comunidade em atualização” até a migração passar. O sistema tenta de novo sozinho.",
+        "paused": "O projeto está pausado no Supabase. Os membros veem “Comunidade indisponível” até você reativá-lo.",
+        "unreachable": "Não conseguimos falar com o projeto. Os membros veem “Comunidade indisponível” até a conexão voltar.",
+        "preparationFailed": "A preparação parou numa etapa. Veja a lista abaixo e tente de novo.",
+        "moving": "Este tenant está sendo movido para um projeto próprio. Ele volta a funcionar quando a mudança terminar.",
+        "code": "Código {code}"
+      },
       "steps": {
+        "title": "Preparação",
+        "listLabel": "Etapas da preparação",
         "verify": "Verificar o projeto",
         "roles": "Criar os papéis de acesso",
         "schema": "Aplicar o esquema do banco",
@@ -9,7 +49,19 @@
         "buckets": "Criar os buckets de arquivos",
         "realtime": "Criar as políticas do Realtime",
         "tenant": "Criar o tenant e os módulos",
-        "invite": "Agendar o convite do primeiro administrador"
+        "invite": "Agendar o convite do primeiro administrador",
+        "status": {
+          "waiting": "aguardando",
+          "running": "em andamento",
+          "done": "concluída",
+          "failed": "falhou"
+        },
+        "retry": "Tentar de novo",
+        "retrying": "Tentando…",
+        "retryNote": "Continua a partir da etapa que falhou. As etapas concluídas não são refeitas.",
+        "running": "Preparando… esta página se atualiza sozinha.",
+        "done": "Preparação concluída em {date}.",
+        "show": "Ver etapas"
       },
       "reasons": {
         "unreachable": "Não foi possível falar com o projeto.",
@@ -22,6 +74,28 @@
         "tenant": "A criação do tenant falhou.",
         "invite": "O agendamento do convite falhou.",
         "unknown": "Algo deu errado nesta etapa."
+      },
+      "credentials": {
+        "title": "Credenciais",
+        "body": "Guardadas com segurança. O sistema não mostra nem devolve estes valores.",
+        "held": "Guardadas",
+        "missing": "Não informadas",
+        "missingNote": "Os dados de acesso ao projeto ainda não foram guardados. Termine a preparação ou use Substituir credenciais.",
+        "updated": "Atualizadas {when}.",
+        "replace": "Substituir credenciais",
+        "sheetTitle": "Substituir credenciais",
+        "intro": "Use quando a senha ou as chaves do projeto mudarem no Supabase. Cole só o que mudou.",
+        "save": "Salvar credenciais",
+        "saving": "Salvando…",
+        "saved": "Credenciais atualizadas."
+      },
+      "errors": {
+        "title": "Algo deu errado",
+        "load": "Não foi possível carregar o banco deste tenant. Tente novamente.",
+        "retry": "Tentar novamente",
+        "check": "Não foi possível verificar agora. Tente novamente.",
+        "access": "Não foi possível entrar no projeto com estes dados. Nada foi alterado.",
+        "generic": "Algo deu errado. Tente novamente."
       }
     }
   }

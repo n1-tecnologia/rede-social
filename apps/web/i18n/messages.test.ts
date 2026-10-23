@@ -4370,3 +4370,116 @@ describe('09.2-18 - the confirmation dialog database task', () => {
     );
   });
 });
+
+/**
+ * 09.2-19 Task 1 (UI-D-536, UI-D-539, UI-D-544, UI-D-547) - the Banco tab's overview words, verbatim
+ * from the Copywriting Contract ('Banco tab' rows): the tab label, the overview card, the eight state
+ * words, the five notices and the load/check errors. `overview.sharedBody` is the one ICU plural and
+ * `overview.verifiedAt`, `overview.schemaOf` and `notices.code` carry placeholders: all pinned.
+ */
+describe('09.2-19 - the Banco tab overview catalog', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator(namespace: string) {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({
+      locale: 'pt-BR',
+      messages: messages as never,
+      namespace: namespace as never,
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+  }
+
+  it.each([
+    ['platform.tenant.tabs.database', 'Banco'],
+    ['platform.database.overview.title', 'Banco de dados'],
+    ['platform.database.overview.verifiedAt', 'Verificado {when}.'],
+    ['platform.database.overview.neverChecked', 'Ainda não verificado.'],
+    ['platform.database.overview.project', 'Projeto'],
+    ['platform.database.overview.schema', 'Esquema'],
+    ['platform.database.overview.schemaOf', '{applied} de {required}'],
+    ['platform.database.overview.plan', 'Plano'],
+    ['platform.database.overview.planPro', 'Pro'],
+    ['platform.database.overview.planFree', 'Free'],
+    ['platform.database.overview.planUnknown', 'Não informado'],
+    ['platform.database.overview.shared', 'Compartilhado'],
+    ['platform.database.overview.openInSupabase', 'Abrir no Supabase'],
+    ['platform.database.overview.newTab', ' (abre em uma nova aba)'],
+    ['platform.database.overview.check', 'Verificar agora'],
+    ['platform.database.overview.checking', 'Verificando…'],
+    ['platform.database.overview.checked', 'Verificação concluída.'],
+    ['platform.database.states.ready', 'Pronto'],
+    ['platform.database.states.preparing', 'Em preparação'],
+    ['platform.database.states.preparationFailed', 'Preparação falhou'],
+    ['platform.database.states.behind', 'Atrasado'],
+    ['platform.database.states.paused', 'Pausado'],
+    ['platform.database.states.unreachable', 'Inacessível'],
+    ['platform.database.states.moving', 'Em mudança'],
+    ['platform.database.states.unchecked', 'Não verificado'],
+    [
+      'platform.database.notices.behind',
+      'O esquema deste tenant está atrás da versão exigida. Os membros veem “Comunidade em atualização” até a migração passar. O sistema tenta de novo sozinho.',
+    ],
+    [
+      'platform.database.notices.paused',
+      'O projeto está pausado no Supabase. Os membros veem “Comunidade indisponível” até você reativá-lo.',
+    ],
+    [
+      'platform.database.notices.unreachable',
+      'Não conseguimos falar com o projeto. Os membros veem “Comunidade indisponível” até a conexão voltar.',
+    ],
+    [
+      'platform.database.notices.preparationFailed',
+      'A preparação parou numa etapa. Veja a lista abaixo e tente de novo.',
+    ],
+    [
+      'platform.database.notices.moving',
+      'Este tenant está sendo movido para um projeto próprio. Ele volta a funcionar quando a mudança terminar.',
+    ],
+    ['platform.database.notices.code', 'Código {code}'],
+    ['platform.database.errors.title', 'Algo deu errado'],
+    [
+      'platform.database.errors.load',
+      'Não foi possível carregar o banco deste tenant. Tente novamente.',
+    ],
+    ['platform.database.errors.retry', 'Tentar novamente'],
+    ['platform.database.errors.check', 'Não foi possível verificar agora. Tente novamente.'],
+    ['platform.database.errors.generic', 'Algo deu errado. Tente novamente.'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('pins the shared-project plural: one, many and the placeholder', async () => {
+    const t = await translator('platform.database.overview');
+    expect(t('sharedBody', { n: 1 })).toBe(
+      'Este projeto também atende outro tenant. Isso só é permitido fora de produção.',
+    );
+    expect(t('sharedBody', { n: 2 })).toBe(
+      'Este projeto também atende 2 outros tenants. Isso só é permitido fora de produção.',
+    );
+  });
+
+  it('pins the placeholders of the overview card', async () => {
+    const t = await translator('platform.database');
+    expect(t('overview.verifiedAt', { when: 'há 3 min' })).toBe('Verificado há 3 min.');
+    expect(t('overview.schemaOf', { applied: 144, required: 147 })).toBe('144 de 147');
+    expect(t('notices.code', { code: 'migration_failed' })).toBe('Código migration_failed');
+  });
+
+  it('has a state word for every database state of the contract', async () => {
+    const { DATABASE_STATES } = await import('@rede-social/contracts/projects');
+    const states = lookup('platform.database.states') as Record<string, string>;
+    expect(Object.keys(states)).toHaveLength(DATABASE_STATES.length);
+    for (const value of Object.values(states)) expect(value.length).toBeGreaterThan(2);
+  });
+
+  it('holds no credential-shaped string in the whole database catalog', () => {
+    const block = JSON.stringify(lookup('platform.database'));
+    expect(block).not.toMatch(/postgres:\/\/|sb_secret_|eyJ/);
+  });
+});
