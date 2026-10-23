@@ -24,6 +24,7 @@ const { deriveBrandColors, normalizeHost, REAL_TENANT_DEFAULT_MODULES, TOGGLEABL
   await import('@rede-social/contracts');
 const { and, eq, ne } = await import('drizzle-orm');
 const { withAdminTx } = await import('@rede-social/core/db/admin-tx');
+const { withPlatformTx } = await import('@rede-social/core/db/platform-tx');
 const {
   accessGrants,
   mediaAssets,
@@ -666,7 +667,7 @@ async function seedEventAttendances(
   eventId: string,
   plan: SeedAttendancePlan,
 ): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     const existing = await tx.execute<{ n: number }>(sql`
       select count(*)::int as n from public.event_attendances
        where tenant_id = ${tenantId}::uuid and event_id = ${eventId}::uuid`);
@@ -1166,7 +1167,7 @@ async function seedPostImageAsset(
     });
   }
 
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await tx
       .insert(mediaAssets)
       .values({
@@ -1223,7 +1224,7 @@ async function seedStoryImageAsset(
     });
   }
 
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await tx
       .insert(mediaAssets)
       .values({
@@ -1258,7 +1259,7 @@ async function seedStoryVideoAsset(
   ownerUserId: string,
   assetId: string,
 ): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await tx
       .insert(mediaAssets)
       .values({
@@ -1292,7 +1293,7 @@ async function seedAttachmentAsset(
   await putObject(mediaOriginalKey(tenantId, assetId), SEED_PDF, {
     contentType: 'application/pdf',
   });
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await tx
       .insert(mediaAssets)
       .values({
@@ -1325,7 +1326,7 @@ async function seedVideoAsset(
   ownerUserId: string,
   assetId: string,
 ): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await tx
       .insert(mediaAssets)
       .values({
@@ -1412,7 +1413,7 @@ async function seedMemberProfile(
   userId: string,
   member: SeedMember,
 ): Promise<boolean> {
-  const existing = await withAdminTx(async (tx) =>
+  const existing = await withAdminTx({ tenantId }, async (tx) =>
     tx
       .select({ id: memberProfiles.id, avatarAssetId: memberProfiles.avatarAssetId })
       .from(memberProfiles)
@@ -1422,7 +1423,7 @@ async function seedMemberProfile(
   const profile = existing[0];
   if (!profile) throw new Error(`the membership trigger did not create a profile for ${userId}`);
 
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await tx
       .update(memberProfiles)
       .set({ bio: member.bio, displayName: member.name, updatedAt: new Date() })
@@ -1449,7 +1450,7 @@ async function seedMemberProfile(
     });
   }
 
-  await withAdminTx(async (tx) => {
+  await withAdminTx({ tenantId }, async (tx) => {
     await tx.insert(mediaAssets).values({
       id: assetId,
       tenantId,
@@ -1475,12 +1476,21 @@ async function seedMemberProfile(
   return true;
 }
 
+/**
+ * 09.2-06 (D-538): which lane each datum goes through. The control-plane facts (the `tenants` row the seed
+ * creates, its enabled modules, its domains, the platform admin) are written through `withPlatformTx`; every
+ * tenant-owned row goes through `withAdminTx({ tenantId })` with the id of the tenant the seed just created.
+ * Both seed tenants are bound to project 0 by the trigger of plan 02, so the central and the tenant database
+ * are one database here and the observable result is unchanged.
+ */
+const seedTenantIds: string[] = [];
+
 for (const t of SEED_TENANTS) {
   // D-25/D-28: the two source colors plus their persisted derivations and the root-relative logo.
   // The icon fields are NOT part of the upsert `set` (a re-run must never briefly null a live icon
   // set): the first insert starts them empty and the follow-up update below writes the derived set.
   const brandSource = { logoUrl: t.logoUrl, colors: deriveBrandColors(t.colors) };
-  const tenantId = await withAdminTx(async (tx) => {
+  const tenantId = await withPlatformTx(async (tx) => {
     const [tenant] = await tx
       .insert(tenants)
       .values({
@@ -1502,6 +1512,7 @@ for (const t of SEED_TENANTS) {
     if (!tenant) throw new Error(`could not upsert tenant ${t.slug}`);
     return tenant.id;
   });
+  seedTenantIds.push(tenantId);
 
   // D-28: derive favicon + 192 + 512 + maskable-on-primary + apple-180 from the seed wordmark and
   // store them under `<tenant_id>/branding/icons/1/` in the public `branding` bucket, so the
@@ -1509,7 +1520,7 @@ for (const t of SEED_TENANTS) {
   const svg = await readFile(resolve(process.cwd(), 'apps/web/public/seed-logos', `${t.slug}.svg`));
   const set = await deriveIconSet(svg, { primaryHex: t.colors.primary, mime: 'image/svg+xml' });
   const { faviconUrl, iconUrls } = await uploadIconSet(tenantId, SEED_ICON_VERSION, set);
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     const iconPatch = JSON.stringify({ faviconUrl, iconUrls, iconVersion: SEED_ICON_VERSION });
     await tx
       .update(tenants)
@@ -1546,7 +1557,7 @@ for (const t of SEED_TENANTS) {
   const memberUserIds: string[] = [];
   for (const p of people) {
     const userId = await ensureUser(p.email, p.name, seedPassword);
-    await withAdminTx(async (tx) => {
+    await withAdminTx({ tenantId }, async (tx) => {
       const [inserted] = await tx
         .insert(memberships)
         .values({ tenantId, userId, role: p.role })
@@ -1573,7 +1584,7 @@ for (const t of SEED_TENANTS) {
   // root workspace may not depend on a `module` package.
   if (t.slug === 'rede-lab') {
     const lab = (local: string) => `${local}@${t.slug}.local`;
-    await withAdminTx(async (tx) => {
+    await withAdminTx({ tenantId }, async (tx) => {
       for (const [follower, followee] of [
         ['alvaro.pinheiro', 'helena.kuster'],
         ['helena.kuster', 'marcos.vinicius'],
@@ -1592,7 +1603,7 @@ for (const t of SEED_TENANTS) {
   // D-16/D-17: one row per TOGGLEABLE key, so flipping a module later is an update, never an insert
   // race. A key absent from `t.modules` is written as `enabled = false` — indistinguishable from a
   // missing row for `requireModule`, but explicit in the platform panel.
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     for (const key of TOGGLEABLE_MODULES) {
       const enabled = t.modules.includes(key);
       await tx
@@ -1608,7 +1619,7 @@ for (const t of SEED_TENANTS) {
   // D-24: ONE transaction — demote any other primary host first (a renamed TENANT_*_HOST on an
   // already-seeded database would otherwise create a second primary row and violate
   // tenant_domains_one_primary_per_tenant; the previous host stays as a non-primary alias).
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     await tx
       .update(tenantDomains)
       .set({ isPrimary: false })
@@ -1645,7 +1656,7 @@ for (const t of SEED_TENANTS) {
   const supportMemberUserId = memberUserIds[0];
   if (t.slug === 'rede-demo' && supportUserId && supportMemberUserId) {
     const staffUserId: string = supportUserId;
-    await withAdminTx(async (tx) => {
+    await withAdminTx({ tenantId }, async (tx) => {
       await tx.execute(sql`
         insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
         values (${SEED_SUPPORT_CONVERSATION_ID}::uuid, ${tenantId}::uuid, 'support',
@@ -1657,7 +1668,7 @@ for (const t of SEED_TENANTS) {
                 ${supportMemberUserId}::uuid, 'member')
         on conflict do nothing`);
     });
-    const existing = await withAdminTx((tx) =>
+    const existing = await withAdminTx({ tenantId }, (tx) =>
       tx.execute<{ n: number }>(sql`
         select count(*)::int as n from public.chat_messages
          where conversation_id = ${SEED_SUPPORT_CONVERSATION_ID}::uuid`),
@@ -1679,7 +1690,7 @@ for (const t of SEED_TENANTS) {
         ],
       ];
       for (const [id, author, side, body] of thread) {
-        await withAdminTx(async (tx) => {
+        await withAdminTx({ tenantId }, async (tx) => {
           await tx.execute(sql`
             insert into public.chat_messages (id, tenant_id, conversation_id, author_user_id, author_side, body)
             values (${id}::uuid, ${tenantId}::uuid, ${SEED_SUPPORT_CONVERSATION_ID}::uuid,
@@ -1701,7 +1712,7 @@ for (const t of SEED_TENANTS) {
     // `turbo boundaries` (2.10.12) mis-attribute that edge to the `kernel`-tagged packages, turning
     // the MOD-02 gate red on an import nobody wrote. `public.feed_posts` is a stable committed
     // migration, so naming it here costs nothing the schema import would have bought.
-    await withAdminTx(async (tx) => {
+    await withAdminTx({ tenantId }, async (tx) => {
       for (const [index, id] of feedPostIds.entries()) {
         // Oldest first in the array, one minute apart: the newest post is the LAST entry, which is
         // what `created_at desc, id desc` puts at the top of the feed.
@@ -1725,7 +1736,7 @@ for (const t of SEED_TENANTS) {
     const fillerPrefix = SEED_FILLER_PREFIX[t.slug];
     const editedPostId = SEED_EDITED_POST_IDS[t.slug];
     if (fillerPrefix && editedPostId) {
-      await withAdminTx(async (tx) => {
+      await withAdminTx({ tenantId }, async (tx) => {
         for (let index = 0; index < SEED_FILLER_COUNT; index += 1) {
           const id = `${fillerPrefix}${String(index).padStart(2, '0')}`;
           const createdAt = new Date(Date.now() - (60 + index) * 60_000);
@@ -1791,7 +1802,7 @@ for (const t of SEED_TENANTS) {
     const commenterUserId = memberUserIds[0];
     const replierUserId = memberUserIds[1] ?? adminUserId;
     if (rootCommentId && replyCommentId && firstPostId && commenterUserId && replierUserId) {
-      await withAdminTx(async (tx) => {
+      await withAdminTx({ tenantId }, async (tx) => {
         await tx.execute(sql`
           insert into public.feed_comments
             (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
@@ -1847,7 +1858,7 @@ for (const t of SEED_TENANTS) {
         seedPassword,
       );
       removedAuthorUserId = removedUserId;
-      await withAdminTx(async (tx) => {
+      await withAdminTx({ tenantId }, async (tx) => {
         const [inserted] = await tx
           .insert(memberships)
           .values({ tenantId, userId: removedUserId, role: 'member' })
@@ -1924,7 +1935,7 @@ for (const t of SEED_TENANTS) {
       await seedVideoAsset(tenantId, authorUserId, mediaIds.video);
       await seedAttachmentAsset(tenantId, authorUserId, mediaIds.attachment);
 
-      await withAdminTx(async (tx) => {
+      await withAdminTx({ tenantId }, async (tx) => {
         // Raw SQL for the same reason the posts above are raw SQL: the seed lives in the ROOT
         // workspace package, and a dependency on a `module`-tagged package makes `turbo boundaries`
         // mis-attribute the edge onto the kernel-tagged packages.
@@ -1981,7 +1992,7 @@ for (const t of SEED_TENANTS) {
         // keyset tie-break exists to prove would silently stop existing —
         // `apps/api/tests/integration/communities.test.ts` case 3 is what caught exactly that.
         const communityClock = Date.now();
-        await withAdminTx(async (tx) => {
+        await withAdminTx({ tenantId }, async (tx) => {
           for (const [index, community] of SEED_COMMUNITIES.entries()) {
             const id = communityIds[index];
             const coverAssetId =
@@ -2016,7 +2027,7 @@ for (const t of SEED_TENANTS) {
         const communityPostIds = SEED_COMMUNITY_POST_IDS[t.slug];
         if (communityPostIds) {
           const postClock = Date.now();
-          await withAdminTx(async (tx) => {
+          await withAdminTx({ tenantId }, async (tx) => {
             for (const [index, entry] of SEED_COMMUNITY_POSTS.entries()) {
               const id = communityPostIds[index];
               const communityId = communityIds[entry.communityIndex];
@@ -2045,7 +2056,7 @@ for (const t of SEED_TENANTS) {
       if (eventIds) {
         // ONE anchor for the batch: the tenant-local NOON of the seed day, computed in Postgres from
         // the tenant's own `timezone` so the zone's offset rules stay in one place (see SEED_EVENTS).
-        const anchor = await withAdminTx((tx) =>
+        const anchor = await withAdminTx({ tenantId }, (tx) =>
           tx.execute<{ noon_ms: number }>(sql`
             select (extract(epoch from
                       (((now() at time zone t.timezone)::date + time '12:00') at time zone t.timezone))
@@ -2056,7 +2067,7 @@ for (const t of SEED_TENANTS) {
         const eventHour = Number(anchor[0]?.noon_ms);
         if (!Number.isFinite(eventHour)) throw new Error(`seed: no timezone for ${t.slug}`);
         const at = (hours: number) => new Date(eventHour + hours * 3_600_000).toISOString();
-        await withAdminTx(async (tx) => {
+        await withAdminTx({ tenantId }, async (tx) => {
           for (const [index, event] of SEED_EVENTS.entries()) {
             const id = eventIds[index];
             const coverAssetId =
@@ -2172,7 +2183,7 @@ for (const t of SEED_TENANTS) {
         // would put rows that share an `hoursAgo` milliseconds apart and would make the ordering
         // this fixture sets up approximate rather than exact.
         const storyClock = Date.now();
-        await withAdminTx(async (tx) => {
+        await withAdminTx({ tenantId }, async (tx) => {
           for (const [index, story] of SEED_STORIES.entries()) {
             const id = storyIds[index];
             const publishedAt = new Date(storyClock - story.hoursAgo * 3_600_000);
@@ -2211,7 +2222,7 @@ for (const t of SEED_TENANTS) {
         const newestStoryId = storyIds[0];
         const expiredStoryId = storyIds[3];
         if (storyLikers.length > 0 && newestStoryId && expiredStoryId) {
-          await withAdminTx(async (tx) => {
+          await withAdminTx({ tenantId }, async (tx) => {
             for (const likerUserId of storyLikers) {
               await tx.execute(sql`
                 insert into public.feed_likes (tenant_id, user_id, story_id)
@@ -2242,7 +2253,7 @@ for (const t of SEED_TENANTS) {
         const storyCommentIds = SEED_STORY_COMMENT_IDS[t.slug];
         const storyCommenters = [memberUserIds[0], memberUserIds[1], removedAuthorUserId];
         if (storyCommentIds && newestStoryId && storyCommenters[0] && storyCommenters[1]) {
-          await withAdminTx(async (tx) => {
+          await withAdminTx({ tenantId }, async (tx) => {
             for (const [index, id] of storyCommentIds.entries()) {
               const authorId = storyCommenters[index] ?? storyCommenters[0];
               if (!authorId) continue;
@@ -2274,7 +2285,7 @@ for (const t of SEED_TENANTS) {
         let seededHighlights = 0;
         let seededHighlightItems = 0;
         if (highlightIds) {
-          await withAdminTx(async (tx) => {
+          await withAdminTx({ tenantId }, async (tx) => {
             const highlight = async (
               id: string,
               communityId: string | null,
@@ -2366,7 +2377,7 @@ for (const t of SEED_TENANTS) {
         const viewerOf = { member: memberUserIds[0], admin: authorUserId };
         let seededViews = 0;
         if (viewIds) {
-          await withAdminTx(async (tx) => {
+          await withAdminTx({ tenantId }, async (tx) => {
             for (const who of ['member', 'admin'] as const) {
               const userId = viewerOf[who];
               if (!userId) continue;
@@ -2397,7 +2408,7 @@ for (const t of SEED_TENANTS) {
     // SEED_LINK_PREVIEW_URLS).
     const linkIds = SEED_LINK_IDS[t.slug];
     if (linkIds) {
-      await withAdminTx(async (tx) => {
+      await withAdminTx({ tenantId }, async (tx) => {
         await tx.execute(sql`
           insert into public.feed_link_previews
             (id, tenant_id, url_hash, url, status, title, description, site_name, fetched_at)
@@ -2450,7 +2461,7 @@ for (const t of SEED_TENANTS) {
 // D-14 / ROLE-01: the platform's super_admin is an identity with NO membership — its authority is the
 // `platform_admins` row alone, which only the admin lane behind `requireSuperAdmin()` can read.
 const superAdminId = await ensureUser(SUPER_ADMIN_EMAIL, 'Rede Social', superAdminPassword);
-await withAdminTx(async (tx) => {
+await withPlatformTx(async (tx) => {
   await tx.insert(platformAdmins).values({ userId: superAdminId }).onConflictDoNothing();
 });
 console.log(`seed: platform admin ${SUPER_ADMIN_EMAIL} ready (no membership, by design)`);
@@ -2472,13 +2483,13 @@ console.log(
  * through `platform_admins` regardless.
  */
 async function grantSeedAccess(emails: string[]): Promise<void> {
-  await withAdminTx(async (tx) => {
-    const [demo] = await tx
-      .select({ id: tenants.id })
-      .from(tenants)
-      .where(eq(tenants.slug, 'rede-demo'))
-      .limit(1);
-    if (!demo) throw new Error('seed: tenant rede-demo is missing; cannot grant seed access');
+  // The tenant row is looked up in the control plane (a platform-lane transaction of its own); the access
+  // rows are the tenant's and go through its own lane. Two databases in general, two transactions, never nested.
+  const [demo] = await withPlatformTx((tx) =>
+    tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, 'rede-demo')).limit(1),
+  );
+  if (!demo) throw new Error('seed: tenant rede-demo is missing; cannot grant seed access');
+  await withAdminTx({ tenantId: demo.id }, async (tx) => {
     const unique = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
     if (unique.length === 0) return;
     await tx
@@ -2497,16 +2508,19 @@ await grantSeedAccess(seedEmails);
 // (`090-feed.sql` does NOT rely on this: it builds and analyzes its own 250-row fixture inside its
 // own rolled-back transaction, precisely so the seeded tenants' feeds stay small enough for
 // `feed.test.ts`'s cursor walk and `feed.spec.ts`'s ordering assertions to stay honest.)
-await withAdminTx(async (tx) => {
-  await tx.execute(sql`analyze public.feed_posts`);
-  await tx.execute(sql`analyze public.feed_comments`);
-  await tx.execute(sql`analyze public.feed_likes`);
-  await tx.execute(sql`analyze public.feed_post_media`);
-  await tx.execute(sql`analyze public.feed_link_previews`);
-  await tx.execute(sql`analyze public.communities`);
-  await tx.execute(sql`analyze public.events`);
-  await tx.execute(sql`analyze public.event_attendances`);
-});
+// `analyze` is database-wide: it runs through each seeded tenant's own lane (both live in project 0 today).
+for (const tenantId of seedTenantIds) {
+  await withAdminTx({ tenantId }, async (tx) => {
+    await tx.execute(sql`analyze public.feed_posts`);
+    await tx.execute(sql`analyze public.feed_comments`);
+    await tx.execute(sql`analyze public.feed_likes`);
+    await tx.execute(sql`analyze public.feed_post_media`);
+    await tx.execute(sql`analyze public.feed_link_previews`);
+    await tx.execute(sql`analyze public.communities`);
+    await tx.execute(sql`analyze public.events`);
+    await tx.execute(sql`analyze public.event_attendances`);
+  });
+}
 console.log(
   'seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media, feed_link_previews, communities, events, event_attendances',
 );
