@@ -10,7 +10,24 @@
 #                     db, e2e-pwa; the dev-server e2e is manual only, e2e-full.yml); `build` runs in
 #                     parallel; `migrate-and-deploy-prod` needs both and sits behind the
 #                     `production` GitHub Environment (a required reviewer), in the order
-#                     migrations -> API -> worker. Pipeline description: docs/deploy/ci.md.
+#                     migrations -> migrate Job -> API -> worker. Pipeline description: docs/deploy/ci.md.
+#
+# Database per tenant (09.2-16, D-544, D-12, D-18): `supabase db push` still migrates project 0 (the CLI
+# path is proven), then ONE Cloud Run Job named `migrate` runs the SAME image digest as the services with
+# ROLE=migrate (answer A-16-1: a Job, not a tagged revision). It fans the central set and every tenant set
+# out to the hosted tenant projects from inside GCP, so no sealed credential leaves it. The step that executes
+# it WAITS (`gcloud run jobs execute --wait`) and fails the deploy on a non-zero execution: a central-set
+# failure (exit 1) therefore stops the deploy before any new API or worker revision exists, while one failing
+# tenant project is a warning (exit 0, `--strict` is not passed, D-545) and never blocks the others. The Job
+# has no listener and no ingress. Its steps and the two services' are kept adjacent and in this order by
+# scripts/check-workflows.sh (CI static job).
+#
+# Release secrets (09.2-16): the preflight step lists, before any migration, every missing item: the GitHub
+# environment variable SUPABASE_ORG_SLUG and the Secret Manager secrets `platform-master-keys-prod`
+# (PLATFORM_MASTER_KEYS), `migration-database-url-prod` (MIGRATION_DATABASE_URL, the central project's
+# `postgres` session URL) and `resend-smtp-pass-prod` (PROJECT_AUTH_SMTP_PASS). They must exist BEFORE the push
+# that triggers this deploy, and the runtime service account must be able to read them. Both services run
+# PROJECT_PROVIDER=supabase: assertProductionEnv refuses the fake provider in production.
 #
 # A direct admin push to `master` cannot skip the gate: the production job needs both `checks` and
 # `build`, so branch protection is a convenience, not the safety mechanism.
@@ -85,7 +102,7 @@ jobs:
   #       inputs:
   #         sha: { description: "master SHA to deploy", required: true }
   migrate-and-deploy-prod:
-    name: Production (migrations -> API -> worker)
+    name: Production (migrations -> migrate job -> API -> worker)
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [checks, build]
     # Never cancel: a cancelled run could abort a migration halfway, so two production deploys queue. Only this
@@ -99,6 +116,23 @@ jobs:
       url: https://rede-social-woad.vercel.app
     steps:
       - uses: actions/checkout@v7
+
+      # Moved before the migrations (09.2-16): the preflight reads Secret Manager and the migrate Job is
+      # deployed and executed with this identity.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      # Fails once, before any migration, naming EVERY missing release item (P55, T-09.2-81). Reads names
+      # only, never a secret value.
+      - name: Release preflight
+        env:
+          SUPABASE_ORG_SLUG: ${{ vars.SUPABASE_ORG_SLUG }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: bash scripts/check-release-env.sh --env prod
+
       - uses: supabase/setup-cli@v3
         with:
           version: 2.117.0
@@ -164,10 +198,58 @@ jobs:
       # 2026-09-28; never run `pnpm db:seed` against production (it creates the demo tenants). See
       # docs/DEPLOY.md "Decisions (2026-09-28)".
 
-      - uses: google-github-actions/auth@v3
+      # The fan-out (09.2-16, D-544): the central set, then every tenant set on every ready project (project 0
+      # included; the runner only records its state when the CLI above already applied it). The Job reads the
+      # sealed credentials through the platform keyring, so it carries the same secrets as the services plus
+      # MIGRATION_DATABASE_URL. assertProductionEnv runs in this process too (NODE_ENV=production in the
+      # image), so the payments pair and API_PUBLIC_URL are listed like on the services. Secrets are mounted
+      # by name from Secret Manager, never in env_vars. `--max-retries=0`: a failed execution is reported, not
+      # re-run by Cloud Run; the worker's retry job heals a behind tenant project later.
+      - name: Deploy the migrate job
+        uses: google-github-actions/deploy-cloudrun@v3
         with:
-          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          service_account: ${{ vars.DEPLOY_SA }}
+          job: migrate
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build.outputs.image }}
+          env_vars: |-
+            ROLE=migrate
+            LOG_LEVEL=info
+            PLATFORM_HOST=rede-social-woad.vercel.app
+            PROJECT_PROVIDER=supabase
+            SUPABASE_ORG_SLUG=${{ vars.SUPABASE_ORG_SLUG }}
+            API_PUBLIC_URL=https://api-253040968821.southamerica-east1.run.app
+            PAYMENTS_PROVIDERS=kiwify
+          secrets: |-
+            DATABASE_URL=api-database-url-prod:latest
+            SUPABASE_SERVICE_KEY=supabase-service-key-prod:latest
+            SUPABASE_URL=supabase-url-prod:latest
+            MIGRATION_DATABASE_URL=migration-database-url-prod:latest
+            PLATFORM_MASTER_KEYS=platform-master-keys-prod:latest
+            SUPABASE_PAT=supabase-pat-prod:latest
+            PAYMENTS_SECRET_KEY=payments-secret-key-prod:latest
+          flags: --service-account=${{ vars.RUNTIME_SA }} --max-retries=0 --task-timeout=3600s
+
+      # Waits for the execution and fails the step on a non-zero exit (central set failed). The Job prints
+      # ids, counts and fixed failure codes only (09.2-15); the step summary links nothing secret.
+      - name: Run the migrate job
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set +e
+          gcloud run jobs execute migrate --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait
+          code=$?
+          set -e
+          execution="$(gcloud run jobs executions list --job migrate --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --limit=1 --format='value(name)' 2>/dev/null || true)"
+          {
+            echo "### Migrate job"
+            echo "- execution: \`${execution:-unknown}\`"
+            echo "- exit code: $code"
+            echo "- logs: Cloud Run > Jobs > migrate > Executions (one JSON line per project, no credential)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ]; then
+            echo "::error::The migrate job failed (exit $code). No new API or worker revision was deployed."
+            exit "$code"
+          fi
 
       # Web Push (07-06, 07-11): both services run the `webpush` transport with the three VAPID
       # secrets. The worker sends; the API only enqueues, but it validates subscription endpoints
@@ -193,7 +275,8 @@ jobs:
       # whose secret is missing (and that failure lands after the migrations and the auth configuration are
       # applied). deploy-cloudrun merges env_vars and secrets into the live service by default, so values set
       # by hand survive. See docs/DEPLOY.md "Custom domains".
-      - uses: google-github-actions/deploy-cloudrun@v3
+      - name: Deploy the API
+        uses: google-github-actions/deploy-cloudrun@v3
         id: api
         with:
           service: api
@@ -214,6 +297,8 @@ jobs:
             SUPABASE_PROJECT_REF=qjjhtduxquvlfppybpqq
             PAYMENTS_PROVIDERS=kiwify
             API_PUBLIC_URL=https://api-253040968821.southamerica-east1.run.app
+            PROJECT_PROVIDER=supabase
+            SUPABASE_ORG_SLUG=${{ vars.SUPABASE_ORG_SLUG }}
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-prod:latest
@@ -231,6 +316,8 @@ jobs:
             VERCEL_TOKEN=vercel-token-prod:latest
             SUPABASE_PAT=supabase-pat-prod:latest
             PAYMENTS_SECRET_KEY=payments-secret-key-prod:latest
+            PLATFORM_MASTER_KEYS=platform-master-keys-prod:latest
+            PROJECT_AUTH_SMTP_PASS=resend-smtp-pass-prod:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
           # --max-instances=20: the regional CPU quota of api-dere-social in southamerica-east1
@@ -240,7 +327,8 @@ jobs:
           # recompute there before changing it or DATABASE_POOL_MAX.
           flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --max-instances=20 --no-invoker-iam-check --port=8080
 
-      - uses: google-github-actions/deploy-cloudrun@v3
+      - name: Deploy the worker
+        uses: google-github-actions/deploy-cloudrun@v3
         with:
           service: worker
           region: ${{ env.GCP_REGION }}
@@ -260,6 +348,9 @@ jobs:
             SUPABASE_PROJECT_REF=qjjhtduxquvlfppybpqq
             PAYMENTS_PROVIDERS=kiwify
             DATABASE_POOL_MAX=10
+            PROJECT_PROVIDER=supabase
+            SUPABASE_ORG_SLUG=${{ vars.SUPABASE_ORG_SLUG }}
+            API_PUBLIC_URL=https://api-253040968821.southamerica-east1.run.app
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             BOSS_DATABASE_URL=worker-database-url-prod:latest
@@ -278,6 +369,9 @@ jobs:
             VERCEL_TOKEN=vercel-token-prod:latest
             SUPABASE_PAT=supabase-pat-prod:latest
             PAYMENTS_SECRET_KEY=payments-secret-key-prod:latest
+            PLATFORM_MASTER_KEYS=platform-master-keys-prod:latest
+            PROJECT_AUTH_SMTP_PASS=resend-smtp-pass-prod:latest
+            MIGRATION_DATABASE_URL=migration-database-url-prod:latest
           # --max-instances=1 and DATABASE_POOL_MAX=10 (worker only): docs/DEPLOY.md "Connection budget
           # (Pro)" (4 push-send jobs at a time plus every other queue); recompute there before changing.
           flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --max-instances=1 --no-cpu-throttling --no-allow-unauthenticated

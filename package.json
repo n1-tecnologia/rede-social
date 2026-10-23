@@ -15,6 +15,7 @@
     "boundaries:negative": "bash scripts/check-boundaries.sh",
     "guard:lanes": "bash scripts/guard-local-settings.sh",
     "guard:hooks": "bash scripts/guard-auth-hooks.sh && bash scripts/guard-auth-hooks.test.sh",
+    "guard:workflows": "bash scripts/check-workflows.sh && bash scripts/check-workflows.sh --self-test && bash scripts/check-release-env.sh --self-test",
     "db:generate": "pnpm --filter @rede-social/api exec drizzle-kit generate",
     "db:generate:central": "pnpm --filter @rede-social/api exec drizzle-kit generate --config drizzle.central.config.ts",
     "db:reset": "bash scripts/supabase.sh db reset && pnpm db:central && bash scripts/db-local-role.sh",

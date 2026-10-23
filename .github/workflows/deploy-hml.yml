@@ -6,7 +6,7 @@
 #
 #   push to homolog -> `checks` (the same reusable ci.yml as production, for THIS sha) in parallel
 #                      with `build` (preflight + image), then `migrate-and-deploy-hml` needs both
-#                      (migrations -> API -> worker), automatically, with NO reviewer.
+#                      (migrations -> migrate Job -> API -> worker), automatically, with NO reviewer.
 #
 # The pipeline is symmetric (quick 261007-kbq): deploy-api.yml (master) and this file both call
 # ci.yml as `checks`, and ci.yml has no push trigger of its own, so a push to homolog starts only this
@@ -24,16 +24,23 @@
 #      and the production provider only `refs/heads/master` (docs/DEPLOY.md "Workload Identity
 #      branch restriction (isolation guard)").
 #
-# Supabase mode (GitHub environment variable HML_SUPABASE on `homolog`, 2026-10-02):
-#   isolated                 -> the hml Supabase project; migrations, api_user, config push and the
-#                               worker all run, and every production-value guard applies.
-#   shared-with-production   -> TEMPORARY: hml reads and writes the PRODUCTION database. Migrations,
-#                               the api_user password and `config push` are skipped (only
-#                               deploy-api.yml, behind the reviewer, may change production), and the
-#                               hml worker is NOT deployed (one pg-boss queue in one database: only
-#                               production's worker may consume it). The -hml secrets then hold
-#                               production's values, VAPID included (push subscriptions are shared).
+# Supabase mode (GitHub environment variable HML_SUPABASE on `homolog`):
+#   isolated                 -> the only accepted value: the hml Supabase project; migrations, api_user,
+#                               config push, the migrate Job and the worker all run, and every
+#                               production-value guard applies.
+#   shared-with-production   -> REFUSED by the preflight since 09.2-16 (A-16-2). Both services now run
+#                               PROJECT_PROVIDER=supabase (a production-mode process cannot run the fake
+#                               provider), so a homolog that shares production's database would have to hold a
+#                               project-provider token and run the fan-out against production data. Homolog
+#                               must be isolated before it can rehearse moves (hml provisioning runbook,
+#                               docs/DEPLOY.md; the hml project and its secrets are plan 09.2-25's gate).
 # Anything else fails the preflight.
+#
+# Database per tenant (09.2-16, D-544): the same sequence as deploy-api.yml: `supabase db push` for project 0,
+# then the Cloud Run Job `migrate-hml` on the SAME image digest as the services (ROLE=migrate), executed with
+# `--wait` before the API and the worker. Release secrets (preflight step, names only, before any migration):
+# the GitHub environment variable SUPABASE_ORG_SLUG and the Secret Manager secrets platform-master-keys-hml,
+# migration-database-url-hml and resend-smtp-pass-hml. scripts/check-workflows.sh guards the order.
 #
 # No seed step: production's never-seed rule does not apply to hml, but a demo seed there is run by
 # hand only, never from a workflow (docs/DEPLOY.md "hml provisioning runbook").
@@ -100,13 +107,12 @@ jobs:
           case "$HML_SUPABASE" in
             isolated) ;;
             shared-with-production)
-              echo "::warning::HML_SUPABASE=shared-with-production: hml uses the PRODUCTION database; migrations, config push and the hml worker are skipped." ;;
-            *) fail "HML_SUPABASE must be 'isolated' or 'shared-with-production' on environment 'homolog'." ;;
+              fail "HML_SUPABASE=shared-with-production is refused since the database-per-tenant release (A-16-2): both services run PROJECT_PROVIDER=supabase, and a homolog that shares production's database would have to hold a project-provider token and run the fan-out against production data. Make homolog isolated first (docs/DEPLOY.md, hml provisioning runbook; plan 09.2-25)." ;;
+            *) fail "HML_SUPABASE must be 'isolated' on environment 'homolog' ('shared-with-production' is refused)." ;;
           esac
 
           # (a) Every homolog value is present.
-          names="WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL VERCEL_PROJECT_ID VERCEL_TEAM_ID SUPABASE_PROJECT_REF API_PUBLIC_URL"
-          if [ "$HML_SUPABASE" = "isolated" ]; then names="$names SUPABASE_PROJECT_ID"; fi
+          names="WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL VERCEL_PROJECT_ID VERCEL_TEAM_ID SUPABASE_PROJECT_REF API_PUBLIC_URL SUPABASE_PROJECT_ID"
           for name in $names; do
             if [ -z "${!name:-}" ]; then
               fail "$name is empty: define it on the GitHub environment 'homolog' (docs/DEPLOY.md)."
@@ -139,13 +145,7 @@ jobs:
             *api-253040968821.southamerica-east1.run.app*) fail "API_PUBLIC_URL is the production API origin; set the hml API origin on environment 'homolog'." ;;
           esac
 
-          # (c) and (e) apply only to an isolated hml Supabase project.
-          if [ "$HML_SUPABASE" = "shared-with-production" ]; then
-            echo "Preflight passed (shared-with-production): homolog GCP and web values present, none resolves to production."
-            exit 0
-          fi
-
-          # (c) The Supabase ref is not production's.
+          # (c) The Supabase ref is not production's (hml is always an isolated Supabase project now).
           if [ "$SUPABASE_PROJECT_ID" = "qjjhtduxquvlfppybpqq" ]; then
             fail "SUPABASE_PROJECT_ID is the production Supabase project; set the hml ref on environment 'homolog'."
           fi
@@ -210,7 +210,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   migrate-and-deploy-hml:
-    name: Homolog (migrations -> API -> worker)
+    name: Homolog (migrations -> migrate job -> API -> worker)
     if: github.ref == 'refs/heads/homolog'
     # Never cancel: a cancelled run could abort a migration halfway, so two homolog deploys queue. Only this
     # job is serialised: `checks` and `build` of a newer push start at once, never waiting behind another run.
@@ -225,9 +225,23 @@ jobs:
       url: ${{ vars.WEB_URL }}
     steps:
       - uses: actions/checkout@v7
-      # The three Supabase steps run only against an isolated hml project (HML_SUPABASE, header).
+
+      # Before the migrations (09.2-16): the preflight reads Secret Manager and the migrate Job is deployed
+      # and executed with this identity.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      # Fails once, before any migration, naming EVERY missing release item (P55, T-09.2-81).
+      - name: Release preflight
+        env:
+          SUPABASE_ORG_SLUG: ${{ vars.SUPABASE_ORG_SLUG }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: bash scripts/check-release-env.sh --env hml
+
       - uses: supabase/setup-cli@v3
-        if: vars.HML_SUPABASE == 'isolated'
         with:
           version: 2.117.0
 
@@ -236,13 +250,11 @@ jobs:
       # fresh runner it fails with "failed to read signing keys: NotFound". The real keys live in the
       # hosted project (JWKS), so an empty set is enough here (same trick as .github/actions/local-stack).
       - name: Empty signing-keys file for the CLI (config.toml references it)
-        if: vars.HML_SUPABASE == 'isolated'
         run: echo '[]' > supabase/signing_keys.json
 
       # Every Supabase CLI command validates config.toml's `[auth.hook.send_email]` block, so each
       # step that runs the CLI needs SEND_EMAIL_HOOK_SECRETS (same value as Secret Manager).
       - name: Migrations (roles included)
-        if: vars.HML_SUPABASE == 'isolated'
         env:
           SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -253,22 +265,19 @@ jobs:
           supabase db push --include-roles
 
       - name: Set the api_user password
-        if: vars.HML_SUPABASE == 'isolated'
         env:
           PGPASSWORD_URL: ${{ secrets.SUPABASE_SESSION_POOLER_URL }}
           API_DB_PASSWORD: ${{ secrets.API_DB_PASSWORD }}
         # psql substitutes :'pw' only in stdin/-f input, never in -c.
         run: echo "alter role api_user with login password :'pw';" | psql "$PGPASSWORD_URL" -v ON_ERROR_STOP=1 -v pw="$API_DB_PASSWORD"
 
-      # 09.1-18 (PAY-28, WR-02, T-09.1-85): unconditional, so it also runs while the push below is skipped
-      # (shared-with-production). A [remotes.*] table inherits the base hook blocks (enabled locally); the
+      # 09.1-18 (PAY-28, WR-02, T-09.1-85): a [remotes.*] table inherits the base hook blocks (enabled locally); the
       # guard fails the run when a remote lacks its two explicit hook blocks or when an enabled hook points
       # at a function no migration defines. It reads the repo only and enables nothing.
       - name: Auth hook guard
         run: bash scripts/guard-auth-hooks.sh
 
       - name: Push auth configuration (Send Email Hook -> API)
-        if: vars.HML_SUPABASE == 'isolated'
         env:
           SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -278,10 +287,52 @@ jobs:
       # No seeding here. A demo seed on hml is allowed, but it is run by hand (docs/DEPLOY.md
       # "hml provisioning runbook"), never from a workflow. Production's never-seed rule is unchanged.
 
-      - uses: google-github-actions/auth@v3
+      # The fan-out (09.2-16, D-544): the same Job as production under the hml names and secrets. See
+      # deploy-api.yml for the reasoning (same image digest, `--wait`, secrets mounted by name, the
+      # assertProductionEnv-driven API_PUBLIC_URL and payments pair).
+      - name: Deploy the migrate job
+        uses: google-github-actions/deploy-cloudrun@v3
         with:
-          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          service_account: ${{ vars.DEPLOY_SA }}
+          job: migrate-hml
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build.outputs.image }}
+          env_vars: |-
+            ROLE=migrate
+            LOG_LEVEL=info
+            PLATFORM_HOST=${{ vars.PLATFORM_HOST }}
+            PROJECT_PROVIDER=supabase
+            SUPABASE_ORG_SLUG=${{ vars.SUPABASE_ORG_SLUG }}
+            API_PUBLIC_URL=${{ vars.API_PUBLIC_URL }}
+            PAYMENTS_PROVIDERS=kiwify
+          secrets: |-
+            DATABASE_URL=api-database-url-hml:latest
+            SUPABASE_SERVICE_KEY=supabase-service-key-hml:latest
+            SUPABASE_URL=supabase-url-hml:latest
+            MIGRATION_DATABASE_URL=migration-database-url-hml:latest
+            PLATFORM_MASTER_KEYS=platform-master-keys-hml:latest
+            SUPABASE_PAT=supabase-pat-hml:latest
+            PAYMENTS_SECRET_KEY=payments-secret-key-hml:latest
+          flags: --service-account=${{ vars.RUNTIME_SA }} --max-retries=0 --task-timeout=3600s
+
+      - name: Run the migrate job
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set +e
+          gcloud run jobs execute migrate-hml --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait
+          code=$?
+          set -e
+          execution="$(gcloud run jobs executions list --job migrate-hml --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --limit=1 --format='value(name)' 2>/dev/null || true)"
+          {
+            echo "### Migrate job (hml)"
+            echo "- execution: \`${execution:-unknown}\`"
+            echo "- exit code: $code"
+            echo "- logs: Cloud Run > Jobs > migrate-hml > Executions (one JSON line per project, no credential)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ]; then
+            echo "::error::The migrate job failed (exit $code). No new API or worker revision was deployed."
+            exit "$code"
+          fi
 
       # Web Push (07-06, 07-11): both services run the `webpush` transport with the three VAPID
       # secrets (the hml pair, never production's). The worker sends; the API only enqueues, but it
@@ -292,11 +343,10 @@ jobs:
       # Payments (09.1-05, 09.1-18, D-486): both services list ONE real gateway adapter in PAYMENTS_PROVIDERS
       # (the test adapter is NEVER listed: its signature is a plain HMAC anyone could forge) and mount
       # PAYMENTS_SECRET_KEY from `payments-secret-key-hml`, which must exist BEFORE the push that triggers
-      # this deploy. While hml shares production's database (HML_SUPABASE=shared-with-production) that secret
-      # holds the SAME value as production's `payments-secret-key-prod`: a sealed webhook token written by
-      # one environment must open in the other. API_PUBLIC_URL (environment variable, checked by the
+      # this deploy. API_PUBLIC_URL (environment variable, checked by the
       # preflight) is the hml API's public origin for the webhook URL the Pagamentos screen shows.
-      - uses: google-github-actions/deploy-cloudrun@v3
+      - name: Deploy the API
+        uses: google-github-actions/deploy-cloudrun@v3
         id: api
         with:
           service: api
@@ -317,6 +367,8 @@ jobs:
             SUPABASE_PROJECT_REF=${{ vars.SUPABASE_PROJECT_REF }}
             PAYMENTS_PROVIDERS=kiwify
             API_PUBLIC_URL=${{ vars.API_PUBLIC_URL }}
+            PROJECT_PROVIDER=supabase
+            SUPABASE_ORG_SLUG=${{ vars.SUPABASE_ORG_SLUG }}
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-hml:latest
@@ -334,16 +386,16 @@ jobs:
             VERCEL_TOKEN=vercel-token-hml:latest
             SUPABASE_PAT=supabase-pat-hml:latest
             PAYMENTS_SECRET_KEY=payments-secret-key-hml:latest
+            PLATFORM_MASTER_KEYS=platform-master-keys-hml:latest
+            PROJECT_AUTH_SMTP_PASS=resend-smtp-pass-hml:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
           # --min-instances=0: hml tolerates a cold start; the deep health check below retries.
-          # --max-instances=2: in HML_SUPABASE=shared-with-production mode hml's api counts against
-          # production's Supavisor budget (docs/DEPLOY.md "Connection budget (Pro)", the H term).
+          # --max-instances=2: hml is isolated, so its api counts against its own Supavisor budget only.
           flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=0 --max-instances=2 --no-invoker-iam-check --port=8080
 
-      # Not while the database is shared: production's worker owns the single pg-boss queue.
-      - uses: google-github-actions/deploy-cloudrun@v3
-        if: vars.HML_SUPABASE == 'isolated'
+      - name: Deploy the worker
+        uses: google-github-actions/deploy-cloudrun@v3
         with:
           service: worker
           region: ${{ env.GCP_REGION }}
@@ -363,6 +415,9 @@ jobs:
             SUPABASE_PROJECT_REF=${{ vars.SUPABASE_PROJECT_REF }}
             PAYMENTS_PROVIDERS=kiwify
             DATABASE_POOL_MAX=10
+            PROJECT_PROVIDER=supabase
+            SUPABASE_ORG_SLUG=${{ vars.SUPABASE_ORG_SLUG }}
+            API_PUBLIC_URL=${{ vars.API_PUBLIC_URL }}
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
             BOSS_DATABASE_URL=worker-database-url-hml:latest
@@ -381,6 +436,9 @@ jobs:
             VERCEL_TOKEN=vercel-token-hml:latest
             SUPABASE_PAT=supabase-pat-hml:latest
             PAYMENTS_SECRET_KEY=payments-secret-key-hml:latest
+            PLATFORM_MASTER_KEYS=platform-master-keys-hml:latest
+            PROJECT_AUTH_SMTP_PASS=resend-smtp-pass-hml:latest
+            MIGRATION_DATABASE_URL=migration-database-url-hml:latest
           # pg-boss needs a warm worker: min 1 and CPU always allocated, as in production.
           # --max-instances=1 and DATABASE_POOL_MAX=10 mirror production (docs/DEPLOY.md "Connection
           # budget (Pro)").
