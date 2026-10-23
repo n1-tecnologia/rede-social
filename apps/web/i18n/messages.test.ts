@@ -4483,3 +4483,62 @@ describe('09.2-19 - the Banco tab overview catalog', () => {
     expect(block).not.toMatch(/postgres:\/\/|sb_secret_|eyJ/);
   });
 });
+
+/**
+ * 09.2-19 Task 2 (UI-D-537) - the Preparação card's words, verbatim from the Copywriting Contract
+ * ('Preparação' row): the section, the list name, the four status words, the resume verb, its pending
+ * word and note, the running note, the done sentence (one placeholder) and "Ver etapas".
+ */
+describe('09.2-19 - the Preparação catalog', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['platform.database.steps.title', 'Preparação'],
+    ['platform.database.steps.listLabel', 'Etapas da preparação'],
+    ['platform.database.steps.status.waiting', 'aguardando'],
+    ['platform.database.steps.status.running', 'em andamento'],
+    ['platform.database.steps.status.done', 'concluída'],
+    ['platform.database.steps.status.failed', 'falhou'],
+    ['platform.database.steps.retry', 'Tentar de novo'],
+    ['platform.database.steps.retrying', 'Tentando…'],
+    [
+      'platform.database.steps.retryNote',
+      'Continua a partir da etapa que falhou. As etapas concluídas não são refeitas.',
+    ],
+    ['platform.database.steps.running', 'Preparando… esta página se atualiza sozinha.'],
+    ['platform.database.steps.done', 'Preparação concluída em {date}.'],
+    ['platform.database.steps.show', 'Ver etapas'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('has a label for every bootstrap step and a status word for every step status', async () => {
+    const { BOOTSTRAP_STEP_KEYS, BOOTSTRAP_STEP_STATUSES } = await import(
+      '@rede-social/contracts/projects'
+    );
+    const steps = lookup('platform.database.steps') as Record<string, unknown>;
+    for (const key of BOOTSTRAP_STEP_KEYS) expect(typeof steps[key]).toBe('string');
+    expect(BOOTSTRAP_STEP_STATUSES).toHaveLength(4);
+    expect(Object.keys(steps.status as object).sort()).toEqual(
+      ['done', 'failed', 'running', 'waiting'].sort(),
+    );
+  });
+
+  it('pins the done sentence placeholder', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages: messages as never,
+      namespace: 'platform.database.steps' as never,
+    }) as unknown as (key: string, values: Record<string, string>) => string;
+    expect(t('done', { date: '12 de outubro de 2026' })).toBe(
+      'Preparação concluída em 12 de outubro de 2026.',
+    );
+  });
+});

@@ -76,3 +76,65 @@ export async function verifyDatabaseAction(tenantId: string): Promise<VerifyData
   if (refusal) redirect(refusal);
   return outcome;
 }
+
+/** What "Tentar de novo" hands back: a conflict means nothing is failed any more (a double click). */
+export type ResumeBootstrapResult = { ok: true } | { ok: false; error: 'conflict' | 'generic' };
+
+/**
+ * "Tentar de novo" - `POST …/database/bootstrap/resume` (D-542): the failed step is queued again and
+ * every finished step is kept. The API answers 200 for the first click and 409 `CONFLICT` for a second
+ * one (nothing is failed any more, P100), which the button swallows: the click already did what it
+ * was for. Both answers revalidate, so the list shows where the run stands.
+ */
+export async function resumeBootstrapAction(tenantId: string): Promise<ResumeBootstrapResult> {
+  if (!uuid.safeParse(tenantId).success) return { ok: false, error: 'generic' };
+
+  let refusal: string | null = null;
+  let outcome: ResumeBootstrapResult;
+  try {
+    const res = await apiFetch(databasePath(tenantId, '/bootstrap/resume'), { method: 'POST' });
+    if (res.ok) {
+      revalidateTenantViews(tenantId);
+      outcome = { ok: true };
+    } else {
+      const err = await readEnvelope(res);
+      if (res.status === 401 || res.status === 403) {
+        refusal = platformRedirectPath(err);
+        outcome = { ok: false, error: 'generic' };
+      } else if (res.status === 409) {
+        revalidateTenantViews(tenantId);
+        outcome = { ok: false, error: 'conflict' };
+      } else {
+        if (res.status >= 500) {
+          console.error('platform.database.resume_failed', { status: res.status, code: err.code });
+        }
+        outcome = { ok: false, error: 'generic' };
+      }
+    }
+  } catch (error) {
+    console.error('platform.database.resume_failed', { error: String(error) });
+    outcome = { ok: false, error: 'generic' };
+  }
+
+  if (refusal) redirect(refusal);
+  return outcome;
+}
+
+/**
+ * The poll's probe (UI-D-544, the E05 assumption): does the overview still answer? The Preparação card
+ * refreshes the page every 3 s while the run is in progress, and a failed read in a refresh would swap
+ * the whole segment for the error screen, so the card asks THIS first and refreshes only on `true`: an
+ * API that is down for a tick leaves the last state on screen and the next tick tries again.
+ *
+ * It answers a boolean and nothing else, never throws and never redirects (a tick must not navigate
+ * an operator away from a run they are watching).
+ */
+export async function pollDatabaseAction(tenantId: string): Promise<boolean> {
+  if (!uuid.safeParse(tenantId).success) return false;
+  try {
+    const res = await apiFetch(databasePath(tenantId));
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
