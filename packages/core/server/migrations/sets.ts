@@ -38,9 +38,22 @@ const FILE_NAME = /^(\d{14})_([a-z0-9_]+)\.sql$/;
 /** Repo root, from this file: packages/core/server/migrations -> four levels up. */
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
-/** The repository directory of a set (the Job image passes its own `--dir` instead). */
-export const defaultMigrationDir = (set: MigrationSetName): string =>
-  join(REPO_ROOT, MIGRATION_SETS[set].relativeDir);
+/**
+ * The directory the image carries both sets in (09.2-15, D-547): `MIGRATIONS_DIR` holds `tenant/`, `central/`
+ * and `roles.sql`, copied there at build time by `scripts/build-migrations-manifest.mjs`. A bundled
+ * `dist/main.js` cannot find the repository from its own location, so in the image this variable is the only
+ * way to the files. Unset (a developer's machine, CI), the repository is used.
+ */
+export const imageMigrationsDir = (): string | undefined => {
+  const dir = process.env.MIGRATIONS_DIR;
+  return dir && dir.length > 0 ? dir : undefined;
+};
+
+/** The directory of a set: the image's when `MIGRATIONS_DIR` is set, else the repository's (an explicit `--dir` wins over both). */
+export const defaultMigrationDir = (set: MigrationSetName): string => {
+  const image = imageMigrationsDir();
+  return image ? join(image, set) : join(REPO_ROOT, MIGRATION_SETS[set].relativeDir);
+};
 
 /**
  * Read one set's directory: only files that match the naming rule, sorted by version, each with the
@@ -86,8 +99,14 @@ export async function readMigrationDir(
  * set's `alter default privileges` already sees the role. It carries no password. `root` is the repository
  * root (a Job image passes its own).
  */
-export async function readRolesSql(root: string = REPO_ROOT): Promise<string> {
-  const text = await readFile(join(root, 'supabase', 'roles.sql'), 'utf8');
+export async function readRolesSql(root?: string): Promise<string> {
+  const image = imageMigrationsDir();
+  const file = root
+    ? join(root, 'supabase', 'roles.sql')
+    : image
+      ? join(image, 'roles.sql')
+      : join(REPO_ROOT, 'supabase', 'roles.sql');
+  const text = await readFile(file, 'utf8');
   if (text.trim().length === 0) throw new MigrationError('empty_set');
   return text;
 }

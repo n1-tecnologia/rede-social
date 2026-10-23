@@ -2,17 +2,21 @@ import { serve } from '@hono/node-server';
 import { app } from './app';
 import { env } from './env';
 import { rootLogger } from './http/logger';
+import { runMigrateAll } from './migrate';
 import { startWorker } from './worker';
 
 /**
- * One image, two roles (D-18). `ROLE=worker` runs pg-boss; anything else serves HTTP.
+ * One image, three roles (D-18, D-544). `ROLE=migrate` runs the migration fan-out and exits with its code
+ * (it binds no listener and starts no queue); `ROLE=worker` runs pg-boss; anything else serves HTTP.
  *
  * The API branch deliberately touches NOTHING in `@rede-social/core/server/jobs/boss`: `serve()` binds the
  * port immediately and the queue is reached only through the lazy per-project sender (`senderFor`) on the first enqueue.
  * That is what keeps `GET /v1/health` answering 200 while the database is unreachable (01-09's
  * DB-free-boot property, re-verified by the Docker smoke in 01-08).
  */
-if (env.ROLE === 'worker') {
+if (env.ROLE === 'migrate') {
+  process.exit(await runMigrateAll(process.argv.slice(2)));
+} else if (env.ROLE === 'worker') {
   await startWorker();
 } else {
   const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {

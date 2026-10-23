@@ -5,7 +5,8 @@ import { z } from 'zod';
 export const env = createEnv({
   server: {
     PORT: z.coerce.number().int().positive().default(8787),
-    ROLE: z.enum(['api', 'worker']).default('api'),
+    /** `migrate` runs the migration fan-out (`runMigrateAll`) and exits: no listener (09.2-15, D-544). */
+    ROLE: z.enum(['api', 'worker', 'migrate']).default('api'),
     // LOG_LEVEL is a kernel setting (`@rede-social/core/server/env`), read by the one root logger.
     DATABASE_URL: z.url(),
     /**
@@ -21,6 +22,17 @@ export const env = createEnv({
     SUPERVISOR_MAX_PROJECTS: z.coerce.number().int().positive().default(40),
     SUPABASE_URL: z.url(),
     SUPABASE_SERVICE_KEY: z.string().min(1),
+    /**
+     * The `postgres` connection of the CENTRAL project for the migrate role (09.2-15): the central set and
+     * project 0's tenant set. A session-mode endpoint; only the migrate Job carries it. Unset, the local
+     * stack's `postgres` URL is used outside production and the run fails closed in production.
+     */
+    MIGRATION_DATABASE_URL: z.url().optional(),
+    /**
+     * Where the image carries both migration sets and their manifest (`/app/migrations`, D-547). Unset in
+     * development: the repository is the source.
+     */
+    MIGRATIONS_DIR: z.string().min(1).optional(),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,

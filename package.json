@@ -21,6 +21,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:central": "tsx scripts/migrate-set.ts --set central",
     "db:two": "bash scripts/db-two-databases.sh",
+    "db:migrate-all": "tsx scripts/migrate-all.ts",
     "platform:reseal": "tsx scripts/reseal.ts",
     "platform:reissue-credentials": "tsx scripts/reissue-credentials.ts",
     "platform:probe": "tsx scripts/probe-management-api.ts",
