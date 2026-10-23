@@ -90,6 +90,23 @@ export function createBoundedTtlCache<V>(max: number): BoundedTtlCache<V> {
 }
 
 /**
+ * 09.2-08 (D-542, D-545, D-537): what the by-host answer says about a host. `suspended` is the tenant's own
+ * flag (D-32); the other three are facts of the tenant's PROJECT read from the control plane:
+ * `preparing` (the project is still being created), `unavailable` (paused or unreachable per the last
+ * health probe) and `updating` (the applied tenant schema is below the image's required schema). The
+ * precedence, highest first, is suspended > preparing > unavailable > updating > active. Closed set: a
+ * new value is a contract change for the web screens.
+ */
+export const HOST_TENANT_STATUSES = [
+  'active',
+  'suspended',
+  'preparing',
+  'updating',
+  'unavailable',
+] as const;
+export type HostTenantStatus = (typeof HOST_TENANT_STATUSES)[number];
+
+/**
  * Body of `GET /v1/public/tenants/by-host` — brand and host facts only, nothing beyond (D-20, T-02-04):
  * no plan, timezone, ids or member counts ever enter this unauthenticated answer.
  *
@@ -104,11 +121,17 @@ export const hostTenantSchema = z
   .object({
     slug: z.string(),
     displayName: z.string(),
-    status: z.enum(['active', 'suspended']),
+    status: z.enum(HOST_TENANT_STATUSES),
     isPrimary: z.boolean(),
     primaryHost: z.string(),
     branding: hostBrandingSchema,
+    // 09.2-08 (D-538, D-542): the PUBLIC coordinates of the tenant's own Supabase project, present ONLY for a
+    // tenant bound to a non-central project (its Auth and Realtime live there). Both are public by design
+    // (the project URL and the publishable key ship to every browser); nothing sealed ever enters this answer.
+    supabaseUrl: z.url().optional(),
+    publishableKey: z.string().min(1).optional(),
   })
   .strict();
 export type HostTenant = z.infer<typeof hostTenantSchema>;
-export type TenantStatus = HostTenant['status'];
+/** The `tenants.status` column and the status body: a tenant is active or suspended, nothing else. */
+export type TenantStatus = 'active' | 'suspended';

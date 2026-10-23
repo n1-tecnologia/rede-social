@@ -48,6 +48,10 @@ export const ERROR_CODES = [
   // released, not a one-way door (the web branches on the literal).
   'TENANT_PROJECT_UNBOUND',
   'TENANT_UNAVAILABLE',
+  // 09.2-08 (D-542, D-545): the tenant's project is still being prepared / is being migrated. 503, no details
+  // (no project fact, no tenant name). Costly to rename once released, not a one-way door.
+  'TENANT_PREPARING',
+  'TENANT_UPDATING',
   'VALIDATION_FAILED',
   'NOT_FOUND',
   // 03-07: the ONE distinguishable refusal of `GET /v1/media/{id}/playback` — the CALLER'S OWN

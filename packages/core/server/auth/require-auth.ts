@@ -1,6 +1,7 @@
 import { normalizeHost, TENANT_CHOICE_HEADER, TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { createMiddleware } from 'hono/factory';
 import { type JWTPayload, jwtVerify } from 'jose';
+import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import {
   type Membership,
@@ -10,28 +11,64 @@ import {
 } from '../tenancy/membership';
 import { resolveTenantHost, type TenantHostResolution } from '../tenancy/tenant-host';
 import type { AppEnv } from './context';
-import { JWKS, JWT_ISSUER } from './jwks';
+import { issuerFor, jwksFor } from './jwks';
 
-/**
- * Bearer parse + ES256 verification against the Supabase JWKS. Shared by `requireAuth` (tenant lane),
- * `requireIdentity` (identity lane) and `requireSuperAdmin` (platform lane) so all three reject an
- * absent, forged, expired or wrongly-signed token identically — one implementation, one set of
- * failure codes.
- */
-export async function verifyBearer(c: {
-  req: { header(name: string): string | undefined };
-}): Promise<JWTPayload & { sub: string }> {
+/** The project whose keys and issuer a bearer is verified against (09.2-08, D-538). */
+export type VerificationProject = { apiUrl: string };
+
+/** The bearer token of the request, or 401 `UNAUTHENTICATED` when the header carries none. */
+function bearerOf(c: { req: { header(name: string): string | undefined } }): string {
   const token = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1];
   if (!token) throw new ApiError(401, 'UNAUTHENTICATED');
+  return token;
+}
+
+/** 401 `UNAUTHENTICATED` unless a bearer is present; verifies nothing. */
+export function assertBearerPresent(c: {
+  req: { header(name: string): string | undefined };
+}): void {
+  bearerOf(c);
+}
+
+/**
+ * Bearer parse + ES256 verification against the keys and issuer of `project` (09.2-08, D-538, DBT-10).
+ * The project is chosen by the caller from the request HOST before the token is parsed; the token's own
+ * `iss` never selects a keyset. Shared by `requireAuth` (tenant lane), `requireIdentity` (identity lane,
+ * central) and `requireSuperAdmin` (platform lane, central) so all three reject an absent, forged,
+ * expired or wrongly-signed token identically — one implementation, one set of failure codes.
+ *
+ * `project` is `{ apiUrl }` from the registry; a missing or empty `apiUrl` is a project that cannot verify
+ * anything, so it is the same 401 as a bad token (never a 500).
+ */
+export async function verifyBearer(
+  c: { req: { header(name: string): string | undefined } },
+  project: VerificationProject = { apiUrl: env.SUPABASE_URL },
+): Promise<JWTPayload & { sub: string }> {
+  const token = bearerOf(c);
 
   let payload: JWTPayload;
   try {
-    ({ payload } = await jwtVerify(token, JWKS, { issuer: JWT_ISSUER, audience: 'authenticated' }));
+    ({ payload } = await jwtVerify(token, jwksFor(project.apiUrl), {
+      issuer: issuerFor(project.apiUrl),
+      audience: 'authenticated',
+      algorithms: ['ES256'],
+    }));
   } catch {
     throw new ApiError(401, 'INVALID_TOKEN');
   }
   if (!payload.sub) throw new ApiError(401, 'INVALID_TOKEN');
   return payload as JWTPayload & { sub: string };
+}
+
+/**
+ * The verification project of a request: a registered tenant host selects that tenant's project; the
+ * platform host, an unregistered host, a Vercel Preview host and a missing `x-tenant-host` select the
+ * central project (09.2-08, D-538).
+ */
+export function verificationProjectOf(hostTenant: TenantHostResolution): VerificationProject {
+  return hostTenant.kind === 'tenant'
+    ? { apiUrl: hostTenant.apiUrl }
+    : { apiUrl: env.SUPABASE_URL };
 }
 
 /**
@@ -70,8 +107,8 @@ export const CUT_ALLOWED_PATHS = new Set(['/v1/me/subscription']);
 
 /**
  * Host FIRST, then the membership (08.1, D-307). Order is fixed:
- *   verify -> resolve host -> select the membership -> tenant suspended -> blocked -> invited scope
- *   -> the payment access state (09.1-02).
+ *   bearer present -> resolve host -> host status gate (09.2-08) -> verify against the host's project ->
+ *   select the membership -> tenant suspended -> blocked -> invited scope -> the payment access state (09.1-02).
  *
  * Selection:
  * - On a registered tenant host the request's membership is `app.membership_in_tenant(user, host
@@ -99,9 +136,28 @@ export const CUT_ALLOWED_PATHS = new Set(['/v1/me/subscription']);
  * `memberships.status`, the profile or any content, and never revokes the Supabase session (D-498).
  */
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
-  const payload = await verifyBearer(c);
-  const userId = payload.sub;
+  // 09.2-08 (D-538, D-542, D-545): bearer present -> the host selects the project and says whether the tenant
+  // can serve at all -> the token is verified against THAT project's keys only -> the tenant lane.
+  assertBearerPresent(c);
   const { hostTenant } = await resolveRequestHost(c);
+  if (hostTenant.kind === 'tenant') {
+    // Before ANY tenant connection and before any key lookup: a project still coming up has no keys to
+    // verify against, and a tenant being held out opens nothing. No details on the three project codes.
+    switch (hostTenant.status) {
+      case 'suspended':
+        throw new ApiError(403, 'TENANT_SUSPENDED', { tenantName: hostTenant.displayName });
+      case 'preparing':
+        throw new ApiError(503, 'TENANT_PREPARING');
+      case 'unavailable':
+        throw new ApiError(503, 'TENANT_UNAVAILABLE');
+      case 'updating':
+        throw new ApiError(503, 'TENANT_UPDATING');
+      default:
+        break;
+    }
+  }
+  const payload = await verifyBearer(c, verificationProjectOf(hostTenant));
+  const userId = payload.sub;
 
   let membership: Membership;
   if (hostTenant.kind === 'tenant') {

@@ -39,7 +39,7 @@ export const publicRoutes = createOpenApiApp()
       responses: {
         200: {
           description:
-            'Tenant served on this VERIFIED host (D-20/D-36): slug, display name, status (a suspended tenant still answers, D-32), primary-host facts (D-35) and the public brand (D-25) — nothing else',
+            'Tenant served on this VERIFIED host (D-20/D-36): slug, display name, status (a suspended, preparing, updating or unavailable tenant still answers so the screen is branded, D-32/D-542), primary-host facts (D-35) and the public brand (D-25) — nothing else',
           content: { 'application/json': { schema: hostTenantSchema } },
         },
         404: {
@@ -64,6 +64,10 @@ export const publicRoutes = createOpenApiApp()
           primaryHost: resolved.primaryHost,
           // Public subset only: `iconUrl`/`iconVersion` are panel facts (T-02-04).
           branding: toHostBranding(resolved.branding),
+          // 09.2-08 (D-538): the tenant's own project coordinates, present ONLY for a non-central project.
+          ...(resolved.supabaseUrl && resolved.publishableKey
+            ? { supabaseUrl: resolved.supabaseUrl, publishableKey: resolved.publishableKey }
+            : {}),
         },
         200,
       );

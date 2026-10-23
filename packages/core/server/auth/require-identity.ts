@@ -1,4 +1,5 @@
 import { createMiddleware } from 'hono/factory';
+import { env } from '../env';
 import type { AppEnv } from './context';
 import { resolveRequestHost, verifyBearer } from './require-auth';
 
@@ -14,7 +15,8 @@ import { resolveRequestHost, verifyBearer } from './require-auth';
  * blocked, removed and platform identities and requires both consents (T-08.1-07).
  */
 export const requireIdentity = createMiddleware<AppEnv>(async (c, next) => {
-  const payload = await verifyBearer(c);
+  // 09.2-08: the identity lane (removed in plan 26) verifies against the central project explicitly.
+  const payload = await verifyBearer(c, { apiUrl: env.SUPABASE_URL });
   const { host, hostTenant } = await resolveRequestHost(c);
   c.set('identity', {
     userId: payload.sub,

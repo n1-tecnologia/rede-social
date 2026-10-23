@@ -2,6 +2,7 @@ import { normalizeHost, TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { createMiddleware } from 'hono/factory';
 import type { Logger } from 'pino';
 import { verifyBearer } from '../auth/require-auth';
+import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { resolveTenantHost } from '../tenancy/tenant-host';
 import { isPlatformAdmin } from './platform-admins';
@@ -33,7 +34,9 @@ export type PlatformEnv = {
  */
 export const requireSuperAdmin = () =>
   createMiddleware<PlatformEnv>(async (c, next) => {
-    const payload = await verifyBearer(c);
+    // 09.2-08 (D-538, DBT-11): a platform session is verified ONLY against the central project, so a tenant
+    // project's token never reaches here, and a super_admin token never reaches a tenant project's keys.
+    const payload = await verifyBearer(c, { apiUrl: env.SUPABASE_URL });
     const userId = payload.sub;
 
     if (!(await isPlatformAdmin(userId))) throw new ApiError(403, 'FORBIDDEN');

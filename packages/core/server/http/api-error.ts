@@ -24,6 +24,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   SUBSCRIPTION_PENDING: 'Sua assinatura não está ativa.',
   TENANT_PROJECT_UNBOUND: 'Esta comunidade não está disponível agora.',
   TENANT_UNAVAILABLE: 'Esta comunidade não está disponível agora.',
+  TENANT_PREPARING: 'Esta comunidade ainda está sendo preparada.',
+  TENANT_UPDATING: 'Esta comunidade está sendo atualizada.',
   VALIDATION_FAILED: 'Dados inválidos.',
   NOT_FOUND: 'Não encontrado.',
   CONFLICT: 'Este recurso ainda não está pronto.',

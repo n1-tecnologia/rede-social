@@ -1,5 +1,6 @@
 import {
   createBoundedTtlCache,
+  type HostTenantStatus,
   isRegistrableHost,
   normalizeHost,
   type ResolvedBranding,
@@ -7,8 +8,15 @@ import {
   type TenantStatus,
 } from '@rede-social/contracts';
 import { and, eq, isNotNull } from 'drizzle-orm';
+import { projectHealth, projectSchemaState, projects, tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenants } from '../../db/schema';
+import { env } from '../env';
+import {
+  getRequiredTenantSchema,
+  isBehind,
+  type RequiredTenantSchema,
+} from '../migrations/required';
 
 /**
  * Everything the public shell may know about the tenant behind a host (D-20, D-25, D-32, D-35):
@@ -21,12 +29,49 @@ export type TenantHostResolution =
       tenantId: string;
       slug: string;
       displayName: string;
-      status: TenantStatus;
+      /** 09.2-08: five values, precedence suspended > preparing > unavailable > updating > active. */
+      status: HostTenantStatus;
       isPrimary: boolean;
       primaryHost: string;
       branding: ResolvedBranding;
+      /** 09.2-08 (D-538): the project the host selects; `''` for a tenant with no binding (it fails closed later). */
+      projectId: string;
+      /**
+       * The registry's `api_url` of that project, or `env.SUPABASE_URL` for the central project: the ONLY input
+       * to key selection (`jwksFor`/`issuerFor`). Never taken from a token.
+       */
+      apiUrl: string;
+      /** Public coordinates of the tenant's own project, ONLY for a tenant of a non-central project. */
+      supabaseUrl?: string;
+      publishableKey?: string;
     }
   | { kind: 'unknown' };
+
+/** The control-plane facts `hostStatus` ranks (09.2-08). `null` means the row does not exist (unknown). */
+export type HostStatusFacts = {
+  tenantStatus: TenantStatus;
+  /** `platform.projects.state`; `null` for a tenant with no binding. */
+  projectState: string | null;
+  /** `platform.project_health.status`; `null` or `'unknown'` holds nothing out. */
+  health: string | null;
+  /** `platform.project_schema_state` applied side; `null` when no row. */
+  applied: { count: number | null; head: string | null } | null;
+  required: RequiredTenantSchema | null;
+};
+
+/**
+ * D-542 / D-545 / D-537 precedence, highest first: suspended > preparing (the project is not `ready`) >
+ * unavailable (paused or unreachable per the last probe) > updating (applied schema below the image's required
+ * schema) > active. A missing health row, a `'unknown'` probe or a missing schema-state row is NOT held out:
+ * unknown is not behind and not down.
+ */
+export function hostStatus(facts: HostStatusFacts): HostTenantStatus {
+  if (facts.tenantStatus === 'suspended') return 'suspended';
+  if (facts.projectState !== null && facts.projectState !== 'ready') return 'preparing';
+  if (facts.health === 'paused' || facts.health === 'unreachable') return 'unavailable';
+  if (isBehind(facts.applied, facts.required)) return 'updating';
+  return 'active';
+}
 
 const TTL_MS = 60_000;
 /**
@@ -72,9 +117,22 @@ export async function resolveTenantHost(rawHost: string): Promise<TenantHostReso
         status: tenants.status,
         branding: tenants.branding,
         isPrimary: tenantDomains.isPrimary,
+        projectId: projects.id,
+        isCentral: projects.isCentral,
+        projectApiUrl: projects.apiUrl,
+        projectPublishableKey: projects.publishableKey,
+        projectState: projects.state,
+        healthStatus: projectHealth.status,
+        appliedCount: projectSchemaState.appliedCount,
+        appliedHead: projectSchemaState.appliedHead,
+        schemaRow: projectSchemaState.projectId,
       })
       .from(tenantDomains)
       .innerJoin(tenants, eq(tenants.id, tenantDomains.tenantId))
+      .leftJoin(tenantProjects, eq(tenantProjects.tenantId, tenants.id))
+      .leftJoin(projects, eq(projects.id, tenantProjects.projectId))
+      .leftJoin(projectHealth, eq(projectHealth.projectId, projects.id))
+      .leftJoin(projectSchemaState, eq(projectSchemaState.projectId, projects.id))
       .where(and(eq(tenantDomains.host, host), isNotNull(tenantDomains.verifiedAt)))
       .limit(1);
     const row = rows[0];
@@ -98,15 +156,30 @@ export async function resolveTenantHost(rawHost: string): Promise<TenantHostReso
       primaryHost = primaries[0]?.host ?? host;
     }
 
+    // 09.2-08: the project facts come from the same platform-lane read as the host itself.
+    const central = row.isCentral !== false;
+    const publicCoordinates =
+      !central && row.projectApiUrl && row.projectPublishableKey
+        ? { supabaseUrl: row.projectApiUrl, publishableKey: row.projectPublishableKey }
+        : {};
     return {
       kind: 'tenant',
       tenantId: row.tenantId,
       slug: row.slug,
       displayName: row.displayName,
-      status: row.status === 'suspended' ? 'suspended' : 'active',
+      status: hostStatus({
+        tenantStatus: row.status === 'suspended' ? 'suspended' : 'active',
+        projectState: row.projectId ? (row.projectState ?? null) : null,
+        health: row.healthStatus ?? null,
+        applied: row.schemaRow ? { count: row.appliedCount, head: row.appliedHead } : null,
+        required: getRequiredTenantSchema(),
+      }),
       isPrimary: row.isPrimary,
       primaryHost,
       branding: resolveBranding(row.branding),
+      projectId: row.projectId ?? '',
+      apiUrl: central ? env.SUPABASE_URL : (row.projectApiUrl ?? ''),
+      ...publicCoordinates,
     };
   });
 
