@@ -1,10 +1,12 @@
 import { and, asc, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { withAdminTx } from '../../db/admin-tx';
+import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenantInvites } from '../../db/schema';
 import { authAllowList } from '../domains/index';
 import { ApiError } from '../http/api-error';
 import { enqueueInTx, registerJobQueues } from '../jobs/boss';
+import { ProjectUnboundError } from '../tenancy/project-errors';
 import { logFor, type PlatformActor, sendPendingInvites } from './invites';
 
 /**
@@ -101,8 +103,8 @@ export function classifyInviteSendError(error: unknown): { retry: boolean; lastE
 export type ScheduleInviteSendsResult = { scheduled: number; reason?: 'no_verified_primary' };
 
 /**
- * Enqueues one `kernel.invite-send` job per `pending` invite of the tenant, in ONE admin transaction
- * (the same verified-primary predicate as `sendPendingInvites`: without a verified primary there is
+ * Enqueues one `kernel.invite-send` job per `pending` invite of the tenant, in ONE tenant-lane transaction
+ * after a platform-lane read of the verified primary (the same predicate as `sendPendingInvites`: without a verified primary there is
  * no origin for the link, so nothing is scheduled and the documented `invite.deferred` line is
  * logged). A `null` job id is the `short` policy dropping a duplicate of a job still waiting — not
  * counted. `opts.delayS` overrides the adapter default (tests prove the delay reaches pg-boss).
@@ -115,8 +117,11 @@ export async function scheduleInviteSends(
   const log = logFor(actor, 'platform.invites');
   const delayS = opts?.delayS ?? inviteSendDelaySeconds(authAllowList.name);
 
-  const result = await withAdminTx(async (tx) => {
-    const hosts = await tx
+  // The verified primary is a central fact (a domain, D-537): read through the platform lane first, in a
+  // transaction of its own. The invites are the tenant's: read and enqueued in the tenant's lane. Never
+  // nested (two databases, two transactions, 09.2-06).
+  const hosts = await withPlatformTx((tx) =>
+    tx
       .select({ id: tenantDomains.id })
       .from(tenantDomains)
       .where(
@@ -126,25 +131,28 @@ export async function scheduleInviteSends(
           isNotNull(tenantDomains.verifiedAt),
         ),
       )
-      .limit(1);
-    if (!hosts[0]) return null;
-    const pending = await tx
-      .select({ id: tenantInvites.id })
-      .from(tenantInvites)
-      .where(and(eq(tenantInvites.tenantId, tenantId), eq(tenantInvites.status, 'pending')))
-      .orderBy(asc(tenantInvites.createdAt));
-    let scheduled = 0;
-    for (const invite of pending) {
-      const jobId = await enqueueInTx(
-        tx,
-        INVITE_SEND_QUEUE,
-        { tenantId, inviteId: invite.id } satisfies InviteSendPayload,
-        inviteSendJobOptions(invite.id, delayS),
-      );
-      if (jobId !== null) scheduled += 1;
-    }
-    return { inviteIds: pending.map((invite) => invite.id), scheduled };
-  });
+      .limit(1),
+  );
+  const result = hosts[0]
+    ? await withAdminTx({ tenantId }, async (tx) => {
+        const pending = await tx
+          .select({ id: tenantInvites.id })
+          .from(tenantInvites)
+          .where(and(eq(tenantInvites.tenantId, tenantId), eq(tenantInvites.status, 'pending')))
+          .orderBy(asc(tenantInvites.createdAt));
+        let scheduled = 0;
+        for (const invite of pending) {
+          const jobId = await enqueueInTx(
+            tx,
+            INVITE_SEND_QUEUE,
+            { tenantId, inviteId: invite.id } satisfies InviteSendPayload,
+            inviteSendJobOptions(invite.id, delayS),
+          );
+          if (jobId !== null) scheduled += 1;
+        }
+        return { inviteIds: pending.map((invite) => invite.id), scheduled };
+      })
+    : null;
 
   if (!result) {
     log.info(
@@ -186,15 +194,22 @@ export async function runScheduledInviteSend(
   payload: InviteSendPayload,
   actor: PlatformActor,
 ): Promise<ScheduledInviteSendOutcome> {
-  const rows = await withAdminTx((tx) =>
-    tx
-      .select({ status: tenantInvites.status })
-      .from(tenantInvites)
-      .where(
-        and(eq(tenantInvites.id, payload.inviteId), eq(tenantInvites.tenantId, payload.tenantId)),
-      )
-      .limit(1),
-  );
+  let rows: { status: string }[];
+  try {
+    rows = await withAdminTx({ tenantId: payload.tenantId }, (tx) =>
+      tx
+        .select({ status: tenantInvites.status })
+        .from(tenantInvites)
+        .where(
+          and(eq(tenantInvites.id, payload.inviteId), eq(tenantInvites.tenantId, payload.tenantId)),
+        )
+        .limit(1),
+    );
+  } catch (error) {
+    // A tenant that was deleted has no binding any more: the job's subject is gone, not a failure to retry.
+    if (error instanceof ProjectUnboundError) return 'gone';
+    throw error;
+  }
   const row = rows[0];
   if (!row) return 'gone';
   if (row.status !== 'pending') return 'not_pending';

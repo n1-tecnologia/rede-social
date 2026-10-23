@@ -1,6 +1,7 @@
 import { isAllowlistRejection, resolveBranding, type TenantInvite } from '@rede-social/contracts';
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { withPlatformTx } from '../../db/platform-tx';
 import {
   memberProfiles,
   memberships,
@@ -19,8 +20,9 @@ import { mailTransport, toMailBrand } from '../mail/index';
 import { renderInvite } from '../mail/templates/invite';
 import { renderInviteExisting } from '../mail/templates/invite-existing';
 import { MAIL_SEND_TIMEOUT_MS, MailTransportError, maskEmail } from '../mail/transport';
-import { supabaseAdmin } from '../supabase-admin';
+import { supabaseAdminFor } from '../supabase-admin';
 import { grantManualAccess } from '../tenancy/access';
+import { resolveProject } from '../tenancy/project-registry';
 
 /** Who is acting (the `super_admin` behind `requireSuperAdmin()`, or the job that verified a host). */
 export type PlatformActor = {
@@ -34,6 +36,47 @@ export type PlatformActor = {
  */
 export const logFor = (actor: PlatformActor | undefined, name: string): Logger =>
   actor?.logger ? actor.logger.child({ name }) : moduleLogger(name);
+
+/**
+ * The CENTRAL facts an invite needs about a tenant (09.2-06, D-537, D-538): whether the tenant exists in
+ * the control plane and its verified primary host. A domain is a central fact (D-20), so it is read through
+ * the platform lane in a transaction of its own and never inside a tenant transaction (two databases, two
+ * transactions, never nested). Every caller reads it BEFORE any Auth call, because the host the link is built
+ * on must be known first; a tenant the control plane does not know has no host.
+ */
+async function centralInviteFacts(
+  tenantId: string,
+): Promise<{ exists: boolean; host: string | null }> {
+  return withPlatformTx(async (tx) => {
+    const known = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
+    if (!known[0]) return { exists: false, host: null };
+    const hosts = await tx
+      .select({ host: tenantDomains.host })
+      .from(tenantDomains)
+      .where(
+        and(
+          eq(tenantDomains.tenantId, tenantId),
+          eq(tenantDomains.isPrimary, true),
+          isNotNull(tenantDomains.verifiedAt),
+        ),
+      )
+      .limit(1);
+    return { exists: true, host: hosts[0]?.host ?? null };
+  });
+}
+
+/**
+ * The Auth admin of the project the tenant lives in (09.2-06, D-539, T-09.2-28): an invite, a recovery link
+ * and the identity they create belong to that project's GoTrue, so the first admin is never an account of
+ * another tenant's project. An unbound tenant throws before any Auth call.
+ */
+async function authAdminOf(tenantId: string) {
+  return supabaseAdminFor(await resolveProject(tenantId)).auth.admin;
+}
 
 /** Where the invite link lands: the accept page on the tenant's own verified primary host (D-29). */
 const INVITE_NEXT_PATH = '/auth/confirm?next=/aceitar-convite';
@@ -211,7 +254,7 @@ async function deliverExistingIdentityInvite(input: {
 }): Promise<ExistingDelivery> {
   const { tenantId, invite, userId, host, tenant, sentAt } = input;
 
-  const refusal = await withAdminTx(async (tx) => {
+  const refusal = await withAdminTx({ tenantId }, async (tx) => {
     const [existing] = await tx
       .select({
         status: memberships.status,
@@ -300,7 +343,7 @@ async function refuseInvite(
   log: Logger,
   meta: { tenantId: string; userId: string | null },
 ): Promise<ApiError> {
-  await withAdminTx(async (tx) =>
+  await withAdminTx({ tenantId: meta.tenantId }, async (tx) =>
     tx
       .update(tenantInvites)
       .set({ status: 'expired', sentAt: null })
@@ -365,41 +408,36 @@ export async function sendPendingInvites(
 ): Promise<SendPendingInvitesResult> {
   const log = logFor(actor, 'platform.invites');
 
-  const target = await withAdminTx(async (tx) => {
-    const hosts = await tx
-      .select({
-        host: tenantDomains.host,
-        slug: tenants.slug,
-        displayName: tenants.displayName,
-        status: tenants.status,
-        branding: tenants.branding,
+  // The host the link is built on is a central fact: read first, in its own platform-lane transaction,
+  // BEFORE the tenant's transaction and before any Auth call (09.2-06, D-537, T-09.2-29).
+  const { host: primaryHost } = await centralInviteFacts(tenantId);
+  const target = primaryHost
+    ? await withAdminTx({ tenantId }, async (tx) => {
+        const [tenant] = await tx
+          .select({
+            slug: tenants.slug,
+            displayName: tenants.displayName,
+            status: tenants.status,
+            branding: tenants.branding,
+          })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId))
+          .limit(1);
+        if (!tenant) return null;
+        const pending = await tx
+          .select({ id: tenantInvites.id, email: tenantInvites.email })
+          .from(tenantInvites)
+          .where(
+            and(
+              eq(tenantInvites.tenantId, tenantId),
+              eq(tenantInvites.status, 'pending'),
+              opts?.inviteId ? eq(tenantInvites.id, opts.inviteId) : undefined,
+            ),
+          )
+          .orderBy(asc(tenantInvites.createdAt));
+        return { host: primaryHost, tenant, pending };
       })
-      .from(tenantDomains)
-      .innerJoin(tenants, eq(tenants.id, tenantDomains.tenantId))
-      .where(
-        and(
-          eq(tenantDomains.tenantId, tenantId),
-          eq(tenantDomains.isPrimary, true),
-          isNotNull(tenantDomains.verifiedAt),
-        ),
-      )
-      .limit(1);
-    const primary = hosts[0];
-    if (!primary) return null;
-    const pending = await tx
-      .select({ id: tenantInvites.id, email: tenantInvites.email })
-      .from(tenantInvites)
-      .where(
-        and(
-          eq(tenantInvites.tenantId, tenantId),
-          eq(tenantInvites.status, 'pending'),
-          opts?.inviteId ? eq(tenantInvites.id, opts.inviteId) : undefined,
-        ),
-      )
-      .orderBy(asc(tenantInvites.createdAt));
-    const { host, ...tenant } = primary;
-    return { host, tenant, pending };
-  });
+    : null;
 
   if (!target) {
     log.info(
@@ -414,7 +452,7 @@ export async function sendPendingInvites(
 
   /** Undoes the claim (`pending`, `sent_at` null): nothing was mailed, so a later send may retry. */
   const revertClaim = (inviteId: string) =>
-    withAdminTx(async (tx) =>
+    withAdminTx({ tenantId }, async (tx) =>
       tx
         .update(tenantInvites)
         .set({ status: 'pending', sentAt: null })
@@ -424,7 +462,7 @@ export async function sendPendingInvites(
   for (const invite of target.pending) {
     // (a) claim
     const sentAt = new Date();
-    const claimed = await withAdminTx(async (tx) =>
+    const claimed = await withAdminTx({ tenantId }, async (tx) =>
       tx
         .update(tenantInvites)
         .set({ status: 'sent', sentAt })
@@ -434,7 +472,9 @@ export async function sendPendingInvites(
     if (claimed.length === 0) continue;
 
     // (a') what the address already is — before GoTrue can mail or re-token anyone.
-    const identity = await withAdminTx((tx) => identityKind(tx, invite.email.trim().toLowerCase()));
+    const identity = await withAdminTx({ tenantId }, (tx) =>
+      identityKind(tx, invite.email.trim().toLowerCase()),
+    );
     if (identity.kind === 'platform_admin') {
       throw await refuseInvite(invite.id, 'email_in_use', log, {
         tenantId,
@@ -498,7 +538,7 @@ export async function sendPendingInvites(
 
     // (b) GoTrue creates (or re-invites an unconfirmed) identity and sends the branded e-mail
     // through the 02-06 hook.
-    const invited = await supabaseAdmin.auth.admin.inviteUserByEmail(invite.email, {
+    const invited = await (await authAdminOf(tenantId)).inviteUserByEmail(invite.email, {
       redirectTo,
       data: { tenant_slug: target.tenant.slug },
     });
@@ -545,7 +585,7 @@ export async function sendPendingInvites(
 
     // (d) membership (blank profile name when new, D-311) + back-reference. The conflict clause
     // tolerates the same-tenant/same-user replay (a re-sent invite keeps its row and its profile).
-    await withAdminTx(async (tx) => {
+    await withAdminTx({ tenantId }, async (tx) => {
       await waitForMirroredUser(tx, invitedUserId);
       const inserted = await tx
         .insert(memberships)
@@ -625,13 +665,11 @@ async function readInvite(tx: Tx, tenantId: string, inviteId: string): Promise<T
  * first. An unknown tenant is a 404 (never an empty list, so the panel can tell the two apart).
  */
 export async function listTenantInvites(tenantId: string): Promise<TenantInvite[]> {
-  return withAdminTx(async (tx) => {
-    const exists = await tx
-      .select({ id: tenants.id })
-      .from(tenants)
-      .where(eq(tenants.id, tenantId))
-      .limit(1);
-    if (!exists[0]) throw new ApiError(404, 'NOT_FOUND');
+  // A tenant the control plane does not know is a 404 BEFORE any tenant database is chosen: it has no
+  // binding, and an unbound tenant must not surface as an availability error (09.2-06).
+  const { exists } = await centralInviteFacts(tenantId);
+  if (!exists) throw new ApiError(404, 'NOT_FOUND');
+  return withAdminTx({ tenantId }, async (tx) => {
     const rows = await tx
       .select(inviteColumns)
       .from(tenantInvites)
@@ -710,7 +748,11 @@ export async function resendInvite(
 ): Promise<TenantInvite> {
   const log = logFor(actor, 'platform.invites');
 
-  const state = await withAdminTx(async (tx) => {
+  // Central first (09.2-06): the tenant exists in the control plane and its verified primary host, in a
+  // platform-lane transaction of its own, before the tenant's transaction and before any Auth call.
+  const central = await centralInviteFacts(tenantId);
+  if (!central.exists) throw new ApiError(404, 'NOT_FOUND');
+  const state = await withAdminTx({ tenantId }, async (tx) => {
     const invite = await readInvite(tx, tenantId, inviteId);
     // The back-reference is internal (not in `tenantInviteSchema`): it names OUR membership row
     // when GoTrue answers that the identity is already confirmed (WR-04).
@@ -730,18 +772,7 @@ export async function resendInvite(
       .where(eq(tenants.id, tenantId))
       .limit(1);
     if (!tenant) throw new ApiError(404, 'NOT_FOUND');
-    const hosts = await tx
-      .select({ host: tenantDomains.host })
-      .from(tenantDomains)
-      .where(
-        and(
-          eq(tenantDomains.tenantId, tenantId),
-          eq(tenantDomains.isPrimary, true),
-          isNotNull(tenantDomains.verifiedAt),
-        ),
-      )
-      .limit(1);
-    return { invite, invitedUserRef: ref?.userId ?? null, tenant, host: hosts[0]?.host ?? null };
+    return { invite, invitedUserRef: ref?.userId ?? null, tenant, host: central.host };
   });
 
   const { invite, invitedUserRef, tenant, host } = state;
@@ -754,11 +785,13 @@ export async function resendInvite(
 
   if (invite.status === 'pending') {
     await sendPendingInvites(tenantId, actor);
-    return withAdminTx((tx) => readInvite(tx, tenantId, inviteId));
+    return withAdminTx({ tenantId }, (tx) => readInvite(tx, tenantId, inviteId));
   }
 
   // `sent` / `expired`: what the address is decides BEFORE any GoTrue call (Pitfall 6).
-  const identity = await withAdminTx((tx) => identityKind(tx, invite.email.trim().toLowerCase()));
+  const identity = await withAdminTx({ tenantId }, (tx) =>
+    identityKind(tx, invite.email.trim().toLowerCase()),
+  );
   if (identity.kind === 'platform_admin') {
     throw await refuseInvite(inviteId, 'email_in_use', log, { tenantId, userId: actor.userId });
   }
@@ -790,7 +823,7 @@ export async function resendInvite(
       );
       throw new ApiError(500, 'INTERNAL');
     }
-    const fresh = await withAdminTx(async (tx) => {
+    const fresh = await withAdminTx({ tenantId }, async (tx) => {
       await tx
         .update(tenantInvites)
         .set({ status: 'sent', sentAt, userId: identity.userId })
@@ -816,7 +849,8 @@ export async function resendInvite(
   // `new` / `existing_without_password`: mint a fresh token (no mail from GoTrue) and send it ourselves.
   const redirectTo = `${publicWebOrigin(host)}${INVITE_NEXT_PATH}`;
   let linkType: 'invite' | 'recovery' = 'invite';
-  let generated = await supabaseAdmin.auth.admin.generateLink({
+  const authAdmin = await authAdminOf(tenantId);
+  let generated = await authAdmin.generateLink({
     type: 'invite',
     email: invite.email,
     options: { redirectTo, data: { tenant_slug: tenant.slug } },
@@ -826,7 +860,7 @@ export async function resendInvite(
     // whether the invite was ACCEPTED is OUR state (WR-04): the invite row was checked above, the
     // membership of this tenant decides here.
     const membership = invitedUserRef
-      ? await withAdminTx(async (tx) => {
+      ? await withAdminTx({ tenantId }, async (tx) => {
           const rows = await tx
             .select({ status: memberships.status })
             .from(memberships)
@@ -854,7 +888,7 @@ export async function resendInvite(
     // `invited`: a recovery link for the same redirectTo (D-C) — `/auth/confirm` accepts the type
     // and honours `next=/aceitar-convite`, where `updateUser` sets the password on that session.
     linkType = 'recovery';
-    generated = await supabaseAdmin.auth.admin.generateLink({
+    generated = await authAdmin.generateLink({
       type: 'recovery',
       email: invite.email,
       options: { redirectTo },
@@ -937,7 +971,7 @@ export async function resendInvite(
     throw new ApiError(500, 'INTERNAL');
   }
 
-  const fresh = await withAdminTx(async (tx) => {
+  const fresh = await withAdminTx({ tenantId }, async (tx) => {
     // `generateLink` recreates the auth user when it had been deleted; wait for the mirror row.
     await waitForMirroredUser(tx, invitedUserId);
     // The same-tenant/same-user replay keeps its row and profile; a new row starts blank (D-311).
