@@ -6,11 +6,14 @@ import { createBoss, createQueues, stopBoss } from '@rede-social/core/server/job
 import { runBootstrap } from '@rede-social/core/server/projects/bootstrap';
 import { createFakeProjectProvider } from '@rede-social/core/server/projects/fake';
 import {
+  type AuthCopyReport,
   assertCoverage,
   type CopyOptions,
+  type CopyReport,
   copyAuth,
   copyRows,
   copyStorage,
+  EmailConflictError,
   MoveError,
   type MoveSide,
   planMove,
@@ -27,7 +30,7 @@ import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry
 import { createClient } from '@supabase/supabase-js';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql } from './setup';
+import { adminSql, SEED_PASSWORD } from './setup';
 
 /**
  * Phase 09.2-22 (DBT-33, D-534, D-536, D-533): the copy engine of the move tool, rehearsed end to end on TWO
@@ -599,5 +602,374 @@ describe('URLs, queued jobs, checksums and files', () => {
         await service.storage.deleteBucket(bucket);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Task 3: resume, conflicts, identity safety, reporting
+// ---------------------------------------------------------------------------------------------------------
+
+const PROBE_PASSWORD = 'Probe-Segredo-123';
+
+/** An account that is a member of BOTH seed tenants, with a password the test knows. */
+async function insertTwoTenantUser(email: string): Promise<string> {
+  const id = crypto.randomUUID();
+  await source`
+    insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    values ('00000000-0000-0000-0000-000000000000', ${id}::uuid, 'authenticated', 'authenticated', ${email},
+            extensions.crypt(${PROBE_PASSWORD}, extensions.gen_salt('bf')), now(),
+            '{"provider":"email","providers":["email"]}'::jsonb, '{"name":"Duas Casas"}'::jsonb, now(), now())`;
+  await source`
+    insert into auth.identities (provider_id, user_id, identity_data, provider, created_at, updated_at)
+    values (${id}, ${id}::uuid, ${JSON.stringify({ sub: id, email })}::jsonb, 'email', now(), now())`;
+  for (const tenantId of [labId, demoId]) {
+    await source`
+      insert into public.memberships (tenant_id, user_id, role, status)
+      values (${tenantId}::uuid, ${id}::uuid, 'member', 'active')`;
+  }
+  return id;
+}
+
+async function removeTwoTenantUser(id: string): Promise<void> {
+  await source`delete from public.member_profiles where user_id = ${id}::uuid`;
+  await source`delete from public.memberships where user_id = ${id}::uuid`;
+  await source`delete from auth.identities where user_id = ${id}::uuid`;
+  await source`delete from auth.users where id = ${id}::uuid`;
+  await source`delete from public.users where id = ${id}::uuid`;
+}
+
+describe('resume, conflicts, identity safety and reports', () => {
+  it('resumes after a crash between groups without duplicating anything', async () => {
+    const target = await freshTarget(labId);
+    const src = side(source, labId, 'p0');
+    const tgt = side(target, labId, 'tb');
+    const plan = await planMove(src, tgt);
+    await copyAuth(src, tgt);
+
+    await expect(
+      copyRows(plan, src, tgt, {
+        afterGroup: ({ tables }) => {
+          if (tables.includes('events')) throw new Error('simulated crash');
+        },
+      }),
+    ).rejects.toThrow('simulated crash');
+    // The groups before the cycle are committed; the later ones are not there yet.
+    const partial = await tenantCounts(target, labId, [
+      'events',
+      'event_secrets',
+      'event_attendances',
+      'memberships',
+    ]);
+    expect(partial.events).toBeGreaterThan(0);
+    expect(partial.event_secrets).toBeGreaterThan(0);
+    expect(partial.event_attendances).toBe(0);
+
+    const rerun = await copyRows(plan, src, tgt);
+    expect(rerun.groups).toBe(plan.groups.length);
+    const report = await verifyCopy(plan, src, tgt);
+    expect(report.ok).toBe(true);
+    const counts = await tenantCounts(
+      target,
+      labId,
+      plan.tables.map((t) => t.name),
+    );
+    for (const entry of plan.tables) expect(counts[entry.name]).toBe(entry.rows);
+  });
+
+  it('inserts a reply after its parent even when the reply sorts first (feed_comments.parent_depth)', async () => {
+    const root = 'ffffffff-ffff-4fff-8fff-ffffffffff01';
+    const reply = '00000000-0000-4000-8000-00000000fe01';
+    const fixture = async (sql: string, params: unknown[]) =>
+      source.begin(async (tx) => {
+        // Fixtures only: the counters of the seeded post are not this case's business.
+        await tx.unsafe('set local session_replication_role = replica');
+        await tx.unsafe(sql, params as never[]);
+      });
+    const target = await freshTarget(labId);
+    try {
+      await fixture(
+        `insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth)
+         values ($1::uuid, $2::uuid, '0e000000-0000-4000-8000-000000000001', '91d2a0c3-4037-41d5-9e0b-2d3a72115ca0', 'raiz', 0)`,
+        [root, labId],
+      );
+      await fixture(
+        `insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+         values ($1::uuid, $2::uuid, '0e000000-0000-4000-8000-000000000001', '91d2a0c3-4037-41d5-9e0b-2d3a72115ca0', 'resposta', 1, $3::uuid, 0, 'post')`,
+        [reply, labId, root],
+      );
+      // One row per statement: the reply (the smallest id) is read BEFORE its parent by key order, so only the
+      // parent-first rule keeps the foreign key satisfied.
+      const { src, tgt, plan } = await fullMove(target, labId, { batchSize: 1 });
+      expect((await verifyCopy(plan, src, tgt)).ok).toBe(true);
+      const [copied] = await target`
+        select count(*)::int as n from public.feed_comments where id in (${root}::uuid, ${reply}::uuid)`;
+      expect(copied?.n).toBe(2);
+    } finally {
+      await fixture('delete from public.feed_comments where id in ($1::uuid, $2::uuid)', [
+        reply,
+        root,
+      ]);
+    }
+  });
+
+  it('copies an account held in two tenants independently: same id and hash, the source keeps it', async () => {
+    const email = `duas-casas-${RUN}@example.test`;
+    const id = await insertTwoTenantUser(email);
+    try {
+      const [original] = await source<{ encrypted_password: string }[]>`
+        select encrypted_password from auth.users where id = ${id}::uuid`;
+
+      // Move 1: rede-lab to a target.
+      const first = await freshTarget(labId);
+      const one = await fullMove(first, labId);
+      expect(one.auth.accounts).toBe(8);
+      const [copied] = await first<{ encrypted_password: string; ok: boolean }[]>`
+        select encrypted_password, extensions.crypt(${PROBE_PASSWORD}, encrypted_password) = encrypted_password as ok
+          from auth.users where id = ${id}::uuid`;
+      expect(copied?.encrypted_password).toBe(original?.encrypted_password);
+      expect(copied?.ok).toBe(true);
+      const [stillThere] =
+        await source`select count(*)::int as n from auth.users where id = ${id}::uuid`;
+      expect(stillThere?.n).toBe(1);
+      // The mirror row carries the source's name and creation time exactly.
+      const [mirrorA] =
+        await source`select name, created_at from public.users where id = ${id}::uuid`;
+      const [mirrorB] =
+        await first`select name, created_at from public.users where id = ${id}::uuid`;
+      expect(mirrorB).toEqual(mirrorA);
+
+      // Move 2: rede-demo to a NEW target. The account is copied again, the source still holds it.
+      const second = await freshTarget(demoId);
+      await fullMove(second, demoId);
+      const [again] = await second<{ encrypted_password: string }[]>`
+        select encrypted_password from auth.users where id = ${id}::uuid`;
+      expect(again?.encrypted_password).toBe(original?.encrypted_password);
+
+      // Independence: a password change in the target does not reach the source.
+      await second`update auth.users set encrypted_password = extensions.crypt('Outra-Senha-9', extensions.gen_salt('bf')) where id = ${id}::uuid`;
+      const [afterChange] = await source<{ encrypted_password: string }[]>`
+        select encrypted_password from auth.users where id = ${id}::uuid`;
+      expect(afterChange?.encrypted_password).toBe(original?.encrypted_password);
+    } finally {
+      await removeTwoTenantUser(id);
+    }
+  });
+
+  it('aborts with email_conflict before any write when the target holds the e-mail under another id', async () => {
+    const target = await freshTarget(labId);
+    const marker = 'member@rede-lab.local';
+    await target`
+      insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+                              raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+      values ('00000000-0000-0000-0000-000000000000', ${crypto.randomUUID()}::uuid, 'authenticated',
+              'authenticated', ${marker}, 'x', now(), '{}'::jsonb, '{}'::jsonb, now(), now())`;
+    const snapshot = async () => ({
+      users: (await target`select count(*)::int as n from auth.users`)[0]?.n,
+      identities: (await target`select count(*)::int as n from auth.identities`)[0]?.n,
+      mirror: (await target`select count(*)::int as n from public.users`)[0]?.n,
+      memberships: (await target`select count(*)::int as n from public.memberships`)[0]?.n,
+    });
+    const before = await snapshot();
+
+    let caught: unknown;
+    try {
+      await copyAuth(side(source, labId, 'p0'), side(target, labId, 'tb'));
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(EmailConflictError);
+    expect((caught as MoveError).code).toBe('email_conflict');
+    // The message and the report carry no address.
+    expect(JSON.stringify([(caught as Error).message, (caught as MoveError).report])).not.toContain(
+      '@',
+    );
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('preserves the password hash byte for byte and the copy still verifies with crypt', async () => {
+    const target = await freshTarget(labId);
+    const { src, tgt, plan } = await fullMove(target, labId);
+    await verifyCopy(plan, src, tgt);
+
+    const sourceHashes = await source<{ id: string; encrypted_password: string }[]>`
+      select id, encrypted_password from auth.users
+       where id in (select user_id from public.memberships where tenant_id = ${labId}::uuid) order by id`;
+    const targetHashes = await target<{ id: string; encrypted_password: string }[]>`
+      select id, encrypted_password from auth.users order by id`;
+    expect(targetHashes).toEqual(sourceHashes);
+    expect(sourceHashes.length).toBe(7);
+    if (SEED_PASSWORD) {
+      const [ok] = await target`
+        select extensions.crypt(${SEED_PASSWORD}, encrypted_password) = encrypted_password as ok
+          from auth.users where email = 'member@rede-lab.local'`;
+      expect(ok?.ok).toBe(true);
+    }
+  });
+
+  it('does not double anything when the copy runs twice', async () => {
+    const target = await freshTarget(labId);
+    const { src, tgt, plan, rows } = await fullMove(target, labId);
+    const first = await tenantCounts(
+      target,
+      labId,
+      plan.tables.map((t) => t.name),
+    );
+    const total = rows.tables.reduce((n, t) => n + t.inserted, 0);
+    expect(total).toBeGreaterThan(0);
+
+    const again = await copyRows(plan, src, tgt);
+    expect(again.tables.every((t) => t.inserted === 0)).toBe(true);
+    const authAgain = await copyAuth(src, tgt);
+    expect(authAgain.usersWritten).toBe(0);
+    expect(
+      await tenantCounts(
+        target,
+        labId,
+        plan.tables.map((t) => t.name),
+      ),
+    ).toEqual(first);
+    expect((await verifyCopy(plan, src, tgt)).ok).toBe(true);
+  });
+
+  it('writes nothing to either database during a dry run', async () => {
+    const target = await freshTarget(labId);
+    // Close the fixture's own connection first: a backend flushes its statistics when it exits.
+    await target.end({ timeout: 5 });
+    const writes = async () => {
+      const reader = open(TGT_URL);
+      try {
+        const [row] = await reader`
+          select coalesce(sum(n_tup_ins + n_tup_upd + n_tup_del), 0)::bigint as n from pg_stat_user_tables`;
+        return Number(row?.n ?? 0);
+      } finally {
+        await reader.end({ timeout: 5 });
+      }
+    };
+    // The dry run opens its own connections and releases them, which flushes their statistics.
+    const planner = open(TGT_URL);
+    const before = await writes();
+    const plan = await planMove(side(source, labId, 'p0'), side(planner, labId, 'tb'));
+    assertCoverage(plan);
+    await planner.end({ timeout: 5 });
+    expect(await writes()).toBe(before);
+
+    // And the transactions it opens are read only: a write through the same entry point is refused.
+    await expect(
+      source.begin('read only', (tx) => tx`update public.tenants set slug = slug`),
+    ).rejects.toThrow(/read-only/);
+  });
+
+  it('refuses a table it cannot place, and names it (T-09.2-100)', async () => {
+    const target = await freshTarget(labId);
+    const withTenant = `mv_probe_t_${RUN}`;
+    const orphan = `mv_probe_o_${RUN}`;
+    try {
+      await source.unsafe(
+        `create table public.${withTenant} (id uuid primary key default gen_random_uuid(), tenant_id uuid not null references public.tenants(id))`,
+      );
+      await source.unsafe(
+        `create table public.${orphan} (id uuid primary key default gen_random_uuid(), note text)`,
+      );
+
+      // Held by the source but not by the target: it cannot be copied.
+      const withTarget = await planMove(side(source, labId, 'p0'), side(target, labId, 'tb'));
+      expect(withTarget.uncovered).toEqual([orphan, withTenant].sort());
+      let caught: unknown;
+      try {
+        assertCoverage(withTarget);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(MoveError);
+      expect((caught as MoveError).code).toBe('uncovered_tables');
+      expect((caught as MoveError).tables).toEqual([orphan, withTenant].sort());
+
+      // copyRows checks again: a caller that forgot assertCoverage still cannot skip the table.
+      await expect(
+        copyRows(withTarget, side(source, labId, 'p0'), side(target, labId, 'tb')),
+      ).rejects.toThrow('uncovered_tables');
+
+      // Without a target the tenant-scoped table is part of the derived set, but the orphan has no home.
+      const dry = await planMove(side(source, labId, 'p0'));
+      expect(dry.uncovered).toEqual([orphan]);
+    } finally {
+      await source.unsafe(`drop table if exists public.${withTenant}`);
+      await source.unsafe(`drop table if exists public.${orphan}`);
+    }
+  });
+
+  it('refuses a row that references a user outside the tenant accounts and never widens the account set', async () => {
+    const target = await freshTarget(labId);
+    const stray = crypto.randomUUID();
+    const [community] = await source<{ id: string; created_by_user_id: string | null }[]>`
+      select id, created_by_user_id from public.communities where tenant_id = ${labId}::uuid order by id limit 1`;
+    try {
+      // An account that exists (public.users references auth.users) but belongs to no membership or invite.
+      await source`
+        insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+                                raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+        values ('00000000-0000-0000-0000-000000000000', ${stray}::uuid, 'authenticated', 'authenticated',
+                ${`stray-${RUN}@example.test`}, 'x', now(), '{}'::jsonb, '{}'::jsonb, now(), now())`;
+      await source`update public.communities set created_by_user_id = ${stray}::uuid where id = ${community?.id ?? ''}::uuid`;
+
+      const plan = await planMove(side(source, labId, 'p0'), side(target, labId, 'tb'));
+      expect(plan.danglingUsers).toEqual(['communities.created_by_user_id']);
+      let caught: unknown;
+      try {
+        assertCoverage(plan);
+      } catch (error) {
+        caught = error;
+      }
+      expect((caught as MoveError).code).toBe('account_missing');
+
+      // The Auth copy takes memberships and invitees only: the stray person gets no account in the target.
+      await copyAuth(side(source, labId, 'p0'), side(target, labId, 'tb'));
+      const [there] =
+        await target`select count(*)::int as n from public.users where id = ${stray}::uuid`;
+      expect(there?.n).toBe(0);
+    } finally {
+      await source`update public.communities set created_by_user_id = ${community?.created_by_user_id ?? null} where id = ${community?.id ?? ''}::uuid`;
+      await source`delete from public.users where id = ${stray}::uuid`;
+      await source`delete from auth.users where id = ${stray}::uuid`;
+    }
+  });
+
+  it('keeps every report free of e-mails, hashes, tokens and connection strings', async () => {
+    const target = await freshTarget(labId);
+    const { src, tgt, plan, auth, rows } = await fullMove(target, labId);
+    const verified = await verifyCopy(plan, src, tgt, {
+      oldOrigin: SUPABASE_URL,
+      newOrigin: NEW_ORIGIN,
+    }).catch((error: MoveError) => error);
+    const reports: unknown[] = [
+      { ...plan, info: undefined },
+      auth satisfies AuthCopyReport,
+      rows satisfies CopyReport,
+      verified instanceof MoveError
+        ? { code: verified.code, tables: verified.tables, report: verified.report }
+        : verified,
+    ];
+
+    // A conflict error as well.
+    const clash = await freshTarget(labId);
+    await clash`
+      insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+                              raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+      values ('00000000-0000-0000-0000-000000000000', ${crypto.randomUUID()}::uuid, 'authenticated',
+              'authenticated', 'admin@rede-lab.local', 'x', now(), '{}'::jsonb, '{}'::jsonb, now(), now())`;
+    const conflict = await copyAuth(side(source, labId, 'p0'), side(clash, labId, 'tb')).catch(
+      (error: MoveError) => error,
+    );
+    reports.push({ message: (conflict as Error).message, report: (conflict as MoveError).report });
+
+    const text = JSON.stringify(reports);
+    expect(text).not.toMatch(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+    expect(text).not.toMatch(/\$2[aby]\$/);
+    expect(text).not.toContain('eyJ');
+    expect(text).not.toContain('postgres://');
+    expect(text).not.toContain('sb_secret_');
+    // And it does say something: tables and counts are there.
+    expect(text).toContain('feed_posts');
   });
 });
