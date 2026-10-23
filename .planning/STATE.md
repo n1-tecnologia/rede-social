@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 7
+current_plan: 9
 status: executing
-stopped_at: Completed 09.2-08-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08 done); next is 09.2-07 (wave 5)
-last_updated: "2026-10-23T00:28:58.936Z"
+stopped_at: Completed 09.2-07-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07 done); next is 09.2-09 (wave 6)
+last_updated: "2026-10-23T00:52:33.845Z"
 last_activity: 2026-10-23
-last_activity_desc: Completed 09.2-08 (host-selected token verification, five-value host status, hold-out gate in requireAuth)
-state_head: 765211fe432d0b65b6f58494778466498577cae0
+last_activity_desc: Completed 09.2-07 (central/tenant ownership table, push and reconcile functions, createTenant saga, brand and public/mail sites on their owner)
+state_head: 12d7299b47eb869d23a6dcf55d2d55ee63f0445b
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 243
+  completed_plans: 244
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 7
+Current Plan: 9
 Total Plans in Phase: 28
-Plan: 07 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status done; wave 4 complete, wave 5 starts with 07)
+Plan: 09 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile done; wave 5 complete, wave 6 starts with 09; only the N sites (plan 10) and the L sites (plan 09) remain pending in the admin-lane inventory)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-08 (host-selected token verification, five-value host status, hold-out gate in requireAuth)
+Last activity: 2026-10-23 — Completed 09.2-07 (central/tenant ownership table, push and reconcile functions, createTenant saga, brand and public/mail sites on their owner)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -301,6 +301,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P05 | 22 min | 3 tasks | 23 files |
 | Phase 09.2 P06 | 17 min | 3 tasks | 11 files |
 | Phase 09.2 P08 | 22min | 3 tasks | 16 files |
+| Phase 09.2 P07 | 30 min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -1003,6 +1004,9 @@ Recent decisions affecting current work:
 - [Phase 09.2-06]: arm-event-reminders.ts stays pending (class L, plan 09); the seed writes tenant_modules through the platform lane — The script reads every tenant's events into one pg-boss and needs plan 09's per-project sender; D-537 makes the enabled flags central
 - [Phase 09.2-08]: The host selects the verification project before the token is parsed (registered tenant host -> its registry api_url; platform, unregistered, Preview and missing host -> central); jwtVerify is pinned to ES256, that project's key set and issuer, and the token's iss never picks a keyset — Stops a token of tenant A verifying on tenant B (confused project, T-09.2-35/36); super_admin and identity lanes verify centrally
 - [Phase 09.2-08]: Host status precedence suspended > preparing (state != ready) > unavailable (health paused/unreachable) > updating (applied below required) > active, gated in requireAuth after the bearer-presence check and before verification; getRequiredTenantSchema() is null until plan 15 so the updating gate is off in every deployed environment — A project still coming up has no keys; unknown health or schema state is not held out; the three project codes are 503 without details, TENANT_SUSPENDED stays 403 with the mirror name
+- [Phase 09.2]: 09.2-07: central/tenant ownership is data (CENTRAL_OWNED, TENANT_OWNED, LOCAL_COLUMNS in tenancy/mirror.ts) with a column-coverage guard; pushes run after the owner's commit, never throw and are healed by reconcileTenantMirror, which seeds tenant-owned columns from the central copy only for a missing row — D-537; a stale copy must not overwrite owned data, and an unreachable tenant project must not block the operator
+- [Phase 09.2]: 09.2-07: platform mutation routes read the tenant detail with tolerateTenantDown, so an unreachable tenant project degrades invites and admins to empty instead of a 503 after a committed central write; a plain GET still answers 503 — T-09.2-33
+- [Phase 09.2]: 09.2-07: an unknown tenant is a 404 from a central existence check before any tenant lane opens (branding, module settings); the hostless open-invite lookup fans out over ready projects and fails closed — TENANT_PROJECT_UNBOUND must not replace the documented 404
 
 ### Pending Todos
 
@@ -1111,6 +1115,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T00:28:58.381Z
-Stopped at: Completed 09.2-08-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08 done); next is 09.2-07 (wave 5)
+Last session: 2026-10-23T00:52:33.631Z
+Stopped at: Completed 09.2-07-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07 done); next is 09.2-09 (wave 6)
 Resume file: None
