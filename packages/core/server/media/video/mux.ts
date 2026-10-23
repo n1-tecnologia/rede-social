@@ -27,7 +27,9 @@ import { normaliseProviderEvent } from './wire';
  *  - `test: true` outside production, on BOTH the upload and its new asset — test assets are
  *    watermarked, capped at 10 seconds and deleted by Mux after 24 h, so a hosted smoke cannot
  *    accumulate stored minutes (RESEARCH Pitfall 7);
- *  - `passthrough: assetId` — our correlation key, max 255 characters (a uuid fits).
+ *  - `passthrough: <tenantId>:<assetId>` — our correlation key, max 255 characters (73 here: two uuids and a
+ *    colon). The tenant half lets the webhook pick the tenant's project without a central read (09.2-10,
+ *    DBT-13); `wire.ts#parsePassthrough` is its only reader.
  *
  * Mux enforces NO duration limit at ingest; a video is only measurable once ready, so the per-purpose
  * duration cap lives in the event job, not here.
@@ -102,7 +104,7 @@ export function createMuxVideoProvider(config: MuxVideoProviderConfig): VideoPro
             playback_policies: ['signed'],
             video_quality: 'basic',
             max_resolution_tier: '1080p',
-            passthrough: input.assetId,
+            passthrough: `${input.tenantId}:${input.assetId}`,
             ...(input.test ? { test: true } : {}),
           },
         });

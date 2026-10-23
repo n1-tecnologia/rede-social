@@ -92,6 +92,10 @@ export type VideoProviderEventKind = 'ready' | 'errored' | 'ignored';
  * `singletonKey` of the job, which is what makes a replayed delivery free (T-03-38).
  * `assetId` is OUR asset id (Mux carries it as `passthrough`); when the provider cannot echo it the
  * job falls back to `providerAssetId`, which `startUpload` recorded.
+ * `tenantId` (09.2-10, DBT-13) is the tenant half of a `<tenantId>:<assetId>` passthrough: it lets the webhook
+ * route pick the tenant's project without a central read. It is `null` for an asset created before the
+ * passthrough carried it (a bare uuid) and for an event with no passthrough; those resolve through the
+ * central `video_asset_routes`. It only selects a project: authenticity is the provider's HMAC (T-09.2-47).
  * `failureReason` is the event TYPE and never the provider's own message (T-03-41).
  */
 export interface VideoProviderEvent {
@@ -99,6 +103,8 @@ export interface VideoProviderEvent {
   kind: VideoProviderEventKind;
   rawType: string;
   assetId: string | null;
+  /** 09.2-10: absent on events queued before this field existed, `null` when the passthrough names no tenant. */
+  tenantId?: string | null;
   providerAssetId: string | null;
   playbackId: string | null;
   durationSeconds: number | null;

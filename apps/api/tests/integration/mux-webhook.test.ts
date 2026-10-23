@@ -679,3 +679,94 @@ describe('an event naming no asset of ours resolves without throwing', () => {
     await expect(mediaProviderEventJob.handler({ nope: true } as never)).resolves.toBeUndefined();
   });
 });
+
+describe('09.2-10 (DBT-13): the tenant rides the passthrough and the route index is the safety net', () => {
+  const routeOf = async (assetId: string) =>
+    (
+      await adminSql<{ tenant_id: string; provider_asset_id: string | null }[]>`
+        select tenant_id::text as tenant_id, provider_asset_id
+          from platform.video_asset_routes where asset_id = ${assetId}::uuid`
+    )[0];
+
+  it('starting an upload writes the asset route (tenant and the provider upload id) before any webhook can arrive', async () => {
+    const { assetId, providerAssetId } = await startVideoAsset();
+    expect(await routeOf(assetId)).toEqual({
+      tenant_id: demoTenantId,
+      provider_asset_id: providerAssetId,
+    });
+  });
+
+  it('a <tenantId>:<assetId> passthrough is recorded once and the job readies the asset', async () => {
+    const { assetId, providerAssetId } = await startVideoAsset();
+    const eventId = `evt-tenant-pt-${assetId}`;
+    createdEventIds.push(eventId);
+    const res = await postWebhook(
+      readyBody({ eventId, assetId: `${demoTenantId}:${assetId}`, providerAssetId }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ received: true, enqueued: true });
+    expect((await eventRows(eventId)).length).toBe(1);
+
+    const [job] = await adminSql<{ data: Record<string, unknown> }[]>`
+      select data from pgboss.job_common
+       where name = 'kernel.media-provider-event' and singleton_key = ${eventId}`;
+    expect(job?.data).toMatchObject({ assetId, tenantId: demoTenantId });
+    await mediaProviderEventJob.handler(job?.data as never);
+    expect((await assetRow(assetId))?.status).toBe('ready');
+  });
+
+  it('a bare-uuid passthrough (an older asset) and an event with no passthrough both resolve through the route', async () => {
+    const legacy = await startVideoAsset();
+    const legacyEvent = `evt-legacy-${legacy.assetId}`;
+    createdEventIds.push(legacyEvent);
+    const a = await postWebhook(
+      readyBody({
+        eventId: legacyEvent,
+        assetId: legacy.assetId,
+        providerAssetId: legacy.providerAssetId,
+      }),
+    );
+    expect(await a.json()).toEqual({ received: true, enqueued: true });
+
+    const bare = await startVideoAsset();
+    const bareEvent = `evt-nopt-${bare.assetId}`;
+    createdEventIds.push(bareEvent);
+    const raw = JSON.stringify({
+      id: bareEvent,
+      type: 'video.asset.ready',
+      data: {
+        id: bare.providerAssetId,
+        duration: 12,
+        aspect_ratio: '16:9',
+        playback_ids: [{ id: `pb-${bare.assetId}` }],
+      },
+    });
+    const b = await postWebhook(raw);
+    expect(await b.json()).toEqual({ received: true, enqueued: true });
+  });
+
+  it('an event naming no tenant of ours is accepted (200) and dropped: no event row, no job', async () => {
+    const orphan = randomUUID();
+    const eventId = `evt-nobody-${orphan}`;
+    createdEventIds.push(eventId);
+    const res = await postWebhook(
+      readyBody({ eventId, assetId: orphan, providerAssetId: `nobody-${orphan}` }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ received: true, enqueued: false });
+    expect((await eventRows(eventId)).length).toBe(0);
+    expect((await eventJobs(eventId)).length).toBe(0);
+  });
+
+  it('the job that learns the provider asset id records it on the route', async () => {
+    const { assetId } = await startVideoAsset();
+    const realAssetId = `mux-asset-${assetId}`;
+    const eventId = `evt-learn-${assetId}`;
+    createdEventIds.push(eventId);
+    await mediaProviderEventJob.handler({
+      ...readyEvent({ eventId, assetId, providerAssetId: realAssetId }),
+      tenantId: demoTenantId,
+    } as never);
+    expect((await routeOf(assetId))?.provider_asset_id).toBe(realAssetId);
+  });
+});

@@ -8,7 +8,7 @@ import {
   signFakeVideoWebhook,
 } from '../server/media/video/fake';
 import { VideoProviderError, type VideoProviderEvent } from '../server/media/video/types';
-import { normaliseProviderEvent } from '../server/media/video/wire';
+import { normaliseProviderEvent, parsePassthrough } from '../server/media/video/wire';
 
 /**
  * The `VIDEO_PROVIDER=fake` contract (MEDIA-03, RESEARCH Pitfall 7): what every non-production
@@ -125,6 +125,7 @@ describe('fake video provider — verifyWebhook is a REAL HMAC check, not a no-o
       kind: 'ready',
       rawType: 'video.asset.ready',
       assetId: ASSET,
+      tenantId: null,
       providerAssetId: 'asset-1',
       playbackId: 'pb-1',
       durationSeconds: 10,
@@ -323,5 +324,80 @@ describe('assertProductionEnv refuses a half-configured Mux selection (T-03-43)'
 
   it('accepts VIDEO_PROVIDER=fake with none of them — the fail-safe default never trips', () => {
     expect(() => assertProductionEnv({ ...base, VIDEO_PROVIDER: 'fake' } as never)).not.toThrow();
+  });
+});
+
+describe('parsePassthrough — the strict shapes of the correlation key (09.2-10, DBT-13)', () => {
+  it('reads <tenantId>:<assetId> as both halves', () => {
+    expect(parsePassthrough(`${TENANT}:${ASSET}`)).toEqual({ tenantId: TENANT, assetId: ASSET });
+  });
+
+  it('reads a bare asset uuid (an asset created before the tenant rode along) as the asset alone', () => {
+    expect(parsePassthrough(ASSET)).toEqual({ assetId: ASSET });
+  });
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['empty', ''],
+    ['not a uuid', 'not-a-uuid'],
+    ['upper case', 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'],
+    ['upper case tenant half', `AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA:${ASSET}`],
+    ['three parts', `${TENANT}:${ASSET}:${ASSET}`],
+    ['tenant half not a uuid', `tenant:${ASSET}`],
+    ['asset half not a uuid', `${TENANT}:asset`],
+    ['separator is not a colon', `${TENANT}-${ASSET}`],
+    ['leading space', ` ${TENANT}:${ASSET}`],
+    ['trailing colon', `${TENANT}:`],
+    ['sql in the asset half', `${TENANT}:${ASSET.slice(0, 30)}'; --`],
+  ])('refuses %s', (_label, value) => {
+    expect(parsePassthrough(value as string | null | undefined)).toBeNull();
+  });
+
+  it('the normaliser carries the tenant half and leaves it null for a bare or unusable passthrough', () => {
+    const upgraded = normaliseProviderEvent({
+      id: 'p1',
+      type: 'video.asset.ready',
+      data: { id: 'a1', passthrough: `${TENANT}:${ASSET}` },
+    });
+    expect(upgraded.tenantId).toBe(TENANT);
+    expect(upgraded.assetId).toBe(ASSET);
+
+    const legacy = normaliseProviderEvent({
+      id: 'p2',
+      type: 'video.asset.ready',
+      data: { id: 'a1', passthrough: ASSET },
+    });
+    expect(legacy.tenantId).toBeNull();
+    expect(legacy.assetId).toBe(ASSET);
+
+    const garbage = normaliseProviderEvent({
+      id: 'p3',
+      type: 'video.asset.ready',
+      data: { id: 'a1', passthrough: 'whatever' },
+    });
+    expect(garbage.tenantId).toBeNull();
+    expect(garbage.assetId).toBeNull();
+    expect(garbage.providerAssetId).toBe('a1');
+  });
+
+  it('the fake adapter sends its synthetic ready event with the same tenant half', async () => {
+    let scheduled: VideoProviderEvent | undefined;
+    fakeVideoInternals.signUpload = async () => ({ signedUrl: 'https://storage.example/x' });
+    fakeVideoInternals.scheduleReady = async (event) => {
+      scheduled = event;
+    };
+    try {
+      await createFakeVideoProvider().createDirectUpload({
+        assetId: ASSET,
+        tenantId: TENANT,
+        corsOrigin: 'https://comunidade.example',
+        test: true,
+      });
+    } finally {
+      resetFakeVideoInternals();
+    }
+    expect(scheduled?.tenantId).toBe(TENANT);
+    expect(scheduled?.assetId).toBe(ASSET);
   });
 });

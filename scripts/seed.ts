@@ -1282,6 +1282,24 @@ async function seedStoryVideoAsset(
       })
       .onConflictDoNothing();
   });
+  await seedVideoRoute(tenantId, assetId, `fake-story-${assetId}`);
+}
+
+/**
+ * 09.2-10 (DBT-13): the central route of a seeded video asset, the row the application writes when an upload
+ * starts, so a provider event for the asset finds its tenant. Idempotent.
+ */
+async function seedVideoRoute(
+  tenantId: string,
+  assetId: string,
+  providerAssetId: string,
+): Promise<void> {
+  await withPlatformTx((tx) =>
+    tx.execute(sql`
+      insert into platform.video_asset_routes (asset_id, tenant_id, provider_asset_id)
+      values (${assetId}::uuid, ${tenantId}::uuid, ${providerAssetId})
+      on conflict do nothing`),
+  );
 }
 
 /** A REAL `ready` PDF attachment asset: the bytes go to the private bucket under `…/original`. */
@@ -1349,6 +1367,7 @@ async function seedVideoAsset(
       })
       .onConflictDoNothing();
   });
+  await seedVideoRoute(tenantId, assetId, `fake-seed-${assetId}`);
 }
 
 /** Every identity `ensureUser` returns, so `grantSeedAccess` can open the door for all of them at once. */

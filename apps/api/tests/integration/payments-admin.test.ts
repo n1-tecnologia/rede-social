@@ -607,6 +607,56 @@ describe('09.1 access products', () => {
     });
   }, 60_000);
 
+  it('09.2-10 (D-488): the central product route is written with the product, swapped when the id changes, and removed with it; the integration route is written with the token', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    await withPaymentsOn(async () => {
+      const first = uniq('route-a');
+      const second = uniq('route-b');
+      const routeRows = async (external: string) =>
+        adminSql<{ tenant_id: string }[]>`
+          select tenant_id::text as tenant_id from platform.payment_product_routes
+           where external_product_id = ${external}`;
+
+      const created = await call(admin, 'POST', '/access-products', {
+        name: 'Rota',
+        externalProductId: first,
+      });
+      expect(created.status).toBe(201);
+      const id = (created.json as { id: string }).id;
+      expect(await routeRows(first)).toEqual([{ tenant_id: labTenantId }]);
+
+      expect(
+        (await call(admin, 'PATCH', `/access-products/${id}`, { externalProductId: second }))
+          .status,
+      ).toBe(200);
+      expect(await routeRows(first)).toEqual([]);
+      expect(await routeRows(second)).toEqual([{ tenant_id: labTenantId }]);
+
+      // Saving the same id again changes no route and is not 'already used' by the holder itself.
+      expect(
+        (await call(admin, 'PATCH', `/access-products/${id}`, { externalProductId: second }))
+          .status,
+      ).toBe(200);
+      expect(await routeRows(second)).toEqual([{ tenant_id: labTenantId }]);
+
+      expect((await call(admin, 'DELETE', `/access-products/${id}`)).status).toBe(200);
+      expect(await routeRows(second)).toEqual([]);
+
+      const saved = await call(admin, 'PUT', '/integration', {
+        token: uniq('tok'),
+        provider: 'fake',
+      });
+      expect(saved.status).toBe(200);
+      const [integration] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.payment_integrations
+         where tenant_id = ${labTenantId}::uuid and provider = 'fake'`;
+      const [route] = await adminSql<{ tenant_id: string; provider: string }[]>`
+        select tenant_id::text as tenant_id, provider from platform.payment_integration_routes
+         where integration_id = ${integration?.id ?? ''}::uuid`;
+      expect(route).toEqual({ tenant_id: labTenantId, provider: 'fake' });
+    });
+  }, 60_000);
+
   it('P45: two tenants registering one gateway id at the same instant leave one row and one gateway_product_taken that names nobody', async () => {
     const labAdmin = await person('lab', 'admin_tenant');
     const demoAdmin = await person('demo', 'admin_tenant');
@@ -644,6 +694,7 @@ describe('09.1 access products', () => {
       });
     } finally {
       await adminSql`delete from public.payment_products where tenant_id = ${demoId}::uuid`;
+      await adminSql`delete from platform.payment_product_routes where tenant_id = ${demoId}::uuid`;
       if (previous) {
         await setPaymentsRow(demoId, { enabled: previous.enabled, settings: previous.settings });
       } else {
@@ -1022,6 +1073,7 @@ describe('09.1 authorisation', () => {
     } finally {
       await removePaymentIntegrations(demoId);
       await adminSql`delete from public.payment_products where tenant_id = ${demoId}::uuid`;
+      await adminSql`delete from platform.payment_product_routes where tenant_id = ${demoId}::uuid`;
       if (previous) {
         await setPaymentsRow(demoId, { enabled: previous.enabled, settings: previous.settings });
       } else {

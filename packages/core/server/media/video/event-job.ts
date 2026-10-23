@@ -5,9 +5,11 @@ import { withAdminTx } from '../../../db/admin-tx';
 import { mediaAssets } from '../../../db/schema';
 import { moduleLogger } from '../../logging';
 import type { JobDefinition } from '../../modules/manifest';
+import { centralProjectId } from '../../tenancy/project-registry';
 import { limitFor } from '../limits';
 import { judgeDuration } from './duration-verdict';
 import { videoProvider } from './index';
+import { setVideoRouteProviderId } from './routes';
 import { MEDIA_PROVIDER_EVENT_QUEUE, type VideoProviderEvent } from './types';
 
 /**
@@ -55,6 +57,8 @@ const payloadSchema = z.object({
   kind: z.enum(['ready', 'errored', 'ignored']),
   rawType: z.string().min(1),
   assetId: z.string().nullable(),
+  // 09.2-10: absent on a job queued before the passthrough carried the tenant.
+  tenantId: z.string().nullable().optional(),
   providerAssetId: z.string().nullable(),
   playbackId: z.string().nullable(),
   durationSeconds: z.number().int().nullable(),
@@ -75,11 +79,26 @@ type Resolved = {
  * The row this event is about. By OUR asset id when the provider echoed it (Mux `passthrough`),
  * otherwise by the provider's own id, which `startUpload` recorded as `provider_asset_id` — that is
  * the only handle a `video.upload.errored` delivery gives us.
+ *
+ * WHICH DATABASE (09.2-10): the webhook recorded the event AND enqueued this job inside the tenant's own
+ * project, so every `media_assets` row of the project the job runs in belongs to one of ITS tenants, and the
+ * lookup opens that project (`{ projectId }`, handed over by the worker). A tenant named by the event that is
+ * not the row's tenant is no match (T-09.2-47): a forged tenant half cannot reach another tenant's asset.
  */
-async function resolveAsset(event: VideoProviderEvent): Promise<Resolved | undefined> {
-  // 09.2-05: class N, plan 10. The provider event names an asset, not a tenant, so this lookup is what FINDS
-  // the tenant; it cannot be given one (and must never default to project 0 for a tenant elsewhere).
-  return withAdminTx(async (tx) => {
+async function resolveAsset(
+  event: VideoProviderEvent,
+  projectId: string,
+): Promise<Resolved | undefined> {
+  const found = await lookupAsset(event, projectId);
+  if (found && event.tenantId && found.tenantId !== event.tenantId) return undefined;
+  return found;
+}
+
+async function lookupAsset(
+  event: VideoProviderEvent,
+  projectId: string,
+): Promise<Resolved | undefined> {
+  return withAdminTx({ projectId }, async (tx) => {
     const columns = {
       id: mediaAssets.id,
       tenantId: mediaAssets.tenantId,
@@ -103,6 +122,26 @@ async function resolveAsset(event: VideoProviderEvent): Promise<Resolved | undef
       .limit(1);
     return byProvider;
   });
+}
+
+/** Best effort: the route's provider id is a safety net, never a reason to fail the event. */
+async function learnProviderId(
+  assetId: string,
+  tenantId: string,
+  providerAssetId: string,
+): Promise<void> {
+  try {
+    await setVideoRouteProviderId(assetId, tenantId, providerAssetId);
+  } catch (error) {
+    log.warn(
+      {
+        event: 'media.provider_event.route_update_failed',
+        assetId,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'could not record the provider asset id on the video route',
+    );
+  }
 }
 
 /** Best effort: a provider asset we could not delete is cost, not corruption. */
@@ -227,7 +266,7 @@ async function applyErrored(event: VideoProviderEvent, row: Resolved): Promise<O
 
 export const mediaProviderEventJob: JobDefinition<VideoProviderEvent> = {
   name: MEDIA_PROVIDER_EVENT_QUEUE,
-  handler: async (payload) => {
+  handler: async (payload, ctx) => {
     const parsed = payloadSchema.safeParse(payload);
     if (!parsed.success) {
       log.error(
@@ -257,7 +296,9 @@ export const mediaProviderEventJob: JobDefinition<VideoProviderEvent> = {
         return;
       }
 
-      const row = await resolveAsset(providerEvent);
+      // The worker names the project whose queue delivered the job; a direct call (a test, an operator
+      // command) means the central project.
+      const row = await resolveAsset(providerEvent, ctx?.projectId ?? (await centralProjectId()));
       if (!row) {
         log.warn(
           {
@@ -277,6 +318,11 @@ export const mediaProviderEventJob: JobDefinition<VideoProviderEvent> = {
         providerEvent.kind === 'ready'
           ? await applyReady(providerEvent, row)
           : await applyErrored(providerEvent, row);
+
+      // The first event that carries both ids teaches the route the provider's own id (best effort).
+      if (providerEvent.providerAssetId && row.providerAssetId !== providerEvent.providerAssetId) {
+        await learnProviderId(row.id, row.tenantId, providerEvent.providerAssetId);
+      }
 
       log.info(
         {

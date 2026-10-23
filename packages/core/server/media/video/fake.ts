@@ -118,12 +118,18 @@ async function enqueueSyntheticReady(event: VideoProviderEvent, tenantId: string
 }
 
 /** The synthetic delivery the fake's own "transcode" produces, already normalised. */
-function syntheticReadyEvent(assetId: string, providerAssetId: string): VideoProviderEvent {
+function syntheticReadyEvent(
+  assetId: string,
+  providerAssetId: string,
+  tenantId: string,
+): VideoProviderEvent {
   return {
     id: `fake-evt-${assetId}`,
     kind: 'ready',
     rawType: VIDEO_EVENT_TYPES.ready,
     assetId,
+    // The same `<tenantId>:<assetId>` the real adapter sends as the passthrough (09.2-10).
+    tenantId,
     providerAssetId,
     playbackId: `fake-playback-${assetId}`,
     durationSeconds: fakeVideoInternals.durationSeconds,
@@ -143,7 +149,7 @@ export function createFakeVideoProvider(): VideoProvider {
       const { signedUrl } = await fakeVideoInternals.signUpload(key);
       const providerUploadId = `fake-${input.assetId}`;
       await fakeVideoInternals.scheduleReady(
-        syntheticReadyEvent(input.assetId, providerUploadId),
+        syntheticReadyEvent(input.assetId, providerUploadId, input.tenantId),
         input.tenantId,
       );
       return { providerUploadId, uploadUrl: signedUrl };

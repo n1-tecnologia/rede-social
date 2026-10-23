@@ -69,6 +69,7 @@ import {
 import { deriveVariants, probeSize } from './variants';
 import { videoProvider } from './video/index';
 import { reconcileVideoAsset } from './video/reconcile';
+import { dropVideoRoute, recordVideoRoute, setVideoRouteProviderId } from './video/routes';
 
 /**
  * The media broker (MEDIA-01, MEDIA-02, TENANT-04) — a tenant-lane service that returns upload
@@ -335,6 +336,11 @@ async function startVideoUpload(
     throw new ApiError(500, 'INTERNAL');
   }
 
+  // 09.2-10 (DBT-13): the asset's central route is written BEFORE the provider can deliver anything about it,
+  // so a webhook for an asset created before the passthrough carried the tenant (or an event with no
+  // passthrough) still finds its tenant. The passthrough itself carries `<tenantId>:<assetId>`.
+  await recordVideoRoute(assetId, ctx.tenantId);
+
   let upload: Awaited<ReturnType<typeof videoProvider.createDirectUpload>>;
   try {
     upload = await videoProvider.createDirectUpload({
@@ -356,6 +362,9 @@ async function startVideoUpload(
       },
       'the video provider refused to mint a direct upload',
     );
+    // No upload exists, so no delivery can name this asset: take the route back (a failure leaves an orphan
+    // id that nothing reads; the pending row is collected by the sweeper as before).
+    await dropVideoRoute(assetId, ctx.tenantId).catch(() => undefined);
     throw new ApiError(500, 'INTERNAL');
   }
 
@@ -365,6 +374,18 @@ async function startVideoUpload(
       .set({ providerAssetId: upload.providerUploadId })
       .where(and(eq(mediaAssets.id, assetId), eq(mediaAssets.tenantId, ctx.tenantId)));
   });
+  // Best effort: the provider's own upload id makes an event with no passthrough findable too.
+  await setVideoRouteProviderId(assetId, ctx.tenantId, upload.providerUploadId).catch((error) =>
+    log.warn(
+      {
+        event: 'media.video_route.provider_id_failed',
+        tenantId: ctx.tenantId,
+        assetId,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'could not record the provider upload id on the video route',
+    ),
+  );
 
   log.info(
     {

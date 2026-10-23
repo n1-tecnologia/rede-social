@@ -20,7 +20,12 @@ import { moduleFlags } from '../modules/flags-cache';
 import { readGate, setupLock } from './gate';
 import { deterministicIntegrationId } from './ids';
 import { enabledProviders, gatewayAdapter } from './index';
-import { releaseIntegrationRoute, reserveIntegrationRoute } from './routes';
+import {
+  releaseIntegrationRoute,
+  releaseProductRoute,
+  reserveIntegrationRoute,
+  reserveProductRoute,
+} from './routes';
 import { paymentsKey, sealSecret } from './secret';
 
 /**
@@ -102,6 +107,47 @@ export function isProductTaken(error: unknown): boolean {
 /** The 409 for a gateway product id someone already holds. Names no tenant and no constraint (T-09.1-41). */
 export const gatewayProductTaken = () =>
   new ApiError(409, 'CONFLICT', { payments: 'gateway_product_taken' });
+
+/**
+ * Reserves a gateway product id centrally BEFORE the tenant row is written (D-488). Returns whether THIS call
+ * inserted the route (only then is it this call's to take back). An id another tenant holds is the
+ * existing 'already used' answer, which names no one (T-09.2-46).
+ */
+async function reserveProduct(
+  tenantId: string,
+  provider: string,
+  externalProductId: string,
+): Promise<boolean> {
+  if (externalProductId === '') return false;
+  const reservation = await reserveProductRoute({ provider, externalProductId, tenantId });
+  if (reservation.taken) throw gatewayProductTaken();
+  return reservation.inserted;
+}
+
+/** Takes back a route this call inserted (the tenant write failed) or retires an old one. Never throws. */
+async function releaseProduct(
+  tenantId: string,
+  provider: string,
+  externalProductId: string,
+  why: 'compensation' | 'retired',
+): Promise<void> {
+  if (externalProductId === '') return;
+  try {
+    await releaseProductRoute({ provider, externalProductId, tenantId });
+  } catch (error) {
+    // An orphan route only makes the id read as 'already used' until the operational cleanup query removes it.
+    log.error(
+      {
+        event: 'payments.product_route.release_failed',
+        tenantId,
+        provider,
+        why,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'could not remove a product route; the cleanup query removes it',
+    );
+  }
+}
 
 type AccessRow = {
   id: string;
@@ -299,6 +345,7 @@ export async function createAccessProduct(
   body: AccessProductBody,
 ): Promise<AccessProduct> {
   const provider = await tenantProvider(ctx.tenantId);
+  const inserted = await reserveProduct(ctx.tenantId, provider, body.externalProductId);
   try {
     return await withTenantTx(ctx, async (tx) => {
       const [created] = await tx
@@ -317,6 +364,8 @@ export async function createAccessProduct(
       return answerFor(tx, ctx.tenantId, created.id);
     });
   } catch (error) {
+    if (inserted)
+      await releaseProduct(ctx.tenantId, provider, body.externalProductId, 'compensation');
     if (isProductTaken(error)) throw gatewayProductTaken();
     throw error;
   }
@@ -337,8 +386,41 @@ export async function updateAccessProduct(
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.externalProductId !== undefined) set.externalProductId = patch.externalProductId;
   if (patch.checkoutUrl !== undefined) set.checkoutUrl = patch.checkoutUrl;
+
+  // A changed gateway id swaps the central route: the new one is reserved first, the old one retired after
+  // the tenant write commits (D-488).
+  let swap: { provider: string; from: string; to: string } | null = null;
+  let inserted = false;
+  if (patch.externalProductId !== undefined) {
+    const [current] = await withTenantTx(ctx, (tx) =>
+      tx
+        .select({
+          provider: paymentProducts.provider,
+          externalProductId: paymentProducts.externalProductId,
+        })
+        .from(paymentProducts)
+        .where(
+          and(
+            eq(paymentProducts.id, id),
+            eq(paymentProducts.tenantId, ctx.tenantId),
+            eq(paymentProducts.kind, 'access'),
+          ),
+        ),
+    );
+    if (!current) throw new ApiError(404, 'NOT_FOUND');
+    if (current.externalProductId !== patch.externalProductId) {
+      swap = {
+        provider: current.provider,
+        from: current.externalProductId,
+        to: patch.externalProductId,
+      };
+      inserted = await reserveProduct(ctx.tenantId, swap.provider, swap.to);
+    }
+  }
+
+  let answer: AccessProduct;
   try {
-    return await withTenantTx(ctx, async (tx) => {
+    answer = await withTenantTx(ctx, async (tx) => {
       const [updated] = await tx
         .update(paymentProducts)
         .set(set)
@@ -354,9 +436,13 @@ export async function updateAccessProduct(
       return answerFor(tx, ctx.tenantId, updated.id);
     });
   } catch (error) {
+    if (swap && inserted)
+      await releaseProduct(ctx.tenantId, swap.provider, swap.to, 'compensation');
     if (isProductTaken(error)) throw gatewayProductTaken();
     throw error;
   }
+  if (swap) await releaseProduct(ctx.tenantId, swap.provider, swap.from, 'retired');
+  return answer;
 }
 
 /**
@@ -369,14 +455,14 @@ export async function removeAccessProduct(
   ctx: RequestContext,
   id: string,
 ): Promise<RemoveAccessProductResult> {
-  return withTenantTx(ctx, async (tx) => {
+  const removed = await withTenantTx(ctx, async (tx) => {
     await tx.execute(setupLock(ctx.tenantId));
     const rows = await listAccessRows(tx, ctx.tenantId);
     if (!rows.some((row) => row.id === id)) throw new ApiError(404, 'NOT_FOUND');
     if (rows.length === 1 && (await readGate(tx, ctx.tenantId))) {
       throw new ApiError(409, 'CONFLICT', { payments: 'last_access_product' });
     }
-    await tx
+    const [gone] = await tx
       .delete(paymentProducts)
       .where(
         and(
@@ -384,9 +470,17 @@ export async function removeAccessProduct(
           eq(paymentProducts.tenantId, ctx.tenantId),
           eq(paymentProducts.kind, 'access'),
         ),
-      );
-    return { id };
+      )
+      .returning({
+        provider: paymentProducts.provider,
+        externalProductId: paymentProducts.externalProductId,
+      });
+    return gone ?? null;
   });
+  // The tenant delete committed: now the central route goes (a failure only leaves a harmless orphan).
+  if (removed)
+    await releaseProduct(ctx.tenantId, removed.provider, removed.externalProductId, 'retired');
+  return { id };
 }
 
 const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -408,6 +502,24 @@ async function mappingOf(tx: Tx, tenantId: string, productId: string) {
     .select({
       externalProductId: paymentProducts.externalProductId,
       checkoutUrl: paymentProducts.checkoutUrl,
+    })
+    .from(paymentProducts)
+    .where(
+      and(
+        eq(paymentProducts.tenantId, tenantId),
+        eq(paymentProducts.kind, 'store_product'),
+        eq(paymentProducts.targetId, productId),
+      ),
+    );
+  return row ?? null;
+}
+
+/** The provider and gateway id a store product is mapped under now: what its central route is keyed by. */
+async function routeKeyOf(tx: Tx, tenantId: string, productId: string) {
+  const [row] = await tx
+    .select({
+      provider: paymentProducts.provider,
+      externalProductId: paymentProducts.externalProductId,
     })
     .from(paymentProducts)
     .where(
@@ -451,9 +563,14 @@ export async function putStoreMapping(
   const provider = integration?.provider ?? defaultProvider();
   const externalProductId = body.externalProductId ?? '';
   const checkoutUrl = body.checkoutUrl ?? null;
+  // Reserve the gateway id centrally FIRST (D-488); the previous mapping's route is retired after the commit.
+  const inserted = await reserveProduct(ctx.tenantId, provider, externalProductId);
+  let previous: { provider: string; externalProductId: string } | null = null;
+  let answer: StoreMappingResponse;
   try {
-    return await withTenantTx(ctx, async (tx) => {
+    answer = await withTenantTx(ctx, async (tx) => {
       await assertStoreProduct(tx, productId);
+      previous = await routeKeyOf(tx, ctx.tenantId, productId);
       await tx
         .insert(paymentProducts)
         .values({
@@ -476,9 +593,15 @@ export async function putStoreMapping(
       };
     });
   } catch (error) {
+    if (inserted) await releaseProduct(ctx.tenantId, provider, externalProductId, 'compensation');
     if (isProductTaken(error)) throw gatewayProductTaken();
     throw error;
   }
+  const old = previous as { provider: string; externalProductId: string } | null;
+  if (old && (old.provider !== provider || old.externalProductId !== externalProductId)) {
+    await releaseProduct(ctx.tenantId, old.provider, old.externalProductId, 'retired');
+  }
+  return answer;
 }
 
 /** `DELETE /v1/payments/store-products/{productId}`: removes the mapping; removing what is not mapped is a no-op. */
@@ -488,8 +611,9 @@ export async function deleteStoreMapping(
 ): Promise<StoreMappingResponse> {
   if (!UUID_SHAPE.test(productId)) throw new ApiError(404, 'NOT_FOUND');
   const connected = (await readIntegration(ctx.tenantId)) !== null;
-  return withTenantTx(ctx, async (tx) => {
+  const removed = await withTenantTx(ctx, async (tx) => {
     await assertStoreProduct(tx, productId);
+    const key = await routeKeyOf(tx, ctx.tenantId, productId);
     await tx
       .delete(paymentProducts)
       .where(
@@ -499,6 +623,11 @@ export async function deleteStoreMapping(
           eq(paymentProducts.targetId, productId),
         ),
       );
-    return { connected, mapping: null };
+    return key;
   });
+  // The tenant delete committed: now the central route goes (a failure only leaves a harmless orphan).
+  if (removed) {
+    await releaseProduct(ctx.tenantId, removed.provider, removed.externalProductId, 'retired');
+  }
+  return { connected, mapping: null };
 }

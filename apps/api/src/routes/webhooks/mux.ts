@@ -24,6 +24,10 @@ import { createOpenApiApp } from '../../http/openapi';
  * provider-named path: `videoProvider` decides who verifies, so pointing a second vendor at
  * its own path is a mount line, not a rewrite.
  *
+ * WHICH TENANT (09.2-10, DBT-13): the delivery carries no host. `recordProviderEvent` finds the tenant from the
+ * `<tenantId>:<assetId>` passthrough (or the central `video_asset_routes` for older assets) and records and
+ * enqueues inside that tenant's own project; the signature checked above stays the only authentication.
+ *
  * Logs carry the event id, the raw type and the request id — never a provider body (T-03-41).
  */
 
@@ -53,19 +57,24 @@ export const muxWebhookRoutes = createOpenApiApp().post('/mux', async (c) => {
   // `recordProviderEvent` is the kernel half: the `on conflict (id) do nothing` insert of the
   // provider's own event id and the `singletonKey: event.id` enqueue, in ONE admin transaction (the
   // admin lane is kernel-only, so the route cannot open it here).
-  const enqueued = await recordProviderEvent(event);
+  const outcome = await recordProviderEvent(event);
+  const enqueued = outcome === 'enqueued';
 
-  log.info(
-    {
-      event: enqueued ? 'media.webhook.received' : 'media.webhook.duplicate',
-      eventId: event.id,
-      rawType: event.rawType,
-      kind: event.kind,
-      provider: videoProvider.name,
-      requestId,
-    },
-    enqueued ? 'video webhook accepted' : 'video webhook already seen; nothing enqueued',
-  );
+  // An event that names no tenant of ours is accepted and dropped (the kernel logged its count): answering
+  // anything but 2xx would make the provider retry, for 24 h, an event nobody can ever apply.
+  if (outcome !== 'unroutable') {
+    log.info(
+      {
+        event: enqueued ? 'media.webhook.received' : 'media.webhook.duplicate',
+        eventId: event.id,
+        rawType: event.rawType,
+        kind: event.kind,
+        provider: videoProvider.name,
+        requestId,
+      },
+      enqueued ? 'video webhook accepted' : 'video webhook already seen; nothing enqueued',
+    );
+  }
 
   return c.json({ received: true, enqueued }, 200);
 });

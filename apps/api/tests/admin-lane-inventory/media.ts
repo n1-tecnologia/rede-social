@@ -50,10 +50,11 @@ export const media: readonly AdminLaneEntry[] = [
   ]),
   ...group('packages/core/server/media/video/event-job.ts', [
     [
-      'resolveAsset',
-      'N',
+      'lookupAsset',
+      'L',
       10,
-      'a provider event names an asset, not a tenant: the lookup is what finds the tenant',
+      'the webhook recorded the event in the tenant project; the job opens the project whose queue delivered it',
+      'migrated',
     ],
     ['applyReady', 'T', 5, undefined, 'migrated'],
     ['applyReady', 'T', 5, undefined, 'migrated'],
@@ -63,5 +64,13 @@ export const media: readonly AdminLaneEntry[] = [
   ...group('packages/core/server/media/video/fake.ts', [
     ['enqueueSyntheticReady', 'T', 5, undefined, 'migrated'],
   ]),
-  ...group('packages/core/server/media/video/inbox.ts', [['recordProviderEvent', 'N', 10]]),
+  ...group('packages/core/server/media/video/inbox.ts', [
+    [
+      'recordProviderEvent',
+      'N',
+      10,
+      'tenant from the passthrough or platform.video_asset_routes before the lane opens',
+      'migrated',
+    ],
+  ]),
 ];

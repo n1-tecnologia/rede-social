@@ -57,6 +57,27 @@ function firstPlaybackId(value: unknown): string | null {
   return asString(first?.id);
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The passthrough we set at upload creation (09.2-10, DBT-13): `<tenantId>:<assetId>` (73 characters, far
+ * below Mux's 255), or, for an asset created before this phase, a bare asset uuid. STRICT: both parts are
+ * lower-case uuids and nothing else is accepted, so a passthrough that is not ours resolves to nothing
+ * instead of reaching a query. The tenant part only selects a project; it grants nothing (the HMAC does).
+ */
+export function parsePassthrough(raw: string | null | undefined): {
+  tenantId?: string;
+  assetId: string;
+} | null {
+  if (typeof raw !== 'string') return null;
+  if (UUID.test(raw)) return { assetId: raw };
+  const colon = raw.indexOf(':');
+  if (colon !== 36 || raw.length !== 73) return null;
+  const tenantId = raw.slice(0, 36);
+  const assetId = raw.slice(37);
+  return UUID.test(tenantId) && UUID.test(assetId) ? { tenantId, assetId } : null;
+}
+
 /**
  * Our asset id as the provider echoed it. A `video.asset.*` delivery carries it at the top level of
  * the asset (`passthrough`); a `video.upload.errored` delivery describes the UPLOAD, whose
@@ -91,12 +112,14 @@ export function normaliseProviderEvent(raw: unknown): VideoProviderEvent {
 
   const data = (event.data ?? {}) as WireAsset;
   const kind = kindOf(rawType);
+  const passthrough = parsePassthrough(passthroughOf(data));
 
   return {
     id,
     kind,
     rawType,
-    assetId: passthroughOf(data),
+    assetId: passthrough?.assetId ?? null,
+    tenantId: passthrough?.tenantId ?? null,
     providerAssetId: asString(data.id),
     playbackId: kind === 'ready' ? firstPlaybackId(data.playback_ids) : null,
     durationSeconds: kind === 'ready' ? asSeconds(data.duration) : null,
