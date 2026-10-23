@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 13
+current_plan: 10
 status: executing
-stopped_at: Completed 09.2-09-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09 done); next is 09.2-13 (wave 7)
-last_updated: "2026-10-23T01:21:21.438Z"
+stopped_at: Completed 09.2-13-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13 done); next is 09.2-10 (wave 8, then 11)
+last_updated: "2026-10-23T01:53:08.655Z"
 last_activity: 2026-10-23
-last_activity_desc: Completed 09.2-09 (lane-aware pg-boss sender and queue scopes, pgboss_platform schema, worker supervisor, per-project dispatcher and sweeper, mirror reconcile job)
-state_head: ffd404a83cfd1f2995af2c482afd7f4268b0671a
+last_activity_desc: "Completed 09.2-13 (eight-step project bootstrap: engine, idempotent steps, platform.project-bootstrap job, Auth template, nullable first-admin creator, pgTAP 212)"
+state_head: febc2c59e1d05170948898c9ffab6030fb8f6408
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 245
+  completed_plans: 246
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 13
+Current Plan: 10
 Total Plans in Phase: 28
-Plan: 13 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper) done; wave 6 complete, wave 7 starts with 13; only the N sites (plan 10) remain pending in the admin-lane inventory)
+Plan: 10 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper), 13 bootstrap engine (eight idempotent steps, platform.project-bootstrap job, Auth template, nullable first-admin creator) done; wave 7 complete; plans run out of numeric order: the next is 10 (wave 8, the N sites and removal of the deprecated overload), then 11; only the N sites (plan 10) remain pending in the admin-lane inventory)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-09 (lane-aware pg-boss sender and queue scopes, pgboss_platform schema, worker supervisor, per-project dispatcher and sweeper, mirror reconcile job)
+Last activity: 2026-10-23 — Completed 09.2-13 (eight-step project bootstrap: engine, idempotent steps, platform.project-bootstrap job, Auth template, nullable first-admin creator, pgTAP 212)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -303,6 +303,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P08 | 22min | 3 tasks | 16 files |
 | Phase 09.2 P07 | 30 min | 3 tasks | 14 files |
 | Phase 09.2 P09 | 30min | 3 tasks | 31 files |
+| Phase 09.2 P13 | 35min | 3 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -1011,6 +1012,8 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-09: a job lands in the database of the transaction that enqueued it: projectOfTx stores { handle, lane }, senderFor keeps one lazy pg-boss sender per project, credential version and scope, and a queue scope (platform in pgboss_platform of the central project, tenant in pgboss) is checked against the lane before any insert — D-546, T-09.2-40; pg-boss reads the queue cache from the sender's own database
 - [Phase 09.2]: 09.2-09: the worker supervisor keeps a platform instance plus one per ready project, reconciles every 60 s, starts four at a time, backs a failing project off alone (5 s to 5 min) and never stops anything when the registry is unreadable — T-09.2-41/42; deploy order is binding: the central set (pgboss_platform) must be applied before the new API or worker revision (plan 24 DEPLOY.md)
 - [Phase 09.2]: 09.2-09: the daily dispatcher, orphan sweeper and arm-event-reminders run once per project with { projectId }; on the central project the dispatcher filters by platform.tenant_projects so a mirror row of a tenant living elsewhere is never dispatched from project 0 — DBT-31, P62
+- [Phase 09.2]: 09.2-13: the bootstrap job is a PLATFORM-scope queue (platform.project-bootstrap in pgboss_platform), payload { projectId } only, singleton by project, retryLimit 0; a failed step is data (a row with a reason code), not a job failure — The run drives a project that has no queue of its own yet; the step rows are the retry mechanism and no credential may ride a queue
+- [Phase 09.2]: 09.2-13: emptiness is checked on the first run only (schema step attempt = 0); the provider is resolved lazily so a worker boots without PROJECT_PROVIDER; the invite step creates with created_by null and its send is non-fatal — Resume of a ledger that is a prefix of the manifest must work; plan 12 handoff keeps the worker bootable; the central actor has no row in the tenant project
 
 ### Pending Todos
 
@@ -1119,6 +1122,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T01:21:21.201Z
-Stopped at: Completed 09.2-09-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09 done); next is 09.2-13 (wave 7)
+Last session: 2026-10-23T01:52:55.001Z
+Stopped at: Completed 09.2-13-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13 done); next is 09.2-10 (wave 8, then 11)
 Resume file: None

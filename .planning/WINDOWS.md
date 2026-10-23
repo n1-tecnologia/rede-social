@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 77
+open_count: 78
 waived_count: 0
 fixed_count: 58
-total_count: 135
-last_updated: 2026-10-21T15:46:30.193Z
+total_count: 136
+last_updated: 2026-10-23T01:53:16.459Z
 ---
 
 # Broken Windows Ledger
@@ -150,6 +150,7 @@ last_updated: 2026-10-21T15:46:30.193Z
 | 133 | 09.1 | unrun-verify | apps/web/app/(app)/configuracoes/pagamentos/GateSwitchRow.tsx |  | 09.1-21: the cut note in the gate dialog at 320px and the six-second toasts were proven by component tests only; no browser walk, no Playwright run and no real-device pass (the owner declined local e2e) | open |  | 2026-10-21T15:40:59.507Z |  |
 | 134 | 09.1 | deviation | apps/web/messages/pt-BR/payments.json |  | 09.1-22: toasts.releasedStaysCut is not in the approved Copywriting Contract or sketch 013 (it says a released address stays without access while the gateway has cut it, gap G-09.1-1); UI-SPEC UI-D-518 amended; sketch 013 not redrawn; it awaits the design team like entry 126 | open |  | 2026-10-21T15:46:30.071Z |  |
 | 135 | 09.1 | unrun-verify | apps/web/app/(app)/configuracoes/pagamentos/AccessList.tsx |  | 09.1-22: the info toast for a released address the gateway has cut was proven by component and integration tests only; no browser walk, no Playwright run and no real-device pass (the owner declined local e2e) | open |  | 2026-10-21T15:46:30.193Z |  |
+| 136 | 09.2 | unrun-verify | packages/core/server/projects/steps.ts |  | 09.2-13: the eight bootstrap steps are proven only against the fake provider and the second local database; the real Management API behaviour is hosted proof H2 (plan 25) | open |  | 2026-10-23T01:53:16.459Z |  |
 
 ````json
 [
@@ -1771,6 +1772,18 @@ last_updated: 2026-10-21T15:46:30.193Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-21T15:46:30.193Z",
+    "resolved_at": null
+  },
+  {
+    "id": 136,
+    "kind": "unrun-verify",
+    "phase": "09.2",
+    "file": "packages/core/server/projects/steps.ts",
+    "line": null,
+    "description": "09.2-13: the eight bootstrap steps are proven only against the fake provider and the second local database; the real Management API behaviour is hosted proof H2 (plan 25)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T01:53:16.459Z",
     "resolved_at": null
   }
 ]
