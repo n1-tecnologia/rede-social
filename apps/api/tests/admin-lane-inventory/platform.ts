@@ -133,4 +133,16 @@ export const platform: readonly AdminLaneEntry[] = [
     ],
     'migrated',
   ),
+  ...group(
+    'packages/core/server/projects/steps.ts',
+    [
+      [
+        'invite',
+        'L',
+        13,
+        'the bootstrap runs in a project that is not ready yet: one { projectId } lane, never a tenant lane, writing the first-admin invite with a null creator',
+      ],
+    ],
+    'migrated',
+  ),
 ];
