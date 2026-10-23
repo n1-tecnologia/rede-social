@@ -7,6 +7,7 @@ import {
   getRequiredTenantSchema,
   setRequiredTenantSchemaForTests,
 } from '../server/migrations/required';
+import { stateOf } from '../server/projects/schema-state';
 
 /**
  * Phase 09.2-15 (DBT-44, D-545; P85): where the required tenant schema comes from, with no database. The
@@ -111,5 +112,52 @@ describe('the test seam', () => {
   it('refuses to run outside NODE_ENV=test', () => {
     vi.stubEnv('NODE_ENV', 'production');
     expect(() => setRequiredTenantSchemaForTests({ count: 1, head: '1' })).toThrow('test seam');
+  });
+});
+
+/**
+ * P50-P52 (DBT-24): the arithmetic of "where does a project stand". Heads are 14-digit strings compared as
+ * text; the count is the number of applied files; a gap (equal head, lower count) is behind.
+ */
+describe('stateOf (P50, P51, P52)', () => {
+  const required = { count: 10, head: '20261022000010' };
+  const applied = (appliedCount: number | null, appliedHead: string | null) => ({
+    appliedCount,
+    appliedHead,
+  });
+
+  it('P50 adjacency: equal is current, one below is behind, above is current (an image older than the database)', () => {
+    expect(stateOf(applied(10, '20261022000010'), required)).toBe('current');
+    expect(stateOf(applied(9, '20261022000010'), required)).toBe('behind');
+    expect(stateOf(applied(10, '20261022000009'), required)).toBe('behind');
+    expect(stateOf(applied(9, '20261022000009'), required)).toBe('behind');
+    expect(stateOf(applied(11, '20261022000011'), required)).toBe('current');
+    expect(stateOf(applied(10, '20261022000011'), required)).toBe('current');
+    expect(stateOf(applied(11, '20261022000010'), required)).toBe('current');
+  });
+
+  it('P51 empty: a project never touched reads unknown, zero applied against a requirement is behind, no requirement never gates', () => {
+    expect(stateOf(null, required)).toBe('unknown');
+    expect(stateOf(undefined, required)).toBe('unknown');
+    expect(stateOf(applied(null, null), required)).toBe('unknown');
+    expect(stateOf(applied(0, null), required)).toBe('behind');
+    expect(stateOf(applied(0, null), { count: 1, head: '20260101000000' })).toBe('behind');
+    expect(stateOf(applied(10, '20261022000010'), null)).toBe('unknown');
+    expect(stateOf(applied(0, null), null)).toBe('unknown');
+    expect(stateOf(null, null)).toBe('unknown');
+  });
+
+  it('P52 ordering: heads compare as full 14-digit strings and a gap in the ledger is behind', () => {
+    // Two heads sharing a prefix: the full string decides, not the prefix and not the count alone.
+    expect(stateOf(applied(10, '20261022000009'), required)).toBe('behind');
+    expect(stateOf(applied(10, '20261022000100'), required)).toBe('current');
+    expect(stateOf(applied(10, '20261021235959'), required)).toBe('behind');
+    expect(stateOf(applied(10, '20271022000010'), required)).toBe('current');
+    // Equal head with a lower count: a file in the middle was never applied.
+    expect(stateOf(applied(9, '20261022000010'), required)).toBe('behind');
+    // A higher head with a lower count is still a gap.
+    expect(stateOf(applied(8, '20261023000000'), required)).toBe('behind');
+    // A count at the requirement with an unknown head is not behind (nothing to compare).
+    expect(stateOf(applied(10, null), required)).toBe('current');
   });
 });
