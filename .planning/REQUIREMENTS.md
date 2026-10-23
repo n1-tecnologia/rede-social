@@ -365,7 +365,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **DBT-45**: A tenant's project binding is cached for 15 seconds and the last good binding is served for at most 10 minutes, only when the central read fails; past that window, or with no last-good value, resolution fails closed with `TENANT_UNAVAILABLE`. *(D-537, D-538)*
 - [x] **DBT-46**: A tenant with no binding fails closed: resolution raises `TENANT_PROJECT_UNBOUND`, and a deferred constraint trigger binds a new tenant to the project flagged default at commit or raises when none is flagged, so no code path falls back to the central project. *(D-538, D-540)*
 - [x] **DBT-47**: A break-glass command re-derives a project's whole credential set through the platform token alone (never from the stored values), re-seals every column under the current key, bumps the credential version and refuses while a bootstrap step is running. *(D-539, D-541)*
-- [ ] **DBT-48**: While a tenant has an open move, no panel route or script can reactivate, edit, re-invite or re-bootstrap it (409 `TENANT_MOVING`), the mirror reconcile skips it, and two concurrent moves of one tenant cannot both start. *(D-535, D-536)*
+- [x] **DBT-48**: While a tenant has an open move, no panel route or script can reactivate, edit, re-invite or re-bootstrap it (409 `TENANT_MOVING`), the mirror reconcile skips it, and two concurrent moves of one tenant cannot both start. *(D-535, D-536)*
 - [ ] **DBT-49**: After the last move the central project holds platform data only: `--confirm-delete` removes the moved tenant's rows, files and exclusive accounts from the source, and `platform:central-clean` lists any residue and, with `--strict-empty`, requires every non-mirror table to be empty before the default-project flag is cleared. *(D-534)*
 - [x] **DBT-50**: The "Novo tenant" form's Projeto Supabase field accepts only a 20-letter project ref (a pasted dashboard or API address is normalised to it), pre-checks the project through the API before the wizard continues, shows the six documented ref errors, and asks for the manual access fields only when the pre-check says the API cannot reveal them. *(D-541, UI-D-533, UI-D-534, UI-D-535)*
 - [x] **DBT-51**: The tenant's Banco tab shows the database state, the eight preparation steps in their fixed order with a catalog reason per failed step and a "Tentar de novo" that resumes at the first step not done, the applied-of-required schema version, and the write-only Credenciais card with "Verificar agora" and "Substituir credenciais". *(D-542, D-543, D-539, UI-D-536, UI-D-537, UI-D-538)*
@@ -749,7 +749,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-45 | Phase 09.2 (plan 03) | Complete |
 | DBT-46 | Phase 09.2 (plans 02, 03) | Complete |
 | DBT-47 | Phase 09.2 (plan 14) | Complete |
-| DBT-48 | Phase 09.2 (plan 23) | Pending |
+| DBT-48 | Phase 09.2 (plan 23) | Complete |
 | DBT-49 | Phase 09.2 (plans 23, 25) | Pending |
 | DBT-50 | Phase 09.2 (plans 14, 18) | Complete |
 | DBT-51 | Phase 09.2 (plans 14, 19) | Complete |

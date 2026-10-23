@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 23
+current_plan: 21
 status: executing
-stopped_at: Completed 09.2-20-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20 done); next is 09.2-23 (wave 12, the move tool), then wave 13 (21, 24)
-last_updated: "2026-10-23T11:18:10.506Z"
+stopped_at: "Completed 09.2-23-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23 done; wave 12 complete); next is wave 13: 09.2-21 (member screens UI, behind the approved sketch 014) and 09.2-24 (documentation)"
+last_updated: "2026-10-23T13:05:03.223Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-20 (tenant list Banco column and Banco com problema chip, header Banco pill, Status tab Reativar guard while moving; isTenantMoving is still the API stub until plan 23; 320 px measurement left to plan 28). Previous: 09.2-16 (deploy-api.yml and deploy-hml.yml: authenticate, release preflight, migrations, migrate Job deployed and executed with --wait on the same image, then API and worker; scripts/check-workflows.sh and check-release-env.sh with self-tests; PostgreSQL 17 client in the local-stack action; DBT-26 stays open for plan 25 and hosted proof H5)"
-state_head: 027b41d9421949339e98c5a12701e9c7524a377d
+last_activity_desc: "Completed 09.2-23 (the move tool: tenant_moves state machine with compare-and-set and a row lease, quiesce/cutover/rollback/recopy, the single deleting path confirm-delete, central-clean, ROLE=move and pnpm platform:move-tenant, the 409 TENANT_MOVING guard, pgTAP 215; the full integration run was 2,113 of 2,116 with three seed-pinned plan 22 cases fixed; hosted cutover is proof H6). Previous: 09.2-20 (tenant list Banco column and Banco com problema chip, header Banco pill, Status tab Reativar guard while moving; isTenantMoving is still the API stub until plan 23; 320 px measurement left to plan 28). Previous: 09.2-16 (deploy-api.yml and deploy-hml.yml: authenticate, release preflight, migrations, migrate Job deployed and executed with --wait on the same image, then API and worker; scripts/check-workflows.sh and check-release-env.sh with self-tests; PostgreSQL 17 client in the local-stack action; DBT-26 stays open for plan 25 and hosted proof H5)"
+state_head: 1eb8c6122a45e97f595cca9cb9fcdeb39e69c23f
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 256
+  completed_plans: 257
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 23
+Current Plan: 21
 Total Plans in Phase: 28
-Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16 and 20 done (20: the tenant list Banco column and chip, the header pill and the Status guard); plans run out of numeric order: the next is 23 (wave 12, the move tool), then wave 13 (21, 24)
+Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20 and 23 done (23: the move tool, wave 12 complete); plans run out of numeric order: the next are wave 13: 21 (member screens UI, behind the approved sketch 014) and 24 (documentation)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-20 (Banco column, Banco com problema chip, header pill, Status guard; nothing run in a browser)
+Last activity: 2026-10-23 — Completed 09.2-23 (move state machine, cutover, rollback, recopy, confirm-delete, central-clean, TENANT_MOVING guard, ROLE=move; hosted cutover is proof H6)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -314,6 +314,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.2 P22 | 22 min | 3 tasks | 15 files |
 | Phase 09.2 P16 | 7 min | 3 tasks | 8 files |
 | Phase 09.2 P20 | 11 min | 2 tasks | 15 files |
+| Phase 09.2 P23 | 104 min | 3 tasks | 43 files |
 
 ## Accumulated Context
 
@@ -1042,6 +1043,7 @@ Recent decisions affecting current work:
 - [Phase 09.2-22]: planMove treats a table as uncovered when it has no tenant_id and no classification, or has tenant_id but the target lacks it; a row referencing a user outside the tenant's accounts refuses the plan with account_missing and the account set is never widened — Keeps T-09.2-100 (no silent skip) and PR-7 (no account copied for a person without membership or invite) both true
 - [Phase 09.2-22]: verifyCopy throws MoveError(verify_failed|origin_leftover) with the report attached; requeueJobs takes started pg-boss instances from the caller (plan 23 builds them from the sealed URLs) — A caller cannot forget to check a returned ok:false; the engine stays free of credentials
 - [Phase 09.2]: A-16-1: the fan-out runs as a Cloud Run Job on the same image (ROLE=migrate), executed with --wait before the API and worker; answered by Igor 2026-10-23 — No DDL-capable public endpoint, 1 h task timeout, readable exit codes, same image and secrets; cost: not literally inside the new revision, deploy SA must run jobs (gate G2)
+- [Phase 09.2]: 09.2-23: a move advances only by compare-and-set with a 15-minute row lease and an append-only event trail; the tool bootstraps its own target inline; only delete-source.ts deletes from the source (grep-guarded); a rollback after the flip holds the tenant, counts the writes since cutover_at and refuses unless --accept-loss; the HTTP TENANT_MOVING guard sits on the parent platform router and setTenantStatus needs the move id — D-535, D-536, D-534, T-09.2-101..108
 
 ### Pending Todos
 
@@ -1150,6 +1152,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T11:18:10.260Z
-Stopped at: Completed 09.2-20-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20 done); next is 09.2-23 (wave 12, the move tool), then wave 13 (21, 24)
+Last session: 2026-10-23T13:05:02.994Z
+Stopped at: Completed 09.2-23-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23 done; wave 12 complete); next is wave 13: 09.2-21 (member screens UI, behind the approved sketch 014) and 09.2-24 (documentation)
 Resume file: None
