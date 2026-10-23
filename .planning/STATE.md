@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 18
+current_plan: 16
 status: executing
-stopped_at: Completed 09.2-15-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15 done); next is 09.2-18 (wave 10, UI, behind sketch 014), then wave 11 (16, 19, 22)
-last_updated: "2026-10-23T04:16:48.620Z"
+stopped_at: Completed 09.2-18-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18 done; wave 10 complete); next is wave 11: 09.2-16 (deploy workflows, human checkpoint), 09.2-19 (Banco tab UI), 09.2-22 (copy engine)
+last_updated: "2026-10-23T04:36:09.657Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-15 (migration fan-out: migrateAll, ROLE=migrate, stored schema state, image manifest and MIGRATIONS_DIR, live updating gate, platform.migration-retry; plan-13 clock fix)"
-state_head: 3351a1ad1e5d1de60089da6665c52e78f80d0758
+last_activity_desc: "Completed 09.2-18 (wizard: Projeto Supabase field with paste normaliser and read-only pre-check, memory-only manual access block, Projeto row in the Resumo, database task in the confirmation dialog with step narration, Banco-tab hand-off and 60 s background option)"
+state_head: 16fb4928b2451fee969f908e04fece3f351aa863
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 251
+  completed_plans: 252
   percent: 0
 ---
 
@@ -29,13 +29,13 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 18
+Current Plan: 16
 Total Plans in Phase: 28
-Plan: 18 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper), 13 bootstrap engine, 10 route indexes for the no-host routes, 11 per-project Send Email Hook, sign-up by slug and allow-list, 14 panel API for a tenant's project, 17 web tier (coordinates per host) and 15 migration fan-out (migrateAll, ROLE=migrate, stored schema state, image manifest, live updating gate, platform.migration-retry) done; plans run out of numeric order: the next is 18 (wave 10, UI, behind the approved sketch 014 gate), then wave 11 (16, 19, 22))
+Plan: wave 11 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper), 13 bootstrap engine, 10 route indexes for the no-host routes, 11 per-project Send Email Hook, sign-up by slug and allow-list, 14 panel API for a tenant's project, 17 web tier (coordinates per host), 15 migration fan-out and 18 wizard (Projeto Supabase field, pre-check, manual access, Projeto row, database task) done; wave 10 is complete; plans run out of numeric order: the next are wave 11: 16 (deploy workflows, autonomous: false, has a human decision checkpoint), 19 (Banco tab UI) and 22 (copy engine))
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-15 (a migration reaches every tenant project with one command; the API holds back a lagging tenant; DBT-24, DBT-25 and DBT-44 wait for the other plans that declare them)
+Last activity: 2026-10-23 — Completed 09.2-18 (the wizard asks for the tenant's Supabase project, pre-checks it, takes manual access in memory only and narrates the database preparation in the confirmation; DBT-50 complete, DBT-21 waits for plan 25)
 
-Progress: [███████████████████░] 159/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -309,6 +309,7 @@ Progress: [███████████████████░] 159/162
 | Phase 09.2 P14 | 47 min | 3 tasks | 35 files |
 | Phase 09.2 P17 | 30 min | 2 tasks | 24 files |
 | Phase 09.2 P15 | 32 min | 3 tasks | 24 files |
+| Phase 09.2 P18 | 28 min | 3 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -1031,6 +1032,8 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-17: coordinates per host are a pure per-request function of the by-host answer; a half or disallowed project address makes the tenant unavailable and the central project is never substituted; a generic answer never deletes session cookies (a failed lookup of a tenant host must not log members out) — Serving tenant B's sign-in against the central Auth is the single-database behaviour this phase removes; cookie cleanup runs only for positively classified tenant and platform hosts
 - [Phase 09.2]: 09.2-15: migrateAll fans the central set then the tenant set out to every ready project (project 0 through MIGRATION_DATABASE_URL, failing closed in production without it); the state row's required values are the applied files' own count and head; a tenant failure is a warning unless --strict; the retry job heals tenant projects only — D-544/D-545: one failing project never blocks the release of the others, and the gate and the fan-out agree by construction
 - [Phase 09.2]: 09.2-15: the image carries both sets and roles.sql under MIGRATIONS_DIR (/app/migrations) with a deterministic manifest; defaultMigrationDir and readRolesSql honour it; a production boot without a manifest stops with 'migrations manifest empty'; outside production the required schema is derived from the repository, so the updating gate is live in dev and tests — D-547/DBT-44: the running API knows its required schema with no database round trip; a dev who applies a tenant migration without db:migrate-all sees updating for projects that have a state row
+- [Phase 09.2]: 09.2-18: the Dados gate enforces the 20-letter shape in the web action before any request and then the read-only pre-check; manualAccess is a persisted non-secret flag while the three access values live in the draft provider's memory only (the sessionStorage mirror is an allow-list of keys) and travel once, with the creation call, never to the Dados action; they are cleared when the API accepts or definitively refuses and kept for a failure with no field to blame — D-539/D-541, UI-D-534, PR-4a: a credential must never reach sessionStorage, a URL, a log or the Resumo, and a reload must find the ref and ask again; keeping them through a generic failure lets Tentar de novo send them again
+- [Phase 09.2]: 09.2-18: the confirmation dialog's database task is second (create, database, logo, icon, domain), read every 2 s by a server action that returns null on any failure; the uploads wait for it, a miss still attempts the domain and ends in the partial phase with a link to the Banco tab, and after 60 s a neutral ghost button attaches the domain, forgets the stored draft and goes to the Banco tab while the preparation continues; RequireDraftData waits while the confirmation is open — D-542, UI-D-535: logo and icon need the buckets the bootstrap creates, the tab (not the dialog) is where a long or failed bootstrap is worked, and what the dialog clears on the way must not move the page
 
 ### Pending Todos
 
@@ -1139,6 +1142,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T04:16:48.404Z
-Stopped at: Completed 09.2-15-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15 done); next is 09.2-18 (wave 10, UI, behind sketch 014), then wave 11 (16, 19, 22)
+Last session: 2026-10-23T04:36:09.445Z
+Stopped at: Completed 09.2-18-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18 done; wave 10 complete); next is wave 11: 09.2-16 (deploy workflows, human checkpoint), 09.2-19 (Banco tab UI), 09.2-22 (copy engine)
 Resume file: None
