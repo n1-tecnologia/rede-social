@@ -5,8 +5,17 @@ import { z } from 'zod';
 export const env = createEnv({
   server: {
     PORT: z.coerce.number().int().positive().default(8787),
-    /** `migrate` runs the migration fan-out (`runMigrateAll`) and exits: no listener (09.2-15, D-544). */
-    ROLE: z.enum(['api', 'worker', 'migrate']).default('api'),
+    /**
+     * `migrate` runs the migration fan-out (`runMigrateAll`) and exits: no listener (09.2-15, D-544). `move` runs
+     * the operator's tenant-move tool (`runMoveCli`) and exits the same way (09.2-23, D-535, D-536).
+     */
+    ROLE: z.enum(['api', 'worker', 'migrate', 'move']).default('api'),
+    /**
+     * The move tool's waits (09.2-23, D-535). Quiescence: the 60 s by-host cache plus 5 s for in-flight requests.
+     * Registry: the 15 s binding cache plus 5 s. Tests and the local rehearsal pass 0.
+     */
+    MOVE_QUIESCE_MS: z.coerce.number().int().min(0).optional(),
+    MOVE_REGISTRY_WAIT_MS: z.coerce.number().int().min(0).optional(),
     // LOG_LEVEL is a kernel setting (`@rede-social/core/server/env`), read by the one root logger.
     DATABASE_URL: z.url(),
     /**

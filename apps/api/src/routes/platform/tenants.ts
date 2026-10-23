@@ -31,6 +31,7 @@ import {
   setTenantStatus,
   updateTenant,
 } from '@rede-social/core/server/platform/tenants';
+import { assertNotMoving } from '@rede-social/core/server/projects/moving';
 import {
   SOCIAL_SETTINGS_DEFAULTS,
   type SocialSettings,
@@ -38,6 +39,7 @@ import {
   socialSettingsPatchSchema,
   socialSettingsSchema,
 } from '@rede-social/module-social/contracts';
+import type { MiddlewareHandler } from 'hono';
 import { platformDefaultHook } from '../../http/openapi';
 
 /**
@@ -50,6 +52,23 @@ import { platformDefaultHook } from '../../http/openapi';
  * fresh strict detail, so the panel never has to guess what changed.
  */
 const tenants = new OpenAPIHono<PlatformEnv>({ defaultHook: platformDefaultHook });
+
+/**
+ * 09.2-23 (D-535, DBT-48, T-09.2-101): the server-side refusal behind the panel's disabled "Reativar tenant".
+ * While a tenant has an open move, EVERY mutation under `/v1/platform/tenants/:id/**` (status, edit, modules,
+ * invites, domains, branding, the database tab) answers 409 `TENANT_MOVING`: the copy must not race an edit.
+ * Reads are never refused. A malformed id falls through to the route's own validation. It is mounted by
+ * `routes/platform/index.ts` on the parent router, right after `requireSuperAdmin()` and before every
+ * sub-router, so a new platform route under a tenant is covered without anyone remembering to.
+ */
+export const refuseWhileMoving: MiddlewareHandler<PlatformEnv> = async (c, next) => {
+  const method = c.req.method;
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  const id = c.req.param('id');
+  if (id === undefined || !z.uuid().safeParse(id).success) return next();
+  await assertNotMoving(id);
+  return next();
+};
 
 const idParams = z.object({ id: z.uuid() });
 /**

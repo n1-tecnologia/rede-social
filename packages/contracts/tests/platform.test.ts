@@ -450,3 +450,22 @@ describe('TENANT_SUSPENDED (D-32)', () => {
     ).toBe(true);
   });
 });
+
+describe('TENANT_MOVING (09.2-23, D-535, DBT-48)', () => {
+  it('is a stable error code, listed right after TENANT_UPDATING', () => {
+    expect(ERROR_CODES).toContain('TENANT_MOVING');
+    expect(ERROR_CODES.indexOf('TENANT_MOVING')).toBe(ERROR_CODES.indexOf('TENANT_UPDATING') + 1);
+  });
+
+  it('is accepted by the envelope schema, with no details', () => {
+    expect(
+      apiErrorEnvelopeSchema.safeParse({
+        error: {
+          code: 'TENANT_MOVING',
+          message: 'Esta comunidade está sendo movida para outro banco.',
+          requestId: 'r1',
+        },
+      }).success,
+    ).toBe(true);
+  });
+});

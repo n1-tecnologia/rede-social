@@ -7,7 +7,7 @@ import { platformDefaultHook } from '../../http/openapi';
 import { brandingRoutes } from './branding';
 import { domainsRoutes } from './domains';
 import { projectsRoutes } from './projects';
-import { tenantsRoutes } from './tenants';
+import { refuseWhileMoving, tenantsRoutes } from './tenants';
 
 /**
  * The platform lane (ROLE-01, D-21/D-23). Its own `OpenAPIHono` because its environment is
@@ -25,6 +25,9 @@ import { tenantsRoutes } from './tenants';
 const platform = new OpenAPIHono<PlatformEnv>({ defaultHook: platformDefaultHook });
 
 platform.use('*', requireSuperAdmin());
+// 09.2-23: a tenant that is being moved is read-only for the whole platform surface (T-09.2-101).
+platform.use('/tenants/:id', refuseWhileMoving);
+platform.use('/tenants/:id/*', refuseWhileMoving);
 
 export const platformRoutes = platform
   .route('/', tenantsRoutes)

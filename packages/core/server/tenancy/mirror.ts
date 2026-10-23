@@ -6,6 +6,7 @@ import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenantModules, tenants } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
 import { moduleLogger, redactDbError } from '../logging';
+import { isTenantMoving } from '../projects/moving';
 import { ProjectUnavailableError, ProjectUnboundError } from './project-errors';
 import { resolveProject } from './project-registry';
 import { invalidateTenantHost } from './tenant-host';
@@ -290,7 +291,7 @@ export type ReconcileResult = {
   /** What was written, as `table.column` names (never a value). Empty when both copies agree. */
   healed: string[];
   /** Set when nothing was compared: the tenant is on the central project, or the reason the compare failed. */
-  skipped?: 'central_project' | 'tenant_not_found';
+  skipped?: 'central_project' | 'tenant_not_found' | 'moving';
   failed?: string;
 };
 
@@ -304,6 +305,9 @@ export type ReconcileResult = {
 export async function reconcileTenantMirror(tenantId: string): Promise<ReconcileResult> {
   const healed: string[] = [];
   try {
+    // 09.2-23 (D-535): a tenant halfway through a move has two diverging copies ON PURPOSE; healing now would
+    // write the old side over the new one. The move's own cutover pushes what must be pushed.
+    if (await isTenantMoving(tenantId)) return { tenantId, healed, skipped: 'moving' };
     const project = await resolveProject(tenantId);
     if (project.isCentral) return { tenantId, healed, skipped: 'central_project' };
 
@@ -449,7 +453,7 @@ export async function reconcileAllMirrors(
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, worker));
 
-  const examined = results.filter((r) => r.skipped !== 'central_project');
+  const examined = results.filter((r) => r.skipped !== 'central_project' && r.skipped !== 'moving');
   return {
     tenants: examined.length,
     healed: examined.reduce((n, r) => n + r.healed.length, 0),
