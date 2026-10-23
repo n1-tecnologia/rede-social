@@ -60,6 +60,14 @@ export type StepRow = {
 export type BootstrapDeps = Partial<StepDeps> & {
   /** The provider, resolved lazily so a process that never bootstraps never needs `PROJECT_PROVIDER`. */
   provider?: ProjectProvider | (() => Promise<ProjectProvider>);
+  /**
+   * The tenants whose `tenants`/`tenant_modules` rows the `tenant` step seeds and whose pending invite the
+   * `invite` step creates (09.2-22). Default: the tenants bound to the project, exactly as before. A MOVE
+   * target has no binding yet (the tenant stays bound to its source until the cutover), so the move tool
+   * names the tenant here; plan 23 extends the default with the tenants of an open move that targets the
+   * project. An empty list still fails closed with reason `unknown`.
+   */
+  tenantsToSeed?: (projectId: string) => Promise<string[]>;
 };
 
 export type RunOutcome =
@@ -210,6 +218,20 @@ async function boundTenants(projectId: string): Promise<BoundTenant[]> {
   return rows.map((row) => ({ tenantId: row.tenantId, pendingInvite: row.pendingInvite ?? null }));
 }
 
+/**
+ * The tenants this run seeds: the bound ones by default, or the ids the caller names (a move target). A named
+ * tenant that is also bound keeps its pending invite; a named tenant with no binding has none.
+ */
+async function tenantsOf(projectId: string, deps: BootstrapDeps): Promise<BoundTenant[]> {
+  const bound = await boundTenants(projectId);
+  if (!deps.tenantsToSeed) return bound;
+  const named = await deps.tenantsToSeed(projectId);
+  return [...new Set(named)].map(
+    (tenantId) =>
+      bound.find((entry) => entry.tenantId === tenantId) ?? { tenantId, pendingInvite: null },
+  );
+}
+
 /** DBT-19: the project is `ready`; the cached binding and the host answers of its tenants are dropped at once. */
 async function finalize(projectId: string, tenants: BoundTenant[]): Promise<void> {
   await withPlatformTx((tx) =>
@@ -270,7 +292,7 @@ export async function runBootstrap(
 
   await withPlatformTx((tx) => insertRows(tx, projectId));
   const rows = await listSteps(projectId);
-  const tenants = await boundTenants(projectId);
+  const tenants = await tenantsOf(projectId, deps);
 
   if (rows.every((row) => row.status === 'done')) {
     if (first.state === 'preparing') await finalize(projectId, tenants);
