@@ -132,7 +132,8 @@
       "notFoundBody": "Verifique o link ou volte para a lista.",
       "notFoundCta": "Voltar para a lista",
       "tabPendingTitle": "Em breve",
-      "tabPendingBody": "Esta aba está em construção."
+      "tabPendingBody": "Esta aba está em construção.",
+      "databasePill": "Banco: {state}"
     },
     "admins": {
       "inviteTitle": "Convite do primeiro administrador",
@@ -167,7 +168,8 @@
       "confirmTitle": "Suspender {tenant}?",
       "confirmBody": "Os membros não conseguirão entrar até a reativação.",
       "confirm": "Suspender",
-      "cancel": "Cancelar"
+      "cancel": "Cancelar",
+      "movingNote": "Este tenant está sendo movido para um projeto próprio. Ele é reativado ao fim da mudança."
     },
     "toasts": {
       "saved": "Alterações salvas.",

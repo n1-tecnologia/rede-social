@@ -3,15 +3,22 @@ import { ChevronLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { type ReactNode, Suspense } from 'react';
+import { databasePillProps } from '@/components/platform/DatabasePill';
 import { FlashToast } from '@/components/platform/FlashToast';
 import { TenantTabs } from '@/components/platform/TenantTabs';
-import { primaryVerifiedHost, requirePlatformTenantDetail } from '@/lib/platform';
+import {
+  getTenantDatabase,
+  primaryVerifiedHost,
+  requirePlatformTenantDetail,
+} from '@/lib/platform';
 
 /**
  * `/plataforma/tenants/{id}` — the tenant page frame (D-33 `tenant-page-*`): back control + "Tenants"
  * crumb, the title row (display name 24/700, status pill, slug 12 tertiary, verified primary host
- * as an external link or the "Sem domínio" pill) and the five tabs in the fixed order
- * Marca · Módulos · Domínios · Admins · Status, each a sub-route the tab pages fill in.
+ * as an external link or the "Sem domínio" pill) and the six tabs in the fixed order
+ * Marca · Módulos · Domínios · Admins · Banco · Status, each a sub-route the tab pages fill in.
+ * When the tenant's database is not Pronto, a second non-interactive pill "Banco: {state}" follows
+ * the status pill (09.2-20, UI-D-541); a failed read of that state renders the frame without it.
  *
  * The detail comes from `requirePlatformTenantDetail` (non-uuid or unknown id → the segment's
  * not-found screen; refusals redirect), deduplicated with the active tab page by React `cache`.
@@ -25,11 +32,19 @@ export default async function TenantLayout({
   children: ReactNode;
 }) {
   const { id } = await params;
-  const [t, detail] = await Promise.all([
+  const [t, tStates, detail] = await Promise.all([
     getTranslations('platform'),
+    getTranslations('platform.database.states'),
     requirePlatformTenantDetail(id),
   ]);
   const { tenant } = detail;
+  // The same React-cached read the Banco and Status tabs make. The header is chrome: a failed read
+  // (or a refused one, which the tab itself will surface) never blocks the tenant frame.
+  const database = await getTenantDatabase(tenant.id).then(
+    (overview) => overview.state,
+    () => null,
+  );
+  const databasePill = database && database !== 'ready' ? databasePillProps(database) : null;
   const host = primaryVerifiedHost(detail);
   const active = tenant.status === 'active';
 
@@ -56,6 +71,11 @@ export default async function TenantLayout({
         <StatusPill tone={active ? 'success' : 'danger'} data-testid="tenant-status-pill">
           {active ? t('tenantStatus.active') : t('tenantStatus.suspended')}
         </StatusPill>
+        {databasePill ? (
+          <StatusPill tone={databasePill.tone} data-testid="tenant-database-pill">
+            {t('tenant.databasePill', { state: tStates(databasePill.labelKey) })}
+          </StatusPill>
+        ) : null}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-text-tertiary">
         <span>{tenant.slug}</span>

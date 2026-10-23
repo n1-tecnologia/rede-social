@@ -134,13 +134,14 @@ export const getPlatformTenantDetail = cache(async (id: string): Promise<Platfor
  * their values). The answer is parsed with the contract's strict schema, so a field that could carry a
  * credential would fail here rather than reach a screen. A refusal or a failed read throws
  * `ApiClientError`; the page goes through `requirePlatformTenantDatabase`, the segment's `error.tsx`
- * renders anything else.
+ * renders anything else. Deduplicated per render by React `cache` (09.2-20): the tenant layout's
+ * header pill, the Banco tab and the Status tab's move guard share ONE call per tenant page.
  */
-export async function getTenantDatabase(id: string): Promise<DatabaseOverview> {
+export const getTenantDatabase = cache(async (id: string): Promise<DatabaseOverview> => {
   const res = await apiFetch(`/v1/platform/tenants/${encodeURIComponent(id)}/database`);
   if (!res.ok) await throwEnvelope(res);
   return databaseOverviewSchema.parse(await res.json());
-}
+});
 
 /**
  * The overview the Banco tab renders, or a navigation: 401/403 redirect like every platform read.

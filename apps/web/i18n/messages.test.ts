@@ -4628,6 +4628,11 @@ describe('09.2-20 - the list, header and Status guard catalog', () => {
     ['platform.list.schemaBehind', 'Esquema {applied} de {required}'],
     ['platform.list.databaseEmpty.title', 'Nenhum tenant com problema no banco'],
     ['platform.list.databaseEmpty.body', 'Todos os bancos estão prontos ou em andamento.'],
+    ['platform.tenant.databasePill', 'Banco: {state}'],
+    [
+      'platform.status.movingNote',
+      'Este tenant está sendo movido para um projeto próprio. Ele é reativado ao fim da mudança.',
+    ],
   ])('%s reads "%s"', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });
@@ -4636,5 +4641,10 @@ describe('09.2-20 - the list, header and Status guard catalog', () => {
     const t = await translator('platform.list');
     expect(t('schema', { applied: 147 })).toBe('Esquema 147');
     expect(t('schemaBehind', { applied: 144, required: 147 })).toBe('Esquema 144 de 147');
+  });
+
+  it('pins the placeholder of the header pill', async () => {
+    const t = await translator('platform.tenant');
+    expect(t('databasePill', { state: 'Atrasado' })).toBe('Banco: Atrasado');
   });
 });

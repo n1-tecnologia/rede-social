@@ -9,6 +9,11 @@ export interface StatusCardProps {
   tenantId: string;
   tenantName: string;
   status: 'active' | 'suspended';
+  /**
+   * Whether the tenant's move to a project of its own is running (09.2-20, UI-D-541, D-535). The
+   * move holds the tenant suspended on purpose, so "Reativar tenant" is disabled until it ends.
+   */
+  moving: boolean;
   /** `setTenantStatusAction` — the API call + layout revalidation live in the server action. */
   action: (
     tenantId: string,
@@ -21,8 +26,12 @@ export interface StatusCardProps {
  * and exactly ONE CTA. Suspending is destructive and goes through `ConfirmDialog` (danger tone,
  * both footer buttons disabled with the spinner while pending — E21); reactivating is immediate.
  * Every outcome ends with a toast; the header pill flips because the action revalidated the layout.
+ *
+ * While the tenant is being moved (`moving`), "Reativar tenant" is disabled with `aria-disabled` and a
+ * note says why (UI-D-541); "Suspender tenant" is untouched. The server refuses the change too
+ * (plan 23 owns that rule): this is the visible half of the guard (T-09.2-93).
  */
-export function StatusCard({ tenantId, tenantName, status, action }: StatusCardProps) {
+export function StatusCard({ tenantId, tenantName, status, moving, action }: StatusCardProps) {
   const t = useTranslations('platform');
   const toast = useToast();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -30,6 +39,7 @@ export function StatusCard({ tenantId, tenantName, status, action }: StatusCardP
   const active = status === 'active';
 
   const reactivate = () => {
+    if (moving) return;
     startTransition(async () => {
       const result = await action(tenantId, 'active');
       toast.show(
@@ -61,15 +71,25 @@ export function StatusCard({ tenantId, tenantName, status, action }: StatusCardP
               {t('status.suspend')}
             </Button>
           ) : (
-            <Button
-              variant="brand"
-              loading={pending}
-              onClick={reactivate}
-              className="w-full md:w-auto"
-            >
-              {pending ? null : <CheckCircle2 aria-hidden size={18} />}
-              {pending ? t('status.reactivatePending') : t('status.reactivate')}
-            </Button>
+            <>
+              <Button
+                variant="brand"
+                loading={pending}
+                disabled={moving}
+                aria-disabled={moving ? 'true' : undefined}
+                aria-describedby={moving ? 'status-moving-note' : undefined}
+                onClick={reactivate}
+                className="w-full md:w-auto"
+              >
+                {pending ? null : <CheckCircle2 aria-hidden size={18} />}
+                {pending ? t('status.reactivatePending') : t('status.reactivate')}
+              </Button>
+              {moving ? (
+                <p id="status-moving-note" className="mt-2 text-xs font-normal text-text-tertiary">
+                  {t('status.movingNote')}
+                </p>
+              ) : null}
+            </>
           )}
         </div>
       </Card>
