@@ -20,10 +20,15 @@
 #                `--max-retries=0`, `--task-timeout=3600s`, or passes `--strict` (D-545: a failing tenant
 #                project is a warning)
 #   (hml)        deploy-hml.yml does not refuse HML_SUPABASE=shared-with-production in its preflight
+#   (e2e-flag)   the e2e-only build flag NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS (quick 261023-ssq) can reach a deploy:
+#                it is named anywhere in deploy-api.yml, deploy-hml.yml or a tracked vercel.json/vercel.ts, or
+#                a .env.example or docs/DEPLOY.md gives it a value (assignment form or first table cell). A
+#                prose mention in docs/DEPLOY.md is allowed.
 #
 # Usage: bash scripts/check-workflows.sh              check the repository's workflows
 #        bash scripts/check-workflows.sh --self-test  run the guard on a valid copy and on mutated copies
-# Env:   WORKFLOW_DIR  directory holding the two files (default .github/workflows)
+# Env:   WORKFLOW_DIR    directory holding the two files (default .github/workflows)
+#        FLAG_SCAN_ROOT  root searched for vercel configs, .env.example files and docs/DEPLOY.md (default: the repository)
 # Exit:  0 clean   1 at least one offence (all printed to stderr)   2 a workflow file is missing
 set -euo pipefail
 
@@ -124,8 +129,55 @@ if [ "${1:-}" = "--self-test" ]; then
   mutate skipped_step deploy-api.yml 's/^      - name: Deploy the worker\n/      - name: Deploy the worker\n        if: false\n/m'
   mutate hml_shared deploy-hml.yml 's/shared-with-production\)/other)/'
 
+  # (e2e-flag) quick 261023-ssq: a fake scan root per case, holding copies of the tracked files the real
+  # repository has at the same relative paths. Each offence must fail WITH the 'e2e-flag:' message.
+  FLAG_NAME="NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS"
+  make_root() { # make_root <case>: workflows in $work/<case>, scan root in $work/<case>-root
+    local f
+    fresh "$1"
+    mkdir -p "$work/$1-root/apps/web" "$work/$1-root/apps/api" "$work/$1-root/docs"
+    for f in apps/web/vercel.json .env.example apps/web/.env.example apps/api/.env.example docs/DEPLOY.md; do
+      if [ -f "$ROOT/$f" ]; then cp "$ROOT/$f" "$work/$1-root/$f"; fi
+    done
+  }
+  run_guard_flag() { WORKFLOW_DIR="$work/$1" FLAG_SCAN_ROOT="$work/$1-root" bash "$self" > "$work/$1.out" 2>&1; }
+  flag_case() { # flag_case <case> <file relative to the case dir> <line to append>
+    make_root "$1"
+    printf '\n%s\n' "$3" >> "$work/$2"
+    if run_guard_flag "$1"; then
+      echo "self-test FAILED: the e2e-flag case '$1' passed the guard" >&2
+      failed=1
+    elif ! grep -q 'e2e-flag:' "$work/$1.out"; then
+      echo "self-test FAILED: the e2e-flag case '$1' failed for another reason" >&2
+      cat "$work/$1.out" >&2
+      failed=1
+    fi
+  }
+  flag_case flag_deploy_api flag_deploy_api/deploy-api.yml "# $FLAG_NAME"
+  flag_case flag_deploy_hml flag_deploy_hml/deploy-hml.yml "# $FLAG_NAME"
+  make_root flag_vercel
+  printf '{ "env": { "%s": "1" } }\n' "$FLAG_NAME" > "$work/flag_vercel-root/apps/web/vercel.json"
+  if run_guard_flag flag_vercel; then
+    echo "self-test FAILED: the e2e-flag case 'flag_vercel' passed the guard" >&2
+    failed=1
+  elif ! grep -q 'e2e-flag:' "$work/flag_vercel.out"; then
+    echo "self-test FAILED: the e2e-flag case 'flag_vercel' failed for another reason" >&2
+    failed=1
+  fi
+  flag_case flag_env_example flag_env_example-root/.env.example "$FLAG_NAME=1"
+  flag_case flag_deploy_md_row flag_deploy_md_row-root/docs/DEPLOY.md "| \`$FLAG_NAME\` | not provisioned | 1 |"
+  flag_case flag_deploy_md_assign flag_deploy_md_assign-root/docs/DEPLOY.md "$FLAG_NAME=1"
+
+  make_root flag_doc_prose
+  printf '\n%s\n' "The build flag \`$FLAG_NAME\` is never set on Vercel." >> "$work/flag_doc_prose-root/docs/DEPLOY.md"
+  if ! run_guard_flag flag_doc_prose; then
+    echo "self-test FAILED: a prose mention of the flag in DEPLOY.md failed the guard" >&2
+    cat "$work/flag_doc_prose.out" >&2
+    failed=1
+  fi
+
   if [ "$failed" -ne 0 ]; then exit 1; fi
-  echo "check-workflows self-test: ok (valid copy passes; swap and nine other mutations fail)"
+  echo "check-workflows self-test: ok (valid copy passes; swap and nine other mutations fail; six e2e-flag cases fail with the e2e-flag message; a prose mention passes)"
   exit 0
 fi
 
@@ -304,8 +356,42 @@ if [ -f "$WF_DIR/deploy-hml.yml" ]; then
   fi
 fi
 
+# (e2e-flag) quick 261023-ssq: NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS lets a PRODUCTION build admit http loopback
+# Supabase origins. Only the PWA Playwright config may set it; it must never reach a deploy.
+E2E_FLAG="NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS"
+# The flag followed by an optional quote or backtick, optional spaces, then `=` or `:` (a value being set).
+E2E_FLAG_ASSIGN="${E2E_FLAG}[\"'\`]?[[:space:]]*[=:]"
+# A markdown table row whose first cell is the flag.
+E2E_FLAG_ROW="^[[:space:]]*\\|[[:space:]]*\`?${E2E_FLAG}"
+
+check_e2e_loopback_flag() {
+  local scan="${FLAG_SCAN_ROOT:-$ROOT}" f
+  # any occurrence, comments included
+  for f in "$WF_DIR/deploy-api.yml" "$WF_DIR/deploy-hml.yml"; do
+    if [ -f "$f" ] && grep -q "$E2E_FLAG" "$f"; then
+      err "e2e-flag: $E2E_FLAG appears in .github/workflows/$(basename "$f"); it is e2e-only and must never reach a deploy"
+    fi
+  done
+  while IFS= read -r f; do
+    if grep -q "$E2E_FLAG" "$f"; then
+      err "e2e-flag: $E2E_FLAG appears in ${f#"$scan"/}; it must never be set on Vercel"
+    fi
+  done < <(find "$scan" \( -name node_modules -o -name .git -o -name .next -o -name .turbo \) -prune -o -type f \( -name vercel.json -o -name vercel.ts \) -print)
+  # a value being set, commented lines included
+  while IFS= read -r f; do
+    if grep -Eq "$E2E_FLAG_ASSIGN" "$f"; then
+      err "e2e-flag: ${f#"$scan"/} gives $E2E_FLAG a value; it is e2e-only and must never be set in a deploy template"
+    fi
+  done < <(find "$scan" \( -name node_modules -o -name .git -o -name .next -o -name .turbo \) -prune -o -type f -name '.env.example' -print)
+  f="$scan/docs/DEPLOY.md"
+  if [ -f "$f" ] && { grep -Eq "$E2E_FLAG_ASSIGN" "$f" || grep -Eq "$E2E_FLAG_ROW" "$f"; }; then
+    err "e2e-flag: docs/DEPLOY.md gives $E2E_FLAG a value or a table row; name it in prose only (it is never set on Vercel)"
+  fi
+}
+check_e2e_loopback_flag
+
 if [ "$errors" -gt 0 ]; then
   echo "check-workflows: $errors offence(s)" >&2
   exit 1
 fi
-echo "check-workflows: ok (production and homolog: order, wait, concurrency, image, secrets, provider)"
+echo "check-workflows: ok (production and homolog: order, wait, concurrency, image, secrets, provider; e2e-flag scan)"
