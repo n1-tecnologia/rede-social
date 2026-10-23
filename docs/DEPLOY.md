@@ -44,8 +44,20 @@ Decisions (2026-09-28) stands.
   the LOCAL `[auth]` values (localhost `site_url`, local hook URI) to the hml project.
 - **Seed.** A demo seed on hml is allowed, but only by hand (see "hml provisioning runbook"), never
   from a workflow. Production's never-seed rule is unchanged.
+- **Homolog is isolated for Phase 09.2 (2026-10-23, plan 16, assumption A-16-2).** The shared-with-
+  production mode described below is now refused: `deploy-hml.yml` fails its preflight on
+  `HML_SUPABASE=shared-with-production`, because a production-mode process refuses the fake project
+  provider and a shared homolog would have to run the migration fan-out and the tenant moves against
+  production data. Homolog must be `HML_SUPABASE=isolated`, on its own Supabase project, before Phase
+  09.2 is released, and it is where every move is rehearsed first ("Phase 09.2 release"). Its
+  Secret Manager list gains `platform-master-keys-hml`, `migration-database-url-hml` and
+  `resend-smtp-pass-hml`.
 
 ### Temporary: hml shares production's Supabase, Mux and Resend (2026-10-02)
+
+**Historical since 2026-10-23.** Phase 09.2 refuses this mode (see "Homolog is isolated for Phase 09.2"
+above); the text is kept for the switch to isolated, which is the only supported direction. Nothing
+below describes a mode a Phase 09.2 deploy accepts.
 
 Until Igor provisions them, hml runs with `HML_SUPABASE=shared-with-production` (GitHub environment
 variable on `homolog`): the hml `api` reads and writes the **production database** — anything
@@ -132,6 +144,9 @@ itself is not edited here.
 
 - `docs/deploy/auth-mail.md` — branded auth e-mails: Send Email Hook secrets, Resend, rotation,
   failure modes (02-06).
+- `.planning/phases/09.2-banco-por-tenant-projeto-supabase-dedicado-por-tenant/09.2-HOSTED-PROOFS.md` —
+  the ledger of the hosted proofs H1 to H8 of Phase 09.2 that only a person with the hosted accounts can
+  run; every row ships `pending` (see "Phase 09.2 release").
 - `## Custom domains (TENANT-07, D-34)` (this file) — provider / allow-list variables and the
   deferred hosted proof (02-09).
 - `## Phase 2 verification` (this file) — the local exit gate `pnpm verify`, the smoke, the manual
@@ -180,10 +195,17 @@ the `homolog` ref regardless (see "Workload Identity branch restriction (isolati
 
 ## GitHub environment variables (not secret) — `production`
 
-No workflow reads any since 2026-09-28: the seed steps that read `PLATFORM_HOST`,
+No workflow read any from 2026-09-28 until Phase 09.2: the seed steps that read `PLATFORM_HOST`,
 `TENANT_DEMO_HOST` and `TENANT_LAB_HOST` were removed with the staging job and the production seed
 workflow. The web app and the API read `PLATFORM_HOST` from their own runtime env (the Vercel and
 Cloud Run tables below).
+
+Phase 09.2 (plan 16) adds one, read by the release preflight (`scripts/check-release-env.sh`) and
+passed to the API, the worker and the migrate Job:
+
+| Name | Value | Read by |
+|---|---|---|
+| `SUPABASE_ORG_SLUG` | the slug of the Supabase organisation that owns the tenant projects (the platform token must reach it; the Management API client is pinned to it) | `deploy-api.yml` — `env_vars` on `api`, `worker` and the `migrate` Job, and the preflight |
 
 ## GitHub environment secrets — `production`
 
@@ -223,6 +245,8 @@ any value that resolves to production.
 | `SUPABASE_PROJECT_REF` | the Supabase project hml logs in against: `qjjhtduxquvlfppybpqq` while `HML_SUPABASE=shared-with-production`, the hml ref once isolated (the preflight enforces it) | `deploy-hml.yml` — `env_vars` on `api` and `worker` with `AUTH_ALLOW_LIST=supabase`: verifying a domain on the hml panel adds `https://<host>/auth/confirm**` to that project's redirect allow-list, so the first admin's invite link is not refused (`redirect_host_not_tenant`) |
 | `WEB_URL` | `https://rede-social-hml.vercel.app` | `deploy-hml.yml` — the `homolog` environment URL, and a preflight check |
 | `API_PUBLIC_URL` | the hml API's public origin (the Cloud Run URL of the hml `api`, `https://…run.app`) | `deploy-hml.yml` — `env_vars` on `api`, so the webhook URL the Pagamentos screen shows is not an internal host (09.1-09). The preflight refuses an empty value and production's origin |
+| `SUPABASE_ORG_SLUG` | the Supabase organisation that owns the hml tenant projects (09.2-16) | `deploy-hml.yml` — `env_vars` on `api`, `worker` and the `migrate-hml` Job, and `scripts/check-release-env.sh --env hml` |
+| `HML_SUPABASE` | `isolated` (the only accepted value for Phase 09.2) | `deploy-hml.yml` preflight: `shared-with-production` fails the run |
 
 Environment settings: **no required reviewer** (Decisions 2026-10-02), and **Deployment branches and
 tags** limited to the `homolog` branch — a third guard, so no other ref can run a job on this
@@ -263,6 +287,13 @@ Readable by `RUNTIME_SA` only. Names are referenced literally in `deploy-api.yml
 | `vapid-private-key-prod` | `VAPID_PRIVATE_KEY` | `api`, `worker` (signs every push; never leaves Secret Manager) |
 | `vapid-subject-prod` | `VAPID_SUBJECT` | `api`, `worker` (a `mailto:` contact, never `localhost`) |
 | `payments-secret-key-prod` | `PAYMENTS_SECRET_KEY` | `api`, `worker` (seals each tenant's gateway webhook token, AES-256-GCM; 32 random bytes in base64 — see "Phase 09.1 release"; must exist before the push that deploys it) |
+| `platform-master-keys-prod` | `PLATFORM_MASTER_KEYS` | `api`, `worker`, `migrate` Job (the keyring that seals every project's credentials; JSON `{"<id>":"<base64 of 32 bytes>"}` — see "Phase 09.2 release", "The master keyring"; must exist before the push) |
+| `migration-database-url-prod` | `MIGRATION_DATABASE_URL` | `worker`, `migrate` Job (the central project's `postgres` role through the session pooler: DDL for the central set and for project 0; never the API) |
+| `resend-smtp-pass-prod` | `PROJECT_AUTH_SMTP_PASS` | `api`, `worker`, `migrate` Job (the SMTP password written into every new tenant project's Auth configuration; the same Resend key kind as the GitHub secret `RESEND_SMTP_PASS`) |
+
+`supabase-pat-prod` (`SUPABASE_PAT`) is now also the platform token of the Management API client
+(`PROJECT_PROVIDER=supabase`) and is mounted on the `migrate` Job as well; its scopes must cover the
+list in "Phase 09.2 release", "Human gates" (hosted proof H1 decides).
 
 `DATABASE_URL` is always the **`api_user`** connection through the Supavisor **transaction** pooler
 (port 6543); `BOSS_DATABASE_URL` is the same role through the **session** pooler (port 5432) because
@@ -294,6 +325,9 @@ ones `deploy-hml.yml` mounts — the production list with `-prod` replaced by `-
 | `vercel-token-hml` | `VERCEL_TOKEN` | `api`, `worker` | a Vercel token scoped to team `n1-tecnologia` (the domain adapter's `POST/GET/DELETE /v*/projects/{VERCEL_PROJECT_ID}/domains` calls) |
 | `supabase-pat-hml` | `SUPABASE_PAT` | `api`, `worker` | a Supabase personal access token with access to the project in `SUPABASE_PROJECT_REF` (only `GET`/`PATCH /v1/projects/{ref}/config/auth`, `uri_allow_list` only) |
 | `payments-secret-key-hml` | `PAYMENTS_SECRET_KEY` | `api`, `worker` | 32 random bytes in base64. **While hml shares production's database it holds the SAME value as `payments-secret-key-prod`** (a sealed webhook token written by one environment must open in the other); a new value only once hml is isolated |
+| `platform-master-keys-hml` | `PLATFORM_MASTER_KEYS` | `api`, `worker`, `migrate-hml` Job | its OWN keyring, never production's (a keyring opens every project's credentials of its environment) |
+| `migration-database-url-hml` | `MIGRATION_DATABASE_URL` | `worker`, `migrate-hml` Job | the hml central project's `postgres` role through the session pooler |
+| `resend-smtp-pass-hml` | `PROJECT_AUTH_SMTP_PASS` | `api`, `worker`, `migrate-hml` Job | a Resend key with sending access on `n1marketingdigital.com.br` |
 
 ## Vercel environment variables (web)
 
@@ -460,6 +494,12 @@ Run in order; every `<hml-...>` value is unknown until its step. No step here is
   `TENANT_DEMO_HOST` / `TENANT_LAB_HOST` (distinct from `PLATFORM_HOST`); then run `pnpm db:seed`.
   Variables in the environment win over `apps/api/.env.local`. Check the target ref first, and
   never run it with a production value.
+- [ ] **Phase 09.2 prerequisites (2026-10-23).** Create `platform-master-keys-hml`,
+  `migration-database-url-hml` and `resend-smtp-pass-hml` in `rede-social-hml` and let the hml runtime
+  service account read them; define the GitHub environment variables `SUPABASE_ORG_SLUG` and
+  `HML_SUPABASE=isolated` on `homolog`; let the hml deploy service account create and execute Cloud Run
+  jobs (`roles/run.admin` already covers it) and, for a real preflight instead of a warning, list secret
+  versions (`roles/secretmanager.viewer`). Hosted proof H5 starts here.
 - [ ] **Placeholders.** Replace every `<hml-...>` placeholder in this file with the real value, and
   date the change.
 
@@ -929,12 +969,17 @@ screens. Both modules are per-tenant flags: a tenant sees nothing until the plat
    exported in the shell for the duration of the command, and never printed:
    ```bash
    DATABASE_URL="$(gcloud secrets versions access latest --secret=api-database-url-prod --project=api-dere-social)" \
-     pnpm exec tsx scripts/arm-event-reminders.ts --dry-run   # plans only: { events, armed, skipped }
+     pnpm exec tsx scripts/arm-event-reminders.ts --dry-run   # plans only: { projects, events, armed, skipped, failedProjects }
    DATABASE_URL="$(gcloud secrets versions access latest --secret=api-database-url-prod --project=api-dere-social)" \
      pnpm exec tsx scripts/arm-event-reminders.ts             # arms; re-running arms nothing new
    ```
    The script loads `apps/api/.env.local` for the other kernel variables, but a variable already in
-   the environment wins, so the production `DATABASE_URL` above is the one it uses. Run it only after
+   the environment wins, so the production `DATABASE_URL` above is the one it uses. **Since Phase 09.2**
+   it makes one pass per ready project of the registry (an event's reminder jobs must land in the
+   database where that tenant lives), prints ONE summary line, and reports a project it could not reach
+   in `failedProjects` while the others still run. With every tenant on project 0 (before the moves)
+   nothing else changes; once a tenant lives on its own project the command also needs that project's
+   sealed credentials, so run it only where `PLATFORM_MASTER_KEYS` is available. Run it only after
    the worker from step 7 is live (it creates the `events.reminder` queue itself if the worker has
    not yet). A window already in the past is skipped, never sent late.
 9. **Staff for support.** Production has no `support_tenant` user: a tenant's `admin_tenant` holds
@@ -966,88 +1011,188 @@ means moving the project to **Pro** (V2-PLAT-06: 500 connections, 500 messages/s
 
 ## Connection budget (Pro)
 
-Quick task 261006-fs9, for the ~10,000-user launch (3 tenants). Cloud Run multiplies every pooled
-client by the instance count, and Supavisor refuses clients past its per-compute limit, so the
-`--max-instances` flags in `deploy-api.yml` / `deploy-hml.yml` and the `DATABASE_POOL_MAX` env var
-are sized together from this section.
+Quick task 261006-fs9 sized this section for one shared database (the ~10,000-user launch, 3 tenants).
+**Phase 09.2 restates it per project (D-543, D-546):** every tenant project has its own pooler, its own
+Postgres and its own limits, so the budget is one calculation for a tenant project and one for the
+central project, and the single global ceiling is gone. Cloud Run multiplies every pooled client by the
+instance count, and Supavisor refuses clients past its per-compute limit, so the `--max-instances` flags
+in `deploy-api.yml` / `deploy-hml.yml`, `DATABASE_POOL_MAX` and `PROJECT_POOL_MAX` are sized together
+from this section. Every figure below was recomputed on 2026-10-23 from the values the code ships with;
+none is copied from the earlier text.
 
-**Assumption:** Supabase **Pro on SMALL compute**: **400 Supavisor (pooler) clients** and **90
-Postgres connections**. Micro (Pro's default compute) is 200 / 60; Medium is 600 / 120. Source:
-<https://supabase.com/docs/guides/platform/compute-and-disk>, read 2026-10-06. Re-check the figures
-whenever the compute changes.
+**Assumption, per project:** Supabase **Pro**. On **Small** compute a project allows **400 Supavisor
+(pooler) clients** and **90 Postgres connections**; **Micro** (Pro's default compute, so what a freshly
+created tenant project starts on) is 200 / 60; Medium is 600 / 120. Source:
+<https://supabase.com/docs/guides/platform/compute-and-disk>, re-read 2026-10-23 (the figures are the
+ones read on 2026-10-06). Re-check them whenever a compute changes. A tenant project is checked against
+both Micro and Small below; the **central project must stay on Small** (its table needs more than 200).
+
+### The values the code ships with
+
+| Setting | Value | Where it lives |
+|---------|-------|----------------|
+| `DATABASE_POOL_MAX` (project 0 and the platform lane, transaction pooler 6543) | 5 on `api` (default), 10 on `worker` | `packages/core/server/env.ts`, `worker` deploy env |
+| `PROJECT_POOL_MAX` (one tenant project, per process, transaction pooler) | 3 | `packages/core/server/env.ts` |
+| `PROJECT_POOL_CACHE_MAX` (tenant pools one process keeps open; project 0 is never counted) | 24 | same |
+| `PROJECT_POOL_IDLE_S` (an idle pooled socket closes after) | 20 s (a pool also recycles a socket at 30 min) | same, `packages/core/db/project-pools.ts` |
+| pg-boss polling instance (one per supervised project, session pooler 5432) | `max: 2` | `apps/api/src/worker.ts` |
+| pg-boss sender (`enqueueInTx`, one per project and queue scope, lazy, kept) | `max: 1` | `packages/core/server/jobs/boss.ts` |
+| `SUPERVISOR_MAX_PROJECTS` (projects one worker instance supervises, project 0 included) | 40 | `apps/api/src/env.ts` |
+| DDL connection (the Job, the move tool, a bootstrap: one per project at a time) | `max: 1` | `packages/core/server/projects/ddl.ts` |
+| `--max-instances` | `api` 20, `worker` 1 (hml: `api` 2, `worker` 1) | `deploy-api.yml`, `deploy-hml.yml` |
 
 ### Per-process pooler clients
 
-| Process | App pool (`DATABASE_POOL_MAX`, transaction pooler 6543) | API-side pg-boss (`getBoss`, lazy, transaction pooler) | Worker pg-boss (`BOSS_DATABASE_URL`, session pooler 5432) | Total pooler clients |
+**One tenant project**, as seen from one process. A process holds a pool for a tenant project only while it
+serves that tenant, and an idle pool gives its sockets back after 20 s, so these are ceilings, not typical
+values.
+
+| Process | Pooled clients (up to `PROJECT_POOL_MAX`) | Sender (`enqueueInTx`, `max: 1`) | pg-boss polling instance (session pooler, `max: 2`) | Pooler clients (`Pa`, `Pw`) |
 |---------|------|------|------|------|
-| `api` instance | 5 (the default) | 1 | — | **6** |
-| `worker` instance | 10 (`DATABASE_POOL_MAX=10`, worker only) | 1 (fan-out and push retry enqueues) | 2 (`createBoss({ max: 2 })`) | **13** |
+| `api` instance | 3 | 1 | — | **4** |
+| `worker` instance | 3 | 1 | 2 | **6** |
 
 The worker's 2 session-mode clients also each hold a real Postgres backend for their lifetime.
 
-### Worker pool fit (re-checked 2026-10-06)
+**The central project** serves the platform lane AND project 0 as a tenant (until the last move), through
+the one `DATABASE_POOL_MAX` pool, and holds the platform's own queue schema.
+
+| Process | App pool (`DATABASE_POOL_MAX`) | Senders (project 0 tenant scope and platform scope, `max: 1` each) | pg-boss polling instances (session pooler: the platform instance and project 0's tenant instance, `max: 2` each) | Pooler clients (`Ca`, `Cw`) |
+|---------|------|------|------|------|
+| `api` instance | 5 | up to 2 | — | **7** |
+| `worker` instance | 10 | up to 2 | 4 | **16** |
+
+(The previous table counted 6 and 13: one API-side pg-boss, and a worker with one polling instance. The
+platform queue scope of plan 09 adds a second sender and a second polling instance.)
+
+### Formula
+
+```
+2 x (A x Pa + W x Pw) + R  <=  L          a tenant project:      Pa = 4, Pw = 6
+2 x (A x Ca + W x Cw) + Rc <=  L          the central project:   Ca = 7, Cw = 16
+```
+
+- `A` = api `--max-instances`, `W` = worker `--max-instances`.
+- `R` = the reserve of a tenant project, **20**: the migrate Job's DDL connection (1, plus 1 when the
+  worker's `platform.migration-retry` job runs the fan-out at the same moment), a bootstrap or a move
+  (1 to 2 more: the target's DDL connection and the source's read-only one), a credential check (1) and
+  Studio, the SQL editor, `psql` and `pg_dump` (about 15).
+- `Rc` = the reserve of the central project, **40** (**20** on Micro): everything in `R`, plus the CI's
+  `supabase db push` and the `api_user` password step, `psql`, and the `spike:supavisor` run.
+- `L` = the compute's pooler-client limit.
+- The factor 2 covers a rollout where the old and the new revision are both alive (postgres.js keeps idle
+  connections until the instance stops).
+- The earlier `H` term (the hml api pointing at production's database) is gone: homolog is isolated and
+  `deploy-hml.yml` refuses the shared mode, so hml has its own budget (last two rows).
+
+| | A | W | R | L | Rollout peak | Steady state |
+|---|---|---|---|---|---|---|
+| **A tenant project, Small** | 20 | 1 | 20 | 400 | 2 x (20 x 4 + 1 x 6) + 20 = **192 ≤ 400** | 80 + 6 = 86 |
+| A tenant project, Micro (Pro's default) | 20 | 1 | 20 | 200 | **192 ≤ 200** (8 to spare) | 86 |
+| **The central project, Small** | 20 | 1 | 40 | 400 | 2 x (20 x 7 + 1 x 16) + 40 = **352 ≤ 400** | 140 + 16 = 156 |
+| The central project, fallback Micro | 10 | 1 | 20 | 200 | 2 x (10 x 7 + 1 x 16) + 20 = **192 ≤ 200** | 70 + 16 = 86 |
+| hml, a tenant project | 2 | 1 | 20 | 200 | 2 x (2 x 4 + 1 x 6) + 20 = **48 ≤ 200** | 14 |
+| hml, the central project | 2 | 1 | 20 | 200 | 2 x (2 x 7 + 1 x 16) + 20 = **80 ≤ 200** | 30 |
+
+The arithmetic holds with the current values, so **neither deploy workflow changes** for the budget. The
+tenant-project rows assume every one of the 20 api instances is serving that one tenant at the same time;
+the real figure is far lower, because an instance opens a pool only for the tenants it serves. On Micro the
+central row fails with `A` = 20: lower `A` to 10 in `deploy-api.yml` before moving the central project to
+Micro (the fallback row).
+
+**Postgres connections** (90 on Small, 60 on Micro) are a different limit from pooler clients. Check, per
+project, that the pooler's server-side **Pool Size** (Dashboard → Database → Settings → Connection
+pooling) plus the worker's session clients (2 per instance) plus Supabase's own services (Auth, Storage,
+Realtime, PostgREST) stay under it.
+
+### The two overlaps this budget is written for (P59)
+
+1. **A deploy with the old and the new revision alive.** This is the factor 2: it multiplies the `A` and `W`
+   terms, in both tables.
+2. **The fan-out Job running while traffic is served.** The Job runs after the project-0 migrations and
+   before the new API and worker deploy, while the old revisions still serve. It opens ONE DDL connection
+   per project (`max: 1`, four projects at a time by default), so a project sees one, and the worker's
+   retry job or a `ROLE=move` execution can add a second. That is why the Job is part of `R` (and not of
+   the doubled term), and why `R` allows two DDL connections on a project.
+
+A credential replacement (`PUT …/database/credentials`, `pnpm platform:reissue-credentials`) bumps the
+project's `credential_version`; each process opens a new pool and drains the old one after its in-flight
+work, so for a moment a project holds up to 2 x `PROJECT_POOL_MAX` per process. That is not in `R`: on a
+tenant project on Micro (192 of 200) do not replace credentials during a deploy.
+
+### The pool cache and the worker's supervision
+
+- A process keeps at most `PROJECT_POOL_CACHE_MAX` (24) tenant pools, each at most `PROJECT_POOL_MAX` (3)
+  sockets, so a process holds **at most 72 pooled sockets to tenant projects** (project 0 is outside the
+  cache). The least recently used IDLE pool is closed past the cap; a pool with work in flight is never
+  closed, so the cache runs over capacity only while every pool is busy.
+- A worker instance supervises at most `SUPERVISOR_MAX_PROJECTS` (40) projects, project 0 included, so 39
+  tenant projects. At the cap its sockets are: project 0, **16** (app pool 10, 4 polling, 2 senders); each
+  tenant project, 2 session + 1 sender = **3** (117 for 39); pooled sockets, at most the cache's 72. That is
+  **205 sockets per worker instance**, spread over 40 poolers, each of which sees only its own 6.
+- Past 24 active tenant projects a process starts closing and reopening idle pools. Nothing breaks (a
+  reopen is one connect), but set `PROJECT_POOL_CACHE_MAX` to at least the number of tenant projects on
+  the worker (and the API) before that point and recompute: with 39 pools cached, the worker holds
+  16 + 39 x (2 + 1 + 3) = **250 sockets**.
+- Handler concurrency multiplies by the number of supervised projects: every project's instance runs its own
+  `localConcurrency`, so `notifications.push-send` can have 4 handlers per project. At the cap that is 156
+  push handlers and, at 16 sends each, up to 2,496 outbound HTTPS requests in the worst case if every
+  tenant pushes at once. That is memory, CPU and sockets of the one worker instance, not database load;
+  recompute (and consider `W` > 1) when several large tenants push together.
+
+### Worker pool fit (re-counted 2026-10-23 for Phase 09.2)
 
 The worker runs `notifications.push-send` with pg-boss `localConcurrency: 4`
 (`PUSH_SEND_JOB_CONCURRENCY`, declared on the job definition) and every other queue at 1; each push
 job sends 16 subscriptions at a time (`PUSH_SEND_PARALLELISM`), so at most 64 outbound HTTPS requests
-per worker.
+per project instance.
 
 - A push-send job holds **at most one app-pool connection at any moment**: its read lane, then per
   distinct recipient a flags-cache-miss lane (only on a miss; the per-tenant 30 s cache has no
   in-flight de-duplication, so 4 concurrent jobs of one tenant may each miss once) released before
   that recipient's counters lane opens, then its report lane. The single-job case in
-  `packages/modules/notifications/tests/push-send-job.test.ts` asserts max open lanes = 1. So 4
-  concurrent push jobs hold at most 4 connections.
-- **No other handler holds an app-pool connection while acquiring a second one:** the fan-out and the
-  event sink read the flags before their lane; `enqueueInTx` inside a lane writes through that lane's
-  own connection (it only starts the separate API-side pg-boss pool, max 1); the media, domain,
-  branding and invite jobs run their `withAdminTx` calls one after another.
-- Worst case at once: 4 (push) + 14 (one per other queue) = **18 holders against a pool of 10**
-  (re-counted 2026-10-21 for Phase 09.1-07, which adds `kernel.payment-event`, one admin lane at a
-  time; before that, re-counted 2026-10-19 for Phase 08.7: 08.6 added `courses.live_reminder` and
-  `courses.lessons_batch`, 08.7 `kernel.daily-tenant-dispatch` and `dashboard.snapshot-build`). The
-  pool covers every push job plus the fan-out with 5 to spare; in the theoretical instant where every
-  queue is in a database phase, up to 8 handlers wait briefly inside postgres.js for a free
-  connection. That is a short wait, never starvation or deadlock, because nothing holds-and-waits.
-- The pg-boss pool stays **max 2**: pg-boss never holds a connection across a handler, LISTEN/NOTIFY
-  is off, and the 15 queues' 18 pollers (every 2 s) and their completes are single short queries.
-
-### Formula
-
-```
-2 × (A × 6 + W × 13) + H × 6 + R ≤ L
-```
-
-- `A` = api `--max-instances`, `W` = worker `--max-instances`.
-- `H` = hml api `--max-instances` while `HML_SUPABASE=shared-with-production` (the hml api then
-  points at the production database, see "Temporary: hml shares production's Supabase" above; the
-  hml worker is not deployed in that mode). `H = 0` once hml is isolated.
-- `R` = reserve for CI migrations (`supabase db push`), Studio / the SQL editor, `psql`, and the
-  `spike:supavisor` run.
-- `L` = the compute's pooler-client limit.
-- The factor 2 covers a rollout where the old and the new revision are both alive (postgres.js keeps
-  idle connections until the instance stops).
-
-| | A | W | H | R | L | Rollout peak | Steady state |
-|---|---|---|---|---|---|---|---|
-| **Current (Small)** | 20 | 1 | 2 | 40 | 400 | 2 × (120 + 13) + 12 + 40 = **318 ≤ 400** | 120 + 13 + 12 = **145** |
-| Fallback (Micro) | 10 | 1 | 2 | 20 | 200 | 2 × (60 + 13) + 12 + 20 = **178 ≤ 200** | 60 + 13 + 12 = 85 |
-
-On Micro, `A` must drop to 10 in `deploy-api.yml` before the deploy.
+  `packages/modules/notifications/tests/push-send-job.test.ts` asserts max open lanes = 1.
+- **No handler holds one connection while acquiring a second**, and with the platform lane that now holds
+  across pools too: the fan-out and the event sink read the flags before their lane; `enqueueInTx` inside a
+  lane writes through that lane's own connection (its sender is a separate socket); the media, domain,
+  branding and invite jobs run their transactions one after another, and the invite scheduling is three
+  transactions that never nest (`packages/core/tests/invites-lanes.test.ts` asserts a lane depth of 1); the
+  mirror push to a tenant project runs after the central transaction has committed.
+- **Count for ONE tenant project's pool** (`PROJECT_POOL_MAX` = 3, per worker instance): the 13 tenant-scope
+  queues (payment event, icon derive, daily dispatch, variant derive, orphan sweep, provider event,
+  dashboard snapshot, lessons batch, live reminder, feed unfurl, event reminder, notification fan-out, and
+  push-send) give 12 single handlers plus push-send's 4 = **16 holders**, plus the health check of that
+  project (1) = 17, against a pool of 3. Nothing holds-and-waits, so the surplus handlers wait briefly
+  inside postgres.js for a free socket; that is a short wait, never starvation or deadlock. What it costs is
+  push throughput: at most 3 of the 4 push jobs of one tenant can be in a database phase at once. If the
+  logs show push-send waiting, set `PROJECT_POOL_MAX=5` on the **worker only**: `Pw` becomes 5 + 1 + 2 = 8
+  and a tenant project on Micro reads 2 x (80 + 8) + 20 = **196 ≤ 200**; every further step costs 2 on that
+  row and 7 reaches 200 of 200, so stop at 5 or 6.
+- **Count for project 0's pool** (`DATABASE_POOL_MAX` = 10 on the worker): the 16 tenant holders of project
+  0 plus the 6 platform-scope queues (domain verify, invite send, mirror reconcile, project bootstrap,
+  project health, migration retry) = up to **22 holders against a pool of 10**, plus the supervisor's
+  registry read every 60 s (the previous count was 18, re-counted 2026-10-21 for Phase 09.1-07 and
+  2026-10-19 for Phase 08.7). The pool covers every push job plus the fan-out with 5 to spare; in the
+  theoretical instant where every queue is in a database phase, up to 12 handlers wait briefly. Same
+  argument: short wait, no starvation.
+- Each pg-boss polling instance stays **max 2**: pg-boss never holds a connection across a handler,
+  LISTEN/NOTIFY is off, and the pollers' fetches (every 2 s) and completes are single short queries.
 
 **Throughput:** 20 api instances × Cloud Run's default concurrency 80 = 1,600 concurrent requests (20 is the regional CPU quota cap, 2026-10-07).
-The real database ceiling is the pooler's server-side **Pool Size** (Dashboard → Database → Settings →
-Connection pooling), which this budget does not change; check that the Pool Size plus the worker's
-session clients plus Supabase's own services stay under the 90 Postgres connections.
+The real database ceiling is each project's pooler server-side **Pool Size** (see above), which this budget
+does not change.
 
 **Push fan-out:** a tenant-wide push to 10,000 subscribers is about 100 `notifications.push-send`
 jobs (100 users each). Per job, about 1 s of sequential badge counts plus about 1 s of sends at 16 in
-flight; with 4 jobs per worker at once (pg-boss polls every 2 s per worker) a tenant-wide push takes
-roughly **one to two minutes**, versus tens of minutes serially before.
+flight; with 4 jobs per project instance at once (pg-boss polls every 2 s) a tenant-wide push takes
+roughly **one to two minutes** on a pool that lets all four run their database phase (project 0's pool of
+10); on a tenant project's pool of 3 the database phases queue, which is what `PROJECT_POOL_MAX=5` on the
+worker undoes.
 
-**Recompute** whenever `DATABASE_POOL_MAX`, a job's `concurrency`, the compute size, the number of
-services on the database, or hml's Supabase mode changes; edit both workflows and this section
-together.
+**Recompute** whenever `DATABASE_POOL_MAX`, `PROJECT_POOL_MAX`, `PROJECT_POOL_CACHE_MAX`,
+`PROJECT_POOL_IDLE_S`, `SUPERVISOR_MAX_PROJECTS`, a job's `concurrency`, the number of queue scopes or
+queues, a compute size, the number of services on a database, or hml's Supabase mode changes; edit both
+workflows and this section together.
 
 ## Phase 8 release (moderation, tenant admin panel, CSP)
 
@@ -2086,7 +2231,9 @@ Two more queues on the worker, each at concurrency 1: the worker now works 14 qu
 a database phase against `DATABASE_POOL_MAX=10` (up to 7 wait briefly inside postgres.js; nothing
 holds-and-waits), and 17 pg-boss pollers on the same `max: 2` session pool. The per-instance pooler
 clients (6 per api, 13 per worker) and the formula in "Connection budget (Pro)" do not change. The
-nightly build holds one connection for at most 120 s per tenant, one tenant at a time.
+nightly build holds one connection for at most 120 s per tenant, one tenant at a time. *(Historical:
+Phase 09.2 restated those counts per project, 4 and 6 for a tenant project and 7 and 16 for the central
+one, in "Connection budget (Pro)".)*
 
 ### Rollback limit
 
@@ -2571,6 +2718,473 @@ Record each line in the Phase 09.1 UAT (`/gsd-verify-work 09.1`); a line that is
   phone, light and dark, under a tenant brand, and the designer's review of sketch 013.
 - The hooks enabled on production per the six steps above, with the smoke list.
 
+## Phase 09.2 release (database per tenant)
+
+**No step below was performed by an automated run, and every command here is for the developer to run by
+hand, in this order.** Production is live and an agent run of this phase may not create a cloud secret,
+push, deploy, run a migration against a hosted project or move a tenant. The repository only makes the
+human steps safe: two workflow guards (`pnpm guard:workflows`), a release preflight, a read-only probe and
+the move tool's `--dry-run`. No command here prints a secret; do not paste a key, a password, a token or a
+connection string into a terminal that records history, a chat or an issue. The proofs only a person with
+the hosted accounts can run are in the ledger
+`.planning/phases/09.2-banco-por-tenant-projeto-supabase-dedicado-por-tenant/09.2-HOSTED-PROOFS.md`
+(H1 to H8); it ships with every row `pending`, and a row becomes `passed` only with the evidence you paste.
+
+Phase 09.2 changes where a tenant's data lives. Before it, every tenant shares one Supabase project (the
+"central" project, also called project 0). After it, each production tenant has its own Supabase **Pro**
+project (its own Postgres, Auth, Storage and Realtime, D-543), and the central project becomes the control
+plane that holds platform data only: the registry of projects, the mirror of each tenant, the sealed
+credentials, the domains and the platform's own queue. Until the last tenant has been moved, project 0 is
+both at once.
+
+### What ships
+
+- **Two migration sets (D-547).** The **tenant set**, `supabase/migrations` (147 files, one new:
+  `20261023012832_tenant_invites_created_by_nullable.sql`), is applied to project 0 by `supabase db push` as
+  before and to every other tenant project by the migrate Job. The **central set**,
+  `supabase/central/migrations` (8 files), is applied ONLY to the central project, by the Job, with its own
+  ledger `supabase_migrations.central_migrations`; the Supabase CLI cannot see it. The central set holds:
+  `platform_registry` and its `_hardening` (projects, the tenant-to-project binding, the bootstrap steps,
+  health, schema state), `pgboss_platform_schema` (the platform's own queue, schema `pgboss_platform`),
+  `tenant_projects_pending_invite`, `platform_route_indexes` and its `_backfill` (where a webhook or a
+  provider event with no host finds its tenant), and `tenant_moves` with its `_hardening`.
+- **The registry and the mirror (D-537, D-539).** Each tenant is bound to a project; the project's database
+  URLs, service key and hook secret are stored sealed under the platform master key; the central project
+  keeps a mirror of each tenant (name, brand, status, modules, primary host, project coordinates) so the host
+  answer and the panel list survive a tenant project being down or paused. A reconcile job heals drift.
+- **Routing (D-538).** A request, a job, a webhook and a script reach the tenant's own project through the
+  registry: `withTenantTx` resolves the project from the tenant id, the admin lane requires a tenant or a
+  project, and a separate platform lane opens the central project. A tenant whose project is unbound or
+  unreachable is answered `503` and never served from project 0.
+- **The bootstrap (D-541, D-542).** "Novo tenant" asks for the project ref of an empty Pro project; the
+  platform token creates the rest through eight recorded, resumable steps ("Creating a tenant on its own
+  project" below).
+- **The fan-out (D-544, D-545).** The image carries both sets and a manifest. The Cloud Run Job `migrate`
+  (same image digest as the services, `ROLE=migrate`) applies the central set and then the tenant set to
+  every ready project, one project failing never blocks the others, and a tenant whose project is behind the
+  image's requirement is answered with the branded "em atualização" screen until it catches up; a worker job
+  (`platform.migration-retry`, every 300 s) retries by itself.
+- **Queues and the worker (D-546).** Every tenant project has its own `pgboss` schema, the platform has
+  `pgboss_platform`, and the worker supervises one polling instance per ready project plus one for the
+  platform (budget in "Connection budget (Pro)").
+- **The move (D-534, D-535, D-536).** `ROLE=move` / `pnpm platform:move-tenant` moves one tenant from
+  project 0 to its own project; `pnpm platform:central-clean` proves the central project holds nothing of
+  a tenant that left.
+- **The web.** The by-host answer gained the statuses `preparing`, `updating` and `unavailable` and the
+  tenant's own project address and publishable key; the proxy, the server client, the Content Security
+  Policy (exact origins, no wildcard), the Realtime client and the resumable upload all use the host's
+  project; two new public screens (`/comunidade-em-preparacao`, `/comunidade-em-atualizacao`) beside
+  the existing `/comunidade-indisponivel`; in the platform panel, the project ref field with its pre-check, the Banco tab
+  of a tenant and the Banco column and filter of the list.
+- **The pipeline.** Both deploy workflows run Authenticate, Release preflight, Migrations (project 0),
+  Push auth configuration, Deploy the migrate job, Run the migrate job (`--wait`), Deploy the API, Deploy the
+  worker, in that order, on one image reference (the order is enforced by `scripts/check-workflows.sh`).
+  The CI `db` job applies the central set and runs two-database cases (`docs/deploy/ci.md`).
+
+**New variables and secrets** (the names; `deploy-api.yml` and `deploy-hml.yml` carry them):
+
+| Name | Where | Value |
+|---|---|---|
+| `PROJECT_PROVIDER` | `api`, `worker`, `migrate` Job | `supabase`. There is no default: unset resolves to the network-free fake, which a production process refuses (an explicit `fake` fails the boot) |
+| `SUPABASE_ORG_SLUG` | `api`, `worker`, `migrate` Job | GitHub environment variable `SUPABASE_ORG_SLUG` of `production` / `homolog` |
+| `SUPABASE_PAT` | `api`, `worker`, `migrate` Job | the existing secret `supabase-pat-prod`, now also the Management API token (scopes in "Human gates", G1) |
+| `PLATFORM_MASTER_KEYS`, `PLATFORM_MASTER_KEY_ID` | `api`, `worker`, `migrate` Job | secret `platform-master-keys-prod`; the id defaults to `1` |
+| `MIGRATION_DATABASE_URL` | `worker`, `migrate` Job | secret `migration-database-url-prod`: the central project's `postgres` session URL |
+| `PROJECT_AUTH_SMTP_PASS` | `api`, `worker`, `migrate` Job | secret `resend-smtp-pass-prod` |
+| `API_PUBLIC_URL` | `api`, `worker`, `migrate` Job | the API's public origin (required when the provider is `supabase`) |
+| `MAIL_DOMAIN`, `SUPABASE_PROJECT_REF` | `migrate` Job (already on the services) | the sender domain and project 0's own ref |
+| `PROJECT_POOL_MAX`, `PROJECT_POOL_CACHE_MAX`, `PROJECT_POOL_IDLE_S`, `SUPERVISOR_MAX_PROJECTS` | optional | 3, 24, 20 and 40 by default; recompute "Connection budget (Pro)" before changing one |
+| `MOVE_QUIESCE_MS`, `MOVE_REGISTRY_WAIT_MS` | optional, move only | 65,000 and 20,000 by default; raise, never lower, on a real tenant |
+
+On Vercel nothing is new: `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` stay
+required on the web, because they are the platform, the generic hosts and project 0's fallback; every other
+project's address and key come from the API at request time. **A tenant project's address must be
+`https://<ref>.supabase.co` in production**; any other shape makes that tenant show as unavailable.
+
+The image also needs `supabase/roles.sql` (the `roles` step reads it); the Dockerfile copies it with both
+migration sets and the manifest to `/app/migrations` (`MIGRATIONS_DIR`), and a production boot without the
+manifest stops with `migrations manifest empty`.
+
+### Human gates
+
+| Gate | Needed before | What it needs |
+|---|---|---|
+| **G1** | the probe (H1), any hosted bootstrap | An **empty** Pro project in the platform's Supabase organisation, and a platform token that reaches that organisation with these scopes: API keys read, API key secrets read, Database read and write, Auth write, Storage and Realtime configuration, and Project read. Store the token as a new version of `supabase-pat-prod` and set the GitHub environment variable `SUPABASE_ORG_SLUG` on `production` and `homolog`. Whether the token reveals secrets, and which key kind the registry should store, is decided by the probe (H1); if it cannot reveal them, the panel asks for the three manual fields (D-541) |
+| **G2** | release 1 | In Secret Manager (project `api-dere-social`, and `rede-social-hml` for homolog): `platform-master-keys-prod`, `migration-database-url-prod` and `resend-smtp-pass-prod` (`-hml` for homolog), each readable by the runtime service account (`roles/secretmanager.secretAccessor`); the deploy service account allowed to create and execute Cloud Run jobs (`roles/run.admin` covers it) and, so the preflight is a real check and not a warning, to list secret versions (`roles/secretmanager.viewer`) |
+| **G3** | the designed screens | The sketch 014 approval, recorded as provisional by plan 01 in `.planning/sketches/014-phase-09.2-designed-screens/README.md`; the designer's final review is yours, on a real phone, under a tenant brand, in light and dark |
+| **G4** | each release push | The `production` GitHub environment's required reviewer approves the run (D-12), once per release |
+| **G5** | recorded | "Migrar todos" is a Cloud Run **Job**, not a tagged revision: answered by Igor on 2026-10-23 (A-16-1 in `09.2-ASSUMPTIONS.md`). The cost accepted: not literally "inside the new revision" of D-544 |
+| **G6** | each production move | The order and the window of each move, and each `--confirm-delete`. Recommended: the two homolog seed tenants first, then production tenants from the smallest to the largest, each in its own off-peak window |
+
+The token creates and configures projects and never deletes, pauses or restores one: the client reaches
+only a closed list of operations and is pinned to `SUPABASE_ORG_SLUG` (a project of another organisation is
+refused). It is rate limited to 100 requests a minute by the client itself.
+
+### Order of the release and the operations
+
+The release has three stages. Between them are the data operations, which are not pushes.
+
+1. **Before any push.**
+   - Phases 09 and 09.1 are not pushed or deployed yet (project state, 2026-10-21, A-25-3): the first push
+     of 09.2 carries them. Their release sections apply to the same push (their migrations, the payments
+     secret, the `API_PUBLIC_URL` variable), and so does "Before the pilot go-live".
+   - Confirm in the Dashboard (Billing) that the central project is on **Pro with Small compute**: the
+     budget needs it, and the host answer of every tenant depends on it.
+   - Create the three secrets of G2 and the variable `SUPABASE_ORG_SLUG` **before the push**. A production
+     boot refuses the fake provider, and a secret that a workflow references but that does not exist fails
+     the deploy after the migrations and the auth configuration have been applied. Run the preflight by
+     hand (it reads names only and prints no value):
+     `SUPABASE_ORG_SLUG=<slug> GCP_PROJECT_ID=api-dere-social bash scripts/check-release-env.sh --env prod`
+     must exit 0. The same step runs in the workflow, first, and lists every missing item at once.
+   - `pnpm guard:workflows` is green locally.
+2. **Release 1 = the phase's code, through the workflow rewrite, in ONE push.** It is behaviour-identical for
+   every existing tenant, because every tenant is bound to project 0 (the project flagged default). There is
+   no earlier split: only the migrate Job applies the central set, and a production boot needs the secrets
+   above, so the code, the sets and the workflow go together. The pipeline then does, in this order:
+   Authenticate; Release preflight; Migrations (roles included), i.e. `supabase db push --include-roles` on
+   project 0; the `api_user` password; the auth hook guard; `supabase config push`; Deploy the migrate job;
+   Run the migrate job (`gcloud run jobs execute migrate --wait`); Deploy the API; Deploy the worker.
+   - **Homolog first.** Make homolog isolated (G2 for `-hml`, `HML_SUPABASE=isolated`, the "hml provisioning
+     runbook" items), push the same code to `homolog`, and run the checks below there. The push to `master`
+     comes after that.
+   - **The web before the API takes traffic.** The web parses the by-host answer strictly, and the API emits
+     the new statuses and fields as soon as a tenant lives on a hosted project. Vercel builds the web from
+     the same push, so approve the `production` environment only after the Vercel production deployment of
+     the same SHA is **Ready**. If the API ever went first, roll the web back to a build that reads the new
+     contract only after the API is serving, never the other way.
+   - **The Job gates the deploy.** A non-zero execution fails the step, so no new API or worker revision
+     exists (the old revisions keep serving). Exit codes: `0` every ready project is current or has only
+     warnings; `1` the central set failed, or `--strict` saw a tenant failure (the workflow never passes
+     `--strict`); `2` a usage error. A single tenant project that fails is a warning: the others still
+     migrate, the tenant shows as "atrasado" and the worker's retry job heals it.
+3. **The data operations (no push).** Create each tenant's own project, bootstrap it, and move the existing
+   tenants one at a time, homolog first ("Moving an existing tenant"). Nothing here changes the code.
+4. **Release 2 = the contract, only after the last production tenant has moved** ("The contract release").
+
+**Check release 1 (production, read-only).**
+- The workflow's "Run the migrate job" step summary shows exit code `0`; the Cloud Run Job's execution log
+  (Cloud Run > Jobs > migrate > Executions) has one JSON line for the central set, one per project and a
+  summary, with no connection string.
+- In the SQL editor of the central project:
+  ```sql
+  select ref, is_central, is_default, credential_source, state from platform.projects;
+  -- one row: is_central and is_default true, credential_source 'env', state 'ready', and a ref that is no
+  -- longer the placeholder 'project-0' (the fan-out and the worker boot align it with the environment)
+  select count(*) from supabase_migrations.central_migrations;           -- 8
+  select count(*) from public.tenants t
+   where not exists (select 1 from platform.tenant_projects tp where tp.tenant_id = t.id); -- 0
+  select p.ref, s.status, s.applied_count, s.required_count
+    from platform.project_schema_state s join platform.projects p on p.id = s.project_id; -- 'current', equal counts
+  ```
+- A tenant host and the platform host load, and a login works. The panel list shows the Banco column with
+  "Pronto" (or "Não verificado" for up to five minutes, until the health job's first sweep).
+- The deploy needs no `PROJECT_POOL_*` change; if any was set, recompute "Connection budget (Pro)".
+
+### Creating a tenant on its own project
+
+**What you do.**
+1. In the Supabase Dashboard, in the platform organisation, create a new project on the **Pro** plan (region
+   São Paulo, like the central project, is the natural choice). **Configure nothing else**: no tables, no
+   buckets, no Auth or Data API settings. The project must be empty. The database password you type at
+   creation is replaced by the bootstrap.
+2. Copy the project ref (20 lower-case letters, the segment after `/project/` in the dashboard address).
+3. Plataforma, Novo tenant: fill the name, slug and first admin e-mail, and paste the ref into **Projeto
+   Supabase**. Continuar runs the pre-check and answers one of: ready; not found; paused; not empty (it
+   already has a migration, a `public` table or a bucket other than the two the tenant set creates); in use
+   (production refuses a second tenant on a project, and so does homolog, because it runs with
+   `NODE_ENV=production`: one empty project per tenant, even on homolog); invalid; or "could not check now".
+   If the token cannot reveal the project's keys, the panel then asks for the `postgres` password, the
+   service key and the publishable key (write-only fields, kept sealed and never shown again).
+4. Confirm. The dialog shows "Etapa n de 8" and the tenant list shows the tenant as **Em preparação**; the
+   tenant's host answers the "em preparação" screen and accepts no login until every step passes. After 60
+   seconds you may continue in the background.
+
+**What the system does** (the platform job `platform.project-bootstrap`, eight idempotent steps, each
+recorded; a retry never repeats a finished step):
+
+| # | Step | What it does |
+|---|---|---|
+| 1 | `verify` | Reads the project through the token and waits until it is healthy (up to 10 minutes), keeps or obtains its keys, generates and sets a `postgres` password once and stores the DDL address. On the first run it refuses a project that already holds data |
+| 2 | `roles` | Creates `api_user` without `BYPASSRLS` (from `supabase/roles.sql`) with a generated password and seals the transaction-pooler and session-pooler addresses |
+| 3 | `schema` | Applies the tenant set with the runner, then closes the Data API (schema `data_api_closed`), then proves the `platform` schema is absent |
+| 4 | `auth` | One Auth configuration, pinned to `supabase/config.toml`: the project's own Send Email Hook address and secret, SMTP, redirects, JWT and password settings, the ES256 signing key. **Both access hooks are set but disabled** (production's state today) |
+| 5 | `buckets` | The `branding` and `media` buckets exist; the project-wide file size limit |
+| 6 | `realtime` | Private channels only; the topic policy is present |
+| 7 | `tenant` | Copies the tenant row and its modules from the central project into the project |
+| 8 | `invite` | Creates the first admin's invite with no creator (sent when the primary domain is verified, D-30) |
+
+**What you see when a step fails.** The step shows one catalog sentence and "Código `<code>`"; the code is
+one of: `unreachable` (the project or the Management API did not answer: paused, still starting, timeout),
+`access_denied` (the token or the organisation is refused: check G1), `not_empty` (the project already holds
+data: use another empty project, do not retry), `migration_failed` (the tenant set failed in the project: read
+the step's log line, which holds a code and never a statement), `auth_config_failed` (the Auth configuration
+was refused, or `PROJECT_AUTH_SMTP_PASS` is missing), `storage_failed`, `realtime_failed`, `tenant_failed`,
+`invite_failed`, `unknown`. **Tentar de novo** resumes at the step that failed (a double click is harmless:
+the second answer is a conflict). After the eighth step the Banco tab shows "Preparação concluída em
+`<data>`" and, within five minutes, **Pronto**.
+
+**Checks on a new project (hosted proof H2).** Run the three curl checks of "Data API exposure" against
+the new project's address and publishable key: `/rest/v1/` answers `PGRST205`, and the other two `PGRST106`.
+The tenant set creates every table with row-level security on, but the Data API is closed per project by
+step 3, not by the dashboard.
+
+**Enabling the access hooks in a tenant project.** This release ships no tool for it: a tenant project is
+created with both hooks disabled, which is production's state today, and enabling one is a separate decision
+(open item). Do not copy the project-0 steps of "Enabling the production Auth hooks" to a tenant project.
+
+### The master keyring
+
+- **Format.** `PLATFORM_MASTER_KEYS` is one JSON object that maps a whole-number key id (1 to 32767) to the
+  base64 of exactly 32 random bytes, for example `{"1":"<base64>"}`; any id in it opens a value sealed
+  under it, and `PLATFORM_MASTER_KEY_ID` (default `1`) names the id that seals. Every sealed value carries
+  its id and is bound to its row and column, so a value copied into another row does not open.
+- **Create it** before the first push, without echoing it:
+  `printf '{"1":"%s"}' "$(openssl rand -base64 32)" | gcloud secrets create platform-master-keys-prod --data-file=- --project=api-dere-social`
+  then `gcloud secrets add-iam-policy-binding platform-master-keys-prod --member=serviceAccount:<RUNTIME_SA> --role=roles/secretmanager.secretAccessor --project=api-dere-social`.
+  For homolog use its own keyring in `platform-master-keys-hml`, never production's.
+- **The blast radius, in plain words.** One keyring seals every project's credentials (assumption A-03-2:
+  two key classes were considered and not built). Whoever holds the keyring **and** can read the central
+  `platform.projects` table can open the database password, the service key and the hook secret of every
+  tenant. The keyring lives only in Secret Manager and in the environment of the API, the worker and the
+  Job, never in Vercel and never on disk except for one of the commands below, and the registry tables are
+  reachable by the `service_role` lane only. If every version of the secret is destroyed, no stored
+  credential opens and every tenant on its own project answers unavailable until each one is re-derived
+  with the break-glass command below. Never disable or destroy a secret version before the rotation below
+  has finished.
+- **Rotate** (the keyring leaked, or on a schedule): (1) add the new key next to the old one as a NEW
+  VERSION of the secret (`{"1":"<old>","2":"<new>"}`) and redeploy so the three processes read it; (2) set
+  `PLATFORM_MASTER_KEY_ID=2` on `api`, `worker` and the Job and redeploy (the deploy merges values set by
+  hand, check with `gcloud run services describe api` and `gcloud run jobs describe migrate`); (3) run
+  `pnpm platform:reseal --dry-run`, then `pnpm platform:reseal`, from a trusted shell with the production
+  `DATABASE_URL` and the new `PLATFORM_MASTER_KEYS` and `PLATFORM_MASTER_KEY_ID` exported for the command
+  only, as step 8 of the "Phase 7 release" exports its `DATABASE_URL`; it re-seals row by row, keeps
+  `credential_version` (pools stay valid), is resumable and prints ids and numbers only; (4) when it reports
+  `resealed: 0` and `failed: 0`, drop the old key in a further version. A row it cannot open is left
+  untouched and the command exits 1.
+- **Break-glass: `pnpm platform:reissue-credentials -- --ref <ref>`.** For the day the keyring is lost and the
+  sealed columns can no longer be opened. It needs the platform token only: set a NEW keyring first
+  (`PLATFORM_MASTER_KEYS`, `PLATFORM_MASTER_KEY_ID`), export `PROJECT_PROVIDER=supabase`, `SUPABASE_PAT`,
+  `SUPABASE_ORG_SLUG` and the production `DATABASE_URL` for the command only, and run it once per project:
+  it re-derives the project's keys, sets a new `postgres` password, re-creates the `api_user` password,
+  writes a new hook secret into the project's Auth configuration, re-seals every column and bumps
+  `credential_version`. Then restart the API and the worker. Exit `0` reissued, `1` failed or refused (the
+  project is busy: a bootstrap step is running, or another replacement holds it; try again in a minute), `2`
+  usage. It never reads a stored credential.
+- **Replace one credential** (a rotated key, a typo): the Banco tab's "Substituir credenciais" tries each
+  value against the project first and changes nothing unless every value works.
+
+### Moving an existing tenant
+
+A move copies a tenant's rows (by `tenant_id`), its Auth accounts (same user ids, password hashes
+preserved) and its Storage objects into a project bootstrapped exactly like a new tenant's, then repoints the
+registry. The tenant is suspended while it is copied, so its members see "temporariamente indisponível",
+and their sessions end (each project signs with its own keys): everybody signs in again with the password
+they had. A person who held a membership in two tenants ends up with an independent account in each. The
+old rows stay until you confirm the deletion; that is the rollback window.
+
+**Production runs the move inside GCP**, as an execution of the `migrate` Job with `ROLE=move` and the move
+flags as arguments, because the sealed credentials never leave it. The Job carries what the move's
+bootstrap needs (`MAIL_DOMAIN`, `PROJECT_AUTH_SMTP_PASS`, the keyring, the token, the central address).
+
+```bash
+gcloud run jobs execute migrate --project api-dere-social --region southamerica-east1 --wait \
+  --update-env-vars=ROLE=move \
+  --args=node,dist/main.js,--tenant,<slug>,--to,<ref>,--dry-run
+```
+
+The image sets `CMD ["node", "dist/main.js"]` and no entrypoint, so `--args` replaces the whole command
+line and must start with `node,dist/main.js`; the overrides apply to that one execution and leave the Job as
+the workflow deployed it. **The override syntax is unproven**: before the first use run
+`gcloud run jobs execute --help` and confirm `--args` and `--update-env-vars`, and run the form above with
+`--dry-run` on homolog (`migrate-hml`, project `rede-social-hml`) first. A usage mistake exits `2` and writes
+nothing. An execution is killed at the Job's one-hour task timeout; the move row keeps its state, its
+15-minute lease expires, and `--resume` continues from the recorded state. On the local stack the same
+modes run as `pnpm platform:move-tenant -- --tenant <slug> --to <ref> [mode]` (fake provider, `rede_tenant_b`).
+
+**The modes**, one at a time (exit `0` ok, `1` a refusal, `2` usage; every line is ids, counts and fixed
+codes, never a row, an e-mail or a key):
+
+| Mode | What it does |
+|---|---|
+| `--dry-run` | The plan, writing nothing at all |
+| (none) | Registers and bootstraps the target, suspends the tenant, waits for the caches, copies, verifies, repoints, waits for the registry, reactivates |
+| `--status` | The move and its audit trail (read only) |
+| `--resume` | Continues from the recorded state (a crash, the timeout); a side effect already logged is not repeated |
+| `--rollback [--accept-loss]` | See "Rollback limit" below |
+| `--recopy` | Wipes the target only, keeps the accounts, and copies again (fixes a failed verification); refused after the flip |
+| `--confirm-delete --confirm-slug <slug>` | The only command that deletes from the source |
+
+**The runbook, in this order, for each tenant:**
+
+1. **Rehearse on homolog.** Move `rede-demo` and `rede-lab` there first, each to its own empty hml project
+   (one project per tenant, even on homolog). Do not touch a production tenant before both rehearsals ended
+   `done` and you signed in with an old password on each.
+2. **Create the target**: an empty Pro project (G1). The move registers and bootstraps it itself, with the
+   same eight steps as a new tenant, so do not create the tenant in the panel.
+3. **Plan**: run `--dry-run` for the tenant and read the plan. Choose an off-peak window and tell the
+   tenant's owner that members will be signed out and see the unavailable screen for the length of the
+   copy.
+4. **Move**: run without `--dry-run`. The waits default to 65 s (the web's 60 s host cache plus 5) and 20 s
+   (the registry's 15 s cache plus 5), which is why a move takes minutes even for a small tenant; raise
+   `MOVE_QUIESCE_MS` / `MOVE_REGISTRY_WAIT_MS` if those cache durations ever grow, never lower them. While a move is open every platform change to that tenant answers
+   `409 TENANT_MOVING`, and the panel shows "Em mudança" and blocks "Reativar tenant".
+5. **Check the result** with `--status` (state `done`), then: the by-host answer
+   (`curl -s "https://api-253040968821.southamerica-east1.run.app/v1/public/tenants/by-host?host=<tenant host>"`)
+   reads `active` with the new project's address; a sign-in with the **old password**; one image and one
+   file open; the panel's Banco tab reads Pronto; and the central project's rows for the tenant still exist
+   (they are the rollback window). Record the result in the hosted-proofs ledger (H6).
+6. **Wait.** Keep the old rows until the owner has used the community and you are sure. There is no time
+   limit, and nothing ages them out.
+7. **Delete the source rows** only when you are sure, with the slug typed again:
+   `--tenant <slug> --confirm-delete --confirm-slug <slug>`. It prints its plan first (per table), then
+   empties the tenant's tables in the source, removes its files, and deletes only the accounts nobody else
+   uses. It is the one irreversible step: after it a rollback is refused. It needs state `done` and a
+   target that still holds the tenant.
+8. **After the LAST production tenant** has been deleted from the source, from a trusted shell with the
+   central session URL exported for the command only (it reads `apps/api/.env.local` for the other kernel
+   variables, which a variable already in the environment overrides; it reads only through
+   `MIGRATION_DATABASE_URL`):
+   ```bash
+   MIGRATION_DATABASE_URL="$(gcloud secrets versions access latest --secret=migration-database-url-prod --project=api-dere-social)" \
+     pnpm platform:central-clean -- --strict-empty
+   ```
+   It must exit `0`: it lists, as counts, the rows of moved tenants, foreign accounts and files still in
+   the central project, and with `--strict-empty` it also fails while any table outside the mirror and the
+   platform tables holds a row. Only then clear the default-project flag, by hand, in the SQL editor of the
+   central project:
+   ```sql
+   update platform.projects set is_default = false where is_default;
+   select count(*) from platform.projects where is_default;   -- 0
+   ```
+   Until you do, a tenant inserted without an explicit binding is bound to project 0 instead of failing;
+   after it, such an insert fails at commit and the panel's creation with a ref is the only way in (the
+   flag can be set again with `update platform.projects set is_default = true where is_central`).
+
+**Rollback limit.** Before the registry flip, `--rollback` restores the tenant's status and leaves the
+target alone. After the flip it first suspends the tenant, waits for the caches and counts the rows written
+in the target since the flip; with any, it refuses (`writes_since_cutover`) unless you pass `--accept-loss`,
+and then it repoints to project 0 in one transaction and puts the branding origin and the queue back. A
+second rollback does nothing, and after `--confirm-delete` it is refused. A known gap: a rollback from state
+`done` holds the tenant by suspending it, but the move is already closed then, so for those seconds a
+platform admin could reactivate it (recorded in `.planning/WINDOWS.md`). Do not run a rollback while someone
+is working in the panel.
+
+### Orphan routes
+
+A webhook or provider event that carries no host finds its tenant through three central tables:
+`platform.payment_integration_routes` (by integration id), `platform.payment_product_routes` (by provider
+and external product id) and `platform.video_asset_routes` (by asset id). The route rows name tenants, not
+projects, so a move changes none of them. They can outlive their tenant row: a compensation that did not
+finish (threat T-09.2-49), a gateway product removed from a tenant's mapping, and every video asset the
+orphan sweeper purges (the sweeper removes the asset and not its route; the rows hold ids only). An orphan
+route is harmless (it points at a tenant that finds nothing) but it grows, and it can make an id look used.
+
+**There is no cleanup command yet; this is an open item, not a done one.** Until it exists, run this by hand,
+read-only first, for one tenant at a time, and never for a tenant with an open move or whose project the
+panel shows as unreachable (an empty answer from an unreachable project would look like "everything is an
+orphan"):
+
+1. In the SQL editor of the **central** project, list what is routed (replace `<tenant uuid>`):
+   ```sql
+   select integration_id from platform.payment_integration_routes where tenant_id = '<tenant uuid>' order by 1;
+   select provider, external_product_id from platform.payment_product_routes where tenant_id = '<tenant uuid>' order by 1, 2;
+   select asset_id from platform.video_asset_routes where tenant_id = '<tenant uuid>' and created_at < now() - interval '1 hour' order by 1;
+   ```
+2. In the SQL editor of **that tenant's project**, list what exists:
+   ```sql
+   select id from public.payment_integrations where tenant_id = '<tenant uuid>' order by 1;
+   select provider, external_product_id from public.payment_products where tenant_id = '<tenant uuid>' order by 1, 2;
+   select id from public.media_assets where tenant_id = '<tenant uuid>' order by 1;
+   ```
+3. A route whose key is absent from the matching list is an orphan. Write the ids down (do not paste them
+   anywhere public). The one-hour margin on video routes keeps a route whose asset is still being created.
+4. Delete only those ids, in a transaction you can read before committing, for example
+   `begin; delete from platform.video_asset_routes where asset_id in ('<id>', '<id>') returning asset_id; commit;`
+   (use `rollback` instead of `commit` to look first), and the matching statement for the two payment tables.
+   A route that is NOT in the tenant's list but belongs to an integration the tenant is about to create
+   again is recreated by the next save; deleting a live route is the only way this can hurt, which is why
+   step 3 compares before step 4 deletes.
+
+### The contract release
+
+The Phase 08.1 shared-identity flows stay in production **until the last tenant has been moved**: while two
+tenants share project 0, a person with a membership in each depends on "Participar de [B]", the community
+picker, the existing-identity invite, the shared-password notice and the choice header. Removing them is
+**release 2** and ships in **two pushes**, because migrations run before the new revision serves:
+
+1. **Push A**: the API and the web that stop using the SQL lookups and that no longer carry those flows (Phase 09.2
+   plans 26 and 27: the server side, then the web side), with no migration.
+2. **Push B**, alone, after push A is serving in production: the one tenant-set migration that drops the
+   three obsolete lookup functions (`app.identity_has_password`, `app.memberships_of_user`,
+   `app.membership_in_tenant(uuid, uuid)`). It is one-way: a revision older than push A would fail every
+   request.
+
+**Neither push is allowed while** `pnpm platform:central-clean -- --strict-empty` lists any account or row of
+a moved tenant, or while any tenant still shares project 0 with another tenant's people. The gate is written
+down in the hosted-proofs ledger: its front matter reads `contract_gate: closed` and only you set it to
+`open`, after the production check above passed and every production tenant has moved and been confirmed.
+An agent never edits that line.
+
+### Rollback limit
+
+- **Release 1.** Roll the web back first, then the API and the worker, as in "Phase 8 release". The expand
+  migrations stay: the tenant set only gains a nullable column, and the central set is new schema that an
+  older revision ignores. **Once any tenant lives on its own project, the API and the worker may only be
+  rolled back to a 09.2 revision or later**: an older revision knows only the central project and would
+  serve that tenant from its old rows, or from none. A failed Job leaves the old revisions serving and the
+  deploy stopped; fix the cause and re-run the workflow, or run
+  `gcloud run jobs execute migrate --project api-dere-social --region southamerica-east1 --wait` yourself
+  (it is idempotent: a project that is current applies nothing).
+- **A move** is undone by `--rollback` as above, before `--confirm-delete`. After it, only a second move
+  back would restore the data, and it would start from the target.
+- **The keyring** has no rollback: see "The master keyring".
+- **Release 2** is never rolled back past push A's revision, and push B's migration is never rolled back.
+
+### Commands at a glance
+
+| Command | What it does | Where it runs |
+|---|---|---|
+| `pnpm db:central` | Applies the central set to the local stack (`pnpm db:reset` already runs it) | local, CI |
+| `bash scripts/db-two-databases.sh [--reset [--bare]] [--assert-no-platform]` (`pnpm db:two`) | Creates, resets or checks the local second database `rede_tenant_b`; `--bare` leaves it empty like a new project | local only |
+| `pnpm db:migrate-all [-- --dry-run --tenant <slug> --project <ref> --concurrency <n> --strict --central-only]` | The fan-out; in production it is the Job (`ROLE=migrate`) | local, the Job |
+| `pnpm platform:probe -- --ref <ref> [--exercise-keys]` (or `-- --fake`) | Read-only probe of the Management API for one project; prints shapes and booleans only | your shell, hosted proof H1 |
+| `pnpm platform:reseal [--dry-run]` | Re-seals the registry under the current master key | trusted shell |
+| `pnpm platform:reissue-credentials -- --ref <ref>` | Break-glass: re-derives a project's credentials from the platform token | trusted shell |
+| `pnpm platform:move-tenant -- --tenant <slug> ...` | The move (modes above); in production the Job with `ROLE=move` | local (fake), the Job |
+| `pnpm platform:central-clean [-- --strict-empty]` | Counts what of a moved tenant is still in the central project | trusted shell |
+| `pnpm guard:workflows` | Checks the order, the lists and the concurrency of both deploy workflows, and the preflight's self-test | local, CI `static` job |
+
+**The local gate.** Outside production the "em atualização" gate derives its requirement from the files
+in the repository: if you apply a new tenant migration (for example with `supabase migration up`) without
+running `pnpm db:migrate-all`, the tenants of any project that already has a schema-state row answer
+`updating` until you do. `pnpm db:reset` clears the rows, and the integration suites clear project 0's row on
+exit.
+
+### Manual UAT (hosted)
+
+Record each line in the Phase 09.2 UAT (`/gsd-verify-work 09.2`) and in the ledger; a line that is not run
+stays `blocked — not run`. Every line depends on a hosted environment, so none counts without your evidence:
+
+- The platform token reaches the organisation, reveals (or does not reveal) the keys, and the registry's key
+  kind is chosen (H1).
+- One real bootstrap of an empty Pro project from the local stack, the three curl checks of "Data API
+  exposure", Auth hooks disabled, the project's own Send Email Hook reaching the API (H2).
+- A second real project end to end: sign-in with the tenant's own Auth, a chat on a private Realtime
+  channel, a file above 6 MB through resumable upload, an image URL, a push (H3).
+- A token of project A refused on the host of project B with real keys (H4).
+- The Cloud Run Job on homolog, then production: the deploy account's rights, the secrets, the one-hour
+  timeout, the exit codes, `deploy-cloudrun@v3` accepting the job inputs, and the PostgreSQL 17 client
+  installing on the runner (H5).
+- A real move, including a sign-in with the old password and a Storage object fetched, and the cache expiry
+  across Cloud Run instances during a cutover (H6).
+- The PWA installed on a phone against homolog after a move (H7).
+- A Kiwify test delivery and a Mux test asset for a tenant on its own project (H8).
+- Not proved by any automated run and owed to the browser spec and your walk: the 320 px width checks with
+  the real Manrope font and the pale and dark brands on the new screens (sketch finding F-6), and the
+  designer's review of sketch 014 on a real phone.
+- Open items you may want to decide: a command for the orphan routes (above), a tool to enable the access
+  hooks in a tenant project (above), and a column in the move report for the rows copied per table.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
@@ -2691,7 +3305,7 @@ Three conditions must hold **on the same `master` SHA** before a single producti
 
 `migrate-and-deploy-prod` declares `needs: [checks, build]`, so a **direct push to `master` by an
 admin goes through the same `checks` job**; branch protection is a convenience, not the gate. Inside
-the job the order is fixed: migrations → API → worker. `concurrency: deploy-<ref>` with
+the job the order is fixed: migrations → migrate Job → API → worker (Phase 09.2, D-544). `concurrency: deploy-<ref>` with
 `cancel-in-progress: false` means two pushes queue instead of migrating in parallel.
 
 If the GitHub plan blocks protected environments on a private repository (RESEARCH §Pitfall 5), use
@@ -2784,6 +3398,9 @@ production users. Production is always a fresh build of `master`.
 **Production is paused (Supabase Free plan).** Free projects pause after a week of inactivity.
 There is no keepalive workflow for production (the staging one was removed with staging); restore
 it in the Supabase dashboard (`rede-social` → Restore).
+*Phase 09.2 (D-543): every production project is on Pro, which does not pause for inactivity; a tenant
+project that is paused or unreachable shows as "Pausado" or "Inacessível" on its Banco tab and in the
+list's "Banco com problema" filter. Confirm the central project's plan before the Phase 09.2 release.*
 
 **Rotate the `api_user` password.** Change `API_DB_PASSWORD` in the environment secrets, update the
 matching `api-database-url-*` / `worker-database-url-*` Secret Manager versions, then re-run the
@@ -2797,6 +3414,11 @@ tenants are created from the platform panel. Homolog may hold demo tenants, seed
 
 **Roll back an API release.** `gcloud run services update-traffic api --to-revisions=<previous>=100
 --region=southamerica-east1`. Migrations are not rolled back — write forward-compatible migrations.
+
+**Tenant projects are migrated by the Job only.** The sealed credentials never leave GCP, so a project other
+than project 0 is migrated by the Cloud Run Job `migrate` (every deploy, and
+`gcloud run jobs execute migrate --project api-dere-social --region southamerica-east1 --wait` by hand; the
+worker's retry job heals a project that is "atrasado" every five minutes). See "Phase 09.2 release".
 
 **Migrations never run from a developer machine.** `supabase db push` against a remote project is a
 workflow step only; locally use `pnpm db:reset`. The single exception is the one-time bootstrap of
