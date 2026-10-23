@@ -4176,3 +4176,105 @@ describe('09-11 - the feed catalog: the follow-required refusal toast', () => {
     expect(lookup('feed.errors.communityLocked')).not.toBe(lookup('feed.errors.followRequired'));
   });
 });
+
+/**
+ * 09.2-18 Task 1 (UI-D-533, UI-D-537, UI-D-547) - the "Projeto Supabase" words of the new-tenant form
+ * and the NEW `platform.database.json` catalog (root key `platform`, one root per file; plan 19 extends
+ * it): the eight bootstrap step labels the dialog narrates and the ten reasons of the Copywriting
+ * Contract. The step and reason keys are the contract's own words (`BOOTSTRAP_STEP_KEYS`), so a step the
+ * engine adds cannot reach the screen without a label.
+ */
+describe('09.2-18 - the project field and the database catalog', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it('platform.database.json declares exactly the `platform` root', () => {
+    const own = JSON.parse(
+      readFileSync(path.join(catalogDir, 'platform.database.json'), 'utf8'),
+    ) as object;
+    expect(Object.keys(own)).toEqual(['platform']);
+  });
+
+  it.each([
+    ['platform.wizard.project.title', 'Projeto Supabase'],
+    [
+      'platform.wizard.project.body',
+      'Crie um projeto vazio na organização da plataforma no Supabase e cole aqui só o código dele.',
+    ],
+    ['platform.wizard.project.label', 'Código do projeto'],
+    [
+      'platform.wizard.project.helper',
+      'São 20 letras minúsculas. Você também pode colar o endereço do projeto no Supabase.',
+    ],
+    [
+      'platform.wizard.errors.projectUnchecked',
+      'Não foi possível conferir o projeto agora. Tente de novo.',
+    ],
+    ['platform.new.errors.projectRefRequired', 'Informe o código do projeto.'],
+    [
+      'platform.new.errors.projectRefInvalid',
+      'Use o código do projeto: 20 letras minúsculas, sem espaços.',
+    ],
+    [
+      'platform.new.errors.projectNotFound',
+      'Não encontramos este projeto. Confira o código e se ele está na organização da plataforma.',
+    ],
+    [
+      'platform.new.errors.projectNotEmpty',
+      'Este projeto já tem tabelas. Use um projeto novo e vazio.',
+    ],
+    ['platform.new.errors.projectInUse', 'Este projeto já está em uso por outro tenant.'],
+    [
+      'platform.new.errors.projectPaused',
+      'Este projeto está pausado. Reative-o no Supabase e tente de novo.',
+    ],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['verify', 'Verificar o projeto'],
+    ['roles', 'Criar os papéis de acesso'],
+    ['schema', 'Aplicar o esquema do banco'],
+    ['auth', 'Configurar a autenticação'],
+    ['buckets', 'Criar os buckets de arquivos'],
+    ['realtime', 'Criar as políticas do Realtime'],
+    ['tenant', 'Criar o tenant e os módulos'],
+    ['invite', 'Agendar o convite do primeiro administrador'],
+  ])('platform.database.steps.%s reads "%s"', (key, expected) => {
+    expect(lookup(`platform.database.steps.${key}`)).toBe(expected);
+  });
+
+  it.each([
+    ['unreachable', 'Não foi possível falar com o projeto.'],
+    ['accessDenied', 'O Supabase recusou o acesso. Confira a senha e as chaves.'],
+    ['notEmpty', 'O projeto já tem tabelas.'],
+    ['migration', 'Uma migração do esquema falhou.'],
+    ['auth', 'A configuração da autenticação falhou.'],
+    ['storage', 'A criação dos buckets falhou.'],
+    ['realtime', 'A criação das políticas do Realtime falhou.'],
+    ['tenant', 'A criação do tenant falhou.'],
+    ['invite', 'O agendamento do convite falhou.'],
+    ['unknown', 'Algo deu errado nesta etapa.'],
+  ])('platform.database.reasons.%s reads "%s"', (key, expected) => {
+    expect(lookup(`platform.database.reasons.${key}`)).toBe(expected);
+  });
+
+  it('has a label for every bootstrap step and a sentence for every reason code', async () => {
+    const { BOOTSTRAP_REASON_CODES, BOOTSTRAP_STEP_KEYS } = await import(
+      '@rede-social/contracts/projects'
+    );
+    const steps = lookup('platform.database.steps') as Record<string, string>;
+    for (const key of BOOTSTRAP_STEP_KEYS) expect(typeof steps[key]).toBe('string');
+    const { reasonCatalogKey } = await import('../lib/database-copy');
+    const reasons = lookup('platform.database.reasons') as Record<string, string>;
+    for (const code of BOOTSTRAP_REASON_CODES) {
+      expect(typeof reasons[reasonCatalogKey(code)]).toBe('string');
+    }
+  });
+});

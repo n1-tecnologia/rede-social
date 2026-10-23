@@ -136,6 +136,8 @@ const BASE: TenantDraft = {
   secondary: NEUTRAL_BRAND.secondary,
   modules: {},
   adminEmail: 'admin@clube.test',
+  projectRef: 'abcdefghijklmnopqrst',
+  manualAccess: false,
   contrastConfirmed: false,
   titleFont: null,
   lightTone: null,

@@ -94,7 +94,13 @@
         "slugTaken": "Este slug já está em uso.",
         "hexInvalid": "Use o formato #RRGGBB.",
         "emailInvalid": "Informe um e-mail válido.",
-        "emailInUse": "Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador."
+        "emailInUse": "Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador.",
+        "projectRefRequired": "Informe o código do projeto.",
+        "projectRefInvalid": "Use o código do projeto: 20 letras minúsculas, sem espaços.",
+        "projectNotFound": "Não encontramos este projeto. Confira o código e se ele está na organização da plataforma.",
+        "projectNotEmpty": "Este projeto já tem tabelas. Use um projeto novo e vazio.",
+        "projectInUse": "Este projeto já está em uso por outro tenant.",
+        "projectPaused": "Este projeto está pausado. Reative-o no Supabase e tente de novo."
       }
     },
     "tenant": {

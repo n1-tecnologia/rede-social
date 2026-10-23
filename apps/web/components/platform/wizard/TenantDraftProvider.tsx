@@ -51,6 +51,17 @@ export type TenantDraft = {
   /** Module key → on; every real module starts on (D-17). */
   modules: Record<string, boolean>;
   adminEmail: string;
+  /**
+   * The Supabase project's bare ref (09.2-18, UI-D-533). Not secret: it joins the persisted draft.
+   * Any edit of it clears its error and closes the later steps again (`dataReady: false`).
+   */
+  projectRef: string;
+  /**
+   * The last pre-check said the platform cannot obtain this project's access by itself, so the
+   * manual-access block shows (UI-D-534). A flag only: the three values are NOT part of the draft
+   * (`TenantDraftAccess`, memory only). Cleared by any edit of the ref.
+   */
+  manualAccess: boolean;
   /** The "Salvar mesmo assim" acknowledgement of a low-contrast pair. */
   contrastConfirmed: boolean;
   /**
@@ -105,6 +116,21 @@ export type TenantDraft = {
   createdId: string | null;
 };
 
+/**
+ * The manual access of the project (UI-D-534, D-539, D-541): write-only secrets. They live in the
+ * provider's MEMORY and nowhere else: not in `TenantDraft`, not in the `sessionStorage` mirror (an
+ * allow-list of persisted keys, `PERSISTED_KEYS`), not in a URL, a cookie or a log. They are sent
+ * once with the creation and cleared the moment the API refuses or accepts it, when the ref is
+ * edited, when the draft is discarded and when the wizard unmounts.
+ */
+export type TenantDraftAccess = {
+  databasePassword: string;
+  serviceKey: string;
+  publishableKey: string;
+};
+
+const NO_ACCESS: TenantDraftAccess = { databasePassword: '', serviceKey: '', publishableKey: '' };
+
 /** A picked logo or icon: the file itself and an object URL the previews show. */
 export type DraftImage = { file: File; url: string };
 
@@ -156,12 +182,62 @@ type TenantDraftValue = {
    */
   confirming: boolean;
   setConfirming: (value: boolean) => void;
+  /** The manual access values, in memory only (`TenantDraftAccess`). */
+  access: TenantDraftAccess;
+  setAccess: (patch: Partial<TenantDraftAccess>) => void;
+  clearAccess: () => void;
   update: (patch: Partial<TenantDraft>) => void;
   setImage: (kind: DraftImageKind, file: File | null) => void;
   reset: () => void;
 };
 
-const STORAGE_KEY = 'rede-social:novo-tenant';
+export const STORAGE_KEY = 'rede-social:novo-tenant';
+
+/**
+ * The ONLY keys of the draft that reach `sessionStorage` (an allow-list, never a deny-list): a key
+ * added to `TenantDraft` is not persisted until it is listed here, so a secret can never leak into
+ * the mirror by being added to the draft later. The manual access is not in `TenantDraft` at all.
+ */
+const PERSISTED_KEYS = [
+  'displayName',
+  'slug',
+  'slugTouched',
+  'primary',
+  'secondary',
+  'modules',
+  'adminEmail',
+  'projectRef',
+  'manualAccess',
+  'contrastConfirmed',
+  'titleFont',
+  'lightTone',
+  'darkColors',
+  'fontColors',
+  'buttonColors',
+  'host',
+  'hostReady',
+  'dataReady',
+  'fieldErrors',
+  'pendingSlug',
+  'createdId',
+] as const satisfies readonly (keyof TenantDraft)[];
+
+function persistable(draft: TenantDraft): Partial<TenantDraft> {
+  return Object.fromEntries(PERSISTED_KEYS.map((key) => [key, draft[key]]));
+}
+
+/**
+ * Drops the stored copy of the draft without touching the live one: for a hand-off to a page outside
+ * the wizard (the Banco tab), where the in-memory draft dies with the wizard's layout but the stored
+ * one would send the next "Novo tenant" to the invite step of a tenant that already exists.
+ */
+export function forgetStoredDraft(): void {
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Storage off: nothing was kept.
+  }
+}
 
 const isHex = (value: string) => hexColorSchema.safeParse(value).success;
 
@@ -174,6 +250,8 @@ function emptyDraft(moduleKeys: readonly string[]): TenantDraft {
     secondary: NEUTRAL_BRAND.secondary,
     modules: Object.fromEntries(moduleKeys.map((key) => [key, true])),
     adminEmail: '',
+    projectRef: '',
+    manualAccess: false,
     contrastConfirmed: false,
     titleFont: null,
     lightTone: null,
@@ -212,6 +290,8 @@ function restoredDraft(raw: string, base: TenantDraft): TenantDraft {
     secondary: text(saved.secondary, base.secondary),
     modules,
     adminEmail: text(saved.adminEmail, base.adminEmail),
+    projectRef: text(saved.projectRef, base.projectRef),
+    manualAccess: flag(saved.manualAccess, base.manualAccess),
     contrastConfirmed: flag(saved.contrastConfirmed, base.contrastConfirmed),
     // Only a name safe for CSS and URLs comes back; the preview still looks it up in the catalogue.
     titleFont: isFontFamilyName(saved.titleFont) ? saved.titleFont : null,
@@ -238,7 +318,9 @@ const TenantDraftContext = createContext<TenantDraftValue | null>(null);
  * the summary's confirmation sends it, through `createTenantFromDraftAction` and then the existing
  * upload and domain actions on the new id.
  *
- * The text fields are mirrored into this tab's `sessionStorage`, so a reload keeps them; the picked
+ * The text fields are mirrored into this tab's `sessionStorage` (the keys of `PERSISTED_KEYS` only),
+ * so a reload keeps them; the project's manual access (`access`, UI-D-534) is NOT among them: it is
+ * write-only, held in memory, and a reload finds the ref and asks for the three values again. The picked
  * files live in memory only (a reload drops them, and the Marca step asks again), and so do the app
  * icon's choices (`appIcon`, files among them; `reset` clears them with the rest). The draft feeds
  * the preview device on every step before creation; once a step carries the created tenant's id,
@@ -274,6 +356,7 @@ export function TenantDraftProvider({
   }));
   const [restored, setRestored] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [access, setAccessState] = useState<TenantDraftAccess>(NO_ACCESS);
   const [logo, setLogo] = useState<DraftImage | null>(null);
   const [logoDark, setLogoDark] = useState<DraftImage | null>(null);
   const [icon, setIcon] = useState<DraftImage | null>(null);
@@ -308,7 +391,7 @@ export function TenantDraftProvider({
   useEffect(() => {
     if (!restored) return;
     try {
-      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(persistable(draft)));
     } catch {
       // A full or blocked storage only costs the reload safety net.
     }
@@ -364,7 +447,13 @@ export function TenantDraftProvider({
     set(next);
   }, []);
 
+  const setAccess = useCallback((patch: Partial<TenantDraftAccess>) => {
+    setAccessState((prev) => ({ ...prev, ...patch }));
+  }, []);
+  const clearAccess = useCallback(() => setAccessState(NO_ACCESS), []);
+
   const reset = useCallback(() => {
+    clearAccess();
     setImage('logo', null);
     setImage('logoDark', null);
     setImage('icon', null);
@@ -382,7 +471,7 @@ export function TenantDraftProvider({
     } catch {
       // Nothing stored, nothing to clear.
     }
-  }, [setImage]);
+  }, [setImage, clearAccess]);
 
   const lowContrast = useMemo(
     () => hasLowContrast(contrastReport(deriveBrandColors(colors))),
@@ -444,6 +533,9 @@ export function TenantDraftProvider({
       restored,
       confirming,
       setConfirming,
+      access,
+      setAccess,
+      clearAccess,
       update,
       setImage,
       reset,
@@ -461,6 +553,9 @@ export function TenantDraftProvider({
       appIcon,
       restored,
       confirming,
+      access,
+      setAccess,
+      clearAccess,
       update,
       setImage,
       reset,

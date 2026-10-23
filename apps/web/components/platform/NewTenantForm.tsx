@@ -1,7 +1,8 @@
 'use client';
 
-import { Button, Card, Input } from '@rede-social/ui';
-import { Mail } from 'lucide-react';
+import { normalizeProjectRef } from '@rede-social/contracts/projects';
+import { Button, Card, Input, SectionTitle } from '@rede-social/ui';
+import { Database, Mail } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type FormEvent, useState } from 'react';
@@ -14,20 +15,28 @@ import { slugify } from '@/lib/slugify';
 import { type TenantDraft, useTenantDraft } from './wizard/TenantDraftProvider';
 
 /** The fields this step owns; the colours and the modules belong to Personalização. */
-const DATA_FIELDS = ['displayName', 'slug', 'adminEmail'] as const satisfies readonly DraftField[];
+const DATA_FIELDS = [
+  'displayName',
+  'slug',
+  'adminEmail',
+  'projectRef',
+] as const satisfies readonly DraftField[];
 
 /**
  * Step 1 (Dados) of the new-tenant wizard: who the tenant is. The display name, the slug (suggested
- * by `slugify` while untouched, editable, immutable once created) and the first-admin e-mail. The
- * colours, the modules and the logo are the next step's (Personalização). Every field lives in the
- * wizard's draft (`TenantDraftProvider`), so going back to this step finds it as it was left;
- * NOTHING is sent to the API here.
+ * by `slugify` while untouched, editable, immutable once created), the first-admin e-mail and, since
+ * 09.2-18, the Supabase project that will hold the tenant's data (UI-D-533): one field, the 20-letter
+ * ref, which also takes the address people copy (`normalizeProjectRef` on blur and on paste, so the
+ * field only ever shows the bare ref). The colours, the modules and the logo are the next step's
+ * (Personalização). Every field lives in the wizard's draft (`TenantDraftProvider`), so going back
+ * to this step finds it as it was left; NOTHING is WRITTEN to the API here.
  *
  * "Continuar" runs the API's own schema in the web tier (`validateTenantDraftAction`, with the
- * draft's last VALID colours and its modules, so only this step's fields can fail here) and opens
- * Personalização; the form never duplicates a regex and never disables the button on a partial
- * fill. What only the API knows (a slug or an e-mail already in use) comes back from the summary's
- * confirmation as field errors, shown here.
+ * draft's last VALID colours and its modules, so only this step's fields can fail here) and the
+ * platform's read-only pre-check of the project, and opens Personalização when both pass; the form
+ * never duplicates a regex and never disables the button on a partial fill. Every edit of the ref
+ * clears its error and closes the later steps again. What only the API knows (a slug or an e-mail
+ * already in use) comes back from the summary's confirmation as field errors, shown here.
  */
 export function NewTenantForm() {
   const t = useTranslations('platform');
@@ -35,7 +44,7 @@ export function NewTenantForm() {
   const { draft, colors, enabledModules, restored, update, reset } = useTenantDraft();
   const [pending, setPending] = useState(false);
   /** A failure no field owns: the schema refused something else, or the check never ran. */
-  const [problem, setProblem] = useState<'invalid' | 'unchecked' | null>(null);
+  const [problem, setProblem] = useState<'invalid' | 'unchecked' | 'projectUnchecked' | null>(null);
 
   /** Any Dados edit re-opens validation: the later steps stay closed until "Continuar" again. */
   const edit = (fields: DraftField[], patch: Partial<TenantDraft>) => {
@@ -54,6 +63,8 @@ export function NewTenantForm() {
     if (pending) return;
     setPending(true);
     setProblem(null);
+    // What reaches the server is always the normalised ref (P99), typed-and-never-blurred included.
+    const projectRef = normalizeProjectRef(draft.projectRef);
     const input: TenantDraftInput = {
       displayName: draft.displayName,
       slug: draft.slug,
@@ -61,13 +72,14 @@ export function NewTenantForm() {
       secondary: colors.secondary,
       adminEmail: draft.adminEmail,
       modules: enabledModules,
+      projectRef,
     };
     try {
       const result = await validateTenantDraftAction(input);
       const fieldErrors = { ...draft.fieldErrors };
       for (const field of DATA_FIELDS) delete fieldErrors[field];
       if (result.ok) {
-        update({ dataReady: true, fieldErrors });
+        update({ projectRef, dataReady: true, fieldErrors });
         router.push('/plataforma/novo/marca');
         return;
       }
@@ -75,8 +87,9 @@ export function NewTenantForm() {
         const key = result.fieldErrors[field];
         if (key) fieldErrors[field] = key;
       }
-      update({ dataReady: false, fieldErrors });
-      if (!DATA_FIELDS.some((field) => result.fieldErrors[field])) setProblem('invalid');
+      update({ projectRef, dataReady: false, fieldErrors });
+      if (result.unchecked) setProblem('projectUnchecked');
+      else if (!DATA_FIELDS.some((field) => result.fieldErrors[field])) setProblem('invalid');
     } catch (error) {
       console.error('platform.tenants.validate_failed', { error: String(error) });
       setProblem('unchecked');
@@ -100,7 +113,9 @@ export function NewTenantForm() {
           >
             {problem === 'invalid'
               ? t('wizard.errors.invalidDraft')
-              : t('wizard.errors.checkFailed')}
+              : problem === 'projectUnchecked'
+                ? t('wizard.errors.projectUnchecked')
+                : t('wizard.errors.checkFailed')}
           </div>
         ) : null}
 
@@ -149,6 +164,42 @@ export function NewTenantForm() {
             error={fieldError('adminEmail')}
           />
           <p className="text-xs text-text-tertiary">{t('new.adminEmailHelper')}</p>
+        </div>
+
+        <div>
+          <SectionTitle variant="group" as="h3">
+            {t('wizard.project.title')}
+          </SectionTitle>
+          <p className="mt-1 text-sm text-text-secondary">{t('wizard.project.body')}</p>
+          <div className="mt-4 flex flex-col gap-2">
+            <Input
+              id="projectRef"
+              name="projectRef"
+              icon={Database}
+              label={t('wizard.project.label')}
+              maxLength={200}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              className="tabular-nums"
+              value={draft.projectRef}
+              onChange={(event) => edit(['projectRef'], { projectRef: event.target.value })}
+              onPaste={(event) => {
+                // A pasted dashboard or API address becomes the bare ref at once (UI-D-533).
+                event.preventDefault();
+                edit(['projectRef'], {
+                  projectRef: normalizeProjectRef(event.clipboardData.getData('text')),
+                });
+              }}
+              onBlur={() => {
+                const normalized = normalizeProjectRef(draft.projectRef);
+                if (normalized !== draft.projectRef)
+                  edit(['projectRef'], { projectRef: normalized });
+              }}
+              error={fieldError('projectRef')}
+            />
+            <p className="text-xs text-text-tertiary">{t('wizard.project.helper')}</p>
+          </div>
         </div>
 
         <div className="flex flex-col-reverse gap-3 md:flex-row md:items-center md:justify-between">

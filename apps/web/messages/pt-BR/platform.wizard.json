@@ -274,7 +274,14 @@
       },
       "errors": {
         "checkFailed": "Não foi possível verificar agora. Tente de novo.",
-        "invalidDraft": "Alguns dados não passaram na verificação. Revise os campos e tente de novo."
+        "invalidDraft": "Alguns dados não passaram na verificação. Revise os campos e tente de novo.",
+        "projectUnchecked": "Não foi possível conferir o projeto agora. Tente de novo."
+      },
+      "project": {
+        "title": "Projeto Supabase",
+        "body": "Crie um projeto vazio na organização da plataforma no Supabase e cole aqui só o código dele.",
+        "label": "Código do projeto",
+        "helper": "São 20 letras minúsculas. Você também pode colar o endereço do projeto no Supabase."
       }
     },
     "devicePreview": {

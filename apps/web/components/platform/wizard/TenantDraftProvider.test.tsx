@@ -405,3 +405,47 @@ describe('TenantDraftProvider — the look', () => {
     expect(draft.appIcon).toBeNull();
   });
 });
+
+/**
+ * 09.2-18 (UI-D-533): the Supabase project's ref joins the persisted draft. It is not secret, so a
+ * reload keeps it, and the later steps stay closed until "Continuar" checks it again.
+ */
+describe('TenantDraftProvider — the project ref', () => {
+  it('starts empty and unchecked', () => {
+    mount();
+    expect(draft.draft.projectRef).toBe('');
+    expect(draft.draft.manualAccess).toBe(false);
+    expect(draft.draft.dataReady).toBe(false);
+  });
+
+  it('mirrors the ref into the tab’s session and reads it back after a reload', () => {
+    const first = mount();
+    act(() => draft.update({ projectRef: 'abcdefghijklmnopqrst', dataReady: true }));
+    expect(stored()).toMatchObject({ projectRef: 'abcdefghijklmnopqrst', dataReady: true });
+    first.unmount();
+    mount();
+    expect(draft.draft.projectRef).toBe('abcdefghijklmnopqrst');
+  });
+
+  it('reads a draft stored before the ref existed as an empty one', () => {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ displayName: 'Antigo' }));
+    mount();
+    expect(draft.draft.displayName).toBe('Antigo');
+    expect(draft.draft.projectRef).toBe('');
+  });
+
+  it('keeps only a string ref from storage', () => {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ projectRef: 42 }));
+    mount();
+    expect(draft.draft.projectRef).toBe('');
+  });
+
+  it('reset clears the ref with the rest', () => {
+    mount();
+    act(() => draft.update({ projectRef: 'abcdefghijklmnopqrst' }));
+    act(() => draft.reset());
+    expect(draft.draft.projectRef).toBe('');
+    // The mirror holds the empty draft again, never the old ref.
+    expect(stored()).toMatchObject({ projectRef: '', dataReady: false });
+  });
+});

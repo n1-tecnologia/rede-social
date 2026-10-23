@@ -1,0 +1,28 @@
+{
+  "platform": {
+    "database": {
+      "steps": {
+        "verify": "Verificar o projeto",
+        "roles": "Criar os papéis de acesso",
+        "schema": "Aplicar o esquema do banco",
+        "auth": "Configurar a autenticação",
+        "buckets": "Criar os buckets de arquivos",
+        "realtime": "Criar as políticas do Realtime",
+        "tenant": "Criar o tenant e os módulos",
+        "invite": "Agendar o convite do primeiro administrador"
+      },
+      "reasons": {
+        "unreachable": "Não foi possível falar com o projeto.",
+        "accessDenied": "O Supabase recusou o acesso. Confira a senha e as chaves.",
+        "notEmpty": "O projeto já tem tabelas.",
+        "migration": "Uma migração do esquema falhou.",
+        "auth": "A configuração da autenticação falhou.",
+        "storage": "A criação dos buckets falhou.",
+        "realtime": "A criação das políticas do Realtime falhou.",
+        "tenant": "A criação do tenant falhou.",
+        "invite": "O agendamento do convite falhou.",
+        "unknown": "Algo deu errado nesta etapa."
+      }
+    }
+  }
+}
