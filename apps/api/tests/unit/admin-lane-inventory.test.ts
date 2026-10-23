@@ -110,6 +110,14 @@ describe('the real repository', () => {
     expect(ALLOW_PENDING || pending.length === 0).toBe(true);
   });
 
+  it('09.2-10: no site is pending and ALLOW_PENDING is false — the single-argument form no longer exists', () => {
+    expect(ALLOW_PENDING).toBe(false);
+    expect(ADMIN_LANE_INVENTORY.filter((e) => e.status === 'pending')).toEqual([]);
+    for (const list of Object.values(sites)) {
+      expect(list.filter((site) => site.legacy)).toEqual([]);
+    }
+  });
+
   it('the legacy overload is only used where the inventory says pending', () => {
     for (const [file, list] of Object.entries(sites)) {
       const entries = ADMIN_LANE_INVENTORY.filter((e) => e.file === file);

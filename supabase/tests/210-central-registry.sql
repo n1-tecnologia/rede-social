@@ -2,7 +2,8 @@ begin;
 -- 210-central-registry.sql — Phase 09.2-02 (DBT-01 table half, DBT-32, DBT-46; D-538, D-540, D-547; P2;
 -- T-09.2-06, T-09.2-08): the CENTRAL set's `platform` registry executed inside Postgres.
 --
--- 1. SHAPE: the schema, the five tables, their primary keys and the five named indexes.
+-- 1. SHAPE: the schema, the five registry tables, their primary keys and the five named indexes. (09.2-10 added
+--    three route-index tables to the schema; the exposure counts below cover all eight, their keys are 214's.)
 -- 2. CHECKs (23514) and uniqueness (23505): ref/provider/state formats, `env` credentials only on the central
 --    row, the smallint key id and the integer credential version (P2: 0 and -1 are refused by the CHECK, 32768
 --    does not fit the smallint at all), the api_url scheme, one central, one default, one hook_ref, the step and
@@ -136,11 +137,11 @@ select throws_ok(
   '23505', null, 'a tenant has ONE binding (tenant_id is the primary key)');
 
 -- ── 3. exposure ────────────────────────────────────────────────────────────────────────────────
-select is((select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'platform' and c.relkind = 'r'), 5,
-  'schema platform holds exactly the five registry tables');
+select is((select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'platform' and c.relkind = 'r'), 8,
+  'schema platform holds exactly the five registry tables and the three route indexes (09.2-10, proved in 214)');
 select is((select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace
-            where n.nspname = 'platform' and c.relkind = 'r' and c.relrowsecurity and not c.relforcerowsecurity), 5,
-  'all five tables: RLS on and NOT forced');
+            where n.nspname = 'platform' and c.relkind = 'r' and c.relrowsecurity and not c.relforcerowsecurity), 8,
+  'all eight tables: RLS on and NOT forced');
 select is((select count(*)::int from pg_policy p join pg_class c on c.oid = p.polrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'platform'), 0,
   'platform has ZERO policies (the registry is service_role only)');
 select ok(not has_schema_privilege('anon', 'platform', 'usage'), 'anon has no USAGE on schema platform');
@@ -155,8 +156,8 @@ select is((select count(*)::int from pg_class c join pg_namespace n on n.oid = c
 select is((select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace
             where n.nspname = 'platform' and c.relkind = 'r'
               and has_table_privilege('service_role', c.oid, 'select') and has_table_privilege('service_role', c.oid, 'insert')
-              and has_table_privilege('service_role', c.oid, 'update') and has_table_privilege('service_role', c.oid, 'delete')), 5,
-  'service_role holds select, insert, update and delete on all five tables');
+              and has_table_privilege('service_role', c.oid, 'update') and has_table_privilege('service_role', c.oid, 'delete')), 8,
+  'service_role holds select, insert, update and delete on all eight tables');
 select ok(
   not has_function_privilege('anon', 'platform.bind_default_project()', 'execute')
     and not has_function_privilege('authenticated', 'platform.bind_default_project()', 'execute'),

@@ -10,8 +10,8 @@ import { type ProjectRecord, ProjectUnboundError } from '../server/tenancy/proje
 /**
  * D-538 (09.2-04): the explicit lane signatures. Fake handles record the statements their transaction ran, so
  * no test opens a socket. Flagged assumption P15 (DBT-07): the typecheck of the overloads, this file, `pnpm
- * lint` and `pnpm boundaries:negative` are the proof; the legacy overload is the deliberate exception until
- * plan 10.
+ * lint` and `pnpm boundaries:negative` are the proof. 09.2-10 removed the legacy `withAdminTx(fn)` overload (it
+ * meant "project 0"); the function-only call no longer type-checks and is refused at run time as well.
  */
 
 type FakeHandle = ProjectHandle & { statements: string[] };
@@ -170,14 +170,15 @@ describe('withAdminTx(target, fn)', () => {
   });
 });
 
-describe('the legacy withAdminTx(fn) and withPlatformTx(fn)', () => {
-  it('the function form means project 0, under service_role, registered in projectOfTx', async () => {
+describe('withPlatformTx(fn) and the removed function-only withAdminTx', () => {
+  it('the legacy function-only form is gone: it is refused before any project is resolved', async () => {
     const h = harness();
-    const used = await h.lanes.withAdminTx(async (tx) => projectOfTx.get(tx)?.handle);
-    expect(used).toBe(h.central);
-    expect(h.central.statements).toEqual([ROLE]);
+    await expect(
+      (h.lanes.withAdminTx as (fn: unknown) => Promise<unknown>)(async () => 1),
+    ).rejects.toBeInstanceOf(TypeError);
     expect(h.resolveProject).not.toHaveBeenCalled();
     expect(h.withHandle).not.toHaveBeenCalled();
+    expect(h.central.statements).toEqual([]);
   });
 
   it('withPlatformTx opens the central project under service_role and registers it', async () => {
@@ -189,7 +190,9 @@ describe('the legacy withAdminTx(fn) and withPlatformTx(fn)', () => {
 
   it('each lane records the lane that opened the transaction (09.2-09: the enqueue scope guard reads it)', async () => {
     const h = harness();
-    expect(await h.lanes.withAdminTx(async (tx) => projectOfTx.get(tx)?.lane)).toBe('admin');
+    expect(
+      await h.lanes.withAdminTx({ projectId: 'p0' }, async (tx) => projectOfTx.get(tx)?.lane),
+    ).toBe('admin');
     expect(
       await h.lanes.withAdminTx({ tenantId: 'tenant-a' }, async (tx) => projectOfTx.get(tx)?.lane),
     ).toBe('admin');
@@ -226,9 +229,10 @@ describe('the lanes are defined once and never in tenant-tx (CR-03)', () => {
     expect(code(read('../db/tenant-tx.ts'))).not.toMatch(/withAdminTx|withPlatformTx/);
   });
 
-  it('admin-tx.ts marks the function form @deprecated and takes a LaneTarget', () => {
+  it('admin-tx.ts has one signature, takes a LaneTarget and carries no @deprecated overload (09.2-10)', () => {
     const source = read('../db/admin-tx.ts');
-    expect(source).toContain('@deprecated');
+    expect(source).not.toContain('@deprecated');
     expect(source).toContain('LaneTarget');
+    expect((source.match(/export function withAdminTx/g) ?? []).length).toBe(1);
   });
 });

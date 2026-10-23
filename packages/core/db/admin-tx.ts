@@ -29,17 +29,6 @@ const lanes = createLanes({
   unbound: () => new ProjectUnboundError(),
 });
 
-export function withAdminTx<T>(target: LaneTarget, fn: (tx: Tx) => Promise<T>): Promise<T>;
-/**
- * @deprecated Project 0 only. Pass a target (`{ tenantId }` or `{ projectId }`) so the transaction opens on
- * the right project; the single-argument form is removed in plan 09.2-10 when the last site migrates.
- */
-export function withAdminTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T>;
-export function withAdminTx<T>(
-  first: LaneTarget | ((tx: Tx) => Promise<T>),
-  second?: (tx: Tx) => Promise<T>,
-): Promise<T> {
-  return second === undefined
-    ? lanes.withAdminTx(first as (tx: Tx) => Promise<T>)
-    : lanes.withAdminTx(first as LaneTarget, second);
+export function withAdminTx<T>(target: LaneTarget, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return lanes.withAdminTx(target, fn);
 }

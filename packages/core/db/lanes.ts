@@ -69,22 +69,19 @@ export function createLanes(deps: LaneDeps) {
   const platform = createPlatformLane(deps);
 
   /**
-   * Overloaded: `(target, fn)` opens on that target's project; the legacy `(fn)` form means project 0 and
-   * exists only so the 119+ call sites migrate plan by plan (09.2-04 planning decision 2, removed by plan 10).
+   * `(target, fn)`: opens on the project the target names. There is no other form (09.2-10 removed the
+   * legacy `(fn)` one, which meant "project 0"): a caller always says where.
    */
-  function withAdminTx<T>(target: LaneTarget, fn: TxFn<T>): Promise<T>;
-  function withAdminTx<T>(fn: TxFn<T>): Promise<T>;
-  async function withAdminTx<T>(first: LaneTarget | TxFn<T>, second?: TxFn<T>): Promise<T> {
-    if (typeof first === 'function') return runOn(deps.centralHandle(), 'admin', first);
-    if (typeof second !== 'function')
+  async function withAdminTx<T>(target: LaneTarget, fn: TxFn<T>): Promise<T> {
+    if (typeof fn !== 'function')
       throw new TypeError('withAdminTx requires a transaction function');
-    const target = targetOf(first);
+    const resolved = targetOf(target);
     const project =
-      'tenantId' in target
-        ? await deps.resolveProject(target.tenantId)
-        : await deps.resolveProjectById(target.projectId);
+      'tenantId' in resolved
+        ? await deps.resolveProject(resolved.tenantId)
+        : await deps.resolveProjectById(resolved.projectId);
     if (!project) throw deps.unbound();
-    return deps.withHandle(project, (handle) => runOn(handle, 'admin', second));
+    return deps.withHandle(project, (handle) => runOn(handle, 'admin', fn));
   }
 
   return { withAdminTx, withPlatformTx: platform.withPlatformTx };

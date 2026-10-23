@@ -137,7 +137,7 @@ settings change plus UI, not a migration that rewrites tables.
 1. **Request handlers reach tenant data only through `withTenantTx(ctx, fn)`** — one transaction
    that binds `set_config('request.jwt.claims', $1, true)` and runs `set local role authenticated`.
    Never query the `db` client directly from a route.
-2. **`withAdminTx(fn)` (`service_role`, bypasses RLS) is kernel-only** — importable from
+2. **`withAdminTx(target, fn)` (`service_role`, bypasses RLS) is kernel-only** — importable from
    `packages/core/server/{tenancy,platform}` and `scripts/` (Biome `noRestrictedImports` enforces
    it). Every use is a deliberate, reviewed exception. It is defined in `packages/core/db/admin-tx.ts`
    and nowhere else: the public `@rede-social/core/db/tenant-tx` entry point must never re-export it, and a

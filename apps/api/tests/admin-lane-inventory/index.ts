@@ -17,8 +17,8 @@ import { tenancy } from './tenancy';
  *   N  no-host entry   no tenant in hand (a webhook, an inbox row): resolve it through a central index first
  *   L  project loop    `withAdminTx({ projectId })` inside a per-project job (dispatcher, sweeper)
  *
- * Status: `pending` = the site still uses the deprecated single-argument form (project 0); `migrated` = it
- * passes a target. Plan 10 removes the deprecated overload and flips `ALLOW_PENDING` to false.
+ * Status: `pending` = the site uses the single-argument form (project 0); `migrated` = it passes a target.
+ * The single-argument form no longer exists (09.2-10), so every entry is `migrated` and `ALLOW_PENDING` is false.
  *
  * Entries are PER CALL SITE, in the order the sites appear in the file. `tests/unit/admin-lane-inventory.test.ts`
  * scans the source and fails when a site has no entry, an entry has no site, a status disagrees with the form
@@ -42,10 +42,11 @@ export type AdminLaneEntry = {
 };
 
 /**
- * Plan 10 flips this to false when the last site migrates and the deprecated overload is removed. While it is
- * true the guard tolerates `pending` entries (they are printed, in inventory order, on every run).
+ * FALSE since 09.2-10: the last pending site migrated and the single-argument `withAdminTx(fn)` form was
+ * removed, so the guard fails on any `pending` entry (a call that names no project). Kept as a constant, not
+ * deleted, so the guard's own test can still prove the tolerant mode on an in-memory fixture.
  */
-export const ALLOW_PENDING = true;
+export const ALLOW_PENDING = false;
 
 export const AREAS = { media, payments, platform, scripts, tenancy } as const;
 
