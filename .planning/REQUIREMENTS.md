@@ -341,10 +341,10 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-21**: The manual access fields (database password, service key, publishable key) are required only when the pre-check answers `manualAccess` and are validated against the project before anything is stored. *(D-541)*
 - [x] **DBT-22**: The migration runner applies a directory of SQL files to a database, one transaction per file with its ledger row, skips files already in the ledger, refuses a file whose recorded checksum changed, and is idempotent on re-run. *(D-545, D-547)*
 - [x] **DBT-23**: "Migrar todos" runs the central set then every tenant project with bounded concurrency, isolates a failing tenant, and supports `--dry-run` and `--tenant <slug>`. *(D-544)*
-- [ ] **DBT-24**: Each tenant's applied-versus-required schema state is stored in the central project after every run and shown as "applied of required". *(D-545)*
+- [x] **DBT-24**: Each tenant's applied-versus-required schema state is stored in the central project after every run and shown as "applied of required". *(D-545)*
 - [ ] **DBT-25**: A tenant whose applied state lacks any version the running image requires is answered `updating` from the cached mirror with zero extra queries, others keep running, and a self-re-arming job retries. *(D-545)*
 - [ ] **DBT-26**: The production workflow runs the central set and the fan-out before deploying the API and worker (D-12 order); a central failure stops the deploy, a tenant failure does not. *(D-544)*
-- [ ] **DBT-27**: A self-re-arming health job records reachable / paused / behind per project and the panel badge states of UI-D-539 derive from it. *(D-543)*
+- [x] **DBT-27**: A self-re-arming health job records reachable / paused / behind per project and the panel badge states of UI-D-539 derive from it. *(D-543)*
 - [ ] **DBT-28**: `docs/DEPLOY.md` "Connection budget (Pro)" is restated per project with the pool-cache arithmetic. *(D-543)*
 - [x] **DBT-29**: `enqueueInTx` writes into the pg-boss schema of the database that owns the transaction, and refuses to enqueue a platform queue from a tenant transaction (and the reverse). *(D-546)*
 - [x] **DBT-30**: The worker supervisor starts one pg-boss instance per ready tenant project plus the central one, adds and removes projects at runtime, and backs off on an unreachable or paused project. *(D-546)*
@@ -357,7 +357,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **DBT-37**: A fake project provider (no network) backs local, CI and test runs and cannot be selected by a production environment. *(D-540)*
 - [ ] **DBT-38**: A small suite over two databases proves routing: tenant A's rows exist only in database A, a lane for A cannot read B, a job enqueued for A lands only in A's pg-boss schema. *(D-540)*
 - [ ] **DBT-39**: The web tier receives the tenant project's own public URL and publishable key from the by-host answer for `@supabase/ssr`, the Realtime client, CSP, manifest icons and the TUS endpoint, and clears stale `sb-*` cookies of another project. *(D-537, D-541)*
-- [ ] **DBT-40**: Credentials are write-only in the panel; "Substituir credenciais" validates new values against the project before replacing anything. *(D-539)*
+- [x] **DBT-40**: Credentials are write-only in the panel; "Substituir credenciais" validates new values against the project before replacing anything. *(D-539)*
 - [ ] **DBT-41**: The existing two-tenant isolation suites (pgTAP and `isolation.test.ts`) stay green and `tenant_id` plus RLS remain on every table. *(D-540)*
 - [x] **DBT-42**: The allow-list adapter and reconcile job act per project (host to tenant to project), serialised per project. *(D-538, D-542)*
 - [ ] **DBT-43**: PROJECT.md is amended (tenant projects are physically separate and Pro; `tenant_id` + RLS stay as defense in depth; Free-plan line superseded). *(D-540, D-543)*
@@ -368,7 +368,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-48**: While a tenant has an open move, no panel route or script can reactivate, edit, re-invite or re-bootstrap it (409 `TENANT_MOVING`), the mirror reconcile skips it, and two concurrent moves of one tenant cannot both start. *(D-535, D-536)*
 - [ ] **DBT-49**: After the last move the central project holds platform data only: `--confirm-delete` removes the moved tenant's rows, files and exclusive accounts from the source, and `platform:central-clean` lists any residue and, with `--strict-empty`, requires every non-mirror table to be empty before the default-project flag is cleared. *(D-534)*
 - [x] **DBT-50**: The "Novo tenant" form's Projeto Supabase field accepts only a 20-letter project ref (a pasted dashboard or API address is normalised to it), pre-checks the project through the API before the wizard continues, shows the six documented ref errors, and asks for the manual access fields only when the pre-check says the API cannot reveal them. *(D-541, UI-D-533, UI-D-534, UI-D-535)*
-- [ ] **DBT-51**: The tenant's Banco tab shows the database state, the eight preparation steps in their fixed order with a catalog reason per failed step and a "Tentar de novo" that resumes at the first step not done, the applied-of-required schema version, and the write-only Credenciais card with "Verificar agora" and "Substituir credenciais". *(D-542, D-543, D-539, UI-D-536, UI-D-537, UI-D-538)*
+- [x] **DBT-51**: The tenant's Banco tab shows the database state, the eight preparation steps in their fixed order with a catalog reason per failed step and a "Tentar de novo" that resumes at the first step not done, the applied-of-required schema version, and the write-only Credenciais card with "Verificar agora" and "Substituir credenciais". *(D-542, D-543, D-539, UI-D-536, UI-D-537, UI-D-538)*
 - [ ] **DBT-52**: The tenant list gains a Banco column with the database pill and the schema line and a "Banco com problema" filter that keeps the list order, the tenant header carries the pill, and the Status tab disables "Reativar tenant" while a move is open. *(D-543, D-535, UI-D-539, UI-D-540, UI-D-541)*
 - [ ] **DBT-53**: A member of a tenant whose project is behind on migrations or still being prepared meets a branded static screen ("Comunidade em atualização", "Comunidade em preparação") that reveals no reason, name or project fact, and the login and sign-up cards show the matching notice. *(D-545, D-542, UI-D-542)*
 
@@ -725,10 +725,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-21 | Phase 09.2 (plans 14, 18, 25) | Pending |
 | DBT-22 | Phase 09.2 (plan 02) | Complete |
 | DBT-23 | Phase 09.2 (plan 15) | Complete |
-| DBT-24 | Phase 09.2 (plans 15, 19) | Pending |
+| DBT-24 | Phase 09.2 (plans 15, 19) | Complete |
 | DBT-25 | Phase 09.2 (plans 08, 15, 21) | Pending |
 | DBT-26 | Phase 09.2 (plans 16, 25) | Pending |
-| DBT-27 | Phase 09.2 (plans 14, 19) | Pending |
+| DBT-27 | Phase 09.2 (plans 14, 19) | Complete |
 | DBT-28 | Phase 09.2 (plan 24) | Pending |
 | DBT-29 | Phase 09.2 (plan 09) | Complete |
 | DBT-30 | Phase 09.2 (plan 09) | Complete |
@@ -741,7 +741,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-37 | Phase 09.2 (plan 12) | Complete |
 | DBT-38 | Phase 09.2 (plans 03, 04, 09, 28) | Pending |
 | DBT-39 | Phase 09.2 (plans 17, 25) | Pending |
-| DBT-40 | Phase 09.2 (plans 14, 19) | Pending |
+| DBT-40 | Phase 09.2 (plans 14, 19) | Complete |
 | DBT-41 | Phase 09.2 (plan 28) | Pending |
 | DBT-42 | Phase 09.2 (plan 11) | Complete |
 | DBT-43 | Phase 09.2 (plan 24) | Pending |
@@ -752,7 +752,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-48 | Phase 09.2 (plan 23) | Pending |
 | DBT-49 | Phase 09.2 (plans 23, 25) | Pending |
 | DBT-50 | Phase 09.2 (plans 14, 18) | Complete |
-| DBT-51 | Phase 09.2 (plans 14, 19) | Pending |
+| DBT-51 | Phase 09.2 (plans 14, 19) | Complete |
 | DBT-52 | Phase 09.2 (plans 14, 20) | Pending |
 | DBT-53 | Phase 09.2 (plan 21) | Pending |
 | MEDIA-01 | Phase 3 | Complete |

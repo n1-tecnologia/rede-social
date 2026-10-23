@@ -4,16 +4,16 @@ current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
 current_plan: 16
 status: executing
-stopped_at: Completed 09.2-18-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18 done; wave 10 complete); next is wave 11: 09.2-16 (deploy workflows, human checkpoint), 09.2-19 (Banco tab UI), 09.2-22 (copy engine)
-last_updated: "2026-10-23T04:36:09.657Z"
+stopped_at: "Completed 09.2-19-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19 done; wave 11 still has 09.2-22 (copy engine) next and 09.2-16 (deploy workflows, human checkpoint) on hold for a user decision)"
+last_updated: "2026-10-23T04:53:04.063Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-18 (wizard: Projeto Supabase field with paste normaliser and read-only pre-check, memory-only manual access block, Projeto row in the Resumo, database task in the confirmation dialog with step narration, Banco-tab hand-off and 60 s background option)"
-state_head: 16fb4928b2451fee969f908e04fece3f351aa863
+last_activity_desc: "Completed 09.2-19 (the Banco tab: overview card with the one eight-state pill vocabulary, the Preparação card with fixed-order steps, single-request resume, 3 s probe-then-refresh and a collapsed done state, and the write-only Credenciais card and replace sheet; DBT-51, DBT-24, DBT-27 and DBT-40 complete)"
+state_head: 94ae0e1d0e55d6db58da08ecbf48c1b4b132520c
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 252
+  completed_plans: 253
   percent: 0
 ---
 
@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
 Current Plan: 16
 Total Plans in Phase: 28
-Plan: wave 11 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper), 13 bootstrap engine, 10 route indexes for the no-host routes, 11 per-project Send Email Hook, sign-up by slug and allow-list, 14 panel API for a tenant's project, 17 web tier (coordinates per host), 15 migration fan-out and 18 wizard (Projeto Supabase field, pre-check, manual access, Projeto row, database task) done; wave 10 is complete; plans run out of numeric order: the next are wave 11: 16 (deploy workflows, autonomous: false, has a human decision checkpoint), 19 (Banco tab UI) and 22 (copy engine))
+Plan: wave 11 in progress (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs, 13 bootstrap engine, 10 route indexes, 11 per-project Send Email Hook, 14 panel API for a tenant's project, 17 web tier, 15 migration fan-out, 18 wizard and 19 Banco tab done; plans run out of numeric order: the next is 22 (copy engine); 16 (deploy workflows, autonomous: false, has a human decision checkpoint) is on hold for a user decision)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-18 (the wizard asks for the tenant's Supabase project, pre-checks it, takes manual access in memory only and narrates the database preparation in the confirmation; DBT-50 complete, DBT-21 waits for plan 25)
+Last activity: 2026-10-23 — Completed 09.2-19 (an operator sees a tenant's database state, its eight preparation steps with a one-request resume, and replaces its credentials through a write-only sheet; DBT-51, DBT-24, DBT-27, DBT-40 complete)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -310,6 +310,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.2 P17 | 30 min | 2 tasks | 24 files |
 | Phase 09.2 P15 | 32 min | 3 tasks | 24 files |
 | Phase 09.2 P18 | 28 min | 3 tasks | 25 files |
+| Phase 09.2 P19 | 17 min | 3 tasks | 21 files |
 
 ## Accumulated Context
 
