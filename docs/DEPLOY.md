@@ -2805,6 +2805,19 @@ The image also needs `supabase/roles.sql` (the `roles` step reads it); the Docke
 migration sets and the manifest to `/app/migrations` (`MIGRATIONS_DIR`), and a production boot without the
 manifest stops with `migrations manifest empty`.
 
+**What each process reads.** The bootstrap's `auth` step (in the worker, and in the Job when it runs a move)
+reads `API_PUBLIC_URL`, `PROJECT_AUTH_SMTP_PASS`, `MAIL_DOMAIN` and `PLATFORM_HOST`; without the SMTP password
+the step fails with `auth_config_failed`. A project that is not the central one needs its sealed session
+address (`database_url_session_sealed`) for the worker to poll its queue; the bootstrap seals it, and a
+project without one is backed off by the supervisor and logged as `worker.supervisor.backoff`. The worker
+boots without `PROJECT_PROVIDER` (it resolves the provider only when a step needs it), but every
+production process refuses an explicit `fake`, and the API and the worker need `PROJECT_PROVIDER=supabase`
+with the token, the organisation slug and the keyring before any revision that imports the provider runs.
+**The central set must be applied before the new API or worker revision runs** (it holds the registry that
+every request reads, `pgboss_platform` for the worker's boot, and the route indexes that every gateway
+delivery reads first; an API without them answers 500 and the gateway retries): that is why the Job
+sits between the migrations and the services and why a failed Job stops the deploy.
+
 ### Human gates
 
 | Gate | Needed before | What it needs |
