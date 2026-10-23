@@ -7,6 +7,7 @@ import {
   classifyFile,
   normaliseImage,
   resolveMime,
+  tusEndpointFor,
   uploadBytes,
   uploadToSignedUrl,
 } from './upload';
@@ -109,7 +110,7 @@ function stubXhr(): { urls: string[] } {
 
 const started = {
   provider: 'supabase',
-  signedUrl: 'http://storage.test/object/upload/sign/media/x',
+  signedUrl: 'http://127.0.0.1:54321/storage/v1/object/upload/sign/media/x?token=t',
   token: 'signed-token',
   path: 'tenant/media/asset/original',
   resumableThresholdBytes: RESUMABLE_THRESHOLD_BYTES,
@@ -187,6 +188,74 @@ describe('uploadBytes — the 6 MiB threshold router (MEDIA-01, RESEARCH Pitfall
         { mime: 'image/jpeg' },
       ),
     ).resolves.toEqual({ ok: false, reason: 'transfer' });
+  });
+});
+
+/**
+ * 09.2-17 (D-538, T-09.2-86): the TUS endpoint is the origin of the signed URL the API minted from the
+ * tenant's own project, never a build-time constant, and a hostile origin is refused.
+ */
+describe('tusEndpointFor — the endpoint follows the signed URL (09.2-17)', () => {
+  const REF = 'abcdefghijklmnopqrst';
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    tusState.constructed.length = 0;
+  });
+
+  it('a hosted project: the /sign endpoint on the same origin', () => {
+    expect(
+      tusEndpointFor(`https://${REF}.supabase.co/storage/v1/object/upload/sign/media/x?token=t`),
+    ).toBe(`https://${REF}.supabase.co/storage/v1/upload/resumable/sign`);
+  });
+
+  it('the local stack keeps its port, outside production only', () => {
+    expect(tusEndpointFor('http://127.0.0.1:54321/storage/v1/object/upload/sign/media/x')).toBe(
+      'http://127.0.0.1:54321/storage/v1/upload/resumable/sign',
+    );
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(() => tusEndpointFor('http://127.0.0.1:54321/storage/v1/x')).toThrow();
+  });
+
+  it('refuses a hostile or malformed signed URL', () => {
+    for (const url of [
+      'https://evil.example.com/storage/v1/object/upload/sign/media/x',
+      'https://x.supabase.co.evil.com/storage/v1/x',
+      `https://${REF}.supabase.co@evil.example.com/storage/v1/x`,
+      `http://${REF}.supabase.co/storage/v1/x`,
+      'javascript:alert(1)',
+      '/storage/v1/object/upload/sign/media/x',
+      '',
+    ]) {
+      expect(() => tusEndpointFor(url), url).toThrow();
+    }
+  });
+
+  it('the TUS upload is addressed to the signed URL origin', async () => {
+    stubXhr();
+    const hosted = {
+      ...started,
+      signedUrl: `https://${REF}.supabase.co/storage/v1/object/upload/sign/media/x?token=t`,
+    };
+    await uploadBytes(hosted, sizedFile('big.jpg', 'image/jpeg', 7 * 1024 * 1024), {
+      mime: 'image/jpeg',
+    });
+    const options = tusState.constructed[0]?.options as { endpoint: string } | undefined;
+    expect(options?.endpoint).toBe(`https://${REF}.supabase.co/storage/v1/upload/resumable/sign`);
+  });
+
+  it('a hostile signed URL fails as a transfer and no byte is queued', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      uploadBytes(
+        { ...started, signedUrl: 'https://evil.example.com/storage/v1/object/upload/sign/x' },
+        sizedFile('big.jpg', 'image/jpeg', 7 * 1024 * 1024),
+        { mime: 'image/jpeg' },
+      ),
+    ).resolves.toEqual({ ok: false, reason: 'transfer' });
+    expect(tusState.constructed).toHaveLength(0);
+    errorSpy.mockRestore();
   });
 });
 

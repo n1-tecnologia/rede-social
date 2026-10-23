@@ -12,6 +12,7 @@ import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
 import { LINK_RETURN_COOKIE, parseLinkReturn } from '@/lib/link-return';
 import { iconsFor, manifestPath, NEUTRAL_DISPLAY_NAME, NEUTRAL_ICONS } from '@/lib/manifest';
+import { brandCoordinates } from '@/lib/supabase-coordinates';
 import './globals.css';
 
 // Manrope is the design system's only typeface; the variable feeds `--font-sans` in tokens.css.
@@ -25,10 +26,12 @@ const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope', displa
  */
 export async function generateMetadata(): Promise<Metadata> {
   const brand = await getHostBrand();
-  const supabaseOrigin = new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin;
+  // 09.2-17 (D-538): the icons live in the HOST's project; a refused address uses the neutral set.
+  const coordinates = brandCoordinates(brand);
   const tenant = brand.mode === 'tenant' ? brand.tenant : null;
   const displayName = tenant?.displayName ?? NEUTRAL_DISPLAY_NAME;
-  const icons = tenant ? iconsFor(brand.branding, supabaseOrigin) : NEUTRAL_ICONS;
+  const icons =
+    tenant && coordinates ? iconsFor(brand.branding, coordinates.origin) : NEUTRAL_ICONS;
   return {
     title: { default: displayName, template: `%s · ${displayName}` },
     applicationName: displayName,

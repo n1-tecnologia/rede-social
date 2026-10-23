@@ -13,6 +13,7 @@ import {
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { TitleFontSheet } from '@/components/brand/TitleFontSheet';
@@ -25,6 +26,7 @@ import { env } from '@/lib/env';
 import { memberAreaTabOverrides } from '@/lib/member-area';
 import { requirePlatformTenants } from '@/lib/platform';
 import { areasFor, collapsingTabsFor, moduleLabelResolver, tabDotsFor } from '@/lib/registry';
+import { coordinatesForRequest, SupabaseCoordinatesUnavailableError } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
 import { logout, setTheme } from './actions';
 
@@ -151,12 +153,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // labels — wraps the tenant shell only. The platform branch above stays static.
   // 07 review C-WR-01: without the notifications module the API answers every push route with
   // MODULE_DISABLED, so the shell gets no VAPID key and never re-saves a subscription on open.
+  // 09.2-17 (D-538): the Realtime client talks to the HOST's project. A tenant whose project address was
+  // refused has no coordinates and is unavailable to the shell, never served from the central project.
+  let live: Awaited<ReturnType<typeof coordinatesForRequest>> | null = null;
+  try {
+    live = await coordinatesForRequest();
+  } catch (error) {
+    if (!(error instanceof SupabaseCoordinatesUnavailableError)) throw error;
+  }
+  if (!live) redirect('/comunidade-indisponivel');
+
   const notificationsOn = bootstrap.modules.some((m) => m.key === 'notifications');
   const vapidPublicKey = notificationsOn ? (env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null) : null;
   return (
     <LiveShell
-      supabaseUrl={env.NEXT_PUBLIC_SUPABASE_URL}
-      publishableKey={env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+      supabaseUrl={live.url}
+      publishableKey={live.publishableKey}
       tenantId={tenant.id}
       userId={bootstrap.user.id}
       initialCounters={bootstrap.counters}

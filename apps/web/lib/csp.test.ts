@@ -104,6 +104,69 @@ describe('cspFor', () => {
   });
 });
 
+/**
+ * 09.2-17 (DBT-39, D-538, T-09.2-84): the policy names the HOST's project, exactly, and nothing broader.
+ */
+describe('cspFor — the host project origin (09.2-17)', () => {
+  const B = 'https://abcdefghijklmnopqrst.supabase.co';
+  const tokens = (policy: string, name: string) => (directive(policy, name) ?? '').split(' ');
+
+  it('puts the exact origin in img-src, media-src and connect-src, and its wss twin in connect-src only', () => {
+    const policy = cspFor('n', { https: true, mode: 'enforce', supabaseOrigin: B });
+    expect(tokens(policy, 'img-src')).toContain(B);
+    expect(tokens(policy, 'media-src')).toContain(B);
+    expect(tokens(policy, 'connect-src')).toContain(B);
+    expect(tokens(policy, 'connect-src')).toContain('wss://abcdefghijklmnopqrst.supabase.co');
+    expect(tokens(policy, 'img-src')).not.toContain('wss://abcdefghijklmnopqrst.supabase.co');
+    expect(policy).not.toContain('ws://abcdefghijklmnopqrst');
+  });
+
+  it('never carries the central project for a tenant of another project', () => {
+    const policy = cspFor('n', { https: true, mode: 'enforce', supabaseOrigin: B });
+    expect(policy).not.toContain('127.0.0.1');
+    expect(policy).not.toContain('54321');
+  });
+
+  it('never writes a Supabase wildcard, whatever the origin', () => {
+    for (const supabaseOrigin of [B, 'http://127.0.0.1:54321', undefined, null]) {
+      const policy = cspFor('n', { https: true, mode: 'enforce', supabaseOrigin });
+      expect(policy).not.toMatch(/\*\.supabase\./);
+      expect(policy).not.toMatch(/\*\.supabase\.co/);
+    }
+  });
+
+  it('an http origin gets the ws: twin, no wss:', () => {
+    const connect = directive(
+      cspFor('n', { https: false, mode: 'enforce', supabaseOrigin: 'http://127.0.0.1:54399' }),
+      'connect-src',
+    );
+    expect(connect).toContain('http://127.0.0.1:54399 ws://127.0.0.1:54399');
+    expect(connect).not.toContain('wss://');
+  });
+
+  it('null names no Supabase origin at all (a tenant whose project address was refused)', () => {
+    const policy = cspFor('n', { https: true, mode: 'enforce', supabaseOrigin: null });
+    expect(policy).not.toContain('127.0.0.1');
+    expect(policy).not.toContain('supabase');
+    expect(directive(policy, 'img-src')).toBe(
+      "img-src 'self' data: blob: https://*.mux.com https://*.litix.io",
+    );
+  });
+
+  it("omitted keeps today's behaviour: the central project from the environment", () => {
+    const policy = cspFor('n', { https: false, mode: 'enforce' });
+    expect(tokens(policy, 'connect-src')).toContain('http://127.0.0.1:54321');
+    expect(tokens(policy, 'connect-src')).toContain('ws://127.0.0.1:54321');
+    expect(tokens(policy, 'img-src')).toContain('http://127.0.0.1:54321');
+  });
+
+  it('a hostile origin string cannot inject a directive', () => {
+    expect(() =>
+      cspFor('n', { https: true, mode: 'enforce', supabaseOrigin: 'https://a.com; script-src *' }),
+    ).toThrow();
+  });
+});
+
 describe('cspHeaderName', () => {
   it('enforces only in enforce mode', () => {
     expect(cspHeaderName('enforce')).toBe('Content-Security-Policy');

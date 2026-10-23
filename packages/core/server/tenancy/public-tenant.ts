@@ -1,9 +1,9 @@
 import { PLATFORM_TERMS_VERSION, type PublicTenant, slugSchema } from '@rede-social/contracts';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { projectHealth, projectSchemaState, projects, tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
-import { tenants } from '../../db/schema';
+import { tenantDomains, tenants } from '../../db/schema';
 import { ApiError } from '../http/api-error';
 import { accessCheckoutUrl } from './access';
 import { hostStatusOf } from './tenant-host';
@@ -28,12 +28,16 @@ import { hostStatusOf } from './tenant-host';
  * `TENANT_UNAVAILABLE`) BEFORE any tenant lane opens, so nothing can be signed up to it. A non-central project
  * that has no publishable key yet is still being prepared. For a non-central project the record also carries
  * that project's public `supabaseUrl` and `publishableKey` (never a sealed value).
+ *
+ * 09.2-17 (D-36): the same non-central record also carries `primaryHost`, the tenant's verified primary host
+ * (the web sends a generic-host sign-up there), and a non-central tenant with no verified primary host is a
+ * 404 `TENANT_NOT_FOUND` (it has no entrance). A tenant of the central project is unchanged.
  */
 export async function getPublicTenant(slug: string): Promise<PublicTenant> {
   if (!slugSchema.safeParse(slug).success) throw new ApiError(404, 'TENANT_NOT_FOUND');
 
-  const [identity] = await withPlatformTx((tx) =>
-    tx
+  const identity = await withPlatformTx(async (tx) => {
+    const [found] = await tx
       .select({
         id: tenants.id,
         slug: tenants.slug,
@@ -54,8 +58,23 @@ export async function getPublicTenant(slug: string): Promise<PublicTenant> {
       .leftJoin(projectHealth, eq(projectHealth.projectId, projects.id))
       .leftJoin(projectSchemaState, eq(projectSchemaState.projectId, projects.id))
       .where(and(eq(tenants.slug, slug), eq(tenants.status, 'active')))
-      .limit(1),
-  );
+      .limit(1);
+    if (!found) return null;
+    // 09.2-17 (D-36): the tenant's verified PRIMARY host, read in the same central transaction. The web
+    // sends a person who signs up from a generic host to it when the tenant lives in another project.
+    const [primary] = await tx
+      .select({ host: tenantDomains.host })
+      .from(tenantDomains)
+      .where(
+        and(
+          eq(tenantDomains.tenantId, found.id),
+          eq(tenantDomains.isPrimary, true),
+          isNotNull(tenantDomains.verifiedAt),
+        ),
+      )
+      .limit(1);
+    return { ...found, primaryHost: primary?.host ?? null };
+  });
   if (!identity) throw new ApiError(404, 'TENANT_NOT_FOUND');
 
   const central = identity.isCentral !== false;
@@ -71,9 +90,17 @@ export async function getPublicTenant(slug: string): Promise<PublicTenant> {
   if (status === 'updating') throw new ApiError(503, 'TENANT_UPDATING');
   if (status === 'unavailable') throw new ApiError(503, 'TENANT_UNAVAILABLE');
 
+  // 09.2-17 (D-36): a tenant of another project signs people in only on its own host, so with no verified
+  // primary host it has no entrance at all: the same 404 as an unknown slug, before any tenant lane opens.
+  if (!central && !identity.primaryHost) throw new ApiError(404, 'TENANT_NOT_FOUND');
+
   const coordinates =
     !central && identity.projectApiUrl && identity.projectPublishableKey
-      ? { supabaseUrl: identity.projectApiUrl, publishableKey: identity.projectPublishableKey }
+      ? {
+          supabaseUrl: identity.projectApiUrl,
+          publishableKey: identity.projectPublishableKey,
+          ...(identity.primaryHost ? { primaryHost: identity.primaryHost } : {}),
+        }
       : {};
 
   const row = await withAdminTx({ tenantId: identity.id }, async (tx) => {

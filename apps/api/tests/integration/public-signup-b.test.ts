@@ -100,6 +100,9 @@ async function heldOutReset() {
   await adminSql`delete from platform.project_health where project_id = ${held.projectId}::uuid`;
   await adminSql`delete from platform.project_schema_state where project_id = ${held.projectId}::uuid`;
   await adminSql`update public.tenants set status = 'active' where id = ${held.tenantId}::uuid`;
+  await adminSql`
+    update public.tenant_domains set verified_at = now()
+     where tenant_id = ${held.tenantId}::uuid and verified_at is null`;
   invalidateTenantHost(held.host);
 }
 
@@ -169,6 +172,29 @@ describe('GET /v1/public/tenants/{slug} for a tenant in another project (DBT-15)
     expect(record).not.toHaveProperty('supabaseUrl');
     expect(record).not.toHaveProperty('publishableKey');
     expect(publicTenantSchema.parse(record).slug).toBe('rede-lab');
+  });
+
+  it('09.2-17: the record of a tenant in another project names its verified primary host; a central tenant does not', async () => {
+    const slug = b.host.replace('.localhost', '');
+    const record = publicTenantSchema.parse(await (await get(slug)).json());
+    expect(record.primaryHost).toBe(b.host);
+
+    const central = (await (await get('rede-lab')).json()) as Record<string, unknown>;
+    expect(central).not.toHaveProperty('primaryHost');
+  });
+
+  it('09.2-17 (D-36): a tenant in another project with no verified primary host has no entrance: 404 before any project lane', async () => {
+    await adminSql`update public.tenant_domains set verified_at = null where tenant_id = ${held.tenantId}::uuid`;
+    const slug = held.host.replace('.localhost', '');
+    reset();
+    const res = await get(slug);
+    expect(res.status).toBe(404);
+    expect(await codeOf(res)).toBe('TENANT_NOT_FOUND');
+    expect(lanes.admin).toBe(0);
+    reset();
+    const signup = await post(slug, signupBody());
+    expect(signup.status).toBe(404);
+    expect(lanes.admin).toBe(0);
   });
 
   it('a slug that is not exactly canonical is a 404 and opens no project and no query at all', async () => {

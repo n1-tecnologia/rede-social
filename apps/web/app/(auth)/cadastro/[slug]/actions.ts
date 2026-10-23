@@ -3,7 +3,10 @@
 import {
   apiErrorEnvelopeSchema,
   isAllowlistRejection,
+  isRegistrableHost,
+  normalizeHost,
   passwordSchema,
+  publicTenantSchema,
   signupFormSchema,
   slugSchema,
 } from '@rede-social/contracts';
@@ -31,6 +34,32 @@ async function clientHeaders(): Promise<Record<string, string>> {
     ...(clientIp ? { 'X-Client-IP': clientIp } : {}),
     ...(userAgent ? { 'User-Agent': userAgent } : {}),
   };
+}
+
+/**
+ * 09.2-17 (D-36, D-538, decision 4): where a sign-up made on a GENERIC host must continue.
+ *
+ * A generic host (localhost, a Vercel preview) always talks to the CENTRAL project's Auth. A tenant that
+ * lives in another project has its members' sessions only on its own host, so the person is sent to
+ * `https://<primaryHost>/entrar` instead of being signed in here. The answer is the public slug record:
+ * `supabaseUrl` is present only for a tenant of another project, and `primaryHost` is its verified primary
+ * host (the API answers 404 for such a tenant without one). `null` means "a tenant of the central project,
+ * or no usable record": the flow continues exactly as before and the POST decides (404 included).
+ */
+async function foreignProjectEntrance(slug: string): Promise<string | null> {
+  const res = await fetch(`${env.API_URL}/v1/public/tenants/${encodeURIComponent(slug)}`, {
+    cache: 'no-store',
+  }).catch(() => null);
+  if (!res?.ok) return null;
+  // A 200 the contract cannot read (a primary host that is not a host, say) is a 404, never the
+  // central flow: the record is the only thing that says which project this tenant lives in.
+  const parsed = publicTenantSchema.safeParse(await res.json().catch(() => null));
+  if (!parsed.success) notFound();
+  if (!parsed.data.supabaseUrl) return null;
+
+  const host = normalizeHost(parsed.data.primaryHost);
+  if (!host || !isRegistrableHost(host)) notFound();
+  return `https://${host}/entrar`;
 }
 
 /**
@@ -79,6 +108,9 @@ export async function signup(formData: FormData): Promise<void> {
 
   const { acceptRules: _acceptRules, acceptTerms: _acceptTerms, ...body } = parsed.data;
 
+  // 09.2-17: on a generic host the central Auth cannot sign anybody in to a tenant of another project.
+  const foreignEntrance = hostTenant.mode === 'generic' ? await foreignProjectEntrance(slug) : null;
+
   const res = await fetch(`${env.API_URL}/v1/public/signup/${encodeURIComponent(slug)}`, {
     method: 'POST',
     cache: 'no-store',
@@ -86,6 +118,12 @@ export async function signup(formData: FormData): Promise<void> {
     body: JSON.stringify(body),
   });
 
+  if (foreignEntrance && (res.ok || res.status === 409)) {
+    // The account now exists (or already did) in the tenant's own project: no confirmation mail from
+    // here, no pending-confirmation cookie on this host, no "já tem conta" draft. The tenant's own host
+    // continues from its sign-in page (and resends the confirmation from there, against its own Auth).
+    redirect(foreignEntrance);
+  }
   if (res.status === 409) {
     await writeJoinDraft({ email: body.email, name: body.name });
     redirect(`${base}?${EXISTING_STATE}`);

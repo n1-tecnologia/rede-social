@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { publicTenantSchema } from '../src/auth';
 import { resolveBranding, toHostBranding } from '../src/branding';
 import { ERROR_CODES } from '../src/errors';
 import {
@@ -141,6 +142,38 @@ describe('hostTenantSchema — host status and the optional project coordinates'
   it('TENANT_PREPARING and TENANT_UPDATING join the error codes next to TENANT_UNAVAILABLE', () => {
     for (const code of ['TENANT_PREPARING', 'TENANT_UPDATING', 'TENANT_UNAVAILABLE']) {
       expect(ERROR_CODES).toContain(code);
+    }
+  });
+});
+
+describe('publicTenantSchema primaryHost (09.2-17, D-36)', () => {
+  const base = {
+    slug: 'rede-b',
+    displayName: 'Rede B',
+    rulesText: 'x',
+    rulesVersion: 1,
+    termsVersion: 1,
+  };
+
+  it('is optional, so a tenant of the central project is unchanged', () => {
+    expect(publicTenantSchema.safeParse(base).success).toBe(true);
+  });
+
+  it('accepts a registrable host and refuses anything that is not one', () => {
+    expect(
+      publicTenantSchema.safeParse({ ...base, primaryHost: 'comunidade.cliente.com.br' }).success,
+    ).toBe(true);
+    for (const primaryHost of [
+      '',
+      'A.example',
+      'evil.example/@x',
+      'a b',
+      'ex ample.com',
+      'a'.repeat(254),
+    ]) {
+      expect(publicTenantSchema.safeParse({ ...base, primaryHost }).success, primaryHost).toBe(
+        false,
+      );
     }
   });
 });

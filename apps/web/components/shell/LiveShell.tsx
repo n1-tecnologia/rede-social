@@ -26,9 +26,9 @@ import {
 } from '@/lib/push';
 
 export interface LiveShellProps {
-  /** `NEXT_PUBLIC_SUPABASE_URL`, passed by the server layout. */
+  /** The host's Supabase project address (09.2-17), passed by the server layout. */
   supabaseUrl: string;
-  /** `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, passed by the server layout. */
+  /** The host's publishable key (09.2-17), passed by the server layout. */
   publishableKey: string;
   /** The tenant of record and the member, from the bootstrap (never from the host). */
   tenantId: string;

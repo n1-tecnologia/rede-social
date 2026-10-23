@@ -4,6 +4,7 @@ import {
   type BrandingUploadMime,
 } from '@rede-social/contracts/branding';
 import { MEDIA_BUCKET, MEDIA_LIMITS } from '@rede-social/contracts/media';
+import { isAllowedSupabaseOrigin } from '@/lib/supabase-origin';
 
 /**
  * Client-safe signed-upload helper (02-14 + 03-04, D-27, CLAUDE.md §4): the browser sends the bytes
@@ -115,17 +116,29 @@ export function uploadToSignedUrl(
 }
 
 /**
- * Supabase's TUS endpoint — the **`/sign` variant**, which is the one that authenticates with a
- * signed upload token in `x-signature`. VERIFIED against this project's own storage service
- * (`dist/http/routes/tus/lifecycle.js`: `SIGNED_URL_SUFFIX = '/sign'`, and only a URL starting with
- * `/upload/resumable/sign` reads `x-signature` at all). The bare `/upload/resumable` path expects a
- * Supabase session JWT in `authorization`, which this browser never holds — sending the upload token
- * there answers `400 Invalid Compact JWS`.
+ * Supabase's TUS endpoint for the project that minted `signedUrl` — the **`/sign` variant**, which is
+ * the one that authenticates with a signed upload token in `x-signature`. VERIFIED against this
+ * project's own storage service (`dist/http/routes/tus/lifecycle.js`: `SIGNED_URL_SUFFIX = '/sign'`,
+ * and only a URL starting with `/upload/resumable/sign` reads `x-signature` at all). The bare
+ * `/upload/resumable` path expects a Supabase session JWT in `authorization`, which this browser never
+ * holds — sending the upload token there answers `400 Invalid Compact JWS`.
  *
- * `NEXT_PUBLIC_SUPABASE_URL` is inlined at build time, so this is a plain string in the bundle — and
- * it is the ONLY Supabase origin the browser talks to for an upload.
+ * 09.2-17 (D-538, T-09.2-86): the origin is NOT a build-time constant any more. A tenant's media lives in
+ * the tenant's own project, and the API builds `signedUrl` from that project (plan 05), so the TUS
+ * endpoint is the origin of the signed URL it just handed out. A signed URL whose origin is not an
+ * allowed Supabase origin (`isAllowedSupabaseOrigin`: https and `<ref>.supabase.co` in production, the
+ * local stack outside it) throws: the browser never sends file bytes and a token to an arbitrary host.
  */
-export const SUPABASE_TUS_ENDPOINT = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/upload/resumable/sign`;
+export function tusEndpointFor(signedUrl: string): string {
+  let origin: string;
+  try {
+    origin = new URL(signedUrl).origin;
+  } catch {
+    throw new Error('upload: the signed URL is not a URL');
+  }
+  if (!isAllowedSupabaseOrigin(origin)) throw new Error('upload: the signed URL origin is refused');
+  return `${origin}/storage/v1/upload/resumable/sign`;
+}
 
 /** What `POST /v1/media/uploads` answers, narrowed to what a transfer needs (`mediaStartSchema`). */
 export type StartedUpload = {
@@ -159,11 +172,18 @@ export type TransferOptions = {
  * the branding path and every screen that never uploads keep it out of their bundle.
  */
 export async function uploadResumable(
-  started: Pick<StartedUpload, 'token' | 'path'>,
+  started: Pick<StartedUpload, 'token' | 'path' | 'signedUrl'>,
   file: File,
   opts: TransferOptions,
 ): Promise<UploadOutcome> {
   if (!started.token || !started.path) return { ok: false, reason: 'transfer' };
+  let endpoint: string;
+  try {
+    endpoint = tusEndpointFor(started.signedUrl);
+  } catch (error) {
+    console.error('media.resumable_failed', { error: String(error) });
+    return { ok: false, reason: 'transfer' };
+  }
   const tus = await import('tus-js-client');
 
   return new Promise<UploadOutcome>((resolve) => {
@@ -183,7 +203,7 @@ export async function uploadResumable(
     }
 
     upload = new tus.Upload(file, {
-      endpoint: SUPABASE_TUS_ENDPOINT,
+      endpoint,
       retryDelays: [0, 3000, 5000, 10000, 20000],
       headers: { 'x-signature': started.token as string, 'x-upsert': 'false' },
       // EXACTLY 6 MiB: Supabase's TUS server refuses any other chunk size (RESEARCH Pitfall 3).

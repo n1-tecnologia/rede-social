@@ -59,14 +59,19 @@ interface Csp {
   policy: string;
 }
 
-function cspForRequest(request: NextRequest): Csp {
+function cspForRequest(request: NextRequest, supabaseOrigin: string | null): Csp {
   const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
   const https = forwardedProto ? forwardedProto === 'https' : request.nextUrl.protocol === 'https:';
   const nonce = newNonce();
   return {
     nonce,
     header: cspHeaderName(env.CSP_MODE),
-    policy: cspFor(nonce, { https, mode: env.CSP_MODE, reportUri: CSP_REPORT_PATH }),
+    policy: cspFor(nonce, {
+      https,
+      mode: env.CSP_MODE,
+      reportUri: CSP_REPORT_PATH,
+      supabaseOrigin,
+    }),
   };
 }
 
@@ -165,7 +170,11 @@ export async function proxy(request: NextRequest) {
   const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
   const browserHost = forwardedHost || request.headers.get('host');
   const hostTenant = await resolveHostTenant(browserHost);
-  const csp = cspForRequest(request);
+  // 09.2-17 (DBT-39, D-538): which Supabase project this host talks to. The by-host answer says; a half
+  // or disallowed address makes the tenant unavailable to the shell and the central project is never
+  // substituted for it. The policy names exactly this project's origin (or none for an unavailable one).
+  const coordinates = getSupabaseCoordinates(hostTenant);
+  const csp = cspForRequest(request, coordinates ? coordinates.origin : null);
 
   // D-35: an alias host answers 308 to the tenant's primary origin (still before the Supabase client).
   const toPrimary = primaryHostRedirect(request, hostTenant, browserHost, csp);
@@ -189,10 +198,7 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  // 2a. Which Supabase project this host talks to (09.2-17, DBT-39, D-538). The by-host answer says; a
-  //     half or disallowed address makes the tenant unavailable to the shell. The central project is
-  //     never substituted for it.
-  const coordinates = getSupabaseCoordinates(hostTenant);
+  // 2a. A tenant whose project address was refused is unavailable to the shell (see above).
   if (!coordinates) {
     const path = request.nextUrl.pathname;
     if (path === '/comunidade-indisponivel' || path === '/api/csp-report') {

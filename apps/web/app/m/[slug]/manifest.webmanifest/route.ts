@@ -1,12 +1,13 @@
-import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
 import {
   buildManifest,
   iconsFor,
   isManifestSlug,
+  NEUTRAL_ICONS,
   NEUTRAL_MANIFEST_SLUG,
   neutralManifest,
 } from '@/lib/manifest';
+import { brandCoordinates } from '@/lib/supabase-coordinates';
 
 /**
  * Per-tenant web-app manifest (PWA-01, D-25/D-28), host-authoritative (T-02-71, D-20/D-23):
@@ -40,11 +41,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
     // A tenant host whose lookup is momentarily unavailable (`tenant` null) cannot vouch for the
     // slug: 404 rather than a neutral manifest under a tenant's name.
     if (!brand.tenant || slug !== brand.tenant.slug) return notFound();
+    const coordinates = brandCoordinates(brand);
     body = buildManifest({
       slug,
       displayName: brand.tenant.displayName,
       themeColor: brand.branding.colors.primary,
-      icons: iconsFor(brand.branding, new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin),
+      // 09.2-17 (D-538): the host's own project hosts the icons; a refused address uses the neutral set.
+      icons: coordinates ? iconsFor(brand.branding, coordinates.origin) : NEUTRAL_ICONS,
     });
   } else {
     if (slug !== NEUTRAL_MANIFEST_SLUG) return notFound();

@@ -71,6 +71,15 @@ export const publicTenantSchema = z.object({
    */
   supabaseUrl: z.url().optional(),
   publishableKey: z.string().min(1).optional(),
+  /**
+   * 09.2-17 (D-36): the tenant's verified primary host, present only with the two fields above (a tenant of
+   * another project). A person who signs up from a generic host (localhost, a preview) for such a tenant is
+   * sent to `https://<primaryHost>/entrar`, because its sessions exist only on its own host.
+   */
+  primaryHost: z
+    .string()
+    .regex(/^[a-z0-9.-]{1,253}$/)
+    .optional(),
 });
 export type PublicTenant = z.infer<typeof publicTenantSchema>;
 

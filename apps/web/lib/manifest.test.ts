@@ -1,5 +1,13 @@
 import { NEUTRAL_BRAND, resolveBranding } from '@rede-social/contracts/branding';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/env', () => ({
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:54321',
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'central-pk',
+  },
+}));
+
 import {
   buildManifest,
   iconsFor,
@@ -11,6 +19,7 @@ import {
   neutralManifest,
   shortName,
 } from './manifest';
+import { brandCoordinates } from './supabase-coordinates';
 
 const origin = 'http://127.0.0.1:54321';
 const bucket = `${origin}/storage/v1/object/public/branding/11111111-1111-1111-1111-111111111111/branding/icons/1`;
@@ -120,5 +129,57 @@ describe('lib/manifest — icon allow-list (T-02-72)', () => {
 
     const otherBucket = { ...derived, i512: `${origin}/storage/v1/object/public/media/i512.png` };
     expect(iconsFor(resolveBranding({ iconUrls: otherBucket }), origin)).toEqual(NEUTRAL_ICONS);
+  });
+});
+
+/**
+ * 09.2-17 (DBT-39, D-538): a tenant whose assets live on project B keeps its icons only against B's
+ * origin; the central origin (or any other) replaces them with the neutral set, never a mix.
+ */
+describe('lib/manifest — icons follow the host project (09.2-17)', () => {
+  const originB = 'https://abcdefghijklmnopqrst.supabase.co';
+  const bucketB = `${originB}/storage/v1/object/public/branding/22222222-2222-2222-2222-222222222222/branding/icons/1`;
+  const derivedB = {
+    i192: `${bucketB}/icon-192.png`,
+    i512: `${bucketB}/icon-512.png`,
+    maskable512: `${bucketB}/icon-maskable-512.png`,
+    apple180: `${bucketB}/apple-touch-icon-180.png`,
+  };
+
+  it('9. B-hosted icons are kept when the origin passed is B', () => {
+    const icons = iconsFor(resolveBranding({ iconUrls: derivedB, faviconUrl: null }), originB);
+    expect(icons).toEqual({ ...derivedB, favicon: derivedB.i192 });
+  });
+
+  it("10. B-hosted icons are replaced by the neutral set against the central origin or another project's", () => {
+    const branding = resolveBranding({
+      iconUrls: derivedB,
+      faviconUrl: `${bucketB}/favicon-48.png`,
+    });
+    expect(iconsFor(branding, origin)).toEqual(NEUTRAL_ICONS);
+    expect(iconsFor(branding, 'https://uvwxyzabcdefghijklmn.supabase.co')).toEqual(NEUTRAL_ICONS);
+  });
+
+  it('11. the origin comes from the host answer: a project-B tenant yields B, a central tenant the environment', () => {
+    const tenantB = {
+      supabaseUrl: originB,
+      publishableKey: 'pk-b',
+    };
+    expect(brandCoordinates({ mode: 'tenant', host: 'b.example', tenant: tenantB })?.origin).toBe(
+      originB,
+    );
+    expect(brandCoordinates({ mode: 'tenant', host: 'a.example', tenant: {} })?.origin).toBe(
+      origin,
+    );
+    expect(brandCoordinates({ mode: 'platform', host: 'p.example', tenant: null })?.origin).toBe(
+      origin,
+    );
+  });
+
+  it('12. a refused project address has no origin, so the page falls back to the neutral icons', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const refused = { supabaseUrl: 'https://evil.example.com', publishableKey: 'pk' };
+    expect(brandCoordinates({ mode: 'tenant', host: 'b.example', tenant: refused })).toBeNull();
+    errorSpy.mockRestore();
   });
 });
