@@ -107,6 +107,11 @@ jobs:
       # `supabase config push`; an enabled hook whose function no migration defines answers 500 on every login.
       - name: Auth hook guard (no hosted environment inherits enabled hooks)
         run: pnpm guard:hooks
+      # 09.2-16 (DBT-26, P54-P57): the deploy workflows keep the order migrations -> migrate Job -> API -> worker,
+      # `--wait`, the serial production concurrency group and the secret lists; the release preflight names
+      # every missing item. Both read files only.
+      - name: Workflow guard (deploy order, wait, concurrency, secret lists)
+        run: pnpm guard:workflows
 
   db:
     name: pgTAP, seed, API integration, pooler spike
@@ -123,6 +128,9 @@ jobs:
       - uses: ./.github/actions/local-stack
         with:
           pgtap: 'true'
+          # The integration suite creates the second database itself (ensureSecondDatabase) and needs a
+          # pg_dump as new as the server for it.
+          second-database: 'true'
 
       - name: API integration suite
         run: pnpm test:integration

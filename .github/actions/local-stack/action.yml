@@ -1,6 +1,7 @@
 # The one local Supabase bring-up of ci.yml (quick 261007-kbq), shared by the `db`, `e2e` and
 # `e2e-pwa` jobs: CLI, ES256 keys, start (with a retry), reset, the api_user login password, the
-# Realtime partition wait, optionally pgTAP, the env files and the seed.
+# Realtime partition wait, optionally pgTAP, the env files and the seed. With `second-database: 'true'` (the
+# `db` job) it also installs a PostgreSQL 17 client for the second-database shim (09.2-16).
 #
 # The ci-only credentials (SEED_PASSWORD, SUPER_ADMIN_PASSWORD, SUPER_ADMIN_EMAIL and
 # SEND_EMAIL_HOOK_SECRETS) are deliberately NOT declared here: they live once, in the workflow-level
@@ -15,6 +16,10 @@ inputs:
     description: "'true' runs `supabase test db` after the Realtime wait and before the seed (the db job only)."
     required: false
     default: 'false'
+  second-database:
+    description: "'true' installs the PostgreSQL 17 client (`pg_dump`) the second-database shim of the integration suite needs (09.2-16; the db job only)."
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -22,6 +27,22 @@ runs:
     - uses: supabase/setup-cli@v3
       with:
         version: 2.117.0
+
+    - name: PostgreSQL 17 client for the second-database shim
+      # scripts/db-two-databases.sh restores the platform schemas of the local server (PostgreSQL 17) into
+      # `rede_tenant_b` with `pg_dump`, and a `pg_dump` older than the server refuses to dump. The runner image
+      # ships an older client, so install 17 from the PGDG repository and put it first on PATH.
+      if: ${{ inputs.second-database == 'true' }}
+      shell: bash
+      run: |
+        sudo install -d /usr/share/postgresql-common/pgdg
+        sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+        . /etc/os-release
+        echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq postgresql-client-17
+        echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+        /usr/lib/postgresql/17/bin/pg_dump --version
 
     - name: Generate ES256 signing keys for the local stack
       # The CLI loads config.toml first, and `signing_keys_path` must already hold valid JSON, so seed
