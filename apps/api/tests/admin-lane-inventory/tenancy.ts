@@ -52,6 +52,13 @@ export const tenancy: readonly AdminLaneEntry[] = [
     ['changeAccess', 'T', 5, undefined, 'migrated'],
     ['setMembershipRole', 'T', 5, undefined, 'migrated'],
   ]),
+  ...group('packages/core/server/tenancy/mirror.ts', [
+    ['pushToTenant', 'T', 7, 'the copy of the central-owned columns, written after the central commit', 'migrated'],
+    ['pushToCentral', 'T', 7, 'reads the tenant-owned brand from the tenant project', 'migrated'],
+    ['reconcileTenantMirror', 'T', 7, 'reads the tenant project copy', 'migrated'],
+    ['reconcileTenantMirror', 'T', 7, 'seeds a missing tenant row from the central values', 'migrated'],
+    ['reconcileTenantMirror', 'T', 7, 'writes the central-owned columns that differ', 'migrated'],
+  ]),
   ...group('packages/core/server/tenancy/public-tenant.ts', [
     ['getPublicTenant', 'S', 7],
     ['getTenantIdBySlug', 'P', 7, 'slug to tenant id, answered by the central mirror'],

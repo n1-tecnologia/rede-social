@@ -2,7 +2,9 @@ import type { AdminLaneEntry, SiteClass } from './index';
 
 /** The platform area (`packages/core/server/platform/*`): domains, invites, branding, tenants, modules, the allow list. One row per site, in site order.
  *
- * 09.2-06: the P files (`domains.ts`, `platform-admins.ts`, `allow-list-lock.ts`, `reconcile-allow-list.ts`, `recordInviteSendOutcome`) now call `withPlatformTx` and so are no `withAdminTx` site at all: their rows left this list (the guard scans `withAdminTx(` only, and a row for a file with no site is a stale entry), the same way `tenant-host.ts` left it in 09.2-04. The grep in plan 06's acceptance criteria is what keeps them out. */
+ * 09.2-06: the P files (`domains.ts`, `platform-admins.ts`, `allow-list-lock.ts`, `reconcile-allow-list.ts`, `recordInviteSendOutcome`) now call `withPlatformTx` and so are no `withAdminTx` site at all: their rows left this list (the guard scans `withAdminTx(` only, and a row for a file with no site is a stale entry), the same way `tenant-host.ts` left it in 09.2-04. The grep in plan 06's acceptance criteria is what keeps them out.
+ *
+ * 09.2-07: the same for `listPlatformTenants`, `invalidateTenantHosts`, `setTenantStatus`, `setModuleEnabled`, `tenantExists` and `invalidateAllTenantHosts` (central tables, `withPlatformTx`). */
 const group = (
   file: string,
   rows: readonly (readonly [fn: string, cls: SiteClass, plan: number, note?: string])[],
@@ -97,17 +99,13 @@ export const platform: readonly AdminLaneEntry[] = [
     ['readModuleSettings', 'S', 7],
     ['patchModuleSettings', 'S', 7],
   ]),
-  ...group('packages/core/server/platform/tenants.ts', [
+  ...group(
+    'packages/core/server/platform/tenants.ts',
     [
-      'listPlatformTenants',
-      'P',
-      7,
-      'the platform tenant list is read from the central tables (D-537)',
+      ['createTenant', 'S', 7, 'step 2 of the saga (the first-admin invite); step 1 is a platform transaction'],
+      ['getTenantDetail', 'S', 7, 'invites and admins from the tenant project, after the central read'],
+      ['updateTenant', 'S', 7, 'the brand colors; the display name is a central write'],
     ],
-    ['createTenant', 'S', 7],
-    ['getTenantDetail', 'S', 7],
-    ['invalidateTenantHosts', 'P', 7, 'reads tenant_domains, central'],
-    ['updateTenant', 'S', 7],
-    ['setTenantStatus', 'S', 7],
-  ]),
+    'migrated',
+  ),
 ];

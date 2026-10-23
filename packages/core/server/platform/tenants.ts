@@ -30,6 +30,8 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { projects, tenantProjects } from '../../db/central';
+import { withPlatformTx } from '../../db/platform-tx';
 import {
   memberProfiles,
   memberships,
@@ -40,6 +42,9 @@ import {
   users,
 } from '../../db/schema';
 import { ApiError } from '../http/api-error';
+import { pushToCentral, pushToTenant } from '../tenancy/mirror';
+import { ProjectUnavailableError, ProjectUnboundError } from '../tenancy/project-errors';
+import { invalidateProject } from '../tenancy/project-registry';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
 import { applyBrandColors } from './branding';
 import {
@@ -87,10 +92,11 @@ function isUniqueViolation(error: unknown, constraintNeedle: string): boolean {
 }
 
 /**
- * ROLE-01 / ROLE-05: the cross-tenant read behind `GET /v1/platform/tenants`. It lives in the
- * kernel's platform lane because that is where the admin lane may be opened at all (Biome
- * `noRestrictedImports` confines `@rede-social/core/db/admin-tx` to `server/tenancy`, `server/platform`
- * and `scripts/`) — a route file in `apps/api` must never reach past RLS on its own.
+ * ROLE-01 / ROLE-05: the cross-tenant read behind `GET /v1/platform/tenants`. It reads ONLY central
+ * tables (the `tenants` mirror, `tenant_modules`, `tenant_domains`) through the platform lane
+ * (09.2-07, D-537), so it answers with every tenant project's database closed. It lives in the
+ * kernel because Biome `noRestrictedImports` confines the service lanes to `server/tenancy`,
+ * `server/platform` and `scripts/` — a route file in `apps/api` must never reach past RLS on its own.
  *
  * Search (`q`) matches the display name OR the slug, case-insensitive substring; `status` filters;
  * the page is ordered by slug ascending (unique, so equal display names never reorder rows) and
@@ -111,7 +117,7 @@ export async function listPlatformTenants(
   if (query.status) conditions.push(eq(tenants.status, query.status));
   if (query.cursor) conditions.push(gt(tenants.slug, query.cursor));
 
-  const { tenantRows, moduleRows, hostRows } = await withAdminTx(async (tx) => {
+  const { tenantRows, moduleRows, hostRows } = await withPlatformTx(async (tx) => {
     const tenantRows = await tx
       .select({
         id: tenants.id,
@@ -168,12 +174,14 @@ export async function listPlatformTenants(
 }
 
 /**
- * ROLE-03 (D-19, D-30, D-31): provisions a tenant in ONE admin transaction — the `tenants` row with
- * its derived brand colors, one `tenant_modules` row per TOGGLEABLE key (`enabled` per the checklist,
- * `example` always false) and the first admin's `pending` invite. A duplicate slug surfaces the unique
- * constraint as 400 `VALIDATION_FAILED { slug: 'taken' }` from inside the transaction, so a concurrent
- * loser leaves no partial rows. The first admin may be anyone EXCEPT a platform account (D-316):
- * `identityKind` runs inside the SAME transaction before the `tenants` insert and refuses a
+ * ROLE-03 (D-19, D-30, D-31, D-538): provisions a tenant as a two-step saga. Step 1 (one platform
+ * transaction): the `tenants` row with its derived brand colors, one `tenant_modules` row per TOGGLEABLE key
+ * (`enabled` per the checklist, `example` always false) and the explicit binding to the default project.
+ * Step 2 (one transaction in the tenant's project): the first admin's `pending` invite. When step 2 fails the
+ * rows of step 1 are deleted (`compensateCreate`), so the slug is free for a retry and no half-created tenant
+ * survives. A duplicate slug surfaces the unique constraint as 400 `VALIDATION_FAILED { slug: 'taken' }` from
+ * inside step 1, so a concurrent loser leaves no partial rows. The first admin may be anyone EXCEPT a
+ * platform account (D-316): `identityKind` runs inside step 1 before the `tenants` insert and refuses a
  * `platform_admin` with 400 `VALIDATION_FAILED` carrying `adminEmail: in_use` as a field error, so
  * the form is where the super_admin corrects it. An existing member of another community is
  * accepted (D-314): the invite adds a membership for that identity instead of refusing it, and the
@@ -202,9 +210,12 @@ export async function createTenant(
   };
   const wanted = new Set<ModuleKey>(input.modules);
 
+  // Step 1, the CONTROL PLANE (one platform transaction): the tenant row with its derived brand, one module
+  // row per toggleable key and the explicit binding to the default project. Committed before step 2 so the
+  // tenant's project can be resolved from the tenant id.
   let tenantId: string;
   try {
-    tenantId = await withAdminTx(async (tx) => {
+    tenantId = await withPlatformTx(async (tx) => {
       // Only a platform account is refused (D-316); a member of another tenant may administer this
       // one (D-314). Nothing was inserted yet, so the throw rolls back nothing.
       const identity = await identityKind(tx, adminEmail);
@@ -212,7 +223,15 @@ export async function createTenant(
         throw new ApiError(400, 'VALIDATION_FAILED', { adminEmail: 'in_use' });
       }
       // The first admin is staff and staff never depend on an access (D-492); the manual row that
-      // `createPendingInvite` writes below is what lets the creation hook pass at send time.
+      // `createPendingInvite` writes in step 2 is what lets the creation hook pass at send time.
+
+      // The default project must exist BEFORE anything is written: no default is a refusal, never a guess.
+      const [defaultProject] = await tx
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.isDefault, true))
+        .limit(1);
+      if (!defaultProject) throw new ProjectUnboundError();
 
       const [tenant] = await tx
         .insert(tenants)
@@ -227,12 +246,9 @@ export async function createTenant(
           enabled: wanted.has(key),
         })),
       );
-
-      await createPendingInvite(tx, {
-        tenantId: tenant.id,
-        email: adminEmail,
-        createdBy: actor.userId,
-      });
+      await tx
+        .insert(tenantProjects)
+        .values({ tenantId: tenant.id, projectId: defaultProject.id });
       return tenant.id;
     });
   } catch (error) {
@@ -240,6 +256,17 @@ export async function createTenant(
     if (isUniqueViolation(error, 'slug')) {
       throw new ApiError(400, 'VALIDATION_FAILED', { slug: 'taken' });
     }
+    throw error;
+  }
+
+  // Step 2, the TENANT'S project (its own transaction): the first admin's pending invite. When it fails, the
+  // rows of step 1 are deleted so the slug is free for a retry and no half-created tenant survives (T-09.2-31).
+  try {
+    await withAdminTx({ tenantId }, (tx) =>
+      createPendingInvite(tx, { tenantId, email: adminEmail, createdBy: actor.userId }),
+    );
+  } catch (error) {
+    await compensateCreate(tenantId, log);
     throw error;
   }
 
@@ -259,6 +286,32 @@ export async function createTenant(
   return { id: tenantId };
 }
 
+/**
+ * The compensation of `createTenant` step 2 (D-538): deletes the binding, the module rows and the tenant row
+ * of step 1 (they also cascade from the tenant row), then forgets the cached binding. A failure here is
+ * logged, not thrown: the caller rethrows the error that made the saga fail.
+ */
+async function compensateCreate(tenantId: string, log: ReturnType<typeof logFor>): Promise<void> {
+  try {
+    await withPlatformTx(async (tx) => {
+      await tx.delete(tenantProjects).where(eq(tenantProjects.tenantId, tenantId));
+      await tx.delete(tenantModules).where(eq(tenantModules.tenantId, tenantId));
+      await tx.delete(tenants).where(eq(tenants.id, tenantId));
+    });
+    log.warn(
+      { event: 'platform.tenants.create_compensated', tenantId },
+      'tenant creation compensated',
+    );
+  } catch {
+    log.error(
+      { event: 'platform.tenants.create_compensation_failed', tenantId },
+      'tenant creation could not be compensated',
+    );
+  } finally {
+    invalidateProject(tenantId);
+  }
+}
+
 const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
 
 /**
@@ -269,8 +322,13 @@ const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() 
  * the Admins tab reads `invites.at(-1)` (02-REVIEW IN-05, fixed in 08-08).
  * `null` for an unknown id; the route turns that into 404.
  */
-export async function getTenantDetail(id: string): Promise<PlatformTenantDetail | null> {
-  const data = await withAdminTx(async (tx) => {
+export async function getTenantDetail(
+  id: string,
+  opts: { tolerateTenantDown?: boolean } = {},
+): Promise<PlatformTenantDetail | null> {
+  // The control plane first: the tenant, its modules and its domains are central facts. A tenant id that
+  // does not exist centrally is the 404, and no tenant lane is opened for it (T-09.2-32).
+  const central = await withPlatformTx(async (tx) => {
     const [tenant] = await tx.select().from(tenants).where(eq(tenants.id, id)).limit(1);
     if (!tenant) return null;
 
@@ -285,40 +343,60 @@ export async function getTenantDetail(id: string): Promise<PlatformTenantDetail 
       .where(eq(tenantDomains.tenantId, id))
       .orderBy(desc(tenantDomains.isPrimary), asc(tenantDomains.createdAt));
 
-    const inviteRows = await tx
-      .select()
-      .from(tenantInvites)
-      .where(eq(tenantInvites.tenantId, id))
-      .orderBy(asc(tenantInvites.createdAt));
-
-    // D-310: an admin's name is the profile of THIS tenant's admin membership (joined by the
-    // membership id, inside the tenant filter), so a person who administers two tenants shows each
-    // tenant's own name. `users` stays joined for the e-mail only.
-    const adminRows = await tx
-      .select({
-        userId: memberships.userId,
-        email: users.email,
-        name: memberProfiles.displayName,
-        joinedAt: memberships.joinedAt,
-      })
-      .from(memberships)
-      .innerJoin(users, eq(users.id, memberships.userId))
-      .innerJoin(memberProfiles, eq(memberProfiles.membershipId, memberships.id))
-      .where(
-        and(
-          eq(memberships.tenantId, id),
-          eq(memberships.role, 'admin_tenant'),
-          eq(memberships.status, 'active'),
-          isNull(memberships.deletedAt),
-        ),
-      )
-      .orderBy(asc(memberships.joinedAt));
-
-    return { tenant, moduleRows, domainRows, inviteRows, adminRows };
+    return { tenant, moduleRows, domainRows };
   });
-  if (!data) return null;
+  if (!central) return null;
 
-  const { tenant, moduleRows, domainRows, inviteRows, adminRows } = data;
+  // Then the tenant's own project, after the first transaction has closed (never nested): invites and the
+  // admins' names are tenant data. Merged in memory below.
+  type TenantSide = {
+    inviteRows: (typeof tenantInvites.$inferSelect)[];
+    adminRows: { userId: string; email: string; name: string; joinedAt: Date }[];
+  };
+  let side: TenantSide;
+  try {
+    side = await withAdminTx({ tenantId: id }, async (tx) => {
+      const inviteRows = await tx
+        .select()
+        .from(tenantInvites)
+        .where(eq(tenantInvites.tenantId, id))
+        .orderBy(asc(tenantInvites.createdAt));
+
+      // D-310: an admin's name is the profile of THIS tenant's admin membership (joined by the
+      // membership id, inside the tenant filter), so a person who administers two tenants shows each
+      // tenant's own name. `users` stays joined for the e-mail only.
+      const adminRows = await tx
+        .select({
+          userId: memberships.userId,
+          email: users.email,
+          name: memberProfiles.displayName,
+          joinedAt: memberships.joinedAt,
+        })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .innerJoin(memberProfiles, eq(memberProfiles.membershipId, memberships.id))
+        .where(
+          and(
+            eq(memberships.tenantId, id),
+            eq(memberships.role, 'admin_tenant'),
+            eq(memberships.status, 'active'),
+            isNull(memberships.deletedAt),
+          ),
+        )
+        .orderBy(asc(memberships.joinedAt));
+      return { inviteRows, adminRows };
+    });
+  } catch (error) {
+    // A mutation's answer must not depend on the tenant's project being up (the central write already
+    // committed): its invites and admins read empty. A plain read of the detail still fails with 503.
+    if (opts.tolerateTenantDown && error instanceof ProjectUnavailableError) {
+      side = { inviteRows: [], adminRows: [] };
+    } else {
+      throw error;
+    }
+  }
+  const { tenant, moduleRows, domainRows } = central;
+  const { inviteRows, adminRows } = side;
   const branding = resolveBranding(tenant.branding);
   const enabledByKey = new Map(moduleRows.map((m) => [m.moduleKey, m.enabled]));
 
@@ -371,7 +449,7 @@ export async function getTenantDetail(id: string): Promise<PlatformTenantDetail 
 
 /** Every host of the tenant leaves the in-process host cache, so the next resolution sees the new row. */
 async function invalidateTenantHosts(tenantId: string): Promise<void> {
-  const hosts = await withAdminTx(async (tx) =>
+  const hosts = await withPlatformTx(async (tx) =>
     tx
       .select({ host: tenantDomains.host })
       .from(tenantDomains)
@@ -382,10 +460,12 @@ async function invalidateTenantHosts(tenantId: string): Promise<void> {
 
 /**
  * `PATCH /v1/platform/tenants/{id}` (D-31): display name and/or the two source colors. The slug is
- * immutable — the contract does not even accept it. Colors go through `applyBrandColors` — the ONE
- * persistence path shared with `PUT …/branding/colors` (02-13) — so a primary change also bumps
- * `iconVersion` and re-derives the maskable icon whichever door changed it; the rest of the
- * branding jsonb (logo, icons) is kept as is. No contrast gate here (the 02-03 contract has no
+ * immutable — the contract does not even accept it. The two halves live in two places (D-537): the
+ * display name is CENTRAL-owned (written in the control plane, then pushed to the tenant's copy), the brand
+ * colors are TENANT-owned (written in the tenant's project, then copied to the central mirror). Colors go
+ * through `applyBrandColors` — the ONE persistence path shared with `PUT …/branding/colors` (02-13) — so a
+ * primary change also bumps `iconVersion` and re-derives the maskable icon whichever door changed it; the
+ * rest of the branding jsonb (logo, icons) is kept as is. No contrast gate here (the 02-03 contract has no
  * confirmation field); the detail answer carries `tenant.contrast` for the caller to read.
  */
 export async function updateTenant(
@@ -393,9 +473,10 @@ export async function updateTenant(
   body: UpdateTenantBody,
   actor: PlatformActor,
 ): Promise<void> {
-  await withAdminTx(async (tx) => {
+  // The control plane: the tenant must exist centrally (404 before any tenant lane), the display name is written.
+  await withPlatformTx(async (tx) => {
     const [current] = await tx
-      .select({ id: tenants.id, branding: tenants.branding })
+      .select({ id: tenants.id })
       .from(tenants)
       .where(eq(tenants.id, id))
       .limit(1);
@@ -407,8 +488,23 @@ export async function updateTenant(
         .set({ displayName: body.displayName, updatedAt: new Date() })
         .where(eq(tenants.id, id));
     }
-    if (body.colors !== undefined) await applyBrandColors(tx, current, body.colors, actor);
   });
+
+  // The tenant's project: the brand colors live in its own `tenants.branding`.
+  if (body.colors !== undefined) {
+    const colors = body.colors;
+    await withAdminTx({ tenantId: id }, async (tx) => {
+      const [current] = await tx
+        .select({ id: tenants.id, branding: tenants.branding })
+        .from(tenants)
+        .where(eq(tenants.id, id))
+        .limit(1);
+      if (!current) throw new ApiError(404, 'NOT_FOUND');
+      await applyBrandColors(tx, current, colors, actor);
+    });
+    await pushToCentral(id, ['branding']);
+  }
+  if (body.displayName !== undefined) await pushToTenant(id, ['displayName']);
 
   await invalidateTenantHosts(id);
   logFor(actor, 'platform.tenants').info(
@@ -423,16 +519,19 @@ export async function updateTenant(
 }
 
 /**
- * `POST /v1/platform/tenants/{id}/status` (D-32): active <-> suspended. The host cache is dropped for
- * every host so the branded "indisponível" shell and `requireAuth`'s 403 TENANT_SUSPENDED agree on
- * the very next request of this instance.
+ * `POST /v1/platform/tenants/{id}/status` (D-32): active <-> suspended. The status is CENTRAL-owned (D-537):
+ * it is decided in the control plane, which is what `requireAuth` and the by-host answer read, and a copy is
+ * pushed to the tenant's own row afterwards. A push that cannot reach the tenant's project is logged and
+ * healed by the reconcile function; it never fails the request, because the authority already changed. The
+ * host cache is dropped for every host so the branded "indisponível" shell and `requireAuth`'s 403
+ * TENANT_SUSPENDED agree on the very next request of this instance.
  */
 export async function setTenantStatus(
   id: string,
   status: TenantStatus,
   actor: PlatformActor,
 ): Promise<void> {
-  const updated = await withAdminTx(async (tx) =>
+  const updated = await withPlatformTx(async (tx) =>
     tx
       .update(tenants)
       .set({ status, updatedAt: new Date() })
@@ -442,6 +541,7 @@ export async function setTenantStatus(
   if (updated.length === 0) throw new ApiError(404, 'NOT_FOUND');
 
   await invalidateTenantHosts(id);
+  await pushToTenant(id, ['status']);
   logFor(actor, 'platform.tenants').info(
     { event: 'platform.tenants.status', userId: actor.userId, tenantId: id, status },
     'tenant status set',

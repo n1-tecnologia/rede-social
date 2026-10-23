@@ -232,8 +232,13 @@ const inviteResendRoute = createRoute({
   },
 });
 
-async function detailOr404(id: string): Promise<PlatformTenantDetail> {
-  const detail = await getTenantDetail(id);
+/**
+ * `afterWrite` is set by the mutations (patch, status, module): their central write already committed, so an
+ * unreachable tenant project must not turn the operator's action into a 503 (09.2-07, D-537, T-09.2-33). The
+ * detail then carries empty `invites`/`admins`; a plain GET of the detail still answers 503.
+ */
+async function detailOr404(id: string, afterWrite = false): Promise<PlatformTenantDetail> {
+  const detail = await getTenantDetail(id, { tolerateTenantDown: afterWrite });
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
   return detail;
 }
@@ -298,7 +303,7 @@ export const tenantsRoutes = tenants
     const body = c.req.valid('json');
 
     await updateTenant(id, body, { userId, logger: c.get('logger') });
-    const detail = await detailOr404(id);
+    const detail = await detailOr404(id, true);
 
     c.get('logger').info(
       { event: 'platform.tenants.update', userId, requestId, tenantId: id },
@@ -313,7 +318,7 @@ export const tenantsRoutes = tenants
     const { status } = c.req.valid('json');
 
     await setTenantStatus(id, status, { userId, logger: c.get('logger') });
-    const detail = await detailOr404(id);
+    const detail = await detailOr404(id, true);
 
     c.get('logger').info(
       { event: 'platform.tenants.status', userId, requestId, tenantId: id, status },
@@ -328,7 +333,7 @@ export const tenantsRoutes = tenants
     const { enabled } = c.req.valid('json');
 
     await setModuleEnabled(id, key, enabled, { userId, logger: c.get('logger') });
-    const detail = await detailOr404(id);
+    const detail = await detailOr404(id, true);
 
     c.get('logger').info(
       { event: 'platform.modules.set', userId, requestId, tenantId: id, module: key, enabled },
