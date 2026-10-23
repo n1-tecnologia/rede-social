@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { withAdminTx } from '../../db/admin-tx';
 import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenantInvites } from '../../db/schema';
-import { authAllowList } from '../domains/index';
+import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { enqueueInTx, registerJobQueues } from '../jobs/boss';
 import { ProjectUnboundError } from '../tenancy/project-errors';
@@ -120,7 +120,7 @@ export async function scheduleInviteSends(
   opts?: { delayS?: number },
 ): Promise<ScheduleInviteSendsResult> {
   const log = logFor(actor, 'platform.invites');
-  const delayS = opts?.delayS ?? inviteSendDelaySeconds(authAllowList.name);
+  const delayS = opts?.delayS ?? inviteSendDelaySeconds(env.AUTH_ALLOW_LIST);
 
   const hosts = await withPlatformTx((tx) =>
     tx

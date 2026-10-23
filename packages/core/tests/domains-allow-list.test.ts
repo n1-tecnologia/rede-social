@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   createLocalAuthAllowList,
   createSupabaseAuthAllowList,
+  localAllowListByProject,
   localAllowListEntries,
 } from '../server/domains/auth-allow-list';
+import { authAllowListFor } from '../server/domains/index';
 import { allowListEntry } from '../server/domains/types';
 
 /**
@@ -81,7 +83,7 @@ describe('createLocalAuthAllowList', () => {
 });
 
 describe('createSupabaseAuthAllowList', () => {
-  it('add: GET then PATCH the same path with the existing entries preserved in order plus the new one', async () => {
+  it('add: GET then PATCH the same path with every existing entry kept and the new one, written sorted', async () => {
     const { calls, fetchImpl, value } = stub(
       'https://app.example/**,https://old.example/auth/confirm**',
     );
@@ -99,7 +101,7 @@ describe('createSupabaseAuthAllowList', () => {
     expect(calls[1]?.headers.get('content-type')).toBe('application/json');
     expect(calls[1]?.body).toEqual({
       uri_allow_list:
-        'https://app.example/**,https://old.example/auth/confirm**,https://h.example/auth/confirm**',
+        'https://app.example/**,https://h.example/auth/confirm**,https://old.example/auth/confirm**',
     });
     expect(value()).toContain('https://h.example/auth/confirm**');
   });
@@ -149,5 +151,101 @@ describe('createSupabaseAuthAllowList', () => {
     expect((caught as Error).message).toContain('403');
     expect((caught as Error).message).not.toContain(PAT);
     expect((caught as Error).message).not.toContain('nope');
+  });
+});
+
+describe('the written list is canonical (09.2-11, P81-P83)', () => {
+  it('writes sorted and de-duplicated whatever order and repeats the stored list had', async () => {
+    const { calls, fetchImpl } = stub(
+      'https://z.example/auth/confirm**,https://b.example/auth/confirm**,https://z.example/auth/confirm**',
+    );
+    await list(fetchImpl).add('m.example');
+    expect(calls[1]?.body).toEqual({
+      uri_allow_list:
+        'https://b.example/auth/confirm**,https://m.example/auth/confirm**,https://z.example/auth/confirm**',
+    });
+  });
+
+  it('a repeated add changes nothing: the second run reads and does not write', async () => {
+    const { calls, fetchImpl, value } = stub('https://z.example/auth/confirm**');
+    const adapter = list(fetchImpl);
+    await adapter.add('a.example');
+    const afterFirst = value();
+    await adapter.add('a.example');
+    await adapter.add('a.example');
+    expect(value()).toBe(afterFirst);
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('an already-present entry in an unsorted stored list is not rewritten', async () => {
+    const { calls, fetchImpl } = stub(
+      'https://z.example/auth/confirm**,https://a.example/auth/confirm**',
+    );
+    await list(fetchImpl).add('a.example');
+    expect(calls.map((c) => c.method)).toEqual(['GET']);
+  });
+
+  it('a host that is a prefix or a suffix of another is a distinct exact entry', async () => {
+    const { calls, fetchImpl } = stub('https://ba.example.com/auth/confirm**');
+    const adapter = list(fetchImpl);
+    await adapter.add('a.example.com');
+    expect(calls[1]?.body).toEqual({
+      uri_allow_list: 'https://a.example.com/auth/confirm**,https://ba.example.com/auth/confirm**',
+    });
+    await adapter.remove('a.example.com');
+    expect(calls[3]?.body).toEqual({ uri_allow_list: 'https://ba.example.com/auth/confirm**' });
+  });
+
+  it('an add never writes an empty list, even over an empty or null stored one', async () => {
+    for (const initial of [null, '', ' , ']) {
+      const { calls, fetchImpl } = stub(initial);
+      await list(fetchImpl).add('h.example');
+      const patch = calls.find((c) => c.method === 'PATCH');
+      expect(patch?.body).toEqual({ uri_allow_list: 'https://h.example/auth/confirm**' });
+    }
+  });
+});
+
+describe('authAllowListFor (09.2-11, DBT-42)', () => {
+  const project = (id: string, credentialVersion = 1) => ({
+    id,
+    ref: `ref-${id}`,
+    provider: 'supabase',
+    credentialVersion,
+  });
+
+  it('keeps one in-memory ledger per project: two projects never cross', async () => {
+    const a = authAllowListFor(project('proj-a'));
+    const b = authAllowListFor(project('proj-b'));
+    expect(a.name).toBe('local');
+    expect(a).not.toBe(b);
+    await a.add('only-a.example');
+    await b.add('only-b.example');
+    expect(
+      localAllowListByProject.get('proj-a')?.has('https://only-a.example/auth/confirm**'),
+    ).toBe(true);
+    expect(
+      localAllowListByProject.get('proj-a')?.has('https://only-b.example/auth/confirm**'),
+    ).toBe(false);
+    expect(
+      localAllowListByProject.get('proj-b')?.has('https://only-b.example/auth/confirm**'),
+    ).toBe(true);
+    // The union view the existing platform tests read still sees both.
+    expect(localAllowListEntries.has('https://only-a.example/auth/confirm**')).toBe(true);
+    await a.remove('only-a.example');
+    await b.remove('only-b.example');
+  });
+
+  it('memoises by project and credential version, and a rotated credential gets a fresh adapter', () => {
+    const first = authAllowListFor(project('proj-c', 1));
+    expect(authAllowListFor(project('proj-c', 1))).toBe(first);
+    expect(authAllowListFor(project('proj-c', 2))).not.toBe(first);
+  });
+
+  it('stays bounded at 64 adapters', () => {
+    const kept = authAllowListFor(project('proj-keep'));
+    for (let n = 0; n < 80; n += 1) authAllowListFor(project(`proj-fill-${n}`));
+    // The oldest were evicted; the earliest key now builds a new adapter.
+    expect(authAllowListFor(project('proj-keep'))).not.toBe(kept);
   });
 });

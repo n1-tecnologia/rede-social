@@ -1,5 +1,6 @@
 import { env } from '../env';
 import { registerJobQueues } from '../jobs/boss';
+import type { ProjectRecord } from '../tenancy/project-registry';
 import { createLocalAuthAllowList, createSupabaseAuthAllowList } from './auth-allow-list';
 import { createFakeDomainProvider } from './fake';
 import { type AuthAllowList, DOMAIN_VERIFY_QUEUE, type DomainProvider } from './types';
@@ -22,12 +23,7 @@ import { createVercelDomainProvider } from './vercel';
  * request header.
  */
 function requireEnv(
-  name:
-    | 'VERCEL_TOKEN'
-    | 'VERCEL_PROJECT_ID'
-    | 'VERCEL_TEAM_ID'
-    | 'SUPABASE_PAT'
-    | 'SUPABASE_PROJECT_REF',
+  name: 'VERCEL_TOKEN' | 'VERCEL_PROJECT_ID' | 'VERCEL_TEAM_ID' | 'SUPABASE_PAT',
 ): string {
   const value = env[name];
   if (!value)
@@ -44,13 +40,38 @@ export const domainProvider: DomainProvider =
       })
     : createFakeDomainProvider();
 
-export const authAllowList: AuthAllowList =
-  env.AUTH_ALLOW_LIST === 'supabase'
-    ? createSupabaseAuthAllowList({
-        pat: requireEnv('SUPABASE_PAT'),
-        projectRef: requireEnv('SUPABASE_PROJECT_REF'),
-      })
-    : createLocalAuthAllowList();
+/** The columns of a registry row the allow-list adapter is chosen from. */
+export type AllowListProject = Pick<ProjectRecord, 'id' | 'ref' | 'provider' | 'credentialVersion'>;
+
+const ADAPTER_CACHE_MAX = 64;
+const adapters = new Map<string, AuthAllowList>();
+
+/**
+ * 09.2-11 (DBT-42, D-538): the redirect allow-list of ONE project. Every project has its own GoTrue and so its
+ * own `uri_allow_list`. `AUTH_ALLOW_LIST=supabase` with a `supabase` project writes through the Management API
+ * with `SUPABASE_PAT` and that project's `ref`; anything else (the env default, or a `fake` project of a local
+ * stack) keeps an in-memory ledger of its own. Memoised by project id and credential version, bounded at 64
+ * (least recently used goes first).
+ */
+export function authAllowListFor(project: AllowListProject): AuthAllowList {
+  const key = `${project.id}:${project.credentialVersion}`;
+  const hit = adapters.get(key);
+  if (hit) {
+    adapters.delete(key);
+    adapters.set(key, hit);
+    return hit;
+  }
+  const adapter =
+    env.AUTH_ALLOW_LIST === 'supabase' && project.provider === 'supabase'
+      ? createSupabaseAuthAllowList({ pat: requireEnv('SUPABASE_PAT'), projectRef: project.ref })
+      : createLocalAuthAllowList(project.id);
+  if (adapters.size >= ADAPTER_CACHE_MAX) {
+    const oldest = adapters.keys().next();
+    if (!oldest.done) adapters.delete(oldest.value);
+  }
+  adapters.set(key, adapter);
+  return adapter;
+}
 
 // `kernel.domain-verify` is a KERNEL-owned queue, so it registers itself here rather than in
 // `apps/api/src/modules/registry.ts` (which lists MODULE queues only, MOD-02). Every enqueue path

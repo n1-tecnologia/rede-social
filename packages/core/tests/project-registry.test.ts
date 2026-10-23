@@ -20,6 +20,7 @@ const STALE = 600_000;
 const record = (n: number): ProjectRecord => ({
   id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
   ref: `proj-${n}`,
+  provider: 'fake',
   isCentral: false,
   isDefault: false,
   credentialSource: 'sealed',

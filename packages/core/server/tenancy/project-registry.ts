@@ -18,6 +18,8 @@ export { ProjectUnavailableError, ProjectUnboundError };
 export type ProjectRecord = {
   id: string;
   ref: string;
+  /** `supabase` for a hosted project, `fake` for a local stand-in; selects the project-level adapters. */
+  provider: string;
   isCentral: boolean;
   isDefault: boolean;
   credentialSource: string;
@@ -39,6 +41,7 @@ export type ProjectRecord = {
 export const projectColumns = {
   id: projects.id,
   ref: projects.ref,
+  provider: projects.provider,
   isCentral: projects.isCentral,
   isDefault: projects.isDefault,
   credentialSource: projects.credentialSource,

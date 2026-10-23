@@ -1,6 +1,5 @@
 import { serve } from '@hono/node-server';
 import { deriveIconsJob } from '@rede-social/core/server/branding/derive-icons-job';
-import { authAllowList } from '@rede-social/core/server/domains/index';
 import { domainVerifyJob } from '@rede-social/core/server/domains/verify-job';
 import {
   createBoss,
@@ -75,10 +74,10 @@ import { createSupervisor, type SupervisedBoss } from './worker-supervisor';
  * `kernel.domain-verify` pattern, so the worker only has to open the cadence once. The first two are opened
  * once per project each time its instance starts (`onProjectStarted`), the third once at boot. Every arm is
  * best-effort — a worker must boot even if the first enqueue fails, and the next successful run re-opens it.
- * At boot the worker also aligns project 0's registry row with the environment (`ensureProjectZero`) and
- * reconciles the auth redirect allow-list for every verified host (`reconcileAuthAllowList`, quick
- * 261012-s0v) because a `supabase config push` wipes the runtime entries and a deploy always rolls a new
- * worker revision.
+ * At boot the worker also aligns project 0's registry row with the environment (`ensureProjectZero`), and
+ * each time a project's instance starts it reconciles THAT project's auth redirect allow-list for the verified
+ * hosts of its tenants (`reconcileAuthAllowList({ projectId })`, quick 261012-s0v, 09.2-11) because a
+ * `supabase config push` wipes the runtime entries and a deploy always rolls a new worker revision.
  *
  * Concurrency and the pool fit (quick 261006-fs9, 09.2-09): each queue runs `job.concurrency ?? 1`
  * handlers per instance (pg-boss `localConcurrency`); only `notifications.push-send` declares one (4). A
@@ -175,16 +174,20 @@ export async function startWorker(): Promise<void> {
         'platform.mirror_reconcile.armed',
         () => armMirrorReconcile(),
       );
-      // quick 261012-s0v: self-heal the allow-list after a `supabase config push`. Best-effort: the
-      // probe below must bind whatever happens here.
-      await bestEffort(
-        'allow-list reconcile failed; "Verificar agora" re-adds a host by hand',
-        'domains.allow_list.reconciled',
-        async () => ({ ...(await reconcileAuthAllowList()), adapter: authAllowList.name }),
-      );
     },
     // The per-project cadences, once per project each time its instance (re)starts.
     onProjectStarted: async (project) => {
+      // quick 261012-s0v, 09.2-11 (DBT-42): self-heal the project's own redirect allow-list (a `supabase config
+      // push` wipes project 0's runtime entries and every deploy rolls a worker revision). One project at a
+      // time, best-effort: a project whose Management API is down counts failed and never blocks the rest.
+      await bestEffort(
+        'allow-list reconcile failed; "Verificar agora" re-adds a host by hand',
+        'domains.allow_list.reconciled',
+        async () => {
+          const { projects, ...totals } = await reconcileAuthAllowList({ projectId: project.id });
+          return { projectId: project.id, ...totals };
+        },
+      );
       await bestEffort(
         'could not arm the media orphan sweeper; the next run re-opens it',
         'media.sweep.armed',

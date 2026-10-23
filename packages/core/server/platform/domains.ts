@@ -11,7 +11,7 @@ import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenants } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
 import {
-  authAllowList,
+  authAllowListFor,
   DOMAIN_VERIFY_DEADLINE_MS,
   DOMAIN_VERIFY_INTERVAL_S,
   DOMAIN_VERIFY_QUEUE,
@@ -21,6 +21,7 @@ import {
 import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { enqueueInTx } from '../jobs/boss';
+import { resolveProject } from '../tenancy/project-registry';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
 import { withAllowListLock } from './allow-list-lock';
 import { scheduleInviteSends } from './invite-send';
@@ -357,6 +358,20 @@ async function clearLastErrorIfSettled(domainId: string): Promise<void> {
 }
 
 /**
+ * 09.2-11 (DBT-42, D-538): runs `step` against the allow-list of the project the TENANT is bound to, under that
+ * project's lock. Two tenants of one project share a list and so a lock; the project comes from the binding,
+ * never from ambient context. An unbound or unreachable registry throws, which the callers record like any
+ * other allow-list failure.
+ */
+async function withTenantAllowList(
+  tenantId: string,
+  step: (list: ReturnType<typeof authAllowListFor>) => Promise<void>,
+): Promise<void> {
+  const project = await resolveProject(tenantId);
+  await withAllowListLock(project.ref, () => step(authAllowListFor(project)));
+}
+
+/**
  * What must follow the verified transition, in this order, OUTSIDE the transaction and idempotent
  * (re-run on every "Verificar agora" of an already verified host — that is how a failed allow-list
  * call is recoverable from the panel):
@@ -379,7 +394,7 @@ async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): 
   let ok = true;
 
   try {
-    await withAllowListLock(() => authAllowList.add(row.host));
+    await withTenantAllowList(row.tenantId, (list) => list.add(row.host));
   } catch (error) {
     ok = false;
     log.error(
@@ -742,7 +757,7 @@ export async function removeDomain(
   }
 
   try {
-    await withAllowListLock(() => authAllowList.remove(row.host));
+    await withTenantAllowList(tenantId, (list) => list.remove(row.host));
   } catch (error) {
     log.error(
       {
