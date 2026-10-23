@@ -140,6 +140,18 @@ export const platform: readonly AdminLaneEntry[] = [
     'migrated',
   ),
   ...group(
+    'packages/core/server/projects/move/rollback.ts',
+    [
+      [
+        'rollbackAfterFlip',
+        'T',
+        23,
+        "the tenant-owned branding row in the tenant's own source project, after the central copy was rewritten in a platform transaction: two transactions, never nested",
+      ],
+    ],
+    'migrated',
+  ),
+  ...group(
     'packages/core/server/projects/steps.ts',
     [
       [
