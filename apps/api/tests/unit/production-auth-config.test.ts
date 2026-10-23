@@ -100,7 +100,9 @@ describe('production hosted auth e-mail config (quick 261022-fku)', () => {
 
   it('uses the sender identity the hook already uses (no-reply@ + MAIL_DOMAIN)', () => {
     const domains = [...WORKFLOW.matchAll(/^\s*MAIL_DOMAIN=(\S+)\s*$/gm)].map((m) => m[1]);
-    expect(domains.length).toBe(2);
+    // API, worker and (09.2-24) the migrate Job, whose move bootstraps its target inline and runs the `auth`
+    // step that reads MAIL_DOMAIN. All three must carry the same domain.
+    expect(domains.length).toBe(3);
     expect(new Set(domains).size).toBe(1);
     expect(unquote(smtp().admin_email ?? '')).toBe(`no-reply@${domains[0]}`);
   });
