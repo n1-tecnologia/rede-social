@@ -35,6 +35,8 @@ const PUBLIC = [
   /^\/endereco-invalido(?:\/|$)/,
   /^\/sem-comunidade(?:\/|$)/,
   /^\/comunidade-indisponivel(?:\/|$)/,
+  /^\/comunidade-em-atualizacao(?:\/|$)/, // 09.2-21: a community being updated (session kept)
+  /^\/comunidade-em-preparacao(?:\/|$)/, // 09.2-21: a community still being prepared (session kept)
   /^\/aceitar-convite(?:\/|$)/,
   /^\/convite-expirado(?:\/|$)/,
   /^\/termos(?:\/|$)/,

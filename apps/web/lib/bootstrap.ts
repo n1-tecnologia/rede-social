@@ -90,6 +90,13 @@ export async function loadOrRedirect<T>(
  * - `TENANT_SUSPENDED` (D-32): the TENANT, not the member, is unavailable; the device is signed out
  *   like D-09 and lands on the branded public screen `/comunidade-indisponivel`. No query — the brand
  *   comes from the host and the copy names no tenant, reason or timestamp.
+ * - `TENANT_UPDATING` / `TENANT_PREPARING` / `TENANT_UNAVAILABLE` (09.2-21, UI-D-542, D-535, D-545):
+ *   the community's database is being updated, is still being prepared, or is paused or unreachable.
+ *   Nothing was decided about this member, so — UNLIKE `TENANT_SUSPENDED` — they go DIRECTLY to their
+ *   public screen (`/comunidade-em-atualizacao`, `/comunidade-em-preparacao`, and the shipped
+ *   `/comunidade-indisponivel` for the third, the same sentence as a suspension, A-UI-8) and never
+ *   through `/auth/suspended`: no route handler clears a cookie for these, so a migration is not a
+ *   logout. The codes carry no details and the screens take no query.
  * - `TENANT_HOST_MISMATCH` (08.1, D-305): the session holds no membership in THIS tenant host's
  *   community, so it is offered to join it on `/participar` (no query parameters: nothing may name
  *   another community). `/participar` itself routes platform admins and the other join states on.
@@ -112,6 +119,12 @@ export function bootstrapRedirectPath(error: ApiClientError): string | null {
       return `/assinatura-pendente?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
     case 'TENANT_SUSPENDED':
       return '/auth/suspended';
+    case 'TENANT_UPDATING':
+      return '/comunidade-em-atualizacao';
+    case 'TENANT_PREPARING':
+      return '/comunidade-em-preparacao';
+    case 'TENANT_UNAVAILABLE':
+      return '/comunidade-indisponivel';
     case 'TENANT_HOST_MISMATCH':
       return '/participar';
     case 'TENANT_CHOICE_REQUIRED':

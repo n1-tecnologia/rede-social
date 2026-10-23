@@ -55,3 +55,53 @@ describe('bootstrapRedirectPath: SUBSCRIPTION_PENDING (09.1-15)', () => {
     expect(bootstrapRedirectPath(new ApiClientError(403, 'FORBIDDEN'))).toBeNull();
   });
 });
+
+/**
+ * 09.2-21 (UI-D-542, DBT-53, T-09.2-95; P105): the three held-out refusals of plan 08 land on their
+ * public screens DIRECTLY. None of them goes through `/auth/suspended` (the only route that clears the
+ * session), so a migration is never a logout; the session is cleared only by the suspended flow's own
+ * route, and a change of state between two requests simply maps the NEW code to its own screen.
+ */
+describe('bootstrapRedirectPath: held-out tenant states (09.2-21)', () => {
+  it.each([
+    ['TENANT_UPDATING', '/comunidade-em-atualizacao'],
+    ['TENANT_PREPARING', '/comunidade-em-preparacao'],
+    ['TENANT_UNAVAILABLE', '/comunidade-indisponivel'],
+  ])('%s -> %s, with no query and no detail carried', (code, path) => {
+    expect(bootstrapRedirectPath(new ApiClientError(503, code))).toBe(path);
+    expect(
+      bootstrapRedirectPath(
+        new ApiClientError(503, code, { tenantName: 'Rede Demo', reason: 'x' }),
+      ),
+    ).toBe(path);
+  });
+
+  it('none of the three routes through the session-clearing /auth/suspended route (T-09.2-95)', () => {
+    for (const code of ['TENANT_UPDATING', 'TENANT_PREPARING', 'TENANT_UNAVAILABLE']) {
+      const path = bootstrapRedirectPath(new ApiClientError(503, code));
+      expect(path).not.toBeNull();
+      expect(path).not.toMatch(/^\/auth\//);
+    }
+  });
+
+  it('P105: a tenant going from updating to suspended maps the next refusal to the suspended flow', () => {
+    expect(bootstrapRedirectPath(new ApiClientError(503, 'TENANT_UPDATING'))).toBe(
+      '/comunidade-em-atualizacao',
+    );
+    expect(bootstrapRedirectPath(new ApiClientError(403, 'TENANT_SUSPENDED'))).toBe(
+      '/auth/suspended',
+    );
+  });
+
+  it('keeps every older mapping exactly as it was', () => {
+    expect(bootstrapRedirectPath(new ApiClientError(401, 'UNAUTHORIZED'))).toBe('/entrar');
+    expect(bootstrapRedirectPath(new ApiClientError(403, 'TENANT_SUSPENDED'))).toBe(
+      '/auth/suspended',
+    );
+    expect(bootstrapRedirectPath(new ApiClientError(403, 'TENANT_HOST_MISMATCH'))).toBe(
+      '/participar',
+    );
+    expect(bootstrapRedirectPath(new ApiClientError(403, 'NO_MEMBERSHIP'))).toBe('/sem-comunidade');
+    expect(bootstrapRedirectPath(new ApiClientError(500, 'INTERNAL'))).toBeNull();
+  });
+});

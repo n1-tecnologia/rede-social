@@ -4648,3 +4648,53 @@ describe('09.2-20 - the list, header and Status guard catalog', () => {
     expect(t('databasePill', { state: 'Atrasado' })).toBe('Banco: Atrasado');
   });
 });
+
+/**
+ * 09.2-21 (UI-D-542, UI-D-547, A-UI-8) - the two member-facing held-out screens and the form cards,
+ * verbatim from the Copywriting Contract: the NEW `updating.json` and `preparing.json` catalogs (one
+ * root each) and the vocabulary rule - a member screen says "comunidade" and never banco, projeto,
+ * esquema, migração, Supabase or tenant.
+ */
+describe('09.2-21 - the member held-out catalogs', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['updating', 'updating.json'],
+    ['preparing', 'preparing.json'],
+  ])('%s declares exactly its own root with title, body and retry', (root, file) => {
+    const own = JSON.parse(readFileSync(path.join(catalogDir, file), 'utf8')) as Record<
+      string,
+      Record<string, string>
+    >;
+    expect(Object.keys(own)).toEqual([root]);
+    expect(Object.keys(own[root] ?? {}).sort()).toEqual(['body', 'retry', 'title']);
+  });
+
+  it.each([
+    ['updating.title', 'Comunidade em atualização'],
+    ['updating.body', 'Estamos atualizando esta comunidade. Volte em alguns minutos.'],
+    ['updating.retry', 'Verificar de novo'],
+    ['preparing.title', 'Comunidade em preparação'],
+    ['preparing.body', 'Esta comunidade ainda está sendo preparada. Volte em breve.'],
+    ['preparing.retry', 'Verificar de novo'],
+    ['unavailable.title', 'Comunidade indisponível'],
+    ['unavailable.body', 'Esta comunidade está temporariamente indisponível.'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('no member-facing held-out string uses the panel vocabulary (UI-D-547)', () => {
+    const words = /banco|projeto|esquema|migra[cç][aã]o|supabase|tenant/i;
+    for (const root of ['updating', 'preparing', 'unavailable']) {
+      for (const [key, text] of Object.entries(lookup(root) as Record<string, string>)) {
+        expect(text, `${root}.${key}`).not.toMatch(words);
+      }
+    }
+  });
+});

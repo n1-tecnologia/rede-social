@@ -188,6 +188,54 @@ describe('proxy.ts — PUBLIC entries', () => {
   });
 });
 
+describe('proxy.ts — the held-out member screens (09.2-21, UI-D-542)', () => {
+  beforeEach(() => {
+    resolve.mockReset();
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+  });
+
+  it.each(['/comunidade-em-atualizacao', '/comunidade-em-preparacao'])(
+    '28. %s is reachable with no session: no redirect to /entrar and no cookie written or cleared',
+    async (path) => {
+      const res = await proxy(
+        request(`http://primary.example${path}`, { host: 'primary.example' }),
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get('location')).toBeNull();
+      expect(res.headers.get('set-cookie')).toBeNull();
+    },
+  );
+
+  it.each(['/comunidade-em-atualizacao', '/comunidade-em-preparacao'])(
+    '29. %s keeps a signed-in member signed in: the session cookie is neither touched nor deleted',
+    async (path) => {
+      refresh.on = true;
+      try {
+        const res = await proxy(
+          request(`http://primary.example${path}`, {
+            host: 'primary.example',
+            cookie: 'sb-test-auth-token=live',
+          }),
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers.get('location')).toBeNull();
+        const cleared = res.cookies
+          .getAll()
+          .filter((c) => c.value === '' || c.name !== 'sb-test-auth-token');
+        expect(cleared).toEqual([]);
+      } finally {
+        refresh.on = false;
+      }
+    },
+  );
+
+  it('30. a private path stays private next to them', async () => {
+    const res = await proxy(request('http://primary.example/inicio', { host: 'primary.example' }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('http://primary.example/entrar');
+  });
+});
+
 describe('proxy.ts — sign-up confirmation (quick 261007-gbk)', () => {
   beforeEach(() => {
     resolve.mockReset();
