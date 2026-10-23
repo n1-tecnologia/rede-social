@@ -93,7 +93,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const t of fixtures) await t.cleanup();
   if (createdTenantIds.length > 0) {
-    await adminSql`delete from public.tenants where id in ${adminSql(createdTenantIds)}`;
+    await adminSql`delete from public.tenants where id = any(${createdTenantIds}::uuid[])`;
   }
   await closeAllPools();
   await stopBoss();
@@ -219,7 +219,7 @@ describe('list from the mirror (P11, DBT-04)', () => {
     createdTenantIds.push(...created.map((r) => r.id));
     const stamps = await adminSql<{ n: number }[]>`
       select count(distinct created_at)::int as n from public.tenants
-       where id in ${adminSql(created.map((r) => r.id))}`;
+       where id = any(${created.map((r) => r.id)}::uuid[])`;
     expect(stamps[0]?.n).toBe(1);
 
     // A fourth tenant that lives in B, whose pool points at a closed port: the list never opens it.

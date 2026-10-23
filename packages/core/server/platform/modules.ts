@@ -1,13 +1,20 @@
 import type { ModuleKey } from '@rede-social/contracts';
 import { and, eq, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { withPlatformTx } from '../../db/platform-tx';
 import { tenantModules, tenants } from '../../db/schema';
 import { ApiError } from '../http/api-error';
 import { moduleFlags } from '../modules/flags-cache';
+import { pushToTenant } from '../tenancy/mirror';
 import { logFor, type PlatformActor } from './invites';
 
 /**
  * ROLE-04 / MOD-04: flips one module of one tenant from the platform panel, without a redeploy.
+ *
+ * `enabled` is CENTRAL-owned (09.2-07, D-537): it is written in the control plane and a copy is pushed to the
+ * tenant's own `tenant_modules` row afterwards (best effort, healed by the reconcile function). The module's
+ * `settings` blob is TENANT-owned and stays in the tenant's project (`readModuleSettings`,
+ * `patchModuleSettings`).
  *
  * The write is a ROW UPSERT keyed by `(tenant_id, module_key)` — the same shape the seed uses — so
  * two concurrent toggles never read-modify-write a boolean set: the last committed value wins and
@@ -28,7 +35,7 @@ export async function setModuleEnabled(
   enabled: boolean,
   actor: PlatformActor,
 ): Promise<void> {
-  await withAdminTx(async (tx) => {
+  await withPlatformTx(async (tx) => {
     const exists = await tx
       .select({ id: tenants.id })
       .from(tenants)
@@ -45,6 +52,7 @@ export async function setModuleEnabled(
       });
   });
 
+  await pushToTenant(tenantId, ['modules']);
   moduleFlags.invalidate(tenantId);
   logFor(actor, 'platform.modules').info(
     { event: 'platform.modules.set', userId: actor.userId, tenantId, module: key, enabled },
@@ -79,11 +87,23 @@ export function mergeSettingsPatch(stored: Json, patch: Json): Json {
 }
 
 /**
+ * An unknown tenant is the bare 404, answered by the control plane BEFORE any tenant project is chosen
+ * (a tenant with no binding would otherwise surface as `TENANT_PROJECT_UNBOUND`).
+ */
+async function assertTenantKnown(tenantId: string): Promise<void> {
+  const [tenant] = await withPlatformTx((tx) =>
+    tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId)).limit(1),
+  );
+  if (!tenant) throw new ApiError(404, 'NOT_FOUND');
+}
+
+/**
  * The stored `settings` blob of one module of one tenant, or `{}` when the tenant has no row for it.
  * An unknown TENANT is the bare 404. Raw: the caller parses it with the module's own tolerant schema.
  */
 export async function readModuleSettings(tenantId: string, key: ModuleKey): Promise<Json> {
-  return withAdminTx(async (tx) => {
+  await assertTenantKnown(tenantId);
+  return withAdminTx({ tenantId }, async (tx) => {
     const [tenant] = await tx
       .select({ id: tenants.id })
       .from(tenants)
@@ -116,7 +136,8 @@ export async function patchModuleSettings(
   patch: Json,
   actor: PlatformActor,
 ): Promise<Json> {
-  const stored = await withAdminTx(async (tx) => {
+  await assertTenantKnown(tenantId);
+  const stored = await withAdminTx({ tenantId }, async (tx) => {
     const [row] = await tx
       .select({ settings: tenantModules.settings })
       .from(tenantModules)

@@ -94,16 +94,39 @@ export const platform: readonly AdminLaneEntry[] = [
     ],
     'migrated',
   ),
-  ...group('packages/core/server/platform/modules.ts', [
-    ['setModuleEnabled', 'S', 7],
-    ['readModuleSettings', 'S', 7],
-    ['patchModuleSettings', 'S', 7],
-  ]),
+  ...group(
+    'packages/core/server/platform/modules.ts',
+    [
+      [
+        'readModuleSettings',
+        'S',
+        7,
+        'the tenant is checked centrally first; settings are tenant-owned',
+      ],
+      [
+        'patchModuleSettings',
+        'S',
+        7,
+        'the tenant is checked centrally first; settings are tenant-owned',
+      ],
+    ],
+    'migrated',
+  ),
   ...group(
     'packages/core/server/platform/tenants.ts',
     [
-      ['createTenant', 'S', 7, 'step 2 of the saga (the first-admin invite); step 1 is a platform transaction'],
-      ['getTenantDetail', 'S', 7, 'invites and admins from the tenant project, after the central read'],
+      [
+        'createTenant',
+        'S',
+        7,
+        'step 2 of the saga (the first-admin invite); step 1 is a platform transaction',
+      ],
+      [
+        'getTenantDetail',
+        'S',
+        7,
+        'invites and admins from the tenant project, after the central read',
+      ],
       ['updateTenant', 'S', 7, 'the brand colors; the display name is a central write'],
     ],
     'migrated',
