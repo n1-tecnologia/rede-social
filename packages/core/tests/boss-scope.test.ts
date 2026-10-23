@@ -102,12 +102,13 @@ describe('registerJobQueues scopes', () => {
     expect(boss.queueScope('scope.dup')).toBe('platform');
   });
 
+  // Loads the whole kernel: a cold CI runner needs more than the 5000 ms default (5696 ms measured in run 40039284864).
   it('the kernel registers its platform queues at import', async () => {
     await import('../server/domains/index');
     await import('../server/platform/invite-send');
     expect(boss.queueScope('kernel.domain-verify')).toBe('platform');
     expect(boss.queueScope('kernel.invite-send')).toBe('platform');
-  });
+  }, 30_000);
 });
 
 describe('createBoss maps a scope to a schema from a closed set', () => {

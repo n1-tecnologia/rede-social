@@ -5,10 +5,21 @@ import {
   type DatabaseState,
   databaseOverviewSchema,
 } from '@rede-social/contracts/projects';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MoveRow } from '../server/projects/move/state';
 import { isTenantMoving } from '../server/projects/moving';
 import { reasonCodeOf, summarizeDatabase } from '../server/projects/overview';
 import { BOOTSTRAP_REASONS, BOOTSTRAP_STEPS } from '../server/projects/reasons';
+
+// The unit lane has no database: only the move-table lookup is replaced, every other export stays real.
+const h = vi.hoisted(() => ({
+  openMoveOf: vi.fn<(tenantId: string) => Promise<MoveRow | null>>(),
+}));
+
+vi.mock('../server/projects/move/state', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../server/projects/move/state')>()),
+  openMoveOf: h.openMoveOf,
+}));
 
 /**
  * 09.2-14 (D-542, D-543, D-545, UI-D-539): the derivation of a tenant's database state from the facts the
@@ -114,9 +125,47 @@ describe('summarizeDatabase: every UI state from fixture facts', () => {
   });
 });
 
-describe('moves are a stub with a contract (planning decision 2)', () => {
-  it('no tenant is moving until plan 23 reads the move table', async () => {
-    expect(await isTenantMoving('0a000000-0000-4000-8000-000000000001')).toBe(false);
+const TENANT = '0a000000-0000-4000-8000-000000000001';
+
+function openMove(): MoveRow {
+  const at = new Date('2026-10-23T12:00:00Z');
+  return {
+    id: '22222222-2222-4222-8222-222222222222',
+    tenantId: TENANT,
+    fromProjectId: '33333333-3333-4333-8333-333333333333',
+    toProjectId: '44444444-4444-4444-8444-444444444444',
+    state: 'copied',
+    statusBefore: 'active',
+    actor: 'cli',
+    counts: {},
+    fingerprint: null,
+    errorCode: null,
+    leaseOwner: null,
+    leaseUntil: null,
+    startedAt: at,
+    updatedAt: at,
+    cutoverAt: null,
+    finishedAt: null,
+    sourceDeletedAt: null,
+  };
+}
+
+describe('the moving flag follows the move table (09.2-23, D-535)', () => {
+  beforeEach(() => {
+    h.openMoveOf.mockReset();
+    h.openMoveOf.mockResolvedValue(null);
+  });
+
+  it('no open move: the tenant is not moving', async () => {
+    h.openMoveOf.mockResolvedValue(null);
+    expect(await isTenantMoving(TENANT)).toBe(false);
+    expect(h.openMoveOf).toHaveBeenCalledWith(TENANT);
+  });
+
+  it('an open move row: the tenant is moving', async () => {
+    h.openMoveOf.mockResolvedValue(openMove());
+    expect(await isTenantMoving(TENANT)).toBe(true);
+    expect(h.openMoveOf).toHaveBeenCalledWith(TENANT);
   });
 
   it('the overview schema has a moving flag', () => {
