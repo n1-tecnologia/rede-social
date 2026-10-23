@@ -25,6 +25,20 @@ the same thing in this file.
 | manual, Actions tab | `e2e-full.yml` (E2E full (manual)) | `plan` (forced to `all`) and four `e2e` shards only |
 | manual, Actions tab | `deploy-hml.yml` | the same as a push, but a dispatch has no push base, so `checks` run the full suite |
 
+**The deploy jobs' sequence (Phase 09.2, D-544).** After `checks` and `build`, the production job
+(`migrate-and-deploy-prod`, behind the reviewer) and the hml job (`migrate-and-deploy-hml`) run, in this
+order and on ONE image reference: Authenticate; **Release preflight**
+(`scripts/check-release-env.sh --env prod|hml`, which names every missing release item at once before any
+migration: the `SUPABASE_ORG_SLUG` variable and the Secret Manager secrets `platform-master-keys-*`,
+`migration-database-url-*` and `resend-smtp-pass-*`); Migrations (roles included, project 0);
+the `api_user` password; the auth hook guard; Push auth configuration; **Deploy the migrate job** (a Cloud
+Run Job, `migrate` / `migrate-hml`, same image, `ROLE=migrate`); **Run the migrate job** (`gcloud run jobs
+execute --wait`, which fails the step on a non-zero exit, so no new revision exists); Deploy the API; Deploy
+the worker. The fan-out applies the central migration set and then the tenant set to every ready tenant
+project; a failing tenant project is a warning, a central failure is exit 1 (`docs/DEPLOY.md`, "Phase 09.2
+release"). `homolog` is isolated: the preflight refuses `HML_SUPABASE=shared-with-production`. The `paths`
+filter is unchanged, and `supabase/central/**` is already inside `supabase/**`.
+
 The deploy `paths` of both files are the same and unchanged: `apps/api/**`, `packages/**`,
 `supabase/**`, `pnpm-lock.yaml` and the workflow file itself. `ci.yml` has **no push trigger**, so a
 push never starts the suite twice. A push that touches only `apps/web` or docs matches no `paths` and
@@ -38,8 +52,8 @@ e2e locally; only CI selects.
 
 | Job | What it proves | Stack |
 |---|---|---|
-| `static` | Biome + UI literal guard, `turbo typecheck build test`, the build-output gate (no authenticated route is static), module boundaries (and the negative fixture), the lane guard | none |
-| `db` | pgTAP (RLS, tenant isolation), the seed, the API integration suite, the pooler spike | one local stack |
+| `static` | Biome + UI literal guard, `turbo typecheck build test`, the build-output gate (no authenticated route is static), module boundaries (and the negative fixture), the lane guard, the auth hook guard, and the **workflow guard** (`pnpm guard:workflows`: the order and adjacency of the release steps, `--wait`, the serial concurrency group, one image, the secret lists, and the self-tests of the guard and of the release preflight) | none |
+| `db` | the central migration set (`pnpm db:central`, applied by the local-stack action after `supabase db reset`), pgTAP (RLS, tenant isolation, the registry and the move tables), the seed, the API integration suite including the **two-database cases** (routing, the bootstrap, the fan-out, the copy and the move between the local database and `rede_tenant_b`), the pooler spike | one local stack plus the second database `rede_tenant_b` that the integration suite creates inside it |
 | `plan` | which e2e specs this change can affect: `none`, `some` or `all` (section 3) | none (plain `node` over `git diff`) |
 | `e2e` | the dev-server suite (iPhone 14, Pixel 7, desktop): skipped on `none`, ONE job on `some`, four `--shard` jobs on `all` | one local stack per job |
 | `e2e-pwa` | the production-build PWA run (service worker, manifest, offline, CSP): always runs | one local stack |
@@ -142,8 +156,11 @@ separated `e2e/<name>.spec.ts`, empty unless `some`) and `matrix=` (one-line JSO
 ## 4. Composite actions
 
 `.github/actions/setup-workspace` (pnpm, Node 24, frozen install) and `.github/actions/local-stack`
-(CLI, ES256 keys, start with retry, reset, role, Realtime partition wait, optional pgTAP, env files,
-seed). Plan 08-02 deliberately left four verbatim copies of the bring-up and added no composite action,
+(CLI, ES256 keys, start with retry, reset, **the central migration set**, role, Realtime partition wait,
+optional pgTAP, env files, seed). Its `second-database: 'true'` input (the `db` job only) installs the
+**PostgreSQL 17 client** from the PGDG repository and puts it first on `PATH`: `scripts/db-two-databases.sh`
+restores the local server's platform schemas into `rede_tenant_b` with `pg_dump`, and a `pg_dump` older than
+the server (the runner image ships an older one) refuses to dump. The e2e jobs do not pass the input. Plan 08-02 deliberately left four verbatim copies of the bring-up and added no composite action,
 because nothing else needed to share them. That reasoning no longer holds: the `e2e` job is now one
 matrix definition fed by `plan`, the Docker retry (section 5) must exist exactly once, and a drifted
 copy would defeat the manual full run. `db`, `e2e` and `e2e-pwa` all call `local-stack`
@@ -178,6 +195,17 @@ follow-up if the warnings keep appearing.
   names: update the branch-protection required checks after the first run (section 7, item 6).
 - **The dev-server e2e is still flaky.** A red affected `e2e` blocks both deploys; use
   `gh run rerun --failed` rather than pushing again (a new push moves the base, see the first point).
+- **The second database exists only in the `db` job.** The two-database cases create `rede_tenant_b` with
+  `ensureSecondDatabase` and need the PostgreSQL 17 client (above). Run pgTAP before the integration suites
+  on any stack: the suites leave residue that makes pgTAP 154 fail, and the CI `db` job already runs them in
+  that order. A local stack seeded with the CI throwaway values needs `SEED_PASSWORD`, `SUPER_ADMIN_EMAIL`,
+  `SUPER_ADMIN_PASSWORD` set to the values in the workflow-level `env` of `ci.yml`, on the command line,
+  when the developer's own env files differ; pgTAP also needs `SEND_EMAIL_HOOK_SECRETS`, which the
+  `pnpm supabase` wrapper exports.
+- **No CI job runs a cloud command.** The Job, the preflight against Secret Manager, the deploy account's
+  rights, the PGDG install on a real runner and the move's override syntax are hosted proof H5 and H6
+  (`.planning/phases/09.2-banco-por-tenant-projeto-supabase-dedicado-por-tenant/09.2-HOSTED-PROOFS.md`); the
+  workflow guard reads files only.
 - **Hard-coded text.** A change to a `messages/pt-BR` catalog selects the specs that import it and the
   feature's own specs; a spec that hard-codes a string without importing the catalog is covered only
   through the feature group.
@@ -203,3 +231,8 @@ while a `master` push that touches only `.github/workflows/ci.yml` matches no de
 6. **Check branch protection** for the required-check names (`checks / ...` for the deploy workflows,
    the job names of `ci.yml` for pull requests).
 7. **Record the durations** of `plan`, `e2e some` and `e2e all` to calibrate `maxSomeShare`.
+8. **First run after Phase 09.2.** The `db` job's "PostgreSQL 17 client for the second-database shim" step
+   ends with a `pg_dump (PostgreSQL) 17.x` line and the "Apply the central migration set" step prints the
+   runner's JSON; the `static` job's `pnpm guard:workflows` step is green. On the first push to `homolog`,
+   read the new deploy steps in order (Release preflight, Deploy the migrate job, Run the migrate job) and
+   the Job's execution log; record them in hosted proof H5.
