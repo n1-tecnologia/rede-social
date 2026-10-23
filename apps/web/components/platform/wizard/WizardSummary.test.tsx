@@ -185,6 +185,8 @@ function stageDraft(initial?: Partial<TenantDraft>) {
     logoDark: null,
     icon: null,
     appIcon: null,
+    access: { databasePassword: '', serviceKey: '', publishableKey: '' },
+    clearAccess: vi.fn(),
     update: vi.fn(),
     setConfirming: vi.fn(),
   };
@@ -730,5 +732,142 @@ describe('the confirmation uploads the app icon on the tenant’s primary', () =
     await waitFor(() =>
       expect(document.querySelector('[data-task="icon"]')?.getAttribute('data-state')).toBe('done'),
     );
+  });
+});
+
+/**
+ * 09.2-18 (UI-D-535, DBT-50): the project is a row of the summary and of the confirmation. The ref is
+ * the draft's (`tabular-nums break-all`, so a 20-letter code never scrolls the card sideways);
+ * "Acesso informado manualmente" shows only when the fallback was used; nothing secret is echoed,
+ * whatever the memory-only access holds.
+ */
+describe('the summary and the confirmation list the project', () => {
+  const REF = 'abcdefghijklmnopqrst';
+  const SECRETS = {
+    databasePassword: 'pw-s3cr3t',
+    serviceKey: 'svc-s3cr3t',
+    publishableKey: 'pub-s3cr3t',
+  };
+
+  it('shows the Projeto card with the ref, tabular and breakable, and no manual note by default', () => {
+    stageDraft({ projectRef: REF });
+    render(<WizardSummary />);
+    const card = document.querySelector('[data-summary-project]') as HTMLElement;
+    expect(card.textContent).toBe(REF);
+    expect(card.querySelector('p')?.className).toContain('tabular-nums');
+    expect(card.querySelector('p')?.className).toContain('break-all');
+    const headings = Array.from(document.querySelectorAll('h2')).map((h) => h.textContent);
+    expect(headings).toContain('Projeto');
+    expect(document.body.textContent).not.toContain('Acesso informado manualmente');
+  });
+
+  it('adds "Acesso informado manualmente" (12/400 tertiary) only when the fallback was used', () => {
+    stageDraft({ projectRef: REF, manualAccess: true });
+    render(<WizardSummary />);
+    const note = Array.from(document.querySelectorAll('[data-summary-project] p')).find(
+      (p) => p.textContent === 'Acesso informado manualmente',
+    );
+    expect(note?.className).toContain('text-xs');
+    expect(note?.className).toContain('text-text-tertiary');
+  });
+
+  it('echoes nothing secret in the summary, whatever the memory holds', () => {
+    stageDraft({ projectRef: REF, manualAccess: true });
+    Object.assign(harness.draft as object, { access: SECRETS });
+    const { container } = render(<WizardSummary />);
+    for (const secret of Object.values(SECRETS)) {
+      expect(container.innerHTML).not.toContain(secret);
+      expect(document.body.textContent).not.toContain(secret);
+    }
+  });
+
+  it('has the Projeto pair in the confirmation, after Domínio and before the first admin', () => {
+    stageDraft({ projectRef: REF, manualAccess: true, host: 'comunidade.exemplo.com.br' });
+    Object.assign(harness.draft as object, { access: SECRETS });
+    render(<CreateTenantDialog open onClose={() => {}} />);
+    const dts = Array.from(document.querySelectorAll('[data-create-dialog="review"] dt')).map(
+      (n) => n.textContent,
+    );
+    const at = (label: string) => dts.indexOf(label);
+    expect(at('Projeto')).toBeGreaterThan(at('Domínio'));
+    expect(at('Projeto')).toBeLessThan(at('E-mail do primeiro administrador'));
+    const dd = document.querySelector('[data-confirm-project]') as HTMLElement;
+    expect(dd.firstElementChild?.className).toContain('break-all');
+    expect(dd.firstElementChild?.className).toContain('tabular-nums');
+    expect(dd.textContent).toContain(REF);
+    expect(dd.textContent).toContain('Acesso informado manualmente');
+    for (const secret of Object.values(SECRETS)) {
+      expect(document.body.textContent).not.toContain(secret);
+    }
+  });
+
+  it('omits the manual note from the confirmation when the access was the platform’s own', () => {
+    stageDraft({ projectRef: REF });
+    render(<CreateTenantDialog open onClose={() => {}} />);
+    expect(document.querySelector('[data-confirm-project]')?.textContent).toBe(REF);
+  });
+});
+
+/**
+ * 09.2-18 (D-539, UI-D-534): the creation call carries the ref, and the manual access travels with
+ * it ONCE and only when the pre-check asked for it; the memory is cleared the moment the API answers.
+ */
+describe('the confirmation sends the project once', () => {
+  const REF = 'abcdefghijklmnopqrst';
+  const SECRETS = { databasePassword: 'pw', serviceKey: 'svc', publishableKey: 'pub' };
+
+  async function confirmWith(
+    result: Awaited<
+      ReturnType<
+        typeof import('@/app/(platform)/plataforma/novo/actions').createTenantFromDraftAction
+      >
+    >,
+    draft: Partial<TenantDraft>,
+  ) {
+    const actions = await import('@/app/(platform)/plataforma/novo/actions');
+    const create = vi.mocked(actions.createTenantFromDraftAction);
+    create.mockReset();
+    create.mockResolvedValue(result);
+    stageDraft(draft);
+    Object.assign(harness.draft as object, { access: SECRETS });
+    render(<CreateTenantDialog open onClose={() => {}} />);
+    fireEvent.click(document.querySelector('[data-create-confirm]') as HTMLElement);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    return create.mock.calls[0]?.[0];
+  }
+
+  it('sends the ref and, when the access is manual, the three values', async () => {
+    const sent = await confirmWith(
+      { ok: false, fieldErrors: { access: 'accessInvalid' } },
+      { projectRef: REF, manualAccess: true },
+    );
+    expect(sent?.projectRef).toBe(REF);
+    expect(sent?.access).toEqual(SECRETS);
+  });
+
+  it('sends no access when the platform obtained it itself, even if memory holds values', async () => {
+    const sent = await confirmWith(
+      { ok: false, fieldErrors: { projectRef: 'projectNotFound' } },
+      { projectRef: REF, manualAccess: false },
+    );
+    expect(sent?.projectRef).toBe(REF);
+    expect(sent).not.toHaveProperty('access');
+  });
+
+  it('clears the memory when the API refuses for good, and keeps it for a retryable failure', async () => {
+    await confirmWith(
+      { ok: false, fieldErrors: { access: 'accessInvalid' } },
+      { projectRef: REF, manualAccess: true },
+    );
+    const cleared = (harness.draft as { clearAccess: ReturnType<typeof vi.fn> }).clearAccess;
+    await waitFor(() => expect(cleared).toHaveBeenCalledTimes(1));
+    cleanup();
+
+    await confirmWith({ ok: false, error: 'generic' }, { projectRef: REF, manualAccess: true });
+    const kept = (harness.draft as { clearAccess: ReturnType<typeof vi.fn> }).clearAccess;
+    await waitFor(() =>
+      expect(document.querySelector('[data-create-dialog="generic"]')).not.toBeNull(),
+    );
+    expect(kept).not.toHaveBeenCalled();
   });
 });

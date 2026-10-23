@@ -100,7 +100,11 @@
         "projectNotFound": "Não encontramos este projeto. Confira o código e se ele está na organização da plataforma.",
         "projectNotEmpty": "Este projeto já tem tabelas. Use um projeto novo e vazio.",
         "projectInUse": "Este projeto já está em uso por outro tenant.",
-        "projectPaused": "Este projeto está pausado. Reative-o no Supabase e tente de novo."
+        "projectPaused": "Este projeto está pausado. Reative-o no Supabase e tente de novo.",
+        "passwordRequired": "Cole a senha do banco.",
+        "serviceKeyRequired": "Cole a chave de serviço.",
+        "publishableKeyRequired": "Cole a chave publicável.",
+        "accessInvalid": "Não foi possível entrar no projeto com estes dados. Confira e tente de novo."
       }
     },
     "tenant": {

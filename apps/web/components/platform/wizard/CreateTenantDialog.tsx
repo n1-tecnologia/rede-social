@@ -89,8 +89,19 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
   const tb = useTranslations('platformBranding');
   const td = useTranslations('platformDomains');
   const router = useRouter();
-  const { draft, colors, enabledModules, logo, logoDark, icon, appIcon, update, setConfirming } =
-    useTenantDraft();
+  const {
+    draft,
+    colors,
+    enabledModules,
+    logo,
+    logoDark,
+    icon,
+    appIcon,
+    access,
+    clearAccess,
+    update,
+    setConfirming,
+  } = useTenantDraft();
   const [phase, setPhase] = useState<Phase>('review');
   const [status, setStatus] = useState<Partial<Record<Task, TaskStatus>>>({});
   const [reasons, setReasons] = useState<Partial<Record<Task, string>>>({});
@@ -223,12 +234,18 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
         secondary: draft.secondary,
         adminEmail: draft.adminEmail,
         modules: enabledModules,
+        projectRef: draft.projectRef,
+        // The manual access travels once, with this call, and only when the pre-check asked for it.
+        ...(draft.manualAccess ? { access } : {}),
         look: lookBodyOf(draft),
       });
     } catch (error) {
       console.error('platform.tenants.create_failed', { error: String(error) });
       created = { ok: false, error: 'generic' };
     }
+    // The API answered: accepted or refused for good, the secrets are spent (D-539, UI-D-534). A
+    // failure with no field to blame (`generic`) keeps them, so "Tentar de novo" can send them again.
+    if (created.ok || 'fieldErrors' in created) clearAccess();
     if (!created.ok && 'fieldErrors' in created && created.fieldErrors.slug === 'slugTaken') {
       // The slug may be taken by THIS creation: an answer lost on the way back (Next replays an
       // action whose fetch failed, and the replay hears "taken"), or that earlier attempt. The same
@@ -465,6 +482,15 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
               ) : null}
               <dt className="text-text-tertiary">{tw('summary.sections.domain')}</dt>
               <dd className="min-w-0 break-words text-text">{host || t('tenant.noHost')}</dd>
+              <dt className="text-text-tertiary">{tw('summary.fields.project')}</dt>
+              <dd data-confirm-project className="min-w-0 text-text">
+                <span className="break-all tabular-nums">{draft.projectRef}</span>
+                {draft.manualAccess ? (
+                  <span className="block text-xs text-text-tertiary">
+                    {tw('summary.fields.projectManual')}
+                  </span>
+                ) : null}
+              </dd>
               <dt className="text-text-tertiary">{tw('summary.fields.email')}</dt>
               <dd className="min-w-0 break-words text-text">{draft.adminEmail}</dd>
             </dl>

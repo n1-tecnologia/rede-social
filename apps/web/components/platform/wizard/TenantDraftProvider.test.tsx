@@ -449,3 +449,101 @@ describe('TenantDraftProvider — the project ref', () => {
     expect(stored()).toMatchObject({ projectRef: '', dataReady: false });
   });
 });
+
+/**
+ * 09.2-18 (UI-D-534, D-539, PR-4a): the manual access is write-only and memory only. The tab's mirror
+ * is an allow-list of keys, so even a secret smuggled into the draft object never reaches it, and a
+ * reload finds the ref and the manual flag but none of the values.
+ */
+describe('TenantDraftProvider — the manual access (memory only)', () => {
+  const SECRETS = {
+    databasePassword: 'pw-s3cr3t-0001',
+    serviceKey: 'svc-s3cr3t-0002',
+    publishableKey: 'pub-s3cr3t-0003',
+  };
+  const mirror = () => window.sessionStorage.getItem(STORAGE_KEY) ?? '';
+
+  it('starts empty and holds what setAccess is given, field by field', () => {
+    mount();
+    expect(draft.access).toEqual({ databasePassword: '', serviceKey: '', publishableKey: '' });
+    act(() => draft.setAccess({ serviceKey: SECRETS.serviceKey }));
+    act(() => draft.setAccess({ databasePassword: SECRETS.databasePassword }));
+    expect(draft.access).toEqual({
+      databasePassword: SECRETS.databasePassword,
+      serviceKey: SECRETS.serviceKey,
+      publishableKey: '',
+    });
+  });
+
+  it('never writes a value to the tab’s session, serialised and scanned', () => {
+    mount();
+    act(() => {
+      draft.setAccess(SECRETS);
+      draft.update({ projectRef: 'abcdefghijklmnopqrst', manualAccess: true, dataReady: true });
+    });
+    expect(draft.access).toEqual(SECRETS);
+    const raw = mirror();
+    expect(JSON.parse(raw)).toMatchObject({
+      projectRef: 'abcdefghijklmnopqrst',
+      manualAccess: true,
+    });
+    for (const secret of Object.values(SECRETS)) expect(raw).not.toContain(secret);
+    for (const key of Object.keys(SECRETS)) expect(raw).not.toContain(key);
+    // Nor anywhere else the browser keeps text across a reload.
+    expect(JSON.stringify(window.localStorage)).not.toContain('s3cr3t');
+    expect(document.cookie).not.toContain('s3cr3t');
+  });
+
+  it('persists an allow-list of keys: a field added to the draft later is not mirrored until listed', () => {
+    mount();
+    act(() => draft.update({ displayName: 'Lista' }));
+    // A foreign key (a secret added by mistake, say) rides in the object but not in the mirror.
+    act(() => draft.update({ leaked: 'pw-s3cr3t' } as never));
+    expect(stored()).toMatchObject({ displayName: 'Lista' });
+    expect(mirror()).not.toContain('leaked');
+    expect(mirror()).not.toContain('s3cr3t');
+  });
+
+  it('a reload yields the ref and the flag, with no values', () => {
+    const first = mount();
+    act(() => {
+      draft.setAccess(SECRETS);
+      draft.update({ projectRef: 'abcdefghijklmnopqrst', manualAccess: true });
+    });
+    first.unmount();
+    mount();
+    expect(draft.draft.projectRef).toBe('abcdefghijklmnopqrst');
+    expect(draft.draft.manualAccess).toBe(true);
+    expect(draft.access).toEqual({ databasePassword: '', serviceKey: '', publishableKey: '' });
+  });
+
+  it('a stored secret planted under the draft’s keys is ignored on reload', () => {
+    window.sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ projectRef: 'abcdefghijklmnopqrst', access: SECRETS, ...SECRETS }),
+    );
+    mount();
+    expect(draft.access).toEqual({ databasePassword: '', serviceKey: '', publishableKey: '' });
+    expect(Object.keys(draft.draft)).not.toContain('databasePassword');
+    expect(mirror()).not.toContain('s3cr3t');
+  });
+
+  it('clearAccess empties the three after the creation answered', () => {
+    mount();
+    act(() => draft.setAccess(SECRETS));
+    act(() => draft.clearAccess());
+    expect(draft.access).toEqual({ databasePassword: '', serviceKey: '', publishableKey: '' });
+  });
+
+  it('reset (a discarded draft) clears the values with the rest', () => {
+    mount();
+    act(() => {
+      draft.setAccess(SECRETS);
+      draft.update({ projectRef: 'abcdefghijklmnopqrst', manualAccess: true });
+    });
+    act(() => draft.reset());
+    expect(draft.access).toEqual({ databasePassword: '', serviceKey: '', publishableKey: '' });
+    expect(draft.draft.manualAccess).toBe(false);
+    expect(mirror()).not.toContain('abcdefghijklmnopqrst');
+  });
+});

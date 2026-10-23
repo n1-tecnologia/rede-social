@@ -7,29 +7,57 @@ import { useTenantDraft } from './TenantDraftProvider';
 /**
  * The draft steps' gate, checked after the draft was read back from the tab's session (so a reload
  * on a later step stays where it is). Each step needs the ones before it:
+ * - while the summary's confirmation is open (`confirming`) the gate waits: the dialog owns what
+ *   follows (its progress, a partial failure, the hand-off to the invite or the Banco tab), and what
+ *   it clears on the way (the manual access once the API answered) must not send the page anywhere;
  * - a draft that already created its tenant (`createdId`) goes on to that tenant's invite step, on
- *   every draft step, Dados included: the tenant exists, so nothing may offer to create it again
- *   (unless the summary's confirmation is still open: it shows the uploads and moves on itself);
+ *   every draft step, Dados included: the tenant exists, so nothing may offer to create it again;
  * - `need="data"` (Personalização): Dados passed its validation (`dataReady`), else Dados;
  * - `need="brand"` (Domínio): also the colours pass (`brandReady`), else Personalização;
  * - `need="host"` (Resumo): also the host was checked by the Domínio step (`hostReady`), else
- *   Domínio, so a host typed and never checked cannot reach the confirmation.
+ *   Domínio, so a host typed and never checked cannot reach the confirmation;
+ * - `need="project"` (Resumo, since 09.2-18): everything above, and the Supabase project: a ref
+ *   (Dados checked it) and, when the pre-check said the access is manual, the three values. They are
+ *   memory only, so a reload on a later step finds the ref without them (UI-D-534): the draft goes
+ *   back to Dados, closed, to ask again.
  */
-export function RequireDraftData({ need = 'data' }: { need?: 'none' | 'data' | 'brand' | 'host' }) {
-  const { draft, brandReady, restored, confirming } = useTenantDraft();
+export function RequireDraftData({
+  need = 'data',
+}: {
+  need?: 'none' | 'data' | 'brand' | 'host' | 'project';
+}) {
+  const { draft, brandReady, restored, confirming, access, update } = useTenantDraft();
   const router = useRouter();
-  const { createdId, dataReady, hostReady } = draft;
+  const { createdId, dataReady, hostReady, projectRef, manualAccess } = draft;
+  const accessMissing = Object.values(access).some((value) => value.trim() === '');
+  const projectMissing = projectRef.trim() === '' || (manualAccess && accessMissing);
   useEffect(() => {
-    if (!restored) return;
+    if (!restored || confirming) return;
     if (createdId) {
-      if (!confirming) router.replace(`/plataforma/novo/${createdId}/convite`);
+      router.replace(`/plataforma/novo/${createdId}/convite`);
       return;
     }
     if (need === 'none') return;
     if (!dataReady) router.replace('/plataforma/novo');
-    else if (need !== 'data' && !brandReady) router.replace('/plataforma/novo/marca');
-    else if (need === 'host' && !hostReady) router.replace('/plataforma/novo/dominio');
-  }, [restored, createdId, confirming, dataReady, brandReady, hostReady, need, router]);
+    else if (need === 'project' && projectMissing) {
+      update({ dataReady: false });
+      router.replace('/plataforma/novo');
+    } else if (need !== 'data' && !brandReady) router.replace('/plataforma/novo/marca');
+    else if ((need === 'host' || need === 'project') && !hostReady) {
+      router.replace('/plataforma/novo/dominio');
+    }
+  }, [
+    restored,
+    createdId,
+    confirming,
+    dataReady,
+    brandReady,
+    hostReady,
+    projectMissing,
+    need,
+    router,
+    update,
+  ]);
   return null;
 }
 

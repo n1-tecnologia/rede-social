@@ -4278,3 +4278,47 @@ describe('09.2-18 - the project field and the database catalog', () => {
     }
   });
 });
+
+/**
+ * 09.2-18 Task 2 (UI-D-534, UI-D-535) - the manual-access block's words and the summary's project pair,
+ * verbatim from the Copywriting Contract (the 'Manual access' and 'Summary' rows).
+ */
+describe('09.2-18 - the manual access and the summary pair', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    [
+      'platform.wizard.project.manual.intro',
+      'Não conseguimos obter o acesso a este projeto sozinhos. Cole os dados abaixo, do painel do Supabase (Configurações do projeto).',
+    ],
+    ['platform.wizard.project.manual.password', 'Senha do banco (usuário postgres)'],
+    ['platform.wizard.project.manual.serviceKey', 'Chave de serviço (service_role)'],
+    ['platform.wizard.project.manual.publishableKey', 'Chave publicável'],
+    [
+      'platform.wizard.project.manual.helper',
+      'Fica guardado com segurança e não pode ser lido depois.',
+    ],
+    ['platform.new.errors.passwordRequired', 'Cole a senha do banco.'],
+    ['platform.new.errors.serviceKeyRequired', 'Cole a chave de serviço.'],
+    ['platform.new.errors.publishableKeyRequired', 'Cole a chave publicável.'],
+    [
+      'platform.new.errors.accessInvalid',
+      'Não foi possível entrar no projeto com estes dados. Confira e tente de novo.',
+    ],
+    ['platform.wizard.summary.fields.project', 'Projeto'],
+    ['platform.wizard.summary.fields.projectManual', 'Acesso informado manualmente'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('no sentence of the project block mentions a secret value, a host or a provider error', () => {
+    const block = JSON.stringify(lookup('platform.wizard.project'));
+    expect(block).not.toMatch(/postgres:\/\/|sb_secret_|eyJ/);
+  });
+});

@@ -194,6 +194,19 @@ export function WizardSummary() {
         >
           <p className="break-words text-sm text-text">{host || tw('summary.noDomain')}</p>
         </SummaryCard>
+
+        <SummaryCard
+          title={tw('summary.fields.project')}
+          editHref="/plataforma/novo"
+          className="md:col-span-2"
+        >
+          <div data-summary-project className="flex min-w-0 flex-col gap-1">
+            <p className="break-all text-sm tabular-nums text-text">{draft.projectRef}</p>
+            {draft.manualAccess ? (
+              <p className="text-xs text-text-tertiary">{tw('summary.fields.projectManual')}</p>
+            ) : null}
+          </div>
+        </SummaryCard>
       </div>
 
       <BrandPreview

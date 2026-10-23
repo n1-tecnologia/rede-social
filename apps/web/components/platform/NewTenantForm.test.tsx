@@ -329,3 +329,215 @@ describe('Dados — the Projeto Supabase group', () => {
     }
   });
 });
+
+/**
+ * 09.2-18 Task 2 (UI-D-534, DBT-21, E02): the manual-access block. Present only after a pre-check that
+ * answered `manualAccess`; the first "Continuar" that learns it only reveals it; from then on all three
+ * values are required, each with its own error; the values live in memory and never in the session
+ * mirror, and they never go to the Dados action.
+ */
+describe('Dados — the manual access block', () => {
+  const SECRETS = {
+    databasePassword: 'pw-s3cr3t-0001',
+    serviceKey: 'svc-s3cr3t-0002',
+    publishableKey: 'pub-s3cr3t-0003',
+  };
+  const manual = (): DraftValidation => ({ ok: true, manualAccess: true });
+  const block = () => document.querySelector('[data-project-access]');
+  const secretField = (key: keyof typeof SECRETS) =>
+    document.getElementById(`access-${key}`) as HTMLInputElement;
+  const fill = (values: Partial<typeof SECRETS>) => {
+    for (const [key, value] of Object.entries(values)) {
+      fireEvent.change(secretField(key as keyof typeof SECRETS), { target: { value } });
+    }
+  };
+  const mirror = () => window.sessionStorage.getItem(STORAGE_KEY) ?? '';
+
+  it('E02: is absent from the DOM when the platform obtained the access itself', async () => {
+    mount();
+    expect(block()).toBeNull();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(harness.router.push).toHaveBeenCalled());
+    expect(block()).toBeNull();
+    expect(document.body.textContent).not.toContain('Chave de serviço');
+  });
+
+  it('E02: the first "Continuar" that learns the access is manual reveals the block and stays', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    expect(harness.router.push).not.toHaveBeenCalled();
+    expect(draft.draft.dataReady).toBe(false);
+    expect(draft.draft.manualAccess).toBe(true);
+    // Revealed, not scolded: no "Cole …" yet. The first field takes the focus.
+    expect(alerts()).toEqual([]);
+    expect(document.activeElement).toBe(secretField('databasePassword'));
+    expect(block()?.firstElementChild?.textContent).toContain(
+      'Não conseguimos obter o acesso a este projeto sozinhos.',
+    );
+  });
+
+  it('E02 empty: with the block on screen each empty field shows its own error and the step stays closed', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    await submit();
+    await waitFor(() =>
+      expect(alerts()).toEqual([
+        'Cole a senha do banco.',
+        'Cole a chave de serviço.',
+        'Cole a chave publicável.',
+      ]),
+    );
+    expect(harness.router.push).not.toHaveBeenCalled();
+    expect(draft.draft.dataReady).toBe(false);
+  });
+
+  it('E02 partial: any one of the three missing blocks "Continuar" with that field’s error', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+
+    fill({ databasePassword: SECRETS.databasePassword, serviceKey: SECRETS.serviceKey });
+    await submit();
+    await waitFor(() => expect(alerts()).toEqual(['Cole a chave publicável.']));
+    expect(harness.router.push).not.toHaveBeenCalled();
+
+    fill({ publishableKey: SECRETS.publishableKey });
+    expect(alerts()).toEqual([]);
+    await submit();
+    await waitFor(() => expect(harness.router.push).toHaveBeenCalledWith('/plataforma/novo/marca'));
+    expect(draft.draft.dataReady).toBe(true);
+  });
+
+  it('E02: all three values sit in the draft’s memory and never reach the session mirror', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    fill(SECRETS);
+    expect(draft.access).toEqual(SECRETS);
+    await submit();
+    await waitFor(() => expect(harness.router.push).toHaveBeenCalled());
+    for (const secret of Object.values(SECRETS)) expect(mirror()).not.toContain(secret);
+    expect(JSON.parse(mirror()).manualAccess).toBe(true);
+  });
+
+  it('E02: the Dados action is never handed a secret', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    fill(SECRETS);
+    await submit();
+    await waitFor(() => expect(harness.router.push).toHaveBeenCalled());
+    for (const [arg] of harness.validate.mock.calls) {
+      expect(JSON.stringify(arg)).not.toContain('s3cr3t');
+      expect(arg).not.toHaveProperty('access');
+    }
+  });
+
+  it('E02: a reload keeps the ref and the manual flag but asks for the three values again', async () => {
+    harness.validate.mockResolvedValue(manual());
+    const first = mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    fill(SECRETS);
+    first.unmount();
+
+    mount();
+    expect(field().value).toBe(REF);
+    expect(block()).not.toBeNull();
+    expect(secretField('databasePassword').value).toBe('');
+    expect(secretField('serviceKey').value).toBe('');
+    expect(secretField('publishableKey').value).toBe('');
+    expect(document.body.innerHTML).not.toContain('s3cr3t');
+  });
+
+  it('E02: editing the ref takes the block away and forgets what was pasted', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    fill(SECRETS);
+    type(`${REF.slice(0, 19)}z`);
+    expect(block()).toBeNull();
+    expect(draft.draft.manualAccess).toBe(false);
+    expect(draft.access).toEqual({ databasePassword: '', serviceKey: '', publishableKey: '' });
+  });
+
+  it('E02: a later pre-check that no longer asks for the access drops the block and the values', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    fill(SECRETS);
+    harness.validate.mockResolvedValue(ok());
+    await submit();
+    await waitFor(() => expect(harness.router.push).toHaveBeenCalled());
+    expect(block()).toBeNull();
+    expect(draft.access).toEqual({ databasePassword: '', serviceKey: '', publishableKey: '' });
+    expect(draft.draft.manualAccess).toBe(false);
+  });
+
+  it('E02 loading: the fields share the pending state of "Continuar"', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    fill(SECRETS);
+    let release: (value: DraftValidation) => void = () => {};
+    harness.validate.mockReturnValue(
+      new Promise<DraftValidation>((resolve) => {
+        release = resolve;
+      }),
+    );
+    await submit();
+    expect(secretField('serviceKey').disabled).toBe(true);
+    await act(async () => release(manual()));
+    expect(secretField('serviceKey').disabled).toBe(false);
+  });
+
+  it('E02 error: a refusal from the project shows its sentence above the block and persists nothing', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    // What the confirmation hands back when the project refuses the values (the dialog's `fixData`).
+    act(() => draft.update({ fieldErrors: { access: 'accessInvalid' }, dataReady: false }));
+    expect(alerts()).toEqual([
+      'Não foi possível entrar no projeto com estes dados. Confira e tente de novo.',
+    ]);
+    for (const secret of Object.values(SECRETS)) expect(mirror()).not.toContain(secret);
+    // Typing in a field clears that block-level error.
+    fill({ serviceKey: 'x' });
+    expect(alerts()).toEqual([]);
+  });
+
+  it('E02 long-text: a long pasted key scrolls inside its password input', async () => {
+    harness.validate.mockResolvedValue(manual());
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(block()).not.toBeNull());
+    const long = 'k'.repeat(2000);
+    fill({ serviceKey: long });
+    expect(secretField('serviceKey').value).toBe(long);
+    expect(secretField('serviceKey').type).toBe('password');
+    expect(document.body.textContent).not.toContain('kkkkkkkk');
+  });
+});
