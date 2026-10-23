@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 15
+current_plan: 18
 status: executing
-stopped_at: Completed 09.2-17-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17 done); next is 09.2-15 (wave 10), then 18
-last_updated: "2026-10-23T03:50:11.568Z"
+stopped_at: Completed 09.2-15-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15 done); next is 09.2-18 (wave 10, UI, behind sketch 014), then wave 11 (16, 19, 22)
+last_updated: "2026-10-23T04:16:48.620Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-17 (web tier: per-host Supabase coordinates for the Auth client, proxy, CSP, icons, Realtime props and upload endpoint; last-good by-host answer; stale session cookie cleanup; generic-host sign-up redirect; Pitfall 12 source guard)"
-state_head: fb81c20890e59d8ea981ceffa5a5bf159de95bb6
+last_activity_desc: "Completed 09.2-15 (migration fan-out: migrateAll, ROLE=migrate, stored schema state, image manifest and MIGRATIONS_DIR, live updating gate, platform.migration-retry; plan-13 clock fix)"
+state_head: 3351a1ad1e5d1de60089da6665c52e78f80d0758
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 250
+  completed_plans: 251
   percent: 0
 ---
 
@@ -29,13 +29,13 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 15
+Current Plan: 18
 Total Plans in Phase: 28
-Plan: 15 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper), 13 bootstrap engine, 10 route indexes for the no-host routes, 11 per-project Send Email Hook, sign-up by slug and allow-list, 14 panel API for a tenant's project (pre-check, create with a ref, overview, verify, resume, credentials, break-glass reissue, health job, database state on the list) and 17 (web tier: coordinates per host for the Auth client, proxy, CSP, icons, Realtime and upload; last-good host answer; stale cookie cleanup; generic-host sign-up redirect) done; plans run out of numeric order: the next is 15 (wave 10), then 18)
+Plan: 18 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper), 13 bootstrap engine, 10 route indexes for the no-host routes, 11 per-project Send Email Hook, sign-up by slug and allow-list, 14 panel API for a tenant's project, 17 web tier (coordinates per host) and 15 migration fan-out (migrateAll, ROLE=migrate, stored schema state, image manifest, live updating gate, platform.migration-retry) done; plans run out of numeric order: the next is 18 (wave 10, UI, behind the approved sketch 014 gate), then wave 11 (16, 19, 22))
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-17 (web follows each tenant's own Supabase project; DBT-39 waits for the other plans that declare it and the hosted proofs)
+Last activity: 2026-10-23 — Completed 09.2-15 (a migration reaches every tenant project with one command; the API holds back a lagging tenant; DBT-24, DBT-25 and DBT-44 wait for the other plans that declare them)
 
-Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 159/162 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -308,6 +308,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P11 | 21 min | 3 tasks | 25 files |
 | Phase 09.2 P14 | 47 min | 3 tasks | 35 files |
 | Phase 09.2 P17 | 30 min | 2 tasks | 24 files |
+| Phase 09.2 P15 | 32 min | 3 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -1028,6 +1029,8 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-14: replaceCredentials validates every supplied value against the project (the publishable key against GET /storage/v1/bucket, the one route the local gateway enforces) and writes the changed columns, the version and the timestamp in one statement under the project lock with the row read for update; reissueCredentials re-derives keys, passwords and the hook secret from the platform token alone and holds the step rows for update — A typo in a replaced credential must never take a tenant down, two writers must leave one coherent set, and a lost master key must have a recovery that reads nothing stored
 - [Phase 09.2]: 09.2-14: one databaseState derivation (contracts) feeds the overview, the list pill and the SQL of ?banco=problema; platform.project-health sweeps ready projects four at a time and drops the caches only on a state change; a ready project not yet checked reads unchecked, and project_schema_state stays plan 15's to write — The Banco tab, the list and the tenant header cannot disagree about a state; the Management API shares one rate limit and a stale cache would show a paused project as active
 - [Phase 09.2]: 09.2-17: coordinates per host are a pure per-request function of the by-host answer; a half or disallowed project address makes the tenant unavailable and the central project is never substituted; a generic answer never deletes session cookies (a failed lookup of a tenant host must not log members out) — Serving tenant B's sign-in against the central Auth is the single-database behaviour this phase removes; cookie cleanup runs only for positively classified tenant and platform hosts
+- [Phase 09.2]: 09.2-15: migrateAll fans the central set then the tenant set out to every ready project (project 0 through MIGRATION_DATABASE_URL, failing closed in production without it); the state row's required values are the applied files' own count and head; a tenant failure is a warning unless --strict; the retry job heals tenant projects only — D-544/D-545: one failing project never blocks the release of the others, and the gate and the fan-out agree by construction
+- [Phase 09.2]: 09.2-15: the image carries both sets and roles.sql under MIGRATIONS_DIR (/app/migrations) with a deterministic manifest; defaultMigrationDir and readRolesSql honour it; a production boot without a manifest stops with 'migrations manifest empty'; outside production the required schema is derived from the repository, so the updating gate is live in dev and tests — D-547/DBT-44: the running API knows its required schema with no database round trip; a dev who applies a tenant migration without db:migrate-all sees updating for projects that have a state row
 
 ### Pending Todos
 
@@ -1136,6 +1139,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T03:36:24.427Z
-Stopped at: Completed 09.2-17-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17 done); next is 09.2-15 (wave 10), then 18
+Last session: 2026-10-23T04:16:48.404Z
+Stopped at: Completed 09.2-15-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15 done); next is 09.2-18 (wave 10, UI, behind sketch 014), then wave 11 (16, 19, 22)
 Resume file: None
