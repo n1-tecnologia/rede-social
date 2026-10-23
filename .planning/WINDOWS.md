@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 81
+open_count: 83
 waived_count: 0
 fixed_count: 60
-total_count: 141
-last_updated: 2026-10-23T13:03:25.713Z
+total_count: 143
+last_updated: 2026-10-23T13:42:21.020Z
 ---
 
 # Broken Windows Ledger
@@ -156,6 +156,8 @@ last_updated: 2026-10-23T13:03:25.713Z
 | 139 | 09.2 | unrun-verify | apps/api/tests/integration |  | 09.2-22: the single full integration run was skipped because free disk fell under 6 GiB (swap and another container, not this plan's data); only move-copy and project-bootstrap were run | fixed |  | 2026-10-23T10:57:43.742Z | 2026-10-23T13:03:25.546Z |
 | 140 | 09.2 | unrun-verify | packages/core/server/projects/move/run.ts |  | 09.2-23: the move (suspension, quiescence waits, cutover cache expiry across instances, rollback, confirm-delete) is proven only on two local databases with in-memory Storage and waits of 0; the real cache-expiry behaviour and a hosted move with real Auth/Storage copy are hosted proof H6 (plan 25) | open |  | 2026-10-23T13:03:25.630Z |  |
 | 141 | 09.2 | deviation | packages/core/server/projects/move/rollback.ts |  | 09.2-23: a rollback from state done holds the tenant by suspending it, but the move is already closed then, so a platform admin could reactivate it between the suspension and the repoint; the closed state has no lease on the tenant | open |  | 2026-10-23T13:03:25.713Z |  |
+| 142 | 09.2 | unrun-verify | docs/DEPLOY.md |  | 09.2-24: the Cloud Run Job execution override that runs the tenant move (gcloud run jobs execute migrate --update-env-vars=ROLE=move --args=node,dist/main.js,...) is documented from the image's CMD and the gcloud flags and has never run; it is part of hosted proofs H5 and H6 | open |  | 2026-10-23T13:42:20.944Z |  |
+| 143 | 09.2 | todo | docs/DEPLOY.md |  | 09.2-24: the orphan-route cleanup (T-09.2-49, plan 10 handoff: payment_integration_routes, payment_product_routes, video_asset_routes rows of purged assets) is a manual read-then-delete procedure in DEPLOY.md; no command exists yet | open |  | 2026-10-23T13:42:21.020Z |  |
 
 ````json
 [
@@ -1849,6 +1851,30 @@ last_updated: 2026-10-23T13:03:25.713Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-23T13:03:25.713Z",
+    "resolved_at": null
+  },
+  {
+    "id": 142,
+    "kind": "unrun-verify",
+    "phase": "09.2",
+    "file": "docs/DEPLOY.md",
+    "line": null,
+    "description": "09.2-24: the Cloud Run Job execution override that runs the tenant move (gcloud run jobs execute migrate --update-env-vars=ROLE=move --args=node,dist/main.js,...) is documented from the image's CMD and the gcloud flags and has never run; it is part of hosted proofs H5 and H6",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T13:42:20.944Z",
+    "resolved_at": null
+  },
+  {
+    "id": 143,
+    "kind": "todo",
+    "phase": "09.2",
+    "file": "docs/DEPLOY.md",
+    "line": null,
+    "description": "09.2-24: the orphan-route cleanup (T-09.2-49, plan 10 handoff: payment_integration_routes, payment_product_routes, video_asset_routes rows of purged assets) is a manual read-then-delete procedure in DEPLOY.md; no command exists yet",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T13:42:21.020Z",
     "resolved_at": null
   }
 ]
