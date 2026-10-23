@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 20
+current_plan: 23
 status: executing
-stopped_at: "Completed 09.2-16-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16 done; wave 11 complete); next is wave 12: 09.2-20 (list/header UI) and 09.2-23 (move tool)"
-last_updated: "2026-10-23T11:06:44.749Z"
+stopped_at: Completed 09.2-20-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20 done); next is 09.2-23 (wave 12, the move tool), then wave 13 (21, 24)
+last_updated: "2026-10-23T11:18:10.506Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-16 (deploy-api.yml and deploy-hml.yml: authenticate, release preflight, migrations, migrate Job deployed and executed with --wait on the same image, then API and worker; scripts/check-workflows.sh and check-release-env.sh with self-tests; PostgreSQL 17 client in the local-stack action; DBT-26 stays open for plan 25 and hosted proof H5)"
-state_head: 066cec48608f9e4568874b929664339fae65da13
+last_activity_desc: "Completed 09.2-20 (tenant list Banco column and Banco com problema chip, header Banco pill, Status tab Reativar guard while moving; isTenantMoving is still the API stub until plan 23; 320 px measurement left to plan 28). Previous: 09.2-16 (deploy-api.yml and deploy-hml.yml: authenticate, release preflight, migrations, migrate Job deployed and executed with --wait on the same image, then API and worker; scripts/check-workflows.sh and check-release-env.sh with self-tests; PostgreSQL 17 client in the local-stack action; DBT-26 stays open for plan 25 and hosted proof H5)"
+state_head: 027b41d9421949339e98c5a12701e9c7524a377d
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 255
+  completed_plans: 256
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 20
+Current Plan: 23
 Total Plans in Phase: 28
-Plan: wave 11 complete (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs, 13 bootstrap engine, 10 route indexes, 11 per-project Send Email Hook, 14 panel API for a tenant's project, 17 web tier, 15 migration fan-out, 18 wizard, 19 Banco tab 22 the copy engine and 16 the deploy workflows (migrate Job, release preflight, repository guards) done; plans run out of numeric order: the next is wave 12 (20 list/header UI, 23 move tool)
+Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16 and 20 done (20: the tenant list Banco column and chip, the header pill and the Status guard); plans run out of numeric order: the next is 23 (wave 12, the move tool), then wave 13 (21, 24)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-16 (both deploy workflows run the migrate Cloud Run Job between the migrations and the API, option A answered by Igor; release preflight, hml refuses the shared mode, order and secret-list guards; nothing run in the cloud)
+Last activity: 2026-10-23 — Completed 09.2-20 (Banco column, Banco com problema chip, header pill, Status guard; nothing run in a browser)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -313,6 +313,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.2 P19 | 17 min | 3 tasks | 21 files |
 | Phase 09.2 P22 | 22 min | 3 tasks | 15 files |
 | Phase 09.2 P16 | 7 min | 3 tasks | 8 files |
+| Phase 09.2 P20 | 11 min | 2 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -1149,6 +1150,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T11:06:44.519Z
-Stopped at: Completed 09.2-16-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16 done; wave 11 complete); next is wave 12: 09.2-20 (list/header UI) and 09.2-23 (move tool)
+Last session: 2026-10-23T11:18:10.260Z
+Stopped at: Completed 09.2-20-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20 done); next is 09.2-23 (wave 12, the move tool), then wave 13 (21, 24)
 Resume file: None

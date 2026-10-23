@@ -369,7 +369,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-49**: After the last move the central project holds platform data only: `--confirm-delete` removes the moved tenant's rows, files and exclusive accounts from the source, and `platform:central-clean` lists any residue and, with `--strict-empty`, requires every non-mirror table to be empty before the default-project flag is cleared. *(D-534)*
 - [x] **DBT-50**: The "Novo tenant" form's Projeto Supabase field accepts only a 20-letter project ref (a pasted dashboard or API address is normalised to it), pre-checks the project through the API before the wizard continues, shows the six documented ref errors, and asks for the manual access fields only when the pre-check says the API cannot reveal them. *(D-541, UI-D-533, UI-D-534, UI-D-535)*
 - [x] **DBT-51**: The tenant's Banco tab shows the database state, the eight preparation steps in their fixed order with a catalog reason per failed step and a "Tentar de novo" that resumes at the first step not done, the applied-of-required schema version, and the write-only Credenciais card with "Verificar agora" and "Substituir credenciais". *(D-542, D-543, D-539, UI-D-536, UI-D-537, UI-D-538)*
-- [ ] **DBT-52**: The tenant list gains a Banco column with the database pill and the schema line and a "Banco com problema" filter that keeps the list order, the tenant header carries the pill, and the Status tab disables "Reativar tenant" while a move is open. *(D-543, D-535, UI-D-539, UI-D-540, UI-D-541)*
+- [x] **DBT-52**: The tenant list gains a Banco column with the database pill and the schema line and a "Banco com problema" filter that keeps the list order, the tenant header carries the pill, and the Status tab disables "Reativar tenant" while a move is open. *(D-543, D-535, UI-D-539, UI-D-540, UI-D-541)*
 - [ ] **DBT-53**: A member of a tenant whose project is behind on migrations or still being prepared meets a branded static screen ("Comunidade em atualização", "Comunidade em preparação") that reveals no reason, name or project fact, and the login and sign-up cards show the matching notice. *(D-545, D-542, UI-D-542)*
 
 ### Media
@@ -753,7 +753,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-49 | Phase 09.2 (plans 23, 25) | Pending |
 | DBT-50 | Phase 09.2 (plans 14, 18) | Complete |
 | DBT-51 | Phase 09.2 (plans 14, 19) | Complete |
-| DBT-52 | Phase 09.2 (plans 14, 20) | Pending |
+| DBT-52 | Phase 09.2 (plans 14, 20) | Complete |
 | DBT-53 | Phase 09.2 (plan 21) | Pending |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
