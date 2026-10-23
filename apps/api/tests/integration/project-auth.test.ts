@@ -7,7 +7,16 @@ import {
 import { invalidateTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type JwksServer, startJwksServer } from './jwks-server';
-import { adminSql, adminSqlB, api, HOSTS, provisionTenantOnB, type TenantOnB } from './setup';
+import {
+  adminSql,
+  adminSqlB,
+  api,
+  HOSTS,
+  provisionTenantOnB,
+  SEED_PASSWORD,
+  signInAs,
+  type TenantOnB,
+} from './setup';
 
 /**
  * Phase 09.2-08 (DBT-10, DBT-11, DBT-19, DBT-25; D-538, D-542, D-545, D-537): the project a request belongs to
@@ -373,5 +382,171 @@ describe('GET /v1/public/tenants/by-host carries the status and the tenant proje
       values (${b.projectId}::uuid, 'paused', now())`;
     invalidateTenantHost(b.host);
     expect((await byHost(b.host)).status).toBe('unavailable');
+  });
+});
+
+/**
+ * The platform lane and the tenant lane against each other (DBT-11), key storms, rotation, slow Auth (P22) and
+ * a status change under traffic (P37). Each case that counts key fetches points tenant B at a FRESH stand-in
+ * (a new URL is a new key set), so a cached key set from another case cannot hide a fetch or fake a hit.
+ */
+describe('DBT-11: the two session kinds cannot cross their lanes', () => {
+  const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
+  const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
+  let superAdmin = '';
+  let fresh: JwksServer | undefined;
+
+  const platformList = (token: string, host?: string) =>
+    api.request('/v1/platform/tenants', {
+      headers: { authorization: `Bearer ${token}`, ...(host ? { 'x-tenant-host': host } : {}) },
+    });
+
+  beforeAll(async () => {
+    if (!SUPER_ADMIN_PASSWORD)
+      throw new Error('SUPER_ADMIN_PASSWORD is required (as `pnpm db:seed`)');
+    superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+  });
+
+  afterEach(async () => {
+    await adminSql`update platform.projects set api_url = ${a1.url} where id = ${b.projectId}::uuid`;
+    invalidateTenantHost(b.host);
+    await fresh?.stop();
+    fresh = undefined;
+  });
+
+  it('DBT-11 super_admin on the platform host', async () => {
+    expect((await platformList(superAdmin)).status).toBe(200);
+  });
+
+  it("DBT-11 super_admin on a tenant host: 403 TENANT_HOST_MISMATCH and no key set of B's project was fetched", async () => {
+    fresh = await startJwksServer();
+    await adminSql`update platform.projects set api_url = ${fresh.url} where id = ${b.projectId}::uuid`;
+    invalidateTenantHost(b.host);
+    fresh.resetFetches();
+    const res = await platformList(superAdmin, b.host);
+    expect(res.status).toBe(403);
+    expect(await codeOf(res)).toBe('TENANT_HOST_MISMATCH');
+    expect(fresh.fetches).toBe(0);
+  });
+
+  it('DBT-11 super_admin on a tenant host through the tenant lane: the central session is not a member of B', async () => {
+    const res = await me(superAdmin, b.host);
+    // The host selects B's project: a project-0 session is not verified there at all.
+    expect(res.status).toBe(401);
+  });
+
+  it('DBT-11 tenant session on the platform host: a bearer issued by a tenant project is 401', async () => {
+    const token = await a1.signBearer({ sub: b.userId, email: b.email });
+    expect((await platformList(token)).status).toBe(401);
+    expect(await codeOf(await platformList(token))).toBe('INVALID_TOKEN');
+  });
+
+  it('DBT-11 tenant session on another tenant host: 401 on the tenant lane and on the platform lane', async () => {
+    const token = await a1.signBearer({ sub: b.userId, email: b.email });
+    expect((await me(token, HOSTS.demo)).status).toBe(401);
+    expect((await platformList(token, HOSTS.lab)).status).toBe(401);
+  });
+
+  it('DBT-11 a project-0 member session still serves its own host (the lanes did not close project 0)', async () => {
+    const member = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+    expect((await me(member, HOSTS.demo)).status).toBe(200);
+  });
+
+  it('P22 first-request storm: twenty concurrent first requests fetch the key set once', async () => {
+    fresh = await startJwksServer();
+    await adminSql`update platform.projects set api_url = ${fresh.url} where id = ${b.projectId}::uuid`;
+    invalidateTenantHost(b.host);
+    fresh.resetFetches();
+    const token = await fresh.signBearer({ sub: b.userId, email: b.email });
+    const responses = await Promise.all(Array.from({ length: 20 }, () => me(token, b.host)));
+    expect(responses.map((r) => r.status)).toEqual(Array(20).fill(200));
+    expect(fresh.fetches).toBe(1);
+  });
+
+  it('P22 unknown kid: refused, and at most one refetch inside the 30 s cooldown even under parallel requests', async () => {
+    fresh = await startJwksServer();
+    await adminSql`update platform.projects set api_url = ${fresh.url} where id = ${b.projectId}::uuid`;
+    invalidateTenantHost(b.host);
+    fresh.resetFetches();
+    expect(
+      (await me(await fresh.signBearer({ sub: b.userId, email: b.email }), b.host)).status,
+    ).toBe(200);
+    const afterFirst = fresh.fetches;
+
+    const rotated = await fresh.newKey();
+    const unknown = await rotated.signBearer({ sub: b.userId, email: b.email });
+    const burst = await Promise.all(Array.from({ length: 10 }, () => me(unknown, b.host)));
+    expect(burst.map((r) => r.status)).toEqual(Array(10).fill(401));
+    expect(fresh.fetches - afterFirst).toBeLessThanOrEqual(1);
+
+    // The server now publishes the new key; inside the cooldown the next request is still refused.
+    rotated.publish();
+    const before = fresh.fetches;
+    expect((await me(unknown, b.host)).status).toBe(401);
+    expect(fresh.fetches - before).toBeLessThanOrEqual(1);
+    // (the acceptance after the cooldown is proved with an injected cooldown in jwks-per-project.test.ts)
+  });
+
+  it('P22 slow JWKS: the request answers 401 within the 5 s fetch timeout instead of hanging', async () => {
+    fresh = await startJwksServer();
+    fresh.setDelay(6_000);
+    await adminSql`update platform.projects set api_url = ${fresh.url} where id = ${b.projectId}::uuid`;
+    invalidateTenantHost(b.host);
+    const token = await fresh.signBearer({ sub: b.userId, email: b.email });
+    const started = Date.now();
+    const res = await me(token, b.host);
+    const elapsed = Date.now() - started;
+    expect(res.status).toBe(401);
+    expect(await codeOf(res)).toBe('INVALID_TOKEN');
+    expect(elapsed).toBeGreaterThanOrEqual(4_000);
+    expect(elapsed).toBeLessThan(5_000 + 2_500);
+  }, 20_000);
+
+  it('P37 status flip in flight: every response is the gate or a 200, never a mix, and a request after the flip is 200', async () => {
+    const token = await a1.signBearer({ sub: b.userId, email: b.email });
+    await adminSql`update platform.projects set state = 'preparing' where id = ${b.projectId}::uuid`;
+    invalidateTenantHost(b.host);
+    try {
+      const results = await Promise.all(
+        Array.from({ length: 50 }, async (_, i) => {
+          if (i === 25) {
+            await adminSql`update platform.projects set state = 'ready' where id = ${b.projectId}::uuid`;
+            invalidateTenantHost(b.host);
+          } else {
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+          const res = await me(token, b.host);
+          return { status: res.status, code: res.status === 200 ? 'OK' : await codeOf(res) };
+        }),
+      );
+      for (const r of results) {
+        expect(
+          (r.status === 200 && r.code === 'OK') ||
+            (r.status === 503 && r.code === 'TENANT_PREPARING'),
+        ).toBe(true);
+      }
+      expect((await me(token, b.host)).status).toBe(200);
+    } finally {
+      await adminSql`update platform.projects set state = 'ready' where id = ${b.projectId}::uuid`;
+      invalidateTenantHost(b.host);
+    }
+  });
+
+  it('P37 the cached answer is the documented staleness; invalidateTenantHost makes the next request see the new state', async () => {
+    const token = await a1.signBearer({ sub: b.userId, email: b.email });
+    expect((await me(token, b.host)).status).toBe(200);
+    // The database flips but this instance still holds the 60 s answer: bounded staleness, one consistent state.
+    await adminSql`update platform.projects set state = 'preparing' where id = ${b.projectId}::uuid`;
+    try {
+      expect((await me(token, b.host)).status).toBe(200);
+      invalidateTenantHost(b.host);
+      const refreshed = await me(token, b.host);
+      expect(refreshed.status).toBe(503);
+      expect(await codeOf(refreshed)).toBe('TENANT_PREPARING');
+    } finally {
+      await adminSql`update platform.projects set state = 'ready' where id = ${b.projectId}::uuid`;
+      invalidateTenantHost(b.host);
+    }
+    expect((await me(token, b.host)).status).toBe(200);
   });
 });
