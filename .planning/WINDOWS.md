@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 81
 waived_count: 0
-fixed_count: 58
-total_count: 139
-last_updated: 2026-10-23T10:57:43.742Z
+fixed_count: 60
+total_count: 141
+last_updated: 2026-10-23T13:03:25.713Z
 ---
 
 # Broken Windows Ledger
@@ -151,9 +151,11 @@ last_updated: 2026-10-23T10:57:43.742Z
 | 134 | 09.1 | deviation | apps/web/messages/pt-BR/payments.json |  | 09.1-22: toasts.releasedStaysCut is not in the approved Copywriting Contract or sketch 013 (it says a released address stays without access while the gateway has cut it, gap G-09.1-1); UI-SPEC UI-D-518 amended; sketch 013 not redrawn; it awaits the design team like entry 126 | open |  | 2026-10-21T15:46:30.071Z |  |
 | 135 | 09.1 | unrun-verify | apps/web/app/(app)/configuracoes/pagamentos/AccessList.tsx |  | 09.1-22: the info toast for a released address the gateway has cut was proven by component and integration tests only; no browser walk, no Playwright run and no real-device pass (the owner declined local e2e) | open |  | 2026-10-21T15:46:30.193Z |  |
 | 136 | 09.2 | unrun-verify | packages/core/server/projects/steps.ts |  | 09.2-13: the eight bootstrap steps are proven only against the fake provider and the second local database; the real Management API behaviour is hosted proof H2 (plan 25) | open |  | 2026-10-23T01:53:16.459Z |  |
-| 137 | 09.2 | stub | packages/core/server/projects/moving.ts |  | 09.2-14: isTenantMoving and tenantsMoving answer false for every tenant (the overview, the list and the derived state already carry the moving fact); plan 23 replaces both bodies with a read of the move table | open |  | 2026-10-23T03:34:21.799Z |  |
+| 137 | 09.2 | stub | packages/core/server/projects/moving.ts |  | 09.2-14: isTenantMoving and tenantsMoving answer false for every tenant (the overview, the list and the derived state already carry the moving fact); plan 23 replaces both bodies with a read of the move table | fixed |  | 2026-10-23T03:34:21.799Z | 2026-10-23T13:03:25.460Z |
 | 138 | 09.2 | unrun-verify | packages/core/server/projects/access.ts |  | 09.2-14: the pre-check, the credential replacement (the publishable key is offered to GET /storage/v1/bucket, the one route the local gateway enforces; the plan named /auth/v1/settings, which is open locally) and the break-glass reissue (incl. the hook secret PATCH) are proven only against the fake provider and the local stack; the hosted gateway answers are hosted proof H5 (plan 25) | open |  | 2026-10-23T03:34:21.869Z |  |
-| 139 | 09.2 | unrun-verify | apps/api/tests/integration |  | 09.2-22: the single full integration run was skipped because free disk fell under 6 GiB (swap and another container, not this plan's data); only move-copy and project-bootstrap were run | open |  | 2026-10-23T10:57:43.742Z |  |
+| 139 | 09.2 | unrun-verify | apps/api/tests/integration |  | 09.2-22: the single full integration run was skipped because free disk fell under 6 GiB (swap and another container, not this plan's data); only move-copy and project-bootstrap were run | fixed |  | 2026-10-23T10:57:43.742Z | 2026-10-23T13:03:25.546Z |
+| 140 | 09.2 | unrun-verify | packages/core/server/projects/move/run.ts |  | 09.2-23: the move (suspension, quiescence waits, cutover cache expiry across instances, rollback, confirm-delete) is proven only on two local databases with in-memory Storage and waits of 0; the real cache-expiry behaviour and a hosted move with real Auth/Storage copy are hosted proof H6 (plan 25) | open |  | 2026-10-23T13:03:25.630Z |  |
+| 141 | 09.2 | deviation | packages/core/server/projects/move/rollback.ts |  | 09.2-23: a rollback from state done holds the tenant by suspending it, but the move is already closed then, so a platform admin could reactivate it between the suspension and the repoint; the closed state has no lease on the tenant | open |  | 2026-10-23T13:03:25.713Z |  |
 
 ````json
 [
@@ -1796,10 +1798,10 @@ last_updated: 2026-10-23T10:57:43.742Z
     "file": "packages/core/server/projects/moving.ts",
     "line": null,
     "description": "09.2-14: isTenantMoving and tenantsMoving answer false for every tenant (the overview, the list and the derived state already carry the moving fact); plan 23 replaces both bodies with a read of the move table",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-23T03:34:21.799Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-23T13:03:25.460Z"
   },
   {
     "id": 138,
@@ -1820,9 +1822,33 @@ last_updated: 2026-10-23T10:57:43.742Z
     "file": "apps/api/tests/integration",
     "line": null,
     "description": "09.2-22: the single full integration run was skipped because free disk fell under 6 GiB (swap and another container, not this plan's data); only move-copy and project-bootstrap were run",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-23T10:57:43.742Z",
+    "resolved_at": "2026-10-23T13:03:25.546Z"
+  },
+  {
+    "id": 140,
+    "kind": "unrun-verify",
+    "phase": "09.2",
+    "file": "packages/core/server/projects/move/run.ts",
+    "line": null,
+    "description": "09.2-23: the move (suspension, quiescence waits, cutover cache expiry across instances, rollback, confirm-delete) is proven only on two local databases with in-memory Storage and waits of 0; the real cache-expiry behaviour and a hosted move with real Auth/Storage copy are hosted proof H6 (plan 25)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T13:03:25.630Z",
+    "resolved_at": null
+  },
+  {
+    "id": 141,
+    "kind": "deviation",
+    "phase": "09.2",
+    "file": "packages/core/server/projects/move/rollback.ts",
+    "line": null,
+    "description": "09.2-23: a rollback from state done holds the tenant by suspending it, but the move is already closed then, so a platform admin could reactivate it between the suspension and the repoint; the closed state has no lease on the tenant",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T13:03:25.713Z",
     "resolved_at": null
   }
 ]
