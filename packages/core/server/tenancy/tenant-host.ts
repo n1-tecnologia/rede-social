@@ -73,6 +73,27 @@ export function hostStatus(facts: HostStatusFacts): HostTenantStatus {
   return 'active';
 }
 
+/**
+ * 09.2-11: the one status computation, shared by `resolveTenantHost` (a host) and `getPublicTenant` (a slug), so
+ * the two entries can never disagree about whether a tenant may be reached. `project` is `null` for a tenant
+ * with no binding (held out by nothing here: it fails closed later, on the first lane it opens), `health` is
+ * the last probe's status, `schema` the applied side of `platform.project_schema_state` (`null` when no row).
+ */
+export function hostStatusOf(
+  project: { state: string | null } | null,
+  health: string | null,
+  schema: { count: number | null; head: string | null } | null,
+  tenantStatus: TenantStatus,
+): HostTenantStatus {
+  return hostStatus({
+    tenantStatus,
+    projectState: project ? (project.state ?? null) : null,
+    health,
+    applied: schema,
+    required: getRequiredTenantSchema(),
+  });
+}
+
 const TTL_MS = 60_000;
 /**
  * Hard bound (WR-06): `GET /v1/public/tenants/by-host` is unauthenticated and the key is whatever
@@ -167,13 +188,12 @@ export async function resolveTenantHost(rawHost: string): Promise<TenantHostReso
       tenantId: row.tenantId,
       slug: row.slug,
       displayName: row.displayName,
-      status: hostStatus({
-        tenantStatus: row.status === 'suspended' ? 'suspended' : 'active',
-        projectState: row.projectId ? (row.projectState ?? null) : null,
-        health: row.healthStatus ?? null,
-        applied: row.schemaRow ? { count: row.appliedCount, head: row.appliedHead } : null,
-        required: getRequiredTenantSchema(),
-      }),
+      status: hostStatusOf(
+        row.projectId ? { state: row.projectState ?? null } : null,
+        row.healthStatus ?? null,
+        row.schemaRow ? { count: row.appliedCount, head: row.appliedHead } : null,
+        row.status === 'suspended' ? 'suspended' : 'active',
+      ),
       isPrimary: row.isPrimary,
       primaryHost,
       branding: resolveBranding(row.branding),

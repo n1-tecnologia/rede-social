@@ -1,10 +1,12 @@
 import { PLATFORM_TERMS_VERSION, type PublicTenant, slugSchema } from '@rede-social/contracts';
 import { and, eq } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { projectHealth, projectSchemaState, projects, tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import { tenants } from '../../db/schema';
 import { ApiError } from '../http/api-error';
 import { accessCheckoutUrl } from './access';
+import { hostStatusOf } from './tenant-host';
 
 /**
  * Everything the public sign-up page may know about a tenant, by slug (AUTH-01). Unauthenticated, so
@@ -19,18 +21,60 @@ import { accessCheckoutUrl } from './access';
  * platform lane; the rules text and its version are TENANT-owned and are read from the tenant's own project
  * (`withAdminTx({ tenantId })`), together with the checkout link. An unreachable tenant project makes this call
  * fail with `TENANT_UNAVAILABLE` while `GET /v1/public/tenants/by-host` (the mirror alone) keeps answering.
+ *
+ * 09.2-11 (DBT-15, D-538): the slug selects the project through the central mirror (tenant -> binding). The
+ * tenant's project facts are ranked by the SAME `hostStatusOf` the host answer uses, and a tenant whose project
+ * is `preparing`, `updating` or `unavailable` answers 503 (`TENANT_PREPARING` / `TENANT_UPDATING` /
+ * `TENANT_UNAVAILABLE`) BEFORE any tenant lane opens, so nothing can be signed up to it. A non-central project
+ * that has no publishable key yet is still being prepared. For a non-central project the record also carries
+ * that project's public `supabaseUrl` and `publishableKey` (never a sealed value).
  */
 export async function getPublicTenant(slug: string): Promise<PublicTenant> {
   if (!slugSchema.safeParse(slug).success) throw new ApiError(404, 'TENANT_NOT_FOUND');
 
   const [identity] = await withPlatformTx((tx) =>
     tx
-      .select({ id: tenants.id, slug: tenants.slug, displayName: tenants.displayName })
+      .select({
+        id: tenants.id,
+        slug: tenants.slug,
+        displayName: tenants.displayName,
+        projectId: projects.id,
+        isCentral: projects.isCentral,
+        projectState: projects.state,
+        projectApiUrl: projects.apiUrl,
+        projectPublishableKey: projects.publishableKey,
+        healthStatus: projectHealth.status,
+        appliedCount: projectSchemaState.appliedCount,
+        appliedHead: projectSchemaState.appliedHead,
+        schemaRow: projectSchemaState.projectId,
+      })
       .from(tenants)
+      .leftJoin(tenantProjects, eq(tenantProjects.tenantId, tenants.id))
+      .leftJoin(projects, eq(projects.id, tenantProjects.projectId))
+      .leftJoin(projectHealth, eq(projectHealth.projectId, projects.id))
+      .leftJoin(projectSchemaState, eq(projectSchemaState.projectId, projects.id))
       .where(and(eq(tenants.slug, slug), eq(tenants.status, 'active')))
       .limit(1),
   );
   if (!identity) throw new ApiError(404, 'TENANT_NOT_FOUND');
+
+  const central = identity.isCentral !== false;
+  const status = hostStatusOf(
+    identity.projectId ? { state: identity.projectState ?? null } : null,
+    identity.healthStatus ?? null,
+    identity.schemaRow ? { count: identity.appliedCount, head: identity.appliedHead } : null,
+    'active',
+  );
+  if (status === 'preparing' || (!central && !identity.projectPublishableKey)) {
+    throw new ApiError(503, 'TENANT_PREPARING');
+  }
+  if (status === 'updating') throw new ApiError(503, 'TENANT_UPDATING');
+  if (status === 'unavailable') throw new ApiError(503, 'TENANT_UNAVAILABLE');
+
+  const coordinates =
+    !central && identity.projectApiUrl && identity.projectPublishableKey
+      ? { supabaseUrl: identity.projectApiUrl, publishableKey: identity.projectPublishableKey }
+      : {};
 
   const row = await withAdminTx({ tenantId: identity.id }, async (tx) => {
     const [own] = await tx
@@ -40,14 +84,20 @@ export async function getPublicTenant(slug: string): Promise<PublicTenant> {
       .limit(1);
     if (!own) return null;
     // 09.1-10 (D-493): the notice's "Assinar" link, from the one reader, in the same read.
-    return { ...identity, ...own, link: await accessCheckoutUrl(tx, identity.id) };
+    return {
+      slug: identity.slug,
+      displayName: identity.displayName,
+      ...own,
+      link: await accessCheckoutUrl(tx, identity.id),
+    };
   });
   if (!row) throw new ApiError(404, 'TENANT_NOT_FOUND');
 
-  const { id: _id, link, ...record } = row;
+  const { link, ...record } = row;
   // The key is emitted only when there is a link, so an ungated tenant's record is unchanged.
   return {
     ...record,
+    ...coordinates,
     termsVersion: PLATFORM_TERMS_VERSION,
     ...(link === null ? {} : { accessCheckoutUrl: link }),
   };

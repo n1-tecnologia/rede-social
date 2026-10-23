@@ -81,11 +81,16 @@ export const publicRoutes = createOpenApiApp()
       responses: {
         200: {
           description:
-            'Public tenant data for the sign-up page: name, rules text and both versions, plus `accessCheckoutUrl` (09.1-10, D-493) ONLY when the tenant\'s payment gate is on and it registered a stored `https:` checkout link: the "Assinar" link of the no-access notice. Nothing about members or other communities.',
+            'Public tenant data for the sign-up page: name, rules text and both versions, plus the OPTIONAL public `supabaseUrl` and `publishableKey` of the tenant\'s own project (only when it is not the central one), plus `accessCheckoutUrl` (09.1-10, D-493) ONLY when the tenant\'s payment gate is on and it registered a stored `https:` checkout link: the "Assinar" link of the no-access notice. Nothing about members or other communities.',
           content: { 'application/json': { schema: publicTenantSchema } },
         },
         404: {
           description: 'Unknown, suspended or malformed slug',
+          content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
+        },
+        503: {
+          description:
+            "The tenant's project is being prepared, updated or unreachable (TENANT_PREPARING, TENANT_UPDATING, TENANT_UNAVAILABLE): nothing is created",
           content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
         },
       },
@@ -124,6 +129,11 @@ export const publicRoutes = createOpenApiApp()
         },
         409: {
           description: 'E-mail already registered — the body never names the owning tenant (D-04)',
+          content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
+        },
+        503: {
+          description:
+            "The tenant's project is being prepared, updated or unreachable (TENANT_PREPARING, TENANT_UPDATING, TENANT_UNAVAILABLE): nothing is created",
           content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
         },
       },

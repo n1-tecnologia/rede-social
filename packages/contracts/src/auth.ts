@@ -64,6 +64,13 @@ export const publicTenantSchema = z.object({
    * ungated tenant's record is byte-identical to before. Never read from a URL (UI-D-532).
    */
   accessCheckoutUrl: z.string().nullable().optional(),
+  /**
+   * 09.2-11 (DBT-15, D-538): the public Auth address and publishable key of the tenant's own Supabase project,
+   * present ONLY when that project is not the central one. Both are public by design (the browser needs them);
+   * no sealed value has a field here. Absent for a tenant in project 0, so its record is unchanged.
+   */
+  supabaseUrl: z.url().optional(),
+  publishableKey: z.string().min(1).optional(),
 });
 export type PublicTenant = z.infer<typeof publicTenantSchema>;
 
