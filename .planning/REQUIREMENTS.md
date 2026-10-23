@@ -322,7 +322,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-02**: Database URL, service key, publishable key, pooler URL and the `postgres` password of a project are stored only sealed (AES-256-GCM, key id, row id as AAD) and no API response, log line or error body contains them. *(D-539)*
 - [x] **DBT-03**: The sealing helper opens values sealed under any key id still present in the keyring and a re-seal job moves every row to the current key id without downtime. *(D-539)*
 - [x] **DBT-04**: `GET /v1/public/tenants/by-host` and the platform list are answered from the central mirror (name, brand, status, enabled modules, primary host, project coordinates) without opening the tenant's database, so they work while that project is down. *(D-537)*
-- [ ] **DBT-05**: Brand and rules text are owned by the tenant project, status/modules/domains/registry by the central project; a reconcile job detects and heals drift in both directions. *(D-537)*
+- [x] **DBT-05**: Brand and rules text are owned by the tenant project, status/modules/domains/registry by the central project; a reconcile job detects and heals drift in both directions. *(D-537)*
 - [x] **DBT-06**: `withTenantTx(ctx, fn)` opens the transaction on the project registered for `ctx.tenantId`, and on no other. *(D-538)*
 - [x] **DBT-07**: `withAdminTx` requires a tenant (or project) target and `withPlatformTx` opens the central project; both stay import-restricted to the kernel by Biome and `pnpm boundaries:negative` proves it. *(D-538)*
 - [ ] **DBT-08**: Every one of the 119 `withAdminTx` call sites is classified platform or tenant (or split) in a checked-in inventory and a unit test fails when a call site has no entry. *(D-538)*
@@ -346,9 +346,9 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-26**: The production workflow runs the central set and the fan-out before deploying the API and worker (D-12 order); a central failure stops the deploy, a tenant failure does not. *(D-544)*
 - [ ] **DBT-27**: A self-re-arming health job records reachable / paused / behind per project and the panel badge states of UI-D-539 derive from it. *(D-543)*
 - [ ] **DBT-28**: `docs/DEPLOY.md` "Connection budget (Pro)" is restated per project with the pool-cache arithmetic. *(D-543)*
-- [ ] **DBT-29**: `enqueueInTx` writes into the pg-boss schema of the database that owns the transaction, and refuses to enqueue a platform queue from a tenant transaction (and the reverse). *(D-546)*
-- [ ] **DBT-30**: The worker supervisor starts one pg-boss instance per ready tenant project plus the central one, adds and removes projects at runtime, and backs off on an unreachable or paused project. *(D-546)*
-- [ ] **DBT-31**: The daily dispatcher runs inside each tenant database queue and enqueues only for tenants of that database. *(D-546)*
+- [x] **DBT-29**: `enqueueInTx` writes into the pg-boss schema of the database that owns the transaction, and refuses to enqueue a platform queue from a tenant transaction (and the reverse). *(D-546)*
+- [x] **DBT-30**: The worker supervisor starts one pg-boss instance per ready tenant project plus the central one, adds and removes projects at runtime, and backs off on an unreachable or paused project. *(D-546)*
+- [x] **DBT-31**: The daily dispatcher runs inside each tenant database queue and enqueues only for tenants of that database. *(D-546)*
 - [x] **DBT-32**: Tenant set stays in `supabase/migrations`, central set lives in its own directory with its own drizzle config and ledger; local and CI apply both to one stack and no tenant project ever holds the `platform` schema. *(D-547)*
 - [ ] **DBT-33**: The move tool copies a tenant's rows in a catalog-derived foreign-key order, its `auth.users`/`auth.identities` with ids and password hashes, its Storage objects, and rewrites bucket URLs inside `tenants.branding`, then verifies row counts and checksums. *(D-534, D-536)*
 - [ ] **DBT-34**: The move suspends the tenant, waits for cache expiry and quiescence, flips the registry pointer, reactivates, keeps the old rows and can roll back by repointing; `--dry-run` writes nothing and an audit row is always written. *(D-535, D-536)*
@@ -706,7 +706,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-02 | Phase 09.2 (plans 03, 14) | Pending |
 | DBT-03 | Phase 09.2 (plan 03) | Complete |
 | DBT-04 | Phase 09.2 (plans 04, 07) | Complete |
-| DBT-05 | Phase 09.2 (plans 07, 09) | Pending |
+| DBT-05 | Phase 09.2 (plans 07, 09) | Complete |
 | DBT-06 | Phase 09.2 (plans 03, 04, 05, 06) | Complete |
 | DBT-07 | Phase 09.2 (plan 04) | Complete |
 | DBT-08 | Phase 09.2 (plans 04, 05, 06, 07, 10) | Pending |
@@ -730,9 +730,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-26 | Phase 09.2 (plans 16, 25) | Pending |
 | DBT-27 | Phase 09.2 (plans 14, 19) | Pending |
 | DBT-28 | Phase 09.2 (plan 24) | Pending |
-| DBT-29 | Phase 09.2 (plan 09) | Pending |
-| DBT-30 | Phase 09.2 (plan 09) | Pending |
-| DBT-31 | Phase 09.2 (plan 09) | Pending |
+| DBT-29 | Phase 09.2 (plan 09) | Complete |
+| DBT-30 | Phase 09.2 (plan 09) | Complete |
+| DBT-31 | Phase 09.2 (plan 09) | Complete |
 | DBT-32 | Phase 09.2 (plan 02) | Complete |
 | DBT-33 | Phase 09.2 (plans 22, 25) | Pending |
 | DBT-34 | Phase 09.2 (plans 23, 25) | Pending |

@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 9
+current_plan: 13
 status: executing
-stopped_at: Completed 09.2-07-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07 done); next is 09.2-09 (wave 6)
-last_updated: "2026-10-23T00:52:33.845Z"
+stopped_at: Completed 09.2-09-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09 done); next is 09.2-13 (wave 7)
+last_updated: "2026-10-23T01:21:21.438Z"
 last_activity: 2026-10-23
-last_activity_desc: Completed 09.2-07 (central/tenant ownership table, push and reconcile functions, createTenant saga, brand and public/mail sites on their owner)
-state_head: 12d7299b47eb869d23a6dcf55d2d55ee63f0445b
+last_activity_desc: Completed 09.2-09 (lane-aware pg-boss sender and queue scopes, pgboss_platform schema, worker supervisor, per-project dispatcher and sweeper, mirror reconcile job)
+state_head: ffd404a83cfd1f2995af2c482afd7f4268b0671a
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 244
+  completed_plans: 245
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 9
+Current Plan: 13
 Total Plans in Phase: 28
-Plan: 09 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile done; wave 5 complete, wave 6 starts with 09; only the N sites (plan 10) and the L sites (plan 09) remain pending in the admin-lane inventory)
+Plan: 13 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper) done; wave 6 complete, wave 7 starts with 13; only the N sites (plan 10) remain pending in the admin-lane inventory)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-07 (central/tenant ownership table, push and reconcile functions, createTenant saga, brand and public/mail sites on their owner)
+Last activity: 2026-10-23 — Completed 09.2-09 (lane-aware pg-boss sender and queue scopes, pgboss_platform schema, worker supervisor, per-project dispatcher and sweeper, mirror reconcile job)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -302,6 +302,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P06 | 17 min | 3 tasks | 11 files |
 | Phase 09.2 P08 | 22min | 3 tasks | 16 files |
 | Phase 09.2 P07 | 30 min | 3 tasks | 14 files |
+| Phase 09.2 P09 | 30min | 3 tasks | 31 files |
 
 ## Accumulated Context
 
@@ -1007,6 +1008,9 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-07: central/tenant ownership is data (CENTRAL_OWNED, TENANT_OWNED, LOCAL_COLUMNS in tenancy/mirror.ts) with a column-coverage guard; pushes run after the owner's commit, never throw and are healed by reconcileTenantMirror, which seeds tenant-owned columns from the central copy only for a missing row — D-537; a stale copy must not overwrite owned data, and an unreachable tenant project must not block the operator
 - [Phase 09.2]: 09.2-07: platform mutation routes read the tenant detail with tolerateTenantDown, so an unreachable tenant project degrades invites and admins to empty instead of a 503 after a committed central write; a plain GET still answers 503 — T-09.2-33
 - [Phase 09.2]: 09.2-07: an unknown tenant is a 404 from a central existence check before any tenant lane opens (branding, module settings); the hostless open-invite lookup fans out over ready projects and fails closed — TENANT_PROJECT_UNBOUND must not replace the documented 404
+- [Phase 09.2]: 09.2-09: a job lands in the database of the transaction that enqueued it: projectOfTx stores { handle, lane }, senderFor keeps one lazy pg-boss sender per project, credential version and scope, and a queue scope (platform in pgboss_platform of the central project, tenant in pgboss) is checked against the lane before any insert — D-546, T-09.2-40; pg-boss reads the queue cache from the sender's own database
+- [Phase 09.2]: 09.2-09: the worker supervisor keeps a platform instance plus one per ready project, reconciles every 60 s, starts four at a time, backs a failing project off alone (5 s to 5 min) and never stops anything when the registry is unreadable — T-09.2-41/42; deploy order is binding: the central set (pgboss_platform) must be applied before the new API or worker revision (plan 24 DEPLOY.md)
+- [Phase 09.2]: 09.2-09: the daily dispatcher, orphan sweeper and arm-event-reminders run once per project with { projectId }; on the central project the dispatcher filters by platform.tenant_projects so a mirror row of a tenant living elsewhere is never dispatched from project 0 — DBT-31, P62
 
 ### Pending Todos
 
@@ -1115,6 +1119,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T00:52:33.631Z
-Stopped at: Completed 09.2-07-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07 done); next is 09.2-09 (wave 6)
+Last session: 2026-10-23T01:21:21.201Z
+Stopped at: Completed 09.2-09-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09 done); next is 09.2-13 (wave 7)
 Resume file: None
