@@ -19,6 +19,10 @@ import base from './playwright.config';
  * serves the production policy; the dev run cannot see a library that asks for eval in the browser
  * (Zod 4's JIT probe was one, fixed in `instrumentation-client.ts`). The base config makes both runs
  * `CSP_MODE=enforce`.
+ * 261023-ssq: the build below talks to the local http Supabase stack, and a production build refuses an
+ * http origin in `isAllowedSupabaseOrigin`, so a signed upload URL on 127.0.0.1 would be refused. The
+ * `next build && next start` entry therefore carries `NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS=1` in its env:
+ * Next inlines it at `next build` and `next start` inherits it. It is set here and nowhere else.
  * Importing the base config loads `.env.local` first (SEED_PASSWORD for the login cases).
  */
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -51,6 +55,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 300_000,
       cwd: repoRoot,
+      env: { NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS: '1' },
     },
   ],
 });

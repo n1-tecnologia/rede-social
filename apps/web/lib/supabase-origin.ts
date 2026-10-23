@@ -16,10 +16,20 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost']);
  * `http(s)://127.0.0.1` and `localhost` (the local stack answers on a port). Always refused: userinfo
  * (`https://x@evil.com`), a path, a query or a fragment, a look-alike such as `x.supabase.co.evil.com`,
  * and anything `new URL` cannot parse.
+ *
+ * `allowLoopback` exists only for the production-build PWA e2e, which runs against the local http stack
+ * (T-09.2-84 keeps every real deploy on https and the hosted host). It defaults to the build-time flag
+ * `NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS` being exactly `'1'`, read as a DIRECT property access so Next
+ * inlines it at `next build`. The flag is set in one place, `apps/web/playwright.pwa.config.ts`, and
+ * `docs/DEPLOY.md` forbids it on Vercel. When on, a production build admits the same loopback hosts as
+ * a non-production one, after every structural check above, and nothing more.
  */
 export function isAllowedSupabaseOrigin(
   raw: unknown,
-  { production = process.env.NODE_ENV === 'production' }: { production?: boolean } = {},
+  {
+    production = process.env.NODE_ENV === 'production',
+    allowLoopback = process.env.NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS === '1',
+  }: { production?: boolean; allowLoopback?: boolean } = {},
 ): boolean {
   if (typeof raw !== 'string') return false;
   let url: URL;
@@ -35,7 +45,7 @@ export function isAllowedSupabaseOrigin(
   if (/[?#]/.test(raw)) return false;
 
   if (url.protocol === 'https:' && HOSTED_HOST.test(url.hostname) && url.port === '') return true;
-  if (production) return false;
+  if (production && !allowLoopback) return false;
   return (
     (url.protocol === 'http:' || url.protocol === 'https:') && LOOPBACK_HOSTS.has(url.hostname)
   );
