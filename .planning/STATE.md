@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 16
+current_plan: 20
 status: executing
-stopped_at: Completed 09.2-22-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22 done); next is 09.2-16 (wave 11, the deploy workflows, option A Cloud Run Job), then wave 12 (20, 23)
-last_updated: "2026-10-23T10:57:38.637Z"
+stopped_at: "Completed 09.2-16-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16 done; wave 11 complete); next is wave 12: 09.2-20 (list/header UI) and 09.2-23 (move tool)"
+last_updated: "2026-10-23T11:06:44.749Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-22 (the move engine's copy: catalog-derived foreign-key order, accounts with ids and password hashes preserved, Storage objects, branding URL rewrite with an old-origin scan, queued jobs and a verification by counts, checksums and a hash digest, rehearsed on two local databases; DBT-33 stays open for plan 23 and the hosted proof H6)"
-state_head: c5d5165d8c37f36419f82126c3d68136bf7853c2
+last_activity_desc: "Completed 09.2-16 (deploy-api.yml and deploy-hml.yml: authenticate, release preflight, migrations, migrate Job deployed and executed with --wait on the same image, then API and worker; scripts/check-workflows.sh and check-release-env.sh with self-tests; PostgreSQL 17 client in the local-stack action; DBT-26 stays open for plan 25 and hosted proof H5)"
+state_head: 066cec48608f9e4568874b929664339fae65da13
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 254
+  completed_plans: 255
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 16
+Current Plan: 20
 Total Plans in Phase: 28
-Plan: wave 11 in progress (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs, 13 bootstrap engine, 10 route indexes, 11 per-project Send Email Hook, 14 panel API for a tenant's project, 17 web tier, 15 migration fan-out, 18 wizard, 19 Banco tab and 22 the copy engine done; plans run out of numeric order: the next is 16 (deploy workflows, user decision option A, a Cloud Run Job), then wave 12 (20, 23))
+Plan: wave 11 complete (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs, 13 bootstrap engine, 10 route indexes, 11 per-project Send Email Hook, 14 panel API for a tenant's project, 17 web tier, 15 migration fan-out, 18 wizard, 19 Banco tab 22 the copy engine and 16 the deploy workflows (migrate Job, release preflight, repository guards) done; plans run out of numeric order: the next is wave 12 (20 list/header UI, 23 move tool)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-22 (a tenant's rows, accounts, files, URLs and queued jobs copy into a bootstrapped database and verify; the move tool's state machine and cutover are plan 23)
+Last activity: 2026-10-23 — Completed 09.2-16 (both deploy workflows run the migrate Cloud Run Job between the migrations and the API, option A answered by Igor; release preflight, hml refuses the shared mode, order and secret-list guards; nothing run in the cloud)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -312,6 +312,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.2 P18 | 28 min | 3 tasks | 25 files |
 | Phase 09.2 P19 | 17 min | 3 tasks | 21 files |
 | Phase 09.2 P22 | 22 min | 3 tasks | 15 files |
+| Phase 09.2 P16 | 7 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -1039,6 +1040,7 @@ Recent decisions affecting current work:
 - [Phase 09.2-22]: The move copy silences each table's user triggers inside the group transaction (disable trigger user, enabled before commit) so counters, the chat sequence, Realtime signals and the member-profile creator do not fire; foreign keys stay enforced — Without it the copy double-counts and the tracer fails; session_replication_role=replica would also switch off the foreign keys
 - [Phase 09.2-22]: planMove treats a table as uncovered when it has no tenant_id and no classification, or has tenant_id but the target lacks it; a row referencing a user outside the tenant's accounts refuses the plan with account_missing and the account set is never widened — Keeps T-09.2-100 (no silent skip) and PR-7 (no account copied for a person without membership or invite) both true
 - [Phase 09.2-22]: verifyCopy throws MoveError(verify_failed|origin_leftover) with the report attached; requeueJobs takes started pg-boss instances from the caller (plan 23 builds them from the sealed URLs) — A caller cannot forget to check a returned ok:false; the engine stays free of credentials
+- [Phase 09.2]: A-16-1: the fan-out runs as a Cloud Run Job on the same image (ROLE=migrate), executed with --wait before the API and worker; answered by Igor 2026-10-23 — No DDL-capable public endpoint, 1 h task timeout, readable exit codes, same image and secrets; cost: not literally inside the new revision, deploy SA must run jobs (gate G2)
 
 ### Pending Todos
 
@@ -1147,6 +1149,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T10:57:38.413Z
-Stopped at: Completed 09.2-22-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22 done); next is 09.2-16 (wave 11, the deploy workflows, option A Cloud Run Job), then wave 12 (20, 23)
+Last session: 2026-10-23T11:06:44.519Z
+Stopped at: Completed 09.2-16-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16 done; wave 11 complete); next is wave 12: 09.2-20 (list/header UI) and 09.2-23 (move tool)
 Resume file: None
