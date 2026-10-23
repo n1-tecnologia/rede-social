@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { sqlClient } from '@rede-social/core/db';
-import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { createBoss, createQueues, stopBoss } from '@rede-social/core/server/jobs/boss';
 import { runBootstrap } from '@rede-social/core/server/projects/bootstrap';
 import { createFakeProjectProvider } from '@rede-social/core/server/projects/fake';
 import {
@@ -10,12 +10,21 @@ import {
   type CopyOptions,
   copyAuth,
   copyRows,
+  copyStorage,
+  MoveError,
   type MoveSide,
   planMove,
+  requeueJobs,
+  type StoragePort,
+  scanForOrigin,
+  storageTotalsOf,
+  supabaseStoragePort,
+  type VerifyReport,
   verifyCopy,
 } from '@rede-social/core/server/projects/move/index';
 import { defaultSecrets } from '@rede-social/core/server/projects/steps';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
+import { createClient } from '@supabase/supabase-js';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql } from './setup';
@@ -33,10 +42,10 @@ import { adminSql } from './setup';
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const SRC_URL = 'postgres://postgres:postgres@127.0.0.1:54322/postgres';
 const TGT_URL = 'postgres://postgres:postgres@127.0.0.1:54322/rede_tenant_b';
-const _API_USER_SRC = 'postgres://api_user:postgres@127.0.0.1:54322/postgres';
-const _API_USER_TGT = 'postgres://api_user:postgres@127.0.0.1:54322/rede_tenant_b';
+const API_USER_SRC = 'postgres://api_user:postgres@127.0.0.1:54322/postgres';
+const API_USER_TGT = 'postgres://api_user:postgres@127.0.0.1:54322/rede_tenant_b';
 const SUPABASE_URL = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321';
-const _RUN = Date.now().toString(36);
+const RUN = Date.now().toString(36);
 
 const open = (url: string) =>
   postgres(url, { max: 4, prepare: false, onnotice: () => undefined, idle_timeout: 2 });
@@ -89,7 +98,7 @@ async function seedTargetTenant(target: postgres.Sql, tenantId: string): Promise
 }
 
 /** A migrated, fixture-free `rede_tenant_b` that holds the tenant row, like a bootstrapped project does. */
-async function _freshTarget(tenantId: string): Promise<postgres.Sql> {
+async function freshTarget(tenantId: string): Promise<postgres.Sql> {
   resetB('migrated');
   const target = connect(TGT_URL);
   await seedTargetTenant(target, tenantId);
@@ -127,7 +136,7 @@ async function sourceFingerprint(): Promise<Record<string, number>> {
   return out;
 }
 
-async function _fullMove(target: postgres.Sql, tenantId: string, copyOptions: CopyOptions = {}) {
+async function fullMove(target: postgres.Sql, tenantId: string, copyOptions: CopyOptions = {}) {
   const src = side(source, tenantId, 'p0');
   const tgt = side(target, tenantId, 'tb');
   const plan = await planMove(src, tgt);
@@ -302,5 +311,293 @@ describe('the tracer: a seeded tenant is copied into a bootstrapped second datab
     // The table set is the catalog's, not a list: 57 public tables minus the five without tenant_id,
     // tenant_domains and tenant_modules.
     expect(plan.tables.length).toBe(50);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Task 2: URLs, jobs, checksums, Storage
+// ---------------------------------------------------------------------------------------------------------
+
+const NEW_ORIGIN = 'https://tgt-ref.supabase.co';
+
+describe('URLs, queued jobs, checksums and files', () => {
+  it('rewrites the branding URLs to the target origin and leaves nothing of the old one', async () => {
+    const target = await freshTarget(labId);
+    // The copy rewrites the public branding URLs while it copies the mirrored tenant row.
+    const { src, tgt, plan } = await fullMove(target, labId, {
+      origins: { from: SUPABASE_URL, to: NEW_ORIGIN },
+    });
+
+    const [row] = await target<
+      { branding: { logoUrl: string; iconUrls: Record<string, string> } }[]
+    >`
+      select branding from public.tenants where id = ${labId}::uuid`;
+    expect(
+      row?.branding.iconUrls.i192?.startsWith(`${NEW_ORIGIN}/storage/v1/object/public/branding/`),
+    ).toBe(true);
+    // A relative logo is not a storage URL: untouched.
+    expect(row?.branding.logoUrl).toBe('/seed-logos/rede-lab.svg');
+
+    expect(
+      await scanForOrigin(
+        target,
+        plan.tables.map((t) => t.name).concat('tenants'),
+        SUPABASE_URL,
+        labId,
+      ),
+    ).toEqual([]);
+    const report = await verifyCopy(plan, src, tgt, {
+      oldOrigin: SUPABASE_URL,
+      newOrigin: NEW_ORIGIN,
+    });
+    expect(report.leftovers).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+
+  it('fails with origin_leftover when the old origin survives anywhere in the copied data', async () => {
+    const target = await freshTarget(labId);
+    const [original] = await source<{ rules_text: string }[]>`
+      select rules_text from public.tenants where id = ${labId}::uuid`;
+    try {
+      // A reference that is NOT a public branding URL: the rewrite must leave it and the scan must find it.
+      await source`
+        update public.tenants set rules_text = rules_text || ${` ${SUPABASE_URL}/storage/v1/object/sign/media/x`}
+         where id = ${labId}::uuid`;
+      const { src, tgt, plan } = await fullMove(target, labId, {
+        origins: { from: SUPABASE_URL, to: NEW_ORIGIN },
+      });
+      let caught: unknown;
+      try {
+        await verifyCopy(plan, src, tgt, { oldOrigin: SUPABASE_URL, newOrigin: NEW_ORIGIN });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(MoveError);
+      expect((caught as MoveError).code).toBe('origin_leftover');
+      expect((caught as MoveError).tables).toEqual(['tenants.rules_text']);
+      // The message names a column, never the text.
+      expect((caught as MoveError).message).not.toContain('storage/v1');
+    } finally {
+      await source`update public.tenants set rules_text = ${original?.rules_text ?? ''} where id = ${labId}::uuid`;
+    }
+  });
+
+  it('re-sends the waiting jobs of the tenant to the target and cancels them in the source', async () => {
+    const target = await freshTarget(labId);
+    const stranger = crypto.randomUUID();
+    const queue = 'kernel.media-provider-event';
+    const sourceBoss = createBoss({
+      connectionString: API_USER_SRC,
+      max: 1,
+      supervise: false,
+      schedule: false,
+    });
+    const targetBoss = createBoss({
+      connectionString: API_USER_TGT,
+      max: 1,
+      supervise: false,
+      schedule: false,
+    });
+    sourceBoss.on('error', () => undefined);
+    targetBoss.on('error', () => undefined);
+    await sourceBoss.start();
+    await targetBoss.start();
+    const mine = `mv-${RUN}-mine`;
+    const others = `mv-${RUN}-other`;
+    try {
+      await createQueues(sourceBoss, [queue]);
+      const startAfter = new Date(Date.now() + 3_600_000);
+      const mineId = await sourceBoss.send(
+        queue,
+        { tenantId: labId, marker: mine },
+        { singletonKey: mine, startAfter },
+      );
+      const otherId = await sourceBoss.send(
+        queue,
+        { tenantId: stranger, marker: others },
+        { singletonKey: others, startAfter },
+      );
+      expect(mineId).toBeTruthy();
+      expect(otherId).toBeTruthy();
+      const waitingBefore = await source`
+        select count(*)::int as n from pgboss.job where state in ('created','retry') and data ->> 'tenantId' is null`;
+
+      // The throwaway jobs carry a tenant id of their own (`stranger`) and a marker: the seeded tenants' real
+      // waiting jobs stay in the source, so the case never changes them.
+      const result = await requeueJobs(
+        { source: { sql: source, boss: sourceBoss }, target: { boss: targetBoss } },
+        stranger,
+      );
+      expect(result.requeued).toBe(1);
+
+      const inTarget = await target<
+        { data: { tenantId: string }; singleton_key: string; start_after: Date; state: string }[]
+      >`
+        select data, singleton_key, start_after, state::text as state from pgboss.job where name = ${queue}`;
+      expect(inTarget).toHaveLength(1);
+      expect(inTarget[0]?.data.tenantId).toBe(stranger);
+      expect(inTarget[0]?.singleton_key).toBe(others);
+      expect(
+        Math.abs((inTarget[0]?.start_after.getTime() ?? 0) - startAfter.getTime()),
+      ).toBeLessThan(2000);
+
+      const [movedSource] =
+        await source`select state::text as state from pgboss.job where id = ${otherId}::uuid`;
+      expect(movedSource?.state).toBe('cancelled');
+      // Another tenant's job and the jobs without a tenant stay exactly as they were.
+      const [kept] =
+        await source`select state::text as state from pgboss.job where id = ${mineId}::uuid`;
+      expect(kept?.state).toBe('created');
+      const waitingAfter = await source`
+        select count(*)::int as n from pgboss.job where state in ('created','retry') and data ->> 'tenantId' is null`;
+      expect(waitingAfter[0]?.n).toBe(waitingBefore[0]?.n);
+
+      // A second run finds nothing left to move.
+      expect(
+        (
+          await requeueJobs(
+            { source: { sql: source, boss: sourceBoss }, target: { boss: targetBoss } },
+            stranger,
+          )
+        ).requeued,
+      ).toBe(0);
+    } finally {
+      await source`delete from pgboss.job where data ->> 'marker' in (${mine}, ${others})`;
+      await sourceBoss.stop({ graceful: false });
+      await targetBoss.stop({ graceful: false });
+    }
+  });
+
+  it('fails the verification with the table name when a copied row was altered', async () => {
+    const target = await freshTarget(labId);
+    const { src, tgt, plan } = await fullMove(target, labId);
+    await verifyCopy(plan, src, tgt);
+
+    await target`update public.communities set name = name || '!' where id = (select id from public.communities where tenant_id = ${labId}::uuid order by id limit 1)`;
+    let caught: unknown;
+    try {
+      await verifyCopy(plan, src, tgt);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(MoveError);
+    expect((caught as MoveError).code).toBe('verify_failed');
+    expect((caught as MoveError).tables).toEqual(['communities:checksum']);
+    const report = (caught as MoveError).report as VerifyReport;
+    expect(report.tables.find((t) => t.name === 'communities')?.checksum).toBe('mismatch');
+    expect(report.ok).toBe(false);
+  });
+
+  it('fails the verification when a row of another tenant is present in the target (T-09.2-96)', async () => {
+    const target = await freshTarget(labId);
+    const { src, tgt, plan } = await fullMove(target, labId);
+    expect((await verifyCopy(plan, src, tgt)).ok).toBe(true);
+
+    // The other seed tenant's mirror row and one of its communities slip into the dedicated target.
+    await seedTargetTenant(target, demoId);
+    const [community] = await source<{ j: string }[]>`
+      select to_jsonb(c)::text as j from public.communities c where c.tenant_id = ${demoId}::uuid order by id limit 1`;
+    // Re-pointed at an account the target holds: only the tenant_id says whose row it is.
+    const row = {
+      ...JSON.parse(community?.j ?? '{}'),
+      created_by_user_id: '91d2a0c3-4037-41d5-9e0b-2d3a72115ca0',
+      cover_asset_id: null,
+    };
+    await target.unsafe(
+      'insert into public.communities select * from jsonb_populate_record(null::public.communities, $1::text::jsonb)',
+      [JSON.stringify(row)],
+    );
+    let caught: unknown;
+    try {
+      await verifyCopy(plan, src, tgt);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as MoveError).code).toBe('verify_failed');
+    expect((caught as MoveError).tables).toEqual(
+      expect.arrayContaining(['communities:foreign_tenant_rows', 'tenants:foreign_tenant_rows']),
+    );
+  });
+
+  it('copies the objects of the tenant and only those, through the local Storage', async () => {
+    const service = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY ?? '', {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const from = `mvtest-a-${RUN}`;
+    const to = `mvtest-b-${RUN}`;
+    const mapped = (port: StoragePort): StoragePort => ({
+      list: (bucket, prefix) => port.list(bucket === from ? to : bucket, prefix),
+      download: (bucket, key) => port.download(bucket === from ? to : bucket, key),
+      upload: (bucket, key, body, options) =>
+        port.upload(bucket === from ? to : bucket, key, body, options),
+      info: (bucket, key) => port.info(bucket === from ? to : bucket, key),
+    });
+    const uploaded: string[] = [];
+    try {
+      for (const bucket of [from, to]) {
+        const created = await service.storage.createBucket(bucket, { public: false });
+        expect(created.error).toBeNull();
+      }
+      const put = async (key: string, bytes: string, contentType: string) => {
+        const { error } = await service.storage
+          .from(from)
+          .upload(key, Buffer.from(bytes), { contentType, upsert: true });
+        expect(error).toBeNull();
+        uploaded.push(key);
+      };
+      await put(`${labId}/branding/logo.txt`, 'abcde', 'text/plain');
+      await put(`${labId}/media/deep/nested/clip.bin`, 'xyz', 'application/octet-stream');
+      await put(`${demoId}/branding/other.txt`, 'not mine', 'text/plain');
+
+      const sourcePort = supabaseStoragePort(service);
+      const targetPort = mapped(supabaseStoragePort(service));
+      const report = await copyStorage({
+        source: sourcePort,
+        target: targetPort,
+        tenantId: labId,
+        buckets: [from],
+      });
+      expect(report).toEqual({ copied: 2, skipped: 0, bytes: 8 });
+
+      const listed = await service.storage.from(to).list(labId, { limit: 10 });
+      expect(listed.data?.map((entry) => entry.name).sort()).toEqual(['branding', 'media']);
+      const other = await service.storage.from(to).list(demoId, { limit: 10 });
+      expect(other.data ?? []).toHaveLength(0);
+      const info = await service.storage.from(to).info(`${labId}/branding/logo.txt`);
+      expect(info.data?.contentType).toBe('text/plain');
+
+      // A second run skips both objects.
+      expect(
+        await copyStorage({
+          source: sourcePort,
+          target: targetPort,
+          tenantId: labId,
+          buckets: [from],
+        }),
+      ).toEqual({
+        copied: 0,
+        skipped: 2,
+        bytes: 8,
+      });
+      expect(await storageTotalsOf(sourcePort, labId, [from])).toEqual({ objects: 2, bytes: 8 });
+    } finally {
+      for (const bucket of [from, to]) {
+        const listed = await service.storage.from(bucket).list('', { limit: 100 });
+        const keys: string[] = [];
+        const walk = async (folder: string) => {
+          const entries =
+            (await service.storage.from(bucket).list(folder, { limit: 100 })).data ?? [];
+          for (const entry of entries) {
+            const key = folder ? `${folder}/${entry.name}` : entry.name;
+            if (entry.id === null) await walk(key);
+            else keys.push(key);
+          }
+        };
+        for (const entry of listed.data ?? []) await walk(entry.name);
+        if (keys.length > 0) await service.storage.from(bucket).remove(keys);
+        await service.storage.emptyBucket(bucket);
+        await service.storage.deleteBucket(bucket);
+      }
+    }
   });
 });

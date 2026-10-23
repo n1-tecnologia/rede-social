@@ -33,6 +33,7 @@ export {
   planMove,
   SPECIAL_TABLES,
 } from './plan';
+export { type RequeuePorts, requeueJobs } from './requeue';
 export {
   assertNoLeftover,
   BRANDING_PUBLIC_PATH,
