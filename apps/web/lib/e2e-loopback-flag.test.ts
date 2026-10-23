@@ -81,3 +81,60 @@ describe('the PWA e2e config carries the flag and nothing else does', () => {
     }
   });
 });
+
+// The same two patterns as scripts/check-workflows.sh (E2E_FLAG_ASSIGN and E2E_FLAG_ROW); change both together.
+const ASSIGN = new RegExp(`${FLAG}["'\`]?\\s*[=:]`);
+const TABLE_ROW = new RegExp(`^\\s*\\|\\s*\`?${FLAG}`);
+
+function lines(file: string): string[] {
+  return readFileSync(join(REPO_ROOT, file), 'utf8').split('\n');
+}
+
+describe('no deploy surface carries the e2e loopback flag', () => {
+  it('no deploy workflow and no Vercel config names it', () => {
+    for (const file of [
+      '.github/workflows/deploy-api.yml',
+      '.github/workflows/deploy-hml.yml',
+      'apps/web/vercel.json',
+    ]) {
+      expect(readFileSync(join(REPO_ROOT, file), 'utf8').includes(FLAG), file).toBe(false);
+    }
+  });
+
+  it('no tracked env template gives it a value, commented lines included', () => {
+    for (const file of ['.env.example', 'apps/web/.env.example', 'apps/api/.env.example']) {
+      expect(
+        lines(file).filter((line) => ASSIGN.test(line)),
+        file,
+      ).toEqual([]);
+    }
+  });
+
+  it('docs/DEPLOY.md gives it no value and no table row, and documents the rule', () => {
+    const deploy = lines('docs/DEPLOY.md');
+    expect(deploy.filter((line) => ASSIGN.test(line) || TABLE_ROW.test(line))).toEqual([]);
+    const paragraphs = deploy.join('\n').split(/\n\s*\n/);
+    expect(
+      paragraphs.some(
+        (block) => block.includes(FLAG) && /Vercel/.test(block) && /\bnever\b/.test(block),
+      ),
+    ).toBe(true);
+  });
+
+  it('the patterns catch a value being set and ignore the prose shape used in DEPLOY.md', () => {
+    for (const set of [
+      `export ${FLAG}=1`,
+      `# ${FLAG}=1`,
+      `  "${FLAG}": "1"`,
+      `${FLAG}: '1'`,
+      `\`${FLAG}\`=1`,
+    ]) {
+      expect(ASSIGN.test(set), set).toBe(true);
+    }
+    expect(TABLE_ROW.test(`| \`${FLAG}\` | not provisioned | 1 |`)).toBe(true);
+    expect(TABLE_ROW.test(`|${FLAG}|x|`)).toBe(true);
+    const prose = `The build flag \`${FLAG}\` is never set on Vercel.`;
+    expect(ASSIGN.test(prose)).toBe(false);
+    expect(TABLE_ROW.test(prose)).toBe(false);
+  });
+});

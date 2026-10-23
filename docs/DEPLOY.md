@@ -345,6 +345,14 @@ before. `DEPLOY_ENV` stays unset on the production project.
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | *(unset — every push surface reads "unsupported")* | the PUBLIC half of the production VAPID pair, the same value as `vapid-public-key-prod` (Phase 7 release, step 3). Inlined at build time, so set it BEFORE the push that ships Phase 7 |
 | `CSP_MODE` | *(unset — the default `report-only`)* | `report-only` when Phase 8 ships; `enforce` only after the 08-12 real-device pass shows zero violations (see the CSP section below). Server-only and read per request, so a change needs a redeploy but no rebuild of anything else |
 
+**E2E-only build flag.** The build flag `NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS` is turned on only by
+`apps/web/playwright.pwa.config.ts`, for the production-build PWA e2e, so that build may talk to the
+local Supabase stack over http loopback (T-09.2-84 otherwise keeps production on https and the hosted
+host). It is inlined at build time. It must never be set on Vercel, neither on the production project
+nor on `homolog`, and not in any deploy workflow or tracked env example. `pnpm guard:workflows` fails
+when it appears in `deploy-api.yml`, `deploy-hml.yml` or a Vercel config, or when a `.env.example` or
+this file gives it a value.
+
 No `SITE_URL` anywhere: every absolute URL, including the password-recovery `redirect_to`, is derived
 from the request origin (D-22). Only publishable keys ever reach Vercel — the service key lives in
 Secret Manager only.
