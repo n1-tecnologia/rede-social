@@ -66,7 +66,7 @@ import {
   validateAccess,
 } from '../projects/access';
 import { startBootstrapInTx } from '../projects/bootstrap';
-import { tenantsMoving } from '../projects/moving';
+import { assertNotMoving, tenantsMoving } from '../projects/moving';
 import { summarizeDatabase } from '../projects/overview';
 import { precheckProject } from '../projects/precheck';
 import { getProjectProvider } from '../projects/provider-access';
@@ -935,13 +935,19 @@ export async function updateTenant(
  * pushed to the tenant's own row afterwards. A push that cannot reach the tenant's project is logged and
  * healed by the reconcile function; it never fails the request, because the authority already changed. The
  * host cache is dropped for every host so the branded "indisponível" shell and `requireAuth`'s 403
- * TENANT_SUSPENDED agree on the very next request of this instance.
+ * TENANT_SUSPENDED agree on the very next request of this instance. While the tenant has an open move the
+ * call is refused with 409 `TENANT_MOVING` unless it carries that move's id (09.2-23): the move tool suspends
+ * the tenant for the length of the copy and reactivates it at the end, and nobody else may.
  */
 export async function setTenantStatus(
   id: string,
   status: TenantStatus,
   actor: PlatformActor,
+  options: { moveId?: string } = {},
 ): Promise<void> {
+  // 09.2-23 (D-535, T-09.2-101): a tenant being moved changes status only through the runner that holds the
+  // move, which names the move's own id. The panel, another route or a script is refused.
+  await assertNotMoving(id, { moveId: options.moveId });
   const updated = await withPlatformTx(async (tx) =>
     tx
       .update(tenants)

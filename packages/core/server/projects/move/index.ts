@@ -7,6 +7,15 @@
  * `verifyCopy`.
  */
 
+export {
+  defaultBossFor,
+  defaultStorage,
+  type MoveContext,
+  type MoveDeps,
+  type MoveWaits,
+  openContext,
+  type StatusSetter,
+} from './context';
 export { copyAuth, EmailConflictError } from './copy-auth';
 export { COPY_BATCH_SIZE, type CopyOptions, copyRows } from './copy-rows';
 export {
@@ -22,6 +31,13 @@ export {
   supabaseStoragePort,
   type UploadOptions,
 } from './copy-storage';
+export {
+  completeCutover,
+  currentStatus,
+  dropCaches,
+  dropTenantHostCache,
+  flipPointer,
+} from './cutover';
 export { type FkEdge, type OrderResult, orderTables, SELF_REF_ORDER } from './fk-order';
 export {
   accountIdsOf,
@@ -33,6 +49,16 @@ export {
   planMove,
   SPECIAL_TABLES,
 } from './plan';
+export {
+  activeJobsOf,
+  DEFAULT_GAP_MS,
+  DEFAULT_JOBS_WAIT_MS,
+  DEFAULT_QUIESCE_MS,
+  type Fingerprint,
+  fingerprintOf,
+  type QuiesceOptions,
+  quiesce,
+} from './quiesce';
 export { type RequeuePorts, requeueJobs } from './requeue';
 export {
   assertNoLeftover,
@@ -40,6 +66,43 @@ export {
   rewriteStorageOrigins,
   scanForOrigin,
 } from './rewrite';
+export {
+  DEFAULT_REGISTRY_WAIT_MS,
+  type MoveLine,
+  type MoveMode,
+  type MoveOptions,
+  type MoveResult,
+  runMove,
+} from './run';
+export {
+  advance,
+  canTransition,
+  claimLease,
+  eventsOf,
+  hasEvent,
+  isOpen,
+  LEASE_MINUTES,
+  latestMoveOf,
+  leaseClaimable,
+  loadMove,
+  MOVE_STATES,
+  type MoveEvent,
+  type MoveRow,
+  type MoveState,
+  type MoveStore,
+  openMoveOf,
+  platformStore,
+  recordEvent,
+  releaseLease,
+  setMoveError,
+  TRANSITIONS,
+} from './state';
+export {
+  assertTargetReady,
+  bootstrapTarget,
+  registerMoveTarget,
+  type TargetDeps,
+} from './target';
 export * from './types';
 export {
   FULL_CHECKSUM_MAX_ROWS,

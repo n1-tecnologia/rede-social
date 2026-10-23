@@ -52,6 +52,9 @@ export const ERROR_CODES = [
   // (no project fact, no tenant name). Costly to rename once released, not a one-way door.
   'TENANT_PREPARING',
   'TENANT_UPDATING',
+  // 09.2-23 (D-535, DBT-48, T-09.2-101): a platform mutation of a tenant whose database is being moved. 409, no
+  // details (no project fact, no tenant name). The panel's disabled button is the visible half; this is the rule.
+  'TENANT_MOVING',
   'VALIDATION_FAILED',
   'NOT_FOUND',
   // 03-07: the ONE distinguishable refusal of `GET /v1/media/{id}/playback` — the CALLER'S OWN

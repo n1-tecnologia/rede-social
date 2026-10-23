@@ -43,6 +43,20 @@
       "when": 1792720626762,
       "tag": "20261023015706_platform_route_indexes_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792754609164,
+      "tag": "20261023112329_tenant_moves",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792754612376,
+      "tag": "20261023112332_tenant_moves_hardening",
+      "breakpoints": true
     }
   ]
 }

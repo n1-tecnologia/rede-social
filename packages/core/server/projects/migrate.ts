@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import postgres, { type Sql } from 'postgres';
+import type { Sql } from 'postgres';
 import { tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import { tenants } from '../../db/schema';
@@ -17,9 +17,9 @@ import {
   type MigrationSetName,
   readMigrationDir,
 } from '../migrations/sets';
-import { open } from '../secrets/sealed';
 import { listReadyProjects, type ProjectRecord } from '../tenancy/project-registry';
 import { ensureProjectZero } from '../tenancy/project-zero';
+import { DdlError, openDdlSql } from './ddl';
 import {
   type AppliedCounts,
   invalidateProjectHosts,
@@ -87,47 +87,15 @@ export type MigrateDeps = {
   ensureProjectZero: () => Promise<unknown>;
 };
 
-const LOCAL_URL = 'postgres://postgres:postgres@127.0.0.1:54322/postgres';
 const SLUG_SHAPE = /^[a-z0-9-]+$/;
 const DEFAULT_CONCURRENCY = 4;
 const MAX_CONCURRENCY = 16;
 
-/** A failure that is the fan-out's own, with a fixed code. */
-class FanOutError extends Error {
-  readonly code: string;
-  constructor(code: string) {
-    super(code);
-    this.name = 'FanOutError';
-    this.code = code;
-  }
-}
-
-/** The central URL: `MIGRATION_DATABASE_URL`, the local stack outside production, nothing in production. */
-function centralUrl(): string {
-  const url = process.env.MIGRATION_DATABASE_URL;
-  if (url && url.length > 0) return url;
-  if (process.env.NODE_ENV === 'production') throw new FanOutError('credential_missing');
-  return LOCAL_URL;
-}
-
-const connectOptions = { max: 1, prepare: false, connect_timeout: 15, onnotice: () => undefined };
-
 function defaultDeps(): MigrateDeps {
   return {
-    connectCentral: () => postgres(centralUrl(), connectOptions),
-    connect: (project) => {
-      if (project.isCentral || project.credentialSource === 'env') {
-        return postgres(centralUrl(), connectOptions);
-      }
-      if (!project.ddlUrlSealed) throw new FanOutError('credential_missing');
-      let url: string;
-      try {
-        url = open(project.ddlUrlSealed, `${project.id}:ddl_url`);
-      } catch {
-        throw new FanOutError('credential_unreadable');
-      }
-      return postgres(url, connectOptions);
-    },
+    connectCentral: () =>
+      openDdlSql({ id: 'central', isCentral: true, credentialSource: 'env', ddlUrlSealed: null }),
+    connect: (project) => openDdlSql(project),
     loadFiles: (set) => readMigrationDir(defaultMigrationDir(set), set),
     apply: applyDirectory,
     listProjects: listReadyProjects,
@@ -149,7 +117,7 @@ function defaultDeps(): MigrateDeps {
 /** A fixed code for any thrown value: never the message, which may carry a statement or an address. */
 function codeOf(error: unknown): string {
   if (error instanceof MigrationError) return error.code;
-  if (error instanceof FanOutError) return error.code;
+  if (error instanceof DdlError) return error.code;
   const code = (error as { code?: unknown } | null)?.code;
   if (typeof code === 'string') {
     if (code === '28P01' || code === '28000') return 'credential_rejected';

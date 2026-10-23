@@ -22,17 +22,35 @@ export type Db = postgres.Sql | postgres.TransactionSql;
  */
 export type MoveSide = { sql: postgres.Sql; tenantId: string; projectId: string };
 
-/** The closed set of error codes the engine raises (plus the two readiness codes below). */
+/**
+ * The closed set of error codes of the move: the ones the copy engine raises (09.2-22) and the ones the
+ * state machine, the rollback and the deletion add (09.2-23). A code is all a log line or a stored reason may
+ * carry; never a message from a driver.
+ */
 export type MoveErrorCode =
+  | 'usage'
+  | 'tenant_not_found'
+  | 'tenant_unbound'
+  | 'already_on_target'
+  | 'move_in_progress'
+  | 'lease_held'
+  | 'move_conflict'
+  | 'target_not_ready'
+  | 'schema_mismatch'
   | 'uncovered_tables'
   | 'unsortable_tables'
-  | 'email_conflict'
-  | 'schema_mismatch'
-  | 'origin_leftover'
+  | 'not_quiescent'
+  | 'jobs_active'
   | 'verify_failed'
-  | 'tenant_not_found'
-  | 'target_not_ready'
-  | 'account_missing';
+  | 'source_changed'
+  | 'email_conflict'
+  | 'origin_leftover'
+  | 'account_missing'
+  | 'writes_since_cutover'
+  | 'source_deleted'
+  | 'not_done'
+  | 'confirm_mismatch'
+  | 'unknown';
 
 /**
  * The one error of the engine. The message is the code and, at most, table names or counts; it never holds a

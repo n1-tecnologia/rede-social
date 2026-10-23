@@ -1,5 +1,5 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
-import { projectBootstrapSteps, projects, tenantProjects } from '../../db/central';
+import { and, asc, eq, notInArray, sql } from 'drizzle-orm';
+import { projectBootstrapSteps, projects, tenantMoves, tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
@@ -63,9 +63,10 @@ export type BootstrapDeps = Partial<StepDeps> & {
   /**
    * The tenants whose `tenants`/`tenant_modules` rows the `tenant` step seeds and whose pending invite the
    * `invite` step creates (09.2-22). Default: the tenants bound to the project, exactly as before. A MOVE
-   * target has no binding yet (the tenant stays bound to its source until the cutover), so the move tool
-   * names the tenant here; plan 23 extends the default with the tenants of an open move that targets the
-   * project. An empty list still fails closed with reason `unknown`.
+   * target has no binding yet (the tenant stays bound to its source until the cutover). Since 09.2-23 the
+   * default is the bound tenants PLUS the tenants of an open move that targets the project (bound first, no
+   * duplicates), so a move target is bootstrapped without the caller naming anything; a caller that does name
+   * the tenants replaces the default. An empty list still fails closed with reason `unknown`.
    */
   tenantsToSeed?: (projectId: string) => Promise<string[]>;
 };
@@ -219,13 +220,35 @@ async function boundTenants(projectId: string): Promise<BoundTenant[]> {
 }
 
 /**
- * The tenants this run seeds: the bound ones by default, or the ids the caller names (a move target). A named
- * tenant that is also bound keeps its pending invite; a named tenant with no binding has none.
+ * The tenants of an OPEN move that targets the project (09.2-23): the target has no binding yet, the tenant
+ * stays bound to its source until the cutover, and the target still has to be seeded for it.
+ */
+async function movingTenants(projectId: string): Promise<string[]> {
+  const rows = await withPlatformTx((tx) =>
+    tx
+      .select({ tenantId: tenantMoves.tenantId })
+      .from(tenantMoves)
+      .where(
+        and(
+          eq(tenantMoves.toProjectId, projectId),
+          notInArray(tenantMoves.state, ['done', 'rolled_back']),
+        ),
+      )
+      .orderBy(asc(tenantMoves.startedAt), asc(tenantMoves.tenantId)),
+  );
+  return rows.map((row) => row.tenantId);
+}
+
+/**
+ * The tenants this run seeds: by default the ones bound to the project and then the tenants of an open move
+ * that targets it; or exactly the ids the caller names. A named tenant that is also bound keeps its pending
+ * invite; one with no binding has none.
  */
 async function tenantsOf(projectId: string, deps: BootstrapDeps): Promise<BoundTenant[]> {
   const bound = await boundTenants(projectId);
-  if (!deps.tenantsToSeed) return bound;
-  const named = await deps.tenantsToSeed(projectId);
+  const named = deps.tenantsToSeed
+    ? await deps.tenantsToSeed(projectId)
+    : [...bound.map((entry) => entry.tenantId), ...(await movingTenants(projectId))];
   return [...new Set(named)].map(
     (tenantId) =>
       bound.find((entry) => entry.tenantId === tenantId) ?? { tenantId, pendingInvite: null },

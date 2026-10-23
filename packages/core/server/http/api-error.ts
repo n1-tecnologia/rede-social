@@ -26,6 +26,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   TENANT_UNAVAILABLE: 'Esta comunidade não está disponível agora.',
   TENANT_PREPARING: 'Esta comunidade ainda está sendo preparada.',
   TENANT_UPDATING: 'Esta comunidade está sendo atualizada.',
+  TENANT_MOVING:
+    'Esta comunidade está sendo movida para outro banco. Tente de novo quando a mudança terminar.',
   VALIDATION_FAILED: 'Dados inválidos.',
   NOT_FOUND: 'Não encontrado.',
   CONFLICT: 'Este recurso ainda não está pronto.',
