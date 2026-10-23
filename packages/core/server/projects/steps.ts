@@ -15,11 +15,7 @@ import {
 } from '../migrations/sets';
 import { createPendingInvite, sendPendingInvites } from '../platform/invites';
 import { open, processKeyring, seal } from '../secrets/sealed';
-import {
-  invalidateProject,
-  type ProjectRecord,
-  resolveProjectById,
-} from '../tenancy/project-registry';
+import { invalidateProject, type ProjectRecord } from '../tenancy/project-registry';
 import { buildAuthConfigBody, STORAGE_FILE_SIZE_LIMIT_BYTES } from './auth-config';
 import type { BootstrapReason, BootstrapStep } from './reasons';
 import type { ProjectProvider } from './types';
@@ -564,7 +560,3 @@ export const STEP_RUNNERS: Record<BootstrapStep, StepRunner> = {
   tenant,
   invite,
 };
-
-/** Re-read of the registry row for the next step. */
-export const freshProject = (projectId: string): Promise<ProjectRecord | null> =>
-  resolveProjectById(projectId);
