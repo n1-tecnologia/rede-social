@@ -345,7 +345,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **DBT-25**: A tenant whose applied state lacks any version the running image requires is answered `updating` from the cached mirror with zero extra queries, others keep running, and a self-re-arming job retries. *(D-545)*
 - [ ] **DBT-26**: The production workflow runs the central set and the fan-out before deploying the API and worker (D-12 order); a central failure stops the deploy, a tenant failure does not. *(D-544)*
 - [x] **DBT-27**: A self-re-arming health job records reachable / paused / behind per project and the panel badge states of UI-D-539 derive from it. *(D-543)*
-- [ ] **DBT-28**: `docs/DEPLOY.md` "Connection budget (Pro)" is restated per project with the pool-cache arithmetic. *(D-543)*
+- [x] **DBT-28**: `docs/DEPLOY.md` "Connection budget (Pro)" is restated per project with the pool-cache arithmetic. *(D-543)*
 - [x] **DBT-29**: `enqueueInTx` writes into the pg-boss schema of the database that owns the transaction, and refuses to enqueue a platform queue from a tenant transaction (and the reverse). *(D-546)*
 - [x] **DBT-30**: The worker supervisor starts one pg-boss instance per ready tenant project plus the central one, adds and removes projects at runtime, and backs off on an unreachable or paused project. *(D-546)*
 - [x] **DBT-31**: The daily dispatcher runs inside each tenant database queue and enqueues only for tenants of that database. *(D-546)*
@@ -360,7 +360,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **DBT-40**: Credentials are write-only in the panel; "Substituir credenciais" validates new values against the project before replacing anything. *(D-539)*
 - [ ] **DBT-41**: The existing two-tenant isolation suites (pgTAP and `isolation.test.ts`) stay green and `tenant_id` plus RLS remain on every table. *(D-540)*
 - [x] **DBT-42**: The allow-list adapter and reconcile job act per project (host to tenant to project), serialised per project. *(D-538, D-542)*
-- [ ] **DBT-43**: PROJECT.md is amended (tenant projects are physically separate and Pro; `tenant_id` + RLS stay as defense in depth; Free-plan line superseded). *(D-540, D-543)*
+- [x] **DBT-43**: PROJECT.md is amended (tenant projects are physically separate and Pro; `tenant_id` + RLS stay as defense in depth; Free-plan line superseded). *(D-540, D-543)*
 - [ ] **DBT-44**: The API image carries both migration sets, `supabase/roles.sql` and a deterministic manifest, so the running API knows the schema version it requires without a database call; a production boot whose manifest is missing or lists no tenant file stops with a named error. *(D-544, D-545, D-547)*
 - [x] **DBT-45**: A tenant's project binding is cached for 15 seconds and the last good binding is served for at most 10 minutes, only when the central read fails; past that window, or with no last-good value, resolution fails closed with `TENANT_UNAVAILABLE`. *(D-537, D-538)*
 - [x] **DBT-46**: A tenant with no binding fails closed: resolution raises `TENANT_PROJECT_UNBOUND`, and a deferred constraint trigger binds a new tenant to the project flagged default at commit or raises when none is flagged, so no code path falls back to the central project. *(D-538, D-540)*
@@ -729,7 +729,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-25 | Phase 09.2 (plans 08, 15, 21) | Complete |
 | DBT-26 | Phase 09.2 (plans 16, 25) | Pending |
 | DBT-27 | Phase 09.2 (plans 14, 19) | Complete |
-| DBT-28 | Phase 09.2 (plan 24) | Pending |
+| DBT-28 | Phase 09.2 (plan 24) | Complete |
 | DBT-29 | Phase 09.2 (plan 09) | Complete |
 | DBT-30 | Phase 09.2 (plan 09) | Complete |
 | DBT-31 | Phase 09.2 (plan 09) | Complete |
@@ -744,7 +744,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-40 | Phase 09.2 (plans 14, 19) | Complete |
 | DBT-41 | Phase 09.2 (plan 28) | Pending |
 | DBT-42 | Phase 09.2 (plan 11) | Complete |
-| DBT-43 | Phase 09.2 (plan 24) | Pending |
+| DBT-43 | Phase 09.2 (plan 24) | Complete |
 | DBT-44 | Phase 09.2 (plans 15, 25) | Pending |
 | DBT-45 | Phase 09.2 (plan 03) | Complete |
 | DBT-46 | Phase 09.2 (plans 02, 03) | Complete |

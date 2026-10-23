@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 24
+current_plan: 25
 status: executing
-stopped_at: Completed 09.2-21-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21 done); next is 09.2-24 (wave 13, documentation), then 25 (human gates)
-last_updated: "2026-10-23T13:17:51.601Z"
+stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor)
+last_updated: "2026-10-23T13:45:03.693Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-21 (the member held-out screens /comunidade-em-atualizacao and /comunidade-em-preparacao, bootstrapRedirectPath mapping the three 503 codes without clearing the session, the login and sign-up cards, actions that refuse a held-out host before any Auth call, lib/held-out.ts; the 320 px measurement, pale/dark brands and a real device are left to plans 28 and 25). Previous: 09.2-23 (the move tool: tenant_moves state machine with compare-and-set and a row lease, quiesce/cutover/rollback/recopy, the single deleting path confirm-delete, central-clean, ROLE=move and pnpm platform:move-tenant, the 409 TENANT_MOVING guard, pgTAP 215; the full integration run was 2,113 of 2,116 with three seed-pinned plan 22 cases fixed; hosted cutover is proof H6). Previous: 09.2-20 (tenant list Banco column and Banco com problema chip, header Banco pill, Status tab Reativar guard while moving; isTenantMoving is still the API stub until plan 23; 320 px measurement left to plan 28). Previous: 09.2-16 (deploy-api.yml and deploy-hml.yml: authenticate, release preflight, migrations, migrate Job deployed and executed with --wait on the same image, then API and worker; scripts/check-workflows.sh and check-release-env.sh with self-tests; PostgreSQL 17 client in the local-stack action; DBT-26 stays open for plan 25 and hosted proof H5)"
-state_head: 51118117638a29c1b3c9d6a733a89132f12ec7cd
+last_activity_desc: "Completed 09.2-24 (the PROJECT.md amendment and its CLAUDE.md mirror, the per-project connection budget, the Phase 09.2 release and move runbook in DEPLOY.md, ci.md and LOCAL-SETUP (on disk, untracked), the H1..H8 hosted-proofs ledger shipped pending with contract_gate closed; the migrate Job gained MAIL_DOMAIN, PROJECT_AUTH_SMTP_PASS and project 0 ref; the ROLE=move Job override syntax is unproven)"
+state_head: a2b2ce26ea9c138854ac070c3940cb0b4a35ea94
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 258
+  completed_plans: 259
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 24
+Current Plan: 25
 Total Plans in Phase: 28
-Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23 and 21 done (21: the member held-out screens and form cards); plans run out of numeric order: the next is 24 (wave 13, documentation), then 25 (human gates)
+Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21 and 24 done (24: the documentation, wave 13 complete); plans run out of numeric order: the next is 25 (wave 14, the human gates: autonomous false, 4 checkpoints for Igor)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-21 (Comunidade em atualização / em preparação screens, the form cards, held-out actions; layout measurement and real device are plans 28 and 25)
+Last activity: 2026-10-23 — Completed 09.2-24 (amendment, per-project budget, release and move runbook, hosted-proofs ledger pending; LOCAL-SETUP edited on disk and left untracked for Igor's review)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -316,6 +316,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.2 P20 | 11 min | 2 tasks | 15 files |
 | Phase 09.2 P23 | 104 min | 3 tasks | 43 files |
 | Phase 09.2 P21 | 15 min | 2 tasks | 24 files |
+| Phase 09.2 P24 | 18 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -1046,6 +1047,7 @@ Recent decisions affecting current work:
 - [Phase 09.2]: A-16-1: the fan-out runs as a Cloud Run Job on the same image (ROLE=migrate), executed with --wait before the API and worker; answered by Igor 2026-10-23 — No DDL-capable public endpoint, 1 h task timeout, readable exit codes, same image and secrets; cost: not literally inside the new revision, deploy SA must run jobs (gate G2)
 - [Phase 09.2]: 09.2-23: a move advances only by compare-and-set with a 15-minute row lease and an append-only event trail; the tool bootstraps its own target inline; only delete-source.ts deletes from the source (grep-guarded); a rollback after the flip holds the tenant, counts the writes since cutover_at and refuses unless --accept-loss; the HTTP TENANT_MOVING guard sits on the parent platform router and setTenantStatus needs the move id — D-535, D-536, D-534, T-09.2-101..108
 - [Phase 09.2]: 09.2-21: the held-out host states live in one env-free table (lib/held-out.ts); TENANT_UPDATING, TENANT_PREPARING and TENANT_UNAVAILABLE go straight to public screens and never through the session-clearing /auth/suspended, so a migration is not a logout; paused and unreachable read byte-identical to a suspension; a generic host reads the slug route's 503 code — D-535, D-545, UI-D-542, A-UI-8, T-09.2-94, T-09.2-95
+- [Phase 09.2]: 09.2-24: the connection budget is restated per project from the shipped defaults (PROJECT_POOL_MAX 3, not 4): a tenant project reads 192 of 400 on Small and 192 of 200 on Micro, the central project 352 of 400, so no workflow --max-instances changed; the production move is documented as a ROLE=move execution of the migrate Job with an override syntax that is unproven (hosted proofs H5 and H6); the hosted-proofs ledger ships pending with contract_gate closed — The arithmetic holds with the shipped values, so the budget needed no workflow change; the Job override follows from the image CMD without an entrypoint and has never run; nothing in the ledger can become passed without Igor's pasted evidence, and the Phase 08.1 removal waits for his contract_gate edit
 
 ### Pending Todos
 
@@ -1154,6 +1156,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T13:17:51.363Z
-Stopped at: Completed 09.2-21-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21 done); next is 09.2-24 (wave 13, documentation), then 25 (human gates)
+Last session: 2026-10-23T13:44:58.039Z
+Stopped at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor)
 Resume file: None
