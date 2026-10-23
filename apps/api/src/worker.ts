@@ -91,10 +91,10 @@ import { createSupervisor, type SupervisedBoss } from './worker-supervisor';
  * connection while acquiring a second one, so nothing holds-and-waits and the pool can only make a handler
  * wait briefly, never starve it. With a database per tenant the pools multiply: the app pool of project 0
  * is `DATABASE_POOL_MAX` (10) and every other project is a pooled connection of its own
- * (`PROJECT_POOL_MAX`, 4 per project, bounded by `PROJECT_POOL_CACHE_MAX`). On the pg-boss side each
+ * (`PROJECT_POOL_MAX`, 3 per project, bounded by `PROJECT_POOL_CACHE_MAX`). On the pg-boss side each
  * project holds `max: 2` session sockets for its instance, project 0 holds two instances (platform and
  * tenant, 4 sockets), and the API-side senders add one socket per project and scope (`max: 1`). Per tenant
- * project that is about 2 session + 1 sender + up to 4 pooled = 7 sockets, which is what
+ * project that is about 2 session + 1 sender + up to 3 pooled = 6 sockets, which is what
  * `SUPERVISOR_MAX_PROJECTS` (default 40) bounds for one worker instance. LISTEN/NOTIFY is off and the
  * pollers' fetches (every 2 s) and completes are single short queries. Recompute docs/DEPLOY.md
  * "Connection budget (Pro)" whenever a concurrency, the pool size or the cap changes.
