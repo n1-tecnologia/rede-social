@@ -267,5 +267,9 @@ export const replaceCredentialsBodySchema = z
   });
 export type ReplaceCredentialsBody = z.infer<typeof replaceCredentialsBodySchema>;
 
+/** `PUT /v1/platform/tenants/{id}/database/credentials` answers only that it worked; no value comes back. */
+export const replaceCredentialsAnswerSchema = z.object({ ok: z.literal(true) }).strict();
+export type ReplaceCredentialsAnswer = z.infer<typeof replaceCredentialsAnswerSchema>;
+
 /** The `?banco=` filter of the tenant list. */
 export const bancoFilterSchema = z.enum(['problema']);

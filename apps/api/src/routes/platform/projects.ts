@@ -6,10 +6,15 @@ import {
   type PrecheckAnswer,
   precheckAnswerSchema,
   precheckBodySchema,
+  replaceCredentialsAnswerSchema,
+  replaceCredentialsBodySchema,
 } from '@rede-social/contracts';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import type { PlatformEnv } from '@rede-social/core/server/platform/require-super-admin';
-import { getDatabaseOverview } from '@rede-social/core/server/projects/overview';
+import { listSteps, resumeBootstrap } from '@rede-social/core/server/projects/bootstrap';
+import { replaceCredentials } from '@rede-social/core/server/projects/credentials';
+import { checkProject } from '@rede-social/core/server/projects/health';
+import { getDatabaseOverview, projectOfTenant } from '@rede-social/core/server/projects/overview';
 import { precheckProject } from '@rede-social/core/server/projects/precheck';
 import { platformDefaultHook } from '../../http/openapi';
 
@@ -65,6 +70,61 @@ const overviewRoute = createRoute({
   },
 });
 
+const verifyRoute = createRoute({
+  method: 'post',
+  path: '/tenants/{id}/database/verify',
+  request: { params: idParams },
+  responses: {
+    200: overviewResponse(
+      'One read-only health check of the tenant’s project (the Domínios tab’s "Verificar agora" precedent), then the fresh overview',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope('CONFLICT — the project is still being prepared; there is nothing to check yet'),
+  },
+});
+
+const resumeRoute = createRoute({
+  method: 'post',
+  path: '/tenants/{id}/database/bootstrap/resume',
+  request: { params: idParams },
+  responses: {
+    200: overviewResponse(
+      '"Tentar de novo": the failed step is queued again and every finished step is kept; the overview as it stands',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope('CONFLICT — no bootstrap step has failed, so there is nothing to resume'),
+  },
+});
+
+const credentialsRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/database/credentials',
+  request: {
+    params: idParams,
+    body: {
+      content: { 'application/json': { schema: replaceCredentialsBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'The supplied values worked against the project and were sealed; nothing is ever returned. The registry holds the new values from the next request on',
+      content: { 'application/json': { schema: replaceCredentialsAnswerSchema } },
+    },
+    400: envelope(
+      'VALIDATION_FAILED — an empty body, or { access: "invalid" } when a supplied value does not work against the project (nothing was changed)',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope(
+      'CONFLICT — the tenant lives in the central project, whose credentials are the environment’s',
+    ),
+  },
+});
+
 export async function overviewOr404(tenantId: string): Promise<DatabaseOverview> {
   const overview = await getDatabaseOverview(tenantId);
   if (!overview) throw new ApiError(404, 'NOT_FOUND');
@@ -109,4 +169,70 @@ export const projectsRoutes = projectsRouter
     );
     c.header('Cache-Control', 'no-store');
     return c.json(overview, 200);
+  })
+  .openapi(verifyRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+
+    const project = await projectOfTenant(id);
+    if (!project) throw new ApiError(404, 'NOT_FOUND');
+    if (project.state !== 'ready') throw new ApiError(409, 'CONFLICT');
+    const result = await checkProject(project.id);
+    const overview = await overviewOr404(id);
+
+    c.get('logger').info(
+      {
+        event: 'platform.projects.verify',
+        userId,
+        requestId,
+        tenantId: id,
+        projectId: project.id,
+        status: result?.status ?? 'unknown',
+        changed: result?.changed ?? false,
+      },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(overview, 200);
+  })
+  .openapi(resumeRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+
+    const project = await projectOfTenant(id);
+    if (!project) throw new ApiError(404, 'NOT_FOUND');
+    const failed = (await listSteps(project.id)).find((row) => row.status === 'failed');
+    if (!failed) throw new ApiError(409, 'CONFLICT');
+    await resumeBootstrap(project.id);
+    const overview = await overviewOr404(id);
+
+    c.get('logger').info(
+      {
+        event: 'platform.projects.resume',
+        userId,
+        requestId,
+        tenantId: id,
+        projectId: project.id,
+        step: failed.step,
+      },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(overview, 200);
+  })
+  .openapi(credentialsRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    const body = c.req.valid('json');
+
+    // The values go straight to the kernel, which validates them against the project, seals them and forgets
+    // them. They are never logged, never echoed and never kept in this scope past the call.
+    await replaceCredentials(id, body, { userId, logger: c.get('logger') });
+
+    c.get('logger').info(
+      { event: 'platform.projects.credentials', userId, requestId, tenantId: id },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const }, 200);
   });

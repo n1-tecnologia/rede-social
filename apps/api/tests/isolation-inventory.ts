@@ -138,6 +138,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // 09.2-14 (D-541..D-543, D-539): the panel's view of a tenant's Supabase project, super_admin only.
   'POST /v1/platform/projects/precheck': { exempt: PLATFORM_LANE },
   'GET /v1/platform/tenants/:id/database': { exempt: PLATFORM_LANE },
+  'POST /v1/platform/tenants/:id/database/verify': { exempt: PLATFORM_LANE },
+  'POST /v1/platform/tenants/:id/database/bootstrap/resume': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/database/credentials': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/verify': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/restart': { exempt: PLATFORM_LANE },

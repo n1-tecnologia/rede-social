@@ -22,6 +22,7 @@
     "db:central": "tsx scripts/migrate-set.ts --set central",
     "db:two": "bash scripts/db-two-databases.sh",
     "platform:reseal": "tsx scripts/reseal.ts",
+    "platform:reissue-credentials": "tsx scripts/reissue-credentials.ts",
     "platform:probe": "tsx scripts/probe-management-api.ts",
     "spike:supavisor": "vitest run --config scripts/vitest.config.ts",
     "test:integration": "pnpm --filter @rede-social/api test:integration && pnpm --filter @rede-social/reuse-fixture test:integration",

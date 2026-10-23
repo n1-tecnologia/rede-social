@@ -76,6 +76,33 @@ export function summarizeDatabase(facts: DatabaseFacts): TenantDatabaseSummary {
 
 const iso = (date: Date | null | undefined): string | null => (date ? date.toISOString() : null);
 
+/** The project a tenant is bound to (id, ref, state), or `null`: the panel routes resolve every action through it. */
+export async function projectOfTenant(
+  tenantId: string,
+): Promise<{ id: string; ref: string; state: string; central: boolean } | null> {
+  const [row] = await withPlatformTx((tx) =>
+    tx
+      .select({
+        id: projects.id,
+        ref: projects.ref,
+        state: projects.state,
+        isCentral: projects.isCentral,
+        source: projects.credentialSource,
+      })
+      .from(tenantProjects)
+      .innerJoin(projects, eq(projects.id, tenantProjects.projectId))
+      .where(eq(tenantProjects.tenantId, tenantId))
+      .limit(1),
+  );
+  if (!row) return null;
+  return {
+    id: row.id,
+    ref: row.ref,
+    state: row.state,
+    central: row.isCentral || row.source === 'env',
+  };
+}
+
 export async function getDatabaseOverview(tenantId: string): Promise<DatabaseOverview | null> {
   const facts = await withPlatformTx(async (tx) => {
     const [project] = await tx

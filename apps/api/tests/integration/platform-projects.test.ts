@@ -1,14 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import {
   databaseOverviewSchema,
   platformTenantDetailSchema,
   precheckAnswerSchema,
 } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
+import { ApiError } from '@rede-social/core/server/http/api-error';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
-import { runBootstrap } from '@rede-social/core/server/projects/bootstrap';
+import { createTenant } from '@rede-social/core/server/platform/tenants';
+import { listSteps, runBootstrap } from '@rede-social/core/server/projects/bootstrap';
 import { PROJECT_BOOTSTRAP_QUEUE } from '@rede-social/core/server/projects/bootstrap-job';
 import {
   createFakeProjectProvider,
@@ -18,11 +17,10 @@ import {
 import { precheckProject } from '@rede-social/core/server/projects/precheck';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { BOOTSTRAP_STEPS } from '@rede-social/core/server/projects/reasons';
-import { defaultSecrets } from '@rede-social/core/server/projects/steps';
 import { open } from '@rede-social/core/server/secrets/sealed';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
-import postgres from 'postgres';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { API_URL, bootstrapDeps, fakeTarget, onB, resetB, restoreB } from './projects-setup';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
 /**
@@ -34,49 +32,15 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  * like a new hosted project, and restored to the usual migrated state at the end.
  */
 
-const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
-const B_ADMIN_URL = 'postgres://postgres:postgres@127.0.0.1:54322/rede_tenant_b';
-const API_URL = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321';
 const RUN = Date.now().toString(36);
 const QUEUE = PROJECT_BOOTSTRAP_QUEUE;
 
 const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
 
-function resetB(): void {
-  execFileSync('bash', ['scripts/db-two-databases.sh', '--reset', '--bare'], {
-    cwd: ROOT,
-    timeout: 120_000,
-    stdio: 'pipe',
-  });
-}
-
-async function onB<T>(fn: (b: postgres.Sql) => Promise<T>): Promise<T> {
-  const b = postgres(B_ADMIN_URL, { max: 1, prepare: false, onnotice: () => undefined });
-  try {
-    return await fn(b);
-  } finally {
-    await b.end({ timeout: 5 });
-  }
-}
-
 // ---------------------------------------------------------------------------------------------------------
 // The fake provider: one instance, several refs that all map to B (the registry keys on the ref)
 // ---------------------------------------------------------------------------------------------------------
-
-const target = (extra: Record<string, unknown> = {}) => ({
-  apiUrl: API_URL,
-  databaseUrl: B_ADMIN_URL,
-  host: '127.0.0.1',
-  port: 54322,
-  txPort: 54322,
-  dbName: 'rede_tenant_b',
-  buckets: [
-    { id: 'branding', name: 'branding', public: true },
-    { id: 'media', name: 'media', public: false },
-  ],
-  ...extra,
-});
 
 let counter = 0;
 const newRef = (tag: string): string => {
@@ -99,18 +63,33 @@ const REFS = {
   tabled: newRef('tbl'),
   /** Never registered with the provider. */
   unknown: newRef('nope'),
+  /** The production-refusal cases (P1). */
+  prod: newRef('prod'),
+  /** Two creates racing for one ref (P3). */
+  race: newRef('race'),
+  /** A shared project outside production (D-540). */
+  shared: newRef('shared'),
+  /** A registered project with no tenant bound. */
+  empty: newRef('zero'),
+  /** The verify and resume cases. */
+  ops: newRef('ops'),
 };
 
 function makeProvider(extra: Partial<FakeProjectProviderOptions> = {}) {
-  const t = target();
+  const t = fakeTarget();
   return createFakeProjectProvider({
     targets: {
       [REFS.fresh]: t,
       [REFS.manual]: t,
-      [REFS.migrated]: target({ migrations: [{ version: '20260101000000', name: 'x' }] }),
-      [REFS.bucketed]: target({ buckets: [{ id: 'avatars', name: 'avatars', public: true }] }),
+      [REFS.migrated]: fakeTarget({ migrations: [{ version: '20260101000000', name: 'x' }] }),
+      [REFS.bucketed]: fakeTarget({ buckets: [{ id: 'avatars', name: 'avatars', public: true }] }),
       [REFS.paused]: t,
       [REFS.tabled]: t,
+      [REFS.prod]: t,
+      [REFS.race]: t,
+      [REFS.shared]: t,
+      [REFS.empty]: t,
+      [REFS.ops]: t,
     },
     ...extra,
   });
@@ -184,6 +163,9 @@ async function createViaRoute(ref: string | undefined, overrides: Record<string,
   return { res, text, detail: null, slug, projectId: '' };
 }
 
+/** 20-letter refs this file made up for the supabase-shaped cases (they match no `pp-` pattern). */
+const letterRefs = new Set<string>();
+
 async function cleanupAll(): Promise<void> {
   // Tenants first (the binding cascades), then the projects this file registered, then the jobs.
   await adminSql`delete from public.tenants where slug like ${`pp-${RUN}-%`}`;
@@ -192,39 +174,17 @@ async function cleanupAll(): Promise<void> {
      where name = ${QUEUE}
        and data->>'projectId' in (select id::text from platform.projects where ref like ${`pp-%-${RUN}-%`})`;
   await adminSql`delete from platform.projects where ref like ${`pp-%-${RUN}-%`}`;
+  for (const ref of letterRefs) {
+    await adminSql`
+      delete from pgboss_platform.job
+       where name = ${QUEUE}
+         and data->>'projectId' in (select id::text from platform.projects where ref = ${ref})`;
+    await adminSql`delete from platform.projects where ref = ${ref}`;
+  }
+  letterRefs.clear();
   await adminSql`
     delete from public.access_grants where email like ${`admin-pp-${RUN}-%@rede-social-test.local`}`;
   created.length = 0;
-}
-
-function bootstrapDeps(overrides: Record<string, unknown> = {}) {
-  return {
-    provider,
-    // The fake never applies the `postgres` password it records: the DDL connection goes to the local
-    // superuser; the `api_user` URLs are used exactly as stored.
-    connect: (kind: 'ddl' | 'api', url: string) =>
-      postgres(kind === 'ddl' ? B_ADMIN_URL : url, {
-        max: 1,
-        prepare: false,
-        connect_timeout: 10,
-        idle_timeout: 2,
-        onnotice: () => undefined,
-      }),
-    secrets: {
-      ...defaultSecrets,
-      ddlPassword: () => `DDL${randomBytes(18).toString('hex')}`,
-      // The local cluster shares its roles: a generated password would lock project 0 out of `api_user`.
-      apiUserPassword: () => 'postgres',
-    },
-    config: () => ({
-      platformOrigin: 'https://app.example.test',
-      apiPublicUrl: 'https://api.example.test',
-      mailDomain: 'mail.example.test',
-      smtpPass: `SMTP${randomBytes(12).toString('hex')}`,
-    }),
-    sendInvites: vi.fn(async () => undefined),
-    ...overrides,
-  };
 }
 
 beforeAll(async () => {
@@ -255,11 +215,7 @@ afterAll(async () => {
   await adminSql.end();
   await sqlClient.end();
   // Leave `rede_tenant_b` as the other suites expect it: the tenant set applied and no fixtures.
-  execFileSync('bash', ['scripts/db-two-databases.sh', '--reset'], {
-    cwd: ROOT,
-    timeout: 120_000,
-    stdio: 'pipe',
-  });
+  restoreB();
 });
 
 // ---------------------------------------------------------------------------------------------------------
@@ -470,7 +426,7 @@ describe('the tracer: a pasted ref becomes a registered project, a durable boots
     );
 
     // 4. The bootstrap runs (the job's own function; the worker is not started here).
-    expect(await runBootstrap(projectId, bootstrapDeps())).toEqual({ status: 'ready' });
+    expect(await runBootstrap(projectId, bootstrapDeps(provider))).toEqual({ status: 'ready' });
 
     const after = databaseOverviewSchema.parse(
       await (await platform(`/tenants/${tenantId}/database`)).json(),
@@ -676,7 +632,9 @@ describe('manual access (D-541, DBT-21, P44)', () => {
 
     // The platform token cannot reveal, so a run that tried to would fail access_denied; with the access
     // stored it passes and never asks the provider for a key or a password.
-    expect(await runBootstrap(made.projectId, bootstrapDeps())).toEqual({ status: 'ready' });
+    expect(await runBootstrap(made.projectId, bootstrapDeps(provider))).toEqual({
+      status: 'ready',
+    });
     expect(provider.calls.ensureKeys[REFS.manual] ?? 0).toBe(0);
     expect(provider.calls.passwords.filter((p) => p.ref === REFS.manual)).toHaveLength(0);
   }, 180_000);
@@ -716,3 +674,365 @@ describe('only a super_admin reaches the project routes (T-09.2-68)', () => {
     expect(row?.n).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// Verify now and resume (D-542, D-543)
+// ---------------------------------------------------------------------------------------------------------
+
+describe('POST /tenants/{id}/database/verify and /bootstrap/resume', () => {
+  const actor = { userId: crypto.randomUUID() };
+  const body = (slug: string, ref: string) => ({
+    ...createBody(slug, { projectRef: ref }),
+    modules: ['feed'] as ('feed' | 'events')[],
+  });
+
+  async function newBootstrapped(ref: string, run = true) {
+    const slug = newSlug();
+    const made = await createTenant(
+      { ...body(slug, ref), adminEmail: `admin-${slug}@rede-social-test.local` } as never,
+      actor,
+      { provider },
+    );
+    if (run)
+      expect(await runBootstrap(made.projectId, bootstrapDeps(provider))).toEqual({
+        status: 'ready',
+      });
+    return made;
+  }
+
+  it('verify: a project still being prepared has nothing to check (409); a ready one gets one check and ends `ready`', async () => {
+    resetB();
+    const preparing = await newBootstrapped(REFS.ops, false);
+    const early = await platform(`/tenants/${preparing.id}/database/verify`, { method: 'POST' });
+    expect(early.status).toBe(409);
+    expect((await envelope(early)).code).toBe('CONFLICT');
+
+    expect(await runBootstrap(preparing.projectId, bootstrapDeps(provider))).toEqual({
+      status: 'ready',
+    });
+    const res = await platform(`/tenants/${preparing.id}/database/verify`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const overview = databaseOverviewSchema.parse(await res.json());
+    expect(overview.state).toBe('ready');
+    expect(overview.lastCheckedAt).toEqual(expect.any(String));
+    const [health] = await adminSql<{ status: string; detail_code: string | null }[]>`
+      select status, detail_code from platform.project_health where project_id = ${preparing.projectId}::uuid`;
+    expect(health).toEqual({ status: 'healthy', detail_code: null });
+  }, 180_000);
+
+  it('verify: an unknown tenant is a 404 and nobody but a super_admin is served', async () => {
+    expect(
+      (await platform(`/tenants/${crypto.randomUUID()}/database/verify`, { method: 'POST' }))
+        .status,
+    ).toBe(404);
+    const [demo] = await adminSql<
+      { id: string }[]
+    >`select id from public.tenants where slug = 'rede-demo'`;
+    for (const token of [tokens.tenantAdmin, tokens.member]) {
+      const res = await platform(`/tenants/${demo?.id}/database/verify`, { method: 'POST', token });
+      expect(res.status).toBe(403);
+    }
+    expect(
+      (await platform(`/tenants/${demo?.id}/database/verify`, { method: 'POST', token: null }))
+        .status,
+    ).toBe(401);
+  });
+
+  it('resume: answers 409 when no step has failed, whatever else is going on', async () => {
+    resetB();
+    const made = await newBootstrapped(REFS.ops, false);
+    const pending = await platform(`/tenants/${made.id}/database/bootstrap/resume`, {
+      method: 'POST',
+    });
+    expect(pending.status).toBe(409);
+    expect((await envelope(pending)).code).toBe('CONFLICT');
+
+    expect(await runBootstrap(made.projectId, bootstrapDeps(provider))).toEqual({
+      status: 'ready',
+    });
+    const done = await platform(`/tenants/${made.id}/database/bootstrap/resume`, {
+      method: 'POST',
+    });
+    expect(done.status).toBe(409);
+  }, 180_000);
+
+  it('resume: puts the failed step back, keeps the finished ones, queues one job, and the run completes', async () => {
+    resetB();
+    const made = await newBootstrapped(REFS.ops, false);
+    const failing = fakeProviderWithFailure('buckets');
+    const failed = await runBootstrap(made.projectId, bootstrapDeps(failing));
+    expect(failed).toMatchObject({ status: 'failed', step: 'buckets' });
+
+    const failedView = databaseOverviewSchema.parse(
+      await (await platform(`/tenants/${made.id}/database`)).json(),
+    );
+    expect(failedView.state).toBe('preparation_failed');
+    expect(failedView.lastErrorCode).not.toBeNull();
+    expect(failedView.steps.find((row) => row.step === 'buckets')).toMatchObject({
+      status: 'failed',
+      attempt: 1,
+    });
+
+    // "Tentar de novo", twice (a double click): the first resumes, the second finds nothing failed (409), and at
+    // most one job waits.
+    const first = await platform(`/tenants/${made.id}/database/bootstrap/resume`, {
+      method: 'POST',
+    });
+    const second = await platform(`/tenants/${made.id}/database/bootstrap/resume`, {
+      method: 'POST',
+    });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    const after = databaseOverviewSchema.parse(await first.json());
+    expect(after.steps.map((row) => row.status)).toEqual(
+      BOOTSTRAP_STEPS.map((step) => (BOOTSTRAP_STEPS.indexOf(step) < 4 ? 'done' : 'pending')),
+    );
+    expect(after.state).toBe('preparing');
+    const jobs = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from pgboss_platform.job_common
+       where name = ${QUEUE} and data->>'projectId' = ${made.projectId} and state in ('created', 'retry')`;
+    expect(jobs[0]?.n).toBeLessThanOrEqual(1);
+
+    expect(await runBootstrap(made.projectId, bootstrapDeps(failing))).toEqual({ status: 'ready' });
+    const rows = await listSteps(made.projectId);
+    expect(rows.map((row) => row.attempt)).toEqual(
+      BOOTSTRAP_STEPS.map((step) => (step === 'buckets' ? 2 : 1)),
+    );
+  }, 180_000);
+
+  it('resume: an unknown tenant is a 404 and nobody but a super_admin is served', async () => {
+    expect(
+      (
+        await platform(`/tenants/${crypto.randomUUID()}/database/bootstrap/resume`, {
+          method: 'POST',
+        })
+      ).status,
+    ).toBe(404);
+    const [demo] = await adminSql<
+      { id: string }[]
+    >`select id from public.tenants where slug = 'rede-demo'`;
+    for (const token of [tokens.tenantAdmin, tokens.member]) {
+      expect(
+        (
+          await platform(`/tenants/${demo?.id}/database/bootstrap/resume`, {
+            method: 'POST',
+            token,
+          })
+        ).status,
+      ).toBe(403);
+    }
+  });
+});
+
+/** The same targets, with one step failing once. */
+function fakeProviderWithFailure(step: (typeof BOOTSTRAP_STEPS)[number]): FakeProjectProvider {
+  return makeProvider({ failAt: { step, times: 1 } });
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// One project, one tenant in production (DBT-01, D-540): P1 and P3
+// ---------------------------------------------------------------------------------------------------------
+
+describe('production refuses a second tenant on a project (D-540, DBT-01, T-09.2-69)', () => {
+  const actor = { userId: crypto.randomUUID() };
+  const input = (slug: string, ref?: string) =>
+    ({
+      ...createBody(slug, ref ? { projectRef: ref } : {}),
+      modules: ['feed'],
+    }) as never;
+
+  const snapshot = async (projectId: string) => {
+    const [project] = await adminSql<Record<string, unknown>[]>`
+      select ref, state, provider, api_url, credential_version, ddl_url_sealed, service_key_sealed
+        from platform.projects where id = ${projectId}::uuid`;
+    const steps = await adminSql<Record<string, unknown>[]>`
+      select step, status, attempt from platform.project_bootstrap_steps
+       where project_id = ${projectId}::uuid order by step`;
+    const bindings = await adminSql<Record<string, unknown>[]>`
+      select tenant_id, pending_invite from platform.tenant_projects
+       where project_id = ${projectId}::uuid order by tenant_id`;
+    const jobs = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from pgboss_platform.job_common
+       where name = ${QUEUE} and data->>'projectId' = ${projectId}`;
+    return { project, steps, bindings, jobs: jobs[0]?.n };
+  };
+
+  it('P1: a project bound to zero tenants takes its first binding; in production the second is refused and the first is untouched', async () => {
+    resetB();
+    const first = await createTenant(input(newSlug(), REFS.prod), actor, {
+      provider,
+      production: true,
+    });
+    const before = await snapshot(first.projectId);
+    expect(before.bindings).toHaveLength(1);
+    expect(before.steps).toHaveLength(8);
+    expect(before.jobs).toBe(1);
+
+    const secondSlug = newSlug();
+    let caught: unknown;
+    try {
+      await createTenant(input(secondSlug, REFS.prod), actor, { provider, production: true });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(400);
+    expect((caught as ApiError).code).toBe('VALIDATION_FAILED');
+    expect((caught as ApiError).details).toEqual({ projectRef: 'in_use' });
+
+    // The first binding, its steps, its credentials and its job are exactly as they were; the loser left nothing.
+    expect(await snapshot(first.projectId)).toEqual(before);
+    const [loser] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.tenants where slug = ${secondSlug}`;
+    expect(loser?.n).toBe(0);
+  }, 120_000);
+
+  it('P1: a registered project with no tenant bound accepts its first binding', async () => {
+    resetB();
+    await adminSql`
+      insert into platform.projects (ref, provider, credential_source, state, api_url)
+      values (${REFS.empty}, 'fake', 'sealed', 'preparing', ${API_URL})`;
+    const made = await createTenant(input(newSlug(), REFS.empty), actor, {
+      provider,
+      production: true,
+    });
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.tenant_projects where project_id = ${made.projectId}::uuid`;
+    expect(row?.n).toBe(1);
+    expect((await listSteps(made.projectId)).map((r) => r.status)).toEqual(
+      BOOTSTRAP_STEPS.map(() => 'pending'),
+    );
+  }, 120_000);
+
+  it('P1: the ref shape — 19 and 21 letters are refused, 20 accepted, only for the supabase provider', async () => {
+    resetB();
+    const letters = 'abcdefghijklmnopqrstuvwxyz';
+    const ref20 = Array.from({ length: 20 }, () => letters[Math.floor(Math.random() * 26)]).join(
+      '',
+    );
+    letterRefs.add(ref20);
+    const supa = { ...fakeProviderFor(ref20), name: 'supabase' as const };
+
+    for (const bad of [
+      ref20.slice(0, 19),
+      `${ref20}a`,
+      ref20.toUpperCase(),
+      `${ref20.slice(0, 19)}1`,
+    ]) {
+      let caught: unknown;
+      try {
+        await createTenant(input(newSlug(), bad), actor, { provider: supa });
+      } catch (error) {
+        caught = error;
+      }
+      expect((caught as ApiError | undefined)?.details, bad).toEqual({ projectRef: 'invalid' });
+    }
+    // A ref is REQUIRED with the supabase provider.
+    let missing: unknown;
+    try {
+      await createTenant(input(newSlug()), actor, { provider: supa });
+    } catch (error) {
+      missing = error;
+    }
+    expect((missing as ApiError | undefined)?.details).toEqual({ projectRef: 'required' });
+
+    const made = await createTenant(input(newSlug(), ref20), actor, { provider: supa });
+    const [project] = await adminSql<{ provider: string; api_url: string }[]>`
+      select provider, api_url from platform.projects where id = ${made.projectId}::uuid`;
+    expect(project).toEqual({ provider: 'supabase', api_url: `https://${ref20}.supabase.co` });
+
+    // The fake provider takes the looser local form, the supabase provider does not.
+    let local: unknown;
+    try {
+      await createTenant(input(newSlug(), REFS.race), actor, { provider: supa });
+    } catch (error) {
+      local = error;
+    }
+    expect((local as ApiError | undefined)?.details).toEqual({ projectRef: 'invalid' });
+  }, 120_000);
+
+  it('outside production any number of tenants bind one project, and the overview reports the others', async () => {
+    resetB();
+    const first = await createTenant(input(newSlug(), REFS.shared), actor, {
+      provider,
+      production: false,
+    });
+    expect(await runBootstrap(first.projectId, bootstrapDeps(provider))).toEqual({
+      status: 'ready',
+    });
+
+    // A second and a third tenant on the same READY project: filled inline, no new bootstrap.
+    const second = await createTenant(input(newSlug(), REFS.shared), actor, {
+      provider,
+      production: false,
+    });
+    const third = await createTenant(input(newSlug(), REFS.shared), actor, {
+      provider,
+      production: false,
+    });
+    expect(second.projectId).toBe(first.projectId);
+    expect(third.projectId).toBe(first.projectId);
+    const [binding] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.tenant_projects where project_id = ${first.projectId}::uuid`;
+    expect(binding?.n).toBe(3);
+    const jobs = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from pgboss_platform.job_common
+       where name = ${QUEUE} and data->>'projectId' = ${first.projectId}`;
+    expect(jobs[0]?.n).toBe(1);
+
+    // The inline tenants exist in the project itself, with their first-admin invite and no creator.
+    await onB(async (b) => {
+      const rows = await b<{ id: string; created_by: string | null }[]>`
+        select t.id, i.created_by from public.tenants t
+          join public.tenant_invites i on i.tenant_id = t.id
+         where t.id in (${second.id}::uuid, ${third.id}::uuid)`;
+      expect(rows).toHaveLength(2);
+      expect(rows.every((row) => row.created_by === null)).toBe(true);
+    });
+
+    const overview = databaseOverviewSchema.parse(
+      await (await platform(`/tenants/${second.id}/database`)).json(),
+    );
+    expect(overview.otherTenants).toBe(2);
+    expect(overview.state).toMatch(/^(ready|unchecked)$/);
+  }, 180_000);
+
+  it('P3: two creates racing for one ref in production leave exactly one tenant bound; the loser leaves no row', async () => {
+    resetB();
+    const slugs = [newSlug(), newSlug()] as const;
+    const results = await Promise.allSettled(
+      slugs.map((slug) =>
+        createTenant(input(slug, REFS.race), actor, { provider, production: true }),
+      ),
+    );
+    const winners = results.filter((r) => r.status === 'fulfilled');
+    const losers = results.filter((r) => r.status === 'rejected');
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    expect(((losers[0] as PromiseRejectedResult).reason as ApiError).details).toEqual({
+      projectRef: 'in_use',
+    });
+
+    const [project] = await adminSql<{ id: string }[]>`
+      select id from platform.projects where ref = ${REFS.race}`;
+    const state = await snapshot(project?.id ?? '');
+    expect(state.bindings).toHaveLength(1);
+    expect(state.steps).toHaveLength(8);
+    expect(state.jobs).toBe(1);
+    const [tenants] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.tenants where slug in (${slugs[0]}, ${slugs[1]})`;
+    expect(tenants?.n).toBe(1);
+    const [modules] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.tenant_modules
+       where tenant_id in (select id from public.tenants where slug in (${slugs[0]}, ${slugs[1]}))`;
+    expect(modules?.n).toBeGreaterThan(0);
+    const [projects] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.projects where ref = ${REFS.race}`;
+    expect(projects?.n).toBe(1);
+  }, 120_000);
+});
+
+function fakeProviderFor(ref: string): FakeProjectProvider {
+  return createFakeProjectProvider({ targets: { [ref]: fakeTarget() } });
+}
