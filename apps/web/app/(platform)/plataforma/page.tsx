@@ -1,43 +1,15 @@
 import { Plus } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { Suspense } from 'react';
-import { z } from 'zod';
 import { LinkButton } from '@/app/(auth)/LinkButton';
 import { TenantTable, TenantTableSkeleton } from '@/components/platform/TenantTable';
 import { TenantToolbar } from '@/components/platform/TenantToolbar';
-import { PANEL_PAGE_SIZE, requirePlatformTenants, toTenantRow } from '@/lib/platform';
+import { parseTenantListQuery, requirePlatformTenants, toTenantRow } from '@/lib/platform';
 import { loadMoreTenantsAction } from './actions';
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-const qSchema = z.string().trim().min(1).max(60);
-const statusSchema = z.enum(['active', 'suspended']);
-const limitSchema = z.coerce.number().int().min(1).max(100);
-
-function first(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-/** Each parameter is parsed on its own; an invalid one is dropped, never a 500 (T-02-67). */
-function parseQuery(sp: SearchParams): {
-  q?: string;
-  status?: 'active' | 'suspended';
-  limit: number;
-  /** Whether the URL carried a valid `limit` (the toolbar only echoes explicit values). */
-  explicitLimit: boolean;
-} {
-  const q = qSchema.safeParse(first(sp.q));
-  const status = statusSchema.safeParse(first(sp.status));
-  const limit = limitSchema.safeParse(first(sp.limit));
-  return {
-    q: q.success ? q.data : undefined,
-    status: status.success ? status.data : undefined,
-    limit: limit.success ? limit.data : PANEL_PAGE_SIZE,
-    explicitLimit: limit.success,
-  };
-}
-
-async function TenantList({ query }: { query: ReturnType<typeof parseQuery> }) {
+async function TenantList({ query }: { query: ReturnType<typeof parseTenantListQuery> }) {
   const [t, page] = await Promise.all([
     getTranslations('platform'),
     // Re-proves the authorisation for this segment (D-23) and fetches the first page.
@@ -50,13 +22,14 @@ async function TenantList({ query }: { query: ReturnType<typeof parseQuery> }) {
     <TenantTable
       rows={rows}
       nextCursor={page.nextCursor}
-      query={{ q: query.q, status: query.status, limit: query.limit }}
+      query={{ q: query.q, status: query.status, banco: query.banco, limit: query.limit }}
       loadMoreAction={loadMoreTenantsAction}
       labels={{
         colTenant: t('list.colTenant'),
         colPrimaryHost: t('list.colPrimaryHost'),
         colModules: t('list.colModules'),
         colStatus: t('list.colStatus'),
+        colDatabase: t('list.colDatabase'),
         colCreatedAt: t('list.colCreatedAt'),
         noHost: t('list.noHost'),
         active: t('tenantStatus.active'),
@@ -67,6 +40,8 @@ async function TenantList({ query }: { query: ReturnType<typeof parseQuery> }) {
         emptyBody: t('list.emptyBody'),
         searchEmptyTitle: t('list.searchEmptyTitle'),
         searchEmptyBody: t('list.searchEmptyBody'),
+        databaseEmptyTitle: t('list.databaseEmpty.title'),
+        databaseEmptyBody: t('list.databaseEmpty.body'),
         new: t('list.new'),
       }}
     />
@@ -77,7 +52,8 @@ async function TenantList({ query }: { query: ReturnType<typeof parseQuery> }) {
  * `/plataforma` — the tenant list (ROLE-05, D-33 `tenant-list`): the title row with the screen's
  * single brand-filled element ("Novo tenant"), then the table streamed behind a Suspense boundary
  * (5 Skeleton rows meanwhile). `q`, `status` and `limit` are forwarded to the API contract — the
- * browser never filters.
+ * browser never filters. `status` and `banco` ("Banco com problema") are one single-select chip row,
+ * so the page forwards at most one of them (`banco` wins in a hand-typed URL).
  */
 export default async function PlatformTenantsPage({
   searchParams,
@@ -85,7 +61,7 @@ export default async function PlatformTenantsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const [t, sp] = await Promise.all([getTranslations('platform'), searchParams]);
-  const query = parseQuery(sp);
+  const query = parseTenantListQuery(sp);
 
   return (
     <div className="flex flex-col">
@@ -100,12 +76,13 @@ export default async function PlatformTenantsPage({
       <TenantToolbar
         q={query.q}
         status={query.status}
+        banco={query.banco}
         limit={query.explicitLimit ? query.limit : undefined}
       />
 
       <div className="mt-4">
         <Suspense
-          key={`${query.q ?? ''}|${query.status ?? ''}|${query.limit}`}
+          key={`${query.q ?? ''}|${query.status ?? ''}|${query.banco ?? ''}|${query.limit}`}
           fallback={<TenantTableSkeleton />}
         >
           <TenantList query={query} />

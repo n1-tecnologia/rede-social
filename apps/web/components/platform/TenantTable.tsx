@@ -1,19 +1,29 @@
 'use client';
 
+import type { DatabaseState } from '@rede-social/contracts/projects';
 import { Button, Card, EmptyState, Skeleton, StatusPill } from '@rede-social/ui';
 import { Building2, ChevronRight, Plus, SearchX } from 'lucide-react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { useState, useTransition } from 'react';
 import { LinkButton } from '@/app/(auth)/LinkButton';
+import { DatabasePill } from '@/components/platform/DatabasePill';
 import type { TenantRowView } from '@/lib/platform';
 
-export type TenantListQuery = { q?: string; status?: 'active' | 'suspended'; limit: number };
+export type TenantListQuery = {
+  q?: string;
+  status?: 'active' | 'suspended';
+  /** `?banco=problema` (09.2-20, UI-D-540): mutually exclusive with `status`. */
+  banco?: 'problema';
+  limit: number;
+};
 
 export interface TenantTableLabels {
   colTenant: string;
   colPrimaryHost: string;
   colModules: string;
   colStatus: string;
+  colDatabase: string;
   colCreatedAt: string;
   noHost: string;
   active: string;
@@ -24,6 +34,8 @@ export interface TenantTableLabels {
   emptyBody: string;
   searchEmptyTitle: string;
   searchEmptyBody: string;
+  databaseEmptyTitle: string;
+  databaseEmptyBody: string;
   new: string;
 }
 
@@ -43,6 +55,42 @@ const rowLink =
 
 function statusTone(status: TenantRowView['status']): 'success' | 'danger' {
   return status === 'active' ? 'success' : 'danger';
+}
+
+/** The states whose list cell carries no schema line (UI-D-540): nothing is applied yet, or a move holds it. */
+const NO_SCHEMA_LINE: readonly DatabaseState[] = ['preparing', 'preparation_failed', 'moving'];
+
+/**
+ * The Banco cell of a row (UI-D-540): the shared `DatabasePill` (UI-D-539, its words and tones come
+ * from `databasePillProps`, never from here) and, under it, the schema line
+ * "Esquema 147" or "Esquema 144 de 147". A row without the fact reads "Não verificado" (P103) and
+ * the line stays out whenever a count is unknown, so nothing is invented. The list keeps the API's
+ * order whatever the pill says (P102): this component only renders.
+ */
+function DatabaseCell({ database }: { database: TenantRowView['database'] }) {
+  const t = useTranslations('platform.list');
+  const state: DatabaseState = database?.state ?? 'unchecked';
+  const applied = database?.schema.applied ?? null;
+  const required = database?.schema.required ?? null;
+  const line =
+    NO_SCHEMA_LINE.includes(state) || applied === null
+      ? null
+      : required !== null && applied < required
+        ? t('schemaBehind', { applied, required })
+        : t('schema', { applied });
+  return (
+    <>
+      <DatabasePill state={state} />
+      {line ? (
+        <p
+          className="mt-1 text-xs font-normal tabular-nums text-text-tertiary"
+          data-testid="schema-line"
+        >
+          {line}
+        </p>
+      ) : null}
+    </>
+  );
 }
 
 /**
@@ -75,6 +123,16 @@ export function TenantTable({
 
   if (rows.length === 0) {
     const filtered = Boolean(query.q) || Boolean(query.status);
+    if (query.banco) {
+      return (
+        <EmptyState
+          variant="card"
+          icon={SearchX}
+          title={labels.databaseEmptyTitle}
+          body={labels.databaseEmptyBody}
+        />
+      );
+    }
     return filtered ? (
       <EmptyState
         variant="card"
@@ -106,31 +164,37 @@ export function TenantTable({
             <tr className="border-b border-border">
               <th
                 scope="col"
-                className="w-[30%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
+                className="w-[24%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
               >
                 {labels.colTenant}
               </th>
               <th
                 scope="col"
-                className="w-[28%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
+                className="w-[22%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
               >
                 {labels.colPrimaryHost}
               </th>
               <th
                 scope="col"
-                className="w-[14%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
+                className="w-[12%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
               >
                 {labels.colModules}
               </th>
               <th
                 scope="col"
-                className="w-[14%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
+                className="w-[12%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
               >
                 {labels.colStatus}
               </th>
               <th
                 scope="col"
-                className="w-[14%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
+                className="w-[18%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
+              >
+                {labels.colDatabase}
+              </th>
+              <th
+                scope="col"
+                className="w-[12%] px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-tertiary"
               >
                 {labels.colCreatedAt}
               </th>
@@ -176,6 +240,9 @@ export function TenantTable({
                     {row.status === 'active' ? labels.active : labels.suspended}
                   </StatusPill>
                 </td>
+                <td className="px-4 py-3 align-middle">
+                  <DatabaseCell database={row.database} />
+                </td>
                 <td className="px-4 py-3 align-middle text-xs tabular-nums text-text-secondary">
                   {row.createdAtLabel}
                 </td>
@@ -215,6 +282,9 @@ export function TenantTable({
                     <span className="text-warning">{labels.noHost}</span>
                   )}
                 </div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  <DatabasePill state={row.database?.state ?? 'unchecked'} />
+                </div>
               </div>
               <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
             </Card>
@@ -248,12 +318,13 @@ export function TenantTableSkeleton() {
             key={i}
             className="flex min-h-14 items-center gap-4 border-b border-divider px-4 last:border-0"
           >
-            <div className="flex w-[30%] flex-col gap-2">
+            <div className="flex w-[24%] flex-col gap-2">
               <Skeleton width="70%" />
               <Skeleton width="45%" className="h-3" />
             </div>
             <Skeleton width="20%" />
             <Skeleton width="10%" />
+            <Skeleton width="10%" className="rounded-full" />
             <Skeleton width="10%" className="rounded-full" />
             <Skeleton width="10%" />
           </div>

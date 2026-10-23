@@ -44,10 +44,12 @@
       "filterAll": "Todos",
       "filterActive": "Ativos",
       "filterSuspended": "Suspensos",
+      "filterDatabaseProblem": "Banco com problema",
       "colTenant": "Tenant",
       "colPrimaryHost": "Domínio primário",
       "colModules": "Módulos",
       "colStatus": "Status",
+      "colDatabase": "Banco",
       "colCreatedAt": "Criado em",
       "noHost": "Sem domínio",
       "loadMore": "Carregar mais",
@@ -56,7 +58,13 @@
       "emptyBody": "Crie o primeiro tenant para começar.",
       "searchEmptyTitle": "Nenhum tenant encontrado",
       "searchEmptyBody": "Tente outro nome ou slug.",
-      "open": "Abrir {tenant}"
+      "open": "Abrir {tenant}",
+      "schema": "Esquema {applied}",
+      "schemaBehind": "Esquema {applied} de {required}",
+      "databaseEmpty": {
+        "title": "Nenhum tenant com problema no banco",
+        "body": "Todos os bancos estão prontos ou em andamento."
+      }
     },
     "new": {
       "title": "Novo tenant",

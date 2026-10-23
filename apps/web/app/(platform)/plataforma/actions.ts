@@ -101,6 +101,7 @@ export async function setTenantStatusAction(
 export async function loadMoreTenantsAction(query: {
   q?: string;
   status?: 'active' | 'suspended';
+  banco?: 'problema';
   limit: number;
   cursor: string;
 }): Promise<{ rows: TenantRowView[]; nextCursor: string | null }> {

@@ -5,7 +5,12 @@ import {
   platformTenantDetailSchema,
   platformTenantsSchema,
 } from '@rede-social/contracts';
-import { type DatabaseOverview, databaseOverviewSchema } from '@rede-social/contracts/projects';
+import {
+  bancoFilterSchema,
+  type DatabaseOverview,
+  databaseOverviewSchema,
+  type TenantDatabaseSummary,
+} from '@rede-social/contracts/projects';
 import {
   SOCIAL_SETTINGS_DEFAULTS,
   type SocialSettings,
@@ -61,11 +66,16 @@ export function formatPanelLongDate(iso: string): string {
   }).format(date);
 }
 
-/** Serialises only the defined keys of a list query (`q`, `status`, `cursor`, `limit`). */
+/**
+ * Serialises only the defined keys of a list query (`q`, `status`, `banco`, `cursor`, `limit`).
+ * `banco` and `status` are one single-select row (UI-D-540) and the API answers 400 for both, so when
+ * both arrive `banco` wins and `status` is not sent.
+ */
 export function buildTenantsQuery(query: Partial<PlatformTenantsQuery>): string {
   const params = new URLSearchParams();
   if (query.q) params.set('q', query.q);
-  if (query.status) params.set('status', query.status);
+  if (query.banco) params.set('banco', query.banco);
+  else if (query.status) params.set('status', query.status);
   if (query.cursor) params.set('cursor', query.cursor);
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   return params.toString();
@@ -241,6 +251,11 @@ export type TenantRowView = {
   /** The `modulesCount` ICU plural, rendered on the server (`tp('modulesCount', { count })`). */
   modulesLabel: string;
   createdAtLabel: string;
+  /**
+   * The derived database state and the schema counts of the row (09.2-14, UI-D-540). Absent only for
+   * a row built without the fact: the table then renders "Não verificado" (P103), never nothing.
+   */
+  database?: TenantDatabaseSummary;
 };
 
 /** Maps a list item to its row view; `modulesLabel` is filled by the caller with the catalog. */
@@ -258,6 +273,46 @@ export function toTenantRow(
     modulesCount: count,
     modulesLabel: modulesLabel(count),
     createdAtLabel: formatPanelDate(item.createdAt),
+    database: item.database,
+  };
+}
+
+const listQSchema = z.string().trim().min(1).max(60);
+const listStatusSchema = z.enum(['active', 'suspended']);
+const listLimitSchema = z.coerce.number().int().min(1).max(100);
+
+/** What `/plataforma` reads from its URL: each parameter parsed alone, an invalid one dropped (T-02-67). */
+export type TenantListSearch = {
+  q?: string;
+  status?: 'active' | 'suspended';
+  banco?: 'problema';
+  limit: number;
+  /** Whether the URL carried a valid `limit` (the toolbar only echoes explicit values). */
+  explicitLimit: boolean;
+};
+
+function firstValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/**
+ * The list page's query from its search params (09.2-20, UI-D-540). `status` and `banco` are one
+ * single-select chip row, so a hand-typed URL carrying both keeps `banco` (the API refuses both with
+ * a 400); a bad value of either is dropped, never a 500.
+ */
+export function parseTenantListQuery(
+  sp: Record<string, string | string[] | undefined>,
+): TenantListSearch {
+  const q = listQSchema.safeParse(firstValue(sp.q));
+  const status = listStatusSchema.safeParse(firstValue(sp.status));
+  const banco = bancoFilterSchema.safeParse(firstValue(sp.banco));
+  const limit = listLimitSchema.safeParse(firstValue(sp.limit));
+  return {
+    q: q.success ? q.data : undefined,
+    status: status.success && !banco.success ? status.data : undefined,
+    banco: banco.success ? banco.data : undefined,
+    limit: limit.success ? limit.data : PANEL_PAGE_SIZE,
+    explicitLimit: limit.success,
   };
 }
 

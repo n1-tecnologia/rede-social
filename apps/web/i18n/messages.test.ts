@@ -4596,3 +4596,45 @@ describe('09.2-19 - the Credenciais catalog', () => {
     expect(t('updated', { when: 'há 2 d' })).toBe('Atualizadas há 2 d.');
   });
 });
+
+/**
+ * 09.2-20 (UI-D-540, UI-D-541) - the tenant list's Banco column, chip, schema line and empty, the
+ * header pill and the Status tab's moving note, verbatim from the Copywriting Contract. The state
+ * words themselves stay in `platform.database.states` (plan 19): the list and the header add no word
+ * of their own, only the column, the chip, the schema sentence and the header wrapper.
+ */
+describe('09.2-20 - the list, header and Status guard catalog', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator(namespace: string) {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({
+      locale: 'pt-BR',
+      messages: messages as never,
+      namespace: namespace as never,
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+  }
+
+  it.each([
+    ['platform.list.colDatabase', 'Banco'],
+    ['platform.list.filterDatabaseProblem', 'Banco com problema'],
+    ['platform.list.schema', 'Esquema {applied}'],
+    ['platform.list.schemaBehind', 'Esquema {applied} de {required}'],
+    ['platform.list.databaseEmpty.title', 'Nenhum tenant com problema no banco'],
+    ['platform.list.databaseEmpty.body', 'Todos os bancos estão prontos ou em andamento.'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('pins the placeholders of the schema line', async () => {
+    const t = await translator('platform.list');
+    expect(t('schema', { applied: 147 })).toBe('Esquema 147');
+    expect(t('schemaBehind', { applied: 144, required: 147 })).toBe('Esquema 144 de 147');
+  });
+});
