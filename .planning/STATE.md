@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 21
+current_plan: 24
 status: executing
-stopped_at: "Completed 09.2-23-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23 done; wave 12 complete); next is wave 13: 09.2-21 (member screens UI, behind the approved sketch 014) and 09.2-24 (documentation)"
-last_updated: "2026-10-23T13:05:03.223Z"
+stopped_at: Completed 09.2-21-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21 done); next is 09.2-24 (wave 13, documentation), then 25 (human gates)
+last_updated: "2026-10-23T13:17:51.601Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-23 (the move tool: tenant_moves state machine with compare-and-set and a row lease, quiesce/cutover/rollback/recopy, the single deleting path confirm-delete, central-clean, ROLE=move and pnpm platform:move-tenant, the 409 TENANT_MOVING guard, pgTAP 215; the full integration run was 2,113 of 2,116 with three seed-pinned plan 22 cases fixed; hosted cutover is proof H6). Previous: 09.2-20 (tenant list Banco column and Banco com problema chip, header Banco pill, Status tab Reativar guard while moving; isTenantMoving is still the API stub until plan 23; 320 px measurement left to plan 28). Previous: 09.2-16 (deploy-api.yml and deploy-hml.yml: authenticate, release preflight, migrations, migrate Job deployed and executed with --wait on the same image, then API and worker; scripts/check-workflows.sh and check-release-env.sh with self-tests; PostgreSQL 17 client in the local-stack action; DBT-26 stays open for plan 25 and hosted proof H5)"
-state_head: 1eb8c6122a45e97f595cca9cb9fcdeb39e69c23f
+last_activity_desc: "Completed 09.2-21 (the member held-out screens /comunidade-em-atualizacao and /comunidade-em-preparacao, bootstrapRedirectPath mapping the three 503 codes without clearing the session, the login and sign-up cards, actions that refuse a held-out host before any Auth call, lib/held-out.ts; the 320 px measurement, pale/dark brands and a real device are left to plans 28 and 25). Previous: 09.2-23 (the move tool: tenant_moves state machine with compare-and-set and a row lease, quiesce/cutover/rollback/recopy, the single deleting path confirm-delete, central-clean, ROLE=move and pnpm platform:move-tenant, the 409 TENANT_MOVING guard, pgTAP 215; the full integration run was 2,113 of 2,116 with three seed-pinned plan 22 cases fixed; hosted cutover is proof H6). Previous: 09.2-20 (tenant list Banco column and Banco com problema chip, header Banco pill, Status tab Reativar guard while moving; isTenantMoving is still the API stub until plan 23; 320 px measurement left to plan 28). Previous: 09.2-16 (deploy-api.yml and deploy-hml.yml: authenticate, release preflight, migrations, migrate Job deployed and executed with --wait on the same image, then API and worker; scripts/check-workflows.sh and check-release-env.sh with self-tests; PostgreSQL 17 client in the local-stack action; DBT-26 stays open for plan 25 and hosted proof H5)"
+state_head: 51118117638a29c1b3c9d6a733a89132f12ec7cd
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 257
+  completed_plans: 258
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 21
+Current Plan: 24
 Total Plans in Phase: 28
-Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20 and 23 done (23: the move tool, wave 12 complete); plans run out of numeric order: the next are wave 13: 21 (member screens UI, behind the approved sketch 014) and 24 (documentation)
+Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23 and 21 done (21: the member held-out screens and form cards); plans run out of numeric order: the next is 24 (wave 13, documentation), then 25 (human gates)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-23 (move state machine, cutover, rollback, recopy, confirm-delete, central-clean, TENANT_MOVING guard, ROLE=move; hosted cutover is proof H6)
+Last activity: 2026-10-23 — Completed 09.2-21 (Comunidade em atualização / em preparação screens, the form cards, held-out actions; layout measurement and real device are plans 28 and 25)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -315,6 +315,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.2 P16 | 7 min | 3 tasks | 8 files |
 | Phase 09.2 P20 | 11 min | 2 tasks | 15 files |
 | Phase 09.2 P23 | 104 min | 3 tasks | 43 files |
+| Phase 09.2 P21 | 15 min | 2 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -1044,6 +1045,7 @@ Recent decisions affecting current work:
 - [Phase 09.2-22]: verifyCopy throws MoveError(verify_failed|origin_leftover) with the report attached; requeueJobs takes started pg-boss instances from the caller (plan 23 builds them from the sealed URLs) — A caller cannot forget to check a returned ok:false; the engine stays free of credentials
 - [Phase 09.2]: A-16-1: the fan-out runs as a Cloud Run Job on the same image (ROLE=migrate), executed with --wait before the API and worker; answered by Igor 2026-10-23 — No DDL-capable public endpoint, 1 h task timeout, readable exit codes, same image and secrets; cost: not literally inside the new revision, deploy SA must run jobs (gate G2)
 - [Phase 09.2]: 09.2-23: a move advances only by compare-and-set with a 15-minute row lease and an append-only event trail; the tool bootstraps its own target inline; only delete-source.ts deletes from the source (grep-guarded); a rollback after the flip holds the tenant, counts the writes since cutover_at and refuses unless --accept-loss; the HTTP TENANT_MOVING guard sits on the parent platform router and setTenantStatus needs the move id — D-535, D-536, D-534, T-09.2-101..108
+- [Phase 09.2]: 09.2-21: the held-out host states live in one env-free table (lib/held-out.ts); TENANT_UPDATING, TENANT_PREPARING and TENANT_UNAVAILABLE go straight to public screens and never through the session-clearing /auth/suspended, so a migration is not a logout; paused and unreachable read byte-identical to a suspension; a generic host reads the slug route's 503 code — D-535, D-545, UI-D-542, A-UI-8, T-09.2-94, T-09.2-95
 
 ### Pending Todos
 
@@ -1152,6 +1154,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T13:05:02.994Z
-Stopped at: Completed 09.2-23-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23 done; wave 12 complete); next is wave 13: 09.2-21 (member screens UI, behind the approved sketch 014) and 09.2-24 (documentation)
+Last session: 2026-10-23T13:17:51.363Z
+Stopped at: Completed 09.2-21-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21 done); next is 09.2-24 (wave 13, documentation), then 25 (human gates)
 Resume file: None

@@ -336,13 +336,13 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **DBT-16**: A gateway product id (provider + external id) maps to exactly one tenant, enforced by a central unique index written before the tenant row (reserve-then-write). *(D-488)*
 - [ ] **DBT-17**: The bootstrap is an ordered list of idempotent steps (verify project, roles, tenant schema, Data API closure and Auth/Storage/Realtime configuration, bucket check, tenant row and modules, invite schedule), each persisting status and a reason code. *(D-542)*
 - [ ] **DBT-18**: "Tentar de novo" resumes at the first step that is not done and never redoes a done step. *(D-542)*
-- [ ] **DBT-19**: A tenant whose bootstrap is incomplete answers the by-host status `preparing`, accepts no login and the API refuses with a dedicated code. *(D-542, D-545)*
+- [x] **DBT-19**: A tenant whose bootstrap is incomplete answers the by-host status `preparing`, accepts no login and the API refuses with a dedicated code. *(D-542, D-545)*
 - [x] **DBT-20**: The Management API client (real and fake behind one interface) honours the 120 requests/min limit with backoff on 429 using `X-RateLimit-Reset`, waits for a project in `COMING_UP`, and maps every failure to a catalog reason code. *(D-541)*
 - [ ] **DBT-21**: The manual access fields (database password, service key, publishable key) are required only when the pre-check answers `manualAccess` and are validated against the project before anything is stored. *(D-541)*
 - [x] **DBT-22**: The migration runner applies a directory of SQL files to a database, one transaction per file with its ledger row, skips files already in the ledger, refuses a file whose recorded checksum changed, and is idempotent on re-run. *(D-545, D-547)*
 - [x] **DBT-23**: "Migrar todos" runs the central set then every tenant project with bounded concurrency, isolates a failing tenant, and supports `--dry-run` and `--tenant <slug>`. *(D-544)*
 - [x] **DBT-24**: Each tenant's applied-versus-required schema state is stored in the central project after every run and shown as "applied of required". *(D-545)*
-- [ ] **DBT-25**: A tenant whose applied state lacks any version the running image requires is answered `updating` from the cached mirror with zero extra queries, others keep running, and a self-re-arming job retries. *(D-545)*
+- [x] **DBT-25**: A tenant whose applied state lacks any version the running image requires is answered `updating` from the cached mirror with zero extra queries, others keep running, and a self-re-arming job retries. *(D-545)*
 - [ ] **DBT-26**: The production workflow runs the central set and the fan-out before deploying the API and worker (D-12 order); a central failure stops the deploy, a tenant failure does not. *(D-544)*
 - [x] **DBT-27**: A self-re-arming health job records reachable / paused / behind per project and the panel badge states of UI-D-539 derive from it. *(D-543)*
 - [ ] **DBT-28**: `docs/DEPLOY.md` "Connection budget (Pro)" is restated per project with the pool-cache arithmetic. *(D-543)*
@@ -370,7 +370,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **DBT-50**: The "Novo tenant" form's Projeto Supabase field accepts only a 20-letter project ref (a pasted dashboard or API address is normalised to it), pre-checks the project through the API before the wizard continues, shows the six documented ref errors, and asks for the manual access fields only when the pre-check says the API cannot reveal them. *(D-541, UI-D-533, UI-D-534, UI-D-535)*
 - [x] **DBT-51**: The tenant's Banco tab shows the database state, the eight preparation steps in their fixed order with a catalog reason per failed step and a "Tentar de novo" that resumes at the first step not done, the applied-of-required schema version, and the write-only Credenciais card with "Verificar agora" and "Substituir credenciais". *(D-542, D-543, D-539, UI-D-536, UI-D-537, UI-D-538)*
 - [x] **DBT-52**: The tenant list gains a Banco column with the database pill and the schema line and a "Banco com problema" filter that keeps the list order, the tenant header carries the pill, and the Status tab disables "Reativar tenant" while a move is open. *(D-543, D-535, UI-D-539, UI-D-540, UI-D-541)*
-- [ ] **DBT-53**: A member of a tenant whose project is behind on migrations or still being prepared meets a branded static screen ("Comunidade em atualização", "Comunidade em preparação") that reveals no reason, name or project fact, and the login and sign-up cards show the matching notice. *(D-545, D-542, UI-D-542)*
+- [x] **DBT-53**: A member of a tenant whose project is behind on migrations or still being prepared meets a branded static screen ("Comunidade em atualização", "Comunidade em preparação") that reveals no reason, name or project fact, and the login and sign-up cards show the matching notice. *(D-545, D-542, UI-D-542)*
 
 ### Media
 
@@ -720,13 +720,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-16 | Phase 09.2 (plan 10) | Complete |
 | DBT-17 | Phase 09.2 (plans 13, 25) | Pending |
 | DBT-18 | Phase 09.2 (plans 13, 25) | Pending |
-| DBT-19 | Phase 09.2 (plans 08, 13, 21) | Pending |
+| DBT-19 | Phase 09.2 (plans 08, 13, 21) | Complete |
 | DBT-20 | Phase 09.2 (plans 12, 25) | Complete |
 | DBT-21 | Phase 09.2 (plans 14, 18, 25) | Pending |
 | DBT-22 | Phase 09.2 (plan 02) | Complete |
 | DBT-23 | Phase 09.2 (plan 15) | Complete |
 | DBT-24 | Phase 09.2 (plans 15, 19) | Complete |
-| DBT-25 | Phase 09.2 (plans 08, 15, 21) | Pending |
+| DBT-25 | Phase 09.2 (plans 08, 15, 21) | Complete |
 | DBT-26 | Phase 09.2 (plans 16, 25) | Pending |
 | DBT-27 | Phase 09.2 (plans 14, 19) | Complete |
 | DBT-28 | Phase 09.2 (plan 24) | Pending |
@@ -754,7 +754,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-50 | Phase 09.2 (plans 14, 18) | Complete |
 | DBT-51 | Phase 09.2 (plans 14, 19) | Complete |
 | DBT-52 | Phase 09.2 (plans 14, 20) | Complete |
-| DBT-53 | Phase 09.2 (plan 21) | Pending |
+| DBT-53 | Phase 09.2 (plan 21) | Complete |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |
