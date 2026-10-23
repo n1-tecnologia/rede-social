@@ -20,37 +20,39 @@ const group = (
   }));
 
 export const platform: readonly AdminLaneEntry[] = [
-  ...group('packages/core/server/platform/branding.ts', [
-    ['tenantExists', 'T', 7],
-    ['invalidateAllTenantHosts', 'P', 7, 'reads tenant_domains of every tenant, all central'],
+  ...group(
+    'packages/core/server/platform/branding.ts',
     [
-      'completeBrandingUpload',
-      'T',
-      7,
-      'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+      [
+        'completeBrandingUpload',
+        'T',
+        7,
+        'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+      ],
+      ['writeIconsIfCurrent', 'T', 7],
+      ['deriveTenantIcons', 'T', 7],
+      ['requeueIconDerivation', 'T', 7],
+      [
+        'setBrandingColors',
+        'T',
+        7,
+        'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+      ],
+      [
+        'setBrandingLook',
+        'T',
+        7,
+        'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+      ],
+      [
+        'removeIconOverride',
+        'T',
+        7,
+        'writes the tenant row on the tenant project and pushes the central mirror afterwards',
+      ],
     ],
-    ['writeIconsIfCurrent', 'T', 7],
-    ['deriveTenantIcons', 'T', 7],
-    ['requeueIconDerivation', 'T', 7],
-    [
-      'setBrandingColors',
-      'T',
-      7,
-      'writes the tenant row on the tenant project and pushes the central mirror afterwards',
-    ],
-    [
-      'setBrandingLook',
-      'T',
-      7,
-      'writes the tenant row on the tenant project and pushes the central mirror afterwards',
-    ],
-    [
-      'removeIconOverride',
-      'T',
-      7,
-      'writes the tenant row on the tenant project and pushes the central mirror afterwards',
-    ],
-  ]),
+    'migrated',
+  ),
   ...group(
     'packages/core/server/platform/invite-send.ts',
     [

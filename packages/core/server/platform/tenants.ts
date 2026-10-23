@@ -246,9 +246,7 @@ export async function createTenant(
           enabled: wanted.has(key),
         })),
       );
-      await tx
-        .insert(tenantProjects)
-        .values({ tenantId: tenant.id, projectId: defaultProject.id });
+      await tx.insert(tenantProjects).values({ tenantId: tenant.id, projectId: defaultProject.id });
       return tenant.id;
     });
   } catch (error) {

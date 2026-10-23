@@ -19,6 +19,7 @@ import {
 } from '@rede-social/contracts';
 import { eq, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenants } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
 import {
@@ -39,16 +40,24 @@ import {
 import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { enqueueInTx } from '../jobs/boss';
-import { supabaseAdmin } from '../supabase-admin';
+import { supabaseAdminFor } from '../supabase-admin';
+import { pushToCentral } from '../tenancy/mirror';
+import { resolveProject } from '../tenancy/project-registry';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
 import { logFor, type PlatformActor } from './invites';
 
 /**
  * Tenant branding through the platform lane (D-27/D-28/D-25/D-41) — the admin-lane service behind
  * `/v1/platform/tenants/{id}/branding/*` AND the `kernel.branding-derive-icons` worker job. This is
- * the ONLY file of the branding capability that imports `supabaseAdmin` and `withAdminTx` (Biome
+ * the ONLY file of the branding capability that imports `supabaseAdminFor` and `withAdminTx` (Biome
  * enforces it): every Storage call and every `tenants.branding` write lives here; `../branding/*`
  * stays pure.
+ *
+ * WHERE THE BRAND LIVES (09.2-07, D-537, D-539): `tenants.branding` is TENANT-owned, so every write goes to
+ * the tenant's own project (`withAdminTx({ tenantId })`) and is copied to the central mirror afterwards
+ * (`pushToCentral`), so the by-host answer keeps the brand while the tenant's project is down. The brand's
+ * files follow the tenant: the keys are `<tenantId>/branding/…` and the bucket is the one of the tenant's
+ * project (`brandingBucketFor`), never project 0's by default.
  *
  * Invariants (pinned by `platform-branding.test.ts`):
  *  - every object key is built server-side from the validated path tenant id and asserted with
@@ -68,9 +77,25 @@ export const BRANDING_UPLOAD_TTL_S = 7200;
 /** Versioned derived keys are immutable — one year is the correct cache lifetime. */
 const ICON_CACHE_CONTROL = '31536000';
 
-const bucket = () => supabaseAdmin.storage.from(BRANDING_BUCKET);
-const publicUrlFor = (key: string): string => bucket().getPublicUrl(key).data.publicUrl;
-const storageOrigin = (): string => env.SUPABASE_URL;
+/**
+ * The branding bucket of the Supabase project that holds `tenantId` (T-09.2-34): the registry decides, from
+ * the tenant id the key prefix names. An unbound tenant throws; there is no fallback to project 0.
+ */
+export async function brandingBucketFor(tenantId: string) {
+  const project = await resolveProject(tenantId);
+  return supabaseAdminFor(project).storage.from(BRANDING_BUCKET);
+}
+
+/** The public URL of `key` in the tenant's own project: what the stored `logoUrl` / `iconUrls` must contain. */
+async function publicUrlFor(tenantId: string, key: string): Promise<string> {
+  return (await brandingBucketFor(tenantId)).getPublicUrl(key).data.publicUrl;
+}
+
+/** The Storage origin of the tenant's project, to recognise its own public URLs. */
+async function storageOriginFor(tenantId: string): Promise<string> {
+  const project = await resolveProject(tenantId);
+  return project.isCentral ? env.SUPABASE_URL : project.apiUrl;
+}
 
 /** Test seam (PATTERNS Analog B): runs between the derivation and the optimistic write. */
 export const brandingInternals = {
@@ -88,13 +113,14 @@ async function loadTenant(tx: Tx, tenantId: string): Promise<TenantRow | undefin
   return rows[0];
 }
 
+/** Does the tenant exist? A central fact (the mirror), answered before any tenant project is chosen. */
 async function tenantExists(tenantId: string): Promise<boolean> {
-  return withAdminTx(async (tx) => (await loadTenant(tx, tenantId)) !== undefined);
+  return withPlatformTx(async (tx) => (await loadTenant(tx, tenantId)) !== undefined);
 }
 
 /** Every host of the tenant leaves the in-process host cache, so the next resolution sees the new row. */
 export async function invalidateAllTenantHosts(tenantId: string): Promise<void> {
-  const hosts = await withAdminTx(async (tx) =>
+  const hosts = await withPlatformTx(async (tx) =>
     tx
       .select({ host: tenantDomains.host })
       .from(tenantDomains)
@@ -127,7 +153,7 @@ async function removeQuietly(
 ): Promise<void> {
   try {
     assertTenantKey(key, tenantId);
-    const { error } = await bucket().remove([key]);
+    const { error } = await (await brandingBucketFor(tenantId)).remove([key]);
     if (error) throw error;
   } catch (error) {
     logFor(actor, 'platform.branding').warn(
@@ -164,7 +190,7 @@ export async function startBrandingUpload(
   const key = brandingObjectKey(tenantId, parsed.uuid, ext);
   assertTenantKey(key, tenantId);
 
-  const { data, error } = await bucket().createSignedUploadUrl(key);
+  const { data, error } = await (await brandingBucketFor(tenantId)).createSignedUploadUrl(key);
   if (error || !data) {
     log.error(
       {
@@ -230,7 +256,8 @@ export async function completeBrandingUpload(
     throw new ApiError(400, 'VALIDATION_FAILED', { upload: reason });
   };
 
-  const info = await bucket().info(key);
+  const objects = await brandingBucketFor(tenantId);
+  const info = await objects.info(key);
   if (info.error || !info.data) throw new ApiError(404, 'NOT_FOUND', { upload: 'object_missing' });
   if (typeof info.data.size === 'number' && info.data.size > BRANDING_MAX_BYTES) {
     await reject('too_large');
@@ -239,7 +266,7 @@ export async function completeBrandingUpload(
     await reject('format_mismatch');
   }
 
-  const download = await bucket().download(key);
+  const download = await objects.download(key);
   if (download.error || !download.data) {
     throw new ApiError(404, 'NOT_FOUND', { upload: 'object_missing' });
   }
@@ -252,8 +279,8 @@ export async function completeBrandingUpload(
     throw error;
   }
 
-  const url = publicUrlFor(key);
-  const iconVersion = await withAdminTx(async (tx) => {
+  const url = await publicUrlFor(tenantId, key);
+  const iconVersion = await withAdminTx({ tenantId }, async (tx) => {
     const row = await loadTenant(tx, tenantId);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     const current = resolveBranding(row.branding);
@@ -270,6 +297,7 @@ export async function completeBrandingUpload(
     return next.iconVersion;
   });
 
+  await pushToCentral(tenantId, ['branding']);
   await invalidateAllTenantHosts(tenantId);
   log.info(
     {
@@ -305,8 +333,8 @@ function mimeFromKey(key: string): string {
 function resolveIconSource(
   branding: ResolvedBranding,
   tenantId: string,
+  origin: string,
 ): { key: string; source: IconSource } | null {
-  const origin = storageOrigin();
   const override = objectKeyFromPublicUrl(branding.iconUrl, tenantId, origin);
   if (override) return { key: override, source: 'override' };
   const logo = objectKeyFromPublicUrl(branding.logoUrl, tenantId, origin);
@@ -327,6 +355,7 @@ async function writeIconsIfCurrent(
 ): Promise<boolean> {
   const patch = JSON.stringify({ faviconUrl: icons.faviconUrl, iconUrls: icons.iconUrls });
   const rows = await withAdminTx(
+    { tenantId },
     async (tx) =>
       (await tx.execute(sql`
         update public.tenants
@@ -358,9 +387,10 @@ export async function uploadIconSet(
     [keys.apple180, set.apple180, 'image/png'],
   ];
   for (const [key] of files) assertTenantKey(key, tenantId);
+  const objects = await brandingBucketFor(tenantId);
   await Promise.all(
     files.map(async ([key, buffer, contentType]) => {
-      const { error } = await bucket().upload(key, buffer, {
+      const { error } = await objects.upload(key, buffer, {
         contentType,
         upsert: true,
         cacheControl: ICON_CACHE_CONTROL,
@@ -369,12 +399,12 @@ export async function uploadIconSet(
     }),
   );
   return {
-    faviconUrl: publicUrlFor(keys.favicon),
+    faviconUrl: await publicUrlFor(tenantId, keys.favicon),
     iconUrls: {
-      i192: publicUrlFor(keys.i192),
-      i512: publicUrlFor(keys.i512),
-      maskable512: publicUrlFor(keys.maskable512),
-      apple180: publicUrlFor(keys.apple180),
+      i192: await publicUrlFor(tenantId, keys.i192),
+      i512: await publicUrlFor(tenantId, keys.i512),
+      maskable512: await publicUrlFor(tenantId, keys.maskable512),
+      apple180: await publicUrlFor(tenantId, keys.apple180),
     },
   };
 }
@@ -390,19 +420,21 @@ export async function deriveTenantIcons(
   opts: { actor: PlatformActor },
 ): Promise<DeriveResult> {
   const log = logFor(opts.actor, 'platform.branding');
-  const row = await withAdminTx((tx) => loadTenant(tx, tenantId));
+  // A tenant deleted since the job was queued has no binding either: answered centrally, no tenant lane.
+  if (!(await tenantExists(tenantId))) return { outcome: 'tenant_gone', iconVersion: -1 };
+  const row = await withAdminTx({ tenantId }, (tx) => loadTenant(tx, tenantId));
   if (!row) return { outcome: 'tenant_gone', iconVersion: -1 };
 
   const branding = resolveBranding(row.branding);
   const version = branding.iconVersion;
-  const source = resolveIconSource(branding, tenantId);
+  const source = resolveIconSource(branding, tenantId, await storageOriginFor(tenantId));
 
   let icons: { faviconUrl: string | null; iconUrls: BrandIconUrls | null };
   if (!source) {
     icons = { faviconUrl: null, iconUrls: null };
   } else {
     assertTenantKey(source.key, tenantId);
-    const download = await bucket().download(source.key);
+    const download = await (await brandingBucketFor(tenantId)).download(source.key);
     if (download.error || !download.data) {
       throw new Error(`branding source missing: ${source.key} (${download.error?.message})`);
     }
@@ -417,7 +449,10 @@ export async function deriveTenantIcons(
 
   const written = await writeIconsIfCurrent(tenantId, version, icons);
   const outcome: DeriveOutcome = !written ? 'superseded' : source ? 'derived' : 'no_source';
-  if (written) await invalidateAllTenantHosts(tenantId);
+  if (written) {
+    await pushToCentral(tenantId, ['branding']);
+    await invalidateAllTenantHosts(tenantId);
+  }
 
   log.info(
     {
@@ -435,7 +470,7 @@ export async function deriveTenantIcons(
 
 /** Crash re-arm from the job wrapper: one deferred job per tenant (`iconVersion: -1` = re-read the row). */
 export async function requeueIconDerivation(tenantId: string, attempt: number): Promise<void> {
-  await withAdminTx((tx) =>
+  await withAdminTx({ tenantId }, (tx) =>
     enqueueDerivation(tx, tenantId, { iconVersion: -1, attempt }, { startAfter: 60 * attempt }),
   );
 }
@@ -506,12 +541,14 @@ export async function setBrandingColors(
     });
   }
 
-  const applied = await withAdminTx(async (tx) => {
+  if (!(await tenantExists(tenantId))) throw new ApiError(404, 'NOT_FOUND');
+  const applied = await withAdminTx({ tenantId }, async (tx) => {
     const row = await loadTenant(tx, tenantId);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     return applyBrandColors(tx, row, body, actor);
   });
 
+  await pushToCentral(tenantId, ['branding']);
   await invalidateAllTenantHosts(tenantId);
   logFor(actor, 'platform.branding').info(
     {
@@ -561,7 +598,8 @@ export async function setBrandingLook(
 ): Promise<SetBrandingLookResult> {
   const look = normalizeBrandLook(body);
 
-  const result = await withAdminTx(async (tx) => {
+  if (!(await tenantExists(tenantId))) throw new ApiError(404, 'NOT_FOUND');
+  const result = await withAdminTx({ tenantId }, async (tx) => {
     const [row] = await tx
       .select({ id: tenants.id, branding: tenants.branding })
       .from(tenants)
@@ -590,6 +628,7 @@ export async function setBrandingLook(
     return { look, primaryDark: colors.primaryDark };
   });
 
+  await pushToCentral(tenantId, ['branding']);
   await invalidateAllTenantHosts(tenantId);
   logFor(actor, 'platform.branding').info(
     {
@@ -618,14 +657,19 @@ export async function removeIconOverride(
   actor: PlatformActor,
 ): Promise<{ removed: boolean; iconVersion: number }> {
   const log = logFor(actor, 'platform.branding');
-  const result = await withAdminTx(async (tx) => {
+  if (!(await tenantExists(tenantId))) throw new ApiError(404, 'NOT_FOUND');
+  const result = await withAdminTx({ tenantId }, async (tx) => {
     const row = await loadTenant(tx, tenantId);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     const current = resolveBranding(row.branding);
     if (current.iconUrl === null) {
       return { removed: false, iconVersion: current.iconVersion, previousKey: null };
     }
-    const previousKey = objectKeyFromPublicUrl(current.iconUrl, tenantId, storageOrigin());
+    const previousKey = objectKeyFromPublicUrl(
+      current.iconUrl,
+      tenantId,
+      await storageOriginFor(tenantId),
+    );
     const next: ResolvedBranding = {
       ...current,
       iconUrl: null,
@@ -641,6 +685,7 @@ export async function removeIconOverride(
 
   if (!result.removed) return { removed: false, iconVersion: result.iconVersion };
 
+  await pushToCentral(tenantId, ['branding']);
   await invalidateAllTenantHosts(tenantId);
   if (result.previousKey) {
     await removeQuietly(

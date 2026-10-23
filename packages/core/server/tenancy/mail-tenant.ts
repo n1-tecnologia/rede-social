@@ -1,10 +1,12 @@
 import { normalizeHost, type ResolvedBranding, resolveBranding } from '@rede-social/contracts';
 import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenantInvites, tenants } from '../../db/schema';
 import { isLinkActionType } from '../mail/templates/neutral';
 import { isPlatformAdmin } from '../platform/platform-admins';
 import { membershipInTenant, membershipsOfUser } from './membership';
+import { listReadyProjects } from './project-registry';
 
 /**
  * Which brand an auth e-mail carries — by the community the flow STARTED ON (D-315), recovery
@@ -134,7 +136,7 @@ export function redirectHostOf(redirectTo: string): string | null {
  */
 export async function verifiedTenantIdForHost(host: string | null): Promise<string | null> {
   if (!host) return null;
-  const rows = await withAdminTx((tx) =>
+  const rows = await withPlatformTx((tx) =>
     tx
       .select({ tenantId: tenantDomains.tenantId })
       .from(tenantDomains)
@@ -164,7 +166,7 @@ export async function hasOpenInviteIn(
   email: string | null,
   userId: string,
 ): Promise<boolean> {
-  const rows = await withAdminTx((tx) =>
+  const rows = await withAdminTx({ tenantId }, (tx) =>
     tx
       .select({ id: tenantInvites.id })
       .from(tenantInvites)
@@ -180,21 +182,35 @@ export async function hasOpenInviteIn(
   return rows.length > 0;
 }
 
-/** Is there an open invite in ANY tenant for this e-mail or user (row 7's `belongsSomewhere`)? */
+/**
+ * Is there an open invite in ANY tenant for this e-mail or user (row 7's `belongsSomewhere`)? No tenant is in
+ * hand, so every ready project is asked in turn, one `{ projectId }` lane at a time, stopping at the first
+ * hit. A project that cannot be reached is not "no invite": when nothing is found elsewhere the failure is
+ * thrown, so the hook fails and the caller retries instead of mailing on a guess.
+ */
 async function hasOpenInviteAnywhere(email: string | null, userId: string): Promise<boolean> {
-  const rows = await withAdminTx((tx) =>
-    tx
-      .select({ id: tenantInvites.id })
-      .from(tenantInvites)
-      .where(and(inArray(tenantInvites.status, OPEN_INVITE), inviteeMatch(email, userId)))
-      .limit(1),
-  );
-  return rows.length > 0;
+  let failure: unknown;
+  for (const project of await listReadyProjects()) {
+    try {
+      const rows = await withAdminTx({ projectId: project.id }, (tx) =>
+        tx
+          .select({ id: tenantInvites.id })
+          .from(tenantInvites)
+          .where(and(inArray(tenantInvites.status, OPEN_INVITE), inviteeMatch(email, userId)))
+          .limit(1),
+      );
+      if (rows.length > 0) return true;
+    } catch (error) {
+      failure = error;
+    }
+  }
+  if (failure !== undefined) throw failure;
+  return false;
 }
 
-/** ONE admin-lane select: the tenant row plus its verified primary host (for the logo URL). */
+/** ONE platform-lane select: the tenant mirror plus its verified primary host (for the logo URL). */
 async function tenantBrandRow(tenantId: string) {
-  return withAdminTx(async (tx) => {
+  return withPlatformTx(async (tx) => {
     const rows = await tx
       .select({
         slug: tenants.slug,

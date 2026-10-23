@@ -38,14 +38,13 @@ export const tenancy: readonly AdminLaneEntry[] = [
     ['joinTenant', 'T', 5, 'removed by plan 26', 'migrated'],
   ]),
   ...group('packages/core/server/tenancy/mail-tenant.ts', [
-    ['verifiedTenantIdForHost', 'P', 7, 'host to tenant id, answered by the central mirror'],
-    ['hasOpenInviteIn', 'T', 7],
-    ['hasOpenInviteAnywhere', 'S', 7, 'asks every project through the central index'],
+    ['hasOpenInviteIn', 'T', 7, undefined, 'migrated'],
     [
-      'tenantBrandRow',
-      'P',
+      'hasOpenInviteAnywhere',
+      'L',
       7,
-      'the tenant row and its verified primary host, both mirrored centrally',
+      'no tenant in hand: one { projectId } lane per ready project, stopping at the first hit',
+      'migrated',
     ],
   ]),
   ...group('packages/core/server/tenancy/member-admin.ts', [
@@ -53,15 +52,32 @@ export const tenancy: readonly AdminLaneEntry[] = [
     ['setMembershipRole', 'T', 5, undefined, 'migrated'],
   ]),
   ...group('packages/core/server/tenancy/mirror.ts', [
-    ['pushToTenant', 'T', 7, 'the copy of the central-owned columns, written after the central commit', 'migrated'],
+    [
+      'pushToTenant',
+      'T',
+      7,
+      'the copy of the central-owned columns, written after the central commit',
+      'migrated',
+    ],
     ['pushToCentral', 'T', 7, 'reads the tenant-owned brand from the tenant project', 'migrated'],
     ['reconcileTenantMirror', 'T', 7, 'reads the tenant project copy', 'migrated'],
-    ['reconcileTenantMirror', 'T', 7, 'seeds a missing tenant row from the central values', 'migrated'],
+    [
+      'reconcileTenantMirror',
+      'T',
+      7,
+      'seeds a missing tenant row from the central values',
+      'migrated',
+    ],
     ['reconcileTenantMirror', 'T', 7, 'writes the central-owned columns that differ', 'migrated'],
   ]),
   ...group('packages/core/server/tenancy/public-tenant.ts', [
-    ['getPublicTenant', 'S', 7],
-    ['getTenantIdBySlug', 'P', 7, 'slug to tenant id, answered by the central mirror'],
+    [
+      'getPublicTenant',
+      'S',
+      7,
+      'identity from the platform lane first, rules text and checkout link from the tenant project',
+      'migrated',
+    ],
   ]),
   ...group('packages/core/server/tenancy/rules.ts', [
     ['getTenantRules', 'T', 5, undefined, 'migrated'],
