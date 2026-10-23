@@ -125,6 +125,15 @@ async function captureLogs(run: () => Promise<void>): Promise<string[]> {
   return lines;
 }
 
+/** The jobs the deliveries enqueued are keyed by their event ids: collect them before the events go. */
+async function forgetPaymentJobsInB(): Promise<void> {
+  await adminSqlB`
+    delete from pgboss.job_common
+     where name = 'kernel.payment-event'
+       and singleton_key in (select id::text from public.payment_events
+                              where tenant_id = ${b.tenantId}::uuid)`;
+}
+
 // ── a gateway integration that exists ONLY in database B ────────────────────────────────────────────
 
 async function seedIntegrationInB(): Promise<{
@@ -136,6 +145,7 @@ async function seedIntegrationInB(): Promise<{
   const id = crypto.randomUUID();
   const token = `tok-${crypto.randomUUID()}`;
   // One integration per tenant and provider: the previous case's is replaced (its events cascade).
+  await forgetPaymentJobsInB();
   await adminSqlB`delete from public.payment_integrations where tenant_id = ${b.tenantId}::uuid`;
   await adminSql`delete from platform.payment_integration_routes where tenant_id = ${b.tenantId}::uuid`;
   await adminSqlB`
@@ -187,6 +197,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  await forgetPaymentJobsInB();
   for (const id of seededIntegrationIds) {
     await adminSqlB`delete from public.payment_events where integration_id = ${id}::uuid`;
     await adminSqlB`delete from public.payment_integrations where id = ${id}::uuid`;
@@ -336,6 +347,7 @@ describe('tracer: a signed gateway delivery for a tenant in database B (D-486, D
   });
 
   it('compensation: a failed tenant write removes the route the save reserved', async () => {
+    await forgetPaymentJobsInB();
     await adminSqlB`delete from public.payment_integrations where tenant_id = ${b.tenantId}::uuid`;
     await adminSql`delete from platform.payment_integration_routes where tenant_id = ${b.tenantId}::uuid`;
     await adminSqlB`
