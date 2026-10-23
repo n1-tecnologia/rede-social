@@ -562,6 +562,19 @@ describe('steps are claimed once (P35)', () => {
 });
 
 describe('adjacency and order (P32, P34)', () => {
+  it('the fixed order of the eight steps', () => {
+    expect([...BOOTSTRAP_STEPS]).toEqual([
+      'verify',
+      'roles',
+      'schema',
+      'auth',
+      'buckets',
+      'realtime',
+      'tenant',
+      'invite',
+    ]);
+  });
+
   it('the Data API closure comes after the last ledger row, and steps run once each in order', async () => {
     resetB();
     const f = await fixture();
