@@ -215,6 +215,23 @@ describe('09.1 tracer', () => {
     expect(await eventsOf(integration.id)).toHaveLength(0);
   });
 
+  it('09.2-10: the tenant comes from the central route index — without its row the same signed delivery answers 404, with it 200', async () => {
+    const integration = await seed(labTenantId);
+    const body = JSON.stringify(approved());
+    await adminSql`
+      delete from platform.payment_integration_routes where integration_id = ${integration.id}::uuid`;
+    expect((await signedWebhook(integration, body)).status).toBe(404);
+    expect(await eventsOf(integration.id)).toHaveLength(0);
+
+    await adminSql`
+      insert into platform.payment_integration_routes (integration_id, tenant_id, provider)
+      values (${integration.id}::uuid, ${labTenantId}::uuid, ${integration.provider})`;
+    expect((await signedWebhook(integration, body)).status).toBe(200);
+    const [event] = await eventsOf(integration.id);
+    // The event's tenant is the integration's, read through the route; nothing in the payload names one.
+    expect(event?.tenant_id).toBe(labTenantId);
+  });
+
   it('answers GET and HEAD with 200 { status: ok } and reads no row', async () => {
     const integration = await seed(labTenantId);
     const url = `${WEBHOOK}/${integration.provider}/${integration.id}`;

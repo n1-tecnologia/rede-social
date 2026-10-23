@@ -27,6 +27,11 @@ import { createOpenApiApp } from '../../http/openapi';
  *    token, the signature or the body: lines carry ids only (the request logger adds the request id), and the request logger
  *    records `c.req.path`, which has no query (pinned by `payments-webhook.test.ts`).
  *
+ * WHICH TENANT (09.2-10, D-486): the URL carries no host, so `receivePaymentWebhook` resolves the integration id
+ * to its tenant through the central route index (`platform.payment_integration_routes`, one indexed read, no
+ * tenant database opened for an unknown id) and then verifies and records INSIDE that tenant's own project.
+ * The URL the operator pasted into the gateway never changes. The signature stays the only authentication.
+ *
  * The `/mux` route is mounted under the same `/v1/webhooks` base without clashing: that one has a single
  * segment, this one two.
  */

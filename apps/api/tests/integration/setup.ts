@@ -725,6 +725,12 @@ export async function seedPaymentIntegration(
   await adminSql`
     insert into public.payment_integrations (id, tenant_id, provider, secret_sealed)
     values (${id}::uuid, ${tenantId}::uuid, ${provider}, ${sealSecret(token, id)})`;
+  // 09.2-10: a delivery finds its tenant through the central route index, which the application writes
+  // BEFORE the tenant row; a seed that bypasses the application writes it too.
+  await adminSql`
+    insert into platform.payment_integration_routes (integration_id, tenant_id, provider)
+    values (${id}::uuid, ${tenantId}::uuid, ${provider})
+    on conflict do nothing`;
   return { id, tenantId, provider, token };
 }
 
@@ -759,12 +765,19 @@ export async function seedPaymentMapping(
             ${kind === 'store_product' ? (options.targetId ?? null) : null}::uuid)
     returning id::text as id`;
   if (!row) throw new Error('could not seed the payment mapping');
+  // 09.2-10: the central product route the application writes before the tenant row (D-488).
+  await adminSql`
+    insert into platform.payment_product_routes (provider, external_product_id, tenant_id)
+    select provider, external_product_id, tenant_id from public.payment_products
+     where id = ${row.id}::uuid
+    on conflict do nothing`;
   return { id: row.id, checkoutUrl };
 }
 
 /** Removes every mapping of `tenantId` (events and grants that pointed at one forget it). */
 export async function removePaymentMappings(tenantId: string): Promise<void> {
   await adminSql`delete from public.payment_products where tenant_id = ${tenantId}::uuid`;
+  await adminSql`delete from platform.payment_product_routes where tenant_id = ${tenantId}::uuid`;
 }
 
 /**
@@ -779,6 +792,7 @@ export async function removePaymentIntegrations(tenantId: string): Promise<void>
                               where tenant_id = ${tenantId}::uuid)`;
   await adminSql`delete from public.payment_events where tenant_id = ${tenantId}::uuid`;
   await adminSql`delete from public.payment_integrations where tenant_id = ${tenantId}::uuid`;
+  await adminSql`delete from platform.payment_integration_routes where tenant_id = ${tenantId}::uuid`;
 }
 
 /**

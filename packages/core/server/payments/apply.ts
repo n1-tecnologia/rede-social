@@ -10,6 +10,7 @@ import type { Tx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { emit, flush } from '../events/bus';
 import { moduleLogger, type RedactedDbError, redactDbError } from '../logging';
+import { centralProjectId } from '../tenancy/project-registry';
 import { type AccessEffect, decideAccessWrite, decideStoreWrite } from './policy';
 
 /**
@@ -422,15 +423,25 @@ function describeFailure(error: unknown): string | RedactedDbError {
 /**
  * Applies one recorded event. Returns null when no such event exists (logged, never thrown); throws after
  * marking the event `failed` when the apply itself failed, so pg-boss retries.
+ *
+ * `projectId` is the project whose queue delivered the job (09.2-10, D-538): the webhook recorded the event
+ * AND enqueued this job inside the tenant's own project, so the event row is in that same database and the
+ * apply transaction opens there with `{ projectId }`. The tenant is still taken from the stored row (never
+ * from the job payload), so the lane target names a database and nothing about whose data is applied.
+ * Called without it (a test, an operator command) the central project is meant.
  */
-export async function applyPaymentEvent(eventId: string): Promise<ApplyResult | null> {
+export async function applyPaymentEvent(
+  eventId: string,
+  projectId?: string,
+): Promise<ApplyResult | null> {
   const seen: { tenantId: string | null } = { tenantId: null };
   let result: Awaited<ReturnType<typeof applyInTx>>;
   try {
-    // 09.2-05: class N, plan 10. The job payload is the event id ALONE, so the tenant is only known after this
-    // very transaction reads the event row; the site cannot name a tenant (and must never default to project
-    // 0 for a tenant on another project). Plan 10 resolves the event id through the central index first.
-    result = await withAdminTx((tx) => applyInTx(tx, eventId, seen));
+    // 09.2-10: the job payload is the event id ALONE, so the tenant is only known after this very transaction
+    // reads the event row. The database is not: the event was recorded in the project that delivered the job,
+    // and `kernel.payment-event` is a tenant-scope queue, so the worker hands that project over.
+    const target = { projectId: projectId ?? (await centralProjectId()) };
+    result = await withAdminTx(target, (tx) => applyInTx(tx, eventId, seen));
   } catch (error) {
     if (seen.tenantId) {
       try {

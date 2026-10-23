@@ -20,6 +20,7 @@ import { moduleFlags } from '../modules/flags-cache';
 import { readGate, setupLock } from './gate';
 import { deterministicIntegrationId } from './ids';
 import { enabledProviders, gatewayAdapter } from './index';
+import { releaseIntegrationRoute, reserveIntegrationRoute } from './routes';
 import { paymentsKey, sealSecret } from './secret';
 
 /**
@@ -32,6 +33,13 @@ import { paymentsKey, sealSecret } from './secret';
  * lane), so it is read and written here through `withAdminTx` with an explicit `tenant_id` predicate.
  * `payment_products` has `admin_tenant` policies (defence in depth), so it goes through `withTenantTx`
  * and ALSO carries an explicit `tenant_id` predicate.
+ *
+ * RESERVE, THEN WRITE (09.2-10, D-488, DBT-16). A gateway delivery carries no host, so every handle it can
+ * name is indexed centrally (`platform.payment_integration_routes`, `platform.payment_product_routes`). The
+ * central row is written BEFORE the tenant row it points at (an orphan answers 404 harmlessly, and a product
+ * id's primary key decides which tenant holds it before either tenant writes), and removed again when the
+ * tenant write fails; a mapping that changes or goes away deletes its old route after the tenant write
+ * commits. `routes.ts` holds the statements; this file holds the order.
  */
 
 const log = moduleLogger('payments-setup');
@@ -198,26 +206,52 @@ export async function saveIntegration(
     throw new ApiError(400, 'VALIDATION_FAILED', { payments: 'provider_unavailable' });
   }
 
-  await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
-    const [existing] = rowsOf<{ id: string }>(
+  // The handle: the existing row's id, else the derived one. The central route is reserved FIRST, so a
+  // delivery for this handle can be routed the moment the tenant row exists (D-488).
+  const known = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) =>
+    rowsOf<{ id: string }>(
       await tx.execute(sql`
         select id::text as id from public.payment_integrations
-         where tenant_id = ${ctx.tenantId}::uuid and provider = ${provider}
-           for update`),
-    );
-    const id = existing?.id ?? deterministicIntegrationId(ctx.tenantId, provider);
-    const sealed = sealSecret(body.token, id);
-    await tx.execute(sql`
-      insert into public.payment_integrations
-             (id, tenant_id, provider, secret_sealed, secret_key_id, secret_set_at)
-      values (${id}::uuid, ${ctx.tenantId}::uuid, ${provider}, ${sealed},
-              ${paymentsKey().keyId}::smallint, now())
-      on conflict (tenant_id, provider) do update
-         set secret_sealed = excluded.secret_sealed,
-             secret_key_id = excluded.secret_key_id,
-             secret_set_at = now(),
-             updated_at = now()`);
+         where tenant_id = ${ctx.tenantId}::uuid and provider = ${provider}`),
+    ),
+  );
+  const integrationId = known[0]?.id ?? deterministicIntegrationId(ctx.tenantId, provider);
+  const reservation = await reserveIntegrationRoute({
+    integrationId,
+    tenantId: ctx.tenantId,
+    provider,
   });
+  if (reservation.taken) throw new ApiError(500, 'INTERNAL');
+
+  try {
+    await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
+      const [existing] = rowsOf<{ id: string }>(
+        await tx.execute(sql`
+          select id::text as id from public.payment_integrations
+           where tenant_id = ${ctx.tenantId}::uuid and provider = ${provider}
+             for update`),
+      );
+      const id = existing?.id ?? integrationId;
+      // A row appeared under another handle between the read and the lock: the route reserved above does
+      // not point at it. Refuse; the next save reads the row first and reserves the right handle.
+      if (id !== integrationId) throw new ApiError(409, 'CONFLICT');
+      const sealed = sealSecret(body.token, id);
+      await tx.execute(sql`
+        insert into public.payment_integrations
+               (id, tenant_id, provider, secret_sealed, secret_key_id, secret_set_at)
+        values (${id}::uuid, ${ctx.tenantId}::uuid, ${provider}, ${sealed},
+                ${paymentsKey().keyId}::smallint, now())
+        on conflict (tenant_id, provider) do update
+           set secret_sealed = excluded.secret_sealed,
+               secret_key_id = excluded.secret_key_id,
+               secret_set_at = now(),
+               updated_at = now()`);
+    });
+  } catch (error) {
+    // Compensation: take back the route this call inserted, unless a concurrent save made the row exist.
+    if (reservation.inserted) await releaseOrphanIntegrationRoute(ctx.tenantId, integrationId);
+    throw error;
+  }
 
   moduleFlags.invalidate(ctx.tenantId);
   // Ids and the provider name only: the token and the sealed string never reach a log line.
@@ -226,6 +260,32 @@ export async function saveIntegration(
     'payments integration saved',
   );
   return { connected: true };
+}
+
+/** Removes the route of an integration whose tenant row does not exist. Never throws. */
+async function releaseOrphanIntegrationRoute(
+  tenantId: string,
+  integrationId: string,
+): Promise<void> {
+  try {
+    const rows = await withAdminTx({ tenantId }, async (tx) =>
+      rowsOf<{ id: string }>(
+        await tx.execute(sql`
+          select id::text as id from public.payment_integrations
+           where id = ${integrationId}::uuid and tenant_id = ${tenantId}::uuid`),
+      ),
+    );
+    if (rows.length === 0) await releaseIntegrationRoute(integrationId, tenantId);
+  } catch (error) {
+    log.error(
+      {
+        event: 'payments.integration_route.release_failed',
+        tenantId,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'could not remove an integration route; an orphan route answers 404',
+    );
+  }
 }
 
 /**

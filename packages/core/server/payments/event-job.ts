@@ -26,7 +26,7 @@ const payloadSchema = z.object({ eventId: z.uuid() });
 
 export const paymentEventJob: JobDefinition<{ eventId: string }> = {
   name: PAYMENT_EVENT_QUEUE,
-  handler: async (payload) => {
+  handler: async (payload, ctx) => {
     const parsed = payloadSchema.safeParse(payload);
     if (!parsed.success) {
       log.error(
@@ -38,7 +38,8 @@ export const paymentEventJob: JobDefinition<{ eventId: string }> = {
     const { eventId } = parsed.data;
     const t0 = Date.now();
 
-    const result = await applyPaymentEvent(eventId);
+    // The worker names the project whose queue delivered the job: the event row lives in that database.
+    const result = await applyPaymentEvent(eventId, ctx?.projectId);
     if (!result) return;
     log.info(
       {

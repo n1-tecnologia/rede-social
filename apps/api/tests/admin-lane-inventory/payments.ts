@@ -32,9 +32,10 @@ export const payments: readonly AdminLaneEntry[] = [
     ['markFailed', 'T', 5, undefined, 'migrated'],
     [
       'applyPaymentEvent',
-      'N',
+      'L',
       10,
-      'the job payload is the event id alone: the tenant is only known after the transaction reads the event row, so plan 10 resolves the event through the central index first',
+      'the job payload is the event id alone, so the site opens the project whose queue delivered the job (the event was recorded there); the tenant still comes from the stored row',
+      'migrated',
     ],
   ]),
   ...group('packages/core/server/payments/events.ts', [
@@ -47,11 +48,29 @@ export const payments: readonly AdminLaneEntry[] = [
     ['previewGate', 'T', 5, undefined, 'migrated'],
     ['setGate', 'T', 5, undefined, 'migrated'],
   ]),
-  ...group('packages/core/server/payments/inbox.ts', [['recordPaymentEvent', 'N', 10]]),
-  ...group('packages/core/server/payments/receive.ts', [['receivePaymentWebhook', 'N', 10]]),
+  ...group('packages/core/server/payments/inbox.ts', [
+    [
+      'recordPaymentEvent',
+      'N',
+      10,
+      'tenant from the integration the route index resolved',
+      'migrated',
+    ],
+  ]),
+  ...group('packages/core/server/payments/receive.ts', [
+    [
+      'receivePaymentWebhook',
+      'N',
+      10,
+      'tenant resolved through platform.payment_integration_routes first',
+      'migrated',
+    ],
+  ]),
   ...group('packages/core/server/payments/setup.ts', [
     ['readIntegration', 'T', 5, undefined, 'migrated'],
     ['saveIntegration', 'T', 5, undefined, 'migrated'],
+    ['saveIntegration', 'T', 10, 'the write after the central route was reserved', 'migrated'],
+    ['releaseOrphanIntegrationRoute', 'T', 10, 'compensation read', 'migrated'],
   ]),
   ...group('packages/core/server/payments/status.ts', [
     ['getSubscriptionStatus', 'T', 5, undefined, 'migrated'],

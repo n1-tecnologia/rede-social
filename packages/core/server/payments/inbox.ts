@@ -8,6 +8,9 @@ import { type NeutralPaymentEvent, PAYMENT_EVENT_QUEUE } from './types';
  * delivery EXACTLY once and enqueue its state change in the SAME admin transaction (09.1-05, D-486,
  * PAY-03; the `recordProviderEvent` shape).
  *
+ * Since 09.2-10 it opens `withAdminTx({ tenantId })` for the integration's tenant, so the `payment_events` row
+ * and the `kernel.payment-event` job are written inside that tenant's project (and in no other).
+ *
  * It lives here rather than in the route because the admin transaction lane is kernel-only (Biome's
  * override lists `server/payments/**`), and because it is the whole replay defence, which deserves one
  * implementation a test can point at.
@@ -41,7 +44,9 @@ export async function recordPaymentEvent(input: {
   dedupeKey: string;
 }): Promise<RecordedPaymentEvent> {
   const { integration, event, dedupeKey } = input;
-  return withAdminTx(async (tx) => {
+  // 09.2-10: the tenant (and with it the project) comes from the integration the route index resolved, never
+  // from the payload; the event row and its job are written in that tenant's own database.
+  return withAdminTx({ tenantId: integration.tenantId }, async (tx) => {
     const inserted = (await tx.execute(sql`
       insert into public.payment_events
         (tenant_id, integration_id, provider, dedupe_key, type, effect, external_ref, order_ref,

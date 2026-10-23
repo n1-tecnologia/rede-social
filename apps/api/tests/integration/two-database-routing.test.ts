@@ -749,6 +749,8 @@ describe('payments admin on B (D-538)', () => {
     await adminSqlB`delete from public.payment_products where tenant_id = ${pay.tenantId}::uuid`;
     await adminSqlB`delete from public.payment_integrations where tenant_id = ${pay.tenantId}::uuid`;
     await adminSql`delete from public.payment_integrations where tenant_id = ${pay.tenantId}::uuid`;
+    await adminSql`delete from platform.payment_integration_routes where tenant_id = ${pay.tenantId}::uuid`;
+    await adminSql`delete from platform.payment_product_routes where tenant_id = ${pay.tenantId}::uuid`;
     await pay?.cleanup();
   });
 
