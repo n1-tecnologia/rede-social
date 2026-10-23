@@ -318,8 +318,8 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 
 Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase project (its own Postgres, Auth, Storage and Realtime), the current project becomes the control plane that mirrors each tenant, and the operator creates a tenant by pasting only the project ref. The registry, the routing seam, the credential custody, the bootstrap steps, the migration fan-out with a version per tenant, the per-project queues and the "move tenant" tool are the platform side; the held-out screens and the Banco tab are the panel and member side. Source: the 2026-10-22 discussion (D-533..D-547), the Phase 09.2 research and the Phase 09.2 UI-SPEC (UI-D-533..UI-D-548).
 
-- [ ] **DBT-01**: The central project holds a registry row per tenant-to-project binding (ref, API URL, publishable key, plan as information, state, credential version); several tenants may bind one project outside production and the production panel refuses a project already bound. *(D-537, D-540)*
-- [ ] **DBT-02**: Database URL, service key, publishable key, pooler URL and the `postgres` password of a project are stored only sealed (AES-256-GCM, key id, row id as AAD) and no API response, log line or error body contains them. *(D-539)*
+- [x] **DBT-01**: The central project holds a registry row per tenant-to-project binding (ref, API URL, publishable key, plan as information, state, credential version); several tenants may bind one project outside production and the production panel refuses a project already bound. *(D-537, D-540)*
+- [x] **DBT-02**: Database URL, service key, publishable key, pooler URL and the `postgres` password of a project are stored only sealed (AES-256-GCM, key id, row id as AAD) and no API response, log line or error body contains them. *(D-539)*
 - [x] **DBT-03**: The sealing helper opens values sealed under any key id still present in the keyring and a re-seal job moves every row to the current key id without downtime. *(D-539)*
 - [x] **DBT-04**: `GET /v1/public/tenants/by-host` and the platform list are answered from the central mirror (name, brand, status, enabled modules, primary host, project coordinates) without opening the tenant's database, so they work while that project is down. *(D-537)*
 - [x] **DBT-05**: Brand and rules text are owned by the tenant project, status/modules/domains/registry by the central project; a reconcile job detects and heals drift in both directions. *(D-537)*
@@ -364,7 +364,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-44**: The API image carries both migration sets, `supabase/roles.sql` and a deterministic manifest, so the running API knows the schema version it requires without a database call; a production boot whose manifest is missing or lists no tenant file stops with a named error. *(D-544, D-545, D-547)*
 - [x] **DBT-45**: A tenant's project binding is cached for 15 seconds and the last good binding is served for at most 10 minutes, only when the central read fails; past that window, or with no last-good value, resolution fails closed with `TENANT_UNAVAILABLE`. *(D-537, D-538)*
 - [x] **DBT-46**: A tenant with no binding fails closed: resolution raises `TENANT_PROJECT_UNBOUND`, and a deferred constraint trigger binds a new tenant to the project flagged default at commit or raises when none is flagged, so no code path falls back to the central project. *(D-538, D-540)*
-- [ ] **DBT-47**: A break-glass command re-derives a project's whole credential set through the platform token alone (never from the stored values), re-seals every column under the current key, bumps the credential version and refuses while a bootstrap step is running. *(D-539, D-541)*
+- [x] **DBT-47**: A break-glass command re-derives a project's whole credential set through the platform token alone (never from the stored values), re-seals every column under the current key, bumps the credential version and refuses while a bootstrap step is running. *(D-539, D-541)*
 - [ ] **DBT-48**: While a tenant has an open move, no panel route or script can reactivate, edit, re-invite or re-bootstrap it (409 `TENANT_MOVING`), the mirror reconcile skips it, and two concurrent moves of one tenant cannot both start. *(D-535, D-536)*
 - [ ] **DBT-49**: After the last move the central project holds platform data only: `--confirm-delete` removes the moved tenant's rows, files and exclusive accounts from the source, and `platform:central-clean` lists any residue and, with `--strict-empty`, requires every non-mirror table to be empty before the default-project flag is cleared. *(D-534)*
 - [ ] **DBT-50**: The "Novo tenant" form's Projeto Supabase field accepts only a 20-letter project ref (a pasted dashboard or API address is normalised to it), pre-checks the project through the API before the wizard continues, shows the six documented ref errors, and asks for the manual access fields only when the pre-check says the API cannot reveal them. *(D-541, UI-D-533, UI-D-534, UI-D-535)*
@@ -702,8 +702,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-32 | Phase 09.1 (plan 16) | Complete |
 | PAY-33 | Phase 09.1 (plans 08, 20) | Complete |
 | PAY-34 | Phase 09.1 (plans 17, 19) | Complete |
-| DBT-01 | Phase 09.2 (plans 02, 14) | Pending |
-| DBT-02 | Phase 09.2 (plans 03, 14) | Pending |
+| DBT-01 | Phase 09.2 (plans 02, 14) | Complete |
+| DBT-02 | Phase 09.2 (plans 03, 14) | Complete |
 | DBT-03 | Phase 09.2 (plan 03) | Complete |
 | DBT-04 | Phase 09.2 (plans 04, 07) | Complete |
 | DBT-05 | Phase 09.2 (plans 07, 09) | Complete |
@@ -748,7 +748,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-44 | Phase 09.2 (plans 15, 25) | Pending |
 | DBT-45 | Phase 09.2 (plan 03) | Complete |
 | DBT-46 | Phase 09.2 (plans 02, 03) | Complete |
-| DBT-47 | Phase 09.2 (plan 14) | Pending |
+| DBT-47 | Phase 09.2 (plan 14) | Complete |
 | DBT-48 | Phase 09.2 (plan 23) | Pending |
 | DBT-49 | Phase 09.2 (plans 23, 25) | Pending |
 | DBT-50 | Phase 09.2 (plans 14, 18) | Pending |
