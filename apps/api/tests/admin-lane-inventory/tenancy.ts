@@ -29,9 +29,9 @@ export const tenancy: readonly AdminLaneEntry[] = [
     ['listMembersForAdmin', 'T', 5, undefined, 'migrated'],
   ]),
   ...group('packages/core/server/tenancy/daily-dispatch.ts', [
-    ['runDailyTenantDispatch', 'L', 9],
-    ['runDailyTenantDispatch', 'L', 9],
-    ['armDailyTenantDispatch', 'L', 9],
+    ['runDailyTenantDispatch', 'L', 9, undefined, 'migrated'],
+    ['runDailyTenantDispatch', 'L', 9, undefined, 'migrated'],
+    ['armDailyTenantDispatch', 'L', 9, undefined, 'migrated'],
   ]),
   ...group('packages/core/server/tenancy/join.ts', [
     ['joinState', 'T', 5, 'removed by plan 26', 'migrated'],

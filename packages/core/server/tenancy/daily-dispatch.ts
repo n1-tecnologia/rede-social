@@ -1,8 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { txContextOf } from '../../db/project-handle';
+import type { Tx } from '../../db/tenant-tx';
 import { enqueueInTx, registerJobQueues } from '../jobs/boss';
 import { moduleLogger } from '../logging';
 import type { JobDefinition } from '../modules/manifest';
+import { centralProjectId } from './project-registry';
 
 /**
  * `kernel.daily-tenant-dispatch` (08.7-01, D-464, INSIGHT-16): the kernel's once-a-day-per-tenant
@@ -31,6 +34,15 @@ import type { JobDefinition } from '../modules/manifest';
  * **Idempotent.** Each job's singleton key is `<tenantId>:<day>`: two dispatches while a build is
  * still `created` leave exactly one job (EP-55), and a job of an already-built day costs the
  * handler one cheap check. The build jobs and the re-arm are enqueued in ONE admin transaction.
+ *
+ * **One run per project (09.2-09, D-546, DBT-31).** The job is a TENANT-scope job: every project's queue
+ * carries its own copy, the supervisor hands the handler `{ projectId }`, and the run opens an admin lane on
+ * THAT project, so the tenants it reads and the jobs it enqueues are the project's own. On a tenant project
+ * every `tenants` row is its own; on the central project (project 0) the `tenants` table also holds the MIRROR
+ * rows of tenants that live elsewhere, so the query adds the binding filter
+ * (`platform.tenant_projects` for the central project) and a mirrored tenant is never dispatched from
+ * project 0. The singleton key `<tenantId>:<day>` stays unique across databases because a tenant is a live row
+ * in exactly one project's table. Tenants are visited in ascending `id`, so a rerun produces the same order.
  *
  * Log lines carry counts only, never a tenant's name.
  */
@@ -87,7 +99,7 @@ export function dailyTenantSingletonKey(tenantId: string, day: string): string {
 export type DailyTenantDispatchResult = { tenants: number; enqueued: number; skipped: number };
 
 /** Queues the next hourly run inside `tx`; a `null` id is the dropped duplicate (a success). */
-async function rearm(tx: Parameters<Parameters<typeof withAdminTx>[0]>[0]): Promise<void> {
+async function rearm(tx: Tx): Promise<void> {
   await enqueueInTx(
     tx,
     DAILY_TENANT_DISPATCH_QUEUE,
@@ -97,25 +109,40 @@ async function rearm(tx: Parameters<Parameters<typeof withAdminTx>[0]>[0]): Prom
 }
 
 /**
- * One dispatch, in ONE admin transaction: read every active tenant with a valid zone and its local
- * yesterday, enqueue one job per tenant × registered queue, then the deferred re-arm. With no daily
- * queue registered it enqueues only the re-arm (EP-56).
+ * The tenants whose data lives in the project of `tx`. On a tenant project that is every row; on the central
+ * project it is the rows bound to it, because the table also holds mirrors of tenants that live elsewhere.
  */
-export async function runDailyTenantDispatch(): Promise<DailyTenantDispatchResult> {
+function ownedHere(tx: Tx, projectId: string) {
+  return txContextOf(tx)?.handle.kind === 'central'
+    ? sql`and t.id in (select tp.tenant_id from platform.tenant_projects tp where tp.project_id = ${projectId}::uuid)`
+    : sql``;
+}
+
+/**
+ * One dispatch for ONE project, in ONE admin transaction on that project: read every active tenant of the
+ * project with a valid zone and its local yesterday, enqueue one job per tenant x registered queue, then the
+ * deferred re-arm. With no daily queue registered, or no active tenant, it enqueues only the re-arm (EP-56).
+ */
+export async function runDailyTenantDispatch(
+  projectId: string,
+): Promise<DailyTenantDispatchResult> {
   const queues = registeredDailyTenantJobs();
-  const result = await withAdminTx(async (tx) => {
+  const result = await withAdminTx({ projectId }, async (tx) => {
+    const owned = ownedHere(tx, projectId);
     const tenants = await tx.execute<{ id: string; day: string }>(sql`
       select t.id::text as id,
              ((now() at time zone t.timezone)::date - 1)::text as day
         from public.tenants t
        where t.status = 'active'
          and t.timezone in (select z.name from pg_catalog.pg_timezone_names z)
+         ${owned}
        order by t.id`);
     const [skippedRow] = await tx.execute<{ n: number }>(sql`
       select count(*)::int as n
         from public.tenants t
-       where t.status <> 'active'
-          or t.timezone not in (select z.name from pg_catalog.pg_timezone_names z)`);
+       where (t.status <> 'active'
+          or t.timezone not in (select z.name from pg_catalog.pg_timezone_names z))
+         ${owned}`);
     let enqueued = 0;
     for (const tenant of tenants) {
       for (const queue of queues) {
@@ -134,7 +161,7 @@ export async function runDailyTenantDispatch(): Promise<DailyTenantDispatchResul
     await rearm(tx);
     return { tenants: tenants.length, enqueued, skipped: Number(skippedRow?.n ?? 0) };
   });
-  log.info({ event: 'kernel.daily_dispatch.ran', ...result }, 'daily tenant dispatch');
+  log.info({ event: 'kernel.daily_dispatch.ran', projectId, ...result }, 'daily tenant dispatch');
   return result;
 }
 
@@ -144,13 +171,21 @@ export async function runDailyTenantDispatch(): Promise<DailyTenantDispatchResul
  */
 export const dailyTenantDispatchJob: JobDefinition<Record<string, never>> = {
   name: DAILY_TENANT_DISPATCH_QUEUE,
-  handler: async () => {
+  handler: async (_payload, ctx) => {
+    // The worker always hands the project of the queue that delivered the job; a direct call (a test, an
+    // operator command) means the central project.
+    let projectId = ctx?.projectId ?? '';
     try {
-      await runDailyTenantDispatch();
+      projectId ||= await centralProjectId();
+      await runDailyTenantDispatch(projectId);
     } catch (err) {
-      log.error({ err, event: 'kernel.daily_dispatch.failed' }, 'daily tenant dispatch failed');
+      log.error(
+        { err, event: 'kernel.daily_dispatch.failed', projectId },
+        'daily tenant dispatch failed',
+      );
       try {
-        await withAdminTx(rearm);
+        if (!projectId) throw new Error('no project to re-arm in');
+        await withAdminTx({ projectId }, rearm);
       } catch (rearmErr) {
         log.error(
           { err: rearmErr },
@@ -162,12 +197,12 @@ export const dailyTenantDispatchJob: JobDefinition<Record<string, never>> = {
 };
 
 /**
- * Queues ONE immediate dispatch under the boot singleton (EP-55), called best-effort by the worker
- * at start. Returns whether THIS call queued it (a `null` id is the dropped duplicate of a boot job
- * still waiting, which is a success).
+ * Queues ONE immediate dispatch under the boot singleton (EP-55) in the queue of `projectId`, called
+ * best-effort by the supervisor each time it starts a project. Returns whether THIS call queued it (a `null`
+ * id is the dropped duplicate of a boot job still waiting, which is a success).
  */
-export async function armDailyTenantDispatch(): Promise<boolean> {
-  const id = await withAdminTx((tx) =>
+export async function armDailyTenantDispatch(target: { projectId: string }): Promise<boolean> {
+  const id = await withAdminTx({ projectId: target.projectId }, (tx) =>
     enqueueInTx(
       tx,
       DAILY_TENANT_DISPATCH_QUEUE,

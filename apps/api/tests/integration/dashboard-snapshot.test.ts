@@ -8,6 +8,7 @@ import {
   DAILY_TENANT_DISPATCH_SINGLETON,
   runDailyTenantDispatch,
 } from '@rede-social/core/server/tenancy/daily-dispatch';
+import { centralProjectId, closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import {
   type OwnerOverviewAnswer,
   ownerOverviewAnswerSchema,
@@ -23,13 +24,16 @@ import {
 } from './dashboard-fixture';
 import {
   adminSql,
+  adminSqlB,
   api,
   createSharedIdentity,
   dashboardJobsOf,
   HOSTS,
+  provisionTenantOnB,
   runDashboardJobs,
   SEED_PASSWORD,
   signInAs,
+  type TenantOnB,
 } from './setup';
 
 // The app tier's composition: registers `dashboard.snapshot-build` with the kernel dispatcher.
@@ -334,8 +338,10 @@ async function dispatchJobs(): Promise<DispatchJobRow[]> {
 describe('08.7 dispatch', () => {
   const FIXTURE_SLUG = `dash87-${Date.now()}`;
   const fixtureTenants = { mars: '', suspended: '', tokyo: '' };
+  let central = '';
 
   beforeAll(async () => {
+    central = await centralProjectId();
     await clearDispatchJobs();
     await adminSql`delete from public.tenants where slug like 'dash87-%'`;
     const insertTenant = async (suffix: string, status: string, timezone: string) => {
@@ -360,7 +366,7 @@ describe('08.7 dispatch', () => {
 
   it('EP-57: one build job per active tenant for its own SQL yesterday, keyed <tenantId>:<day>, plus one deferred re-arm', async () => {
     await clearDispatchJobs();
-    const result = await runDailyTenantDispatch();
+    const result = await runDailyTenantDispatch(central);
     expect(result.enqueued).toBeGreaterThanOrEqual(3);
     for (const tenantId of [tenants.demo, tenants.lab, fixtureTenants.tokyo]) {
       const day = await dashboardDay(tenantId);
@@ -392,7 +398,7 @@ describe('08.7 dispatch', () => {
   });
 
   it('EP-55: a second dispatch while the builds are still created leaves exactly one job per tenant and day', async () => {
-    const result = await runDailyTenantDispatch();
+    const result = await runDailyTenantDispatch(central);
     expect(result.skipped).toBeGreaterThanOrEqual(2);
     expect(await dashboardJobsOf(tenants.demo)).toHaveLength(1);
     expect(await dashboardJobsOf(tenants.lab)).toHaveLength(1);
@@ -412,7 +418,7 @@ describe('08.7 dispatch', () => {
        where tenant_id = ${tenants.demo}::uuid and snapshot_day = ${day}::date`;
     expect(row?.n).toBe(1);
 
-    await runDailyTenantDispatch();
+    await runDailyTenantDispatch(central);
     expect(await runDashboardJobs(tenants.demo)).toEqual(['skipped']);
   });
 
@@ -420,13 +426,103 @@ describe('08.7 dispatch', () => {
     expect(
       (await dispatchJobs()).some((row) => row.singleton_key === DAILY_TENANT_DISPATCH_SINGLETON),
     ).toBe(true);
-    expect(await armDailyTenantDispatch()).toBe(true);
+    expect(await armDailyTenantDispatch({ projectId: central })).toBe(true);
     const created = (await dispatchJobs()).filter((row) => row.state === 'created');
     expect(created.map((row) => row.singleton_key).sort()).toEqual(
       [DAILY_TENANT_DISPATCH_BOOT_SINGLETON, DAILY_TENANT_DISPATCH_SINGLETON].sort(),
     );
     // A second boot arm while the first is still waiting is the dropped duplicate.
-    expect(await armDailyTenantDispatch()).toBe(false);
+    expect(await armDailyTenantDispatch({ projectId: central })).toBe(false);
+  });
+});
+
+/**
+ * 09.2-09 (DBT-31, D-546, P62-P64): the dispatcher runs once PER PROJECT. A tenant that lives in database B is
+ * dispatched by B's own run, into B's own `pgboss.job`; project 0 holds a MIRROR row of it (a different
+ * display name) and never dispatches it; a project with no active tenant enqueues nothing and still re-arms.
+ */
+describe('09.2 dispatch over two databases', () => {
+  const DASH_QUEUE = 'dashboard.snapshot-build';
+  let b: TenantOnB;
+  let central = '';
+
+  const jobsIn = (db: typeof adminSql, name: string) =>
+    db<{ singleton_key: string | null; data: Record<string, unknown> }[]>`
+      select singleton_key, data from pgboss.job_common where name = ${name} order by singleton_key`;
+  const clearBoth = async () => {
+    for (const db of [adminSql, adminSqlB]) {
+      await db`delete from pgboss.job_common where name in (${DASH_QUEUE}, ${DAILY_TENANT_DISPATCH_QUEUE})`;
+    }
+  };
+
+  beforeAll(async () => {
+    central = await centralProjectId();
+    b = await provisionTenantOnB({ slug: `dsp-b-${Date.now().toString(36)}`.slice(0, 40) });
+    await clearBoth();
+  });
+
+  afterAll(async () => {
+    await clearBoth();
+    await b?.cleanup();
+    await closeAllPools();
+    await adminSqlB.end();
+  });
+
+  it("P62: B's run enqueues the build of B's tenant into B's own pgboss.job and nothing centrally", async () => {
+    const result = await runDailyTenantDispatch(b.projectId);
+    expect(result).toMatchObject({ tenants: 1, enqueued: 1 });
+
+    const inB = await jobsIn(adminSqlB, DASH_QUEUE);
+    expect(inB.map((row) => row.data.tenantId)).toEqual([b.tenantId]);
+    expect(inB[0]?.singleton_key).toBe(`${b.tenantId}:${inB[0]?.data.day}`);
+    // The re-arm stays in B too.
+    expect(
+      (await jobsIn(adminSqlB, DAILY_TENANT_DISPATCH_QUEUE)).map((row) => row.singleton_key),
+    ).toEqual([DAILY_TENANT_DISPATCH_SINGLETON]);
+    // ...and the central project received nothing for it.
+    expect(await jobsIn(adminSql, DASH_QUEUE)).toEqual([]);
+    expect(await jobsIn(adminSql, DAILY_TENANT_DISPATCH_QUEUE)).toEqual([]);
+  });
+
+  it("P62: project 0's run never dispatches the tenant that lives in B, although a mirror row exists centrally", async () => {
+    const [mirror] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.tenants where id = ${b.tenantId}::uuid`;
+    expect(mirror?.n).toBe(1);
+
+    await runDailyTenantDispatch(central);
+    const centralJobs = await jobsIn(adminSql, DASH_QUEUE);
+    expect(centralJobs.length).toBeGreaterThanOrEqual(2); // the seed tenants of project 0
+    expect(centralJobs.map((row) => row.data.tenantId)).not.toContain(b.tenantId);
+    // B's own copy is unchanged: one build job, not two.
+    expect(await jobsIn(adminSqlB, DASH_QUEUE)).toHaveLength(1);
+  });
+
+  it('P63: a project with no active tenant enqueues nothing, counts the skipped one and still re-arms', async () => {
+    await clearBoth();
+    await adminSqlB`update public.tenants set status = 'suspended' where id = ${b.tenantId}::uuid`;
+    const suspended = await runDailyTenantDispatch(b.projectId);
+    expect(suspended).toEqual({ tenants: 0, enqueued: 0, skipped: 1 });
+    expect(await jobsIn(adminSqlB, DASH_QUEUE)).toEqual([]);
+    expect(await jobsIn(adminSqlB, DAILY_TENANT_DISPATCH_QUEUE)).toHaveLength(1);
+
+    await clearBoth();
+    await adminSqlB`delete from public.memberships where tenant_id = ${b.tenantId}::uuid`;
+    await adminSqlB`delete from public.tenants where id = ${b.tenantId}::uuid`;
+    const empty = await runDailyTenantDispatch(b.projectId);
+    expect(empty).toEqual({ tenants: 0, enqueued: 0, skipped: 0 });
+    expect(await jobsIn(adminSqlB, DASH_QUEUE)).toEqual([]);
+    expect(
+      (await jobsIn(adminSqlB, DAILY_TENANT_DISPATCH_QUEUE)).map((row) => row.singleton_key),
+    ).toEqual([DAILY_TENANT_DISPATCH_SINGLETON]);
+  });
+
+  it("the boot arm of B lands in B's queue under the boot key", async () => {
+    await clearBoth();
+    expect(await armDailyTenantDispatch({ projectId: b.projectId })).toBe(true);
+    expect(
+      (await jobsIn(adminSqlB, DAILY_TENANT_DISPATCH_QUEUE)).map((row) => row.singleton_key),
+    ).toEqual([DAILY_TENANT_DISPATCH_BOOT_SINGLETON]);
+    expect(await jobsIn(adminSql, DAILY_TENANT_DISPATCH_QUEUE)).toEqual([]);
   });
 });
 

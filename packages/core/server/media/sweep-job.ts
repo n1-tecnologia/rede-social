@@ -4,6 +4,7 @@ import { mediaAssets } from '../../db/schema';
 import { registeredSweepFunctions } from '../jobs/sweep-functions';
 import { moduleLogger } from '../logging';
 import type { JobDefinition } from '../modules/manifest';
+import { centralProjectId } from '../tenancy/project-registry';
 import { MEDIA_SWEEP_QUEUE } from './index';
 import {
   MEDIA_DELETED_TTL_MS,
@@ -92,10 +93,10 @@ export const SWEEP_FUNCTION_MAX_CALLS = 20;
  * One registered sweep function, repeated while it returns a full batch. Returns the rows deleted.
  * `name` was validated at registration and still travels only as an IDENTIFIER, never as text.
  */
-async function runSweepFunction(name: string): Promise<number> {
+async function runSweepFunction(name: string, projectId: string): Promise<number> {
   let deleted = 0;
   for (let call = 0; call < SWEEP_FUNCTION_MAX_CALLS; call += 1) {
-    const rows = await withAdminTx(async (tx) =>
+    const rows = await withAdminTx({ projectId }, async (tx) =>
       tx.execute<{ n: number | null }>(
         sql`select ${sql.identifier('app')}.${sql.identifier(name)}(${SWEEP_FUNCTION_BATCH}::int) as n`,
       ),
@@ -111,8 +112,8 @@ async function runSweepFunction(name: string): Promise<number> {
 const RECONCILE_SWEEP_MIN_AGE_S = 300;
 
 /** One bounded batch of stale videos the reconcile pass asks the provider about. */
-async function reconcilable(): Promise<ReconcilableVideo[]> {
-  return withAdminTx(async (tx) =>
+async function reconcilable(projectId: string): Promise<ReconcilableVideo[]> {
+  return withAdminTx({ projectId }, async (tx) =>
     tx
       .select({
         id: mediaAssets.id,
@@ -140,8 +141,8 @@ async function reconcilable(): Promise<ReconcilableVideo[]> {
 }
 
 /** One bounded batch of collectable assets, newest constraint applied in SQL rather than in JS. */
-async function collectable(): Promise<PurgeableAsset[]> {
-  return withAdminTx(async (tx) =>
+async function collectable(projectId: string): Promise<PurgeableAsset[]> {
+  return withAdminTx({ projectId }, async (tx) =>
     tx
       .select({
         id: mediaAssets.id,
@@ -171,8 +172,12 @@ async function collectable(): Promise<PurgeableAsset[]> {
 
 export const sweepOrphansJob: JobDefinition<Record<string, never>> = {
   name: MEDIA_SWEEP_QUEUE,
-  handler: async () => {
+  handler: async (_payload, ctx) => {
     const t0 = Date.now();
+    // The worker hands the project of the queue that delivered the job; a direct call (a test, an operator
+    // command) means the central project. Resolved inside the first guarded step so a registry failure is a
+    // logged failed run, never a thrown job.
+    let projectId = ctx?.projectId ?? '';
     let collected = 0;
     let failed = 0;
     let reconciled = 0;
@@ -181,7 +186,8 @@ export const sweepOrphansJob: JobDefinition<Record<string, never>> = {
     // Sequential, bounded and throttled by the same per-asset map the read path uses; it never
     // deletes, and a failure here never stops the purge below.
     try {
-      for (const row of await reconcilable()) {
+      projectId ||= await centralProjectId();
+      for (const row of await reconcilable(projectId)) {
         if (await reconcileVideoAsset(row)) reconciled += 1;
       }
     } catch (error) {
@@ -195,7 +201,7 @@ export const sweepOrphansJob: JobDefinition<Record<string, never>> = {
     }
 
     try {
-      const rows = await collectable();
+      const rows = await collectable(projectId);
       // Sequential on purpose: each purge is several Storage round-trips, and a fan-out would let one
       // busy tenant's backlog saturate the worker (T-03-58). The batch is bounded; the re-arm below
       // picks up whatever is left, so "slow" only ever means "next hour", never "never".
@@ -230,7 +236,7 @@ export const sweepOrphansJob: JobDefinition<Record<string, never>> = {
     // 07-04: the registered sweep functions, each isolated from the others and from the media passes.
     for (const name of registeredSweepFunctions()) {
       try {
-        const deleted = await runSweepFunction(name);
+        const deleted = await runSweepFunction(name, projectId);
         log.info({ event: 'sweep.function', name, deleted }, 'sweep function ran');
       } catch (error) {
         log.error(
@@ -247,7 +253,7 @@ export const sweepOrphansJob: JobDefinition<Record<string, never>> = {
     // Outside the try/catch above so the cadence survives ANY failure inside the batch: a run that
     // collected nothing and a run that crashed on its very first read both still queue the next one.
     try {
-      await armSweeper();
+      await armSweeper({ projectId });
     } catch (error) {
       log.error(
         {

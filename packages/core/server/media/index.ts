@@ -41,7 +41,7 @@ export const deriveVariantsPayloadSchema = z.object({
 
 // `kernel.media-derive-variants` is a KERNEL-owned queue, so it registers itself here rather than in
 // `apps/api/src/modules/registry.ts` (which lists MODULE queues only, MOD-02). Every enqueue path
-// (`media/service.ts`) imports this barrel at module top, so the API's lazy `startedBoss()` always
+// (`media/service.ts`) imports this barrel at module top, so the API's lazy sender (`senderFor`) always
 // knows the queue before the first `send`; the worker creates it from its explicit job list.
 registerJobQueues([MEDIA_DERIVE_QUEUE, MEDIA_SWEEP_QUEUE]);
 

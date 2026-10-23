@@ -1160,8 +1160,9 @@ export async function deriveAssetVariants(
 }
 
 /**
- * Queues the NEXT orphan sweep (03-08, R-07). Called from exactly two places: once when the worker
- * starts, and by `kernel.media-sweep-orphans` itself at the end of every run. Together those two are
+ * Queues the NEXT orphan sweep (03-08, R-07) in the queue of `projectId` (09.2-09, D-546: the sweeper is a
+ * per-project job). Called from exactly two places: once per project when the supervisor starts it, and by
+ * `kernel.media-sweep-orphans` itself at the end of every run. Together those two are
  * the whole cadence — `boss.schedule()` stays unused in this codebase, and `kernel.domain-verify`
  * paces itself the same way (`jobs/boss.ts`, the `startAfter` paragraph of the `enqueueInTx`
  * docblock). One mechanism for periodic work, so the one the team already debugs is the one this
@@ -1173,8 +1174,8 @@ export async function deriveAssetVariants(
  * cadence. Returns whether THIS call is the one that queued the job (a `null` id is the dropped
  * duplicate, which is a success, not a failure).
  */
-export async function armSweeper(): Promise<boolean> {
-  const id = await withAdminTx(async (tx) =>
+export async function armSweeper(target: { projectId: string }): Promise<boolean> {
+  const id = await withAdminTx({ projectId: target.projectId }, async (tx) =>
     enqueueInTx(
       tx,
       MEDIA_SWEEP_QUEUE,

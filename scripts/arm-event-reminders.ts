@@ -9,6 +9,13 @@
  * after the deploy (07-11 writes the step into DEPLOY.md). It is optional: an event edited or
  * reactivated after the deploy re-arms itself.
  *
+ * **One pass per ready project (09.2-09, D-546).** Every tenant's events live in the tenant's own
+ * database, and its reminder jobs must land in that database's `pgboss` schema, where that project's
+ * worker polls. So the script loops over the ready projects of the registry (`listReadyProjects`), reads
+ * each project's events through a `{ projectId }` admin lane and enqueues each job through the kernel's
+ * `enqueueInTx` inside a lane of the same project (the sender follows the transaction). A project that
+ * cannot be reached is reported and skipped; the others still run.
+ *
  * **Idempotent.** It uses the module's own payload, `startAfter` and singleton key
  * (`{eventId}:{window}:{startsAtEpochSeconds}`), and every queue has the `short` policy, so a job
  * still waiting for the same start is never duplicated: running this twice arms nothing new. A
@@ -24,13 +31,13 @@
  * module's microsecond ISO format, never a title, T-07-31). Edit both together.
  *
  * Connection: the same env the seed reads (`apps/api/.env.local` locally, the process environment in
- * production). `DATABASE_URL` is never printed. The pg-boss instance is the kernel's `createBoss`
- * (schema `pgboss`, `migrate: false`: the runtime issues no DDL), started without supervision or
- * scheduling, and stopped before exit.
+ * production). `DATABASE_URL` is never printed. The pg-boss senders are the kernel's (schema `pgboss`,
+ * `migrate: false`: the runtime issues no DDL), started without supervision or scheduling, and stopped
+ * before exit.
  *
- * Output: ONE summary line, `{ events, armed, skipped }` (`skipped` = past windows plus windows
- * whose job was already waiting). `--dry-run` reads and plans only: nothing is enqueued, and `armed`
- * is the number of windows a real run would try to arm.
+ * Output: ONE summary line, `{ projects, events, armed, skipped, failedProjects }` (`skipped` = past
+ * windows plus windows whose job was already waiting). `--dry-run` reads and plans only: nothing is
+ * enqueued, and `armed` is the number of windows a real run would try to arm.
  */
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -45,11 +52,17 @@ const dryRun = process.argv.includes('--dry-run');
 const { sql } = await import('drizzle-orm');
 const { withAdminTx } = await import('@rede-social/core/db/admin-tx');
 const { sqlClient } = await import('@rede-social/core/db');
-const { env } = await import('@rede-social/core/server/env');
-const { createBoss, createQueues } = await import('@rede-social/core/server/jobs/boss');
+const { enqueueInTx, registerJobQueues, stopBoss } = await import(
+  '@rede-social/core/server/jobs/boss'
+);
+const { closeAllPools, listReadyProjects } = await import(
+  '@rede-social/core/server/tenancy/project-registry'
+);
 
 /** `EVENTS_QUEUES.reminder`, restated. */
 const REMINDER_QUEUE = 'events.reminder';
+// A tenant-scope queue: the kernel's sender creates it (policy `short`, which the idempotency below relies on).
+registerJobQueues([REMINDER_QUEUE]);
 
 /** `EVENT_REMINDER_WINDOWS` and `EVENT_REMINDER_OFFSET_MS`, restated, in firing order. */
 const WINDOWS = [
@@ -58,10 +71,16 @@ const WINDOWS = [
 ] as const;
 
 type UpcomingEvent = { id: string; tenant_id: string; starts_at: string };
+type Planned = {
+  payload: { tenantId: string; eventId: string; window: string; startsAt: string };
+  startAfter: Date;
+  singletonKey: string;
+};
 
-// Every tenant's active, upcoming, not-removed event, the start in the module's own ISO format.
-const upcoming = await withAdminTx((tx) =>
-  tx.execute<UpcomingEvent>(sql`
+// One project's active, upcoming, not-removed events, the start in the module's own ISO format.
+async function readUpcoming(projectId: string): Promise<UpcomingEvent[]> {
+  return withAdminTx({ projectId }, (tx) =>
+    tx.execute<UpcomingEvent>(sql`
     select id::text as id,
            tenant_id::text as tenant_id,
            to_char(starts_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as starts_at
@@ -70,77 +89,84 @@ const upcoming = await withAdminTx((tx) =>
        and deleted_at is null
        and starts_at > now()
      order by starts_at, id`),
-);
-
-const nowMs = Date.now();
-const plan: {
-  payload: { tenantId: string; eventId: string; window: string; startsAt: string };
-  startAfter: Date;
-  singletonKey: string;
-}[] = [];
-let skipped = 0;
-
-for (const event of upcoming) {
-  const startsAtMs = Date.parse(event.starts_at);
-  for (const { window, offsetMs } of WINDOWS) {
-    const fireAtMs = startsAtMs - offsetMs;
-    // `planEventReminders`' rule: a window at or before now is skipped, never sent late.
-    if (!Number.isFinite(fireAtMs) || fireAtMs <= nowMs) {
-      skipped += 1;
-      continue;
-    }
-    plan.push({
-      payload: {
-        tenantId: event.tenant_id,
-        eventId: event.id,
-        window,
-        startsAt: event.starts_at,
-      },
-      startAfter: new Date(fireAtMs),
-      singletonKey: `${event.id}:${window}:${Math.floor(startsAtMs / 1000)}`,
-    });
-  }
+  );
 }
 
+// One job, enqueued inside an admin lane of the project that holds the event (the sender follows it).
+async function armOne(projectId: string, job: Planned): Promise<string | null> {
+  return withAdminTx({ projectId }, (tx) =>
+    enqueueInTx(tx, REMINDER_QUEUE, job.payload, {
+      startAfter: job.startAfter,
+      singletonKey: job.singletonKey,
+    }),
+  );
+}
+
+const nowMs = Date.now();
+let projectsDone = 0;
+let eventsSeen = 0;
 let armed = 0;
-if (dryRun) {
-  armed = plan.length;
-} else if (plan.length > 0) {
-  const boss = createBoss({
-    connectionString: env.DATABASE_URL,
-    max: 1,
-    supervise: false,
-    schedule: false,
-  });
-  // A connection-level error must not print the connection string: only its message.
-  boss.on('error', (error: unknown) => {
-    console.error('arm-event-reminders: pg-boss error', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  });
-  await boss.start();
-  try {
-    // Idempotent, and verifies the `short` policy the idempotency above relies on.
-    await createQueues(boss, [REMINDER_QUEUE]);
-    for (const job of plan) {
-      const id = await boss.send(REMINDER_QUEUE, job.payload, {
-        startAfter: job.startAfter,
-        singletonKey: job.singletonKey,
+let skipped = 0;
+const failedProjects: string[] = [];
+
+try {
+  for (const project of await listReadyProjects()) {
+    try {
+      const upcoming = await readUpcoming(project.id);
+      eventsSeen += upcoming.length;
+      const plan: Planned[] = [];
+      for (const event of upcoming) {
+        const startsAtMs = Date.parse(event.starts_at);
+        for (const { window, offsetMs } of WINDOWS) {
+          const fireAtMs = startsAtMs - offsetMs;
+          // `planEventReminders`' rule: a window at or before now is skipped, never sent late.
+          if (!Number.isFinite(fireAtMs) || fireAtMs <= nowMs) {
+            skipped += 1;
+            continue;
+          }
+          plan.push({
+            payload: {
+              tenantId: event.tenant_id,
+              eventId: event.id,
+              window,
+              startsAt: event.starts_at,
+            },
+            startAfter: new Date(fireAtMs),
+            singletonKey: `${event.id}:${window}:${Math.floor(startsAtMs / 1000)}`,
+          });
+        }
+      }
+      if (dryRun) {
+        armed += plan.length;
+      } else {
+        for (const job of plan) {
+          // `null`: a job for the same start is still waiting (the `short` policy dropped this one).
+          if (await armOne(project.id, job)) armed += 1;
+          else skipped += 1;
+        }
+      }
+      projectsDone += 1;
+    } catch (error) {
+      // Never the connection string: the project ref and the error's message only.
+      failedProjects.push(project.ref);
+      console.error('arm-event-reminders: project failed', {
+        project: project.ref,
+        error: error instanceof Error ? error.message : String(error),
       });
-      // `null`: a job for the same start is still waiting (the `short` policy dropped this one).
-      if (id) armed += 1;
-      else skipped += 1;
     }
-  } finally {
-    await boss.stop({ graceful: false });
   }
+} finally {
+  await stopBoss();
+  await closeAllPools();
 }
 
 console.log(
   `arm-event-reminders${dryRun ? ' (dry run)' : ''}: ${JSON.stringify({
-    events: upcoming.length,
+    projects: projectsDone,
+    events: eventsSeen,
     armed,
     skipped,
+    failedProjects,
   })}`,
 );
 await sqlClient.end();

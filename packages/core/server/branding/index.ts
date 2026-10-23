@@ -27,7 +27,7 @@ export const deriveIconsPayloadSchema = z.object({
 
 // `kernel.branding-derive-icons` is a KERNEL-owned queue, so it registers itself here rather than in
 // `apps/api/src/modules/registry.ts` (which lists MODULE queues only, MOD-02). Every enqueue path
-// (`platform/branding.ts`) imports this barrel at module top, so the API's lazy `startedBoss()`
+// (`platform/branding.ts`) imports this barrel at module top, so the API's lazy sender (`senderFor`)
 // always knows the queue before the first `send`; the worker creates it from its explicit job list.
 registerJobQueues([BRANDING_DERIVE_ICONS_QUEUE]);
 

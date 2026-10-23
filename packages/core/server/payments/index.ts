@@ -44,7 +44,7 @@ export function gatewayAdapter(
 
 // `kernel.payment-event` is a KERNEL-owned queue, so it registers itself here rather than in
 // `apps/api/src/modules/registry.ts` (which lists MODULE queues only, MOD-02). The webhook route's
-// receive service imports this barrel, so the API's lazy `startedBoss()` knows the queue before the
+// receive service imports this barrel, so the API's lazy sender (`senderFor`) knows the queue before the
 // first `send`; the worker creates it from its explicit job list (plan 07).
 registerJobQueues([PAYMENT_EVENT_QUEUE]);
 

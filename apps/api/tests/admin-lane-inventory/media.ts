@@ -40,13 +40,13 @@ export const media: readonly AdminLaneEntry[] = [
     ['deleteAsset', 'T', 5, undefined, 'migrated'],
     ['deriveAssetVariants', 'T', 5, undefined, 'migrated'],
     ['deriveAssetVariants', 'T', 5, undefined, 'migrated'],
-    ['armSweeper', 'L', 9],
+    ['armSweeper', 'L', 9, undefined, 'migrated'],
     ['purgeAsset', 'T', 5, undefined, 'migrated'],
   ]),
   ...group('packages/core/server/media/sweep-job.ts', [
-    ['runSweepFunction', 'L', 9],
-    ['reconcilable', 'L', 9],
-    ['collectable', 'L', 9],
+    ['runSweepFunction', 'L', 9, undefined, 'migrated'],
+    ['reconcilable', 'L', 9, undefined, 'migrated'],
+    ['collectable', 'L', 9, undefined, 'migrated'],
   ]),
   ...group('packages/core/server/media/video/event-job.ts', [
     [

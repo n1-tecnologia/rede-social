@@ -16,14 +16,19 @@ const group = (
   }));
 
 export const scripts: readonly AdminLaneEntry[] = [
-  ...group('scripts/arm-event-reminders.ts', [
+  ...group(
+    'scripts/arm-event-reminders.ts',
     [
-      '(module)',
-      'L',
-      9,
-      'reads the events of every tenant: a per-project loop (the plan list said 06)',
+      [
+        'readUpcoming',
+        'L',
+        9,
+        'reads the events of every tenant: one { projectId } lane per ready project (the plan list said 06)',
+      ],
+      ['armOne', 'L', 9, 'enqueues in the lane of the project that holds the event'],
     ],
-  ]),
+    'migrated',
+  ),
   // 09.2-06: the seed's control-plane writes (the tenant row and its icon patch, the enabled modules, the
   // domains, the platform admin) call `withPlatformTx`, so they are no `withAdminTx` site and have no row
   // here (the same way the P rows left `platform.ts`). What is left is tenant data, all `{ tenantId }`.

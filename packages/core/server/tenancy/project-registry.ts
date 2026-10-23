@@ -208,6 +208,24 @@ export async function resolveProjectById(id: string): Promise<ProjectRecord | nu
   return rows[0] ?? null;
 }
 
+let centralId: string | undefined;
+
+/**
+ * The id of project 0 (`is_central`), read once and kept: it never changes for the life of the registry.
+ * For the jobs that run in the central project's queue and need a `{ projectId }` lane target when they are
+ * called without the worker's context (a test, an operator command).
+ */
+export async function centralProjectId(): Promise<string> {
+  if (centralId) return centralId;
+  const rows = await withPlatformTx((tx) =>
+    tx.select({ id: projects.id }).from(projects).where(eq(projects.isCentral, true)).limit(1),
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('no central project is registered');
+  centralId = id;
+  return id;
+}
+
 /** Every project whose state is `ready`, ascending `ref`: the fan-out of migrations, jobs and health checks. */
 export async function listReadyProjects(): Promise<ProjectRecord[]> {
   return withPlatformTx((tx) =>

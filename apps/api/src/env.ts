@@ -14,6 +14,11 @@ export const env = createEnv({
      * path stays on the transaction pooler (A6).
      */
     BOSS_DATABASE_URL: z.url().optional(),
+    /**
+     * How many tenant projects one worker instance supervises (one pg-boss instance, two session sockets,
+     * each). Past it the supervisor logs `worker.supervisor.cap_reached` and skips the rest (D-546, T-09.2-42).
+     */
+    SUPERVISOR_MAX_PROJECTS: z.coerce.number().int().positive().default(40),
     SUPABASE_URL: z.url(),
     SUPABASE_SERVICE_KEY: z.string().min(1),
   },

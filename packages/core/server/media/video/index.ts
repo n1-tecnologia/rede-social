@@ -48,7 +48,7 @@ export const videoProvider: VideoProvider =
 // `kernel.media-provider-event` is a KERNEL-owned queue, so it registers itself here rather than in
 // `apps/api/src/modules/registry.ts` (which lists MODULE queues only, MOD-02). Every enqueue path
 // (the webhook route, the fake's simulated transcode) imports this barrel at module top, so the
-// API's lazy `startedBoss()` always knows the queue before the first `send`; the worker creates it
+// API's lazy sender (`senderFor`) always knows the queue before the first `send`; the worker creates it
 // from its explicit job list.
 registerJobQueues([MEDIA_PROVIDER_EVENT_QUEUE]);
 
