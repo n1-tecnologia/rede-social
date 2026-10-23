@@ -1,5 +1,6 @@
 'use server';
 
+import { replaceCredentialsBodySchema } from '@rede-social/contracts/projects';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
@@ -137,4 +138,74 @@ export async function pollDatabaseAction(tenantId: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The values the replace sheet sends: any non-empty subset, trimmed by the sheet. */
+export type ReplaceCredentialsValues = {
+  databasePassword?: string;
+  serviceKey?: string;
+  publishableKey?: string;
+};
+
+/** What the sheet gets back: a flag and a catalog key. NEVER a value - nothing sealed or typed returns. */
+export type ReplaceCredentialsResult = { ok: true } | { ok: false; error: 'access' | 'generic' };
+
+/**
+ * "Salvar credenciais" - `PUT …/database/credentials` (D-539, DBT-40, UI-D-538). The same Zod the API
+ * validates with runs first (an empty body never leaves), then the API tries every supplied value against
+ * the project and replaces them only if they all work: 400 `details.access = 'invalid'` means nothing was
+ * changed and maps to `access`; every other refusal is `generic`; 401/403 navigate.
+ *
+ * The values travel from the sheet to the API once, in this call's body. They are never logged (the only
+ * log lines carry a status and a code), never echoed, never put in a URL, a cookie or a revalidation tag,
+ * and nothing in the answer holds them.
+ */
+export async function replaceCredentialsAction(
+  tenantId: string,
+  values: ReplaceCredentialsValues,
+): Promise<ReplaceCredentialsResult> {
+  if (!uuid.safeParse(tenantId).success) return { ok: false, error: 'generic' };
+  const body = replaceCredentialsBodySchema.safeParse({
+    ...(values.databasePassword ? { databasePassword: values.databasePassword } : {}),
+    ...(values.serviceKey ? { serviceKey: values.serviceKey } : {}),
+    ...(values.publishableKey ? { publishableKey: values.publishableKey } : {}),
+  });
+  if (!body.success) return { ok: false, error: 'generic' };
+
+  let refusal: string | null = null;
+  let outcome: ReplaceCredentialsResult;
+  try {
+    const res = await apiFetch(databasePath(tenantId, '/credentials'), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body.data),
+    });
+    if (res.ok) {
+      revalidateTenantViews(tenantId);
+      outcome = { ok: true };
+    } else {
+      const err = await readEnvelope(res);
+      if (res.status === 401 || res.status === 403) {
+        refusal = platformRedirectPath(err);
+        outcome = { ok: false, error: 'generic' };
+      } else if (res.status === 400 && err.details?.access === 'invalid') {
+        outcome = { ok: false, error: 'access' };
+      } else {
+        if (res.status >= 500) {
+          console.error('platform.database.credentials_failed', {
+            status: res.status,
+            code: err.code,
+          });
+        }
+        outcome = { ok: false, error: 'generic' };
+      }
+    }
+  } catch {
+    // The error's own text could quote the request; only the fact is logged.
+    console.error('platform.database.credentials_failed', { status: 0, code: 'NETWORK' });
+    outcome = { ok: false, error: 'generic' };
+  }
+
+  if (refusal) redirect(refusal);
+  return outcome;
 }

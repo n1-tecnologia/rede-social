@@ -4542,3 +4542,57 @@ describe('09.2-19 - the Preparação catalog', () => {
     );
   });
 });
+
+/**
+ * 09.2-19 Task 3 (UI-D-538, D-539) - the Credenciais card and the replace sheet, verbatim from the
+ * Copywriting Contract ('Credentials' and 'Error state, writes' rows).
+ */
+describe('09.2-19 - the Credenciais catalog', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['platform.database.credentials.title', 'Credenciais'],
+    [
+      'platform.database.credentials.body',
+      'Guardadas com segurança. O sistema não mostra nem devolve estes valores.',
+    ],
+    ['platform.database.credentials.held', 'Guardadas'],
+    ['platform.database.credentials.missing', 'Não informadas'],
+    [
+      'platform.database.credentials.missingNote',
+      'Os dados de acesso ao projeto ainda não foram guardados. Termine a preparação ou use Substituir credenciais.',
+    ],
+    ['platform.database.credentials.updated', 'Atualizadas {when}.'],
+    ['platform.database.credentials.replace', 'Substituir credenciais'],
+    ['platform.database.credentials.sheetTitle', 'Substituir credenciais'],
+    [
+      'platform.database.credentials.intro',
+      'Use quando a senha ou as chaves do projeto mudarem no Supabase. Cole só o que mudou.',
+    ],
+    ['platform.database.credentials.save', 'Salvar credenciais'],
+    ['platform.database.credentials.saving', 'Salvando…'],
+    ['platform.database.credentials.saved', 'Credenciais atualizadas.'],
+    [
+      'platform.database.errors.access',
+      'Não foi possível entrar no projeto com estes dados. Nada foi alterado.',
+    ],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('pins the placeholder of the updated sentence', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages: messages as never,
+      namespace: 'platform.database.credentials' as never,
+    }) as unknown as (key: string, values: Record<string, string>) => string;
+    expect(t('updated', { when: 'há 2 d' })).toBe('Atualizadas há 2 d.');
+  });
+});

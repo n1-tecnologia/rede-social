@@ -1,4 +1,5 @@
 import { BootstrapSteps } from '@/components/platform/BootstrapSteps';
+import { CredentialsCard } from '@/components/platform/CredentialsCard';
 import { DatabaseOverviewCard } from '@/components/platform/DatabaseOverviewCard';
 import {
   formatPanelLongDate,
@@ -6,7 +7,12 @@ import {
   requirePlatformTenantDetail,
 } from '@/lib/platform';
 import { relativeFrom } from '@/lib/relative-time';
-import { pollDatabaseAction, resumeBootstrapAction, verifyDatabaseAction } from './actions';
+import {
+  pollDatabaseAction,
+  replaceCredentialsAction,
+  resumeBootstrapAction,
+  verifyDatabaseAction,
+} from './actions';
 
 /**
  * Banco tab (09.2-19, UI-D-536, DBT-51, DBT-24, DBT-27): where an operator sees whether a tenant's
@@ -57,6 +63,14 @@ export default async function TenantDatabasePage({ params }: { params: Promise<{
           pollAction={pollDatabaseAction}
         />
       ) : null}
+      <CredentialsCard
+        tenantId={detail.tenant.id}
+        held={overview.credentials.held}
+        updatedWhen={
+          overview.credentials.updatedAt ? relativeFrom(overview.credentials.updatedAt, now) : null
+        }
+        replaceAction={replaceCredentialsAction}
+      />
     </div>
   );
 }
