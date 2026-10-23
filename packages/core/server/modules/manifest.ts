@@ -7,6 +7,7 @@ import {
 import type { Hono } from 'hono';
 import type { Tx } from '../../db/tenant-tx';
 import type { AppEnv, RequestContext } from '../auth/context';
+import type { JobScope } from '../jobs/boss';
 import type { NotificationRetraction, NotificationSource } from '../notifications/source';
 import type { Counters } from './counters';
 
@@ -68,10 +69,23 @@ export interface ModuleHomeSlot {
   order: number;
 }
 
+/**
+ * What the worker tells a handler about where it runs (09.2-09, D-546): the project whose queue delivered the
+ * job. A tenant-scope job runs once per project queue, so a handler that works on "this database" (the daily
+ * dispatcher, the orphan sweeper) reads it; every other handler ignores it. For a platform-scope job it is the
+ * central project.
+ */
+export type JobContext = { projectId: string };
+
 /** A pg-boss job a module owns; `P` is the payload shape the module's own handler expects. */
 export interface JobDefinition<P = unknown> {
   name: string;
-  handler: (payload: P) => Promise<void>;
+  handler: (payload: P, ctx?: JobContext) => Promise<void>;
+  /**
+   * Which kind of queue the job lives in (default `tenant`): `tenant` jobs sit in the `pgboss` schema of the
+   * project that owns the data they touch, `platform` jobs in `pgboss_platform` of the central project.
+   */
+  scope?: JobScope;
   /**
    * pg-boss `localConcurrency` for this queue, per worker instance (default 1). Each concurrent
    * handler may hold one pooled connection at a time, so the sum over all queues must fit the

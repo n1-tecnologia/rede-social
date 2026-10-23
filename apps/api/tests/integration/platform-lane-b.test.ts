@@ -65,7 +65,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (domainIds.length > 0) {
     await adminSql`
-      delete from pgboss.job_common
+      delete from pgboss_platform.job_common
        where name = 'kernel.domain-verify' and singleton_key in ${adminSql(domainIds)}`;
   }
   // The throwaway lab host, if a failed run left it behind.

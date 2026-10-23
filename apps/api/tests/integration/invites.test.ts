@@ -191,7 +191,7 @@ async function throwawayInvited(tag: string, opts: { password?: boolean } = {}):
 /** Removes every `inv-…` tenant, its memberships/consents and the throwaway auth users. */
 async function cleanup(): Promise<void> {
   await adminSql`
-    delete from pgboss.job_common
+    delete from pgboss_platform.job_common
      where name = 'kernel.invite-send' and data->>'tenantId' in
        (select id::text from public.tenants where slug like 'inv-%')`;
   await adminSql`
@@ -204,7 +204,7 @@ async function cleanup(): Promise<void> {
   await adminSql`delete from auth.users where lower(email) like '%@invite.test'`;
   if (createdDomainIds.length > 0) {
     await adminSql`
-      delete from pgboss.job_common
+      delete from pgboss_platform.job_common
        where name = 'kernel.domain-verify' and singleton_key in ${adminSql(createdDomainIds)}`;
   }
 }

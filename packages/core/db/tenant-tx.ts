@@ -21,7 +21,7 @@ export type Tx = PgTransaction<
  *
  * 09.2-03 (D-538): the transaction opens on the project REGISTERED for `ctx.tenantId` and on no other. The
  * project is resolved from the tenant id argument through the registry, never from ambient context, and the
- * transaction carries its project (`projectOfTx`) so a later step (plan 09's `enqueueInTx`) can find the
+ * transaction carries its project and lane (`projectOfTx`) so `enqueueInTx` (plan 09) can find the
  * database it belongs to. A tenant with no binding fails closed (`ProjectUnboundError`); nothing falls back
  * to project 0. For every tenant bound to project 0 (all of them today) the connection is the same
  * process-wide pool as before.
@@ -33,7 +33,7 @@ export async function withTenantTx<T>(
   const project = await resolveProject(ctx.tenantId);
   return withHandle(project, (handle) =>
     handle.db.transaction(async (tx) => {
-      projectOfTx.set(tx, handle);
+      projectOfTx.set(tx, { handle, lane: 'tenant' });
       const claims = JSON.stringify({
         sub: ctx.userId,
         role: 'authenticated',

@@ -87,8 +87,9 @@ const ROLE = 'set local role service_role';
 describe('withAdminTx(target, fn)', () => {
   it('{ tenantId } opens on the project registered for that tenant and issues set local role service_role', async () => {
     const h = harness();
-    const used = await h.lanes.withAdminTx({ tenantId: 'tenant-a' }, async (tx) =>
-      projectOfTx.get(tx),
+    const used = await h.lanes.withAdminTx(
+      { tenantId: 'tenant-a' },
+      async (tx) => projectOfTx.get(tx)?.handle,
     );
     expect(used).toBe(h.handles.pa);
     expect(h.resolveProject).toHaveBeenCalledWith('tenant-a');
@@ -101,18 +102,21 @@ describe('withAdminTx(target, fn)', () => {
     const h = harness();
     const a = await h.lanes.withAdminTx(
       { tenantId: 'tenant-a' },
-      async (tx) => projectOfTx.get(tx)?.projectId,
+      async (tx) => projectOfTx.get(tx)?.handle.projectId,
     );
     const b = await h.lanes.withAdminTx(
       { tenantId: 'tenant-b' },
-      async (tx) => projectOfTx.get(tx)?.projectId,
+      async (tx) => projectOfTx.get(tx)?.handle.projectId,
     );
     expect([a, b]).toEqual(['pa', 'pb']);
   });
 
   it('{ projectId } opens on that project without resolving any tenant', async () => {
     const h = harness();
-    const used = await h.lanes.withAdminTx({ projectId: 'pb' }, async (tx) => projectOfTx.get(tx));
+    const used = await h.lanes.withAdminTx(
+      { projectId: 'pb' },
+      async (tx) => projectOfTx.get(tx)?.handle,
+    );
     expect(used).toBe(h.handles.pb);
     expect(h.resolveProjectById).toHaveBeenCalledWith('pb');
     expect(h.resolveProject).not.toHaveBeenCalled();
@@ -121,8 +125,9 @@ describe('withAdminTx(target, fn)', () => {
 
   it('a tenant bound to project 0 runs on the central handle', async () => {
     const h = harness();
-    const used = await h.lanes.withAdminTx({ tenantId: 'tenant-0' }, async (tx) =>
-      projectOfTx.get(tx),
+    const used = await h.lanes.withAdminTx(
+      { tenantId: 'tenant-0' },
+      async (tx) => projectOfTx.get(tx)?.handle,
     );
     expect(used).toBe(h.central);
   });
@@ -168,7 +173,7 @@ describe('withAdminTx(target, fn)', () => {
 describe('the legacy withAdminTx(fn) and withPlatformTx(fn)', () => {
   it('the function form means project 0, under service_role, registered in projectOfTx', async () => {
     const h = harness();
-    const used = await h.lanes.withAdminTx(async (tx) => projectOfTx.get(tx));
+    const used = await h.lanes.withAdminTx(async (tx) => projectOfTx.get(tx)?.handle);
     expect(used).toBe(h.central);
     expect(h.central.statements).toEqual([ROLE]);
     expect(h.resolveProject).not.toHaveBeenCalled();
@@ -177,15 +182,24 @@ describe('the legacy withAdminTx(fn) and withPlatformTx(fn)', () => {
 
   it('withPlatformTx opens the central project under service_role and registers it', async () => {
     const h = harness();
-    const used = await h.lanes.withPlatformTx(async (tx) => projectOfTx.get(tx));
+    const used = await h.lanes.withPlatformTx(async (tx) => projectOfTx.get(tx)?.handle);
     expect(used).toBe(h.central);
     expect(h.central.statements).toEqual([ROLE]);
+  });
+
+  it('each lane records the lane that opened the transaction (09.2-09: the enqueue scope guard reads it)', async () => {
+    const h = harness();
+    expect(await h.lanes.withAdminTx(async (tx) => projectOfTx.get(tx)?.lane)).toBe('admin');
+    expect(
+      await h.lanes.withAdminTx({ tenantId: 'tenant-a' }, async (tx) => projectOfTx.get(tx)?.lane),
+    ).toBe('admin');
+    expect(await h.lanes.withPlatformTx(async (tx) => projectOfTx.get(tx)?.lane)).toBe('platform');
   });
 
   it('the platform lane alone needs only the central handle', async () => {
     const central = fakeHandle('p0', 'central');
     const lane = createPlatformLane({ centralHandle: () => central });
-    expect(await lane.withPlatformTx(async (tx) => projectOfTx.get(tx))).toBe(central);
+    expect(await lane.withPlatformTx(async (tx) => projectOfTx.get(tx)?.handle)).toBe(central);
   });
 
   it('a throwing callback rejects with its own error and the lanes keep working', async () => {

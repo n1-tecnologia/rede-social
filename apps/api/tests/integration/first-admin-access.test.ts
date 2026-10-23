@@ -200,12 +200,12 @@ async function throwawayInvited(name: string): Promise<Invited> {
 
 async function sweep(): Promise<void> {
   await adminSql`
-    delete from pgboss.job_common
+    delete from pgboss_platform.job_common
      where name = 'kernel.invite-send' and data->>'tenantId' in
        (select id::text from public.tenants where slug like ${`${PREFIX}-%`})`;
   if (createdDomainIds.length > 0) {
     await adminSql`
-      delete from pgboss.job_common
+      delete from pgboss_platform.job_common
        where name = 'kernel.domain-verify' and singleton_key in ${adminSql(createdDomainIds)}`;
   }
   await adminSql`

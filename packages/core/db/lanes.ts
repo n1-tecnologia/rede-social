@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { ProjectRecord } from '../server/tenancy/project-registry';
 import type { LaneTarget } from './lane-target';
-import { projectOfTx } from './project-handle';
+import { projectOfTx, type TxLane } from './project-handle';
 import type { ProjectHandle } from './project-pools';
 import type { Tx } from './tenant-tx';
 
@@ -11,8 +11,9 @@ import type { Tx } from './tenant-tx';
  * no socket. It is not exported from the package: a module cannot reach it.
  *
  * Every lane runs `set local role service_role` on the handle of the project it resolved, and registers the
- * transaction in `projectOfTx` so a later step can find the database the transaction belongs to. Nothing is
- * ambient: the project comes from the target the caller passed.
+ * transaction in `projectOfTx` (with the lane that opened it, 09.2-09) so a later step can find the database
+ * the transaction belongs to and which kind of queue it may write to. Nothing is ambient: the project comes
+ * from the target the caller passed.
  */
 
 export type PlatformLaneDeps = {
@@ -33,11 +34,11 @@ export type LaneDeps = PlatformLaneDeps & {
 
 type TxFn<T> = (tx: Tx) => Promise<T>;
 
-/** `set local role service_role` on `handle`, registering the transaction with its project. */
-function runOn<T>(handle: ProjectHandle, fn: TxFn<T>): Promise<T> {
+/** `set local role service_role` on `handle`, registering the transaction with its project and its lane. */
+function runOn<T>(handle: ProjectHandle, lane: TxLane, fn: TxFn<T>): Promise<T> {
   return handle.db.transaction(async (tx) => {
     await tx.execute(sql`set local role service_role`);
-    projectOfTx.set(tx, handle);
+    projectOfTx.set(tx, { handle, lane });
     return fn(tx);
   });
 }
@@ -46,7 +47,7 @@ export function createPlatformLane(deps: PlatformLaneDeps) {
   return {
     /** A transaction on the CENTRAL project under `service_role`, for the registry and the host mirror. */
     withPlatformTx<T>(fn: TxFn<T>): Promise<T> {
-      return runOn(deps.centralHandle(), fn);
+      return runOn(deps.centralHandle(), 'platform', fn);
     },
   };
 }
@@ -74,7 +75,7 @@ export function createLanes(deps: LaneDeps) {
   function withAdminTx<T>(target: LaneTarget, fn: TxFn<T>): Promise<T>;
   function withAdminTx<T>(fn: TxFn<T>): Promise<T>;
   async function withAdminTx<T>(first: LaneTarget | TxFn<T>, second?: TxFn<T>): Promise<T> {
-    if (typeof first === 'function') return runOn(deps.centralHandle(), first);
+    if (typeof first === 'function') return runOn(deps.centralHandle(), 'admin', first);
     if (typeof second !== 'function')
       throw new TypeError('withAdminTx requires a transaction function');
     const target = targetOf(first);
@@ -83,7 +84,7 @@ export function createLanes(deps: LaneDeps) {
         ? await deps.resolveProject(target.tenantId)
         : await deps.resolveProjectById(target.projectId);
     if (!project) throw deps.unbound();
-    return deps.withHandle(project, (handle) => runOn(handle, second));
+    return deps.withHandle(project, (handle) => runOn(handle, 'admin', second));
   }
 
   return { withAdminTx, withPlatformTx: platform.withPlatformTx };

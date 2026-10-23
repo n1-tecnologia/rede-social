@@ -26,9 +26,10 @@ import { logFor, type PlatformActor, sendPendingInvites } from './invites';
 export const INVITE_SEND_QUEUE = 'kernel.invite-send';
 
 // Registered at import, the `domains/index.ts` contract for `kernel.domain-verify`: `domains.ts`
-// imports this file at module top, so the API's lazy `startedBoss()` creates the queue before the
-// first `send` from a "Verificar agora"; the worker creates it from its explicit job list.
-registerJobQueues([INVITE_SEND_QUEUE]);
+// imports this file at module top, so the API's lazy sender creates the queue before the first `send`
+// from a "Verificar agora"; the worker creates it from its explicit job list. A PLATFORM queue (09.2-09,
+// D-546): it lives in `pgboss_platform` of the central project and is enqueued from `withPlatformTx`.
+registerJobQueues([INVITE_SEND_QUEUE], 'platform');
 
 /**
  * Seconds between the allow-list PATCH and the first send attempt: the Supabase Auth config
@@ -103,11 +104,15 @@ export function classifyInviteSendError(error: unknown): { retry: boolean; lastE
 export type ScheduleInviteSendsResult = { scheduled: number; reason?: 'no_verified_primary' };
 
 /**
- * Enqueues one `kernel.invite-send` job per `pending` invite of the tenant, in ONE tenant-lane transaction
- * after a platform-lane read of the verified primary (the same predicate as `sendPendingInvites`: without a verified primary there is
- * no origin for the link, so nothing is scheduled and the documented `invite.deferred` line is
- * logged). A `null` job id is the `short` policy dropping a duplicate of a job still waiting — not
- * counted. `opts.delayS` overrides the adapter default (tests prove the delay reaches pg-boss).
+ * Enqueues one `kernel.invite-send` job per `pending` invite of the tenant (09.2-06, 09.2-09). Three steps,
+ * three transactions, never nested: the verified primary is a central fact (a domain, D-537), read through
+ * the platform lane; the pending invites are the tenant's, read in the tenant's own lane; the jobs are
+ * PLATFORM-scope (they carry the tenant and invite ids and are worked by the control plane's queue), so they
+ * are enqueued from the platform lane. The jobs carry ids only and the sender re-reads the invite, so an invite
+ * that changes between the steps is simply `not_pending` when the job runs. Without a verified primary there is
+ * no origin for the link, so nothing is scheduled and the documented `invite.deferred` line is logged. A `null`
+ * job id is the `short` policy dropping a duplicate of a job still waiting — not counted. `opts.delayS`
+ * overrides the adapter default (tests prove the delay reaches pg-boss).
  */
 export async function scheduleInviteSends(
   tenantId: string,
@@ -117,9 +122,6 @@ export async function scheduleInviteSends(
   const log = logFor(actor, 'platform.invites');
   const delayS = opts?.delayS ?? inviteSendDelaySeconds(authAllowList.name);
 
-  // The verified primary is a central fact (a domain, D-537): read through the platform lane first, in a
-  // transaction of its own. The invites are the tenant's: read and enqueued in the tenant's lane. Never
-  // nested (two databases, two transactions, 09.2-06).
   const hosts = await withPlatformTx((tx) =>
     tx
       .select({ id: tenantDomains.id })
@@ -133,26 +135,30 @@ export async function scheduleInviteSends(
       )
       .limit(1),
   );
-  const result = hosts[0]
-    ? await withAdminTx({ tenantId }, async (tx) => {
-        const pending = await tx
-          .select({ id: tenantInvites.id })
-          .from(tenantInvites)
-          .where(and(eq(tenantInvites.tenantId, tenantId), eq(tenantInvites.status, 'pending')))
-          .orderBy(asc(tenantInvites.createdAt));
-        let scheduled = 0;
-        for (const invite of pending) {
-          const jobId = await enqueueInTx(
-            tx,
-            INVITE_SEND_QUEUE,
-            { tenantId, inviteId: invite.id } satisfies InviteSendPayload,
-            inviteSendJobOptions(invite.id, delayS),
-          );
-          if (jobId !== null) scheduled += 1;
-        }
-        return { inviteIds: pending.map((invite) => invite.id), scheduled };
-      })
-    : null;
+  let result: { inviteIds: string[]; scheduled: number } | null = null;
+  if (hosts[0]) {
+    const pending = await withAdminTx({ tenantId }, (tx) =>
+      tx
+        .select({ id: tenantInvites.id })
+        .from(tenantInvites)
+        .where(and(eq(tenantInvites.tenantId, tenantId), eq(tenantInvites.status, 'pending')))
+        .orderBy(asc(tenantInvites.createdAt)),
+    );
+    const scheduled = await withPlatformTx(async (tx) => {
+      let count = 0;
+      for (const invite of pending) {
+        const jobId = await enqueueInTx(
+          tx,
+          INVITE_SEND_QUEUE,
+          { tenantId, inviteId: invite.id } satisfies InviteSendPayload,
+          inviteSendJobOptions(invite.id, delayS),
+        );
+        if (jobId !== null) count += 1;
+      }
+      return count;
+    });
+    result = { inviteIds: pending.map((invite) => invite.id), scheduled };
+  }
 
   if (!result) {
     log.info(

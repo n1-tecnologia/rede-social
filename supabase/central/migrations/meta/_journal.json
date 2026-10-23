@@ -15,6 +15,13 @@
       "when": 1792704114623,
       "tag": "20261022212154_platform_registry_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792716945178,
+      "tag": "20261023005545_pgboss_platform_schema",
+      "breakpoints": true
     }
   ]
 }

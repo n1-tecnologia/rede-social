@@ -56,7 +56,7 @@ export const authAllowList: AuthAllowList =
 // `apps/api/src/modules/registry.ts` (which lists MODULE queues only, MOD-02). Every enqueue path
 // (`platform/domains.ts`) imports this barrel at module top, so the API's lazy `startedBoss()`
 // always knows the queue before the first `send`; the worker creates it from its explicit job list.
-registerJobQueues([DOMAIN_VERIFY_QUEUE]);
+registerJobQueues([DOMAIN_VERIFY_QUEUE], 'platform');
 
 export type {
   AuthAllowList,

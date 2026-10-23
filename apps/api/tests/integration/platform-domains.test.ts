@@ -4,8 +4,8 @@ import {
   tenantDomainsListSchema,
 } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
-import { withTenantTx } from '@rede-social/core/db/tenant-tx';
-import type { RequestContext } from '@rede-social/core/server/auth/context';
+// biome-ignore lint/style/noRestrictedImports: the platform queue is enqueued from the platform lane
+import { withPlatformTx } from '@rede-social/core/db/platform-tx';
 import { localAllowListEntries } from '@rede-social/core/server/domains/auth-allow-list';
 import { fakeDomainProviderStats } from '@rede-social/core/server/domains/fake';
 import { DOMAIN_VERIFY_QUEUE } from '@rede-social/core/server/domains/types';
@@ -69,8 +69,6 @@ const inviteJobsFor = async (tenantId: string, inviteId: string) =>
 
 let superAdmin = '';
 const createdDomainIds: string[] = [];
-/** A seeded tenant-lane context, only to prove the duplicate-key drop through `enqueueInTx` (as jobs.test.ts does). */
-let laneCtx: RequestContext;
 /** Rows shared across the part-2 describes (populated by the tracer and the poller describes). */
 const shared = { tenantA: '', hostA: '', domainA: '', adminA: '', tenantC: '', domainC: '' };
 
@@ -120,7 +118,7 @@ async function tenantDetail(id: string) {
 /** Removes every `pd-…` tenant, its memberships and the auth users this file invited. */
 async function cleanup(): Promise<void> {
   await adminSql`
-    delete from pgboss.job_common
+    delete from pgboss_platform.job_common
      where name = 'kernel.invite-send' and data->>'tenantId' in
        (select id::text from public.tenants where slug like 'pd-%')`;
   await adminSql`
@@ -130,7 +128,7 @@ async function cleanup(): Promise<void> {
   await adminSql`delete from auth.users where lower(email) like 'admin-pd-%@rede-social-test.local'`;
   if (createdDomainIds.length > 0) {
     await adminSql`
-      delete from pgboss.job_common
+      delete from pgboss_platform.job_common
        where name = 'kernel.domain-verify' and singleton_key in ${adminSql(createdDomainIds)}`;
   }
 }
@@ -141,19 +139,6 @@ beforeAll(async () => {
   }
   await cleanup();
   superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
-
-  const [row] = await adminSql<{ tenant_id: string; user_id: string }[]>`
-    select m.tenant_id, m.user_id from public.memberships m
-      join public.tenants t on t.id = m.tenant_id
-     where t.slug = 'rede-demo' and m.role = 'admin_tenant' limit 1`;
-  if (!row) throw new Error('seed tenant rede-demo has no admin (run pnpm db:seed)');
-  laneCtx = {
-    userId: row.user_id,
-    tenantId: row.tenant_id,
-    role: 'admin_tenant',
-    requestId: 'platform-domains-test',
-    events: [],
-  };
 });
 
 afterAll(async () => {
@@ -227,7 +212,7 @@ describe('tracer — attach, verify, resolve, invite scheduled (D-34/D-36)', () 
     expect(fakeDomainProviderStats().addDomain).toBe(statsBefore.addDomain + 1);
 
     const jobs = await adminSql<{ state: string; start_after: string; singleton_key: string }[]>`
-      select state, start_after, singleton_key from pgboss.job_common
+      select state, start_after, singleton_key from pgboss_platform.job_common
        where name = 'kernel.domain-verify' and singleton_key = ${domainId}`;
     expect(jobs).toHaveLength(1);
     expect(jobs[0]?.state).toBe('created');
@@ -300,7 +285,7 @@ describe('tracer — attach, verify, resolve, invite scheduled (D-34/D-36)', () 
 
 const jobRows = (domainId: string) =>
   adminSql<{ state: string; start_after: string }[]>`
-    select state, start_after from pgboss.job_common
+    select state, start_after from pgboss_platform.job_common
      where name = 'kernel.domain-verify' and singleton_key = ${domainId}`;
 
 const domainRow = async (domainId: string) => {
@@ -345,7 +330,8 @@ describe('poller — kernel.domain-verify cadence, deadline, expiry and restart 
       590_000,
     );
 
-    const duplicate = await withTenantTx(laneCtx, (tx) =>
+    // A platform queue is enqueued from the platform lane (09.2-09, D-546).
+    const duplicate = await withPlatformTx((tx) =>
       enqueueInTx(
         tx,
         DOMAIN_VERIFY_QUEUE,
@@ -400,7 +386,7 @@ describe('poller — kernel.domain-verify cadence, deadline, expiry and restart 
 
   it('9. restart reopens the deadline, re-arms a fresh job and runs one check (still pending); restart on a non-expired host is 409 { reason: "not_expired" }', async () => {
     // The worker would have consumed the attach job by now; mimic that so the fresh job is observable.
-    await adminSql`update pgboss.job_common set state = 'completed'
+    await adminSql`update pgboss_platform.job_common set state = 'completed'
                    where name = 'kernel.domain-verify' and singleton_key = ${domainId}`;
 
     const res = await platform(`/tenants/${tenantId}/domains/${domainId}/restart`, {
@@ -675,7 +661,7 @@ describe('adjacency and concurrency — a second tenant (TENANT-07 edge ledger)'
 
 /** Mimics the worker consuming every job of the host, so a re-arm is observable as a NEW created row. */
 const completeJobsOf = (domainId: string) =>
-  adminSql`update pgboss.job_common set state = 'completed'
+  adminSql`update pgboss_platform.job_common set state = 'completed'
             where name = 'kernel.domain-verify' and singleton_key = ${domainId}`;
 
 const createdJobsOf = async (domainId: string) =>

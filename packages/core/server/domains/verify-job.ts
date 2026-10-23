@@ -27,6 +27,7 @@ const payloadSchema = z.object({ domainId: z.uuid() });
 
 export const domainVerifyJob: JobDefinition<DomainVerifyPayload> = {
   name: DOMAIN_VERIFY_QUEUE,
+  scope: 'platform',
   handler: async (payload) => {
     const parsed = payloadSchema.safeParse(payload);
     if (!parsed.success) {

@@ -346,17 +346,17 @@ describe('resendInvite: the recovery and re-invite links come from the tenant pr
 });
 
 describe("kernel.invite-send: the verified host is central, the invites are the tenant's", () => {
-  it('scheduleInviteSends reads the host in the platform lane, then enqueues inside the tenant lane of { tenantId }', async () => {
+  it('scheduleInviteSends reads the host in the platform lane, the invites in the tenant lane of { tenantId }, then enqueues the platform queue from the platform lane', async () => {
     h.rows = {
       'select:tenant_domains': [{ id: 'domain-1' }],
       'select:tenant_invites': [{ id: INVITE_ID }],
     };
     const result = await scheduleInviteSends(TENANT_B, actor, { delayS: 0 });
     expect(result).toEqual({ scheduled: 1 });
-    expect(trail()).toEqual(['open:platform', 'open:tenant:B']);
+    expect(trail()).toEqual(['open:platform', 'open:tenant:B', 'open:platform']);
     expect(h.enqueued).toHaveLength(1);
     expect(h.enqueued[0]?.name).toBe('kernel.invite-send');
-    expect((h.enqueued[0]?.tx as { lane: string } | undefined)?.lane).toBe('tenant:B');
+    expect((h.enqueued[0]?.tx as { lane: string } | undefined)?.lane).toBe('platform');
     expect(h.maxDepth).toBe(1);
   });
 

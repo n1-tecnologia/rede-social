@@ -306,7 +306,7 @@ export type InviteSendJobRow = {
 export async function inviteSendJobsOf(tenantId: string): Promise<InviteSendJobRow[]> {
   return adminSql<InviteSendJobRow[]>`
     select id, state::text as state, singleton_key, start_after, retry_limit, retry_backoff, data
-      from pgboss.job_common
+      from pgboss_platform.job_common
      where name = 'kernel.invite-send' and data->>'tenantId' = ${tenantId}
      order by created_on`;
 }
@@ -324,7 +324,7 @@ export async function runInviteSendJobs(tenantId: string): Promise<number> {
   for (const row of rows) {
     await inviteSendJob.handler(row.data as { tenantId: string; inviteId: string });
     await adminSql`
-      update pgboss.job_common set state = 'completed', completed_on = now()
+      update pgboss_platform.job_common set state = 'completed', completed_on = now()
        where name = 'kernel.invite-send' and id = ${row.id}::uuid`;
   }
   return rows.length;

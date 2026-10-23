@@ -1,35 +1,90 @@
 import { sql } from 'drizzle-orm';
 import { fromDrizzle, PgBoss } from 'pg-boss';
+import { type TxLane, txContextOf } from '../../db/project-handle';
+import type { ProjectHandle } from '../../db/project-pools';
 import type { Tx } from '../../db/tenant-tx';
 import { env } from '../env';
+import { open } from '../secrets/sealed';
+import type { ProjectRecord } from '../tenancy/project-registry';
 import { bossConnectionString } from './connection';
 
 /**
- * pg-boss wiring (discretion item resolved in 01-07).
+ * pg-boss wiring (discretion item resolved in 01-07; per-project since 09.2-09, D-546).
  *
- * Three properties this file exists to guarantee:
- *  1. **The runtime never issues DDL.** `migrate: false` + a fixed `schema: 'pgboss'`: the schema is
- *     a reviewed Supabase migration (`*_pgboss_schema.sql`), so `api_user` needs DML only
- *     (threat T-07-05). A pg-boss upgrade means a NEW custom migration, never `migrate: true`.
- *  2. **The API never touches pg-boss at boot.** The API-side instance is created and started
- *     lazily by the first `enqueueInTx`; `apps/api/src/main.ts` reaches nothing here in the
- *     `ROLE=api` branch, which is what keeps `GET /v1/health` answering with an unreachable
- *     database (the 01-09 DB-free-boot property).
+ * Properties this file exists to guarantee:
+ *  1. **The runtime never issues DDL.** `migrate: false` + a schema chosen from a closed set
+ *     (`pgboss` for tenant queues, `pgboss_platform` for platform queues): both are reviewed migrations
+ *     (`*_pgboss_schema.sql` in the tenant set, `*_pgboss_platform_schema.sql` in the central set), so
+ *     `api_user` needs DML only (threat T-07-05). A pg-boss upgrade means a NEW custom migration for both,
+ *     never `migrate: true`.
+ *  2. **The API never touches pg-boss at boot.** A sender is created and started lazily by the first
+ *     `enqueueInTx` that needs it; `apps/api/src/main.ts` reaches nothing here in the `ROLE=api` branch,
+ *     which is what keeps `GET /v1/health` answering with an unreachable database (the 01-09 DB-free-boot
+ *     property).
  *  3. **Enqueue is transactional.** `fromDrizzle(tx, sql)` routes the insert through the caller's
  *     Drizzle transaction, so a rolled-back write takes its job with it.
+ *  4. **A job lands in the database of the transaction that enqueued it (D-546, T-09.2-40).** pg-boss
+ *     `send` reads the queue's definition from the SENDER's own database before inserting through the
+ *     caller's transaction (pg-boss 12.31.0 `manager.js`), so one process-wide sender is only correct while
+ *     there is one database. The sender is therefore chosen from the transaction itself: every lane records
+ *     `{ handle, lane }` in `projectOfTx`, and `senderFor` keeps one lazily started sender per
+ *     project, credential version and scope.
+ *  5. **A queue has a scope, and a lane may only write to the queues of its scope.** Platform queues
+ *     (domain checks, invite sends, the mirror reconcile, later the project bootstrap and health) carry
+ *     control-plane facts and live in `pgboss_platform` of the central project; they are enqueued from
+ *     `withPlatformTx` and never from a tenant transaction. Tenant queues live in `pgboss` of the project
+ *     that owns the tenant, enqueued from a tenant or admin transaction. A mismatch throws before any insert.
  */
 
-/** Queue names the app tier owns, registered by `apps/api/src/modules/registry.ts` (MOD-02: the kernel never imports a module). */
-const queueNames = new Set<string>();
+/** Where a queue lives: the control plane (`pgboss_platform`, central) or a tenant's own project (`pgboss`). */
+export type JobScope = 'platform' | 'tenant';
 
-/** Idempotent: adding the same queue name twice is a no-op. Called at registry import time. */
-export function registerJobQueues(names: readonly string[]): void {
-  for (const name of names) queueNames.add(name);
+const SCHEMA_OF_SCOPE: Record<JobScope, string> = {
+  platform: 'pgboss_platform',
+  tenant: 'pgboss',
+};
+
+/** Queue names the app tier owns, registered by `apps/api/src/modules/registry.ts` (MOD-02: the kernel never imports a module). */
+const queueScopes = new Map<string, JobScope>();
+
+/**
+ * Idempotent: adding the same queue name twice with the same scope is a no-op; registering it again with
+ * ANOTHER scope throws, because a queue cannot live in both schemas without one of them losing its jobs.
+ * Called at registry import time.
+ */
+export function registerJobQueues(names: readonly string[], scope: JobScope = 'tenant'): void {
+  for (const name of names) {
+    const known = queueScopes.get(name);
+    if (known !== undefined && known !== scope) {
+      throw new Error(`queue ${name} is already registered as a ${known} queue`);
+    }
+    queueScopes.set(name, scope);
+  }
 }
 
-/** Every queue name registered so far — the worker creates one queue per entry at start. */
-export function registeredJobQueues(): string[] {
-  return [...queueNames];
+/** Every queue name registered so far (of one scope when given) — a worker creates one queue per entry at start. */
+export function registeredJobQueues(scope?: JobScope): string[] {
+  return [...queueScopes]
+    .filter(([, queueScope]) => scope === undefined || queueScope === scope)
+    .map(([name]) => name);
+}
+
+/** The scope a queue was registered with, `undefined` for a name nobody registered. */
+export function queueScope(name: string): JobScope | undefined {
+  return queueScopes.get(name);
+}
+
+/**
+ * The guard (T-09.2-40): a platform queue needs a platform transaction, a tenant queue a tenant or an admin
+ * one. Throws before anything is written; an unregistered name is refused too, because no worker creates it.
+ */
+export function assertQueueScope(name: string, lane: TxLane): JobScope {
+  const scope = queueScopes.get(name);
+  if (scope === undefined) throw new Error(`enqueueInTx: ${name} is not a registered queue`);
+  const allowed =
+    scope === 'platform' ? lane === 'platform' : lane === 'tenant' || lane === 'admin';
+  if (!allowed) throw new Error(`enqueueInTx: ${name} is a ${scope} queue`);
+  return scope;
 }
 
 export type CreateBossOptions = {
@@ -37,16 +92,19 @@ export type CreateBossOptions = {
   max?: number;
   supervise?: boolean;
   schedule?: boolean;
+  /** Which schema family the instance works: `tenant` (default, `pgboss`) or `platform` (`pgboss_platform`). */
+  scope?: JobScope;
 };
 
 /**
  * The ONE constructor. `schema`/`migrate` are not options on purpose — every instance in this
- * codebase must agree on them or the "runtime issues no DDL" property is only true by accident.
+ * codebase must agree on them or the "runtime issues no DDL" property is only true by accident. The scope
+ * picks the schema from a closed set; no option accepts a schema string.
  */
 export function createBoss(opts: CreateBossOptions): PgBoss {
   return new PgBoss({
     connectionString: bossConnectionString(opts.connectionString),
-    schema: 'pgboss',
+    schema: SCHEMA_OF_SCOPE[opts.scope ?? 'tenant'],
     migrate: false,
     max: opts.max ?? 2,
     supervise: opts.supervise ?? true,
@@ -91,41 +149,99 @@ export async function createQueues(boss: PgBoss, names: readonly string[]): Prom
   }
 }
 
-let apiBoss: PgBoss | null = null;
-let apiBossStarted: Promise<PgBoss> | null = null;
+type Sender = { projectId: string; scope: JobScope; started: Promise<PgBoss> };
+
+/** One sender per `${projectId}:${credentialVersion}:${scope}`, created on first use and kept until `stopBoss`. */
+const senders = new Map<string, Sender>();
 
 /**
- * The API-side process singleton: no supervision, no scheduling, one connection — it only ever
- * writes jobs; the `ROLE=worker` process does the polling and maintenance.
+ * The URL a sender connects with: the transaction-pooler URL of the project (project 0: `DATABASE_URL`, a
+ * tenant project: its sealed `database_url_tx`). The registry and the sealed-value helper are imported on
+ * demand so that loading this file (every module imports it) pulls neither the registry nor the keyring.
  */
-export function getBoss(): PgBoss {
-  apiBoss ??= createBoss({
-    connectionString: env.DATABASE_URL,
-    max: 1,
-    supervise: false,
-    schedule: false,
-  });
-  return apiBoss;
+async function senderConnectionString(handle: ProjectHandle): Promise<string> {
+  if (handle.kind === 'central') return env.DATABASE_URL;
+  const { resolveProjectById } = await import('../tenancy/project-registry');
+  const project = await resolveProjectById(handle.projectId);
+  if (!project?.databaseUrlTxSealed) {
+    throw new Error('enqueueInTx: the project has no transaction url');
+  }
+  return open(project.databaseUrlTxSealed, `${project.id}:database_url_tx`);
 }
 
 /**
- * Started on FIRST enqueue, never at boot. The queue creation here is the API's half of the
- * concurrency story: `createQueues` is idempotent, so the worker doing the same at its own start
- * (and a second worker instance booting simultaneously) is safe, and `send` can never target a
- * queue that does not exist yet.
+ * The SESSION-mode URL a supervised polling instance connects with (the worker holds long-lived listeners):
+ * `centralUrl` for the project whose credentials live in the environment (project 0), the sealed
+ * `database_url_session` of any other. Throws when a tenant project has none, so the supervisor backs that
+ * project off instead of polling through the wrong database. Never logged.
  */
-async function startedBoss(): Promise<PgBoss> {
-  apiBossStarted ??= (async () => {
-    const boss = getBoss();
-    await boss.start();
-    await createQueues(boss, [...queueNames]);
+export function sessionConnectionString(
+  project: Pick<ProjectRecord, 'id' | 'credentialSource' | 'databaseUrlSessionSealed'>,
+  centralUrl: string,
+): string {
+  if (project.credentialSource === 'env') return centralUrl;
+  if (!project.databaseUrlSessionSealed) {
+    throw new Error('the project has no session url');
+  }
+  return open(project.databaseUrlSessionSealed, `${project.id}:database_url_session`);
+}
+
+/**
+ * The API-side sender of one project and scope: no supervision, no scheduling, one connection — it only ever
+ * reads the queue cache and lets the caller's transaction insert; the worker's supervisor does the polling and
+ * the maintenance. Started on FIRST use, never at boot, with the queues of its scope created idempotently
+ * (`createQueues` is `INSERT … ON CONFLICT DO NOTHING`, so a worker doing the same at its own start, or a
+ * second instance, converges on the same rows), so `send` can never target a queue that does not exist yet.
+ * A new credential version of a project replaces its older senders (the old connection is closed behind it).
+ * A sender whose start failed is forgotten, so the next enqueue tries again instead of replaying the failure.
+ */
+export function senderFor(handle: ProjectHandle, scope: JobScope): Promise<PgBoss> {
+  const key = `${handle.projectId}:${handle.credentialVersion}:${scope}`;
+  const known = senders.get(key);
+  if (known) return known.started;
+
+  for (const [otherKey, other] of senders) {
+    if (other.projectId === handle.projectId && other.scope === scope) {
+      senders.delete(otherKey);
+      void other.started.then(
+        (boss) => boss.stop({ graceful: false }),
+        () => undefined,
+      );
+    }
+  }
+
+  const started = (async () => {
+    const boss = createBoss({
+      connectionString: await senderConnectionString(handle),
+      max: 1,
+      supervise: false,
+      schedule: false,
+      scope,
+    });
+    // An idle error on the sender's socket must not crash the process; the next `send` surfaces a real failure.
+    boss.on('error', () => undefined);
+    try {
+      await boss.start();
+      await createQueues(boss, registeredJobQueues(scope));
+    } catch (error) {
+      await boss.stop({ graceful: false }).catch(() => undefined);
+      throw error;
+    }
     return boss;
   })();
-  return apiBossStarted;
+  const sender: Sender = { projectId: handle.projectId, scope, started };
+  senders.set(key, sender);
+  started.catch(() => {
+    if (senders.get(key) === sender) senders.delete(key);
+  });
+  return started;
 }
 
 /**
- * Enqueue INSIDE the caller's transaction (A17: `fromDrizzle(tx, sql)`, verified against
+ * Enqueue INSIDE the caller's transaction, into the database that owns it (D-546): the project and the lane
+ * come from the transaction (`txContextOf`), the sender from the project (`senderFor`), and the queue's scope
+ * must match the lane (`assertQueueScope`) — a platform queue from a platform transaction, a tenant queue from
+ * a tenant or admin one — or nothing is written. (A17: `fromDrizzle(tx, sql)`, verified against
  * pg-boss 12.31.0 `dist/adapters/drizzle.d.ts`). Use `singletonKey` for natural idempotency —
  * the example module keys on the item id (threat T-07-04). That idempotency exists ONLY because
  * every queue is created with `QUEUE_POLICY = 'short'` (see `createQueues`): the second enqueue of
@@ -174,7 +290,10 @@ export async function enqueueInTx(
     retentionSeconds?: number;
   } = {},
 ): Promise<string | null> {
-  const boss = await startedBoss();
+  const context = txContextOf(tx);
+  if (!context) throw new Error('enqueueInTx: transaction was not opened by a lane');
+  const scope = assertQueueScope(name, context.lane);
+  const boss = await senderFor(context.handle, scope);
   const rows = (await tx.execute(sql`select current_role as role`)) as unknown as {
     role: string;
   }[];
@@ -189,11 +308,19 @@ export async function enqueueInTx(
   return id;
 }
 
-/** Stops the lazily-started API instance (tests and graceful shutdown). */
+/** The keys (`${projectId}:${credentialVersion}:${scope}`) of the senders alive right now. For tests and diagnostics. */
+export function activeSenders(): string[] {
+  return [...senders.keys()];
+}
+
+/** Stops every lazily-started sender (tests and graceful shutdown). */
 export async function stopBoss(): Promise<void> {
-  if (!apiBossStarted) return;
-  const boss = await apiBossStarted;
-  apiBossStarted = null;
-  apiBoss = null;
-  await boss.stop({ graceful: false });
+  const all = [...senders.values()];
+  senders.clear();
+  await Promise.allSettled(
+    all.map(async (sender) => {
+      const boss = await sender.started;
+      await boss.stop({ graceful: false });
+    }),
+  );
 }

@@ -45,6 +45,7 @@ async function recordOutcome(tenantId: string, lastError: string | null): Promis
 
 export const inviteSendJob: JobDefinition<InviteSendPayload> = {
   name: INVITE_SEND_QUEUE,
+  scope: 'platform',
   handler: async (payload) => {
     const parsed = inviteSendPayloadSchema.safeParse(payload);
     if (!parsed.success) {
