@@ -119,11 +119,15 @@ export async function claimStep(
   return row ? { attempt: row.attempt } : null;
 }
 
+/**
+ * `started_at` is stamped by the DATABASE clock (`claimStep`), so `finished_at` is too: a process clock that
+ * differs by a millisecond would put step N's end after step N+1's start (found in plans 11 and 14).
+ */
 async function finishStep(projectId: string, step: BootstrapStep): Promise<void> {
   await withPlatformTx((tx) =>
     tx
       .update(projectBootstrapSteps)
-      .set({ status: 'done', finishedAt: new Date(), reasonCode: null })
+      .set({ status: 'done', finishedAt: sql`now()`, reasonCode: null })
       .where(
         and(eq(projectBootstrapSteps.projectId, projectId), eq(projectBootstrapSteps.step, step)),
       ),
@@ -138,7 +142,7 @@ async function failStep(
   await withPlatformTx((tx) =>
     tx
       .update(projectBootstrapSteps)
-      .set({ status: 'failed', finishedAt: new Date(), reasonCode: reason })
+      .set({ status: 'failed', finishedAt: sql`now()`, reasonCode: reason })
       .where(
         and(eq(projectBootstrapSteps.projectId, projectId), eq(projectBootstrapSteps.step, step)),
       ),

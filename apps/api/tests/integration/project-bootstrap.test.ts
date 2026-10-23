@@ -623,6 +623,31 @@ describe('adjacency and order (P32, P34)', () => {
     }
   }, 180_000);
 
+  it('finished_at and started_at come from the same clock: a process clock an hour behind never ends a step before it started', async () => {
+    resetB();
+    const f = await fixture({ failAt: { step: 'roles', times: 1 } });
+    // Only `Date` is faked (postgres.js and the fake provider keep real timers). Before the fix `finishStep` and
+    // `failStep` stamped `new Date()`, so `finished_at` landed an hour before the database's `started_at`.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() - 3_600_000);
+    try {
+      expect(await runBootstrap(f.projectId, f.deps)).toMatchObject({
+        status: 'failed',
+        step: 'roles',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    const rows = await listSteps(f.projectId);
+    // 'verify' ended `done` (finishStep) and 'roles' ended `failed` (failStep): both are checked.
+    expect(rows.slice(0, 2).map((row) => row.status)).toEqual(['done', 'failed']);
+    for (const row of rows.slice(0, 2)) {
+      expect((row.finishedAt as Date).getTime()).toBeGreaterThanOrEqual(
+        (row.startedAt as Date).getTime(),
+      );
+    }
+  }, 120_000);
+
   it('listSteps returns the fixed order whatever the insertion order and the timestamps', async () => {
     const f = await fixture();
     await adminSql.begin(async (tx) => {
