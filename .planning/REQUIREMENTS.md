@@ -331,7 +331,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-11**: A `super_admin` session verifies only against the central project and is refused on a tenant host; a tenant member session is refused on the platform host. *(D-23, D-538)*
 - [ ] **DBT-12**: A payment-gateway delivery on the unchanged URL `/v1/webhooks/{provider}/{integrationId}` resolves its tenant and project through a central integration index before any tenant database is opened, then records and enqueues inside that tenant's database. *(D-488, D-538)*
 - [ ] **DBT-13**: A Mux delivery resolves its tenant from the `passthrough` the platform wrote at upload creation (`<tenantId>:<assetId>`), with a documented fallback for assets created before the move. *(D-488, D-538)*
-- [ ] **DBT-14**: Each project's Send Email Hook URL carries an opaque hook reference and verifies with that project's own secret; the legacy URL keeps serving project 0. *(D-37, D-542)*
+- [x] **DBT-14**: Each project's Send Email Hook URL carries an opaque hook reference and verifies with that project's own secret; the legacy URL keeps serving project 0. *(D-37, D-542)*
 - [ ] **DBT-15**: Public sign-up by slug on a generic host resolves the project through the central mirror and the web client is told that project's public URL and publishable key. *(D-537, D-538)*
 - [x] **DBT-16**: A gateway product id (provider + external id) maps to exactly one tenant, enforced by a central unique index written before the tenant row (reserve-then-write). *(D-488)*
 - [ ] **DBT-17**: The bootstrap is an ordered list of idempotent steps (verify project, roles, tenant schema, Data API closure and Auth/Storage/Realtime configuration, bucket check, tenant row and modules, invite schedule), each persisting status and a reason code. *(D-542)*
@@ -359,7 +359,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-39**: The web tier receives the tenant project's own public URL and publishable key from the by-host answer for `@supabase/ssr`, the Realtime client, CSP, manifest icons and the TUS endpoint, and clears stale `sb-*` cookies of another project. *(D-537, D-541)*
 - [ ] **DBT-40**: Credentials are write-only in the panel; "Substituir credenciais" validates new values against the project before replacing anything. *(D-539)*
 - [ ] **DBT-41**: The existing two-tenant isolation suites (pgTAP and `isolation.test.ts`) stay green and `tenant_id` plus RLS remain on every table. *(D-540)*
-- [ ] **DBT-42**: The allow-list adapter and reconcile job act per project (host to tenant to project), serialised per project. *(D-538, D-542)*
+- [x] **DBT-42**: The allow-list adapter and reconcile job act per project (host to tenant to project), serialised per project. *(D-538, D-542)*
 - [ ] **DBT-43**: PROJECT.md is amended (tenant projects are physically separate and Pro; `tenant_id` + RLS stay as defense in depth; Free-plan line superseded). *(D-540, D-543)*
 - [ ] **DBT-44**: The API image carries both migration sets, `supabase/roles.sql` and a deterministic manifest, so the running API knows the schema version it requires without a database call; a production boot whose manifest is missing or lists no tenant file stops with a named error. *(D-544, D-545, D-547)*
 - [x] **DBT-45**: A tenant's project binding is cached for 15 seconds and the last good binding is served for at most 10 minutes, only when the central read fails; past that window, or with no last-good value, resolution fails closed with `TENANT_UNAVAILABLE`. *(D-537, D-538)*
@@ -715,7 +715,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-11 | Phase 09.2 (plans 08, 25) | Pending |
 | DBT-12 | Phase 09.2 (plans 10, 25) | Pending |
 | DBT-13 | Phase 09.2 (plans 10, 25) | Pending |
-| DBT-14 | Phase 09.2 (plan 11) | Pending |
+| DBT-14 | Phase 09.2 (plan 11) | Complete |
 | DBT-15 | Phase 09.2 (plans 11, 25) | Pending |
 | DBT-16 | Phase 09.2 (plan 10) | Complete |
 | DBT-17 | Phase 09.2 (plans 13, 25) | Pending |
@@ -743,7 +743,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-39 | Phase 09.2 (plans 17, 25) | Pending |
 | DBT-40 | Phase 09.2 (plans 14, 19) | Pending |
 | DBT-41 | Phase 09.2 (plan 28) | Pending |
-| DBT-42 | Phase 09.2 (plan 11) | Pending |
+| DBT-42 | Phase 09.2 (plan 11) | Complete |
 | DBT-43 | Phase 09.2 (plan 24) | Pending |
 | DBT-44 | Phase 09.2 (plans 15, 25) | Pending |
 | DBT-45 | Phase 09.2 (plan 03) | Complete |
