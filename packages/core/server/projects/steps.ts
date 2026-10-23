@@ -200,7 +200,14 @@ function apiUrlOf(provider: ProjectProvider, ref: string): string {
   return target?.apiUrl ?? `https://${ref}.supabase.co`;
 }
 
-function connectionUrl(user: string, password: string, host: string, port: number, db: string) {
+/** `postgres://user:password@host:port/db`, each part percent-encoded; shared with the panel's access code. */
+export function connectionUrl(
+  user: string,
+  password: string,
+  host: string,
+  port: number,
+  db: string,
+) {
   return `postgres://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(db)}`;
 }
 

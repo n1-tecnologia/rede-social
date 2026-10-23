@@ -74,6 +74,11 @@ export interface FakeProjectProvider extends ProjectProvider {
   arm(failAt: FakeFailAt): void;
   /** The target a ref maps to, for a test that needs its URLs. */
   targetOf(ref: string): FakeTarget | undefined;
+  /**
+   * 09.2-14 (D-541): makes the key reveal answer `forbidden 403` (a platform token that cannot read the
+   * project's secrets), so the manual-access path of the pre-check and of the create call is testable.
+   */
+  forbidReveal(on: boolean): void;
 }
 
 export type FakeProjectProviderOptions = {
@@ -81,6 +86,8 @@ export type FakeProjectProviderOptions = {
   /** The number of `describe` polls of a ref that answer `COMING_UP` before it is healthy. */
   comingUpPolls?: number;
   failAt?: FakeFailAt | FakeFailAt[];
+  /** Start with the key reveal answering `forbidden 403` (see `forbidReveal`). */
+  revealForbidden?: boolean;
   orgSlug?: string;
   /** Only used to name generated signing keys; default is a fixed-seed sequence, so runs are repeatable. */
   random?: () => number;
@@ -117,6 +124,8 @@ export function createFakeProjectProvider(
   const random = options.random ?? seededRandom();
   const now = options.now ?? (() => performance.now());
   const sleep = options.sleep ?? (async () => undefined);
+
+  let revealForbidden = options.revealForbidden ?? false;
 
   const polls = new Map<string, number>();
   const configs = new Map<string, ConfigBody>();
@@ -260,17 +269,22 @@ export function createFakeProjectProvider(
     },
     arm,
     targetOf: (ref) => targets.get(ref),
+    forbidReveal(on) {
+      revealForbidden = on;
+    },
     describe,
     health,
     waitUntilHealthy: (ref, waitOptions) =>
       waitUntilHealthy({ describe, health, now, sleep }, ref, waitOptions),
     async listApiKeys(ref) {
       enter(ref, 'verify');
+      if (revealForbidden) throw new ProjectProviderError('forbidden', 403);
       const { publishable, service } = keysOf(ref);
       return [publishable, service];
     },
     async ensureKeys(ref) {
       enter(ref, 'verify');
+      if (revealForbidden) throw new ProjectProviderError('forbidden', 403);
       bump(calls.ensureKeys, ref);
       return keysOf(ref);
     },

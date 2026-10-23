@@ -94,7 +94,7 @@ const createRouteDef = createRoute({
       'The provisioned tenant: branding with derived colors, one module row per key, the pending first-admin invite',
     ),
     400: envelope(
-      'VALIDATION_FAILED — field issues, { slug: "taken" } for a duplicate slug, or { adminEmail: "in_use" } when the e-mail already has an identity on the platform',
+      'VALIDATION_FAILED — field issues, { slug: "taken" } for a duplicate slug, { adminEmail: "in_use" } when the e-mail already has an identity on the platform, { projectRef: invalid | required | not_found | paused | not_empty | in_use | unchecked } for the Supabase project, { databasePassword | serviceKey | publishableKey: "required" } when the project needs manual access, or { access: "invalid" } when a supplied value does not work against the project',
     ),
     403: envelope('Not a platform admin'),
   },
@@ -274,11 +274,20 @@ export const tenantsRoutes = tenants
     const { userId, requestId } = c.get('platformCtx');
     const body = c.req.valid('json');
 
-    const { id } = await createTenant(body, { userId, logger: c.get('logger') });
-    const detail = await detailOr404(id);
+    // The body carries `projectRef` and the write-only `access` block (09.2-14, D-541): both go to the kernel,
+    // which seals the access and never echoes it; only ids reach the log below.
+    const { id, projectId } = await createTenant(body, { userId, logger: c.get('logger') });
+    const detail = await detailOr404(id, true);
 
     c.get('logger').info(
-      { event: 'platform.tenants.create', userId, requestId, tenantId: id, slug: body.slug },
+      {
+        event: 'platform.tenants.create',
+        userId,
+        requestId,
+        tenantId: id,
+        projectId,
+        slug: body.slug,
+      },
       'platform write',
     );
     c.header('Cache-Control', 'no-store');

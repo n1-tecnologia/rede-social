@@ -154,10 +154,20 @@ async function failStep(
  * payload `{ projectId }` only. Both happen in one platform transaction: a rolled-back call leaves no job.
  */
 export async function startBootstrap(projectId: string): Promise<{ jobId: string | null }> {
-  return withPlatformTx(async (tx) => {
-    await insertRows(tx, projectId);
-    return { jobId: await enqueueBootstrap(tx, projectId) };
-  });
+  return withPlatformTx((tx) => startBootstrapInTx(tx, projectId));
+}
+
+/**
+ * `startBootstrap` inside the caller's PLATFORM transaction (09.2-14, D-541): the create call registers the
+ * project, binds the tenant, stores the first-admin input and queues the job in ONE transaction, so a rolled
+ * back create leaves neither a tenant nor a job behind. Same rows, same payload, same singleton.
+ */
+export async function startBootstrapInTx(
+  tx: Tx,
+  projectId: string,
+): Promise<{ jobId: string | null }> {
+  await insertRows(tx, projectId);
+  return { jobId: await enqueueBootstrap(tx, projectId) };
 }
 
 /**

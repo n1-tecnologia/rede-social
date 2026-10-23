@@ -118,10 +118,16 @@ export const platform: readonly AdminLaneEntry[] = [
     'packages/core/server/platform/tenants.ts',
     [
       [
-        'createTenant',
+        'createOnDefaultProject',
         'S',
         7,
         'step 2 of the saga (the first-admin invite); step 1 is a platform transaction',
+      ],
+      [
+        'createOnProject',
+        'S',
+        7,
+        'a ready shared project (09.2-14): the invite is created inline after the platform transaction; a project being prepared gets it from the bootstrap job',
       ],
       [
         'getTenantDetail',

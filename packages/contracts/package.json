@@ -18,6 +18,7 @@
     "./moderation": "./src/moderation.ts",
     "./payments": "./src/payments.ts",
     "./profiles": "./src/profiles.ts",
+    "./projects": "./src/projects.ts",
     "./realtime": "./src/realtime.ts",
     "./rules": "./src/rules.ts",
     "./text": "./src/text.ts"

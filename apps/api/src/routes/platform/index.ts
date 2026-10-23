@@ -6,6 +6,7 @@ import {
 import { platformDefaultHook } from '../../http/openapi';
 import { brandingRoutes } from './branding';
 import { domainsRoutes } from './domains';
+import { projectsRoutes } from './projects';
 import { tenantsRoutes } from './tenants';
 
 /**
@@ -19,7 +20,7 @@ import { tenantsRoutes } from './tenants';
  * with 403 TENANT_HOST_MISMATCH.
  *
  * Sub-routers are chained with `.route('/', …)` so `AppType` carries every platform route for
- * `hc<AppType>()`: `tenantsRoutes` (02-05), `domainsRoutes` (02-09), `brandingRoutes` (02-13).
+ * `hc<AppType>()`: `tenantsRoutes` (02-05), `domainsRoutes` (02-09), `brandingRoutes` (02-13), `projectsRoutes` (09.2-14).
  */
 const platform = new OpenAPIHono<PlatformEnv>({ defaultHook: platformDefaultHook });
 
@@ -28,4 +29,5 @@ platform.use('*', requireSuperAdmin());
 export const platformRoutes = platform
   .route('/', tenantsRoutes)
   .route('/', domainsRoutes)
-  .route('/', brandingRoutes);
+  .route('/', brandingRoutes)
+  .route('/', projectsRoutes);

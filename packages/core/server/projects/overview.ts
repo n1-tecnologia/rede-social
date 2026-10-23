@@ -1,0 +1,171 @@
+import {
+  BOOTSTRAP_REASON_CODES,
+  BOOTSTRAP_STEP_KEYS,
+  BOOTSTRAP_STEP_STATUSES,
+  type BootstrapReasonCode,
+  type BootstrapStepRow,
+  type DatabaseOverview,
+  databaseState,
+  type TenantDatabaseSummary,
+} from '@rede-social/contracts/projects';
+import { and, asc, eq, ne, sql } from 'drizzle-orm';
+import {
+  projectBootstrapSteps,
+  projectHealth,
+  projectSchemaState,
+  projects,
+  tenantProjects,
+} from '../../db/central';
+import { withPlatformTx } from '../../db/platform-tx';
+import { getRequiredTenantSchema } from '../migrations/required';
+import { isTenantMoving } from './moving';
+
+/**
+ * The Banco tab's data (09.2-14, D-537, D-542, D-543, D-545, UI-D-536..539): everything the panel shows about a
+ * tenant's database, built from the registry in ONE platform-lane read and the move fact after it (never
+ * nested lanes). The answer is the strict `databaseOverviewSchema`: it carries the ref, the plan as
+ * information, the steps with their reason CODES, the applied-of-required schema counts, the last check, and
+ * whether the registry HOLDS credentials. It has no field that could carry a credential, and nothing here reads
+ * a sealed column's value: only whether it is present.
+ */
+
+const REASONS: ReadonlySet<string> = new Set(BOOTSTRAP_REASON_CODES);
+const STEP_KEYS: ReadonlySet<string> = new Set(BOOTSTRAP_STEP_KEYS);
+const STEP_STATUSES: ReadonlySet<string> = new Set(BOOTSTRAP_STEP_STATUSES);
+
+/** A stored reason becomes a catalog code; anything outside the catalog is `unknown`, never shown as text. */
+export function reasonCodeOf(value: string | null | undefined): BootstrapReasonCode | null {
+  if (value === null || value === undefined) return null;
+  return REASONS.has(value) ? (value as BootstrapReasonCode) : 'unknown';
+}
+
+export type DatabaseFacts = {
+  /** `platform.projects.state`. */
+  projectState: string;
+  /** The bootstrap step rows of the project (only `status` is read). */
+  steps: ReadonlyArray<{ status: string }>;
+  /** `platform.project_health.status`, `null` when the project was never checked. */
+  healthStatus: string | null;
+  /** `platform.project_schema_state.applied_count`, `null` when there is no row. */
+  appliedCount: number | null;
+  moving: boolean;
+  /** Test seam: the required count; default is the image's (`null` until plan 15 loads the manifest). */
+  required?: number | null;
+};
+
+/**
+ * The state and the schema counts of one project, from the facts the registry holds. The ONE place the
+ * overview and the tenant list turn rows into a state, so the Banco tab, the list pill and the header cannot
+ * disagree (`databaseState` is the derivation; this only gathers its inputs).
+ */
+export function summarizeDatabase(facts: DatabaseFacts): TenantDatabaseSummary {
+  const schema = {
+    applied: facts.appliedCount ?? null,
+    required:
+      facts.required === undefined ? (getRequiredTenantSchema()?.count ?? null) : facts.required,
+  };
+  const state = databaseState({
+    projectState: facts.projectState,
+    steps: facts.steps,
+    health: facts.healthStatus,
+    schema,
+    moving: facts.moving,
+  });
+  return { state, schema };
+}
+
+const iso = (date: Date | null | undefined): string | null => (date ? date.toISOString() : null);
+
+export async function getDatabaseOverview(tenantId: string): Promise<DatabaseOverview | null> {
+  const facts = await withPlatformTx(async (tx) => {
+    const [project] = await tx
+      .select({
+        id: projects.id,
+        ref: projects.ref,
+        plan: projects.plan,
+        state: projects.state,
+        credentialSource: projects.credentialSource,
+        updatedAt: projects.updatedAt,
+        hasSealed: sql<boolean>`(
+          ${projects.databaseUrlTxSealed} is not null
+          or ${projects.databaseUrlSessionSealed} is not null
+          or ${projects.ddlUrlSealed} is not null
+          or ${projects.serviceKeySealed} is not null)`,
+        healthStatus: projectHealth.status,
+        healthDetail: projectHealth.detailCode,
+        healthCheckedAt: projectHealth.checkedAt,
+        appliedCount: projectSchemaState.appliedCount,
+      })
+      .from(tenantProjects)
+      .innerJoin(projects, eq(projects.id, tenantProjects.projectId))
+      .leftJoin(projectHealth, eq(projectHealth.projectId, projects.id))
+      .leftJoin(projectSchemaState, eq(projectSchemaState.projectId, projects.id))
+      .where(eq(tenantProjects.tenantId, tenantId))
+      .limit(1);
+    if (!project) return null;
+
+    const steps = await tx
+      .select()
+      .from(projectBootstrapSteps)
+      .where(eq(projectBootstrapSteps.projectId, project.id))
+      .orderBy(asc(projectBootstrapSteps.step));
+
+    const [others] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(tenantProjects)
+      .where(and(eq(tenantProjects.projectId, project.id), ne(tenantProjects.tenantId, tenantId)));
+
+    return { project, steps, others: others?.n ?? 0 };
+  });
+  if (!facts) return null;
+
+  const moving = await isTenantMoving(tenantId);
+  const { project } = facts;
+
+  const rows: BootstrapStepRow[] = facts.steps
+    .filter((row) => STEP_KEYS.has(row.step) && STEP_STATUSES.has(row.status))
+    .map((row) => ({
+      step: row.step as BootstrapStepRow['step'],
+      status: row.status as BootstrapStepRow['status'],
+      attempt: row.attempt,
+      reasonCode: reasonCodeOf(row.reasonCode),
+      startedAt: iso(row.startedAt),
+      finishedAt: iso(row.finishedAt),
+    }))
+    .sort((a, b) => BOOTSTRAP_STEP_KEYS.indexOf(a.step) - BOOTSTRAP_STEP_KEYS.indexOf(b.step));
+
+  const { state, schema } = summarizeDatabase({
+    projectState: project.state,
+    steps: rows,
+    healthStatus: project.healthStatus,
+    appliedCount: project.appliedCount,
+    moving,
+  });
+
+  const failed = rows.find((row) => row.status === 'failed');
+  const lastErrorCode: BootstrapReasonCode | null =
+    failed?.reasonCode ??
+    (project.healthStatus === 'unreachable'
+      ? (reasonCodeOf(project.healthDetail) ?? 'unreachable')
+      : null);
+
+  const invite = rows.find((row) => row.step === 'invite');
+
+  return {
+    ref: project.ref,
+    plan: project.plan,
+    state,
+    steps: rows,
+    schema,
+    lastCheckedAt: iso(project.healthCheckedAt),
+    preparationFinishedAt: invite?.status === 'done' ? invite.finishedAt : null,
+    credentials: {
+      // Project 0's credentials live in the environment, not in the registry: they are held all the same.
+      held: project.credentialSource === 'env' || project.hasSealed === true,
+      updatedAt: iso(project.updatedAt),
+    },
+    otherTenants: facts.others,
+    moving,
+    lastErrorCode,
+  };
+}

@@ -14,3 +14,4 @@ export * from './invites';
 export * from './legal';
 export * from './modules';
 export * from './platform';
+export * from './projects';
