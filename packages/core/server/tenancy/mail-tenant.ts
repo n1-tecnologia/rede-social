@@ -6,7 +6,8 @@ import { tenantDomains, tenantInvites, tenants } from '../../db/schema';
 import { isLinkActionType } from '../mail/templates/neutral';
 import { isPlatformAdmin } from '../platform/platform-admins';
 import { membershipInTenant, membershipsOfUser } from './membership';
-import { listReadyProjects } from './project-registry';
+import { ProjectUnboundError } from './project-errors';
+import { listReadyProjects, resolveProject } from './project-registry';
 
 /**
  * Which brand an auth e-mail carries — by the community the flow STARTED ON (D-315), recovery
@@ -61,7 +62,10 @@ export type MailTenantResolution =
       hostMatched: boolean;
     }
   | { kind: 'neutral'; via: 'platform_admin' | 'no_tenant' }
-  | { kind: 'refused'; reason: 'redirect_host_not_member' | 'redirect_host_not_tenant' };
+  | {
+      kind: 'refused';
+      reason: 'redirect_host_not_member' | 'redirect_host_not_tenant' | 'wrong_project';
+    };
 
 /**
  * The pre-read facts `decideMailTenant` decides from. `belongsSomewhere` = at least one non-deleted
@@ -208,6 +212,19 @@ async function hasOpenInviteAnywhere(email: string | null, userId: string): Prom
   return false;
 }
 
+/** Is `tenantId` bound to `projectId`? An unbound tenant belongs to no project; an unreachable registry throws. */
+export async function tenantBelongsToProject(
+  tenantId: string,
+  projectId: string,
+): Promise<boolean> {
+  try {
+    return (await resolveProject(tenantId)).id === projectId;
+  } catch (error) {
+    if (error instanceof ProjectUnboundError) return false;
+    throw error;
+  }
+}
+
 /** ONE platform-lane select: the tenant mirror plus its verified primary host (for the logo URL). */
 async function tenantBrandRow(tenantId: string) {
   return withPlatformTx(async (tx) => {
@@ -244,8 +261,19 @@ export async function resolveMailTenant(input: {
   email: string | null;
   redirectTo: string;
   actionType: string;
+  /**
+   * 09.2-11 (DBT-14): the project whose own Send Email Hook delivered this call. When set, a `redirect_to`
+   * host that belongs to a tenant of ANOTHER project is refused `wrong_project` before any fact is read
+   * from that other project's database. Absent on the legacy hook route.
+   */
+  projectId?: string;
 }): Promise<MailTenantResolution> {
   const hostTenantId = await verifiedTenantIdForHost(redirectHostOf(input.redirectTo));
+  if (input.projectId !== undefined && hostTenantId !== null) {
+    if (!(await tenantBelongsToProject(hostTenantId, input.projectId))) {
+      return { kind: 'refused', reason: 'wrong_project' };
+    }
+  }
   const facts: MailTenantFacts = {
     isPlatformAdmin: await isPlatformAdmin(input.userId),
     hostTenantId,

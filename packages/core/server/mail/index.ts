@@ -10,7 +10,9 @@ import {
   type MailTenantResolution,
   redirectHostOf,
   resolveMailTenant,
+  tenantBelongsToProject,
 } from '../tenancy/mail-tenant';
+import type { ProjectRecord } from '../tenancy/project-registry';
 import { buildActionLink, HookPayloadError, type SendEmailHookPayload } from './hook-schema';
 import { localTransport } from './local';
 import { resendTransport } from './resend';
@@ -173,6 +175,12 @@ export type SendAuthMailInput = {
   webhookId: string;
   /** The request's child logger, so `mail.*` lines carry `requestId`. */
   logger?: Logger;
+  /**
+   * 09.2-11 (DBT-14): the project whose own hook route delivered the call. The tenant the mail would be
+   * branded for must belong to it, else `MailRefusedError('wrong_project')` and nothing is sent. Absent on
+   * the legacy route, which serves project 0 exactly as before.
+   */
+  project?: Pick<ProjectRecord, 'id'>;
 };
 
 export type SendAuthMailResult = {
@@ -204,8 +212,17 @@ export async function sendAuthMail(input: SendAuthMailInput): Promise<SendAuthMa
     email: to,
     redirectTo: payload.email_data.redirect_to,
     actionType,
+    ...(input.project ? { projectId: input.project.id } : {}),
   });
   if (resolution.kind === 'refused') throw new MailRefusedError(resolution.reason);
+  if (
+    input.project &&
+    resolution.kind === 'tenant' &&
+    !(await tenantBelongsToProject(resolution.tenantId, input.project.id))
+  ) {
+    // A brand drawn from another project's tenant (a hostless row 6a/8 pick): nothing is rendered.
+    throw new MailRefusedError('wrong_project');
+  }
 
   const brand = toMailBrand(resolution, redirectHost);
   const tenantId = resolution.kind === 'tenant' ? resolution.tenantId : null;

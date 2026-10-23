@@ -8,6 +8,13 @@ import { createMiddleware } from 'hono/factory';
  */
 export { rootLogger };
 
+/**
+ * 09.2-11 (T-09.2-51): a project's Send Email Hook reference is a path segment that selects a project; it is
+ * not a secret, but nothing needs it in a log line, so the access log writes the route pattern instead.
+ */
+const HOOK_REF_PATH = /^(\/v1\/hooks\/auth\/send-email\/)[^/]*/;
+export const loggedPath = (path: string): string => path.replace(HOOK_REF_PATH, '$1:hookRef');
+
 /** Child logger per request; later plans add `tenantId`/`userId` once `requireAuth` has run. */
 export const logger = () =>
   createMiddleware<AppEnv>(async (c, next) => {
@@ -19,7 +26,7 @@ export const logger = () =>
     log.info(
       {
         method: c.req.method,
-        path: c.req.path,
+        path: loggedPath(c.req.path),
         status: c.res.status,
         durationMs: Math.round(performance.now() - started),
       },

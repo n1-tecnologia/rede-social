@@ -35,7 +35,8 @@ export type ProjectRecord = {
   hookSecretSealed: string | null;
 };
 
-const columns = {
+/** The `platform.projects` select list as a `ProjectRecord`; shared by the by-handle lookups (hook reference). */
+export const projectColumns = {
   id: projects.id,
   ref: projects.ref,
   isCentral: projects.isCentral,
@@ -54,6 +55,7 @@ const columns = {
   hookRef: projects.hookRef,
   hookSecretSealed: projects.hookSecretSealed,
 } as const;
+const columns = projectColumns;
 
 /** A binding is served without reading the registry for this long (D-537). */
 export const BINDING_TTL_MS = 15_000;

@@ -1,5 +1,5 @@
 import { Webhook } from 'standardwebhooks';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildActionLink,
   HookPayloadError,
@@ -7,6 +7,30 @@ import {
   parseHookSecrets,
   verifyHookRequest,
 } from '../server/mail/hook-schema';
+import {
+  HOOK_PROJECT_CACHE_MAX,
+  HOOK_PROJECT_NEGATIVE_TTL_MS,
+  HOOK_PROJECT_TTL_MS,
+  hookProjectCacheSize,
+  hookSecretsFor,
+  invalidateHookProject,
+  resolveHookProject,
+} from '../server/mail/project-hook';
+
+// The registry read and the sealed-secret opener are replaced: this file never touches a database or a keyring.
+const registry = vi.hoisted(() => ({
+  reads: [] as string[],
+  answer: null as { id: string; hookRef: string } | null,
+}));
+vi.mock('../db/platform-tx', () => ({
+  withPlatformTx: async () => {
+    registry.reads.push('read');
+    return registry.answer ? [registry.answer] : [];
+  },
+}));
+vi.mock('../server/secrets/sealed', () => ({
+  open: (sealed: string, aad: string) => `v1,whsec_${sealed}|${aad.length}`,
+}));
 
 /**
  * Send Email Hook signature and payload handling (T-02-21, T-02-26). Test payloads are signed with
@@ -112,5 +136,91 @@ describe('buildActionLink', () => {
 
   it('refuses a redirect_to that is not a URL', () => {
     expect(() => buildActionLink('not a url', 'abc', 'recovery')).toThrow(HookPayloadError);
+  });
+});
+
+const REF = 'AbCdEfGhIjKlMnOpQrSt_-';
+
+describe('resolveHookProject (09.2-11, DBT-14, P26/P27)', () => {
+  beforeEach(() => {
+    registry.reads.length = 0;
+    registry.answer = null;
+    invalidateHookProject();
+  });
+
+  it('answers null WITHOUT a query for anything that cannot be a reference', async () => {
+    for (const bad of [
+      undefined,
+      '',
+      REF.slice(0, 21),
+      `${REF}x`,
+      `${REF.slice(0, 21)}=`,
+      `${REF.slice(0, 21)}.`,
+      ' '.repeat(22),
+      'é'.repeat(22),
+    ]) {
+      expect(await resolveHookProject(bad)).toBeNull();
+    }
+    expect(registry.reads).toHaveLength(0);
+  });
+
+  it('reads the registry once for a well-formed reference and remembers a hit', async () => {
+    registry.answer = { id: 'p1', hookRef: REF };
+    expect((await resolveHookProject(REF))?.id).toBe('p1');
+    expect((await resolveHookProject(REF))?.id).toBe('p1');
+    expect(registry.reads).toHaveLength(1);
+  });
+
+  it('remembers a miss too, and a later row is found after the cache is dropped', async () => {
+    expect(await resolveHookProject(REF)).toBeNull();
+    expect(await resolveHookProject(REF)).toBeNull();
+    expect(registry.reads).toHaveLength(1);
+    registry.answer = { id: 'p1', hookRef: REF };
+    invalidateHookProject(REF);
+    expect((await resolveHookProject(REF))?.id).toBe('p1');
+  });
+
+  it('keeps positive answers for 5 minutes and negative ones for 30 seconds', async () => {
+    expect(HOOK_PROJECT_TTL_MS).toBe(300_000);
+    expect(HOOK_PROJECT_NEGATIVE_TTL_MS).toBe(30_000);
+    vi.useFakeTimers();
+    try {
+      expect(await resolveHookProject(REF)).toBeNull();
+      vi.advanceTimersByTime(HOOK_PROJECT_NEGATIVE_TTL_MS - 1);
+      await resolveHookProject(REF);
+      expect(registry.reads).toHaveLength(1);
+      vi.advanceTimersByTime(2);
+      await resolveHookProject(REF);
+      expect(registry.reads).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is bounded at 1,000 remembered references however many are asked about', async () => {
+    expect(HOOK_PROJECT_CACHE_MAX).toBe(1_000);
+    for (let n = 0; n < HOOK_PROJECT_CACHE_MAX + 50; n += 1) {
+      await resolveHookProject(`ref-${String(n).padStart(18, '0')}`);
+    }
+    expect(hookProjectCacheSize()).toBe(HOOK_PROJECT_CACHE_MAX);
+  });
+});
+
+describe('hookSecretsFor (09.2-11, P27/P28)', () => {
+  it('yields no secret for a project that has none, which verifies nothing', () => {
+    expect(hookSecretsFor({ id: 'p1', hookSecretSealed: null })).toEqual([]);
+    expect(() =>
+      verifyHookRequest(
+        PAYLOAD,
+        sign(SECRET_A, PAYLOAD),
+        hookSecretsFor({ id: 'p1', hookSecretSealed: null }),
+      ),
+    ).toThrow(HookSignatureError);
+  });
+
+  it('opens the sealed column with the project id as part of the AAD and keeps stored order', () => {
+    const secrets = hookSecretsFor({ id: 'p1', hookSecretSealed: 'x' });
+    // The stub opens to `v1,whsec_x|<aad length>`: two entries, the second is `p1:hook_secret`'s length.
+    expect(secrets).toEqual(['x', String('p1:hook_secret'.length)]);
   });
 });
