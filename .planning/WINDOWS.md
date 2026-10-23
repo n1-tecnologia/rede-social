@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 78
+open_count: 80
 waived_count: 0
 fixed_count: 58
-total_count: 136
-last_updated: 2026-10-23T01:53:16.459Z
+total_count: 138
+last_updated: 2026-10-23T03:34:21.869Z
 ---
 
 # Broken Windows Ledger
@@ -151,6 +151,8 @@ last_updated: 2026-10-23T01:53:16.459Z
 | 134 | 09.1 | deviation | apps/web/messages/pt-BR/payments.json |  | 09.1-22: toasts.releasedStaysCut is not in the approved Copywriting Contract or sketch 013 (it says a released address stays without access while the gateway has cut it, gap G-09.1-1); UI-SPEC UI-D-518 amended; sketch 013 not redrawn; it awaits the design team like entry 126 | open |  | 2026-10-21T15:46:30.071Z |  |
 | 135 | 09.1 | unrun-verify | apps/web/app/(app)/configuracoes/pagamentos/AccessList.tsx |  | 09.1-22: the info toast for a released address the gateway has cut was proven by component and integration tests only; no browser walk, no Playwright run and no real-device pass (the owner declined local e2e) | open |  | 2026-10-21T15:46:30.193Z |  |
 | 136 | 09.2 | unrun-verify | packages/core/server/projects/steps.ts |  | 09.2-13: the eight bootstrap steps are proven only against the fake provider and the second local database; the real Management API behaviour is hosted proof H2 (plan 25) | open |  | 2026-10-23T01:53:16.459Z |  |
+| 137 | 09.2 | stub | packages/core/server/projects/moving.ts |  | 09.2-14: isTenantMoving and tenantsMoving answer false for every tenant (the overview, the list and the derived state already carry the moving fact); plan 23 replaces both bodies with a read of the move table | open |  | 2026-10-23T03:34:21.799Z |  |
+| 138 | 09.2 | unrun-verify | packages/core/server/projects/access.ts |  | 09.2-14: the pre-check, the credential replacement (the publishable key is offered to GET /storage/v1/bucket, the one route the local gateway enforces; the plan named /auth/v1/settings, which is open locally) and the break-glass reissue (incl. the hook secret PATCH) are proven only against the fake provider and the local stack; the hosted gateway answers are hosted proof H5 (plan 25) | open |  | 2026-10-23T03:34:21.869Z |  |
 
 ````json
 [
@@ -1784,6 +1786,30 @@ last_updated: 2026-10-23T01:53:16.459Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-23T01:53:16.459Z",
+    "resolved_at": null
+  },
+  {
+    "id": 137,
+    "kind": "stub",
+    "phase": "09.2",
+    "file": "packages/core/server/projects/moving.ts",
+    "line": null,
+    "description": "09.2-14: isTenantMoving and tenantsMoving answer false for every tenant (the overview, the list and the derived state already carry the moving fact); plan 23 replaces both bodies with a read of the move table",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T03:34:21.799Z",
+    "resolved_at": null
+  },
+  {
+    "id": 138,
+    "kind": "unrun-verify",
+    "phase": "09.2",
+    "file": "packages/core/server/projects/access.ts",
+    "line": null,
+    "description": "09.2-14: the pre-check, the credential replacement (the publishable key is offered to GET /storage/v1/bucket, the one route the local gateway enforces; the plan named /auth/v1/settings, which is open locally) and the break-glass reissue (incl. the hook secret PATCH) are proven only against the fake provider and the local stack; the hosted gateway answers are hosted proof H5 (plan 25)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T03:34:21.869Z",
     "resolved_at": null
   }
 ]
