@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 17
+current_plan: 15
 status: executing
-stopped_at: Completed 09.2-14-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14 done); next is 09.2-17 (wave 9)
-last_updated: "2026-10-23T03:36:24.650Z"
+stopped_at: Completed 09.2-17-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17 done); next is 09.2-15 (wave 10), then 18
+last_updated: "2026-10-23T03:50:11.568Z"
 last_activity: 2026-10-23
-last_activity_desc: Completed 09.2-14 (panel API: pre-check, create with a project ref in one transaction, database overview, verify, resume, safe credential replacement, break-glass reissue, project health job, database state on the tenant list)
-state_head: 2cde962b436f649d9757c9a32a8c76a5c3758863
+last_activity_desc: "Completed 09.2-17 (web tier: per-host Supabase coordinates for the Auth client, proxy, CSP, icons, Realtime props and upload endpoint; last-good by-host answer; stale session cookie cleanup; generic-host sign-up redirect; Pitfall 12 source guard)"
+state_head: fb81c20890e59d8ea981ceffa5a5bf159de95bb6
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 249
+  completed_plans: 250
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 17
+Current Plan: 15
 Total Plans in Phase: 28
-Plan: 17 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper), 13 bootstrap engine, 10 route indexes for the no-host routes, 11 per-project Send Email Hook, sign-up by slug and allow-list, 14 panel API for a tenant's project (pre-check, create with a ref, overview, verify, resume, credentials, break-glass reissue, health job, database state on the list) done; plans run out of numeric order: the next is 17 (wave 9, web tier), then wave 10)
+Plan: 15 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs (queue scopes, pgboss_platform, worker supervisor, per-project dispatcher and sweeper), 13 bootstrap engine, 10 route indexes for the no-host routes, 11 per-project Send Email Hook, sign-up by slug and allow-list, 14 panel API for a tenant's project (pre-check, create with a ref, overview, verify, resume, credentials, break-glass reissue, health job, database state on the list) and 17 (web tier: coordinates per host for the Auth client, proxy, CSP, icons, Realtime and upload; last-good host answer; stale cookie cleanup; generic-host sign-up redirect) done; plans run out of numeric order: the next is 15 (wave 10), then 18)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-14 (panel API for a tenant's Supabase project; DBT-01, DBT-02 and DBT-47 complete, DBT-21/27/40/50/51/52 wait for the web plans and the hosted proofs)
+Last activity: 2026-10-23 — Completed 09.2-17 (web follows each tenant's own Supabase project; DBT-39 waits for the other plans that declare it and the hosted proofs)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -307,6 +307,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P10 | 45 min | 3 tasks | 43 files |
 | Phase 09.2 P11 | 21 min | 3 tasks | 25 files |
 | Phase 09.2 P14 | 47 min | 3 tasks | 35 files |
+| Phase 09.2 P17 | 30 min | 2 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -1026,6 +1027,7 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-14: the create call with a project ref pre-checks an unknown ref, validates any supplied manual access against the project before sealing it, and registers the project, binds the tenant with pending_invite and queues the bootstrap in ONE platform transaction under a per-ref advisory lock; production refuses a second tenant on a project — The check-and-bind cannot interleave with another create for the same ref (P3), and a rolled back call leaves neither a tenant nor a job; outbound work stays outside the transaction
 - [Phase 09.2]: 09.2-14: replaceCredentials validates every supplied value against the project (the publishable key against GET /storage/v1/bucket, the one route the local gateway enforces) and writes the changed columns, the version and the timestamp in one statement under the project lock with the row read for update; reissueCredentials re-derives keys, passwords and the hook secret from the platform token alone and holds the step rows for update — A typo in a replaced credential must never take a tenant down, two writers must leave one coherent set, and a lost master key must have a recovery that reads nothing stored
 - [Phase 09.2]: 09.2-14: one databaseState derivation (contracts) feeds the overview, the list pill and the SQL of ?banco=problema; platform.project-health sweeps ready projects four at a time and drops the caches only on a state change; a ready project not yet checked reads unchecked, and project_schema_state stays plan 15's to write — The Banco tab, the list and the tenant header cannot disagree about a state; the Management API shares one rate limit and a stale cache would show a paused project as active
+- [Phase 09.2]: 09.2-17: coordinates per host are a pure per-request function of the by-host answer; a half or disallowed project address makes the tenant unavailable and the central project is never substituted; a generic answer never deletes session cookies (a failed lookup of a tenant host must not log members out) — Serving tenant B's sign-in against the central Auth is the single-database behaviour this phase removes; cookie cleanup runs only for positively classified tenant and platform hosts
 
 ### Pending Todos
 
@@ -1135,5 +1137,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-23T03:36:24.427Z
-Stopped at: Completed 09.2-14-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14 done); next is 09.2-17 (wave 9)
+Stopped at: Completed 09.2-17-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17 done); next is 09.2-15 (wave 10), then 18
 Resume file: None
