@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createBoundedTtlCache, isRegistrableHost, normalizeHost } from '../src/hosts';
+import { resolveBranding, toHostBranding } from '../src/branding';
+import { ERROR_CODES } from '../src/errors';
+import {
+  createBoundedTtlCache,
+  HOST_TENANT_STATUSES,
+  hostTenantSchema,
+  isRegistrableHost,
+  normalizeHost,
+} from '../src/hosts';
 
 /** WR-06 (phase-1 review): host caches are keyed by client input, so they must be bounded and shaped. */
 
@@ -76,5 +84,63 @@ describe('createBoundedTtlCache', () => {
 
   it('refuses a non-positive bound', () => {
     expect(() => createBoundedTtlCache(0)).toThrow();
+  });
+});
+
+/**
+ * 09.2-08 (D-542, D-545): the by-host answer says five things about a host, carries the tenant's own project
+ * coordinates only when it has them, and stays strict.
+ */
+describe('hostTenantSchema — host status and the optional project coordinates', () => {
+  const body = {
+    slug: 'rede-demo',
+    displayName: 'Rede Demo',
+    status: 'active',
+    isPrimary: true,
+    primaryHost: 'rede-demo.localhost',
+    branding: toHostBranding(resolveBranding({})),
+  };
+
+  it('pins the closed set of host statuses, in precedence-free declaration order', () => {
+    expect([...HOST_TENANT_STATUSES]).toEqual([
+      'active',
+      'suspended',
+      'preparing',
+      'updating',
+      'unavailable',
+    ]);
+  });
+
+  it('accepts each status and refuses anything else', () => {
+    for (const status of HOST_TENANT_STATUSES) {
+      expect(hostTenantSchema.safeParse({ ...body, status }).success).toBe(true);
+    }
+    for (const status of ['deleted', 'ready', 'paused', '', 'ACTIVE']) {
+      expect(hostTenantSchema.safeParse({ ...body, status }).success).toBe(false);
+    }
+  });
+
+  it('supabaseUrl and publishableKey are optional, valid when present and never empty', () => {
+    expect(hostTenantSchema.safeParse(body).success).toBe(true);
+    expect(
+      hostTenantSchema.safeParse({
+        ...body,
+        supabaseUrl: 'https://abcdefgh.supabase.co',
+        publishableKey: 'sb_publishable_x',
+      }).success,
+    ).toBe(true);
+    expect(hostTenantSchema.safeParse({ ...body, supabaseUrl: 'not a url' }).success).toBe(false);
+    expect(hostTenantSchema.safeParse({ ...body, publishableKey: '' }).success).toBe(false);
+  });
+
+  it('stays strict: an unknown key is a parse failure', () => {
+    expect(hostTenantSchema.safeParse({ ...body, projectId: 'p' }).success).toBe(false);
+    expect(hostTenantSchema.safeParse({ ...body, serviceKey: 'secret' }).success).toBe(false);
+  });
+
+  it('TENANT_PREPARING and TENANT_UPDATING join the error codes next to TENANT_UNAVAILABLE', () => {
+    for (const code of ['TENANT_PREPARING', 'TENANT_UPDATING', 'TENANT_UNAVAILABLE']) {
+      expect(ERROR_CODES).toContain(code);
+    }
   });
 });
