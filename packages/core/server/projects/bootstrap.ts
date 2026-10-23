@@ -16,7 +16,7 @@ import {
   type StepContext,
   type StepDeps,
 } from './steps';
-import type { ProjectProvider } from './types';
+import { type ProjectProvider, ProjectProviderError } from './types';
 
 export { BOOTSTRAP_STEPS, type BootstrapStep };
 
@@ -37,7 +37,9 @@ export { BOOTSTRAP_STEPS, type BootstrapStep };
  *    project's tenants, in the same breath (DBT-19).
  *
  * Credentials never travel through this file: the job payload is `{ projectId }`, the step rows hold keys,
- * numbers and codes, and every log line is built from ids, step keys, attempts and reason codes.
+ * numbers and codes, and every log line is built from ids, step keys, attempts and reason codes. A failed
+ * step's line also names the error's class and, for a provider error, its kind, status and code, never the
+ * message.
  */
 
 const log = moduleLogger('project-bootstrap');
@@ -300,6 +302,32 @@ function stepDeps(deps: BootstrapDeps): StepDeps {
 }
 
 /**
+ * What the `step_failed` line says about the thrown value, so the several causes that end in one reason code
+ * can be told apart. Identifiers only, from a closed set: the class name (the constructor's, never the
+ * instance's own name, which a provider or a bug can overwrite), and for a `ProjectProviderError` its kind,
+ * status and code. The error's message, stack, cause and any response body are never read (D-539, the rule
+ * in `reasonOf`).
+ */
+function failureFields(error: unknown): {
+  errorName: string;
+  kind?: string;
+  status?: number;
+  code?: string;
+} {
+  if (!(error instanceof Error)) return { errorName: typeof error };
+  const constructorName = error.constructor?.name;
+  const errorName =
+    typeof constructorName === 'string' && constructorName !== '' ? constructorName : 'Error';
+  if (!(error instanceof ProjectProviderError)) return { errorName };
+  return {
+    errorName,
+    kind: error.kind,
+    status: error.status,
+    ...(error.code !== undefined ? { code: error.code } : {}),
+  };
+}
+
+/**
  * Drives the project through the steps. Never throws for a step failure (it is recorded and returned), so the
  * job handler stays a thin wrapper. Project 0 (`credential_source = 'env'`) is never bootstrapped and its
  * credentials are never replaced by these steps.
@@ -376,6 +404,7 @@ export async function runBootstrap(
           step,
           attempt: claimed.attempt,
           reason,
+          ...failureFields(error),
         },
         'bootstrap step failed',
       );
