@@ -54,6 +54,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
     exempt:
       'GoTrue Send Email Hook: server-to-server, authenticated by its standard-webhooks signature, no tenant session (send-email-hook.test.ts)',
   },
+  'POST /v1/hooks/auth/send-email/:hookRef': {
+    exempt:
+      "one Supabase project's Send Email Hook (09.2-11): server-to-server, the reference only selects the project and that project's own sealed secret authenticates the standard-webhooks signature; a tenant of another project is refused wrong_project (send-email-hook-b.test.ts)",
+  },
   'POST /v1/webhooks/mux': {
     exempt:
       "video provider webhook: server-to-server, authenticated by the provider's HMAC over the raw body, no tenant session (mux-webhook.test.ts)",
