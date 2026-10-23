@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 6
+current_plan: 8
 status: executing
-stopped_at: Completed 09.2-05-PLAN.md (plans 01, 02, 03, 04, 12, 05 done); next is 09.2-06 (wave 4, then 08)
-last_updated: "2026-10-22T23:55:36.552Z"
+stopped_at: Completed 09.2-06-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06 done); next is 09.2-08 (wave 4)
+last_updated: "2026-10-23T00:14:17.211Z"
 last_activity: 2026-10-22
-last_activity_desc: Completed 09.2-05 (tenant-scoped admin-lane sites of tenancy, payments and media, key-routed Storage, per-project sign-up)
-state_head: ec580e3acb829a737fc4c8954d61fefaab20d4a8
+last_activity_desc: Completed 09.2-06 (platform-lane domains, lane-split invite flow with per-project Auth, lane-aware seed)
+state_head: a58ae2e5d29fe12837cf0d211a1d892fcbc4a866
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 241
+  completed_plans: 242
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 6
+Current Plan: 8
 Total Plans in Phase: 28
-Plan: 06 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites done; wave 4 continues: 06, then 08)
+Plan: 08 of 28 next (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed done; wave 4 continues with 08)
 Status: Ready to execute
-Last activity: 2026-10-22 — Completed 09.2-05 (tenant-scoped admin-lane sites of tenancy, payments and media, key-routed Storage, per-project sign-up)
+Last activity: 2026-10-23 — Completed 09.2-06 (platform-lane domains, lane-split invite flow with per-project Auth, lane-aware seed)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -299,6 +299,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.2 P04 | 22 min | 3 tasks | 23 files |
 | Phase 09.2 P12 | 24min | 3 tasks | 14 files |
 | Phase 09.2 P05 | 22 min | 3 tasks | 23 files |
+| Phase 09.2 P06 | 17 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -996,6 +997,9 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-12: the Management API organisation pin covers every adapter method except describe and health (one cached describe per ref); getPostgrestConfig drops jwt_secret inside the adapter
 - [Phase 09.2]: 09.2-05: applyPaymentEvent (payments/apply.ts) is class N, plan 10 (the job payload is the event id alone, so the tenant is only known after the row is read); only its markFailed step migrated. resolveAsset stays N as planned. — A tenant-less site is re-classed in the inventory with the reason instead of defaulting to project 0 (PR-3, planning decision 2).
 - [Phase 09.2]: 09.2-05: Storage routes by the tenant uuid in the first segment of the object key (bucketFor), refusing a non-uuid segment and a multi-tenant removal batch before any call; signupMember creates and compensates the Auth user through the tenant's project (D-539). — Keeps exported Storage signatures unchanged (planning decision 1) and pairs the Auth user with the membership's project (T-09.2-23, T-09.2-24).
+- [Phase 09.2-06]: P sites leave the admin-lane inventory instead of flipping to migrated: the guard scans withAdminTx( only, so a site on withPlatformTx has no entry — A row for a file with no withAdminTx site is a stale entry; plan 04 did the same for tenant-host.ts
+- [Phase 09.2-06]: Central invite facts (tenant exists, verified primary host) are read in one platform-lane transaction before the tenant transaction and before any Auth call; unknown tenant is 404 before the tenant lane — Keeps the documented 404 and the host-before-Auth order; never nests two lanes
+- [Phase 09.2-06]: arm-event-reminders.ts stays pending (class L, plan 09); the seed writes tenant_modules through the platform lane — The script reads every tenant's events into one pg-boss and needs plan 09's per-project sender; D-537 makes the enabled flags central
 
 ### Pending Todos
 
@@ -1104,6 +1108,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-22T23:55:30.404Z
-Stopped at: Completed 09.2-05-PLAN.md (plans 01, 02, 03, 04, 12, 05 done); next is 09.2-06 (wave 4, then 08)
+Last session: 2026-10-23T00:14:16.988Z
+Stopped at: Completed 09.2-06-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06 done); next is 09.2-08 (wave 4)
 Resume file: None
