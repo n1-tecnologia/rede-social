@@ -323,7 +323,9 @@ describe('the schema gate lets a tenant at or above the required schema through 
     expect(await codeOf(await ask())).toBe('TENANT_UPDATING');
   });
 
-  it('with the gate off (no required schema, as today) a behind row holds nobody out', async () => {
+  it('with the gate off (no required schema) a behind row holds nobody out', async () => {
+    // 09.2-15: the requirement now comes from the repository outside production, so "off" is stated, not assumed.
+    setRequiredTenantSchemaForTests(null);
     await adminSql`
       insert into platform.project_schema_state (project_id, applied_count, applied_head, status)
       values (${b.projectId}::uuid, 1, '20000101000000', 'behind')`;

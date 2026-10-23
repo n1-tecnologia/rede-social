@@ -73,10 +73,11 @@ describe('summarizeDatabase: every UI state from fixture facts', () => {
     });
   });
 
-  it('the image requirement is unknown until the fan-out plan loads it, so nothing is behind', () => {
-    // No `required` given: the kernel asks the image, which answers null today.
+  it('an unknown image requirement (null) means nothing is behind', () => {
+    // 09.2-15: outside production the kernel derives the requirement from the repository, so "unknown" is
+    // stated with `required: null` (a process without a manifest has no other way to say it).
     const { required: _omit, ...withoutRequired } = base;
-    expect(summarizeDatabase({ ...withoutRequired, appliedCount: 1 })).toEqual({
+    expect(summarizeDatabase({ ...withoutRequired, required: null, appliedCount: 1 })).toEqual({
       state: 'ready',
       schema: { applied: 1, required: null },
     });

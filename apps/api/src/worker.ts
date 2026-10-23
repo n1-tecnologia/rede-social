@@ -17,6 +17,10 @@ import { reconcileAuthAllowList } from '@rede-social/core/server/platform/reconc
 import { projectBootstrapJob } from '@rede-social/core/server/projects/bootstrap-job';
 import { armProjectHealth, projectHealthJob } from '@rede-social/core/server/projects/health-job';
 import {
+  armMigrationRetry,
+  migrationRetryJob,
+} from '@rede-social/core/server/projects/migration-retry-job';
+import {
   armDailyTenantDispatch,
   dailyTenantDispatchJob,
 } from '@rede-social/core/server/tenancy/daily-dispatch';
@@ -45,7 +49,7 @@ import { createSupervisor, type SupervisedBoss } from './worker-supervisor';
  * ONE database, so the worker no longer starts one instance: `createSupervisor` (`worker-supervisor.ts`)
  * keeps a PLATFORM instance (`pgboss_platform` of the central project: `kernel.domain-verify`,
  * `kernel.invite-send`, `platform.mirror-reconcile`, `platform.project-bootstrap`,
- * `platform.project-health`) and one TENANT-scope instance per `ready` project
+ * `platform.project-health`, `platform.migration-retry`) and one TENANT-scope instance per `ready` project
  * (the `pgboss` schema of that project's database: the other jobs), reconciled against the registry every
  * 60 s. A tenant job's handler receives `{ projectId }` as its second argument; the daily dispatcher and the
  * orphan sweeper use it, they run once per project. A job's `scope` (default tenant) decides which list it
@@ -105,6 +109,8 @@ export async function startWorker(): Promise<void> {
     projectBootstrapJob,
     // 09.2-14 (D-543): checks every ready project every 300 s and re-arms itself. A platform queue.
     projectHealthJob,
+    // 09.2-15 (D-545): re-runs the migration fan-out for projects that are behind or failed, every 300 s. A platform queue.
+    migrationRetryJob,
     deriveIconsJob,
     deriveVariantsJob,
     mediaProviderEventJob,
@@ -183,6 +189,12 @@ export async function startWorker(): Promise<void> {
         'could not arm the project health; the next boot re-opens it',
         'platform.project_health.armed',
         () => armProjectHealth(),
+      );
+      // 09.2-15 (D-545): open the migration retry cadence under the BOOT singleton.
+      await bestEffort(
+        'could not arm the migration retry; the next boot re-opens it',
+        'platform.migration_retry.armed',
+        () => armMigrationRetry(),
       );
     },
     // The per-project cadences, once per project each time its instance (re)starts.

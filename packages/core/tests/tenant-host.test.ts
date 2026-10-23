@@ -89,9 +89,14 @@ describe('hostStatus precedence', () => {
     expect(hostStatus({ ...base, projectState: null })).toBe('active');
   });
 
-  it('the gate is off while the image has no required schema (plan 15 loads it)', () => {
+  it('the gate is off while no required schema is known (null)', () => {
     expect(hostStatus({ ...facts(NONE), applied: BEHIND, required: null })).toBe('active');
-    expect(getRequiredTenantSchema()).toBeNull();
+    setRequiredTenantSchemaForTests(null);
+    try {
+      expect(getRequiredTenantSchema()).toBeNull();
+    } finally {
+      setRequiredTenantSchemaForTests(undefined);
+    }
   });
 });
 
@@ -134,6 +139,7 @@ describe('isBehind boundaries (D-545)', () => {
     setRequiredTenantSchemaForTests(required);
     expect(getRequiredTenantSchema()).toEqual(required);
     setRequiredTenantSchemaForTests(undefined);
-    expect(getRequiredTenantSchema()).toBeNull();
+    // 09.2-15: cleared, the requirement is what the repository ships (the image manifest in production).
+    expect(getRequiredTenantSchema()?.count).toBeGreaterThan(100);
   });
 });

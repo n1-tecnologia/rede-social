@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { assertManifestPresent } from '@rede-social/core/server/migrations/manifest';
 import { app } from './app';
 import { env } from './env';
 import { rootLogger } from './http/logger';
@@ -14,6 +15,10 @@ import { startWorker } from './worker';
  * That is what keeps `GET /v1/health` answering 200 while the database is unreachable (01-09's
  * DB-free-boot property, re-verified by the Docker smoke in 01-08).
  */
+// 09.2-15 (DBT-44, P85): a production process with no migrations manifest in its image stops here, before it can
+// serve as if no schema were required. No database is involved, so `GET /v1/health` stays database-free.
+assertManifestPresent();
+
 if (env.ROLE === 'migrate') {
   process.exit(await runMigrateAll(process.argv.slice(2)));
 } else if (env.ROLE === 'worker') {

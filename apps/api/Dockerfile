@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 #
-# One image, two Cloud Run services (D-18): `ROLE=api` serves Hono, `ROLE=worker` runs pg-boss
-# (plan 01-07 adds the branch in src/main.ts). Build from the REPO ROOT:
+# One image, three roles (D-18, D-544): `ROLE=api` serves Hono, `ROLE=worker` runs pg-boss
+# (plan 01-07 adds the branch in src/main.ts), `ROLE=migrate` fans the migration sets out to every tenant
+# project and exits (09.2-15). Build from the REPO ROOT:
 #   docker build -f apps/api/Dockerfile -t rede-social-api:local .
 #
 # Stages: prune the monorepo to @rede-social/api's slice -> install + build -> ship dist + production deps
@@ -19,6 +20,10 @@ FROM base AS pruner
 WORKDIR /repo
 COPY . .
 RUN pnpm dlx turbo@2.10.12 prune @rede-social/api --docker
+# D-547: both migration sets and `roles.sql` plus a deterministic manifest, built here because this is the stage
+# that has the whole repository (the pruned slice below holds no `supabase/` directory). The runtime stage copies
+# the result to /app/migrations; `MIGRATIONS_DIR` points the API, the worker and the migrate role at it.
+RUN node scripts/build-migrations-manifest.mjs --root /repo --out /repo/migrations-out
 
 # ── build ────────────────────────────────────────────────────────────────────
 # out/json holds the package.json files (+ lockfile, .npmrc, pnpm-workspace.yaml) so the install
@@ -37,8 +42,10 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=8080 \
-    ROLE=api
+    ROLE=api \
+    MIGRATIONS_DIR=/app/migrations
 COPY --from=builder --chown=node:node /app /app
+COPY --from=pruner --chown=node:node /repo/migrations-out /app/migrations
 USER node
 EXPOSE 8080
 # Cloud Run sends SIGTERM; src/main.ts drains the server itself, so no init shim is needed.

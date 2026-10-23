@@ -1,19 +1,61 @@
+import {
+  loadManifest,
+  ManifestError,
+  migrationDirs,
+  summarize,
+  tenantVersionsInDir,
+} from './manifest';
+import { imageMigrationsDir } from './sets';
+
 /**
- * The tenant schema this image requires (09.2-08, D-545, DBT-25): how many tenant migrations the image
- * ships and the newest one's 14-digit version. A project whose applied schema is BELOW it is held out
- * (`updating`) until the fan-out catches it up; one AHEAD of it (a rolled-back image) is never held out.
+ * The tenant schema this image requires (09.2-08, 09.2-15, D-545, DBT-25, DBT-44): how many tenant migrations
+ * the image ships and the newest one's 14-digit version. A project whose applied schema is BELOW it is held
+ * out (`updating`) until the fan-out catches it up; one AHEAD of it (a rolled-back image) is never held out.
  *
- * Plan 15 loads the image manifest and replaces the body of `getRequiredTenantSchema`; until then it
- * answers `null` and the gate is off, so no environment changes behaviour ahead of the fan-out.
+ * Where the answer comes from, in order, with NO database round trip:
+ *  1. the test override (`setRequiredTenantSchemaForTests`);
+ *  2. the image manifest at `MIGRATIONS_DIR` (`{ count: tenant.length, head: last version }`);
+ *  3. outside production, the repository's `supabase/migrations/*.sql`, so a developer's stack behaves like the
+ *     image;
+ *  4. in production anything else is `ManifestError('migrations manifest empty')`: a deployed instance with no
+ *     manifest must not serve as if nothing were required (P85). `{ count: 0 }` is never an answer.
  */
 export type RequiredTenantSchema = { count: number; head: string };
 export type AppliedTenantSchema = { count: number | null; head: string | null };
 
 let override: RequiredTenantSchema | null | undefined;
 
+/** The manifest and the repository do not change while a process runs: read each directory once. */
+const memo = new Map<string, RequiredTenantSchema | null>();
+
+function fromImage(dir: string): RequiredTenantSchema {
+  const cached = memo.get(dir);
+  if (cached) return cached;
+  const summary = summarize(loadManifest(dir).tenant.map((entry) => entry.version));
+  if (!summary) throw new ManifestError('migrations manifest empty');
+  memo.set(dir, summary);
+  return summary;
+}
+
+function fromRepository(): RequiredTenantSchema | null {
+  let dir: string;
+  try {
+    dir = migrationDirs().tenant;
+  } catch {
+    return null;
+  }
+  if (memo.has(dir)) return memo.get(dir) ?? null;
+  const summary = summarize(tenantVersionsInDir(dir));
+  memo.set(dir, summary);
+  return summary;
+}
+
 export function getRequiredTenantSchema(): RequiredTenantSchema | null {
   if (override !== undefined) return override;
-  return null;
+  const image = imageMigrationsDir();
+  if (image) return fromImage(image);
+  if (process.env.NODE_ENV === 'production') throw new ManifestError('migrations manifest empty');
+  return fromRepository();
 }
 
 /** Test seam: pin (or clear with `undefined`) the required schema. Refuses to run outside `NODE_ENV=test`. */
