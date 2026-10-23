@@ -4,16 +4,16 @@ current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
 current_plan: 16
 status: executing
-stopped_at: "Completed 09.2-19-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19 done; wave 11 still has 09.2-22 (copy engine) next and 09.2-16 (deploy workflows, human checkpoint) on hold for a user decision)"
-last_updated: "2026-10-23T04:53:04.063Z"
+stopped_at: Completed 09.2-22-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22 done); next is 09.2-16 (wave 11, the deploy workflows, option A Cloud Run Job), then wave 12 (20, 23)
+last_updated: "2026-10-23T10:57:38.637Z"
 last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-19 (the Banco tab: overview card with the one eight-state pill vocabulary, the Preparação card with fixed-order steps, single-request resume, 3 s probe-then-refresh and a collapsed done state, and the write-only Credenciais card and replace sheet; DBT-51, DBT-24, DBT-27 and DBT-40 complete)"
-state_head: 94ae0e1d0e55d6db58da08ecbf48c1b4b132520c
+last_activity_desc: "Completed 09.2-22 (the move engine's copy: catalog-derived foreign-key order, accounts with ids and password hashes preserved, Storage objects, branding URL rewrite with an old-origin scan, queued jobs and a verification by counts, checksums and a hash digest, rehearsed on two local databases; DBT-33 stays open for plan 23 and the hosted proof H6)"
+state_head: c5d5165d8c37f36419f82126c3d68136bf7853c2
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 268
-  completed_plans: 253
+  completed_plans: 254
   percent: 0
 ---
 
@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
 Current Plan: 16
 Total Plans in Phase: 28
-Plan: wave 11 in progress (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs, 13 bootstrap engine, 10 route indexes, 11 per-project Send Email Hook, 14 panel API for a tenant's project, 17 web tier, 15 migration fan-out, 18 wizard and 19 Banco tab done; plans run out of numeric order: the next is 22 (copy engine); 16 (deploy workflows, autonomous: false, has a human decision checkpoint) is on hold for a user decision)
+Plan: wave 11 in progress (plans 01 design gate approved provisionally, 02 tracer, 03 routing, 04 lanes, 12 Management API client, 05 tenant-scoped admin-lane sites, 06 platform-lane sites and seed, 08 per-project token verification and host status, 07 mirror/ownership/saga/reconcile, 09 jobs, 13 bootstrap engine, 10 route indexes, 11 per-project Send Email Hook, 14 panel API for a tenant's project, 17 web tier, 15 migration fan-out, 18 wizard, 19 Banco tab and 22 the copy engine done; plans run out of numeric order: the next is 16 (deploy workflows, user decision option A, a Cloud Run Job), then wave 12 (20, 23))
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed 09.2-19 (an operator sees a tenant's database state, its eight preparation steps with a one-request resume, and replaces its credentials through a write-only sheet; DBT-51, DBT-24, DBT-27, DBT-40 complete)
+Last activity: 2026-10-23 — Completed 09.2-22 (a tenant's rows, accounts, files, URLs and queued jobs copy into a bootstrapped database and verify; the move tool's state machine and cutover are plan 23)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -311,6 +311,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.2 P15 | 32 min | 3 tasks | 24 files |
 | Phase 09.2 P18 | 28 min | 3 tasks | 25 files |
 | Phase 09.2 P19 | 17 min | 3 tasks | 21 files |
+| Phase 09.2 P22 | 22 min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -1035,6 +1036,9 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-15: the image carries both sets and roles.sql under MIGRATIONS_DIR (/app/migrations) with a deterministic manifest; defaultMigrationDir and readRolesSql honour it; a production boot without a manifest stops with 'migrations manifest empty'; outside production the required schema is derived from the repository, so the updating gate is live in dev and tests — D-547/DBT-44: the running API knows its required schema with no database round trip; a dev who applies a tenant migration without db:migrate-all sees updating for projects that have a state row
 - [Phase 09.2]: 09.2-18: the Dados gate enforces the 20-letter shape in the web action before any request and then the read-only pre-check; manualAccess is a persisted non-secret flag while the three access values live in the draft provider's memory only (the sessionStorage mirror is an allow-list of keys) and travel once, with the creation call, never to the Dados action; they are cleared when the API accepts or definitively refuses and kept for a failure with no field to blame — D-539/D-541, UI-D-534, PR-4a: a credential must never reach sessionStorage, a URL, a log or the Resumo, and a reload must find the ref and ask again; keeping them through a generic failure lets Tentar de novo send them again
 - [Phase 09.2]: 09.2-18: the confirmation dialog's database task is second (create, database, logo, icon, domain), read every 2 s by a server action that returns null on any failure; the uploads wait for it, a miss still attempts the domain and ends in the partial phase with a link to the Banco tab, and after 60 s a neutral ghost button attaches the domain, forgets the stored draft and goes to the Banco tab while the preparation continues; RequireDraftData waits while the confirmation is open — D-542, UI-D-535: logo and icon need the buckets the bootstrap creates, the tab (not the dialog) is where a long or failed bootstrap is worked, and what the dialog clears on the way must not move the page
+- [Phase 09.2-22]: The move copy silences each table's user triggers inside the group transaction (disable trigger user, enabled before commit) so counters, the chat sequence, Realtime signals and the member-profile creator do not fire; foreign keys stay enforced — Without it the copy double-counts and the tracer fails; session_replication_role=replica would also switch off the foreign keys
+- [Phase 09.2-22]: planMove treats a table as uncovered when it has no tenant_id and no classification, or has tenant_id but the target lacks it; a row referencing a user outside the tenant's accounts refuses the plan with account_missing and the account set is never widened — Keeps T-09.2-100 (no silent skip) and PR-7 (no account copied for a person without membership or invite) both true
+- [Phase 09.2-22]: verifyCopy throws MoveError(verify_failed|origin_leftover) with the report attached; requeueJobs takes started pg-boss instances from the caller (plan 23 builds them from the sealed URLs) — A caller cannot forget to check a returned ok:false; the engine stays free of credentials
 
 ### Pending Todos
 
@@ -1143,6 +1147,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T04:36:09.445Z
-Stopped at: Completed 09.2-18-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18 done; wave 10 complete); next is wave 11: 09.2-16 (deploy workflows, human checkpoint), 09.2-19 (Banco tab UI), 09.2-22 (copy engine)
+Last session: 2026-10-23T10:57:38.413Z
+Stopped at: Completed 09.2-22-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22 done); next is 09.2-16 (wave 11, the deploy workflows, option A Cloud Run Job), then wave 12 (20, 23)
 Resume file: None

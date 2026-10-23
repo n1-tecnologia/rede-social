@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 80
+open_count: 81
 waived_count: 0
 fixed_count: 58
-total_count: 138
-last_updated: 2026-10-23T03:34:21.869Z
+total_count: 139
+last_updated: 2026-10-23T10:57:43.742Z
 ---
 
 # Broken Windows Ledger
@@ -153,6 +153,7 @@ last_updated: 2026-10-23T03:34:21.869Z
 | 136 | 09.2 | unrun-verify | packages/core/server/projects/steps.ts |  | 09.2-13: the eight bootstrap steps are proven only against the fake provider and the second local database; the real Management API behaviour is hosted proof H2 (plan 25) | open |  | 2026-10-23T01:53:16.459Z |  |
 | 137 | 09.2 | stub | packages/core/server/projects/moving.ts |  | 09.2-14: isTenantMoving and tenantsMoving answer false for every tenant (the overview, the list and the derived state already carry the moving fact); plan 23 replaces both bodies with a read of the move table | open |  | 2026-10-23T03:34:21.799Z |  |
 | 138 | 09.2 | unrun-verify | packages/core/server/projects/access.ts |  | 09.2-14: the pre-check, the credential replacement (the publishable key is offered to GET /storage/v1/bucket, the one route the local gateway enforces; the plan named /auth/v1/settings, which is open locally) and the break-glass reissue (incl. the hook secret PATCH) are proven only against the fake provider and the local stack; the hosted gateway answers are hosted proof H5 (plan 25) | open |  | 2026-10-23T03:34:21.869Z |  |
+| 139 | 09.2 | unrun-verify | apps/api/tests/integration |  | 09.2-22: the single full integration run was skipped because free disk fell under 6 GiB (swap and another container, not this plan's data); only move-copy and project-bootstrap were run | open |  | 2026-10-23T10:57:43.742Z |  |
 
 ````json
 [
@@ -1810,6 +1811,18 @@ last_updated: 2026-10-23T03:34:21.869Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-23T03:34:21.869Z",
+    "resolved_at": null
+  },
+  {
+    "id": 139,
+    "kind": "unrun-verify",
+    "phase": "09.2",
+    "file": "apps/api/tests/integration",
+    "line": null,
+    "description": "09.2-22: the single full integration run was skipped because free disk fell under 6 GiB (swap and another container, not this plan's data); only move-copy and project-bootstrap were run",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T10:57:43.742Z",
     "resolved_at": null
   }
 ]
