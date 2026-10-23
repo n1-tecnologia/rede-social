@@ -207,7 +207,10 @@ jobs:
       # re-run by Cloud Run; the worker's retry job heals a behind tenant project later.
       # MAIL_DOMAIN and PROJECT_AUTH_SMTP_PASS (09.2-24): the fan-out does not read them, but the SAME Job runs
       # the tenant move (`ROLE=move`, docs/DEPLOY.md "Moving an existing tenant"), and the move bootstraps the
-      # target project, whose `auth` step needs the sender domain and the SMTP password.
+      # target project, whose `auth` step needs the sender domain and the SMTP password. SUPABASE_PROJECT_REF is
+      # project 0's own ref: the fan-out aligns the central registry row with the environment
+      # (`ensureProjectZero`), and without it the Job would write the development value `local` there on every
+      # deploy until the worker boot wrote the real ref back.
       - name: Deploy the migrate job
         uses: google-github-actions/deploy-cloudrun@v3
         with:
@@ -223,6 +226,7 @@ jobs:
             API_PUBLIC_URL=https://api-253040968821.southamerica-east1.run.app
             PAYMENTS_PROVIDERS=kiwify
             MAIL_DOMAIN=n1marketingdigital.com.br
+            SUPABASE_PROJECT_REF=qjjhtduxquvlfppybpqq
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-prod:latest

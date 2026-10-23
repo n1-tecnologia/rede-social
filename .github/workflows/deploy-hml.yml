@@ -291,6 +291,7 @@ jobs:
       # deploy-api.yml for the reasoning (same image digest, `--wait`, secrets mounted by name, the
       # assertProductionEnv-driven API_PUBLIC_URL and payments pair). MAIL_DOMAIN and PROJECT_AUTH_SMTP_PASS
       # are for the tenant move (`ROLE=move` on this same Job, 09.2-24), whose target bootstrap needs them.
+      # SUPABASE_PROJECT_REF is project 0's ref for `ensureProjectZero` (see deploy-api.yml).
       - name: Deploy the migrate job
         uses: google-github-actions/deploy-cloudrun@v3
         with:
@@ -306,6 +307,7 @@ jobs:
             API_PUBLIC_URL=${{ vars.API_PUBLIC_URL }}
             PAYMENTS_PROVIDERS=kiwify
             MAIL_DOMAIN=n1marketingdigital.com.br
+            SUPABASE_PROJECT_REF=${{ vars.SUPABASE_PROJECT_REF }}
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-hml:latest
