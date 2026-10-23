@@ -205,6 +205,9 @@ jobs:
       # image), so the payments pair and API_PUBLIC_URL are listed like on the services. Secrets are mounted
       # by name from Secret Manager, never in env_vars. `--max-retries=0`: a failed execution is reported, not
       # re-run by Cloud Run; the worker's retry job heals a behind tenant project later.
+      # MAIL_DOMAIN and PROJECT_AUTH_SMTP_PASS (09.2-24): the fan-out does not read them, but the SAME Job runs
+      # the tenant move (`ROLE=move`, docs/DEPLOY.md "Moving an existing tenant"), and the move bootstraps the
+      # target project, whose `auth` step needs the sender domain and the SMTP password.
       - name: Deploy the migrate job
         uses: google-github-actions/deploy-cloudrun@v3
         with:
@@ -219,6 +222,7 @@ jobs:
             SUPABASE_ORG_SLUG=${{ vars.SUPABASE_ORG_SLUG }}
             API_PUBLIC_URL=https://api-253040968821.southamerica-east1.run.app
             PAYMENTS_PROVIDERS=kiwify
+            MAIL_DOMAIN=n1marketingdigital.com.br
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-prod:latest
@@ -227,6 +231,7 @@ jobs:
             PLATFORM_MASTER_KEYS=platform-master-keys-prod:latest
             SUPABASE_PAT=supabase-pat-prod:latest
             PAYMENTS_SECRET_KEY=payments-secret-key-prod:latest
+            PROJECT_AUTH_SMTP_PASS=resend-smtp-pass-prod:latest
           flags: --service-account=${{ vars.RUNTIME_SA }} --max-retries=0 --task-timeout=3600s
 
       # Waits for the execution and fails the step on a non-zero exit (central set failed). The Job prints

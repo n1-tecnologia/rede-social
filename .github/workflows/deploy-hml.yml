@@ -289,7 +289,8 @@ jobs:
 
       # The fan-out (09.2-16, D-544): the same Job as production under the hml names and secrets. See
       # deploy-api.yml for the reasoning (same image digest, `--wait`, secrets mounted by name, the
-      # assertProductionEnv-driven API_PUBLIC_URL and payments pair).
+      # assertProductionEnv-driven API_PUBLIC_URL and payments pair). MAIL_DOMAIN and PROJECT_AUTH_SMTP_PASS
+      # are for the tenant move (`ROLE=move` on this same Job, 09.2-24), whose target bootstrap needs them.
       - name: Deploy the migrate job
         uses: google-github-actions/deploy-cloudrun@v3
         with:
@@ -304,6 +305,7 @@ jobs:
             SUPABASE_ORG_SLUG=${{ vars.SUPABASE_ORG_SLUG }}
             API_PUBLIC_URL=${{ vars.API_PUBLIC_URL }}
             PAYMENTS_PROVIDERS=kiwify
+            MAIL_DOMAIN=n1marketingdigital.com.br
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-hml:latest
@@ -312,6 +314,7 @@ jobs:
             PLATFORM_MASTER_KEYS=platform-master-keys-hml:latest
             SUPABASE_PAT=supabase-pat-hml:latest
             PAYMENTS_SECRET_KEY=payments-secret-key-hml:latest
+            PROJECT_AUTH_SMTP_PASS=resend-smtp-pass-hml:latest
           flags: --service-account=${{ vars.RUNTIME_SA }} --max-retries=0 --task-timeout=3600s
 
       - name: Run the migrate job
