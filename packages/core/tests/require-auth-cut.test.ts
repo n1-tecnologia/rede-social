@@ -16,9 +16,21 @@ vi.mock('jose', () => ({
   jwtVerify: async () => ({ payload: { sub: 'user-1' } }),
   createRemoteJWKSet: () => ({}),
 }));
-vi.mock('../server/auth/jwks', () => ({ JWKS: {}, JWT_ISSUER: 'issuer' }));
+vi.mock('../server/auth/jwks', () => ({
+  JWKS: {},
+  JWT_ISSUER: 'issuer',
+  jwksFor: () => ({}),
+  issuerFor: () => 'issuer',
+}));
+// 09.2-08: the host resolution now carries the status and the project's `apiUrl`, which `requireAuth` reads.
 vi.mock('../server/tenancy/tenant-host', () => ({
-  resolveTenantHost: async () => ({ kind: 'tenant', tenantId: 'tenant-1' }),
+  resolveTenantHost: async () => ({
+    kind: 'tenant',
+    tenantId: 'tenant-1',
+    status: 'active',
+    displayName: 'Rede Lab',
+    apiUrl: 'http://127.0.0.1:54321',
+  }),
 }));
 vi.mock('../server/tenancy/membership', async (importOriginal) => {
   const original = await importOriginal<typeof import('../server/tenancy/membership')>();
