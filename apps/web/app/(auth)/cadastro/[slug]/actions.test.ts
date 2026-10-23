@@ -3,7 +3,7 @@ import { writeJoinDraft } from '@/lib/join-draft';
 import { writePendingConfirmation } from '@/lib/pending-confirmation';
 import { sendSignupConfirmation } from '@/lib/signup-confirmation';
 import { getHostTenant } from '@/lib/tenant-host';
-import { signup } from './actions';
+import { joinFromSignup, signup } from './actions';
 
 /**
  * 09.2-17 (D-36, D-538, decision 4): the sign-up of `/cadastro/{slug}` on a GENERIC host. The central
@@ -19,6 +19,12 @@ vi.mock('@/lib/tenant-host', () => ({
   getHostTenant: vi.fn(),
   signupPath: (t: { mode: string }, slug: string) =>
     t.mode === 'tenant' ? '/cadastro' : `/cadastro/${slug}`,
+}));
+const brandStatus = vi.hoisted(() => ({ value: 'active' as string | undefined }));
+vi.mock('@/lib/host-brand', () => ({
+  getHostBrand: async () => ({
+    tenant: brandStatus.value === undefined ? null : { status: brandStatus.value },
+  }),
 }));
 vi.mock('@/lib/join-draft', () => ({
   writeJoinDraft: vi.fn(),
@@ -91,6 +97,7 @@ async function run(): Promise<string> {
 }
 
 beforeEach(() => {
+  brandStatus.value = 'active';
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   vi.mocked(getHostTenant).mockResolvedValue({ mode: 'generic', host: 'localhost' });
@@ -156,5 +163,58 @@ describe("signup on the tenant's own host (09.2-17)", () => {
     expect(await run()).toBe('redirect:/verifique-seu-email');
     expect(fetchMock.mock.calls.filter(([, init]) => !init?.method)).toHaveLength(0);
     expect(sendSignupConfirmation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('sign-up and join on a held-out host (09.2-21, UI-D-542)', () => {
+  it.each([
+    ['suspended', '/comunidade-indisponivel'],
+    ['unavailable', '/comunidade-indisponivel'],
+    ['updating', '/comunidade-em-atualizacao'],
+    ['preparing', '/comunidade-em-preparacao'],
+  ])('%s: the sign-up redirects to %s before any request, mail or draft', async (status, path) => {
+    brandStatus.value = status;
+    api(json(200, tenantRecord), json(201, { userId: crypto.randomUUID(), tenantSlug: 'rede-b' }));
+    expect(await run()).toBe(`redirect:${path}`);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendSignupConfirmation).not.toHaveBeenCalled();
+    expect(writePendingConfirmation).not.toHaveBeenCalled();
+    expect(writeJoinDraft).not.toHaveBeenCalled();
+  });
+
+  it('the join with an existing password is refused the same way, before the password is proven', async () => {
+    brandStatus.value = 'updating';
+    const data = form();
+    let message = 'returned';
+    try {
+      await joinFromSignup(data);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toBe('redirect:/comunidade-em-atualizacao');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['TENANT_UPDATING', '/comunidade-em-atualizacao'],
+    ['TENANT_PREPARING', '/comunidade-em-preparacao'],
+    ['TENANT_UNAVAILABLE', '/comunidade-indisponivel'],
+  ])(
+    'a generic host: the slug route answering 503 %s sends the person to %s and creates nothing',
+    async (code, path) => {
+      brandStatus.value = undefined;
+      api(
+        json(200, tenantRecord),
+        json(503, { error: { code, message: 'x', requestId: 'req-1' } }),
+      );
+      expect(await run()).toBe(`redirect:${path}`);
+      expect(sendSignupConfirmation).not.toHaveBeenCalled();
+      expect(writePendingConfirmation).not.toHaveBeenCalled();
+    },
+  );
+
+  it('an active host keeps the shipped flow', async () => {
+    api(json(200, tenantRecord), json(201, { userId: crypto.randomUUID(), tenantSlug: 'rede-b' }));
+    expect(await run()).toBe('redirect:/verifique-seu-email');
   });
 });

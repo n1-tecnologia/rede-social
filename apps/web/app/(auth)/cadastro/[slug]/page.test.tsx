@@ -10,7 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * URL's. Real pt-BR catalog; the form controls are stubs.
  */
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), draft: null as { email: string } | null }));
+const mocks = vi.hoisted(() => ({
+  fetch: vi.fn(),
+  draft: null as { email: string } | null,
+  status: 'active' as string | undefined,
+}));
 
 vi.mock('next-intl/server', async () => {
   const { createTranslator } = await import('next-intl');
@@ -40,7 +44,9 @@ vi.mock('next/link', () => ({
 vi.mock('@/lib/env', () => ({ env: { API_URL: 'http://api.test' } }));
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/lib/host-brand', () => ({
-  getHostBrand: async () => ({ tenant: { status: 'active' } }),
+  getHostBrand: async () => ({
+    tenant: mocks.status === undefined ? null : { status: mocks.status },
+  }),
 }));
 vi.mock('@/lib/join-draft', () => ({ readJoinDraft: async () => mocks.draft }));
 vi.mock('@/lib/tenant-host', () => ({
@@ -91,6 +97,7 @@ async function show(searchParams: Record<string, string>) {
 
 beforeEach(() => {
   mocks.draft = null;
+  mocks.status = 'active';
   mocks.fetch.mockReset();
   vi.stubGlobal('fetch', mocks.fetch);
 });
@@ -196,5 +203,79 @@ describe('/cadastro: secrecy and a byte-identical sentence (D-302, T-09.1-71)', 
     await show({ estado: 'ja-tem-conta', erro: 'nao-liberado' });
     expect(screen.getByRole('alert').textContent).toBe(SENTENCE);
     expect(document.body.textContent).not.toContain('Rede Lab');
+  });
+});
+
+/**
+ * 09.2-21 (UI-D-542, A-UI-8; E10; P104, P105) — the sign-up form steps aside for every held-out state with
+ * the state's glyph and sentences, before the public record is even read; on a generic host (no host status)
+ * the slug record's own 503 produces the same card.
+ */
+describe('/cadastro: the held-out host cards (09.2-21)', () => {
+  it.each([
+    ['suspended', 'Comunidade indisponível', 'lucide-triangle-alert'],
+    ['unavailable', 'Comunidade indisponível', 'lucide-triangle-alert'],
+    ['updating', 'Comunidade em atualização', 'lucide-refresh-cw'],
+    ['preparing', 'Comunidade em preparação', 'lucide-hourglass'],
+  ])(
+    '%s renders the card with its glyph instead of the form and reads nothing',
+    async (status, title, glyph) => {
+      mocks.status = status;
+      await show({});
+      expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy();
+      const svg = document.querySelector('h2')?.parentElement?.querySelector('svg');
+      expect(svg?.classList.contains(glyph)).toBe(true);
+      expect(svg?.getAttribute('width')).toBe('28');
+      expect(document.querySelector('form')).toBeNull();
+      expect(document.querySelector('input')).toBeNull();
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(document.body.textContent).not.toMatch(
+        /banco|projeto|esquema|migra[cç][aã]o|supabase|tenant/i,
+      );
+    },
+  );
+
+  it('paused and unreachable read byte-identically to a suspension (A-UI-8)', async () => {
+    mocks.status = 'suspended';
+    await show({});
+    const suspended = document.body.innerHTML;
+    cleanup();
+    mocks.status = 'unavailable';
+    await show({});
+    expect(document.body.innerHTML).toBe(suspended);
+  });
+
+  it('P105: a cleared state brings the form back on the next render', async () => {
+    mocks.status = 'preparing';
+    await show({});
+    expect(document.querySelector('form')).toBeNull();
+    cleanup();
+    mocks.status = 'active';
+    mocks.fetch.mockImplementation(async () => Response.json(publicTenant()));
+    await show({});
+    expect(document.querySelector('form')).not.toBeNull();
+  });
+
+  it.each([
+    ['TENANT_UPDATING', 'Comunidade em atualização'],
+    ['TENANT_PREPARING', 'Comunidade em preparação'],
+    ['TENANT_UNAVAILABLE', 'Comunidade indisponível'],
+  ])(
+    'a generic host: the slug record answering 503 %s renders the same card',
+    async (code, title) => {
+      mocks.status = undefined;
+      mocks.fetch.mockImplementation(async () =>
+        Response.json({ error: { code, message: 'x', requestId: 'req-1' } }, { status: 503 }),
+      );
+      await show({});
+      expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy();
+      expect(document.querySelector('form')).toBeNull();
+    },
+  );
+
+  it('a generic host: a 503 without a held-out code is still "não encontrada"', async () => {
+    mocks.status = undefined;
+    mocks.fetch.mockImplementation(async () => new Response('x', { status: 503 }));
+    await expect(show({})).rejects.toThrow('NOT_FOUND');
   });
 });

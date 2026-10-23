@@ -15,6 +15,8 @@ import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { apiFetchWithToken } from '@/lib/api';
 import { env } from '@/lib/env';
+import { heldOf, heldOfCode, heldPath } from '@/lib/held-out';
+import { getHostBrand } from '@/lib/host-brand';
 import { clearJoinDraft, readJoinDraft, writeJoinDraft } from '@/lib/join-draft';
 import { isEmailNotConfirmed, writePendingConfirmation } from '@/lib/pending-confirmation';
 import { sendSignupConfirmation } from '@/lib/signup-confirmation';
@@ -82,6 +84,10 @@ async function foreignProjectEntrance(slug: string): Promise<string | null> {
 export async function signup(formData: FormData): Promise<void> {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/entrar');
+  // 09.2-21 (UI-D-542): a host held out (suspended, unreachable, updating, preparing) refuses the
+  // sign-up before anything is read, sent or remembered. No cookie is cleared.
+  const held = heldOf((await getHostBrand()).tenant?.status);
+  if (held) redirect(heldPath(held));
 
   const formSlug = String(formData.get('slug') ?? '');
   const slug = hostTenant.mode === 'tenant' ? hostTenant.slug : formSlug;
@@ -129,6 +135,13 @@ export async function signup(formData: FormData): Promise<void> {
     redirect(`${base}?${EXISTING_STATE}`);
   }
   if (res.status === 404) notFound();
+  if (res.status === 503) {
+    // 09.2-11: the slug route refuses a tenant that is preparing, updating or unreachable (no details);
+    // on a generic host this is the only place that learns it. Nothing was created.
+    const envelope = apiErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
+    const heldByCode = envelope.success ? heldOfCode(envelope.data.error.code) : null;
+    if (heldByCode) redirect(heldPath(heldByCode));
+  }
   if (res.status === 403) {
     // Quick 261018-owq: the e-mail is not `liberado` on the global allowlist. Any other 403 falls
     // through to the generic answer below.
@@ -172,6 +185,9 @@ function fieldToken(path: readonly PropertyKey[]): string {
 export async function joinFromSignup(formData: FormData): Promise<void> {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/entrar');
+  // 09.2-21 (UI-D-542): refused for a held-out host before the password is proven anywhere.
+  const held = heldOf((await getHostBrand()).tenant?.status);
+  if (held) redirect(heldPath(held));
 
   const formSlug = String(formData.get('slug') ?? '');
   const slug = hostTenant.mode === 'tenant' ? hostTenant.slug : formSlug;
@@ -266,6 +282,10 @@ export async function joinFromSignup(formData: FormData): Promise<void> {
         target = `${state}&erro=recusado`;
       } else if (res.status === 400 && apiError?.details?.consents === 'stale') {
         target = `${state}&erro=consentimento`;
+      } else if (res.status === 503 && heldOfCode(apiError?.code)) {
+        // 09.2-21: the community was put on hold between the page and the join. Nothing was decided
+        // about this person, so the session is kept (no `signOutLocally`).
+        target = heldPath(heldOfCode(apiError?.code) ?? 'unavailable');
       } else {
         target = `${state}&erro=falha`;
       }

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { RearmProfileNudge } from '@/components/profile/RearmProfileNudge';
 import { ForgetSignedOutDevice } from '@/components/push/ForgetSignedOutDevice';
 import { env } from '@/lib/env';
+import { type Held, heldIcon, heldNamespace, heldOf } from '@/lib/held-out';
 import { getHostBrand } from '@/lib/host-brand';
 import { createClient } from '@/lib/supabase/server';
 import { signupPath } from '@/lib/tenant-host';
@@ -22,8 +23,11 @@ type Shell = {
   tenantName: string | null;
   /** Where "Criar nova conta" points (null = link hidden). */
   signupHref: string | null;
-  /** D-32: the host tenant is suspended — the form is replaced by the "indisponível" card. */
-  suspended: boolean;
+  /**
+   * D-32, 09.2-21 (UI-D-542): the host tenant is suspended, paused or unreachable, being updated or still
+   * being prepared — the form is replaced by that state's card (null = the form shows).
+   */
+  held: Held | null;
   /** E06 populated: with a logo in the brand block the "Entrar" title drops to 16/700 secondary. */
   hasLogo: boolean;
   /**
@@ -53,7 +57,7 @@ async function resolveShell(): Promise<Shell> {
       platform: false,
       tenantName: brand.displayName,
       signupHref: signupPath(brand, ''),
-      suspended: brand.tenant?.status === 'suspended',
+      held: heldOf(brand.tenant?.status),
       hasLogo: brand.tenant !== null && hasLogo(brand),
       tenantSlug: brand.tenant?.slug ?? null,
     };
@@ -63,7 +67,7 @@ async function resolveShell(): Promise<Shell> {
       platform: true,
       tenantName: null,
       signupHref: null,
-      suspended: false,
+      held: null,
       hasLogo: false,
       tenantSlug: null,
     };
@@ -75,7 +79,7 @@ async function resolveShell(): Promise<Shell> {
       platform: false,
       tenantName: null,
       signupHref: null,
-      suspended: false,
+      held: null,
       hasLogo: false,
       tenantSlug: null,
     };
@@ -96,7 +100,7 @@ async function resolveShell(): Promise<Shell> {
     platform: false,
     tenantName,
     signupHref: signupPath(brand, slug),
-    suspended: false,
+    held: null,
     hasLogo: false,
     tenantSlug: null,
   };
@@ -127,12 +131,14 @@ export default async function EntrarPage({
 }: {
   searchParams: Promise<{ erro?: string }>;
 }) {
-  const [{ erro }, t, tc, tp, tu, ts, shell, claims] = await Promise.all([
+  const [{ erro }, t, tc, tp, tu, tUpdating, tPreparing, ts, shell, claims] = await Promise.all([
     searchParams,
     getTranslations('login'),
     getTranslations('common'),
     getTranslations('platform'),
     getTranslations('unavailable'),
+    getTranslations('updating'),
+    getTranslations('preparing'),
     getTranslations('signup'),
     resolveShell(),
     createClient().then((supabase) => supabase.auth.getClaims()),
@@ -140,6 +146,11 @@ export default async function EntrarPage({
   // 07 review C-WR-06: on this device nobody is signed in, so a push subscription left by a session
   // that ended without "Sair" is forgotten. A signed-in visit keeps its subscription.
   const signedOut = !claims.data?.claims;
+  const heldCopy = {
+    unavailable: { title: tu('title'), body: tu('body') },
+    updating: { title: tUpdating('title'), body: tUpdating('body') },
+    preparing: { title: tPreparing('title'), body: tPreparing('body') },
+  };
   // 09.1-15: the notice's link is read only when the notice shows, never on a plain visit.
   const checkoutUrl = erro === 'nao-liberado' ? await noticeCheckoutUrl(shell.tenantSlug) : null;
 
@@ -162,9 +173,15 @@ export default async function EntrarPage({
         {shell.platform ? tp('loginTitle') : t('title')}
       </h1>
 
-      {shell.suspended ? (
-        // D-32: nothing else renders on a suspended host — no form, no forgot link, no sign-up CTA.
-        <UnavailableCard title={tu('title')} body={tu('body')} />
+      {shell.held ? (
+        // D-32, UI-D-542: nothing else renders on a held-out host — no form, no forgot link, no sign-up
+        // CTA. Suspended and unreachable share the generic sentence (A-UI-8); updating and preparing
+        // have their own, with their own glyph.
+        <UnavailableCard
+          title={heldCopy[heldNamespace(shell.held)].title}
+          body={heldCopy[heldNamespace(shell.held)].body}
+          icon={heldIcon(shell.held)}
+        />
       ) : (
         <>
           {erro === 'nao-liberado' ? (

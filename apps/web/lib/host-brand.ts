@@ -5,6 +5,9 @@ import {
 } from '@rede-social/contracts';
 import { getHostTenant, type HostMode, resolveHostTenant } from '@/lib/tenant-host';
 
+// 09.2-21: the closed status set -> held-out state table lives in the env-free `lib/held-out.ts`.
+export { type Held, heldOf } from '@/lib/held-out';
+
 /**
  * The brand a PUBLIC page renders for the host it is served on (TENANT-02, D-25):
  * - `tenant` host: the full by-host answer (`tenant`) and its resolved brand;

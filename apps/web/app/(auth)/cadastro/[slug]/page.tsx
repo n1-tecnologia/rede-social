@@ -1,9 +1,10 @@
-import { publicTenantSchema, slugSchema } from '@rede-social/contracts';
+import { apiErrorEnvelopeSchema, publicTenantSchema, slugSchema } from '@rede-social/contracts';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { RearmProfileNudge } from '@/components/profile/RearmProfileNudge';
 import { env } from '@/lib/env';
+import { type Held, heldIcon, heldNamespace, heldOf, heldOfCode } from '@/lib/held-out';
 import { getHostBrand } from '@/lib/host-brand';
 import { readJoinDraft } from '@/lib/join-draft';
 import { getHostTenant, signupPath } from '@/lib/tenant-host';
@@ -69,29 +70,53 @@ export default async function CadastroPage({
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ erro?: string; campos?: string; estado?: string }>;
 }) {
-  const [{ slug }, { erro, campos, estado }, hostTenant, brand, t, tu, tj] = await Promise.all([
-    params,
-    searchParams,
-    getHostTenant(),
-    getHostBrand(),
-    getTranslations('signup'),
-    getTranslations('unavailable'),
-    getTranslations('join'),
-  ]);
+  const [{ slug }, { erro, campos, estado }, hostTenant, brand, t, tu, tUpdating, tPreparing, tj] =
+    await Promise.all([
+      params,
+      searchParams,
+      getHostTenant(),
+      getHostBrand(),
+      getTranslations('signup'),
+      getTranslations('unavailable'),
+      getTranslations('updating'),
+      getTranslations('preparing'),
+      getTranslations('join'),
+    ]);
+  // UI-D-542: suspended and unreachable share the generic sentence (A-UI-8); updating and preparing have
+  // their own, with their own glyph. The same card replaces the form for every held-out state.
+  const heldCopy = {
+    unavailable: { title: tu('title'), body: tu('body') },
+    updating: { title: tUpdating('title'), body: tUpdating('body') },
+    preparing: { title: tPreparing('title'), body: tPreparing('body') },
+  };
+  const heldCard = (held: Held) => (
+    <UnavailableCard
+      title={heldCopy[heldNamespace(held)].title}
+      body={heldCopy[heldNamespace(held)].body}
+      icon={heldIcon(held)}
+    />
+  );
 
   // Member sign-up is never offered on the platform domain (D-21) — defence in depth behind proxy.ts.
   if (hostTenant.mode === 'platform') redirect('/entrar');
   // D-22: on a tenant domain the host is the only authority for the slug.
   if (hostTenant.mode === 'tenant' && slug !== hostTenant.slug) notFound();
   if (!slugSchema.safeParse(slug).success) notFound();
-  // D-32: a suspended host answers with the branded card, not "não encontrada" (the API 404s anyway).
-  if (brand.tenant?.status === 'suspended') {
-    return <UnavailableCard title={tu('title')} body={tu('body')} />;
-  }
+  // D-32, UI-D-542: a held-out host (suspended, unreachable, updating, preparing) answers with the
+  // branded card, not "não encontrada" (the API 404s or 503s anyway).
+  const heldHost = heldOf(brand.tenant?.status);
+  if (heldHost) return heldCard(heldHost);
 
   const res = await fetch(`${env.API_URL}/v1/public/tenants/${encodeURIComponent(slug)}`, {
     cache: 'no-store',
   });
+  if (res.status === 503) {
+    // 09.2-11: on a GENERIC host there is no host status to read; the slug record itself refuses a tenant
+    // that is preparing, updating or unreachable (no details), and the member sees the same card.
+    const envelope = apiErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
+    const heldSlug = envelope.success ? heldOfCode(envelope.data.error.code) : null;
+    if (heldSlug) return heldCard(heldSlug);
+  }
   if (!res.ok) notFound();
   const parsed = publicTenantSchema.safeParse(await res.json());
   if (!parsed.success) notFound();

@@ -4,6 +4,7 @@ import { isAllowlistRejection, loginSchema } from '@rede-social/contracts';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { CONTINUE_COOKIE, safeContinuePath } from '@/lib/continue-path';
+import { heldOf, heldPath } from '@/lib/held-out';
 import { getHostBrand } from '@/lib/host-brand';
 import { isEmailNotConfirmed, writePendingConfirmation } from '@/lib/pending-confirmation';
 import { createClient } from '@/lib/supabase/server';
@@ -15,14 +16,19 @@ import { createClient } from '@/lib/supabase/server';
  * An UNCONFIRMED account (quick 261007-gbk) with the right password goes to `/verifique-seu-email`
  * with the address in an HttpOnly cookie, where a new confirmation mail can be requested.
  *
- * D-32: on a SUSPENDED host the login is refused before any GoTrue call — the page already hides the
+ * D-32, 09.2-21: on a SUSPENDED, unavailable, updating or preparing host the login is refused before any GoTrue call — the page already hides the
  * form, this is the server-side half. Otherwise the action does not look at the host: a member of
  * another tenant reaches `/inicio`, where the API answers 403 TENANT_HOST_MISMATCH and plan 01-05
  * renders the host-mismatch screen (D-23). `redirect()` is never called inside a try/catch.
  */
 export async function login(formData: FormData): Promise<void> {
   const brand = await getHostBrand();
-  if (brand.tenant?.status === 'suspended') redirect('/comunidade-indisponivel');
+  // 09.2-21 (UI-D-542): the same refusal for a community being updated or prepared, or whose project is
+  // paused or unreachable, each to its own public screen (`updating` -> /comunidade-em-atualizacao,
+  // `preparing` -> /comunidade-em-preparacao, the rest -> /comunidade-indisponivel) and before any Auth
+  // call. No cookie is cleared.
+  const held = heldOf(brand.tenant?.status);
+  if (held) redirect(heldPath(held));
 
   const parsed = loginSchema.safeParse({
     email: formData.get('email'),

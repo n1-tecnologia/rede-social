@@ -213,3 +213,108 @@ describe('/entrar: secrecy and a byte-identical sentence (D-302, T-09.1-71)', ()
     expect(document.body.textContent).not.toMatch(/gateway|webhook|token|membership/i);
   });
 });
+
+/**
+ * 09.2-21 (UI-D-542, A-UI-8, UI-D-547; E10; P104, P105) — the form steps aside for every held-out state of
+ * the host, with the state's glyph and the state's two sentences; paused and unreachable read exactly as a
+ * suspension. The five statuses of the closed set, one table.
+ */
+describe('/entrar: the held-out host cards (09.2-21)', () => {
+  const SUSPENDED_TITLE = 'Comunidade indisponível';
+  const SUSPENDED_BODY = 'Esta comunidade está temporariamente indisponível.';
+  const UPDATING = [
+    'Comunidade em atualização',
+    'Estamos atualizando esta comunidade. Volte em alguns minutos.',
+  ] as const;
+  const PREPARING = [
+    'Comunidade em preparação',
+    'Esta comunidade ainda está sendo preparada. Volte em breve.',
+  ] as const;
+
+  const withStatus = (status: string) => ({
+    ...tenantBrand,
+    tenant: { slug: 'rede-demo', status },
+  });
+
+  it.each([
+    ['suspended', SUSPENDED_TITLE, SUSPENDED_BODY, 'lucide-triangle-alert'],
+    ['unavailable', SUSPENDED_TITLE, SUSPENDED_BODY, 'lucide-triangle-alert'],
+    ['updating', UPDATING[0], UPDATING[1], 'lucide-refresh-cw'],
+    ['preparing', PREPARING[0], PREPARING[1], 'lucide-hourglass'],
+  ])(
+    '%s renders the card instead of the form: "%s", glyph %s',
+    async (status, title, body, glyph) => {
+      mocks.brand = withStatus(status);
+      await show({});
+      expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy();
+      expect(screen.getByText(body)).toBeTruthy();
+      const svg = document.querySelector('h2')?.parentElement?.querySelector('svg');
+      expect(svg?.classList.contains(glyph)).toBe(true);
+      expect(svg?.getAttribute('width')).toBe('28');
+      expect(svg?.getAttribute('class')).toContain('text-warning');
+      // Nothing else of the form renders: no form, no inputs, no forgot link, no sign-up CTA.
+      expect(document.querySelector('form')).toBeNull();
+      expect(document.querySelector('input')).toBeNull();
+      expect(screen.queryByRole('link')).toBeNull();
+      expect(document.body.textContent).not.toMatch(
+        /banco|projeto|esquema|migra[cç][aã]o|supabase|tenant/i,
+      );
+    },
+  );
+
+  it('active renders the form and no card', async () => {
+    mocks.brand = withStatus('active');
+    await show({});
+    expect(document.querySelector('form')).not.toBeNull();
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+  });
+
+  it('paused and unreachable read byte-identically to a suspension (A-UI-8)', async () => {
+    mocks.brand = withStatus('suspended');
+    await show({});
+    const suspended = document.body.innerHTML;
+    cleanup();
+    mocks.brand = withStatus('unavailable');
+    await show({});
+    expect(document.body.innerHTML).toBe(suspended);
+  });
+
+  it('P104: the card is a pure function of the status: a re-render and a second device read the same', async () => {
+    mocks.brand = withStatus('updating');
+    await show({});
+    const first = document.body.innerHTML;
+    cleanup();
+    await show({});
+    expect(document.body.innerHTML).toBe(first);
+  });
+
+  it('P105: a status change between two renders switches the card, and a cleared state brings the form back', async () => {
+    mocks.brand = withStatus('updating');
+    await show({});
+    expect(screen.getByText(UPDATING[1])).toBeTruthy();
+    cleanup();
+    mocks.brand = withStatus('suspended');
+    await show({});
+    expect(screen.queryByText(UPDATING[1])).toBeNull();
+    expect(screen.getByText(SUSPENDED_BODY)).toBeTruthy();
+    cleanup();
+    mocks.brand = withStatus('active');
+    await show({});
+    expect(document.querySelector('form')).not.toBeNull();
+  });
+
+  it('keeps the host line and the title above the card (E10: the long name still wraps)', async () => {
+    mocks.brand = { ...withStatus('preparing'), displayName: 'A'.repeat(60) };
+    await show({});
+    const hint = screen.getByText(/A{60}/);
+    expect(hint.className).toContain('break-words');
+    expect(screen.getByRole('heading', { level: 1 })).toBeTruthy();
+  });
+
+  it('a generic or platform host never shows a held-out card', async () => {
+    mocks.brand = { mode: 'platform', displayName: null, tenant: null, branding: {} };
+    await show({});
+    expect(document.querySelector('form')).not.toBeNull();
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+  });
+});
