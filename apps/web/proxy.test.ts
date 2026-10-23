@@ -22,11 +22,13 @@ vi.mock('@/lib/env', () => ({
  * calls `setAll` (which rebuilds the request headers and the response) and reports a session.
  */
 const refresh = vi.hoisted(() => ({ on: false }));
+/** Every `createServerClient(url, key)` the proxy made (09.2-17): which project each request talked to. */
+const clients = vi.hoisted(() => ({ calls: [] as { url: string; key: string }[] }));
 
 vi.mock('@supabase/ssr', () => ({
   createServerClient: (
-    _url: string,
-    _key: string,
+    url: string,
+    key: string,
     options: {
       cookies: {
         setAll: (
@@ -35,17 +37,20 @@ vi.mock('@supabase/ssr', () => ({
         ) => void;
       };
     },
-  ) => ({
-    auth: {
-      getClaims: async () => {
-        if (!refresh.on) return { data: { claims: null } };
-        options.cookies.setAll([{ name: 'sb-test-auth-token', value: 'rotated', options: {} }], {
-          'Cache-Control': 'private, no-cache, no-store, must-revalidate, max-age=0',
-        });
-        return { data: { claims: { sub: 'user-1' } } };
+  ) => {
+    clients.calls.push({ url, key });
+    return {
+      auth: {
+        getClaims: async () => {
+          if (!refresh.on) return { data: { claims: null } };
+          options.cookies.setAll([{ name: 'sb-test-auth-token', value: 'rotated', options: {} }], {
+            'Cache-Control': 'private, no-cache, no-store, must-revalidate, max-age=0',
+          });
+          return { data: { claims: { sub: 'user-1' } } };
+        },
       },
-    },
-  }),
+    };
+  },
 }));
 
 vi.mock('@/lib/tenant-host', async (orig) => ({
@@ -359,5 +364,202 @@ describe('proxy.ts — the Content Security Policy rides every branch (08-08, Pi
       expect(res.headers.get('location'), path).toBeNull();
       expect(res.headers.get(CSP), path).toContain("worker-src 'self' blob:");
     }
+  });
+});
+
+/**
+ * 09.2-17 (DBT-39, D-538, D-535, P76): the session client, the cookie hygiene and the unavailable route
+ * follow the project the by-host answer names. A project-0 tenant (no coordinates in the answer) keeps
+ * the environment pair.
+ */
+describe('proxy.ts — a tenant of another project (09.2-17)', () => {
+  const REF_B = 'abcdefghijklmnopqrst';
+  const REF_C = 'uvwxyzabcdefghijklmn';
+  const withProject = (host: string, ref: string) => ({
+    ...tenant(host, true, host),
+    supabaseUrl: `https://${ref}.supabase.co`,
+    publishableKey: `pk-${ref}`,
+  });
+  const cookieHeader = (...names: string[]) => names.map((n) => `${n}=v`).join('; ');
+  const setCookie = (res: Response) => res.headers.getSetCookie().join('\n');
+
+  beforeEach(() => {
+    resolve.mockReset();
+    refresh.on = false;
+    clients.calls.length = 0;
+  });
+
+  it('18. the session client is built from the project the host names, not from the environment', async () => {
+    resolve.mockResolvedValue(withProject('b.example', REF_B));
+    await proxy(request('http://b.example/entrar', { host: 'b.example' }));
+    expect(clients.calls).toEqual([{ url: `https://${REF_B}.supabase.co`, key: `pk-${REF_B}` }]);
+  });
+
+  it('19. a tenant of the central project, the platform host and a generic host keep the environment pair', async () => {
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+    await proxy(request('http://primary.example/entrar', { host: 'primary.example' }));
+    resolve.mockResolvedValue({ mode: 'platform', host: 'rede-social.test' });
+    await proxy(request('http://rede-social.test/entrar', { host: 'rede-social.test' }));
+    resolve.mockResolvedValue({ mode: 'generic', host: 'localhost' });
+    await proxy(request('http://localhost:3000/entrar', { host: 'localhost:3000' }));
+    expect(clients.calls).toEqual([
+      { url: 'http://sb.test', key: 'pk' },
+      { url: 'http://sb.test', key: 'pk' },
+      { url: 'http://sb.test', key: 'pk' },
+    ]);
+  });
+
+  it('20. a stale session cookie of the previous project (chunks included) is deleted; the current one is kept (D-535, T-09.2-85)', async () => {
+    resolve.mockResolvedValue(withProject('b.example', REF_B));
+    const res = await proxy(
+      request('http://b.example/entrar', {
+        host: 'b.example',
+        cookie: cookieHeader(
+          'sb-oldref-auth-token',
+          'sb-oldref-auth-token.0',
+          'sb-oldref-auth-token.1',
+          `sb-${REF_B}-auth-token`,
+          `sb-${REF_B}-auth-token.0`,
+          'theme',
+        ),
+      }),
+    );
+    const written = setCookie(res);
+    for (const name of [
+      'sb-oldref-auth-token',
+      'sb-oldref-auth-token.0',
+      'sb-oldref-auth-token.1',
+    ]) {
+      expect(written, name).toMatch(new RegExp(`${name.replace('.', '\\.')}=;`));
+    }
+    expect(written).not.toContain(`sb-${REF_B}-auth-token`);
+    expect(written).not.toContain('theme');
+  });
+
+  it('21. the cleanup also rides the redirects that carry the response cookies', async () => {
+    resolve.mockResolvedValue(withProject('b.example', REF_B));
+    const res = await proxy(
+      request('http://b.example/inicio', {
+        host: 'b.example',
+        cookie: cookieHeader('sb-oldref-auth-token'),
+      }),
+    );
+    expect(res.status).toBe(307);
+    expect(setCookie(res)).toMatch(/sb-oldref-auth-token=;/);
+  });
+
+  it('22. a project-0 tenant is unchanged: its own cookie stays, nothing is deleted', async () => {
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+    const res = await proxy(
+      request('http://primary.example/entrar', {
+        host: 'primary.example',
+        cookie: cookieHeader('sb-sb-auth-token', 'sb-sb-auth-token.0'),
+      }),
+    );
+    expect(setCookie(res)).toBe('');
+  });
+
+  it('23. a generic answer never deletes a session cookie (a failed lookup of a tenant host must not log members out)', async () => {
+    resolve.mockResolvedValue({ mode: 'generic', host: 'b.example' });
+    const res = await proxy(
+      request('http://b.example/entrar', {
+        host: 'b.example',
+        cookie: cookieHeader(`sb-${REF_B}-auth-token`),
+      }),
+    );
+    expect(setCookie(res)).toBe('');
+  });
+
+  it('24. a rotated session cookie of the current project survives the cleanup', async () => {
+    refresh.on = true;
+    resolve.mockResolvedValue(withProject('b.example', REF_B));
+    const res = await proxy(
+      request('http://b.example/inicio', {
+        host: 'b.example',
+        cookie: cookieHeader('sb-oldref-auth-token'),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.cookies.get('sb-test-auth-token')?.value).toBe('rotated');
+    expect(setCookie(res)).toMatch(/sb-oldref-auth-token=;/);
+  });
+
+  it('25. a half pair or a disallowed address makes the tenant unavailable: no client, no fallback to the central project', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const answer of [
+      { ...tenant('b.example', true, 'b.example'), supabaseUrl: `https://${REF_B}.supabase.co` },
+      { ...tenant('b.example', true, 'b.example'), publishableKey: 'pk-only' },
+      {
+        ...tenant('b.example', true, 'b.example'),
+        supabaseUrl: 'https://evil.example.com',
+        publishableKey: 'pk',
+      },
+      {
+        ...tenant('b.example', true, 'b.example'),
+        supabaseUrl: 'https://x.supabase.co.evil.com',
+        publishableKey: 'pk',
+      },
+    ]) {
+      resolve.mockResolvedValue(answer);
+      const res = await proxy(request('http://b.example/inicio', { host: 'b.example' }));
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe('http://b.example/comunidade-indisponivel');
+      expect(res.headers.get('content-security-policy-report-only')).toContain(
+        "frame-ancestors 'none'",
+      );
+    }
+    expect(clients.calls).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith('tenant-host.coordinates_rejected', {
+      host: 'b.example',
+    });
+    errorSpy.mockRestore();
+  });
+
+  it('26. the unavailable page itself is served for such a tenant (no redirect loop)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    resolve.mockResolvedValue({ ...tenant('b.example', true, 'b.example'), publishableKey: 'pk' });
+    const res = await proxy(
+      request('http://b.example/comunidade-indisponivel', { host: 'b.example' }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
+    expect(clients.calls).toEqual([]);
+    errorSpy.mockRestore();
+  });
+
+  it('27. P76: two interleaved requests for two hosts never share coordinates or cookie keys', async () => {
+    const delays: Record<string, number> = { 'b.example': 30, 'c.example': 1 };
+    resolve.mockImplementation(async (host) => {
+      await new Promise((r) => setTimeout(r, delays[host as string] ?? 0));
+      return host === 'b.example'
+        ? withProject('b.example', REF_B)
+        : withProject('c.example', REF_C);
+    });
+    const [resB, resC] = await Promise.all([
+      proxy(
+        request('http://b.example/entrar', {
+          host: 'b.example',
+          cookie: cookieHeader(`sb-${REF_B}-auth-token`, `sb-${REF_C}-auth-token`),
+        }),
+      ),
+      proxy(
+        request('http://c.example/entrar', {
+          host: 'c.example',
+          cookie: cookieHeader(`sb-${REF_B}-auth-token`, `sb-${REF_C}-auth-token`),
+        }),
+      ),
+    ]);
+    // Each host deletes the OTHER project's cookie and keeps its own.
+    expect(setCookie(resB)).toContain(`sb-${REF_C}-auth-token=;`);
+    expect(setCookie(resB)).not.toContain(`sb-${REF_B}-auth-token`);
+    expect(setCookie(resC)).toContain(`sb-${REF_B}-auth-token=;`);
+    expect(setCookie(resC)).not.toContain(`sb-${REF_C}-auth-token`);
+    expect(clients.calls).toHaveLength(2);
+    expect(clients.calls).toEqual(
+      expect.arrayContaining([
+        { url: `https://${REF_B}.supabase.co`, key: `pk-${REF_B}` },
+        { url: `https://${REF_C}.supabase.co`, key: `pk-${REF_C}` },
+      ]),
+    );
   });
 });

@@ -6,6 +6,7 @@ import { CONTINUE_COOKIE, CONTINUE_MAX_AGE_S, isContinuablePath } from '@/lib/co
 import { CSP_REPORT_PATH, cspFor, cspHeaderName, NONCE_HEADER, newNonce } from '@/lib/csp';
 import { env } from '@/lib/env';
 import { sessionCookieOptions } from '@/lib/supabase/cookie-options';
+import { getSupabaseCoordinates, staleAuthCookieNames } from '@/lib/supabase-coordinates';
 import {
   type HostTenant,
   resolveHostTenant,
@@ -188,27 +189,60 @@ export async function proxy(request: NextRequest) {
     );
   }
 
+  // 2a. Which Supabase project this host talks to (09.2-17, DBT-39, D-538). The by-host answer says; a
+  //     half or disallowed address makes the tenant unavailable to the shell. The central project is
+  //     never substituted for it.
+  const coordinates = getSupabaseCoordinates(hostTenant);
+  if (!coordinates) {
+    const path = request.nextUrl.pathname;
+    if (path === '/comunidade-indisponivel' || path === '/api/csp-report') {
+      return withCsp(NextResponse.next({ request: { headers: requestHeaders } }), csp);
+    }
+    const target = request.nextUrl.clone();
+    target.pathname = '/comunidade-indisponivel';
+    target.search = '';
+    const unavailable = NextResponse.redirect(target, 307);
+    unavailable.headers.set('Cache-Control', 'no-store');
+    return withCsp(unavailable, csp);
+  }
+
+  // D-535: the session cookie of ANOTHER project (the host moved, or its coordinates changed) must not
+  // linger as an HttpOnly cookie on this host. Only on a positively classified host: a generic answer
+  // may be a failed lookup of a tenant host, and that must never log its members out (Pitfall 15).
+  const staleCookies =
+    hostTenant.mode === 'generic'
+      ? []
+      : staleAuthCookieNames(
+          request.cookies.getAll().map((cookie) => cookie.name),
+          coordinates.cookieKey,
+        );
+  const clearStale = <T extends NextResponse>(target: T, keep: readonly string[] = []): T => {
+    for (const name of staleCookies) if (!keep.includes(name)) target.cookies.delete(name);
+    return target;
+  };
+
   // 2. Session refresh (RESEARCH §Pattern 5, official @supabase/ssr shape).
-  let response = withCsp(NextResponse.next({ request: { headers: requestHeaders } }), csp);
-  const supabase = createServerClient(
-    env.NEXT_PUBLIC_SUPABASE_URL,
-    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-    {
-      cookieOptions: sessionCookieOptions,
-      cookies: {
-        getAll: () => request.cookies.getAll(),
-        setAll(cookiesToSet, headers) {
-          for (const { name, value } of cookiesToSet) request.cookies.set(name, value);
-          requestHeaders = buildRequestHeaders(request, hostTenant, csp);
-          response = withCsp(NextResponse.next({ request: { headers: requestHeaders } }), csp);
-          for (const { name, value, options } of cookiesToSet) {
-            response.cookies.set(name, value, options);
-          }
-          for (const [key, val] of Object.entries(headers)) response.headers.set(key, val);
-        },
+  let response = clearStale(
+    withCsp(NextResponse.next({ request: { headers: requestHeaders } }), csp),
+  );
+  const supabase = createServerClient(coordinates.url, coordinates.publishableKey, {
+    cookieOptions: sessionCookieOptions,
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll(cookiesToSet, headers) {
+        for (const { name, value } of cookiesToSet) request.cookies.set(name, value);
+        requestHeaders = buildRequestHeaders(request, hostTenant, csp);
+        response = clearStale(
+          withCsp(NextResponse.next({ request: { headers: requestHeaders } }), csp),
+          cookiesToSet.map((cookie) => cookie.name),
+        );
+        for (const { name, value, options } of cookiesToSet) {
+          response.cookies.set(name, value, options);
+        }
+        for (const [key, val] of Object.entries(headers)) response.headers.set(key, val);
       },
     },
-  );
+  });
   // Signature-verified claims (ES256 via JWKS); refreshes the session when the access token expired.
   const { data } = await supabase.auth.getClaims();
   const authenticated = Boolean(data?.claims);

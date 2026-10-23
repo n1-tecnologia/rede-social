@@ -59,7 +59,12 @@ export const TENANT_SLUG_MAX_AGE_S = 31536000;
 // ≤ 60 s web + 60 s API before the public pages show a brand change).
 const TTL_HIT_MS = 60_000; // registered host
 const TTL_MISS_MS = 60_000; // 404 TENANT_NOT_FOUND
-const TTL_ERROR_MS = 10_000; // network error / 5xx (fail-open to generic, logged)
+const TTL_ERROR_MS = 10_000; // network error / 5xx (last good value, else fail-open to generic, logged)
+// 09.2-17 (D-537, Pitfall 15): how long the LAST SUCCESSFUL answer for a host outlives its 60 s entry.
+// A refresh that fails (network error, timeout, 5xx, an unreadable body) keeps serving it instead of
+// turning a known tenant into the generic shell on a transient API or central outage. Only a 404 (the
+// host really is unknown) clears it.
+const TTL_LAST_GOOD_MS = 10 * 60_000;
 // Interactive path (proxy + every layout); the API-side adapters use 10 s — a hanging Cloud Run must
 // fail open to generic within one perceived beat (WR-06). A timeout is a lookup failure: generic for
 // TTL_ERROR_MS, never another tenant's brand.
@@ -71,6 +76,9 @@ const HOST_LOOKUP_TIMEOUT_MS = 2_000;
 // random-hostname storm at a fixed memory cost.
 const MAX_ENTRIES = 1_000;
 const cache = createBoundedTtlCache<HostTenant>(MAX_ENTRIES);
+// The last good TENANT answer per host (09.2-17). Same bound and same key as `cache`; only a verified
+// tenant answer ever enters it, so a negative or generic result is never "kept".
+const lastGood = createBoundedTtlCache<HostTenant>(MAX_ENTRIES);
 
 function isGenericFastPath(host: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.vercel.app');
@@ -96,7 +104,9 @@ export async function resolveHostTenant(rawHost: string | null | undefined): Pro
   const hit = cache.get(host);
   if (hit) return hit;
 
-  let value: HostTenant = { mode: 'generic', host };
+  // 09.2-17: on a transient failure the previous good tenant value (if any) stands in for `generic`.
+  const fallback = (): HostTenant => lastGood.get(host) ?? { mode: 'generic', host };
+  let value: HostTenant | null = null;
   let ttl = TTL_ERROR_MS;
   try {
     const res = await fetch(
@@ -108,10 +118,14 @@ export async function resolveHostTenant(rawHost: string | null | undefined): Pro
       if (parsed.success) {
         value = { mode: 'tenant', host, ...parsed.data };
         ttl = TTL_HIT_MS;
+        lastGood.set(host, value, TTL_LAST_GOOD_MS);
       } else {
         console.error('tenant-host.lookup_failed', { host, reason: 'invalid_body' });
       }
     } else if (res.status === 404) {
+      // The host really is unknown now (detached, or never verified): forget the last good value.
+      lastGood.delete(host);
+      value = { mode: 'generic', host };
       ttl = TTL_MISS_MS;
     } else {
       console.error('tenant-host.lookup_failed', { host, status: res.status });
@@ -120,8 +134,10 @@ export async function resolveHostTenant(rawHost: string | null | undefined): Pro
     console.error('tenant-host.lookup_failed', { host, error: String(error) });
   }
 
-  cache.set(host, value, ttl);
-  return value;
+  // Every failure path left `value` unset: the last good tenant answer, else the generic shell.
+  const result = value ?? fallback();
+  cache.set(host, result, ttl);
+  return result;
 }
 
 /**

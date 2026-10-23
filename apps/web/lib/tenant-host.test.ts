@@ -114,3 +114,125 @@ describe('resolveHostTenant — bounded by-host lookup (WR-06)', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 09.2-17 (D-537, Pitfall 15): a known tenant survives a transient outage of the API or the central
+ * project for ten minutes. Fake timers drive the clock; `fetch` is stubbed per case.
+ */
+describe('resolveHostTenant — the last good answer survives a transient failure (09.2-17)', () => {
+  let n = 0;
+  const uniqueHost = () => `lastgood-${Date.now()}-${n++}.example`;
+  const ok = (host: string) => async () =>
+    new Response(JSON.stringify(tenantBody(host)), { status: 200 });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Fills the cache, then moves past the 60 s hit TTL so the next call refreshes. */
+  async function warm(host: string) {
+    fetchMock.mockImplementation(ok(host));
+    const first = await resolveHostTenant(host);
+    expect(first.mode).toBe('tenant');
+    await vi.advanceTimersByTimeAsync(61_000);
+  }
+
+  it('a network error keeps serving the tenant', async () => {
+    const host = uniqueHost();
+    await warm(host);
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    const result = await resolveHostTenant(host);
+    expect(result).toEqual({ mode: 'tenant', host, ...tenantBody(host) });
+    expect(errorSpy).toHaveBeenCalledWith(
+      'tenant-host.lookup_failed',
+      expect.objectContaining({ host }),
+    );
+  });
+
+  it('a timeout keeps serving the tenant', async () => {
+    const host = uniqueHost();
+    await warm(host);
+    fetchMock.mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    expect((await resolveHostTenant(host)).mode).toBe('tenant');
+  });
+
+  it('a 500 keeps serving the tenant, and the retry waits for the 10 s error TTL', async () => {
+    const host = uniqueHost();
+    await warm(host);
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(new Response('boom', { status: 500 }));
+    expect((await resolveHostTenant(host)).mode).toBe('tenant');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await resolveHostTenant(host)).mode).toBe('tenant');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_500);
+    expect((await resolveHostTenant(host)).mode).toBe('tenant');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps it for ten minutes, then falls open to generic', async () => {
+    const host = uniqueHost();
+    await warm(host); // 61 s since the good answer
+    fetchMock.mockResolvedValue(new Response('boom', { status: 503 }));
+    await vi.advanceTimersByTimeAsync(8 * 60_000); // ~9 min
+    expect((await resolveHostTenant(host)).mode).toBe('tenant');
+    await vi.advanceTimersByTimeAsync(2 * 60_000); // ~11 min since the good answer
+    expect(await resolveHostTenant(host)).toEqual({ mode: 'generic', host });
+  });
+
+  it('a 404 clears it: the host really is unknown', async () => {
+    const host = uniqueHost();
+    await warm(host);
+    fetchMock.mockResolvedValue(new Response('{}', { status: 404 }));
+    expect(await resolveHostTenant(host)).toEqual({ mode: 'generic', host });
+    // ...and a later failure does not resurrect the deleted tenant.
+    await vi.advanceTimersByTimeAsync(61_000);
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    expect(await resolveHostTenant(host)).toEqual({ mode: 'generic', host });
+  });
+
+  it('an invalid body keeps the tenant and logs it', async () => {
+    const host = uniqueHost();
+    await warm(host);
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ nope: true }), { status: 200 }));
+    expect((await resolveHostTenant(host)).mode).toBe('tenant');
+    expect(errorSpy).toHaveBeenCalledWith('tenant-host.lookup_failed', {
+      host,
+      reason: 'invalid_body',
+    });
+  });
+
+  it('a first-ever failure still falls open to generic for the error TTL', async () => {
+    const host = uniqueHost();
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    expect(await resolveHostTenant(host)).toEqual({ mode: 'generic', host });
+    expect(await resolveHostTenant(host)).toEqual({ mode: 'generic', host });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('the answer carries the project coordinates through unchanged', async () => {
+    const host = uniqueHost();
+    const body = {
+      ...tenantBody(host),
+      supabaseUrl: 'https://abcdefghijklmnopqrst.supabase.co',
+      publishableKey: 'pk-b',
+    };
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify(body), { status: 200 }));
+    expect(await resolveHostTenant(host)).toEqual({ mode: 'tenant', host, ...body });
+  });
+
+  it('stays bounded: a storm of distinct hosts cannot grow the caches past their limit', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const host = new URL(url).searchParams.get('host') as string;
+      return new Response(JSON.stringify(tenantBody(host)), { status: 200 });
+    });
+    for (let i = 0; i < 1_050; i++) await resolveHostTenant(`storm-${n}-${i}.example`);
+    // The earliest hosts were evicted: asking again refetches instead of being served from memory.
+    fetchMock.mockClear();
+    await resolveHostTenant(`storm-${n}-0.example`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
