@@ -8,6 +8,12 @@
  */
 
 export {
+  CENTRAL_KEEPS,
+  centralResidue,
+  type ResidueLine,
+  type ResidueResult,
+} from './central-clean';
+export {
   defaultBossFor,
   defaultStorage,
   type MoveContext,
@@ -38,6 +44,7 @@ export {
   dropTenantHostCache,
   flipPointer,
 } from './cutover';
+export { confirmDeleteSource, type DeleteReport } from './delete-source';
 export { type FkEdge, type OrderResult, orderTables, SELF_REF_ORDER } from './fk-order';
 export {
   accountIdsOf,
@@ -66,6 +73,14 @@ export {
   rewriteStorageOrigins,
   scanForOrigin,
 } from './rewrite';
+export {
+  type RollbackOutcome,
+  recopyTarget,
+  rollbackAfterFlip,
+  rollbackBeforeFlip,
+  type WriteReport,
+  writesSinceCutover,
+} from './rollback';
 export {
   DEFAULT_REGISTRY_WAIT_MS,
   type MoveLine,

@@ -81,6 +81,11 @@ function memoryStore(initial: MoveRow = row()) {
       };
       return current;
     },
+    async markSourceDeleted() {
+      if (current.state !== 'done' || current.sourceDeletedAt) return false;
+      current = { ...current, sourceDeletedAt: clock.now };
+      return true;
+    },
     async setError(_id, code) {
       current = { ...current, errorCode: code };
     },

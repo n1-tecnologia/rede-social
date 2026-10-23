@@ -9,9 +9,11 @@ import { copyAuth } from './copy-auth';
 import { copyRows } from './copy-rows';
 import { copyStorage } from './copy-storage';
 import { completeCutover, flipPointer } from './cutover';
+import { confirmDeleteSource } from './delete-source';
 import { assertCoverage, planMove } from './plan';
 import { DEFAULT_GAP_MS, DEFAULT_QUIESCE_MS, fingerprintOf, quiesce } from './quiesce';
 import { requeueJobs } from './requeue';
+import { recopyTarget, rollbackAfterFlip, rollbackBeforeFlip } from './rollback';
 import {
   advance,
   claimLease,
@@ -23,6 +25,7 @@ import {
   type MoveState,
   type MoveStore,
   openMoveOf,
+  PRE_FLIP_STATES,
   platformStore,
   recordEvent,
   releaseLease,
@@ -209,6 +212,12 @@ export async function runMove(
     case 'start':
     case 'resume':
       return startOrResume(runner);
+    case 'recopy':
+      return recopyMode(runner);
+    case 'rollback':
+      return rollbackMode(runner);
+    case 'confirm-delete':
+      return confirmDeleteMode(runner);
     default:
       throw new MoveError('usage', ['mode']);
   }
@@ -395,6 +404,7 @@ async function drive(
   tenant: TenantFacts,
   initial: MoveRow,
   owner: string,
+  flags: { recopy?: boolean } = {},
 ): Promise<MoveResult> {
   const { options, deps } = runner;
   const store = deps.store ?? platformStore;
@@ -409,22 +419,13 @@ async function drive(
       throw error;
     }
   }
-  const targetProject = await resolveProjectById(move.toProjectId);
-  if (!targetProject) throw new MoveError('target_not_ready', ['unregistered']);
-
-  const ctx = await openContext({
-    move,
-    tenant: { id: tenant.id, slug: tenant.slug },
-    sourceProject: tenant.sourceProject,
-    targetProject,
-    waits: {
-      quiesceMs: options.quiesceMs ?? DEFAULT_QUIESCE_MS,
-      registryWaitMs: options.registryWaitMs ?? DEFAULT_REGISTRY_WAIT_MS,
-    },
-    deps,
-  });
+  const ctx = await contextOf(runner, tenant, move);
 
   try {
+    if (flags.recopy) {
+      move = await guarded(runner, ctx, 'recopy', () => recopyTarget(ctx));
+      runner.emit({ kind: 'state', moveId: move.id, state: move.state, recopied: true });
+    }
     for (;;) {
       await claimLease(move.id, owner, store);
       ctx.move = move;
@@ -461,6 +462,27 @@ async function drive(
   } finally {
     await ctx.close();
   }
+}
+
+/** The move's own two projects (never the binding, which has moved after the flip) and the open sides. */
+async function contextOf(runner: Runner, tenant: TenantFacts, move: MoveRow): Promise<MoveContext> {
+  const [sourceProject, targetProject] = await Promise.all([
+    resolveProjectById(move.fromProjectId),
+    resolveProjectById(move.toProjectId),
+  ]);
+  if (!sourceProject) throw new MoveError('tenant_unbound');
+  if (!targetProject) throw new MoveError('target_not_ready', ['unregistered']);
+  return openContext({
+    move,
+    tenant: { id: tenant.id, slug: tenant.slug },
+    sourceProject,
+    targetProject,
+    waits: {
+      quiesceMs: runner.options.quiesceMs ?? DEFAULT_QUIESCE_MS,
+      registryWaitMs: runner.options.registryWaitMs ?? DEFAULT_REGISTRY_WAIT_MS,
+    },
+    deps: runner.deps,
+  });
 }
 
 /** Records the failure (a code, never text) and keeps the move where it was, so `--resume` can continue. */
@@ -668,4 +690,118 @@ async function stepComplete(runner: Runner, ctx: MoveContext): Promise<MoveRow> 
     runner.emit({ kind: 'state', moveId: next.id, state: next.state });
     return next;
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// recopy, rollback, confirm-delete
+// ---------------------------------------------------------------------------------------------------------
+
+/** The move a mode acts on: the open one, else the most recent. */
+async function moveForMode(runner: Runner, tenantId: string): Promise<MoveRow> {
+  const store = runner.deps.store ?? platformStore;
+  const move = (await openMoveOf(tenantId, store)) ?? (await latestMoveOf(tenantId));
+  if (!move) throw new MoveError('usage', ['no_move']);
+  return move;
+}
+
+/** `--recopy`: wipe the target's rows of the tenant and restart the copy from `suspended`. */
+async function recopyMode(runner: Runner): Promise<MoveResult> {
+  const { deps } = runner;
+  const store = deps.store ?? platformStore;
+  const tenant = await resolveTenant(runner.options.tenantSlug);
+  const move = await openMoveOf(tenant.id, store);
+  if (!move) throw new MoveError('not_done');
+  if (move.state !== 'suspended' && move.state !== 'copied') throw new MoveError('not_done');
+  const owner = (deps.newOwner ?? (() => crypto.randomUUID()))();
+  await claimLease(move.id, owner, store);
+  try {
+    return await drive(runner, tenant, move, owner, { recopy: true });
+  } finally {
+    await releaseLease(move.id, owner, store).catch(() => undefined);
+  }
+}
+
+/** `--rollback`: valid from every state before `done`, and after it until the source is deleted. */
+async function rollbackMode(runner: Runner): Promise<MoveResult> {
+  const { options, deps } = runner;
+  const store = deps.store ?? platformStore;
+  const tenant = await resolveTenant(options.tenantSlug);
+  const move = await moveForMode(runner, tenant.id);
+  const report = (outcome: string, state: MoveState, extra: MoveLine = {}): MoveResult => {
+    runner.emit({ kind: 'rollback', moveId: move.id, outcome, state, ...extra });
+    return {
+      ok: true,
+      mode: 'rollback',
+      outcome,
+      moveId: move.id,
+      state,
+      lines: runner.lines,
+    };
+  };
+
+  if (move.state === 'rolled_back') return report('already_rolled_back', 'rolled_back');
+  if (move.sourceDeletedAt) throw new MoveError('source_deleted');
+
+  const owner = (deps.newOwner ?? (() => crypto.randomUUID()))();
+  await claimLease(move.id, owner, store);
+  try {
+    if (PRE_FLIP_STATES.includes(move.state)) {
+      const done = await rollbackBeforeFlip(move, deps);
+      return report(done.outcome, 'rolled_back', { flipped: false });
+    }
+    const ctx = await contextOf(runner, tenant, move);
+    try {
+      const done = await rollbackAfterFlip(ctx, { acceptLoss: options.acceptLoss === true });
+      return report(done.outcome, 'rolled_back', { flipped: true, lost: done.lost });
+    } finally {
+      await ctx.close();
+    }
+  } finally {
+    await releaseLease(move.id, owner, store).catch(() => undefined);
+  }
+}
+
+/** `--confirm-delete --confirm-slug <slug>`: the only path that removes anything from the source. */
+async function confirmDeleteMode(runner: Runner): Promise<MoveResult> {
+  const { options, deps } = runner;
+  const store = deps.store ?? platformStore;
+  // The typed slug is checked before anything is opened or read about the move.
+  if (options.confirmSlug === undefined || options.confirmSlug !== options.tenantSlug) {
+    throw new MoveError('confirm_mismatch');
+  }
+  const tenant = await resolveTenant(options.tenantSlug);
+  const move = await moveForMode(runner, tenant.id);
+  if (move.sourceDeletedAt) throw new MoveError('source_deleted');
+  if (move.state !== 'done') throw new MoveError('not_done');
+
+  const owner = (deps.newOwner ?? (() => crypto.randomUUID()))();
+  await claimLease(move.id, owner, store);
+  try {
+    const ctx = await contextOf(runner, tenant, move);
+    try {
+      const deleted = await confirmDeleteSource(ctx, {
+        confirmSlug: options.confirmSlug,
+        onPlan: (plan) => runner.emit({ kind: 'delete_plan', ...plan }),
+      });
+      runner.emit({
+        kind: 'source_deleted',
+        moveId: move.id,
+        rows: deleted.rows,
+        files: deleted.files,
+        accounts: deleted.accounts,
+      });
+      return {
+        ok: true,
+        mode: 'confirm-delete',
+        outcome: 'source_deleted',
+        moveId: move.id,
+        state: move.state,
+        lines: runner.lines,
+      };
+    } finally {
+      await ctx.close();
+    }
+  } finally {
+    await releaseLease(move.id, owner, store).catch(() => undefined);
+  }
 }

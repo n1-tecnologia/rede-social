@@ -98,6 +98,24 @@ export function defaultStorage(project: ProjectRecord): StoragePort {
   return supabaseStoragePort(supabaseAdminFor(project));
 }
 
+/** Deletes an account through the project's Admin API (never a raw delete of `auth.users`). */
+export async function defaultDeleteAccount(project: ProjectRecord, userId: string): Promise<void> {
+  const { error } = await supabaseAdminFor(project).auth.admin.deleteUser(userId);
+  if (error) throw new Error('account delete failed');
+}
+
+/** Removes Storage objects of a project through its service-key client. The message names nothing. */
+export async function defaultPurgeStorage(
+  project: ProjectRecord,
+  bucket: string,
+  keys: readonly string[],
+): Promise<void> {
+  const { error } = await supabaseAdminFor(project)
+    .storage.from(bucket)
+    .remove([...keys]);
+  if (error) throw new Error('storage remove failed');
+}
+
 export async function openContext(input: {
   move: MoveRow;
   tenant: { id: string; slug: string };

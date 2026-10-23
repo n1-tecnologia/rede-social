@@ -26,6 +26,7 @@
     "platform:reseal": "tsx scripts/reseal.ts",
     "platform:reissue-credentials": "tsx scripts/reissue-credentials.ts",
     "platform:probe": "tsx scripts/probe-management-api.ts",
+    "platform:central-clean": "tsx scripts/central-clean.ts",
     "spike:supavisor": "vitest run --config scripts/vitest.config.ts",
     "test:integration": "pnpm --filter @rede-social/api test:integration && pnpm --filter @rede-social/reuse-fixture test:integration",
     "e2e": "pnpm --filter @rede-social/web e2e",

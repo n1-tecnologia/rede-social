@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, notInArray, sql } from 'drizzle-orm';
 import { tenantMoveEvents, tenantMoves } from '../../../db/central';
 import { withPlatformTx } from '../../../db/platform-tx';
 import { MoveError } from './types';
@@ -98,6 +98,8 @@ export interface MoveStore {
   cas(id: string, from: MoveState, to: MoveState, patch: AdvancePatch): Promise<MoveRow | null>;
   /** Stores (or clears, with `null`) the failure code of a move, whatever its state. */
   setError(id: string, code: string | null): Promise<void>;
+  /** Stamps `source_deleted_at` (state `done`, not yet stamped); `false` when zero rows matched. */
+  markSourceDeleted(id: string): Promise<boolean>;
   /** True when this owner now holds the lease. */
   claim(id: string, owner: string): Promise<boolean>;
   release(id: string, owner: string): Promise<void>;
@@ -255,6 +257,23 @@ export const platformStore: MoveStore = {
     );
   },
 
+  async markSourceDeleted(id) {
+    const rows = await withPlatformTx((tx) =>
+      tx
+        .update(tenantMoves)
+        .set({ sourceDeletedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(tenantMoves.id, id),
+            eq(tenantMoves.state, 'done'),
+            isNull(tenantMoves.sourceDeletedAt),
+          ),
+        )
+        .returning({ id: tenantMoves.id }),
+    );
+    return rows.length === 1;
+  },
+
   async claim(id, owner) {
     const rows = await withPlatformTx((tx) =>
       tx
@@ -364,6 +383,14 @@ export const setMoveError = (
   code: string | null,
   store: MoveStore = platformStore,
 ): Promise<void> => store.setError(moveId, code);
+
+/** Stamps `source_deleted_at`: the point after which the move cannot be rolled back. */
+export async function markSourceDeleted(
+  moveId: string,
+  store: MoveStore = platformStore,
+): Promise<void> {
+  if (!(await store.markSourceDeleted(moveId))) throw new MoveError('move_conflict');
+}
 
 export const releaseLease = (
   moveId: string,
