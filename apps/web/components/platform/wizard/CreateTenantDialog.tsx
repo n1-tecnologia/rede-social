@@ -1,16 +1,20 @@
 'use client';
 
+import { BOOTSTRAP_STEP_KEYS } from '@rede-social/contracts/projects';
 import { BrandPreview } from '@rede-social/core/ui';
-import { BottomSheet, Button } from '@rede-social/ui';
+import { BottomSheet, Button, buttonClasses } from '@rede-social/ui';
 import { CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  type BootstrapProgress,
   type CreateTenantResult,
   createTenantFromDraftAction,
   type DraftFieldErrors,
   findCreatedTenantAction,
+  readBootstrapProgressAction,
 } from '@/app/(platform)/plataforma/novo/actions';
 import { attachDomainAction } from '@/app/(platform)/plataforma/tenants/[id]/dominios/actions';
 import {
@@ -19,17 +23,65 @@ import {
 } from '@/app/(platform)/plataforma/tenants/[id]/marca/actions';
 import { lookBodyOf, resolveButtonPairs } from '@/lib/bg-tone';
 import { brandingUploadErrorKey, runBrandingUpload } from '@/lib/branding-upload';
+import { reasonCatalogKey } from '@/lib/database-copy';
 import { DEFAULT_TITLE_FONT, titleFontStyle, useTitleFont } from '@/lib/title-font';
 import { needsRecompose, recomposeDraftIcon } from './draft-icon';
 import { type ButtonRowKey, type InkKey, lookChanges } from './preview-colors';
-import { useTenantDraft } from './TenantDraftProvider';
+import { forgetStoredDraft, useTenantDraft } from './TenantDraftProvider';
 
-type Task = 'create' | 'logo' | 'icon' | 'domain';
+/** The order the dialog writes in: the database is second because the uploads need its buckets. */
+type Task = 'create' | 'database' | 'logo' | 'icon' | 'domain';
 type TaskStatus = 'pending' | 'running' | 'done' | 'failed';
 /** review → running → (the invite step) | fix | generic | partial */
 type Phase = 'review' | 'running' | 'fix' | 'generic' | 'partial';
 
 const UPLOAD_ACTIONS = { start: startBrandingUploadAction, complete: completeBrandingUploadAction };
+
+/** How often the preparation is read while the `database` task runs (UI-D-544: the cadence is the contract). */
+const POLL_MS = 2000;
+/** After this long in `database` the dialog offers to go on in the background (UI-D-535). */
+const BACKGROUND_AFTER_MS = 60_000;
+
+/** How the wait for the database ended. */
+type DatabaseOutcome =
+  | { kind: 'done' }
+  | { kind: 'failed'; reason: ReturnType<typeof reasonCatalogKey> }
+  | { kind: 'background' }
+  /** The dialog went away while waiting: nothing more is written. */
+  | { kind: 'stopped' };
+
+/**
+ * "Etapa {n} de {total}: {step}" from the last read: the step that runs (or, between two steps, the
+ * one that comes next), 1-based; the first step before anything was read.
+ */
+function stepLineOf(progress: BootstrapProgress | null) {
+  const total = BOOTSTRAP_STEP_KEYS.length;
+  const steps = progress?.steps ?? [];
+  const running = steps.findIndex((step) => step.status === 'running');
+  const index =
+    running >= 0
+      ? running
+      : Math.min(steps.filter((step) => step.status === 'done').length, total - 1);
+  return {
+    n: index + 1,
+    total,
+    step: steps[index]?.step ?? BOOTSTRAP_STEP_KEYS[index] ?? BOOTSTRAP_STEP_KEYS[0],
+  };
+}
+
+/** Finished, failed or still going, from one read of the preparation (null: still going). */
+function judge(progress: BootstrapProgress): DatabaseOutcome | null {
+  const failed = progress.steps.find((step) => step.status === 'failed');
+  if (failed || progress.state === 'preparation_failed') {
+    return { kind: 'failed', reason: reasonCatalogKey(failed?.reasonCode) };
+  }
+  // Anything but `preparing` means the project is ready (a shared one is filled with no steps at all).
+  if (progress.state !== 'preparing') return { kind: 'done' };
+  if (progress.steps.length > 0 && progress.steps.every((step) => step.status === 'done')) {
+    return { kind: 'done' };
+  }
+  return null;
+}
 
 /** The confirmation's phrase of each ink (`summary.fontColorParts`). */
 const INK_PART: Record<InkKey, string> = {
@@ -88,6 +140,7 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
   const tw = useTranslations('platform.wizard');
   const tb = useTranslations('platformBranding');
   const td = useTranslations('platformDomains');
+  const tdb = useTranslations('platform.database');
   const router = useRouter();
   const {
     draft,
@@ -106,12 +159,31 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
   const [status, setStatus] = useState<Partial<Record<Task, TaskStatus>>>({});
   const [reasons, setReasons] = useState<Partial<Record<Task, string>>>({});
   const [fieldErrors, setFieldErrors] = useState<DraftFieldErrors>({});
+  /** The tenant this dialog created, for the Banco tab's address. */
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  /** The last read of the database preparation; a failed read keeps the one before. */
+  const [progress, setProgress] = useState<BootstrapProgress | null>(null);
+  /** The database task has run long enough to offer the background option. */
+  const [slow, setSlow] = useState(false);
 
   // Read by `close`, which keeps ONE identity while the dialog is open. Only by habit now: the
   // sheet's focus trap reads its onClose through a ref and arms once per opening, so a new
   // identity would no longer move the focus.
   const phaseRef = useRef<Phase>('review');
   const createdRef = useRef<string | null>(null);
+  /** Where "Continuar" leads once the tenant exists: its invite step, or the Banco tab after a database miss. */
+  const landingRef = useRef<'invite' | 'banco'>('invite');
+  /** The operator chose to go on in the background; the wait wakes up and lets go. */
+  const backgroundRef = useRef(false);
+  const wakeRef = useRef<(() => void) | null>(null);
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      wakeRef.current?.();
+    };
+  }, []);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -130,6 +202,7 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
   const host = draft.host.trim();
   const tasks: Task[] = [
     'create',
+    'database',
     ...(logo ? (['logo'] as const) : []),
     ...(icon ? (['icon'] as const) : []),
     ...(host ? (['domain'] as const) : []),
@@ -152,18 +225,32 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
     [router],
   );
 
+  /**
+   * To the tenant's Banco tab, outside the wizard: the stored draft goes first, or the next "Novo
+   * tenant" would be sent to the invite step of a tenant that already exists.
+   */
+  const toBanco = useCallback(
+    (id: string) => {
+      forgetStoredDraft();
+      router.replace(`/plataforma/tenants/${id}/banco`);
+    },
+    [router],
+  );
+
   const close = useCallback(() => {
     if (phaseRef.current === 'running') return;
-    // The tenant exists: there is no way back to the summary, closing goes on to its invite step.
+    // The tenant exists: there is no way back to the summary, closing goes on to its invite step
+    // (or, when its database is not ready, to the Banco tab where the failed step is worked).
     if (createdRef.current) {
-      toInvite(createdRef.current);
+      if (landingRef.current === 'banco') toBanco(createdRef.current);
+      else toInvite(createdRef.current);
       return;
     }
     enter('review');
     setStatus({});
     setReasons({});
     onCloseRef.current();
-  }, [enter, toInvite]);
+  }, [enter, toInvite, toBanco]);
 
   // The kernel mini-shells carry a real (inert, tabIndex -1) button, and the sheet's focus trap aims
   // its first focus at the first ENABLED button: disabled, they drop out of its list, so the focus
@@ -201,6 +288,47 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
     }
   };
 
+  // The background option appears once the database task has run for a minute (and goes with it).
+  const databaseRunning = status.database === 'running';
+  useEffect(() => {
+    if (!databaseRunning) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), BACKGROUND_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [databaseRunning]);
+
+  /**
+   * Reads the preparation every `POLL_MS` until it finishes or fails, the operator goes on in the
+   * background, or the dialog goes away. A read that fails keeps the last state on screen and is
+   * simply asked again at the next tick (UI-D-544).
+   */
+  const waitForDatabase = async (id: string): Promise<DatabaseOutcome> => {
+    for (;;) {
+      if (!aliveRef.current) return { kind: 'stopped' };
+      const next = await readBootstrapProgressAction(id).catch(() => null);
+      if (!aliveRef.current) return { kind: 'stopped' };
+      if (next) {
+        setProgress(next);
+        const verdict = judge(next);
+        if (verdict) return verdict;
+      }
+      if (backgroundRef.current) return { kind: 'background' };
+      await new Promise<void>((resolve) => {
+        wakeRef.current = resolve;
+        setTimeout(resolve, POLL_MS);
+      });
+      wakeRef.current = null;
+    }
+  };
+
+  /** "Continuar em segundo plano": the preparation goes on without the dialog. */
+  const goBackground = () => {
+    backgroundRef.current = true;
+    wakeRef.current?.();
+  };
+
   const run = async () => {
     if (phaseRef.current === 'running') return;
     // The tenant exists already (this dialog reopened after a reload): its invite step is next.
@@ -218,6 +346,10 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
     enter('running');
     setStatus({});
     setReasons({});
+    setProgress(null);
+    setSlow(false);
+    backgroundRef.current = false;
+    landingRef.current = 'invite';
     mark('create', 'running');
 
     const slug = draft.slug;
@@ -274,14 +406,32 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
 
     const id = created.id;
     createdRef.current = id;
+    setTenantId(id);
     update({ createdId: id, pendingSlug: null });
     mark('create', 'done');
 
+    // The uploads need the buckets, so they wait for the database; so does the domain, except after a
+    // miss, where it is still attempted (it is central and needs no bucket).
     let missed = false;
-    for (const [task, image] of [
-      ['logo', logo],
-      ['icon', icon],
-    ] as const) {
+    mark('database', 'running');
+    const prepared = await waitForDatabase(id);
+    if (prepared.kind === 'stopped') return;
+    if (prepared.kind === 'failed') {
+      missed = true;
+      landingRef.current = 'banco';
+      fail('database', tdb(`reasons.${prepared.reason}`));
+    } else if (prepared.kind === 'done') {
+      mark('database', 'done');
+    }
+    setProgress(null);
+    const uploads =
+      prepared.kind === 'done'
+        ? ([
+            ['logo', logo],
+            ['icon', icon],
+          ] as const)
+        : [];
+    for (const [task, image] of uploads) {
       if (!image) continue;
       mark(task, 'running');
       const file = task === 'icon' ? await iconOnPrimary(image.file) : image.file;
@@ -318,6 +468,12 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
       }
     }
 
+    // Went on in the background: the preparation is worked on the Banco tab, the logo and the icon
+    // are sent from the Marca tab, and the domain (attached above) needs nothing from either.
+    if (prepared.kind === 'background') {
+      toBanco(id);
+      return;
+    }
     if (missed) {
       enter('partial');
       return;
@@ -523,6 +679,14 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
                         ? Loader2
                         : Circle;
                 const reason = state === 'failed' ? reasons[task] : undefined;
+                // After a miss of the database the uploads were never tried: they say so (UI-D-535).
+                const notSent =
+                  state === 'pending' &&
+                  (task === 'logo' || task === 'icon') &&
+                  status.database === 'failed';
+                // The step the database is on, while it runs: "Etapa 3 de 8: Aplicar o esquema do banco".
+                const stepLine =
+                  task === 'database' && state === 'running' ? stepLineOf(progress) : null;
                 return (
                   <li
                     key={task}
@@ -552,11 +716,45 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
                         {tw(`confirm.progress.${task}`)}
                       </span>
                       {reason ? <span className="text-xs text-danger">{reason}</span> : null}
+                      {notSent ? (
+                        <span className="text-xs text-text-tertiary">
+                          {tw('confirm.progress.notSent')}
+                        </span>
+                      ) : null}
+                      {stepLine ? (
+                        <span
+                          aria-live="polite"
+                          className="mt-1 break-words text-xs tabular-nums text-text-tertiary"
+                        >
+                          {tw('confirm.progress.step', {
+                            n: stepLine.n,
+                            total: stepLine.total,
+                            step: tdb(`steps.${stepLine.step}`),
+                          })}
+                        </span>
+                      ) : null}
                     </div>
                   </li>
                 );
               })}
             </ol>
+
+            {phase === 'running' && slow && status.database === 'running' ? (
+              <div className="flex flex-col gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  fullWidth
+                  className="text-text"
+                  onClick={goBackground}
+                >
+                  {tw('confirm.progress.background')}
+                </Button>
+                <p className="text-xs text-text-tertiary">
+                  {tw('confirm.progress.backgroundHelper')}
+                </p>
+              </div>
+            ) : null}
 
             {phase === 'fix' ? (
               <div role="alert" className="flex flex-col gap-3">
@@ -588,10 +786,25 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
 
             {phase === 'partial' ? (
               <div role="alert" className="flex flex-col gap-3">
-                <p className="text-sm text-text-secondary">{tw('confirm.failed.partial')}</p>
-                <Button type="button" variant="brand" onClick={close}>
-                  {tw('confirm.failed.continue')}
-                </Button>
+                <p className="text-sm text-text-secondary">
+                  {status.database === 'failed'
+                    ? tw('confirm.failed.partialDatabase')
+                    : tw('confirm.failed.partial')}
+                </p>
+                {status.database === 'failed' && tenantId ? (
+                  // A route, so a link (UI-D-545): the Banco tab, where the failed step is worked.
+                  <Link
+                    href={`/plataforma/tenants/${tenantId}/banco`}
+                    onClick={forgetStoredDraft}
+                    className={buttonClasses({ variant: 'brand', size: 'md' })}
+                  >
+                    {tw('confirm.failed.continue')}
+                  </Link>
+                ) : (
+                  <Button type="button" variant="brand" onClick={close}>
+                    {tw('confirm.failed.continue')}
+                  </Button>
+                )}
               </div>
             ) : null}
           </div>

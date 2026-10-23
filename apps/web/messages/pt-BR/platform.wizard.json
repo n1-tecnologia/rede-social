@@ -239,6 +239,11 @@
         "progress": {
           "title": "Criando o tenant",
           "create": "Criar o tenant",
+          "database": "Preparar o banco de dados",
+          "step": "Etapa {n} de {total}: {step}",
+          "notSent": "Não enviado: o banco ainda não está pronto. Envie na aba Marca depois.",
+          "background": "Continuar em segundo plano",
+          "backgroundHelper": "O banco continua sendo preparado. O logo e o ícone podem ser enviados depois, na aba Marca.",
           "logo": "Enviar o logo",
           "icon": "Enviar o ícone do app",
           "domain": "Conectar o domínio"
@@ -252,6 +257,7 @@
           "retry": "Tentar de novo",
           "partialTitle": "Tenant criado com pendências",
           "partial": "O tenant foi criado, mas o que está marcado acima não foi concluído. Dá para refazer na página do tenant.",
+          "partialDatabase": "O tenant foi criado, mas o banco ainda não está pronto. Continue para ver a etapa que falhou e tentar de novo.",
           "continue": "Continuar"
         }
       },

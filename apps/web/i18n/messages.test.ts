@@ -4322,3 +4322,51 @@ describe('09.2-18 - the manual access and the summary pair', () => {
     expect(block).not.toMatch(/postgres:\/\/|sb_secret_|eyJ/);
   });
 });
+
+/**
+ * 09.2-18 Task 3 (UI-D-535) - the confirmation dialog's `database` task, verbatim from the Copywriting
+ * Contract ('Dialog task' and 'Dialog partial' rows). `confirm.progress.step` is the one ICU message
+ * with placeholders: its three are pinned so a rename cannot silently blank the sub-line.
+ */
+describe('09.2-18 - the confirmation dialog database task', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['platform.wizard.confirm.progress.database', 'Preparar o banco de dados'],
+    ['platform.wizard.confirm.progress.step', 'Etapa {n} de {total}: {step}'],
+    [
+      'platform.wizard.confirm.progress.notSent',
+      'Não enviado: o banco ainda não está pronto. Envie na aba Marca depois.',
+    ],
+    ['platform.wizard.confirm.progress.background', 'Continuar em segundo plano'],
+    [
+      'platform.wizard.confirm.progress.backgroundHelper',
+      'O banco continua sendo preparado. O logo e o ícone podem ser enviados depois, na aba Marca.',
+    ],
+    ['platform.wizard.confirm.failed.partialTitle', 'Tenant criado com pendências'],
+    [
+      'platform.wizard.confirm.failed.partialDatabase',
+      'O tenant foi criado, mas o banco ainda não está pronto. Continue para ver a etapa que falhou e tentar de novo.',
+    ],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('formats the step line with its three placeholders', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages: messages as never,
+      namespace: 'platform.wizard.confirm.progress' as never,
+    }) as unknown as (key: string, values: Record<string, string | number>) => string;
+    expect(t('step', { n: 3, total: 8, step: 'Aplicar o esquema do banco' })).toBe(
+      'Etapa 3 de 8: Aplicar o esquema do banco',
+    );
+  });
+});

@@ -87,6 +87,8 @@ vi.mock('next/link', async () => {
 vi.mock('@/app/(platform)/plataforma/novo/actions', () => ({
   createTenantFromDraftAction: vi.fn(),
   findCreatedTenantAction: vi.fn(),
+  // The database is ready at the first read, so the uploads these claims watch follow at once.
+  readBootstrapProgressAction: vi.fn(async () => ({ state: 'ready', steps: [] })),
 }));
 vi.mock('@/app/(platform)/plataforma/tenants/[id]/dominios/actions', () => ({
   attachDomainAction: vi.fn(),
@@ -98,6 +100,7 @@ vi.mock('@/app/(platform)/plataforma/tenants/[id]/marca/actions', () => ({
 
 vi.mock('./TenantDraftProvider', () => ({
   useTenantDraft: () => harness.draft,
+  forgetStoredDraft: vi.fn(),
 }));
 
 // The app icon's decoding and composition (`app-icon-image.test.ts` covers them) and the signed
