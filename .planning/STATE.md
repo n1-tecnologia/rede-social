@@ -33,7 +33,7 @@ Current Plan: 25
 Total Plans in Phase: 28
 Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21 and 24 done (24: the documentation, wave 13 complete); plans run out of numeric order: the next is 25 (wave 14, the human gates: autonomous false, 4 checkpoints for Igor)
 Status: Ready to execute
-Last activity: 2026-10-23 — Completed quick task 261023-sfy (two CI-failing core unit tests fixed); master pushed to origin (073a9af6), CI red on the e2e PWA csp walk (upload origin refused in a production build against the local http stack), nothing deployed to production; Phase 09.2 still paused at plan 25
+Last activity: 2026-10-23 — Completed quick task 261023-ssq (e2e-only loopback origin flag + deploy guard); first CI run of the 09.2 push was red (unit tests fixed, e2e flag added, API integration residue from two-database-routing breaker test still open); nothing deployed to production; Phase 09.2 still paused at plan 25
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1116,6 +1116,7 @@ None yet.
 | 261022-fku | Raise the production auth e-mail ceiling from 2 to 100 per hour: custom Resend SMTP block + `email_sent` override in `[remotes.production]`, `RESEND_SMTP_PASS` wired into deploy-api.yml with a fail-fast guard, hermetic config pin, docs/deploy/auth-mail.md runbook (nothing pushed or applied to production) | 2026-10-22 | f23bb7d | complete | [261022-fku-prod-auth-e-mail-limited-to-2-h-custom-s](./quick/261022-fku-prod-auth-e-mail-limited-to-2-h-custom-s/) |
 | 261023-qev | Name the error class, and a provider error's kind, status and code, in the `project.bootstrap.step_failed` worker log line (never the message or any value), so a bootstrap step that ends in `auth_config_failed` can be told apart; found when a real bootstrap against a hosted Pro project failed twice at step 4 (H2 evidence, Igor's 2026-10-23 test); hermetic test, 22 passing in packages/core | 2026-10-23 | a660b67a | complete | [261023-qev-log-the-error-kind-status-and-class-when](./quick/261023-qev-log-the-error-kind-status-and-class-when/) |
 | 261023-sfy | Make the two CI-failing core unit tests pass in the unit lane: boss-scope kernel-import test gets a 30 s timeout, project-database-state mocks `openMoveOf` so it needs no database (found by the first CI run of the 09.2 push, run 40039284864); 31 tests passing with and without a reachable database | 2026-10-23 | 7a12ce39 | complete | [261023-sfy-make-the-two-ci-failing-core-unit-tests-](./quick/261023-sfy-make-the-two-ci-failing-core-unit-tests-/) |
+| 261023-ssq | Admit loopback Supabase origins in a production build ONLY behind the build-time flag `NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS` (set only in the PWA e2e webServer env), with a workflow guard and vitest scan that fail if the flag reaches deploy-api, deploy-hml, a vercel config, .env.example or a DEPLOY.md assignment; fixes the CI e2e PWA avatar upload (`upload: the signed URL origin is refused` in a production build against the local http stack); e2e NOT run locally, the next CI run is the proof; 54 web tests passing | 2026-10-23 | 759e9845 | complete | [261023-ssq-admit-loopback-supabase-origins-in-the-e](./quick/261023-ssq-admit-loopback-supabase-origins-in-the-e/) |
 
 ### Roadmap Evolution
 
