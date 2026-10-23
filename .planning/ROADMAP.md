@@ -1267,7 +1267,7 @@ Plans:
 **Goal**: Each tenant runs on its own Supabase project (its own Postgres, Auth, Storage and Realtime) instead of the shared database: the platform operator registers a tenant's project access in the platform panel, the system loads the full schema and baseline configuration into that project, every later migration reaches every tenant project from one command, and the API and worker send each request and job to the tenant's own database.
 **Requirements**: DBT-01, DBT-02, DBT-03, DBT-04, DBT-05, DBT-06, DBT-07, DBT-08, DBT-09, DBT-10, DBT-11, DBT-12, DBT-13, DBT-14, DBT-15, DBT-16, DBT-17, DBT-18, DBT-19, DBT-20, DBT-21, DBT-22, DBT-23, DBT-24, DBT-25, DBT-26, DBT-27, DBT-28, DBT-29, DBT-30, DBT-31, DBT-32, DBT-33, DBT-34, DBT-35, DBT-36, DBT-37, DBT-38, DBT-39, DBT-40, DBT-41, DBT-42, DBT-43, DBT-44, DBT-45, DBT-46, DBT-47, DBT-48, DBT-49, DBT-50, DBT-51, DBT-52, DBT-53 (written at planning, 2026-10-22); UI-04 for the design gate; amends the Free-plan constraint and the Architecture constraint of PROJECT.md and retires V2-PLAT-07
 **Depends on:** Phase 09.1 (runs before Phase 10; builds on Phase 1 tenancy and the RLS lane, Phase 2 platform panel and tenant provisioning, Phase 7 realtime and pg-boss, Phase 08.1 identity, which this phase has to revisit, and Phase 09.1 access grants)
-**Plans:** 11/28 plans executed
+**Plans:** 12/28 plans executed
 
 **Notes**: User decision 2026-10-22: physical isolation, one Supabase project per tenant. Today every tenant shares one project: one `DATABASE_URL`, one `SUPABASE_URL` and service key, one JWKS, one pg-boss queue (process-wide singletons in `packages/core/server`, `apps/api/src/env.ts` and `apps/web/lib/supabase/server.ts`), and one `supabase db push` in `deploy-api.yml`. Intended flow: when the super_admin creates a tenant, they fill in the access information of that tenant's project and the system loads everything into it (schema, roles, Auth configuration, buckets, baseline rows); and a migration must reach every tenant database without per-project manual work.
 
@@ -1322,7 +1322,7 @@ Plans:
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 09.2-10-PLAN.md — The routes with no tenant host: the central integration, product and video indexes, the gateway webhook and Mux through them, reserve-then-write, the legacy lane form removed, pgTAP 214
+- [x] 09.2-10-PLAN.md — The routes with no tenant host: the central integration, product and video indexes, the gateway webhook and Mux through them, reserve-then-write, the legacy lane form removed, pgTAP 214
 - [ ] 09.2-11-PLAN.md — The Send Email Hook per project, public sign-up by slug through the mirror, and the allow-list adapter and reconcile per project
 
 **Wave 9** *(blocked on Wave 8 completion)*
@@ -1434,7 +1434,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
 | 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
 | 09.1. Acesso por gateway de pagamento | 22/22 | In Progress|  |
-| 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 11/28 | In Progress|  |
+| 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 12/28 | In Progress|  |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 

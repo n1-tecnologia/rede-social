@@ -325,7 +325,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **DBT-05**: Brand and rules text are owned by the tenant project, status/modules/domains/registry by the central project; a reconcile job detects and heals drift in both directions. *(D-537)*
 - [x] **DBT-06**: `withTenantTx(ctx, fn)` opens the transaction on the project registered for `ctx.tenantId`, and on no other. *(D-538)*
 - [x] **DBT-07**: `withAdminTx` requires a tenant (or project) target and `withPlatformTx` opens the central project; both stay import-restricted to the kernel by Biome and `pnpm boundaries:negative` proves it. *(D-538)*
-- [ ] **DBT-08**: Every one of the 119 `withAdminTx` call sites is classified platform or tenant (or split) in a checked-in inventory and a unit test fails when a call site has no entry. *(D-538)*
+- [x] **DBT-08**: Every one of the 119 `withAdminTx` call sites is classified platform or tenant (or split) in a checked-in inventory and a unit test fails when a call site has no entry. *(D-538)*
 - [x] **DBT-09**: Connection pools are held in a bounded LRU keyed by project and credential version, with a small per-pool `max`, an idle timeout, graceful eviction that never ends an in-flight transaction, and a circuit breaker for an unreachable project. *(D-538)*
 - [ ] **DBT-10**: A bearer token is verified against the JWKS and issuer of the project selected by the request host (platform host selects the central project) and never against the token's own `iss`; a token of project A presented on a host of project B answers 401. *(D-23, D-538)*
 - [ ] **DBT-11**: A `super_admin` session verifies only against the central project and is refused on a tenant host; a tenant member session is refused on the platform host. *(D-23, D-538)*
@@ -333,7 +333,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **DBT-13**: A Mux delivery resolves its tenant from the `passthrough` the platform wrote at upload creation (`<tenantId>:<assetId>`), with a documented fallback for assets created before the move. *(D-488, D-538)*
 - [ ] **DBT-14**: Each project's Send Email Hook URL carries an opaque hook reference and verifies with that project's own secret; the legacy URL keeps serving project 0. *(D-37, D-542)*
 - [ ] **DBT-15**: Public sign-up by slug on a generic host resolves the project through the central mirror and the web client is told that project's public URL and publishable key. *(D-537, D-538)*
-- [ ] **DBT-16**: A gateway product id (provider + external id) maps to exactly one tenant, enforced by a central unique index written before the tenant row (reserve-then-write). *(D-488)*
+- [x] **DBT-16**: A gateway product id (provider + external id) maps to exactly one tenant, enforced by a central unique index written before the tenant row (reserve-then-write). *(D-488)*
 - [ ] **DBT-17**: The bootstrap is an ordered list of idempotent steps (verify project, roles, tenant schema, Data API closure and Auth/Storage/Realtime configuration, bucket check, tenant row and modules, invite schedule), each persisting status and a reason code. *(D-542)*
 - [ ] **DBT-18**: "Tentar de novo" resumes at the first step that is not done and never redoes a done step. *(D-542)*
 - [ ] **DBT-19**: A tenant whose bootstrap is incomplete answers the by-host status `preparing`, accepts no login and the API refuses with a dedicated code. *(D-542, D-545)*
@@ -709,7 +709,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-05 | Phase 09.2 (plans 07, 09) | Complete |
 | DBT-06 | Phase 09.2 (plans 03, 04, 05, 06) | Complete |
 | DBT-07 | Phase 09.2 (plan 04) | Complete |
-| DBT-08 | Phase 09.2 (plans 04, 05, 06, 07, 10) | Pending |
+| DBT-08 | Phase 09.2 (plans 04, 05, 06, 07, 10) | Complete |
 | DBT-09 | Phase 09.2 (plan 03) | Complete |
 | DBT-10 | Phase 09.2 (plans 08, 25) | Pending |
 | DBT-11 | Phase 09.2 (plans 08, 25) | Pending |
@@ -717,7 +717,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DBT-13 | Phase 09.2 (plans 10, 25) | Pending |
 | DBT-14 | Phase 09.2 (plan 11) | Pending |
 | DBT-15 | Phase 09.2 (plans 11, 25) | Pending |
-| DBT-16 | Phase 09.2 (plan 10) | Pending |
+| DBT-16 | Phase 09.2 (plan 10) | Complete |
 | DBT-17 | Phase 09.2 (plans 13, 25) | Pending |
 | DBT-18 | Phase 09.2 (plans 13, 25) | Pending |
 | DBT-19 | Phase 09.2 (plans 08, 13, 21) | Pending |
