@@ -15,3 +15,17 @@
 ## 09.2-13/14: the bootstrap ordering flake is a mixed-clock stamp (confirmed by reading the code, not seen again in plan 14's run)
 
 `packages/core/server/projects/bootstrap.ts` stamps `started_at` with the DATABASE clock (`claimStep`: `set started_at = now()`) and `finished_at` with the PROCESS clock (`finishStep` and `failStep`: `finishedAt: new Date()`), so step N+1's `started_at` can read a millisecond before step N's `finished_at`. Fix when plan 13's engine is next touched: `sql\`now()\`` in `finishStep`/`failStep`. Left alone in plan 14 on purpose (the plan text does not require it).
+
+## 2026-10-23, found by the first CI run of the 09.2 push (quick 261023-t3x)
+
+**D-t3x-1 (product, not fixed): a tenant-project connection can hang with no deadline.**
+`packages/core/db/project-pools.ts` lines 361-369: `connectProject` opens a postgres.js pool with
+`connect_timeout: 10`, then awaits `sql\`select 1\``. postgres.js 3.4.9 (`src/connection.js`: the timer starts in
+`connect()` line 343 and is cancelled in `closed()` line 445) reconnects at once, without backoff, when a peer
+completes TCP and then closes cleanly before authentication, and only an error event (RST, ECONNRESET) rejects
+the pending query. So `connect_timeout` never bounds such a peer: the lease waits for as long as the peer keeps
+accepting, and the breaker (threshold 3) never counts a failure. `closeAll` (line 314) awaits `entry.ready` with no
+bound, so a shutdown can hang behind the same connect. Measured on macOS with a listener that `end()`s on accept:
+still pending at 6 s after about 3000 accepts. Not reproduced against a real Supabase pooler or on Linux. A fix
+belongs to a product task: a total deadline around the first query (reject with the connection error class the
+breaker already counts) and a bounded `closeAll`.
