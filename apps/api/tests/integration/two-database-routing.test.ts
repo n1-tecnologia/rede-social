@@ -1,4 +1,4 @@
-import { createServer, type Server } from 'node:net';
+import { createServer, type Server, type Socket } from 'node:net';
 import { sqlClient } from '@rede-social/core/db';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { env } from '@rede-social/core/server/env';
@@ -15,7 +15,7 @@ import {
 } from '@rede-social/core/server/tenancy/tenant-host';
 import { sql } from 'drizzle-orm';
 import postgres from 'postgres';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
   adminSqlB,
@@ -44,17 +44,56 @@ type Bootstrap = { tenant: { id: string; displayName: string }; membership: { te
 
 let b: TenantOnB;
 
+/**
+ * Teardown that outlives a test body. CI run 40039284864 showed why: a test that hits its time limit is not
+ * cancelled by vitest, and a `finally` inside its body never runs while the body is stuck awaiting something,
+ * so the tenant it bound to an unreachable project stayed in the central database and failed ten other suites.
+ * A hook still runs after a timed-out test, so a test registers each cleanup here right after the resource
+ * exists, and the hooks below drain the list. Each entry leaves the list before it runs, so a second drain
+ * finds nothing to do. Registration order is run order: a test registers the listener close before the tenant
+ * cleanup, so the listener goes first, which ends any postgres.js retry loop still spinning against it, and
+ * only then are the tenant rows removed.
+ */
+type Teardown = () => Promise<void>;
+const teardowns: Teardown[] = [];
+const onTeardown = (fn: Teardown): void => {
+  teardowns.push(fn);
+};
+const drainTeardowns = async (): Promise<void> => {
+  let first: unknown;
+  let failed = false;
+  for (let next = teardowns.shift(); next; next = teardowns.shift()) {
+    try {
+      await next();
+    } catch (error) {
+      if (!failed) {
+        failed = true;
+        first = error;
+      }
+    }
+  }
+  if (failed) throw first;
+};
+
 beforeAll(async () => {
   b = await provisionTenantOnB({ slug: SLUG });
 });
 
 afterAll(async () => {
-  await b?.cleanup();
-  await closeAllPools();
-  await adminSqlB.end();
-  await adminSql.end();
-  await sqlClient.end();
-});
+  try {
+    await drainTeardowns();
+    await b?.cleanup();
+    await closeAllPools();
+  } finally {
+    await adminSqlB.end();
+    await adminSql.end();
+    await sqlClient.end();
+  }
+}, 120_000);
+
+afterEach(async () => {
+  await drainTeardowns();
+}, 60_000);
 
 const bootstrap = (token: string, host: string) =>
   api.request('/v1/me/bootstrap', {
@@ -306,15 +345,12 @@ describe('fail closed: an unbound or unreachable tenant is never served from ano
       slug: `down-b-${RUN}`.slice(0, 40),
       databaseUrl: 'postgres://api_user:postgres@127.0.0.1:1/rede_tenant_b',
     });
-    try {
-      const res = await bootstrap(down.token, down.host);
-      expect(res.status).toBe(503);
-      const body = (await res.json()) as Envelope;
-      expect(body.error.code).toBe('TENANT_UNAVAILABLE');
-      expect(JSON.stringify(body)).not.toMatch(/central mirror|127\.0\.0\.1|postgres:\/\//);
-    } finally {
-      await down.cleanup();
-    }
+    onTeardown(down.cleanup);
+    const res = await bootstrap(down.token, down.host);
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('TENANT_UNAVAILABLE');
+    expect(JSON.stringify(body)).not.toMatch(/central mirror|127\.0\.0\.1|postgres:\/\//);
   });
 });
 
@@ -336,20 +372,41 @@ describe('by-host is served from the mirror while the tenant database is down (D
   const byHost = (host: string) =>
     api.request(`/v1/public/tenants/by-host?host=${encodeURIComponent(host)}`);
 
-  /** A listener that accepts a TCP connection and drops it at once: an unreachable Postgres that counts. */
-  const listen = (): Promise<{ server: Server; port: number; attempts: () => number }> =>
+  /**
+   * A listener that accepts a TCP connection and resets it at once: an unreachable Postgres that counts. It
+   * RESETS the connection, it does not close it cleanly, because postgres.js 3.4.9 retries a clean close
+   * without end (the connect timer is re-armed on every attempt, src/connection.js lines 343, 445, 450-451)
+   * and only an error event, which a reset produces, rejects the startup on every platform. net.Server has no
+   * closeAllConnections (that belongs to http.Server), so the listener tracks the sockets it accepted and
+   * destroys them in its own close.
+   */
+  const listen = (): Promise<{
+    server: Server;
+    port: number;
+    attempts: () => number;
+    close: () => Promise<void>;
+  }> =>
     new Promise((resolve) => {
       let attempts = 0;
+      const sockets = new Set<Socket>();
       const server = createServer((socket) => {
         attempts += 1;
-        socket.destroy();
+        sockets.add(socket);
+        socket.on('close', () => sockets.delete(socket));
+        socket.resetAndDestroy();
       });
+      const close = () =>
+        new Promise<void>((done) => {
+          server.close(() => done());
+          for (const socket of sockets) socket.destroy();
+        });
       server.listen(0, '127.0.0.1', () => {
         const address = server.address();
         resolve({
           server,
           port: typeof address === 'object' && address ? address.port : 0,
           attempts: () => attempts,
+          close,
         });
       });
     });
@@ -424,63 +481,57 @@ describe('by-host is served from the mirror while the tenant database is down (D
 
   it('P9 empty: unknown, unverified, whitespace and no-row hosts answer 404 with no tenant database opened', async () => {
     const probe = await listen();
+    onTeardown(probe.close);
     const counted = await provisionTenantOnB({
       slug: `mirror-count-${RUN}`.slice(0, 40),
       databaseUrl: `postgres://api_user:postgres@127.0.0.1:${probe.port}/none`,
     });
-    try {
-      const noRow = `no-row-${RUN}.example.com`;
-      const cases = [noRow, unverified, '  ', ' '];
-      for (const host of cases) {
-        const res = await byHost(host);
-        expect(res.status).toBe(404);
-        expect(((await res.json()) as Envelope).error.code).toBe('TENANT_NOT_FOUND');
-      }
-      // The query-level empty string fails validation before any lookup (no resolver, no database).
-      const empty = await api.request('/v1/public/tenants/by-host?host=');
-      expect(empty.status).toBe(400);
-      // The resolver itself treats empty and whitespace as unknown.
-      expect(await resolveTenantHost('')).toEqual({ kind: 'unknown' });
-      expect(await resolveTenantHost('   ')).toEqual({ kind: 'unknown' });
-
-      // A host that exists for the tenant bound to the probe port is served from the mirror too...
-      expect((await byHost(counted.host)).status).toBe(200);
-      // ...and none of this opened a connection to a tenant database.
-      expect(probe.attempts()).toBe(0);
-
-      // One central read per registrable no-row host: it is cached once, a second request adds no entry.
-      const before = cachedTenantHostCount();
-      expect((await byHost(noRow)).status).toBe(404);
-      expect(cachedTenantHostCount()).toBe(before);
-    } finally {
-      await counted.cleanup();
-      await new Promise((resolve) => probe.server.close(resolve));
+    onTeardown(counted.cleanup);
+    const noRow = `no-row-${RUN}.example.com`;
+    const cases = [noRow, unverified, '  ', ' '];
+    for (const host of cases) {
+      const res = await byHost(host);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as Envelope).error.code).toBe('TENANT_NOT_FOUND');
     }
+    // The query-level empty string fails validation before any lookup (no resolver, no database).
+    const empty = await api.request('/v1/public/tenants/by-host?host=');
+    expect(empty.status).toBe(400);
+    // The resolver itself treats empty and whitespace as unknown.
+    expect(await resolveTenantHost('')).toEqual({ kind: 'unknown' });
+    expect(await resolveTenantHost('   ')).toEqual({ kind: 'unknown' });
+
+    // A host that exists for the tenant bound to the probe port is served from the mirror too...
+    expect((await byHost(counted.host)).status).toBe(200);
+    // ...and none of this opened a connection to a tenant database.
+    expect(probe.attempts()).toBe(0);
+
+    // One central read per registrable no-row host: it is cached once, a second request adds no entry.
+    const before = cachedTenantHostCount();
+    expect((await byHost(noRow)).status).toBe(404);
+    expect(cachedTenantHostCount()).toBe(before);
   });
 
   it('the breaker of a tenant project opens at the third failed connection: the 4th request touches no socket', async () => {
     const probe = await listen();
+    onTeardown(probe.close);
     const counted = await provisionTenantOnB({
       slug: `breaker-${RUN}`.slice(0, 40),
       databaseUrl: `postgres://api_user:postgres@127.0.0.1:${probe.port}/none`,
     });
-    try {
-      for (let i = 0; i < 3; i += 1) {
-        expect((await bootstrap(counted.token, counted.host)).status).toBe(503);
-      }
-      const afterThree = probe.attempts();
-      expect(afterThree).toBeGreaterThanOrEqual(3);
-      const res = await bootstrap(counted.token, counted.host);
-      expect(res.status).toBe(503);
-      expect(((await res.json()) as Envelope).error.code).toBe('TENANT_UNAVAILABLE');
-      expect(probe.attempts()).toBe(afterThree);
-      // The by-host answer of that tenant is unaffected.
-      expect((await byHost(counted.host)).status).toBe(200);
-    } finally {
-      await counted.cleanup();
-      await new Promise((resolve) => probe.server.close(resolve));
+    onTeardown(counted.cleanup);
+    for (let i = 0; i < 3; i += 1) {
+      expect((await bootstrap(counted.token, counted.host)).status).toBe(503);
     }
-  });
+    const afterThree = probe.attempts();
+    expect(afterThree).toBeGreaterThanOrEqual(3);
+    const res = await bootstrap(counted.token, counted.host);
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as Envelope).error.code).toBe('TENANT_UNAVAILABLE');
+    expect(probe.attempts()).toBe(afterThree);
+    // The by-host answer of that tenant is unaffected.
+    expect((await byHost(counted.host)).status).toBe(200);
+  }, 120_000);
 
   it('P10 encoding: case, port and a trailing dot share one answer; an underscore, an IDN label and 300 characters are unknown before the cache', async () => {
     const upper = down.host.toUpperCase();
@@ -568,27 +619,24 @@ describe('project 0 describes the environment (D-539, T-09.2-22)', () => {
 
   it('a registry row for another project is not changed by it', async () => {
     const other = await provisionTenantOnB({ slug: `zero-${RUN}`.slice(0, 40) });
+    onTeardown(other.cleanup);
+    const snapshot = async () => {
+      const [row] = await adminSql<Row[]>`
+        select id, ref, api_url, is_central, is_default, state, credential_source, credential_version,
+               secret_key_id, service_key_sealed, database_url_tx_sealed, updated_at
+          from platform.projects where id = ${other.projectId}::uuid`;
+      return row;
+    };
+    const before = await snapshot();
+    await adminSql`update platform.projects set api_url = '' where is_central`;
     try {
-      const snapshot = async () => {
-        const [row] = await adminSql<Row[]>`
-          select id, ref, api_url, is_central, is_default, state, credential_source, credential_version,
-                 secret_key_id, service_key_sealed, database_url_tx_sealed, updated_at
-            from platform.projects where id = ${other.projectId}::uuid`;
-        return row;
-      };
-      const before = await snapshot();
-      await adminSql`update platform.projects set api_url = '' where is_central`;
-      try {
-        await ensureProjectZero();
-      } finally {
-        await adminSql`
-          update platform.projects set api_url = ${env.SUPABASE_URL}
-           where is_central and api_url = ''`;
-      }
-      expect(await snapshot()).toEqual(before);
+      await ensureProjectZero();
     } finally {
-      await other.cleanup();
+      await adminSql`
+        update platform.projects set api_url = ${env.SUPABASE_URL}
+         where is_central and api_url = ''`;
     }
+    expect(await snapshot()).toEqual(before);
   });
 });
 
