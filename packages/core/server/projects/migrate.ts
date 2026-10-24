@@ -47,8 +47,15 @@ import {
  * never follows completion order), then a summary. A line holds the `ref`, counts, 14-digit versions and a
  * code; never a connection string, a statement or a driver message (PR-4, T-09.2-75).
  *
+ * The first release: the registry (`platform.projects`) does not exist until the central set creates it, and only
+ * this command applies the central set. The first selector pass therefore tolerates exactly that case (PostgreSQL
+ * 42P01 on a registry read), the central set is applied, and a second, strict pass reads the registry and fans the
+ * tenant set out. A dry run on such a database reports the central set as pending, writes nothing and exits 0.
+ * The retry path (`projectIds`) never applies the central set and stays strict.
+ *
  * Exit codes: 0 ok (a tenant failure is a warning unless `strict`), 1 the central set failed or `strict` saw a
- * tenant failure, 2 a usage error (nothing changed).
+ * tenant failure, 2 a usage error (nothing changed, except a selector that can only be checked once the central
+ * set has created the registry: the central line is then printed before the usage line).
  */
 
 export type MigrateLine = Record<string, string | number | boolean | string[] | null>;
@@ -143,6 +150,71 @@ const usage = (message: string): MigrateResult => ({
   exitCode: 2,
   lines: [{ kind: 'usage', message }],
 });
+
+/**
+ * True when the error, or any link of its `.cause` chain, carries PostgreSQL code 42P01 (undefined_table). The
+ * driver error is wrapped by the query builder, so the code sits on the cause, not on the thrown error. Only the
+ * `code` strings are read; the message (it holds the statement) is never read or kept (PR-4).
+ */
+function isUndefinedTable(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (typeof current !== 'object' || current === null || seen.has(current)) return false;
+    seen.add(current);
+    if ((current as { code?: unknown }).code === '42P01') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+type TargetSelection =
+  | { kind: 'usage'; result: MigrateResult }
+  | { kind: 'registry_missing' }
+  | { kind: 'targets'; targets: ProjectRecord[] };
+
+/**
+ * The selector resolution: which ready projects the run acts on, ascending by `ref`. The first pass is tolerant
+ * because the central set creates the registry, so on the first release it cannot exist yet: a 42P01 on either
+ * registry read then means "no registry", the selectors are not judged and the caller applies the central set.
+ * The second pass (after the central apply) and the retry path are strict: every error propagates as the same
+ * object. A selector is judged only against a registry that exists.
+ */
+async function selectTargets(
+  options: MigrateOptions,
+  deps: MigrateDeps,
+  tolerant: boolean,
+): Promise<TargetSelection> {
+  let onlyIds: Set<string> | null = options.projectIds ? new Set(options.projectIds) : null;
+  let ready: ProjectRecord[];
+  try {
+    if (options.tenantSlug !== undefined) {
+      const projectId = await deps.projectIdOfTenant(options.tenantSlug);
+      if (!projectId) return { kind: 'usage', result: usage('no tenant has that slug') };
+      onlyIds = new Set([projectId]);
+    }
+    ready = await deps.listProjects();
+  } catch (error) {
+    if (tolerant && isUndefinedTable(error)) return { kind: 'registry_missing' };
+    throw error;
+  }
+
+  let selected = ready;
+  if (onlyIds) selected = selected.filter((project) => onlyIds?.has(project.id));
+  if (options.projectRef !== undefined) {
+    selected = selected.filter((project) => project.ref === options.projectRef);
+  }
+  if (
+    (options.tenantSlug !== undefined || options.projectRef !== undefined) &&
+    selected.length === 0
+  ) {
+    return { kind: 'usage', result: usage('no ready project matches') };
+  }
+  // One project once (a project bound to two tenants is listed once by the registry; guard anyway), ascending ref.
+  const byId = new Map(selected.map((project) => [project.id, project]));
+  const targets = [...byId.values()].sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
+  return { kind: 'targets', targets };
+}
 
 type ProjectOutcome = {
   line: MigrateLine;
@@ -280,29 +352,12 @@ export async function migrateAll(options: MigrateOptions = {}): Promise<MigrateR
     return usage('--project must be a ref of lowercase letters, digits and hyphens');
   }
 
-  // Resolve the selectors (read-only) before anything is applied: an unknown one changes nothing (P47).
-  let onlyIds: Set<string> | null = options.projectIds ? new Set(options.projectIds) : null;
-  if (options.tenantSlug !== undefined) {
-    const projectId = await deps.projectIdOfTenant(options.tenantSlug);
-    if (!projectId) return usage('no tenant has that slug');
-    onlyIds = new Set([projectId]);
-  }
-
-  const ready = await deps.listProjects();
-  let selected = ready;
-  if (onlyIds) selected = selected.filter((project) => onlyIds?.has(project.id));
-  if (options.projectRef !== undefined) {
-    selected = selected.filter((project) => project.ref === options.projectRef);
-  }
-  if (
-    (options.tenantSlug !== undefined || options.projectRef !== undefined) &&
-    selected.length === 0
-  ) {
-    return usage('no ready project matches');
-  }
-  // One project once (a project bound to two tenants is listed once by the registry; guard anyway), ascending ref.
-  const byId = new Map(selected.map((project) => [project.id, project]));
-  const targets = [...byId.values()].sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
+  // Resolve the selectors (read-only) before anything is applied: an unknown one changes nothing (P47). The
+  // first pass tolerates a registry that does not exist yet (the first release); the retry path stays strict.
+  const first = await selectTargets(options, deps, options.projectIds === undefined);
+  if (first.kind === 'usage') return first.result;
+  const registryMissing = first.kind === 'registry_missing';
+  let targets: ProjectRecord[] = first.kind === 'targets' ? first.targets : [];
 
   const lines: MigrateLine[] = [];
 
@@ -355,6 +410,16 @@ export async function migrateAll(options: MigrateOptions = {}): Promise<MigrateR
       });
       return { ok: false, exitCode: 1, lines };
     }
+  }
+
+  // The central set has just created the registry: resolve the selectors and list the projects again, strictly.
+  // A registry that is still missing here rejects loudly. A dry run wrote nothing, so the registry is still
+  // missing: selectors given to it cannot be resolved and are deferred, not rejected, and no project is listed.
+  if (registryMissing && !dryRun) {
+    const second = await selectTargets(options, deps, false);
+    if (second.kind === 'usage')
+      return { ...second.result, lines: [...lines, ...second.result.lines] };
+    if (second.kind === 'targets') targets = second.targets;
   }
 
   // 2. The tenant set, project by project with isolation.
