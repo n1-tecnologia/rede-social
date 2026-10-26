@@ -2154,7 +2154,16 @@ export async function listStoryHighlightIds(
   storyId: string,
 ): Promise<StoryHighlightIds> {
   const gate = await readPlaceGate(ctx);
-  const places = gate.communitiesOn ? sql`true` : sql`h.community_id is null`;
+  // A highlight whose community was DELETED (09.3, D-556) is left out, like the catalogue leaves it.
+  // Archived communities stay listed: a story can still be removed from their highlights.
+  const places = gate.communitiesOn
+    ? sql`(h.community_id is null or exists (
+          select 1 from communities hc
+           where hc.id = h.community_id
+             and hc.tenant_id = ${ctx.tenantId}::uuid
+             and hc.deleted_at is null
+        ))`
+    : sql`h.community_id is null`;
 
   const highlightIds = await withTenantTx(ctx, async (tx) => {
     const stories = await tx.execute<{ id: string }>(sql`

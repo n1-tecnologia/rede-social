@@ -1,7 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { sqlClient } from '@rede-social/core/db';
-import type { CommunityPage, CommunitySummary } from '@rede-social/module-communities/contracts';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import {
+  COMMUNITY_UNLOCK_NAMES_MAX,
+  type CommunityPage,
+  type CommunitySummary,
+  communityUnlockRefusalSchema,
+} from '@rede-social/module-communities/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from './setup';
 
 /**
  * Deleting a community end to end against the live local stack and the real seed (09.3, PEND-04,
@@ -67,6 +74,13 @@ async function expectBare404(res: Response, label: string): Promise<string> {
   return raw;
 }
 
+/** Stories and media assets this file inserts for the highlight case, removed by `sweep`. */
+const createdStories: string[] = [];
+const createdAssets: string[] = [];
+/** Every product created through the API, swept by id as well (some names carry no prefix). */
+const createdProducts: string[] = [];
+let restoreStore: () => Promise<void> = async () => {};
+
 let counter = 0;
 const uniqueName = (suffix: string) => `${TEST_NAME_PREFIX} ${suffix} ${++counter}`;
 
@@ -121,13 +135,71 @@ async function listedIds(status: 'active' | 'archived'): Promise<string[]> {
   return seen;
 }
 
+const post = (path: string, token: string, body: unknown, host = HOSTS.demo) =>
+  request(path, token, { method: 'POST', body: JSON.stringify(body) }, host);
+
+/** A Loja product through the admin API, linked to `communityIds`. */
+async function createProduct(
+  name: string,
+  communityIds: string[],
+): Promise<{ id: string; name: string }> {
+  const res = await post('/v1/store/products', tokens.demoAdmin, {
+    name,
+    priceCents: 990,
+    communityIds,
+  });
+  expect(res.status, await res.clone().text()).toBe(201);
+  const created = (await res.json()) as { id: string; name: string };
+  createdProducts.push(created.id);
+  return created;
+}
+
+async function archiveProduct(productId: string): Promise<void> {
+  const res = await request(`/v1/store/products/${productId}/status`, tokens.demoAdmin, {
+    method: 'PUT',
+    body: JSON.stringify({ status: 'archived' }),
+  });
+  expect(res.status, await res.clone().text()).toBe(200);
+}
+
+const productName = (suffix: string) => `${PRODUCT_PREFIX} ${suffix} ${++counter}`;
+
+async function linkCount(communityId: string): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.store_product_communities
+     where community_id = ${communityId}::uuid`;
+  return row?.n ?? -1;
+}
+
+/** An archived community that an ACTIVE product links, ready for the refusal. */
+async function lockedArchived(suffix: string, productNames: string[]) {
+  const community = await createCommunity(uniqueName(suffix));
+  const products = [];
+  for (const name of productNames) products.push(await createProduct(name, [community.id]));
+  await archive(community.id);
+  return { community, products };
+}
+
+async function refusalOf(res: Response) {
+  const raw = await res.clone().text();
+  expect(res.status, raw).toBe(409);
+  const error = await envelope(res);
+  expect(error.code).toBe('CONFLICT');
+  return communityUnlockRefusalSchema.parse(error.details);
+}
+
 async function sweep(): Promise<void> {
+  if (createdStories.length > 0) {
+    await adminSql`
+      delete from public.story_highlight_items where story_id = any(${createdStories}::uuid[])`;
+  }
   const communities = await adminSql<{ id: string }[]>`
     select id::text as id from public.communities where name like ${`${TEST_NAME_PREFIX}%`}`;
   const communityIds = communities.map((row) => row.id);
   const products = await adminSql<{ id: string }[]>`
     select id::text as id from public.store_products where name like ${`${PRODUCT_PREFIX}%`}`;
-  const productIds = products.map((row) => row.id);
+  const productIds = [...products.map((row) => row.id), ...createdProducts];
+  createdProducts.length = 0;
   if (productIds.length > 0) {
     await adminSql`delete from public.store_product_communities where product_id = any(${productIds}::uuid[])`;
   }
@@ -143,6 +215,14 @@ async function sweep(): Promise<void> {
     await adminSql`delete from public.store_products where id = any(${productIds}::uuid[])`;
   }
   await adminSql`delete from public.communities where name like ${`${TEST_NAME_PREFIX}%`}`;
+  if (createdStories.length > 0) {
+    await adminSql`delete from public.stories where id = any(${createdStories}::uuid[])`;
+    createdStories.length = 0;
+  }
+  if (createdAssets.length > 0) {
+    await adminSql`delete from public.media_assets where id = any(${createdAssets}::uuid[])`;
+    createdAssets.length = 0;
+  }
 }
 
 beforeAll(async () => {
@@ -157,9 +237,11 @@ beforeAll(async () => {
     if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
   await sweep();
+  restoreStore = await withStoreEnabled('demo');
 });
 
 afterAll(async () => {
+  await restoreStore();
   await sweep();
   await adminSql.end();
   await sqlClient.end();
@@ -230,5 +312,417 @@ describe('DELETE /v1/communities/{communityId} - an archived community, soft-del
 
     expect(await deletedAtOf(community.id)).toBeNull();
     expect(await listedIds('archived')).toContain(community.id);
+  });
+});
+
+describe('the Loja refusal - unlock_active (D-554)', () => {
+  it('4. unlock_active: names and total, nothing changed; an archived product no longer blocks (P16, P19, P20)', async () => {
+    const name = productName('unico');
+    const { community, products } = await lockedArchived('bloqueada', [name]);
+    const product = products[0];
+    if (!product) throw new Error('no product');
+
+    const first = await del(community.id);
+    const firstText = await first.clone().text();
+    const refusal = await refusalOf(first);
+    expect(refusal).toEqual({
+      community: 'unlock_active',
+      products: [{ id: product.id, name }],
+      count: 1,
+    });
+    expect(await deletedAtOf(community.id)).toBeNull();
+
+    // Repeating the refused call answers the same body (P20).
+    const second = await del(community.id);
+    expect(second.status).toBe(409);
+    expect(sansRequestId(await second.text())).toBe(sansRequestId(firstText));
+
+    // The product is archived: the same delete now succeeds, and the link row stays.
+    await archiveProduct(product.id);
+    expect((await del(community.id)).status).toBe(204);
+    expect(await deletedAtOf(community.id)).toEqual(expect.any(String));
+    expect(await linkCount(community.id)).toBe(1);
+  });
+
+  it('5. the cap and the order: 5 names, the total, created_at desc then id desc, 5 stays 5, 1 stays 1 (P16, P19)', async () => {
+    const names = Array.from({ length: 6 }, (_, index) => productName(`lote ${index + 1}`));
+    const { community, products } = await lockedArchived('cheia', names);
+    expect(products).toHaveLength(6);
+    expect(COMMUNITY_UNLOCK_NAMES_MAX).toBe(5);
+
+    // Fixed instants, the third and the fourth product TIED, so `id desc` is what orders them.
+    const ids = products.map((product) => product.id);
+    const stamps = [
+      '2026-03-01T10:00:01.000Z',
+      '2026-03-01T10:00:02.000Z',
+      '2026-03-01T10:00:03.000Z',
+      '2026-03-01T10:00:03.000Z',
+      '2026-03-01T10:00:05.000Z',
+      '2026-03-01T10:00:06.000Z',
+    ];
+    for (const [index, id] of ids.entries()) {
+      await adminSql`
+        update public.store_products set created_at = ${stamps[index] ?? ''}::timestamptz
+         where id = ${id}::uuid`;
+    }
+    const expectedOrder = (activeIds: string[]) =>
+      activeIds
+        .map((id) => ({ id, at: stamps[ids.indexOf(id)] ?? '' }))
+        .sort((a, b) => (a.at === b.at ? (a.id < b.id ? 1 : -1) : a.at < b.at ? 1 : -1))
+        .map((entry) => entry.id);
+
+    const six = await del(community.id);
+    const sixText = await six.clone().text();
+    const sixRefusal = await refusalOf(six);
+    expect(sixRefusal.products).toHaveLength(5);
+    expect(sixRefusal.count).toBe(6);
+    expect(sixRefusal.products.map((product) => product.id)).toEqual(
+      expectedOrder(ids).slice(0, 5),
+    );
+    // Two consecutive calls return the same names in the same order.
+    const again = await del(community.id);
+    expect(sansRequestId(await again.text())).toBe(sansRequestId(sixText));
+
+    // Archive the oldest: exactly 5 remain, so 5 names and a total of 5.
+    const oldest = ids[0] ?? '';
+    await archiveProduct(oldest);
+    const five = await refusalOf(await del(community.id));
+    expect(five.products).toHaveLength(5);
+    expect(five.count).toBe(5);
+
+    // Archive three more: 2 remain; then one more: exactly 1.
+    for (const id of ids.slice(1, 5)) await archiveProduct(id);
+    const one = await refusalOf(await del(community.id));
+    expect(one.products).toEqual([{ id: ids[5], name: names[5] }]);
+    expect(one.count).toBe(1);
+
+    // Zero active products: the delete proceeds.
+    await archiveProduct(ids[5] ?? '');
+    expect((await del(community.id)).status).toBe(204);
+  });
+
+  it('6. names are bytes: accents, emoji, markup and the longest name come back unchanged (P18)', async () => {
+    const markup = `Ação 🎉 <b>x</b> & "q" ${++counter}`;
+    // 80 code points (the longest the store accepts), 100 UTF-16 code units.
+    const longest = `${'ã'.repeat(60)}${'🎉'.repeat(20)}`;
+    expect([...longest]).toHaveLength(80);
+    // Products can only link an ACTIVE community, so the community is archived afterwards.
+    const community = await createCommunity(uniqueName('bytes'));
+    const created = [
+      await createProduct(markup, [community.id]),
+      await createProduct(longest, [community.id]),
+    ];
+    expect(created.map((product) => product.name)).toEqual([markup, longest]);
+    await archive(community.id);
+
+    const refusal = await refusalOf(await del(community.id));
+    expect(refusal.count).toBe(2);
+    const byId = new Map(refusal.products.map((product) => [product.id, product.name]));
+    expect(byId.get(created[0]?.id ?? '')).toBe(markup);
+    expect(byId.get(created[1]?.id ?? '')).toBe(longest);
+  });
+});
+
+describe('the store flag, the lock and the races (A1, P21, P12)', () => {
+  it('7. the store flag (A1): with the Loja off the links unlock nothing; the link row stays', async () => {
+    const { community, products } = await lockedArchived('loja desligada', [productName('flag')]);
+    const product = products[0];
+    if (!product) throw new Error('no product');
+    // With the Loja on the product blocks.
+    expect((await del(community.id)).status).toBe(409);
+
+    try {
+      await adminSql`
+        update public.tenant_modules set enabled = false
+         where tenant_id = ${tenantIds.demo}::uuid and module_key = 'store'`;
+      moduleFlags.invalidate(tenantIds.demo);
+      expect((await del(community.id)).status).toBe(204);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${tenantIds.demo}::uuid and module_key = 'store'`;
+      moduleFlags.invalidate(tenantIds.demo);
+    }
+
+    // Back on: the deleted community is still the bare 404 and its link row is still there.
+    await expectBare404(await detail(community.id), 'detail after delete');
+    expect(await linkCount(community.id)).toBe(1);
+  });
+
+  it('8. the lock (P21): a link committed while the delete waits is seen; a later link is refused community_invalid', async () => {
+    // Product P exists and links a DIFFERENT active community D, so it is an active product.
+    const other = await createCommunity(uniqueName('outra'));
+    const product = await createProduct(productName('trava'), [other.id]);
+    const community = await createCommunity(uniqueName('travada'));
+    await archive(community.id);
+
+    let release: () => void = () => {};
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let linked: () => void = () => {};
+    const linkedFirst = new Promise<void>((resolve) => {
+      linked = resolve;
+    });
+    // The link insert takes FOR KEY SHARE on the community row through its foreign key and the
+    // transaction stays open; `adminSql` has one connection, so nothing else may use it until release.
+    const holder = adminSql.begin(async (tx) => {
+      await tx`
+        insert into public.store_product_communities (tenant_id, product_id, community_id)
+        values (${tenantIds.demo}::uuid, ${product.id}::uuid, ${community.id}::uuid)`;
+      linked();
+      await barrier;
+    });
+
+    let pending: Promise<Response> | undefined;
+    try {
+      await linkedFirst;
+      pending = Promise.resolve(del(community.id));
+      let settled = false;
+      pending.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      // A plain update (FOR NO KEY UPDATE) would have finished by now with a 204; FOR UPDATE waits.
+      expect(settled, 'the delete waits for the uncommitted link').toBe(false);
+    } finally {
+      release();
+      await holder;
+    }
+
+    if (!pending) throw new Error('the delete was never started');
+    const refusal = await refusalOf(await pending);
+    expect(refusal.products).toEqual([{ id: product.id, name: product.name }]);
+    expect(refusal.count).toBe(1);
+    expect(await deletedAtOf(community.id)).toBeNull();
+
+    // Take P off the active products, delete, then a NEW link to the deleted community is refused.
+    await archiveProduct(product.id);
+    expect((await del(community.id)).status).toBe(204);
+    const relink = await post('/v1/store/products', tokens.demoAdmin, {
+      name: productName('religada'),
+      priceCents: 990,
+      communityIds: [community.id],
+    });
+    expect(relink.status).toBe(400);
+    expect((await envelope(relink)).details).toEqual({ store: 'community_invalid' });
+  });
+
+  it('9. races (P12): two deletes give one 204 and one 404; a reactivation racing a delete never ends half-way', async () => {
+    const community = await createCommunity(uniqueName('corrida'));
+    await archive(community.id);
+    const both = await Promise.all([del(community.id), del(community.id)]);
+    expect(both.map((res) => res.status).sort()).toEqual([204, 404]);
+    expect(await deletedAtOf(community.id)).toEqual(expect.any(String));
+
+    for (let round = 0; round < 3; round++) {
+      const racing = await createCommunity(uniqueName(`disputa ${round}`));
+      await archive(racing.id);
+      await Promise.all([del(racing.id), setStatus(racing.id, 'active')]);
+      const [row] = await adminSql<{ status: string; deleted_at: string | null }[]>`
+        select status, deleted_at::text from public.communities where id = ${racing.id}::uuid`;
+      const deleted = row?.deleted_at != null;
+      const reactivated = row?.status === 'active' && row?.deleted_at === null;
+      expect(deleted || reactivated, JSON.stringify(row)).toBe(true);
+    }
+  });
+});
+
+describe('what stays: highlights, the Loja and the slug (D-556, D-554, D-557)', () => {
+  /** A ready story image and a live story authored by the demo admin, swept by `sweep`. */
+  async function seedStory(): Promise<string> {
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+         variant_widths, filename, ready_at)
+      select ${tenantIds.demo}::uuid, u.id, 'image', 'story', 'ready', 'supabase',
+             'image/webp', 262144, 1080, 1920, '{640,1080}'::int[], 'story.webp', now()
+        from public.users u where u.email = 'admin@rede-demo.local'
+      returning id::text as id`;
+    if (!asset) throw new Error('could not seed a story image');
+    createdAssets.push(asset.id);
+    const [story] = await adminSql<{ id: string }[]>`
+      insert into public.stories
+        (tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+      select ${tenantIds.demo}::uuid, u.id, ${asset.id}::uuid, 'image', 'Historia de exclusao',
+             now(), now() + interval '24 hours'
+        from public.users u where u.email = 'admin@rede-demo.local'
+      returning id::text as id`;
+    if (!story) throw new Error('could not seed a story');
+    createdStories.push(story.id);
+    return story.id;
+  }
+
+  it('10. highlights hidden, nothing erased (D-556): the rows stay, every read filters them, the sheet ids drop it', async () => {
+    const community = await createCommunity(uniqueName('destaques'));
+    const storyId = await seedStory();
+    const [highlight] = await adminSql<{ id: string }[]>`
+      insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+      select ${tenantIds.demo}::uuid, ${community.id}::uuid, 'Destaque exclusao', 0, u.id
+        from public.users u where u.email = 'admin@rede-demo.local'
+      returning id::text as id`;
+    const highlightId = highlight?.id ?? '';
+    expect(highlightId).not.toBe('');
+    await adminSql`
+      insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+      select s.tenant_id, ${highlightId}::uuid, s.id, s.author_user_id
+        from public.stories s where s.id = ${storyId}::uuid`;
+
+    const counts = async () => {
+      const [row] = await adminSql<{ highlights: number; items: number }[]>`
+        select (select count(*)::int from public.story_highlights where community_id = ${community.id}::uuid)
+                 as highlights,
+               (select count(*)::int from public.story_highlight_items where highlight_id = ${highlightId}::uuid)
+                 as items`;
+      return row;
+    };
+    const sheetIds = async () => {
+      const res = await request(`/v1/stories/${storyId}/highlights`, tokens.demoAdmin);
+      expect(res.status, await res.clone().text()).toBe(200);
+      return ((await res.json()) as { highlightIds: string[] }).highlightIds;
+    };
+    const catalogIds = async () => {
+      const res = await request('/v1/stories/highlights/catalog', tokens.demoAdmin);
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { items: { id: string }[] }).items.map((item) => item.id);
+    };
+
+    // Positive controls while the community is live and while it is archived but not yet deleted.
+    expect(await catalogIds()).toContain(highlightId);
+    expect(await sheetIds()).toContain(highlightId);
+    const before = await counts();
+    expect(before).toEqual({ highlights: 1, items: 1 });
+    await archive(community.id);
+    expect(await sheetIds()).toContain(highlightId);
+
+    expect((await del(community.id)).status).toBe(204);
+
+    // Nothing erased.
+    expect(await counts()).toEqual(before);
+    // Hidden: the place, the catalogue and the curator sheet's ids no longer name it.
+    await expectBare404(
+      await request(`/v1/stories/highlights?communityId=${community.id}`, tokens.demoAdmin),
+      'highlight list of a deleted community',
+    );
+    expect(await catalogIds()).not.toContain(highlightId);
+    expect(await sheetIds()).not.toContain(highlightId);
+  });
+
+  it('11. the Loja is untouched and the slug stays (D-554, D-557)', async () => {
+    const name = uniqueName('loja intacta');
+    const community = await createCommunity(name);
+    const product = await createProduct(productName('arquivado'), [community.id]);
+    await archiveProduct(product.id);
+    await archive(community.id);
+
+    const lojaSnapshot = async () => {
+      const [row] = await adminSql<{ snapshot: string }[]>`
+        select jsonb_build_object(
+          'products', coalesce((select jsonb_agg(to_jsonb(r) order by r.id)
+                                  from public.store_products r
+                                 where r.tenant_id = ${tenantIds.demo}::uuid), '[]'),
+          'links', coalesce((select jsonb_agg(to_jsonb(r) order by r.product_id, r.community_id)
+                               from public.store_product_communities r
+                              where r.tenant_id = ${tenantIds.demo}::uuid), '[]'),
+          'orders', coalesce((select jsonb_agg(to_jsonb(r) order by r.id)
+                                from public.store_orders r
+                               where r.tenant_id = ${tenantIds.demo}::uuid), '[]'),
+          'entitlements', coalesce((select jsonb_agg(to_jsonb(r) order by r.id)
+                                      from public.store_entitlements r
+                                     where r.tenant_id = ${tenantIds.demo}::uuid), '[]')
+        )::text as snapshot`;
+      return row?.snapshot;
+    };
+    const [slugBefore] = await adminSql<{ slug: string }[]>`
+      select slug from public.communities where id = ${community.id}::uuid`;
+    const before = await lojaSnapshot();
+
+    expect((await del(community.id)).status).toBe(204);
+
+    expect(await lojaSnapshot()).toBe(before);
+    const [slugAfter] = await adminSql<{ slug: string }[]>`
+      select slug from public.communities where id = ${community.id}::uuid`;
+    expect(slugAfter?.slug).toBe(slugBefore?.slug);
+
+    // The same name again gets the numeric suffix: the deleted row keeps its slug.
+    const again = await createCommunity(name);
+    expect(again.slug).not.toBe(slugBefore?.slug);
+    expect(again.slug).toMatch(new RegExp(`^${slugBefore?.slug}-\\d+$`));
+  });
+});
+
+describe('no oracle and no leak (PEND-13, P38)', () => {
+  it('12. another tenant is the bare 404 of an unknown id; a member learns no product name; the zero-match case moves nothing', async () => {
+    const [labAdmin] = await adminSql<{ id: string }[]>`
+      select u.id::text as id from public.users u where u.email = 'admin@rede-lab.local'`;
+    const labName = `${TEST_NAME_PREFIX} laboratorio ${++counter}`;
+    const insertLab = async (status: 'active' | 'archived', slug: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.communities (tenant_id, created_by_user_id, name, slug, status)
+        values (${tenantIds.lab}::uuid, ${labAdmin?.id ?? ''}::uuid, ${`${labName} ${status}`},
+                ${slug}, ${status})
+        returning id::text as id`;
+      return row?.id ?? '';
+    };
+    const labArchived = await insertLab('archived', `exclusao-lab-arquivada-${counter}`);
+    const labActive = await insertLab('active', `exclusao-lab-ativa-${counter}`);
+    const labProductName = productName('laboratorio');
+    await adminSql`
+      insert into public.store_products (tenant_id, created_by_user_id, name, price_cents, status)
+      values (${tenantIds.lab}::uuid, ${labAdmin?.id ?? ''}::uuid, ${labProductName}, 990, 'active')`;
+    await adminSql`
+      insert into public.store_product_communities (tenant_id, product_id, community_id)
+      select ${tenantIds.lab}::uuid, p.id, ${labArchived}::uuid
+        from public.store_products p where p.name = ${labProductName}`;
+
+    const labRows = async () => {
+      const [row] = await adminSql<{ snapshot: string }[]>`
+        select jsonb_build_object(
+          'communities', (select jsonb_agg(to_jsonb(c) order by c.id)
+                            from public.communities c where c.id = any(${[labArchived, labActive]}::uuid[])),
+          'links', (select jsonb_agg(to_jsonb(l) order by l.product_id)
+                      from public.store_product_communities l where l.community_id = ${labArchived}::uuid)
+        )::text as snapshot`;
+      return row?.snapshot;
+    };
+    const deletedCounts = async () =>
+      JSON.stringify(
+        await adminSql<{ tenant_id: string; n: number }[]>`
+          select tenant_id::text, count(*)::int as n from public.communities
+           where deleted_at is not null group by tenant_id order by tenant_id`,
+      );
+
+    const labBefore = await labRows();
+    const countsBefore = await deletedCounts();
+
+    const unknown = sansRequestId(await expectBare404(await del(randomUUID()), 'unknown id'));
+    for (const [label, id] of [
+      ['lab archived', labArchived],
+      ['lab active', labActive],
+    ] as const) {
+      const raw = await expectBare404(await del(id), label);
+      expect(sansRequestId(raw), label).toBe(unknown);
+      for (const needle of [id, tenantIds.lab, labName, labProductName]) {
+        expect(raw, `${label}: ${needle}`).not.toContain(needle);
+      }
+    }
+    // The zero-match calls changed no row of any tenant.
+    expect(await labRows()).toBe(labBefore);
+    expect(await deletedCounts()).toBe(countsBefore);
+
+    // A member deleting an archived community that an active product links is 403, naming nothing.
+    const secret = productName('segredo');
+    const { community } = await lockedArchived('sigilosa', [secret]);
+    const asMember = await del(community.id, tokens.demoMember);
+    const memberText = await asMember.text();
+    expect(asMember.status, memberText).toBe(403);
+    expect(memberText).not.toContain(secret);
+    expect(memberText).not.toContain(community.id);
+    expect(await deletedAtOf(community.id)).toBeNull();
   });
 });
