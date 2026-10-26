@@ -67,7 +67,7 @@ begin;
 --
 -- Fixture ids use the `19800000-…` prefix and the tenants `pgtap-dashboard-a` / `-b` / `-e` / `-c` /
 -- `-m` / `-h`, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(144);
+select plan(148);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-dashboard-a', 'Painel A', '19800000-0000-4000-8000-000000000001');
@@ -861,6 +861,25 @@ select ok(pg_temp.activity_of('19800000-0000-4000-8000-000000000601')::text not 
 select is(pg_temp.activity_of('19800000-0000-4000-8000-000000000601') -> 'attendance',
   '{"attended": 2, "events": 3}'::jsonb,
   'UI-D-485 / EP-09 (INSIGHT-04): events from 00:00 of D-29 (23:59 of D-30 out) the member was in, not_going and cancelled left out; attended = checked in or walked in');
+-- D-550 (09.3-04): a DELETED event keeps counting for the member. E1 (checked in) is soft-deleted,
+-- the day is rebuilt, and the tile is still {2, 3}: the `att` CTE no longer filters `deleted_at`. E5
+-- (cancelled) is then soft-deleted as well and stays uncounted: `status = 'active'` is still the rule.
+update public.events set deleted_at = now() where id = '19800000-0000-4000-8000-0000000006e1';
+delete from public.dashboard_snapshots
+ where tenant_id = '19800000-0000-4000-8000-000000000061' and snapshot_day = pg_temp.d();
+select is(pg_temp.build('19800000-0000-4000-8000-000000000061'), true,
+  'D-550: tenant V rebuilds its day after E1 was soft-deleted');
+select is(pg_temp.activity_of('19800000-0000-4000-8000-000000000601') -> 'attendance',
+  '{"attended": 2, "events": 3}'::jsonb,
+  'D-550: a soft-deleted event (E1, checked in) still counts in "Sua atividade": attended 2 of 3');
+update public.events set deleted_at = now() where id = '19800000-0000-4000-8000-0000000006e5';
+delete from public.dashboard_snapshots
+ where tenant_id = '19800000-0000-4000-8000-000000000061' and snapshot_day = pg_temp.d();
+select is(pg_temp.build('19800000-0000-4000-8000-000000000061'), true,
+  'D-550: tenant V rebuilds its day after the cancelled E5 was soft-deleted too');
+select is(pg_temp.activity_of('19800000-0000-4000-8000-000000000601') -> 'attendance',
+  '{"attended": 2, "events": 3}'::jsonb,
+  'D-550: a cancelled event still does not count, deleted or not (status = active stays the rule)');
 select is((pg_temp.activity_of('19800000-0000-4000-8000-000000000602') ->> 'weekStreak')::int, 1,
   'UI-D-483: a single week is a streak of 1 (stored; the web shows the tile only from 2)');
 select is((pg_temp.activity_of('19800000-0000-4000-8000-000000000603') ->> 'weekStreak')::int, 2,

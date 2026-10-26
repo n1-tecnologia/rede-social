@@ -1030,6 +1030,13 @@
       "when": 1793048210995,
       "tag": "20261026205650_story_highlight_title_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1793049112211,
+      "tag": "20261026211152_dashboard_activity_keeps_deleted_events",
+      "breakpoints": true
     }
   ]
 }
