@@ -4,7 +4,7 @@ current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
 current_plan: 25
 status: executing
-stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered and UI-SPEC approved 2026-10-26 on the side, next is plan-phase 09.3 (may run ahead), execute waits for 09.2.
+stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered, UI-SPEC approved and planned (9 plans, 6 waves, plan checker passed) 2026-10-26 on the side; execute-phase 09.3 waits for 09.2 to close.
 last_updated: "2026-10-26T17:44:30.182Z"
 last_activity: 2026-10-24
 last_activity_desc: Completed 09.2-24 (the PROJECT.md amendment and its CLAUDE.md mirror, the per-project connection budget, the Phase 09.2 release and move runbook in DEPLOY.md, ci.md and LOCAL-SETUP (on disk, untracked), the H1..H8 hosted-proofs ledger shipped pending with contract_gate closed; the migrate Job gained MAIL_DOMAIN, PROJECT_AUTH_SMTP_PASS and project 0 ref; the ROLE=move Job override syntax is unproven)
@@ -1163,5 +1163,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-26T17:44:29.129Z
-Stopped at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered and UI-SPEC approved 2026-10-26 on the side, next is plan-phase 09.3 (may run ahead), execute waits for 09.2.
+Stopped at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered, UI-SPEC approved and planned (9 plans, 6 waves, plan checker passed) 2026-10-26 on the side; execute-phase 09.3 waits for 09.2 to close.
 Resume file: None
