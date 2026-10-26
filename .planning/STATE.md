@@ -5,15 +5,15 @@ current_phase_name: Pendências de backend do FRONT.pdf (INSERTED)
 current_plan: 7
 status: executing
 stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered, UI-SPEC approved and planned (9 plans, 6 waves, plan checker passed) 2026-10-26 on the side; execute-phase 09.3 waits for 09.2 to close.
-last_updated: "2026-10-26T21:35:18.611Z"
+last_updated: "2026-10-26T21:49:01.186Z"
 last_activity: 2026-10-26
 last_activity_desc: Phase 09.3 execution started
-state_head: f17d794121807bb857d731cbcc396b4ba04208c3
+state_head: a833bdc36275e14417e88ece8a2db5547307b216
 progress:
   total_phases: 25
   completed_phases: 0
   total_plans: 277
-  completed_plans: 265
+  completed_plans: 266
   percent: 0
 ---
 
@@ -1077,6 +1077,7 @@ None yet.
 - [Phase 08.4]: Complete 2026-10-15 (UAT 2/2, Nyquist validated, security 15/15, UI review 20/24) but local only, nothing pushed; release order (08.3 + 08.4 migrations together, migrations first, never roll back to an 08.3 API after the drop) is in DEPLOY.md "Phase 08.4 release". Open: 08.4-REVIEW WR-01..03, IN-01..04 (IN-04 composite tenant FKs); UI-REVIEW top 3 (unsaved edits lost via the read-only product links, off-screen link-block errors, silent picker-load failure).
 - [Phase 08.6]: Complete 2026-10-18 (UAT 7/7, VERIFICATION passed with the out-of-phase e2e override, SECURITY 52 rows threats_open 0) but local only, nothing pushed. Open follow-ups: review WR-01/WR-02/WR-05 (edge-case lesson-notice losses); accepted risk AR-08.6-01 (WR-04: worker-only definers callable by authenticated, unreachable while the Data API is closed); two FRONT-AJUSTES branding e2e specs (admin-branding.spec.ts:308, platform-branding.spec.ts:235) in 08.6 deferred-items.md; UAT tests 2-3 (real-device push) recorded pass before 08.6 reached homolog. DEPLOY.md "Phase 08.6 release" lists six migrations (--include-all).
 - [Quick 261018-owq]: Global e-mail allowlist (`public.email_allowlist`, `liberado|bloqueado`) gating sign-up and login via the `before_user_created` and `custom_access_token` Auth hooks plus API pre-checks in `signupMember`/`createTenant` (GoTrue's `admin.createUser` never fires `before_user_created`). Complete 2026-10-19 (verification passed 7/7, review 0/3/6, WR-03 fixed) and pushed. Production hooks ship `enabled = false`; runbook (db push, populate list, who-would-be-locked-out query, flip, config push, smoke, rollback) is in `.planning/quick/261018-owq-*/261018-owq-SUMMARY.md`. Open: WR-01 (API checks live before the hooks), WR-02 (hml remote must carry the disabled blocks); stale/env failures outside it: signup.spec test 6 (link host re-homed by 261012-s0v), courses-admin E09 (Mux vs fake), three 08.7 dashboard integration tests that need a seed older than a day. Pushed to origin/master 2026-10-19 (29095bf8, 457 commits; the 32 FRONT-AJUSTES commits lost their Claude trailer, so every SHA from febeaaf9 onward changed; backup branch `backup/pre-push-2026-10-19`). Deploy API run 39288583558 stopped at 3 time-dependent 08.7 dashboard tests; quick 261019-jia fixed them and run 39293604816 deployed production on 2026-10-19 (37 migrations, API and worker image 9e35db8b; allowlist hooks still `enabled = false`, list still to be populated).
+- 09.3-06 halted at Task 1 (blocked: policy plan regression): feed_posts_deleted_community_gate turns supabase/tests/180-store.sql test 121 (P41) red in the full pgTAP run, HEAD is green. Owner decision on the policy shape or the pin needed before Tasks 2 and 3. See 09.3-06-SUMMARY.md.
 
 ### Quick Tasks Completed
 
