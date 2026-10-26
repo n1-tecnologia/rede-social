@@ -23,6 +23,7 @@ import {
   addEventPhoto,
   checkIn,
   createEvent,
+  deleteEvent,
   type EventSectionsData,
   getAttendance,
   getEventPhotos,
@@ -379,6 +380,37 @@ export async function cancelEventAction(eventId: string): Promise<EventWriteResu
 /** Reactivate (D-214): refused by the API once the event has started (`reactivate_started`). */
 export async function reactivateEventAction(eventId: string): Promise<EventWriteResult> {
   return statusAction(eventId, 'active');
+}
+
+/**
+ * Delete (D-552, PEND-07): `DELETE /v1/events/{id}`, a soft delete the API answers for ANY event
+ * (D-548: active, cancelled or past). A miss is `not_found` (D-551: the same bare 404 for an event
+ * already gone and for another tenant's), a refusal is a code never copy, and `redirect()` sits
+ * OUTSIDE the try/catch (Next 16). A server action is a public endpoint, so a malformed id is refused
+ * as `generic` before any request; the API's permission guard and tenant lane stay the authority.
+ * The page, the lists and the home card are revalidated only after success.
+ */
+export async function deleteEventAction(eventId: string): Promise<EventWriteResult> {
+  if (!isEventId(eventId)) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: EventWriteResult = { ok: false, code: 'generic' };
+  try {
+    await deleteEvent(eventId);
+    result = { ok: true, eventId };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) result = eventWriteRefusal(error);
+  }
+
+  if (refusal) redirect(refusal);
+  if (result.ok) {
+    revalidatePath('/eventos');
+    revalidatePath('/eventos/meus');
+    revalidatePath(`/eventos/${eventId}`);
+    revalidatePath('/inicio');
+  }
+  return result;
 }
 
 /* ── EVENT-05: the organiser's Participantes (06-07) ──────────────────────────────────────────── */

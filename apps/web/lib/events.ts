@@ -520,3 +520,14 @@ export async function removeEventPhoto(eventId: string, photoId: string): Promis
   );
   if (!res.ok) throw await apiError(res);
 }
+
+/**
+ * `DELETE /v1/events/{eventId}` (manage only, D-548 any event, D-552): a soft delete, so the event
+ * leaves every list and its link stops opening while the confirmations and check-ins are kept. Throws
+ * an `ApiClientError` on refusal (a bare 404 for an event already gone or from another tenant, 403 for
+ * a member).
+ */
+export async function deleteEvent(eventId: string): Promise<void> {
+  const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+  if (!res.ok) throw await apiError(res);
+}

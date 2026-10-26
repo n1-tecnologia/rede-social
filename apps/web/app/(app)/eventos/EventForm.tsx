@@ -34,7 +34,6 @@ import { useTranslations } from 'next-intl';
 import { useEffect, useId, useRef, useState, useTransition } from 'react';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
-import { PendingDeleteButton } from '@/components/pending/PendingDeleteButton';
 import {
   type AddressParts,
   addressIssues,
@@ -56,6 +55,7 @@ import {
 } from '@/lib/event-extras';
 import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import { CancelEventControl } from './[eventId]/CancelEventControl';
+import { DeleteEventControl } from './[eventId]/DeleteEventControl';
 import { ReactivateEventControl } from './[eventId]/ReactivateEventControl';
 import { createEventAction, type EventWriteResult, updateEventAction } from './actions';
 import { ADDRESS_FIELD_IDS, EventAddressFields } from './EventAddressFields';
@@ -103,9 +103,9 @@ import { useCepLookup } from './useCepLookup';
  * Edit mode adds the note under "Quando" and the bottom row: "Cancelar evento" while active and before
  * the end, "Reativar evento" while cancelled and before the start, or the locked note. All three
  * flags are computed by the RSC from ONE request instant (UI-D-14: no clock read in client render).
- * Since 2026-10-20 (the client's FRONT.pdf) the row always ends with "Excluir evento" and "Em breve"
- * (`PendingDeleteButton`): the API cannot delete an event yet (`docs/pendencias-backend.md` item 11),
- * so the button is there to be found and does nothing.
+ * The row always ends with the live "Excluir evento" (`DeleteEventControl`, FRONT.pdf item 11, D-548
+ * any event, D-552 confirmed first): a soft delete that lands on `/eventos` and never goes through
+ * this form's own "Descartar alterações?" guard.
  *
  * **2026-10-03: "Categoria" and "Vagas", both optional and both sent by either format.** The
  * category sits under the name (the poster prints it above the title), capped at
@@ -1134,8 +1134,8 @@ export function EventForm({
             <ArrowRight aria-hidden size={16} />
           </Button>
 
-          {/* ── (7) Edit only: the status row at the bottom (UI-D-211), then "Excluir evento",
-              a placeholder until the API can delete (2026-10-20). ── */}
+          {/* ── (7) Edit only: the status row at the bottom (UI-D-211), then the live "Excluir evento"
+              (D-548: any event, D-552: always confirmed first). ── */}
           {mode === 'edit' && eventId ? (
             <>
               <div aria-hidden className="h-px bg-border" />
@@ -1148,12 +1148,7 @@ export function EventForm({
                   {t('form.cancelledLocked')}
                 </p>
               ) : null}
-              <PendingDeleteButton
-                kind="event"
-                label={t('delete.action')}
-                soon={t('delete.soon')}
-                hint={t('delete.hint')}
-              />
+              <DeleteEventControl eventId={eventId} />
             </>
           ) : null}
         </div>

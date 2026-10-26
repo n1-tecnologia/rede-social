@@ -99,7 +99,9 @@
       "cancel": "Não foi possível cancelar o evento. Tente novamente.",
       "reactivate": "Não foi possível reativar o evento. Tente novamente.",
       "reactivateStarted": "Não é possível reativar um evento que já começou.",
-      "regenerate": "Não foi possível gerar um novo código. Tente novamente."
+      "regenerate": "Não foi possível gerar um novo código. Tente novamente.",
+      "delete": "Não foi possível excluir o evento. Tente novamente.",
+      "deleteGone": "Este evento já foi excluído."
     },
     "count": {
       "confirmed": "{count, plural, =0 {Ninguém confirmou ainda} one {# confirmado} other {# confirmados}}",
@@ -218,9 +220,7 @@
       "action": "Reativar evento"
     },
     "delete": {
-      "action": "Excluir evento",
-      "soon": "Em breve",
-      "hint": "A exclusão de eventos ainda não está disponível."
+      "action": "Excluir evento"
     },
     "form": {
       "titleCreate": "Novo evento",
@@ -386,6 +386,12 @@
       }
     },
     "confirm": {
+      "delete": {
+        "title": "Excluir evento?",
+        "body": "O evento some das listas e o link deixa de abrir. As confirmações e os check-ins já feitos ficam guardados. Ninguém é avisado.",
+        "confirm": "Excluir",
+        "dismiss": "Manter evento"
+      },
       "cancel": {
         "title": "Cancelar evento?",
         "body": "O evento continua na lista com o selo Cancelado. A confirmação, o check-in e o link ficam desativados, e ninguém é avisado automaticamente.",
@@ -423,6 +429,7 @@
       "saved": "Alterações salvas.",
       "cancelled": "Evento cancelado.",
       "reactivated": "Evento reativado.",
+      "deleted": "Evento excluído.",
       "codeRegenerated": "Novo código gerado.",
       "photosAdded": "{count, plural, one {Foto adicionada.} other {# fotos adicionadas.}}",
       "photoRemoved": "Foto removida."
