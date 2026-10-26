@@ -3,6 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { STORY_HIGHLIGHT_MAX_TITLE } from '../contracts/index';
 import {
   type HighlightEditItem,
   HighlightEditSheet,
@@ -155,6 +156,24 @@ describe('HighlightEditSheet — the edit sheet (UI-D-74)', () => {
     expect(saveName()).toBeEnabled();
     fireEvent.click(saveName());
     await waitFor(() => expect(onRename).toHaveBeenCalledWith('Aulas novas'));
+  });
+
+  it('E1b. D-559, UI E6: at the contract constant the name field holds exactly 50 and the counter reads 50/50', () => {
+    const base = props();
+    render(
+      <HighlightEditSheet
+        {...base}
+        labels={{ ...base.labels, limit: STORY_HIGHLIGHT_MAX_TITLE }}
+      />,
+    );
+
+    expect(nameField()).toHaveAttribute('maxLength', String(STORY_HIGHLIGHT_MAX_TITLE));
+    fireEvent.change(nameField(), { target: { value: 'b'.repeat(60) } });
+
+    expect(nameField().value).toHaveLength(STORY_HIGHLIGHT_MAX_TITLE);
+    expect(
+      screen.getByText(`${STORY_HIGHLIGHT_MAX_TITLE}/${STORY_HIGHLIGHT_MAX_TITLE}`),
+    ).toBeInTheDocument();
   });
 
   it('E2. the position controls are disabled at the ends and call onMove(-1 | 1)', () => {

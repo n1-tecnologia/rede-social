@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { STORY_DURATION_MS } from '../contracts/index';
+import { STORY_DURATION_MS, STORY_HIGHLIGHT_MAX_TITLE } from '../contracts/index';
 import { StoryProgressBars } from '../ui/StoryProgressBars';
 import {
   type StoryMediaControls,
@@ -400,6 +400,43 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
 
     unmount();
     expect(document.querySelector('[data-shell-hide]')).toBeNull();
+  });
+
+  it('9b. D-560: a highlight with a name of STORY_HIGHLIGHT_MAX_TITLE characters opens with the whole name shown', () => {
+    // The shape `highlightGroupView` plus the host's `buildItem` produce: the highlight's name is
+    // both the group header name and the item's `authorName`.
+    const NAME = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'.slice(
+      0,
+      STORY_HIGHLIGHT_MAX_TITLE,
+    );
+    expect(NAME).toHaveLength(STORY_HIGHLIGHT_MAX_TITLE);
+    row([group('H', [item(0, { authorName: NAME })], { header: { name: NAME, avatar: null } })]);
+
+    // (a) the header span carries the whole name as text, not a clipped copy.
+    const span = screen.getByText(NAME, { selector: 'span' });
+    expect(span.textContent).toBe(NAME);
+
+    // (b) the sr-only announcement carries it whole as well.
+    expect(screen.getByTestId('story-position')).toHaveTextContent(`position-${NAME}-1-of-1`);
+
+    // (c) the name wraps: no ellipsis token and no line clamp.
+    const classes = Array.from(span.classList);
+    expect(classes).toContain('break-words');
+    expect(classes).not.toContain('truncate');
+    expect(classes.some((token) => token.startsWith('line-clamp'))).toBe(false);
+
+    // (d) its column can shrink, so an unbroken name breaks at the box edge instead of overflowing.
+    const column = span.parentElement as HTMLElement;
+    expect(column.classList.contains('min-w-0')).toBe(true);
+    expect(column.classList.contains('flex-1')).toBe(true);
+
+    // (e) a one-word name renders in the same span with the same classes: one line stays unchanged.
+    cleanup();
+    row([
+      group('S', [item(0, { authorName: 'Curto' })], { header: { name: 'Curto', avatar: null } }),
+    ]);
+    const short = screen.getByText('Curto', { selector: 'span' });
+    expect(Array.from(short.classList)).toEqual(classes);
   });
 
   it('10. the keyboard reaches the same three actions: arrows navigate, space toggles pause', () => {

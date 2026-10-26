@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { STORY_HIGHLIGHT_MAX_TITLE } from '@rede-social/module-stories/contracts';
 import { describe, expect, it } from 'vitest';
 import { assembleMessages, loadMessages, type MessageTree } from './messages';
 
@@ -688,7 +689,13 @@ describe('05.2-08 — the composer "Destaque" strings, and the "Publicar em" wor
   });
 
   it('the title rule interpolates the limit — no digit is typed into it (UI-D-05)', () => {
-    expect(String(lookup('stories.publish.errors.titleInvalid'))).not.toMatch(/\b15\b/);
+    const line = String(lookup('stories.publish.errors.titleInvalid'));
+    expect(line).toContain('{limit}');
+    expect(line).not.toMatch(/\b15\b/);
+    expect(line).not.toMatch(/\b50\b/);
+    // D-559: the number arrives from the contract constant, 50 since 09.3.
+    const sentence = line.replaceAll('{limit}', String(STORY_HIGHLIGHT_MAX_TITLE));
+    expect(sentence).toMatch(/\b50\b/);
   });
 
   it.each(['stories.publish.toastCommunity', 'stories.publish.destination.helper'])(

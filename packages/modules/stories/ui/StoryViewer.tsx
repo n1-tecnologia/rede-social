@@ -1008,7 +1008,9 @@ export function StoryViewer({
       >
         {current ? current.avatar : group?.header.avatar}
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-bold">
+          {/* The name wraps so a highlight's whole name shows (D-560); a 50-character name has
+              no room on one line at phone widths. */}
+          <span className="block break-words text-sm font-bold">
             {current ? current.authorName : group?.header.name}
           </span>
           {current ? (

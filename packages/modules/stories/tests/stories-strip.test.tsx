@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { STORY_HIGHLIGHT_MAX_TITLE } from '../contracts/index';
 import { StoriesStrip, type StoryStripCircle } from '../ui/StoriesStrip';
 import { StoryCircle, StoryMonogram, StoryPhoto } from '../ui/StoryCircle';
 
@@ -189,6 +190,35 @@ describe('StoryCircle — 64x64, every disc and ring, one geometry (UI-D-60..UI-
     const label = screen.getByText('ha 2 h');
     expect(label.className).toContain('truncate');
     expect(label.className).toContain('max-w-16');
+  });
+
+  it('9b. D-560: a highlight name of STORY_HIGHLIGHT_MAX_TITLE characters is one ellipsis line in the same 64px column, whole in the DOM and in the accessible name', () => {
+    const NAME = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'.slice(
+      0,
+      STORY_HIGHLIGHT_MAX_TITLE,
+    );
+    expect(NAME).toHaveLength(STORY_HIGHLIGHT_MAX_TITLE);
+    const disc = { kind: 'asset', assetId: null, variantWidths: [] } as const;
+    const long = render(
+      <StoryCircle ring="brand" disc={disc} label={NAME} actionLabel={NAME} onOpen={() => {}} />,
+    );
+
+    // One line with an ellipsis, in a column no wider than the disc.
+    const label = screen.getByText(NAME, { selector: 'span' });
+    expect(label.className).toContain('truncate');
+    expect(label.className).toContain('max-w-16');
+    // CSS cuts the text; the DOM keeps all of it.
+    expect(label.textContent).toBe(NAME);
+    // The circle's button is named by the whole name.
+    expect(screen.getByRole('button', { name: NAME })).toBeInTheDocument();
+
+    // A short and a long label share the same column width class, so a long name never widens it.
+    const longClass = label.className;
+    long.unmount();
+    render(
+      <StoryCircle ring="brand" disc={disc} label="Aulas" actionLabel="Aulas" onOpen={() => {}} />,
+    );
+    expect(screen.getByText('Aulas', { selector: 'span' }).className).toBe(longClass);
   });
 
   it('10. ring="brand" wears the SECONDARY colour (2026-10-06); neutral wears border-border; both keep the geometry', () => {

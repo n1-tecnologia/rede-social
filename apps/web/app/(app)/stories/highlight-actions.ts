@@ -308,7 +308,7 @@ export async function createHighlightAction(
   });
 }
 
-/** "Salvar nome" (UI-D-74): `PATCH { title }` — trimmed, 1..15, else `title_invalid`. */
+/** "Salvar nome" (UI-D-74): `PATCH { title }` — trimmed, 1..`STORY_HIGHLIGHT_MAX_TITLE`, else `title_invalid`. */
 export async function renameHighlightAction(
   highlightId: string,
   title: string,

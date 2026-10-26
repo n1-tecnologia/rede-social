@@ -1550,8 +1550,8 @@ test.describe('05.2 — publishing into a highlight (D-111..D-115)', () => {
     longName: 'Grupo de trabalho de comunicacao interna e eventos do ano 26',
   } as const;
 
-  /** Exactly 15 UTF-16 units — the title cap — for the E11 backstop's value. */
-  const LONG_TITLE = 'Teste de quinze';
+  /** Exactly 50 UTF-16 units — the title cap (D-559) — for the E11 backstop's value. */
+  const LONG_TITLE = 'Teste de cinquenta caracteres em um destaque longo';
 
   let stopWorker: (() => Promise<void>) | null = null;
 
@@ -1746,7 +1746,7 @@ test.describe('05.2 — publishing into a highlight (D-111..D-115)', () => {
     }
   });
 
-  test('UI E11 backstop: a 60-character community and a 15-character title truncate inside the row at 320px', async ({
+  test('UI E11 backstop: a 60-character community and a 50-character title truncate inside the row at 320px', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
@@ -1761,7 +1761,7 @@ test.describe('05.2 — publishing into a highlight (D-111..D-115)', () => {
     expect(communityId).toMatch(/^[0-9a-f-]{36}$/);
 
     // A highlight in the long-named community, through the API, so the row arrives pre-filled.
-    expect(LONG_TITLE).toHaveLength(15);
+    expect(LONG_TITLE).toHaveLength(50);
     const created = await storiesApi(await adminToken(), '/v1/stories/highlights', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -2184,7 +2184,7 @@ test.describe('the seen ring (D-105, UI-D-61, HIGHLIGHT-06)', () => {
  *    vendor bar, is never left paused, and has its sound after a touch.
  *
  * Every story it writes carries `STORY_PREFIX` and every highlight `HIGHLIGHT_PREFIX` (a highlight
- * title is capped at 15 characters by the database), and `afterAll` removes them, so the seed is
+ * title is capped at 50 characters by the database), and `afterAll` removes them, so the seed is
  * found exactly as it was. The streams of the video case never answer (`reels.spec.ts`'s
  * technique): the element stays loading and never errors, so the case asserts what the page asked
  * of it rather than a decode no local stack can do.

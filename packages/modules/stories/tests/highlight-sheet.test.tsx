@@ -3,6 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { STORY_HIGHLIGHT_MAX_TITLE } from '../contracts/index';
 import {
   HighlightMembershipList,
   type HighlightMembershipListProps,
@@ -444,6 +445,19 @@ describe('HighlightTitleStep — the shared "Novo destaque" form (UI-D-72, UI E0
 
     expect(field.value).toBe('abcdefghijklmno');
     expect(screen.getByText('15/15')).toBeInTheDocument();
+  });
+
+  it('T2b. D-559, UI E6: at the contract constant the field holds exactly 50 and the counter reads 50/50', () => {
+    render(<HighlightTitleStep {...stepProps({ limit: STORY_HIGHLIGHT_MAX_TITLE })} />);
+
+    const field = screen.getByLabelText('field-label') as HTMLInputElement;
+    expect(field).toHaveAttribute('maxLength', String(STORY_HIGHLIGHT_MAX_TITLE));
+    fireEvent.change(field, { target: { value: 'a'.repeat(60) } });
+
+    expect(field.value).toHaveLength(STORY_HIGHLIGHT_MAX_TITLE);
+    expect(
+      screen.getByText(`${STORY_HIGHLIGHT_MAX_TITLE}/${STORY_HIGHLIGHT_MAX_TITLE}`),
+    ).toBeInTheDocument();
   });
 
   it('T3. while onSubmit is pending the button reads the submitting label and a second submit is ignored; a failure keeps the title', async () => {
