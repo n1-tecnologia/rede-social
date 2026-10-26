@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "09.2"
-current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 25
+current_phase: "09.3"
+current_phase_name: Pendências de backend do FRONT.pdf (INSERTED)
+current_plan: 2
 status: executing
 stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered, UI-SPEC approved and planned (9 plans, 6 waves, plan checker passed) 2026-10-26 on the side; execute-phase 09.3 waits for 09.2 to close.
-last_updated: "2026-10-26T17:44:30.182Z"
-last_activity: 2026-10-24
-last_activity_desc: Completed 09.2-24 (the PROJECT.md amendment and its CLAUDE.md mirror, the per-project connection budget, the Phase 09.2 release and move runbook in DEPLOY.md, ci.md and LOCAL-SETUP (on disk, untracked), the H1..H8 hosted-proofs ledger shipped pending with contract_gate closed; the migrate Job gained MAIL_DOMAIN, PROJECT_AUTH_SMTP_PASS and project 0 ref; the ROLE=move Job override syntax is unproven)
-state_head: 3c4316154b6c334d3d23ebc253aa41e83aa77965
+last_updated: "2026-10-26T20:42:47.853Z"
+last_activity: 2026-10-26
+last_activity_desc: Phase 09.3 execution started
+state_head: ec76b921d1558ab760ff2e0d1787792dcc7de7c6
 progress:
   total_phases: 25
   completed_phases: 0
-  total_plans: 268
-  completed_plans: 259
+  total_plans: 277
+  completed_plans: 260
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 09.2 — Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)
+**Current focus:** Phase 09.3 — Pendências de backend do FRONT.pdf (INSERTED)
 
 ## Current Position
 
-Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING
-Current Plan: 25
-Total Plans in Phase: 28
-Plan: plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21 and 24 done (24: the documentation, wave 13 complete); plans run out of numeric order: the next is 25 (wave 14, the human gates: autonomous false, 4 checkpoints for Igor)
+Phase: 09.3 (Pendências de backend do FRONT.pdf (INSERTED)) — EXECUTING
+Current Plan: 2
+Total Plans in Phase: 9
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-10-24 — Completed quick task 261024-lcq (migrateAll first-release fix); first production run: migrations, api_user password, Auth config pushed and migrate Job created, then the Job crashed on the missing platform schema, API and worker still the old revisions and healthy; Phase 09.2 still paused at plan 25
+Last activity: 2026-10-26 — Phase 09.3 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -317,6 +317,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.2 P23 | 104 min | 3 tasks | 43 files |
 | Phase 09.2 P21 | 15 min | 2 tasks | 24 files |
 | Phase 09.2 P24 | 18 min | 3 tasks | 8 files |
+| Phase 09.3 P01 | 6 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
