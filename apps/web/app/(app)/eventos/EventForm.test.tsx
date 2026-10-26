@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+
+import { EVENT_SCHEDULE_MAX_ITEMS } from '@rede-social/module-events/contracts';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1327,6 +1329,57 @@ describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => 
       const sent = update.mock.calls[0]?.[1] as Record<string, unknown>;
       expect((sent.description as string).length).toBe(3990);
       expect(sent.schedule).toHaveLength(30);
+    });
+
+    /** `count` DISTINCT moments over 25 days, eight a day, in order (the cap is 200, 09.3-01). */
+    const distinctMoments = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        day: Math.floor(i / 8) + 1,
+        time: `${String(8 + (i % 8)).padStart(2, '0')}:00`,
+        title: `Momento número ${i + 1}`,
+      }));
+    const limitLine = () =>
+      lookup('events', 'form.extras.schedule.limit', { max: EVENT_SCHEDULE_MAX_ITEMS });
+
+    it('at the limit: 200 moments are all listed, the counter line says 200, the add controls are disabled and 200 submit', async () => {
+      expect(EVENT_SCHEDULE_MAX_ITEMS).toBe(200);
+      const schedule = distinctMoments(EVENT_SCHEDULE_MAX_ITEMS);
+      editForm({ schedule });
+      expect(moments()).toHaveLength(200);
+      expect(moments()[0]).toBe('08:00Momento número 1');
+      expect(moments()[199]).toBe('15:00Momento número 200');
+      // The line is the catalog's, with the number the contract owns.
+      expect(limitLine()).toContain('200');
+      expect(editor().textContent).toContain(limitLine());
+      expect(field('event-schedule-time').disabled).toBe(true);
+      expect(field('event-schedule-what').disabled).toBe(true);
+      expect(addButton().disabled).toBe(true);
+      // Overflow: the list grows with the page, it is never an inner scroller.
+      const list = editor().querySelector('[data-schedule-list]') as HTMLElement;
+      expect(list.className).not.toMatch(/overflow|max-h/);
+
+      type('event-title', 'Encontro anual 2026');
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+      const sent = update.mock.calls[0]?.[1] as Record<string, unknown>;
+      expect(sent.schedule).toHaveLength(200);
+    });
+
+    it('one below the limit: 199 moments keep the controls enabled, one more makes 200 and disables them again', () => {
+      editForm({ schedule: distinctMoments(EVENT_SCHEDULE_MAX_ITEMS - 1) });
+      expect(moments()).toHaveLength(199);
+      expect(editor().textContent).not.toContain(limitLine());
+      expect(field('event-schedule-time').disabled).toBe(false);
+      expect(field('event-schedule-what').disabled).toBe(false);
+      type('event-schedule-time', '23:30');
+      type('event-schedule-what', 'Último momento');
+      expect(addButton().disabled).toBe(false);
+      fireEvent.click(addButton());
+      expect(moments()).toHaveLength(200);
+      expect(editor().textContent).toContain(limitLine());
+      expect(field('event-schedule-time').disabled).toBe(true);
+      expect(field('event-schedule-what').disabled).toBe(true);
+      expect(addButton().disabled).toBe(true);
     });
   });
 

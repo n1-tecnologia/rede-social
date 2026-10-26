@@ -1,3 +1,4 @@
+import { EVENT_SCHEDULE_MAX_ITEMS } from '@rede-social/module-events/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   composeEventDescription,
@@ -230,7 +231,8 @@ describe('effectiveSchedule', () => {
 describe('EXTRAS_CAPS', () => {
   it('the programme caps are the contract limits (one definition)', () => {
     expect(EXTRAS_CAPS.scheduleTitle).toBe(80);
-    expect(EXTRAS_CAPS.scheduleItems).toBe(30);
+    expect(EXTRAS_CAPS.scheduleItems).toBe(EVENT_SCHEDULE_MAX_ITEMS);
+    expect(EVENT_SCHEDULE_MAX_ITEMS).toBe(200);
     expect(EXTRAS_CAPS.scheduleDays).toBe(31);
   });
 });
