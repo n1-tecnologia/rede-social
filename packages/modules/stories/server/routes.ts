@@ -269,7 +269,7 @@ const createHighlightRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.highlight` carrying exactly one machine code: `title_invalid` (empty after trimming, or longer than 15), `archived` (the community is archived and takes no new content) or `full` (the place already holds 50 highlights). Nothing is written.',
+        '`VALIDATION_FAILED` with `details.highlight` carrying exactly one machine code: `title_invalid` (empty after trimming, or longer than 50), `archived` (the community is archived and takes no new content) or `full` (the place already holds 50 highlights). Nothing is written.',
     },
     403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
     404: {
@@ -327,7 +327,7 @@ const updateHighlightRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.highlight` = `title_invalid` (empty after trimming, or longer than 15) or `archived` (the highlight’s community is archived and takes no curation); or with `details.issues` for a body naming neither `title` nor `cover`. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.highlight` = `title_invalid` (empty after trimming, or longer than 50) or `archived` (the highlight’s community is archived and takes no curation); or with `details.issues` for a body naming neither `title` nor `cover`. Nothing is written.',
     },
     403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
     404: {
@@ -443,7 +443,7 @@ const publishStoryRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.story` carrying exactly one machine code: `media_required` (a story with no media has nothing to show) or `media_invalid` (an asset of this tenant whose purpose is not `story`, or whose kind does not match). With a highlight destination, `details.highlight` carries `archived` (the destination community is archived), `title_invalid` (`newHighlight.title` is empty after trimming or longer than 15) or `full` (the highlight or the place is at its cap). Naming both destinations, or any unknown key (05.1’s retired `communityId` included), is a plain `VALIDATION_FAILED`. In every case NO story, highlight or item is written.',
+        '`VALIDATION_FAILED` with `details.story` carrying exactly one machine code: `media_required` (a story with no media has nothing to show) or `media_invalid` (an asset of this tenant whose purpose is not `story`, or whose kind does not match). With a highlight destination, `details.highlight` carries `archived` (the destination community is archived), `title_invalid` (`newHighlight.title` is empty after trimming or longer than 50) or `full` (the highlight or the place is at its cap). Naming both destinations, or any unknown key (05.1’s retired `communityId` included), is a plain `VALIDATION_FAILED`. In every case NO story, highlight or item is written.',
     },
     403: {
       description:

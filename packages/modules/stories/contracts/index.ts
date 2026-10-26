@@ -487,13 +487,14 @@ export interface StoryCommentDeleted {
 /* ── Highlights (05.2) ─────────────────────────────────────────────────────────────────────────── */
 
 /**
- * A highlight title's cap, in UTF-16 code units — the unit the input's `maxLength` and the Zod
- * `.max()` both count, so a title the field accepts is never refused by the API. The 64 px circle
- * truncates visually anyway; the cap is Instagram parity (R-D-B). The database backstop
- * (`story_highlights_title_chk`) counts code points, which is never MORE than UTF-16 units, so it
- * can never refuse a title this schema accepted.
+ * A highlight title's cap (50, D-559, PEND-09). The input's `maxLength` counts UTF-16 code units, the
+ * Zod `.max()` and the database backstop (`story_highlights_title_chk`) count code points, and a code
+ * point is never MORE than its UTF-16 units, so a title the field accepts is never refused by the API
+ * or the CHECK. The 64 px circle shows a longer name cut on one line with an ellipsis (D-560); the
+ * opened viewer shows it whole. The CHECK mirrors this literal, and pgTAP 120 plus the stories
+ * integration suite fail if they drift.
  */
-export const STORY_HIGHLIGHT_MAX_TITLE = 15;
+export const STORY_HIGHLIGHT_MAX_TITLE = 50;
 
 /** How many stories one highlight may hold; the items read is `limit`ed to the same number. */
 export const STORY_HIGHLIGHT_MAX_ITEMS = 100;
@@ -523,7 +524,7 @@ export type StoryHighlightIssue = (typeof STORY_HIGHLIGHT_ISSUES)[number];
 export const STORY_HIGHLIGHT_ISSUE_SET: ReadonlySet<string> = new Set(STORY_HIGHLIGHT_ISSUES);
 
 /**
- * A highlight title: trimmed, then 1..15 UTF-16 units. The issue MESSAGE is the machine code, so the
+ * A highlight title: trimmed, then 1..`STORY_HIGHLIGHT_MAX_TITLE` characters (code points under Zod 4). The issue MESSAGE is the machine code, so the
  * route's `defaultHook` lifts both refusals into `details.highlight: 'title_invalid'`.
  */
 export const storyHighlightTitleSchema = z

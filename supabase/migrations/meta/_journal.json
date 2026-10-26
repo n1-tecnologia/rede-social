@@ -1023,6 +1023,13 @@
       "when": 1793046981753,
       "tag": "20261026203621_event_schedule_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1793048210995,
+      "tag": "20261026205650_story_highlight_title_limit",
+      "breakpoints": true
     }
   ]
 }

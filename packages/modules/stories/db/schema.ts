@@ -160,7 +160,7 @@ export const stories = pgTable(
  * `module -> module` package edge `turbo boundaries` denies (MOD-02). The foreign key is REAL: `story_highlights_community_fk` (`on delete cascade`) is hand-written SQL in the table's own
  * migration, and `120-story-highlights.sql` asserts it with a 23503 and a positive control.
  *
- * - `title` is required, trimmed and 1..15 characters (`STORY_HIGHLIGHT_MAX_TITLE`); duplicates are
+ * - `title` is required, trimmed and 1..50 characters (`STORY_HIGHLIGHT_MAX_TITLE`); duplicates are
  *   allowed inside a place (ids disambiguate). `story_highlights_title_chk` is the backstop.
  * - `position` orders a place's row. There is deliberately NO unique index on it: every read orders
  *   by `(position, id)`, a total order, and a create appends at `max + 1` under a lock on the place's
@@ -195,7 +195,7 @@ export const storyHighlights = pgTable(
     index('story_highlights_tenant_place_idx').on(t.tenantId, t.communityId, t.position, t.id),
     check(
       'story_highlights_title_chk',
-      sql`char_length(${t.title}) between 1 and 15 and ${t.title} = btrim(${t.title})`,
+      sql`char_length(${t.title}) between 1 and 50 and ${t.title} = btrim(${t.title})`,
     ),
     check(
       'story_highlights_cover_chk',

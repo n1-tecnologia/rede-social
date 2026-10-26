@@ -1389,14 +1389,41 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
 
   it('05.2-4 every refusal is the closed vocabulary or ONE bare 404 — and an active community still creates', async () => {
     // Titles: the Zod contract's issue message IS the machine code, lifted to `details.highlight`.
-    for (const title of ['', 'Teste de 16 unid']) {
-      expect(title.length === 0 || title.length === 16).toBe(true);
+    for (const title of ['', 'x'.repeat(51)]) {
+      expect(title.length === 0 || title.length === 51).toBe(true);
       const res = await createHighlight(tokens.demoAdmin, { title });
       expect(res.status, JSON.stringify(title)).toBe(400);
       const body = await envelope(res);
       expect(body.error.code).toBe('VALIDATION_FAILED');
       expect(body.error.details).toEqual({ highlight: 'title_invalid' });
     }
+
+    // D-559, PEND-09: the cap is 50, so a name of EXACTLY 50 is the positive control for the loop
+    // above — created through the API (201), read back whole, and a direct writer meets the CHECK
+    // (23514 at 51, accepted at 50). The `Teste ` prefix keeps the crash sweep able to find it.
+    const fiftyName = `Teste ${'m'.repeat(44)}`;
+    expect(fiftyName).toHaveLength(50);
+    const fifty = await create(tokens.demoAdmin, { title: fiftyName });
+    expect(fifty.title).toBe(fiftyName);
+    expect((await row(tokens.demoAdmin, '?scope=all')).find((h) => h.id === fifty.id)?.title).toBe(
+      fiftyName,
+    );
+    await adminSql`delete from public.story_highlights where id = ${fifty.id}::uuid`;
+
+    const directInsert = async (title: string) =>
+      adminSql`
+        insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+        select ${tenantIds.demo}::uuid, null, ${title}, 0, m.user_id
+          from public.memberships m
+          join public.users u on u.id = m.user_id
+         where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
+         limit 1`;
+    await expect(directInsert(`Teste ${'m'.repeat(45)}`)).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'story_highlights_title_chk',
+    });
+    await directInsert(fiftyName);
+    await adminSql`delete from public.story_highlights where title = ${fiftyName}`;
 
     // T-05.2-01: curating is a PERMISSION. A member is refused on both writes, before any lookup.
     const target = await create(tokens.demoAdmin, { title: 'Teste Recusas' });
@@ -2219,7 +2246,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
       ],
       [
         'long title',
-        { newHighlight: { communityId: null, title: 'x'.repeat(16) } },
+        { newHighlight: { communityId: null, title: 'x'.repeat(51) } },
         400,
         { highlight: 'title_invalid' },
       ],

@@ -22,8 +22,9 @@ begin;
 --    boundaries` denies (MOD-02). A random `community_id` is refused 23503; the real community and
 --    a NULL (Início) are both accepted.
 --
--- 3. `story_highlights_title_chk`: 1..15 characters and already trimmed. 16 characters, an
---    untrimmed title and an empty one are each refused 23514; exactly 15 is accepted. The API trims
+-- 3. `story_highlights_title_chk`: 1..50 characters and already trimmed (09.3-03, D-559, widened
+--    from 15). 51 characters, an untrimmed title and an empty one are each refused 23514; exactly
+--    50 is accepted. The API trims
 --    before it writes; this is the backstop for everything that does not go through the API.
 --
 -- 4. `story_highlights_position_chk` refuses a negative position; 0 is accepted (every highlight in
@@ -163,11 +164,11 @@ values ('12000000-0000-4000-8000-0000000000f3', '12000000-0000-4000-8000-0000000
 -- ══ 6-9. story_highlights_title_chk ═════════════════════════════════════════════════════════════
 select throws_ok(
   $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
-     values ('12000000-0000-4000-8000-000000000001', null, repeat('a', 16), 1,
+     values ('12000000-0000-4000-8000-000000000001', null, repeat('a', 51), 1,
              '12000000-0000-4000-8000-000000000002') $$,
   '23514',
   'new row for relation "story_highlights" violates check constraint "story_highlights_title_chk"',
-  'story_highlights_title_chk refuses a 16-character title'
+  'story_highlights_title_chk refuses a 51-character title'
 );
 select throws_ok(
   $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
@@ -187,9 +188,9 @@ select throws_ok(
 );
 select lives_ok(
   $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
-     values ('12000000-0000-4000-8000-000000000001', null, repeat('a', 15), 1,
+     values ('12000000-0000-4000-8000-000000000001', null, repeat('a', 50), 1,
              '12000000-0000-4000-8000-000000000002') $$,
-  'positive control: exactly 15 characters, trimmed, is accepted'
+  'positive control: exactly 50 characters, trimmed, is accepted'
 );
 
 -- ══ 10-11. story_highlights_position_chk ════════════════════════════════════════════════════════
