@@ -6,11 +6,11 @@ begin;
 --    reads back as an empty array. That is also the proof that the rows that exist before the
 --    migration need no data migration: they take the default.
 --
--- 2. `events_schedule_chk` ACCEPTS: an empty array, one valid item, thirty items, day 31 at 23:59 and a
+-- 2. `events_schedule_chk` ACCEPTS: an empty array, one valid item, 199 and 200 items, day 31 at 23:59 and a
 --    title of exactly 80 characters.
 --
 -- 3. `events_schedule_chk` REFUSES (23514), for a writer that skips the API: a JSON object, a JSON
---    string, thirty-one items, an array holding a number, an item missing a key, a day of 0, 32, 1.5
+--    string, 201 items, an array holding a number, an item missing a key, a day of 0, 32, 1.5
 --    or a string, a time of 24:00, 8:00 or 08:60, an empty title, a blank title, a title of 81
 --    characters. A NULL is refused by the NOT NULL (23502), and an UPDATE to an invalid value is
 --    refused the same way as an INSERT.
@@ -22,7 +22,7 @@ begin;
 -- Every event is written together with its `event_secrets` row in ONE statement; this file never
 -- commits, so the deferred keys are never checked. Fixture ids use the `1e500000-…` prefix. Like its
 -- siblings, this file ROLLS BACK.
-select plan(30);
+select plan(31);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-sch-a', 'Cronograma A', '1e500000-0000-4000-8000-000000000001');
@@ -92,8 +92,14 @@ select lives_ok(
 select lives_ok(
   $$ select pg_temp.ev('1e500000-0000-4000-8000-0000000000a3',
        (select jsonb_agg(jsonb_build_object('day', 1, 'time', '09:00', 'title', 'Momento ' || n))::text
-          from generate_series(1, 30) n)) $$,
-  '…thirty items are accepted'
+          from generate_series(1, 199) n)) $$,
+  '…199 items are accepted (one below the limit)'
+);
+select lives_ok(
+  $$ select pg_temp.ev('1e500000-0000-4000-8000-0000000000a6',
+       (select jsonb_agg(jsonb_build_object('day', 1, 'time', '09:00', 'title', 'Momento ' || n))::text
+          from generate_series(1, 200) n)) $$,
+  '…two hundred items are accepted (the limit, D-558)'
 );
 select lives_ok(
   $$ select pg_temp.ev('1e500000-0000-4000-8000-0000000000a4',
@@ -118,8 +124,8 @@ select throws_ok(
 select throws_ok(
   $$ select pg_temp.ev('1e500000-0000-4000-8000-0000000000b3',
        (select jsonb_agg(jsonb_build_object('day', 1, 'time', '09:00', 'title', 'Momento ' || n))::text
-          from generate_series(1, 31) n)) $$,
-  '23514', null, '…thirty-one items are refused'
+          from generate_series(1, 201) n)) $$,
+  '23514', null, '…two hundred and one items are refused'
 );
 select throws_ok(
   $$ select pg_temp.ev('1e500000-0000-4000-8000-0000000000b4', '[1]') $$,

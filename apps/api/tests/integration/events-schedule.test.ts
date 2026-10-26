@@ -27,7 +27,9 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
  *  - tenant isolation: another tenant's member reads a bare 404, another tenant's admin cannot
  *    replace it (bare 404) and the stored schedule is unchanged;
  *  - the database is the last line of defence: a direct write of a non-array is 23514
- *    `events_schedule_chk`.
+ *    `events_schedule_chk`;
+ *  - the boundary (09.3-01, D-558): 200 moments save and read back whole, 201 is refused by the
+ *    contract (400) and by the CHECK (23514).
  *
  * Every event this file writes carries `TEST_TITLE_PREFIX` and is swept by both hooks. Test ORDER is
  * load-bearing (`fileParallelism: false`, declaration order).
@@ -228,9 +230,12 @@ describe('events schedule', () => {
 
   it('5. validation on the wire: every malformed schedule is a 400 and nothing is written', async () => {
     const moment: Moment = { day: 1, time: '09:00', title: 'Abertura' };
-    const thirtyOne = Array.from({ length: 31 }, (_, i) => ({ ...moment, title: `Momento ${i}` }));
+    const twoHundredOne = Array.from({ length: 201 }, (_, i) => ({
+      ...moment,
+      title: `Momento ${i}`,
+    }));
     const bad: Array<[string, unknown]> = [
-      ['31 items', thirtyOne],
+      ['201 items', twoHundredOne],
       ['time 24:00', [{ ...moment, time: '24:00' }]],
       ['time 8:00', [{ ...moment, time: '8:00' }]],
       ['day 0', [{ ...moment, day: 0 }]],
@@ -318,5 +323,55 @@ describe('events schedule', () => {
     expect(caught?.code).toBe('23514');
     expect(caught?.constraint_name).toBe('events_schedule_chk');
     expect((await stored(tracerId))?.schedule).toEqual(normalised);
+  });
+
+  it('10. the boundary at 200, end to end: 200 saves and reads back whole, 201 is refused at every layer', async () => {
+    // 200 DISTINCT moments (25 days x 8 hours), handed in REVERSE so the stored order is the sort.
+    const sorted: Moment[] = Array.from({ length: 200 }, (_, i) => ({
+      day: Math.floor(i / 8) + 1,
+      time: `${String(8 + (i % 8)).padStart(2, '0')}:00`,
+      title: `Momento número ${i + 1}`,
+    }));
+    const payload = body('limite 200', { schedule: [...sorted].reverse() });
+    const event = await create(body('limite 200'));
+
+    const saved = await put(event.id, payload);
+    expect(saved.status, JSON.stringify(await saved.clone().json())).toBe(200);
+    const row = await stored(event.id);
+    expect(row?.schedule).toEqual(sorted);
+    const [length] = await adminSql<{ n: number }[]>`
+      select jsonb_array_length(schedule)::int as n from public.events where id = ${event.id}::uuid`;
+    expect(length?.n).toBe(200);
+
+    const edit = await request(`/v1/events/${event.id}/edit`, tokens.demoAdmin);
+    expect(edit.status).toBe(200);
+    const read = ((await edit.json()) as EventEdit).schedule;
+    expect(read).toHaveLength(200);
+    expect(read).toEqual(sorted);
+
+    // 201 is refused by the contract: a generic 400 and nothing is written.
+    const tooMany: Moment[] = [...sorted, { day: 26, time: '08:00', title: 'Momento número 201' }];
+    const refused = await put(event.id, body('limite 200', { schedule: tooMany }));
+    expect(refused.status).toBe(400);
+    const error = await envelope(refused);
+    expect(error.code).toBe('VALIDATION_FAILED');
+    expect(Object.keys((error.details ?? {}) as object)).toEqual(['issues']);
+    expect(await stored(event.id)).toEqual(row);
+
+    // A writer that skips the API still meets the CHECK: 23514 `events_schedule_chk`.
+    let caught: { code?: string; constraint_name?: string } | undefined;
+    try {
+      await adminSql`
+        update public.events
+           set schedule = (
+             select jsonb_agg(jsonb_build_object('day', 1, 'time', '09:00', 'title', 'M' || g))
+               from generate_series(1, 201) g)
+         where id = ${event.id}::uuid`;
+    } catch (thrown) {
+      caught = thrown as { code?: string; constraint_name?: string };
+    }
+    expect(caught?.code).toBe('23514');
+    expect(caught?.constraint_name).toBe('events_schedule_chk');
+    expect(await stored(event.id)).toEqual(row);
   });
 });

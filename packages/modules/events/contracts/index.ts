@@ -59,7 +59,7 @@ export const EVENT_MAX_CAPACITY = 100_000;
  * moment may fall on. MIRRORED by `events_schedule_chk`, which judges each item for a writer that
  * skips the API; the web derives its own editor caps from these, so there is ONE definition.
  */
-export const EVENT_SCHEDULE_MAX_ITEMS = 30;
+export const EVENT_SCHEDULE_MAX_ITEMS = 200;
 export const EVENT_SCHEDULE_MAX_TITLE = 80;
 export const EVENT_SCHEDULE_MAX_DAY = 31;
 /** `HH:MM` on the 24-hour clock, fixed width: a string comparison IS a chronological one. */

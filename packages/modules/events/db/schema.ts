@@ -103,7 +103,7 @@ export const events = pgTable(
      */
     capacity: integer(),
     /**
-     * The event's programme ("Cronograma", quick 261007-n1g): up to 30 moments of
+     * The event's programme ("Cronograma", quick 261007-n1g): up to `EVENT_SCHEDULE_MAX_ITEMS` moments of
      * `{ day, time, title }`, written as a WHOLE with the event (the PUT is a whole-event replacement,
      * D-214) and read WITH it, never queried, filtered or joined per item. That is why it is a column
      * and not an `event_schedule_items` table: no extra statement on the one-statement projection, no
@@ -157,13 +157,13 @@ export const events = pgTable(
     ),
     // A limit of at least one seat; NULL is "no limit".
     check('events_capacity_chk', sql`${t.capacity} is null or ${t.capacity} between 1 and 100000`),
-    // The programme is an array of at most 30 well-formed moments: day 1..31 (an integer), time HH:MM on
+    // The programme is an array of at most 200 well-formed moments (raised from 30 by Phase 09.3, D-558): day 1..31 (an integer), time HH:MM on
     // the 24-hour clock, a non-blank title of 1..80 characters. Extra keys inside an item are tolerated
     // here on purpose: the API's strict item schema is what forbids them. `jsonb_path_exists` is
     // IMMUTABLE, so it is allowed in a CHECK.
     check(
       'events_schedule_chk',
-      sql`jsonb_typeof(${t.schedule}) = 'array' and jsonb_array_length(${t.schedule}) <= 30 and not jsonb_path_exists(${t.schedule}, '$[*] ? (!(@.type() == "object" && @.day.type() == "number" && @.day.floor() == @.day && @.day >= 1 && @.day <= 31 && @.time.type() == "string" && @.time like_regex "^([01][0-9]|2[0-3]):[0-5][0-9]$" && @.title.type() == "string" && @.title like_regex "^.{1,80}$" && @.title like_regex "[^[:space:]]"))')`,
+      sql`jsonb_typeof(${t.schedule}) = 'array' and jsonb_array_length(${t.schedule}) <= 200 and not jsonb_path_exists(${t.schedule}, '$[*] ? (!(@.type() == "object" && @.day.type() == "number" && @.day.floor() == @.day && @.day >= 1 && @.day <= 31 && @.time.type() == "string" && @.time like_regex "^([01][0-9]|2[0-3]):[0-5][0-9]$" && @.title.type() == "string" && @.title like_regex "^.{1,80}$" && @.title like_regex "[^[:space:]]"))')`,
     ),
     tenantIsolationPolicy('events_tenant_isolation'),
   ],

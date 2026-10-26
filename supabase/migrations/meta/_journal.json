@@ -1016,6 +1016,13 @@
       "when": 1792718912569,
       "tag": "20261023012832_tenant_invites_created_by_nullable",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1793046981753,
+      "tag": "20261026203621_event_schedule_limit",
+      "breakpoints": true
     }
   ]
 }

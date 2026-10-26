@@ -569,8 +569,8 @@ describe('2026-10-07 — the schedule (quick 261007-n1g)', () => {
   const many = (count: number) =>
     Array.from({ length: count }, (_, i) => ({ ...moment, title: `Momento ${i}` }));
 
-  it('33. the limits are 30 items, 80 characters and day 31', () => {
-    expect(EVENT_SCHEDULE_MAX_ITEMS).toBe(30);
+  it('33. the limits are 200 items, 80 characters and day 31', () => {
+    expect(EVENT_SCHEDULE_MAX_ITEMS).toBe(200);
     expect(EVENT_SCHEDULE_MAX_TITLE).toBe(80);
     expect(EVENT_SCHEDULE_MAX_DAY).toBe(31);
   });
@@ -590,7 +590,7 @@ describe('2026-10-07 — the schedule (quick 261007-n1g)', () => {
 
   it('35. eventInputSchema refuses every malformed schedule as a generic 400 (no machine code)', () => {
     const bad: Array<[string, unknown]> = [
-      ['31 items', many(EVENT_SCHEDULE_MAX_ITEMS + 1)],
+      ['201 items', many(EVENT_SCHEDULE_MAX_ITEMS + 1)],
       ['time 24:00', [{ ...moment, time: '24:00' }]],
       ['time 8:00', [{ ...moment, time: '8:00' }]],
       ['time 08:60', [{ ...moment, time: '08:60' }]],
@@ -675,6 +675,6 @@ describe('2026-10-07 — the schedule (quick 261007-n1g)', () => {
     ]);
     expect(normaliseEventSchedule(normalised)).toEqual(normalised);
     expect(normaliseEventSchedule([])).toEqual([]);
-    expect(normaliseEventSchedule(many(40))).toHaveLength(EVENT_SCHEDULE_MAX_ITEMS);
+    expect(normaliseEventSchedule(many(250))).toHaveLength(EVENT_SCHEDULE_MAX_ITEMS);
   });
 });
