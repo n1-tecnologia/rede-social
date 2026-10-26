@@ -4,13 +4,13 @@ current_phase: "09.2"
 current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
 current_plan: 25
 status: executing
-stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor)
-last_updated: "2026-10-23T13:45:03.693Z"
-last_activity: 2026-10-23
-last_activity_desc: "Completed 09.2-24 (the PROJECT.md amendment and its CLAUDE.md mirror, the per-project connection budget, the Phase 09.2 release and move runbook in DEPLOY.md, ci.md and LOCAL-SETUP (on disk, untracked), the H1..H8 hosted-proofs ledger shipped pending with contract_gate closed; the migrate Job gained MAIL_DOMAIN, PROJECT_AUTH_SMTP_PASS and project 0 ref; the ROLE=move Job override syntax is unproven)"
-state_head: a2b2ce26ea9c138854ac070c3940cb0b4a35ea94
+stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered 2026-10-26 on the side (D-548..D-565), plan-phase 09.3 may run ahead, execute waits for 09.2.
+last_updated: "2026-10-26T17:31:25.989Z"
+last_activity: 2026-10-24
+last_activity_desc: Completed 09.2-24 (the PROJECT.md amendment and its CLAUDE.md mirror, the per-project connection budget, the Phase 09.2 release and move runbook in DEPLOY.md, ci.md and LOCAL-SETUP (on disk, untracked), the H1..H8 hosted-proofs ledger shipped pending with contract_gate closed; the migrate Job gained MAIL_DOMAIN, PROJECT_AUTH_SMTP_PASS and project 0 ref; the ROLE=move Job override syntax is unproven)
+state_head: 88f3bcc0f3e6a28bd225d2dd4fb2272fc76044f3
 progress:
-  total_phases: 24
+  total_phases: 25
   completed_phases: 0
   total_plans: 268
   completed_plans: 259
@@ -1150,6 +1150,7 @@ None yet.
 - Phase 08.7 inserted after Phase 08.6: Dados Reais do Perfil: Sua atividade and Visão do dono on the tenant's own data (pendências 8-10 from FRONT-AJUSTES); planned ahead, executes after 08.6
 - Phase 09.1 inserted after Phase 9: Acesso por gateway de pagamento: webhook per-tenant (Kiwify first, provider-neutral) replaces the global email_allowlist and unlocks store products; runs before Phase 10 (URGENT)
 - Phase 09.2 inserted after Phase 9: Banco por Tenant: one Supabase project per tenant (provisioning, migration fan-out, per-tenant routing); runs after 09.1, before 10; 10 open decisions listed in the ROADMAP notes
+- Phase 09.3 inserted after Phase 9: Pendências de backend do FRONT.pdf (delete event/community, limits, Android icon); placed after 09.2 by hand, STATE stays on 09.2
 
 ## Deferred Items
 
@@ -1161,6 +1162,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T13:44:58.039Z
-Stopped at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor)
+Last session: 2026-10-26T17:31:11.979Z
+Stopped at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered 2026-10-26 on the side (D-548..D-565), plan-phase 09.3 may run ahead, execute waits for 09.2.
 Resume file: None
