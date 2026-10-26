@@ -86,6 +86,11 @@ export default mergeConfig(
         VIDEO_PROVIDER: 'fake',
         // 07-06: the same rule for Web Push. No automated run may reach FCM, Mozilla, Apple or WNS.
         PUSH_TRANSPORT: 'fake',
+        // 09.3-02: the same rule for the project provider. A developer's `.env.local` may carry
+        // `PROJECT_PROVIDER=supabase` for the hosted proofs of 09.2; tenant creation then demands a
+        // real `projectRef` and every throwaway tenant of the suite answers 400. The suite runs the
+        // fake provider, which is also the code default.
+        PROJECT_PROVIDER: 'fake',
       },
       globalSetup: integrationRun ? ['tests/integration/global-setup.ts'] : [],
       fileParallelism: false,
