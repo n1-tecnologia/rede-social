@@ -1037,6 +1037,20 @@
       "when": 1793049112211,
       "tag": "20261026211152_dashboard_activity_keeps_deleted_events",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1793050676932,
+      "tag": "20261026213756_community_soft_delete_gate",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1793050696983,
+      "tag": "20261026213816_feed_posts_deleted_community_gate",
+      "breakpoints": true
     }
   ]
 }

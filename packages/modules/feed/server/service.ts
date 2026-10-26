@@ -174,10 +174,14 @@ const postProjection = (viewerUserId: string, extraColumns: ReturnType<typeof sq
       --     already scopes this lane. It is the ONE join condition in this projection that carries a
       --     tenant predicate, because this is the one join whose failure mode is a FOREIGN TENANT'S
       --     NAME rendered inside a post card (T-05-14). Defence in depth, stated not implied;
-      --   * there is NO c.status and no c.deleted_at predicate. Archive is a write gate and a list
-      --     gate, never a feed gate (05-RESEARCH Pattern 7): an archived community's posts stay in
-      --     the feed, still labelled and still reachable, so the feed keeps exactly one ordering
-      --     expression and no outstanding cursor is ever invalidated by an archive.
+      --   * the JOIN carries NO c.status and NO c.deleted_at condition. Archive is a write gate and a
+      --     list gate, never a feed gate (05-RESEARCH Pattern 7): an archived community's posts stay
+      --     in the feed, still labelled and still reachable, so the feed keeps exactly one ordering
+      --     expression and no outstanding cursor is ever invalidated by an archive. A DELETED
+      --     community's posts (09.3-06, D-555) are removed by the callers' WHERE predicate
+      --     (c.deleted_at is null, in feedPage and getPost), NEVER by this ON: a filter in the ON
+      --     would null c and leave the post in the feed as a community-less one. For a post with no
+      --     community the joined row is all NULL, so the WHERE predicate is true for it.
       left join public.communities c
              on c.id = p.community_id and c.tenant_id = p.tenant_id
       left join lateral (
@@ -399,7 +403,7 @@ async function feedPage(
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<FeedRow>(sql`
       ${postProjection(ctx.userId)}
-       where p.deleted_at is null
+       where p.deleted_at is null and c.deleted_at is null
          ${predicate}
          and (
            ${afterAt}::timestamptz is null
@@ -760,6 +764,7 @@ export async function getPost(
       )}
        where p.id = ${postId}::uuid
          and p.deleted_at is null
+         and c.deleted_at is null
          and ${memberPostVisible(opts.canModerate)}
        limit 1`);
     if (rows[0]) return { row: rows[0], lockedCommunityId: null, lockedAuthor: null };

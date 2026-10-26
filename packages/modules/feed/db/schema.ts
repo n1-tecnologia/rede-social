@@ -31,6 +31,14 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
 export const SAMPLE_POST_IDS = sql`coalesce((select app.feed_sample_post_ids()), '{}'::uuid[])`;
 
 /**
+ * 09.3-06 (D-555): the ids of this tenant's SOFT-DELETED communities (`app.community_deleted_ids()`, a
+ * feed-owned SECURITY DEFINER function in `*_community_soft_delete_gate.sql`, EARLIER than the
+ * generated policy file that calls it). The coalesce wrapper keeps it an InitPlan, evaluated once per
+ * statement and never once per row (RESEARCH Pitfall 1).
+ */
+export const DELETED_COMMUNITY_IDS = sql`coalesce((select app.community_deleted_ids()), '{}'::uuid[])`;
+
+/**
  * The feed's post table (FEED-02, FEED-08) and the module's first table.
  *
  * FOUR THINGS A REVIEWER MUST NOT "FIX":
@@ -255,6 +263,21 @@ export const feedPosts = pgTable(
       for: 'select',
       to: authenticatedRole,
       using: sql`community_id is null or community_id <> all (${LOCKED_COMMUNITY_IDS}) or id = any (${SAMPLE_POST_IDS})`,
+    }),
+    // 09.3-06 (D-555, PEND-05; assumption A3, the structural backstop the owner chose): the DELETED
+    // community gate. RESTRICTIVE, so it ANDs with the isolation and every gate above and can only
+    // NARROW. It hides a deleted community's posts from every tenant lane, so a route that finds a post
+    // by id alone, or a comment-id route that relies on RLS alone, answers the bare 404 without a
+    // per-route patch. Comments and likes inherit it through the inner `exists (select 1 from
+    // feed_posts)` of their own gates, exactly like the social gate below. The precise form is the
+    // `c.deleted_at is null` predicate in the WHERE of `feedPage` and `getPost` (server/service.ts); the
+    // two are written side by side. The rows are never touched (D-556): clearing `deleted_at` on the
+    // community shows everything again.
+    pgPolicy('feed_posts_deleted_community_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`community_id is null or community_id <> all (${DELETED_COMMUNITY_IDS})`,
     }),
     // 09-03 (SOCIAL-06, D-483, D-484; RESEARCH Pattern 2): the social gate. RESTRICTIVE again, so it
     // ANDs with the tenant isolation and the community gate and can only NARROW what they allow.
