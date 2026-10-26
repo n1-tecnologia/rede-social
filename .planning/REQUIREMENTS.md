@@ -383,8 +383,8 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [ ] **PEND-07**: "Excluir evento" (the event form and the cancelled-event notice) and "Excluir comunidade" (the archived community's page and form) lose their "Em breve" badge and open the existing `ConfirmDialog` in pt-BR before calling the new route; after it the admin lands on the list, and a refusal reads as a catalog line (D-552, D-557).
 - [x] **PEND-08**: `EVENT_SCHEDULE_MAX_ITEMS` rises from 30 to 200 in the contract and the `events_schedule_chk` CHECK is replaced by a migration at 200 (D-558), so the form, the API and the database accept the same count; pgTAP covers 200 and one past it.
 - [ ] **PEND-09**: `STORY_HIGHLIGHT_MAX_TITLE` rises from 15 to 50 in the contract and in the service check, and the `story_highlights_title_chk` CHECK is replaced by a migration at 50 (D-559); existing highlights are untouched, a long name is cut on one line with an ellipsis under its circle (D-560), and pgTAP covers 50 and one past it.
-- [ ] **PEND-10**: The worker's `deriveIconSet` fills the whole `maskable512` square when the source is an own, opaque icon, and keeps the 80% margin over the primary colour for a transparent icon or one derived from the logo.
-- [ ] **PEND-11**: The icon editor tells the API the icon is its own art when it saves, and the tenant's branding stores that as a new optional field next to the icon URLs (D-562); the contract change is additive, and an icon sent any other way leaves the field unset and keeps the margin.
+- [x] **PEND-10**: The worker's `deriveIconSet` fills the whole `maskable512` square when the source is an own, opaque icon, and keeps the 80% margin over the primary colour for a transparent icon or one derived from the logo.
+- [x] **PEND-11**: The icon editor tells the API the icon is its own art when it saves, and the tenant's branding stores that as a new optional field next to the icon URLs (D-562); the contract change is additive, and an icon sent any other way leaves the field unset and keeps the margin.
 - [ ] **PEND-12**: Tenants that already have an own icon are not touched at the deploy (D-564): nothing is re-derived over them and their app keeps the margin until the admin saves the editor again; a save from the editor derives the new set under the optimistic `iconVersion` write and the manifest serves it. DEPLOY.md tells the client to save the icon again and that an installed Android app updates when Chrome refreshes it.
 - [ ] **PEND-13**: Every new or changed route, query and migration of this phase carries a cross-tenant negative test (pgTAP and integration), and the tenant-scoped reads stay on the RLS lane.
 - [ ] **PEND-14**: The release runs migrations first on every tenant project through `migrateAll`, then the API and the worker, then the web, as the 09.2 runbook says; `docs/DEPLOY.md` records the order and the rollback limit, and `docs/pendencias-backend.md` marks items 3, 11, 12, 13 and 14 as done.
@@ -781,8 +781,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PEND-07 | Phase 09.3 | Pending |
 | PEND-08 | Phase 09.3 | Complete |
 | PEND-09 | Phase 09.3 | Pending |
-| PEND-10 | Phase 09.3 | Pending |
-| PEND-11 | Phase 09.3 | Pending |
+| PEND-10 | Phase 09.3 | Complete |
+| PEND-11 | Phase 09.3 | Complete |
 | PEND-12 | Phase 09.3 | Pending |
 | PEND-13 | Phase 09.3 | Pending |
 | PEND-14 | Phase 09.3 | Pending |
