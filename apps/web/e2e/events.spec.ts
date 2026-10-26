@@ -1125,6 +1125,30 @@ test.describe('events admin', () => {
         .getByRole('button', { name: E.delete.action }),
     ).toBeEnabled();
 
+    // P22 / UI E1 long-text: at 320px "Reativar evento" and "Excluir evento" sit adjacent without
+    // overlap, each target is at least 44px tall, and the delete trigger wraps left-aligned.
+    const viewport = page.viewportSize();
+    await page.setViewportSize({ width: 320, height: 720 });
+    try {
+      const reactivateBox = await banner.locator('[data-event-reactivate]').boundingBox();
+      const deleteBox = await banner
+        .locator('[data-delete-control="event"]')
+        .getByRole('button', { name: E.delete.action })
+        .boundingBox();
+      if (!reactivateBox || !deleteBox) throw new Error('a banner control has no box at 320px');
+      const apart =
+        reactivateBox.x + reactivateBox.width <= deleteBox.x + 1 ||
+        deleteBox.x + deleteBox.width <= reactivateBox.x + 1 ||
+        reactivateBox.y + reactivateBox.height <= deleteBox.y + 1 ||
+        deleteBox.y + deleteBox.height <= reactivateBox.y + 1;
+      expect(apart, 'the two banner controls overlap').toBe(true);
+      expect(reactivateBox.height).toBeGreaterThanOrEqual(44);
+      expect(deleteBox.height).toBeGreaterThanOrEqual(44);
+      await expectNoHorizontalOverflow(page);
+    } finally {
+      if (viewport) await page.setViewportSize(viewport);
+    }
+
     // D-201, on the member's own session: still listed, with the pill; the detail disabled.
     const memberContext = await browser.newContext({
       ...devices['iPhone 14'],
@@ -1277,23 +1301,37 @@ test.describe('events admin', () => {
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
     if (!tenant) throw new Error('the throwaway tenant was not created');
-    test.setTimeout(180_000);
+    const current: EventsTenant = tenant;
+    test.setTimeout(240_000);
     const DELETE_TITLE = 'Evento de exclusao e2e';
-    const deleteId = await insertEvent(tenant.tenantId, {
+    const KEEP_FIRST = 'Evento de exclusao e2e A';
+    const KEEP_LAST = 'Evento de exclusao e2e C';
+    const day = 60 * 24;
+    const keepFirstId = await insertEvent(current.tenantId, {
+      title: KEEP_FIRST,
+      startsInMinutes: day * 3,
+      endsInMinutes: day * 3 + 120,
+    });
+    const deleteId = await insertEvent(current.tenantId, {
       title: DELETE_TITLE,
-      startsInMinutes: 60 * 24 * 4,
-      endsInMinutes: 60 * 24 * 4 + 120,
+      startsInMinutes: day * 4,
+      endsInMinutes: day * 4 + 120,
+    });
+    await insertEvent(current.tenantId, {
+      title: KEEP_LAST,
+      startsInMinutes: day * 6,
+      endsInMinutes: day * 6 + 120,
     });
     const memberContext = await browser.newContext({
       ...devices['iPhone 14'],
       serviceWorkers: 'block',
     });
     const member = await memberContext.newPage();
-    try {
-      await login(page, tenant.adminEmail, tenant.password, tenant.origin);
-      await page.goto(`${tenant.origin}/eventos/${deleteId}/editar`);
-      await expect(page.locator('#event-title')).toHaveValue(DELETE_TITLE);
 
+    /** Opens the form's "Excluir evento", checks the dialog, confirms and waits for the landing. */
+    const deleteFromForm = async (id: string) => {
+      await page.goto(`${current.origin}/eventos/${id}/editar`);
+      await expect(page.locator('[data-event-form]')).toBeVisible();
       // The live trigger (dispatched: it can sit under the dev pill or the BottomNav on a phone).
       const control = page.locator('[data-delete-control="event"]');
       await expect(control.getByRole('button', { name: E.delete.action })).toBeEnabled();
@@ -1302,32 +1340,60 @@ test.describe('events admin', () => {
       await expect(dialog).toContainText(E.confirm.delete.title);
       await expect(dialog).toContainText(E.confirm.delete.body);
       await expect(dialog.getByRole('button', { name: E.confirm.delete.dismiss })).toBeVisible();
-
       // Nothing is sent before the confirm: the event is still readable through the API.
-      await eventsApiAs(tenant, tenant.adminEmail, `/v1/events/${deleteId}`, { method: 'GET' });
-
+      await eventsApiAs(current, current.adminEmail, `/v1/events/${id}`, { method: 'GET' });
       await dialog.getByRole('button', { name: E.confirm.delete.confirm }).click();
       await expect(page).toHaveURL(/\/eventos$/, { timeout: 30_000 });
       await expect(toast(page, E.toasts.deleted)).toBeVisible();
+    };
+
+    try {
+      await login(page, current.adminEmail, current.password, current.origin);
+
+      // P24: the order the gallery has before the delete.
+      await page.goto(`${current.origin}/eventos`);
+      const wanted = [KEEP_FIRST, DELETE_TITLE, KEEP_LAST];
+      await expect(posterIn(page, 'others', KEEP_LAST)).toBeAttached();
+      expect(inOrder(await galleryTitles(page, 'others'), wanted)).toEqual(wanted);
+
+      await deleteFromForm(deleteId);
+
+      // UI E7 populated: the others remain in the same order, the deleted one is simply absent.
       await expect(gallery(page, 'others')).toBeVisible();
-      expect(await galleryTitles(page, 'others')).not.toContain(DELETE_TITLE);
+      await expect(posterIn(page, 'others', KEEP_LAST)).toBeAttached();
+      const after = await galleryTitles(page, 'others');
+      expect(after).not.toContain(DELETE_TITLE);
+      expect(inOrder(after, wanted)).toEqual([KEEP_FIRST, KEEP_LAST]);
       expect(await galleryTitles(page, 'mine')).not.toContain(DELETE_TITLE);
 
       // D-551: the link is the existing not-found screen, for the admin and for a member.
-      await page.goto(`${tenant.origin}/eventos/${deleteId}`);
+      await page.goto(`${current.origin}/eventos/${deleteId}`);
       await expect(page.getByText(E.notFound.title, { exact: true })).toBeVisible();
-      await login(member, tenant.memberEmail, tenant.password, tenant.origin);
-      await member.goto(`${tenant.origin}/eventos/${deleteId}`);
+      await login(member, current.memberEmail, current.password, current.origin);
+      await member.goto(`${current.origin}/eventos/${deleteId}`);
       await expect(member.getByText(E.notFound.title, { exact: true })).toBeVisible();
       await expect(member.getByTestId('event-info-grid')).toHaveCount(0);
-
       // The API answers the bare 404 for the id.
       await expect(
-        eventsApiAs(tenant, tenant.adminEmail, `/v1/events/${deleteId}`, { method: 'GET' }),
+        eventsApiAs(current, current.adminEmail, `/v1/events/${deleteId}`, { method: 'GET' }),
       ).rejects.toThrow(/: 404 /);
+
+      // UI E7 empty: with every other event gone, deleting the LAST one shows the existing empty state.
+      expect(keepFirstId).not.toBe(deleteId);
+      await deleteEventsByTitlePrefix(current.tenantId, '');
+      const lastId = await insertEvent(current.tenantId, {
+        title: DELETE_TITLE,
+        startsInMinutes: day * 5,
+        endsInMinutes: day * 5 + 120,
+      });
+      await deleteFromForm(lastId);
+      await expect(page.getByTestId('events-empty-mine')).toContainText(E.sections.mine.emptyTitle);
+      await expect(page.getByTestId('events-empty-others')).toContainText(
+        E.sections.others.emptyBodyManager,
+      );
     } finally {
       await memberContext.close();
-      await deleteEventsByTitlePrefix(tenant.tenantId, DELETE_TITLE);
+      await deleteEventsByTitlePrefix(current.tenantId, 'Evento de exclusao e2e');
     }
   });
 });

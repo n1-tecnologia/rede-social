@@ -5,8 +5,9 @@ import { PendingDeleteButton } from './PendingDeleteButton';
 
 /**
  * 2026-10-20 — the "Excluir" placeholder of the client's FRONT.pdf (an event, an archived
- * community), until the API can delete either. The labels are the REAL `events.delete` strings, as
- * the event form passes them, so a copy drift fails here too. The contract:
+ * community), until the API can delete either. The event side went live in 09.3-07, so the labels are
+ * the REAL `communities.delete` strings, as the community form passes them (plan 08 retires this
+ * component and its test with the last two call sites), so a copy drift fails here too. The contract:
  *  1. the danger button, named by its label, with "Em breve" beside it;
  *  2. `aria-disabled` and not `disabled`: it stays focusable and is described by the hint;
  *  3. nothing happens: inside a form a click submits nothing.
@@ -18,9 +19,9 @@ const LABELS = await vi.hoisted(async () => {
   const { readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
   const catalog = JSON.parse(
-    readFileSync(join(process.cwd(), 'messages', 'pt-BR', 'events.json'), 'utf8'),
-  ) as { events: { delete: { action: string; soon: string; hint: string } } };
-  const copy = catalog.events.delete;
+    readFileSync(join(process.cwd(), 'messages', 'pt-BR', 'communities.json'), 'utf8'),
+  ) as { communities: { delete: { action: string; soon: string; hint: string } } };
+  const copy = catalog.communities.delete;
   return { label: copy.action, soon: copy.soon, hint: copy.hint };
 });
 
@@ -28,8 +29,8 @@ afterEach(cleanup);
 
 describe('PendingDeleteButton', () => {
   it('1. names the action, marks what it would delete and says "Em breve"', () => {
-    render(<PendingDeleteButton kind="event" {...LABELS} />);
-    const root = document.querySelector('[data-pending-delete="event"]') as HTMLElement;
+    render(<PendingDeleteButton kind="community" {...LABELS} />);
+    const root = document.querySelector('[data-pending-delete="community"]') as HTMLElement;
     const button = screen.getByRole('button', { name: LABELS.label });
     expect(root.contains(button)).toBe(true);
     expect(root.textContent).toContain(LABELS.soon);
@@ -37,7 +38,7 @@ describe('PendingDeleteButton', () => {
   });
 
   it('2. is aria-disabled but focusable, and described by the hint', () => {
-    render(<PendingDeleteButton kind="event" {...LABELS} />);
+    render(<PendingDeleteButton kind="community" {...LABELS} />);
     const button = screen.getByRole('button', { name: LABELS.label }) as HTMLButtonElement;
     expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(button.disabled).toBe(false);

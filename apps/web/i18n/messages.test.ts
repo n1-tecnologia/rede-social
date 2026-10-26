@@ -4757,3 +4757,48 @@ describe('2026-10-20 — the stories strings of the FRONT.pdf corrections', () =
     }
   });
 });
+
+/**
+ * 09.3-07 (PEND-07, D-552) — the delete event strings, verbatim from the UI-SPEC copy. The placeholder
+ * pair ("Em breve" and its hint) is gone from the event side; the trigger label stays.
+ */
+describe('09.3 — events delete strings', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  const NEW_KEYS: [string, string][] = [
+    ['events.confirm.delete.title', 'Excluir evento?'],
+    [
+      'events.confirm.delete.body',
+      'O evento some das listas e o link deixa de abrir. As confirmações e os check-ins já feitos ficam guardados. Ninguém é avisado.',
+    ],
+    ['events.confirm.delete.confirm', 'Excluir'],
+    ['events.confirm.delete.dismiss', 'Manter evento'],
+    ['events.toasts.deleted', 'Evento excluído.'],
+    ['events.errors.delete', 'Não foi possível excluir o evento. Tente novamente.'],
+    ['events.errors.deleteGone', 'Este evento já foi excluído.'],
+  ];
+
+  it.each(NEW_KEYS)('%s is the agreed string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('keeps the trigger label and retires the placeholder pair', () => {
+    expect(lookup('events.delete.action')).toBe('Excluir evento');
+    expect(lookup('events.delete.soon')).toBeUndefined();
+    expect(lookup('events.delete.hint')).toBeUndefined();
+  });
+
+  it('no new string carries an em dash or a digit', () => {
+    for (const [key] of NEW_KEYS) {
+      const text = String(lookup(key));
+      expect(text, key).not.toContain('\u2014');
+      expect(text, key).not.toMatch(/\d/);
+    }
+  });
+});

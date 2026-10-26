@@ -47,7 +47,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { catalogs, toast, push, replace, refresh, create, update, cancel, reactivate } =
+const { catalogs, toast, push, replace, refresh, create, update, cancel, reactivate, remove } =
   await vi.hoisted(async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
@@ -66,6 +66,7 @@ const { catalogs, toast, push, replace, refresh, create, update, cancel, reactiv
       update: vi.fn(),
       cancel: vi.fn(),
       reactivate: vi.fn(),
+      remove: vi.fn(),
     };
   });
 
@@ -100,6 +101,7 @@ vi.mock('./actions', () => ({
   updateEventAction: update,
   cancelEventAction: cancel,
   reactivateEventAction: reactivate,
+  deleteEventAction: remove,
 }));
 
 /** The options the form hands the upload hook: the cover test drives `onPicked`/`onCompleted`. */
@@ -172,9 +174,12 @@ const E = catalogs.events as {
       capacityInvalid: string;
     };
   };
-  confirm: { discard: { titleCreate: string; titleEdit: string } };
+  confirm: {
+    discard: { titleCreate: string; titleEdit: string };
+    delete: { title: string; confirm: string };
+  };
   reactivate: { action: string };
-  delete: { action: string; soon: string; hint: string };
+  delete: { action: string };
   toasts: { created: string; saved: string };
 };
 
@@ -209,7 +214,17 @@ async function fillInPerson() {
 }
 
 beforeEach(() => {
-  for (const mock of [toast.show, push, replace, refresh, create, update, cancel, reactivate]) {
+  for (const mock of [
+    toast.show,
+    push,
+    replace,
+    refresh,
+    create,
+    update,
+    cancel,
+    reactivate,
+    remove,
+  ]) {
     mock.mockReset();
   }
   create.mockResolvedValue({ ok: true, eventId: EVENT_ID });
@@ -810,32 +825,57 @@ describe('EventForm — edit', () => {
     expect(document.querySelector('[data-event-reactivate]')).toBeNull();
   });
 
-  it('22. 2026-10-20: the row ends with "Excluir evento" and "Em breve", which does nothing; creating has none', () => {
+  it('22. the row ends with the live "Excluir evento"; creating has none', async () => {
+    remove.mockResolvedValue({ ok: true, eventId: EVENT_ID });
     renderEdit({ canCancel: true });
-    const placeholder = document.querySelector('[data-pending-delete="event"]') as HTMLElement;
-    const button = within(placeholder).getByRole('button', { name: E.delete.action });
-    expect(button.getAttribute('aria-disabled')).toBe('true');
+    const control = document.querySelector('[data-delete-control="event"]') as HTMLElement;
+    const button = within(control).getByRole('button', { name: E.delete.action });
     expect(button.getAttribute('type')).toBe('button');
-    expect(placeholder.textContent).toContain(E.delete.soon);
-    // The reason is the button's description, read with it.
-    const hint = document.getElementById(button.getAttribute('aria-describedby') ?? '');
-    expect(hint?.textContent).toBe(E.delete.hint);
+    expect(button.hasAttribute('aria-disabled')).toBe(false);
+    expect(control.textContent).not.toContain('Em breve');
+    expect(screen.queryByRole('dialog')).toBeNull();
 
+    // The tap only opens the explained confirmation; the confirm deletes and lands on the list.
     fireEvent.click(button);
+    expect(screen.getByRole('dialog').textContent).toContain(E.confirm.delete.title);
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: E.confirm.delete.confirm }));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/eventos'));
+    expect(remove).toHaveBeenCalledWith(EVENT_ID);
     expect(update).not.toHaveBeenCalled();
     expect(cancel).not.toHaveBeenCalled();
-    expect(push).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(create).not.toHaveBeenCalled();
     cleanup();
 
-    // An event already over has no status control, and still the placeholder.
+    // An event already over has no status control, and still the delete control.
     renderEdit({});
     expect(document.querySelector('[data-event-cancel]')).toBeNull();
-    expect(document.querySelector('[data-pending-delete="event"]')).not.toBeNull();
+    expect(document.querySelector('[data-delete-control="event"]')).not.toBeNull();
     cleanup();
 
     renderCreate();
-    expect(document.querySelector('[data-pending-delete]')).toBeNull();
+    expect(document.querySelector('[data-delete-control]')).toBeNull();
+  });
+
+  it('22b. with unsaved edits the confirmed delete lands on the list and the discard guard never opens', async () => {
+    remove.mockResolvedValue({ ok: true, eventId: EVENT_ID });
+    renderEdit({ canCancel: true });
+    fireEvent.change(field('event-title'), { target: { value: 'Outro nome, ainda sem salvar' } });
+
+    fireEvent.click(
+      within(document.querySelector('[data-delete-control="event"]') as HTMLElement).getByRole(
+        'button',
+        { name: E.delete.action },
+      ),
+    );
+    // Only the delete confirmation is open, never the form's own discard one.
+    expect(screen.queryByText(E.confirm.discard.titleEdit)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: E.confirm.delete.confirm }));
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/eventos'));
+    expect(screen.queryByText(E.confirm.discard.titleEdit)).toBeNull();
+    expect(push).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('12. a composed address comes back as its parts, clean, and saves the same string', async () => {
