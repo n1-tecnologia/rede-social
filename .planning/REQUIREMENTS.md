@@ -380,7 +380,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **PEND-04**: `DELETE /v1/communities/{id}` is accepted only for an archived community, from whoever manages communities, and soft-deletes it by filling `communities.deleted_at`; a community that is not archived answers a distinct refusal and another tenant's community answers 404.
 - [ ] **PEND-05**: The publications of a deleted community disappear from Início, Explorar, Reels, the community lists and the post page (404 on its link), and stay in the database.
 - [x] **PEND-06**: `DELETE /v1/communities/{id}` is refused, with the product names in the answer, while an active Loja product still unlocks the community (archived products do not count); its highlights, pinned stories and membership rows are hidden by the read filters and nothing is erased (D-554, D-556).
-- [ ] **PEND-07**: "Excluir evento" (the event form and the cancelled-event notice) and "Excluir comunidade" (the archived community's page and form) lose their "Em breve" badge and open the existing `ConfirmDialog` in pt-BR before calling the new route; after it the admin lands on the list, and a refusal reads as a catalog line (D-552, D-557).
+- [x] **PEND-07**: "Excluir evento" (the event form and the cancelled-event notice) and "Excluir comunidade" (the archived community's page and form) lose their "Em breve" badge and open the existing `ConfirmDialog` in pt-BR before calling the new route; after it the admin lands on the list, and a refusal reads as a catalog line (D-552, D-557).
 - [x] **PEND-08**: `EVENT_SCHEDULE_MAX_ITEMS` rises from 30 to 200 in the contract and the `events_schedule_chk` CHECK is replaced by a migration at 200 (D-558), so the form, the API and the database accept the same count; pgTAP covers 200 and one past it.
 - [x] **PEND-09**: `STORY_HIGHLIGHT_MAX_TITLE` rises from 15 to 50 in the contract and in the service check, and the `story_highlights_title_chk` CHECK is replaced by a migration at 50 (D-559); existing highlights are untouched, a long name is cut on one line with an ellipsis under its circle (D-560), and pgTAP covers 50 and one past it.
 - [x] **PEND-10**: The worker's `deriveIconSet` fills the whole `maskable512` square when the source is an own, opaque icon, and keeps the 80% margin over the primary colour for a transparent icon or one derived from the logo.
@@ -778,7 +778,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PEND-04 | Phase 09.3 | Complete |
 | PEND-05 | Phase 09.3 | Pending |
 | PEND-06 | Phase 09.3 | Complete |
-| PEND-07 | Phase 09.3 | Pending |
+| PEND-07 | Phase 09.3 | Complete |
 | PEND-08 | Phase 09.3 | Complete |
 | PEND-09 | Phase 09.3 | Complete |
 | PEND-10 | Phase 09.3 | Complete |
