@@ -46,6 +46,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers (completed 2026-10-20)
 - [ ] **Phase 09.1: Acesso por gateway de pagamento (INSERTED)** - Per-tenant payment-gateway webhook (Kiwify first, provider-neutral seam) that grants and cuts platform access per tenant and e-mail (replaces the global email_allowlist) and unlocks store products on purchase
 - [ ] **Phase 09.2: Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)** - One Supabase project per tenant: the super_admin registers the project access at tenant creation, the system loads the schema and baseline configuration into it, migrations fan out to every tenant database, and the API and worker route each request and job to the tenant's own database
+- [ ] **Phase 09.3: Pendências de backend do FRONT.pdf (INSERTED)** - Delete an event and delete an archived community (today "Em breve"), the longer limits of the event schedule and the highlight name, and the Android app icon that fills the whole circle: the five corrections of the client's FRONT.pdf that need the backend
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 
@@ -1367,6 +1368,31 @@ Plans:
 
 - [ ] 09.2-28-PLAN.md — Exit gate: the structural isolation invariants on both databases, the 320px layout measurements, the mechanical coverage check and the full `pnpm verify`
 
+### Phase 09.3: Pendências de backend do FRONT.pdf (INSERTED)
+
+**Goal**: The five corrections of the client's FRONT.pdf that the front could not finish alone become real: an admin can delete an event and delete an archived community (today both buttons say "Em breve"), the event schedule and the highlight name accept the longer limits the client asked for, and the app icon installed on Android fills the whole circle instead of showing a band of the primary colour. All five were listed by whoever merged FRONT-AJUSTES on 2026-10-21 (`docs/pendencias-backend.md`, items 3 and 11 to 14; the PDF "Pendências de backend - FRONT.pdf").
+**Requirements**: PEND-01, PEND-02, PEND-03, PEND-04, PEND-05, PEND-06, PEND-07, PEND-08, PEND-09, PEND-10, PEND-11, PEND-12, PEND-13, PEND-14
+**Depends on:** Phase 09.2 (runs after it: it ships migrations and the 09.2 runner `migrateAll` is how a migration reaches every tenant project; one local Supabase stack, so the phases do not overlap in execution), and the FRONT-AJUSTES commit `0211d871` already on master (the disabled buttons, the editor's icon preview and the forms that read the two limits from the contract)
+**Plans:** 0 plans
+**UI hint**: yes, small: the two disabled "Excluir" buttons become live with a confirmation, and nothing else changes on screen. The existing `components/pending/PendingDeleteButton` is the seam; the confirmation is a new surface, so plan-phase will stop at the UI-SPEC gate first (run `/gsd-ui-phase 09.3`, then plan-phase again).
+**Success Criteria** (draft, to be confirmed in discuss-phase):
+
+  1. An admin (whoever can edit events) deletes an event from its form or from its cancelled notice, confirms, and lands on the list; the event is gone from lists, detail, calendar export, reminders, notifications and photos, a member's saved link answers "not found", and its RSVPs and check-ins are still in the database (D-214).
+  2. An admin (whoever manages communities) deletes an archived community from its page or form after a confirmation; a community that is not archived cannot be deleted; its publications leave Início, Explorar, Reels, the lists and the post page; what happens to its members, highlights, pinned stories and Loja links is the decided one, and tested.
+  3. A schedule with more than 30 moments (up to the new limit) saves from the form, through the API and into the database; one past the limit is refused by all three with the same message.
+  4. A highlight name longer than 15 characters (up to the new limit) saves from "Publicar story" and from the highlight manager; one past the limit is refused by all three; a long name shows cut with an ellipsis under its circle.
+  5. The icon the app's editor sends reaches the API with an "own art" marker stored in the tenant's branding, and the Android icon (`maskable512`) of that tenant fills the square when the art is opaque; a transparent, logo-derived or unmarked icon keeps the margin; tenants that already have an icon are not touched until their admin saves the editor again.
+  6. Every new route, query and migration has a cross-tenant negative test (pgTAP and integration): no tenant deletes, reads or re-derives another tenant's event, community or icon.
+  7. The release order (migrations on every tenant project, then API and worker, then web) and its rollback limit are written in `docs/DEPLOY.md`, and `docs/pendencias-backend.md` marks items 3, 11, 12, 13 and 14 as done.
+
+**Notes**: Inserted 2026-10-26 by user decision, right after merging the FRONT-AJUSTES commit `85a4b81c` into master (`0211d871`, conflicts resolved in `VideoPlayer.tsx`, `affected-map.json`, `messages.test.ts` and the doc). Numbered 09.3 and placed after 09.2 by hand: `phase.insert` after a decimal nests (09.2.1), so it ran after Phase 9 and the block was moved. STATE stays on 09.2, which is still executing (plan 25, Igor's hosted proofs): plan-phase can run ahead, execute-phase waits for 09.2 to close.
+
+The six open questions were decided in `09.3-CONTEXT.md` (D-548..D-565, 2026-10-26): any event can be deleted, silently, and its RSVPs and check-ins keep counting for the member; an archived community is deleted only when no active Loja product unlocks it, and its publications go with it; both confirm with the existing `ConfirmDialog`; the limits are 200 moments and 50 characters; the icon editor sends an "own art" marker stored in the branding and nothing is backfilled; items 1, 2, 4, 5, 6 and 8 of `docs/pendencias-backend.md` stay out. Proposed split for plan-phase to confirm: wave 1, the two limit migrations with their constants and tests, and the icon marker with the worker rule; wave 2, delete event and delete community (routes, services, read filters, tests); wave 3, the two buttons made live, the DEPLOY.md order and notes, the update of `docs/pendencias-backend.md` and the exit gate with `pnpm verify`.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 09.3 to break down)
+
 ### Phase 10: Rede Social - Member Stories and Communities
 
 **Goal**: With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from whoever created it.
@@ -1413,7 +1439,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14) -> 08.5 (member-side course and live unlock, inserted 2026-10-15) -> 08.6 (member area, inserted 2026-10-16) -> 08.7 (real profile data, inserted 2026-10-16), then the post-MVP "Rede social" phases 9 -> 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14) -> 08.5 (member-side course and live unlock, inserted 2026-10-15) -> 08.6 (member area, inserted 2026-10-16) -> 08.7 (real profile data, inserted 2026-10-16), then the post-MVP "Rede social" phases 9, then 09.1 -> 09.2 -> 09.3 (FRONT.pdf backend pendencies, inserted 2026-10-26), then 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -1435,6 +1461,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
 | 09.1. Acesso por gateway de pagamento | 22/22 | In Progress|  |
 | 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 24/28 | In Progress|  |
+| 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 
