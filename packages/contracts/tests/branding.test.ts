@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   adminBrandingSchema,
   adminTenantBodySchema,
+  BRANDING_UPLOAD_ID_RE,
+  BRANDING_UPLOAD_KINDS,
   BUTTON_STYLES,
   brandingLookBodySchema,
+  brandingUploadBodySchema,
   brandLookSchema,
   brandStyleVars,
   contrastRatio,
@@ -22,6 +25,7 @@ import {
   normalizeBrandLook,
   relativeLuminance,
   resolveBranding,
+  tenantBrandingSchema,
   toHostBranding,
   WHITE,
   withDarkPrimary,
@@ -520,5 +524,46 @@ describe('display name parity: platform update vs tenant lane (08-06, ADMIN-01 e
       );
     }
     expect(adminTenantBodySchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('own-art icon marker (09.3, D-562, D-563, PEND-10, PEND-11)', () => {
+  const UUID = '0a1b2c3d-4e5f-4a6b-8c7d-9e8f7a6b5c4d';
+
+  it('the upload kinds are logo, icon and icon_art, in that order', () => {
+    expect([...BRANDING_UPLOAD_KINDS]).toEqual(['logo', 'icon', 'icon_art']);
+  });
+
+  it('the current upload body { kind: icon } stays valid and the new kind is accepted', () => {
+    const body = { mime: 'image/png', size: 1000 };
+    expect(brandingUploadBodySchema.safeParse({ ...body, kind: 'icon' }).success).toBe(true);
+    expect(brandingUploadBodySchema.safeParse({ ...body, kind: 'icon_art' }).success).toBe(true);
+    expect(brandingUploadBodySchema.safeParse({ ...body, kind: 'icon_artx' }).success).toBe(false);
+  });
+
+  it('the id regex accepts icon_art ids and refuses look-alikes and path separators (T-09.3-11)', () => {
+    expect(BRANDING_UPLOAD_ID_RE.test(`icon_art-${UUID}.jpg`)).toBe(true);
+    expect(BRANDING_UPLOAD_ID_RE.test(`icon-${UUID}.png`)).toBe(true);
+    expect(BRANDING_UPLOAD_ID_RE.test(`icon_artx-${UUID}.png`)).toBe(false);
+    expect(BRANDING_UPLOAD_ID_RE.test(`icon-art-${UUID}.png`)).toBe(false);
+    expect(BRANDING_UPLOAD_ID_RE.test(`icon_art/../x-${UUID}.png`)).toBe(false);
+    expect(BRANDING_UPLOAD_ID_RE.test(`icon_art-${UUID}/x.png`)).toBe(false);
+    expect(BRANDING_UPLOAD_ID_RE.test(`../icon_art-${UUID}.png`)).toBe(false);
+  });
+
+  it('a stored brand with no marker reads false (no backfill, D-564) and the marker survives resolve', () => {
+    expect(tenantBrandingSchema.parse({}).iconOwnArt).toBe(false);
+    expect(resolveBranding({}).iconOwnArt).toBe(false);
+    expect(resolveBranding({ iconUrl: '/x.png', iconVersion: 4 }).iconOwnArt).toBe(false);
+    expect(resolveBranding({ iconOwnArt: true }).iconOwnArt).toBe(true);
+    // a whole-object rewrite rebuilt from resolveBranding keeps it
+    const rewritten = resolveBranding(resolveBranding({ iconOwnArt: true }));
+    expect(rewritten.iconOwnArt).toBe(true);
+  });
+
+  it('the marker never reaches the public by-host answer (T-09.3-07)', () => {
+    const host = toHostBranding(resolveBranding({ iconOwnArt: true }));
+    expect(host).not.toHaveProperty('iconOwnArt');
+    expect(hostBrandingSchema.safeParse({ ...host, iconOwnArt: true }).success).toBe(false);
   });
 });

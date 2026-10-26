@@ -221,6 +221,12 @@ export const tenantBrandingSchema = z.object({
   iconUrl: z.string().nullable().default(null),
   iconUrls: brandIconUrlsSchema.nullable().default(null),
   iconVersion: z.number().int().nonnegative().default(0),
+  /**
+   * True only while the stored `iconUrl` is the editor's own art (upload kind `icon_art`, 09.3 D-562).
+   * The worker fills the whole `maskable512` square with it when it is also opaque (D-563). Absent
+   * reads as false, so no tenant needs a backfill (D-564). A panel fact: never in the public answer.
+   */
+  iconOwnArt: z.boolean().default(false),
   colors: brandColorsSchema.partial().default({}),
   look: brandLookSchema.prefault({}),
 });
@@ -234,6 +240,8 @@ export type ResolvedBranding = {
   iconUrl: string | null;
   iconUrls: BrandIconUrls | null;
   iconVersion: number;
+  /** True while `iconUrl` is the editor's own art (09.3 D-562): the worker full-bleeds an opaque one. */
+  iconOwnArt: boolean;
   /**
    * The five colours. `primaryDark` / `onPrimaryDark` are the accent the dark theme paints: the dark
    * mode's own primary with the ink that reads on it when the look has one, else the derivation.
@@ -399,6 +407,7 @@ export function resolveBranding(raw: unknown): ResolvedBranding {
     iconUrl: parsed.iconUrl,
     iconUrls: parsed.iconUrls,
     iconVersion: parsed.iconVersion,
+    iconOwnArt: parsed.iconOwnArt,
     colors: withDarkPrimary(
       {
         primary: derived.primary,
@@ -481,8 +490,12 @@ export type BrandingUploadMime = z.infer<typeof brandingUploadMimeSchema>;
 /** D-27: "order of 2 MB" — the bucket's `file_size_limit` and the 413 threshold agree on this value. */
 export const BRANDING_MAX_BYTES = 2 * 1024 * 1024;
 
-/** `logo` (the wordmark shown everywhere) or `icon` (the optional square override of the derived set, D-28). */
-export const BRANDING_UPLOAD_KINDS = ['logo', 'icon'] as const;
+/**
+ * `logo` (the wordmark shown everywhere), `icon` (the optional square override of the derived set,
+ * D-28, sent any other way: unmarked) or `icon_art` (the app-icon editor's own art, marked as such,
+ * 09.3 D-562). An old client that sends `icon` keeps working and means "unmarked".
+ */
+export const BRANDING_UPLOAD_KINDS = ['logo', 'icon', 'icon_art'] as const;
 export type BrandingUploadKind = (typeof BRANDING_UPLOAD_KINDS)[number];
 
 /** The object-key extension of each accepted mime (one canonical extension per format). */
@@ -525,7 +538,7 @@ export type BrandingUpload = z.infer<typeof brandingUploadSchema>;
  * no path separators can ever pass).
  */
 export const BRANDING_UPLOAD_ID_RE =
-  /^(logo|icon)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|svg|webp|jpg)$/;
+  /^(logo|icon_art|icon)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|svg|webp|jpg)$/;
 export const brandingUploadIdSchema = z.string().regex(BRANDING_UPLOAD_ID_RE);
 export const brandingUploadParamsSchema = z.object({
   id: z.uuid(),

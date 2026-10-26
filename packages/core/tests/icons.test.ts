@@ -116,6 +116,167 @@ describe('deriveIconSet — sizes, maskable background and safe zone, favicon co
   });
 });
 
+describe('deriveIconSet — own art (09.3, D-562, D-563)', () => {
+  const GREEN = { r: 16, g: 185, b: 129, a: 255 };
+  const CORNERS: [number, number][] = [
+    [2, 2],
+    [509, 2],
+    [2, 509],
+    [509, 509],
+  ];
+
+  it('fills the whole maskable square with an opaque own art, not the primary colour', async () => {
+    const art = await solidSquarePng(400, { r: 255, g: 0, b: 0 });
+    const set = await deriveIconSet(art, { primaryHex: PRIMARY, mime: 'image/png', ownArt: true });
+    expect(await inspectBrandingImage(set.maskable512, 'image/png')).toMatchObject({
+      width: 512,
+      height: 512,
+    });
+    for (const [x, y] of [...CORNERS, [40, 256], [256, 40], [256, 256]] as [number, number][]) {
+      expect(await readPixel(set.maskable512, x, y)).toEqual(RED);
+    }
+  });
+
+  it('derives the other four outputs byte for byte the same with or without the marker', async () => {
+    const art = await solidSquarePng(400, { r: 255, g: 0, b: 0 });
+    const marked = await deriveIconSet(art, {
+      primaryHex: PRIMARY,
+      mime: 'image/png',
+      ownArt: true,
+    });
+    const plain = await deriveIconSet(art, { primaryHex: PRIMARY, mime: 'image/png' });
+    expect(marked.i192.equals(plain.i192)).toBe(true);
+    expect(marked.i512.equals(plain.i512)).toBe(true);
+    expect(marked.apple180.equals(plain.apple180)).toBe(true);
+    expect(marked.favicon.equals(plain.favicon)).toBe(true);
+    expect(marked.maskable512.equals(plain.maskable512)).toBe(false);
+  });
+
+  it('keeps the margin for a transparent own art (ownArt true, alpha below 255)', async () => {
+    // The wordmark's 512 render has transparent margins around the contained logo.
+    const transparent = (
+      await deriveIconSet(WORDMARK_SVG, { primaryHex: PRIMARY, mime: 'image/svg+xml' })
+    ).i512;
+    expect((await readPixel(transparent, 2, 2)).a).toBe(0);
+    const out = await deriveIconSet(transparent, {
+      primaryHex: PRIMARY,
+      mime: 'image/png',
+      ownArt: true,
+    });
+    for (const [x, y] of CORNERS)
+      expect(await readPixel(out.maskable512, x, y)).toEqual(PRIMARY_RGB);
+    expect(await readPixel(out.maskable512, 256, 256)).toEqual(AMBER);
+  });
+
+  it('keeps the margin for an opaque source when the marker is false or absent', async () => {
+    const art = await solidSquarePng(400, { r: 255, g: 0, b: 0 });
+    for (const ownArt of [false, undefined]) {
+      const set = await deriveIconSet(art, { primaryHex: PRIMARY, mime: 'image/png', ownArt });
+      for (const [x, y] of CORNERS) {
+        expect(await readPixel(set.maskable512, x, y)).toEqual(PRIMARY_RGB);
+      }
+      expect(await readPixel(set.maskable512, 256, 256)).toEqual(RED);
+    }
+  });
+
+  it('keeps the margin when a single pixel is transparent (one pixel flips isOpaque)', async () => {
+    const solid = await solidSquarePng(400, { r: 255, g: 0, b: 0 });
+    const hole = await sharp({
+      create: { width: 1, height: 1, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+    const holey = await sharp(solid)
+      .composite([{ input: hole, left: 10, top: 10, blend: 'dest-out' }])
+      .png()
+      .toBuffer();
+    expect((await readPixel(holey, 10, 10)).a).toBe(0);
+    expect((await readPixel(holey, 11, 10)).a).toBe(255);
+    const set = await deriveIconSet(holey, {
+      primaryHex: PRIMARY,
+      mime: 'image/png',
+      ownArt: true,
+    });
+    for (const [x, y] of CORNERS)
+      expect(await readPixel(set.maskable512, x, y)).toEqual(PRIMARY_RGB);
+  });
+
+  it('fills for a JPEG own art (no alpha channel)', async () => {
+    const jpeg = await sharp({
+      create: { width: 300, height: 300, channels: 3, background: '#10b981' },
+    })
+      .jpeg({ quality: 100 })
+      .toBuffer();
+    const set = await deriveIconSet(jpeg, {
+      primaryHex: PRIMARY,
+      mime: 'image/jpeg',
+      ownArt: true,
+    });
+    for (const [x, y] of CORNERS) {
+      const px = await readPixel(set.maskable512, x, y);
+      expect(px.a).toBe(255);
+      expect(Math.abs(px.r - GREEN.r)).toBeLessThan(6);
+      expect(Math.abs(px.g - GREEN.g)).toBeLessThan(6);
+      expect(Math.abs(px.b - GREEN.b)).toBeLessThan(6);
+    }
+  });
+
+  it('fills a 512x512 output from a non-square opaque art with cover (corners are the art)', async () => {
+    const wide = await sharp({
+      create: {
+        width: 300,
+        height: 200,
+        channels: 4,
+        background: { r: 255, g: 0, b: 0, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+    const set = await deriveIconSet(wide, { primaryHex: PRIMARY, mime: 'image/png', ownArt: true });
+    expect(await inspectBrandingImage(set.maskable512, 'image/png')).toMatchObject({
+      width: 512,
+      height: 512,
+    });
+    for (const [x, y] of CORNERS) expect(await readPixel(set.maskable512, x, y)).toEqual(RED);
+  });
+
+  it('fills for a full-size rect SVG and keeps the margin for a circle on transparent', async () => {
+    const rect = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="#10b981"/></svg>',
+    );
+    const filled = await deriveIconSet(rect, {
+      primaryHex: PRIMARY,
+      mime: 'image/svg+xml',
+      ownArt: true,
+    });
+    for (const [x, y] of CORNERS) expect(await readPixel(filled.maskable512, x, y)).toEqual(GREEN);
+    const circle = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><circle cx="100" cy="100" r="90" fill="#10b981"/></svg>',
+    );
+    const margin = await deriveIconSet(circle, {
+      primaryHex: PRIMARY,
+      mime: 'image/svg+xml',
+      ownArt: true,
+    });
+    for (const [x, y] of CORNERS) {
+      expect(await readPixel(margin.maskable512, x, y)).toEqual(PRIMARY_RGB);
+    }
+  });
+
+  it('builds and parses the icon_art upload id and refuses look-alike kinds (T-09.3-11)', () => {
+    const id = buildUploadId('icon_art', 'png');
+    expect(parseUploadId(id)).toMatchObject({ kind: 'icon_art', ext: 'png', mime: 'image/png' });
+    expect(parseUploadId(`icon_art-${UUID}.png`)).toEqual({
+      kind: 'icon_art',
+      uuid: UUID,
+      ext: 'png',
+      mime: 'image/png',
+    });
+    expect(parseUploadId(`icon_artx-${UUID}.png`)).toBeNull();
+    expect(parseUploadId(`icon-art-${UUID}.png`)).toBeNull();
+  });
+});
+
 describe('inspectBrandingImage — header-only rejections', () => {
   const reasonOf = async (buf: Buffer, mime: string) => {
     try {

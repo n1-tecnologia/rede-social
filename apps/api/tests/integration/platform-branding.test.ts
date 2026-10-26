@@ -94,7 +94,8 @@ async function createThrowawayTenant(
     method: 'POST',
     body: { displayName: `Marca ${slug}`, slug, colors, modules: ['feed'], adminEmail },
   });
-  if (res.status !== 201) throw new Error(`tenant create failed: ${res.status}`);
+  if (res.status !== 201)
+    throw new Error(`tenant create failed: ${res.status} ${await res.text()}`);
   const body = platformTenantDetailSchema.parse(await res.json());
   const host = `${slug}.cliente.test`;
   await adminSql`
@@ -350,7 +351,7 @@ describe('tracer — upload a logo, complete, the worker derives the icons, by-h
 /** Uploads `bytes` as `kind` for the tenant and completes it; answers the complete response. */
 async function uploadAndComplete(
   tenantId: string,
-  kind: 'logo' | 'icon',
+  kind: 'logo' | 'icon' | 'icon_art',
   mime: string,
   bytes: Buffer,
   putContentType = mime,
@@ -747,6 +748,89 @@ describe('square-icon override — set, derive from it, remove, derive from the 
     expect(platformTenantDetailSchema.parse(await again.json()).tenant.branding.iconVersion).toBe(
       3,
     );
+  });
+});
+
+describe('own-art icon (09.3, D-562, D-563)', () => {
+  const SQUARE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="#10b981"/></svg>`;
+  const GREEN = { r: 16, g: 185, b: 129, a: 255 };
+  const CORNERS: [number, number][] = [
+    [2, 2],
+    [509, 2],
+    [2, 509],
+    [509, 509],
+  ];
+  let ART_PNG: Buffer;
+  let tenantId = '';
+  let versionAtStart = 0;
+
+  /** Derive at the given version, then answer the maskable bytes. */
+  async function maskableAt(tid: string, iconVersion: number): Promise<Buffer> {
+    await deriveIconsJob.handler({ tenantId: tid, iconVersion, attempt: 0 });
+    const icons = (await tenantDetail(tid)).tenant.branding.iconUrls;
+    return (await fetchBytes(icons?.maskable512 ?? '')).buf;
+  }
+
+  it('0. fixture: an opaque green square (corner alpha 255) and a tenant with a logo-derived set', async () => {
+    ART_PNG = (
+      await deriveIconSet(Buffer.from(SQUARE_SVG), { primaryHex: '#10b981', mime: 'image/svg+xml' })
+    ).maskable512;
+    for (const [x, y] of CORNERS) expect(await readPixel(ART_PNG, x, y)).toEqual(GREEN);
+
+    tenantId = (await createThrowawayTenant('pb-art')).id;
+    const { res } = await uploadAndComplete(tenantId, 'logo', 'image/png', LOGO_PNG);
+    expect(res.status).toBe(200);
+    await deriveIconsJob.handler({ tenantId, iconVersion: 1, attempt: 0 });
+    const branding = (await tenantDetail(tenantId)).tenant.branding;
+    expect(branding.iconOwnArt).toBe(false);
+    versionAtStart = branding.iconVersion;
+    // A logo-derived set keeps the margin: the corner is the tenant primary.
+    const maskable = await fetchBytes(branding.iconUrls?.maskable512 ?? '');
+    expect(await readPixel(maskable.buf, 2, 2)).toEqual(PRIMARY_RGB);
+  });
+
+  it('1. tracer: kind icon_art marks the icon, one job waits and the worker fills maskable512 with the art', async () => {
+    const start = await startUpload(tenantId, {
+      kind: 'icon_art',
+      mime: 'image/png',
+      size: ART_PNG.length,
+    });
+    expect(start.status).toBe(201);
+    const { uploadId, signedUrl } = (await start.json()) as {
+      uploadId: string;
+      signedUrl: string;
+    };
+    expect(uploadId.startsWith('icon_art-')).toBe(true);
+    expect(uploadId).toMatch(BRANDING_UPLOAD_ID_RE);
+    expect((await putToSignedUrl(signedUrl, ART_PNG, 'image/png')).ok).toBe(true);
+
+    const res = await complete(tenantId, uploadId);
+    expect(res.status).toBe(200);
+    const branding = platformTenantDetailSchema.parse(await res.json()).tenant.branding;
+    expect(branding.iconOwnArt).toBe(true);
+    expect(branding.iconUrl).toContain(`/${tenantId}/branding/`);
+    expect(branding.iconVersion).toBe(versionAtStart + 1);
+    // The queue policy is `short` (one waiting job per tenant): the fixture ran the worker handler
+    // in-process, so the job still waiting is the single one, never a second.
+    const waiting = (await deriveJobs(tenantId)).filter((j) => j.state === 'created');
+    expect(waiting).toHaveLength(1);
+
+    const maskable = await maskableAt(tenantId, versionAtStart + 1);
+    for (const [x, y] of CORNERS) {
+      const px = await readPixel(maskable, x, y);
+      expect(px).toEqual(GREEN);
+      expect(px).not.toEqual(PRIMARY_RGB);
+    }
+  });
+
+  it('2. control: the same bytes sent as kind icon stay unmarked and keep the margin over the primary', async () => {
+    const { res } = await uploadAndComplete(tenantId, 'icon', 'image/png', ART_PNG);
+    expect(res.status).toBe(200);
+    const branding = platformTenantDetailSchema.parse(await res.json()).tenant.branding;
+    expect(branding.iconOwnArt).toBe(false);
+    const maskable = await maskableAt(tenantId, branding.iconVersion);
+    for (const [x, y] of CORNERS) expect(await readPixel(maskable, x, y)).toEqual(PRIMARY_RGB);
+    expect(await readPixel(maskable, 256, 256)).toEqual(GREEN);
   });
 });
 

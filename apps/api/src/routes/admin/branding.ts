@@ -130,7 +130,7 @@ const uploadCompleteRoute = createRoute({
   request: { params: adminBrandingUploadParamsSchema },
   responses: {
     200: brandResponse(
-      'The object was verified (size, content type, image header) and recorded as logoUrl (kind logo) or iconUrl (kind icon); iconVersion bumped and ONE derivation job enqueued — the icons follow once the worker ran',
+      'The object was verified (size, content type, image header) and recorded as logoUrl (kind logo), iconUrl (kind icon) or iconUrl plus the own-art marker (kind icon_art); iconVersion bumped and ONE derivation job enqueued — the icons follow once the worker ran',
     ),
     400: envelope(
       'VALIDATION_FAILED { upload: "not_an_image" | "format_mismatch" | "svg_unsafe" | "too_large" } — the object was removed; pick another file',

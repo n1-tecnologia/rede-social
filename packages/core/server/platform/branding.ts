@@ -287,7 +287,11 @@ export async function completeBrandingUpload(
     const next: ResolvedBranding = {
       ...current,
       iconVersion: current.iconVersion + 1,
-      ...(parsed.kind === 'logo' ? { logoUrl: url } : { iconUrl: url }),
+      // One statement writes the URL and its marker together (P34): the worker never reads a URL
+      // without the marker that goes with it. `icon` is unmarked; `icon_art` is the editor's own art.
+      ...(parsed.kind === 'logo'
+        ? { logoUrl: url }
+        : { iconUrl: url, iconOwnArt: parsed.kind === 'icon_art' }),
     };
     await tx
       .update(tenants)
@@ -442,6 +446,8 @@ export async function deriveTenantIcons(
     const set = await deriveIconSet(buf, {
       primaryHex: branding.colors.primary,
       mime: mimeFromKey(source.key),
+      // Only the stored own-art override is full-bleed; a logo-derived source keeps the margin.
+      ownArt: source.source === 'override' && branding.iconOwnArt,
     });
     await brandingInternals.beforeIconWrite();
     icons = await uploadIconSet(tenantId, version, set);
@@ -673,6 +679,7 @@ export async function removeIconOverride(
     const next: ResolvedBranding = {
       ...current,
       iconUrl: null,
+      iconOwnArt: false,
       iconVersion: current.iconVersion + 1,
     };
     await tx

@@ -85,6 +85,11 @@ export type DeriveIconSetOptions = {
   primaryHex: string;
   /** Declared mime of `input`; SVGs are rasterised at a density that avoids upscaling. */
   mime: string;
+  /**
+   * The source is the tenant's own editor art (09.3 D-562). When it is also fully opaque, the
+   * maskable icon is the art filling the whole square instead of sitting at 80 % over `primaryHex`.
+   */
+  ownArt?: boolean;
 };
 
 /** The base pipeline: an SVG gets a density so its longer side rasterises to ≥ SVG_RASTER_TARGET px. */
@@ -103,11 +108,15 @@ async function basePipeline(input: Buffer, mime: string): Promise<Sharp> {
 /**
  * favicon.ico (32 + 48), icon-192, icon-512, maskable-512 (logo centred in the 80 % safe zone over
  * `primaryHex`) and apple-touch-icon-180 — the D-28 set, every PNG a transparent `contain` fit.
+ * Exception (09.3 D-563): an `ownArt` source with no transparent pixel at all fills the maskable
+ * square edge to edge (`cover`); a transparent one, a logo-derived one and an unmarked one keep the margin.
  */
 export async function deriveIconSet(input: Buffer, opts: DeriveIconSetOptions): Promise<IconSet> {
   const base = await basePipeline(input, opts.mime);
   const contain = (size: number): Promise<Buffer> =>
     base.clone().resize(size, size, { fit: 'contain', background: TRANSPARENT }).png().toBuffer();
+
+  const fullBleed = opts.ownArt === true && (await base.clone().stats()).isOpaque;
 
   const [i192, i512, apple180, png32, png48, safe] = await Promise.all([
     contain(ICON_SIZES.i192),
@@ -118,17 +127,23 @@ export async function deriveIconSet(input: Buffer, opts: DeriveIconSetOptions): 
     contain(Math.round(ICON_SIZES.maskable512 * MASKABLE_SAFE_ZONE)),
   ]);
 
-  const maskable512 = await sharp({
-    create: {
-      width: ICON_SIZES.maskable512,
-      height: ICON_SIZES.maskable512,
-      channels: 4,
-      background: opts.primaryHex,
-    },
-  })
-    .composite([{ input: safe, gravity: 'centre' }])
-    .png()
-    .toBuffer();
+  const maskable512 = fullBleed
+    ? await base
+        .clone()
+        .resize(ICON_SIZES.maskable512, ICON_SIZES.maskable512, { fit: 'cover' })
+        .png()
+        .toBuffer()
+    : await sharp({
+        create: {
+          width: ICON_SIZES.maskable512,
+          height: ICON_SIZES.maskable512,
+          channels: 4,
+          background: opts.primaryHex,
+        },
+      })
+        .composite([{ input: safe, gravity: 'centre' }])
+        .png()
+        .toBuffer();
 
   const favicon = await pngToIco([png32, png48]);
 
