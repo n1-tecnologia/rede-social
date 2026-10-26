@@ -28,9 +28,7 @@
       "reactivate": "Reativar comunidade"
     },
     "delete": {
-      "action": "Excluir comunidade",
-      "soon": "Em breve",
-      "hint": "A exclusão de comunidades ainda não está disponível."
+      "action": "Excluir comunidade"
     },
     "emptyPosts": {
       "title": "Nada publicado ainda",
@@ -80,6 +78,7 @@
       "saved": "Alterações salvas.",
       "archived": "Comunidade arquivada.",
       "reactivated": "Comunidade reativada.",
+      "deleted": "Comunidade excluída.",
       "reordered": "Nova ordem salva."
     },
     "reorder": {
@@ -111,7 +110,20 @@
         "body": "Ela volta para a lista de comunidades e pode receber publicações de novo.",
         "confirm": "Reativar",
         "cancel": "Cancelar"
+      },
+      "delete": {
+        "title": "Excluir comunidade?",
+        "body": "A comunidade e as publicações dela, com curtidas e comentários, deixam de aparecer para todos. Não há como desfazer por aqui.",
+        "confirm": "Excluir",
+        "cancel": "Cancelar"
       }
+    },
+    "blocked": {
+      "title": "Não é possível excluir",
+      "body": "{count, plural, one {Este produto da Loja ainda dá acesso a esta comunidade. Tire a comunidade dele primeiro.} other {Estes produtos da Loja ainda dão acesso a esta comunidade. Tire a comunidade deles primeiro.}}",
+      "more": "{count, plural, one {e mais 1 produto} other {e mais # produtos}}",
+      "confirm": "Ver produtos",
+      "cancel": "Fechar"
     },
     "discard": {
       "title": "Descartar comunidade?",
@@ -141,7 +153,10 @@
       "archived": "Esta comunidade foi arquivada. Não é possível publicar nela.",
       "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra.",
       "save": "Não foi possível salvar. Revise os campos e tente novamente.",
-      "reactivate": "Não foi possível reativar a comunidade. Tente novamente."
+      "reactivate": "Não foi possível reativar a comunidade. Tente novamente.",
+      "delete": "Não foi possível excluir a comunidade. Tente novamente.",
+      "deleteGone": "Esta comunidade já foi excluída.",
+      "deleteNotArchived": "Esta comunidade não está mais arquivada, então não pode ser excluída."
     }
   }
 }

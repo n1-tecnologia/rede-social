@@ -254,3 +254,17 @@ export async function updateCommunity(
   if (!res.ok) throw await apiError(res);
   return communitySummarySchema.parse(await res.json());
 }
+
+/**
+ * `DELETE /v1/communities/{communityId}` (PEND-07, D-553): the soft delete of an ARCHIVED community,
+ * for whoever may manage communities. The answer is `204` with no body, so there is nothing to parse.
+ * A refusal throws the `ApiClientError` the other writes throw: a bare 404 (gone or another tenant's),
+ * or a `409` whose `details.community` is `not_archived` or `unlock_active` (D-554: the second carries
+ * the Loja products that still unlock it).
+ */
+export async function deleteCommunity(communityId: string): Promise<void> {
+  const res = await apiFetch(`/v1/communities/${encodeURIComponent(communityId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw await apiError(res);
+}

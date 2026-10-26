@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '@/lib/bootstrap';
 import {
   createCommunity,
+  deleteCommunity,
   getCommunities,
   getOrderableCommunities,
   loadCommunity,
@@ -14,6 +15,7 @@ import {
 import {
   archiveCommunityAction,
   createCommunityAction,
+  deleteCommunityAction,
   loadMoreCommunitiesAction,
   loadOrderableCommunitiesAction,
   refreshCommunitiesAction,
@@ -55,6 +57,7 @@ vi.mock('@/lib/env', () => ({
 vi.mock('@/lib/communities', () => ({
   createCommunity: vi.fn(),
   updateCommunity: vi.fn(),
+  deleteCommunity: vi.fn(),
   loadCommunity: vi.fn(),
   getCommunities: vi.fn(),
   getOrderableCommunities: vi.fn(),
@@ -78,6 +81,7 @@ const bare404 = () => new ApiClientError(404, 'NOT_FOUND', undefined, 'req-1');
 beforeEach(() => {
   vi.mocked(createCommunity).mockReset();
   vi.mocked(updateCommunity).mockReset();
+  vi.mocked(deleteCommunity).mockReset();
   vi.mocked(loadCommunity).mockReset();
   vi.mocked(getCommunities).mockReset();
   vi.mocked(getOrderableCommunities).mockReset();
@@ -336,5 +340,140 @@ describe('2026-10-03 — the reorder actions', () => {
       'redirect should not be reached in these cases',
     );
     expect(redirect).toHaveBeenCalledWith('/entrar');
+  });
+});
+
+describe('09.3 — deleteCommunityAction (PEND-07, D-553, D-554, D-557)', () => {
+  const PRODUCT_NAMES = ['Curso Premium Ouro', 'Mentoria <b>x</b> & "q"', 'Pacote 4'];
+  const product = (i: number) => ({
+    id: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa0${i}`,
+    name: PRODUCT_NAMES[i] ?? `Produto ${i}`,
+  });
+  const refusal = (products: unknown, count: unknown) =>
+    new ApiClientError(409, 'CONFLICT', { community: 'unlock_active', products, count }, 'req-d');
+
+  it('success returns the id and revalidates the list, the page, Início and Reels', async () => {
+    vi.mocked(deleteCommunity).mockResolvedValue(undefined);
+
+    const result = await deleteCommunityAction(COMMUNITY);
+
+    expect(result).toEqual({ ok: true, communityId: COMMUNITY });
+    expect(deleteCommunity).toHaveBeenCalledWith(COMMUNITY);
+    expect(vi.mocked(revalidatePath).mock.calls.map((call) => call[0])).toEqual([
+      '/comunidades',
+      `/comunidades/${COMMUNITY}`,
+      '/inicio',
+      '/reels',
+    ]);
+  });
+
+  it('a bare 404 is not_found and revalidates nothing', async () => {
+    vi.mocked(deleteCommunity).mockRejectedValue(bare404());
+
+    expect(await deleteCommunityAction(COMMUNITY)).toEqual({ ok: false, code: 'not_found' });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('409 not_archived is not_archived', async () => {
+    vi.mocked(deleteCommunity).mockRejectedValue(
+      new ApiClientError(409, 'CONFLICT', { community: 'not_archived' }, 'req-d'),
+    );
+
+    expect(await deleteCommunityAction(COMMUNITY)).toEqual({ ok: false, code: 'not_archived' });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('409 unlock_active returns the products and the total unchanged, never revalidating', async () => {
+    const one = [product(0)];
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(refusal(one, 1));
+    expect(await deleteCommunityAction(COMMUNITY)).toEqual({
+      ok: false,
+      code: 'unlock_active',
+      products: one,
+      count: 1,
+    });
+
+    const five = [0, 1, 2, 3, 4].map(product);
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(refusal(five, 9));
+    expect(await deleteCommunityAction(COMMUNITY)).toEqual({
+      ok: false,
+      code: 'unlock_active',
+      products: five,
+      count: 9,
+    });
+
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('a 409 unlock_active body that fails the contract schema is generic', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bodies: [unknown, unknown][] = [
+      [[], 1],
+      [[{ id: 'not-a-uuid', name: 'Curso' }], 1],
+      [[product(0)], undefined],
+      [[product(0)], 0],
+      [[0, 1, 2, 3, 4, 5].map(product), 6],
+    ];
+    for (const [products, count] of bodies) {
+      vi.mocked(deleteCommunity).mockRejectedValueOnce(refusal(products, count));
+      expect(await deleteCommunityAction(COMMUNITY)).toEqual({ ok: false, code: 'generic' });
+    }
+    expect(revalidatePath).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
+  it('any other ApiClientError or a thrown Error is generic', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(
+      new ApiClientError(403, 'FORBIDDEN', undefined, 'req-d'),
+    );
+    expect(await deleteCommunityAction(COMMUNITY)).toEqual({ ok: false, code: 'generic' });
+
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(
+      new ApiClientError(500, 'INTERNAL', undefined, 'req-d'),
+    );
+    expect(await deleteCommunityAction(COMMUNITY)).toEqual({ ok: false, code: 'generic' });
+
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(new Error('network down'));
+    expect(await deleteCommunityAction(COMMUNITY)).toEqual({ ok: false, code: 'generic' });
+
+    expect(revalidatePath).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
+  it('a lost session is a navigation, taken outside the try/catch', async () => {
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(
+      new ApiClientError(401, 'UNAUTHENTICATED', undefined, 'req-d'),
+    );
+
+    await expect(deleteCommunityAction(COMMUNITY)).rejects.toThrow(
+      'redirect should not be reached in these cases',
+    );
+    expect(redirect).toHaveBeenCalledWith('/entrar');
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('a non-uuid id is generic and no request is made', async () => {
+    for (const id of ['', 'nope', '../comunidades', `${COMMUNITY}/x`, '22222222-2222-2222-2222']) {
+      expect(await deleteCommunityAction(id)).toEqual({ ok: false, code: 'generic' });
+    }
+    expect(deleteCommunity).not.toHaveBeenCalled();
+  });
+
+  it('no console.error argument carries a product or community name', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(refusal([], 1));
+    await deleteCommunityAction(COMMUNITY);
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(
+      refusal([{ id: 'x', name: PRODUCT_NAMES[0] }], 1),
+    );
+    await deleteCommunityAction(COMMUNITY);
+    vi.mocked(deleteCommunity).mockRejectedValueOnce(new Error('network down'));
+    await deleteCommunityAction(COMMUNITY);
+
+    const logged = JSON.stringify(errorLog.mock.calls);
+    for (const name of PRODUCT_NAMES) expect(logged).not.toContain(name);
+    expect(errorLog).toHaveBeenCalledTimes(3);
+    errorLog.mockRestore();
   });
 });

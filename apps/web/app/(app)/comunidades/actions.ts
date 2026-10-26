@@ -6,6 +6,7 @@ import {
   type CommunityStatus,
   type CommunitySummary,
   communityQuerySchema,
+  communityUnlockRefusalSchema,
   createCommunitySchema,
   reorderCommunitiesSchema,
   updateCommunitySchema,
@@ -15,11 +16,13 @@ import type { PostCardView } from '@rede-social/module-feed/ui';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { z } from 'zod';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
   createCommunity,
+  deleteCommunity,
   getCommunities,
   getOrderableCommunities,
   loadCommunity,
@@ -470,4 +473,89 @@ export async function reactivateCommunityAction(
   communityId: string,
 ): Promise<CommunityWriteResult> {
   return updateCommunityAction(communityId, { status: 'active' });
+}
+
+/* ── PEND-07: delete an archived community (09.3-08, D-553, D-554, D-557) ─────────────────────── */
+
+/**
+ * What the delete can answer. A refusal is a CODE, never copy, and the one that carries data is
+ * `unlock_active` (D-554): the Loja products that still give access to the community (at most
+ * `COMMUNITY_UNLOCK_NAMES_MAX` of them, newest first) and the TOTAL, parsed from the API's own 409
+ * body with the contract's `communityUnlockRefusalSchema`.
+ */
+export type CommunityDeleteResult =
+  | { ok: true; communityId: string }
+  | { ok: false; code: 'not_found' | 'not_archived' | 'generic' }
+  | {
+      ok: false;
+      code: 'unlock_active';
+      products: { id: string; name: string }[];
+      count: number;
+    };
+
+const communityIdSchema = z.uuid();
+
+/**
+ * The delete's refusal mapping: a bare 404 is `not_found` (gone, or another tenant's, D-553), the two
+ * closed 409 codes are `not_archived` and `unlock_active`, anything else is `generic`. A 409 whose
+ * body fails the contract schema (no products, a bad id, no count) is `generic` too, so the island
+ * never draws an empty refusal dialog. Shape only in the log: a community or product NAME is member
+ * content and never reaches a log line (T-05-06, T-09.3-43).
+ */
+function deleteRefusal(error: unknown): CommunityDeleteResult {
+  if (error instanceof ApiClientError) {
+    if (error.status === 404) return { ok: false, code: 'not_found' };
+    const community = (error.details as { community?: unknown } | undefined)?.community;
+    if (community === 'not_archived') return { ok: false, code: 'not_archived' };
+    if (community === 'unlock_active') {
+      const refusal = communityUnlockRefusalSchema.safeParse(error.details);
+      if (refusal.success) {
+        return {
+          ok: false,
+          code: 'unlock_active',
+          products: refusal.data.products,
+          count: refusal.data.count,
+        };
+      }
+      console.error('communities.delete_refusal_shape', { issues: refusal.error.issues.length });
+      return { ok: false, code: 'generic' };
+    }
+  }
+  console.error('communities.delete_failed', { error: String(error) });
+  return { ok: false, code: 'generic' };
+}
+
+/**
+ * `DELETE /v1/communities/{id}` (PEND-07): only an ARCHIVED community deletes (D-553), and only while
+ * no active Loja product still unlocks it (D-554). The same conventions as every action here: a server
+ * action is a public endpoint, so a malformed id is refused as `generic` before any request and the
+ * API stays the authority on permission, tenant and state; `redirect()` sits OUTSIDE the try/catch
+ * (Next 16); the paths the deletion changes are revalidated only after success: the list, the
+ * community's own page, and Início and Reels, which stop showing its publications.
+ *
+ * The slug stays with the deleted row (D-557), so nothing to release here.
+ *
+ * **This module must not re-export anything** and exports only async functions and types.
+ */
+export async function deleteCommunityAction(communityId: string): Promise<CommunityDeleteResult> {
+  if (!communityIdSchema.safeParse(communityId).success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: CommunityDeleteResult = { ok: false, code: 'generic' };
+  try {
+    await deleteCommunity(communityId);
+    result = { ok: true, communityId };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) result = deleteRefusal(error);
+  }
+
+  if (refusal) redirect(refusal);
+  if (result.ok) {
+    revalidatePath('/comunidades');
+    revalidatePath(`/comunidades/${communityId}`);
+    revalidatePath('/inicio');
+    revalidatePath('/reels');
+  }
+  return result;
 }

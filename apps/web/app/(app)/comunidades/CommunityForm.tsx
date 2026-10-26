@@ -29,13 +29,13 @@ import {
 } from '@/app/(app)/comunidades/actions';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
-import { PendingDeleteButton } from '@/components/pending/PendingDeleteButton';
 import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import {
   type CommunityAccessProductView,
   communityAccessSegments,
   type StoreTranslator,
 } from '@/lib/store-view';
+import { DeleteCommunityControl } from './[communityId]/DeleteCommunityControl';
 
 /**
  * THE community form (COMM-01, UI-D-38) — one component, two routes: `/comunidades/nova` in
@@ -531,10 +531,9 @@ export function CommunityForm({
         ) : null}
 
         {/* ── UI-D-38: the archive row exists on EDIT only, at the BOTTOM, behind a confirmation.
-            There is still no destructive DELETE: COMM-01 asks for archive, archive is reversible,
-            and a delete would cascade over posts, comments and likes authored by members who never
-            agreed to lose them (what the API must decide first, `docs/pendencias-backend.md`
-            item 12). ── */}
+            Archive is the reversible step; an ARCHIVED community alone offers the destructive
+            "Excluir comunidade" (09.3, D-553), which the API refuses while a Loja product still
+            unlocks it (D-554). ── */}
         {mode === 'edit' && communityId ? (
           <>
             <div aria-hidden className="h-px bg-border" />
@@ -551,14 +550,9 @@ export function CommunityForm({
                   <ArchiveRestore aria-hidden size={20} />
                   {t('archived.reactivate')}
                 </Button>
-                {/* 2026-10-20 (FRONT.pdf): deleting an ARCHIVED community is asked for, and the API
-                    has no route for it yet, so the control is a placeholder with "Em breve". */}
-                <PendingDeleteButton
-                  kind="community"
-                  label={t('delete.action')}
-                  soon={t('delete.soon')}
-                  hint={t('delete.hint')}
-                />
+                {/* 09.3 (D-553): deleting an ARCHIVED community is live, behind its own confirmation.
+                    Edit mode always has the id, and only this archived branch offers it. */}
+                <DeleteCommunityControl communityId={communityId} />
               </>
             ) : (
               <Button

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,8 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * and is ABSENT without its prop (store off, no permission, or a failed access read). Nothing in it
  * writes: links are edited in the product form only.
  *
- * 2026-10-20 (the client's FRONT.pdf): an ARCHIVED community's form also offers "Excluir comunidade"
- * with "Em breve", a placeholder that sends nothing (the API cannot delete a community yet).
+ * 09.3 (the client's FRONT.pdf item 12): an ARCHIVED community's form also offers a LIVE "Excluir
+ * comunidade" behind its own confirmation (D-553); an active community and the create form offer none.
  *
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
@@ -42,6 +42,7 @@ vi.mock('@rede-social/ui', async (orig) => ({
 vi.mock('@/app/(app)/comunidades/actions', () => ({
   archiveCommunityAction: vi.fn(),
   createCommunityAction: vi.fn(),
+  deleteCommunityAction: vi.fn(),
   reactivateCommunityAction: vi.fn(),
   updateCommunityAction: vi.fn(),
 }));
@@ -137,9 +138,13 @@ describe('CommunityForm — the read-only "Acesso" block (UI-D-379)', () => {
   });
 });
 
-describe('CommunityForm — "Excluir comunidade", a placeholder (2026-10-20, FRONT.pdf)', () => {
-  it('5. an archived community offers it beside "Reativar", aria-disabled, and it sends nothing', async () => {
+describe('CommunityForm — "Excluir comunidade", live and archived-only (09.3, D-553)', () => {
+  it('5. an archived community offers it beside "Reativar", and it deletes only after the confirmation', async () => {
     const actions = await import('@/app/(app)/comunidades/actions');
+    vi.mocked(actions.deleteCommunityAction).mockResolvedValue({
+      ok: true,
+      communityId: COMMUNITY,
+    });
     render(
       <CommunityForm
         mode="edit"
@@ -149,26 +154,32 @@ describe('CommunityForm — "Excluir comunidade", a placeholder (2026-10-20, FRO
       />,
     );
     expect(document.querySelector('[data-community-reactivate]')).not.toBeNull();
-    const placeholder = document.querySelector('[data-pending-delete="community"]') as HTMLElement;
+    const control = document.querySelector('[data-delete-control="community"]') as HTMLElement;
     const button = screen.getByRole('button', { name: 'Excluir comunidade' });
-    expect(placeholder.contains(button)).toBe(true);
-    expect(button.getAttribute('aria-disabled')).toBe('true');
-    expect(placeholder.textContent).toContain('Em breve');
-    expect(
-      document.getElementById(button.getAttribute('aria-describedby') ?? '')?.textContent,
-    ).toBe('A exclusão de comunidades ainda não está disponível.');
+    expect(control.contains(button)).toBe(true);
+    expect(button.getAttribute('type')).toBe('button');
+    expect(button.hasAttribute('aria-disabled')).toBe(false);
+    expect(control.textContent).not.toContain('Em breve');
 
     fireEvent.click(button);
+    expect(screen.getByRole('dialog').textContent).toContain('Excluir comunidade?');
     for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir' }));
+    await waitFor(() => expect(actions.deleteCommunityAction).toHaveBeenCalledTimes(1));
+    expect(actions.deleteCommunityAction).toHaveBeenCalledWith(COMMUNITY);
+    expect(actions.updateCommunityAction).not.toHaveBeenCalled();
+    expect(actions.archiveCommunityAction).not.toHaveBeenCalled();
+    expect(actions.reactivateCommunityAction).not.toHaveBeenCalled();
   });
 
   it('6. an active community has only "Arquivar comunidade", and creating has neither', () => {
     renderEdit();
     expect(document.querySelector('[data-community-archive]')).not.toBeNull();
-    expect(document.querySelector('[data-pending-delete]')).toBeNull();
+    expect(document.querySelector('[data-delete-control]')).toBeNull();
     cleanup();
 
     render(<CommunityForm mode="create" tenantName="Rede Demo" />);
-    expect(document.querySelector('[data-pending-delete]')).toBeNull();
+    expect(document.querySelector('[data-delete-control]')).toBeNull();
   });
 });

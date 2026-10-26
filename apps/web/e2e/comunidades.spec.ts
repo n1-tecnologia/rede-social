@@ -516,9 +516,9 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
     await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
     await expect(page.locator('[data-community-edit]')).toHaveCount(0);
-    // 2026-10-20 (FRONT.pdf): the delete placeholder is the managers' only.
+    // 09.3: the live delete control is the managers' only.
     await expect(page.getByText(C.archived.note)).toBeVisible();
-    await expect(page.locator('[data-pending-delete]')).toHaveCount(0);
+    await expect(page.locator('[data-delete-control]')).toHaveCount(0);
 
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
@@ -526,13 +526,15 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
     await expect(edit).toBeVisible();
     await expect(edit).toHaveAttribute('href', `/comunidades/${SEEDED.archivedId}/editar`);
 
-    // …and the archived note carries "Excluir comunidade" under Reativar: disabled, "Em breve".
+    // …and the archived note carries the LIVE "Excluir comunidade" under Reativar (D-553). It is
+    // only looked at: the seeded archived community is never deleted.
     await expect(page.locator('[data-community-page-reactivate]')).toBeVisible();
-    const pendingDelete = page.locator('[data-pending-delete="community"]');
-    const deleteButton = pendingDelete.getByRole('button', { name: C.delete.action });
+    const control = page.locator('[data-delete-control="community"]');
+    const deleteButton = control.getByRole('button', { name: C.delete.action });
     await expect(deleteButton).toBeVisible();
-    await expect(deleteButton).toHaveAttribute('aria-disabled', 'true');
-    await expect(pendingDelete).toContainText(C.delete.soon);
+    await expect(deleteButton).toBeEnabled();
+    await expect(deleteButton).not.toHaveAttribute('aria-disabled', 'true');
+    await expect(control).not.toContainText('Em breve');
   });
 
   test('an archived community offers Reativar where an active one offers Arquivar', async ({
@@ -546,31 +548,24 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
     await expect(page.locator('[data-community-reactivate]')).toContainText(C.archived.reactivate);
     await expect(page.locator('[data-community-archive]')).toHaveCount(0);
 
-    // 2026-10-20 (FRONT.pdf): beside it, "Excluir comunidade" with "Em breve", a placeholder until
-    // the API can delete: aria-disabled, and a click changes nothing.
-    const pendingDelete = page.locator('[data-pending-delete="community"]');
-    const deleteButton = pendingDelete.getByRole('button', { name: C.delete.action });
+    // 09.3 (D-553): beside it, the LIVE "Excluir comunidade". It is looked at, never tapped, on the
+    // seeded community; its tap and its confirmation are driven on a community the case creates.
+    const control = page.locator('[data-delete-control="community"]');
+    const deleteButton = control.getByRole('button', { name: C.delete.action });
     await expect(deleteButton).toBeVisible();
-    await expect(deleteButton).toHaveAttribute('aria-disabled', 'true');
-    await expect(deleteButton).toHaveAccessibleDescription(C.delete.hint);
-    await expect(pendingDelete).toContainText(C.delete.soon);
-    // `force`: Playwright waits for an aria-disabled control to enable, and this one never does.
-    await deleteButton.click({ force: true });
-    await expect(page).toHaveURL(new RegExp(`/comunidades/${SEEDED.archivedId}/editar$`));
-    // No confirmation opens (the dev overlay's own dialog is not ours).
-    await expect(
-      page.locator('[role="dialog"][aria-modal="true"]:not([data-nextjs-dialog])'),
-    ).toHaveCount(0);
+    await expect(deleteButton).toBeEnabled();
+    await expect(deleteButton).not.toHaveAttribute('aria-disabled', 'true');
+    await expect(control).not.toContainText('Em breve');
 
     // Its ACTIVE positive control, in the same case: the danger archive row, and no reactivate row
-    // (and no delete placeholder: only an archived community offers it).
+    // (and no delete control: only an archived community offers it).
     await page.goto(`${hosts.demo}/comunidades`);
     await cardWith(page, SEEDED.first).click();
     const activeId = page.url().split('/').pop() ?? '';
     await page.goto(`${hosts.demo}/comunidades/${activeId}/editar`);
     await expect(page.locator('[data-community-archive]')).toBeVisible();
     await expect(page.locator('[data-community-reactivate]')).toHaveCount(0);
-    await expect(page.locator('[data-pending-delete]')).toHaveCount(0);
+    await expect(page.locator('[data-delete-control]')).toHaveCount(0);
   });
 
   test('archive → reactivate → archive is a round trip the list follows each way', async ({
@@ -615,6 +610,68 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
     // Leave the shared seed exactly as it was found.
     await archive();
     await expect(cards(page)).toHaveCount(SEEDED.total);
+  });
+
+  test('delete an archived community: confirm, land on the list, it is gone and its link is not found', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/nova`);
+
+    // The case deletes ONLY the community it creates: never a seeded one.
+    const name = `${E2E_COMMUNITY_PREFIX} excluir ${Date.now()}`;
+    await page.getByLabel(C.form.name.label).fill(name);
+    await page.getByRole('button', { name: C.actions.create }).click();
+    await page.waitForURL(/\/comunidades\/[0-9a-f-]{36}$/);
+    const communityId = page.url().split('/').pop() ?? '';
+
+    // An ACTIVE community offers no delete control.
+    await expect(page.locator('[data-delete-control]')).toHaveCount(0);
+
+    // Archive it through its form, with the confirm.
+    await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+    await untilHydrated(page.locator('[data-community-archive]'));
+    await page.locator('[data-community-archive]').click();
+    await page.getByRole('dialog').getByRole('button', { name: C.confirm.archive.confirm }).click();
+    await page.waitForURL(/\/comunidades$/);
+
+    // Its page now carries the live control under Reativar.
+    await page.goto(`${hosts.demo}/comunidades/${communityId}`);
+    const control = page.locator('[data-delete-control="community"]');
+    const trigger = control.getByRole('button', { name: C.delete.action });
+    await expect(trigger).toBeEnabled();
+    await untilHydrated(trigger);
+    // Dispatched: on a phone the trigger can sit under the dev pill or the BottomNav.
+    await trigger.dispatchEvent('click');
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText(C.confirm.delete.title);
+    await expect(dialog).toContainText(C.confirm.delete.body);
+    await expect(dialog.getByRole('button', { name: C.confirm.delete.cancel })).toBeVisible();
+    // Nothing is sent before the confirm: the community still opens.
+    await page.goto(`${hosts.demo}/comunidades/${communityId}`);
+    await expect(page.locator('[data-community-name]')).toBeVisible();
+    await untilHydrated(trigger);
+    await trigger.dispatchEvent('click');
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: C.confirm.delete.confirm, exact: true })
+      .click();
+
+    // The admin lands on the list, with the toast, and the name is on neither list.
+    await expect(page).toHaveURL(/\/comunidades$/, { timeout: 30_000 });
+    await expect(page.getByRole('status').filter({ hasText: C.toasts.deleted })).toBeVisible();
+    await expect(cardWith(page, name)).toHaveCount(0);
+    await page.goto(`${hosts.demo}/comunidades?status=arquivadas`);
+    await expect(cards(page).first()).toBeVisible();
+    await expect(cardWith(page, name)).toHaveCount(0);
+
+    // Its link is the existing not-found screen, for the admin and for a member.
+    await page.goto(`${hosts.demo}/comunidades/${communityId}`);
+    await expect(page.getByText(C.notFound.title, { exact: true })).toBeVisible();
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${communityId}`);
+    await expect(page.getByText(C.notFound.title, { exact: true })).toBeVisible();
   });
 });
 

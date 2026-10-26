@@ -758,9 +758,12 @@
       "specs": ["store.spec.ts", "courses-admin.spec.ts"]
     },
     {
-      "id": "pending-delete",
-      "why": "The placeholder delete buttons (2026-10-20, the client's FRONT.pdf): \"Excluir evento\" and \"Excluir comunidade\" are shown disabled with \"Em breve\" until the backend has the routes; events.spec and comunidades.spec check them for managers and their absence for members.",
-      "globs": ["apps/web/components/pending/**"],
+      "id": "delete-controls",
+      "why": "The live delete controls (09.3): \"Excluir evento\" and \"Excluir comunidade\" open a confirmation and call the new delete routes; events.spec and comunidades.spec drive them for managers and check their absence for members.",
+      "globs": [
+        "apps/web/app/(app)/eventos/[eventId]/DeleteEventControl.tsx",
+        "apps/web/app/(app)/comunidades/[communityId]/DeleteCommunityControl.tsx"
+      ],
       "specs": ["events.spec.ts", "comunidades.spec.ts"]
     }
   ]

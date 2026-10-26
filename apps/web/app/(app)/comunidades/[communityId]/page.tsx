@@ -19,7 +19,6 @@ import {
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
-import { PendingDeleteButton } from '@/components/pending/PendingDeleteButton';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { loadAuthorInstagrams, withAuthorInstagrams } from '@/lib/author-instagram';
@@ -45,6 +44,7 @@ import {
 } from '@/lib/story-view';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 import { CommunityPosts } from './CommunityPosts';
+import { DeleteCommunityControl } from './DeleteCommunityControl';
 import { LockedCommunity } from './LockedCommunity';
 import { ReactivateCommunity } from './ReactivateCommunity';
 
@@ -73,10 +73,10 @@ import { ReactivateCommunity } from './ReactivateCommunity';
  * here would break both a shared link and every post of that community already in the feed, which is
  * exactly what archiving must not do.
  *
- * **2026-10-20 (the client's FRONT.pdf):** a manager's archived note also carries "Excluir
- * comunidade" under Reativar, a placeholder by the owner's decision (`PendingDeleteButton`: disabled,
- * "Em breve", no action) until the API can delete a community (`docs/pendencias-backend.md` item 12).
- * A member never sees it.
+ * **09.3 (the client's FRONT.pdf item 12):** a manager's archived note also carries a LIVE "Excluir
+ * comunidade" under Reativar (`DeleteCommunityControl`, D-553): it exists only on an archived
+ * community, for whoever may manage communities, and always opens a confirmation first. A member and
+ * an active community never see it.
  *
  * **The compose entry is the shipped `ComposeFab`, unchanged** (D-70, UI-D-44), rendered by
  * `FeedList` from the `createHref` and `canPost` this page passes: mobile gets the floating control,
@@ -435,13 +435,7 @@ export default async function CommunityPage({
               <>
                 {tc('archived.note')}
                 <ReactivateCommunity communityId={community.id} />
-                <PendingDeleteButton
-                  kind="community"
-                  label={tc('delete.action')}
-                  soon={tc('delete.soon')}
-                  hint={tc('delete.hint')}
-                  className="mt-2"
-                />
+                <DeleteCommunityControl communityId={community.id} className="mt-2" />
               </>
             ) : (
               tc('archived.note')
