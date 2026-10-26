@@ -267,6 +267,24 @@ describe('events-reminders: the job follows moves and skips cancels', () => {
     expect(await runWindow(event.id, '24h', fireAt(event.startsAt, '24h'))).toEqual(['emitted']);
   });
 
+  it('deleted through the route: a waiting reminder is skipped and sends nothing (D-549)', async () => {
+    const event = await createIn('excluir', 30 * HOUR);
+    expect((await waiting(event.id)).map((job) => job.data.window).sort()).toEqual(['1h', '24h']);
+
+    const deleted = await request(`/v1/events/${event.id}`, tokens.admin, { method: 'DELETE' });
+    expect(deleted.status).toBe(204);
+    // Nothing cancels the jobs: they stay and become no-ops at fire time.
+    expect((await waiting(event.id)).map((job) => job.data.window).sort()).toEqual(['1h', '24h']);
+
+    await closeFanouts();
+    const before = (await notificationJobsOf(ids.demo)).length;
+    expect(await runWindow(event.id, '24h', fireAt(event.startsAt, '24h'))).toEqual(['skipped']);
+    expect(await runWindow(event.id, '1h', fireAt(event.startsAt, '1h'))).toEqual(['skipped']);
+    expect(await reminderRows(event.id, 'events.reminder_24h')).toEqual([]);
+    expect(await reminderRows(event.id, 'events.reminder_1h')).toEqual([]);
+    expect((await notificationJobsOf(ids.demo)).length).toBe(before);
+  });
+
   it('a worker 31 minutes late sends nothing, and enqueues no fan-out', async () => {
     const event = await createIn('atrasado', 26 * HOUR);
     await closeFanouts();
