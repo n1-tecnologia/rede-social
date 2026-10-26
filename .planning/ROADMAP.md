@@ -1411,7 +1411,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [x] 09.3-06-PLAN.md — A deleted community's publications leave Início, Reels and the post page: the `app.community_deleted_ids()` function, the RESTRICTIVE `feed_posts` policy, the WHERE predicates, the replaced `app.feed_locked_post_community`, pgTAP 112 and the 090 and 130 re-runs (PEND-05, PEND-13, tracer)
+- [ ] 09.3-06-PLAN.md — A deleted community's publications leave Início, Reels and the post page: the `app.community_deleted_ids()` function, the RESTRICTIVE `feed_posts` policy, the WHERE predicates, the replaced `app.feed_locked_post_community`, pgTAP 112 and the 090 and 130 re-runs (PEND-05, PEND-13, tracer)
 - [x] 09.3-08-PLAN.md — The web "Excluir comunidade" with the second dialog for the Loja refusal; `PendingDeleteButton` deleted; the affected-map update (PEND-07, PEND-13, tracer)
 
 **Wave 6** *(blocked on Wave 5 completion)*
@@ -1490,7 +1490,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
 | 09.1. Acesso por gateway de pagamento | 22/22 | In Progress|  |
 | 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 24/28 | In Progress|  |
-| 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 8/9 | In Progress|  |
+| 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 7/9 | In Progress|  |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 

@@ -13,7 +13,7 @@ progress:
   total_phases: 25
   completed_phases: 0
   total_plans: 277
-  completed_plans: 267
+  completed_plans: 266
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.3 (Pendências de backend do FRONT.pdf (INSERTED)) — EXECUTING
-Current Plan: 8
+Current Plan: 6
 Total Plans in Phase: 9
-Plan: 8 of 9
-Status: Ready to execute
-Last activity: 2026-10-26 — Phase 09.3 execution started
+Plan: 7 of 9 done (01, 02, 03, 04, 05, 07, 08); 06 is HALTED at Task 1 on the P41 plan pin, 09 is blocked by 06
+Status: Blocked (owner decision on 09.3-06)
+Last activity: 2026-10-26 — Phase 09.3 waves 1-5 executed except plan 06 (halted); Phase 09.2 stays paused at its plan 25 (Igor's hosted proofs)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
