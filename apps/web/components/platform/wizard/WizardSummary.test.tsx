@@ -685,8 +685,11 @@ describe('the confirmation uploads the app icon on the tenant’s primary', () =
     render(<CreateTenantDialog open onClose={() => {}} />);
     fireEvent.click(document.querySelector('[data-create-confirm]') as HTMLElement);
     await waitFor(() => expect(images.upload).toHaveBeenCalledTimes(2));
-    const sent = (kind: 'logo' | 'icon') =>
-      images.upload.mock.calls.find(([call]) => call.kind === kind)?.[0].file;
+    // The draft icon is the editor's own art: it goes up as `icon_art` (09.3, D-562).
+    const sent = (which: 'logo' | 'icon') =>
+      images.upload.mock.calls.find(
+        ([call]) => call.kind === (which === 'icon' ? 'icon_art' : which),
+      )?.[0].file;
     return { logo, icon, sent };
   }
 

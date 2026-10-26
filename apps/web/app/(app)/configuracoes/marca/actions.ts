@@ -5,6 +5,7 @@ import {
   adminTenantBodySchema,
   BRANDING_UPLOAD_ISSUES,
   type BrandingUploadIssue,
+  type BrandingUploadKind,
   brandingColorsBodySchema,
   brandingUploadBodySchema,
   brandingUploadIdSchema,
@@ -177,7 +178,7 @@ export async function getBrandingStatusAction(
  */
 export async function startBrandingUploadAction(
   _tenantId: string,
-  input: { kind: 'logo' | 'icon'; mime: string; size: number },
+  input: { kind: BrandingUploadKind; mime: string; size: number },
 ): Promise<StartBrandingUploadResult> {
   const body = brandingUploadBodySchema.safeParse(input);
   if (!body.success) {

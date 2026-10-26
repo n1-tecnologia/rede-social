@@ -1,6 +1,6 @@
 'use client';
 
-import { BRANDING_MAX_BYTES } from '@rede-social/contracts/branding';
+import { BRANDING_MAX_BYTES, type BrandingUploadKind } from '@rede-social/contracts/branding';
 import { FileDropZone, type FileDropZoneState, SectionTitle, useToast } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { useRef, useState } from 'react';
@@ -34,7 +34,7 @@ export function useSignedUpload({
   onCompleted,
 }: {
   tenantId: string;
-  kind: 'logo' | 'icon';
+  kind: BrandingUploadKind;
   actions: UploadActions;
   onCompleted: (view: BrandingView) => void;
 }) {

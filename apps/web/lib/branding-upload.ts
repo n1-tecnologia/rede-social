@@ -1,3 +1,4 @@
+import type { BrandingUploadKind } from '@rede-social/contracts/branding';
 import type {
   CompleteBrandingUploadResult,
   completeBrandingUploadAction,
@@ -39,7 +40,7 @@ export async function runBrandingUpload({
   onProcessing,
 }: {
   tenantId: string;
-  kind: 'logo' | 'icon';
+  kind: BrandingUploadKind;
   file: File;
   actions: UploadActions;
   onProgress?: (percent: number) => void;

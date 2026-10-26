@@ -44,9 +44,9 @@ export interface HomeScreenPreviewProps {
  * **`androidFill` (2026-10-20).** The client asked that a whole art set as the app's icon take the
  * entire circle, never a smaller square on a ring of the primary. With it the Android tile shows the
  * art edge to edge, clipped to the circle (`data-android-icon="fill"`), and paints no ground of its
- * own, so no ring of another colour can show at the edge. This is the PREVIEW: the icon a phone
- * installs is still the worker's maskable one (the art at 80% over the primary) until the worker
- * renders an opaque override full-bleed (`docs/pendencias-backend.md` item 3).
+ * own, so no ring of another colour can show at the edge. This is the PREVIEW of what the worker
+ * now installs (09.3 D-563): an opaque own art, sent by the editor as `icon_art`, fills the whole
+ * maskable icon; a transparent icon or one derived from the logo keeps the art at 80% over the primary.
  *
  * Presentational: the caller draws the icon (`renderIcon`). The wallpaper is a dark-theme scope
  * (tokens only), so the labels read as on a phone whatever the panel's theme. It never carries

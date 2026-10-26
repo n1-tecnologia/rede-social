@@ -277,7 +277,7 @@ describe('the confirmation — the database task', () => {
     expect(harness.attach).not.toHaveBeenCalled();
 
     await tick(2000);
-    expect(order).toEqual(['logo', 'icon', 'domain']);
+    expect(order).toEqual(['logo', 'icon_art', 'domain']);
     expect(harness.router.replace).toHaveBeenCalledWith(
       `/plataforma/novo/${ID}/convite?toast=created`,
     );

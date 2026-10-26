@@ -23,7 +23,8 @@ export interface IconOverrideUploadProps {
 /**
  * The "Ícone do app" of the Marca tab (D-28, 2026-10-09): the app-icon editor (`AppIconEditor`)
  * over the square-override upload. The composed icon goes through the same signed-PUT flow as any
- * override (`useSignedUpload` with `kind: 'icon'`), and the editor closes once it is recorded; the
+ * override (`useSignedUpload` with `kind: 'icon_art'`: the editor's composed art is the tenant's own art,
+ * the marker 09.3 D-562 adds so the worker fills the Android icon with it), and the editor closes once it is recorded; the
  * worker then derives the icon set from it ("Gerados a partir do ícone do app"). With an icon of its
  * own, a ghost-danger "Remover" opens a `ConfirmDialog` ("Remover o ícone do app?") calling
  * `removeIconOverrideAction`; afterwards the icons re-derive from the logo, or, for a tenant without
@@ -44,7 +45,7 @@ export function IconOverrideUpload({
   const t = useTranslations('platformBranding');
   const toast = useToast();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const upload = useSignedUpload({ tenantId, kind: 'icon', actions, onCompleted });
+  const upload = useSignedUpload({ tenantId, kind: 'icon_art', actions, onCompleted });
   const editorRoot = useRef<HTMLDivElement>(null);
   /** The dialog confirmed a removal: its closing hands the focus to the editor. */
   const removed = useRef(false);

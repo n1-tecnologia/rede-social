@@ -169,10 +169,11 @@ function availableSource(
 
 /**
  * "Ícone do app" (2026-10-09): how the installed app shows on a phone's home screen, composed here
- * and sent as the square override (`kind: 'icon'`, D-28) by the caller (`onApply`): the Marca tab
- * uploads it at once (`IconOverrideUpload`), the wizard keeps it in its draft until the tenant is
- * created. The worker derives the favicon and the 192/512/maskable/Apple set from it as from any
- * override, and the manifest follows on its own.
+ * and sent as the tenant's own art (`kind: 'icon_art'`, D-28 and 09.3 D-562) by the caller
+ * (`onApply`): the Marca tab uploads it at once (`IconOverrideUpload`), the wizard keeps it in its
+ * draft until the tenant is created. The worker derives the favicon and the 192/512/maskable/Apple
+ * set from it as from any override (an opaque art fills the whole maskable icon, D-563), and the
+ * manifest follows on its own.
  *
  * Closed by default: the home screen as it is today (`HomeScreenPreview`, the icon of its own or the
  * logo the icons come from, else the set the server still serves, `derivedIconUrl`) with

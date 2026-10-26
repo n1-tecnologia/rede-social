@@ -15,6 +15,8 @@ import type { BrandingView } from '@/lib/branding-view';
  *  1. A tenant with neither a logo nor an icon of its own whose derived set is still served (an
  *     override removed, the worker deriving again from the previous render): the closed editor
  *     previews that set's Apple icon, never empty tiles.
+ *  3. (09.3, D-562) The editor's apply sends the composed art as upload kind `icon_art` (the marker
+ *     the worker reads); the logo zone still sends `logo`.
  *  2. A confirmed "Remover" leaves with the icon, so the dialog's trap has no opener to return the
  *     focus to: once the dialog has closed, "Personalizar ícone" holds it, never `<body>`. A
  *     refused removal keeps "Remover", where the trap returns it.
@@ -26,6 +28,7 @@ const harness = await vi.hoisted(async () => {
   return {
     messages: loadMessages(join(process.cwd(), 'messages', 'pt-BR')),
     toast: { show: vi.fn(), dismiss: vi.fn() },
+    onApply: null as null | ((file: File, settings: never) => boolean | Promise<boolean>),
   };
 });
 
@@ -50,10 +53,24 @@ vi.mock('@rede-social/ui', async (orig) => ({
   useToast: () => harness.toast,
 }));
 
+// The real editor, with its `onApply` captured: the canvas composition itself is not under test here,
+// what `onApply` hands to the upload is.
+vi.mock('./AppIconEditor', async (orig) => {
+  const actual = await orig<typeof import('./AppIconEditor')>();
+  return {
+    ...actual,
+    AppIconEditor: (props: React.ComponentProps<typeof actual.AppIconEditor>) => {
+      harness.onApply = props.onApply;
+      return <actual.AppIconEditor {...props} />;
+    },
+  };
+});
+
 // The dialog animates in and out; a cancelled spring rejects AFTER the run ends under happy-dom.
 MotionGlobalConfig.skipAnimations = true;
 
 const { IconOverrideUpload } = await import('./IconOverrideUpload');
+const { LogoUpload } = await import('./LogoUpload');
 
 type Copy = {
   icon: { remove: string; confirm: string };
@@ -114,6 +131,8 @@ const tiles = () =>
 
 beforeEach(() => {
   removeIcon.mockReset();
+  vi.mocked(actions.start).mockReset().mockResolvedValue({ ok: false, code: 'generic' });
+  harness.onApply = null;
   harness.toast.show.mockReset();
 });
 afterEach(cleanup);
@@ -160,5 +179,37 @@ describe('IconOverrideUpload', () => {
 
     expect(harness.toast.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
     expect(document.activeElement).toBe(screen.getByRole('button', { name: B.icon.remove }));
+  });
+
+  it('3. the editor apply starts the upload with kind icon_art, and the logo zone still sends logo', async () => {
+    render(<Tab initial={makeView({ iconUrls: SET })} />);
+    const art = new File([new Uint8Array(32)], 'icone-do-app.png', { type: 'image/png' });
+    await act(async () => {
+      await harness.onApply?.(art, undefined as never);
+    });
+    expect(actions.start).toHaveBeenCalledExactlyOnceWith(TENANT, {
+      kind: 'icon_art',
+      mime: 'image/png',
+      size: 32,
+    });
+    cleanup();
+
+    vi.mocked(actions.start).mockClear();
+    const { container } = render(
+      <LogoUpload tenantId={TENANT} view={makeView()} actions={actions} onCompleted={() => {}} />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, {
+        target: { files: [new File([new Uint8Array(16)], 'logo.png', { type: 'image/png' })] },
+      });
+    });
+    await waitFor(() =>
+      expect(actions.start).toHaveBeenCalledExactlyOnceWith(TENANT, {
+        kind: 'logo',
+        mime: 'image/png',
+        size: 16,
+      }),
+    );
   });
 });

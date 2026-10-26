@@ -437,7 +437,8 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
       const file = task === 'icon' ? await iconOnPrimary(image.file) : image.file;
       const outcome = await runBrandingUpload({
         tenantId: id,
-        kind: task,
+        // The draft icon is always the editor's own composition (09.3 D-562): it goes up as `icon_art`.
+        kind: task === 'icon' ? 'icon_art' : 'logo',
         file,
         actions: UPLOAD_ACTIONS,
       }).catch((error: unknown) => {
