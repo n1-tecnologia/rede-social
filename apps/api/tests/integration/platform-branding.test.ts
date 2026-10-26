@@ -823,7 +823,7 @@ describe('own-art icon (09.3, D-562, D-563)', () => {
     }
   });
 
-  it('2. control: the same bytes sent as kind icon stay unmarked and keep the margin over the primary', async () => {
+  it('2. control and reset: the same bytes sent as kind icon right after icon_art reset the marker and keep the margin', async () => {
     const { res } = await uploadAndComplete(tenantId, 'icon', 'image/png', ART_PNG);
     expect(res.status).toBe(200);
     const branding = platformTenantDetailSchema.parse(await res.json()).tenant.branding;
@@ -831,6 +831,201 @@ describe('own-art icon (09.3, D-562, D-563)', () => {
     const maskable = await maskableAt(tenantId, branding.iconVersion);
     for (const [x, y] of CORNERS) expect(await readPixel(maskable, x, y)).toEqual(PRIMARY_RGB);
     expect(await readPixel(maskable, 256, 256)).toEqual(GREEN);
+  });
+
+  /** A marked completion on `tid`: icon_art upload -> complete -> the parsed branding. */
+  async function markArt(tid: string, bytes: Buffer = ART_PNG) {
+    const { res, uploadId } = await uploadAndComplete(tid, 'icon_art', 'image/png', bytes);
+    expect(res.status).toBe(200);
+    return {
+      uploadId,
+      branding: platformTenantDetailSchema.parse(await res.json()).tenant.branding,
+    };
+  }
+
+  const storedMarker = async (tid: string) => {
+    const [row] = await adminSql<{ marker: string | null; version: string; icon: string | null }[]>`
+      select branding->>'iconOwnArt' as marker, branding->>'iconVersion' as version,
+             branding->>'iconUrl' as icon
+        from public.tenants where id = ${tid}::uuid`;
+    return row;
+  };
+
+  it('3. P34: iconUrl, iconOwnArt and the bumped iconVersion are in the same row state before any job ran', async () => {
+    const before = await storedMarker(tenantId);
+    const { branding } = await markArt(tenantId);
+    const row = await storedMarker(tenantId);
+    expect(row?.marker).toBe('true');
+    expect(row?.icon).toBe(branding.iconUrl);
+    expect(Number(row?.version)).toBe(Number(before?.version) + 1);
+    await deriveIconsJob.handler({ tenantId, iconVersion: branding.iconVersion, attempt: 0 });
+  });
+
+  it('4. P32: two consecutive icon_art saves leave two versioned sets, the older objects untouched', async () => {
+    const first = (await markArt(tenantId)).branding.iconVersion;
+    await deriveIconsJob.handler({ tenantId, iconVersion: first, attempt: 0 });
+    const second = (await markArt(tenantId)).branding.iconVersion;
+    expect(second).toBe(first + 1);
+    await deriveIconsJob.handler({ tenantId, iconVersion: second, attempt: 0 });
+    const names = await objectNames(tenantId);
+    for (const version of [first, second]) {
+      expect(names).toContain(`${tenantId}/branding/icons/${version}/maskable-512.png`);
+    }
+    const firstSet = await adminSql<{ name: string }[]>`
+      select name from storage.objects where bucket_id = 'branding'
+         and name like ${`${tenantId}/branding/icons/${first}/%`}`;
+    expect(firstSet).toHaveLength(5);
+  });
+
+  it('5. P31: a colour save between the completion and the derivation keeps the marker and the full-bleed set', async () => {
+    const { branding } = await markArt(tenantId);
+    const saved = await putColors(tenantId, { primary: '#1d4ed8', secondary: '#60a5fa' });
+    expect(saved.status).toBe(200);
+    const afterSave = platformTenantDetailSchema.parse(await saved.json()).tenant.branding;
+    expect(afterSave.iconOwnArt).toBe(true);
+    expect((await storedMarker(tenantId))?.marker).toBe('true');
+    expect(afterSave.iconVersion).toBeGreaterThan(branding.iconVersion);
+    const maskable = await maskableAt(tenantId, afterSave.iconVersion);
+    for (const [x, y] of CORNERS) {
+      expect(await readPixel(maskable, x, y)).toEqual(GREEN);
+    }
+  });
+
+  it('6. P31: a derivation superseded by a newer iconVersion writes nothing', async () => {
+    const { branding } = await markArt(tenantId);
+    await deriveIconsJob.handler({ tenantId, iconVersion: branding.iconVersion, attempt: 0 });
+    const settled = (await tenantDetail(tenantId)).tenant.branding;
+    await markArt(tenantId);
+    const original = brandingInternals.beforeIconWrite;
+    brandingInternals.beforeIconWrite = async () => {
+      await adminSql`
+        update public.tenants
+           set branding = jsonb_set(branding, '{iconVersion}', to_jsonb((branding->>'iconVersion')::int + 1))
+         where id = ${tenantId}::uuid`;
+    };
+    try {
+      const result = await deriveTenantIcons(tenantId, { actor: { userId: 'test' } });
+      expect(result.outcome).toBe('superseded');
+    } finally {
+      brandingInternals.beforeIconWrite = original;
+    }
+    const after = (await tenantDetail(tenantId)).tenant.branding;
+    expect(after.iconUrls).toEqual(settled.iconUrls);
+    expect(after.iconOwnArt).toBe(true);
+  });
+
+  it('7. P35: DELETE …/branding/icon clears the marker once; a second DELETE writes nothing', async () => {
+    const { branding } = await markArt(tenantId);
+    const res = await platform(`/tenants/${tenantId}/branding/icon`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    const cleared = platformTenantDetailSchema.parse(await res.json()).tenant.branding;
+    expect(cleared.iconOwnArt).toBe(false);
+    expect(cleared.iconUrl).toBeNull();
+    expect(cleared.iconVersion).toBe(branding.iconVersion + 1);
+    expect((await storedMarker(tenantId))?.marker).toBe('false');
+
+    const again = await platform(`/tenants/${tenantId}/branding/icon`, { method: 'DELETE' });
+    expect(again.status).toBe(200);
+    expect(platformTenantDetailSchema.parse(await again.json()).tenant.branding.iconVersion).toBe(
+      cleared.iconVersion,
+    );
+  });
+
+  it('8. D-563: a transparent own art is marked but keeps the margin over the primary', async () => {
+    const { branding } = await markArt(tenantId, LOGO_PNG);
+    expect(branding.iconOwnArt).toBe(true);
+    const maskable = await maskableAt(tenantId, branding.iconVersion);
+    const primary = (await tenantDetail(tenantId)).tenant.branding.colors.primary;
+    expect(primary).toBe('#1d4ed8');
+    for (const [x, y] of CORNERS) {
+      expect(await readPixel(maskable, x, y)).toEqual({ r: 29, g: 78, b: 216, a: 255 });
+    }
+  });
+
+  it('9. D-564, P33: no backfill. A seeded brand reads false and is untouched, an empty brand derives nothing', async () => {
+    const seeded = await adminSql<
+      { id: string; marker: boolean; version: string; icons: string | null }[]
+    >`
+      select id::text, (branding->>'iconOwnArt') is not distinct from 'true' as marker, branding->>'iconVersion' as version,
+             branding->>'iconUrls' as icons
+        from public.tenants where slug in ('rede-demo', 'rede-lab')`;
+    expect(seeded).toHaveLength(2);
+    for (const row of seeded) {
+      // Never marked: absent in a seeded row, or `false` once an earlier save rewrote the object.
+      expect(row.marker).toBe(false);
+      const detail = await tenantDetail(row.id);
+      expect(detail.tenant.branding.iconOwnArt).toBe(false);
+      const [after] = await adminSql<{ version: string; icons: string | null }[]>`
+        select branding->>'iconVersion' as version, branding->>'iconUrls' as icons
+          from public.tenants where id = ${row.id}::uuid`;
+      expect(after).toEqual({ version: row.version, icons: row.icons });
+      const jobs = await adminSql<{ id: string }[]>`
+        select id from pgboss.job_common
+         where name = 'kernel.branding-derive-icons' and singleton_key = ${row.id}
+           and created_on >= ${new Date(RUN)}`;
+      expect(jobs).toHaveLength(0);
+    }
+
+    const empty = (await createThrowawayTenant('pb-art-empty')).id;
+    await adminSql`update public.tenants set branding = '{}'::jsonb where id = ${empty}::uuid`;
+    const detail = await tenantDetail(empty);
+    expect(detail.tenant.branding.iconOwnArt).toBe(false);
+    expect(detail.tenant.branding.iconUrls).toBeNull();
+    const result = await deriveTenantIcons(empty, { actor: { userId: 'test' } });
+    expect(result.outcome).toBe('no_source');
+    expect((await objectNames(empty)).filter((n) => n.includes('/icons/'))).toHaveLength(0);
+  });
+
+  it('10. PEND-13: tenant B cannot complete tenant A icon_art id; A is untouched; a member is refused', async () => {
+    const other = (await createThrowawayTenant('pb-art-b')).id;
+    const start = await startUpload(tenantId, {
+      kind: 'icon_art',
+      mime: 'image/png',
+      size: ART_PNG.length,
+    });
+    const { uploadId, signedUrl } = (await start.json()) as { uploadId: string; signedUrl: string };
+    expect((await putToSignedUrl(signedUrl, ART_PNG, 'image/png')).ok).toBe(true);
+    const [before] = await adminSql<{ branding: string }[]>`
+      select branding::text as branding from public.tenants where id = ${tenantId}::uuid`;
+
+    const crossed = await complete(other, uploadId);
+    expect(crossed.status).toBe(404);
+    expect((await envelope(crossed)).details?.upload).toBe('object_missing');
+    const [after] = await adminSql<{ branding: string }[]>`
+      select branding::text as branding from public.tenants where id = ${tenantId}::uuid`;
+    expect(after?.branding).toBe(before?.branding);
+    expect((await storedMarker(other))?.marker ?? null).toBeNull();
+
+    const traversal = await complete(tenantId, '..%2Ficon_art-x');
+    expect(traversal.status).toBe(400);
+    const lookAlike = await complete(tenantId, uploadId.replace('icon_art-', 'icon_artx-'));
+    expect(lookAlike.status).toBe(400);
+    expect((await storedMarker(other))?.marker ?? null).toBeNull();
+
+    if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
+    const member = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+    const refused = await startUpload(
+      tenantId,
+      { kind: 'icon_art', mime: 'image/png', size: 10 },
+      member,
+    );
+    expect(refused.status).toBe(403);
+  });
+
+  it('11. T-09.3-07: the public by-host answer never carries the marker', async () => {
+    const created = await createThrowawayTenant('pb-art-host');
+    const { branding } = await markArt(created.id);
+    expect(branding.iconOwnArt).toBe(true);
+    await deriveIconsJob.handler({
+      tenantId: created.id,
+      iconVersion: branding.iconVersion,
+      attempt: 0,
+    });
+    const res = await byHost(created.host);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('iconOwnArt');
+    expect(hostTenantSchema.parse(JSON.parse(text)).branding.iconUrls).not.toBeNull();
   });
 });
 

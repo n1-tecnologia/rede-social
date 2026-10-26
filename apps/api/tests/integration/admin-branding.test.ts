@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type AdminBranding, adminBrandingSchema, iconsUpToDate } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { deriveIconsJob } from '@rede-social/core/server/branding/derive-icons-job';
-import { deriveIconSet } from '@rede-social/core/server/branding/icons';
+import { deriveIconSet, readPixel } from '@rede-social/core/server/branding/icons';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -47,6 +47,10 @@ const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="12
 const SQUARE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#dc2626"/></svg>`;
 let LOGO_PNG: Buffer;
 let SQUARE_PNG: Buffer;
+/** An opaque square of one colour (alpha 255 at every pixel): the editor's own art, 09.3. */
+const OPAQUE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="#10b981"/></svg>`;
+const ART_GREEN = { r: 16, g: 185, b: 129, a: 255 };
+let OPAQUE_PNG: Buffer;
 
 const request = (
   path: string,
@@ -113,7 +117,7 @@ async function removeRunObjects(key: 'demo' | 'lab'): Promise<void> {
 /** Start → PUT the bytes straight to Storage → the upload id (never through the API). */
 async function uploadBytes(
   token: string,
-  kind: 'logo' | 'icon',
+  kind: 'logo' | 'icon' | 'icon_art',
   bytes: Buffer,
   host?: string,
 ): Promise<{ uploadId: string; path: string }> {
@@ -167,6 +171,10 @@ beforeAll(async () => {
   SQUARE_PNG = (
     await deriveIconSet(Buffer.from(SQUARE_SVG), { primaryHex: '#7c3aed', mime: 'image/svg+xml' })
   ).i512;
+
+  OPAQUE_PNG = (
+    await deriveIconSet(Buffer.from(OPAQUE_SVG), { primaryHex: '#10b981', mime: 'image/svg+xml' })
+  ).maskable512;
 
   tokens.admin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
   tokens.member = await signInAs('member@rede-demo.local', SEED_PASSWORD);
@@ -339,6 +347,68 @@ describe('uploads on the tenant lane', () => {
       await request('/v1/admin/branding/icon', tokens.admin, { method: 'DELETE' }),
     );
     expect(again.tenant.branding.iconVersion).toBe(after.tenant.branding.iconVersion);
+  });
+
+  it('the own-art icon on the tenant lane: marked, derived full-bleed, refused to member and support (09.3)', async () => {
+    // Fixture: the art itself has opaque corners, or a green corner below would prove nothing.
+    for (const [x, y] of [
+      [2, 2],
+      [509, 509],
+    ] as [number, number][]) {
+      expect(await readPixel(OPAQUE_PNG, x, y)).toEqual(ART_GREEN);
+    }
+
+    for (const token of [tokens.member, tokens.support]) {
+      const refused = await request('/v1/admin/branding/uploads', token, {
+        method: 'POST',
+        body: { kind: 'icon_art', mime: 'image/png', size: OPAQUE_PNG.length },
+      });
+      expect(refused.status).toBe(403);
+    }
+
+    const { uploadId } = await uploadBytes(tokens.admin, 'icon_art', OPAQUE_PNG);
+    expect(uploadId.startsWith('icon_art-')).toBe(true);
+    const completed = await adminBrand(await completeUpload(tokens.admin, uploadId));
+    expect(completed.tenant.branding.iconOwnArt).toBe(true);
+    const read = await adminBrand(await request('/v1/admin/branding', tokens.admin));
+    expect(read.tenant.branding.iconOwnArt).toBe(true);
+
+    await deriveIconsJob.handler({
+      tenantId: ids.demo,
+      iconVersion: completed.tenant.branding.iconVersion,
+      attempt: 0,
+    });
+    const derived = await adminBrand(await request('/v1/admin/branding', tokens.admin));
+    const maskable = await fetch(derived.tenant.branding.iconUrls?.maskable512 ?? '');
+    const bytes = Buffer.from(await maskable.arrayBuffer());
+    for (const [x, y] of [
+      [2, 2],
+      [509, 2],
+      [2, 509],
+      [509, 509],
+    ] as [number, number][]) {
+      expect(await readPixel(bytes, x, y)).toEqual(ART_GREEN);
+    }
+
+    // A plain icon afterwards resets the marker; removal keeps it cleared.
+    const plain = await uploadBytes(tokens.admin, 'icon', OPAQUE_PNG);
+    const reset = await adminBrand(await completeUpload(tokens.admin, plain.uploadId));
+    expect(reset.tenant.branding.iconOwnArt).toBe(false);
+  });
+
+  it('a rede-lab icon_art id completed from rede-demo is the same bare 404 and lab keeps its brand (09.3)', async () => {
+    const labBefore = await brandRow(ids.lab);
+    const lab = await uploadBytes(tokens.labAdmin, 'icon_art', OPAQUE_PNG, HOSTS.lab);
+    const foreign = await completeUpload(tokens.admin, lab.uploadId);
+    const unknown = await completeUpload(tokens.admin, `icon_art-${randomUUID()}.png`);
+    expect(foreign.status).toBe(404);
+    expect(unknown.status).toBe(404);
+    expect((await envelope(foreign)).error.details).toEqual(
+      (await envelope(unknown)).error.details,
+    );
+    expect(await brandRow(ids.lab)).toEqual(labBefore);
+    // An earlier colour save in this file rewrote lab's whole object, so the key may read `false`; it is never `true`.
+    expect((await brandRow(ids.lab)).branding.iconOwnArt).not.toBe(true);
   });
 
   it('a rede-lab uploadId completed from rede-demo is the same bare 404 a nonexistent one gets, and changes nothing', async () => {
