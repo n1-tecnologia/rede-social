@@ -424,6 +424,7 @@ describe('brand schemas keep the 02-01 rules (the look of 2026-10-03 added, defa
       iconUrl: null,
       iconUrls: null,
       iconVersion: 0,
+      iconOwnArt: false,
       colors: {},
       look: emptyBrandLook(),
     });
