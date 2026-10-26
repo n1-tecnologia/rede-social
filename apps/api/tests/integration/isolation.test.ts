@@ -7392,6 +7392,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET   /v1/events/{id}/edit                   | lab event: bare 404, no URL or code in the body     |
     // | PUT   /v1/events/{id}                        | lab event: bare 404, the lab row byte-identical     |
     // | PATCH /v1/events/{id}                        | lab event: bare 404, still active                   |
+    // | DELETE /v1/events/{id}                       | lab event: bare 404, still live                     |
     // | GET   /v1/events/{id}/attendance             | lab event: bare 404                                 |
     // | GET   /v1/events/{id}/attendance/summary     | lab event: bare 404, the lab code never printed     |
     // | POST  /v1/events/{id}/checkin-code           | lab event: bare 404, the lab code unchanged         |
@@ -7472,6 +7473,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
           ['edit read', 'GET', `/v1/events/${id}/edit`, undefined],
           ['edit', 'PUT', `/v1/events/${id}`, body],
           ['cancel', 'PATCH', `/v1/events/${id}`, { status: 'cancelled' }],
+          ['delete', 'DELETE', `/v1/events/${id}`, undefined],
           ['attendance', 'GET', `/v1/events/${id}/attendance`, undefined],
           ['summary', 'GET', `/v1/events/${id}/attendance/summary`, undefined],
           ['new door code', 'POST', `/v1/events/${id}/checkin-code`, undefined],
@@ -7516,6 +7518,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         ['GET', `/v1/events/${ownEvent}/edit`, undefined],
         ['PUT', `/v1/events/${ownEvent}`, body],
         ['PATCH', `/v1/events/${ownEvent}`, { status: 'active' }],
+        ['DELETE', `/v1/events/${ownEvent}`, undefined],
         ['GET', `/v1/events/${ownEvent}/attendance`, undefined],
         ['GET', `/v1/events/${ownEvent}/attendance/summary`, undefined],
         ['POST', `/v1/events/${ownEvent}/checkin-code`, undefined],
@@ -7525,6 +7528,13 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
           `${method} ${path}`,
         );
       }
+      // Positive control for the delete: the own event was cancelled above, and a cancelled event
+      // deletes all the same (D-548). After it the edit read is the bare 404.
+      expect((await asAdmin('DELETE', `/v1/events/${ownEvent}`)).status).toBe(204);
+      await expectBareNotFound(
+        await asAdmin('GET', `/v1/events/${ownEvent}/edit`),
+        'edit read after delete',
+      );
       expect(await labTrace()).toEqual(before);
     } finally {
       if (created.length > 0) {

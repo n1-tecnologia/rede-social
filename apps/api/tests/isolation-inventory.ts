@@ -219,6 +219,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   },
   'PUT /v1/events/:eventId': { case: 'inventory sweep: events' },
   'PATCH /v1/events/:eventId': { case: 'inventory sweep: events' },
+  'DELETE /v1/events/:eventId': { case: 'inventory sweep: events' },
   'POST /v1/events/:eventId/check-in': { case: 'b4' },
   'POST /v1/events/:eventId/enter': { case: 'b4' },
   'GET /v1/events/:eventId/attendance/summary': { case: 'inventory sweep: events' },

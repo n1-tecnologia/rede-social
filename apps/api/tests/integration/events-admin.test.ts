@@ -502,11 +502,14 @@ describe('events admin', () => {
       body: JSON.stringify({ status: 'cancelled', title: 'x' }),
     });
     expect(crafted.status).toBe(400);
-    // And there is no delete verb at all (D-214).
-    const del = await request(`/v1/events/${created.id}`, tokens.demoAdmin, { method: 'DELETE' });
-    expect([404, 405]).toContain(del.status);
+    // A member cannot delete either (the delete itself is proved in events-delete.test.ts, 09.3).
+    const memberDelete = await request(`/v1/events/${created.id}`, tokens.demoMember, {
+      method: 'DELETE',
+    });
+    expect(memberDelete.status).toBe(403);
     const [still] = await adminSql<{ n: number }[]>`
-      select count(*)::int as n from public.events where id = ${created.id}::uuid`;
+      select count(*)::int as n from public.events
+       where id = ${created.id}::uuid and deleted_at is null`;
     expect(still?.n).toBe(1);
   });
 });

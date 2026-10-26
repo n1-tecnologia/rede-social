@@ -32,6 +32,7 @@ import { addEventPhoto, listEventPhotos, removeEventPhoto } from './photos';
 import {
   checkInEvent,
   createEvent,
+  deleteEvent,
   enterEvent,
   getAttendanceSummary,
   getEvent,
@@ -260,7 +261,7 @@ const statusRoute = createRoute({
   responses: {
     200: {
       description:
-        'The event after the status write. `cancelled` cancels an active event that has not ended; `active` reactivates a cancelled event that has not started. Asking for the status the event already has writes nothing and emits nothing. There is no delete (D-214).',
+        'The event after the status write. `cancelled` cancels an active event that has not ended; `active` reactivates a cancelled event that has not started. Asking for the status the event already has writes nothing and emits nothing. Deleting is the separate `DELETE /v1/events/{eventId}` (D-548).',
       content: { 'application/json': { schema: eventSummarySchema } },
     },
     400: {
@@ -500,6 +501,29 @@ const removePhotoRoute = createRoute({
   },
 });
 
+/**
+ * Deleting an event (09.3, D-548): the literal manage guard. Any event of the tenant qualifies
+ * (active, cancelled or past, answers or not); it is a soft delete and silent (D-549).
+ */
+const deleteEventRoute = createRoute({
+  method: 'delete',
+  path: '/{eventId}',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: { params: eventParamSchema },
+  responses: {
+    204: {
+      description:
+        'The event is soft-deleted and leaves every list, detail, edit read, calendar export, reminder and photo surface. Its answers, check-ins and photos stay in the database and keep counting for the member. Nobody is notified.',
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or already deleted. One bare code, no details (D-23).',
+    },
+  },
+});
+
 /** A 204 that no cache may keep: the gallery just changed. */
 const noContent = () =>
   new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
@@ -569,5 +593,9 @@ export const eventsRoutes = events
   .openapi(removePhotoRoute, async (c) => {
     const { eventId, photoId } = c.req.valid('param');
     await removeEventPhoto(c.get('ctx'), eventId, photoId);
+    return noContent();
+  })
+  .openapi(deleteEventRoute, async (c) => {
+    await deleteEvent(c.get('ctx'), c.req.valid('param').eventId);
     return noContent();
   });

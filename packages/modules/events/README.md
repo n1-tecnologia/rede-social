@@ -3,7 +3,7 @@
 The tenant's events (EVENT-01..07): a timezone-aware start and end, in person or online, with the
 meeting URL and the check-in code kept in the admin-only `event_secrets` table. Members see the
 upcoming and past lists, answer (RSVP), check in at the venue with the code and enter online events;
-admins create, edit, cancel and reactivate events and read attendance. Reminders fire 24 h and 1 h
+admins create, edit, cancel, reactivate and delete events and read attendance. Reminders fire 24 h and 1 h
 before the start through a deferred job. Its schema references only kernel tables (`tenants`,
 `users`, `media_assets`), which is why it is the module the reuse fixture mounts.
 
@@ -28,7 +28,7 @@ Main contract names (`./contracts`): `eventInputSchema`, `eventQuerySchema`, `ev
 vocabulary `EVENT_ISSUES`, `EVENTS_QUEUES` and `EVENTS_NOTIFICATION_KINDS`.
 
 Main server names (`./server`): `eventsRoutes`, `listEvents`, `getEvent`, `getNextEvent`,
-`createEvent`, `updateEvent`, `setEventStatus`, `rsvpEvent`, `checkInEvent`, `enterEvent`,
+`createEvent`, `updateEvent`, `setEventStatus`, `deleteEvent`, `rsvpEvent`, `checkInEvent`, `enterEvent`,
 `listAttendance`, `getAttendanceSummary`, `regenerateCheckinCode`, `armEventReminders`,
 `eventReminderJob`, `eventsNotificationSources`, `eventsSystemCtx`.
 
@@ -43,6 +43,8 @@ Payloads carry ids, statuses and instants only, never a title, URL or code.
 - `event.rsvp`: `tenantId`, `eventId`, `userId`, `status`, `previousStatus`, `startsAt`
 - `event.checked_in`: `tenantId`, `eventId`, `userId`, `walkIn`, `via`, `startsAt` (first check-in only)
 - `event.reminder_due`: `tenantId`, `eventId`, `window`, `startsAt` (emitted by the reminder job)
+
+Deleting an event emits nothing: it is silent, and its scheduled reminders skip themselves when they fire.
 
 ## Events consumed
 

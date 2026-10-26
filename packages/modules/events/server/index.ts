@@ -20,6 +20,7 @@ export { eventsRoutes } from './routes';
 export {
   checkInEvent,
   createEvent,
+  deleteEvent,
   enterEvent,
   getAttendanceSummary,
   getEvent,

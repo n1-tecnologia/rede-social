@@ -1088,8 +1088,8 @@ export async function updateEvent(
 
 /**
  * `PATCH /v1/events/{eventId} { status }` (06-04, D-214): cancel and reactivate, the ONLY status
- * writes. There is no delete anywhere (D-214, T-06-23): a cancelled event stays in every list with
- * its `Cancelado` state until it ends (D-201).
+ * writes. Deleting is the separate `deleteEvent` (09.3, D-548): a cancelled event stays in every
+ * list with its `Cancelado` state until it ends (D-201) unless an admin deletes it.
  *
  * Each transition is ONE guarded UPDATE, so the rule and the write are the same statement:
  *  - cancel: `set status = 'cancelled', cancelled_at = now() where status = 'active' and now() <
@@ -1193,6 +1193,49 @@ export async function setEventStatus(
   );
 
   return toEvent(row);
+}
+
+/**
+ * `DELETE /v1/events/{eventId}` (09.3, D-548, PEND-01): the admin removes ANY event of the tenant,
+ * active, cancelled or already past, with or without answers or check-ins. This reverses Phase 6's
+ * "Cancel is the only way out in V1" by the client's request in the FRONT.pdf (D-552).
+ *
+ * A SOFT delete by ONE guarded UPDATE: `deleted_at` and `updated_at` are the only columns written,
+ * and there is no status or time predicate. Every read of the module already filters
+ * `deleted_at is null`, so the event leaves the lists, the next-event card, the detail, the edit
+ * read, attendance, the door code, the photos, RSVP, check-in and enter at once. Rows kept
+ * (D-214, D-550): answers, check-ins, attempts, secrets, photos and notifications stay in the
+ * database untouched; nothing cascades.
+ *
+ * Silent (D-549): no bus event, no notification, no push, no job; reminders already scheduled
+ * become no-ops at fire time (`runEventReminder` answers `skipped`, reason `deleted`). The one
+ * trace is an ids-only log line, never the title.
+ *
+ * A miss (unknown, another tenant's, already deleted) is the bare `404 NOT_FOUND` with no
+ * `details` (D-23, D-551): the three are indistinguishable.
+ */
+export async function deleteEvent(ctx: RequestContext, eventId: string): Promise<void> {
+  await withTenantTx(ctx, async (tx) => {
+    const written = await tx.execute<{ id: string }>(sql`
+      update events
+         set deleted_at = now(), updated_at = now()
+       where tenant_id = ${ctx.tenantId}::uuid
+         and id = ${eventId}::uuid
+         and deleted_at is null
+      returning id`);
+    if (written.length === 0) throw new ApiError(404, 'NOT_FOUND');
+  });
+
+  log.info(
+    {
+      event: 'events.deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+    },
+    'event deleted',
+  );
 }
 
 /** Every outcome `app.events_check_in` can return (its migration header is the vocabulary). */
