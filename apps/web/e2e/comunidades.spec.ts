@@ -535,6 +535,19 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
     await expect(deleteButton).toBeEnabled();
     await expect(deleteButton).not.toHaveAttribute('aria-disabled', 'true');
     await expect(control).not.toContainText('Em breve');
+
+    // At 320px the trigger sits on its own row under "Reativar comunidade": the boxes do not overlap
+    // and the target is at least 44px tall.
+    await page.setViewportSize({ width: 320, height: 720 });
+    const reactivateBox = await page.locator('[data-community-page-reactivate]').boundingBox();
+    const deleteBox = await deleteButton.boundingBox();
+    expect(reactivateBox).not.toBeNull();
+    expect(deleteBox).not.toBeNull();
+    if (reactivateBox && deleteBox) {
+      expect(deleteBox.y).toBeGreaterThanOrEqual(reactivateBox.y + reactivateBox.height);
+      expect(deleteBox.height).toBeGreaterThanOrEqual(44);
+      expect(deleteBox.x + deleteBox.width).toBeLessThanOrEqual(320);
+    }
   });
 
   test('an archived community offers Reativar where an active one offers Arquivar', async ({

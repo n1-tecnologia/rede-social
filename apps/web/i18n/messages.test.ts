@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STORY_HIGHLIGHT_MAX_TITLE } from '@rede-social/module-stories/contracts';
+import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { assembleMessages, loadMessages, type MessageTree } from './messages';
 
@@ -4800,5 +4801,76 @@ describe('09.3 — events delete strings', () => {
       expect(text, key).not.toContain('\u2014');
       expect(text, key).not.toMatch(/\d/);
     }
+  });
+});
+
+/**
+ * 09.3-08 (PEND-07, D-553, D-554, D-557) — the delete community strings, verbatim from the UI-SPEC
+ * copy. The placeholder pair ("Em breve" and its hint) is gone from the community side; the trigger
+ * label stays. The refusal's plurals are FORMATTED, not looked up, so a drifted ICU form fails here.
+ */
+describe('09.3 — communities delete strings', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  const t = createTranslator({
+    locale: 'pt-BR',
+    messages: messages as never,
+    namespace: 'communities' as never,
+  }) as unknown as (key: string, values?: Record<string, unknown>) => string;
+
+  const NEW_KEYS: [string, string][] = [
+    ['communities.confirm.delete.title', 'Excluir comunidade?'],
+    [
+      'communities.confirm.delete.body',
+      'A comunidade e as publicações dela, com curtidas e comentários, deixam de aparecer para todos. Não há como desfazer por aqui.',
+    ],
+    ['communities.confirm.delete.confirm', 'Excluir'],
+    ['communities.confirm.delete.cancel', 'Cancelar'],
+    ['communities.toasts.deleted', 'Comunidade excluída.'],
+    ['communities.errors.delete', 'Não foi possível excluir a comunidade. Tente novamente.'],
+    ['communities.errors.deleteGone', 'Esta comunidade já foi excluída.'],
+    [
+      'communities.errors.deleteNotArchived',
+      'Esta comunidade não está mais arquivada, então não pode ser excluída.',
+    ],
+    ['communities.blocked.title', 'Não é possível excluir'],
+    ['communities.blocked.confirm', 'Ver produtos'],
+    ['communities.blocked.cancel', 'Fechar'],
+  ];
+
+  it.each(NEW_KEYS)('%s is the agreed string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('formats the refusal body for one product and for several', () => {
+    const singular =
+      'Este produto da Loja ainda dá acesso a esta comunidade. Tire a comunidade dele primeiro.';
+    const plural =
+      'Estes produtos da Loja ainda dão acesso a esta comunidade. Tire a comunidade deles primeiro.';
+    expect(t('blocked.body', { count: 1 })).toBe(singular);
+    for (const count of [2, 5, 9]) expect(t('blocked.body', { count })).toBe(plural);
+  });
+
+  it('formats the "e mais" line from the total', () => {
+    expect(t('blocked.more', { count: 1 })).toBe('e mais 1 produto');
+    expect(t('blocked.more', { count: 4 })).toBe('e mais 4 produtos');
+  });
+
+  it('keeps the trigger label and retires the placeholder pair', () => {
+    expect(lookup('communities.delete.action')).toBe('Excluir comunidade');
+    expect(lookup('communities.delete.soon')).toBeUndefined();
+    expect(lookup('communities.delete.hint')).toBeUndefined();
+  });
+
+  it('no new string carries an em dash', () => {
+    for (const [key] of NEW_KEYS) expect(String(lookup(key)), key).not.toContain('\u2014');
+    expect(String(lookup('communities.blocked.body'))).not.toContain('\u2014');
+    expect(String(lookup('communities.blocked.more'))).not.toContain('\u2014');
   });
 });
