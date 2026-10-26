@@ -1,6 +1,6 @@
 # @rede-social/module-communities
 
-The tenant's communities (COMM-01..04): named containers that the admin creates, edits and archives,
+The tenant's communities (COMM-01..04): named containers that the admin creates, edits, archives, reactivates and deletes,
 listed newest-active first with a keyset over the trigger-owned `last_activity_at`. Feed posts and
 story highlights carry a community id; those modules own their references, this one never imports
 them.
@@ -18,16 +18,20 @@ them.
 Main contract names (`./contracts`): `communityQuerySchema`, `communitySummarySchema`,
 `communityPageSchema`, `createCommunitySchema`, `updateCommunitySchema`, the permission names
 `COMMUNITY_PERMISSIONS` (`communities.community.manage`), `COMMUNITY_STATUSES`,
-`COMMUNITY_MEMBER_ROLES` and the refusal vocabulary `COMMUNITY_ISSUES`.
+`COMMUNITY_MEMBER_ROLES` and the refusal vocabulary `COMMUNITY_ISSUES` (`name_required`,
+`archived`, `cover_invalid`, `order_stale`, `not_archived`, `unlock_active`), with
+`COMMUNITY_UNLOCK_NAMES_MAX` and `communityUnlockRefusalSchema` for the delete's refusal.
 
 Main server names (`./server`): `communitiesRoutes`, `listCommunities`, `getCommunity`,
-`createCommunity`, `updateCommunity`, `slugify`.
+`createCommunity`, `updateCommunity`, `deleteCommunity`, `slugify`.
 
 ## Events emitted
 
 - `community.created`: `tenantId`, `communityId`, `actorUserId`
 - `community.updated`: `tenantId`, `communityId`, `actorUserId`
 - `community.archived`: `tenantId`, `communityId`, `actorUserId`
+
+Deleting a community emits nothing: it is a silent soft delete of an archived community.
 
 ## Events consumed
 

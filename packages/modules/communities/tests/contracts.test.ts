@@ -3,6 +3,8 @@ import {
   COMMUNITY_ISSUE_SET,
   COMMUNITY_ISSUES,
   COMMUNITY_MAX_ORDER,
+  COMMUNITY_UNLOCK_NAMES_MAX,
+  communityUnlockRefusalSchema,
   reorderCommunitiesSchema,
 } from '../contracts/index';
 
@@ -70,15 +72,68 @@ describe('reorderCommunitiesSchema — one full permutation, bounded and duplica
 });
 
 describe('COMMUNITY_ISSUES — the closed refusal vocabulary', () => {
-  it('6. gains order_stale (2026-10-03) and keeps every earlier code', () => {
+  it('6. gains order_stale (2026-10-03), not_archived and unlock_active (09.3) and keeps every earlier code', () => {
     expect([...COMMUNITY_ISSUES]).toEqual([
       'name_required',
       'archived',
       'cover_invalid',
       'order_stale',
+      'not_archived',
+      'unlock_active',
     ]);
     expect(COMMUNITY_ISSUE_SET.has('order_stale')).toBe(true);
+    expect(COMMUNITY_ISSUE_SET.has('not_archived')).toBe(true);
+    expect(COMMUNITY_ISSUE_SET.has('unlock_active')).toBe(true);
     // A miss is never in here: it is a bare 404 with no `details` (D-23).
     expect(COMMUNITY_ISSUE_SET.has('not_found')).toBe(false);
+  });
+});
+
+describe('communityUnlockRefusalSchema - the delete refusal the web parses (D-554)', () => {
+  const product = (index: number) => ({ id: uuid(index), name: `Produto ${index}` });
+
+  it('7. the cap is five names', () => {
+    expect(COMMUNITY_UNLOCK_NAMES_MAX).toBe(5);
+  });
+
+  it('8. accepts 1 to 5 products with a count of at least 1 (a count above the list is the "e mais N")', () => {
+    for (const size of [1, 2, 5]) {
+      const products = Array.from({ length: size }, (_, index) => product(index + 1));
+      expect(
+        communityUnlockRefusalSchema.safeParse({
+          community: 'unlock_active',
+          products,
+          count: size,
+        }).success,
+      ).toBe(true);
+    }
+    const five = Array.from({ length: 5 }, (_, index) => product(index + 1));
+    const parsed = communityUnlockRefusalSchema.parse({
+      community: 'unlock_active',
+      products: five,
+      count: 6,
+    });
+    expect(parsed.count).toBe(6);
+    expect(parsed.products).toHaveLength(5);
+  });
+
+  it('9. refuses an empty list, six products, a non-uuid id, a count of 0 and another code', () => {
+    const one = [product(1)];
+    const six = Array.from({ length: 6 }, (_, index) => product(index + 1));
+    const base = { community: 'unlock_active', products: one, count: 1 };
+    expect(communityUnlockRefusalSchema.safeParse(base).success).toBe(true);
+    expect(communityUnlockRefusalSchema.safeParse({ ...base, products: [] }).success).toBe(false);
+    expect(communityUnlockRefusalSchema.safeParse({ ...base, products: six }).success).toBe(false);
+    expect(
+      communityUnlockRefusalSchema.safeParse({
+        ...base,
+        products: [{ id: 'not-a-uuid', name: 'x' }],
+      }).success,
+    ).toBe(false);
+    expect(communityUnlockRefusalSchema.safeParse({ ...base, count: 0 }).success).toBe(false);
+    expect(communityUnlockRefusalSchema.safeParse({ ...base, count: 1.5 }).success).toBe(false);
+    expect(
+      communityUnlockRefusalSchema.safeParse({ ...base, community: 'not_archived' }).success,
+    ).toBe(false);
   });
 });

@@ -7,6 +7,7 @@ import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { type SQL, sql } from 'drizzle-orm';
 import {
   COMMUNITY_PAGE_SIZE,
+  COMMUNITY_UNLOCK_NAMES_MAX,
   type CommunityPage,
   type CommunityQuery,
   type CommunityStatus,
@@ -899,4 +900,95 @@ export async function reorderCommunities(
   );
 
   return page;
+}
+
+/**
+ * `DELETE /v1/communities/{communityId}` (09.3, PEND-04, PEND-06) - an ARCHIVED community is
+ * soft-deleted by filling `deleted_at`. One tenant-lane transaction, four steps:
+ *
+ *  1. **Locking read, tenant-scoped, FIRST.** `select status ... for update` under the explicit
+ *     `tenant_id` predicate: an unknown id, another tenant's community (active OR archived) and an
+ *     already deleted one are the SAME bare 404, decided BEFORE any state check, so the 409s below are
+ *     never an existence oracle (D-23). The `FOR UPDATE` is deliberate: the Loja's link insert takes
+ *     `FOR KEY SHARE` on this row through the foreign key of `store_product_communities`, and only
+ *     `FOR UPDATE` conflicts with it (a plain UPDATE is `FOR NO KEY UPDATE` and would not), so a
+ *     product link committed concurrently with this delete is serialised against it.
+ *  2. **Archived only (D-553).** Anything else is `409 { community: 'not_archived' }`, nothing written.
+ *  3. **No active product unlocks it (D-554).** The Loja is READ by SQL name and never written (MOD-02):
+ *     the active products linking the community, newest first (`created_at desc, id desc`, a
+ *     deterministic selection), at most `COMMUNITY_UNLOCK_NAMES_MAX` names plus the total. Links count
+ *     regardless of the COMMUNITY's status, as the gate does; archived products do not count. The store
+ *     module flag is read in the same transaction from `tenant_modules`, exactly as
+ *     `app.community_locked_ids()` reads it (assumption A1): with the Loja off the links unlock nothing
+ *     and do not block. Reading it in SQL adds no kernel import and no cached read that could contradict
+ *     the gate for one request. The refusal is `409 { community: 'unlock_active', products, count }`.
+ *  4. **Soft delete (D-555).** One UPDATE of `deleted_at` and `updated_at`. No row is deleted anywhere:
+ *     posts, comments, likes, highlights and store links all stay, and every read already filters
+ *     `deleted_at is null`.
+ *
+ * What it does not do. D-556: `story_community_pins` was dropped in Phase 05.2-11, so there is nothing
+ * to treat there; `community_members` is born-unused, so there is no member row; the highlights stay and
+ * are hidden by the read filters. D-557: the slug stays with the row (`communities_tenant_slug_uq` has
+ * no `deleted_at` predicate), so a new community with the same name gets the numeric suffix.
+ *
+ * Silent, like the event delete: no `emit(...)`, one ids-only log line (never a name, T-05-06).
+ */
+export async function deleteCommunity(ctx: RequestContext, communityId: string): Promise<void> {
+  await withTenantTx(ctx, async (tx) => {
+    const found = await tx.execute<{ status: string }>(sql`
+      select status
+        from communities
+       where tenant_id = ${ctx.tenantId}::uuid
+         and id = ${communityId}::uuid
+         and deleted_at is null
+         for update`);
+    const current = found[0];
+    if (!current) throw new ApiError(404, 'NOT_FOUND');
+    if (current.status !== 'archived') {
+      throw new ApiError(409, 'CONFLICT', { community: 'not_archived' });
+    }
+
+    const unlocking = await tx.execute<{ id: string; name: string; total: number }>(sql`
+      select p.id::text as id, p.name, (count(*) over ())::int as total
+        from store_product_communities l
+        join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
+       where l.tenant_id = ${ctx.tenantId}::uuid
+         and l.community_id = ${communityId}::uuid
+         and p.status = 'active'
+         and exists (
+           select 1
+             from tenant_modules tm
+            where tm.tenant_id = l.tenant_id
+              and tm.module_key = 'store'
+              and tm.enabled)
+       order by p.created_at desc, p.id desc
+       limit ${COMMUNITY_UNLOCK_NAMES_MAX}`);
+    const first = unlocking[0];
+    if (first) {
+      throw new ApiError(409, 'CONFLICT', {
+        community: 'unlock_active',
+        products: unlocking.map(({ id, name }) => ({ id, name })),
+        count: first.total,
+      });
+    }
+
+    await tx.execute(sql`
+      update communities
+         set deleted_at = now(),
+             updated_at = now()
+       where tenant_id = ${ctx.tenantId}::uuid
+         and id = ${communityId}::uuid
+         and deleted_at is null`);
+  });
+
+  log.info(
+    {
+      event: 'communities.deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      communityId,
+    },
+    'community deleted',
+  );
 }

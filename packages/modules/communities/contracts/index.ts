@@ -59,14 +59,45 @@ export const COMMUNITY_MAX_DESCRIPTION = 280;
  *    archived or removed since the admin's screen loaded, and an id that is unknown or another
  *    tenant's — so it is not an existence oracle either: a foreign id and a random uuid answer the
  *    same bytes. The client's move is always the same one: reload the list and start again.
+ *
+ * 2026-10-26 (09.3) adds the two STATE refusals of the delete (`409 CONFLICT`, D-553 and D-554):
+ *  - `not_archived`: only an ARCHIVED community can be deleted. It is decided AFTER the
+ *    tenant-scoped locking read, so a foreign community is the bare 404 and never this code.
+ *  - `unlock_active`: an ACTIVE Loja product still unlocks the community. The answer carries
+ *    `products` (at most `COMMUNITY_UNLOCK_NAMES_MAX` names) and `count` (the total), see
+ *    `communityUnlockRefusalSchema`. Only a manager can reach it: the permission guard runs first.
  */
 export const COMMUNITY_ISSUES = [
   'name_required',
   'archived',
   'cover_invalid',
   'order_stale',
+  'not_archived',
+  'unlock_active',
 ] as const;
 export type CommunityIssue = (typeof COMMUNITY_ISSUES)[number];
+
+/**
+ * The most product names the `unlock_active` refusal lists (D-554, assumption A2). The service and the
+ * web read this one number: the screen says "e mais N" from `count`, the TOTAL of active products
+ * that link the community.
+ */
+export const COMMUNITY_UNLOCK_NAMES_MAX = 5;
+
+/**
+ * `error.details` of `409 CONFLICT` when `community` is `unlock_active`: the active Loja products
+ * that still unlock the community, newest first, at most `COMMUNITY_UNLOCK_NAMES_MAX` of them, and the
+ * total. A plain (non-strict) object: the web parses `error.details` with it. Never an empty list.
+ */
+export const communityUnlockRefusalSchema = z.object({
+  community: z.literal('unlock_active'),
+  products: z
+    .array(z.object({ id: z.uuid(), name: z.string() }))
+    .min(1)
+    .max(COMMUNITY_UNLOCK_NAMES_MAX),
+  count: z.number().int().min(1),
+});
+export type CommunityUnlockRefusal = z.infer<typeof communityUnlockRefusalSchema>;
 
 /** The route `defaultHook`'s lookup: a Zod issue whose `message` is in here becomes `details.community`. */
 export const COMMUNITY_ISSUE_SET: ReadonlySet<string> = new Set(COMMUNITY_ISSUES);

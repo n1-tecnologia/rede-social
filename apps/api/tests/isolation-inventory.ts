@@ -177,6 +177,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/communities': { case: 'b5' },
   'PUT /v1/communities/order': { case: 'inventory sweep: event photos and community order' },
   'PATCH /v1/communities/:communityId': { case: 'inventory sweep: stories and communities' },
+  'DELETE /v1/communities/:communityId': { case: 'inventory sweep: stories and communities' },
 
   // ── /v1/stories ─────────────────────────────────────────────────────────────────────────────
   'GET /v1/stories/mine': { case: 'inventory sweep: stories and communities' },

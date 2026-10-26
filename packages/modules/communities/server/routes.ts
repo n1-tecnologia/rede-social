@@ -18,6 +18,7 @@ import {
 } from '../contracts/index';
 import {
   createCommunity,
+  deleteCommunity,
   getCommunity,
   listCommunities,
   reorderCommunities,
@@ -215,6 +216,43 @@ const reorderCommunitiesRoute = createRoute({
   },
 });
 
+/**
+ * Deleting a community (09.3, D-553, D-554): the literal manage guard, ARCHIVED communities only. A
+ * soft delete; the Loja is read and never written. The guard runs before the handler, so the product
+ * names of an `unlock_active` refusal are readable only by a manager of the same tenant.
+ */
+const deleteCommunityRoute = createRoute({
+  method: 'delete',
+  path: '/{communityId}',
+  // The literal, not `COMMUNITY_PERMISSIONS.manage`: this string is the one thing a reviewer greps
+  // for when asking "what guards deleting a community?", and an indirection here is the kind that
+  // hides a change.
+  middleware: [requirePermission('communities.community.manage')] as const,
+  request: { params: communityIdParam },
+  responses: {
+    204: {
+      description:
+        'The community is soft-deleted and leaves the lists and the detail. Its posts, comments, likes, highlights and store links stay in the database. Nobody is notified.',
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    403: {
+      description: 'The caller does not hold `communities.community.manage` in this tenant',
+    },
+    404: {
+      description:
+        'No community with that id is visible to this tenant - unknown, another tenant’s, or already deleted. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.community`: `not_archived` (only an archived community can be deleted) or `unlock_active` (an active Loja product still unlocks it; `details` also carries `products`, at most five `{ id, name }` newest first, and `count`, the total). Nothing is written.',
+    },
+  },
+});
+
+/** A 204 that no cache may keep: the lists just changed. */
+const noContent = () =>
+  new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+
 export const communitiesRoutes = communities
   .openapi(listRoute, async (c) => {
     const ctx = c.get('ctx');
@@ -243,4 +281,8 @@ export const communitiesRoutes = communities
   })
   .openapi(reorderCommunitiesRoute, async (c) =>
     c.json(await reorderCommunities(c.get('ctx'), c.req.valid('json')), 200),
-  );
+  )
+  .openapi(deleteCommunityRoute, async (c) => {
+    await deleteCommunity(c.get('ctx'), c.req.valid('param').communityId);
+    return noContent();
+  });

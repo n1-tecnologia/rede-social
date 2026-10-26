@@ -6,6 +6,7 @@
 export { communitiesRoutes } from './routes';
 export {
   createCommunity,
+  deleteCommunity,
   getCommunity,
   listCommunities,
   reorderCommunities,

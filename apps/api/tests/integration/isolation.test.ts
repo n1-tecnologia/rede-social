@@ -7094,6 +7094,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET    /v1/stories/{id}/comments, POST …/comments       | lab story: bare 404, nothing written      |
     // | GET    /v1/stories/{id}/highlights                      | lab story: bare 404                       |
     // | PATCH  /v1/communities/{id}                             | lab community: bare 404, row unchanged    |
+    // | DELETE /v1/communities/{id}                             | lab community: bare 404, row unchanged    |
     // Every one of them is also refused on the lab's registered host.
     const since = await dbNow();
     const labMemberUser = await userIdOf('member@rede-lab.local');
@@ -7279,6 +7280,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
             `/v1/communities/${community}`,
             { description: 'Invadida.' },
           ],
+          // The lab community here is ACTIVE: a 409 `not_archived` would be an existence oracle, so
+          // this crossing also proves the tenant check precedes the state check (09.3, T-09.3-26).
+          ['delete community', 'admin', 'DELETE', `/v1/communities/${community}`, undefined],
         ] as const;
       const unknownCalls = crossings(unknownId, unknownId, unknownId);
       for (const [index, [label, who, method, path, body]] of crossings(
@@ -7354,6 +7358,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         ['POST', `/v1/stories/${demoStory}/comments`, { body: 'Oi.' }],
         ['GET', `/v1/stories/${demoStory}/highlights`, undefined],
         ['PATCH', `/v1/communities/${ownCommunity}`, { description: 'Invadida.' }],
+        ['DELETE', `/v1/communities/${ownCommunity}`, undefined],
       ] as const) {
         await expectHostRefused(
           await send(method, path, tokens.demoAdmin, HOSTS.lab, body),
@@ -7365,6 +7370,16 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect((await asAdmin('DELETE', `/v1/stories/highlights/${ownHighlight}`)).status).toBe(204);
       ownHighlight = '';
       expect((await asAdmin('DELETE', `/v1/stories/${demoStory}`)).status).toBe(204);
+      // Positive control for the community delete (09.3): the own community is archived first (only
+      // an archived community deletes), then goes; it is the bare 404 afterwards.
+      expect(
+        (await asAdmin('PATCH', `/v1/communities/${ownCommunity}`, { status: 'archived' })).status,
+      ).toBe(200);
+      expect((await asAdmin('DELETE', `/v1/communities/${ownCommunity}`)).status).toBe(204);
+      await expectBareNotFound(
+        await asAdmin('GET', `/v1/communities/${ownCommunity}`),
+        'community after delete',
+      );
       expect(await labTrace()).toEqual(before);
     } finally {
       if (ownHighlight) {
