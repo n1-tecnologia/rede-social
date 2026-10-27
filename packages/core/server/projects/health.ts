@@ -13,6 +13,7 @@ import {
 } from '../tenancy/project-registry';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
 import { getProjectProviderFor } from './provider-for';
+import { tokenChangeFields, tokenStateOf } from './token-state';
 import { type ProjectProvider, ProjectProviderError, type ProjectStatus } from './types';
 import { REQUIRED_SERVICES } from './wait';
 
@@ -201,6 +202,7 @@ export async function checkProject(
       changed: false,
       tokenCheck: null,
       previousTokenCheck,
+      token: null,
     };
   }
 
@@ -232,6 +234,23 @@ export async function checkProject(
       }),
   );
 
+  // The token state before and after, derived by the one contracts function (D-573, D-576). A platform project
+  // has none. A change writes ONE line of ids and states and nothing else about the token.
+  const effectiveCheck = verdict.tokenCheck ?? previousTokenCheck;
+  const tokenFrom = tokenStateOf({
+    owner: project.owner,
+    tokenCheck: previousTokenCheck,
+    expiresAt: project.mgmtTokenExpiresAt,
+  });
+  const tokenTo = tokenStateOf({
+    owner: project.owner,
+    tokenCheck: effectiveCheck,
+    expiresAt: project.mgmtTokenExpiresAt,
+  });
+  const token = tokenFrom === tokenTo ? null : { from: tokenFrom, to: tokenTo };
+  if (token)
+    log.info(tokenChangeFields(projectId, token.from, token.to), 'project token state changed');
+
   const changed = previous !== verdict.status;
   if (changed) {
     invalidateProject();
@@ -255,6 +274,7 @@ export async function checkProject(
     changed,
     tokenCheck: verdict.tokenCheck,
     previousTokenCheck,
+    token,
   };
 }
 

@@ -675,6 +675,7 @@ const tokenLines = () =>
 describe('project.token.state_changed (D-576, CTK-21)', () => {
   it('a check that moves a customer project from ok to invalid writes ONE line of project id, from and to', async () => {
     const { fixture, world } = await customerProject('log-one');
+    logged.calls.length = 0;
     await checkProject(fixture.projectId);
     // The first look of a never-checked project reads `unchecked` to the new state once; that is accepted.
     expect(tokenLines()).toEqual([
