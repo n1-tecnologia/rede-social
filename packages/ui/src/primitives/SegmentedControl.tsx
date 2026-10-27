@@ -27,6 +27,11 @@ export interface SegmentedControlProps {
   disabled?: boolean;
   /** A write is running: `aria-busy` on the group and both buttons disabled. */
   busy?: boolean;
+  /**
+   * Long labels (09.4-15, UI-D-549): the options may wrap to two lines and the control grows with
+   * them, never below 44px. Off by default, where every option is one fixed 44px line.
+   */
+  wrap?: boolean;
   className?: string;
 }
 
@@ -54,6 +59,7 @@ export function SegmentedControl({
   onChange,
   disabled = false,
   busy = false,
+  wrap = false,
   className,
 }: SegmentedControlProps) {
   const generatedId = useId();
@@ -89,7 +95,8 @@ export function SegmentedControl({
               disabled={inert}
               onClick={() => onChange(option.value)}
               className={cn(
-                'inline-flex h-11 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-bold transition-colors',
+                'inline-flex min-w-0 items-center justify-center gap-2 rounded-lg text-sm font-bold transition-colors',
+                wrap ? 'min-h-11 px-2 py-2 text-center leading-tight' : 'h-11 whitespace-nowrap',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg-input',
                 selected ? 'bg-card text-text shadow-sm' : 'text-text-secondary',
                 !selected && !inert && 'hover:text-text',

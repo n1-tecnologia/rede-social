@@ -113,6 +113,8 @@ const BASE: TenantDraft = {
   modules: {},
   adminEmail: 'admin@clube.test',
   projectRef: REF,
+  owner: 'platform',
+  tokenExpiresAt: '',
   manualAccess: false,
   contrastConfirmed: false,
   titleFont: null,

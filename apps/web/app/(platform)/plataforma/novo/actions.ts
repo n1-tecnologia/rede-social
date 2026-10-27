@@ -51,6 +51,9 @@ export type DraftField =
   | 'databasePassword'
   | 'serviceKey'
   | 'publishableKey'
+  /** The customer project's token and its typed expiry (09.4-15, UI-D-550). */
+  | 'token'
+  | 'tokenExpiresAt'
   /** The project refused the manual access as a whole (a block-level error, no single field). */
   | 'access';
 export type DraftFieldError =
@@ -69,7 +72,16 @@ export type DraftFieldError =
   | 'passwordRequired'
   | 'serviceKeyRequired'
   | 'publishableKeyRequired'
-  | 'accessInvalid';
+  | 'accessInvalid'
+  // 09.4-15 (UI-D-550): the customer project's token, its date and its two customer-only ref refusals.
+  | 'tokenRequired'
+  | 'tokenInvalid'
+  | 'tokenForbidden'
+  | 'tokenOtherProject'
+  | 'tokenAccountWide'
+  | 'tokenExpiryInvalid'
+  | 'projectNotFoundCustomer'
+  | 'projectNotPro';
 export type DraftFieldErrors = Partial<Record<DraftField, DraftFieldError>>;
 
 /** What the wizard collects (the API body, in the form's shape). */
@@ -85,6 +97,14 @@ export type TenantDraftInput = {
    * (`normalizeProjectRef`) and only a bare 20-letter ref ever reaches the API.
    */
   projectRef?: string;
+  /**
+   * Who owns the project (09.4-15, D-570): absent or `platform` is today's flow and sends no new field.
+   * `customer` adds the write-only `token` and the optional typed `tokenExpiresAt` (`YYYY-MM-DD`), sent
+   * to the pre-check and to the creation and nowhere else: never logged, never echoed.
+   */
+  owner?: 'platform' | 'customer';
+  token?: string;
+  tokenExpiresAt?: string;
   /**
    * The manual access (UI-D-534), sent ONCE with the creation and nowhere else: never to the Dados
    * check, never logged, never echoed. Empty strings count as absent.
@@ -115,6 +135,7 @@ export type CreateTenantResult =
 
 function fieldErrorFor(path: string): [DraftField, DraftFieldError] | null {
   if (path === 'projectRef') return ['projectRef', 'projectRefInvalid'];
+  if (path === 'token') return ['token', 'tokenRequired'];
   if (path === 'displayName') return ['displayName', 'displayNameRequired'];
   if (path === 'slug') return ['slug', 'slugInvalid'];
   if (path === 'colors.primary') return ['primary', 'hexInvalid'];
@@ -143,6 +164,24 @@ function refFormatError(ref: string): 'projectRefRequired' | 'projectRefInvalid'
   return projectRefSchema.safeParse(ref).success ? null : 'projectRefInvalid';
 }
 
+/** Whether this draft is a customer-owned project (D-570). Anything else is the platform's. */
+const isCustomer = (input: TenantDraftInput) => input.owner === 'customer';
+
+/** The customer fields a request carries, `{}` for a platform draft (no new field, byte for byte). */
+function customerFields(input: TenantDraftInput): {
+  owner?: 'customer';
+  token?: string;
+  tokenExpiresAt?: string;
+} {
+  if (!isCustomer(input)) return {};
+  const expiresAt = (input.tokenExpiresAt ?? '').trim();
+  return {
+    owner: 'customer',
+    token: input.token ?? '',
+    ...(expiresAt === '' ? {} : { tokenExpiresAt: expiresAt }),
+  };
+}
+
 /** The manual access with its empty values dropped, or `undefined` for none at all. */
 function presentAccess(access: ProjectAccess | undefined): ProjectAccess | undefined {
   if (!access) return undefined;
@@ -165,26 +204,34 @@ function parseDraft(input: TenantDraftInput) {
     adminEmail: input.adminEmail,
     ...(ref === '' ? {} : { projectRef: ref }),
     ...(access ? { access } : {}),
+    ...customerFields(input),
     ...(input.look === undefined ? {} : { look: input.look }),
   });
 }
 
 /**
- * Pre-check reasons the form shows under the field (`unchecked` is the top alert instead). The six token
- * reasons of 09.4-03 only answer a customer body, which this form does not send yet; until plan 15 maps them
- * to their own field errors they read as a check that could not run.
+ * Where a pre-check refusal lands and which sentence it reads (UI-D-550, D-570): `token_expiry_invalid` under the
+ * date, every other `token_*` under the token, the ref reasons under the ref. `unchecked` is the top alert
+ * instead and has no entry. `not_found` reads the customer wording for a customer draft (UI-D-559);
+ * `token_other_project` and `not_pro` are mapped but never produced today (D-572).
  */
-const PRECHECK_FIELD_ERRORS: Partial<Record<PrecheckReason, DraftFieldError>> = {
-  invalid: 'projectRefInvalid',
-  not_found: 'projectNotFound',
-  not_empty: 'projectNotEmpty',
-  in_use: 'projectInUse',
-  paused: 'projectPaused',
+const PRECHECK_FIELD_ERRORS: Partial<Record<PrecheckReason, [DraftField, DraftFieldError]>> = {
+  invalid: ['projectRef', 'projectRefInvalid'],
+  not_found: ['projectRef', 'projectNotFound'],
+  not_empty: ['projectRef', 'projectNotEmpty'],
+  in_use: ['projectRef', 'projectInUse'],
+  paused: ['projectRef', 'projectPaused'],
+  not_pro: ['projectRef', 'projectNotPro'],
+  token_invalid: ['token', 'tokenInvalid'],
+  token_forbidden: ['token', 'tokenForbidden'],
+  token_other_project: ['token', 'tokenOtherProject'],
+  token_account_wide: ['token', 'tokenAccountWide'],
+  token_expiry_invalid: ['tokenExpiresAt', 'tokenExpiryInvalid'],
 };
 
 type PrecheckOutcome =
   | { kind: 'ok'; manualAccess: boolean }
-  | { kind: 'refused'; error: DraftFieldError }
+  | { kind: 'refused'; field: DraftField; error: DraftFieldError }
   | { kind: 'unchecked' }
   | { kind: 'redirect'; path: string };
 
@@ -194,12 +241,14 @@ type PrecheckOutcome =
  * to the operator. A 401/403 navigates like every platform read (the caller `redirect`s outside the
  * try/catch, the Next 16 rule).
  */
-async function precheckRef(ref: string): Promise<PrecheckOutcome> {
+async function precheckRef(ref: string, input: TenantDraftInput): Promise<PrecheckOutcome> {
+  const customer = isCustomer(input);
   try {
     const res = await apiFetch('/v1/platform/projects/precheck', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ projectRef: ref }),
+      // A platform draft posts exactly `{ projectRef }`; a customer draft adds owner, token and date, once.
+      body: JSON.stringify({ projectRef: ref, ...customerFields(input) }),
     });
     if (res.status === 401 || res.status === 403) {
       const body = (await res.json().catch(() => null)) as {
@@ -221,9 +270,14 @@ async function precheckRef(ref: string): Promise<PrecheckOutcome> {
     }
     const answer = precheckAnswerSchema.parse(await res.json());
     if (answer.ok) return { kind: 'ok', manualAccess: answer.manualAccess };
-    const fieldError = PRECHECK_FIELD_ERRORS[answer.reason];
-    if (!fieldError) return { kind: 'unchecked' };
-    return { kind: 'refused', error: fieldError };
+    const mapped = PRECHECK_FIELD_ERRORS[answer.reason];
+    if (!mapped) return { kind: 'unchecked' };
+    const [field, error] = mapped;
+    return {
+      kind: 'refused',
+      field,
+      error: customer && error === 'projectNotFound' ? 'projectNotFoundCustomer' : error,
+    };
   } catch (error) {
     console.error('platform.projects.precheck_failed', { error: String(error) });
     return { kind: 'unchecked' };
@@ -245,16 +299,17 @@ export async function validateTenantDraftAction(input: TenantDraftInput): Promis
     ? {}
     : mapIssues(parsed.error.issues.map((issue) => ({ path: issue.path.map(String).join('.') })));
   const shapeError = refFormatError(ref);
-  if (shapeError) {
-    fieldErrors.projectRef = shapeError;
-    return { ok: false, fieldErrors };
-  }
+  // A customer draft needs its token before anything is asked of the API (UI-D-550): no request.
+  const tokenMissing = isCustomer(input) && (input.token ?? '').trim() === '';
+  if (tokenMissing) fieldErrors.token = 'tokenRequired';
+  if (shapeError) fieldErrors.projectRef = shapeError;
+  if (shapeError || tokenMissing) return { ok: false, fieldErrors };
 
-  const check = await precheckRef(ref);
+  const check = await precheckRef(ref, input);
   if (check.kind === 'redirect') redirect(check.path);
   if (check.kind === 'unchecked') return { ok: false, fieldErrors, unchecked: true };
   if (check.kind === 'refused') {
-    fieldErrors.projectRef = check.error;
+    fieldErrors[check.field] = check.error;
     return { ok: false, fieldErrors };
   }
   if (!parsed.success || Object.keys(fieldErrors).length > 0) {

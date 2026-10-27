@@ -40,6 +40,9 @@ import { hasLowContrast } from '../ContrastFeedback';
 import { useTenantPreview } from '../preview/TenantPreviewProvider';
 import { BrandLookContext, type PreviewColors } from './brand-look-context';
 
+/** Who owns the Supabase project (09.4-15, UI-D-549): the platform's organisation or the customer's. */
+export type DraftOwner = 'platform' | 'customer';
+
 /** Everything the wizard collects before the tenant exists (the files apart: see `DraftImage`). */
 export type TenantDraft = {
   displayName: string;
@@ -56,6 +59,16 @@ export type TenantDraft = {
    * Any edit of it clears its error and closes the later steps again (`dataReady: false`).
    */
   projectRef: string;
+  /**
+   * Who owns the project (09.4-15, UI-D-549, A-UI-1): `platform` by default. Not secret: persisted. A
+   * customer project also carries a write-only token, which is NOT in this draft (`token`, memory only).
+   */
+  owner: DraftOwner;
+  /**
+   * The expiry the operator typed for the customer's token, `YYYY-MM-DD` or empty (A-UI-4). Not secret:
+   * persisted (a reload keeps it and asks for the token again).
+   */
+  tokenExpiresAt: string;
   /**
    * The last pre-check said the platform cannot obtain this project's access by itself, so the
    * manual-access block shows (UI-D-534). A flag only: the three values are NOT part of the draft
@@ -131,6 +144,14 @@ export type TenantDraftAccess = {
 
 const NO_ACCESS: TenantDraftAccess = { databasePassword: '', serviceKey: '', publishableKey: '' };
 
+/**
+ * The customer project's token (09.4-15, UI-D-550, UI-D-561, A-UI-2, T-09.4-53): a write-only secret in
+ * the provider's MEMORY. Not in `TenantDraft`, not in `PERSISTED_KEYS`, not in a URL, a cookie, a log or a
+ * prop beyond the field that holds it. Sent once with the pre-check and once with the creation, cleared
+ * the moment the API answers, when the owner or the ref changes and when the draft is discarded.
+ */
+const NO_TOKEN = '';
+
 /** A picked logo or icon: the file itself and an object URL the previews show. */
 export type DraftImage = { file: File; url: string };
 
@@ -186,6 +207,10 @@ type TenantDraftValue = {
   access: TenantDraftAccess;
   setAccess: (patch: Partial<TenantDraftAccess>) => void;
   clearAccess: () => void;
+  /** The customer project's token, in memory only (`NO_TOKEN`); empty for a platform project. */
+  token: string;
+  setToken: (value: string) => void;
+  clearToken: () => void;
   update: (patch: Partial<TenantDraft>) => void;
   setImage: (kind: DraftImageKind, file: File | null) => void;
   reset: () => void;
@@ -207,6 +232,8 @@ const PERSISTED_KEYS = [
   'modules',
   'adminEmail',
   'projectRef',
+  'owner',
+  'tokenExpiresAt',
   'manualAccess',
   'contrastConfirmed',
   'titleFont',
@@ -251,6 +278,8 @@ function emptyDraft(moduleKeys: readonly string[]): TenantDraft {
     modules: Object.fromEntries(moduleKeys.map((key) => [key, true])),
     adminEmail: '',
     projectRef: '',
+    owner: 'platform',
+    tokenExpiresAt: '',
     manualAccess: false,
     contrastConfirmed: false,
     titleFont: null,
@@ -291,6 +320,8 @@ function restoredDraft(raw: string, base: TenantDraft): TenantDraft {
     modules,
     adminEmail: text(saved.adminEmail, base.adminEmail),
     projectRef: text(saved.projectRef, base.projectRef),
+    owner: saved.owner === 'customer' ? 'customer' : 'platform',
+    tokenExpiresAt: text(saved.tokenExpiresAt, base.tokenExpiresAt),
     manualAccess: flag(saved.manualAccess, base.manualAccess),
     contrastConfirmed: flag(saved.contrastConfirmed, base.contrastConfirmed),
     // Only a name safe for CSS and URLs comes back; the preview still looks it up in the catalogue.
@@ -319,8 +350,9 @@ const TenantDraftContext = createContext<TenantDraftValue | null>(null);
  * upload and domain actions on the new id.
  *
  * The text fields are mirrored into this tab's `sessionStorage` (the keys of `PERSISTED_KEYS` only),
- * so a reload keeps them; the project's manual access (`access`, UI-D-534) is NOT among them: it is
- * write-only, held in memory, and a reload finds the ref and asks for the three values again. The picked
+ * so a reload keeps them; the project's manual access (`access`, UI-D-534) and the customer project's
+ * token (`token`, 09.4-15, UI-D-550) are NOT among them: they are write-only, held in memory, and a
+ * reload finds the ref (and the owner and the typed expiry) and asks for the secrets again. The picked
  * files live in memory only (a reload drops them, and the Marca step asks again), and so do the app
  * icon's choices (`appIcon`, files among them; `reset` clears them with the rest). The draft feeds
  * the preview device on every step before creation; once a step carries the created tenant's id,
@@ -357,6 +389,7 @@ export function TenantDraftProvider({
   const [restored, setRestored] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [access, setAccessState] = useState<TenantDraftAccess>(NO_ACCESS);
+  const [token, setTokenState] = useState<string>(NO_TOKEN);
   const [logo, setLogo] = useState<DraftImage | null>(null);
   const [logoDark, setLogoDark] = useState<DraftImage | null>(null);
   const [icon, setIcon] = useState<DraftImage | null>(null);
@@ -451,9 +484,12 @@ export function TenantDraftProvider({
     setAccessState((prev) => ({ ...prev, ...patch }));
   }, []);
   const clearAccess = useCallback(() => setAccessState(NO_ACCESS), []);
+  const setToken = useCallback((value: string) => setTokenState(value), []);
+  const clearToken = useCallback(() => setTokenState(NO_TOKEN), []);
 
   const reset = useCallback(() => {
     clearAccess();
+    clearToken();
     setImage('logo', null);
     setImage('logoDark', null);
     setImage('icon', null);
@@ -471,7 +507,7 @@ export function TenantDraftProvider({
     } catch {
       // Nothing stored, nothing to clear.
     }
-  }, [setImage, clearAccess]);
+  }, [setImage, clearAccess, clearToken]);
 
   const lowContrast = useMemo(
     () => hasLowContrast(contrastReport(deriveBrandColors(colors))),
@@ -536,6 +572,9 @@ export function TenantDraftProvider({
       access,
       setAccess,
       clearAccess,
+      token,
+      setToken,
+      clearToken,
       update,
       setImage,
       reset,
@@ -556,6 +595,9 @@ export function TenantDraftProvider({
       access,
       setAccess,
       clearAccess,
+      token,
+      setToken,
+      clearToken,
       update,
       setImage,
       reset,

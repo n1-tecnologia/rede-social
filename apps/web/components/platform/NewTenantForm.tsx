@@ -1,7 +1,7 @@
 'use client';
 
-import { normalizeProjectRef } from '@rede-social/contracts/projects';
-import { Button, Card, Input, SectionTitle } from '@rede-social/ui';
+import { normalizeProjectRef, projectRefSchema } from '@rede-social/contracts/projects';
+import { Button, Card, Input, SectionTitle, SegmentedControl } from '@rede-social/ui';
 import { Database, Mail } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -13,6 +13,8 @@ import {
 } from '@/app/(platform)/plataforma/novo/actions';
 import { slugify } from '@/lib/slugify';
 import { ProjectAccessFields } from './ProjectAccessFields';
+import { ProjectTokenFields } from './ProjectTokenFields';
+import { TokenHowTo } from './TokenHowTo';
 import { type TenantDraft, useTenantDraft } from './wizard/TenantDraftProvider';
 
 /** The fields this step owns; the colours and the modules belong to Personalização. */
@@ -25,6 +27,8 @@ const DATA_FIELDS = [
   'serviceKey',
   'publishableKey',
   'access',
+  'token',
+  'tokenExpiresAt',
 ] as const satisfies readonly DraftField[];
 
 /** The manual-access fields, with the error each one raises when it is empty on "Continuar". */
@@ -42,6 +46,16 @@ const REF_FIELDS = [
   'publishableKey',
   'access',
 ] as const satisfies readonly DraftField[];
+
+/** What switching the owner also resets: the ref's fields plus the token and its date (UI-D-549). */
+const OWNER_FIELDS = [
+  ...REF_FIELDS,
+  'token',
+  'tokenExpiresAt',
+] as const satisfies readonly DraftField[];
+
+/** Today as `YYYY-MM-DD` in the platform's time zone: the bounds of the expiry field come from it. */
+const todayLabel = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
 /**
  * Step 1 (Dados) of the new-tenant wizard: who the tenant is. The display name, the slug (suggested
@@ -64,12 +78,31 @@ const REF_FIELDS = [
  * absent from the DOM otherwise. The first "Continuar" that learns it only reveals the block; from
  * then on all three are required, each with its own error. Their values live in the draft provider's
  * MEMORY (`access`), never in `sessionStorage`, and travel once, with the creation.
+ *
+ * Since 09.4-15 the group opens with the owner choice (UI-D-549): "Projeto da plataforma" (default,
+ * today's flow, byte for byte) or "Projeto do cliente", which adds the write-only token and the optional
+ * expiry (`ProjectTokenFields`, UI-D-550) and the open how-to (`TokenHowTo`). The token lives in the
+ * draft provider's MEMORY (`token`), never in `sessionStorage`; switching the owner clears it, the date
+ * and the project's errors and closes the later steps again, exactly as editing the ref does.
  */
 export function NewTenantForm() {
   const t = useTranslations('platform');
   const router = useRouter();
-  const { draft, colors, enabledModules, restored, access, setAccess, clearAccess, update, reset } =
-    useTenantDraft();
+  const {
+    draft,
+    colors,
+    enabledModules,
+    restored,
+    access,
+    setAccess,
+    clearAccess,
+    token,
+    setToken,
+    clearToken,
+    update,
+    reset,
+  } = useTenantDraft();
+  const customer = draft.owner === 'customer';
   /** The block was just revealed by "Continuar": its first field takes the focus (not on a reload). */
   const revealed = useRef(false);
   const [pending, setPending] = useState(false);
@@ -87,6 +120,16 @@ export function NewTenantForm() {
   const setRef = (projectRef: string) => {
     clearAccess();
     edit([...REF_FIELDS], { projectRef, manualAccess: false });
+  };
+
+  /** A new owner is a new question: the token, the date, the project's errors and the access go; the ref stays. */
+  const setOwner = (value: string) => {
+    const owner = value === 'customer' ? 'customer' : 'platform';
+    if (owner === draft.owner) return;
+    clearAccess();
+    clearToken();
+    setProblem(null);
+    edit([...OWNER_FIELDS], { owner, tokenExpiresAt: '', manualAccess: false });
   };
 
   useEffect(() => {
@@ -115,8 +158,22 @@ export function NewTenantForm() {
       adminEmail: draft.adminEmail,
       modules: enabledModules,
       projectRef,
+      // A platform draft sends no new field (D-566); a customer draft adds owner, token and date, once.
+      ...(customer ? { owner: 'customer', token, tokenExpiresAt: draft.tokenExpiresAt } : {}),
     };
     try {
+      // A customer draft without its token asks nothing of the server (UI-D-550): the errors show here.
+      if (customer && token.trim() === '') {
+        const fieldErrors = { ...draft.fieldErrors };
+        for (const field of DATA_FIELDS) delete fieldErrors[field];
+        fieldErrors.token = 'tokenRequired';
+        if (projectRef === '') fieldErrors.projectRef = 'projectRefRequired';
+        else if (!projectRefSchema.safeParse(projectRef).success) {
+          fieldErrors.projectRef = 'projectRefInvalid';
+        }
+        update({ projectRef, dataReady: false, fieldErrors });
+        return;
+      }
       const result = await validateTenantDraftAction(input);
       const fieldErrors = { ...draft.fieldErrors };
       for (const field of DATA_FIELDS) delete fieldErrors[field];
@@ -238,7 +295,21 @@ export function NewTenantForm() {
           <SectionTitle variant="group" as="h3">
             {t('wizard.project.title')}
           </SectionTitle>
-          <p className="mt-1 text-sm text-text-secondary">{t('wizard.project.body')}</p>
+          <SegmentedControl
+            className="mt-4"
+            wrap
+            label={t('wizard.project.owner.label')}
+            options={[
+              { value: 'platform', label: t('wizard.project.owner.platform') },
+              { value: 'customer', label: t('wizard.project.owner.customer') },
+            ]}
+            value={draft.owner}
+            onChange={setOwner}
+            disabled={pending}
+          />
+          <p className="mt-2 text-sm text-text-secondary">
+            {customer ? t('wizard.project.bodyCustomer') : t('wizard.project.body')}
+          </p>
           <div className="mt-4 flex flex-col gap-2">
             <Input
               id="projectRef"
@@ -265,6 +336,28 @@ export function NewTenantForm() {
             />
             <p className="text-xs text-text-tertiary">{t('wizard.project.helper')}</p>
           </div>
+          {customer ? (
+            <>
+              <ProjectTokenFields
+                className="mt-4"
+                disabled={pending}
+                today={todayLabel()}
+                values={{ token, expiresAt: draft.tokenExpiresAt }}
+                onChange={(next) => {
+                  const tokenChanged = next.token !== token;
+                  if (tokenChanged) setToken(next.token);
+                  edit(tokenChanged ? ['token'] : ['tokenExpiresAt'], {
+                    tokenExpiresAt: next.expiresAt,
+                  });
+                }}
+                errors={{
+                  token: fieldError('token'),
+                  expiresAt: fieldError('tokenExpiresAt'),
+                }}
+              />
+              <TokenHowTo className="mt-4" />
+            </>
+          ) : null}
           {draft.manualAccess ? (
             <ProjectAccessFields
               className="mt-4"
