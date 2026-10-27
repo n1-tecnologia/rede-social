@@ -15,7 +15,7 @@ import {
 } from './access';
 import { checkProject } from './health';
 import { projectOfTenant } from './overview';
-import { getProjectProvider } from './provider-access';
+import { getProjectProviderFor } from './provider-for';
 import type { ProjectProvider } from './types';
 
 /**
@@ -50,6 +50,11 @@ type LockedProject = {
   credential_source: string;
   ddl_url_sealed: string | null;
   state: string;
+  provider: string;
+  credential_version: number;
+  owner: string;
+  org_slug: string | null;
+  mgmt_token_sealed: string | null;
 };
 
 export async function replaceCredentials(
@@ -71,7 +76,8 @@ export async function replaceCredentials(
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`project:${target.ref}`}))`);
 
     const found = (await tx.execute(sql`
-      select id::text as id, ref, api_url, credential_source, ddl_url_sealed, state
+      select id::text as id, ref, api_url, credential_source, ddl_url_sealed, state,
+             provider, credential_version, owner, org_slug, mgmt_token_sealed
         from platform.projects
        where id = ${target.id}::uuid
          for update`)) as unknown as LockedProject[];
@@ -82,7 +88,17 @@ export async function replaceCredentials(
     let ddlTarget: Awaited<ReturnType<typeof ddlTargetOf>> | null = null;
     if (values.databasePassword !== undefined) {
       try {
-        const provider = deps.provider ?? (await getProjectProvider());
+        const provider =
+          deps.provider ??
+          (await getProjectProviderFor({
+            id: row.id,
+            ref: row.ref,
+            provider: row.provider,
+            credentialVersion: row.credential_version,
+            owner: row.owner,
+            orgSlug: row.org_slug,
+            mgmtTokenSealed: row.mgmt_token_sealed,
+          }));
         ddlTarget = await ddlTargetOf(
           { id: row.id, ref: row.ref, ddlUrlSealed: row.ddl_url_sealed },
           provider,

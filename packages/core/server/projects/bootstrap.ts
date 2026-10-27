@@ -7,6 +7,7 @@ import { moduleLogger } from '../logging';
 import { invalidateProject, resolveProjectById } from '../tenancy/project-registry';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
 import { enqueueBootstrap } from './bootstrap-job';
+import { getProjectProviderFor, type ProviderProject } from './provider-for';
 import { BOOTSTRAP_STEPS, type BootstrapReason, type BootstrapStep, reasonOf } from './reasons';
 import {
   BootstrapStepError,
@@ -280,10 +281,17 @@ async function finalize(projectId: string, tenants: BoundTenant[]): Promise<void
   for (const host of hosts) invalidateTenantHost(host);
 }
 
-async function resolveProvider(deps: BootstrapDeps): Promise<ProjectProvider> {
+async function resolveProvider(
+  deps: BootstrapDeps,
+  project: ProviderProject,
+): Promise<ProjectProvider> {
   const given = deps.provider;
   if (given && typeof given !== 'function') return given;
   if (typeof given === 'function') return given();
+  // A customer project runs on its OWN token (09.4-06, D-566): the platform singleton below would silently
+  // have sent the platform token to an account that is not ours (T-09.4-19). Platform projects keep the
+  // direct singleton import byte for byte.
+  if (project.owner === 'customer') return getProjectProviderFor(project);
   // The singleton module throws in production without `PROJECT_PROVIDER=supabase`: loaded on demand, so
   // booting a worker that never bootstraps does not depend on it.
   return (await import('./index')).projectProvider;
@@ -385,7 +393,7 @@ export async function runBootstrap(
     try {
       const project = await resolveProjectById(projectId);
       if (!project) throw new BootstrapStepError('unknown');
-      const provider = await resolveProvider(deps);
+      const provider = await resolveProvider(deps, project);
       const context: StepContext = {
         project,
         tenants,

@@ -9,7 +9,11 @@
  *   1. generate a NEW master key and set `PLATFORM_MASTER_KEYS` (and `PLATFORM_MASTER_KEY_ID`) to it, in the
  *      environment this command and the API/worker will use;
  *   2. set `PROJECT_PROVIDER=supabase`, `SUPABASE_PAT` and `SUPABASE_ORG_SLUG` (the platform token is the ONLY
- *      thing the command needs from the old world; it never reads a stored credential);
+ *      thing the command needs from the old world; it never reads a stored credential). Only a PLATFORM project
+ *      needs them: the command asks for no platform variable up front, the provider is resolved per project
+ *      (09.4-06), and a CUSTOMER project is served by its own management token, read from the registry. That
+ *      token is sealed under the master key, so after a master-key loss it is unreadable and the command ends
+ *      with a closed reason code; paste the customer token again in the panel, then run this command;
  *   3. run this command once per project: it reveals or creates the project's keys, sets a new `postgres`
  *      password, re-creates the `api_user` password, writes a new hook secret into the project's Auth
  *      configuration, re-seals every credential column under the new key and bumps `credential_version`;

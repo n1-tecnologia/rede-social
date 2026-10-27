@@ -6,7 +6,7 @@ import { processKeyring, seal } from '../secrets/sealed';
 import { invalidateProject, resolveProjectById } from '../tenancy/project-registry';
 import { STEP_LEASE_MINUTES } from './bootstrap';
 import { checkProject } from './health';
-import { getProjectProvider } from './provider-access';
+import { getProjectProviderFor } from './provider-for';
 import { type BootstrapReason, reasonOf } from './reasons';
 import {
   type Connect,
@@ -94,7 +94,7 @@ export async function reissueCredentials(
     if (steps.some((row) => row.status === 'running' && row.live)) return { status: 'busy' };
 
     try {
-      const provider = deps.provider ?? (await getProjectProvider());
+      const provider = deps.provider ?? (await getProjectProviderFor(project));
       const ref = project.ref;
 
       const keys = await provider.ensureKeys(ref);
