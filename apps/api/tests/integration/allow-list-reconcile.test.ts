@@ -26,6 +26,7 @@ import { adminSql, provisionTenantOnB, type TenantOnB } from './setup';
 const spy = vi.hoisted(() => ({
   adds: [] as Array<{ projectId: string; host: string }>,
   failFor: new Set<string>(),
+  buildFailFor: new Set<string>(),
   failHosts: new Set<string>(),
   delayMs: 0,
   active: new Map<string, number>(),
@@ -37,6 +38,8 @@ vi.mock('@rede-social/core/server/domains/index', async (importOriginal) => {
   return {
     ...original,
     authAllowListFor: ((project: Parameters<typeof original.authAllowListFor>[0]) => {
+      // The adapter of a customer project cannot be built when its sealed token does not open (WR-02).
+      if (spy.buildFailFor.has(project.id)) throw new Error('sealed token does not open');
       const inner = original.authAllowListFor(project);
       return {
         name: inner.name,
@@ -75,6 +78,7 @@ const extraDomains: string[] = [];
 const resetSpy = () => {
   spy.adds.length = 0;
   spy.failFor.clear();
+  spy.buildFailFor.clear();
   spy.failHosts.clear();
   spy.delayMs = 0;
   spy.active.clear();
@@ -289,6 +293,29 @@ describe('one list per project (09.2-11, DBT-42)', () => {
     });
     expect(result.failed).toBe(1);
     expect(localAllowListByProject.get(b.projectId)?.has(allowListEntry(b.host))).toBe(true);
+  });
+
+  it('a project whose adapter cannot be built counts failed and the projects after it are still reconciled (WR-02)', async () => {
+    resetSpy();
+    const rows = await adminSql<{ id: string }[]>`
+      select id from platform.projects
+       where id in (${b.projectId}::uuid, ${c.projectId}::uuid) order by ref`;
+    const [first, second] = rows.map((row) => row.id);
+    if (!first || !second) throw new Error('the two fixture projects are missing');
+    localAllowListByProject.delete(second);
+    spy.buildFailFor.add(first);
+
+    const result = await reconcileAuthAllowList();
+
+    const failedOne = result.projects.find((p) => p.projectId === first);
+    expect(failedOne).toMatchObject({ added: 0 });
+    expect(failedOne?.failed).toBe(failedOne?.hosts);
+    expect(failedOne?.failed).toBeGreaterThan(0);
+    const laterOne = result.projects.find((p) => p.projectId === second);
+    expect(laterOne).toMatchObject({ failed: 0 });
+    expect(laterOne?.added).toBe(laterOne?.hosts);
+    expect(localAllowListByProject.get(second)?.size ?? 0).toBeGreaterThan(0);
+    expect(result.failed).toBe(failedOne?.failed);
   });
 
   it('an unknown project id reconciles nothing and a project that is not ready is skipped by the full run', async () => {

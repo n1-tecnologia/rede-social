@@ -3,6 +3,7 @@ import { tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains } from '../../db/schema';
 import { authAllowListFor } from '../domains/index';
+import type { AuthAllowList } from '../domains/types';
 import { moduleLogger } from '../logging';
 import {
   listReadyProjects,
@@ -36,6 +37,23 @@ export async function clearAllowListError(host: string): Promise<void> {
       },
       'could not clear the allow_list error of a host',
     );
+  }
+}
+
+/**
+ * The allow-list adapter of one project, or `null`. Building the adapter of a CUSTOMER project opens its sealed
+ * token and throws when the column does not open; that is this project's failure, never the whole run's
+ * (09.4 review WR-02). Only the project id is logged.
+ */
+function adapterOf(project: ProjectRecord): AuthAllowList | null {
+  try {
+    return authAllowListFor(project);
+  } catch {
+    log.error(
+      { event: 'platform.domains.allow_list_adapter_failed', projectId: project.id },
+      'allow-list adapter could not be built for a project; its hosts were not reconciled',
+    );
+    return null;
   }
 }
 
@@ -111,8 +129,10 @@ export async function reconcileAuthAllowList(
       failed: 0,
     };
     if (hosts.length > 0) {
-      const adapter = authAllowListFor(project);
-      for (const host of hosts) {
+      const adapter = adapterOf(project);
+      // No adapter: the whole project failed, counted once per host, and the next project is still visited.
+      if (!adapter) result.failed = hosts.length;
+      for (const host of adapter ? hosts : []) {
         try {
           await withAllowListLock(project.ref, () => adapter.add(host));
           result.added += 1;
