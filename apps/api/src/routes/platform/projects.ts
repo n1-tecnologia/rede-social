@@ -8,6 +8,8 @@ import {
   precheckBodySchema,
   replaceCredentialsAnswerSchema,
   replaceCredentialsBodySchema,
+  replaceTokenAnswerSchema,
+  replaceTokenBodySchema,
 } from '@rede-social/contracts';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import type { PlatformEnv } from '@rede-social/core/server/platform/require-super-admin';
@@ -16,6 +18,7 @@ import { replaceCredentials } from '@rede-social/core/server/projects/credential
 import { checkProject } from '@rede-social/core/server/projects/health';
 import { getDatabaseOverview, projectOfTenant } from '@rede-social/core/server/projects/overview';
 import { precheckProject } from '@rede-social/core/server/projects/precheck';
+import { replaceProjectToken } from '@rede-social/core/server/projects/token';
 import { platformDefaultHook } from '../../http/openapi';
 
 /**
@@ -123,6 +126,33 @@ const credentialsRoute = createRoute({
     404: envelope('No such tenant'),
     409: envelope(
       'CONFLICT — the tenant lives in the central project, whose credentials are the environment’s',
+    ),
+  },
+});
+
+const tokenRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/database/token',
+  request: {
+    params: idParams,
+    body: {
+      content: { 'application/json': { schema: replaceTokenBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'The new management token worked for the project and its registered organisation and was sealed; nothing is ever returned. The registry and the caches hold it from the next request on',
+      content: { 'application/json': { schema: replaceTokenAnswerSchema } },
+    },
+    400: envelope(
+      'VALIDATION_FAILED — an empty or unknown body key, or one closed code under `token` (token_invalid, token_forbidden, token_account_wide, org_mismatch, not_found, unchecked) or `tokenExpiresAt` (token_expiry_invalid); nothing was changed',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope(
+      'CONFLICT — the tenant does not live on a customer-owned project, so there is no management token of its own to replace',
     ),
   },
 });
@@ -249,6 +279,31 @@ export const projectsRoutes = projectsRouter
 
     c.get('logger').info(
       { event: 'platform.projects.credentials', userId, requestId, tenantId: id },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const }, 200);
+  })
+  .openapi(tokenRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    const body = c.req.valid('json');
+
+    // The token goes straight to the kernel, which validates it against the project, seals it and forgets it.
+    // It is never logged, never echoed and never kept in this scope past the call.
+    await replaceProjectToken(
+      id,
+      {
+        token: body.token,
+        ...(body.tokenExpiresAt === undefined || body.tokenExpiresAt.trim() === ''
+          ? {}
+          : { tokenExpiresAt: body.tokenExpiresAt.trim() }),
+      },
+      { userId, logger: c.get('logger') },
+    );
+
+    c.get('logger').info(
+      { event: 'platform.projects.token', userId, requestId, tenantId: id },
       'platform write',
     );
     c.header('Cache-Control', 'no-store');

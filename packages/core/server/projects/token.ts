@@ -3,10 +3,15 @@ import { eq, sql } from 'drizzle-orm';
 import { projects, projectTokenEvents } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import type { Tx } from '../../db/tenant-tx';
+import { dropAllowListAdapter } from '../domains/index';
+import { ApiError } from '../http/api-error';
 import { moduleLogger } from '../logging';
+import { logFor, type PlatformActor } from '../platform/invites';
 import { processKeyring, seal } from '../secrets/sealed';
+import { invalidateProject } from '../tenancy/project-registry';
 import { apiUrlFor } from './access';
-import { createRequestTokenProvider } from './provider-for';
+import { projectOfTenant } from './overview';
+import { createRequestTokenProvider, dropProjectProvider } from './provider-for';
 import { type ProjectProvider, ProjectProviderError } from './types';
 
 /**
@@ -294,4 +299,138 @@ export async function registerCustomerProject(input: {
 
   log.info({ event: 'project.token.registered', projectId, actor }, 'customer project registered');
   return { projectId, orgSlug: validated.orgSlug };
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Replacing the token (D-575, UI-D-555, D-576, CTK-19, CTK-20, CTK-27)
+// ---------------------------------------------------------------------------------------------------------
+
+export type ReplaceTokenDeps = {
+  /** Test seam: a ready provider the validation runs on; defaults to one built from the candidate token. */
+  provider?: ProjectProvider;
+  /** The follow-up after the commit; tests inject one that hands its promise back so they can await it. */
+  afterReplace?: (projectId: string) => unknown;
+  /** Test seam: the day the typed date is judged against. */
+  today?: string;
+};
+
+type LockedTokenProject = {
+  id: string;
+  ref: string;
+  owner: string;
+  org_slug: string | null;
+  is_central: boolean;
+  credential_source: string;
+};
+
+/**
+ * "Substituir token" (D-575, UI-D-555): replaces the sealed management token of a CUSTOMER project, and NEVER
+ * before the new one has been validated against the project and the REGISTERED organisation pin. Inside ONE
+ * platform transaction, under `pg_advisory_xact_lock(hashtext('project:' || ref))` (the lock `replaceCredentials`
+ * and the bootstrap take), the row is read `for update`, the candidate is validated by `validateCustomerToken`
+ * with the stored `org_slug`, and only then are the sealed token, the typed expiry, the version and the audit
+ * event written together. Two replacements for one project queue on the lock and the later one wins ENTIRELY.
+ * The validation is outbound I/O inside the transaction on purpose (the lock must cover the validate-then-write
+ * pair); it is an operator action of seconds, bounded by the provider's own timeouts.
+ *
+ * After the commit the registry cache and the cached provider and allow-list adapter of the project are dropped
+ * (the next call rebuilds them from the new token) and the follow-up starts. The `credential_version` bump also
+ * recycles the project's tenant pools, admin clients and job senders: harmless churn, documented in
+ * `docs/DEPLOY.md`, and the reason not to replace tokens in a loop.
+ *
+ * Nothing here logs, returns or throws the token: the log line carries ids only (D-576).
+ */
+export async function replaceProjectToken(
+  tenantId: string,
+  input: { token: string; tokenExpiresAt?: string | null },
+  actor: PlatformActor,
+  deps: ReplaceTokenDeps = {},
+): Promise<{ ok: true; credentialVersion: number }> {
+  const target = await projectOfTenant(tenantId);
+  if (!target) throw new ApiError(404, 'NOT_FOUND');
+  // Project 0's token lives nowhere: there is nothing to replace.
+  if (target.central) throw new ApiError(409, 'CONFLICT');
+
+  const outcome = await withPlatformTx(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`project:${target.ref}`}))`);
+
+    const found = (await tx.execute(sql`
+      select id::text as id, ref, owner, org_slug, is_central, credential_source
+        from platform.projects
+       where id = ${target.id}::uuid
+         for update`)) as unknown as LockedTokenProject[];
+    const row = found[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    // Only a customer project has a token of its own to replace.
+    if (row.owner !== 'customer' || row.is_central || row.credential_source === 'env') {
+      throw new ApiError(409, 'CONFLICT');
+    }
+
+    const expiresAt = input.tokenExpiresAt ?? null;
+    const validated = await validateCustomerToken({
+      ref: row.ref,
+      token: input.token,
+      expiresAt,
+      ...(row.org_slug ? { orgSlug: row.org_slug } : {}),
+      ...(deps.today === undefined ? {} : { today: deps.today }),
+      ...(deps.provider === undefined ? {} : { provider: deps.provider }),
+    });
+
+    const updated = await tx
+      .update(projects)
+      .set({
+        mgmtTokenSealed: sealManagementToken(input.token, row.id),
+        mgmtTokenExpiresAt: validated.expiresAt,
+        // A project registered without a pin is pinned now; one that has a pin keeps it (it was just enforced).
+        orgSlug: row.org_slug ?? validated.orgSlug,
+        // Bookkeeping only (the reseal command owns it once set): each string carries its own key id.
+        secretKeyId: sql`coalesce(${projects.secretKeyId}, ${processKeyring().currentId}::smallint)`,
+        credentialVersion: sql`${projects.credentialVersion} + 1`,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(projects.id, row.id))
+      .returning({ credentialVersion: projects.credentialVersion });
+    await recordTokenEvent(tx, {
+      kind: 'replaced',
+      projectId: row.id,
+      projectRef: row.ref,
+      actor: `platform:${actor.userId}`,
+      outcome: 'ok',
+    });
+    return { projectId: row.id, credentialVersion: updated[0]?.credentialVersion ?? 0 };
+  });
+
+  // The pools and the binding cached under the old version are dropped; the next call rebuilds from the new token.
+  invalidateProject();
+  dropProjectProvider(outcome.projectId);
+  dropAllowListAdapter(outcome.projectId);
+  logFor(actor, 'platform.projects').info(
+    {
+      event: 'project.token.replaced',
+      userId: actor.userId,
+      tenantId,
+      projectId: outcome.projectId,
+      credentialVersion: outcome.credentialVersion,
+    },
+    'project token replaced',
+  );
+  startFollowUp(deps.afterReplace ?? defaultAfterReplace, outcome.projectId);
+  return { ok: true, credentialVersion: outcome.credentialVersion };
+}
+
+/** Fire and forget: a failing follow-up is logged by project id only and never reaches the operator's answer. */
+function startFollowUp(run: (projectId: string) => unknown, projectId: string): void {
+  const failed = () =>
+    log.warn({ event: 'project.token.follow_up_failed', projectId }, 'token follow-up failed');
+  try {
+    void Promise.resolve(run(projectId)).catch(failed);
+  } catch {
+    failed();
+  }
+}
+
+/** The health check refreshes the token and database states together (D-573). Imported lazily: health imports this module's state helper. */
+async function defaultAfterReplace(projectId: string): Promise<void> {
+  const { checkProject } = await import('./health');
+  await checkProject(projectId);
 }
