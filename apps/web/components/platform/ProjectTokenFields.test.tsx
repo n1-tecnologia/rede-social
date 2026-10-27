@@ -105,7 +105,7 @@ describe('ProjectTokenFields', () => {
   });
 
   it('3. has no show/hide control and never displays the token, a prefix or a length', () => {
-    const secret = 'sbp_fc_' + 'a'.repeat(5000);
+    const secret = `sbp_fc_${'a'.repeat(5000)}`;
     mount({ values: { token: secret, expiresAt: '' } });
     expect(document.querySelectorAll('button')).toHaveLength(0);
     expect(document.querySelector('[aria-pressed]')).toBeNull();
@@ -117,7 +117,9 @@ describe('ProjectTokenFields', () => {
 
   it('4. shows an error under its own field with role="alert", and none otherwise', () => {
     mount({ errors: { token: 'Cole o token de acesso do projeto.', expiresAt: 'Data ruim.' } });
-    const alerts = Array.from(document.querySelectorAll('[role="alert"]')).map((n) => n.textContent);
+    const alerts = Array.from(document.querySelectorAll('[role="alert"]')).map(
+      (n) => n.textContent,
+    );
     expect(alerts).toEqual(['Cole o token de acesso do projeto.', 'Data ruim.']);
     expect(token().getAttribute('aria-describedby')).toBe('projectToken-error');
     expect(expiry().getAttribute('aria-describedby')).toBe('projectTokenExpiresAt-error');
