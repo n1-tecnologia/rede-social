@@ -16,6 +16,13 @@ import {
   precheckBodySchema,
   projectRefSchema,
   replaceCredentialsBodySchema,
+  TOKEN_CHECKS,
+  TOKEN_EXPIRING_WINDOW_DAYS,
+  TOKEN_STATES,
+  type TokenCheck,
+  type TokenState,
+  tokenExpiryIsValid,
+  tokenState,
 } from '../src';
 import * as projectsSubpath from '../src/projects';
 
@@ -330,5 +337,144 @@ describe('the create body and the list query carry the project fields', () => {
     expect(both.success).toBe(false);
     expect(both.error?.issues[0]?.path).toEqual(['banco']);
     expect(platformTenantsQuerySchema.safeParse({ status: 'suspended' }).success).toBe(true);
+  });
+});
+
+describe('tokenState (D-573, UI-D-553): the precedence org_mismatch > invalid > no_permission > expired > expiring > unchecked > valid', () => {
+  const today = '2026-10-27';
+  const past = '2026-10-01';
+  const in12 = '2026-11-08';
+  const in30 = '2026-11-26';
+  const in31 = '2026-11-27';
+
+  type Row = [TokenCheck | null, string | null, TokenState];
+  const table: Row[] = [
+    // organização diferente wins over everything, expired or not
+    ['org_mismatch', past, 'org_mismatch'],
+    ['org_mismatch', in12, 'org_mismatch'],
+    ['org_mismatch', in30, 'org_mismatch'],
+    ['org_mismatch', in31, 'org_mismatch'],
+    ['org_mismatch', null, 'org_mismatch'],
+    // inválido
+    ['invalid', past, 'invalid'],
+    ['invalid', in12, 'invalid'],
+    ['invalid', in30, 'invalid'],
+    ['invalid', in31, 'invalid'],
+    ['invalid', null, 'invalid'],
+    // sem permissão ('forbidden' is the stored outcome)
+    ['forbidden', past, 'no_permission'],
+    ['forbidden', in12, 'no_permission'],
+    ['forbidden', in30, 'no_permission'],
+    ['forbidden', in31, 'no_permission'],
+    ['forbidden', null, 'no_permission'],
+    // ok: the date decides
+    ['ok', past, 'expired'],
+    ['ok', in12, 'expiring'],
+    ['ok', in30, 'expiring'],
+    ['ok', in31, 'valid'],
+    ['ok', null, 'valid'],
+    // never checked: a date can still say vencido / vencendo, otherwise não verificado
+    [null, past, 'expired'],
+    [null, in12, 'expiring'],
+    [null, in30, 'expiring'],
+    [null, in31, 'unchecked'],
+    [null, null, 'unchecked'],
+  ];
+
+  it('precedence: every check crossed with every expiry follows the fixed order', () => {
+    expect(table.length).toBeGreaterThanOrEqual(20);
+    for (const [check, expiresAt, expected] of table) {
+      expect(tokenState({ check, expiresAt, today }), `${check} / ${expiresAt}`).toBe(expected);
+    }
+  });
+
+  it('the table covers every stored check outcome and every state', () => {
+    for (const check of TOKEN_CHECKS) expect(table.some((row) => row[0] === check)).toBe(true);
+    for (const state of TOKEN_STATES) expect(table.some((row) => row[2] === state)).toBe(true);
+    expect([...TOKEN_CHECKS]).toEqual(['ok', 'invalid', 'forbidden', 'org_mismatch']);
+    expect([...TOKEN_STATES]).toEqual([
+      'valid',
+      'expiring',
+      'expired',
+      'invalid',
+      'no_permission',
+      'org_mismatch',
+      'unchecked',
+    ]);
+  });
+
+  it('window: today is expiring (0 days left), 30 days is expiring, 31 days is valid, yesterday is expired', () => {
+    expect(TOKEN_EXPIRING_WINDOW_DAYS).toBe(30);
+    expect(tokenState({ check: 'ok', expiresAt: today, today })).toBe('expiring');
+    expect(tokenState({ check: 'ok', expiresAt: '2026-11-26', today })).toBe('expiring');
+    expect(tokenState({ check: 'ok', expiresAt: '2026-11-27', today })).toBe('valid');
+    expect(tokenState({ check: 'ok', expiresAt: '2026-10-26', today })).toBe('expired');
+  });
+
+  it('window: the whole days are counted on calendar dates, with no timezone or DST in them', () => {
+    // Crosses a year end and a leap day.
+    expect(tokenState({ check: 'ok', expiresAt: '2027-01-05', today: '2026-12-06' })).toBe(
+      'expiring',
+    );
+    expect(tokenState({ check: 'ok', expiresAt: '2027-01-06', today: '2026-12-06' })).toBe('valid');
+    expect(tokenState({ check: 'ok', expiresAt: '2028-03-01', today: '2028-01-31' })).toBe(
+      'expiring',
+    );
+    expect(tokenState({ check: 'ok', expiresAt: '2028-03-02', today: '2028-01-31' })).toBe('valid');
+  });
+});
+
+describe('tokenExpiryIsValid (D-575): YYYY-MM-DD, strictly after today, at most one year after today', () => {
+  const today = '2026-10-27';
+
+  it('today, yesterday, an impossible date and a non-date are refused', () => {
+    expect(tokenExpiryIsValid('2026-10-27', today)).toBe(false);
+    expect(tokenExpiryIsValid('2026-10-26', today)).toBe(false);
+    expect(tokenExpiryIsValid('2026-13-40', today)).toBe(false);
+    expect(tokenExpiryIsValid('2026-02-30', today)).toBe(false);
+    expect(tokenExpiryIsValid('abc', today)).toBe(false);
+    expect(tokenExpiryIsValid('', today)).toBe(false);
+    expect(tokenExpiryIsValid('2026-10-28T00:00:00Z', today)).toBe(false);
+    expect(tokenExpiryIsValid('27/10/2026', today)).toBe(false);
+  });
+
+  it('more than one year after today is refused, exactly one year is accepted', () => {
+    expect(tokenExpiryIsValid('2027-10-28', today)).toBe(false);
+    expect(tokenExpiryIsValid('2028-10-27', today)).toBe(false);
+    expect(tokenExpiryIsValid('2027-10-27', today)).toBe(true);
+  });
+
+  it('tomorrow is accepted', () => {
+    expect(tokenExpiryIsValid('2026-10-28', today)).toBe(true);
+  });
+});
+
+describe('the token state is its own axis (D-573, D-574, UI-D-551)', () => {
+  it('DATABASE_STATES is the same eight entries and databaseState has no token input', () => {
+    expect([...DATABASE_STATES]).toEqual([
+      'ready',
+      'preparing',
+      'preparation_failed',
+      'behind',
+      'paused',
+      'unreachable',
+      'moving',
+      'unchecked',
+    ]);
+    const base: DatabaseStateInput = {
+      projectState: 'ready',
+      steps: [],
+      health: 'healthy',
+      schema: { applied: 147, required: 147 },
+      moving: false,
+    };
+    // A dead token handed in by mistake changes nothing: it can never become "Inacessível".
+    for (const check of ['invalid', 'forbidden', 'org_mismatch']) {
+      expect(databaseState({ ...base, check, token: 'invalid' } as DatabaseStateInput)).toBe(
+        'ready',
+      );
+    }
+    expect(DATABASE_STATES).not.toContain('invalid');
+    expect(DATABASE_STATES).not.toContain('org_mismatch');
   });
 });
