@@ -998,7 +998,7 @@ describe('The write surface (D-541)', () => {
 describe('The adapter reaches only the INTEGRATE list of COVERAGE.md (PR-9, T-09.2-56)', () => {
   const coverage = readFileSync(
     new URL(
-      '../../../.planning/phases/09.2-banco-por-tenant-projeto-supabase-dedicado-por-tenant/COVERAGE.md',
+      '../../../.planning/phases/09.4-projeto-do-tenant-no-supabase-do-cliente/COVERAGE.md',
       import.meta.url,
     ),
     'utf8',
@@ -1014,8 +1014,9 @@ describe('The adapter reaches only the INTEGRATE list of COVERAGE.md (PR-9, T-09
     'utf8',
   );
 
-  it('COVERAGE.md lists 20 INTEGRATE operations', () => {
-    expect(integrate).toHaveLength(20);
+  it('COVERAGE.md lists 21 INTEGRATE operations', () => {
+    expect(integrate).toHaveLength(21);
+    expect(coverage).toMatch(/21 \+ 148 = 169/);
   });
 
   it('every call(...) literal and every /v1 path in the adapter is an INTEGRATE row, and every row is used', () => {
@@ -1024,7 +1025,7 @@ describe('The adapter reaches only the INTEGRATE list of COVERAGE.md (PR-9, T-09
     const calls = [...source.matchAll(/call(?:<[^>]*>)?\(\s*'([A-Z]+)',\s*'([^']+)'/g)].map(
       (m) => `${m[1]} ${m[2]}`,
     );
-    expect(calls.length).toBe(12);
+    expect(calls.length).toBe(13);
     for (const literal of calls) expect(allowed).toContain(literal);
 
     const paths = new Set([...source.matchAll(/'(\/v1\/[^']+)'/g)].map((m) => m[1] as string));
@@ -1079,7 +1080,7 @@ describe('Reason catalog (DBT-20, UI A-UI-10)', () => {
     'not_ready',
   ];
 
-  it('the catalog is the ten closed codes', () => {
+  it('the catalog is the thirteen closed codes', () => {
     expect([...BOOTSTRAP_REASONS]).toEqual([
       'unreachable',
       'access_denied',
@@ -1091,6 +1092,9 @@ describe('Reason catalog (DBT-20, UI A-UI-10)', () => {
       'tenant_failed',
       'invite_failed',
       'unknown',
+      'token_invalid',
+      'token_forbidden',
+      'org_mismatch',
     ]);
   });
 
@@ -1119,6 +1123,30 @@ describe('Reason catalog (DBT-20, UI A-UI-10)', () => {
     expect(reasonOf(new Error('x'), 'invite')).toBe('invite_failed');
     expect(reasonOf(new Error('x'), 'verify')).toBe('unreachable');
     expect(reasonOf(new Error('x'), 'roles')).toBe('unreachable');
+  });
+
+  it('a token code comes only from an error of a customer-token provider (09.4-05, D-573)', () => {
+    const customerError = (
+      status: number,
+      code?: 'token_invalid' | 'token_forbidden' | 'org_mismatch',
+    ) => new ProjectProviderError('forbidden', status, code, true);
+    expect(reasonOf(customerError(401, 'token_invalid'), 'schema')).toBe('token_invalid');
+    expect(reasonOf(customerError(403, 'token_forbidden'), 'verify')).toBe('token_forbidden');
+    expect(reasonOf(customerError(403, 'org_mismatch'), 'verify')).toBe('org_mismatch');
+    for (const step of BOOTSTRAP_STEPS) {
+      // A platform forbidden, and the platform org_mismatch, stay access_denied.
+      expect(reasonOf(new ProjectProviderError('forbidden', 403), step)).toBe('access_denied');
+      expect(reasonOf(new ProjectProviderError('forbidden', 403, 'org_mismatch'), step)).toBe(
+        'access_denied',
+      );
+      // A customer error with no code (a 404, a 500) follows the old branches.
+      expect(reasonOf(new ProjectProviderError('unavailable', 500, undefined, true), step)).toBe(
+        'unreachable',
+      );
+    }
+    expect(reasonOf(new ProjectProviderError('conflict', 409, undefined, true), 'auth')).toBe(
+      'auth_config_failed',
+    );
   });
 
   it('an unknown step, a string or a missing error is unknown; the message is never forwarded', () => {
@@ -1266,5 +1294,49 @@ describe('customer token provider (09.4-05, D-571, D-573, CTK-12, CTK-15, CTK-23
     await first.describe(REF);
     expect(sleeps).toEqual([2000]);
     expect(otherAnswer).toMatchObject({ ref: REF });
+  });
+});
+
+describe('listProjects, the 21st operation (09.4-05, D-570, CTK-11)', () => {
+  const REF2 = 'tsrqponmlkjihgfedcba';
+  const listing: Handler = (r) =>
+    r.method === 'GET' && r.path === '/v1/projects'
+      ? { status: 200, body: [{ ref: REF }, { id: REF2 }, { ref: 'not-a-ref' }, { name: 'x' }] }
+      : undefined;
+  const customerProvider = (baseUrl: string) =>
+    createSupabaseProjectProvider({
+      pat: 'sbp_CUSTOMER-scoped-token-0002',
+      tokenKind: 'customer',
+      baseUrl,
+      limiter: createLimiter({ perMinute: 10_000 }),
+      jitter: () => 0,
+    });
+
+  it('returns the refs only, using ref or id, dropping what is not a ref, without any org check', async () => {
+    const stub = await startStub(listing);
+    const entries = await customerProvider(stub.baseUrl).listProjects();
+    expect(entries).toEqual([{ ref: REF }, { ref: REF2 }]);
+    expect(stub.requests.map((r) => `${r.method} ${r.path}`)).toEqual(['GET /v1/projects']);
+    expect(JSON.stringify(entries)).not.toContain('Authorization');
+  });
+
+  it('a non-array answer is unavailable and a 403 is forbidden with the customer code', async () => {
+    const odd = await startStub(() => ({ status: 200, body: { projects: [] } }));
+    await expect(customerProvider(odd.baseUrl).listProjects()).rejects.toMatchObject({
+      kind: 'unavailable',
+    });
+    const refused = await startStub(() => ({ status: 403, body: {} }));
+    await expect(customerProvider(refused.baseUrl).listProjects()).rejects.toMatchObject({
+      kind: 'forbidden',
+      status: 403,
+      code: 'token_forbidden',
+      customerToken: true,
+    });
+    const platformRefused = await startStub(() => ({ status: 403, body: {} }));
+    await expect(provider(platformRefused.baseUrl).listProjects()).rejects.toMatchObject({
+      kind: 'forbidden',
+      code: undefined,
+      customerToken: false,
+    });
   });
 });

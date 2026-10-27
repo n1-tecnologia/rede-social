@@ -30,7 +30,7 @@ vi.mock('../server/projects/move/state', async (importOriginal) => ({
 const done = [{ status: 'done' }];
 
 describe('the contract mirrors the kernel catalogs', () => {
-  it('the eight steps and the ten reason codes are the bootstrap engine’s, in order', () => {
+  it('the eight steps and the thirteen reason codes are the bootstrap engine’s, in order', () => {
     expect([...BOOTSTRAP_STEP_KEYS]).toEqual([...BOOTSTRAP_STEPS]);
     expect([...BOOTSTRAP_REASON_CODES]).toEqual([...BOOTSTRAP_REASONS]);
   });
