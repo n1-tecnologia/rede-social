@@ -1,8 +1,17 @@
 import { replaceTokenAnswerSchema } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
+import { localAllowListByProject } from '@rede-social/core/server/domains/auth-allow-list';
 import { authAllowListFor } from '@rede-social/core/server/domains/index';
+import { allowListEntry } from '@rede-social/core/server/domains/types';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import {
+  listSteps,
+  resumeBootstrap,
+  runBootstrap,
+} from '@rede-social/core/server/projects/bootstrap';
+import { PROJECT_BOOTSTRAP_QUEUE } from '@rede-social/core/server/projects/bootstrap-job';
 import type { FakeProjectProvider } from '@rede-social/core/server/projects/fake';
+import { checkProject } from '@rede-social/core/server/projects/health';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { getProjectProviderFor } from '@rede-social/core/server/projects/provider-for';
 import { replaceProjectToken } from '@rede-social/core/server/projects/token';
@@ -11,6 +20,7 @@ import { open } from '@rede-social/core/server/secrets/sealed';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  bootstrapDeps,
   createReadyTenant,
   fakeProvider,
   fakeTarget,
@@ -57,6 +67,35 @@ vi.mock('@rede-social/core/server/logging', async (importOriginal) => {
 });
 
 /**
+ * The order of the follow-up (D-575(b)(c)): the health check refreshes the states, THEN the allow-list is
+ * reconciled. The wrappers only record the call and hand it on to the real function.
+ */
+const order = vi.hoisted(() => ({ calls: [] as string[] }));
+vi.mock('@rede-social/core/server/projects/health', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@rede-social/core/server/projects/health')>();
+  return {
+    ...real,
+    checkProject: async (...args: Parameters<typeof real.checkProject>) => {
+      order.calls.push('check');
+      return real.checkProject(...args);
+    },
+  };
+});
+vi.mock('@rede-social/core/server/platform/reconcile-allow-list', async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import('@rede-social/core/server/platform/reconcile-allow-list')>();
+  return {
+    ...real,
+    reconcileProjectAllowList: async (
+      ...args: Parameters<typeof real.reconcileProjectAllowList>
+    ) => {
+      order.calls.push('reconcile');
+      return real.reconcileProjectAllowList(...args);
+    },
+  };
+});
+
+/**
  * Phase 09.4-10 (D-575, UI-D-555, D-576, D-539, CTK-19, CTK-20, CTK-27): replacing the management token of a
  * customer project. Real route, kernel, registry, sealing and audit table against the FAKE provider's customer
  * tokens.
@@ -68,9 +107,11 @@ const REF_A = `tr-a-${RUN}`;
 const REF_P = `tr-p-${RUN}`;
 const REF_M = `tr-m-${RUN}`;
 const REF_X = `tr-x-${RUN}`;
+const REF_Q = `tr-q-${RUN}`;
 const SLUG_A = `tr-a-${RUN}`;
 const SLUG_P = `tr-p-${RUN}`;
 const SLUG_M = `tr-m-${RUN}`;
+const SLUG_Q = `tr-q-${RUN}`;
 
 const TOKEN_OLD = `sbp_fc_fake_replace_old_${RUN}`;
 const TOKEN_NEW = `sbp_fc_fake_replace_new_${RUN}`;
@@ -81,6 +122,8 @@ const TOKEN_UNPREFIXED = `plain_${RUN}_not_a_scoped_token_at_all`;
 const TOKEN_M = `sbp_fc_fake_replace_other_org_${RUN}`;
 const TOKEN_R1 = `sbp_fc_fake_replace_race_one_${RUN}`;
 const TOKEN_R2 = `sbp_fc_fake_replace_race_two_${RUN}`;
+const TOKEN_Q_OLD = `sbp_fc_fake_replace_q_old_${RUN}`;
+const TOKEN_Q_NEW = `sbp_fc_fake_replace_q_new_${RUN}`;
 const ACTOR = { userId: '00000000-0000-4000-8000-000000000010' };
 const noFollowUp = () => undefined;
 
@@ -90,6 +133,7 @@ const provider: FakeProjectProvider = fakeProvider(
     [REF_P]: fakeTarget(),
     [REF_M]: fakeTarget(),
     [REF_X]: fakeTarget(),
+    [REF_Q]: fakeTarget(),
   },
   {
     orgSlug: ORG,
@@ -101,6 +145,8 @@ const provider: FakeProjectProvider = fakeProvider(
       [TOKEN_M]: { refs: [REF_M] },
       [TOKEN_R1]: { refs: [REF_A] },
       [TOKEN_R2]: { refs: [REF_A] },
+      [TOKEN_Q_OLD]: { refs: [REF_Q], state: 'dead' },
+      [TOKEN_Q_NEW]: { refs: [REF_Q] },
     },
   },
 );
@@ -148,9 +194,13 @@ let tenantP = '';
 let tenantM = '';
 
 async function cleanup(): Promise<void> {
-  await adminSql`delete from public.tenants where slug in (${SLUG_A}, ${SLUG_P}, ${SLUG_M})`;
-  await adminSql`delete from platform.project_token_events where project_ref in (${REF_A}, ${REF_P}, ${REF_M})`;
-  await adminSql`delete from platform.projects where ref in (${REF_A}, ${REF_P}, ${REF_M})`;
+  await adminSql`delete from public.tenants where slug in (${SLUG_A}, ${SLUG_P}, ${SLUG_M}, ${SLUG_Q})`;
+  await adminSql`
+    delete from pgboss_platform.job
+     where name = ${PROJECT_BOOTSTRAP_QUEUE}
+       and data->>'projectId' in (select id::text from platform.projects where ref = ${REF_Q})`;
+  await adminSql`delete from platform.project_token_events where project_ref in (${REF_A}, ${REF_P}, ${REF_M}, ${REF_Q})`;
+  await adminSql`delete from platform.projects where ref in (${REF_A}, ${REF_P}, ${REF_M}, ${REF_Q})`;
   await adminSql`
     delete from public.access_grants where email like ${`admin-tr-%-${RUN}@rede-social-test.local`}`;
 }
@@ -418,4 +468,82 @@ describe('a refused replacement changes nothing (CTK-20)', () => {
       expect(haystack).not.toContain(token.slice(0, 8));
     }
   });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// The follow-up: check, then reconcile (D-575(b)(c)(d), CTK-27, T-09.4-38)
+// ---------------------------------------------------------------------------------------------------------
+
+type DomainRow = { host: string; last_error: string | null };
+const errorsOf = async (hosts: string[]): Promise<Record<string, string | null>> => {
+  const rows = await adminSql<DomainRow[]>`
+    select host, last_error from public.tenant_domains where host = any(${hosts}::text[])`;
+  return Object.fromEntries(rows.map((row) => [row.host, row.last_error]));
+};
+const tokenCheckOf = async (projectId: string): Promise<string | null> => {
+  const [row] = await adminSql<{ token_check: string | null }[]>`
+    select token_check from platform.project_health where project_id = ${projectId}::uuid`;
+  return row?.token_check ?? null;
+};
+
+describe('after a replacement the system finishes the recovery (CTK-27)', () => {
+  const HOST_ALLOW = `trf-allow-${RUN}.cliente.test`;
+  const HOST_INVITE = `trf-invite-${RUN}.cliente.test`;
+
+  it('check first, then reconcile: a dead token turns ok and only the allow_list error is cleared', async () => {
+    // Settle the background follow-ups of the earlier route calls before this one is observed.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at, verification_status, last_error)
+      values (${tenantA}::uuid, ${HOST_ALLOW}, false, now(), 'verified', 'allow_list'),
+             (${tenantA}::uuid, ${HOST_INVITE}, false, now(), 'verified', 'invite')`;
+    // The token on file stops working: the check turns the verdict to invalid.
+    expect((await put(tenantA, { token: TOKEN_OLD })).res.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    provider.setTokenState(TOKEN_OLD, 'dead');
+    await checkProject(projectA);
+    expect(await tokenCheckOf(projectA)).toBe('invalid');
+    localAllowListByProject.delete(projectA);
+
+    order.calls.length = 0;
+    const { res, text } = await put(tenantA, { token: TOKEN_NEW });
+    expect(res.status, text).toBe(200);
+
+    // The follow-up is fire and forget: wait for what it leaves behind.
+    await vi.waitFor(
+      async () => {
+        expect(await tokenCheckOf(projectA)).toBe('ok');
+        expect((await errorsOf([HOST_ALLOW]))[HOST_ALLOW]).toBeNull();
+      },
+      { timeout: 10_000, interval: 200 },
+    );
+    expect(order.calls).toEqual(['check', 'reconcile']);
+    // The other error is not this follow-up's to clear, and the verified hosts are in the project's own list.
+    expect((await errorsOf([HOST_INVITE]))[HOST_INVITE]).toBe('invite');
+    const list = localAllowListByProject.get(projectA);
+    expect(list?.has(allowListEntry(HOST_ALLOW))).toBe(true);
+    expect(list?.has(allowListEntry(HOST_INVITE))).toBe(true);
+  });
+
+  it('a bootstrap stopped by a dead token stays failed with the same reason; the replacement leaves its steps alone and Tentar de novo then proceeds', async () => {
+    resetB();
+    const q = await createReadyTenant(provider, REF_Q, SLUG_Q, { run: false });
+    await makeCustomerProject(q.projectId, TOKEN_Q_OLD, ORG);
+    const { provider: _injected, ...deps } = bootstrapDeps(provider);
+
+    expect((await runBootstrap(q.projectId, deps)).status).toBe('failed');
+    const before = await listSteps(q.projectId);
+    const failed = before.find((step) => step.status === 'failed');
+    expect(failed).toMatchObject({ step: 'verify', reasonCode: 'token_invalid' });
+
+    const replaced = await replaceProjectToken(q.tenantId, { token: TOKEN_Q_NEW }, ACTOR, {
+      afterReplace: noFollowUp,
+    });
+    expect(replaced.ok).toBe(true);
+    // The replacement does not touch the bootstrap rows.
+    expect(await listSteps(q.projectId)).toEqual(before);
+
+    await resumeBootstrap(q.projectId);
+    expect(await runBootstrap(q.projectId, deps)).toEqual({ status: 'ready' });
+  }, 120_000);
 });
