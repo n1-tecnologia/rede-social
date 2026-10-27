@@ -8,6 +8,7 @@ import {
 } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { ApiError } from '@rede-social/core/server/http/api-error';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { setRequiredTenantSchemaForTests } from '@rede-social/core/server/migrations/required';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { sendPendingInvites } from '@rede-social/core/server/platform/invites';
@@ -19,11 +20,19 @@ import {
   setTenantStatus,
   updateTenant,
 } from '@rede-social/core/server/platform/tenants';
+import { runBootstrap } from '@rede-social/core/server/projects/bootstrap';
+import { PROJECT_BOOTSTRAP_QUEUE } from '@rede-social/core/server/projects/bootstrap-job';
+import { createFakeProjectProvider } from '@rede-social/core/server/projects/fake';
+import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
+import { registerCustomerProject } from '@rede-social/core/server/projects/token';
+import { open } from '@rede-social/core/server/secrets/sealed';
+import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import {
   invalidateTenantHost,
   resolveTenantHost,
 } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { bootstrapDeps, fakeTarget, resetB, restoreB } from './projects-setup';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
@@ -1264,4 +1273,298 @@ describe('GET /v1/platform/tenants — the database column and the Banco filter 
       demo?.database.schema.applied === null || typeof demo?.database.schema.applied === 'number',
     ).toBe(true);
   });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-09 Task 2: creation on a project of the customer's own account (CTK-01, D-566, D-567, D-571)
+// ---------------------------------------------------------------------------------------------------------
+
+describe('createTenant on a customer project (09.4-09, CTK-01)', () => {
+  const ORG = `acme-create-${RUN}`.slice(0, 40);
+  const ref = (tag: string): string => `pt-cu-${tag}-${RUN}`.slice(0, 40);
+  const REFS = {
+    a: ref('a'),
+    b: ref('b'),
+    c: ref('c'),
+    d: ref('d'),
+    e: ref('e'),
+    f: ref('f'),
+    unknown: ref('nope'),
+  };
+  const tokenOf = (tag: string): string => `sbp_fc_fake_create_${tag}_${RUN}_qqqqqqqqqqqq`;
+  const T = {
+    a: tokenOf('a'),
+    b: tokenOf('b'),
+    c: tokenOf('c'),
+    c2: tokenOf('c2'),
+    d: tokenOf('d'),
+    e: tokenOf('e'),
+    f: tokenOf('f'),
+    unknown: tokenOf('unknown'),
+    everything: tokenOf('everything'),
+    never: tokenOf('never-issued'),
+  };
+  const EXPIRY = new Date(Date.now() + 60 * 86_400_000).toISOString().slice(0, 10);
+
+  const world = createFakeProjectProvider({
+    orgSlug: ORG,
+    targets: Object.fromEntries(
+      [REFS.a, REFS.b, REFS.c, REFS.d, REFS.e, REFS.f].map((r) => [r, fakeTarget()]),
+    ),
+    tokens: {
+      [T.a]: { refs: [REFS.a] },
+      [T.b]: { refs: [REFS.b] },
+      [T.c]: { refs: [REFS.c] },
+      [T.c2]: { refs: [REFS.c] },
+      [T.d]: { refs: [REFS.d] },
+      [T.e]: { refs: [REFS.e] },
+      [T.f]: { refs: [REFS.f] },
+      [T.unknown]: { refs: [REFS.unknown] },
+      [T.everything]: { refs: 'all' },
+    },
+  });
+
+  /** Every line the kernel logger writes for these calls (the actor carries the logger, like a request does). */
+  const lines: string[] = [];
+  const recorder: Record<string, unknown> = {};
+  for (const level of ['info', 'warn', 'error', 'debug', 'trace', 'fatal']) {
+    recorder[level] = (...args: unknown[]) => lines.push(JSON.stringify(args));
+  }
+  recorder.child = () => recorder;
+  const operator = () => ({ userId: actor.userId, logger: recorder as never });
+
+  let counter = 0;
+  const slugOf = (): string => {
+    counter += 1;
+    return `pt-test-cu-${RUN}-${counter}`.slice(0, 40);
+  };
+  const bodyFor = (projectRef: string, token: string, extra: Record<string, unknown> = {}) =>
+    ({
+      displayName: 'Comunidade do Cliente',
+      slug: slugOf(),
+      colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+      modules: ['feed'],
+      adminEmail: `admin-cu-${RUN}-${counter}@rede-social-test.local`,
+      projectRef,
+      owner: 'customer',
+      token,
+      ...extra,
+    }) as never;
+
+  const allRefs = Object.values(REFS);
+  type ProjectRow = {
+    id: string;
+    owner: string;
+    org_slug: string | null;
+    mgmt_token_sealed: string | null;
+    mgmt_token_expires_at: string | null;
+    state: string;
+  };
+  const projectsOf = (r: string) =>
+    adminSql<ProjectRow[]>`
+      select id::text as id, owner, org_slug, mgmt_token_sealed,
+             mgmt_token_expires_at::text as mgmt_token_expires_at, state
+        from platform.projects where ref = ${r}`;
+  const eventsOf = (r: string) =>
+    adminSql<{ kind: string; actor: string; outcome: string; project_id: string | null }[]>`
+      select kind, actor, outcome, project_id::text as project_id
+        from platform.project_token_events where project_ref = ${r} order by at, id`;
+
+  async function cleanup(): Promise<void> {
+    await cleanupTestTenants();
+    await adminSql`
+      delete from pgboss_platform.job
+       where name = ${PROJECT_BOOTSTRAP_QUEUE}
+         and data->>'projectId' in (select id::text from platform.projects where ref = any(${allRefs}::text[]))`;
+    await adminSql`delete from platform.projects where ref = any(${allRefs}::text[])`;
+    await adminSql`delete from platform.project_token_events where project_ref = any(${allRefs}::text[])`;
+    await adminSql`delete from auth.users where lower(email) like ${`admin-cu-${RUN}-%`}`;
+  }
+
+  beforeAll(async () => {
+    await cleanup();
+    // The pre-check wants an EMPTY project, like a new hosted one; every ref of this suite maps to B.
+    resetB();
+    setProjectProviderForTests(world);
+  }, 180_000);
+  afterAll(async () => {
+    setProjectProviderForTests(undefined);
+    await cleanup();
+    await stopBoss();
+    await closeAllPools();
+    restoreB();
+  }, 180_000);
+
+  it('CTK-01 creation: a customer tenant inserts the project with the sealed token, the learned pin, the expiry and one registered event', async () => {
+    lines.length = 0;
+    const made = await createTenant(bodyFor(REFS.a, T.a, { tokenExpiresAt: EXPIRY }), operator(), {
+      production: false,
+    });
+    expect(Object.keys(made).sort()).toEqual(['id', 'projectId']);
+
+    const rows = await projectsOf(REFS.a);
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as ProjectRow;
+    expect(row.id).toBe(made.projectId);
+    expect(row.owner).toBe('customer');
+    expect(row.org_slug).toBe(ORG);
+    expect(row.state).toBe('preparing');
+    expect(row.mgmt_token_expires_at).toBe(EXPIRY);
+    expect(open(row.mgmt_token_sealed as string, `${row.id}:mgmt_token`)).toBe(T.a);
+
+    expect(await eventsOf(REFS.a)).toEqual([
+      {
+        kind: 'registered',
+        actor: `platform:${actor.userId}`,
+        outcome: 'ok',
+        project_id: row.id,
+      },
+    ]);
+    const [binding] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.tenant_projects
+       where tenant_id = ${made.id}::uuid and project_id = ${row.id}::uuid`;
+    expect(binding?.n).toBe(1);
+
+    // The token is nowhere but the sealed column: not in the answer, the logger or any audit row.
+    const events = JSON.stringify(await eventsOf(REFS.a));
+    const tenantRow = JSON.stringify(
+      await adminSql`select * from public.tenants where id = ${made.id}::uuid`,
+    );
+    for (const text of [JSON.stringify(made), lines.join('\n'), events, tenantRow]) {
+      expect(text).not.toContain(T.a);
+      expect(text).not.toContain(T.a.slice(0, 8));
+    }
+  });
+
+  it('CTK-01 creation: every refusal maps to its field and writes no tenant, project or event (UI-D-550)', async () => {
+    const cases: Array<[string, string, string, Record<string, unknown>, Record<string, string>]> =
+      [
+        ['an unknown token', REFS.b, T.never, {}, { token: 'token_invalid' }],
+        ['a token of another project', REFS.b, T.a, {}, { token: 'token_forbidden' }],
+        ['an account-wide token', REFS.b, T.everything, {}, { token: 'token_account_wide' }],
+        [
+          'a past expiry',
+          REFS.b,
+          T.b,
+          { tokenExpiresAt: '2020-01-01' },
+          { tokenExpiresAt: 'token_expiry_invalid' },
+        ],
+        ['an unknown project', REFS.unknown, T.unknown, {}, { projectRef: 'not_found' }],
+      ];
+    for (const [label, projectRef, token, extra, details] of cases) {
+      const body = bodyFor(projectRef, token, extra) as unknown as { slug: string };
+      const err = await expectApiError(
+        createTenant(body as never, operator(), { production: false }),
+        400,
+        'VALIDATION_FAILED',
+      );
+      expect(err.details, label).toEqual(details);
+      expect(await projectsOf(projectRef), label).toHaveLength(0);
+      expect(await eventsOf(projectRef), label).toHaveLength(0);
+      const [tenant] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.tenants where slug = ${body.slug}`;
+      expect(tenant?.n, label).toBe(0);
+    }
+  });
+
+  it('CTK-01 creation: a customer owner needs a projectRef in the kernel and a token in the contract', async () => {
+    const { projectRef: _omitted, ...withoutRef } = bodyFor(REFS.b, T.b) as unknown as Record<
+      string,
+      unknown
+    >;
+    const err = await expectApiError(
+      createTenant(withoutRef as never, operator(), { production: false }),
+      400,
+      'VALIDATION_FAILED',
+    );
+    expect(err.details).toEqual({ projectRef: 'required' });
+
+    const { token: _token, ...withoutToken } = bodyFor(REFS.b, T.b) as unknown as Record<
+      string,
+      unknown
+    >;
+    const res = await platform('/tenants', {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: withoutToken,
+    });
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).code).toBe('VALIDATION_FAILED');
+    expect(await projectsOf(REFS.b)).toHaveLength(0);
+  });
+
+  it('CTK-01 creation: a KNOWN customer project is bound without re-sealing, and a supplied token is ignored', async () => {
+    await registerCustomerProject({
+      ref: REFS.c,
+      token: T.c,
+      expiresAt: null,
+      actor: `platform:${actor.userId}`,
+    });
+    const [before] = await projectsOf(REFS.c);
+    const eventsBefore = await eventsOf(REFS.c);
+
+    const made = await createTenant(bodyFor(REFS.c, T.c2), operator(), { production: false });
+    expect(made.projectId).toBe(before?.id);
+
+    const [after] = await projectsOf(REFS.c);
+    expect(after?.mgmt_token_sealed).toBe(before?.mgmt_token_sealed);
+    expect(open(after?.mgmt_token_sealed as string, `${after?.id}:mgmt_token`)).toBe(T.c);
+    expect(await eventsOf(REFS.c)).toEqual(eventsBefore);
+  });
+
+  it('CTK-01 creation: the owner must match the registered owner of a known project', async () => {
+    await adminSql`
+      insert into platform.projects (ref, provider, api_url, state, credential_source)
+      values (${REFS.d}, 'fake', 'http://127.0.0.1:54321', 'preparing', 'sealed')`;
+    const platformOwned = await expectApiError(
+      createTenant(bodyFor(REFS.d, T.d), operator(), { production: false }),
+      400,
+      'VALIDATION_FAILED',
+    );
+    expect(platformOwned.details).toEqual({ owner: 'mismatch' });
+
+    const customerOwned = await expectApiError(
+      createTenant(
+        {
+          displayName: 'Comunidade Plataforma',
+          slug: slugOf(),
+          colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+          modules: ['feed'],
+          adminEmail: `admin-cu-${RUN}-x${counter}@rede-social-test.local`,
+          projectRef: REFS.c,
+        } as never,
+        operator(),
+        { provider: world, production: false },
+      ),
+      400,
+      'VALIDATION_FAILED',
+    );
+    expect(customerOwned.details).toEqual({ owner: 'mismatch' });
+    const [still] = await projectsOf(REFS.d);
+    expect(still?.owner).toBe('platform');
+    expect(still?.mgmt_token_sealed).toBeNull();
+  });
+
+  it('CTK-01 creation: two creations racing for one ref leave one project row and one event', async () => {
+    const results = await Promise.allSettled([
+      createTenant(bodyFor(REFS.e, T.e), operator(), { production: false }),
+      createTenant(bodyFor(REFS.e, T.e), operator(), { production: false }),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const loser = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect((loser.reason as ApiError).details).toEqual({ projectRef: 'in_use' });
+    expect(await projectsOf(REFS.e)).toHaveLength(1);
+    expect(await eventsOf(REFS.e)).toHaveLength(1);
+  });
+
+  it('CTK-01 creation: the bootstrap that follows runs on the customer token, never the platform one', async () => {
+    resetB();
+    const made = await createTenant(bodyFor(REFS.f, T.f), operator(), { production: false });
+    const { provider: _given, ...deps } = bootstrapDeps(world);
+    expect(await runBootstrap(made.projectId, deps)).toEqual({ status: 'ready' });
+
+    const uses = world.calls.tokenUses.filter((use) => use.ref === REFS.f);
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.filter((use) => use.kind === 'platform')).toEqual([]);
+  }, 180_000);
 });
