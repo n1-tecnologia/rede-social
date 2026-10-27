@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  date,
   integer,
   pgSchema,
   smallint,
@@ -35,6 +36,14 @@ export const platform = pgSchema('platform');
  *
  * Several tenants may bind ONE project (D-540): nothing here makes `project_id` unique in `tenant_projects`.
  * The rule that production refuses a second tenant is an application rule (plan 14), not a database rule.
+ *
+ * Phase 09.4-02 (D-566, D-571, D-539): `owner` is a FORMAT of two values, `platform` (the platform created the
+ * project, the default, so every older row keeps meaning what it meant) or `customer` (the customer created it
+ * in their own Supabase account and gave the platform a management token). A customer row carries the token
+ * SEALED in `mgmt_token_sealed` (AAD `<id>:mgmt_token`, plan 07), the organisation it is pinned to in
+ * `org_slug` (stored PER PROJECT: a platform project and a customer project never share a pin) and the date
+ * the operator typed in `mgmt_token_expires_at`. A platform row has none of the three. The pair is pinned by
+ * `projects_owner_token_chk`; no column here can hold a token in clear.
  */
 export const projects = platform
   .table(
@@ -63,6 +72,10 @@ export const projects = platform
       serviceKeySealed: text('service_key_sealed'),
       hookSecretSealed: text('hook_secret_sealed'),
       serviceKeyKind: text('service_key_kind'),
+      owner: text('owner').notNull().default('platform'),
+      orgSlug: text('org_slug'),
+      mgmtTokenSealed: text('mgmt_token_sealed'),
+      mgmtTokenExpiresAt: date('mgmt_token_expires_at'),
       createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
       updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     },
@@ -75,6 +88,15 @@ export const projects = platform
       check('projects_secret_key_id_chk', sql`${t.secretKeyId} between 1 and 32767`),
       check('projects_api_url_chk', sql`${t.apiUrl} = '' or ${t.apiUrl} ~ '^https?://'`),
       check('projects_state_chk', sql`${t.state} ~ '^[a-z_]{3,20}$'`),
+      check('projects_owner_chk', sql`${t.owner} in ('platform', 'customer')`),
+      check(
+        'projects_org_slug_chk',
+        sql`${t.orgSlug} is null or ${t.orgSlug} ~ '^[A-Za-z0-9_-]{1,128}$'`,
+      ),
+      check(
+        'projects_owner_token_chk',
+        sql`(${t.owner} = 'platform' and ${t.mgmtTokenSealed} is null and ${t.orgSlug} is null and ${t.mgmtTokenExpiresAt} is null) or (${t.owner} = 'customer' and ${t.mgmtTokenSealed} is not null and ${t.orgSlug} is not null)`,
+      ),
       uniqueIndex('projects_ref_uq').on(t.ref),
       uniqueIndex('projects_hook_ref_uq').on(t.hookRef),
       uniqueIndex('projects_one_central_uq').on(t.isCentral).where(sql`${t.isCentral}`),

@@ -57,6 +57,13 @@
       "when": 1792754612376,
       "tag": "20261023112332_tenant_moves_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793121040230,
+      "tag": "20261027171040_project_owner_token",
+      "breakpoints": true
     }
   ]
 }

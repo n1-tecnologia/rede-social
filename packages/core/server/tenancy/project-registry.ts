@@ -35,6 +35,14 @@ export type ProjectRecord = {
   serviceKeyKind: string | null;
   hookRef: string | null;
   hookSecretSealed: string | null;
+  /** `platform` (the platform created the project) or `customer` (the customer did, 09.4-02, D-566). */
+  owner: string;
+  /** The Supabase organisation a customer project is pinned to; null for a platform project (D-571). */
+  orgSlug: string | null;
+  /** The customer's management token, SEALED (AAD `<id>:mgmt_token`); null for a platform project (D-539). */
+  mgmtTokenSealed: string | null;
+  /** The expiry date the operator typed (`YYYY-MM-DD`); null when none was given. */
+  mgmtTokenExpiresAt: string | null;
 };
 
 /** The `platform.projects` select list as a `ProjectRecord`; shared by the by-handle lookups (hook reference). */
@@ -57,6 +65,10 @@ export const projectColumns = {
   serviceKeyKind: projects.serviceKeyKind,
   hookRef: projects.hookRef,
   hookSecretSealed: projects.hookSecretSealed,
+  owner: projects.owner,
+  orgSlug: projects.orgSlug,
+  mgmtTokenSealed: projects.mgmtTokenSealed,
+  mgmtTokenExpiresAt: projects.mgmtTokenExpiresAt,
 } as const;
 const columns = projectColumns;
 

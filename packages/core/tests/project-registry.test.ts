@@ -36,6 +36,10 @@ const record = (n: number): ProjectRecord => ({
   serviceKeyKind: null,
   hookRef: null,
   hookSecretSealed: null,
+  owner: 'platform',
+  orgSlug: null,
+  mgmtTokenSealed: null,
+  mgmtTokenExpiresAt: null,
 });
 
 function harness(options: { max?: number } = {}) {

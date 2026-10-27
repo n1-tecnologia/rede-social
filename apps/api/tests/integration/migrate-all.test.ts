@@ -295,6 +295,10 @@ const fakeRecord = (ref: string): ProjectRecord => ({
   serviceKeyKind: null,
   hookRef: null,
   hookSecretSealed: null,
+  owner: 'platform',
+  orgSlug: null,
+  mgmtTokenSealed: null,
+  mgmtTokenExpiresAt: null,
 });
 
 const toB = () => postgres(B_ADMIN_URL, { max: 1, prepare: false, onnotice: () => undefined });

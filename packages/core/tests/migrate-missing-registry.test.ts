@@ -91,6 +91,10 @@ const project = (ref: string, id: string): ProjectRecord => ({
   serviceKeyKind: null,
   hookRef: null,
   hookSecretSealed: null,
+  owner: 'platform',
+  orgSlug: null,
+  mgmtTokenSealed: null,
+  mgmtTokenExpiresAt: null,
 });
 
 const ALPHA = project('alpha-proj', '00000000-0000-4000-8000-00000000000a');

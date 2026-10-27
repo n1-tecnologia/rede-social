@@ -35,6 +35,10 @@ const project = (n: number, overrides: Partial<ProjectRecord> = {}): ProjectReco
   serviceKeyKind: null,
   hookRef: null,
   hookSecretSealed: null,
+  owner: 'platform',
+  orgSlug: null,
+  mgmtTokenSealed: null,
+  mgmtTokenExpiresAt: null,
   ...overrides,
 });
 
