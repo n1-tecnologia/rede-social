@@ -27,6 +27,7 @@ vi.mock('next/navigation', () => ({
 const {
   pollDatabaseAction,
   replaceCredentialsAction,
+  replaceTokenAction,
   resumeBootstrapAction,
   verifyDatabaseAction,
 } = await import('./actions');
@@ -186,5 +187,121 @@ describe('pollDatabaseAction', () => {
     expect(await pollDatabaseAction(TENANT)).toBe(false);
     expect(await pollDatabaseAction('nope')).toBe(false);
     expect(api.redirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 09.4-16 Task 2 (UI-D-555, UI-D-561, CTK-37, T-09.4-56..58) - "Salvar token". The token travels in the
+ * body of ONE PUT and comes back nowhere: the answer is `{ ok }` or a closed code, no log line carries it.
+ */
+describe('replaceTokenAction', () => {
+  const TOKEN = `sbp_${'t'.repeat(40)}`;
+
+  it('sends ONE PUT with the trimmed token and the optional date and answers a bare flag', async () => {
+    const result = await replaceTokenAction(TENANT, {
+      token: `  ${TOKEN}  `,
+      tokenExpiresAt: '2027-03-05',
+    });
+    expect(result).toEqual({ ok: true });
+    expect(api.apiFetch).toHaveBeenCalledTimes(1);
+    const [path, init] = api.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/platform/tenants/${TENANT}/database/token`);
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ token: TOKEN, tokenExpiresAt: '2027-03-05' });
+    expect(path).not.toContain(TOKEN);
+    expect(api.revalidate).toHaveBeenCalledWith(TENANT);
+  });
+
+  it('leaves the date out of the body when it is blank: a token alone is a complete submission', async () => {
+    expect(await replaceTokenAction(TENANT, { token: TOKEN, tokenExpiresAt: '  ' })).toEqual({
+      ok: true,
+    });
+    const init = api.apiFetch.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ token: TOKEN });
+  });
+
+  it('never reaches the API with a blank token, an oversized token or a malformed tenant id', async () => {
+    expect(await replaceTokenAction(TENANT, { token: '   ' })).toEqual({
+      ok: false,
+      error: 'unavailable',
+    });
+    expect(await replaceTokenAction(TENANT, { token: 'x'.repeat(5000) })).toEqual({
+      ok: false,
+      error: 'unavailable',
+    });
+    expect(await replaceTokenAction('not-a-uuid', { token: TOKEN })).toEqual({
+      ok: false,
+      error: 'unavailable',
+    });
+    expect(api.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['token_invalid'],
+    ['token_forbidden'],
+    ['token_account_wide'],
+    ['token_other_project'],
+    ['org_mismatch'],
+  ])('maps the closed code token=%s to itself, with nothing revalidated', async (code) => {
+    api.apiFetch.mockResolvedValue(envelope(400, 'VALIDATION_FAILED', { token: code }));
+    expect(await replaceTokenAction(TENANT, { token: TOKEN })).toEqual({ ok: false, error: code });
+    expect(api.revalidate).not.toHaveBeenCalled();
+  });
+
+  it('maps the date refusal to token_expiry_invalid', async () => {
+    api.apiFetch.mockResolvedValue(
+      envelope(400, 'VALIDATION_FAILED', { tokenExpiresAt: 'token_expiry_invalid' }),
+    );
+    expect(
+      await replaceTokenAction(TENANT, { token: TOKEN, tokenExpiresAt: '2020-01-01' }),
+    ).toEqual({ ok: false, error: 'token_expiry_invalid' });
+  });
+
+  it.each([
+    [400, 'VALIDATION_FAILED', { token: 'not_found' }],
+    [400, 'VALIDATION_FAILED', { token: 'unchecked' }],
+    [400, 'VALIDATION_FAILED', { token: 'something_new' }],
+    [400, 'VALIDATION_FAILED', undefined],
+    [404, 'NOT_FOUND', undefined],
+    [409, 'CONFLICT', undefined],
+    [500, 'INTERNAL', undefined],
+  ])('maps a %s %s answer (%j) to `unavailable`', async (status, code, details) => {
+    api.apiFetch.mockResolvedValue(envelope(status, code, details));
+    expect(await replaceTokenAction(TENANT, { token: TOKEN })).toEqual({
+      ok: false,
+      error: 'unavailable',
+    });
+    expect(api.revalidate).not.toHaveBeenCalled();
+  });
+
+  it('answers `unavailable` for a transport failure', async () => {
+    api.apiFetch.mockRejectedValueOnce(new Error('network'));
+    expect(await replaceTokenAction(TENANT, { token: TOKEN })).toEqual({
+      ok: false,
+      error: 'unavailable',
+    });
+  });
+
+  it('navigates on a 401 and on a 403, after the try/catch', async () => {
+    api.apiFetch.mockResolvedValueOnce(envelope(401, 'UNAUTHENTICATED'));
+    await expect(replaceTokenAction(TENANT, { token: TOKEN })).rejects.toThrow(
+      'NEXT_REDIRECT /entrar',
+    );
+    api.apiFetch.mockResolvedValueOnce(envelope(403, 'FORBIDDEN'));
+    await expect(replaceTokenAction(TENANT, { token: TOKEN })).rejects.toThrow(
+      'NEXT_REDIRECT /auth/host-mismatch',
+    );
+  });
+
+  it('returns nothing but a flag or a code and logs only a status and a code (T-09.4-56)', async () => {
+    api.apiFetch.mockResolvedValueOnce(envelope(500, 'INTERNAL'));
+    const refused = await replaceTokenAction(TENANT, { token: TOKEN });
+    api.apiFetch.mockRejectedValueOnce(new Error(`connect failed for ${TOKEN}`));
+    const thrown = await replaceTokenAction(TENANT, { token: TOKEN });
+    const ok = await replaceTokenAction(TENANT, { token: TOKEN });
+    expect(JSON.stringify([refused, thrown, ok])).not.toContain(TOKEN);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(TOKEN);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain('sbp_');
+    expect(consoleError).toHaveBeenCalledTimes(2);
   });
 });

@@ -91,6 +91,7 @@ function card(
       }}
       today={TODAY}
       verifiedWhen={over.verifiedWhen === undefined ? 'há 3 min' : over.verifiedWhen}
+      replaceAction={vi.fn()}
     />,
   );
 }

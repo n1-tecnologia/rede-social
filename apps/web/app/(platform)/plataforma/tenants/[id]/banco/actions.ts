@@ -209,3 +209,12 @@ export async function replaceCredentialsAction(
   if (refusal) redirect(refusal);
   return outcome;
 }
+
+/** RED stub (09.4-16 Task 2). */
+export type ReplaceTokenResult = { ok: true } | { ok: false; error: 'unavailable' };
+export async function replaceTokenAction(
+  _tenantId: string,
+  _values: { token: string; tokenExpiresAt?: string },
+): Promise<ReplaceTokenResult> {
+  return { ok: false, error: 'unavailable' };
+}
