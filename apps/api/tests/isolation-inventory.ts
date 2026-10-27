@@ -141,6 +141,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/platform/tenants/:id/database/verify': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/database/bootstrap/resume': { exempt: PLATFORM_LANE },
   'PUT /v1/platform/tenants/:id/database/credentials': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/database/token': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/verify': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/restart': { exempt: PLATFORM_LANE },
