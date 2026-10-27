@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { moduleLogger } from '../logging';
+import type { ProjectProvider } from '../projects/types';
 import { type AuthAllowList, allowListEntry } from './types';
 
 /**
@@ -57,9 +58,12 @@ const DEFAULT_BASE_URL = 'https://api.supabase.com';
 const REQUEST_TIMEOUT_MS = 10_000;
 
 /** The only entry shape this adapter will ever write: exact lower-case host, the confirm path, `**`. */
-const ALLOW_LIST_ENTRY = /^https:\/\/[a-z0-9.-]+\/auth\/confirm\*\*$/;
+export const ALLOW_LIST_ENTRY = /^https:\/\/[a-z0-9.-]+\/auth\/confirm\*\*$/;
 
 const authConfigSchema = z.object({ uri_allow_list: z.string().nullable() }).loose();
+
+/** Sorted, de-duplicated: the one string shape these adapters ever write. */
+export const canonical = (entries: string[]): string[] => [...new Set(entries)].sort();
 
 export type SupabaseAuthAllowListOptions = {
   pat: string;
@@ -112,11 +116,55 @@ export function createSupabaseAuthAllowList(opts: SupabaseAuthAllowListOptions):
       .filter((entry) => entry.length > 0);
   }
 
-  /** Sorted, de-duplicated: the one string shape this adapter ever writes. */
-  const canonical = (entries: string[]): string[] => [...new Set(entries)].sort();
-
   async function write(entries: string[]): Promise<void> {
     await call({ method: 'PATCH', body: { uri_allow_list: canonical(entries).join(',') } });
+  }
+
+  return {
+    name: 'supabase',
+    async add(host) {
+      const entry = allowListEntry(host);
+      if (!ALLOW_LIST_ENTRY.test(entry)) {
+        throw new Error(
+          'allow-list: refusing to write an entry that is not an exact-host confirm path',
+        );
+      }
+      const current = await read();
+      if (current.includes(entry)) return;
+      // Never an empty overwrite: the new list always holds at least the entry just added.
+      await write([...current, entry]);
+    },
+    async remove(host) {
+      const entry = allowListEntry(host);
+      const current = await read();
+      const next = current.filter((e) => e !== entry);
+      if (next.length === current.length) return;
+      await write(next);
+    },
+  };
+}
+
+/**
+ * 09.4-06 (CTK-27, D-575): the allow-list of a CUSTOMER project, read and written through that project's own
+ * GUARDED provider (`getAuthConfig`, `patchAuthConfig`) instead of a request of its own. One HTTP path, one
+ * limiter and one organisation pin for everything done to the project, and the refined token errors
+ * (`token_invalid`, `token_forbidden`, `org_mismatch`) reach the reconcile logs untouched. The semantics are
+ * those of `createSupabaseAuthAllowList`: the exact-host rule is checked before any request (T-09.4-22), the
+ * write happens only when the set changed, is sorted and de-duplicated, and an add never writes an empty list.
+ * Only `uri_allow_list` is ever sent.
+ */
+export function createProviderAuthAllowList(provider: ProjectProvider, ref: string): AuthAllowList {
+  async function read(): Promise<string[]> {
+    const parsed = authConfigSchema.safeParse(await provider.getAuthConfig(ref));
+    if (!parsed.success) throw new Error('supabase auth config GET answered an unexpected body');
+    return (parsed.data.uri_allow_list ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
+
+  async function write(entries: string[]): Promise<void> {
+    await provider.patchAuthConfig(ref, { uri_allow_list: canonical(entries).join(',') });
   }
 
   return {
