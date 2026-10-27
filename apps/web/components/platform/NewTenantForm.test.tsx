@@ -213,7 +213,7 @@ describe('Dados — the Projeto Supabase group', () => {
     ['projectRefInvalid', 'Use o código do projeto: 20 letras minúsculas, sem espaços.'],
     [
       'projectNotFound',
-      'Não encontramos este projeto. Confira o código e se ele está na organização da plataforma.',
+      'Não encontramos este projeto. Confira o código e se ele está na organização da plataforma. Se ele é do cliente, escolha “Projeto do cliente”.',
     ],
     ['projectNotEmpty', 'Este projeto já tem tabelas. Use um projeto novo e vazio.'],
     ['projectInUse', 'Este projeto já está em uso por outro tenant.'],
@@ -539,5 +539,263 @@ describe('Dados — the manual access block', () => {
     expect(secretField('serviceKey').value).toBe(long);
     expect(secretField('serviceKey').type).toBe('password');
     expect(document.body.textContent).not.toContain('kkkkkkkk');
+  });
+});
+
+/**
+ * 09.4-15 Task 1 (D-566 journey 1, UI-D-549, UI-D-550, A-UI-1, A-UI-2, CTK-31, CTK-32): the owner choice
+ * and the customer's token. The platform choice is today's flow; the customer choice adds the write-only
+ * token and the optional expiry, sent ONCE with the pre-check, held in the draft provider's memory.
+ */
+describe('Dados — the project owner and the customer token', () => {
+  const TOKEN = 'sbp_s3cr3t-token-0001';
+  const DATE = '2027-03-01';
+  const owner = (name: string) =>
+    Array.from(document.querySelectorAll('button[aria-pressed]')).find(
+      (button) => button.textContent?.trim() === name,
+    ) as HTMLButtonElement;
+  const tokenField = () => document.getElementById('projectToken') as HTMLInputElement | null;
+  const dateField = () =>
+    document.getElementById('projectTokenExpiresAt') as HTMLInputElement | null;
+  const chooseCustomer = () => fireEvent.click(owner('Projeto do cliente'));
+  const fillToken = (value: string) =>
+    fireEvent.change(tokenField() as HTMLInputElement, { target: { value } });
+  const fillDate = (value: string) =>
+    fireEvent.change(dateField() as HTMLInputElement, { target: { value } });
+  const tokenRefused = (key: string): DraftValidation =>
+    ({ ok: false, fieldErrors: { token: key } }) as DraftValidation;
+
+  it('1. the platform is pressed by default and the customer fields are absent from the DOM', () => {
+    mount();
+    expect(document.body.textContent).toContain('Onde fica o projeto?');
+    expect(owner('Projeto da plataforma').getAttribute('aria-pressed')).toBe('true');
+    expect(owner('Projeto do cliente').getAttribute('aria-pressed')).toBe('false');
+    expect(tokenField()).toBeNull();
+    expect(dateField()).toBeNull();
+    expect(document.querySelector('[data-token-howto]')).toBeNull();
+    expect(draft.draft.owner).toBe('platform');
+  });
+
+  it('1. pressing the customer shows the token, the date and the OPEN how-to, and swaps the helper', () => {
+    mount();
+    chooseCustomer();
+    expect(owner('Projeto do cliente').getAttribute('aria-pressed')).toBe('true');
+    expect(owner('Projeto da plataforma').getAttribute('aria-pressed')).toBe('false');
+    const token = tokenField() as HTMLInputElement;
+    expect(token.type).toBe('password');
+    expect(token.maxLength).toBe(4096);
+    expect(token.hasAttribute('name')).toBe(false);
+    expect(dateField()?.type).toBe('date');
+    const howto = document.querySelector('[data-token-howto]');
+    expect(howto).not.toBeNull();
+    expect(howto?.closest('details')).toBeNull();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('O projeto fica na conta do Supabase do cliente');
+    expect(text).not.toContain('Crie um projeto vazio na organização da plataforma');
+    expect(draft.draft.owner).toBe('customer');
+  });
+
+  it('2. E02 empty: an empty token shows the required error under the token and sends NO request', async () => {
+    mount();
+    chooseCustomer();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(alerts()).toContain(E.tokenRequired));
+    expect(harness.validate).not.toHaveBeenCalled();
+    expect(tokenField()?.getAttribute('aria-invalid')).toBe('true');
+    expect(field().getAttribute('aria-invalid')).toBeNull();
+    expect(draft.draft.dataReady).toBe(false);
+    expect(harness.router.push).not.toHaveBeenCalled();
+  });
+
+  it('2. E02 partial: a missing token and a missing ref show both errors and still send nothing', async () => {
+    mount();
+    chooseCustomer();
+    await submit();
+    await waitFor(() => expect(alerts()).toContain(E.tokenRequired));
+    expect(alerts()).toContain(E.projectRefRequired);
+    expect(harness.validate).not.toHaveBeenCalled();
+  });
+
+  it('2. with a token, "Continuar" calls the action ONCE with owner, token and date, and opens the next step', async () => {
+    mount();
+    chooseCustomer();
+    type(REF);
+    fillToken(TOKEN);
+    fillDate(DATE);
+    await submit();
+    await waitFor(() => expect(harness.router.push).toHaveBeenCalledWith('/plataforma/novo/marca'));
+    expect(harness.validate).toHaveBeenCalledTimes(1);
+    expect(harness.validate.mock.calls[0]?.[0]).toMatchObject({
+      projectRef: REF,
+      owner: 'customer',
+      token: TOKEN,
+      tokenExpiresAt: DATE,
+    });
+    expect(draft.draft.dataReady).toBe(true);
+    // The token stays in memory for the creation; it is not in the persisted draft.
+    expect(draft.token).toBe(TOKEN);
+  });
+
+  it('2. E02 partial: an empty date is valid (optional)', async () => {
+    mount();
+    chooseCustomer();
+    type(REF);
+    fillToken(TOKEN);
+    await submit();
+    await waitFor(() => expect(harness.router.push).toHaveBeenCalled());
+    expect(harness.validate.mock.calls[0]?.[0]).toMatchObject({ owner: 'customer', token: TOKEN });
+  });
+
+  it('2. the platform choice sends no new request field', async () => {
+    mount();
+    type(REF);
+    await submit();
+    await waitFor(() => expect(harness.router.push).toHaveBeenCalled());
+    const sent = harness.validate.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(sent).not.toHaveProperty('owner');
+    expect(sent).not.toHaveProperty('token');
+    expect(sent).not.toHaveProperty('tokenExpiresAt');
+  });
+
+  it.each([
+    ['tokenInvalid', 'token'],
+    ['tokenForbidden', 'token'],
+    ['tokenOtherProject', 'token'],
+    ['tokenAccountWide', 'token'],
+  ])('3. E02 error: %s reads its catalog sentence under the token field', async (key, _where) => {
+    harness.validate.mockResolvedValue(tokenRefused(key));
+    mount();
+    chooseCustomer();
+    type(REF);
+    fillToken(TOKEN);
+    await submit();
+    await waitFor(() => expect(alerts()).toContain(E[key]));
+    expect((E[key] ?? '').length).toBeGreaterThan(10);
+    expect(tokenField()?.getAttribute('aria-invalid')).toBe('true');
+    expect(dateField()?.getAttribute('aria-invalid')).toBeNull();
+    expect(field().getAttribute('aria-invalid')).toBeNull();
+    expect(draft.draft.dataReady).toBe(false);
+    expect(harness.router.push).not.toHaveBeenCalled();
+  });
+
+  it('3. the date error renders under the date field, not the token', async () => {
+    harness.validate.mockResolvedValue({
+      ok: false,
+      fieldErrors: { tokenExpiresAt: 'tokenExpiryInvalid' },
+    } as DraftValidation);
+    mount();
+    chooseCustomer();
+    type(REF);
+    fillToken(TOKEN);
+    fillDate(DATE);
+    await submit();
+    await waitFor(() => expect(alerts()).toContain(E.tokenExpiryInvalid));
+    expect(dateField()?.getAttribute('aria-invalid')).toBe('true');
+    expect(tokenField()?.getAttribute('aria-invalid')).toBeNull();
+  });
+
+  it.each(['projectNotFoundCustomer', 'projectNotPro'])(
+    '3. the customer ref error %s renders under the ref',
+    async (key) => {
+      harness.validate.mockResolvedValue(refused(key));
+      mount();
+      chooseCustomer();
+      type(REF);
+      fillToken(TOKEN);
+      await submit();
+      await waitFor(() => expect(alerts()).toContain(E[key]));
+      expect(field().getAttribute('aria-invalid')).toBe('true');
+      expect(tokenField()?.getAttribute('aria-invalid')).toBeNull();
+    },
+  );
+
+  it('3. editing a field clears only that field’s error and closes the later steps', async () => {
+    harness.validate.mockResolvedValue({
+      ok: false,
+      fieldErrors: { token: 'tokenInvalid', tokenExpiresAt: 'tokenExpiryInvalid' },
+    } as DraftValidation);
+    mount();
+    chooseCustomer();
+    type(REF);
+    fillToken(TOKEN);
+    fillDate(DATE);
+    await submit();
+    await waitFor(() => expect(alerts()).toContain(E.tokenInvalid));
+    act(() => draft.update({ dataReady: true }));
+    fillToken(`${TOKEN}x`);
+    expect(alerts()).not.toContain(E.tokenInvalid);
+    expect(alerts()).toContain(E.tokenExpiryInvalid);
+    expect(draft.draft.dataReady).toBe(false);
+    fillDate('2027-04-01');
+    expect(alerts()).not.toContain(E.tokenExpiryInvalid);
+  });
+
+  it('4. E01: switching owner clears the token, the date, the errors and the manual access, keeps the ref', async () => {
+    harness.validate.mockResolvedValue({
+      ok: false,
+      fieldErrors: { token: 'tokenInvalid' },
+      manualAccess: true,
+    } as DraftValidation);
+    mount();
+    chooseCustomer();
+    type(REF);
+    fillToken(TOKEN);
+    fillDate(DATE);
+    await submit();
+    await waitFor(() => expect(alerts()).toContain(E.tokenInvalid));
+    expect(draft.draft.manualAccess).toBe(true);
+    act(() => draft.update({ dataReady: true }));
+
+    fireEvent.click(owner('Projeto da plataforma'));
+    expect(draft.draft.owner).toBe('platform');
+    expect(draft.token).toBe('');
+    expect(draft.draft.tokenExpiresAt).toBe('');
+    expect(draft.draft.fieldErrors).toEqual({});
+    expect(draft.draft.manualAccess).toBe(false);
+    expect(draft.draft.dataReady).toBe(false);
+    expect(field().value).toBe(REF);
+    expect(tokenField()).toBeNull();
+
+    // And back: the fields are empty again.
+    chooseCustomer();
+    expect((tokenField() as HTMLInputElement).value).toBe('');
+    expect((dateField() as HTMLInputElement).value).toBe('');
+  });
+
+  it('4. E01 loading: the control and both fields are disabled while "Continuar" is pending', async () => {
+    let release: (value: DraftValidation) => void = () => {};
+    harness.validate.mockReturnValue(
+      new Promise<DraftValidation>((resolve) => {
+        release = resolve;
+      }),
+    );
+    mount();
+    chooseCustomer();
+    type(REF);
+    fillToken(TOKEN);
+    await submit();
+    expect(owner('Projeto do cliente').disabled).toBe(true);
+    expect(owner('Projeto da plataforma').disabled).toBe(true);
+    expect(tokenField()?.disabled).toBe(true);
+    expect(dateField()?.disabled).toBe(true);
+    await act(async () => release(ok()));
+    expect(owner('Projeto do cliente').disabled).toBe(false);
+    expect(tokenField()?.disabled).toBe(false);
+  });
+
+  it('every token sentence the form can show exists in the catalog', () => {
+    for (const key of [
+      'tokenRequired',
+      'tokenInvalid',
+      'tokenForbidden',
+      'tokenOtherProject',
+      'tokenAccountWide',
+      'tokenExpiryInvalid',
+      'projectNotFoundCustomer',
+      'projectNotPro',
+    ]) {
+      expect(typeof E[key]).toBe('string');
+    }
   });
 });

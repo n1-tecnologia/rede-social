@@ -547,3 +547,89 @@ describe('TenantDraftProvider — the manual access (memory only)', () => {
     expect(mirror()).not.toContain('abcdefghijklmnopqrst');
   });
 });
+
+/**
+ * 09.4-15 Task 1 (UI-D-550, UI-D-561, A-UI-2, T-09.4-53): the customer project. The owner and the typed
+ * expiry are plain data and join the persisted draft; the project token is a write-only secret and
+ * lives in the provider's MEMORY only, never in the tab's session mirror.
+ */
+describe('TenantDraftProvider — the customer project token', () => {
+  const TOKEN = 'sbp_s3cr3t-token-0001';
+  const mirror = () => window.sessionStorage.getItem(STORAGE_KEY) ?? '';
+
+  it('starts as a platform project with no expiry and no token', () => {
+    mount();
+    expect(draft.draft.owner).toBe('platform');
+    expect(draft.draft.tokenExpiresAt).toBe('');
+    expect(draft.token).toBe('');
+  });
+
+  it('persists the owner and the expiry but NOT the token (a scan of every stored string)', () => {
+    mount();
+    act(() => {
+      draft.update({
+        owner: 'customer',
+        tokenExpiresAt: '2027-03-01',
+        projectRef: 'abcdefghijklmnopqrst',
+      });
+      draft.setToken(TOKEN);
+    });
+    expect(stored().owner).toBe('customer');
+    expect(stored().tokenExpiresAt).toBe('2027-03-01');
+    expect(Object.keys(stored())).not.toContain('token');
+    expect(mirror()).not.toContain('s3cr3t');
+    expect(mirror()).not.toContain(TOKEN);
+  });
+
+  it('a reload restores the owner, the ref and the date, and the token is empty', () => {
+    const first = mount();
+    act(() => {
+      draft.update({
+        owner: 'customer',
+        tokenExpiresAt: '2027-03-01',
+        projectRef: 'abcdefghijklmnopqrst',
+      });
+      draft.setToken(TOKEN);
+    });
+    first.unmount();
+    mount();
+    expect(draft.draft.owner).toBe('customer');
+    expect(draft.draft.projectRef).toBe('abcdefghijklmnopqrst');
+    expect(draft.draft.tokenExpiresAt).toBe('2027-03-01');
+    expect(draft.token).toBe('');
+  });
+
+  it('a stored token planted under the draft’s keys is ignored, and an unknown owner reads as the platform', () => {
+    window.sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ owner: 'someone', token: TOKEN, tokenExpiresAt: 42 }),
+    );
+    mount();
+    expect(draft.draft.owner).toBe('platform');
+    expect(draft.draft.tokenExpiresAt).toBe('');
+    expect(draft.token).toBe('');
+    expect(Object.keys(draft.draft)).not.toContain('token');
+    expect(mirror()).not.toContain('s3cr3t');
+  });
+
+  it('clearToken empties it after the creation answered', () => {
+    mount();
+    act(() => draft.setToken(TOKEN));
+    expect(draft.token).toBe(TOKEN);
+    act(() => draft.clearToken());
+    expect(draft.token).toBe('');
+  });
+
+  it('reset (a discarded draft) clears the token and the owner with the rest', () => {
+    mount();
+    act(() => {
+      draft.setToken(TOKEN);
+      draft.update({ owner: 'customer', tokenExpiresAt: '2027-03-01' });
+    });
+    act(() => draft.reset());
+    expect(draft.token).toBe('');
+    expect(draft.draft.owner).toBe('platform');
+    expect(draft.draft.tokenExpiresAt).toBe('');
+    expect(mirror()).not.toContain('2027-03-01');
+  });
+});

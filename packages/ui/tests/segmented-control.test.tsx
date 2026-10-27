@@ -158,4 +158,15 @@ describe('SegmentedControl', () => {
     expect(group).not.toHaveAttribute('aria-busy');
     expect(group).not.toHaveAttribute('aria-disabled');
   });
+
+  it('wrap: the options may grow to two lines (09.4-15, UI-D-549) while the default stays one fixed line', () => {
+    renderControl({ wrap: true });
+    for (const button of screen.getAllByRole('button')) {
+      expect(button.className).toContain('min-h-11');
+      expect(button.className).toContain('text-center');
+      expect(button.className).toContain('leading-tight');
+      expect(button.className).not.toContain('whitespace-nowrap');
+      expect(button.className).not.toMatch(/(^|\s)h-11(\s|$)/);
+    }
+  });
 });

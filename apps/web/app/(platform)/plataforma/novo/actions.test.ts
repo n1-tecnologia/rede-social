@@ -335,3 +335,112 @@ describe('readBootstrapProgressAction', () => {
     expect(api.apiFetch).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 09.4-15 Task 1 (D-570, UI-D-550, CTK-31, CTK-32, T-09.4-53): the customer project in the Dados check.
+ * The token is carried ONCE, to the pre-check, and the reasons land on the field that owns them.
+ */
+describe('validateTenantDraftAction — the customer project', () => {
+  const TOKEN = 'sbp_s3cr3t-token-0001';
+  const customer = (extra: Record<string, unknown> = {}) => ({
+    ...input(REF),
+    owner: 'customer' as const,
+    token: TOKEN,
+    tokenExpiresAt: '2027-03-01',
+    ...extra,
+  });
+
+  it('posts { projectRef, owner, token, tokenExpiresAt } once to the pre-check', async () => {
+    const result = await validateTenantDraftAction(customer());
+    expect(result).toEqual({ ok: true, manualAccess: false });
+    expect(precheckCalls()).toHaveLength(1);
+    expect(JSON.parse(precheckCalls()[0]?.[1].body)).toEqual({
+      projectRef: REF,
+      owner: 'customer',
+      token: TOKEN,
+      tokenExpiresAt: '2027-03-01',
+    });
+  });
+
+  it('leaves the date out when it is empty', async () => {
+    await validateTenantDraftAction(customer({ tokenExpiresAt: '' }));
+    expect(JSON.parse(precheckCalls()[0]?.[1].body)).toEqual({
+      projectRef: REF,
+      owner: 'customer',
+      token: TOKEN,
+    });
+  });
+
+  it('a platform input posts exactly { projectRef }, whatever stale token it carries', async () => {
+    await validateTenantDraftAction({
+      ...input(REF),
+      owner: 'platform',
+      token: TOKEN,
+      tokenExpiresAt: '2027-03-01',
+    });
+    expect(JSON.parse(precheckCalls()[0]?.[1].body)).toEqual({ projectRef: REF });
+  });
+
+  it.each([[undefined], [''], ['   ']])(
+    'an empty customer token (%j) is "required" and no request is made',
+    async (token) => {
+      const result = await validateTenantDraftAction(customer({ token }));
+      expect(result).toEqual({ ok: false, fieldErrors: { token: 'tokenRequired' } });
+      expect(api.apiFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('an empty token and a malformed ref report both and make no request', async () => {
+    const result = await validateTenantDraftAction(customer({ token: '', projectRef: 'abc' }));
+    expect(result).toEqual({
+      ok: false,
+      fieldErrors: { token: 'tokenRequired', projectRef: 'projectRefInvalid' },
+    });
+    expect(api.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['token_invalid', 'token', 'tokenInvalid'],
+    ['token_forbidden', 'token', 'tokenForbidden'],
+    ['token_other_project', 'token', 'tokenOtherProject'],
+    ['token_account_wide', 'token', 'tokenAccountWide'],
+    ['token_expiry_invalid', 'tokenExpiresAt', 'tokenExpiryInvalid'],
+    ['not_found', 'projectRef', 'projectNotFoundCustomer'],
+    ['not_pro', 'projectRef', 'projectNotPro'],
+    ['not_empty', 'projectRef', 'projectNotEmpty'],
+    ['in_use', 'projectRef', 'projectInUse'],
+    ['paused', 'projectRef', 'projectPaused'],
+  ])('the pre-check answer "%s" is %s: %s', async (reason, field, key) => {
+    api.apiFetch.mockResolvedValue(json(200, { ok: false, reason }));
+    const result = await validateTenantDraftAction(customer());
+    expect(result).toEqual({ ok: false, fieldErrors: { [field]: key } });
+  });
+
+  it('the platform not-found keeps its own sentence key', async () => {
+    api.apiFetch.mockResolvedValue(json(200, { ok: false, reason: 'not_found' }));
+    const result = await validateTenantDraftAction(input(REF));
+    expect(result).toEqual({ ok: false, fieldErrors: { projectRef: 'projectNotFound' } });
+  });
+
+  it('a transport error, a 5xx and an "unchecked" answer are all unchecked', async () => {
+    api.apiFetch.mockRejectedValue(new Error('ECONNRESET'));
+    expect(await validateTenantDraftAction(customer())).toMatchObject({
+      ok: false,
+      unchecked: true,
+    });
+    api.apiFetch.mockResolvedValue(json(503, {}));
+    expect(await validateTenantDraftAction(customer())).toMatchObject({ unchecked: true });
+    api.apiFetch.mockResolvedValue(json(200, { ok: false, reason: 'unchecked' }));
+    expect(await validateTenantDraftAction(customer())).toMatchObject({ unchecked: true });
+  });
+
+  it('never logs the token', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    api.apiFetch.mockResolvedValue(json(503, {}));
+    await validateTenantDraftAction(customer());
+    api.apiFetch.mockRejectedValue(new Error('ECONNRESET'));
+    await validateTenantDraftAction(customer());
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('s3cr3t');
+    spy.mockRestore();
+  });
+});
