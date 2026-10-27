@@ -375,11 +375,24 @@ export async function createTenantFromDraftAction(
         if (details?.slug === 'taken') fieldErrors.slug = 'slugTaken';
         if (details?.adminEmail === 'in_use') fieldErrors.adminEmail = 'emailInUse';
         // 09.2-14: the project's refusals (the same words the pre-check uses) and the manual access.
+        const customer = isCustomer(input);
         const projectKey =
           typeof details?.projectRef === 'string'
             ? REF_DETAIL_ERRORS[details.projectRef]
             : undefined;
-        if (projectKey) fieldErrors.projectRef = projectKey;
+        if (projectKey) {
+          fieldErrors.projectRef =
+            customer && projectKey === 'projectNotFound' ? 'projectNotFoundCustomer' : projectKey;
+        }
+        // 09.4-15 (D-570): a customer token the API refused, as a closed code. `org_mismatch` and
+        // `unchecked` have no field to blame: they stay a generic failure the operator can retry.
+        if (customer && typeof details?.token === 'string') {
+          const token = TOKEN_DETAIL_ERRORS[details.token];
+          if (token) fieldErrors[token[0]] = token[1];
+        }
+        if (customer && details?.tokenExpiresAt === 'token_expiry_invalid') {
+          fieldErrors.tokenExpiresAt = 'tokenExpiryInvalid';
+        }
         if (details?.databasePassword === 'required')
           fieldErrors.databasePassword = 'passwordRequired';
         if (details?.serviceKey === 'required') fieldErrors.serviceKey = 'serviceKeyRequired';
@@ -420,6 +433,15 @@ const REF_DETAIL_ERRORS: Record<string, DraftFieldError> = {
   not_empty: 'projectNotEmpty',
   in_use: 'projectInUse',
   paused: 'projectPaused',
+};
+
+/** The API's `VALIDATION_FAILED { token: <code> }` words of a customer project, and the field each lands on. */
+const TOKEN_DETAIL_ERRORS: Record<string, [DraftField, DraftFieldError]> = {
+  token_invalid: ['token', 'tokenInvalid'],
+  token_forbidden: ['token', 'tokenForbidden'],
+  token_other_project: ['token', 'tokenOtherProject'],
+  token_account_wide: ['token', 'tokenAccountWide'],
+  not_found: ['projectRef', 'projectNotFoundCustomer'],
 };
 
 /** How recent a tenant must be to count as "just created by this confirmation". */

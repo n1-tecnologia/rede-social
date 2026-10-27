@@ -12,6 +12,7 @@ import {
   type BootstrapProgress,
   type CreateTenantResult,
   createTenantFromDraftAction,
+  type DraftField,
   type DraftFieldErrors,
   findCreatedTenantAction,
   readBootstrapProgressAction,
@@ -25,6 +26,7 @@ import { lookBodyOf, resolveButtonPairs } from '@/lib/bg-tone';
 import { brandingUploadErrorKey, runBrandingUpload } from '@/lib/branding-upload';
 import { reasonCatalogKey } from '@/lib/database-copy';
 import { DEFAULT_TITLE_FONT, titleFontStyle, useTitleFont } from '@/lib/title-font';
+import { typedDateLabel } from '@/lib/typed-date';
 import { needsRecompose, recomposeDraftIcon } from './draft-icon';
 import { type ButtonRowKey, type InkKey, lookChanges } from './preview-colors';
 import { forgetStoredDraft, useTenantDraft } from './TenantDraftProvider';
@@ -36,6 +38,20 @@ type TaskStatus = 'pending' | 'running' | 'done' | 'failed';
 type Phase = 'review' | 'running' | 'fix' | 'generic' | 'partial';
 
 const UPLOAD_ACTIONS = { start: startBrandingUploadAction, complete: completeBrandingUploadAction };
+
+/** The fields Dados owns: a refusal of any of them sends the operator back there (the rest is Personalização's). */
+const DADOS_FIELDS = [
+  'displayName',
+  'slug',
+  'adminEmail',
+  'projectRef',
+  'databasePassword',
+  'serviceKey',
+  'publishableKey',
+  'access',
+  'token',
+  'tokenExpiresAt',
+] as const satisfies readonly DraftField[];
 
 /** How often the preparation is read while the `database` task runs (UI-D-544: the cadence is the contract). */
 const POLL_MS = 2000;
@@ -152,6 +168,8 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
     appIcon,
     access,
     clearAccess,
+    token,
+    clearToken,
     update,
     setConfirming,
   } = useTenantDraft();
@@ -200,6 +218,7 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
   }, [open, setConfirming]);
 
   const host = draft.host.trim();
+  const tokenExpires = typedDateLabel(draft.tokenExpiresAt);
   const tasks: Task[] = [
     'create',
     'database',
@@ -369,6 +388,11 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
         projectRef: draft.projectRef,
         // The manual access travels once, with this call, and only when the pre-check asked for it.
         ...(draft.manualAccess ? { access } : {}),
+        // A customer project adds its owner, its write-only token and the typed expiry (09.4-15); a
+        // platform draft sends none of the three.
+        ...(draft.owner === 'customer'
+          ? { owner: 'customer', token, tokenExpiresAt: draft.tokenExpiresAt }
+          : {}),
         look: lookBodyOf(draft),
       });
     } catch (error) {
@@ -377,7 +401,11 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
     }
     // The API answered: accepted or refused for good, the secrets are spent (D-539, UI-D-534). A
     // failure with no field to blame (`generic`) keeps them, so "Tentar de novo" can send them again.
-    if (created.ok || 'fieldErrors' in created) clearAccess();
+    // The same goes for the customer project's token (UI-D-561): memory only, spent once answered.
+    if (created.ok || 'fieldErrors' in created) {
+      clearAccess();
+      clearToken();
+    }
     if (!created.ok && 'fieldErrors' in created && created.fieldErrors.slug === 'slugTaken') {
       // The slug may be taken by THIS creation: an answer lost on the way back (Next replays an
       // action whose fetch failed, and the replay hears "taken"), or that earlier attempt. The same
@@ -485,7 +513,7 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
   const fixData = () => {
     // Back to the step that owns the refused field: Dados (name, slug, e-mail) closes its gate
     // again; a refused colour only needs Personalização.
-    const onDados = Boolean(fieldErrors.displayName || fieldErrors.slug || fieldErrors.adminEmail);
+    const onDados = DADOS_FIELDS.some((field) => fieldErrors[field]);
     update(onDados ? { fieldErrors, dataReady: false } : { fieldErrors });
     enter('review');
     setStatus({});
@@ -642,11 +670,27 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
               <dt className="text-text-tertiary">{tw('summary.fields.project')}</dt>
               <dd data-confirm-project className="min-w-0 text-text">
                 <span className="break-all tabular-nums">{draft.projectRef}</span>
+                {draft.owner === 'customer' ? (
+                  <>
+                    <span className="block text-xs text-text-tertiary">
+                      {tw('summary.fields.projectToken')}
+                    </span>
+                    {tokenExpires ? (
+                      <span className="block text-xs text-text-tertiary">
+                        {tw('summary.fields.projectTokenExpires', { date: tokenExpires })}
+                      </span>
+                    ) : null}
+                  </>
+                ) : null}
                 {draft.manualAccess ? (
                   <span className="block text-xs text-text-tertiary">
                     {tw('summary.fields.projectManual')}
                   </span>
                 ) : null}
+              </dd>
+              <dt className="text-text-tertiary">{tw('summary.fields.owner')}</dt>
+              <dd data-confirm-owner className="min-w-0 break-words text-text">
+                {tw(`summary.fields.ownerValues.${draft.owner}`)}
               </dd>
               <dt className="text-text-tertiary">{tw('summary.fields.email')}</dt>
               <dd className="min-w-0 break-words text-text">{draft.adminEmail}</dd>

@@ -19,18 +19,22 @@ import { useTenantDraft } from './TenantDraftProvider';
  * - `need="project"` (Resumo, since 09.2-18): everything above, and the Supabase project: a ref
  *   (Dados checked it) and, when the pre-check said the access is manual, the three values. They are
  *   memory only, so a reload on a later step finds the ref without them (UI-D-534): the draft goes
- *   back to Dados, closed, to ask again.
+ *   back to Dados, closed, to ask again. A CUSTOMER project (09.4-15, UI-D-550, A-UI-2) also needs its
+ *   token, which is memory only too: a reload finds the owner and the ref without it and sends the
+ *   draft back to Dados the same way.
  */
 export function RequireDraftData({
   need = 'data',
 }: {
   need?: 'none' | 'data' | 'brand' | 'host' | 'project';
 }) {
-  const { draft, brandReady, restored, confirming, access, update } = useTenantDraft();
+  const { draft, brandReady, restored, confirming, access, token, update } = useTenantDraft();
   const router = useRouter();
-  const { createdId, dataReady, hostReady, projectRef, manualAccess } = draft;
+  const { createdId, dataReady, hostReady, projectRef, manualAccess, owner } = draft;
   const accessMissing = Object.values(access).some((value) => value.trim() === '');
-  const projectMissing = projectRef.trim() === '' || (manualAccess && accessMissing);
+  const tokenMissing = owner === 'customer' && (token ?? '').trim() === '';
+  const projectMissing =
+    projectRef.trim() === '' || (manualAccess && accessMissing) || tokenMissing;
   useEffect(() => {
     if (!restored || confirming) return;
     if (createdId) {

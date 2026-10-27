@@ -8,6 +8,7 @@ import { type ReactNode, useCallback, useState } from 'react';
 import { LinkButton } from '@/app/(auth)/LinkButton';
 import { resolveButtonPairs } from '@/lib/bg-tone';
 import { DEFAULT_TITLE_FONT, titleFontStyle, useTitleFont } from '@/lib/title-font';
+import { typedDateLabel } from '@/lib/typed-date';
 import { CreateTenantDialog } from './CreateTenantDialog';
 import { lookChanges } from './preview-colors';
 import { type DraftImage, useTenantDraft } from './TenantDraftProvider';
@@ -49,6 +50,7 @@ export function WizardSummary() {
   const closeConfirmation = useCallback(() => setConfirming(false), []);
   const name = draft.displayName.trim();
   const host = draft.host.trim();
+  const tokenExpires = typedDateLabel(draft.tokenExpiresAt);
 
   return (
     <div className="flex flex-col gap-6">
@@ -202,9 +204,26 @@ export function WizardSummary() {
         >
           <div data-summary-project className="flex min-w-0 flex-col gap-1">
             <p className="break-all text-sm tabular-nums text-text">{draft.projectRef}</p>
+            {draft.owner === 'customer' ? (
+              <>
+                {/* Fixed catalog text: nothing of the token is echoed, not even its length (UI-D-561). */}
+                <p className="text-xs text-text-tertiary">{tw('summary.fields.projectToken')}</p>
+                {tokenExpires ? (
+                  <p className="text-xs text-text-tertiary">
+                    {tw('summary.fields.projectTokenExpires', { date: tokenExpires })}
+                  </p>
+                ) : null}
+              </>
+            ) : null}
             {draft.manualAccess ? (
               <p className="text-xs text-text-tertiary">{tw('summary.fields.projectManual')}</p>
             ) : null}
+          </div>
+          <div data-summary-owner>
+            <SummaryRow
+              label={tw('summary.fields.owner')}
+              value={tw(`summary.fields.ownerValues.${draft.owner}`)}
+            />
           </div>
         </SummaryCard>
       </div>
