@@ -19,7 +19,12 @@
  * `--scoped` (Phase 09.4-01, D-567, D-578) probes ONE project with a customer's throwaway scoped token. The token
  * is typed at a hidden terminal prompt (`scripts/lib/read-secret.ts`): there is no `--token` flag, it is not read
  * from the environment, and it is held in memory for the call only. The mode is a customer-token tool: it never
- * reads SUPABASE_PAT or SUPABASE_ORG_SLUG. See `runScopedProbe` for what it sends and what it never does.
+ * reads SUPABASE_PAT or SUPABASE_ORG_SLUG. It sends 12 real reads, 8 write rows as INVALID-BODY requests (a
+ * token with the permission is answered by validation, one without it by 401/403; a 2xx is flagged
+ * `unexpectedSuccess`) and the project listing; it never sends a real write, a DELETE or a PUT. The report says
+ * `allowed`, `denied` or `other` with the HTTP status per operation, the permission identifiers of a refusal, the
+ * listing and organisation answers as numbers and statuses, and the response header NAMES. Igor runs it once per
+ * throwaway token (plan 09.4-01, ledger row P1).
  */
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -30,6 +35,7 @@ import {
   type ProjectProvider,
   ProjectProviderError,
 } from '@rede-social/core/server/projects/types';
+import { REQUIRED_SERVICES } from '@rede-social/core/server/projects/wait';
 import { NoTerminalError, readSecret, SecretAbortError } from './lib/read-secret';
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -180,23 +186,128 @@ async function exerciseKey(
 const SCOPED_BASE_URL = 'https://api.supabase.com';
 const SCOPED_TIMEOUT_MS = 15_000;
 const SCOPED_PROMPT = 'Cole o token do projeto e tecle Enter (nada aparece na tela): ';
+/** An id no signing key can have: the PATCH below must be answered by validation or a refusal, never applied. */
+const IMPOSSIBLE_ID = '00000000-0000-0000-0000-000000000000';
+const PERMISSION_ID = /^[a-z0-9_]{1,64}$/;
+const MAX_PERMISSION_IDS = 20;
+const HEADER_NAME = /^[a-z0-9-]{1,64}$/;
 
-export type ProbeKind = 'read';
+/** `read`: a real GET (or the read-only SQL query). `write-invalid`: a write sent with a body that is rejected. */
+export type ProbeKind = 'read' | 'write-invalid';
 export type ProbeResult = 'allowed' | 'denied' | 'other';
 
 type PlanRow = {
   op: string;
-  method: 'GET';
+  method: 'GET' | 'POST' | 'PATCH';
   path: string;
   kind: ProbeKind;
+  query?: Record<string, string>;
+  body?: unknown;
 };
 
-/** The operation table, in the order of the INTEGRATE list of 09.4 COVERAGE.md. */
+const read = (path: string, query?: Record<string, string>): PlanRow => ({
+  op: `GET ${path}`,
+  method: 'GET',
+  path,
+  kind: 'read',
+  query,
+});
+
+/**
+ * The per-project operation table, in the order of the INTEGRATE list of 09.4 COVERAGE.md (20 rows).
+ * A `write-invalid` row is sent with a KNOWN field of the wrong type, a malformed value or an impossible id: a
+ * token WITH the permission is answered by validation (400/404/409/422), one WITHOUT it by 401/403, and
+ * nothing is applied.
+ */
 export const PROBE_PLAN: PlanRow[] = [
-  { op: 'GET /v1/projects/{ref}', method: 'GET', path: '/v1/projects/{ref}', kind: 'read' },
+  read('/v1/projects/{ref}'),
+  read('/v1/projects/{ref}/health', { services: REQUIRED_SERVICES.join(',') }),
+  read('/v1/projects/{ref}/api-keys', { reveal: 'true' }),
+  {
+    op: 'POST /v1/projects/{ref}/api-keys',
+    method: 'POST',
+    path: '/v1/projects/{ref}/api-keys',
+    kind: 'write-invalid',
+    body: { type: 'not-a-key-type' },
+  },
+  read('/v1/projects/{ref}/config/database/pooler'),
+  {
+    op: 'PATCH /v1/projects/{ref}/database/password',
+    method: 'PATCH',
+    path: '/v1/projects/{ref}/database/password',
+    kind: 'write-invalid',
+    body: { password: 'x' },
+  },
+  read('/v1/projects/{ref}/database/migrations'),
+  read('/v1/projects/{ref}/storage/buckets'),
+  {
+    op: 'POST /v1/projects/{ref}/database/query/read-only',
+    method: 'POST',
+    path: '/v1/projects/{ref}/database/query/read-only',
+    kind: 'read',
+    body: { query: 'select 1' },
+  },
+  read('/v1/projects/{ref}/config/auth'),
+  {
+    op: 'PATCH /v1/projects/{ref}/config/auth',
+    method: 'PATCH',
+    path: '/v1/projects/{ref}/config/auth',
+    kind: 'write-invalid',
+    body: { site_url: 12345 },
+  },
+  read('/v1/projects/{ref}/config/auth/signing-keys'),
+  {
+    op: 'POST /v1/projects/{ref}/config/auth/signing-keys',
+    method: 'POST',
+    path: '/v1/projects/{ref}/config/auth/signing-keys',
+    kind: 'write-invalid',
+    body: { algorithm: 'NOT-AN-ALGORITHM' },
+  },
+  {
+    op: 'PATCH /v1/projects/{ref}/config/auth/signing-keys/{id}',
+    method: 'PATCH',
+    path: `/v1/projects/{ref}/config/auth/signing-keys/${IMPOSSIBLE_ID}`,
+    kind: 'write-invalid',
+    body: { status: 'not-a-status' },
+  },
+  read('/v1/projects/{ref}/postgrest'),
+  {
+    op: 'PATCH /v1/projects/{ref}/postgrest',
+    method: 'PATCH',
+    path: '/v1/projects/{ref}/postgrest',
+    kind: 'write-invalid',
+    body: { max_rows: 'not-a-number' },
+  },
+  read('/v1/projects/{ref}/config/storage'),
+  {
+    op: 'PATCH /v1/projects/{ref}/config/storage',
+    method: 'PATCH',
+    path: '/v1/projects/{ref}/config/storage',
+    kind: 'write-invalid',
+    body: { fileSizeLimit: 'not-a-number' },
+  },
+  read('/v1/projects/{ref}/config/realtime'),
+  {
+    op: 'PATCH /v1/projects/{ref}/config/realtime',
+    method: 'PATCH',
+    path: '/v1/projects/{ref}/config/realtime',
+    kind: 'write-invalid',
+    body: { private_only: 'not-a-boolean' },
+  },
 ];
 
-export type ScopedOperation = { op: string; result: ProbeResult; status: number };
+/** The 21st operation: the project listing, called last (D-570). */
+const LISTING_OP = 'GET /v1/projects';
+
+export type ScopedOperation = {
+  op: string;
+  result: ProbeResult;
+  status: number;
+  /** Only on a 403, only identifiers matching `^[a-z0-9_]{1,64}$`, at most 20. */
+  missingPermissions?: string[];
+  /** A write row that answered 2xx: the probe meant to change nothing, so Igor must see this. */
+  unexpectedSuccess?: true;
+};
 
 export type ScopedProbeReport = {
   mode: 'scoped';
@@ -211,10 +322,15 @@ export type ScopedProbeReport = {
   responseHeaderNames: string[];
 };
 
-/** `allowed` for a read 2xx, `denied` for 401 and 403, `other` for anything else. */
-export function classifyStatus(_kind: ProbeKind, status: number): ProbeResult {
+/**
+ * `denied`: 401 and 403. A read is `allowed` on 2xx. A write-invalid row is `allowed` when validation was
+ * reached (400, 404, 409, 422) and also on a 2xx (the caller flags that as `unexpectedSuccess`). The rest is `other`.
+ */
+export function classifyStatus(kind: ProbeKind, status: number): ProbeResult {
   if (status === 401 || status === 403) return 'denied';
-  return status >= 200 && status < 300 ? 'allowed' : 'other';
+  if (status >= 200 && status < 300) return 'allowed';
+  if (kind === 'write-invalid' && [400, 404, 409, 422].includes(status)) return 'allowed';
+  return 'other';
 }
 
 /** The same rule as `management-api.ts`: https, or http on loopback for a test stub. */
@@ -232,12 +348,24 @@ function assertProbeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-const HEADER_NAME = /^[a-z0-9-]{1,64}$/;
+/** The identifiers of a 403 `missing_permissions` array that match the strict pattern. The body is dropped. */
+function permissionIds(json: unknown): string[] {
+  const list = (json as { missing_permissions?: unknown } | null | undefined)?.missing_permissions;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((id): id is string => typeof id === 'string' && PERMISSION_ID.test(id))
+    .slice(0, MAX_PERMISSION_IDS);
+}
 
 /**
- * Probes ONE project with a customer's scoped token. The token is read only through the hidden prompt, lives in
- * this function and is dropped when it returns. Output is codes, statuses and counts: never a key, a token, a
- * project name, a host or any response text (T-09.2-60, T-09.4-02).
+ * Probes ONE project with a customer's scoped token (D-578). Never changes a project: reads are real GETs (the
+ * read-only SQL query is the one POST that reads) and every write row is an INVALID-BODY request, so a token
+ * WITH the permission is answered by validation and one WITHOUT it by 401/403. There is no DELETE and no PUT.
+ *
+ * The token is read only through the hidden prompt, lives in this function and is dropped when it returns; it is
+ * never read from the environment and never stored in a returned value. Output is codes, statuses, counts,
+ * header NAMES and permission identifiers: never a key, a token, a project name, a host or response text
+ * (T-09.2-60, T-09.4-02). Rows run one after another (one rate-limit window) and a failure stops nothing.
  */
 export async function runScopedProbe(
   args: ProbeArgs,
@@ -252,11 +380,20 @@ export async function runScopedProbe(
   async function probeRequest(
     method: string,
     path: string,
+    query?: Record<string, string>,
+    body?: unknown,
   ): Promise<{ status: number; json?: unknown; headerNames: string[] }> {
+    const search = query ? `?${new URLSearchParams(query).toString()}` : '';
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token ?? ''}`,
+      Accept: 'application/json',
+    };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
     try {
-      const response = await fetchImpl(`${baseUrl}${path}`, {
+      const response = await fetchImpl(`${baseUrl}${path}${search}`, {
         method,
-        headers: { Authorization: `Bearer ${token ?? ''}`, Accept: 'application/json' },
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
         redirect: 'error',
         signal: AbortSignal.timeout(SCOPED_TIMEOUT_MS),
       });
@@ -275,30 +412,72 @@ export async function runScopedProbe(
     }
   }
 
+  const operationOf = (
+    op: string,
+    kind: ProbeKind,
+    answer: { status: number; json?: unknown },
+  ): ScopedOperation => {
+    const result: ProbeResult = answer.status === 0 ? 'other' : classifyStatus(kind, answer.status);
+    const operation: ScopedOperation = { op, result, status: answer.status };
+    if (answer.status === 403) {
+      const ids = permissionIds(answer.json);
+      if (ids.length > 0) operation.missingPermissions = ids;
+    }
+    if (kind === 'write-invalid' && answer.status >= 200 && answer.status < 300) {
+      operation.unexpectedSuccess = true;
+    }
+    return operation;
+  };
+
   try {
     const operations: ScopedOperation[] = [];
     let organisationSlug: string | null = null;
     let headerNames: string[] = [];
     for (const row of PROBE_PLAN) {
-      const answer = await probeRequest(row.method, row.path.replace('{ref}', ref));
-      operations.push({
-        op: row.op,
-        result: answer.status === 0 ? 'other' : classifyStatus(row.kind, answer.status),
-        status: answer.status,
-      });
-      if (row.op === 'GET /v1/projects/{ref}' && answer.status === 200) {
+      const answer = await probeRequest(
+        row.method,
+        row.path.replace('{ref}', ref),
+        row.query,
+        row.body,
+      );
+      operations.push(operationOf(row.op, row.kind, answer));
+      if (row === PROBE_PLAN[0] && answer.status === 200) {
         const slug = (answer.json as { organization_slug?: unknown } | undefined)
           ?.organization_slug;
         if (typeof slug === 'string' && /^[\w-]{1,128}$/.test(slug)) organisationSlug = slug;
         headerNames = answer.headerNames;
       }
     }
+
+    // The listing: numbers only. Whatever the token answers, no name, ref or id leaves this function.
+    const listed = await probeRequest('GET', '/v1/projects');
+    operations.push(operationOf(LISTING_OP, 'read', listed));
+    const items = listed.status === 200 && Array.isArray(listed.json) ? listed.json : null;
+    const listing: ScopedProbeReport['listing'] = {
+      status: listed.status,
+      projectsTotal: items ? items.length : null,
+      projectsOtherThanTarget: items
+        ? items.filter((item) => {
+            const entry = (item ?? {}) as { ref?: unknown; id?: unknown };
+            return entry.ref !== ref && entry.id !== ref;
+          }).length
+        : null,
+    };
+
+    // The organisation read uses the slug learned from row 1 in the URL only; its status is all that is kept.
+    const organisationRead: ScopedProbeReport['organisationRead'] = {
+      status: organisationSlug
+        ? (await probeRequest('GET', `/v1/organizations/${encodeURIComponent(organisationSlug)}`))
+            .status
+        : null,
+    };
+
     return {
       mode: 'scoped',
       organisationLearned: organisationSlug !== null,
       operations,
-      listing: { status: null, projectsTotal: null, projectsOtherThanTarget: null },
-      organisationRead: { status: null },
+      listing,
+      organisationRead,
       responseHeaderNames: [...new Set(headerNames)].sort(),
     };
   } finally {
