@@ -633,3 +633,106 @@ describe('a dead management token is a token state, never an outage (D-573, UI-D
     expect(spies.project).toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-08 (D-576, CTK-21): one structured line per change of the token state, ids and states only
+// ---------------------------------------------------------------------------------------------------------
+
+/** Every call any logger of the kernel makes in this file, so the scan reads what a person tailing logs sees. */
+const logged = vi.hoisted(() => ({ calls: [] as Array<{ bindings: object; args: unknown[] }> }));
+vi.mock('@rede-social/core/server/logging', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@rede-social/core/server/logging')>();
+  const make = (bindings: Record<string, unknown>): unknown => {
+    const record = (...args: unknown[]) => {
+      logged.calls.push({ bindings, args });
+    };
+    return {
+      info: record,
+      warn: record,
+      error: record,
+      debug: record,
+      trace: record,
+      fatal: record,
+      level: 'trace',
+      bindings: () => bindings,
+      child: (extra: Record<string, unknown>) => make({ ...bindings, ...extra }),
+    };
+  };
+  const rootLogger = make({});
+  return {
+    ...real,
+    rootLogger,
+    moduleLogger: (name: string) =>
+      (rootLogger as { child: (b: object) => unknown }).child({ name }),
+  };
+});
+
+const tokenLines = () =>
+  logged.calls
+    .map((call) => call.args[0] as Record<string, unknown> | undefined)
+    .filter((fields) => fields?.event === 'project.token.state_changed');
+
+describe('project.token.state_changed (D-576, CTK-21)', () => {
+  it('a check that moves a customer project from ok to invalid writes ONE line of project id, from and to', async () => {
+    const { fixture, world } = await customerProject('log-one');
+    await checkProject(fixture.projectId);
+    // The first look of a never-checked project reads `unchecked` to the new state once; that is accepted.
+    expect(tokenLines()).toEqual([
+      {
+        event: 'project.token.state_changed',
+        projectId: fixture.projectId,
+        from: 'unchecked',
+        to: 'valid',
+      },
+    ]);
+
+    logged.calls.length = 0;
+    world.setTokenState(TOKEN, 'dead');
+    const first = await checkProject(fixture.projectId);
+    expect(tokenLines()).toEqual([
+      {
+        event: 'project.token.state_changed',
+        projectId: fixture.projectId,
+        from: 'valid',
+        to: 'invalid',
+      },
+    ]);
+    expect(first?.token).toEqual({ from: 'valid', to: 'invalid' });
+
+    // The same verdict again changes nothing and says nothing.
+    logged.calls.length = 0;
+    const again = await checkProject(fixture.projectId);
+    expect(tokenLines()).toEqual([]);
+    expect(again?.token).toBeNull();
+  });
+
+  it('a platform project never writes a token line', async () => {
+    logged.calls.length = 0;
+    const f = await project('log-plat');
+    const result = await checkProject(f.projectId, {
+      provider: fakeProvider({ [f.ref]: fakeTarget() }),
+    });
+    expect(result?.token ?? null).toBeNull();
+    expect(tokenLines()).toEqual([]);
+  });
+
+  it('nothing the health run logs holds the token, a prefix of it, the organisation or the ref', async () => {
+    logged.calls.length = 0;
+    const { fixture, world } = await customerProject('log-scan');
+    await checkProject(fixture.projectId);
+    world.setTokenState(TOKEN, 'dead');
+    await checkProject(fixture.projectId);
+    world.setTokenState(TOKEN, 'forbidden');
+    await checkProject(fixture.projectId);
+    expect(tokenLines().length).toBeGreaterThanOrEqual(3);
+
+    const text = JSON.stringify(logged.calls);
+    expect(text).not.toContain(TOKEN);
+    expect(text).not.toContain('sbp_');
+    expect(text).not.toContain(customerSetup.CUSTOMER_ORG);
+    expect(text).not.toContain(fixture.ref);
+    for (const fields of tokenLines()) {
+      expect(Object.keys(fields ?? {}).sort()).toEqual(['event', 'from', 'projectId', 'to']);
+    }
+  });
+});

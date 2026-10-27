@@ -1,4 +1,4 @@
-import type { BootstrapReasonCode, TokenCheck } from '@rede-social/contracts/projects';
+import type { BootstrapReasonCode, TokenCheck, TokenState } from '@rede-social/contracts/projects';
 import { eq, sql } from 'drizzle-orm';
 import { projectHealth, tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
@@ -62,6 +62,8 @@ export type HealthResult = {
    */
   tokenCheck?: TokenCheck | null;
   previousTokenCheck?: TokenCheck | null;
+  /** 09.4-08 (D-576): the change of the derived token state this check made, `null` when it made none. */
+  token?: { from: TokenState | null; to: TokenState | null } | null;
 };
 
 export type HealthDeps = {
