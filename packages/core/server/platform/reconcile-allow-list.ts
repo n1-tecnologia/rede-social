@@ -130,25 +130,28 @@ export async function reconcileAuthAllowList(
     };
     if (hosts.length > 0) {
       const adapter = adapterOf(project);
-      // No adapter: the whole project failed, counted once per host, and the next project is still visited.
-      if (!adapter) result.failed = hosts.length;
-      for (const host of adapter ? hosts : []) {
-        try {
-          await withAllowListLock(project.ref, () => adapter.add(host));
-          result.added += 1;
-          if (options.clearAllowListErrors) await clearAllowListError(host);
-        } catch (error) {
-          result.failed += 1;
-          log.error(
-            {
-              event: 'platform.domains.allow_list_reconcile_failed',
-              projectId: project.id,
-              host,
-              err: error instanceof Error ? error.message : String(error),
-            },
-            'allow-list reconcile failed for a host; "Verificar agora" re-adds it by hand',
-          );
+      if (adapter) {
+        for (const host of hosts) {
+          try {
+            await withAllowListLock(project.ref, () => adapter.add(host));
+            result.added += 1;
+            if (options.clearAllowListErrors) await clearAllowListError(host);
+          } catch (error) {
+            result.failed += 1;
+            log.error(
+              {
+                event: 'platform.domains.allow_list_reconcile_failed',
+                projectId: project.id,
+                host,
+                err: error instanceof Error ? error.message : String(error),
+              },
+              'allow-list reconcile failed for a host; "Verificar agora" re-adds it by hand',
+            );
+          }
         }
+      } else {
+        // No adapter: the whole project failed, counted once per host, and the next project is still visited.
+        result.failed = hosts.length;
       }
     }
     total.hosts += result.hosts;
