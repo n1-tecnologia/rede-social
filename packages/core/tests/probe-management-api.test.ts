@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createLimiter } from '../server/projects/limiter';
 import { createSupabaseProjectProvider } from '../server/projects/management-api';
 
@@ -15,9 +17,16 @@ type Probe = {
       fetchImpl?: typeof fetch;
       env?: Record<string, string | undefined>;
       apiUrlFor?: (ref: string) => string;
+      readSecret?: (label: string) => Promise<string>;
+      baseUrl?: string;
     },
   ) => Promise<Record<string, unknown> & { recommendation: string }>;
-  parseArgs: (argv: string[]) => { ref: string | null; fake: boolean; exerciseKeys: boolean };
+  parseArgs: (argv: string[]) => {
+    ref: string | null;
+    fake: boolean;
+    exerciseKeys: boolean;
+    scoped: boolean;
+  };
   hostShape: (host: string) => string;
 };
 const { runProbe, parseArgs, hostShape } = (await import(
@@ -37,6 +46,8 @@ const SECRET_SHAPES = [
   'fake_secret_',
   PAT,
   'SECRETVALUE',
+  'sbp_',
+  'Bearer',
 ];
 
 const expectNoSecrets = (report: unknown) => {
@@ -198,11 +209,17 @@ describe('platform:probe against the real adapter (stubbed transport)', () => {
 
 describe('platform:probe arguments', () => {
   it('needs exactly one of --ref or --fake, rejects unknown flags and a --ref without a value', () => {
-    expect(parseArgs(['--fake'])).toEqual({ ref: null, fake: true, exerciseKeys: false });
+    expect(parseArgs(['--fake'])).toEqual({
+      ref: null,
+      fake: true,
+      exerciseKeys: false,
+      scoped: false,
+    });
     expect(parseArgs(['--ref', REF, '--exercise-keys'])).toEqual({
       ref: REF,
       fake: false,
       exerciseKeys: true,
+      scoped: false,
     });
     expect(() => parseArgs([])).toThrow(/exactly one/);
     expect(() => parseArgs(['--fake', '--ref', REF])).toThrow(/exactly one/);
@@ -229,5 +246,116 @@ describe('platform:probe arguments', () => {
     );
     expect(hostShape('127.0.0.1')).toBe('local');
     expect(hostShape('db.internal.example')).toBe('other');
+  });
+});
+
+/**
+ * 09.4-01 (CTK-07, D-578, T-09.4-01..04): the scoped mode. The token comes only from the hidden prompt (here a
+ * fake), the requests go to a loopback stub, and the report carries codes and statuses only.
+ */
+const FAKE_TOKEN = 'sbp_fc_FAKE-scoped-token-0002';
+const servers: Server[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    servers.splice(0).map(
+      (server) =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections();
+          server.close(() => resolve());
+        }),
+    ),
+  );
+});
+
+type StubRequest = { method: string; path: string; authorization: string | undefined };
+type StubReply = { status: number; body?: unknown; headers?: Record<string, string> };
+
+async function startStub(handler: (request: StubRequest & { rawBody: string }) => StubReply) {
+  const requests: StubRequest[] = [];
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      const url = new URL(req.url ?? '/', 'http://stub.local');
+      const recorded = {
+        method: req.method ?? 'GET',
+        path: url.pathname,
+        authorization: req.headers.authorization,
+      };
+      requests.push(recorded);
+      const reply = handler({ ...recorded, rawBody: Buffer.concat(chunks).toString('utf8') });
+      res.writeHead(reply.status, { 'Content-Type': 'application/json', ...reply.headers });
+      res.end(reply.body === undefined ? '' : JSON.stringify(reply.body));
+    });
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return { baseUrl: `http://127.0.0.1:${port}`, requests };
+}
+
+describe('platform:probe --scoped (tracer: fake terminal, fake token, loopback stub)', () => {
+  it('takes the token only from the hidden prompt, reports the first row, and prints no part of the token', async () => {
+    const stub = await startStub((request) =>
+      request.path === `/v1/projects/${REF}`
+        ? {
+            status: 200,
+            body: { ref: REF, organization_slug: ORG, name: FAKE_TOKEN },
+            headers: { 'x-ratelimit-limit': '120' },
+          }
+        : { status: 404, body: { message: `no route ${FAKE_TOKEN}` } },
+    );
+    const labels: string[] = [];
+    const report = (await runProbe(['--scoped', '--ref', REF], {
+      readSecret: async (label) => {
+        labels.push(label);
+        return FAKE_TOKEN;
+      },
+      baseUrl: stub.baseUrl,
+    })) as unknown as {
+      mode: string;
+      organisationLearned: boolean;
+      operations: Array<{ op: string; result: string; status: number }>;
+      responseHeaderNames: string[];
+    };
+    expect(labels).toHaveLength(1);
+    expect(report.mode).toBe('scoped');
+    expect(report.organisationLearned).toBe(true);
+    expect(report.operations[0]).toMatchObject({
+      op: 'GET /v1/projects/{ref}',
+      result: 'allowed',
+      status: 200,
+    });
+    expect(report.responseHeaderNames).toContain('x-ratelimit-limit');
+    // The stub saw the token as a bearer; the report holds none of it.
+    expect(stub.requests[0]?.authorization).toBe(`Bearer ${FAKE_TOKEN}`);
+    const text = JSON.stringify(report);
+    expect(text).not.toContain(FAKE_TOKEN);
+    expect(text).not.toContain('FAKE-scoped');
+    expect(text).not.toContain('Bearer');
+    expectNoSecrets(report);
+  });
+
+  it('parses --scoped: it needs --ref, a 20-letter ref, and rejects --fake and --exercise-keys', () => {
+    expect(parseArgs(['--scoped', '--ref', REF])).toEqual({
+      ref: REF,
+      fake: false,
+      exerciseKeys: false,
+      scoped: true,
+    });
+    expect(() => parseArgs(['--scoped'])).toThrow(/--scoped/);
+    expect(() => parseArgs(['--scoped', '--fake'])).toThrow(/--scoped/);
+    expect(() => parseArgs(['--scoped', '--ref', REF, '--exercise-keys'])).toThrow(/--scoped/);
+    expect(() => parseArgs(['--scoped', '--ref', 'Not-A-Ref'])).toThrow(/ref/);
+  });
+
+  it('a network failure on the first row is other/0, never a thrown token', async () => {
+    const report = (await runProbe(['--scoped', '--ref', REF], {
+      readSecret: async () => FAKE_TOKEN,
+      baseUrl: 'http://127.0.0.1:1',
+    })) as unknown as { operations: Array<{ result: string; status: number }> };
+    expect(report.operations[0]).toMatchObject({ result: 'other', status: 0 });
+    expectNoSecrets(report);
   });
 });
