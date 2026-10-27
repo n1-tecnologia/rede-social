@@ -296,7 +296,9 @@ export type TokenSummary = z.infer<typeof tokenSummarySchema>;
  */
 export const customerProjectFields = {
   owner: z.enum(OWNERS).optional(),
-  token: z.string().max(TOKEN_MAX_LENGTH).optional(),
+  // Trimmed like `replaceTokenBodySchema`: a pasted leading space or newline must not read as another kind of
+  // token, and the sealed value is never padded (09.4 review WR-03).
+  token: z.string().trim().max(TOKEN_MAX_LENGTH).optional(),
   tokenExpiresAt: z.string().max(10).optional(),
 };
 

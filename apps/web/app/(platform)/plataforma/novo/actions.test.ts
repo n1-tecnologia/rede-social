@@ -362,6 +362,11 @@ describe('validateTenantDraftAction — the customer project', () => {
     });
   });
 
+  it('posts the token trimmed: a pasted leading space or newline is not part of it (WR-03)', async () => {
+    await validateTenantDraftAction(customer({ token: `\n  ${TOKEN} \t` }));
+    expect(JSON.parse(precheckCalls()[0]?.[1].body)).toMatchObject({ token: TOKEN });
+  });
+
   it('leaves the date out when it is empty', async () => {
     await validateTenantDraftAction(customer({ tokenExpiresAt: '' }));
     expect(JSON.parse(precheckCalls()[0]?.[1].body)).toEqual({

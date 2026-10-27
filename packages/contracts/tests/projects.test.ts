@@ -544,6 +544,36 @@ describe('the token exists only in INPUT bodies, strict and bounded (CTK-26, T-0
     ).toBe(true);
   });
 
+  it('trims a pasted token on the pre-check and the create bodies, so padding is never sealed (WR-03)', () => {
+    const padded = `\n  ${TOKEN}\t `;
+    expect(
+      precheckBodySchema.parse({ projectRef: REF, owner: 'customer', token: padded }).token,
+    ).toBe(TOKEN);
+    expect(
+      createTenantBodySchema.parse({
+        ...tenantBody,
+        projectRef: REF,
+        owner: 'customer',
+        token: padded,
+      }).token,
+    ).toBe(TOKEN);
+    // The bound applies to what is kept: 4096 characters plus padding pass, 4097 characters do not.
+    expect(
+      precheckBodySchema.safeParse({
+        projectRef: REF,
+        owner: 'customer',
+        token: ` ${'a'.repeat(4096)} `,
+      }).success,
+    ).toBe(true);
+    expect(
+      precheckBodySchema.safeParse({
+        projectRef: REF,
+        owner: 'customer',
+        token: ` ${'a'.repeat(4097)} `,
+      }).success,
+    ).toBe(false);
+  });
+
   it('a customer body needs a non-blank token; a platform body cannot carry a token or an expiry', () => {
     for (const body of [
       { projectRef: REF, owner: 'customer' },

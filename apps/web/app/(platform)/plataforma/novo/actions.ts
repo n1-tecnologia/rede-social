@@ -177,7 +177,7 @@ function customerFields(input: TenantDraftInput): {
   const expiresAt = (input.tokenExpiresAt ?? '').trim();
   return {
     owner: 'customer',
-    token: input.token ?? '',
+    token: (input.token ?? '').trim(),
     ...(expiresAt === '' ? {} : { tokenExpiresAt: expiresAt }),
   };
 }
