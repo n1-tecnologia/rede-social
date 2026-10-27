@@ -21,6 +21,8 @@ type Probe = {
       baseUrl?: string;
     },
   ) => Promise<Record<string, unknown> & { recommendation: string }>;
+  classifyStatus: (kind: 'read' | 'write-invalid', status: number) => string;
+  PROBE_PLAN: Array<{ op: string; method: string; path: string; kind: string }>;
   parseArgs: (argv: string[]) => {
     ref: string | null;
     fake: boolean;
@@ -29,7 +31,7 @@ type Probe = {
   };
   hostShape: (host: string) => string;
 };
-const { runProbe, parseArgs, hostShape } = (await import(
+const { runProbe, parseArgs, hostShape, classifyStatus, PROBE_PLAN } = (await import(
   /* @vite-ignore */ new URL('../../../scripts/probe-management-api.ts', import.meta.url).href
 )) as Probe;
 
@@ -268,23 +270,31 @@ afterEach(async () => {
   );
 });
 
-type StubRequest = { method: string; path: string; authorization: string | undefined };
+type StubRequest = {
+  method: string;
+  path: string;
+  search: string;
+  authorization: string | undefined;
+  rawBody: string;
+};
 type StubReply = { status: number; body?: unknown; headers?: Record<string, string> };
 
-async function startStub(handler: (request: StubRequest & { rawBody: string }) => StubReply) {
+async function startStub(handler: (request: StubRequest) => StubReply) {
   const requests: StubRequest[] = [];
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
       const url = new URL(req.url ?? '/', 'http://stub.local');
-      const recorded = {
+      const recorded: StubRequest = {
         method: req.method ?? 'GET',
         path: url.pathname,
+        search: url.search,
         authorization: req.headers.authorization,
+        rawBody: Buffer.concat(chunks).toString('utf8'),
       };
       requests.push(recorded);
-      const reply = handler({ ...recorded, rawBody: Buffer.concat(chunks).toString('utf8') });
+      const reply = handler(recorded);
       res.writeHead(reply.status, { 'Content-Type': 'application/json', ...reply.headers });
       res.end(reply.body === undefined ? '' : JSON.stringify(reply.body));
     });
@@ -357,5 +367,250 @@ describe('platform:probe --scoped (tracer: fake terminal, fake token, loopback s
     })) as unknown as { operations: Array<{ result: string; status: number }> };
     expect(report.operations[0]).toMatchObject({ result: 'other', status: 0 });
     expectNoSecrets(report);
+  });
+});
+
+/**
+ * 09.4-01 task 2 (CTK-07, D-569, D-570, D-578): the full operation table, the listing and organisation blocks and
+ * the permission identifiers of a refusal.
+ */
+type Scoped = {
+  mode: string;
+  organisationLearned: boolean;
+  operations: Array<{
+    op: string;
+    result: string;
+    status: number;
+    missingPermissions?: string[];
+    unexpectedSuccess?: boolean;
+  }>;
+  listing: {
+    status: number | null;
+    projectsTotal: number | null;
+    projectsOtherThanTarget: number | null;
+  };
+  organisationRead: { status: number | null };
+  responseHeaderNames: string[];
+};
+
+const P = `/v1/projects/${REF}`;
+const isRead = (r: StubRequest) =>
+  r.method === 'GET' || (r.method === 'POST' && r.path === `${P}/database/query/read-only`);
+
+/** A stub that answers 200 to every read and 400 to every write; `override` replaces an answer. */
+const permissive =
+  (override: (r: StubRequest) => StubReply | undefined = () => undefined) =>
+  (r: StubRequest): StubReply =>
+    override(r) ??
+    (r.method === 'GET' && r.path === '/v1/projects'
+      ? { status: 200, body: [{ ref: REF }, { ref: 'zzzzzzzzzzzzzzzzzzzz' }, { id: 'other' }] }
+      : r.method === 'GET' && r.path === P
+        ? {
+            status: 200,
+            body: { ref: REF, organization_slug: ORG },
+            headers: { 'x-ratelimit-limit': '120' },
+          }
+        : isRead(r)
+          ? { status: 200, body: [] }
+          : { status: 400, body: { message: 'validation' } });
+
+const runScoped = async (handler: (r: StubRequest) => StubReply) => {
+  const stub = await startStub(handler);
+  const report = (await runProbe(['--scoped', '--ref', REF], {
+    readSecret: async () => FAKE_TOKEN,
+    baseUrl: stub.baseUrl,
+  })) as unknown as Scoped;
+  return { report, requests: stub.requests };
+};
+
+describe('platform:probe --scoped, the 21 operations', () => {
+  it('a stub that answers 200 to reads and 400 to writes gives 21 allowed rows and no unexpectedSuccess', async () => {
+    const { report, requests } = await runScoped(permissive());
+    expect(report.operations).toHaveLength(21);
+    expect(report.operations.every((o) => o.result === 'allowed')).toBe(true);
+    expect(report.operations.some((o) => o.unexpectedSuccess === true)).toBe(false);
+    expect(report.operations[0]?.op).toBe('GET /v1/projects/{ref}');
+    expect(report.operations[20]?.op).toBe('GET /v1/projects');
+    expect(PROBE_PLAN).toHaveLength(20);
+    expect(PROBE_PLAN.filter((row) => row.kind === 'write-invalid')).toHaveLength(8);
+    // Nothing but GET, POST and PATCH is ever sent, and every request carries the token as a bearer.
+    expect([...new Set(requests.map((r) => r.method))].sort()).toEqual(['GET', 'PATCH', 'POST']);
+    expect(requests.every((r) => r.authorization === `Bearer ${FAKE_TOKEN}`)).toBe(true);
+    expectNoSecrets(report);
+  });
+
+  it('sends the reads for real and every write as an invalid body that cannot change a project', async () => {
+    const { requests } = await runScoped(permissive());
+    const sent = (r: StubRequest) => `${r.method} ${r.path.replace(REF, '{ref}')}`;
+    const body = (method: string, path: string) =>
+      JSON.parse(
+        requests.find((r) => r.method === method && r.path === `${P}${path}`)?.rawBody ?? 'null',
+      );
+    const health = requests.find((r) => r.path === `${P}/health`);
+    expect(new URLSearchParams(health?.search).get('services')).toBe(
+      'auth,db,db_postgres_user,pooler,realtime,rest,storage',
+    );
+    expect(
+      new URLSearchParams(requests.find((r) => r.path === `${P}/api-keys`)?.search).get('reveal'),
+    ).toBe('true');
+    expect(body('POST', '/database/query/read-only')).toEqual({ query: 'select 1' });
+    expect(body('POST', '/api-keys')).toEqual({ type: 'not-a-key-type' });
+    expect(body('PATCH', '/database/password')).toEqual({ password: 'x' });
+    expect(body('PATCH', '/config/auth')).toEqual({ site_url: 12345 });
+    expect(body('POST', '/config/auth/signing-keys')).toEqual({ algorithm: 'NOT-AN-ALGORITHM' });
+    expect(body('PATCH', '/config/auth/signing-keys/00000000-0000-0000-0000-000000000000')).toEqual(
+      {
+        status: 'not-a-status',
+      },
+    );
+    expect(body('PATCH', '/postgrest')).toEqual({ max_rows: 'not-a-number' });
+    expect(body('PATCH', '/config/storage')).toEqual({ fileSizeLimit: 'not-a-number' });
+    expect(body('PATCH', '/config/realtime')).toEqual({ private_only: 'not-a-boolean' });
+    expect(requests.map(sent)).toContain('GET /v1/projects');
+    expect(requests.map(sent)).toContain(`GET /v1/organizations/${ORG}`);
+  });
+
+  it('keeps only the missing_permissions identifiers that match the strict pattern (at most 20)', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => `perm_${i}`);
+    const { report } = await runScoped(
+      permissive((r) =>
+        r.path === `${P}/config/realtime`
+          ? {
+              status: 403,
+              body: {
+                message: `x ${FAKE_TOKEN}`,
+                missing_permissions:
+                  r.method === 'GET'
+                    ? ['realtime_config_write', 'BAD ID', 'a'.repeat(80), 42]
+                    : many,
+              },
+            }
+          : undefined,
+      ),
+    );
+    const rows = report.operations.filter((o) => o.op.endsWith('/config/realtime'));
+    expect(rows).toHaveLength(2);
+    const get = rows.find((o) => o.op.startsWith('GET'));
+    const patch = rows.find((o) => o.op.startsWith('PATCH'));
+    expect(get).toMatchObject({
+      result: 'denied',
+      status: 403,
+      missingPermissions: ['realtime_config_write'],
+    });
+    expect(patch?.result).toBe('denied');
+    expect(patch?.missingPermissions).toEqual(many.slice(0, 20));
+    expectNoSecrets(report);
+  });
+
+  it('flags a 2xx on a write row as unexpectedSuccess so Igor sees it', async () => {
+    const { report } = await runScoped(
+      permissive((r) =>
+        r.method === 'PATCH' && r.path === `${P}/postgrest` ? { status: 200, body: {} } : undefined,
+      ),
+    );
+    const row = report.operations.find((o) => o.op === 'PATCH /v1/projects/{ref}/postgrest');
+    expect(row).toMatchObject({ result: 'allowed', status: 200, unexpectedSuccess: true });
+    expect(report.operations.filter((o) => o.unexpectedSuccess === true)).toHaveLength(1);
+  });
+
+  it('classifies a write row: validation is allowed, 401 and 403 denied, 2xx allowed, the rest other', () => {
+    for (const status of [400, 404, 409, 422])
+      expect(classifyStatus('write-invalid', status)).toBe('allowed');
+    for (const status of [401, 403]) expect(classifyStatus('write-invalid', status)).toBe('denied');
+    expect(classifyStatus('write-invalid', 204)).toBe('allowed');
+    for (const status of [0, 429, 500, 502])
+      expect(classifyStatus('write-invalid', status)).toBe('other');
+    expect(classifyStatus('read', 200)).toBe('allowed');
+    expect(classifyStatus('read', 400)).toBe('other');
+    expect(classifyStatus('read', 403)).toBe('denied');
+  });
+
+  it('counts the listing as numbers only, null-fills it on 403, and reads the organisation by the learned slug', async () => {
+    const counted = await runScoped(permissive());
+    expect(counted.report.listing).toEqual({
+      status: 200,
+      projectsTotal: 3,
+      projectsOtherThanTarget: 2,
+    });
+    expect(counted.report.organisationRead).toEqual({ status: 200 });
+    expect(counted.report.organisationLearned).toBe(true);
+
+    const refused = await runScoped(
+      permissive((r) =>
+        r.path === '/v1/projects' ? { status: 403, body: { message: 'no' } } : undefined,
+      ),
+    );
+    expect(refused.report.listing).toEqual({
+      status: 403,
+      projectsTotal: null,
+      projectsOtherThanTarget: null,
+    });
+    expect(refused.report.operations[20]).toMatchObject({
+      op: 'GET /v1/projects',
+      result: 'denied',
+      status: 403,
+    });
+
+    // No slug learned (row 1 refused): the organisation is not read at all and its status is null.
+    const unlearned = await runScoped(
+      permissive((r) =>
+        r.path === P && r.method === 'GET' ? { status: 403, body: {} } : undefined,
+      ),
+    );
+    expect(unlearned.report.organisationLearned).toBe(false);
+    expect(unlearned.report.organisationRead).toEqual({ status: null });
+    expect(unlearned.requests.some((r) => r.path.startsWith('/v1/organizations'))).toBe(false);
+  });
+
+  it('prints the response header NAMES of the first row, sorted and filtered, never their values', async () => {
+    const { report } = await runScoped(
+      permissive((r) =>
+        r.method === 'GET' && r.path === P
+          ? {
+              status: 200,
+              body: { ref: REF, organization_slug: ORG },
+              headers: { 'X-Plan-Expiry': FAKE_TOKEN, 'x-ratelimit-limit': '120' },
+            }
+          : undefined,
+      ),
+    );
+    const names = report.responseHeaderNames;
+    expect(names).toEqual([...names].sort());
+    expect(names).toEqual(
+      expect.arrayContaining(['content-type', 'x-plan-expiry', 'x-ratelimit-limit']),
+    );
+    expect(names.every((name) => /^[a-z0-9-]{1,64}$/.test(name))).toBe(true);
+    expectNoSecrets(report);
+  });
+
+  it('puts the token, a JWT, a secret key and a connection string in every body and header: none reaches the report', async () => {
+    const leak = `${FAKE_TOKEN} eyJhbGciOi.payload.sig sb_secret_abc postgres://u:p@h/db`;
+    const { report } = await runScoped((r) => {
+      const answer = permissive()(r);
+      return {
+        ...answer,
+        body: {
+          ...(answer.body as object),
+          message: leak,
+          name: leak,
+          db_host: leak,
+          missing_permissions: [leak],
+        },
+        headers: { ...answer.headers, 'x-leak': leak },
+      };
+    });
+    const text = JSON.stringify(report);
+    for (const shape of [
+      FAKE_TOKEN,
+      'eyJ',
+      'sb_secret_',
+      'postgres://',
+      'sbp_',
+      'Bearer',
+      'payload',
+    ]) {
+      expect(text).not.toContain(shape);
+    }
+    expect(report.responseHeaderNames).toContain('x-leak');
   });
 });
