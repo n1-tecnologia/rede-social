@@ -1,6 +1,8 @@
 import { hostTenantSchema } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
+import { invalidateTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as customerSetup from './projects-setup';
 import { adminSql, api, HOSTS } from './setup';
 
 /**
@@ -143,5 +145,64 @@ describe('GET /v1/public/tenants/by-host — verified-only, brand-carrying, prim
     const text = await (await byHost(HOSTS.lab)).text();
     expect(text).not.toContain('rede-demo');
     expect(text).not.toContain('#7c3aed');
+  });
+});
+
+describe('GET /v1/public/tenants/by-host — a dead management token is invisible (D-574, CTK-33, T-09.4-27)', () => {
+  it('7. a tenant on a customer project answers byte for byte the same with token_check invalid as with ok, and stays active', async () => {
+    const slug = `hosts-tok-${RUN}`.slice(0, 40);
+    const tokenHost = host(7);
+    const projectId = crypto.randomUUID();
+    const [tenant] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${slug}, 'Comunidade do Cliente', 'Regras de teste.', 1)
+      returning id`;
+    const tenantId = tenant?.id ?? '';
+    try {
+      await adminSql.begin(async (tx) => {
+        await tx`
+          insert into platform.projects
+                 (id, ref, provider, credential_source, state, api_url, publishable_key, secret_key_id)
+          values (${projectId}::uuid, ${slug}, 'fake', 'sealed', 'ready', 'https://customer-project.example.test',
+                  'sb_publishable_fake_key', 1)`;
+        // A new tenant is bound to project 0 by default: re-bind it to the customer project.
+        await tx`
+          update platform.tenant_projects set project_id = ${projectId}::uuid
+           where tenant_id = ${tenantId}::uuid`;
+        await tx`
+          insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+          values (${tenantId}::uuid, ${tokenHost}, true, now())`;
+        await tx`
+          insert into platform.project_health (project_id, status, token_check, token_checked_at)
+          values (${projectId}::uuid, 'healthy', 'ok', now())`;
+      });
+      await customerSetup.makeCustomerProject(projectId, 'sbp_fc_fake_hosts_token');
+
+      const working = await byHost(tokenHost);
+      expect(working.status).toBe(200);
+      const workingText = await working.text();
+      expect(hostTenantSchema.parse(JSON.parse(workingText)).status).toBe('active');
+      expect(workingText).toContain('customer-project.example.test');
+
+      // The token dies. The host cache is dropped so the next answer is read from the registry again.
+      await adminSql`
+        update platform.project_health
+           set token_check = 'invalid', token_checked_at = now()
+         where project_id = ${projectId}::uuid`;
+      invalidateTenantHost(tokenHost);
+
+      const dead = await byHost(tokenHost);
+      expect(dead.status).toBe(200);
+      const deadText = await dead.text();
+      expect(deadText).toBe(workingText);
+      expect(hostTenantSchema.parse(JSON.parse(deadText)).status).toBe('active');
+      const [stored] = await adminSql<{ status: string }[]>`
+        select status from public.tenants where id = ${tenantId}::uuid`;
+      expect(stored?.status).toBe('active');
+    } finally {
+      invalidateTenantHost(tokenHost);
+      await adminSql`delete from public.tenants where id = ${tenantId}::uuid`;
+      await adminSql`delete from platform.projects where id = ${projectId}::uuid`;
+    }
   });
 });

@@ -7,6 +7,8 @@ import {
   readMigrationDir,
 } from '@rede-social/core/server/migrations/sets';
 import { type MigrateDeps, migrateAll } from '@rede-social/core/server/projects/migrate';
+import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
+import { ProjectProviderError } from '@rede-social/core/server/projects/types';
 import { seal } from '@rede-social/core/server/secrets/sealed';
 import {
   closeAllPools,
@@ -14,6 +16,7 @@ import {
 } from '@rede-social/core/server/tenancy/project-registry';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import * as customerSetup from './projects-setup';
 import { API_URL, B_ADMIN_URL, onB, resetB, restoreB } from './projects-setup';
 import { adminSql, adminSqlB, ensureSecondDatabase } from './setup';
 
@@ -632,5 +635,35 @@ describe('concurrent runs (T-09.2-77)', () => {
       select count(*)::int as n from supabase_migrations.rede_checksums where set = 'tenant'`;
     expect(sums?.n).toBe(files.length);
     expect(await stateOf(f.projectId)).toMatchObject({ status: 'current' });
+  }, 240_000);
+});
+
+describe('a dead management token never reaches the fan-out (D-574, CTK-19, T-09.4-27)', () => {
+  afterEach(() => {
+    setProjectProviderForTests(undefined);
+  });
+
+  it('a customer project with a dead token (invalid) is migrated like any other: the DDL connection is not the Management API', async () => {
+    const files = await laggingB(2);
+    const f = await register('deadtok');
+    await customerSetup.makeCustomerProject(f.projectId, 'sbp_fc_fake_migrate_dead');
+
+    // A provider whose every method refuses with the 401 a revoked token earns, and counts the calls.
+    const calls: string[] = [];
+    const everyCallRefused = new Proxy({} as object, {
+      get: (_target, name) => () => {
+        calls.push(String(name));
+        throw new ProjectProviderError('forbidden', 401, 'token_invalid', true);
+      },
+    }) as never;
+    setProjectProviderForTests(everyCallRefused);
+
+    const result = await migrateAll({ projectIds: [f.projectId], concurrency: 2 });
+    expect(result.exitCode).toBe(0);
+    expect(lineOf(result.lines, f.ref)).toMatchObject({ status: 'current', applied: 2 });
+    expect(await ledgerOfB()).toEqual({ count: files.length, head: files.at(-1)?.version });
+    expect(await stateOf(f.projectId)).toMatchObject({ status: 'current', error_code: null });
+    // The member-visible fact it protects: the schema fan-out never asked the Management API anything.
+    expect(calls).toEqual([]);
   }, 240_000);
 });

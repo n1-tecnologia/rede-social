@@ -1,5 +1,6 @@
 import { databaseOverviewSchema } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
+import * as bossSenders from '@rede-social/core/server/jobs/boss';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import type { FakeProjectProvider } from '@rede-social/core/server/projects/fake';
 import { checkAllProjects, checkProject } from '@rede-social/core/server/projects/health';
@@ -735,5 +736,84 @@ describe('project.token.state_changed (D-576, CTK-21)', () => {
     for (const fields of tokenLines()) {
       expect(Object.keys(fields ?? {}).sort()).toEqual(['event', 'from', 'projectId', 'to']);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-08 (D-573, D-574, CTK-18, CTK-19): the sweep treats a dead token as a token state, members feel nothing
+// ---------------------------------------------------------------------------------------------------------
+
+describe('the sweep with a dead token (CTK-18, CTK-19, T-09.4-27)', () => {
+  it('a platform project, a customer with a dead token and a customer with a working token: the dead one stays healthy and nothing is recycled', async () => {
+    const platform = await project('sw-plat');
+    const dead = await project('sw-dead');
+    const live1 = await project('sw-live');
+    await customerSetup.makeCustomerProject(dead.projectId, 'sbp_fc_fake_sweep_dead');
+    await customerSetup.makeCustomerProject(live1.projectId, 'sbp_fc_fake_sweep_live');
+    const world = fakeProvider(
+      {
+        [platform.ref]: fakeTarget(),
+        [dead.ref]: fakeTarget(),
+        [live1.ref]: fakeTarget(),
+      },
+      {
+        orgSlug: customerSetup.CUSTOMER_ORG,
+        tokens: {
+          sbp_fc_fake_sweep_dead: { refs: 'all' },
+          sbp_fc_fake_sweep_live: { refs: 'all' },
+        },
+      },
+    );
+    world.setTokenState('sbp_fc_fake_sweep_dead', 'dead');
+    setProjectProviderForTests(world);
+
+    const versionOf = async (projectId: string) => {
+      const [row] = await adminSql<{ credential_version: number }[]>`
+        select credential_version from platform.projects where id = ${projectId}::uuid`;
+      return row?.credential_version;
+    };
+    const versionsBefore = [await versionOf(dead.projectId), await versionOf(live1.projectId)];
+    const sendersBefore = bossSenders.activeSenders();
+    spies.host.mockClear();
+    spies.project.mockClear();
+
+    const result = await checkAllProjects();
+    expect(result.failed).toBe(0);
+    const mine = new Map(
+      result.results
+        .filter((r) => [platform, dead, live1].some((f) => f.projectId === r.projectId))
+        .map((r) => [r.projectId, r]),
+    );
+    expect(mine.size).toBe(3);
+    expect(mine.get(platform.projectId)).toMatchObject({ status: 'healthy', tokenCheck: null });
+    expect(mine.get(live1.projectId)).toMatchObject({ status: 'healthy', tokenCheck: 'ok' });
+    // The dead token is a token verdict beside a healthy database.
+    expect(mine.get(dead.projectId)).toMatchObject({
+      status: 'healthy',
+      detailCode: null,
+      tokenCheck: 'invalid',
+    });
+    expect(await tokenRowOf(dead.projectId)).toMatchObject({
+      status: 'healthy',
+      token_check: 'invalid',
+    });
+    expect(await resolveTenantHost(dead.host)).toMatchObject({ kind: 'tenant', status: 'active' });
+
+    // No credential version moved, so no per-project queue sender or pool was recycled.
+    expect([await versionOf(dead.projectId), await versionOf(live1.projectId)]).toEqual(
+      versionsBefore,
+    );
+    expect(bossSenders.activeSenders()).toEqual(sendersBefore);
+
+    // A second sweep with the same dead token changes nothing at all.
+    spies.host.mockClear();
+    spies.project.mockClear();
+    const again = await checkAllProjects();
+    expect(again.failed).toBe(0);
+    expect(again.results.find((r) => r.projectId === dead.projectId)).toMatchObject({
+      changed: false,
+      token: null,
+    });
+    expect(spies.host).not.toHaveBeenCalledWith(dead.host);
   });
 });
