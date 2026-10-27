@@ -4,10 +4,10 @@ current_phase: "09.4"
 current_phase_name: Projeto do tenant no Supabase do cliente (INSERTED)
 current_plan: 17
 status: executing
-stopped_at: Completed 09.4-12-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01, 11, 12 done = 16/17; only 17 left). Plan 12: move to a customer project registers an unknown target from the local hidden prompt, fails closed with register_first in the Job, the way back is a normal move (pgTAP 2920, move-run 15, move-guard 22); P7 hosted proof is Igor's. Plan 11: `platform:set-owner` (hidden prompt, 41/41 integration, pgTAP 2920 pass); P6 hosted proof is Igor's. Probe run A ran on Igor's terminal on 2026-10-27 (21/21 allowed with the thirteen permissions) and was pasted into ledger P1 at his word, P1 Status still pending (his line); ruling 1 resolved: Igor said the token only had access to the specific project, so the 13 stay. Igor approved sketch 015 and the orchestrator wrote the approval on his explicit word (aea382b2). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
+stopped_at: Completed 09.4-12-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01, 11, 12 done = 16/17; plan 17 tasks 1-2 done (46fbb7fa DEPLOY.md section + ledger steps, 7f3f1860 comment; all static gates, pgTAP 2920, 15 integration files, core 1268, contracts 258, web 5810 green except the one expected-red 'permission list written'), task 3 waits for Igor to sign P1). Plan 12: move to a customer project registers an unknown target from the local hidden prompt, fails closed with register_first in the Job, the way back is a normal move (pgTAP 2920, move-run 15, move-guard 22); P7 hosted proof is Igor's. Plan 11: `platform:set-owner` (hidden prompt, 41/41 integration, pgTAP 2920 pass); P6 hosted proof is Igor's. Probe run A ran on Igor's terminal on 2026-10-27 (21/21 allowed with the thirteen permissions) and was pasted into ledger P1 at his word, P1 Status still pending (his line); ruling 1 resolved: Igor said the token only had access to the specific project, so the 13 stay. Igor approved sketch 015 and the orchestrator wrote the approval on his explicit word (aea382b2). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
 last_updated: "2026-10-27T16:36:21.752Z"
 last_activity: 2026-10-27
-last_activity_desc: Phase 09.4 plan 12 done (16/17); 17 next (tasks 1-2 now, task 3 waits for P1 signed by Igor)
+last_activity_desc: Phase 09.4 plan 17 tasks 1-2 done; task 3 waits for P1 signed by Igor; code review gate next
 state_head: 79c11da34733d016bac4ecde1abeee8c955cb1f0
 progress:
   total_phases: 26
@@ -33,7 +33,7 @@ Current Plan: 1
 Total Plans in Phase: 17
 Plan: 16 of 17 done (03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01, 11, 12); 17 next; its task 3 waits for P1 signed by Igor, and hosted proofs P2..P8 stay his
 Status: Executing Phase 09.4
-Last activity: 2026-10-27 — Phase 09.4 plan 12 done (16/17); P1 run A recorded, Status pending for Igor
+Last activity: 2026-10-27 — Phase 09.4 plan 17 tasks 1-2 done (16/17 plans complete); P1 run A recorded, Status pending for Igor
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
