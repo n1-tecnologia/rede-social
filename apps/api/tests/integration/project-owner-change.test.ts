@@ -69,10 +69,19 @@ const REF_A = `ow-a-${RUN}`;
 const REF_B = `ow-b-${RUN}`;
 const REF_C = `ow-c-${RUN}`;
 const REF_R = `ow-r-${RUN}`;
+const REF_D = `ow-d-${RUN}`;
+const REF_E = `ow-e-${RUN}`;
+const REF_F = `ow-f-${RUN}`;
+const REF_G = `ow-g-${RUN}`;
+const REF_H = `ow-h-${RUN}`;
 const SLUG_A = `ow-a-${RUN}`;
 const SLUG_B = `ow-b-${RUN}`;
 const SLUG_C = `ow-c-${RUN}`;
 const SLUG_R = `ow-r-${RUN}`;
+const SLUG_D = `ow-d-${RUN}`;
+const SLUG_E = `ow-e-${RUN}`;
+const SLUG_F = `ow-f-${RUN}`;
+const SLUG_NOPE = `ow-nope-${RUN}`;
 const ACTOR = 'tester';
 
 const TOKEN_A = `sbp_fc_fake_owner_aaaa_${RUN}`;
@@ -80,6 +89,16 @@ const TOKEN_B = `sbp_fc_fake_owner_bbbb_${RUN}`;
 const TOKEN_C = `sbp_fc_fake_owner_cccc_${RUN}`;
 const TOKEN_R_OLD = `sbp_fc_fake_owner_rold_${RUN}`;
 const TOKEN_R_NEW = `sbp_fc_fake_owner_rnew_${RUN}`;
+const TOKEN_D = `sbp_fc_fake_owner_dddd_${RUN}`;
+const TOKEN_E = `sbp_fc_fake_owner_eeee_${RUN}`;
+const TOKEN_F = `sbp_fc_fake_owner_ffff_${RUN}`;
+const TOKEN_F_DEAD = `sbp_fc_fake_owner_fdead_${RUN}`;
+const TOKEN_F_FORBIDDEN = `sbp_fc_fake_owner_fforb_${RUN}`;
+const TOKEN_WIDE = `sbp_fc_fake_owner_wide_${RUN}`;
+const TOKEN_UNPREFIXED = `plain_${RUN}_not_a_scoped_token_at_all`;
+const TOKEN_G = `sbp_fc_fake_owner_gggg_${RUN}`;
+const TOKEN_H = `sbp_fc_fake_owner_hhhh_${RUN}`;
+const TOKEN_H_DEAD = `sbp_fc_fake_owner_hdead_${RUN}`;
 
 const provider: FakeProjectProvider = fakeProvider(
   {
@@ -87,6 +106,11 @@ const provider: FakeProjectProvider = fakeProvider(
     [REF_B]: fakeTarget(),
     [REF_C]: fakeTarget(),
     [REF_R]: fakeTarget(),
+    [REF_D]: fakeTarget(),
+    [REF_E]: fakeTarget(),
+    [REF_F]: fakeTarget(),
+    [REF_G]: fakeTarget(),
+    [REF_H]: fakeTarget(),
   },
   {
     orgSlug: ORG,
@@ -97,6 +121,15 @@ const provider: FakeProjectProvider = fakeProvider(
       [TOKEN_C]: { refs: [REF_C] },
       [TOKEN_R_OLD]: { refs: [REF_R] },
       [TOKEN_R_NEW]: { refs: [REF_R] },
+      [TOKEN_D]: { refs: [REF_D] },
+      [TOKEN_E]: { refs: [REF_E] },
+      [TOKEN_F]: { refs: [REF_F] },
+      [TOKEN_F_DEAD]: { refs: [REF_F], state: 'dead' },
+      [TOKEN_F_FORBIDDEN]: { refs: [REF_F], state: 'forbidden' },
+      [TOKEN_WIDE]: { refs: 'all' },
+      [TOKEN_G]: { refs: [REF_G] },
+      [TOKEN_H]: { refs: [REF_H] },
+      [TOKEN_H_DEAD]: { refs: [REF_H], state: 'dead' },
     },
   },
 );
@@ -163,8 +196,8 @@ async function snapshot(tenantId: string, projectId: string) {
 const inDays = (days: number): string =>
   new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
-const REFS = [REF_A, REF_B, REF_C, REF_R];
-const SLUGS = [SLUG_A, SLUG_B, SLUG_C, SLUG_R];
+const REFS = [REF_A, REF_B, REF_C, REF_R, REF_D, REF_E, REF_F, REF_G, REF_H];
+const SLUGS = [SLUG_A, SLUG_B, SLUG_C, SLUG_R, SLUG_D, SLUG_E, SLUG_F];
 
 async function cleanup(): Promise<void> {
   await adminSql`delete from public.tenants where slug = any(${SLUGS}::text[])`;
@@ -178,6 +211,9 @@ let projectA = '';
 let tenantB = '';
 let projectB = '';
 let projectC = '';
+let projectD = '';
+let projectF = '';
+let projectR = '';
 
 beforeAll(async () => {
   await cleanup();
@@ -188,9 +224,15 @@ beforeAll(async () => {
     run: false,
   }));
   projectC = (await createReadyTenant(provider, REF_C, SLUG_C, { run: false })).projectId;
-  await createReadyTenant(provider, REF_R, SLUG_R, { run: false }).then(async (made) => {
-    await makeCustomerProject(made.projectId, TOKEN_R_OLD, ORG);
-  });
+  projectR = (await createReadyTenant(provider, REF_R, SLUG_R, { run: false })).projectId;
+  await makeCustomerProject(projectR, TOKEN_R_OLD, ORG);
+  projectD = (await createReadyTenant(provider, REF_D, SLUG_D, { run: false })).projectId;
+  projectF = (await createReadyTenant(provider, REF_F, SLUG_F, { run: false })).projectId;
+  // A tenant with an open move: the owner change must refuse it before the prompt.
+  const moving = await createReadyTenant(provider, REF_E, SLUG_E, { run: false });
+  await adminSql`
+    insert into platform.tenant_moves (tenant_id, from_project_id, to_project_id, state, status_before, actor)
+    values (${moving.tenantId}::uuid, ${moving.projectId}::uuid, ${projectC}::uuid, 'planned', 'active', 'tester')`;
   captured.lines.length = 0;
 }, 180_000);
 
@@ -283,5 +325,248 @@ describe('arguments', () => {
       actor: ACTOR,
       dryRun: false,
     });
+  });
+});
+
+describe('re-pin (CTK-04, D-568)', () => {
+  it('re-pin: a customer project reads the organisation again and stores the new pin and token', async () => {
+    const before = await rowOf(projectR);
+    expect(before.org_slug).toBe(ORG);
+    const term = terminal(TOKEN_R_NEW);
+
+    const code = await main(['--tenant', SLUG_R, '--actor', ACTOR], term.deps);
+
+    expect(code, term.stderr.join('\n')).toBe(0);
+    expect(JSON.parse(term.stdout[0] as string)).toStrictEqual({
+      kind: 'repinned',
+      projectId: projectR,
+      repinned: true,
+      dryRun: false,
+    });
+    const after = await rowOf(projectR);
+    expect(after.org_slug).toBe(NEW_ORG);
+    expect(open(after.mgmt_token_sealed ?? '', `${projectR}:mgmt_token`)).toBe(TOKEN_R_NEW);
+    expect(after.credential_version).toBe(before.credential_version + 1);
+    const events = await eventsOf(projectR);
+    expect(events.map((event) => event.kind)).toEqual(['repinned']);
+    expect(events[0]).toMatchObject({ outcome: 'ok', actor: ACTOR });
+  });
+});
+
+describe('register (orchestrator ruling 2, D-568)', () => {
+  it('register: a project the registry does not know becomes a customer project with no tenant and no move', async () => {
+    const term = terminal(TOKEN_G);
+
+    const code = await main(['--register', '--ref', REF_G], term.deps);
+
+    expect(code, term.stderr.join('\n')).toBe(0);
+    const line = JSON.parse(term.stdout[0] as string) as {
+      kind: string;
+      projectId: string;
+      dryRun: boolean;
+    };
+    expect(line.kind).toBe('registered');
+    expect(line.dryRun).toBe(false);
+    const [row] = await adminSql<
+      { id: string; owner: string; state: string; org_slug: string; sealed: string }[]
+    >`
+      select id::text as id, owner, state, org_slug, mgmt_token_sealed as sealed
+        from platform.projects where ref = ${REF_G}`;
+    expect(row).toMatchObject({
+      id: line.projectId,
+      owner: 'customer',
+      state: 'preparing',
+      org_slug: ORG,
+    });
+    expect(open(row?.sealed ?? '', `${line.projectId}:mgmt_token`)).toBe(TOKEN_G);
+    const [bound] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.tenant_projects where project_id = ${line.projectId}::uuid`;
+    const [moves] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.tenant_moves
+       where to_project_id = ${line.projectId}::uuid or from_project_id = ${line.projectId}::uuid`;
+    expect(bound?.n).toBe(0);
+    expect(moves?.n).toBe(0);
+    expect((await eventsOf(line.projectId)).map((event) => event.kind)).toEqual(['registered']);
+  });
+
+  it('register: the same ref again is refused as already_registered and writes nothing', async () => {
+    const [known] = await adminSql<{ id: string; v: number }[]>`
+      select id::text as id, credential_version as v from platform.projects where ref = ${REF_G}`;
+    const eventsBefore = await eventsOf(known?.id ?? '');
+    const term = terminal(TOKEN_G);
+
+    const code = await main(['--register', '--ref', REF_G], term.deps);
+
+    expect(code).toBe(1);
+    expect(JSON.parse(term.stdout[0] as string)).toStrictEqual({
+      kind: 'refused',
+      code: 'already_registered',
+    });
+    // The refusal comes from the database facts, before the prompt.
+    expect(term.prompts).toHaveLength(0);
+    const [after] = await adminSql<{ n: number; v: number }[]>`
+      select count(*)::int as n, max(credential_version) as v from platform.projects where ref = ${REF_G}`;
+    expect(after).toMatchObject({ n: 1, v: known?.v });
+    expect(await eventsOf(known?.id ?? '')).toEqual(eventsBefore);
+  });
+
+  it('register: a token that does not work registers nothing and leaves one code-only event', async () => {
+    const term = terminal(TOKEN_H_DEAD);
+
+    const code = await main(['--register', '--ref', REF_H], term.deps);
+
+    expect(code).toBe(1);
+    expect(JSON.parse(term.stdout[0] as string)).toStrictEqual({
+      kind: 'refused',
+      code: 'token_invalid',
+    });
+    const [rows] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.projects where ref = ${REF_H}`;
+    expect(rows?.n).toBe(0);
+    const events = await adminSql<{ kind: string; outcome: string }[]>`
+      select kind, outcome from platform.project_token_events where project_ref = ${REF_H}`;
+    expect(events).toEqual([{ kind: 'registered', outcome: 'token_invalid' }]);
+  });
+});
+
+describe('dry run', () => {
+  it('dry: the tenant mode validates and writes no row, no version and no event', async () => {
+    const before = await rowOf(projectD);
+    const term = terminal(TOKEN_D);
+
+    const code = await main(['--tenant', SLUG_D, '--dry-run'], term.deps);
+
+    expect(code, term.stderr.join('\n')).toBe(0);
+    expect(JSON.parse(term.stdout[0] as string)).toStrictEqual({
+      kind: 'owner_changed',
+      projectId: projectD,
+      repinned: false,
+      dryRun: true,
+    });
+    expect(term.prompts).toHaveLength(1);
+    expect(await rowOf(projectD)).toEqual(before);
+    expect(await eventsOf(projectD)).toHaveLength(0);
+    expect(term.afterChange).not.toHaveBeenCalled();
+  });
+
+  it('dry: the register mode validates, writes nothing, and a refused dry run leaves no event either', async () => {
+    const ok = terminal(TOKEN_H);
+    expect(await main(['--register', '--ref', REF_H, '--dry-run'], ok.deps)).toBe(0);
+    expect(JSON.parse(ok.stdout[0] as string)).toMatchObject({ kind: 'registered', dryRun: true });
+    const dead = terminal(TOKEN_H_DEAD);
+    expect(await main(['--register', '--ref', REF_H, '--dry-run'], dead.deps)).toBe(1);
+    expect(JSON.parse(dead.stdout[0] as string)).toStrictEqual({
+      kind: 'refused',
+      code: 'token_invalid',
+    });
+
+    const [rows] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.projects where ref = ${REF_H}`;
+    expect(rows?.n).toBe(0);
+    const [events] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.project_token_events where project_ref = ${REF_H}`;
+    // Only the real (non dry) refusal of the register test above exists for this ref.
+    expect(events?.n).toBe(1);
+  });
+
+  it('dry: a refused tenant dry run appends no event', async () => {
+    const before = await eventsOf(projectD);
+    const term = terminal(TOKEN_UNPREFIXED);
+    expect(await main(['--tenant', SLUG_D, '--dry-run'], term.deps)).toBe(1);
+    expect(JSON.parse(term.stdout[0] as string)).toStrictEqual({
+      kind: 'refused',
+      code: 'token_account_wide',
+    });
+    expect(await eventsOf(projectD)).toEqual(before);
+  });
+});
+
+describe('refusals before the prompt', () => {
+  it('before the prompt: an unknown tenant, the central project and an open move never ask for a token', async () => {
+    const cases: Array<[string, string]> = [
+      [SLUG_NOPE, 'tenant_not_found'],
+      ['rede-demo', 'project_central'],
+      [SLUG_E, 'tenant_moving'],
+    ];
+    for (const [slug, expected] of cases) {
+      const term = terminal(TOKEN_E);
+      const code = await main(['--tenant', slug], term.deps);
+      expect(code, slug).toBe(1);
+      expect(JSON.parse(term.stdout[0] as string), slug).toStrictEqual({
+        kind: 'refused',
+        code: expected,
+      });
+      expect(term.prompts, slug).toHaveLength(0);
+    }
+  });
+
+  it('before the prompt: usage errors exit 2 with the prompt untouched', async () => {
+    const bad: string[][] = [
+      [],
+      ['--tenant'],
+      ['--tenant', 'Bad Slug'],
+      ['--tenant', SLUG_A, '--register'],
+      ['--tenant', SLUG_A, '--register', '--ref', REF_G],
+      ['--register'],
+      ['--register', '--ref'],
+      ['--register', '--ref', 'NOT A REF'],
+      ['--tenant', SLUG_A, '--expires', 'tomorrow'],
+    ];
+    for (const argv of bad) {
+      const term = terminal(TOKEN_A);
+      expect(await main(argv, term.deps), argv.join(' ')).toBe(2);
+      expect(term.prompts, argv.join(' ')).toHaveLength(0);
+      expect(term.stdout).toHaveLength(0);
+    }
+  });
+});
+
+describe('token refusals, no terminal and abort', () => {
+  it('each token refusal exits 1 with its code, changes nothing and appends one event', async () => {
+    const cases: Array<[string, string[], string]> = [
+      [TOKEN_UNPREFIXED, [], 'token_account_wide'],
+      [TOKEN_WIDE, [], 'token_account_wide'],
+      [TOKEN_F_DEAD, [], 'token_invalid'],
+      [TOKEN_F_FORBIDDEN, [], 'token_forbidden'],
+      [TOKEN_F, ['--expires', '2001-01-01'], 'token_expiry_invalid'],
+    ];
+    const before = await rowOf(projectF);
+    for (const [token, extra, expected] of cases) {
+      const term = terminal(token);
+      const code = await main(['--tenant', SLUG_F, ...extra], term.deps);
+      expect(code, expected).toBe(1);
+      expect(JSON.parse(term.stdout[0] as string), expected).toStrictEqual({
+        kind: 'refused',
+        code: expected,
+      });
+      expect(term.afterChange).not.toHaveBeenCalled();
+    }
+    expect(await rowOf(projectF)).toEqual(before);
+    const events = await eventsOf(projectF);
+    expect(events.map((event) => event.outcome)).toEqual(cases.map(([, , expected]) => expected));
+    expect(events.every((event) => event.kind === 'owner_changed')).toBe(true);
+  });
+
+  it('a stdin that is not a terminal exits 2 before any request, and Ctrl-C exits 130', async () => {
+    const { NoTerminalError, SecretAbortError } = (await import(
+      /* @vite-ignore */ new URL('../../../../scripts/lib/read-secret.ts', import.meta.url).href
+    )) as typeof import('../../../../scripts/lib/read-secret');
+    const usesBefore = provider.calls.tokenUses.length;
+
+    const noTty = terminal(TOKEN_F);
+    noTty.deps.readSecret = async () => {
+      throw new NoTerminalError();
+    };
+    expect(await main(['--tenant', SLUG_F], noTty.deps)).toBe(2);
+    expect(noTty.stdout).toHaveLength(0);
+
+    const abort = terminal(TOKEN_F);
+    abort.deps.readSecret = async () => {
+      throw new SecretAbortError();
+    };
+    expect(await main(['--tenant', SLUG_F], abort.deps)).toBe(130);
+    expect(abort.stdout).toHaveLength(0);
+
+    expect(provider.calls.tokenUses.length).toBe(usesBefore);
   });
 });
