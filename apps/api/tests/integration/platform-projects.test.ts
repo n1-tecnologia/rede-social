@@ -17,11 +17,48 @@ import {
 import { precheckProject } from '@rede-social/core/server/projects/precheck';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { BOOTSTRAP_STEPS } from '@rede-social/core/server/projects/reasons';
+import type { ProjectProvider } from '@rede-social/core/server/projects/types';
 import { open } from '@rede-social/core/server/secrets/sealed';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { API_URL, bootstrapDeps, fakeTarget, onB, resetB, restoreB } from './projects-setup';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
+
+/**
+ * Every line any logger writes in this file is captured, so the 09.4-09 token scan reads what a person tailing
+ * the logs would see (T-09.4-31). The mock replaces the ONE root logger every kernel and API logger derives from.
+ */
+const captured = vi.hoisted(() => ({ lines: [] as string[] }));
+vi.mock('@rede-social/core/server/logging', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@rede-social/core/server/logging')>();
+  const text = (value: unknown) =>
+    JSON.stringify(value, (_key, item) =>
+      item instanceof Error ? { name: item.name, message: item.message, stack: item.stack } : item,
+    );
+  const make = (bindings: Record<string, unknown>): unknown => {
+    const record = (...args: unknown[]) => {
+      captured.lines.push(text([bindings, ...args]));
+    };
+    return {
+      info: record,
+      warn: record,
+      error: record,
+      debug: record,
+      trace: record,
+      fatal: record,
+      level: 'trace',
+      bindings: () => bindings,
+      child: (extra: Record<string, unknown>) => make({ ...bindings, ...extra }),
+    };
+  };
+  const rootLogger = make({});
+  return {
+    ...real,
+    rootLogger,
+    moduleLogger: (name: string) =>
+      (rootLogger as { child: (b: object) => unknown }).child({ name }),
+  };
+});
 
 /**
  * Phase 09.2-14 (DBT-01, DBT-21, DBT-50, DBT-51, D-541, D-540), the panel API for a tenant's Supabase project.
@@ -1036,3 +1073,240 @@ describe('production refuses a second tenant on a project (D-540, DBT-01, T-09.2
 function fakeProviderFor(ref: string): FakeProjectProvider {
   return createFakeProjectProvider({ targets: { [ref]: fakeTarget() } });
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-09 Task 1 (tracer): the customer-token pre-check (CTK-01, D-566, D-570, D-571, D-572)
+// ---------------------------------------------------------------------------------------------------------
+
+describe('POST /v1/platform/projects/precheck with a customer token (09.4-09, CTK-01)', () => {
+  const tokenOf = (name: string): string => `sbp_fc_fake_pre_${name}_${RUN}_zzzzzzzzzzzz`;
+  const T = {
+    fresh: tokenOf('fresh'),
+    manual: tokenOf('manual'),
+    migrated: tokenOf('migrated'),
+    bucketed: tokenOf('bucketed'),
+    paused: tokenOf('paused'),
+    tabled: tokenOf('tabled'),
+    unknown: tokenOf('unknown'),
+    dead: tokenOf('dead'),
+    forbidden: tokenOf('forbidden'),
+    everything: tokenOf('everything'),
+    never: tokenOf('never-issued'),
+  };
+  const tokenScopes = () => ({
+    [T.fresh]: { refs: [REFS.fresh] },
+    [T.manual]: { refs: [REFS.manual] },
+    [T.migrated]: { refs: [REFS.migrated] },
+    [T.bucketed]: { refs: [REFS.bucketed] },
+    [T.paused]: { refs: [REFS.paused] },
+    [T.tabled]: { refs: [REFS.tabled] },
+    [T.unknown]: { refs: [REFS.unknown] },
+    [T.dead]: { refs: [REFS.fresh], state: 'dead' as const },
+    [T.forbidden]: { refs: [REFS.fresh], state: 'forbidden' as const },
+    [T.everything]: { refs: 'all' as const },
+  });
+  const makeWorld = (extra: Partial<FakeProjectProviderOptions> = {}) =>
+    makeProvider({ orgSlug: 'acme-pre', tokens: tokenScopes(), ...extra });
+
+  let world: FakeProjectProvider = makeWorld();
+  beforeEach(() => {
+    captured.lines.length = 0;
+    world = makeWorld();
+    setProjectProviderForTests(world);
+  });
+  afterEach(() => {
+    setProjectProviderForTests(provider);
+  });
+
+  const customer = async (
+    projectRef: string,
+    token: string,
+    extra: Record<string, unknown> = {},
+  ) => {
+    const res = await platform('/projects/precheck', {
+      method: 'POST',
+      body: { projectRef, owner: 'customer', token, ...extra },
+    });
+    const text = await res.text();
+    return {
+      res,
+      text,
+      answer: res.status === 200 ? precheckAnswerSchema.parse(JSON.parse(text)) : null,
+    };
+  };
+
+  it('CTK-01 customer: a good project-scoped token on an empty project is ok, no manual access', async () => {
+    const { res, answer } = await customer(REFS.fresh, T.fresh);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(answer).toEqual({ ok: true, manualAccess: false });
+    // Every provider call of the check went through the customer token, none through the platform's.
+    expect(world.calls.tokenUses.filter((use) => use.kind === 'platform')).toEqual([]);
+    expect(world.calls.tokenUses.some((use) => use.kind === 'customer')).toBe(true);
+  });
+
+  it('CTK-01 customer: a token the provider does not know answers token_invalid', async () => {
+    expect((await customer(REFS.fresh, T.never)).answer).toEqual({
+      ok: false,
+      reason: 'token_invalid',
+    });
+    expect((await customer(REFS.fresh, T.dead)).answer).toEqual({
+      ok: false,
+      reason: 'token_invalid',
+    });
+  });
+
+  it('CTK-01 customer: a token for another project, or one the provider forbids, answers token_forbidden', async () => {
+    expect((await customer(REFS.fresh, T.manual)).answer).toEqual({
+      ok: false,
+      reason: 'token_forbidden',
+    });
+    expect((await customer(REFS.fresh, T.forbidden)).answer).toEqual({
+      ok: false,
+      reason: 'token_forbidden',
+    });
+  });
+
+  it('CTK-01 customer: an account-wide token and a string without the scoped prefix answer token_account_wide', async () => {
+    expect((await customer(REFS.fresh, T.everything)).answer).toEqual({
+      ok: false,
+      reason: 'token_account_wide',
+    });
+    expect((await customer(REFS.fresh, `sbp_0123456789abcdef_${RUN}`)).answer).toEqual({
+      ok: false,
+      reason: 'token_account_wide',
+    });
+  });
+
+  it('CTK-01 customer: a past, malformed or too distant expiry answers token_expiry_invalid', async () => {
+    for (const tokenExpiresAt of ['2020-01-01', '2026-13-45', 'amanha', '2099-01-01']) {
+      expect(
+        (await customer(REFS.fresh, T.fresh, { tokenExpiresAt })).answer,
+        tokenExpiresAt,
+      ).toEqual({ ok: false, reason: 'token_expiry_invalid' });
+    }
+  });
+
+  it('CTK-01 customer: an unknown project is not_found and a check that could not run is unchecked', async () => {
+    expect((await customer(REFS.unknown, T.unknown)).answer).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
+    setProjectProviderForTests(makeWorld({ failAt: { step: 'verify', times: 'always' } }));
+    expect((await customer(REFS.fresh, T.fresh)).answer).toEqual({
+      ok: false,
+      reason: 'unchecked',
+    });
+  });
+
+  it('CTK-01 customer: the emptiness and paused checks run through the customer provider', async () => {
+    expect((await customer(REFS.paused, T.paused)).answer).toEqual({ ok: false, reason: 'paused' });
+    expect((await customer(REFS.migrated, T.migrated)).answer).toEqual({
+      ok: false,
+      reason: 'not_empty',
+    });
+    expect((await customer(REFS.bucketed, T.bucketed)).answer).toEqual({
+      ok: false,
+      reason: 'not_empty',
+    });
+    await onB((b) => b`create table public.pp_customer_leftover (id int)`);
+    try {
+      expect((await customer(REFS.tabled, T.tabled)).answer).toEqual({
+        ok: false,
+        reason: 'not_empty',
+      });
+    } finally {
+      await onB((b) => b`drop table public.pp_customer_leftover`);
+    }
+    expect(world.calls.tokenUses.filter((use) => use.kind === 'platform')).toEqual([]);
+  });
+
+  it('CTK-01 customer: a 403 on the key list is token_forbidden (D-569); keys listed without values still ask for manual access', async () => {
+    world.forbidReveal(true);
+    expect((await customer(REFS.manual, T.manual)).answer).toEqual({
+      ok: false,
+      reason: 'token_forbidden',
+    });
+
+    const masking = (inner: ProjectProvider): ProjectProvider => ({
+      ...inner,
+      async listApiKeys(ref) {
+        return (await inner.listApiKeys(ref)).map(({ value: _value, ...key }) => key);
+      },
+    });
+    const viewed = makeWorld().forToken(T.manual);
+    expect(
+      await precheckProject(REFS.manual, {
+        provider: masking(viewed),
+        production: false,
+        owner: 'customer',
+        token: T.manual,
+      }),
+    ).toMatchObject({ ok: true, manualAccess: true });
+  });
+
+  it('CTK-14 customer: no pre-check answer is ever token_other_project or not_pro (D-572)', async () => {
+    const seen = new Set<string>();
+    const cases: Array<[string, string, Record<string, unknown>?]> = [
+      [REFS.fresh, T.fresh],
+      [REFS.fresh, T.never],
+      [REFS.fresh, T.manual],
+      [REFS.fresh, T.everything],
+      [REFS.fresh, T.fresh, { tokenExpiresAt: '2020-01-01' }],
+      [REFS.unknown, T.unknown],
+      [REFS.paused, T.paused],
+      [REFS.migrated, T.migrated],
+    ];
+    for (const [ref, token, extra] of cases) {
+      const { answer } = await customer(ref, token, extra);
+      seen.add(answer && !answer.ok ? answer.reason : 'ok');
+    }
+    expect(seen.has('token_other_project')).toBe(false);
+    expect(seen.has('not_pro')).toBe(false);
+  });
+
+  it('CTK-01 customer: a platform body is unchanged and a platform body carrying a token is a 400', async () => {
+    const platformBody = await platform('/projects/precheck', {
+      method: 'POST',
+      body: { projectRef: REFS.fresh },
+    });
+    expect(platformBody.status).toBe(200);
+    expect(precheckAnswerSchema.parse(await platformBody.json())).toEqual({
+      ok: true,
+      manualAccess: false,
+    });
+    for (const body of [
+      { projectRef: REFS.fresh, token: T.fresh },
+      { projectRef: REFS.fresh, owner: 'platform', token: T.fresh },
+      { projectRef: REFS.fresh, tokenExpiresAt: '2027-01-01' },
+    ]) {
+      const res = await platform('/projects/precheck', { method: 'POST', body });
+      expect(res.status).toBe(400);
+      expect((await envelope(res)).code).toBe('VALIDATION_FAILED');
+    }
+    // A platform pre-check never used a customer token.
+    expect(world.calls.tokenUses.filter((use) => use.kind === 'customer')).toEqual([]);
+  });
+
+  it('CTK-01 customer: the answer, every log line and the fake calls hold neither the token nor its first 8 characters', async () => {
+    const outcomes = [
+      await customer(REFS.fresh, T.fresh),
+      await customer(REFS.fresh, T.dead),
+      await customer(REFS.fresh, T.everything),
+      await customer(REFS.migrated, T.migrated),
+    ];
+    const scanned = [
+      ...outcomes.map((outcome) => outcome.text),
+      ...captured.lines,
+      JSON.stringify(world.calls),
+    ].join('\n');
+    for (const token of [T.fresh, T.dead, T.everything, T.migrated]) {
+      expect(scanned).not.toContain(token);
+      expect(scanned).not.toContain(token.slice(0, 8));
+    }
+    for (const outcome of outcomes) {
+      const keys = Object.keys(JSON.parse(outcome.text) as Record<string, unknown>).sort();
+      expect(['manualAccess,ok', 'ok,reason']).toContain(keys.join(','));
+    }
+  });
+});
