@@ -511,6 +511,18 @@ export type OwnerTarget = {
 };
 
 /**
+ * Whether the registry already knows a project by its ref. The register command asks it BEFORE the operator is
+ * prompted, so a ref that is already registered costs no typed token (D-567); the registration itself repeats
+ * the check under the project lock.
+ */
+export async function projectIsRegistered(ref: string): Promise<boolean> {
+  const rows = await withPlatformTx((tx) =>
+    tx.select({ id: projects.id }).from(projects).where(eq(projects.ref, ref)).limit(1),
+  );
+  return rows.length > 0;
+}
+
+/**
  * The facts the owner change starts from, read BEFORE the operator is asked for anything (D-567): the tenant's
  * project and who owns it. Refuses, with a closed code, a tenant that does not exist (`tenant_not_found`), one
  * on the central project or on a project whose credentials live in the environment (`project_central`) and one
