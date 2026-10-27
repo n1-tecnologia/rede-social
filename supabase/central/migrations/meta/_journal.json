@@ -64,6 +64,13 @@
       "when": 1793121040230,
       "tag": "20261027171040_project_owner_token",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793121158213,
+      "tag": "20261027171238_project_token_events_hardening",
+      "breakpoints": true
     }
   ]
 }
