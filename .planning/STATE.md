@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "09.2"
-current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
-current_plan: 25
+current_phase: "09.4"
+current_phase_name: Projeto do tenant no Supabase do cliente (INSERTED)
+current_plan: 1
 status: executing
 stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 was executed and closed on 2026-10-27 by developer closure while 09.2 stayed paused here (its 7 hosted and real-device UAT rows are Igor's, see 09.3-UAT.md).
-last_updated: "2026-10-27T14:18:36.099Z"
+last_updated: "2026-10-27T16:36:21.752Z"
 last_activity: 2026-10-27
-last_activity_desc: Phase 09.3 closed by developer closure (verification human_needed 7/7, review WR-03 fixed by quick 261027-c8f); STATE pointer back on 09.2 plan 25
-state_head: 9ddbec59b52de4712aa4b45decabcd4fb243a212
+last_activity_desc: Phase 09.4 execution started
+state_head: 79c11da34733d016bac4ecde1abeee8c955cb1f0
 progress:
   total_phases: 26
   completed_phases: 0
-  total_plans: 277
+  total_plans: 294
   completed_plans: 268
   percent: 0
 ---
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 09.2 — Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)
+**Current focus:** Phase 09.4 — Projeto do tenant no Supabase do cliente (INSERTED)
 
 ## Current Position
 
-Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING (paused at plan 25)
-Current Plan: 25
-Total Plans in Phase: 28
-Plan: 24 of 28 done on 09.2 (plans run out of numeric order); the next is 25 (wave 14, the human gates: autonomous false, 4 checkpoints for Igor). Phase 09.3 is CLOSED (9/9, 2026-10-27, developer closure; its 7 UAT rows are Igor's)
-Status: Ready to execute
-Last activity: 2026-10-27 — Phase 09.3 closed by developer closure (verification human_needed 7/7, e2e: 30 tests red on the pre-phase code too, e2e:pwa green; review WR-03 fixed by quick 261027-c8f); Phase 09.2 stays paused at its plan 25 (Igor's hosted proofs)
+Phase: 09.4 (Projeto do tenant no Supabase do cliente (INSERTED)) — EXECUTING
+Current Plan: 1
+Total Plans in Phase: 17
+Plan: 1 of 17
+Status: Executing Phase 09.4
+Last activity: 2026-10-27 — Phase 09.4 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
