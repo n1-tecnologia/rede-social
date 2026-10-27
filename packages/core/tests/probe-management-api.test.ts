@@ -455,7 +455,9 @@ describe('platform:probe --scoped, the 21 operations', () => {
     ).toBe('true');
     expect(body('POST', '/database/query/read-only')).toEqual({ query: 'select 1' });
     expect(body('POST', '/api-keys')).toEqual({ type: 'not-a-key-type' });
-    expect(body('PATCH', '/database/password')).toEqual({ password: 'x' });
+    // Never a string: a string is a valid password type and could reset the real project's password (WR-05).
+    expect(body('PATCH', '/database/password')).toEqual({ password: 12345 });
+    expect(typeof body('PATCH', '/database/password').password).not.toBe('string');
     expect(body('PATCH', '/config/auth')).toEqual({ site_url: 12345 });
     expect(body('POST', '/config/auth/signing-keys')).toEqual({ algorithm: 'NOT-AN-ALGORITHM' });
     expect(body('PATCH', '/config/auth/signing-keys/00000000-0000-0000-0000-000000000000')).toEqual(

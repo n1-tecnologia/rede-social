@@ -236,7 +236,9 @@ export const PROBE_PLAN: PlanRow[] = [
     method: 'PATCH',
     path: '/v1/projects/{ref}/database/password',
     kind: 'write-invalid',
-    body: { password: 'x' },
+    // A number, never a string: a string is the right type for a password and the server could apply it to the
+    // real project (09.4 review WR-05). A wrong-typed value is always refused by validation.
+    body: { password: 12345 },
   },
   read('/v1/projects/{ref}/database/migrations'),
   read('/v1/projects/{ref}/storage/buckets'),
