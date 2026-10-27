@@ -14,6 +14,7 @@ import {
   type FakeProjectProvider,
   type FakeProjectProviderOptions,
 } from '@rede-social/core/server/projects/fake';
+import { checkProject } from '@rede-social/core/server/projects/health';
 import { precheckProject } from '@rede-social/core/server/projects/precheck';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { BOOTSTRAP_STEPS } from '@rede-social/core/server/projects/reasons';
@@ -1309,4 +1310,228 @@ describe('POST /v1/platform/projects/precheck with a customer token (09.4-09, CT
       expect(['manualAccess,ok', 'ok,reason']).toContain(keys.join(','));
     }
   });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-09 Task 3: the platform path byte for byte, the reserved reasons, the disclosure sweep, atomicity
+// ---------------------------------------------------------------------------------------------------------
+
+describe('customer creation guarantees (09.4-09, CTK-01, CTK-14, D-566, D-572, T-09.4-31)', () => {
+  const ORG = `acme-sweep-${RUN}`.slice(0, 40);
+  const tokenOf = (name: string): string => `sbp_fc_fake_sw_${name}_${RUN}_wwwwwwwwwwwwww`;
+  const SWEEP = `sbp_fc_fake_sweep_${RUN}_${'x'.repeat(40)}`.slice(0, 40);
+  const T = {
+    sweep: SWEEP,
+    plan: tokenOf('plan'),
+    atomic: tokenOf('atomic'),
+    other: tokenOf('other'),
+    everything: tokenOf('everything'),
+  };
+  const R = {
+    sweep: newRef('sweep'),
+    plan: newRef('plan'),
+    atomic: newRef('atomic'),
+    platform: newRef('plat'),
+  };
+
+  const makeWorld = (): FakeProjectProvider =>
+    makeProvider({
+      orgSlug: ORG,
+      targets: Object.fromEntries(Object.values(R).map((ref) => [ref, fakeTarget()])) as never,
+      tokens: {
+        [T.sweep]: { refs: [R.sweep] },
+        [T.plan]: { refs: [R.plan] },
+        [T.atomic]: { refs: [R.atomic] },
+        [T.other]: { refs: [REFS.fresh] },
+        [T.everything]: { refs: 'all' },
+      },
+    });
+  // The shared helper maps its own refs only; the refs of this block are added through `targets` above.
+  let world: FakeProjectProvider = makeWorld();
+
+  beforeEach(() => {
+    captured.lines.length = 0;
+    world = makeWorld();
+    setProjectProviderForTests(world);
+    resetB();
+  }, 180_000);
+  afterEach(async () => {
+    setProjectProviderForTests(provider);
+    await adminSql`delete from platform.project_token_events where project_ref like ${`pp-%-${RUN}-%`}`;
+  });
+
+  type Row = Record<string, unknown>;
+  const projectOf = async (ref: string) => {
+    const [row] = await adminSql<
+      {
+        id: string;
+        owner: string;
+        org_slug: string | null;
+        mgmt_token_sealed: string | null;
+        mgmt_token_expires_at: string | null;
+        plan: string | null;
+      }[]
+    >`
+      select id::text as id, owner, org_slug, mgmt_token_sealed,
+             mgmt_token_expires_at::text as mgmt_token_expires_at, plan
+        from platform.projects where ref = ${ref}`;
+    return row ?? null;
+  };
+  const eventsOf = (ref: string) =>
+    adminSql<Row[]>`select * from platform.project_token_events where project_ref = ${ref}`;
+  const customerBody = (token: string, extra: Record<string, unknown> = {}) => ({
+    owner: 'customer',
+    token,
+    ...extra,
+  });
+
+  it('CTK-01 platform: a platform pre-check and creation use only the platform token and leave no pin, token or expiry (D-566)', async () => {
+    const check = await platform('/projects/precheck', {
+      method: 'POST',
+      body: { projectRef: R.platform },
+    });
+    expect(precheckAnswerSchema.parse(await check.json())).toEqual({
+      ok: true,
+      manualAccess: false,
+    });
+    const made = await createViaRoute(R.platform);
+    expect(made.res.status).toBe(201);
+
+    const uses = world.calls.tokenUses.filter((use) => use.ref === R.platform);
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.every((use) => use.kind === 'platform')).toBe(true);
+    const row = await projectOf(R.platform);
+    expect(row).toMatchObject({
+      owner: 'platform',
+      org_slug: null,
+      mgmt_token_sealed: null,
+      mgmt_token_expires_at: null,
+    });
+    expect(await eventsOf(R.platform)).toHaveLength(0);
+  }, 180_000);
+
+  it('CTK-14 reserved: token_other_project and not_pro are never emitted, and a customer project created here has no plan (D-572)', async () => {
+    // A provider whose projects LOOK like a Free plan: the platform must still not read or claim a plan.
+    const withPlan = (inner: ProjectProvider): ProjectProvider =>
+      ({
+        ...inner,
+        async describe(ref: string) {
+          return { ...(await inner.describe(ref)), plan: 'free' };
+        },
+      }) as ProjectProvider;
+    const freeShaped = {
+      ...world,
+      forToken: (token: string, options?: { orgSlug?: string }) =>
+        withPlan(world.forToken(token, options)),
+    } as unknown as FakeProjectProvider;
+    setProjectProviderForTests(freeShaped);
+
+    const seen: string[] = [];
+    const precheckCases: Array<[string, string, Record<string, unknown>?]> = [
+      [R.plan, T.plan],
+      [R.plan, T.sweep],
+      [R.plan, T.everything],
+      [R.plan, 'nao-e-um-token'],
+      [R.plan, T.plan, { tokenExpiresAt: '2020-01-01' }],
+    ];
+    for (const [ref, token, extra] of precheckCases) {
+      const res = await platform('/projects/precheck', {
+        method: 'POST',
+        body: { projectRef: ref, ...customerBody(token, extra) },
+      });
+      const answer = precheckAnswerSchema.parse(await res.json());
+      seen.push(answer.ok ? 'ok' : answer.reason);
+    }
+    // Creation refusals carry their reason as the detail value.
+    for (const [token, extra] of [
+      [T.other, {}],
+      [T.everything, {}],
+      [T.plan, { tokenExpiresAt: '2020-01-01' }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      const made = await createViaRoute(R.plan, customerBody(token, extra));
+      expect(made.res.status).toBe(400);
+      seen.push(...Object.values(errorOf(made).details ?? {}).map(String));
+    }
+    expect(seen).not.toContain('not_pro');
+    expect(seen).not.toContain('token_other_project');
+    expect(seen.length).toBeGreaterThan(5);
+
+    const ok = await createViaRoute(R.plan, customerBody(T.plan));
+    expect(ok.res.status).toBe(201);
+    const row = await projectOf(R.plan);
+    expect(row?.owner).toBe('customer');
+    expect(row?.plan).toBeNull();
+  }, 180_000);
+
+  it('CTK-01 sweep: no response, log line, step row, audit row, health row or job holds the token or its first 8 characters', async () => {
+    expect(SWEEP).toHaveLength(40);
+    const bodies: string[] = [];
+
+    const check = await platform('/projects/precheck', {
+      method: 'POST',
+      body: { projectRef: R.sweep, ...customerBody(SWEEP) },
+    });
+    bodies.push(await check.text());
+    expect(check.status).toBe(200);
+
+    const made = await createViaRoute(R.sweep, customerBody(SWEEP));
+    bodies.push(made.text);
+    expect(made.res.status).toBe(201);
+    const project = await projectOf(R.sweep);
+    expect(project?.owner).toBe('customer');
+    const projectId = project?.id ?? '';
+
+    const { provider: _given, ...deps } = bootstrapDeps(world);
+    expect(await runBootstrap(projectId, deps)).toEqual({ status: 'ready' });
+    await checkProject(projectId);
+
+    bodies.push(await (await platform(`/tenants/${made.detail?.tenant.id}/database`)).text());
+    bodies.push(await (await platform(`/tenants/${made.detail?.tenant.id}`)).text());
+
+    const rows = JSON.stringify({
+      project: await adminSql`
+        select to_jsonb(p) - 'mgmt_token_sealed' as p from platform.projects p where id = ${projectId}::uuid`,
+      steps: await adminSql`
+        select * from platform.project_bootstrap_steps where project_id = ${projectId}::uuid`,
+      events: await eventsOf(R.sweep),
+      health: await adminSql`
+        select * from platform.project_health where project_id = ${projectId}::uuid`,
+      binding: await adminSql`
+        select * from platform.tenant_projects where project_id = ${projectId}::uuid`,
+      tenant: await adminSql`
+        select * from public.tenants where id = ${made.detail?.tenant.id ?? ''}::uuid`,
+      jobs: await adminSql`
+        select data from pgboss_platform.job where data->>'projectId' = ${projectId}`,
+    });
+    const everything = [...bodies, rows, ...captured.lines, JSON.stringify(world.calls)].join('\n');
+    // The corpus is real: the run wrote logs, step rows, a health row and an audit event to look through.
+    expect(captured.lines.length).toBeGreaterThan(5);
+    const parsed = JSON.parse(rows) as Record<string, unknown[]>;
+    expect(parsed.steps?.length).toBeGreaterThan(0);
+    expect(parsed.health?.length).toBeGreaterThan(0);
+    expect(parsed.events).toHaveLength(1);
+    expect(everything).not.toContain(SWEEP);
+    expect(everything).not.toContain(SWEEP.slice(0, 8));
+    // And the one place it IS: sealed, openable only with its own AAD.
+    expect(open(project?.mgmt_token_sealed as string, `${projectId}:mgmt_token`)).toBe(SWEEP);
+  }, 240_000);
+
+  it('CTK-01 atomic: a creation that fails after the project insert leaves no project row and no event', async () => {
+    // A tenant with this slug already exists, so the tenants insert (after the project row and the event were
+    // written in the same transaction) hits the unique index and the whole transaction rolls back.
+    const first = await createViaRoute(R.platform);
+    expect(first.res.status).toBe(201);
+    const taken = await createViaRoute(R.atomic, {
+      ...customerBody(T.atomic),
+      slug: first.slug,
+    });
+    expect(taken.res.status).toBe(400);
+    expect(errorOf(taken).details).toEqual({ slug: 'taken' });
+    expect(await projectOf(R.atomic)).toBeNull();
+    expect(await eventsOf(R.atomic)).toHaveLength(0);
+    const [steps] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.project_bootstrap_steps
+       where project_id in (select id from platform.projects where ref = ${R.atomic})`;
+    expect(steps?.n).toBe(0);
+  }, 180_000);
 });
