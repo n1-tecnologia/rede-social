@@ -137,7 +137,7 @@
           "title": "Como criar o token",
           "step1": "Entre no Supabase com a conta que tem acesso ao projeto do cliente e abra a página de tokens de acesso.",
           "step2": "Crie um token novo e limite-o a este projeto, não à conta toda.",
-          "step3": "Marque as permissões: [PENDENTE-PERMISSÕES]. Escolha o vencimento (no máximo 1 ano) e anote a data.",
+          "step3": "Marque as permissões: Project Settings (leitura e escrita), API Keys (leitura e escrita), API Key Secrets (leitura), Connection Pooling (leitura), Database (leitura), Database Config (leitura e escrita), Migrations (leitura), Storage (leitura), Storage Config (leitura e escrita), Auth Config (leitura e escrita), Auth Signing Keys (leitura e escrita), Data API Config (leitura e escrita), Realtime Config (leitura e escrita). Escolha o vencimento (no máximo 1 ano) e anote a data.",
           "step4": "Copie o token na hora. O Supabase não mostra de novo.",
           "link": "Abrir os tokens no Supabase",
           "newTab": " (abre em uma nova aba)",

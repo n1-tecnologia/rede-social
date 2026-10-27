@@ -3440,8 +3440,14 @@ means a new token.
 - **If the person who created the token loses access to the customer's account, the token stops working**
   (Supabase gives "token revoked" and "creator lost access" the same answer, both shown as Inválido).
 
-The same list, in short pt-BR, is the sentence of the "Como criar o token" helper (step 3), written from the
-probe's output (P1). Until the ledger signs P1, that sentence still carries its placeholder.
+The same list, in short pt-BR, is the sentence of the "Como criar o token" helper (step 3): "Marque as
+permissões: Project Settings (leitura e escrita), API Keys (leitura e escrita), API Key Secrets (leitura),
+Connection Pooling (leitura), Database (leitura), Database Config (leitura e escrita), Migrations (leitura),
+Storage (leitura), Storage Config (leitura e escrita), Auth Config (leitura e escrita), Auth Signing Keys
+(leitura e escrita), Data API Config (leitura e escrita), Realtime Config (leitura e escrita)." It was written
+from the one probe run of 2026-10-27 (21 of 21 operations allowed with these thirteen), while the ledger row
+P1 is still `pending`; read that sentence in the "Novo tenant" helper and in the Banco card before the first
+customer.
 
 ### The commands
 

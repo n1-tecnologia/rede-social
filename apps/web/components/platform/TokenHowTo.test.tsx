@@ -11,9 +11,8 @@ import { TokenHowTo } from './TokenHowTo';
  *  1. Open: the four steps in an `ol`, in order, one link with the exact href, `target="_blank"`,
  *     `rel="noopener noreferrer"` and the hidden "(abre em uma nova aba)" suffix, then the note.
  *  2. Collapsible: a closed `<details>` whose summary is at least 44px high; opening shows the same.
- *  3. Step 3 still carries the placeholder `[PENDENTE-PERMISSÕES]` (D-578): this test asserts the
- *     CURRENT catalog value so that plan 17's edit, after Igor's probe, is the one that flips it; the
- *     component renders whatever the catalog says and types no text of its own.
+ *  3. Step 3 carries the thirteen permissions of D-569 (plan 17 replaced the `[PENDENTE-PERMISSÕES]`
+ *     marker); the component renders whatever the catalog says and types no text of its own.
  *  4. A long unbroken string in a step wraps (`break-words`), so nothing scrolls sideways at 320px.
  */
 
@@ -44,7 +43,7 @@ afterEach(cleanup);
 const STEPS = [
   'Entre no Supabase com a conta que tem acesso ao projeto do cliente e abra a página de tokens de acesso.',
   'Crie um token novo e limite-o a este projeto, não à conta toda.',
-  'Marque as permissões: [PENDENTE-PERMISSÕES]. Escolha o vencimento (no máximo 1 ano) e anote a data.',
+  'Marque as permissões: Project Settings (leitura e escrita), API Keys (leitura e escrita), API Key Secrets (leitura), Connection Pooling (leitura), Database (leitura), Database Config (leitura e escrita), Migrations (leitura), Storage (leitura), Storage Config (leitura e escrita), Auth Config (leitura e escrita), Auth Signing Keys (leitura e escrita), Data API Config (leitura e escrita), Realtime Config (leitura e escrita). Escolha o vencimento (no máximo 1 ano) e anote a data.',
   'Copie o token na hora. O Supabase não mostra de novo.',
 ];
 
@@ -98,10 +97,11 @@ describe('TokenHowTo', () => {
     expect(details.querySelectorAll('a')).toHaveLength(1);
   });
 
-  it('3. step 3 renders the placeholder verbatim from the catalog (plan 17 replaces it after probe P1)', () => {
+  it('3. step 3 renders the thirteen permissions from the catalog, with no placeholder marker', () => {
     render(<TokenHowTo />);
     const step3 = document.querySelectorAll('ol > li')[2];
-    expect(step3?.textContent).toContain('[PENDENTE-PERMISSÕES]');
+    expect(step3?.textContent).toContain('Auth Signing Keys (leitura e escrita)');
+    expect(step3?.textContent).not.toContain('[PENDENTE');
   });
 
   it('4. wraps long text: every step has break-words, so nothing scrolls sideways at 320px', () => {
