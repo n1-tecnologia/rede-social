@@ -105,13 +105,21 @@
         "emailInUse": "Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador.",
         "projectRefRequired": "Informe o código do projeto.",
         "projectRefInvalid": "Use o código do projeto: 20 letras minúsculas, sem espaços.",
-        "projectNotFound": "Não encontramos este projeto. Confira o código e se ele está na organização da plataforma.",
+        "projectNotFound": "Não encontramos este projeto. Confira o código e se ele está na organização da plataforma. Se ele é do cliente, escolha “Projeto do cliente”.",
         "projectNotEmpty": "Este projeto já tem tabelas. Use um projeto novo e vazio.",
         "projectInUse": "Este projeto já está em uso por outro tenant.",
         "projectPaused": "Este projeto está pausado. Reative-o no Supabase e tente de novo.",
         "passwordRequired": "Cole a senha do banco.",
         "serviceKeyRequired": "Cole a chave de serviço.",
         "publishableKeyRequired": "Cole a chave publicável.",
+        "tokenRequired": "Cole o token de acesso do projeto.",
+        "tokenInvalid": "O Supabase não aceitou este token. Ele pode estar errado, vencido ou apagado. Crie outro e cole de novo.",
+        "tokenForbidden": "Este token não tem as permissões necessárias para este projeto. Confira se ele é deste projeto e se tem as permissões do passo a passo.",
+        "tokenOtherProject": "Este token é de outro projeto. Crie um token só para este projeto.",
+        "tokenAccountWide": "Este token vale para a conta inteira. Crie um token limitado a este projeto.",
+        "tokenExpiryInvalid": "Informe uma data futura, em até 1 ano.",
+        "projectNotFoundCustomer": "Não encontramos este projeto. Confira o código e se o token foi criado para ele.",
+        "projectNotPro": "Este projeto não está no plano Pro. Passe-o para o Pro no Supabase e tente de novo.",
         "accessInvalid": "Não foi possível entrar no projeto com estes dados. Confira e tente de novo."
       }
     },
@@ -133,8 +141,8 @@
       "notFoundCta": "Voltar para a lista",
       "tabPendingTitle": "Em breve",
       "tabPendingBody": "Esta aba está em construção.",
-      "databasePill": "Banco: {state}",
-      "tokenPill": "Token: {state}"
+      "tokenPill": "Token: {state}",
+      "databasePill": "Banco: {state}"
     },
     "admins": {
       "inviteTitle": "Convite do primeiro administrador",

@@ -6,6 +6,10 @@
         "verifiedAt": "Verificado {when}.",
         "neverChecked": "Ainda não verificado.",
         "project": "Projeto",
+        "owner": "Dono",
+        "ownerPlatform": "Plataforma",
+        "ownerCustomer": "Cliente",
+        "organization": "Organização",
         "schema": "Esquema",
         "schemaOf": "{applied} de {required}",
         "schemaUnknown": "Não informado",
@@ -37,6 +41,7 @@
         "unreachable": "Não conseguimos falar com o projeto. Os membros veem “Comunidade indisponível” até a conexão voltar.",
         "preparationFailed": "A preparação parou numa etapa. Veja a lista abaixo e tente de novo.",
         "moving": "Este tenant está sendo movido para um projeto próprio. Ele volta a funcionar quando a mudança terminar.",
+        "planNotPro": "O plano deste projeto não é Pro. O projeto do cliente deve estar no plano Pro.",
         "code": "Código {code}"
       },
       "steps": {
@@ -66,6 +71,9 @@
       "reasons": {
         "unreachable": "Não foi possível falar com o projeto.",
         "accessDenied": "O Supabase recusou o acesso. Confira a senha e as chaves.",
+        "tokenInvalid": "O Supabase não aceitou o token de acesso. Substitua o token e tente de novo.",
+        "tokenForbidden": "O token de acesso não tem permissão para esta etapa. Substitua por um token com as permissões certas.",
+        "orgMismatch": "O projeto está em outra organização do Supabase. Nada foi alterado.",
         "notEmpty": "O projeto já tem tabelas.",
         "migration": "Uma migração do esquema falhou.",
         "auth": "A configuração da autenticação falhou.",
@@ -90,6 +98,21 @@
         "saved": "Credenciais atualizadas."
       },
       "token": {
+        "title": "Token de acesso",
+        "body": "O sistema usa este token para falar com o projeto no Supabase. Ele vale só para este projeto, fica guardado com segurança e não é mostrado de novo.",
+        "save": "Salvar token",
+        "saving": "Salvando…",
+        "replace": "Substituir token",
+        "saved": "Token atualizado.",
+        "sheetTitle": "Substituir token",
+        "intro": "Use quando o token venceu, foi revogado ou está perto de vencer. O token antigo deixa de ser usado.",
+        "expiresOn": "Vence em {date}.",
+        "expiresIn": "Vence em {days, plural, one {# dia} other {# dias}}, em {date}.",
+        "expiredOn": "Venceu em {date}.",
+        "noExpiry": "Sem data de vencimento informada.",
+        "verifiedAt": "Verificado {when}.",
+        "neverChecked": "Ainda não verificado.",
+        "checking": "Verificando…",
         "states": {
           "valid": "Válido",
           "expiring": "Vencendo",
@@ -98,6 +121,17 @@
           "noPermission": "Sem permissão",
           "orgMismatch": "Organização diferente",
           "unchecked": "Não verificado"
+        },
+        "notices": {
+          "expiring": "O token vence em breve. Crie outro no Supabase e use Substituir token antes da data. Sem ele, o sistema deixa de conferir o projeto e de atualizar os endereços de login. A comunidade continua no ar.",
+          "expired": "O token venceu. A comunidade continua no ar, mas o sistema não consegue conferir nem atualizar o projeto. Crie outro token e substitua.",
+          "invalid": "O Supabase não aceita mais este token. Ele foi apagado ou revogado, ou quem o criou perdeu o acesso à conta do cliente. Crie outro e substitua. A comunidade continua no ar.",
+          "noPermission": "Este token não tem as permissões que o sistema precisa. Crie outro seguindo os passos abaixo e substitua.",
+          "orgMismatch": "O projeto agora está em outra organização do Supabase, diferente da registrada. Por segurança, o sistema parou de usá-lo. Confira se o projeto foi transferido."
+        },
+        "errors": {
+          "orgChanged": "O projeto está em outra organização do Supabase, diferente da registrada. Nada foi alterado.",
+          "notSaved": "Não foi possível salvar o token agora. Nada foi alterado. Tente de novo."
         },
         "howto": {
           "title": "Como criar o token",

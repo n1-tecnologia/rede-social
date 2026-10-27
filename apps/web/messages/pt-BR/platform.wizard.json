@@ -174,8 +174,15 @@
           "name": "Nome de exibição",
           "slug": "Slug",
           "email": "E-mail do primeiro administrador",
+          "owner": "Dono do projeto",
+          "ownerValues": {
+            "platform": "Plataforma",
+            "customer": "Cliente"
+          },
           "project": "Projeto",
           "projectManual": "Acesso informado manualmente",
+          "projectToken": "Token informado, guardado com segurança",
+          "projectTokenExpires": "Vence em {date}",
           "logo": "Logo",
           "logoLight": "Logo do modo claro",
           "logoDark": "Logo do modo escuro (só na prévia)",
@@ -287,7 +294,13 @@
       },
       "project": {
         "title": "Projeto Supabase",
+        "owner": {
+          "label": "Onde fica o projeto?",
+          "platform": "Projeto da plataforma",
+          "customer": "Projeto do cliente"
+        },
         "body": "Crie um projeto vazio na organização da plataforma no Supabase e cole aqui só o código dele.",
+        "bodyCustomer": "O projeto fica na conta do Supabase do cliente: vazio e no plano Pro. Cole o código dele e o token de acesso criado só para ele.",
         "label": "Código do projeto",
         "helper": "São 20 letras minúsculas. Você também pode colar o endereço do projeto no Supabase.",
         "manual": {

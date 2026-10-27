@@ -4230,7 +4230,8 @@ describe('09.2-18 - the project field and the database catalog', () => {
     ],
     [
       'platform.new.errors.projectNotFound',
-      'Não encontramos este projeto. Confira o código e se ele está na organização da plataforma.',
+      // 09.4-14 (UI-D-559): the platform wording gained the pointer to "Projeto do cliente".
+      'Não encontramos este projeto. Confira o código e se ele está na organização da plataforma. Se ele é do cliente, escolha “Projeto do cliente”.',
     ],
     [
       'platform.new.errors.projectNotEmpty',
