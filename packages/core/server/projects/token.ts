@@ -351,7 +351,60 @@ export async function replaceProjectToken(
   // Project 0's token lives nowhere: there is nothing to replace.
   if (target.central) throw new ApiError(409, 'CONFLICT');
 
-  const outcome = await withPlatformTx(async (tx) => {
+  const actorLabel = `platform:${actor.userId}`;
+  let outcome: { projectId: string; credentialVersion: number };
+  try {
+    outcome = await replaceLocked(target, input, actorLabel, deps);
+  } catch (error) {
+    // A refusal rolled the transaction back untouched; its trail is written AFTER the rollback, best effort,
+    // and the operator gets one closed code under the field it belongs to (UI-D-555).
+    if (error instanceof TokenRefusal) {
+      if (error.code !== 'already_registered') {
+        await recordTokenEvent(undefined, {
+          kind: 'replaced',
+          projectId: target.id,
+          projectRef: target.ref,
+          actor: actorLabel,
+          outcome: error.code,
+        });
+      }
+      throw new ApiError(
+        400,
+        'VALIDATION_FAILED',
+        error.code === 'token_expiry_invalid'
+          ? { tokenExpiresAt: 'token_expiry_invalid' }
+          : { token: error.code },
+      );
+    }
+    throw error;
+  }
+
+  // The pools and the binding cached under the old version are dropped; the next call rebuilds from the new token.
+  invalidateProject();
+  dropProjectProvider(outcome.projectId);
+  dropAllowListAdapter(outcome.projectId);
+  logFor(actor, 'platform.projects').info(
+    {
+      event: 'project.token.replaced',
+      userId: actor.userId,
+      tenantId,
+      projectId: outcome.projectId,
+      credentialVersion: outcome.credentialVersion,
+    },
+    'project token replaced',
+  );
+  startFollowUp(deps.afterReplace ?? defaultAfterReplace, outcome.projectId);
+  return { ok: true, credentialVersion: outcome.credentialVersion };
+}
+
+/** The locked validate-then-write pair of `replaceProjectToken`. A `TokenRefusal` thrown here rolls everything back. */
+async function replaceLocked(
+  target: { id: string; ref: string },
+  input: { token: string; tokenExpiresAt?: string | null },
+  actorLabel: string,
+  deps: ReplaceTokenDeps,
+): Promise<{ projectId: string; credentialVersion: number }> {
+  return withPlatformTx(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`project:${target.ref}`}))`);
 
     const found = (await tx.execute(sql`
@@ -394,28 +447,11 @@ export async function replaceProjectToken(
       kind: 'replaced',
       projectId: row.id,
       projectRef: row.ref,
-      actor: `platform:${actor.userId}`,
+      actor: actorLabel,
       outcome: 'ok',
     });
     return { projectId: row.id, credentialVersion: updated[0]?.credentialVersion ?? 0 };
   });
-
-  // The pools and the binding cached under the old version are dropped; the next call rebuilds from the new token.
-  invalidateProject();
-  dropProjectProvider(outcome.projectId);
-  dropAllowListAdapter(outcome.projectId);
-  logFor(actor, 'platform.projects').info(
-    {
-      event: 'project.token.replaced',
-      userId: actor.userId,
-      tenantId,
-      projectId: outcome.projectId,
-      credentialVersion: outcome.credentialVersion,
-    },
-    'project token replaced',
-  );
-  startFollowUp(deps.afterReplace ?? defaultAfterReplace, outcome.projectId);
-  return { ok: true, credentialVersion: outcome.credentialVersion };
 }
 
 /** Fire and forget: a failing follow-up is logged by project id only and never reaches the operator's answer. */
