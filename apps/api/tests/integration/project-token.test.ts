@@ -68,28 +68,32 @@ vi.mock('@rede-social/core/server/logging', async (importOriginal) => {
 
 /**
  * The order of the follow-up (D-575(b)(c)): the health check refreshes the states, THEN the allow-list is
- * reconciled. The wrappers only record the call and hand it on to the real function.
+ * reconciled. The wrapper records the stored token verdict at the instant the reconcile starts and hands the
+ * call on to the real function: a verdict already turned ok proves the check ran first.
  */
 const order = vi.hoisted(() => ({ calls: [] as string[] }));
-vi.mock('@rede-social/core/server/projects/health', async (importOriginal) => {
-  const real = await importOriginal<typeof import('@rede-social/core/server/projects/health')>();
-  return {
-    ...real,
-    checkProject: async (...args: Parameters<typeof real.checkProject>) => {
-      order.calls.push('check');
-      return real.checkProject(...args);
-    },
-  };
-});
 vi.mock('@rede-social/core/server/platform/reconcile-allow-list', async (importOriginal) => {
   const real =
     await importOriginal<typeof import('@rede-social/core/server/platform/reconcile-allow-list')>();
+  const { default: postgres } = await import('postgres');
   return {
     ...real,
     reconcileProjectAllowList: async (
       ...args: Parameters<typeof real.reconcileProjectAllowList>
     ) => {
-      order.calls.push('reconcile');
+      // Its own short connection: the factory must not import the suite's helpers (a cycle would hang).
+      const sql = postgres('postgres://postgres:postgres@127.0.0.1:54322/postgres', {
+        prepare: false,
+        max: 1,
+      });
+      let row: { token_check: string | null } | undefined;
+      try {
+        [row] = await sql<{ token_check: string | null }[]>`
+          select token_check from platform.project_health where project_id = ${args[0]}::uuid`;
+      } finally {
+        await sql.end({ timeout: 5 });
+      }
+      order.calls.push(`reconcile after token_check=${row?.token_check ?? 'none'}`);
       return real.reconcileProjectAllowList(...args);
     },
   };
@@ -517,7 +521,7 @@ describe('after a replacement the system finishes the recovery (CTK-27)', () => 
       },
       { timeout: 10_000, interval: 200 },
     );
-    expect(order.calls).toEqual(['check', 'reconcile']);
+    expect(order.calls).toEqual(['reconcile after token_check=ok']);
     // The other error is not this follow-up's to clear, and the verified hosts are in the project's own list.
     expect((await errorsOf([HOST_INVITE]))[HOST_INVITE]).toBe('invite');
     const list = localAllowListByProject.get(projectA);

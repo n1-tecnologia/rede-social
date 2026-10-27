@@ -13,6 +13,32 @@ import { withAllowListLock } from './allow-list-lock';
 
 const log = moduleLogger('domains-allow-list');
 
+/**
+ * 09.4-10 (D-575(c), CTK-27): after a host has been ensured in its project's list, the `allow_list` error the
+ * panel was showing on that domain is stale. Clears `last_error` for THAT value only (an `invite` or any other
+ * error is not this reconcile's to clear). A failure of this update is logged by host and swallowed: the host
+ * is already in the list, and the loop must go on.
+ */
+export async function clearAllowListError(host: string): Promise<void> {
+  try {
+    await withPlatformTx(async (tx) => {
+      await tx
+        .update(tenantDomains)
+        .set({ lastError: null })
+        .where(and(eq(tenantDomains.host, host), eq(tenantDomains.lastError, 'allow_list')));
+    });
+  } catch (error) {
+    log.warn(
+      {
+        event: 'platform.domains.allow_list_error_clear_failed',
+        host,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'could not clear the allow_list error of a host',
+    );
+  }
+}
+
 export type AllowListReconcileResult = {
   hosts: number;
   added: number;
@@ -45,7 +71,11 @@ export type AllowListReconcileResult = {
  * projects; only the initial reads may throw, and the worker catches that.
  */
 export async function reconcileAuthAllowList(
-  options: { projectId?: string } = {},
+  options: {
+    projectId?: string;
+    /** 09.4-10: after each successful `add`, clear `last_error = 'allow_list'` of that host (and no other error). */
+    clearAllowListErrors?: boolean;
+  } = {},
 ): Promise<AllowListReconcileResult> {
   let targets: ProjectRecord[];
   if (options.projectId !== undefined) {
@@ -86,6 +116,7 @@ export async function reconcileAuthAllowList(
         try {
           await withAllowListLock(project.ref, () => adapter.add(host));
           result.added += 1;
+          if (options.clearAllowListErrors) await clearAllowListError(host);
         } catch (error) {
           result.failed += 1;
           log.error(
@@ -106,4 +137,16 @@ export async function reconcileAuthAllowList(
     total.projects.push(result);
   }
   return total;
+}
+
+/**
+ * 09.4-10 (D-575(b)(c), CTK-27): the allow-list half of the follow-up to a token replacement. Re-adds every
+ * verified host of the tenants bound to ONE project through that project's own guarded provider and clears the
+ * `allow_list` errors that now succeed; a host that still fails keeps its error, is counted and logged, and never
+ * stops the others.
+ */
+export async function reconcileProjectAllowList(
+  projectId: string,
+): Promise<AllowListReconcileResult> {
+  return reconcileAuthAllowList({ projectId, clearAllowListErrors: true });
 }

@@ -7,9 +7,11 @@ import { dropAllowListAdapter } from '../domains/index';
 import { ApiError } from '../http/api-error';
 import { moduleLogger } from '../logging';
 import { logFor, type PlatformActor } from '../platform/invites';
+import { reconcileProjectAllowList } from '../platform/reconcile-allow-list';
 import { processKeyring, seal } from '../secrets/sealed';
 import { invalidateProject } from '../tenancy/project-registry';
 import { apiUrlFor } from './access';
+import { checkProject } from './health';
 import { projectOfTenant } from './overview';
 import { createRequestTokenProvider, dropProjectProvider } from './provider-for';
 import { type ProjectProvider, ProjectProviderError } from './types';
@@ -393,7 +395,7 @@ export async function replaceProjectToken(
     },
     'project token replaced',
   );
-  startFollowUp(deps.afterReplace ?? defaultAfterReplace, outcome.projectId);
+  startFollowUp(deps.afterReplace ?? runTokenFollowUp, outcome.projectId);
   return { ok: true, credentialVersion: outcome.credentialVersion };
 }
 
@@ -465,8 +467,18 @@ function startFollowUp(run: (projectId: string) => unknown, projectId: string): 
   }
 }
 
-/** The health check refreshes the token and database states together (D-573). Imported lazily: health imports this module's state helper. */
-async function defaultAfterReplace(projectId: string): Promise<void> {
-  const { checkProject } = await import('./health');
-  await checkProject(projectId);
+/**
+ * The follow-up of a replacement (D-575(b)(c), CTK-27): the health check refreshes the token and database
+ * states together (D-573), then the allow-list of the project is reconciled so the domains that failed while
+ * the token was dead are re-added and their `allow_list` errors cleared. Exported so a test can await the real
+ * follow-up.
+ */
+export async function runTokenFollowUp(projectId: string): Promise<void> {
+  try {
+    await checkProject(projectId);
+  } catch {
+    // A check that could not run must not keep the allow-list from being reconciled: the two are independent.
+    log.warn({ event: 'project.token.check_failed', projectId }, 'token follow-up check failed');
+  }
+  await reconcileProjectAllowList(projectId);
 }
