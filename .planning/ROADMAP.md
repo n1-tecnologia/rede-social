@@ -1428,7 +1428,7 @@ Plans:
 **Goal**: A tenant can run on a Supabase project that lives in its own Supabase account: the platform operator registers the project together with a scoped personal access token limited to that one project, the platform stores the token sealed and uses it, and only it, for every Management API call about that project, while the projects of the platform's own organisation keep the platform token and its organisation pin.
 **Requirements**: CTK-01, CTK-02, CTK-03, CTK-04, CTK-05, CTK-06, CTK-07, CTK-08, CTK-09, CTK-10, CTK-11, CTK-12, CTK-13, CTK-14, CTK-15, CTK-16, CTK-17, CTK-18, CTK-19, CTK-20, CTK-21, CTK-22, CTK-23, CTK-24, CTK-25, CTK-26, CTK-27, CTK-28, CTK-29, CTK-30, CTK-31, CTK-32, CTK-33, CTK-34, CTK-35, CTK-36, CTK-37, CTK-38, CTK-39, CTK-40, CTK-41, CTK-42 (plus UI-04 for the sketch gate)
 **Depends on:** Phase 09.2 (the project registry, the `ProjectProvider` seam, the bootstrap, the health job, the credential replacement and the move tool that this phase extends; the hosted proofs of 09.2 plan 25 come first)
-**Plans:** 17 plans (planned 2026-10-27; execution waits for 09.2 plan 25, D-579)
+**Plans:** 1/17 plans executed (planned 2026-10-27; execution waits for 09.2 plan 25, D-579)
 **UI hint**: yes, small: the "Novo tenant" form and the Banco tab gain the choice "Projeto da plataforma" or "Projeto do cliente", the token field and the token state (valid, expiring, revoked). plan-phase will stop at the UI-SPEC gate first (run `/gsd-ui-phase 09.4`, then plan-phase again).
 
 **Notes**: Inserted 2026-10-27 by user decision. Numbered 09.4 by hand: `phase.insert` after a decimal nests (09.3.1), and the `projects` of a customer's own account were Deferred in `09.2-CONTEXT.md` ("the platform token would not reach them"). STATE stays on 09.2 plan 25: plan-phase can run ahead, execute-phase waits for 09.2 to close.
@@ -1455,7 +1455,7 @@ Plans:
 
 - [ ] 09.4-01-PLAN.md — The hidden terminal prompt `scripts/lib/read-secret.ts`, the `platform:probe --scoped` mode (21 operations, allowed or denied with the status, never a write) and the P1..P8 ledger; Igor runs the probe once (CTK-06, CTK-07, CTK-42, tracer, `autonomous: false`)
 - [ ] 09.4-02-PLAN.md — The registry: owner, per-project organisation pin, sealed token and typed expiry on `platform.projects`, the token-check outcome on `platform.project_health`, the append-only token audit table, one generated and one hand-written central migration, pgTAP 216 and the [BLOCKING] schema gate (CTK-24, CTK-28, tracer)
-- [ ] 09.4-03-PLAN.md — The shared contracts: `tokenState` with one 30-day constant, `tokenExpiryIsValid`, thirteen reason codes, the six pre-check reasons, strict token inputs and token-free optional answer fields (CTK-16, CTK-26, CTK-29, CTK-33, tracer)
+- [x] 09.4-03-PLAN.md — The shared contracts: `tokenState` with one 30-day constant, `tokenExpiryIsValid`, thirteen reason codes, the six pre-check reasons, strict token inputs and token-free optional answer fields (CTK-16, CTK-26, CTK-29, CTK-33, tracer)
 - [ ] 09.4-04-PLAN.md — Sketch 015: the 18 prototype-less customer-project frames, the README with `approved: false` and Igor's recorded approval (UI-04, `autonomous: false`)
 
 **Wave 2** *(blocked on the contracts)*
