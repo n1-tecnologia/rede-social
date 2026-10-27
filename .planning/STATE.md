@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.3 (Pendências de backend do FRONT.pdf (INSERTED)) — EXECUTING
 Current Plan: 9
 Total Plans in Phase: 9
-Plan: 8 of 9 done (01-08); 09 is next
+Plan: 8 of 9 done (01-08); 09 is PARTIAL (release notes and pendencias doc committed; exit gate pnpm verify stopped at e2e: Docker engine down after the disk filled, e2e:pwa not run)
 Status: Executing
-Last activity: 2026-10-26 — Phase 09.3 plan 06 complete (owner re-pinned P41, commit 5c5c392c); plans 01-08 done, 09 is next; Phase 09.2 stays paused at its plan 25 (Igor's hosted proofs)
+Last activity: 2026-10-26 — Phase 09.3 plan 09 partial (docs 7cce5fbb, ef8c131f, SUMMARY 4bf61556); pnpm verify green through integration, e2e blocked by a stopped Docker engine; Phase 09.2 stays paused at its plan 25 (Igor's hosted proofs)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
