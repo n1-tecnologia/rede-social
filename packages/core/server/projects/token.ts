@@ -30,10 +30,11 @@ import { type ProjectProvider, ProjectProviderError } from './types';
  *   4. `listProjects()`: any listed ref other than the target is `token_account_wide` (D-570b); a 403 passes (a
  *      project-scoped token is refused the listing); a timeout or a 5xx is `unchecked`
  *
- * D-570, both checks required (orchestrator ruling 1): the prefix and the listing are independent. With the
- * locked thirteen permissions the listing check is WEAK: an organisation-wide fine-grained token is also
- * refused the listing (403) and passes it. That is stated here, in `docs/DEPLOY.md` (plan 17) and as a ledger
- * advisory; this plan does not add a fourteenth permission.
+ * D-570, both checks required (orchestrator ruling 1): the prefix and the listing are independent. A real
+ * scoped token with the locked thirteen permissions (probe P1 run A, 2026-10-27) was answered the listing with
+ * 200 and only the target, so check 4 works with the thirteen; an organisation-wide fine-grained token has not
+ * been tried yet (ledger P3 step 3). That rests on one run and is stated in `docs/DEPLOY.md` and as a ledger
+ * advisory; no fourteenth permission was added.
  *
  * D-571: with no pin the first `describe` LEARNS the organisation and the validation returns it for the caller
  * to store; with a pin (a replacement, plan 10) a different organisation is `org_mismatch` before anything is
