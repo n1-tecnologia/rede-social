@@ -60,6 +60,7 @@ import { getRequiredTenantSchema } from '../migrations/required';
 import {
   type AccessDeps,
   type AccessValues,
+  apiUrlFor,
   ddlTargetOf,
   ddlUrlFor,
   presentAccess,
@@ -70,6 +71,8 @@ import { assertNotMoving, tenantsMoving } from '../projects/moving';
 import { summarizeDatabase } from '../projects/overview';
 import { precheckProject } from '../projects/precheck';
 import { getProjectProvider } from '../projects/provider-access';
+import { createRequestTokenProvider } from '../projects/provider-for';
+import { recordTokenEvent, sealManagementToken } from '../projects/token';
 import type { ProjectProvider } from '../projects/types';
 import { processKeyring, seal } from '../secrets/sealed';
 import { pushToCentral, pushToTenant } from '../tenancy/mirror';
@@ -403,13 +406,15 @@ function providerNameIn(options: CreateTenantOptions): 'supabase' | 'fake' {
   return options.provider?.name ?? env.PROJECT_PROVIDER ?? 'fake';
 }
 
-/** The API origin of a project the platform registers: `https://<ref>.supabase.co`, or the fake's local target. */
-function apiUrlFor(provider: ProjectProvider, ref: string): string {
-  if (provider.name === 'supabase') return `https://${ref}.supabase.co`;
-  const target = (
-    provider as { targetOf?: (r: string) => { apiUrl: string } | undefined }
-  ).targetOf?.(ref);
-  return target?.apiUrl ?? env.SUPABASE_URL;
+/**
+ * The form field a pre-check refusal belongs to (09.4-09, UI-D-550): the expiry reason sits on the date, every
+ * other `token_*` reason on the token, the rest (the ref reasons) on the project ref. A reason is a closed code,
+ * never provider text, so it is safe to echo as the detail.
+ */
+function mapPrecheckReason(reason: string): Record<string, string> {
+  if (reason === 'token_expiry_invalid') return { tokenExpiresAt: reason };
+  if (reason.startsWith('token_')) return { token: reason };
+  return { projectRef: reason };
 }
 
 const fieldErrors = (fields: readonly string[], reason: string): Record<string, string> =>
@@ -442,7 +447,8 @@ export async function createTenant(
 ): Promise<{ id: string; projectId: string }> {
   const ref = input.projectRef?.trim();
   if (!ref) {
-    if (providerNameIn(options) === 'supabase') {
+    // A customer project IS a ref: there is no default project for the customer's own account (09.4-09).
+    if (providerNameIn(options) === 'supabase' || input.owner === 'customer') {
       throw new ApiError(400, 'VALIDATION_FAILED', { projectRef: 'required' });
     }
     return createOnDefaultProject(input, actor);
@@ -454,6 +460,7 @@ type ProjectRow = {
   id: string;
   state: string;
   isCentral: boolean;
+  owner: string;
   bound: number;
 };
 
@@ -478,7 +485,13 @@ async function createOnProject(
   };
   const wanted = new Set<ModuleKey>(input.modules);
 
-  const provider = options.provider ?? (await getProjectProvider());
+  // 09.4-09 (D-566): a customer project is judged and bootstrapped on the customer's OWN token. The provider is
+  // built from the pasted token (never cached, never stored) instead of the platform singleton.
+  const customer = input.owner === 'customer';
+  const token = customer ? (input.token ?? '') : '';
+  const provider =
+    options.provider ??
+    (customer ? await createRequestTokenProvider({ token }) : await getProjectProvider());
   if (!isProjectRef(provider.name, ref)) {
     throw new ApiError(400, 'VALIDATION_FAILED', { projectRef: 'invalid' });
   }
@@ -489,6 +502,7 @@ async function createOnProject(
         id: projects.id,
         state: projects.state,
         isCentral: projects.isCentral,
+        owner: projects.owner,
         bound: sql<number>`(select count(*)::int from ${tenantProjects} where ${tenantProjects.projectId} = ${projects.id})`,
       })
       .from(projects)
@@ -506,10 +520,40 @@ async function createOnProject(
     serviceKeyKind: string;
     publishableKey: string;
     secretKeyId: number;
+    owner: 'customer';
+    orgSlug: string;
+    mgmtTokenSealed: string;
+    mgmtTokenExpiresAt: string | null;
   }> = {};
+  // A KNOWN project keeps the owner it was registered with (09.4-09): the body must agree with it, and a token
+  // supplied for a known customer project is ignored ("Substituir token" is the way to change it).
+  if (known && known.owner !== (customer ? 'customer' : 'platform')) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { owner: 'mismatch' });
+  }
   if (!known) {
-    const check = await precheckProject(ref, { production, provider });
-    if (!check.ok) throw new ApiError(400, 'VALIDATION_FAILED', { projectRef: check.reason });
+    const check = await precheckProject(
+      ref,
+      customer
+        ? {
+            production,
+            provider,
+            owner: 'customer',
+            token,
+            tokenExpiresAt: input.tokenExpiresAt?.trim() || null,
+          }
+        : { production, provider },
+    );
+    if (!check.ok) throw new ApiError(400, 'VALIDATION_FAILED', mapPrecheckReason(check.reason));
+    if (customer) {
+      if (!check.learned) throw new ApiError(400, 'VALIDATION_FAILED', { token: 'token_invalid' });
+      // The token is sealed with the id the row will have, together with the organisation pin LEARNED from the
+      // project's first read (D-571) and the expiry the operator typed (D-567).
+      sealedAccess.owner = 'customer';
+      sealedAccess.orgSlug = check.learned.orgSlug;
+      sealedAccess.mgmtTokenSealed = sealManagementToken(token, projectId);
+      sealedAccess.mgmtTokenExpiresAt = check.learned.expiresAt;
+      sealedAccess.secretKeyId = processKeyring().currentId;
+    }
 
     const access: AccessValues = presentAccess(input.access);
     if (check.manualAccess) {
@@ -568,6 +612,10 @@ async function createOnProject(
       let mode: 'bootstrap' | 'inline' = 'bootstrap';
       let isCentral = false;
       if (row) {
+        // The project may have been registered since the read above: its owner still has to match the body.
+        if (row.owner !== (customer ? 'customer' : 'platform')) {
+          throw new ApiError(400, 'VALIDATION_FAILED', { owner: 'mismatch' });
+        }
         isCentral = row.isCentral;
         // Production never shares a project (D-540); a project still being prepared for a tenant is taken too.
         if ((production && row.bound > 0) || (row.state !== 'ready' && row.bound > 0)) {
@@ -584,6 +632,16 @@ async function createOnProject(
           state: 'preparing',
           ...sealedAccess,
         });
+        // The registration is audited in the SAME transaction as the row and the tenant (D-567, T-09.4-34).
+        if (sealedAccess.mgmtTokenSealed !== undefined) {
+          await recordTokenEvent(tx, {
+            kind: 'registered',
+            projectId,
+            projectRef: ref,
+            actor: `platform:${actor.userId}`,
+            outcome: 'ok',
+          });
+        }
       }
       const boundProjectId = row?.id ?? projectId;
 
@@ -672,6 +730,7 @@ async function createOnProject(
       tenantId,
       projectId: created.projectId,
       mode: created.mode,
+      owner: customer ? 'customer' : 'platform',
       slug: input.slug,
       modules: [...wanted],
       look: input.look !== undefined,
