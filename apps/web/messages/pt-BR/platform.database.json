@@ -98,6 +98,16 @@
           "noPermission": "Sem permissão",
           "orgMismatch": "Organização diferente",
           "unchecked": "Não verificado"
+        },
+        "howto": {
+          "title": "Como criar o token",
+          "step1": "Entre no Supabase com a conta que tem acesso ao projeto do cliente e abra a página de tokens de acesso.",
+          "step2": "Crie um token novo e limite-o a este projeto, não à conta toda.",
+          "step3": "Marque as permissões: [PENDENTE-PERMISSÕES]. Escolha o vencimento (no máximo 1 ano) e anote a data.",
+          "step4": "Copie o token na hora. O Supabase não mostra de novo.",
+          "link": "Abrir os tokens no Supabase",
+          "newTab": " (abre em uma nova aba)",
+          "note": "Se quem criou o token perder o acesso à conta do cliente, o token deixa de funcionar."
         }
       },
       "errors": {

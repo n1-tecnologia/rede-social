@@ -296,6 +296,14 @@
           "serviceKey": "Chave de serviço (service_role)",
           "publishableKey": "Chave publicável",
           "helper": "Fica guardado com segurança e não pode ser lido depois."
+        },
+        "token": {
+          "label": "Token de acesso do projeto",
+          "helper": "Fica guardado com segurança e não pode ser lido depois."
+        },
+        "expiry": {
+          "label": "Vence em (opcional)",
+          "helper": "A data escolhida ao criar o token. Com ela, o painel avisa antes de vencer."
         }
       }
     },
