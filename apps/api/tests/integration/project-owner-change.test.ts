@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { sqlClient } from '@rede-social/core/db';
 import type { FakeProjectProvider } from '@rede-social/core/server/projects/fake';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
@@ -568,5 +570,164 @@ describe('token refusals, no terminal and abort', () => {
     expect(abort.stdout).toHaveLength(0);
 
     expect(provider.calls.tokenUses.length).toBe(usesBefore);
+  });
+});
+
+describe('command discipline (T-09.4-39, D-567)', () => {
+  it('--token and every other flag that is not on the list is an unknown argument (exit 2)', async () => {
+    const unknown: string[][] = [
+      ['--tenant', SLUG_A, '--token', TOKEN_A],
+      ['--tenant', SLUG_A, `--token=${TOKEN_A}`],
+      ['--tenant', SLUG_A, '--pat', TOKEN_A],
+      ['--tenant', SLUG_A, '--access-token', TOKEN_A],
+      ['--tenant', SLUG_A, '--password', 'x'],
+      ['--tenant', SLUG_A, '-t', TOKEN_A],
+      ['--tenant', SLUG_A, TOKEN_A],
+      [TOKEN_A],
+      ['--tenant', SLUG_A, '--dry-run=true'],
+      ['--tenant', SLUG_A, '--register=1'],
+    ];
+    for (const argv of unknown) {
+      expect(parseSetOwnerArgs(argv), argv.join(' ')).toStrictEqual({ error: 'unknown argument' });
+      const term = terminal(TOKEN_A);
+      expect(await main(argv, term.deps)).toBe(2);
+      expect(term.prompts).toHaveLength(0);
+      // The refusal never repeats an argument: a token typed by mistake does not land in the terminal log.
+      expect([...term.stdout, ...term.stderr].join('\n')).not.toContain(TOKEN_A);
+    }
+  });
+
+  it('the parser is strict about shapes, repeats and `--`', () => {
+    expect(parseSetOwnerArgs(['--', '--tenant', SLUG_A, '--dry-run'])).toMatchObject({
+      mode: 'tenant',
+      tenant: SLUG_A,
+      dryRun: true,
+      actor: 'cli',
+      expires: null,
+    });
+    expect(parseSetOwnerArgs([`--tenant=${SLUG_A}`, `--expires=${inDays(3)}`])).toMatchObject({
+      mode: 'tenant',
+      expires: inDays(3),
+    });
+    expect(parseSetOwnerArgs(['--register', '--ref', REF_G])).toMatchObject({
+      mode: 'register',
+      ref: REF_G,
+    });
+    const errors: string[][] = [
+      [],
+      ['--tenant'],
+      ['--tenant', '--dry-run'],
+      ['--tenant', SLUG_A, '--tenant', SLUG_B],
+      ['--tenant', SLUG_A, '--dry-run', '--dry-run'],
+      ['--tenant', 'UPPER'],
+      ['--tenant', 'a b'],
+      ['--tenant', SLUG_A, '--expires', '2026-1-1'],
+      ['--tenant', SLUG_A, '--expires', 'next week'],
+      ['--tenant', SLUG_A, '--actor', 'two words'],
+      ['--tenant', SLUG_A, '--actor', 'x'.repeat(65)],
+      ['--tenant', SLUG_A, '--ref', REF_G],
+      ['--register', '--ref', REF_G, '--tenant', SLUG_A],
+      ['--register'],
+      ['--register', '--ref', 'UPPER'],
+    ];
+    for (const argv of errors) {
+      expect(parseSetOwnerArgs(argv), argv.join(' ')).toHaveProperty('error');
+    }
+  });
+
+  it('the source reads no environment variable for a token and no stdin outside readSecret', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('../../../../scripts/set-project-owner.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(source).not.toMatch(/process\.env/);
+    expect(source).not.toMatch(/process\.stdin|\breadline\b/);
+    // The only argv read is the flag list handed to the parser.
+    const argvReads = source.match(/process\.argv[^\n]*/g) ?? [];
+    for (const read of argvReads) expect(read).toMatch(/slice\(2\)|\[1\]/);
+    // And the prompt is the only way a token is obtained.
+    expect(source).toMatch(/from '\.\/lib\/read-secret'/);
+  });
+
+  it('sweep: no outcome prints or stores a token, a prefix, the organisation or the ref', async () => {
+    const { NoTerminalError, SecretAbortError } = (await import(
+      /* @vite-ignore */ new URL('../../../../scripts/lib/read-secret.ts', import.meta.url).href
+    )) as typeof import('../../../../scripts/lib/read-secret');
+    const seen: string[] = [];
+    const run = async (
+      argv: string[],
+      token: string,
+      expectedCode: number,
+      prompt?: () => Promise<string>,
+    ) => {
+      const term = terminal(token);
+      if (prompt) term.deps.readSecret = prompt;
+      expect(await main(argv, term.deps), argv.join(' ')).toBe(expectedCode);
+      seen.push(...term.stdout, ...term.stderr, ...term.prompts);
+    };
+
+    captured.lines.length = 0;
+    await run(['--tenant', SLUG_A], TOKEN_A, 0); // an owner change, or a re-pin when it ran before
+    await run(['--tenant', SLUG_R], TOKEN_R_OLD, 0); // another re-pin
+    await run(['--register', '--ref', REF_H], TOKEN_H, 0); // registered
+    await run(['--register', '--ref', REF_H], TOKEN_H, 1); // already_registered
+    await run(['--tenant', SLUG_D, '--dry-run'], TOKEN_D, 0); // dry run
+    await run(['--register', '--ref', REF_H, '--dry-run'], TOKEN_H, 1); // dry run of a known ref
+    await run(['--tenant', SLUG_F], TOKEN_UNPREFIXED, 1);
+    await run(['--tenant', SLUG_F], TOKEN_WIDE, 1);
+    await run(['--tenant', SLUG_F], TOKEN_F_DEAD, 1);
+    await run(['--tenant', SLUG_F], TOKEN_F_FORBIDDEN, 1);
+    await run(['--tenant', SLUG_F, '--expires', '2001-01-01'], TOKEN_F, 1);
+    await run(['--tenant', SLUG_NOPE], TOKEN_F, 1);
+    await run(['--tenant', 'rede-demo'], TOKEN_F, 1);
+    await run(['--tenant', SLUG_E], TOKEN_F, 1);
+    await run(['--tenant', SLUG_F, '--token', TOKEN_F], TOKEN_F, 2);
+    await run([], TOKEN_F, 2);
+    await run(['--tenant', SLUG_F], TOKEN_F, 2, async () => {
+      throw new NoTerminalError();
+    });
+    await run(['--tenant', SLUG_F], TOKEN_F, 130, async () => {
+      throw new SecretAbortError();
+    });
+
+    // Every audit column except the registry's own `project_ref` (the ref is that column's whole purpose).
+    const rows = await adminSql`
+      select id::text as id, kind, project_id::text as project_id, actor, outcome, at::text as at
+        from platform.project_token_events where project_ref = any(${REFS}::text[])`;
+    const everything = [...seen, ...captured.lines, JSON.stringify(rows)].join('\n');
+
+    const tokens = [
+      TOKEN_A,
+      TOKEN_B,
+      TOKEN_C,
+      TOKEN_D,
+      TOKEN_E,
+      TOKEN_F,
+      TOKEN_F_DEAD,
+      TOKEN_F_FORBIDDEN,
+      TOKEN_G,
+      TOKEN_H,
+      TOKEN_H_DEAD,
+      TOKEN_R_OLD,
+      TOKEN_R_NEW,
+      TOKEN_WIDE,
+      TOKEN_UNPREFIXED,
+    ];
+    const shapes = [
+      ...tokens,
+      ...tokens.map((token) => token.slice(0, 8)),
+      'sbp_',
+      'Bearer',
+      'eyJ',
+      ORG,
+      NEW_ORG,
+      ...REFS,
+    ];
+    for (const shape of shapes) {
+      expect(everything.includes(shape), `a ${shape.length}-character secret shape leaked`).toBe(
+        false,
+      );
+    }
+    expect(seen.length).toBeGreaterThan(10);
   });
 });
