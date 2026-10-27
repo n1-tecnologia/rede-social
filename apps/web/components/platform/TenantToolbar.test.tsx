@@ -145,3 +145,34 @@ describe('TenantToolbar - the single-select chip row', () => {
     }
   });
 });
+
+/**
+ * 09.4-16 Task 3 (UI-D-560) - the API owns the wider "Banco com problema" match (it now also covers the five
+ * token states that need attention), so the toolbar does not change: the chip, its link, its place in the
+ * row and its single active mark stay exactly as shipped.
+ */
+describe('TenantToolbar - the Banco com problema chip after the token pill (UI-D-560)', () => {
+  it('still renders the chip fourth, linking to ?banco=problema, with the same single-select behaviour', () => {
+    render(<TenantToolbar />);
+    expect(chips().map((chip) => chip.textContent)).toEqual([
+      'Todos',
+      'Ativos',
+      'Suspensos',
+      'Banco com problema',
+    ]);
+    expect(hrefOf('Banco com problema')).toBe('/plataforma?banco=problema');
+    cleanup();
+    render(<TenantToolbar banco="problema" />);
+    expect(
+      chips()
+        .filter((chip) => chip.getAttribute('aria-current') === 'page')
+        .map((chip) => chip.textContent),
+    ).toEqual(['Banco com problema']);
+  });
+
+  it('adds no chip for the token states: the token has its own pill, not its own filter', () => {
+    render(<TenantToolbar />);
+    expect(chips()).toHaveLength(4);
+    expect(screen.queryByText(/Token/)).toBeNull();
+  });
+});

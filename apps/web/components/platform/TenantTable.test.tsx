@@ -304,3 +304,105 @@ describe('TenantTableSkeleton (E07 loading)', () => {
     }
   });
 });
+
+/**
+ * 09.4-16 Task 3 (UI-D-560, CTK-41; E08) - the "Token: {state}" pill of the list. It sits under the Banco
+ * pill and schema line of the desktop cell (`mt-1`) and in the mobile card's pills line, ONLY for a row whose
+ * `database.token.state` needs attention. Platform rows, Válido and Não verificado rows show none; the pill
+ * text is fixed catalog text, and the tenant name and slug still truncate.
+ */
+describe('TenantTable - the token pill (UI-D-560)', () => {
+  const schema = { applied: 147, required: 147 };
+  const withToken = (id: string, token: string | null, state: DatabaseState = 'ready') =>
+    row(id, state, schema, {
+      database: { state, schema, ...(token ? { token: { state: token as never } } : {}) },
+    });
+
+  it.each([
+    ['expiring', 'Token: Vencendo'],
+    ['expired', 'Token: Vencido'],
+    ['invalid', 'Token: Inválido'],
+    ['no_permission', 'Token: Sem permissão'],
+    ['org_mismatch', 'Token: Organização diferente'],
+  ])('shows "%s" as "%s" in the table cell and in the mobile card', (token, text) => {
+    const { container } = renderTable([withToken('a', token)]);
+    expect(within(desktop(container)).getByTestId('row-token-pill').textContent).toBe(text);
+    expect(within(mobile(container)).getByTestId('row-token-pill').textContent).toBe(text);
+  });
+
+  it('places the pill under the Banco pill and the schema line, with mt-1', () => {
+    const { container } = renderTable([withToken('a', 'expiring')]);
+    const cell = within(desktop(container))
+      .getByTestId('database-pill')
+      .closest('td') as HTMLElement;
+    const pill = within(cell).getByTestId('row-token-pill');
+    const line = within(cell).getByTestId('schema-line');
+    expect(line.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect((pill.parentElement as HTMLElement).className).toContain('mt-1');
+  });
+
+  it('puts the pill in the mobile card pills line, beside the Banco pill', () => {
+    const { container } = renderTable([withToken('a', 'expired', 'behind')]);
+    const line = within(mobile(container)).getByTestId('database-pill')
+      .parentElement as HTMLElement;
+    expect(line.className).toContain('flex-wrap');
+    expect(line.className).toContain('gap-1');
+    expect(within(line).getByTestId('row-token-pill').textContent).toBe('Token: Vencido');
+  });
+
+  it.each([
+    ['valid', 'a Válido row'],
+    ['unchecked', 'a Não verificado row'],
+    [null, 'a platform row (no token)'],
+  ])('shows no token pill for %s: %s (E08 partial)', (token) => {
+    const { container } = renderTable([withToken('a', token)]);
+    expect(within(desktop(container)).queryByTestId('row-token-pill')).toBeNull();
+    expect(within(mobile(container)).queryByTestId('row-token-pill')).toBeNull();
+  });
+
+  it('shows no token pill for a row whose database fact is absent', () => {
+    const { container } = renderTable([row('a', null)]);
+    expect(container.querySelector('[data-testid="row-token-pill"]')).toBeNull();
+  });
+
+  it('shows the pill only on the rows that need it, in the same row geometry (zero, one, many)', () => {
+    const zero = renderTable([withToken('a', 'valid'), withToken('b', null)]);
+    expect(zero.container.querySelectorAll('[data-testid="row-token-pill"]')).toHaveLength(0);
+    cleanup();
+    const many = renderTable([
+      withToken('a', 'expiring'),
+      withToken('b', 'valid'),
+      withToken('c', 'invalid'),
+      withToken('d', 'org_mismatch', 'unreachable'),
+    ]);
+    const trs = Array.from(desktop(many.container).querySelectorAll('tbody tr'));
+    expect(trs).toHaveLength(4);
+    expect(trs.map((tr) => tr.querySelectorAll('[data-testid="row-token-pill"]').length)).toEqual([
+      1, 0, 1, 1,
+    ]);
+    expect(new Set(trs.map((tr) => tr.className)).size).toBe(1);
+  });
+
+  it('keeps the name and the slug truncating with title beside the pill (E08 long-text)', () => {
+    const name = 'Associação Brasileira de Mentoras e Mentores de Carreira e Negócios do Sul';
+    const { container } = renderTable([
+      row('a', 'ready', schema, {
+        displayName: name,
+        slug: 'a-very-long-slug-for-a-tenant-that-keeps-going',
+        database: { state: 'ready', schema, token: { state: 'org_mismatch' } },
+      }),
+    ]);
+    expect(within(desktop(container)).getByTitle(name).className).toContain('truncate');
+    expect(
+      within(desktop(container)).getByTitle('a-very-long-slug-for-a-tenant-that-keeps-going')
+        .className,
+    ).toContain('truncate');
+    expect(within(desktop(container)).getByTestId('row-token-pill').textContent).toBe(
+      'Token: Organização diferente',
+    );
+    const card = within(mobile(container)).getByRole('link', {
+      name: `${name} (a-very-long-slug-for-a-tenant-that-keeps-going)`,
+    });
+    expect(card.className).toContain('line-clamp-2');
+  });
+});

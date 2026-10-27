@@ -68,3 +68,8 @@ export function TokenPill({
     </StatusPill>
   );
 }
+
+/** RED stub (09.4-16 Task 3). */
+export function tokenNeedsAttention(_state: TokenState): boolean {
+  return false;
+}

@@ -2,7 +2,7 @@
 import { TOKEN_STATES, type TokenState } from '@rede-social/contracts/projects';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TokenPill, tokenPillProps } from './TokenPill';
+import { TokenPill, tokenNeedsAttention, tokenPillProps } from './TokenPill';
 
 /**
  * 09.4-14 Task 1 (UI-D-553, CTK-35) - the ONE vocabulary of a customer token's state. The card, the
@@ -82,5 +82,27 @@ describe('TokenPill', () => {
   it('accepts a test id for the header and the list', () => {
     render(<TokenPill state="valid" data-testid="row-token-pill" />);
     expect(screen.getByTestId('row-token-pill').textContent).toBe('Válido');
+  });
+});
+
+/**
+ * 09.4-16 Task 3 (UI-D-560, CTK-41; E08 partial) - which states earn a pill on the tenant header and the list.
+ * A token is the one thing in this phase that fails slowly and silently on a date, so the five states that
+ * need a person get a signal; Válido and Não verificado stay quiet.
+ */
+describe('tokenNeedsAttention', () => {
+  it.each(['expiring', 'expired', 'invalid', 'no_permission', 'org_mismatch'] as const)(
+    'is true for %s',
+    (state) => {
+      expect(tokenNeedsAttention(state)).toBe(true);
+    },
+  );
+
+  it.each(['valid', 'unchecked'] as const)('is false for %s', (state) => {
+    expect(tokenNeedsAttention(state)).toBe(false);
+  });
+
+  it('covers every one of the seven states with an answer', () => {
+    expect(TOKEN_STATES.filter(tokenNeedsAttention)).toHaveLength(5);
   });
 });

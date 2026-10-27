@@ -147,3 +147,115 @@ describe('TenantLayout - the database pill in the header', () => {
     expect(row.contains(screen.getByTestId('tenant-database-pill'))).toBe(true);
   });
 });
+
+/**
+ * 09.4-16 Task 3 (UI-D-560, CTK-41; E08) - the third header pill. After Ativo/Suspenso and "Banco: {state}",
+ * a non-interactive "Token: {state}" shows ONLY for a customer project whose token needs attention
+ * (Vencendo, Vencido, Inválido, Sem permissão, Organização diferente): never for Válido, never for
+ * Não verificado, never for a platform project, and never when the read fails. It reuses the ONE
+ * `getTenantDatabase` call the header already makes.
+ */
+describe('TenantLayout - the token pill in the header', () => {
+  const customer = (state: string, over: Record<string, unknown> = {}) => ({
+    state: 'ready',
+    moving: false,
+    owner: 'customer',
+    organization: 'acme-corp',
+    token: { state, expiresAt: null, checkedAt: null },
+    ...over,
+  });
+
+  it('shows "Token: Vencendo" with the warning tone after the status pill', async () => {
+    platform.database.mockResolvedValue(customer('expiring'));
+    await renderLayout();
+    const pill = screen.getByTestId('tenant-token-pill');
+    expect(pill.textContent).toBe('Token: Vencendo');
+    expect(pill.className).toContain('warning');
+    expect(screen.getByTestId('tenant-status-pill').nextElementSibling).toBe(pill);
+  });
+
+  it('puts the pills in the order name, Ativo, Banco, Token when the database also needs a pill', async () => {
+    platform.database.mockResolvedValue(customer('expired', { state: 'behind' }));
+    await renderLayout();
+    const row = screen.getByRole('heading', { level: 1 }).parentElement as HTMLElement;
+    expect(
+      Array.from(row.children).map((child) => child.getAttribute('data-testid') ?? child.tagName),
+    ).toEqual(['H1', 'tenant-status-pill', 'tenant-database-pill', 'tenant-token-pill']);
+    expect(screen.getByTestId('tenant-token-pill').textContent).toBe('Token: Vencido');
+  });
+
+  it.each([
+    ['expiring', 'Token: Vencendo', 'warning'],
+    ['expired', 'Token: Vencido', 'danger'],
+    ['invalid', 'Token: Inválido', 'danger'],
+    ['no_permission', 'Token: Sem permissão', 'danger'],
+    ['org_mismatch', 'Token: Organização diferente', 'danger'],
+  ])(
+    'writes the %s state as "%s" in the %s tone, as plain text with a word',
+    async (state, text, tone) => {
+      platform.database.mockResolvedValue(customer(state));
+      await renderLayout();
+      const pill = screen.getByTestId('tenant-token-pill');
+      expect(pill.textContent).toBe(text);
+      expect(pill.className).toContain(tone);
+      expect(pill.closest('a')).toBeNull();
+      expect(pill.closest('button')).toBeNull();
+      expect(pill.getAttribute('role')).toBeNull();
+    },
+  );
+
+  it.each(['valid', 'unchecked'])(
+    'shows no token pill for a customer project in the %s state (E08 partial)',
+    async (state) => {
+      platform.database.mockResolvedValue(customer(state));
+      await renderLayout();
+      expect(screen.queryByTestId('tenant-token-pill')).toBeNull();
+    },
+  );
+
+  it('shows no token pill for a platform project, for a missing token or for an older API', async () => {
+    platform.database.mockResolvedValue(customer('expired', { owner: 'platform', token: null }));
+    await renderLayout();
+    expect(screen.queryByTestId('tenant-token-pill')).toBeNull();
+    cleanup();
+    platform.database.mockResolvedValue(customer('expired', { token: null }));
+    await renderLayout();
+    expect(screen.queryByTestId('tenant-token-pill')).toBeNull();
+    cleanup();
+    platform.database.mockResolvedValue({ state: 'ready', moving: false });
+    await renderLayout();
+    expect(screen.queryByTestId('tenant-token-pill')).toBeNull();
+  });
+
+  it('shows no token pill and keeps the frame when the overview read fails', async () => {
+    platform.database.mockRejectedValue(new Error('boom'));
+    await renderLayout();
+    expect(screen.queryByTestId('tenant-token-pill')).toBeNull();
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Ana Souza Mentoria');
+  });
+
+  it('makes one overview read for both pills', async () => {
+    platform.database.mockResolvedValue(customer('expired', { state: 'behind' }));
+    await renderLayout();
+    expect(platform.database).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the title row wrapping a 60-plus-character name and three pills (E08 overflow, long-text)', async () => {
+    platform.detail.mockResolvedValue(detail({ displayName: NAME, status: 'suspended' }));
+    platform.database.mockResolvedValue(customer('org_mismatch', { state: 'preparation_failed' }));
+    await renderLayout();
+    const title = screen.getByRole('heading', { level: 1 });
+    expect(title.textContent).toBe(NAME);
+    expect(title.className).toContain('min-w-0');
+    expect(title.className).toContain('break-words');
+    const row = title.parentElement as HTMLElement;
+    expect(row.className).toContain('flex-wrap');
+    expect(row.className).toContain('gap-3');
+    for (const id of ['tenant-status-pill', 'tenant-database-pill', 'tenant-token-pill']) {
+      expect(row.contains(screen.getByTestId(id))).toBe(true);
+    }
+    expect(screen.getByTestId('tenant-token-pill').textContent).toBe(
+      'Token: Organização diferente',
+    );
+  });
+});
