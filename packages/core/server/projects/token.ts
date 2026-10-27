@@ -317,6 +317,8 @@ export type ReplaceTokenDeps = {
   afterReplace?: (projectId: string) => unknown;
   /** Test seam: the day the typed date is judged against. */
   today?: string;
+  /** Test seam: how long the answer waits for the follow-up (default `FOLLOW_UP_WAIT_MS`). */
+  followUpWaitMs?: number;
 };
 
 type LockedTokenProject = {
@@ -398,7 +400,11 @@ export async function replaceProjectToken(
     },
     'project token replaced',
   );
-  startFollowUp(deps.afterReplace ?? runTokenFollowUp, outcome.projectId);
+  await runFollowUpBounded(
+    deps.afterReplace ?? runTokenFollowUp,
+    outcome.projectId,
+    deps.followUpWaitMs ?? FOLLOW_UP_WAIT_MS,
+  );
   return { ok: true, credentialVersion: outcome.credentialVersion };
 }
 
@@ -459,14 +465,37 @@ async function replaceLocked(
   });
 }
 
-/** Fire and forget: a failing follow-up is logged by project id only and never reaches the operator's answer. */
-function startFollowUp(run: (projectId: string) => unknown, projectId: string): void {
+/**
+ * How long the answer to a replacement waits for its follow-up (09.4 review WR-04). The API runs on request-based
+ * CPU, so work left running after the response may be throttled and the allow-list reconcile of D-575(c) could
+ * stall; the operator is already waiting seconds on the validation, so the answer waits for the follow-up too,
+ * up to this bound. A follow-up that outlasts the bound keeps running detached: the token verdict then heals on
+ * the next health sweep and the allow-list on the worker's next start reconcile or the domain's "Verificar agora".
+ */
+export const FOLLOW_UP_WAIT_MS = 8_000;
+
+/**
+ * Runs the follow-up and waits for it, at most `waitMs`. A failing follow-up (or one that throws at once) is
+ * logged by project id only and never reaches the operator's answer: the replacement itself is already committed.
+ */
+async function runFollowUpBounded(
+  run: (projectId: string) => unknown,
+  projectId: string,
+  waitMs: number,
+): Promise<void> {
   const failed = () =>
     log.warn({ event: 'project.token.follow_up_failed', projectId }, 'token follow-up failed');
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    void Promise.resolve(run(projectId)).catch(failed);
+    const work = Promise.resolve(run(projectId)).then(() => undefined, failed);
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs);
+    });
+    await Promise.race([work, bound]);
   } catch {
     failed();
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

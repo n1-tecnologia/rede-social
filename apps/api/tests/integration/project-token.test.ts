@@ -424,6 +424,39 @@ describe('a refused replacement changes nothing (CTK-20)', () => {
     ).toBeGreaterThanOrEqual(3);
   });
 
+  it('the answer waits for the follow-up, bounded: it is done when the call returns, a hang is cut, a failure is swallowed (WR-04)', async () => {
+    let finished = false;
+    const done = await replaceProjectToken(tenantA, { token: TOKEN_R1 }, ACTOR, {
+      afterReplace: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        finished = true;
+      },
+    });
+    expect(done.ok).toBe(true);
+    expect(finished).toBe(true);
+
+    const startedAt = Date.now();
+    const hung = await replaceProjectToken(tenantA, { token: TOKEN_R2 }, ACTOR, {
+      afterReplace: () => new Promise(() => undefined),
+      followUpWaitMs: 120,
+    });
+    expect(hung.ok).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+
+    const failing = await replaceProjectToken(tenantA, { token: TOKEN_R1 }, ACTOR, {
+      afterReplace: async () => {
+        throw new Error('follow-up exploded');
+      },
+    });
+    expect(failing.ok).toBe(true);
+    const thrown = await replaceProjectToken(tenantA, { token: TOKEN_R2 }, ACTOR, {
+      afterReplace: () => {
+        throw new Error('follow-up exploded at once');
+      },
+    });
+    expect(thrown.ok).toBe(true);
+  });
+
   it('race: two replacements of one project queue on the lock and the later one wins entirely', async () => {
     const before = await rowOf(projectA);
     const real = provider.forToken(TOKEN_R1, { orgSlug: ORG });
