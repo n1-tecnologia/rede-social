@@ -22,11 +22,11 @@ screens:
   - token-como-criar-aberto
   - cabecalho-selo-token
   - lista-selo-token
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor
+approved_at: 2026-10-27
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-09.4, design-review, D-33, UI-04, D-417, customer-token]
