@@ -273,6 +273,9 @@ export function createFakeProjectProvider(
       revealForbidden = on;
     },
     describe,
+    async listProjects() {
+      return [...targets.keys()].map((ref) => ({ ref }));
+    },
     health,
     waitUntilHealthy: (ref, waitOptions) =>
       waitUntilHealthy({ describe, health, now, sleep }, ref, waitOptions),

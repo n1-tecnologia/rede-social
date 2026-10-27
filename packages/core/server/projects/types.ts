@@ -67,6 +67,9 @@ export class ProjectProviderError extends Error {
   }
 }
 
+/** One entry of `listProjects`: the ref only, nothing else of the project crosses the seam. */
+export type ProjectListEntry = { ref: string };
+
 export type ProjectDescription = {
   ref: string;
   name: string;
@@ -132,6 +135,11 @@ export type WaitOptions = { maxMs?: number };
 export interface ProjectProvider {
   readonly name: 'fake' | 'supabase';
   describe(ref: string): Promise<ProjectDescription>;
+  /**
+   * The projects the token can see (`GET /v1/projects`, 09.4-05, D-570). The only operation without a project
+   * ref and never org-guarded; used ONLY by the registration check (plan 07) and never on a health tick.
+   */
+  listProjects(): Promise<ProjectListEntry[]>;
   health(ref: string): Promise<ProjectHealth>;
   /** Resolves only when the project is `ACTIVE_HEALTHY` with every service healthy; see `wait.ts`. */
   waitUntilHealthy(ref: string, options?: WaitOptions): Promise<void>;

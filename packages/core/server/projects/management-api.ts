@@ -10,6 +10,7 @@ import {
   type PoolerConfig,
   type ProjectDescription,
   type ProjectHealth,
+  type ProjectListEntry,
   type ProjectProvider,
   ProjectProviderError,
   type ProjectProviderErrorKind,
@@ -129,7 +130,7 @@ const configSchema = z.object({}).loose();
 type HttpMethod = 'GET' | 'POST' | 'PATCH';
 
 type CallOptions<T> = {
-  params: { ref: string; id?: string };
+  params: { ref?: string; id?: string };
   query?: Record<string, string>;
   body?: unknown;
   /** Parse the answer with this schema. Omitted: the body is ignored (a PATCH answers 200 or 204). */
@@ -304,8 +305,13 @@ export function createSupabaseProjectProvider(
     template: string,
     opts: CallOptions<T>,
   ): Promise<T> {
-    assertRef(opts.params.ref);
-    let path = template.replace('{ref}', encodeURIComponent(opts.params.ref));
+    let path = template;
+    if (opts.params.ref !== undefined) {
+      assertRef(opts.params.ref);
+      path = path.replace('{ref}', encodeURIComponent(opts.params.ref));
+    } else if (template.includes('{ref}')) {
+      throw new ProjectProviderError('invalid', 0, undefined, customer);
+    }
     if (template.includes('{id}')) {
       const id = opts.params.id;
       if (id === undefined || !ID_PATTERN.test(id))
@@ -410,6 +416,23 @@ export function createSupabaseProjectProvider(
       status: toStatus(project.status),
       orgSlug: project.organization_slug,
     };
+  }
+
+  /**
+   * The 21st operation (D-570): every project the token sees, as refs. Not org-guarded and called only at
+   * registration; an entry whose ref or id is not a 20-letter ref is dropped.
+   */
+  async function listProjects(): Promise<ProjectListEntry[]> {
+    const items = await call('GET', '/v1/projects', {
+      params: {},
+      schema: z.array(z.object({ ref: z.string().nullish(), id: z.string().nullish() }).loose()),
+    });
+    const entries: ProjectListEntry[] = [];
+    for (const item of items) {
+      const ref = item.ref ?? item.id;
+      if (typeof ref === 'string' && REF_PATTERN.test(ref)) entries.push({ ref });
+    }
+    return entries;
   }
 
   /** Runs `fn` only for a project of the pinned organisation (one `describe` per ref per instance). */
@@ -574,6 +597,7 @@ export function createSupabaseProjectProvider(
   return {
     name: 'supabase',
     describe,
+    listProjects,
     health,
     waitUntilHealthy: (ref, waitOptions) =>
       waitUntilHealthy(
