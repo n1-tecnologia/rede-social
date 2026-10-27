@@ -5,6 +5,8 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import type { FakeProjectProvider } from '@rede-social/core/server/projects/fake';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { getProjectProviderFor } from '@rede-social/core/server/projects/provider-for';
+import { replaceProjectToken } from '@rede-social/core/server/projects/token';
+import { ProjectProviderError } from '@rede-social/core/server/projects/types';
 import { open } from '@rede-social/core/server/secrets/sealed';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -72,6 +74,15 @@ const SLUG_M = `tr-m-${RUN}`;
 
 const TOKEN_OLD = `sbp_fc_fake_replace_old_${RUN}`;
 const TOKEN_NEW = `sbp_fc_fake_replace_new_${RUN}`;
+const TOKEN_ELSEWHERE = `sbp_fc_fake_replace_elsewhere_${RUN}`;
+const TOKEN_ALL = `sbp_fc_fake_replace_everything_${RUN}`;
+const TOKEN_UNKNOWN = `sbp_fc_fake_replace_unknown_${RUN}`;
+const TOKEN_UNPREFIXED = `plain_${RUN}_not_a_scoped_token_at_all`;
+const TOKEN_M = `sbp_fc_fake_replace_other_org_${RUN}`;
+const TOKEN_R1 = `sbp_fc_fake_replace_race_one_${RUN}`;
+const TOKEN_R2 = `sbp_fc_fake_replace_race_two_${RUN}`;
+const ACTOR = { userId: '00000000-0000-4000-8000-000000000010' };
+const noFollowUp = () => undefined;
 
 const provider: FakeProjectProvider = fakeProvider(
   {
@@ -85,6 +96,11 @@ const provider: FakeProjectProvider = fakeProvider(
     tokens: {
       [TOKEN_OLD]: { refs: [REF_A] },
       [TOKEN_NEW]: { refs: [REF_A] },
+      [TOKEN_ELSEWHERE]: { refs: [REF_X] },
+      [TOKEN_ALL]: { refs: 'all' },
+      [TOKEN_M]: { refs: [REF_M] },
+      [TOKEN_R1]: { refs: [REF_A] },
+      [TOKEN_R2]: { refs: [REF_A] },
     },
   },
 );
@@ -174,9 +190,6 @@ afterAll(async () => {
   restoreB();
 });
 
-// Keep the unused fixtures referenced for the refusal cases added in the next task.
-void tenantM;
-
 describe('PUT /v1/platform/tenants/{id}/database/token (tracer, CTK-20)', () => {
   it('a valid token replaces the sealed one, bumps the version and keeps the pin', async () => {
     const before = await rowOf(projectA);
@@ -242,5 +255,167 @@ describe('PUT /v1/platform/tenants/{id}/database/token (tracer, CTK-20)', () => 
     expect((await put(tenantP, { token: TOKEN_NEW })).res.status).toBe(409);
     expect((await put(tenantA, { token: '' })).res.status).toBe(400);
     expect((await put(tenantA, { token: TOKEN_NEW, extra: 1 })).res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Validate first, replace second (D-575, UI-D-555, T-09.4-35, T-09.4-36)
+// ---------------------------------------------------------------------------------------------------------
+
+type EventRow = { kind: string; project_ref: string; actor: string; outcome: string };
+const eventsOf = (ref: string) =>
+  adminSql<EventRow[]>`
+    select kind, project_ref, actor, outcome
+      from platform.project_token_events where project_ref = ${ref} order by at, id`;
+
+describe('a refused replacement changes nothing (CTK-20)', () => {
+  const refusals: Array<{
+    name: string;
+    body: Record<string, string>;
+    details: Record<string, string>;
+    outcome: string;
+  }> = [
+    {
+      name: 'an unknown token',
+      body: { token: TOKEN_UNKNOWN },
+      details: { token: 'token_invalid' },
+      outcome: 'token_invalid',
+    },
+    {
+      name: 'a token scoped to another project',
+      body: { token: TOKEN_ELSEWHERE },
+      details: { token: 'token_forbidden' },
+      outcome: 'token_forbidden',
+    },
+    {
+      name: 'a string without the fine-grained prefix',
+      body: { token: TOKEN_UNPREFIXED },
+      details: { token: 'token_account_wide' },
+      outcome: 'token_account_wide',
+    },
+    {
+      name: 'a token whose scope is every project',
+      body: { token: TOKEN_ALL },
+      details: { token: 'token_account_wide' },
+      outcome: 'token_account_wide',
+    },
+    {
+      name: 'a date in the past',
+      body: { token: TOKEN_NEW, tokenExpiresAt: '2020-01-01' },
+      details: { tokenExpiresAt: 'token_expiry_invalid' },
+      outcome: 'token_expiry_invalid',
+    },
+  ];
+
+  it('byte-identical: each refusal answers one closed code under its field, leaves the row as it was and writes one code-only event', async () => {
+    for (const refusal of refusals) {
+      const before = await rowOf(projectA);
+      const eventsBefore = await eventsOf(REF_A);
+
+      const { res, text } = await put(tenantA, refusal.body);
+      expect(res.status, refusal.name).toBe(400);
+      const error = (JSON.parse(text) as { error: { code: string; details: unknown } }).error;
+      expect(error.code, refusal.name).toBe('VALIDATION_FAILED');
+      expect(error.details, refusal.name).toEqual(refusal.details);
+
+      // Not the sealed value, the expiry, the version nor the timestamp moved.
+      expect(await rowOf(projectA), refusal.name).toEqual(before);
+      const eventsAfter = await eventsOf(REF_A);
+      expect(eventsAfter.length, refusal.name).toBe(eventsBefore.length + 1);
+      const last = eventsAfter[eventsAfter.length - 1];
+      expect(last).toMatchObject({
+        kind: 'replaced',
+        project_ref: REF_A,
+        outcome: refusal.outcome,
+      });
+      expect(last?.actor).toMatch(/^platform:[0-9a-f-]{36}$/);
+    }
+  });
+
+  it('a project that now reports another organisation refuses a token the project itself accepts (D-571)', async () => {
+    const [moved] = await adminSql<
+      { id: string }[]
+    >`select id::text as id from platform.projects where ref = ${REF_M}`;
+    const before = await rowOf(moved?.id ?? '');
+    const { res, text } = await put(tenantM, { token: TOKEN_M });
+    expect(res.status, text).toBe(400);
+    expect((JSON.parse(text) as { error: { details: unknown } }).error.details).toEqual({
+      token: 'org_mismatch',
+    });
+    expect(await rowOf(moved?.id ?? '')).toEqual(before);
+    const events = await eventsOf(REF_M);
+    expect(events.map((event) => event.outcome)).toEqual(['org_mismatch']);
+  });
+
+  it('a project that cannot be reached is { token: unchecked } and changes nothing', async () => {
+    const before = await rowOf(projectA);
+    const unreachable = {
+      ...provider.forToken(TOKEN_NEW, { orgSlug: ORG }),
+      describe: async () => {
+        throw new ProjectProviderError('unavailable', 0, undefined, true);
+      },
+    };
+    const refused = await replaceProjectToken(tenantA, { token: TOKEN_NEW }, ACTOR, {
+      provider: unreachable,
+      afterReplace: noFollowUp,
+    }).catch((error: unknown) => error as { status?: number; details?: unknown });
+    expect(refused).toMatchObject({ status: 400, details: { token: 'unchecked' } });
+    expect(await rowOf(projectA)).toEqual(before);
+  });
+
+  it('the success of the tracer left its audit event', async () => {
+    const events = await eventsOf(REF_A);
+    expect(
+      events.filter((event) => event.outcome === 'ok' && event.kind === 'replaced').length,
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it('race: two replacements of one project queue on the lock and the later one wins entirely', async () => {
+    const before = await rowOf(projectA);
+    const real = provider.forToken(TOKEN_R1, { orgSlug: ORG });
+    const slow = {
+      ...real,
+      describe: async (ref: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        return real.describe(ref);
+      },
+    };
+    const first = replaceProjectToken(tenantA, { token: TOKEN_R1 }, ACTOR, {
+      provider: slow,
+      afterReplace: noFollowUp,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const second = replaceProjectToken(tenantA, { token: TOKEN_R2 }, ACTOR, {
+      afterReplace: noFollowUp,
+    });
+    const [one, two] = await Promise.all([first, second]);
+
+    expect(two.credentialVersion).toBe(one.credentialVersion + 1);
+    const after = await rowOf(projectA);
+    expect(open(after.mgmt_token_sealed ?? '', `${projectA}:mgmt_token`)).toBe(TOKEN_R2);
+    expect(after.credential_version).toBe(before.credential_version + 2);
+  });
+
+  it('no response, log line, error detail or audit row holds a refused token or its first 8 characters', async () => {
+    captured.lines.length = 0;
+    const outputs: string[] = [];
+    for (const refusal of refusals) {
+      outputs.push((await put(tenantA, refusal.body)).text);
+    }
+    outputs.push((await put(tenantM, { token: TOKEN_M })).text);
+    outputs.push(JSON.stringify(await eventsOf(REF_A)), JSON.stringify(await eventsOf(REF_M)));
+    outputs.push(captured.lines.join('\n'));
+    const haystack = outputs.join('\n');
+    for (const token of [
+      TOKEN_UNKNOWN,
+      TOKEN_ELSEWHERE,
+      TOKEN_ALL,
+      TOKEN_UNPREFIXED,
+      TOKEN_NEW,
+      TOKEN_M,
+    ]) {
+      expect(haystack).not.toContain(token);
+      expect(haystack).not.toContain(token.slice(0, 8));
+    }
   });
 });
