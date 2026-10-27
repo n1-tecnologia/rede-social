@@ -113,6 +113,11 @@ export async function ddlTargetOf(
   };
 }
 
+/** RED skeleton (09.4-07 Task 2): replaced in the GREEN commit. */
+export function apiUrlFor(_provider: ProjectProvider, _ref: string): string {
+  return '';
+}
+
 /** The DDL URL for `password` at `target`. */
 export const ddlUrlFor = (target: DdlTarget, password: string): string =>
   connectionUrl(target.user, password, target.host, target.port, target.db);

@@ -148,3 +148,33 @@ export async function validateCustomerToken(input: {
   }
   return { orgSlug, expiresAt, provider };
 }
+
+// RED skeleton (09.4-07 Task 2): the shapes exist, the behaviour does not. Replaced in the GREEN commit.
+
+export type TokenEventKind = 'registered' | 'replaced' | 'owner_changed' | 'repinned';
+export type TokenEventOutcome = 'ok' | Exclude<TokenReason, 'already_registered'>;
+export type TokenEvent = {
+  kind: TokenEventKind;
+  projectId: string | null;
+  projectRef: string;
+  actor: string;
+  outcome: TokenEventOutcome;
+};
+
+export function sealManagementToken(_token: string, _projectId: string): string {
+  return '';
+}
+
+export async function recordTokenEvent(_tx: unknown, _event: TokenEvent): Promise<void> {}
+
+export async function registerCustomerProject(input: {
+  ref: string;
+  token: string;
+  expiresAt: string | null;
+  actor: string;
+  today?: string;
+  provider?: ProjectProvider;
+}): Promise<{ projectId: string; orgSlug: string }> {
+  const validated = await validateCustomerToken(input);
+  return { projectId: crypto.randomUUID(), orgSlug: validated.orgSlug };
+}
