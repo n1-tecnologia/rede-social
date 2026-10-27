@@ -2,12 +2,12 @@
 gsd_state_version: "1.0"
 current_phase: "09.4"
 current_phase_name: Projeto do tenant no Supabase do cliente (INSERTED)
-current_plan: 1
+current_plan: 11
 status: executing
-stopped_at: Completed 09.4-16-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16 done = 13/17; 01 stopped at Igor's probe P1 checkpoint; 11 and 12 wait for 01, 17 waits for all). Igor approved sketch 015 and the orchestrator wrote the approval on his explicit word (aea382b2). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
+stopped_at: Completed 09.4-01-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01 done = 14/17; 11 and 12 next, 17 waits for all). Probe run A ran on Igor's terminal on 2026-10-27 (21/21 allowed with the thirteen permissions) and was pasted into ledger P1 at his word, P1 Status still pending (his line); his answer on the 14th permission (ruling 1) is open. Igor approved sketch 015 and the orchestrator wrote the approval on his explicit word (aea382b2). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
 last_updated: "2026-10-27T16:36:21.752Z"
 last_activity: 2026-10-27
-last_activity_desc: Phase 09.4 web plans 14-16 done (13/17); paused at the 01 human gate (probe P1)
+last_activity_desc: Phase 09.4 plan 01 done (14/17); P1 run A pasted, Status pending for Igor; 11, 12, 17 next
 state_head: 79c11da34733d016bac4ecde1abeee8c955cb1f0
 progress:
   total_phases: 26
@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.4 (Projeto do tenant no Supabase do cliente (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 17
-Plan: 13 of 17 done (03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16); 01 at its human checkpoint (probe P1); 11, 12 blocked on 01; 17 blocked on all
-Status: Executing Phase 09.4 (paused at Igor gates)
-Last activity: 2026-10-27 — Phase 09.4 web plans 14-16 done (13/17); paused at probe P1 (01)
+Plan: 14 of 17 done (03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01); 11 and 12 next (unblocked by 01); 17 waits for all and for Igor's hosted proofs P1..P8
+Status: Executing Phase 09.4
+Last activity: 2026-10-27 — Phase 09.4 plan 01 done (14/17); P1 run A recorded, Status pending for Igor
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
