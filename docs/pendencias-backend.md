@@ -1,6 +1,6 @@
 # Pendências de backend
 
-Ajustes de 09/10, de 12/10, de 15/10 e de 20/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-20.
+Ajustes de 09/10, de 12/10, de 15/10 e de 20/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-26. Os itens 3, 11, 12, 13 e 14 foram feitos na Fase 09.3 (26/10); os itens 1, 2, 4, 5, 6 e 8 continuam abertos.
 
 ## Feed e perfil
 
@@ -24,7 +24,7 @@ Ajustes de 09/10, de 12/10, de 15/10 e de 20/10 (branch `FRONT-AJUSTES`). Atuali
 
 ## Marca: ícone do app e aparência
 
-### 3. Ícone do app no Android sem moldura
+### 3. Ícone do app no Android sem moldura (feito em 26/10)
 
 - **O que mudou:** o editor "Ícone do app" (Marca da plataforma, Marca do admin e assistente de novo tenant) monta o ícone no navegador, já com o fundo, e envia um PNG quadrado de 1024 px (JPEG só se o PNG passar de 2 MB) pelo upload de ícone que já existe (`kind: 'icon'`). Desde 20/10 (pedido do cliente: "a arte tem que tomar o círculo inteiro"), a prévia do Android nesses editores mostra a arte ocupando o círculo inteiro, sem a faixa da cor principal: sempre no rascunho do editor e, no ícone salvo, quando o tenant tem um ícone próprio. O ícone derivado do logo continua com a margem na prévia. **O app instalado ainda mostra a moldura** até a mudança abaixo.
 - **Back:**
@@ -32,12 +32,14 @@ Ajustes de 09/10, de 12/10, de 15/10 e de 20/10 (branch `FRONT-AJUSTES`). Atuali
   - depois do deploy, refazer os ícones dos tenants que já têm um ícone próprio;
   - opcional: a marca pública do host (`toHostBranding`) dizer se o ícone é próprio, para o manifest e o front saberem sem outra leitura.
 - **Por quê:** com um fundo diferente da cor principal, aparece uma moldura no Android: a faixa da cor principal em volta do ícone. Aviso para o cliente: no Android de quem já instalou o app, o ícone novo não aparece na hora; ele troca quando o Chrome atualizar o app instalado.
+- **Feito (26/10):** o editor envia a arte pelo tipo de upload `icon_art`, a marca guarda `iconOwnArt` e o worker preenche o `maskable512` inteiro quando a arte própria é opaca; um ícone com transparência, derivado do logo ou enviado de outro jeito (`kind: 'icon'`) mantém a margem. Dois pontos da lista "Back" acima foram decididos de outro jeito: o ícone dos tenants que já têm um ícone próprio NÃO é refeito no deploy (decisão D-564: eles ficam com a margem até o admin abrir o editor de ícone, em Marca, e salvar de novo), e a marca pública do host não ganhou o campo opcional. O aviso ao cliente sobre o Android instalado está no `docs/DEPLOY.md`.
 
 ### 4. Guardar as escolhas do editor de ícone
 
 - **O que mudou:** as escolhas do editor "Ícone do app" ficam só no navegador; só o ícone pronto é enviado. Nas telas Marca, quem volta à página encontra o editor no padrão, e o ícone não acompanha uma troca da cor principal: o editor avisa para editar o ícone de novo.
 - **Back:** um campo `appIcon` na marca com as escolhas (modo, cor ou imagem de fundo, tamanho do logo e as imagens de origem: o logo usado, a imagem de fundo e a arte), devolvido no detalhe do tenant (`GET /v1/platform/tenants/{id}`) e no `GET /v1/admin/branding`. Opcional: refazer o ícone quando a cor principal mudar.
 - **Por quê:** o editor reabrir com o que foi usado da última vez, e o ícone acompanhar a cor principal sem ninguém precisar refazê-lo.
+- **Nota (Fase 09.3):** o campo `iconOwnArt` da marca, criado na Fase 09.3, é onde as escolhas salvas do editor podem morar depois (D-565). Este item continua aberto.
 
 ### 5. Aparência na Marca do admin
 
@@ -89,7 +91,7 @@ Ajustes de 09/10, de 12/10, de 15/10 e de 20/10 (branch `FRONT-AJUSTES`). Atuali
 
 Os outros itens do PDF ficaram só no front: vídeos sem a barra do player e com som desde a abertura, story que só pausa segurando, setas e cantos arredondados na barra de stories, excluir e compartilhar story. Os itens abaixo dependem do back. Riscos comuns: qualquer migration roda em produção no merge da master, e a homolog usa o mesmo Supabase; nos itens 13 e 14, o banco e a API sobem antes (ou junto) do web, porque o formulário passa a aceitar mais assim que a constante do contrato muda.
 
-### 11. Excluir evento
+### 11. Excluir evento (feito em 26/10)
 
 - **O que mudou:** o formulário de edição do evento (junto de cancelar e reativar) e o aviso de evento cancelado ganharam o botão "Excluir evento", desativado e com "Em breve", só para quem gerencia eventos. O botão não faz nada: não existe rota de exclusão de evento.
 - **Back:**
@@ -98,8 +100,9 @@ Os outros itens do PDF ficaram só no front: vídeos sem a barra do player e com
   - lembretes já agendados: o job de lembretes já lê se o evento foi excluído, conferir que ele pula o envio;
   - decidir se dá para excluir evento que já tem check-in, ou só cancelado ou sem confirmações.
 - **Por quê:** hoje o evento só pode ser cancelado (e reativado); não há como tirá-lo do app.
+- **Feito (26/10):** `DELETE /v1/events/{id}` com a mesma permissão de editar o evento, exclusão suave em `events.deleted_at`, em silêncio (ninguém é avisado), para qualquer evento (ativo, cancelado ou passado, com ou sem confirmações). As respostas e os check-ins ficam no banco e continuam contando para o membro, inclusive em "Sua atividade", por uma migration que ajusta a função do painel. Os lembretes já agendados pulam o envio. O link de um evento excluído abre a tela de não encontrado. O botão virou real, com confirmação.
 
-### 12. Excluir comunidade arquivada
+### 12. Excluir comunidade arquivada (feito em 26/10)
 
 - **O que mudou:** o formulário da comunidade arquivada e a página dela (junto de "Reativar") ganharam o botão "Excluir comunidade", desativado e com "Em breve", só para quem gerencia comunidades. O botão não faz nada: não existe rota de exclusão de comunidade.
 - **Back:**
@@ -107,15 +110,19 @@ Os outros itens do PDF ficaram só no front: vídeos sem a barra do player e com
   - publicações: a chave de `feed_posts.community_id` não tem `on delete`, então uma exclusão definitiva falha; na suave, o feed, o Reels e a página do post precisam esconder as publicações da comunidade excluída;
   - o que hoje cai em cascata numa exclusão definitiva e precisa de decisão na suave: membros (`community_members`), destaques e fixações de story (`story_highlights`, `story_community_pins`) e os vínculos com produtos da Loja (`store_product_communities`); para a Loja, decidir o que acontece com quem comprou acesso a ela.
 - **Por quê:** hoje a comunidade arquivada só pode ser reativada; não há como removê-la.
+- **Feito (26/10):** `DELETE /v1/communities/{id}` só para comunidade arquivada (`409` com `not_archived` para as outras), exclusão suave em `communities.deleted_at`. A exclusão é recusada, com até cinco nomes e o total, enquanto um produto ATIVO da Loja ainda libera a comunidade (produtos arquivados não contam, e nada na Loja é alterado). As publicações saem do Início, do Reels e da página do post (que passa a responder 404), junto com curtidas e comentários, e continuam no banco: o suporte desfaz limpando `deleted_at`, não há tela de restauração. Os destaques ficam escondidos pelos filtros de leitura e nada é apagado; `story_community_pins` já não existe desde a Fase 05.2.
+- **Ainda aberto:** a Loja mantém o vínculo de um produto com uma comunidade arquivada, e o formulário do produto só lista comunidades ativas. Então, para tirar a comunidade do produto, hoje é preciso reativá-la, tirá-la do produto, arquivá-la de novo e só então excluir. O texto da recusa ("Tire a comunidade dele primeiro") não diz isso, e a decisão fica com o dono do produto.
 
-### 13. Cronograma do evento sem o limite de 30 momentos
+### 13. Cronograma do evento sem o limite de 30 momentos (feito em 26/10)
 
 - **O que mudou:** nada no front, por decisão de 20/10. O limite de 30 está no contrato (`EVENT_SCHEDULE_MAX_ITEMS` em `packages/modules/events/contracts/index.ts`, usado pelo schema da API e lido pelo formulário em `apps/web/lib/event-extras.ts`) e numa CHECK do banco (`events_schedule_chk`, `jsonb_array_length(schedule) <= 30`). Mudar só o front faria o formulário aceitar mais momentos e a API recusar o salvamento.
 - **Back:** migration trocando a CHECK `events_schedule_chk` e a constante no contrato (o formulário acompanha sozinho). Proposta: 200 momentos, mantendo um teto para proteger a linha do evento e a página.
 - **Por quê:** o cliente pediu cronogramas com mais de 30 momentos.
+- **Feito (26/10):** limite em 200 momentos no contrato (`EVENT_SCHEDULE_MAX_ITEMS`) e na CHECK `events_schedule_chk` (migration que a troca); o formulário acompanha sozinho. Baixar o limite de novo exige uma decisão sobre os dados.
 
-### 14. Nome do destaque sem o limite de 15 caracteres
+### 14. Nome do destaque sem o limite de 15 caracteres (feito em 26/10)
 
 - **O que mudou:** nada no front, por decisão de 20/10. O limite de 15 está no contrato (`STORY_HIGHLIGHT_MAX_TITLE` em `packages/modules/stories/contracts/index.ts`, lido pelo publicar story e pelo gerenciador de destaques), na checagem do serviço (`packages/modules/stories/server/service.ts`) e numa CHECK do banco (`story_highlights_title_chk`, de 1 a 15 caracteres).
 - **Back:** migration trocando a CHECK `story_highlights_title_chk` e a constante no contrato (os formulários acompanham sozinhos). Proposta: 50 caracteres. O nome aparece numa linha embaixo do círculo do destaque, então nomes longos vão aparecer cortados com reticências.
 - **Por quê:** o cliente pediu nomes de destaque maiores.
+- **Feito (26/10):** limite em 50 caracteres no contrato (`STORY_HIGHLIGHT_MAX_TITLE`), na checagem do serviço e na CHECK `story_highlights_title_chk` (migration que a troca). O nome longo aparece cortado em uma linha, com reticências, embaixo do círculo, e inteiro quando o destaque abre. Baixar o limite de novo exige uma decisão sobre os dados.
