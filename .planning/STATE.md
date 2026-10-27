@@ -4,10 +4,10 @@ current_phase: "09.4"
 current_phase_name: Projeto do tenant no Supabase do cliente (INSERTED)
 current_plan: 1
 status: executing
-stopped_at: Completed 09.4-13-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13 done; 04 and 01 stopped at their human checkpoints, Igor's sketch 015 approval and probe P1; 11 and 12 wait for 01, 14-16 wait for 04, 17 waits for all). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
+stopped_at: Completed 09.4-16-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16 done = 13/17; 01 stopped at Igor's probe P1 checkpoint; 11 and 12 wait for 01, 17 waits for all). Igor approved sketch 015 and the orchestrator wrote the approval on his explicit word (aea382b2). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
 last_updated: "2026-10-27T16:36:21.752Z"
 last_activity: 2026-10-27
-last_activity_desc: Phase 09.4 waves 1-6 backend plans done (9/17); paused at the 04 and 01 human gates
+last_activity_desc: Phase 09.4 web plans 14-16 done (13/17); paused at the 01 human gate (probe P1)
 state_head: 79c11da34733d016bac4ecde1abeee8c955cb1f0
 progress:
   total_phases: 26
@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.4 (Projeto do tenant no Supabase do cliente (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 17
-Plan: 9 of 17 done (03, 05, 02, 06, 07, 08, 09, 10, 13); 04 and 01 at human checkpoints; 11, 12, 14, 15, 16, 17 blocked on them
+Plan: 13 of 17 done (03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16); 01 at its human checkpoint (probe P1); 11, 12 blocked on 01; 17 blocked on all
 Status: Executing Phase 09.4 (paused at Igor gates)
-Last activity: 2026-10-27 — Phase 09.4 backend plans done (9/17); paused at sketch 015 approval (04) and probe P1 (01)
+Last activity: 2026-10-27 — Phase 09.4 web plans 14-16 done (13/17); paused at probe P1 (01)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
