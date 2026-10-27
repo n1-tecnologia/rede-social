@@ -190,6 +190,26 @@ describe('BootstrapSteps', () => {
     expect(screen.getByText(sentence)).toBeTruthy();
   });
 
+  it.each([
+    [
+      'token_invalid',
+      'O Supabase não aceitou o token de acesso. Substitua o token e tente de novo.',
+    ],
+    [
+      'token_forbidden',
+      'O token de acesso não tem permissão para esta etapa. Substitua por um token com as permissões certas.',
+    ],
+    ['org_mismatch', 'O projeto está em outra organização do Supabase. Nada foi alterado.'],
+  ] as const)(
+    'maps the customer-token reason %s to its sentence together with its "Código" line (09.4-16, CTK-29)',
+    (code, sentence) => {
+      mount(steps({ verify: 'failed' }, { verify: code }));
+      expect(screen.getByText(sentence)).toBeTruthy();
+      expect(screen.getByText(`Código ${code}`)).toBeTruthy();
+      expect(screen.queryByText('Algo deu errado nesta etapa.')).toBeNull();
+    },
+  );
+
   it('falls back to the unknown sentence, and shows no code line, for a failure without a code', () => {
     mount(steps({ verify: 'failed' }));
     expect(screen.getByText('Algo deu errado nesta etapa.')).toBeTruthy();

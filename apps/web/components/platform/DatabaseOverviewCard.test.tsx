@@ -365,3 +365,94 @@ describe('DatabaseOverviewCard', () => {
     });
   });
 });
+
+/**
+ * 09.4-16 Task 1 (UI-D-552, UI-D-558, CTK-14, CTK-34, CTK-40, E05) - who owns the project. A customer
+ * project reads Projeto · Dono · Organização · Esquema · Plano · Compartilhado; a platform project (or an
+ * answer from an API that predates the fields) gets only the "Dono: Plataforma" row. The customer-Free
+ * notice exists but fires only when the plan reads Free for a customer project.
+ */
+describe('DatabaseOverviewCard - owner and organisation (09.4-16)', () => {
+  const labels = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('dt')).map((dt) => dt.textContent);
+  const valueOf = (container: HTMLElement, label: string) => {
+    const index = labels(container).indexOf(label);
+    return container.querySelectorAll('dd')[index];
+  };
+
+  it('lists Projeto, Dono, Organização, Esquema, Plano for a customer project, with the slug breaking', () => {
+    const { container } = mount({ owner: 'customer', organization: 'acme-corp' });
+    expect(labels(container)).toEqual(['Projeto', 'Dono', 'Organização', 'Esquema', 'Plano']);
+    expect(valueOf(container, 'Dono')?.textContent).toBe('Cliente');
+    const organization = valueOf(container, 'Organização') as HTMLElement;
+    expect(organization.textContent).toBe('acme-corp');
+    expect(organization.className).toContain('break-all');
+    expect(organization.className).toContain('min-w-0');
+  });
+
+  it('keeps a long organisation slug inside the minmax(0,1fr) column (E05 overflow, long-text)', () => {
+    const slug = 'a-very-long-organisation-slug-that-would-push-a-320px-card-sideways-0123456789';
+    const { container } = mount({ owner: 'customer', organization: slug });
+    expect(valueOf(container, 'Organização')?.textContent).toBe(slug);
+    const dl = container.querySelector('dl') as HTMLElement;
+    expect(dl.className).toContain('grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)]');
+  });
+
+  it('lists Projeto, Dono, Esquema, Plano for a platform project: one new row and no Organização', () => {
+    const { container } = mount({ owner: 'platform', organization: null });
+    expect(labels(container)).toEqual(['Projeto', 'Dono', 'Esquema', 'Plano']);
+    expect(valueOf(container, 'Dono')?.textContent).toBe('Plataforma');
+  });
+
+  it('renders an answer without the new fields (an older API) as a platform project', () => {
+    const { container } = mount();
+    expect(labels(container)).toEqual(['Projeto', 'Dono', 'Esquema', 'Plano']);
+    expect(valueOf(container, 'Dono')?.textContent).toBe('Plataforma');
+    expect(screen.queryByText('Organização')).toBeNull();
+  });
+
+  it('keeps Compartilhado after Plano for a customer project', () => {
+    const { container } = mount({ owner: 'customer', organization: 'acme', otherTenants: 2 });
+    expect(labels(container)).toEqual([
+      'Projeto',
+      'Dono',
+      'Organização',
+      'Esquema',
+      'Plano',
+      'Compartilhado',
+    ]);
+  });
+
+  it('reads Plano as "Não informado" for a customer project the locked permissions cannot read', () => {
+    const { container } = mount({ owner: 'customer', organization: 'acme', plan: null });
+    expect(valueOf(container, 'Plano')?.textContent).toBe('Não informado');
+    expect(container.querySelector('[data-notice="planNotPro"]')).toBeNull();
+  });
+
+  it.each(['free', 'Free', 'FREE'])(
+    'warns "O plano deste projeto não é Pro." for a customer project on %s, and nothing blocks',
+    (plan) => {
+      const { container } = mount({ owner: 'customer', organization: 'acme', plan });
+      const notice = container.querySelector('[data-notice="planNotPro"]') as HTMLElement;
+      expect(notice.textContent).toBe(
+        'O plano deste projeto não é Pro. O projeto do cliente deve estar no plano Pro.',
+      );
+      expect(notice.hasAttribute('role')).toBe(false);
+      expect(notice.className).toContain('bg-warning/10');
+      expect(notice.querySelector('svg')?.getAttribute('class')).toContain('lucide-circle-alert');
+      expect(
+        (screen.getByRole('button', { name: 'Verificar agora' }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    },
+  );
+
+  it.each([
+    ['customer', 'pro'],
+    ['customer', null],
+    ['platform', 'free'],
+    ['platform', 'pro'],
+  ] as const)('never shows the customer-Free notice for owner %s on plan %s', (owner, plan) => {
+    const { container } = mount({ owner, organization: owner === 'customer' ? 'acme' : null, plan });
+    expect(container.querySelector('[data-notice="planNotPro"]')).toBeNull();
+  });
+});
