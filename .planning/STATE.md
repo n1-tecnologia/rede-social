@@ -5,10 +5,10 @@ current_phase_name: Pendências de backend do FRONT.pdf (INSERTED)
 current_plan: 9
 status: executing
 stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered, UI-SPEC approved and planned (9 plans, 6 waves, plan checker passed) 2026-10-26 on the side; execute-phase 09.3 waits for 09.2 to close.
-last_updated: "2026-10-26T21:58:58.196Z"
-last_activity: 2026-10-26
+last_updated: "2026-10-27T12:02:35.666Z"
+last_activity: 2026-10-27
 last_activity_desc: Phase 09.3 execution started
-state_head: 628bf920e92b3c8c09e6511a2f4d7245b599d689
+state_head: 2939d5a38c69968d4388460582df81d465ae6ecb
 progress:
   total_phases: 25
   completed_phases: 0
@@ -1127,6 +1127,7 @@ None yet.
 | 261023-ssq | Admit loopback Supabase origins in a production build ONLY behind the build-time flag `NEXT_PUBLIC_E2E_LOOPBACK_ORIGINS` (set only in the PWA e2e webServer env), with a workflow guard and vitest scan that fail if the flag reaches deploy-api, deploy-hml, a vercel config, .env.example or a DEPLOY.md assignment; fixes the CI e2e PWA avatar upload (`upload: the signed URL origin is refused` in a production build against the local http stack); e2e NOT run locally, the next CI run is the proof; 54 web tests passing | 2026-10-23 | 759e9845 | complete | [261023-ssq-admit-loopback-supabase-origins-in-the-e](./quick/261023-ssq-admit-loopback-supabase-origins-in-the-e/) |
 | 261023-t3x | Make `two-database-routing.test.ts` survive a slow test on the CI runner: the breaker test's probe now `resetAndDestroy()`s (Linux can turn `destroy()` into a clean FIN, which postgres.js 3.4.9 reconnects on forever with no error), teardown is registered and drained in `afterEach`/`afterAll` so a timeout cannot leave a tenant bound to an unreachable project (the residue that failed ten other integration tests in CI run 40039284864); biome, api typecheck and guards green; the integration suite was NOT run locally, the next CI run is the proof; deferred PRODUCT finding: `connectProject` has no total deadline | 2026-10-23 | c9d0e955 | complete | [261023-t3x-make-the-two-database-routing-integratio](./quick/261023-t3x-make-the-two-database-routing-integratio/) |
 | 261024-lcq | `migrateAll` now tolerates a central database that has no `platform` schema yet (PostgreSQL 42P01 on the first registry read, found along the `.cause` chain), applies the central set, then reads the registry strictly and fans the tenant set out; the retry path and every other error behave as before. Found by the FIRST PRODUCTION RUN of the 09.2 release on 2026-10-24 (Actions run 40043498712 attempt 4, execution migrate-5gs9z crashed with `relation platform.projects does not exist`); CI never covered a central database without the platform schema. 21 hermetic cases (12 red before, all green after); integration suite NOT run locally, the next CI run is the proof | 2026-10-24 | 942ea89b | complete | [261024-lcq-migrateall-must-tolerate-a-central-datab](./quick/261024-lcq-migrateall-must-tolerate-a-central-datab/) |
+| 261027-c8f | Phase 09.3 WR-03: setProductStatus refuses (409) to reactivate a product linked to a soft-deleted community | 2026-10-27 | 2939d5a3 | — | [261027-c8f-phase-09-3-wr-03-setproductstatus-refuse](./quick/261027-c8f-phase-09-3-wr-03-setproductstatus-refuse/) |
 
 ### Roadmap Evolution
 
