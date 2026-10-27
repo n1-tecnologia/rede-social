@@ -92,7 +92,7 @@ begin;
 -- the EXPLAIN and every assertion run the same text; pgTAP executes a single-word query as a
 -- prepared statement. Like its siblings the file ROLLS BACK, so it re-runs identically against a
 -- seeded or an empty database, twice in a row, in any order (TENANT-05 ordering).
-select plan(20);
+select plan(24);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 -- V: the vocabulary and volume tenant. A: no reels row. B: reels already DISABLED.
@@ -462,6 +462,130 @@ select is_empty(
   'T-05.3-06 / layer 3: from V''s lane, even the statement whose constant names A returns nothing (RLS)'
 );
 
+reset role;
+
+-- ══ 21-24. A DELETED COMMUNITY'S VIDEO LEAVES 'TODOS' (09.3-06, PEND-05, PEND-13, D-555) ══════════
+-- Added after every assertion above, which stay byte-identical. The RESTRICTIVE policy
+-- `feed_posts_deleted_community_gate` narrows the 'Todos' statement in the member lane (RLS applies
+-- to a lane, unlike the owner-run EXPLAIN of block 9-13): a READY video post of a live community
+-- is on the first page (positive control), it is gone once the community is soft-deleted, the SAME
+-- statement under that policy still never plans a Seq Scan on feed_posts, and clearing `deleted_at`
+-- brings the video back (D-556: nothing was erased). The statement is the 'todos' text of block 9-13
+-- verbatim, so the author needs the membership the join to `memberships` reads.
+select tests.member('1c000000-0000-4000-8000-000000000001', '1c000000-0000-4000-8000-000000000002');
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes)
+values ('1c00a400-0000-4000-8000-000000000001', '1c000000-0000-4000-8000-000000000001',
+        '1c000000-0000-4000-8000-000000000002', 'video', 'post', 'ready', 'video/mp4', 1024);
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, media_kind, community_id, created_at)
+values ('1c00f400-0000-4000-8000-000000000001', '1c000000-0000-4000-8000-000000000001',
+        '1c000000-0000-4000-8000-000000000002', 'video newest', 'video',
+        '1c00c100-0000-4000-8000-000000000001', now() + interval '1 hour');
+insert into public.feed_post_media (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+values ('1c000000-0000-4000-8000-000000000001', '1c00f400-0000-4000-8000-000000000001', 'video',
+        '1c00a400-0000-4000-8000-000000000001', 'video', 0);
+analyze public.feed_posts;
+
+prepare reels_todos_deleted as
+    select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id and ms.tenant_id = p.tenant_id
+      where p.tenant_id = '1c000000-0000-4000-8000-000000000001'
+        and p.deleted_at is null
+        and (p.visibility = 'tenant'
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), '{}'::uuid[]))))
+        and p.media_kind = 'video'
+        and exists (
+          select 1
+            from public.feed_post_media vm
+            join public.media_assets va on va.id = vm.media_asset_id
+           where vm.post_id = p.id
+             and vm.kind = 'video'
+             and va.status = 'ready')
+      order by p.created_at desc, p.id desc limit 11;
+
+create temporary table reels_deleted_plans (name text primary key, plan text);
+grant all on reels_deleted_plans to public;
+
+select tests.as_tenant('1c000000-0000-4000-8000-000000000001', '1c000000-0000-4000-8000-000000000002');
+select results_eq(
+  $$ select count(*)::int from (
+    select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id and ms.tenant_id = p.tenant_id
+      where p.tenant_id = '1c000000-0000-4000-8000-000000000001'
+        and p.deleted_at is null
+        and (p.visibility = 'tenant'
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), '{}'::uuid[]))))
+        and p.media_kind = 'video'
+        and exists (
+          select 1
+            from public.feed_post_media vm
+            join public.media_assets va on va.id = vm.media_asset_id
+           where vm.post_id = p.id
+             and vm.kind = 'video'
+             and va.status = 'ready')
+      order by p.created_at desc, p.id desc limit 11) s where s.id = '1c00f400-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'positive control: the newest READY video of a LIVE community is on the ''Todos'' page in the member lane');
+reset role;
+
+update public.communities set deleted_at = now() where id = '1c00c100-0000-4000-8000-000000000001';
+select tests.as_tenant('1c000000-0000-4000-8000-000000000001', '1c000000-0000-4000-8000-000000000002');
+select results_eq(
+  $$ select count(*)::int from (
+    select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id and ms.tenant_id = p.tenant_id
+      where p.tenant_id = '1c000000-0000-4000-8000-000000000001'
+        and p.deleted_at is null
+        and (p.visibility = 'tenant'
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), '{}'::uuid[]))))
+        and p.media_kind = 'video'
+        and exists (
+          select 1
+            from public.feed_post_media vm
+            join public.media_assets va on va.id = vm.media_asset_id
+           where vm.post_id = p.id
+             and vm.kind = 'video'
+             and va.status = 'ready')
+      order by p.created_at desc, p.id desc limit 11) s where s.id = '1c00f400-0000-4000-8000-000000000001' $$,
+  ARRAY[0], 'PEND-05: the SAME ''Todos'' statement omits the video once its community is soft-deleted');
+do $$
+declare
+  r record;
+  v_plan text := '';
+begin
+  for r in execute 'explain execute reels_todos_deleted' loop
+    v_plan := v_plan || r."QUERY PLAN" || E'\n';
+  end loop;
+  insert into reels_deleted_plans values ('todos', v_plan);
+end
+$$;
+select ok(
+  (select plan from reels_deleted_plans where name = 'todos') not like '%Seq Scan on feed_posts%',
+  '…and the statement under the new policy is still never a Seq Scan on feed_posts');
+reset role;
+
+update public.communities set deleted_at = null where id = '1c00c100-0000-4000-8000-000000000001';
+select tests.as_tenant('1c000000-0000-4000-8000-000000000001', '1c000000-0000-4000-8000-000000000002');
+select results_eq(
+  $$ select count(*)::int from (
+    select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id and ms.tenant_id = p.tenant_id
+      where p.tenant_id = '1c000000-0000-4000-8000-000000000001'
+        and p.deleted_at is null
+        and (p.visibility = 'tenant'
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), '{}'::uuid[]))))
+        and p.media_kind = 'video'
+        and exists (
+          select 1
+            from public.feed_post_media vm
+            join public.media_assets va on va.id = vm.media_asset_id
+           where vm.post_id = p.id
+             and vm.kind = 'video'
+             and va.status = 'ready')
+      order by p.created_at desc, p.id desc limit 11) s where s.id = '1c00f400-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'recovery: clearing deleted_at lists the video again (nothing was erased)');
 reset role;
 
 select * from finish();

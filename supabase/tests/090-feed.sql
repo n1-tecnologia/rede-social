@@ -32,7 +32,7 @@ begin;
 -- tenant would push the demo posts off the first feed page and quietly break `feed.test.ts`'s
 -- cursor walk and `feed.spec.ts`'s ordering assertions. Like its siblings, this file rolls back, so
 -- it re-runs identically against a seeded or an empty database, twice in a row, in any order.
-select plan(44);
+select plan(47);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-feed', 'Comunidade Feed', '0c000000-0000-4000-8000-000000000001');
@@ -617,6 +617,51 @@ select doesnt_match(
   'Seq Scan on feed_comments',
   '…and never a sequential scan of feed_comments'
 );
+
+-- 09.3-06 (PEND-05, PEND-13, D-555): the RESTRICTIVE policy `feed_posts_deleted_community_gate` leaves
+-- the statement text above unchanged and still narrows its answer. The SAME 'merged' statement, run
+-- in the member lane (where RLS applies, unlike the owner-run EXPLAIN above), lists a newest post of a
+-- community while the community is live, stops listing it once the community is soft-deleted, and
+-- lists it again after `deleted_at` is cleared (D-556: nothing was erased). Added, never edited: every
+-- assertion above is byte-identical.
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, community_id, created_at)
+values ('0c000000-0000-4000-8000-0000000000d1', '0c000000-0000-4000-8000-000000000001', 'newest in c1',
+        '0c000000-0000-4000-8000-000000000002', '0c000000-0000-4000-8000-0000000000c1', now() + interval '1 hour');
+select tests.as_tenant('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-000000000002');
+select results_eq(
+  $$ select count(*)::int from (
+       select p.id from public.feed_posts p
+        where p.tenant_id = '0c000000-0000-4000-8000-000000000001' and p.deleted_at is null
+        order by p.created_at desc, p.id desc limit 10) s
+      where s.id = '0c000000-0000-4000-8000-0000000000d1' $$,
+  ARRAY[1],
+  '09.3-06: the newest post of a LIVE community is on the first page of the merged statement (positive control)'
+);
+reset role;
+update public.communities set deleted_at = now() where id = '0c000000-0000-4000-8000-0000000000c1';
+select tests.as_tenant('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-000000000002');
+select results_eq(
+  $$ select count(*)::int from (
+       select p.id from public.feed_posts p
+        where p.tenant_id = '0c000000-0000-4000-8000-000000000001' and p.deleted_at is null
+        order by p.created_at desc, p.id desc limit 10) s
+      where s.id = '0c000000-0000-4000-8000-0000000000d1' $$,
+  ARRAY[0],
+  '09.3-06: the SAME statement stops listing the post once its community is soft-deleted'
+);
+reset role;
+update public.communities set deleted_at = null where id = '0c000000-0000-4000-8000-0000000000c1';
+select tests.as_tenant('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-000000000002');
+select results_eq(
+  $$ select count(*)::int from (
+       select p.id from public.feed_posts p
+        where p.tenant_id = '0c000000-0000-4000-8000-000000000001' and p.deleted_at is null
+        order by p.created_at desc, p.id desc limit 10) s
+      where s.id = '0c000000-0000-4000-8000-0000000000d1' $$,
+  ARRAY[1],
+  '09.3-06: clearing deleted_at lists it again (recovery, nothing was erased)'
+);
+reset role;
 
 select * from finish();
 rollback;

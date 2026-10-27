@@ -340,4 +340,235 @@ describe('a deleted community leaves the feed (D-555, D-556)', () => {
     expect(rows[0]?.cmd).toBe('SELECT');
     expect(rows[0]?.roles).toContain('authenticated');
   });
+
+  it('4. every route that takes a post or comment id answers the bare 404, rows and counters stay', async () => {
+    const k = await createCommunity(communityName('rotas K'));
+    const p = await publish({ caption: caption('t4 K post'), communityId: k.id });
+    const asMember = async (path: string, init: RequestInit = {}) =>
+      request(path, tokens.demoMember, init);
+    const json = (body: unknown) => ({ body: JSON.stringify(body) });
+
+    const rootRes = await asMember(`/v1/feed/posts/${p.id}/comments`, {
+      method: 'POST',
+      ...json({ body: `${CAPTION_PREFIX} raiz` }),
+    });
+    expect(rootRes.status, await rootRes.clone().text()).toBe(201);
+    const c1 = (await rootRes.json()) as { id: string };
+    const replyRes = await asMember(`/v1/feed/posts/${p.id}/comments`, {
+      method: 'POST',
+      ...json({ body: `${CAPTION_PREFIX} resposta`, parentId: c1.id }),
+    });
+    expect(replyRes.status, await replyRes.clone().text()).toBe(201);
+    const c2 = (await replyRes.json()) as { id: string };
+    expect((await asMember(`/v1/feed/posts/${p.id}/like`, { method: 'POST' })).status).toBe(200);
+    expect((await asMember(`/v1/feed/comments/${c1.id}/like`, { method: 'POST' })).status).toBe(
+      200,
+    );
+
+    // Positive controls: while the community is live every route below answers.
+    expect((await asMember(`/v1/feed/posts/${p.id}/comments`)).status).toBe(200);
+    expect((await asMember(`/v1/feed/comments/${c1.id}/replies`)).status).toBe(200);
+    expect((await asMember(`/v1/feed/comments/${c2.id}/thread`)).status).toBe(200);
+    const before = await snapshotOf([p.id]);
+    expect(JSON.parse(before).comments).toHaveLength(2);
+    expect(JSON.parse(before).likes).toHaveLength(2);
+
+    await archiveAndDelete(k.id);
+
+    for (const [who, token] of [
+      ['member', tokens.demoMember],
+      ['admin', tokens.demoAdmin],
+    ] as const) {
+      const call = (method: string, path: string, body?: unknown) =>
+        send(method, path, token, body);
+      const routes: [string, string, string, unknown?][] = [
+        ['GET', `/v1/feed/posts/${p.id}`, 'post page'],
+        ['GET', `/v1/feed/posts/${p.id}/comments`, 'comments list'],
+        [
+          'POST',
+          `/v1/feed/posts/${p.id}/comments`,
+          'new comment',
+          { body: `${CAPTION_PREFIX} nova` },
+        ],
+        ['POST', `/v1/feed/posts/${p.id}/like`, 'like post'],
+        ['DELETE', `/v1/feed/posts/${p.id}/like`, 'unlike post'],
+        ['POST', `/v1/feed/comments/${c1.id}/like`, 'like comment (RLS only)'],
+        ['DELETE', `/v1/feed/comments/${c1.id}/like`, 'unlike comment (RLS only)'],
+        ['GET', `/v1/feed/comments/${c1.id}/replies`, 'replies'],
+        ['GET', `/v1/feed/comments/${c2.id}/thread`, 'thread'],
+      ];
+      for (const [method, path, label, body] of routes) {
+        await expectBare404(await call(method, path, body), `${who} ${label}`);
+      }
+    }
+    // The author edits and removes: the admin's own routes on the post.
+    await expectBare404(
+      await send('PATCH', `/v1/feed/posts/${p.id}`, tokens.demoAdmin, {
+        caption: caption('editado'),
+      }),
+      'admin PATCH post',
+    );
+    await expectBare404(
+      await send('DELETE', `/v1/feed/posts/${p.id}`, tokens.demoAdmin),
+      'admin DELETE post',
+    );
+    await expectBare404(
+      await send('DELETE', `/v1/feed/comments/${c1.id}`, tokens.demoMember),
+      'member DELETE own comment',
+    );
+
+    // D-556: every row and every counter is as it was.
+    expect(await snapshotOf([p.id])).toBe(before);
+  });
+
+  it('5. recovery: clearing deleted_at brings everything back', async () => {
+    const k = await createCommunity(communityName('recupera K'));
+    const p = await publish({ caption: caption('t5 K post'), communityId: k.id });
+    const commented = await send('POST', `/v1/feed/posts/${p.id}/comments`, tokens.demoMember, {
+      body: `${CAPTION_PREFIX} recupera`,
+    });
+    expect(commented.status, await commented.clone().text()).toBe(201);
+    const c1 = (await commented.json()) as { id: string };
+    await archiveAndDelete(k.id);
+    await expectBare404(await request(`/v1/feed/posts/${p.id}`, tokens.demoMember), 'deleted');
+
+    await adminSql`update public.communities set deleted_at = null where id = ${k.id}::uuid`;
+
+    for (const token of [tokens.demoMember, tokens.demoAdmin]) {
+      expect((await request(`/v1/feed/posts/${p.id}`, token)).status).toBe(200);
+      expect((await inicio(token)).map((item) => item.id)).toContain(p.id);
+    }
+    const list = await request(`/v1/feed/posts/${p.id}/comments`, tokens.demoMember);
+    expect(list.status).toBe(200);
+    const page = (await list.json()) as { items: { id: string }[] };
+    expect(page.items.map((item) => item.id)).toContain(c1.id);
+  });
+
+  it('6. adjacency and ordering (P13, P15): same instant, strict order, an old cursor still pages', async () => {
+    const k = await createCommunity(communityName('ordem K'));
+    const l = await createCommunity(communityName('ordem L'));
+    const kPost = await publish({ caption: caption('t6 K'), communityId: k.id });
+    const orgPost = await publish({ caption: caption('t6 organizacao') });
+    const lPost = await publish({ caption: caption('t6 L'), communityId: l.id });
+    const same = [kPost.id, orgPost.id, lPost.id];
+    await adminSql`
+      update public.feed_posts set created_at = date_trunc('milliseconds', now())
+       where id = any(${same}::uuid[])`;
+
+    // The full order before, and a cursor issued BEFORE the delete from the K post's own row: walk
+    // one post per page until the K post is the item just returned.
+    const beforeIds = (await inicio(tokens.demoMember)).map((item) => item.id);
+    const tied = beforeIds.filter((id) => same.includes(id));
+    expect(tied).toEqual([...same].sort().reverse());
+    let cursor: string | null = null;
+    let found: string | null = null;
+    for (let guard = 0; guard < 50 && found === null; guard += 1) {
+      const path: string = cursor
+        ? `/v1/feed?limit=1&cursor=${encodeURIComponent(cursor)}`
+        : '/v1/feed?limit=1';
+      const page = (await (await request(path, tokens.demoMember)).json()) as FeedPage;
+      cursor = page.nextCursor;
+      if (page.items[0]?.id === kPost.id) found = cursor;
+      if (cursor === null) break;
+    }
+    expect(found, 'a cursor sitting on the K post').not.toBeNull();
+    const idx = beforeIds.indexOf(kPost.id);
+    const expectedTail = beforeIds.slice(idx + 1);
+
+    await archiveAndDelete(k.id);
+
+    const after = await inicio(tokens.demoMember);
+    const afterIds = after.map((item) => item.id);
+    expect(afterIds).toEqual(beforeIds.filter((id) => id !== kPost.id));
+    expect(afterIds.filter((id) => id === orgPost.id)).toHaveLength(1);
+    const org = after.find((item) => item.id === orgPost.id);
+    expect(org?.communityId).toBeNull();
+    expect(org?.caption).toBe(orgPost.caption);
+
+    // The old cursor: 200, no K id, no repeated and no skipped remaining row.
+    const rest: string[] = [];
+    let next: string | null = found;
+    for (let guard = 0; guard < 500; guard += 1) {
+      const path: string = next
+        ? `/v1/feed?limit=25&cursor=${encodeURIComponent(next)}`
+        : '/v1/feed?limit=25';
+      const res = await request(path, tokens.demoMember);
+      expect(res.status, await res.clone().text()).toBe(200);
+      const page = (await res.json()) as FeedPage;
+      rest.push(...page.items.map((item) => item.id));
+      next = page.nextCursor;
+      if (next === null) break;
+    }
+    expect(rest).not.toContain(kPost.id);
+    expect(new Set(rest).size).toBe(rest.length);
+    expect(rest).toEqual(expectedTail);
+  });
+
+  it('7. empty and fill (P14): a page of deleted posts still fills from older rows', async () => {
+    const k = await createCommunity(communityName('cheio K'));
+    const kPosts = [
+      await publish({ caption: caption('t7 K um'), communityId: k.id }),
+      await publish({ caption: caption('t7 K dois'), communityId: k.id }),
+      await publish({ caption: caption('t7 K tres'), communityId: k.id }),
+    ];
+    const ids = kPosts.map((post) => post.id);
+    for (const [i, id] of ids.entries()) {
+      await adminSql`
+        update public.feed_posts
+           set created_at = (select max(created_at) from public.feed_posts
+                              where tenant_id = ${tenantIds.demo}::uuid and id <> all(${ids}::uuid[]))
+                            + ${i + 1} * interval '1 second'
+         where id = ${id}::uuid`;
+    }
+    const top = (await (await request('/v1/feed?limit=3', tokens.demoMember)).json()) as FeedPage;
+    expect(top.items.map((item) => item.id).sort()).toEqual([...ids].sort());
+
+    await archiveAndDelete(k.id);
+
+    for (const token of [tokens.demoMember, tokens.demoAdmin]) {
+      const res = await request('/v1/feed?limit=3', token);
+      expect(res.status, await res.clone().text()).toBe(200);
+      const page = (await res.json()) as FeedPage;
+      expect(page.items).toHaveLength(3);
+      for (const item of page.items) expect(ids).not.toContain(item.id);
+      expect(page.nextCursor).not.toBeNull();
+    }
+
+    // A community with no post at all deletes with no effect on the feed.
+    const before = (await inicio(tokens.demoMember)).map((item) => item.id);
+    const empty = await createCommunity(communityName('vazio'));
+    await archiveAndDelete(empty.id);
+    expect((await inicio(tokens.demoMember)).map((item) => item.id)).toEqual(before);
+  });
+
+  it('8. the community page of a deleted community is the bare 404', async () => {
+    const k = await createCommunity(communityName('pagina K'));
+    const p = await publish({ caption: caption('t8 K'), communityId: k.id });
+    for (const token of [tokens.demoMember, tokens.demoAdmin]) {
+      const ok = await request(`/v1/feed?communityId=${k.id}`, token);
+      expect(ok.status, await ok.clone().text()).toBe(200);
+      expect(((await ok.json()) as FeedPage).items.map((item) => item.id)).toContain(p.id);
+    }
+    await archiveAndDelete(k.id);
+    for (const [who, token] of [
+      ['member', tokens.demoMember],
+      ['admin', tokens.demoAdmin],
+    ] as const) {
+      await expectBare404(
+        await request(`/v1/feed?communityId=${k.id}`, token),
+        `${who} community page`,
+      );
+    }
+  });
+
+  it('9. an archived (not deleted) community keeps its posts: the archive rule is unchanged', async () => {
+    const k = await createCommunity(communityName('arquivada K'));
+    const p = await publish({ caption: caption('t9 K'), communityId: k.id });
+    await archiveCommunity(k.id);
+    for (const token of [tokens.demoMember, tokens.demoAdmin]) {
+      expect((await inicio(token)).map((item) => item.id)).toContain(p.id);
+      const page = await request(`/v1/feed/posts/${p.id}`, token);
+      expect(page.status, await page.clone().text()).toBe(200);
+    }
+  });
 });
