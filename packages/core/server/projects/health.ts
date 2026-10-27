@@ -37,8 +37,9 @@ import { REQUIRED_SERVICES } from './wait';
  * customer-token error (`token_invalid`, `token_forbidden`, `org_mismatch`) is a TOKEN verdict, not an outage:
  * it is recorded and the database state then comes from the pool ping alone, so a dead token with a working
  * pool is `healthy` and the tenant is never held out of the shell. A timeout, a 5xx or an unhealthy service is
- * not a token verdict: it keeps `unreachable` and leaves the stored `token_check` as it was. A platform project
- * never has a token verdict. The one thing a dead token costs is the paused-or-not fact.
+ * not a token verdict: it keeps `unreachable` and leaves the stored `token_check` as it was. A sealed token that
+ * cannot be opened is a dead token too (`invalid`, 09.4 review WR-01). A platform project never has a token
+ * verdict. The one thing a dead token costs is the paused-or-not fact.
  *
  * When the DATABASE state changed, the cached binding and the host answers of every tenant on the project are
  * dropped, so the shell and `requireAuth` show the new state on the very next request instead of up to a minute
@@ -133,27 +134,43 @@ async function judge(project: ProjectRecord, deps: HealthDeps): Promise<Verdict>
 
   // Project 0 has no Management API entry the platform manages: the pool alone answers for it.
   if (!project.isCentral && project.credentialSource !== 'env') {
+    // Building the provider opens the sealed customer token. A column that does not open (a corrupted value, an
+    // AAD mismatch, a master key dropped before `platform:reseal` reached the row) is operationally a dead token:
+    // it is a TOKEN verdict (`invalid`: the operator must replace it), never an outage, and the pool alone then
+    // answers for the database. Only the project id is logged, never what the failure carried.
+    let provider: ProjectProvider | null = null;
     try {
-      const provider = deps.provider ?? (await getProjectProviderFor(project));
-      const described = await withTimeout(provider.describe(project.ref), timeoutMs);
-      // The token reached the project: the verdict is `ok` for whatever the project itself then says.
-      if (customer) tokenCheck = 'ok';
-      if (PAUSED_STATUSES.has(described.status))
-        return { status: 'paused', detailCode: null, tokenCheck };
-      if (described.status !== 'ACTIVE_HEALTHY') {
-        return { status: 'unreachable', detailCode: 'unreachable', tokenCheck };
-      }
-      const { services } = await withTimeout(provider.health(project.ref), timeoutMs);
-      const healthy = REQUIRED_SERVICES.every((name) => services[name] === 'ACTIVE_HEALTHY');
-      if (!healthy) return { status: 'unreachable', detailCode: 'unreachable', tokenCheck };
+      provider = deps.provider ?? (await getProjectProviderFor(project));
     } catch (error) {
-      const verdict = customer ? tokenVerdictOf(error) : null;
-      // Not a token verdict (a timeout, a 5xx, a platform refusal): an outage, and the stored check stays.
-      if (verdict === null) {
-        return { status: 'unreachable', detailCode: codeOf(error), tokenCheck: null };
+      if (!customer) return { status: 'unreachable', detailCode: codeOf(error), tokenCheck: null };
+      tokenCheck = 'invalid';
+      log.warn(
+        { event: 'project.health.token_unreadable', projectId: project.id },
+        'sealed management token could not be opened',
+      );
+    }
+    if (provider) {
+      try {
+        const described = await withTimeout(provider.describe(project.ref), timeoutMs);
+        // The token reached the project: the verdict is `ok` for whatever the project itself then says.
+        if (customer) tokenCheck = 'ok';
+        if (PAUSED_STATUSES.has(described.status))
+          return { status: 'paused', detailCode: null, tokenCheck };
+        if (described.status !== 'ACTIVE_HEALTHY') {
+          return { status: 'unreachable', detailCode: 'unreachable', tokenCheck };
+        }
+        const { services } = await withTimeout(provider.health(project.ref), timeoutMs);
+        const healthy = REQUIRED_SERVICES.every((name) => services[name] === 'ACTIVE_HEALTHY');
+        if (!healthy) return { status: 'unreachable', detailCode: 'unreachable', tokenCheck };
+      } catch (error) {
+        const verdict = customer ? tokenVerdictOf(error) : null;
+        // Not a token verdict (a timeout, a 5xx, a platform refusal): an outage, and the stored check stays.
+        if (verdict === null) {
+          return { status: 'unreachable', detailCode: codeOf(error), tokenCheck: null };
+        }
+        // A token verdict (D-573): record it and let the pool alone answer for the database.
+        tokenCheck = verdict;
       }
-      // A token verdict (D-573): record it and let the pool alone answer for the database.
-      tokenCheck = verdict;
     }
   }
 

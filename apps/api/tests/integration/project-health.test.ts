@@ -590,6 +590,53 @@ describe('a dead management token is a token state, never an outage (D-573, UI-D
     });
   });
 
+  it('a sealed token that cannot be opened is a token verdict (invalid), the pool answers and the tenant stays active (WR-01)', async () => {
+    const { fixture } = await customerProject('tok-unread');
+    // The column does not open: sealed under another AAD, as after a half-finished reseal. No earlier check,
+    // because the provider cache is keyed by id and version and would still hold the working one.
+    await adminSql`
+      update platform.projects
+         set mgmt_token_sealed = ${seal(TOKEN, 'someone-else:mgmt_token')}
+       where id = ${fixture.projectId}::uuid`;
+    logged.calls.length = 0;
+    const result = await checkProject(fixture.projectId);
+    expect(result).toMatchObject({ status: 'healthy', detailCode: null, tokenCheck: 'invalid' });
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({
+      status: 'healthy',
+      detail_code: null,
+      token_check: 'invalid',
+    });
+    expect(await resolveTenantHost(fixture.host)).toMatchObject({
+      kind: 'tenant',
+      status: 'active',
+    });
+    // One distinct line with the project id only; what the failure carried is never logged.
+    const unreadable = logged.calls.filter(
+      (call) =>
+        (call.args[0] as Record<string, unknown> | undefined)?.event ===
+        'project.health.token_unreadable',
+    );
+    expect(unreadable).toHaveLength(1);
+    expect(unreadable[0]?.args[0]).toEqual({
+      event: 'project.health.token_unreadable',
+      projectId: fixture.projectId,
+    });
+    expect(JSON.stringify(logged.calls)).not.toContain(TOKEN);
+  });
+
+  it('a sealed token that cannot be opened does not hide a failing pool: unreachable, token still invalid (WR-01)', async () => {
+    const { fixture } = await customerProject('tok-unread-pool', { url: TX_CLOSED });
+    await adminSql`
+      update platform.projects
+         set mgmt_token_sealed = ${seal(TOKEN, 'someone-else:mgmt_token')}
+       where id = ${fixture.projectId}::uuid`;
+    expect(await checkProject(fixture.projectId)).toMatchObject({
+      status: 'unreachable',
+      detailCode: 'unreachable',
+    });
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({ token_check: 'invalid' });
+  });
+
   it('a PLATFORM project refused with a forbidden error is still access_denied and writes no token_check', async () => {
     const f = await project('tok-plat');
     const refused = wrap(fakeProvider({ [f.ref]: fakeTarget() }), {
