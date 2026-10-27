@@ -46,7 +46,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers (completed 2026-10-20)
 - [ ] **Phase 09.1: Acesso por gateway de pagamento (INSERTED)** - Per-tenant payment-gateway webhook (Kiwify first, provider-neutral seam) that grants and cuts platform access per tenant and e-mail (replaces the global email_allowlist) and unlocks store products on purchase
 - [ ] **Phase 09.2: Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)** - One Supabase project per tenant: the super_admin registers the project access at tenant creation, the system loads the schema and baseline configuration into it, migrations fan out to every tenant database, and the API and worker route each request and job to the tenant's own database
-- [ ] **Phase 09.3: Pendências de backend do FRONT.pdf (INSERTED)** - Delete an event and delete an archived community (today "Em breve"), the longer limits of the event schedule and the highlight name, and the Android app icon that fills the whole circle: the five corrections of the client's FRONT.pdf that need the backend
+- [x] **Phase 09.3: Pendências de backend do FRONT.pdf (INSERTED)** - Delete an event and delete an archived community (today "Em breve"), the longer limits of the event schedule and the highlight name, and the Android app icon that fills the whole circle: the five corrections of the client's FRONT.pdf that need the backend
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 
@@ -1373,7 +1373,7 @@ Plans:
 **Goal**: The five corrections of the client's FRONT.pdf that the front could not finish alone become real: an admin can delete an event and delete an archived community (today both buttons say "Em breve"), the event schedule and the highlight name accept the longer limits the client asked for, and the app icon installed on Android fills the whole circle instead of showing a band of the primary colour. All five were listed by whoever merged FRONT-AJUSTES on 2026-10-21 (`docs/pendencias-backend.md`, items 3 and 11 to 14; the PDF "Pendências de backend - FRONT.pdf").
 **Requirements**: PEND-01, PEND-02, PEND-03, PEND-04, PEND-05, PEND-06, PEND-07, PEND-08, PEND-09, PEND-10, PEND-11, PEND-12, PEND-13, PEND-14
 **Depends on:** Phase 09.2 (runs after it: it ships migrations and the 09.2 runner `migrateAll` is how a migration reaches every tenant project; one local Supabase stack, so the phases do not overlap in execution), and the FRONT-AJUSTES commit `0211d871` already on master (the disabled buttons, the editor's icon preview and the forms that read the two limits from the contract)
-**Plans:** 8/9 plans executed
+**Plans:** 9/9 plans executed (closed by developer closure 2026-10-27: verification human_needed 7/7; the 7 hosted and real-device UAT rows are Igor's, see 09.3-UAT.md; the full e2e has 30 tests red on the pre-phase code too; follow-up quick 261027-c8f closed review WR-03)
 **UI hint**: yes, small: the two disabled "Excluir" buttons become live with a confirmation, and nothing else changes on screen. The existing `components/pending/PendingDeleteButton` is the seam; the confirmation is a new surface, so plan-phase will stop at the UI-SPEC gate first (run `/gsd-ui-phase 09.3`, then plan-phase again).
 **Success Criteria** (draft, to be confirmed in discuss-phase):
 
@@ -1416,7 +1416,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 09.3-09-PLAN.md — The DEPLOY.md "Phase 09.3 release" section (order, rollback limit, the Android icon notice), `docs/pendencias-backend.md` items 3, 11, 12, 13 and 14 marked done, and the exit gate `pnpm verify` (PEND-14, PEND-12, PEND-13)
+- [x] 09.3-09-PLAN.md — The DEPLOY.md "Phase 09.3 release" section (order, rollback limit, the Android icon notice), `docs/pendencias-backend.md` items 3, 11, 12, 13 and 14 marked done, and the exit gate `pnpm verify` (PEND-14, PEND-12, PEND-13)
 
 **Cross-cutting constraints:**
 
@@ -1490,7 +1490,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
 | 09.1. Acesso por gateway de pagamento | 22/22 | In Progress|  |
 | 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 24/28 | In Progress|  |
-| 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 8/9 | In Progress|  |
+| 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 
