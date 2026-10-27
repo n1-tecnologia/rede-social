@@ -705,3 +705,28 @@ describe('the confirmation — the customer project', () => {
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(TOKEN);
   });
 });
+
+/**
+ * 09.4-15 Task 3 (T-09.4-53): whatever the memory-only token holds, the confirmation leaves it out of
+ * both browser storages, the console and the reads of the preparation.
+ */
+describe('the confirmation — the token reaches no storage', () => {
+  const TOKEN = 'sbp_s3cr3t-token-0002';
+
+  it('5. neither sessionStorage nor localStorage ever holds it, and the reads never carry it', async () => {
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    stage({ draft: { owner: 'customer', tokenExpiresAt: '2027-03-01' } });
+    Object.assign(harness.draft as object, { token: TOKEN });
+    harness.read.mockResolvedValue(reading({ done: 0, failed: true, reason: 'token_invalid' }));
+    await start();
+    expect(JSON.stringify({ ...window.sessionStorage })).not.toContain(TOKEN);
+    expect(JSON.stringify({ ...window.localStorage })).not.toContain(TOKEN);
+    expect(JSON.stringify(harness.read.mock.calls)).not.toContain(TOKEN);
+    expect(
+      Array.from(document.querySelectorAll('[aria-label], [title]')).map(
+        (node) => `${node.getAttribute('aria-label')}${node.getAttribute('title')}`,
+      ),
+    ).not.toContain(TOKEN);
+  });
+});

@@ -799,3 +799,65 @@ describe('Dados — the project owner and the customer token', () => {
     }
   });
 });
+
+/**
+ * 09.4-15 Task 3 (UI-D-549, UI-D-550, E01/E02 long-text): the narrow-screen and long-value states.
+ * The class assertions are the project's technique for width-dependent layout under happy-dom (no real
+ * 320px layout exists here): the wrap variant is what lets the two labels take two lines, and the
+ * visual check at 320px stays a backstop for the UI-state review.
+ */
+describe('Dados — the 320px states and the long token', () => {
+  const owner = (name: string) =>
+    Array.from(document.querySelectorAll('button[aria-pressed]')).find(
+      (button) => button.textContent?.trim() === name,
+    ) as HTMLButtonElement;
+
+  it('E01 long-text (backstop, 320px): both labels may wrap to two lines and stay at least 44px', () => {
+    mount();
+    for (const name of ['Projeto da plataforma', 'Projeto do cliente']) {
+      const classes = owner(name).className;
+      expect(classes).toContain('text-center');
+      expect(classes).toContain('leading-tight');
+      expect(classes).toContain('min-h-11');
+      expect(classes).not.toContain('truncate');
+      expect(classes).not.toContain('whitespace-nowrap');
+      expect(classes).not.toMatch(/(^|\s)h-11(\s|$)/);
+    }
+    const group = owner('Projeto do cliente').closest('[role="group"]') as HTMLElement;
+    expect(group.className).not.toContain('overflow-hidden');
+    expect(group.className).toContain('grid-cols-2');
+    // The words "plataforma" and "cliente" stay in the labels (UI-D-549).
+    expect(owner('Projeto da plataforma').textContent).toContain('plataforma');
+    expect(owner('Projeto do cliente').textContent).toContain('cliente');
+  });
+
+  it('E02 long-text: a 2000-character token is held by the password input and shown nowhere else', () => {
+    mount();
+    fireEvent.click(owner('Projeto do cliente'));
+    const long = 'k'.repeat(2000);
+    const input = document.getElementById('projectToken') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: long } });
+    expect(input.value).toBe(long);
+    expect(input.type).toBe('password');
+    expect(input.maxLength).toBe(4096);
+    expect(draft.token).toBe(long);
+    // Outside the field's own value, no text node, label or wrapper carries any of it.
+    expect(document.body.textContent).not.toContain('kkkkkkkk');
+    for (const node of Array.from(document.querySelectorAll('*'))) {
+      if (node === input) continue;
+      for (const attribute of Array.from(node.attributes)) {
+        expect(attribute.value).not.toContain('kkkkkkkk');
+      }
+    }
+    // The input scrolls its own value: no ancestor up to the form turns on horizontal scrolling.
+    for (
+      let node = input.parentElement;
+      node && node !== document.body;
+      node = node.parentElement
+    ) {
+      expect(node.className).not.toMatch(/overflow-x/);
+    }
+    // And nothing of it reaches the session mirror.
+    expect(window.sessionStorage.getItem(STORAGE_KEY) ?? '').not.toContain('kkkkkkkk');
+  });
+});

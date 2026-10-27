@@ -956,3 +956,39 @@ describe('the summary and the confirmation name the project owner', () => {
     expect(document.body.textContent).not.toContain('Token informado');
   });
 });
+
+/**
+ * 09.4-15 Task 3 (UI-D-556, E04 overflow / long-text): the summary's project card never scrolls
+ * sideways. The only user text is the ref (`break-all`) and a date formatted from the typed string;
+ * the two token lines are fixed catalog strings of one sentence each.
+ */
+describe('the project card at narrow widths', () => {
+  const REF = 'abcdefghijklmnopqrst';
+
+  it('E04: a 20-letter ref breaks anywhere and the token lines are single catalog strings', () => {
+    stageDraft({ projectRef: REF, owner: 'customer', tokenExpiresAt: '2026-11-08' });
+    render(<WizardSummary />);
+    const card = document.querySelector('[data-summary-project]') as HTMLElement;
+    expect(card.className).toContain('min-w-0');
+    const [ref, ...lines] = Array.from(card.querySelectorAll('p'));
+    expect(ref?.className).toContain('break-all');
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'Token informado, guardado com segurança',
+      'Vence em 08/11/2026',
+    ]);
+    for (const node of [card, ...Array.from(card.querySelectorAll('*'))]) {
+      expect((node as HTMLElement).className).not.toMatch(/overflow-x|whitespace-nowrap|truncate/);
+    }
+  });
+
+  it('E04: the confirmation’s ref keeps break-all and its token lines never force a width', () => {
+    stageDraft({ projectRef: REF, owner: 'customer', tokenExpiresAt: '2026-11-08' });
+    render(<CreateTenantDialog open onClose={() => {}} />);
+    const dd = document.querySelector('[data-confirm-project]') as HTMLElement;
+    expect(dd.className).toContain('min-w-0');
+    expect(dd.querySelector('span')?.className).toContain('break-all');
+    for (const node of Array.from(dd.querySelectorAll('*'))) {
+      expect((node as HTMLElement).className).not.toMatch(/overflow-x|whitespace-nowrap|truncate/);
+    }
+  });
+});
