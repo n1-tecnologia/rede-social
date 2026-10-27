@@ -4,6 +4,7 @@ import { projects, tenantMoveEvents, tenantMoves, tenantProjects } from '../../.
 import { withPlatformTx } from '../../../db/platform-tx';
 import { env } from '../../env';
 import { resolveProjectById } from '../../tenancy/project-registry';
+import { apiUrlFor } from '../access';
 import { type BootstrapDeps, listSteps, runBootstrap } from '../bootstrap';
 import { precheckProject } from '../precheck';
 import { getProjectProvider } from '../provider-access';
@@ -40,20 +41,12 @@ export type TargetDeps = {
   readToken?: (() => Promise<string>) | undefined;
 };
 
-/** The API origin of a project the platform registers: `https://<ref>.supabase.co`, or the fake's target. */
-function apiUrlFor(provider: ProjectProvider, ref: string): string {
-  if (provider.name === 'supabase') return `https://${ref}.supabase.co`;
-  const target = (
-    provider as { targetOf?: (r: string) => { apiUrl: string } | undefined }
-  ).targetOf?.(ref);
-  return target?.apiUrl ?? env.SUPABASE_URL;
-}
-
 type ProjectFacts = {
   id: string;
   state: string;
   isCentral: boolean;
   credentialSource: string;
+  owner: string;
   boundToOthers: number;
   movingToOthers: number;
 };
@@ -69,6 +62,7 @@ async function projectFacts(
       state: projects.state,
       isCentral: projects.isCentral,
       credentialSource: projects.credentialSource,
+      owner: projects.owner,
       boundToOthers: sql<number>`(select count(*)::int from ${tenantProjects}
          where ${tenantProjects.projectId} = ${projects.id} and ${tenantProjects.tenantId} <> ${tenantId}::uuid)`,
       movingToOthers: sql<number>`(select count(*)::int from ${tenantMoves}
@@ -79,6 +73,16 @@ async function projectFacts(
     .where(eq(projects.ref, ref))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Whose project a KNOWN target is must agree with what the operator asked for (09.4-12, D-566, T-09.4-44): a
+ * registered customer project is a customer target whatever the flag said when it was absent, and asking for
+ * the other owner than the registry's is refused as `owner` (the move never rewrites a project's owner).
+ */
+function assertOwnerAgrees(registered: string, asked: 'platform' | 'customer' | undefined): void {
+  if (asked === undefined) return;
+  if (registered !== asked) throw new MoveError('target_not_ready', ['owner']);
 }
 
 export type RegisterInput = {
@@ -108,6 +112,7 @@ export async function registerMoveTarget(
 
   // Outbound work first, OUTSIDE any transaction: a project the registry does not know yet is checked.
   const known = await withPlatformTx((tx) => projectFacts(tx, input.ref, input.tenantId));
+  if (known) assertOwnerAgrees(known.owner, input.owner);
   if (!known) {
     const check = await precheckProject(input.ref, {
       tenantId: input.tenantId,
@@ -127,6 +132,7 @@ export async function registerMoveTarget(
       let projectId: string;
       let registered = false;
       if (row) {
+        assertOwnerAgrees(row.owner, input.owner);
         if (row.isCentral || row.credentialSource === 'env') {
           throw new MoveError('target_not_ready', ['central']);
         }

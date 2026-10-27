@@ -369,6 +369,8 @@ async function startOrResume(runner: Runner): Promise<MoveResult> {
         actor: options.actor,
         statusBefore: tenant.status,
         fromProjectId: tenant.sourceProject.id,
+        owner: options.owner,
+        tokenExpiresAt: options.tokenExpiresAt,
       },
       deps.target,
     );
