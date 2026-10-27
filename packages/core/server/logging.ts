@@ -34,6 +34,9 @@ const CREDENTIAL_KEYS = [
   'accessToken',
   'refreshToken',
   'authorization',
+  'mgmtToken',
+  'projectToken',
+  'managementToken',
 ] as const;
 
 /** The pino `redact` option of the root logger; exported so a test can build a logger with the same one. */

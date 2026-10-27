@@ -9,6 +9,9 @@
  * `resealed: 0` and `failed: 0`, drop the old key. Rows stay readable the whole time because the ring
  * holds both keys; the command is resumable (a second run reports 0) and idempotent.
  *
+ * The six sealed columns are the five a platform project holds plus `mgmt_token_sealed`, the management token
+ * of a customer-owned project (09.4-07, AAD `<id>:mgmt_token`); a platform row holds none and is skipped for it.
+ *
  * For each `platform.projects` row, in ASCENDING `id` order and inside ONE transaction (`select ... for
  * update`), it opens each non-null sealed column under the key id written in the string (AAD
  * `<id>:<column without _sealed>`), seals it again under the current id, checks the new string opens, and
@@ -32,6 +35,7 @@ export const SEALED_COLUMNS = [
   'ddl_url_sealed',
   'service_key_sealed',
   'hook_secret_sealed',
+  'mgmt_token_sealed',
 ] as const;
 
 type SealedColumn = (typeof SEALED_COLUMNS)[number];
@@ -101,7 +105,7 @@ export async function resealAll(
       const report = await withPlatformTx(async (tx) => {
         const found = await tx.execute<ProjectRow>(sql`
           select id::text as id, database_url_tx_sealed, database_url_session_sealed,
-                 ddl_url_sealed, service_key_sealed, hook_secret_sealed
+                 ddl_url_sealed, service_key_sealed, hook_secret_sealed, mgmt_token_sealed
             from platform.projects
            where id = ${id}::uuid
              for update`);
@@ -127,6 +131,7 @@ export async function resealAll(
               ddl_url_sealed = coalesce(${next.ddl_url_sealed ?? null}::text, ddl_url_sealed),
               service_key_sealed = coalesce(${next.service_key_sealed ?? null}::text, service_key_sealed),
               hook_secret_sealed = coalesce(${next.hook_secret_sealed ?? null}::text, hook_secret_sealed),
+              mgmt_token_sealed = coalesce(${next.mgmt_token_sealed ?? null}::text, mgmt_token_sealed),
               secret_key_id = ${currentId}::smallint,
               updated_at = now()
             where id = ${id}::uuid`);
