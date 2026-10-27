@@ -18,11 +18,13 @@ import { checkProject } from '@rede-social/core/server/projects/health';
 import { precheckProject } from '@rede-social/core/server/projects/precheck';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { BOOTSTRAP_STEPS } from '@rede-social/core/server/projects/reasons';
+import { todayInSaoPaulo } from '@rede-social/core/server/projects/token';
 import type { ProjectProvider } from '@rede-social/core/server/projects/types';
 import { open } from '@rede-social/core/server/secrets/sealed';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { API_URL, bootstrapDeps, fakeTarget, onB, resetB, restoreB } from './projects-setup';
+import * as customerSetup from './projects-setup';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
 /**
@@ -1534,4 +1536,152 @@ describe('customer creation guarantees (09.4-09, CTK-01, CTK-14, D-566, D-572, T
        where project_id in (select id from platform.projects where ref = ${R.atomic})`;
     expect(steps?.n).toBe(0);
   }, 180_000);
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-13 Task 1 (tracer): the Banco overview names the owner, the pinned organisation and the token summary
+// (CTK-34, CTK-14, D-571, D-572, UI-D-552)
+// ---------------------------------------------------------------------------------------------------------
+
+describe('GET /v1/platform/tenants/{id}/database for a customer project (09.4-13, CTK-34, CTK-14)', () => {
+  const ORG = `acme-ovw-${RUN}`.slice(0, 40);
+  const addDays = (day: string, n: number): string => {
+    const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+    return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+  };
+
+  /** A tenant bound to a throwaway project, built from central rows only (the overview reads the registry). */
+  async function seedProject(opts: {
+    owner: 'platform' | 'customer';
+    check?: 'ok' | 'invalid' | 'forbidden' | 'org_mismatch' | null;
+    expiresAt?: string | null;
+    withHealth?: boolean;
+  }) {
+    const projectId = crypto.randomUUID();
+    const tenantId = crypto.randomUUID();
+    const ref = newRef('ovw');
+    await adminSql.begin(async (tx) => {
+      await tx`
+        insert into platform.projects (id, ref, provider, credential_source, state, api_url)
+        values (${projectId}::uuid, ${ref}, 'fake', 'sealed', 'ready', '')`;
+      await tx`
+        insert into public.tenants (id, slug, display_name, rules_text, rules_version)
+        values (${tenantId}::uuid, ${newSlug()}, 'Comunidade Banco', 'Regras.', 1)`;
+      await tx`
+        insert into platform.tenant_projects (tenant_id, project_id)
+        values (${tenantId}::uuid, ${projectId}::uuid)
+        on conflict (tenant_id) do update set project_id = excluded.project_id`;
+      if (opts.withHealth !== false) {
+        await tx`
+          insert into platform.project_health (project_id, status, checked_at, token_check, token_checked_at)
+          values (${projectId}::uuid, 'healthy', now(), ${opts.check ?? null},
+                  ${opts.check ? new Date() : null})`;
+      }
+    });
+    if (opts.owner === 'customer') {
+      await customerSetup.makeCustomerProject(projectId, `sbp_fc_fake_ovw_${RUN}`, ORG);
+      if (opts.expiresAt) {
+        await adminSql`
+          update platform.projects set mgmt_token_expires_at = ${opts.expiresAt}::date
+           where id = ${projectId}::uuid`;
+      }
+    }
+    return { projectId, tenantId };
+  }
+
+  async function overviewOf(tenantId: string) {
+    const res = await platform(`/tenants/${tenantId}/database`);
+    expect(res.status).toBe(200);
+    const raw = (await res.json()) as Record<string, unknown>;
+    return { raw, body: databaseOverviewSchema.parse(raw) };
+  }
+
+  it('a checked token 12 days from its expiry reads expiring with the typed date, the pinned slug and the check time', async () => {
+    const expiresAt = addDays(todayInSaoPaulo(), 12);
+    const { tenantId } = await seedProject({ owner: 'customer', check: 'ok', expiresAt });
+    const { body } = await overviewOf(tenantId);
+    expect(body.owner).toBe('customer');
+    expect(body.organization).toBe(ORG);
+    expect(body.token?.state).toBe('expiring');
+    expect(body.token?.expiresAt).toBe(expiresAt);
+    const checkedAt = body.token?.checkedAt ?? '';
+    expect(new Date(checkedAt).toISOString()).toBe(checkedAt);
+  });
+
+  it('a never-checked token with no date reads unchecked and has no check time', async () => {
+    const { tenantId } = await seedProject({ owner: 'customer', check: null });
+    const { body } = await overviewOf(tenantId);
+    expect(body.token).toEqual({ state: 'unchecked', expiresAt: null, checkedAt: null });
+    const noHealth = await seedProject({ owner: 'customer', withHealth: false });
+    expect((await overviewOf(noHealth.tenantId)).body.token?.state).toBe('unchecked');
+  });
+
+  it('a stored invalid, forbidden or org_mismatch check reads invalid, no_permission, org_mismatch whatever the date', async () => {
+    const dates = [null, addDays(todayInSaoPaulo(), 200), addDays(todayInSaoPaulo(), -3)];
+    const expected = {
+      invalid: 'invalid',
+      forbidden: 'no_permission',
+      org_mismatch: 'org_mismatch',
+    } as const;
+    for (const [check, state] of Object.entries(expected)) {
+      for (const expiresAt of dates) {
+        const { tenantId } = await seedProject({
+          owner: 'customer',
+          check: check as keyof typeof expected,
+          expiresAt,
+        });
+        expect((await overviewOf(tenantId)).body.token?.state, `${check} ${expiresAt}`).toBe(state);
+      }
+    }
+  });
+
+  it('a platform project answers owner platform, no organisation and no token, and the rest of the shape is unchanged', async () => {
+    const { tenantId } = await seedProject({ owner: 'platform', check: null });
+    const { raw, body } = await overviewOf(tenantId);
+    expect(body.owner).toBe('platform');
+    expect(body.organization).toBeNull();
+    expect(body.token).toBeNull();
+    expect(Object.keys(raw).sort()).toEqual(
+      [
+        'credentials',
+        'lastCheckedAt',
+        'lastErrorCode',
+        'moving',
+        'organization',
+        'otherTenants',
+        'owner',
+        'plan',
+        'preparationFinishedAt',
+        'ref',
+        'schema',
+        'state',
+        'steps',
+        'token',
+      ].sort(),
+    );
+  });
+
+  it('the plan stays information: null for a customer project; the strict schema refuses a token string key (D-572, UI-D-561)', async () => {
+    const { tenantId } = await seedProject({ owner: 'customer', check: 'ok' });
+    const { raw, body } = await overviewOf(tenantId);
+    expect(body.plan).toBeNull();
+    expect(databaseOverviewSchema.safeParse({ ...raw, token: 'sbp_fc_fake_token' }).success).toBe(
+      false,
+    );
+    expect(databaseOverviewSchema.safeParse({ ...raw, tokenValue: 'sbp_x' }).success).toBe(false);
+    const text = JSON.stringify(raw);
+    expect(text).not.toContain(`sbp_fc_fake_ovw_${RUN}`);
+  });
+
+  it('a dead token with a working pool never becomes a database fact: state and lastErrorCode match a working token', async () => {
+    const working = await seedProject({ owner: 'customer', check: 'ok' });
+    const dead = await seedProject({ owner: 'customer', check: 'invalid' });
+    const a = (await overviewOf(working.tenantId)).body;
+    const b = (await overviewOf(dead.tenantId)).body;
+    expect(b.token?.state).toBe('invalid');
+    expect(b.state).toBe(a.state);
+    expect(b.state).not.toBe('unreachable');
+    expect(b.lastErrorCode).toBeNull();
+    expect(a.lastErrorCode).toBeNull();
+  });
 });
