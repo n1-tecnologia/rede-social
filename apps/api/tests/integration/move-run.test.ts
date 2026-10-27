@@ -17,6 +17,7 @@ import {
 import * as vt from 'vitest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  adoptAsSource,
   type CustomerHarness,
   closeHelperClients,
   connect,
@@ -558,4 +559,169 @@ describe('an unknown customer target (09.4-12, CTK-02, D-567, D-571)', () => {
       moves: 1,
     });
   }, 120_000);
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// The way back (CTK-05, D-566): customer project to platform project, no new code path
+// ---------------------------------------------------------------------------------------------------------
+
+type WayBack = {
+  t: MoveTenant;
+  ch: CustomerHarness;
+  refA: string;
+  refB: string;
+  refC: string;
+  idA: string;
+  tokenA: string;
+  tokenC: string;
+  base: {
+    tenantSlug: string;
+    actor: string;
+    quiesceMs: number;
+    registryWaitMs: number;
+  };
+};
+
+const wayBackCases: WayBack[] = [];
+
+/** A tenant whose data sits in project 0's database but is BOUND to a customer project A (the source). */
+async function wayBackCase(label: string, bootstrap: 'platform' | 'per-project'): Promise<WayBack> {
+  resetB('bare');
+  const suffix = `${label}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const [refA, refB, refC] = [`mva-${suffix}`, `mvb-${suffix}`, `mvk-${suffix}`];
+  const tokenA = `sbp_fc_fake_wb_a_${suffix}`;
+  const tokenC = `sbp_fc_fake_wb_c_${suffix}`;
+  const ch = customerHarness({
+    refs: [refA, refB, refC],
+    tokens: { [tokenA]: { refs: [refA] }, [tokenC]: { refs: [refC] } },
+    sourceRefs: [refA],
+    bootstrap,
+  });
+  setProjectProviderForTests(ch.provider);
+  const t = await createMoveTenant(`mv12-${suffix}`.slice(0, 40));
+  const idA = await registerCustomerTarget(ch, refA, tokenA);
+  await adoptAsSource(t.tenantId, idA);
+  const made = {
+    t,
+    ch,
+    refA,
+    refB,
+    refC,
+    idA,
+    tokenA,
+    tokenC,
+    base: { tenantSlug: t.slug, actor: ACTOR, quiesceMs: 0, registryWaitMs: 0 },
+  };
+  wayBackCases.push(made);
+  return made;
+}
+
+vt.afterEach(async () => {
+  setProjectProviderForTests(undefined);
+  for (const made of wayBackCases.splice(0)) {
+    await made.t.cleanup().catch(() => undefined);
+    for (const ref of [made.refA, made.refB, made.refC]) {
+      await removeTargetProject(ref).catch(() => undefined);
+    }
+  }
+});
+
+/** The columns of a customer project's registry row that a move must never change, and its audit trail. */
+async function customerRowOf(projectId: string) {
+  const [row] = await adminSql<Record<string, unknown>[]>`
+    select owner, org_slug, mgmt_token_sealed, mgmt_token_expires_at::text as expires,
+           credential_version, state, credential_source, api_url
+      from platform.projects where id = ${projectId}::uuid`;
+  const [events] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from platform.project_token_events where project_id = ${projectId}::uuid`;
+  return { row, events: events?.n };
+}
+
+describe('the way back: customer project to platform project (CTK-05, D-566, T-09.4-44)', () => {
+  it('CTK-05: moves a tenant off a customer project with no call on the customer token and the customer row untouched', async () => {
+    const w = await wayBackCase('back', 'platform');
+    const before = await customerRowOf(w.idA);
+    expect(before.row?.owner).toBe('customer');
+    expect(before.events).toBe(1);
+    // Registering the project validated its token (that is a customer use); the move is judged from here on.
+    const mark = w.ch.provider.calls.tokenUses.length;
+    const usesSince = () => w.ch.provider.calls.tokenUses.slice(mark);
+
+    const readToken = vt.vi.fn(async () => {
+      throw new Error('the way back asks for no token');
+    });
+    const result = await runMove(
+      { ...w.base, mode: 'start', toRef: w.refB },
+      { ...w.ch.deps, target: { ...w.ch.deps.target, readToken } },
+    );
+    expect(result.outcome).toBe('moved');
+    expect(readToken).not.toHaveBeenCalled();
+
+    // The tenant now lives on a platform project, remembering the customer project it came from.
+    const [binding] = await adminSql<{ project_id: string; previous_project_id: string | null }[]>`
+      select project_id, previous_project_id from platform.tenant_projects
+       where tenant_id = ${w.t.tenantId}::uuid`;
+    const [target] = await adminSql<{ id: string; owner: string; state: string }[]>`
+      select id, owner, state from platform.projects where ref = ${w.refB}`;
+    expect(binding?.project_id).toBe(target?.id);
+    expect(binding?.previous_project_id).toBe(w.idA);
+    expect(target).toMatchObject({ owner: 'platform', state: 'ready' });
+
+    // CTK-05: nothing at all reached the customer's project (no customer token, and never the platform's).
+    const calls = usesSince();
+    expect(calls.filter((use) => use.ref === w.refA)).toEqual([]);
+    // The target was bootstrapped with the platform token.
+    const onTarget = calls.filter((use) => use.ref === w.refB);
+    expect(onTarget.length).toBeGreaterThan(0);
+    expect(onTarget.every((use) => use.kind === 'platform')).toBe(true);
+
+    // CTK-05: the customer project's registry row and audit trail are byte for byte what they were.
+    expect(await customerRowOf(w.idA)).toEqual(before);
+
+    // No token, organisation or ref of the customer's side in anything the move printed or recorded.
+    const text = JSON.stringify([result.lines, await eventsOf(result.moveId ?? '')]);
+    for (const secret of [w.tokenA, 'sbp_fc', 'acme-customer', w.refA]) {
+      expect(text).not.toContain(secret);
+    }
+
+    // After the source is deleted (the only step that removes anything), the customer row is still untouched
+    // and still no call went to the customer's account.
+    const deleted = await runMove(
+      { ...w.base, mode: 'confirm-delete', confirmSlug: w.t.slug },
+      w.ch.deps,
+    );
+    expect(deleted.outcome).toBe('source_deleted');
+    expect(await customerRowOf(w.idA)).toEqual(before);
+    expect(usesSince().filter((use) => use.ref === w.refA)).toEqual([]);
+  }, 240_000);
+
+  it("CTK-05: customer to customer uses the target project's own token and never the source's", async () => {
+    const w = await wayBackCase('c2c', 'per-project');
+    const idC = await registerCustomerTarget(w.ch, w.refC, w.tokenC);
+    const before = await customerRowOf(w.idA);
+    const rowC = await customerRowOf(idC);
+    const mark = w.ch.provider.calls.tokenUses.length;
+
+    const result = await runMove(
+      { ...w.base, mode: 'start', toRef: w.refC, owner: 'customer' },
+      w.ch.deps,
+    );
+    // Token A reaches only project A: had it been used on C the bootstrap would have been refused.
+    expect(result.outcome).toBe('moved');
+
+    const uses = w.ch.provider.calls.tokenUses.slice(mark);
+    expect(uses.filter((use) => use.ref === w.refA)).toEqual([]);
+    const onC = uses.filter((use) => use.ref === w.refC);
+    expect(onC.length).toBeGreaterThan(0);
+    expect(onC.every((use) => use.kind === 'customer')).toBe(true);
+    expect(await customerRowOf(w.idA)).toEqual(before);
+    // The target's own row is prepared by the bootstrap (state, access); its owner, pin and sealed token stay.
+    const afterC = await customerRowOf(idC);
+    for (const column of ['owner', 'org_slug', 'mgmt_token_sealed', 'expires']) {
+      expect(afterC.row?.[column]).toBe(rowC.row?.[column]);
+    }
+    const [binding] = await adminSql<{ project_id: string }[]>`
+      select project_id from platform.tenant_projects where tenant_id = ${w.t.tenantId}::uuid`;
+    expect(binding?.project_id).toBe(idC);
+  }, 240_000);
 });
