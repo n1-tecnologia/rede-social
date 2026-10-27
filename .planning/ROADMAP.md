@@ -47,6 +47,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 09.1: Acesso por gateway de pagamento (INSERTED)** - Per-tenant payment-gateway webhook (Kiwify first, provider-neutral seam) that grants and cuts platform access per tenant and e-mail (replaces the global email_allowlist) and unlocks store products on purchase
 - [ ] **Phase 09.2: Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)** - One Supabase project per tenant: the super_admin registers the project access at tenant creation, the system loads the schema and baseline configuration into it, migrations fan out to every tenant database, and the API and worker route each request and job to the tenant's own database
 - [x] **Phase 09.3: Pendências de backend do FRONT.pdf (INSERTED)** - Delete an event and delete an archived community (today "Em breve"), the longer limits of the event schedule and the highlight name, and the Android app icon that fills the whole circle: the five corrections of the client's FRONT.pdf that need the backend
+- [ ] **Phase 09.4: Projeto do tenant no Supabase do cliente (INSERTED)** - A tenant can run on a Supabase project in its own account: a scoped access token limited to that one project is stored sealed per project and used for every Management API call about it, with the organisation pin, the allow-list, the rate limiter, the health and the panel working per project
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 
@@ -1421,6 +1422,84 @@ Plans:
 **Cross-cutting constraints:**
 
 - D-561: the migration only widens a CHECK, so every existing row satisfies it and an old API on the new database keeps working; D-544 [informational]: it reaches every tenant project through the ledgered `migrateAll`, databases before API and worker
+
+### Phase 09.4: Projeto do tenant no Supabase do cliente (INSERTED)
+
+**Goal**: A tenant can run on a Supabase project that lives in its own Supabase account: the platform operator registers the project together with a scoped personal access token limited to that one project, the platform stores the token sealed and uses it, and only it, for every Management API call about that project, while the projects of the platform's own organisation keep the platform token and its organisation pin.
+**Requirements**: CTK-01, CTK-02, CTK-03, CTK-04, CTK-05, CTK-06, CTK-07, CTK-08, CTK-09, CTK-10, CTK-11, CTK-12, CTK-13, CTK-14, CTK-15, CTK-16, CTK-17, CTK-18, CTK-19, CTK-20, CTK-21, CTK-22, CTK-23, CTK-24, CTK-25, CTK-26, CTK-27, CTK-28, CTK-29, CTK-30, CTK-31, CTK-32, CTK-33, CTK-34, CTK-35, CTK-36, CTK-37, CTK-38, CTK-39, CTK-40, CTK-41, CTK-42 (plus UI-04 for the sketch gate)
+**Depends on:** Phase 09.2 (the project registry, the `ProjectProvider` seam, the bootstrap, the health job, the credential replacement and the move tool that this phase extends; the hosted proofs of 09.2 plan 25 come first)
+**Plans:** 17 plans (planned 2026-10-27; execution waits for 09.2 plan 25, D-579)
+**UI hint**: yes, small: the "Novo tenant" form and the Banco tab gain the choice "Projeto da plataforma" or "Projeto do cliente", the token field and the token state (valid, expiring, revoked). plan-phase will stop at the UI-SPEC gate first (run `/gsd-ui-phase 09.4`, then plan-phase again).
+
+**Notes**: Inserted 2026-10-27 by user decision. Numbered 09.4 by hand: `phase.insert` after a decimal nests (09.3.1), and the `projects` of a customer's own account were Deferred in `09.2-CONTEXT.md` ("the platform token would not reach them"). STATE stays on 09.2 plan 25: plan-phase can run ahead, execute-phase waits for 09.2 to close.
+
+Decided by Igor on 2026-10-27: the credential is a Supabase scoped personal access token limited to ONE project (the changelog of 2026-10-06 makes scoped tokens generally available; expiry up to one year; the token loses access when its creator does), never an account-level token; a customer project is always on the Pro plan; Igor manages the customer's database himself in most cases, so he creates the token and pastes it into the panel; the customer is the owner of the project and answers for it.
+
+Scope found reading the code on 2026-10-27 (to be decided in `/gsd-discuss-phase 09.4`):
+
+1. **Provider per project.** `getProjectProvider()` and the env singleton (`SUPABASE_PAT`, `SUPABASE_ORG_SLUG`) become a provider built from the project's own token; callers: health, precheck, credentials, reissue, move target, tenant creation.
+2. **Organisation pin per project.** `SUPABASE_ORG_SLUG` stays the platform's organisation; a customer project stores its own and a project that no longer reports it is refused.
+3. **Registry.** New columns on `platform.projects` (owner, organisation, sealed token with the AAD `<id>:mgmt_token`), a central migration, the re-seal command and the credential replacement cover the token.
+4. **Redirect allow-list.** `authAllowListFor` reads `SUPABASE_PAT`; it must use the project's token (reconcile and domain verification included).
+5. **Rate limiter.** One limiter of 100 requests a minute per process is built for one token; it becomes one per token.
+6. **Errors and health.** 401 and 403 both map to `forbidden`, the same as `org_mismatch`; a revoked or expired customer token needs its own kind, and the health job and the panel show "token inválido" or "token vencendo" apart from "project down", with the action to replace the token.
+7. **Panel.** The project choice, the token field, the error copy that today names "the platform's organisation", all in `pt-BR` catalogs, behind the UI gate.
+8. **Operations.** The move tool, `scripts/reissue-credentials.ts` and `scripts/probe-management-api.ts` assume the platform token.
+9. **Proofs and docs.** Tests of organisation mismatch per project, pgTAP for the new columns, `docs/DEPLOY.md`, and a hosted proof with a second real Supabase account.
+
+Open for discuss-phase: which permissions the scoped token needs per endpoint (the INTEGRATE list of `COVERAGE.md`; the per-endpoint table of Supabase was not read), how far ahead the panel warns before the expiry, whether the organisation slug is read from the project or typed, and the way back from a customer project to a platform one with the move tool.
+
+Plans:
+
+**Wave 1** *(independent: the probe and the hidden prompt, the registry, the contracts and the sketch gate; planned 2026-10-27)*
+
+- [ ] 09.4-01-PLAN.md — The hidden terminal prompt `scripts/lib/read-secret.ts`, the `platform:probe --scoped` mode (21 operations, allowed or denied with the status, never a write) and the P1..P8 ledger; Igor runs the probe once (CTK-06, CTK-07, CTK-42, tracer, `autonomous: false`)
+- [ ] 09.4-02-PLAN.md — The registry: owner, per-project organisation pin, sealed token and typed expiry on `platform.projects`, the token-check outcome on `platform.project_health`, the append-only token audit table, one generated and one hand-written central migration, pgTAP 216 and the [BLOCKING] schema gate (CTK-24, CTK-28, tracer)
+- [ ] 09.4-03-PLAN.md — The shared contracts: `tokenState` with one 30-day constant, `tokenExpiryIsValid`, thirteen reason codes, the six pre-check reasons, strict token inputs and token-free optional answer fields (CTK-16, CTK-26, CTK-29, CTK-33, tracer)
+- [ ] 09.4-04-PLAN.md — Sketch 015: the 18 prototype-less customer-project frames, the README with `approved: false` and Igor's recorded approval (UI-04, `autonomous: false`)
+
+**Wave 2** *(blocked on the contracts)*
+
+- [ ] 09.4-05-PLAN.md — The adapter: learn-and-pin organisation, `token_invalid` and `token_forbidden` by code only, `GET /v1/projects` as the 21st operation, the 09.4 coverage matrix, the thirteen-code catalog and the fake provider that mirrors tokens, organisations and listing (CTK-11, CTK-12, CTK-13, CTK-15, CTK-29, CTK-30, tracer)
+
+**Wave 3** *(blocked on the registry and the adapter)*
+
+- [ ] 09.4-06-PLAN.md — `getProjectProviderFor` with a bounded cache and a limiter per token, bootstrap, reissue and credentials resolved per project, the allow-list of a customer project through its own provider, and the grep gate that keeps the platform token in three files (CTK-13, CTK-22, CTK-23, CTK-27, tracer)
+
+**Wave 4** *(blocked on the resolver)*
+
+- [ ] 09.4-07-PLAN.md — The token kernel: `validateCustomerToken` (date, prefix, project read, listing check, learned pin), `registerCustomerProject`, the audit append, the re-seal column and the log redaction (CTK-09, CTK-10, CTK-12, CTK-21, CTK-25, CTK-28, tracer)
+
+**Wave 5** *(blocked on the token kernel)*
+
+- [ ] 09.4-08-PLAN.md — Health on its own axis: a dead token is a token state and never an outage, one check refreshes both, one `project.token.state_changed` line, and sign-in, the host answer and the migration fan-out proven unaffected (CTK-17, CTK-18, CTK-19, CTK-21, CTK-33, tracer)
+- [ ] 09.4-09-PLAN.md — Journey 1: the pre-check and the creation of a tenant on a customer project, the token sealed with its learned pin in the same transaction, refusals mapped to their field (CTK-01, CTK-14, tracer)
+- [ ] 09.4-11-PLAN.md — Journey 3: `pnpm platform:set-owner` (owner change, organisation re-pin, `--register` of a move target, `--dry-run`), the hidden prompt, copying nothing (CTK-03, CTK-04, tracer)
+- [ ] 09.4-12-PLAN.md — Journey 2: the move to a customer target (registered ahead or typed locally, fail-closed in the Job) and the way back proven not to touch the customer's account (CTK-02, CTK-05, tracer)
+
+**Wave 6** *(blocked on the create and health plans)*
+
+- [ ] 09.4-10-PLAN.md — "Substituir token": validate against the project and the registered organisation, then replace, drop both caches, refresh both states and re-run the allow-list reconcile clearing only the `allow_list` errors that now succeed (CTK-19, CTK-20, CTK-27, tracer)
+- [ ] 09.4-13-PLAN.md — The panel read side: owner, organisation and token summary in the Banco answer, the token state on the list row, "Banco com problema" widened in step with `tokenState`, and the source scan that keeps the token axis out of member paths (CTK-14, CTK-33, CTK-34, CTK-41, tracer)
+
+**Wave 7** *(web, blocked on the sketch approval of plan 04)*
+
+- [ ] 09.4-14-PLAN.md — The shared UI: every catalog string of the UI-SPEC, `TokenPill`, `TokenHowTo`, the write-only `ProjectTokenFields` and the catalog test whose permission guard stays red until Igor's probe (CTK-08, CTK-29, CTK-35, CTK-39, CTK-40, tracer)
+
+**Wave 8** *(web, blocked on the shared UI)*
+
+- [ ] 09.4-15-PLAN.md — The wizard: the owner choice, the token and expiry fields with the token in memory only, the Resumo rows and the three customer failure sentences (CTK-31, CTK-32, CTK-38, tracer)
+- [ ] 09.4-16-PLAN.md — The Banco tab and the list: Dono and Organização, the Token de acesso card, the "Substituir token" sheet and the "Token: …" pill on the header and the list (CTK-14, CTK-34, CTK-36, CTK-37, CTK-40, CTK-41, tracer)
+
+**Wave 9** *(release and close)*
+
+- [ ] 09.4-17-PLAN.md — The `docs/DEPLOY.md` "Phase 09.4 release" section, the ledger steps and advisories, the static gates and, after Igor's probe, the permission sentence and the exit gate (CTK-08, CTK-42, `autonomous: false`)
+
+**Cross-cutting constraints:**
+
+- D-579: execution starts only after Phase 09.2 plan 25 closes; this phase edits the provider, health, move, allow-list and credential code 09.2 delivered; STATE stays on 09.2 plan 25
+- D-566 [informational]: reversibility `costly`; the owner concept is carried by the registry columns of plan 02 into every project-aware call site
+- The phase closes `human_needed` while any hosted-proof row P1..P8 is pending; only Igor writes `passed`; `token-messages.test.ts` has one expected-red test until P1 and plan 17
 
 ### Phase 10: Rede Social - Member Stories and Communities
 

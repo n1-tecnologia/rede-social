@@ -5,12 +5,12 @@ current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INS
 current_plan: 25
 status: executing
 stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 was executed and closed on 2026-10-27 by developer closure while 09.2 stayed paused here (its 7 hosted and real-device UAT rows are Igor's, see 09.3-UAT.md).
-last_updated: "2026-10-27T12:02:35.666Z"
+last_updated: "2026-10-27T14:18:36.099Z"
 last_activity: 2026-10-27
 last_activity_desc: Phase 09.3 closed by developer closure (verification human_needed 7/7, review WR-03 fixed by quick 261027-c8f); STATE pointer back on 09.2 plan 25
-state_head: 2939d5a38c69968d4388460582df81d465ae6ecb
+state_head: 9ddbec59b52de4712aa4b45decabcd4fb243a212
 progress:
-  total_phases: 25
+  total_phases: 26
   completed_phases: 0
   total_plans: 277
   completed_plans: 268
@@ -1160,6 +1160,7 @@ None yet.
 - Phase 09.1 inserted after Phase 9: Acesso por gateway de pagamento: webhook per-tenant (Kiwify first, provider-neutral) replaces the global email_allowlist and unlocks store products; runs before Phase 10 (URGENT)
 - Phase 09.2 inserted after Phase 9: Banco por Tenant: one Supabase project per tenant (provisioning, migration fan-out, per-tenant routing); runs after 09.1, before 10; 10 open decisions listed in the ROADMAP notes
 - Phase 09.3 inserted after Phase 9: Pendências de backend do FRONT.pdf (delete event/community, limits, Android icon); placed after 09.2 by hand, STATE stays on 09.2
+- Phase 09.4 inserted after Phase 09.3: Projeto do tenant no Supabase do cliente: token com escopo por projeto (decided with Igor 2026-10-27; numbered 09.4 by hand, STATE stays on 09.2 plan 25)
 
 ## Deferred Items
 
