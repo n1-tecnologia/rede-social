@@ -22,6 +22,7 @@ import {
   type FakeFailAt,
   type FakeProjectProvider,
 } from '@rede-social/core/server/projects/fake';
+import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { BOOTSTRAP_REASONS, BOOTSTRAP_STEPS } from '@rede-social/core/server/projects/reasons';
 import { defaultSecrets } from '@rede-social/core/server/projects/steps';
 import { open, seal } from '@rede-social/core/server/secrets/sealed';
@@ -32,6 +33,7 @@ import {
 import { resolveTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { CUSTOMER_ORG, makeCustomerProject } from './projects-setup';
 import { adminSql, api, authAdmin, SEED_PASSWORD, signInAs } from './setup';
 
 /**
@@ -127,6 +129,8 @@ async function newProject(
     bindTenant?: boolean;
     sealed?: boolean;
     apiUserPassword?: () => string;
+    /** 09.4-06: the row is a CUSTOMER project whose sealed management token is this fake token. */
+    customerToken?: string;
   } = {},
 ): Promise<Fixture> {
   counter += 1;
@@ -174,7 +178,11 @@ async function newProject(
       },
     },
     ...(options.failAt ? { failAt: options.failAt } : {}),
+    ...(options.customerToken
+      ? { orgSlug: CUSTOMER_ORG, tokens: { [options.customerToken]: { refs: 'all' as const } } }
+      : {}),
   });
+  if (options.customerToken) await makeCustomerProject(projectId, options.customerToken);
 
   const connects: string[] = [];
   const sendInvites = vi.fn(async () => undefined);
@@ -852,4 +860,31 @@ describe('hooks stay disabled (T-09.2-64)', () => {
       expect(body.hook_custom_access_token_enabled).toBe(false);
     }
   }, 180_000);
+});
+
+describe('a customer project runs on its own token (09.4-06, CTK-22, T-09.4-19)', () => {
+  it('customer: the provider steps use the project token and the platform token is never used', async () => {
+    resetB();
+    const f = await fixture({ customerToken: 'sbp_fc_fake_boot' });
+    setProjectProviderForTests(f.provider);
+    try {
+      // No injected provider: the engine must resolve one per project.
+      const { provider: _injected, ...withoutProvider } = f.deps;
+      expect(await runBootstrap(f.projectId, withoutProvider)).toEqual({ status: 'ready' });
+    } finally {
+      setProjectProviderForTests(undefined);
+    }
+    const uses = f.provider.calls.tokenUses.filter((use) => use.ref === f.ref);
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.filter((use) => use.kind === 'platform')).toEqual([]);
+  }, 120_000);
+
+  it('a platform project is unchanged: the injected provider is used and its calls are platform uses', async () => {
+    resetB();
+    const f = await fixture();
+    expect(await runBootstrap(f.projectId, f.deps)).toEqual({ status: 'ready' });
+    const uses = f.provider.calls.tokenUses.filter((use) => use.ref === f.ref);
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.every((use) => use.kind === 'platform')).toBe(true);
+  }, 120_000);
 });

@@ -10,8 +10,10 @@ import {
   type FakeTarget,
 } from '@rede-social/core/server/projects/fake';
 import { defaultSecrets } from '@rede-social/core/server/projects/steps';
+import { seal } from '@rede-social/core/server/secrets/sealed';
 import postgres from 'postgres';
 import { vi } from 'vitest';
+import { adminSql } from './setup';
 
 /**
  * Shared fixtures of the 09.2-14 panel-API suites (`platform-projects`, `project-credentials`,
@@ -138,4 +140,33 @@ export async function createReadyTenant(
     if (outcome.status !== 'ready') throw new Error(`bootstrap of ${ref} ended ${outcome.status}`);
   }
   return { tenantId: made.id, projectId: made.projectId };
+}
+
+/** The organisation the customer fixtures are pinned to (the fake provider answers it for every ref). */
+export const CUSTOMER_ORG = 'acme-customer';
+
+/**
+ * Turns an existing registry row into a CUSTOMER project (09.4-06): owner, organisation pin and a management
+ * token sealed under the test keyring with the real AAD `<id>:mgmt_token`. The token is a fake string.
+ */
+export async function makeCustomerProject(
+  projectId: string,
+  token: string,
+  orgSlug: string = CUSTOMER_ORG,
+): Promise<void> {
+  await adminSql`
+    update platform.projects
+       set owner = 'customer',
+           org_slug = ${orgSlug},
+           mgmt_token_sealed = ${seal(token, `${projectId}:mgmt_token`)},
+           mgmt_token_expires_at = null
+     where id = ${projectId}::uuid`;
+}
+
+/** A fake provider whose world also knows one customer token for every ref it maps. */
+export function customerFakeProvider(
+  targets: Record<string, FakeTarget>,
+  token: string,
+): FakeProjectProvider {
+  return fakeProvider(targets, { orgSlug: CUSTOMER_ORG, tokens: { [token]: { refs: 'all' } } });
 }

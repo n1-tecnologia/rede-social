@@ -27,8 +27,10 @@ import {
   bootstrapDeps,
   connectToB,
   createReadyTenant,
+  customerFakeProvider,
   fakeProvider,
   fakeTarget,
+  makeCustomerProject,
   ROOT,
   resetB,
   restoreB,
@@ -793,4 +795,84 @@ describe('a bootstrap that resumes after a reissue uses the NEW credentials (P94
     );
     expect(view.success).toBe(true);
   }, 180_000);
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// A customer project resolves its provider per project (09.4-06, CTK-22, T-09.4-19)
+// ---------------------------------------------------------------------------------------------------------
+
+describe('a customer project is served by its own token (09.4-06)', () => {
+  const TOKEN = 'sbp_fc_fake_cred';
+  const REF_C = `pc-c-${RUN}`;
+  const SLUG_C = `pc-c-${RUN}`;
+  const world = customerFakeProvider({ [REF_C]: fakeTarget() }, TOKEN);
+  let customerTenant = '';
+  let customerProject = '';
+  let mark = 0;
+
+  const usesSinceMark = () => world.calls.tokenUses.slice(mark).filter((use) => use.ref === REF_C);
+
+  beforeAll(async () => {
+    resetB();
+    setProjectProviderForTests(world);
+    ({ tenantId: customerTenant, projectId: customerProject } = await createReadyTenant(
+      world,
+      REF_C,
+      SLUG_C,
+    ));
+    await makeCustomerProject(customerProject, TOKEN);
+  }, 180_000);
+
+  afterAll(async () => {
+    setProjectProviderForTests(provider);
+    await adminSql`delete from public.tenants where slug = ${SLUG_C}`;
+    await adminSql`
+      delete from pgboss_platform.job
+       where name = ${QUEUE} and data->>'projectId' = ${customerProject}`;
+    await adminSql`delete from platform.projects where ref = ${REF_C}`;
+  });
+
+  it('customer: replacing the database password reaches the provider through the project token', async () => {
+    // Without a stored DDL URL the pooler coordinates come from the provider, so the provider is called.
+    await adminSql`update platform.projects set ddl_url_sealed = null where id = ${customerProject}::uuid`;
+    mark = world.calls.tokenUses.length;
+    const access: AccessDeps = {
+      connect: (url) => connectToB('ddl', url),
+      serviceKeyWorks: async () => true,
+      publishableKeyWorks: async () => true,
+    };
+    await replaceCredentials(customerTenant, { databasePassword: 'postgres' }, actor, {
+      access,
+      startCheck: noCheck,
+    });
+    const uses = usesSinceMark();
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.filter((use) => use.kind === 'platform')).toEqual([]);
+  });
+
+  it('customer: a reissue runs on the project token, and a dead token ends as token_invalid, never provider text', async () => {
+    const base = bootstrapDeps(world);
+    const run = () =>
+      reissueCredentials(customerProject, {
+        connect: base.connect as never,
+        secrets: base.secrets as never,
+        startCheck: noCheck,
+      });
+
+    mark = world.calls.tokenUses.length;
+    expect(await run()).toMatchObject({ status: 'reissued' });
+    const uses = usesSinceMark();
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.filter((use) => use.kind === 'platform')).toEqual([]);
+
+    world.setTokenState(TOKEN, 'dead');
+    try {
+      const failure = await run().catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(ReissueError);
+      expect((failure as ReissueError).reason).toBe('token_invalid');
+      expect((failure as ReissueError).message).not.toContain('sbp_');
+    } finally {
+      world.setTokenState(TOKEN, 'ok');
+    }
+  }, 120_000);
 });
