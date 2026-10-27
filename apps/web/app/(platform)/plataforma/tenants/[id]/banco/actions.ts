@@ -1,6 +1,9 @@
 'use server';
 
-import { replaceCredentialsBodySchema } from '@rede-social/contracts/projects';
+import {
+  replaceCredentialsBodySchema,
+  replaceTokenBodySchema,
+} from '@rede-social/contracts/projects';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
@@ -210,11 +213,96 @@ export async function replaceCredentialsAction(
   return outcome;
 }
 
-/** RED stub (09.4-16 Task 2). */
-export type ReplaceTokenResult = { ok: true } | { ok: false; error: 'unavailable' };
+/** What the token sheet sends: the new token and the optional typed expiry (`YYYY-MM-DD`). */
+export type ReplaceTokenValues = { token: string; tokenExpiresAt?: string };
+
+/**
+ * Why a replacement was refused, as a closed code the sheet turns into a catalog sentence: the five token
+ * refusals (under the token and the date), the organisation that is no longer the registered one and
+ * everything else the operator cannot fix from the form (`unavailable`).
+ */
+export type ReplaceTokenError =
+  | 'token_invalid'
+  | 'token_forbidden'
+  | 'token_account_wide'
+  | 'token_other_project'
+  | 'token_expiry_invalid'
+  | 'org_mismatch'
+  | 'unavailable';
+
+/** What the sheet gets back: a flag or a closed code. NEVER the token, a prefix of it or a provider message. */
+export type ReplaceTokenResult = { ok: true } | { ok: false; error: ReplaceTokenError };
+
+/** The codes of `VALIDATION_FAILED { token: <code> }` that have a place on the form (09.4-10). */
+const TOKEN_REFUSALS: readonly string[] = [
+  'token_invalid',
+  'token_forbidden',
+  'token_account_wide',
+  'token_other_project',
+  'org_mismatch',
+];
+
+/**
+ * "Salvar token" - `PUT …/database/token` (D-575, UI-D-555, CTK-37). The same Zod the API validates with
+ * runs first (a blank token never leaves), then the API checks the new token against the project and the
+ * registered organisation and replaces the old one only if all of it holds: 400 with one closed code under
+ * `token` or `tokenExpiresAt` means nothing was changed and maps to that code; the project not being a
+ * customer's (409), an unknown tenant (404), a 5xx and a transport failure are all `unavailable`;
+ * 401/403 navigate.
+ *
+ * The token travels from the sheet to the API once, in this call's body. It is never logged (the only log
+ * lines carry a status and a code), never echoed, never put in a URL, a cookie or a revalidation tag, and
+ * nothing in the answer holds it (UI-D-561).
+ */
 export async function replaceTokenAction(
-  _tenantId: string,
-  _values: { token: string; tokenExpiresAt?: string },
+  tenantId: string,
+  values: ReplaceTokenValues,
 ): Promise<ReplaceTokenResult> {
-  return { ok: false, error: 'unavailable' };
+  if (!uuid.safeParse(tenantId).success) return { ok: false, error: 'unavailable' };
+  const expiresAt = (values.tokenExpiresAt ?? '').trim();
+  const body = replaceTokenBodySchema.safeParse({
+    token: values.token,
+    ...(expiresAt ? { tokenExpiresAt: expiresAt } : {}),
+  });
+  if (!body.success) return { ok: false, error: 'unavailable' };
+
+  let refusal: string | null = null;
+  let outcome: ReplaceTokenResult;
+  try {
+    const res = await apiFetch(databasePath(tenantId, '/token'), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body.data),
+    });
+    if (res.ok) {
+      revalidateTenantViews(tenantId);
+      outcome = { ok: true };
+    } else {
+      const err = await readEnvelope(res);
+      if (res.status === 401 || res.status === 403) {
+        refusal = platformRedirectPath(err);
+        outcome = { ok: false, error: 'unavailable' };
+      } else if (res.status === 400 && err.details?.tokenExpiresAt === 'token_expiry_invalid') {
+        outcome = { ok: false, error: 'token_expiry_invalid' };
+      } else if (
+        res.status === 400 &&
+        typeof err.details?.token === 'string' &&
+        TOKEN_REFUSALS.includes(err.details.token)
+      ) {
+        outcome = { ok: false, error: err.details.token as ReplaceTokenError };
+      } else {
+        if (res.status >= 500) {
+          console.error('platform.database.token_failed', { status: res.status, code: err.code });
+        }
+        outcome = { ok: false, error: 'unavailable' };
+      }
+    }
+  } catch {
+    // The error's own text could quote the request; only the fact is logged.
+    console.error('platform.database.token_failed', { status: 0, code: 'NETWORK' });
+    outcome = { ok: false, error: 'unavailable' };
+  }
+
+  if (refusal) redirect(refusal);
+  return outcome;
 }

@@ -12,6 +12,7 @@ import { relativeFrom } from '@/lib/relative-time';
 import {
   pollDatabaseAction,
   replaceCredentialsAction,
+  replaceTokenAction,
   resumeBootstrapAction,
   verifyDatabaseAction,
 } from './actions';
@@ -76,6 +77,7 @@ export default async function TenantDatabasePage({ params }: { params: Promise<{
           tenantId={detail.tenant.id}
           token={overview.token}
           today={today}
+          replaceAction={replaceTokenAction}
           verifiedWhen={
             overview.token.checkedAt ? relativeFrom(overview.token.checkedAt, now) : null
           }

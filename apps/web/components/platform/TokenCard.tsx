@@ -2,8 +2,9 @@ import type { TokenState, TokenSummary } from '@rede-social/contracts/projects';
 import { Card, SectionTitle } from '@rede-social/ui';
 import { CircleAlert, KeyRound, TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import type { ReplaceTokenSheetProps } from './ReplaceTokenSheet';
+import { TokenCardActions } from './TokenCardActions';
 import { TokenHowTo } from './TokenHowTo';
-import { TokenPill } from './TokenPill';
 
 export interface TokenCardProps {
   tenantId: string;
@@ -13,6 +14,8 @@ export interface TokenCardProps {
   today: string;
   /** "há 3 min" - computed on the server with `relativeFrom`; null when the token was never checked. */
   verifiedWhen: string | null;
+  /** `replaceTokenAction`, handed down by the page (the card knows no route and no API). */
+  replaceAction: ReplaceTokenSheetProps['action'];
 }
 
 /**
@@ -65,9 +68,11 @@ function typedLongDate(value: string | null): string | null {
  * length, the last characters or a "mostrar" control, because nothing of the kind reaches it (UI-D-561).
  *
  * A dead token is not an outage (UI-D-551): this card is the only place the state lives besides the header
- * and list pills, and it never changes the database pill.
+ * and list pills, and it never changes the database pill. The live parts (the status block that reads
+ * "Verificando…" after a save, and "Substituir token" with its sheet) are the `TokenCardActions` island;
+ * the notice stays server-rendered and is passed in as its children.
  */
-export function TokenCard({ token, today, verifiedWhen }: TokenCardProps) {
+export function TokenCard({ tenantId, token, today, verifiedWhen, replaceAction }: TokenCardProps) {
   const t = useTranslations('platform.database.token');
   const notice = hasNotice(token.state) ? NOTICES[token.state] : null;
 
@@ -94,34 +99,33 @@ export function TokenCard({ token, today, verifiedWhen }: TokenCardProps) {
         <p className="min-w-0 break-words text-sm text-text-secondary">{t('body')}</p>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-3">
-          <TokenPill state={token.state} />
-          <span className="min-w-0 break-words text-xs text-text-tertiary">{expiryLine}</span>
-        </div>
-        <p className="break-words text-xs text-text-tertiary">
-          {verifiedWhen ? t('verifiedAt', { when: verifiedWhen }) : t('neverChecked')}
-        </p>
-      </div>
-
-      {notice ? (
-        <div
-          role={notice.tone === 'danger' ? 'alert' : undefined}
-          data-notice={notice.key}
-          className={
-            notice.tone === 'danger'
-              ? 'flex items-start gap-2 rounded-xl border border-danger/40 bg-danger/5 px-3 py-3'
-              : 'flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-3'
-          }
-        >
-          {notice.tone === 'danger' ? (
-            <TriangleAlert aria-hidden size={16} className="mt-0.5 shrink-0 text-danger" />
-          ) : (
-            <CircleAlert aria-hidden size={16} className="mt-0.5 shrink-0 text-warning" />
-          )}
-          <p className="min-w-0 break-words text-xs text-text">{t(`notices.${notice.key}`)}</p>
-        </div>
-      ) : null}
+      <TokenCardActions
+        tenantId={tenantId}
+        state={token.state}
+        expiryLine={expiryLine}
+        verifiedWhen={verifiedWhen}
+        today={today}
+        replaceAction={replaceAction}
+      >
+        {notice ? (
+          <div
+            role={notice.tone === 'danger' ? 'alert' : undefined}
+            data-notice={notice.key}
+            className={
+              notice.tone === 'danger'
+                ? 'flex items-start gap-2 rounded-xl border border-danger/40 bg-danger/5 px-3 py-3'
+                : 'flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-3'
+            }
+          >
+            {notice.tone === 'danger' ? (
+              <TriangleAlert aria-hidden size={16} className="mt-0.5 shrink-0 text-danger" />
+            ) : (
+              <CircleAlert aria-hidden size={16} className="mt-0.5 shrink-0 text-warning" />
+            )}
+            <p className="min-w-0 break-words text-xs text-text">{t(`notices.${notice.key}`)}</p>
+          </div>
+        ) : null}
+      </TokenCardActions>
 
       <TokenHowTo collapsible />
     </Card>
