@@ -1293,12 +1293,69 @@ export async function updateProduct(
 }
 
 /**
+ * 09.3 WR-03 (D-554): refuses a reactivation when ANY community this product links, in the caller's
+ * tenant, is soft-deleted (`deleted_at` set). One tenant-scoped LOCKING read: the linked community
+ * rows are taken FOR SHARE in ascending id, and the deleted flag is read from the locked row (never
+ * a `deleted_at` predicate in the WHERE: a row filtered out before the wait would never be locked
+ * and the wait would never happen). A product has at most `STORE_MAX_LINKS` links, so the lock set
+ * is bounded. The refusal is the closed code only, never a name or an id; the throw rolls the
+ * transaction back.
+ */
+async function refuseDeletedCommunityLinks(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+): Promise<void> {
+  const rows = await tx.execute<{ deleted: boolean }>(sql`
+    select (c.deleted_at is not null) as deleted
+      from store_product_communities l
+      join communities c on c.id = l.community_id and c.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+     order by c.id
+       for share of c`);
+  if (!rows.some((row) => row.deleted)) return;
+  log.info(
+    {
+      event: 'store.product_status_refused',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      productId,
+      reason: 'community_deleted',
+    },
+    'store product reactivation refused',
+  );
+  throw new ApiError(409, 'CONFLICT', { store: 'community_deleted' });
+}
+
+/**
  * `PUT /v1/store/products/{productId}/status` (decision 3, STORE-09). Idempotent (P12): the status
  * the product already has answers the unchanged detail and leaves `updated_at` alone. Archiving
  * removes the product from `filter=all` and makes NEW purchases answer 409 `unavailable`
  * (`app.store_purchase`); it touches no link and no entitlement, so a holder keeps every community
  * the product opens, and the product stays under their `filter=owned` (the prohibition: a member
  * never loses access through catalogue housekeeping).
+ *
+ * 09.3 WR-03 (D-554): a TRANSITION to `active` (the locked current status is not `active`) is
+ * refused `409 { store: 'community_deleted' }` when any linked community of this tenant is deleted:
+ * an admin may delete an ARCHIVED community while only ARCHIVED products link it (D-553, D-554), and
+ * reactivating such a product would sell access to a community that no longer exists. Nothing is
+ * written. Archiving and re-sending the current status never run the check.
+ *
+ * Locks, in order: the product row FOR NO KEY UPDATE (the lock the plain UPDATE always took, so it
+ * does not start blocking the foreign-key inserts of purchases and grants, while it still conflicts
+ * with `updateProduct`'s FOR UPDATE and with another status write), then the linked community rows
+ * FOR SHARE by ascending id. The community rows are locked, not merely read, because
+ * `deleteCommunity` takes its community row FOR UPDATE and only THEN plain-reads the products: a
+ * reactivation and a delete racing each other end as exactly one of (delete 204, reactivation 409)
+ * or (delete 409 `unlock_active`, reactivation 200), never as an active product unlocking a deleted
+ * community. The delete holds a single community row and never waits on a product lock, so no wait
+ * cycle exists; `updateProduct` already goes product then community.
+ *
+ * Known consequence (not changed here): `replaceLinks` drops links only to ACTIVE, live communities
+ * (CR-02), so a link to a deleted community can never be removed by an edit and such a product stays
+ * archived for good.
  */
 export async function setProductStatus(
   ctx: RequestContext,
@@ -1307,6 +1364,16 @@ export async function setProductStatus(
 ): Promise<ProductDetail> {
   const coursesOn = await coursesEnabled(ctx);
   const result = await withTenantTx(ctx, async (tx) => {
+    const current = await tx.execute<{ status: string }>(sql`
+      select status from store_products
+       where id = ${productId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+         for no key update`);
+    const currentStatus = current[0]?.status;
+    if (currentStatus === undefined) return null;
+    if (status === 'active' && currentStatus !== 'active') {
+      await refuseDeletedCommunityLinks(tx, ctx, productId);
+    }
     const rows = await tx.execute<{ changed: boolean }>(sql`
       update store_products
          set status = ${status},

@@ -36,7 +36,8 @@ export const STORE_MAX_LINKS = 50;
  *    of this tenant nor one already linked to this product, or not a uuid), `too_many_courses`,
  *    `live_invalid` (not a non-cancelled live of this tenant nor one already linked to this product,
  *    or not a uuid), `too_many_lives` (08.4, D-418);
- *  - `409 CONFLICT`: `unavailable` (the product is archived) and `price_changed` (the price moved).
+ *  - `409 CONFLICT`: `unavailable` (the product is archived), `price_changed` (the price moved) and
+ *    `community_deleted` (09.3 WR-03: reactivating a product that links a deleted community).
  */
 export const STORE_ISSUES = [
   'name_required',
@@ -52,6 +53,7 @@ export const STORE_ISSUES = [
   'too_many_lives',
   'unavailable',
   'price_changed',
+  'community_deleted',
 ] as const;
 export type StoreIssue = (typeof STORE_ISSUES)[number];
 

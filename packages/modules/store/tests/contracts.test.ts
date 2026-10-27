@@ -67,6 +67,7 @@ describe('store contracts (08.2-01)', () => {
     expect(STORE_PERMISSIONS.manage).toBe('store.product.manage');
     expect(STORE_ISSUES).toContain('price_changed');
     expect(STORE_ISSUES).toContain('unavailable');
+    expect(STORE_ISSUES).toContain('community_deleted');
   });
 
   it('name: 0 after trim fails name_required; 1 and 80 pass; 81 fails name_too_long', () => {

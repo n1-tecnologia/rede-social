@@ -25,6 +25,10 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from 
  *    flag, the row lock that serialises a concurrent product link, races, hidden-not-erased
  *    highlights, an untouched Loja, the slug, and the no-oracle rule.
  *
+ * The converse of D-554 (09.3 WR-03): reactivating a product that links a DELETED community is
+ * `409 { store: 'community_deleted' }`, and a reactivation racing a delete never ends with an
+ * active product that unlocks a deleted community.
+ *
  * `story_community_pins` no longer exists (dropped in Phase 05.2-11), so D-556 has nothing to treat
  * there; the highlights stay in `story_highlights` and are hidden by the read filters.
  *
@@ -724,5 +728,115 @@ describe('no oracle and no leak (PEND-13, P38)', () => {
     expect(memberText).not.toContain(secret);
     expect(memberText).not.toContain(community.id);
     expect(await deletedAtOf(community.id)).toBeNull();
+  });
+});
+
+type ProductRow = { status: string; updated_at: string };
+
+/** `PUT /v1/store/products/{productId}/status`. */
+const putProductStatus = (
+  productId: string,
+  status: 'active' | 'archived',
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+) =>
+  request(
+    `/v1/store/products/${productId}/status`,
+    token,
+    { method: 'PUT', body: JSON.stringify({ status }) },
+    host,
+  );
+
+async function productRow(productId: string): Promise<ProductRow | undefined> {
+  const [row] = await adminSql<ProductRow[]>`
+    select status, updated_at::text from public.store_products where id = ${productId}::uuid`;
+  return row;
+}
+
+/** Asserts the closed 409 and that the raw body names nothing. Returns the raw body. */
+async function expectCommunityDeleted(
+  res: Response,
+  label: string,
+  forbidden: string[] = [],
+): Promise<string> {
+  const raw = await res.clone().text();
+  expect(res.status, `${label}: ${raw}`).toBe(409);
+  const error = await envelope(res);
+  expect(error.code, label).toBe('CONFLICT');
+  expect(error.details, label).toEqual({ store: 'community_deleted' });
+  for (const needle of forbidden) expect(raw, `${label}: ${needle}`).not.toContain(needle);
+  return raw;
+}
+
+/** An ARCHIVED product linking an ARCHIVED, DELETED community. */
+async function archivedProductOfDeletedCommunity(suffix: string) {
+  const community = await createCommunity(uniqueName(suffix));
+  const product = await createProduct(productName(suffix), [community.id]);
+  await archiveProduct(product.id);
+  await archive(community.id);
+  expect((await del(community.id)).status).toBe(204);
+  return { community, product };
+}
+
+describe('reactivating a product that links a deleted community (09.3 WR-03, D-554)', () => {
+  it('13. tracer: the reactivation is 409 community_deleted and writes nothing; archiving is still 200', async () => {
+    const { community, product } = await archivedProductOfDeletedCommunity('reativar');
+    const before = await productRow(product.id);
+    expect(before?.status).toBe('archived');
+
+    const first = await putProductStatus(product.id, 'active');
+    const firstText = await expectCommunityDeleted(first, 'first', [
+      product.id,
+      product.name,
+      community.id,
+      community.name,
+    ]);
+    expect(await productRow(product.id)).toEqual(before);
+    expect(await linkCount(community.id)).toBe(1);
+    expect(await deletedAtOf(community.id)).toEqual(expect.any(String));
+
+    // The same call answers the same body.
+    const second = await putProductStatus(product.id, 'active');
+    expect(second.status).toBe(409);
+    expect(sansRequestId(await second.text())).toBe(sansRequestId(firstText));
+    expect(await productRow(product.id)).toEqual(before);
+
+    // Archiving is never refused.
+    const archived = await putProductStatus(product.id, 'archived');
+    expect(archived.status, await archived.clone().text()).toBe(200);
+    expect(await productRow(product.id)).toEqual(before);
+  });
+
+  it('14. control: an archived but NOT deleted community does not block; the reactivated product counts again', async () => {
+    const community = await createCommunity(uniqueName('controle'));
+    const product = await createProduct(productName('controle'), [community.id]);
+    await archiveProduct(product.id);
+    await archive(community.id);
+
+    const res = await putProductStatus(product.id, 'active');
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('active');
+    expect((await productRow(product.id))?.status).toBe('active');
+
+    const refusal = await refusalOf(await del(community.id));
+    expect(refusal.products).toEqual([{ id: product.id, name: product.name }]);
+    expect(await deletedAtOf(community.id)).toBeNull();
+  });
+
+  it('15. idempotent: re-sending active leaves the row alone, even when a linked community is deleted', async () => {
+    const community = await createCommunity(uniqueName('idempotente'));
+    const product = await createProduct(productName('idempotente'), [community.id]);
+    const before = await productRow(product.id);
+    expect(before?.status).toBe('active');
+
+    const first = await putProductStatus(product.id, 'active');
+    expect(first.status, await first.clone().text()).toBe(200);
+    expect(await productRow(product.id)).toEqual(before);
+
+    // The inconsistent state an older row or a support recovery could leave.
+    await adminSql`update public.communities set deleted_at = now() where id = ${community.id}::uuid`;
+    const second = await putProductStatus(product.id, 'active');
+    expect(second.status, await second.clone().text()).toBe(200);
+    expect(await productRow(product.id)).toEqual(before);
   });
 });
