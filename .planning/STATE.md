@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "09.3"
-current_phase_name: Pendências de backend do FRONT.pdf (INSERTED)
-current_plan: 9
+current_phase: "09.2"
+current_phase_name: "Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)"
+current_plan: 25
 status: executing
-stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered, UI-SPEC approved and planned (9 plans, 6 waves, plan checker passed) 2026-10-26 on the side; execute-phase 09.3 waits for 09.2 to close.
+stopped_at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 was executed and closed on 2026-10-27 by developer closure while 09.2 stayed paused here (its 7 hosted and real-device UAT rows are Igor's, see 09.3-UAT.md).
 last_updated: "2026-10-27T12:02:35.666Z"
 last_activity: 2026-10-27
-last_activity_desc: Phase 09.3 execution started
+last_activity_desc: Phase 09.3 closed by developer closure (verification human_needed 7/7, review WR-03 fixed by quick 261027-c8f); STATE pointer back on 09.2 plan 25
 state_head: 2939d5a38c69968d4388460582df81d465ae6ecb
 progress:
   total_phases: 25
   completed_phases: 0
   total_plans: 277
-  completed_plans: 267
+  completed_plans: 268
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 09.3 — Pendências de backend do FRONT.pdf (INSERTED)
+**Current focus:** Phase 09.2 — Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)
 
 ## Current Position
 
-Phase: 09.3 (Pendências de backend do FRONT.pdf (INSERTED)) — EXECUTING
-Current Plan: 9
-Total Plans in Phase: 9
-Plan: 8 of 9 done (01-08); 09 is PARTIAL (docs committed; pnpm verify green except e2e, where 30 distinct tests fail identically on pre-phase code). Code review 0 critical / 4 warnings, verification human_needed 7/7, UAT 7 items pending; closing the phase is Igor's call
-Status: Executing
-Last activity: 2026-10-27 — Phase 09.3 verified human_needed (7/7), REVIEW and UAT committed; e2e baseline compared, e2e:pwa green; Phase 09.2 stays paused at its plan 25 (Igor's hosted proofs)
+Phase: 09.2 (Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)) — EXECUTING (paused at plan 25)
+Current Plan: 25
+Total Plans in Phase: 28
+Plan: 24 of 28 done on 09.2 (plans run out of numeric order); the next is 25 (wave 14, the human gates: autonomous false, 4 checkpoints for Igor). Phase 09.3 is CLOSED (9/9, 2026-10-27, developer closure; its 7 UAT rows are Igor's)
+Status: Ready to execute
+Last activity: 2026-10-27 — Phase 09.3 closed by developer closure (verification human_needed 7/7, e2e: 30 tests red on the pre-phase code too, e2e:pwa green; review WR-03 fixed by quick 261027-c8f); Phase 09.2 stays paused at its plan 25 (Igor's hosted proofs)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
