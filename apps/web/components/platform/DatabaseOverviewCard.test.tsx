@@ -375,7 +375,7 @@ describe('DatabaseOverviewCard', () => {
 describe('DatabaseOverviewCard - owner and organisation (09.4-16)', () => {
   const labels = (container: HTMLElement) =>
     Array.from(container.querySelectorAll('dt')).map((dt) => dt.textContent);
-  const valueOf = (container: HTMLElement, label: string) => {
+  const cellOf = (container: HTMLElement, label: string) => {
     const index = labels(container).indexOf(label);
     return container.querySelectorAll('dd')[index];
   };
@@ -383,8 +383,8 @@ describe('DatabaseOverviewCard - owner and organisation (09.4-16)', () => {
   it('lists Projeto, Dono, Organização, Esquema, Plano for a customer project, with the slug breaking', () => {
     const { container } = mount({ owner: 'customer', organization: 'acme-corp' });
     expect(labels(container)).toEqual(['Projeto', 'Dono', 'Organização', 'Esquema', 'Plano']);
-    expect(valueOf(container, 'Dono')?.textContent).toBe('Cliente');
-    const organization = valueOf(container, 'Organização') as HTMLElement;
+    expect(cellOf(container, 'Dono')?.textContent).toBe('Cliente');
+    const organization = cellOf(container, 'Organização') as HTMLElement;
     expect(organization.textContent).toBe('acme-corp');
     expect(organization.className).toContain('break-all');
     expect(organization.className).toContain('min-w-0');
@@ -393,7 +393,7 @@ describe('DatabaseOverviewCard - owner and organisation (09.4-16)', () => {
   it('keeps a long organisation slug inside the minmax(0,1fr) column (E05 overflow, long-text)', () => {
     const slug = 'a-very-long-organisation-slug-that-would-push-a-320px-card-sideways-0123456789';
     const { container } = mount({ owner: 'customer', organization: slug });
-    expect(valueOf(container, 'Organização')?.textContent).toBe(slug);
+    expect(cellOf(container, 'Organização')?.textContent).toBe(slug);
     const dl = container.querySelector('dl') as HTMLElement;
     expect(dl.className).toContain('grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)]');
   });
@@ -401,13 +401,13 @@ describe('DatabaseOverviewCard - owner and organisation (09.4-16)', () => {
   it('lists Projeto, Dono, Esquema, Plano for a platform project: one new row and no Organização', () => {
     const { container } = mount({ owner: 'platform', organization: null });
     expect(labels(container)).toEqual(['Projeto', 'Dono', 'Esquema', 'Plano']);
-    expect(valueOf(container, 'Dono')?.textContent).toBe('Plataforma');
+    expect(cellOf(container, 'Dono')?.textContent).toBe('Plataforma');
   });
 
   it('renders an answer without the new fields (an older API) as a platform project', () => {
     const { container } = mount();
     expect(labels(container)).toEqual(['Projeto', 'Dono', 'Esquema', 'Plano']);
-    expect(valueOf(container, 'Dono')?.textContent).toBe('Plataforma');
+    expect(cellOf(container, 'Dono')?.textContent).toBe('Plataforma');
     expect(screen.queryByText('Organização')).toBeNull();
   });
 
@@ -425,7 +425,7 @@ describe('DatabaseOverviewCard - owner and organisation (09.4-16)', () => {
 
   it('reads Plano as "Não informado" for a customer project the locked permissions cannot read', () => {
     const { container } = mount({ owner: 'customer', organization: 'acme', plan: null });
-    expect(valueOf(container, 'Plano')?.textContent).toBe('Não informado');
+    expect(cellOf(container, 'Plano')?.textContent).toBe('Não informado');
     expect(container.querySelector('[data-notice="planNotPro"]')).toBeNull();
   });
 
@@ -452,7 +452,11 @@ describe('DatabaseOverviewCard - owner and organisation (09.4-16)', () => {
     ['platform', 'free'],
     ['platform', 'pro'],
   ] as const)('never shows the customer-Free notice for owner %s on plan %s', (owner, plan) => {
-    const { container } = mount({ owner, organization: owner === 'customer' ? 'acme' : null, plan });
+    const { container } = mount({
+      owner,
+      organization: owner === 'customer' ? 'acme' : null,
+      plan,
+    });
     expect(container.querySelector('[data-notice="planNotPro"]')).toBeNull();
   });
 });

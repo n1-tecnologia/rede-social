@@ -1,8 +1,10 @@
 import { BootstrapSteps } from '@/components/platform/BootstrapSteps';
 import { CredentialsCard } from '@/components/platform/CredentialsCard';
 import { DatabaseOverviewCard } from '@/components/platform/DatabaseOverviewCard';
+import { TokenCard } from '@/components/platform/TokenCard';
 import {
   formatPanelLongDate,
+  PANEL_TIME_ZONE,
   requirePlatformTenantDatabase,
   requirePlatformTenantDetail,
 } from '@/lib/platform';
@@ -21,6 +23,11 @@ import {
  * steps (hidden for a tenant on the central project, which was never bootstrapped) and the
  * Credenciais card.
  *
+ * 09.4-16 (UI-D-554, UI-D-558): a CUSTOMER project (`owner 'customer'` with a token summary) gets a fourth
+ * card, Token de acesso, between Preparação and Credenciais; a platform project, and an answer from an
+ * API that predates the fields, render exactly the three cards above. `today` is the panel's date, computed
+ * here so the card counts its days left from the server and never from a client clock.
+ *
  * The tenant detail comes from `requirePlatformTenantDetail` (the segment re-proves the authorisation,
  * deduplicated with the layout's call by React `cache`; an unknown id is the segment's not-found
  * screen); the database from `GET …/database` through `requirePlatformTenantDatabase` (401/403
@@ -32,6 +39,7 @@ export default async function TenantDatabasePage({ params }: { params: Promise<{
   const detail = await requirePlatformTenantDetail(id);
   const overview = await requirePlatformTenantDatabase(id);
   const now = Date.now();
+  const today = new Date(now).toLocaleDateString('sv-SE', { timeZone: PANEL_TIME_ZONE });
 
   // The end of the run: the recorded one, else the latest step end (a run whose summary row was lost).
   const finishedAt =
@@ -61,6 +69,16 @@ export default async function TenantDatabasePage({ params }: { params: Promise<{
           finishedAtText={finishedAtText}
           resumeAction={resumeBootstrapAction}
           pollAction={pollDatabaseAction}
+        />
+      ) : null}
+      {overview.owner === 'customer' && overview.token ? (
+        <TokenCard
+          tenantId={detail.tenant.id}
+          token={overview.token}
+          today={today}
+          verifiedWhen={
+            overview.token.checkedAt ? relativeFrom(overview.token.checkedAt, now) : null
+          }
         />
       ) : null}
       <CredentialsCard

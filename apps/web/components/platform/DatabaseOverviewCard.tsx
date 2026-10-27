@@ -52,6 +52,10 @@ function isPreparing(overview: DatabaseOverview): boolean {
  * production, who else shares it) and where it is behind (the notice row of the state). A Server
  * Component; the only interactive part is the "Verificar agora" island.
  *
+ * 09.4-16 (UI-D-552, UI-D-558): the `dl` gains **Dono** after Projeto and, for a customer project only,
+ * **Organização** (the pinned Supabase organisation slug, `break-all`) after it; an answer without the
+ * fields reads as a platform project, so existing tenants see one new row.
+ *
  * Everything here is React text. The dashboard link is built from the stored ref ONLY when it is
  * exactly twenty lower-case letters, `^[a-z]{20}$` (UI-D-548) and opens a new tab with `noopener noreferrer`; the
  * columns are `minmax(0, …)` and the ref is `break-all`, so the card never scrolls sideways at 320px.
@@ -79,6 +83,11 @@ export function DatabaseOverviewCard({
 
   const dashboardRef = PROJECT_REF_PATTERN.test(overview.ref) ? overview.ref : null;
   const notice = hasNotice(overview.state) ? NOTICES[overview.state] : null;
+  // 09.4-16 (UI-D-552, UI-D-558): an answer from an API that predates the owner reads as a platform project.
+  const customer = overview.owner === 'customer';
+  // D-572: a customer project is always Pro; the locked permissions cannot read the plan today, so this
+  // fires only when the overview ever reads Free. Information only: nothing blocks.
+  const planNotPro = customer && planKey(overview.plan) === 'planFree';
 
   return (
     <Card className="flex flex-col gap-4 p-4 md:p-6">
@@ -110,6 +119,20 @@ export function DatabaseOverviewCard({
             </a>
           ) : null}
         </dd>
+
+        <dt className="text-text-tertiary">{t('overview.owner')}</dt>
+        <dd className="m-0 min-w-0 break-words text-text">
+          {t(customer ? 'overview.ownerCustomer' : 'overview.ownerPlatform')}
+        </dd>
+
+        {customer ? (
+          <>
+            <dt className="text-text-tertiary">{t('overview.organization')}</dt>
+            <dd className="m-0 min-w-0 break-all text-text">
+              {overview.organization ?? t('overview.planUnknown')}
+            </dd>
+          </>
+        ) : null}
 
         <dt className="text-text-tertiary">{t('overview.schema')}</dt>
         <dd className="m-0 min-w-0 break-words tabular-nums text-text">{schemaText}</dd>
@@ -156,6 +179,16 @@ export function DatabaseOverviewCard({
               </p>
             ) : null}
           </div>
+        </div>
+      ) : null}
+
+      {planNotPro ? (
+        <div
+          data-notice="planNotPro"
+          className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-3"
+        >
+          <CircleAlert aria-hidden size={16} className="mt-0.5 shrink-0 text-warning" />
+          <p className="min-w-0 break-words text-xs text-text">{t('notices.planNotPro')}</p>
         </div>
       ) : null}
 
