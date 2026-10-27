@@ -117,6 +117,34 @@ describe('credential redaction', () => {
     expect(line).toContain('[redacted]');
   });
 
+  it('09.4-07 (CTK-21): a management token is censored under mgmtToken, projectToken and managementToken, top level and one level down', () => {
+    const line = logged({
+      mgmtToken: 'mgmt-token-value',
+      projectToken: 'project-token-value',
+      managementToken: 'management-token-value',
+      nested: {
+        mgmtToken: 'nested-mgmt-value',
+        projectToken: 'nested-project-value',
+        managementToken: 'nested-management-value',
+      },
+      keep: 'visible',
+    });
+    for (const value of [
+      'mgmt-token-value',
+      'project-token-value',
+      'management-token-value',
+      'nested-mgmt-value',
+      'nested-project-value',
+      'nested-management-value',
+    ]) {
+      expect(line, value).not.toContain(value);
+    }
+    expect(line).toContain('"mgmtToken":"[redacted]"');
+    expect(line).toContain('"projectToken":"[redacted]"');
+    expect(line).toContain('"managementToken":"[redacted]"');
+    expect(line).toContain('"keep":"visible"');
+  });
+
   it('redactDbError strips a connection string out of a plain error, its stack and its cause', () => {
     const inner = new Error(`connect failed for ${URL_WITH_PASSWORD}`);
     const outer = new Error(`could not open ${URL_WITH_PASSWORD} (retry)`, { cause: inner });

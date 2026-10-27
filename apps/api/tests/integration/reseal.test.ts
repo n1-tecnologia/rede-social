@@ -37,6 +37,7 @@ const PLAIN = {
   ddl_url: 'postgres://postgres:ddl-password-ZZ@db.one.test:5432/postgres',
   service_key: 'service-key-value-ZZ',
   hook_secret: 'v1,whsec_hook-secret-ZZ',
+  mgmt_token: 'sbp_fc_fake_reseal_token_ZZ',
 } as const;
 const ALL_PLAINTEXTS = Object.values(PLAIN);
 
@@ -58,6 +59,7 @@ async function insertProject(
     ddl_url_sealed: null,
     service_key_sealed: null,
     hook_secret_sealed: null,
+    mgmt_token_sealed: null,
   };
   for (const column of columns) {
     const aad = `${id}:${column.replace(/_sealed$/, '')}`;
@@ -72,6 +74,13 @@ async function insertProject(
     values (${id}::uuid, ${ref}, 'fake', 'sealed', 'ready', 'https://reseal.example.test', 1, 4,
             ${values.database_url_tx_sealed}, ${values.database_url_session_sealed},
             ${values.ddl_url_sealed}, ${values.service_key_sealed}, ${values.hook_secret_sealed})`;
+  if (values.mgmt_token_sealed !== null) {
+    // The registry CHECK ties the sealed management token to a customer owner and an organisation pin (09.4-02).
+    await adminSql`
+      update platform.projects
+         set owner = 'customer', org_slug = 'reseal-org', mgmt_token_sealed = ${values.mgmt_token_sealed}
+       where id = ${id}::uuid`;
+  }
   created.push(id);
   return id;
 }
@@ -83,6 +92,10 @@ const rowOf = async (id: string): Promise<Row> => {
            hook_secret_sealed, secret_key_id, credential_version
       from platform.projects where id = ${id}::uuid`;
   if (!row) throw new Error('project row missing');
+  // The sixth sealed column (09.4-07) is read beside the original five, so the original select stays as it was.
+  const [mgmt] = await adminSql<{ mgmt_token_sealed: string | null }[]>`
+    select mgmt_token_sealed from platform.projects where id = ${id}::uuid`;
+  row.mgmt_token_sealed = mgmt?.mgmt_token_sealed ?? null;
   return row;
 };
 
@@ -197,6 +210,45 @@ describe('resealAll', () => {
     expect(summary.resealed).toBe(0);
     expect(summary.failed).toBe(0);
     expect(summary.skipped).toBe(summary.rows);
+  });
+
+  it('09.4-07 (CTK-25, D-539): the management token of a customer row is re-sealed under the current key, credential_version untouched', async () => {
+    const id = await insertProject('mgmt', ['mgmt_token_sealed']);
+    expect((await rowOf(id)).mgmt_token_sealed?.startsWith('v1:1:')).toBe(true);
+
+    const summary = await resealAll(ring12, 2);
+    expect(summary.failed).toBe(0);
+    expect(summary.byColumn.mgmt_token_sealed).toBe(1);
+    expect(Object.keys(summary.byColumn).at(-1)).toBe('mgmt_token_sealed');
+
+    const row = await rowOf(id);
+    expect(row.credential_version).toBe(4);
+    expect(row.secret_key_id).toBe(2);
+    const sealed = row.mgmt_token_sealed as string;
+    expect(sealed.startsWith('v1:2:')).toBe(true);
+    // The same plaintext, under the AAD <id>:mgmt_token, with the NEW key alone.
+    expect(openWith(new Map([[2, k2]]), sealed, `${id}:mgmt_token`)).toBe(PLAIN.mgmt_token);
+    const [owner] = await adminSql<{ owner: string; org_slug: string }[]>`
+      select owner, org_slug from platform.projects where id = ${id}::uuid`;
+    expect(owner).toEqual({ owner: 'customer', org_slug: 'reseal-org' });
+  });
+
+  it('09.4-07: a platform row (no token) is skipped for that column without error, and --dry-run on a customer row writes nothing and prints counts only', async () => {
+    const platform = await insertProject('plat', ['service_key_sealed']);
+    const first = await resealAll(ring12, 2, { dryRun: true });
+    expect(first.failed).toBe(0);
+    expect(first.byColumn.mgmt_token_sealed).toBe(0);
+    expect(first.byColumn.service_key_sealed).toBe(1);
+    expect((await rowOf(platform)).mgmt_token_sealed).toBeNull();
+
+    const customer = await insertProject('dry-mgmt', ['mgmt_token_sealed']);
+    const before = await rowOf(customer);
+    const dry = await resealAll(ring12, 2, { dryRun: true });
+    expect(dry.byColumn.mgmt_token_sealed).toBe(1);
+    expect(await rowOf(customer)).toEqual(before);
+    const printed = JSON.stringify(dry);
+    expect(printed).not.toContain(PLAIN.mgmt_token);
+    expect(printed).not.toMatch(/v1:\d+:/);
   });
 
   it('refuses a ring that does not hold the current id', async () => {
