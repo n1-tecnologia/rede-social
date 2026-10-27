@@ -37,7 +37,9 @@ import {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type ProductStatusResult = { ok: true } | { ok: false; code: 'not_found' | 'generic' };
+export type ProductStatusResult =
+  | { ok: true }
+  | { ok: false; code: 'not_found' | 'community_deleted' | 'generic' };
 
 export async function setProductStatusAction(
   productId: string,
@@ -57,6 +59,10 @@ export async function setProductStatusAction(
     if (error instanceof ApiClientError) {
       refusal = bootstrapRedirectPath(error);
       if (!refusal && error.status === 404) result = { ok: false, code: 'not_found' };
+      // 09.3 WR-03 (D-554): the product links a deleted community; the client shows its own copy.
+      if (!refusal && error.status === 409 && error.details?.store === 'community_deleted') {
+        result = { ok: false, code: 'community_deleted' };
+      }
     }
     if (!refusal) {
       console.error('store.status_failed', {

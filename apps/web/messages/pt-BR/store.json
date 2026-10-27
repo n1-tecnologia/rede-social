@@ -270,6 +270,7 @@
       "loadMore": "Não foi possível carregar mais produtos.",
       "loadMoreBuyers": "Não foi possível carregar mais compradores.",
       "reactivate": "Não foi possível reativar o produto. Tente novamente.",
+      "reactivateCommunityDeleted": "Não é possível reativar este produto: ele libera uma comunidade que foi excluída. Crie um novo produto com as comunidades que ainda existem.",
       "archive": "Não foi possível arquivar o produto. Tente novamente."
     },
     "notFound": {

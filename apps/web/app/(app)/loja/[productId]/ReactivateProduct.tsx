@@ -26,7 +26,13 @@ export function ReactivateProduct({ productId }: { productId: string }) {
   const reactivate = async () => {
     const result = await setProductStatusAction(productId, 'active');
     if (!result.ok) {
-      toast.show({ tone: 'error', message: t('errors.reactivate') });
+      toast.show({
+        tone: 'error',
+        message:
+          result.code === 'community_deleted'
+            ? t('errors.reactivateCommunityDeleted')
+            : t('errors.reactivate'),
+      });
       return;
     }
     toast.show({ tone: 'success', message: t('toasts.reactivated') });

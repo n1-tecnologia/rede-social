@@ -596,7 +596,12 @@ export function ProductForm({
     if (!result.ok) {
       toast.show({
         tone: 'error',
-        message: statusDialog === 'archive' ? t('errors.archive') : t('errors.reactivate'),
+        message:
+          statusDialog === 'archive'
+            ? t('errors.archive')
+            : result.code === 'community_deleted'
+              ? t('errors.reactivateCommunityDeleted')
+              : t('errors.reactivate'),
       });
       return;
     }

@@ -437,6 +437,29 @@ describe('ProductForm — edit (UI-D-377, D-363)', () => {
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Produto reativado.' });
   });
 
+  it('13a. a reactivation refused for a deleted community toasts its own copy, not the generic one', async () => {
+    setStatus.mockResolvedValue({ ok: false, code: 'community_deleted' });
+    renderEdit({ initial: { ...EDIT_INITIAL, status: 'archived' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reativar produto' }));
+    const dialog = screen.getByRole('dialog', { name: 'Reativar produto?' });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Reativar' }));
+    });
+
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message:
+          'Não é possível reativar este produto: ele libera uma comunidade que foi excluída. Crie um novo produto com as comunidades que ainda existem.',
+      }),
+    );
+    expect(toast.show).not.toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível reativar o produto. Tente novamente.',
+    });
+  });
+
   it('14. archiving goes through its danger dialog', async () => {
     setStatus.mockResolvedValue({ ok: true });
     renderEdit();
