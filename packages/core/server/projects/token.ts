@@ -1,4 +1,11 @@
 import { tokenExpiryIsValid } from '@rede-social/contracts/projects';
+import { eq, sql } from 'drizzle-orm';
+import { projects, projectTokenEvents } from '../../db/central';
+import { withPlatformTx } from '../../db/platform-tx';
+import type { Tx } from '../../db/tenant-tx';
+import { moduleLogger } from '../logging';
+import { processKeyring, seal } from '../secrets/sealed';
+import { apiUrlFor } from './access';
 import { createRequestTokenProvider } from './provider-for';
 import { type ProjectProvider, ProjectProviderError } from './types';
 
@@ -149,24 +156,76 @@ export async function validateCustomerToken(input: {
   return { orgSlug, expiresAt, provider };
 }
 
-// RED skeleton (09.4-07 Task 2): the shapes exist, the behaviour does not. Replaced in the GREEN commit.
+// ---------------------------------------------------------------------------------------------------------
+// Sealing, the audit append and the registration (D-567, D-568, D-539, CTK-12, CTK-28)
+// ---------------------------------------------------------------------------------------------------------
+
+const log = moduleLogger('project-token');
+
+/** The management token sealed for one project: AAD `<project id>:mgmt_token`, like every other sealed column. */
+export function sealManagementToken(token: string, projectId: string): string {
+  return seal(token, `${projectId}:mgmt_token`);
+}
 
 export type TokenEventKind = 'registered' | 'replaced' | 'owner_changed' | 'repinned';
+/** The closed outcome list of the audit table: `ok` or a refusal code (`already_registered` writes nothing). */
 export type TokenEventOutcome = 'ok' | Exclude<TokenReason, 'already_registered'>;
+
 export type TokenEvent = {
   kind: TokenEventKind;
+  /** Null when the event precedes the project (a refused registration). */
   projectId: string | null;
   projectRef: string;
+  /** An operator label (`platform:<user id>`), never free text. */
   actor: string;
   outcome: TokenEventOutcome;
 };
 
-export function sealManagementToken(_token: string, _projectId: string): string {
-  return '';
+/**
+ * Appends ONE row to the audit table of the customer's token (kind and closed outcome only, never a token, a
+ * prefix, a length or a hash; the table has no column that could hold one). Given a platform transaction it
+ * writes inside it and catches nothing, so the event commits and rolls back with the change it records. Run
+ * alone (a refusal, which has no change to ride on) it opens its own transaction and is BEST EFFORT: a failure
+ * is logged by id and outcome and swallowed, so the audit can never mask the refusal it records.
+ */
+export async function recordTokenEvent(tx: Tx | undefined, event: TokenEvent): Promise<void> {
+  const row = {
+    kind: event.kind,
+    projectId: event.projectId,
+    projectRef: event.projectRef,
+    actor: event.actor,
+    outcome: event.outcome,
+  };
+  if (tx) {
+    await tx.insert(projectTokenEvents).values(row);
+    return;
+  }
+  try {
+    await withPlatformTx(async (own) => {
+      await own.insert(projectTokenEvents).values(row);
+    });
+  } catch {
+    log.warn(
+      {
+        event: 'project.token.event_failed',
+        projectId: event.projectId,
+        kind: event.kind,
+        outcome: event.outcome,
+      },
+      'token audit event not written',
+    );
+  }
 }
 
-export async function recordTokenEvent(_tx: unknown, _event: TokenEvent): Promise<void> {}
-
+/**
+ * Registers a customer-owned project (D-567, D-568): validates the token (all outbound work, OUTSIDE any
+ * transaction), then in ONE platform transaction under `pg_advisory_xact_lock(hashtext('project:' || ref))`
+ * (the lock create, credential replacement and the bootstrap take) inserts the project row (owner `customer`,
+ * the pin, the token sealed with AAD `<project id>:mgmt_token`, the typed expiry, state `preparing`) and the
+ * audit event. A ref already in the registry is refused as `already_registered` and nothing is written. A
+ * refused token writes no project, only its own best-effort event. The token lives in this function's argument
+ * and in the sealed column; nothing else holds it, and the log line carries ids only.
+ */
 export async function registerCustomerProject(input: {
   ref: string;
   token: string;
@@ -175,6 +234,64 @@ export async function registerCustomerProject(input: {
   today?: string;
   provider?: ProjectProvider;
 }): Promise<{ projectId: string; orgSlug: string }> {
-  const validated = await validateCustomerToken(input);
-  return { projectId: crypto.randomUUID(), orgSlug: validated.orgSlug };
+  const { ref, actor } = input;
+  let validated: ValidatedToken;
+  try {
+    validated = await validateCustomerToken({
+      ref,
+      token: input.token,
+      expiresAt: input.expiresAt,
+      ...(input.today === undefined ? {} : { today: input.today }),
+      ...(input.provider === undefined ? {} : { provider: input.provider }),
+    });
+  } catch (error) {
+    if (error instanceof TokenRefusal && error.code !== 'already_registered') {
+      await recordTokenEvent(undefined, {
+        kind: 'registered',
+        projectId: null,
+        projectRef: ref,
+        actor,
+        outcome: error.code,
+      });
+    }
+    throw error;
+  }
+
+  // The id is chosen up front so the AAD of the sealed column is known before the row exists.
+  const projectId = crypto.randomUUID();
+  const sealedToken = sealManagementToken(input.token, projectId);
+
+  await withPlatformTx(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`project:${ref}`}))`);
+    const existing = await tx
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.ref, ref))
+      .limit(1);
+    if (existing.length > 0) throw new TokenRefusal('already_registered');
+
+    await tx.insert(projects).values({
+      id: projectId,
+      ref,
+      provider: validated.provider.name,
+      owner: 'customer',
+      orgSlug: validated.orgSlug,
+      mgmtTokenSealed: sealedToken,
+      mgmtTokenExpiresAt: validated.expiresAt,
+      credentialSource: 'sealed',
+      apiUrl: apiUrlFor(validated.provider, ref),
+      state: 'preparing',
+      secretKeyId: processKeyring().currentId,
+    });
+    await recordTokenEvent(tx, {
+      kind: 'registered',
+      projectId,
+      projectRef: ref,
+      actor,
+      outcome: 'ok',
+    });
+  });
+
+  log.info({ event: 'project.token.registered', projectId, actor }, 'customer project registered');
+  return { projectId, orgSlug: validated.orgSlug };
 }

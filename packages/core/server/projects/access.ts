@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import postgres, { type Sql } from 'postgres';
+import { env } from '../env';
 import { open } from '../secrets/sealed';
 import type { ProjectRecord } from '../tenancy/project-registry';
 import { connectionUrl } from './steps';
@@ -113,9 +114,17 @@ export async function ddlTargetOf(
   };
 }
 
-/** RED skeleton (09.4-07 Task 2): replaced in the GREEN commit. */
-export function apiUrlFor(_provider: ProjectProvider, _ref: string): string {
-  return '';
+/**
+ * The API origin of a project the platform registers: `https://<ref>.supabase.co` for the real provider, else
+ * the fake's local target (or the environment's). The one shared copy (09.4-07, D-579); plans 09 and 12 switch
+ * their private copies to it.
+ */
+export function apiUrlFor(provider: ProjectProvider, ref: string): string {
+  if (provider.name === 'supabase') return `https://${ref}.supabase.co`;
+  const target = (
+    provider as { targetOf?: (r: string) => { apiUrl: string } | undefined }
+  ).targetOf?.(ref);
+  return target?.apiUrl ?? env.SUPABASE_URL;
 }
 
 /** The DDL URL for `password` at `target`. */
