@@ -7,6 +7,7 @@ import {
   type DatabaseOverview,
   databaseState,
   type TenantDatabaseSummary,
+  type TokenSummary,
 } from '@rede-social/contracts/projects';
 import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import {
@@ -19,6 +20,7 @@ import {
 import { withPlatformTx } from '../../db/platform-tx';
 import { getRequiredTenantSchema } from '../migrations/required';
 import { isTenantMoving } from './moving';
+import { tokenStateOf } from './token-state';
 
 /**
  * The Banco tab's data (09.2-14, D-537, D-542, D-543, D-545, UI-D-536..539): everything the panel shows about a
@@ -27,6 +29,14 @@ import { isTenantMoving } from './moving';
  * information, the steps with their reason CODES, the applied-of-required schema counts, the last check, and
  * whether the registry HOLDS credentials. It has no field that could carry a credential, and nothing here reads
  * a sealed column's value: only whether it is present.
+ *
+ * 09.4-13 (D-566, D-571..D-574, UI-D-552, CTK-34): the answer also names who owns the project (`owner`), the
+ * Supabase organisation a customer project is pinned to (`organization`, the slug and nothing else) and the token
+ * summary (`token`: the state from `tokenStateOf`, the expiry the operator typed, when the last check ran). A
+ * platform project answers `owner: 'platform'`, `organization: null`, `token: null`. The token is its OWN axis:
+ * `summarizeDatabase` and `databaseState` get no token input, so a dead token never changes `state` or
+ * `lastErrorCode`. The plan stays information (D-572): a customer project registered by this phase has `plan`
+ * null, the platform never reads it from the Management API, and the panel says 'Plano: Não informado'.
  */
 
 const REASONS: ReadonlySet<string> = new Set(BOOTSTRAP_REASON_CODES);
@@ -113,6 +123,10 @@ export async function getDatabaseOverview(tenantId: string): Promise<DatabaseOve
         state: projects.state,
         credentialSource: projects.credentialSource,
         updatedAt: projects.updatedAt,
+        owner: projects.owner,
+        orgSlug: projects.orgSlug,
+        // A `date` column read as the typed `YYYY-MM-DD` string, never a Date (no timezone enters).
+        expiresAt: projects.mgmtTokenExpiresAt,
         hasSealed: sql<boolean>`(
           ${projects.databaseUrlTxSealed} is not null
           or ${projects.databaseUrlSessionSealed} is not null
@@ -121,6 +135,8 @@ export async function getDatabaseOverview(tenantId: string): Promise<DatabaseOve
         healthStatus: projectHealth.status,
         healthDetail: projectHealth.detailCode,
         healthCheckedAt: projectHealth.checkedAt,
+        tokenCheck: projectHealth.tokenCheck,
+        tokenCheckedAt: projectHealth.tokenCheckedAt,
         appliedCount: projectSchemaState.appliedCount,
       })
       .from(tenantProjects)
@@ -178,6 +194,18 @@ export async function getDatabaseOverview(tenantId: string): Promise<DatabaseOve
 
   const invite = rows.find((row) => row.step === 'invite');
 
+  // The token axis (D-573, D-574): derived apart from the database state above, from the stored check and the
+  // typed expiry; `null` for a platform project.
+  const derived = tokenStateOf({
+    owner: project.owner,
+    tokenCheck: project.tokenCheck,
+    expiresAt: project.expiresAt,
+  });
+  const token: TokenSummary | null = derived
+    ? { state: derived, expiresAt: project.expiresAt, checkedAt: iso(project.tokenCheckedAt) }
+    : null;
+  const customer = project.owner === 'customer';
+
   return {
     ref: project.ref,
     plan: project.plan,
@@ -194,5 +222,8 @@ export async function getDatabaseOverview(tenantId: string): Promise<DatabaseOve
     otherTenants: facts.others,
     moving,
     lastErrorCode,
+    owner: customer ? 'customer' : 'platform',
+    organization: customer ? project.orgSlug : null,
+    token,
   };
 }

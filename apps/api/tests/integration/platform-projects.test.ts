@@ -23,8 +23,8 @@ import type { ProjectProvider } from '@rede-social/core/server/projects/types';
 import { open } from '@rede-social/core/server/secrets/sealed';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { API_URL, bootstrapDeps, fakeTarget, onB, resetB, restoreB } from './projects-setup';
 import * as customerSetup from './projects-setup';
+import { API_URL, bootstrapDeps, fakeTarget, onB, resetB, restoreB } from './projects-setup';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
 /**
