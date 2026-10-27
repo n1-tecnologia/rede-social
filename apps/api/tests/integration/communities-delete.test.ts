@@ -1040,7 +1040,9 @@ describe('the reactivation guard across tenants, links and races (09.3 WR-03, T-
       try {
         await lockedFirst;
         pending = Promise.resolve(del(community.id));
-        expect(await settlesWithin(pending, 400), 'the delete waits for the share lock').toBe(false);
+        expect(await settlesWithin(pending, 400), 'the delete waits for the share lock').toBe(
+          false,
+        );
       } finally {
         release();
         await holder;
