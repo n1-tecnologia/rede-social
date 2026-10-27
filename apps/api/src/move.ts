@@ -37,7 +37,12 @@ const MODE_FLAGS = ['dry-run', 'resume', 'rollback', 'recopy', 'confirm-delete',
 
 const usageLine = (message: string) => JSON.stringify({ kind: 'usage', message });
 
-export async function runMoveCli(argv: string[]): Promise<number> {
+export type MoveCliDeps = {
+  /** The hidden prompt, injected by the local wrapper only (09.4-12, D-567). The Job passes nothing. */
+  readSecret?: ((label: string) => Promise<string>) | undefined;
+};
+
+export async function runMoveCli(argv: string[], _deps: MoveCliDeps = {}): Promise<number> {
   let values: {
     tenant?: string;
     to?: string;

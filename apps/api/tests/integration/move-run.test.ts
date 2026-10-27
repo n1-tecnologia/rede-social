@@ -1,21 +1,21 @@
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { eventsOf, latestMoveOf, runMove } from '@rede-social/core/server/projects/move/index';
 import {
-  eventsOf,
-  latestMoveOf,
-  MoveError,
   type RegisterInput,
   registerMoveTarget,
-  runMove,
-} from '@rede-social/core/server/projects/move/index';
+} from '@rede-social/core/server/projects/move/target';
+import { MoveError } from '@rede-social/core/server/projects/move/types';
 import { isTenantMoving } from '@rede-social/core/server/projects/moving';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
+import { open } from '@rede-social/core/server/secrets/sealed';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import {
   invalidateTenantHost,
   resolveTenantHost,
 } from '@rede-social/core/server/tenancy/tenant-host';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import * as vt from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   type CustomerHarness,
   closeHelperClients,
@@ -204,7 +204,10 @@ type CustomerCase = {
 
 const customerCases: CustomerCase[] = [];
 
-async function customerCase(label: string): Promise<CustomerCase> {
+async function customerCase(
+  label: string,
+  options: { register?: boolean } = {},
+): Promise<CustomerCase> {
   resetB('bare');
   const suffix = `${label}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
   const customerRef = `mvc-${suffix}`;
@@ -212,13 +215,19 @@ async function customerCase(label: string): Promise<CustomerCase> {
   const token = `sbp_fc_fake_mv12_${suffix}`;
   const ch = customerHarness({
     refs: [customerRef, platformRef],
-    tokens: { [token]: { refs: [customerRef] } },
+    tokens: {
+      [token]: { refs: [customerRef] },
+      // A token of the same account that reaches only the OTHER project, and one that reaches everything.
+      [`${token}_other`]: { refs: [platformRef] },
+      [`${token}_wide`]: { refs: 'all' },
+    },
     bootstrap: 'per-project',
   });
   // The per-project resolver builds the customer view from the pinned fake.
   setProjectProviderForTests(ch.provider);
   const t = await createMoveTenant(`mv12-${suffix}`.slice(0, 40));
-  const customerId = await registerCustomerTarget(ch, customerRef, token);
+  const customerId =
+    options.register === false ? '' : await registerCustomerTarget(ch, customerRef, token);
   const [central] = await adminSql<
     { id: string }[]
   >`select id from platform.projects where is_central`;
@@ -227,7 +236,7 @@ async function customerCase(label: string): Promise<CustomerCase> {
   return made;
 }
 
-afterEach(async () => {
+vt.afterEach(async () => {
   setProjectProviderForTests(undefined);
   for (const made of customerCases.splice(0)) {
     await made.t.cleanup().catch(() => undefined);
@@ -249,6 +258,7 @@ const startInput = (
   c: CustomerCase,
   ref: string,
   owner?: 'platform' | 'customer',
+  tokenExpiresAt?: string | null,
 ): RegisterInput => ({
   tenantId: c.t.tenantId,
   ref,
@@ -256,6 +266,7 @@ const startInput = (
   statusBefore: 'active',
   fromProjectId: c.centralId,
   owner,
+  tokenExpiresAt,
 });
 
 async function dropOpenMove(tenantId: string): Promise<void> {
@@ -274,7 +285,7 @@ const moveRowsOf = async (tenantId: string): Promise<number> => {
 describe('a registered customer target (09.4-12, CTK-02, D-566 journey 2)', () => {
   it('tracer: moves a tenant to a customer project on the sealed token and asks for nothing', async () => {
     const c = await customerCase('trace');
-    const readToken = vi.fn(async () => {
+    const readToken = vt.vi.fn(async () => {
       throw new Error('the prompt must not be called');
     });
     const result = await runMove(
@@ -334,7 +345,7 @@ describe('a registered customer target (09.4-12, CTK-02, D-566 journey 2)', () =
 
   it('accepts a known CUSTOMER project without an owner (the registry says what it is)', async () => {
     const c = await customerCase('known');
-    const readToken = vi.fn(async () => 'never');
+    const readToken = vt.vi.fn(async () => 'never');
     const accepted = await registerMoveTarget(startInput(c, c.customerRef), {
       ...c.ch.deps.target,
       readToken,
@@ -352,4 +363,198 @@ describe('a registered customer target (09.4-12, CTK-02, D-566 journey 2)', () =
     expect((error as MoveError).tables).toEqual(['owner']);
     expect(await moveRowsOf(c.t.tenantId)).toBe(0);
   });
+});
+
+async function rowsAbout(ref: string, tenantId: string) {
+  const one = async (query: Promise<{ n: number }[]>) => (await query)[0]?.n ?? -1;
+  return {
+    projects: await one(
+      adminSql<
+        { n: number }[]
+      >`select count(*)::int as n from platform.projects where ref = ${ref}`,
+    ),
+    events: await one(
+      adminSql<{ n: number }[]>`
+        select count(*)::int as n from platform.project_token_events where project_ref = ${ref}`,
+    ),
+    moves: await moveRowsOf(tenantId),
+  };
+}
+
+describe('an unknown customer target (09.4-12, CTK-02, D-567, D-571)', () => {
+  const ASKED = '2999-12-31';
+
+  it('registers the project, its sealed token and the move in one transaction, from the injected prompt', async () => {
+    const c = await customerCase('reg', { register: false });
+    const readToken = vt.vi.fn(async () => c.token);
+    const done = await registerMoveTarget(startInput(c, c.customerRef, 'customer', ASKED), {
+      ...c.ch.deps.target,
+      readToken,
+    });
+    expect(done.registered).toBe(true);
+    expect(readToken).toHaveBeenCalledTimes(1);
+
+    const [row] = await adminSql<
+      {
+        owner: string;
+        org_slug: string | null;
+        state: string;
+        sealed: string | null;
+        expires: string | null;
+      }[]
+    >`
+      select owner, org_slug, state, mgmt_token_sealed as sealed, mgmt_token_expires_at::text as expires
+        from platform.projects where id = ${done.projectId}::uuid`;
+    expect(row?.owner).toBe('customer');
+    expect(row?.org_slug).toBe('acme-customer');
+    expect(row?.state).toBe('preparing');
+    expect(row?.expires).toBe(ASKED);
+    // Sealed under the project's own AAD, and only opens to the typed token.
+    expect(open(row?.sealed ?? '', `${done.projectId}:mgmt_token`)).toBe(c.token);
+
+    const [move] = await adminSql<{ to_project_id: string }[]>`
+      select to_project_id from platform.tenant_moves where tenant_id = ${c.t.tenantId}::uuid`;
+    expect(move?.to_project_id).toBe(done.projectId);
+    const events = await adminSql<{ kind: string; outcome: string; project_id: string | null }[]>`
+      select kind, outcome, project_id from platform.project_token_events
+       where project_ref = ${c.customerRef}`;
+    expect(events).toEqual([{ kind: 'registered', outcome: 'ok', project_id: done.projectId }]);
+  });
+
+  it('writes nothing when the move row cannot be written: the registration rides the same transaction', async () => {
+    const c = await customerCase('atomic', { register: false });
+    const readToken = vt.vi.fn(async () => c.token);
+    await expect(
+      registerMoveTarget(
+        { ...startInput(c, c.customerRef, 'customer'), fromProjectId: crypto.randomUUID() },
+        { ...c.ch.deps.target, readToken },
+      ),
+    ).rejects.toThrow();
+    expect(await rowsAbout(c.customerRef, c.t.tenantId)).toEqual({
+      projects: 0,
+      events: 0,
+      moves: 0,
+    });
+  });
+
+  it('fails closed with register_first when no prompt exists or the terminal is missing', async () => {
+    const c = await customerCase('first', { register: false });
+    const noTerminal = Object.assign(new Error('readSecret: stdin is not a terminal'), {
+      name: 'NoTerminalError',
+    });
+    for (const target of [
+      { ...c.ch.deps.target },
+      {
+        ...c.ch.deps.target,
+        readToken: async (): Promise<string> => {
+          throw noTerminal;
+        },
+      },
+    ]) {
+      const error = await refusalOf(
+        registerMoveTarget(startInput(c, c.customerRef, 'customer'), target),
+      );
+      expect(error).toBeInstanceOf(MoveError);
+      expect((error as MoveError).code).toBe('target_not_ready');
+      expect((error as MoveError).tables).toEqual(['register_first']);
+    }
+    expect(await rowsAbout(c.customerRef, c.t.tenantId)).toEqual({
+      projects: 0,
+      events: 0,
+      moves: 0,
+    });
+  });
+
+  it('turns every token refusal into a closed code and writes nothing', async () => {
+    const c = await customerCase('reasons', { register: false });
+    const cases: Array<{ token: string; expires?: string; code: string }> = [
+      { token: `${c.token}_unknown`, code: 'token_invalid' },
+      { token: `${c.token}_other`, code: 'token_forbidden' },
+      { token: `${c.token}_wide`, code: 'token_account_wide' },
+      { token: 'plain_not_a_scoped_token_at_all', code: 'token_account_wide' },
+      { token: c.token, expires: '2000-01-01', code: 'token_expiry_invalid' },
+    ];
+    for (const entry of cases) {
+      const error = await refusalOf(
+        registerMoveTarget(startInput(c, c.customerRef, 'customer', entry.expires ?? null), {
+          ...c.ch.deps.target,
+          readToken: async () => entry.token,
+        }),
+      );
+      expect(error).toBeInstanceOf(MoveError);
+      expect((error as MoveError).code).toBe('target_not_ready');
+      expect((error as MoveError).tables).toEqual([entry.code]);
+      expect((error as MoveError).message).not.toContain(entry.token);
+    }
+    expect(await rowsAbout(c.customerRef, c.t.tenantId)).toEqual({
+      projects: 0,
+      events: 0,
+      moves: 0,
+    });
+  });
+
+  it('a dry run never prompts and writes nothing', async () => {
+    const c = await customerCase('dry', { register: false });
+    const readToken = vt.vi.fn(async () => c.token);
+    const result = await runMove(
+      {
+        mode: 'dry-run',
+        tenantSlug: c.t.slug,
+        toRef: c.customerRef,
+        owner: 'customer',
+        actor: ACTOR,
+        quiesceMs: 0,
+        registryWaitMs: 0,
+      },
+      { ...c.ch.deps, target: { ...c.ch.deps.target, readToken } },
+    );
+    expect(result.outcome).toBe('dry_run');
+    expect(readToken).not.toHaveBeenCalled();
+    const plan = result.lines.find((line) => line.kind === 'plan');
+    expect(plan?.targetChecked).toBe(false);
+    expect(await rowsAbout(c.customerRef, c.t.tenantId)).toEqual({
+      projects: 0,
+      events: 0,
+      moves: 0,
+    });
+  });
+
+  it('a resume of an interrupted move finds the target registered and prompts for nothing', async () => {
+    const c = await customerCase('resume', { register: false });
+    // The target cannot be prepared: the start registers it (one prompt), then stops at the bootstrap.
+    c.ch.provider.arm({ step: 'verify', times: 'always' });
+    const first = vt.vi.fn(async () => c.token);
+    const base = {
+      tenantSlug: c.t.slug,
+      toRef: c.customerRef,
+      actor: ACTOR,
+      quiesceMs: 0,
+      registryWaitMs: 0,
+    } as const;
+    const started = await refusalOf(
+      runMove(
+        { ...base, mode: 'start', owner: 'customer' },
+        { ...c.ch.deps, target: { ...c.ch.deps.target, readToken: first } },
+      ),
+    );
+    expect((started as MoveError).code).toBe('target_not_ready');
+    expect(first).toHaveBeenCalledTimes(1);
+    expect((await rowsAbout(c.customerRef, c.t.tenantId)).projects).toBe(1);
+
+    const second = vt.vi.fn(async () => c.token);
+    const resumed = await refusalOf(
+      runMove(
+        { ...base, mode: 'resume' },
+        { ...c.ch.deps, target: { ...c.ch.deps.target, readToken: second } },
+      ),
+    );
+    expect((resumed as MoveError).code).toBe('target_not_ready');
+    expect(second).not.toHaveBeenCalled();
+    // Still one project, one move, one audit event.
+    expect(await rowsAbout(c.customerRef, c.t.tenantId)).toEqual({
+      projects: 1,
+      events: 1,
+      moves: 1,
+    });
+  }, 120_000);
 });

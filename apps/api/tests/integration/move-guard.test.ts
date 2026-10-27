@@ -14,6 +14,7 @@ import {
   runMove,
 } from '@rede-social/core/server/projects/move/index';
 import { isTenantMoving } from '@rede-social/core/server/projects/moving';
+import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { reconcileTenantMirror } from '@rede-social/core/server/tenancy/mirror';
 import {
   closeAllPools,
@@ -27,6 +28,7 @@ import {
   closeHelperClients,
   connect,
   createMoveTenant,
+  customerHarness,
   footprint,
   type Harness,
   harness,
@@ -572,5 +574,106 @@ describe('reports (T-09.2-105)', () => {
     expect(text).not.toContain('sb_secret_');
     invalidateProject();
     invalidateTenantHost(t.host);
+  });
+});
+
+describe('the command, customer target (09.4-12, CTK-02, D-567, T-09.4-43)', () => {
+  const TOKEN = `sbp_fc_fake_guard12_${RUN}`;
+  const LABEL_SEEN: string[] = [];
+
+  afterEach(() => {
+    setProjectProviderForTests(undefined);
+  });
+
+  const runWith = async (args: string[], readSecret?: (label: string) => Promise<string>) => {
+    const out: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line) => void out.push(String(line)));
+    const err = vi
+      .spyOn(console, 'error')
+      .mockImplementation((line) => void out.push(String(line)));
+    try {
+      const code = await runMoveCli(args, readSecret ? { readSecret } : {});
+      return { code, out };
+    } finally {
+      log.mockRestore();
+      err.mockRestore();
+    }
+  };
+
+  const projectsOf = async (ref: string) =>
+    (
+      await adminSql<{ n: number }[]>`
+        select count(*)::int as n from platform.projects where ref = ${ref}`
+    )[0]?.n;
+
+  it('rejects a malformed --owner or --expires and an owner outside a start as a usage error', async () => {
+    const ref = `mvg-${RUN}`.slice(0, 30);
+    const base = ['--tenant', t.slug, '--to', ref];
+    expect((await runWith([...base, '--owner', 'other'])).code).toBe(2);
+    expect((await runWith([...base, '--expires', '2999-12-31'])).code).toBe(2);
+    expect((await runWith([...base, '--owner', 'platform', '--expires', '2999-12-31'])).code).toBe(
+      2,
+    );
+    expect((await runWith([...base, '--owner', 'customer', '--expires', '31/12/2999'])).code).toBe(
+      2,
+    );
+    expect((await runWith(['--tenant', t.slug, '--resume', '--owner', 'customer'])).code).toBe(2);
+    expect((await runWith(['--tenant', t.slug, '--status', '--owner', 'customer'])).code).toBe(2);
+    expect((await runWith([...base, '--token', 'x'])).code).toBe(2);
+    expect(await projectsOf(ref)).toBe(0);
+  });
+
+  it('with no hidden prompt (the Job) an unknown customer target fails closed with register_first', async () => {
+    const ref = `mvg-${RUN}`.slice(0, 30);
+    const before = await moveCounts();
+    const result = await runWith(['--tenant', t.slug, '--to', ref, '--owner', 'customer']);
+    expect(result.code).toBe(1);
+    const text = result.out.join('\n');
+    expect(text).toContain('register_first');
+    expect(text).toContain('platform:set-owner --register');
+    expect(await moveCounts()).toEqual(before);
+    expect(await projectsOf(ref)).toBe(0);
+    seen.push(result.out);
+  });
+
+  it('with the local prompt the token is asked for once, only for an unknown target, and never printed', async () => {
+    const ref = `mvg-${RUN}`.slice(0, 30);
+    const ch = customerHarness({
+      refs: [ref],
+      tokens: { [TOKEN]: { refs: [ref] } },
+      bootstrap: 'per-project',
+    });
+    setProjectProviderForTests(ch.provider);
+    const before = await moveCounts();
+
+    // A token the account does not know: refused as a closed code, nothing written.
+    const readSecret = vi.fn(async (label: string) => {
+      LABEL_SEEN.push(label);
+      return `${TOKEN}_unknown`;
+    });
+    const refused = await runWith(
+      ['--tenant', t.slug, '--to', ref, '--owner', 'customer'],
+      readSecret,
+    );
+    expect(refused.code).toBe(1);
+    expect(readSecret).toHaveBeenCalledTimes(1);
+    const text = refused.out.join('\n');
+    expect(text).toContain('token_invalid');
+    expect(text).not.toContain(TOKEN);
+    expect(text).not.toContain('sbp_fc');
+    expect(LABEL_SEEN.join('')).not.toContain(TOKEN);
+    expect(await moveCounts()).toEqual(before);
+    expect(await projectsOf(ref)).toBe(0);
+
+    // A dry run never asks.
+    readSecret.mockClear();
+    const planned = await runWith(
+      ['--tenant', t.slug, '--to', ref, '--owner', 'customer', '--dry-run'],
+      readSecret,
+    );
+    expect(planned.code).toBe(0);
+    expect(readSecret).not.toHaveBeenCalled();
+    expect(await moveCounts()).toEqual(before);
+    seen.push(refused.out, planned.out);
   });
 });
