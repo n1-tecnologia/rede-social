@@ -623,12 +623,11 @@ describe('a dead management token is a token state, never an outage (D-573, UI-D
       status: 'active',
     });
 
-    // The database state is what moves the shell: a closed pool is a status change and invalidates.
-    await adminSql`
-      update platform.projects
-         set database_url_tx_sealed = ${seal(TX_CLOSED, `${fixture.projectId}:database_url_tx`)}
-       where id = ${fixture.projectId}::uuid`;
-    const worse = await checkProject(fixture.projectId);
+    // The database state is what moves the shell: a failing ping is a status change and invalidates.
+    const closed = async () => {
+      throw new Error('closed');
+    };
+    const worse = await checkProject(fixture.projectId, { ping: closed });
     expect(worse).toMatchObject({ status: 'unreachable', changed: true });
     expect(spies.host).toHaveBeenCalledWith(fixture.host);
     expect(spies.project).toHaveBeenCalled();

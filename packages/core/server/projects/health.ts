@@ -1,4 +1,4 @@
-import type { BootstrapReasonCode } from '@rede-social/contracts/projects';
+import type { BootstrapReasonCode, TokenCheck } from '@rede-social/contracts/projects';
 import { eq, sql } from 'drizzle-orm';
 import { projectHealth, tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
@@ -12,7 +12,7 @@ import {
   resolveProjectById,
 } from '../tenancy/project-registry';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
-import { getProjectProvider } from './provider-access';
+import { getProjectProviderFor } from './provider-for';
 import { type ProjectProvider, ProjectProviderError, type ProjectStatus } from './types';
 import { REQUIRED_SERVICES } from './wait';
 
@@ -31,9 +31,18 @@ import { REQUIRED_SERVICES } from './wait';
  * dead pool is `unreachable` with a `detail_code` from the closed reason catalog (`access_denied` for a refused
  * token, `unreachable` otherwise); `unknown` is only what a project that was never checked reads as (no row).
  *
- * When the state CHANGED, the cached binding and the host answers of every tenant on the project are dropped, so
- * the shell and `requireAuth` show the new state on the very next request instead of up to a minute later.
- * Nothing here logs more than ids, states and codes.
+ * The token axis (09.4-08, D-573, D-574, UI-D-551): a CUSTOMER project is asked through its OWN provider, and
+ * the same check also stores `token_check` (`ok | invalid | forbidden | org_mismatch`). A refusal that is a
+ * customer-token error (`token_invalid`, `token_forbidden`, `org_mismatch`) is a TOKEN verdict, not an outage:
+ * it is recorded and the database state then comes from the pool ping alone, so a dead token with a working
+ * pool is `healthy` and the tenant is never held out of the shell. A timeout, a 5xx or an unhealthy service is
+ * not a token verdict: it keeps `unreachable` and leaves the stored `token_check` as it was. A platform project
+ * never has a token verdict. The one thing a dead token costs is the paused-or-not fact.
+ *
+ * When the DATABASE state changed, the cached binding and the host answers of every tenant on the project are
+ * dropped, so the shell and `requireAuth` show the new state on the very next request instead of up to a minute
+ * later. A token-only change drops nothing: members never feel the token. Nothing here logs more than ids,
+ * states and codes.
  */
 
 const log = moduleLogger('project-health');
@@ -47,6 +56,12 @@ export type HealthResult = {
   /** The previous stored status (`null` when the project was never checked). */
   previous: HealthStatus | null;
   changed: boolean;
+  /**
+   * 09.4-08 (D-573): the token verdict of this check (`null`: none was made, the stored one stays) and the one it
+   * replaced. Optional so a result built before the token axis existed still satisfies the type.
+   */
+  tokenCheck?: TokenCheck | null;
+  previousTokenCheck?: TokenCheck | null;
 };
 
 export type HealthDeps = {
@@ -88,35 +103,63 @@ function codeOf(error: unknown): BootstrapReasonCode {
     : 'unreachable';
 }
 
-type Verdict = { status: HealthStatus; detailCode: BootstrapReasonCode | null };
+/** `tokenCheck` is the token verdict of this check; `null` means "none was made, leave the stored one". */
+type Verdict = {
+  status: HealthStatus;
+  detailCode: BootstrapReasonCode | null;
+  tokenCheck: TokenCheck | null;
+};
+
+/**
+ * The token verdict a provider failure stands for: only an error that carries `customerToken` and one of the
+ * three token codes counts (a platform `forbidden`, a timeout or a 5xx never does, T-09.4-29).
+ */
+function tokenVerdictOf(error: unknown): TokenCheck | null {
+  if (!(error instanceof ProjectProviderError) || !error.customerToken) return null;
+  if (error.code === 'token_invalid') return 'invalid';
+  if (error.code === 'token_forbidden') return 'forbidden';
+  if (error.code === 'org_mismatch') return 'org_mismatch';
+  return null;
+}
 
 async function judge(project: ProjectRecord, deps: HealthDeps): Promise<Verdict> {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ping = deps.ping ?? defaultPing;
+  const customer = project.owner === 'customer';
+  let tokenCheck: TokenCheck | null = null;
 
   // Project 0 has no Management API entry the platform manages: the pool alone answers for it.
   if (!project.isCentral && project.credentialSource !== 'env') {
     try {
-      const provider = deps.provider ?? (await getProjectProvider());
+      const provider = deps.provider ?? (await getProjectProviderFor(project));
       const described = await withTimeout(provider.describe(project.ref), timeoutMs);
-      if (PAUSED_STATUSES.has(described.status)) return { status: 'paused', detailCode: null };
+      // The token reached the project: the verdict is `ok` for whatever the project itself then says.
+      if (customer) tokenCheck = 'ok';
+      if (PAUSED_STATUSES.has(described.status))
+        return { status: 'paused', detailCode: null, tokenCheck };
       if (described.status !== 'ACTIVE_HEALTHY') {
-        return { status: 'unreachable', detailCode: 'unreachable' };
+        return { status: 'unreachable', detailCode: 'unreachable', tokenCheck };
       }
       const { services } = await withTimeout(provider.health(project.ref), timeoutMs);
       const healthy = REQUIRED_SERVICES.every((name) => services[name] === 'ACTIVE_HEALTHY');
-      if (!healthy) return { status: 'unreachable', detailCode: 'unreachable' };
+      if (!healthy) return { status: 'unreachable', detailCode: 'unreachable', tokenCheck };
     } catch (error) {
-      return { status: 'unreachable', detailCode: codeOf(error) };
+      const verdict = customer ? tokenVerdictOf(error) : null;
+      // Not a token verdict (a timeout, a 5xx, a platform refusal): an outage, and the stored check stays.
+      if (verdict === null) {
+        return { status: 'unreachable', detailCode: codeOf(error), tokenCheck: null };
+      }
+      // A token verdict (D-573): record it and let the pool alone answer for the database.
+      tokenCheck = verdict;
     }
   }
 
   try {
     await withTimeout(ping(project), timeoutMs);
   } catch {
-    return { status: 'unreachable', detailCode: 'unreachable' };
+    return { status: 'unreachable', detailCode: 'unreachable', tokenCheck };
   }
-  return { status: 'healthy', detailCode: null };
+  return { status: 'healthy', detailCode: null, tokenCheck };
 }
 
 /** The hosts of every tenant bound to the project, read in one platform transaction. */
@@ -146,12 +189,26 @@ export async function checkProject(
     tx.select().from(projectHealth).where(eq(projectHealth.projectId, projectId)).limit(1),
   );
   const previous = (before?.status ?? null) as HealthStatus | null;
+  const previousTokenCheck = (before?.tokenCheck ?? null) as TokenCheck | null;
   if (project.state !== 'ready') {
-    return { projectId, status: previous ?? 'unknown', detailCode: null, previous, changed: false };
+    return {
+      projectId,
+      status: previous ?? 'unknown',
+      detailCode: null,
+      previous,
+      changed: false,
+      tokenCheck: null,
+      previousTokenCheck,
+    };
   }
 
   const verdict = await judge(project, deps);
 
+  // The token columns are written ONLY on a token verdict (T-09.4-30): any other outcome leaves them as they were.
+  const tokenColumns =
+    verdict.tokenCheck === null
+      ? {}
+      : { tokenCheck: verdict.tokenCheck, tokenCheckedAt: sql`now()` };
   await withPlatformTx((tx) =>
     tx
       .insert(projectHealth)
@@ -160,10 +217,16 @@ export async function checkProject(
         status: verdict.status,
         detailCode: verdict.detailCode,
         checkedAt: sql`now()`,
+        ...tokenColumns,
       })
       .onConflictDoUpdate({
         target: projectHealth.projectId,
-        set: { status: verdict.status, detailCode: verdict.detailCode, checkedAt: sql`now()` },
+        set: {
+          status: verdict.status,
+          detailCode: verdict.detailCode,
+          checkedAt: sql`now()`,
+          ...tokenColumns,
+        },
       }),
   );
 
@@ -182,7 +245,15 @@ export async function checkProject(
       'project health changed',
     );
   }
-  return { projectId, status: verdict.status, detailCode: verdict.detailCode, previous, changed };
+  return {
+    projectId,
+    status: verdict.status,
+    detailCode: verdict.detailCode,
+    previous,
+    changed,
+    tokenCheck: verdict.tokenCheck,
+    previousTokenCheck,
+  };
 }
 
 export type CheckAllResult = {
