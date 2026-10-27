@@ -25,6 +25,7 @@
     "db:migrate-all": "tsx scripts/migrate-all.ts",
     "platform:reseal": "tsx scripts/reseal.ts",
     "platform:reissue-credentials": "tsx scripts/reissue-credentials.ts",
+    "platform:set-owner": "tsx scripts/set-project-owner.ts",
     "platform:probe": "tsx scripts/probe-management-api.ts",
     "platform:central-clean": "tsx scripts/central-clean.ts",
     "platform:move-tenant": "tsx scripts/move-tenant.ts",

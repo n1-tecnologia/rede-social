@@ -155,6 +155,7 @@ async function snapshot(tenantId: string, projectId: string) {
            (select count(*)::int from public.tenant_modules where tenant_id = ${tenantId}::uuid) as modules,
            (select count(*)::int from platform.tenant_moves where tenant_id = ${tenantId}::uuid) as moves,
            (select count(*)::int from platform.projects) as projects`;
+  if (!counts) throw new Error('no counts');
   return { tenant, bound, counts, projectId };
 }
 

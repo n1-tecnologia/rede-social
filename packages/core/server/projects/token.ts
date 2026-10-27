@@ -1,7 +1,8 @@
 import { tokenExpiryIsValid } from '@rede-social/contracts/projects';
-import { eq, sql } from 'drizzle-orm';
-import { projects, projectTokenEvents } from '../../db/central';
+import { and, eq, notInArray, sql } from 'drizzle-orm';
+import { projects, projectTokenEvents, tenantMoves, tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
+import { tenants } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
 import { dropAllowListAdapter } from '../domains/index';
 import { ApiError } from '../http/api-error';
@@ -12,6 +13,7 @@ import { processKeyring, seal } from '../secrets/sealed';
 import { invalidateProject } from '../tenancy/project-registry';
 import { apiUrlFor } from './access';
 import { checkProject } from './health';
+import { openMoveOf } from './move/state';
 import { projectOfTenant } from './overview';
 import { createRequestTokenProvider, dropProjectProvider } from './provider-for';
 import { type ProjectProvider, ProjectProviderError } from './types';
@@ -508,23 +510,177 @@ export type OwnerTarget = {
   isCentral: boolean;
 };
 
-export async function findOwnerTarget(_tenantSlug: string): Promise<OwnerTarget> {
-  throw new Error('not implemented');
+/**
+ * The facts the owner change starts from, read BEFORE the operator is asked for anything (D-567): the tenant's
+ * project and who owns it. Refuses, with a closed code, a tenant that does not exist (`tenant_not_found`), one
+ * on the central project or on a project whose credentials live in the environment (`project_central`) and one
+ * with an open move (`tenant_moving`), so none of them costs the operator a typed token.
+ */
+export async function findOwnerTarget(tenantSlug: string): Promise<OwnerTarget> {
+  const [row] = await withPlatformTx((tx) =>
+    tx
+      .select({
+        tenantId: tenants.id,
+        projectId: projects.id,
+        ref: projects.ref,
+        owner: projects.owner,
+        isCentral: projects.isCentral,
+        source: projects.credentialSource,
+      })
+      .from(tenants)
+      .innerJoin(tenantProjects, eq(tenantProjects.tenantId, tenants.id))
+      .innerJoin(projects, eq(projects.id, tenantProjects.projectId))
+      .where(eq(tenants.slug, tenantSlug))
+      .limit(1),
+  );
+  if (!row) throw new OwnerChangeError('tenant_not_found');
+  const isCentral = row.isCentral || row.source === 'env';
+  if (isCentral) throw new OwnerChangeError('project_central');
+  if (await openMoveOf(row.tenantId)) throw new OwnerChangeError('tenant_moving');
+  return {
+    tenantId: row.tenantId,
+    projectId: row.projectId,
+    ref: row.ref,
+    owner: row.owner,
+    isCentral,
+  };
 }
 
 export type SetOwnerInput = {
   tenantSlug: string;
   token: string;
   expiresAt: string | null;
+  /** An operator label (`^[A-Za-z0-9:_@.-]{1,64}$`), never free text. */
   actor: string;
+  /** Validate exactly as a real run and write nothing: no row, no event, no version bump. */
   dryRun?: boolean;
+  /** Test seam: the day the typed date is judged against. */
   today?: string;
+  /** Test seam: a ready provider the validation runs on; defaults to one built from the token alone. */
   provider?: ProjectProvider;
+  /** The follow-up after the commit; defaults to a best-effort health check. Tests inject a recorder. */
   afterChange?: (projectId: string) => unknown;
 };
 
-export async function setProjectOwner(
-  _input: SetOwnerInput,
-): Promise<{ projectId: string; repinned: boolean; dryRun: boolean }> {
-  throw new Error('not implemented');
+export type SetOwnerResult = { projectId: string; repinned: boolean; dryRun: boolean };
+
+/**
+ * "The project now lives in the customer's account" (D-566 journey 3, D-568, CTK-03/04): validates the customer's
+ * project-scoped token with the whole registration validation and WITHOUT a pin (the first read teaches the
+ * project's CURRENT organisation, which is what makes this the one path that accepts an organisation change),
+ * then in ONE locked platform transaction rewrites owner, pin, sealed token and typed expiry, bumps
+ * `credential_version` and appends `owner_changed` (a platform project) or `repinned` (a project that is
+ * already the customer's). It COPIES NOTHING: no tenant row moves and no move function is called.
+ *
+ * The direction is one way on purpose: customer to platform is not offered here. A project still living in the
+ * customer's account is unreachable with the platform token (the organisation pin would refuse it), so flipping
+ * the owner back would leave a project nobody can manage; the way back is a move to a platform target (plan 12).
+ *
+ * A refused token changes nothing and leaves one code-only event (best effort, after nothing was written). A
+ * dry run validates and returns; it writes no event either. Nothing here logs, returns or throws the token, a
+ * prefix of it, the organisation slug or the ref.
+ */
+export async function setProjectOwner(input: SetOwnerInput): Promise<SetOwnerResult> {
+  const target = await findOwnerTarget(input.tenantSlug);
+  const repinned = target.owner === 'customer';
+  const kind: TokenEventKind = repinned ? 'repinned' : 'owner_changed';
+  const dryRun = input.dryRun === true;
+
+  let validated: ValidatedToken;
+  try {
+    validated = await validateCustomerToken({
+      ref: target.ref,
+      token: input.token,
+      expiresAt: input.expiresAt,
+      ...(input.today === undefined ? {} : { today: input.today }),
+      ...(input.provider === undefined ? {} : { provider: input.provider }),
+    });
+  } catch (error) {
+    if (error instanceof TokenRefusal && error.code !== 'already_registered' && !dryRun) {
+      await recordTokenEvent(undefined, {
+        kind,
+        projectId: target.projectId,
+        projectRef: target.ref,
+        actor: input.actor,
+        outcome: error.code,
+      });
+    }
+    throw error;
+  }
+  if (dryRun) return { projectId: target.projectId, repinned, dryRun: true };
+
+  await withPlatformTx(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`project:${target.ref}`}))`);
+    const found = (await tx.execute(sql`
+      select id::text as id, owner, is_central, credential_source
+        from platform.projects
+       where id = ${target.projectId}::uuid
+         for update`)) as unknown as Array<{
+      id: string;
+      owner: string;
+      is_central: boolean;
+      credential_source: string;
+    }>;
+    const row = found[0];
+    if (!row) throw new OwnerChangeError('tenant_not_found');
+    if (row.is_central || row.credential_source === 'env') {
+      throw new OwnerChangeError('project_central');
+    }
+    // A move may have opened while the operator was typing: re-checked under the lock, inside the transaction.
+    const moving = await tx
+      .select({ id: tenantMoves.id })
+      .from(tenantMoves)
+      .where(
+        and(
+          eq(tenantMoves.tenantId, target.tenantId),
+          notInArray(tenantMoves.state, ['done', 'rolled_back']),
+        ),
+      )
+      .limit(1);
+    if (moving.length > 0) throw new OwnerChangeError('tenant_moving');
+
+    await tx
+      .update(projects)
+      .set({
+        owner: 'customer',
+        orgSlug: validated.orgSlug,
+        mgmtTokenSealed: sealManagementToken(input.token, row.id),
+        mgmtTokenExpiresAt: validated.expiresAt,
+        // Bookkeeping only (the reseal command owns it once set): each string carries its own key id.
+        secretKeyId: sql`coalesce(${projects.secretKeyId}, ${processKeyring().currentId}::smallint)`,
+        credentialVersion: sql`${projects.credentialVersion} + 1`,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(projects.id, row.id));
+    await recordTokenEvent(tx, {
+      kind: row.owner === 'customer' ? 'repinned' : 'owner_changed',
+      projectId: row.id,
+      projectRef: target.ref,
+      actor: input.actor,
+      outcome: 'ok',
+    });
+  });
+
+  // The pools and the binding cached under the old version are dropped; the next call rebuilds from the new token.
+  invalidateProject();
+  dropProjectProvider(target.projectId);
+  dropAllowListAdapter(target.projectId);
+  log.info(
+    { event: 'project.owner.changed', projectId: target.projectId, to: 'customer', repinned },
+    'project owner changed',
+  );
+  await runOwnerFollowUp(input.afterChange ?? checkProject, target.projectId);
+  return { projectId: target.projectId, repinned, dryRun: false };
+}
+
+/** Best effort: the change is committed, a check that cannot run must not turn it into a failure. */
+async function runOwnerFollowUp(
+  run: (projectId: string) => unknown,
+  projectId: string,
+): Promise<void> {
+  try {
+    await run(projectId);
+  } catch {
+    log.warn({ event: 'project.owner.check_failed', projectId }, 'owner change check failed');
+  }
 }
