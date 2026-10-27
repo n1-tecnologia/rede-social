@@ -159,6 +159,102 @@ export function databaseState(input: DatabaseStateInput): DatabaseState {
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// The token state (09.4-03, D-573, D-574, UI-D-553): its own axis, never a database state
+// ---------------------------------------------------------------------------------------------------------
+
+/** The seven token states of UI-D-553, in the order the pill vocabulary lists them. */
+export const TOKEN_STATES = [
+  'valid',
+  'expiring',
+  'expired',
+  'invalid',
+  'no_permission',
+  'org_mismatch',
+  'unchecked',
+] as const;
+export type TokenState = (typeof TOKEN_STATES)[number];
+
+/** The stored outcomes of the last token check (`platform.project_health.token_check`). */
+export const TOKEN_CHECKS = ['ok', 'invalid', 'forbidden', 'org_mismatch'] as const;
+export type TokenCheck = (typeof TOKEN_CHECKS)[number];
+
+/** How many days before the typed expiry the state reads `expiring` (A-UI-5): the ONLY place the number lives. */
+export const TOKEN_EXPIRING_WINDOW_DAYS = 30;
+
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Whole days since the epoch of a real `YYYY-MM-DD` calendar date, or `null`. Date.UTC only: no timezone enters. */
+function epochDay(value: string): number | null {
+  const match = DATE_ONLY.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const ms = Date.UTC(year, month - 1, day);
+  const date = new Date(ms);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return Math.round(ms / 86_400_000);
+}
+
+export type TokenStateInput = {
+  /** The last stored check outcome; `null` when the token was never checked. */
+  check: TokenCheck | null;
+  /** The expiry date the operator typed (`YYYY-MM-DD`), or `null` when none was informed. */
+  expiresAt: string | null;
+  /** Today's date (`YYYY-MM-DD`), injected so the function stays pure. */
+  today: string;
+};
+
+/**
+ * The ONE derivation of a customer project's token state (D-573, UI-D-553), with the precedence
+ * org_mismatch > invalid > no_permission > expired > expiring > unchecked > valid. The token card, the header
+ * pill, the list pill and the list filter all call it, so they cannot disagree. API and web import it, as they
+ * do `databaseState`.
+ *
+ *  - `org_mismatch` / `invalid` / `no_permission` (the stored `forbidden`): the last check said so;
+ *  - `expired`: the typed expiry is before `today`;
+ *  - `expiring`: the whole days from `today` to the expiry are at most `TOKEN_EXPIRING_WINDOW_DAYS`;
+ *  - `unchecked`: nothing says otherwise and the token was never checked;
+ *  - `valid`: everything above is false.
+ *
+ * A platform-owned project has no token state at all, and the token state never feeds `databaseState`
+ * (D-574, A-UI-6): a dead token is not an outage.
+ */
+export function tokenState(input: TokenStateInput): TokenState {
+  if (input.check === 'org_mismatch') return 'org_mismatch';
+  if (input.check === 'invalid') return 'invalid';
+  if (input.check === 'forbidden') return 'no_permission';
+  const expiry = input.expiresAt === null ? null : epochDay(input.expiresAt);
+  const today = epochDay(input.today);
+  if (expiry !== null && today !== null) {
+    if (expiry < today) return 'expired';
+    if (expiry - today <= TOKEN_EXPIRING_WINDOW_DAYS) return 'expiring';
+  }
+  if (input.check === null) return 'unchecked';
+  return 'valid';
+}
+
+/**
+ * The one rule for the typed expiry (D-575, UI-D-550): `YYYY-MM-DD`, a real calendar date, strictly after
+ * `today` and at most one year after `today`. The API and the form both use it.
+ */
+export function tokenExpiryIsValid(expiresAt: string, today: string): boolean {
+  const expiry = epochDay(expiresAt);
+  const from = epochDay(today);
+  if (expiry === null || from === null) return false;
+  if (expiry <= from) return false;
+  const [year, month, day] = today.split('-').map(Number) as [number, number, number];
+  const limit = Math.round(Date.UTC(year + 1, month - 1, day) / 86_400_000);
+  return expiry <= limit;
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Answers (strict: no field can carry a credential)
 // ---------------------------------------------------------------------------------------------------------
 
