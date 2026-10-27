@@ -5,6 +5,7 @@ import {
   REAL_TENANT_DEFAULT_MODULES,
   TENANT_HOST_HEADER,
   TOGGLEABLE_MODULES,
+  tokenState,
 } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { ApiError } from '@rede-social/core/server/http/api-error';
@@ -24,6 +25,7 @@ import { runBootstrap } from '@rede-social/core/server/projects/bootstrap';
 import { PROJECT_BOOTSTRAP_QUEUE } from '@rede-social/core/server/projects/bootstrap-job';
 import { createFakeProjectProvider } from '@rede-social/core/server/projects/fake';
 import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
+import * as tokenKernel from '@rede-social/core/server/projects/token';
 import { registerCustomerProject } from '@rede-social/core/server/projects/token';
 import { open } from '@rede-social/core/server/secrets/sealed';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
@@ -32,6 +34,7 @@ import {
   resolveTenantHost,
 } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as customerSetup from './projects-setup';
 import { bootstrapDeps, fakeTarget, resetB, restoreB } from './projects-setup';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -1567,4 +1570,233 @@ describe('createTenant on a customer project (09.4-09, CTK-01)', () => {
     expect(uses.length).toBeGreaterThan(0);
     expect(uses.filter((use) => use.kind === 'platform')).toEqual([]);
   }, 180_000);
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-13 Task 2: the token state on the list row and in "Banco com problema" (CTK-41, UI-D-560, D-573)
+// ---------------------------------------------------------------------------------------------------------
+
+describe('GET /v1/platform/tenants: the token state of each row and the Banco filter (09.4-13, CTK-41)', () => {
+  const TAG = Date.now().toString(36);
+  const gridPrefix = `pt-tkg-${TAG}-`;
+  const dbPrefix = `pt-tkd-${TAG}-`;
+  const ORG = `acme-list-${TAG}`;
+  const PROBLEMS = ['expiring', 'expired', 'invalid', 'no_permission', 'org_mismatch'];
+
+  const addDays = (day: string, n: number): string => {
+    const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+    return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+  };
+  type Check = 'ok' | 'invalid' | 'forbidden' | 'org_mismatch' | null;
+  const CHECKS: Check[] = [null, 'ok', 'invalid', 'forbidden', 'org_mismatch'];
+  // The day offsets are generated from the same calendar day the function and the SQL use.
+  const today = tokenKernel.todayInSaoPaulo();
+  const OFFSETS: Array<number | null> = [null, -1, 0, 12, 30, 31, 200];
+  const expiryOf = (offset: number | null): string | null =>
+    offset === null ? null : addDays(today, offset);
+
+  let token = '';
+  const list = async (query: string) => {
+    const res = await platform(`/tenants?${query}`, { token });
+    const text = await res.text();
+    return {
+      res,
+      text,
+      body: res.status === 200 ? platformTenantsSchema.parse(JSON.parse(text)) : null,
+    };
+  };
+
+  async function seed(opts: {
+    slug: string;
+    owner: 'platform' | 'customer';
+    projectState?: 'ready' | 'preparing';
+    health?: 'healthy' | 'paused' | 'unreachable';
+    check?: Check;
+    expiresAt?: string | null;
+    failedStep?: boolean;
+  }) {
+    const projectId = crypto.randomUUID();
+    const tenantId = crypto.randomUUID();
+    await adminSql.begin(async (tx) => {
+      await tx`
+        insert into platform.projects (id, ref, provider, credential_source, state, api_url)
+        values (${projectId}::uuid, ${opts.slug}, 'fake', 'sealed', ${opts.projectState ?? 'ready'}, '')`;
+      await tx`
+        insert into public.tenants (id, slug, display_name, rules_text, rules_version)
+        values (${tenantId}::uuid, ${opts.slug}, ${`Lista ${opts.slug}`}, 'Regras.', 1)`;
+      await tx`
+        insert into platform.tenant_projects (tenant_id, project_id)
+        values (${tenantId}::uuid, ${projectId}::uuid)
+        on conflict (tenant_id) do update set project_id = excluded.project_id`;
+      await tx`
+        insert into platform.project_health (project_id, status, checked_at, token_check, token_checked_at)
+        values (${projectId}::uuid, ${opts.health ?? 'healthy'}, now(), ${opts.check ?? null},
+                ${opts.check ? new Date() : null})`;
+      if (opts.failedStep) {
+        await tx`
+          insert into platform.project_bootstrap_steps (project_id, step, status, attempt)
+          values (${projectId}::uuid, 'verify', 'failed', 1)`;
+      }
+    });
+    if (opts.owner === 'customer') {
+      await customerSetup.makeCustomerProject(projectId, `sbp_fc_fake_list_${TAG}`, ORG);
+      if (opts.expiresAt) {
+        await adminSql`
+          update platform.projects set mgmt_token_expires_at = ${opts.expiresAt}::date
+           where id = ${projectId}::uuid`;
+      }
+    }
+  }
+
+  const grid = CHECKS.flatMap((check) =>
+    OFFSETS.map((offset) => ({ check, offset, expiresAt: expiryOf(offset) })),
+  ).map((cell, i) => ({ ...cell, slug: `${gridPrefix}${String(i).padStart(2, '0')}` }));
+
+  async function cleanup() {
+    for (const prefix of [gridPrefix, dbPrefix]) {
+      await adminSql`delete from public.tenants where slug like ${`${prefix}%`}`;
+      await adminSql`delete from platform.projects where ref like ${`${prefix}%`}`;
+    }
+  }
+
+  beforeAll(async () => {
+    token = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    await cleanup();
+    setRequiredTenantSchemaForTests({ count: 147, head: '20261022000000' });
+    for (const cell of grid) {
+      await seed({
+        slug: cell.slug,
+        owner: 'customer',
+        check: cell.check,
+        expiresAt: cell.expiresAt,
+      });
+    }
+    await seed({ slug: `${gridPrefix}plat`, owner: 'platform', check: null });
+    // The database problems, for platform and customer rows, and one row that matches both facts.
+    await seed({ slug: `${dbPrefix}a-plat-unreach`, owner: 'platform', health: 'unreachable' });
+    await seed({
+      slug: `${dbPrefix}b-cust-unreach`,
+      owner: 'customer',
+      health: 'unreachable',
+      check: 'ok',
+    });
+    await seed({ slug: `${dbPrefix}c-plat-paused`, owner: 'platform', health: 'paused' });
+    await seed({
+      slug: `${dbPrefix}d-cust-failed`,
+      owner: 'customer',
+      projectState: 'preparing',
+      failedStep: true,
+    });
+    await seed({
+      slug: `${dbPrefix}e-cust-both`,
+      owner: 'customer',
+      health: 'paused',
+      check: 'invalid',
+      expiresAt: addDays(today, 5),
+    });
+    await seed({
+      slug: `${dbPrefix}f-cust-fine`,
+      owner: 'customer',
+      check: 'ok',
+      expiresAt: addDays(today, 200),
+    });
+    await seed({ slug: `${dbPrefix}g-plat-fine`, owner: 'platform', check: null });
+  }, 180_000);
+
+  afterAll(async () => {
+    setRequiredTenantSchemaForTests(undefined);
+    await cleanup();
+  });
+
+  it('parity: banco=problema matches a customer row for its token exactly when tokenState is a state that needs attention', async () => {
+    const { body } = await list(`q=${gridPrefix}&banco=problema&limit=100`);
+    const listed = new Set(body?.tenants.map((t) => t.slug));
+    expect(grid.length).toBe(CHECKS.length * OFFSETS.length);
+    for (const cell of grid) {
+      const state = tokenState({ check: cell.check, expiresAt: cell.expiresAt, today });
+      expect(listed.has(cell.slug), `${cell.check} ${cell.expiresAt} -> ${state}`).toBe(
+        PROBLEMS.includes(state),
+      );
+    }
+    // `unchecked` and `valid` never match; the platform row never does.
+    expect(listed.has(`${gridPrefix}plat`)).toBe(false);
+    const states = new Set(
+      grid.map((c) => tokenState({ check: c.check, expiresAt: c.expiresAt, today })),
+    );
+    expect([...states].sort()).toEqual(
+      [
+        'expired',
+        'expiring',
+        'invalid',
+        'no_permission',
+        'org_mismatch',
+        'unchecked',
+        'valid',
+      ].sort(),
+    );
+  });
+
+  it('the four database problems match as before for platform and customer rows, and a row matching both is listed once', async () => {
+    const { body } = await list(`q=${dbPrefix}&banco=problema&limit=100`);
+    const slugs = body?.tenants.map((t) => t.slug);
+    expect(slugs).toEqual(
+      ['a-plat-unreach', 'b-cust-unreach', 'c-plat-paused', 'd-cust-failed', 'e-cust-both'].map(
+        (k) => `${dbPrefix}${k}`,
+      ),
+    );
+    expect(new Set(slugs).size).toBe(slugs?.length);
+  });
+
+  it('each row carries database.token { state } for a customer project and null for a platform one, and database.state ignores it', async () => {
+    const { body } = await list(`q=${gridPrefix}&limit=100`);
+    const rows = new Map(body?.tenants.map((t) => [t.slug, t.database]));
+    const plat = rows.get(`${gridPrefix}plat`);
+    expect(plat?.token).toBeNull();
+    const dbStates = new Set<string>();
+    for (const cell of grid) {
+      const database = rows.get(cell.slug);
+      expect(database?.token, cell.slug).toEqual({
+        state: tokenState({ check: cell.check, expiresAt: cell.expiresAt, today }),
+      });
+      dbStates.add(database?.state ?? 'missing');
+    }
+    // Every grid row has the same database facts, so the same database state: no token state moved it.
+    expect([...dbStates]).toEqual([plat?.state]);
+  });
+
+  it('the order stays the slug order and the cursor walks the filtered list with no repeat and no skip', async () => {
+    const expected = grid
+      .filter((c) =>
+        PROBLEMS.includes(tokenState({ check: c.check, expiresAt: c.expiresAt, today })),
+      )
+      .map((c) => c.slug)
+      .sort();
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 40; page += 1) {
+      const query: string = `q=${gridPrefix}&banco=problema&limit=7${cursor ? `&cursor=${cursor}` : ''}`;
+      const { body } = await list(query);
+      seen.push(...(body?.tenants.map((t) => t.slug) ?? []));
+      cursor = body?.nextCursor ?? null;
+      if (!cursor) break;
+    }
+    expect(seen).toEqual(expected);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it('the list holds only { state } of the token: no expiry date, no organisation slug, no check time, no token', async () => {
+    const { text, body } = await list(`q=${gridPrefix}&limit=100`);
+    expect(text).not.toContain(ORG);
+    expect(text).not.toContain('organization');
+    expect(text).not.toContain('expiresAt');
+    expect(text).not.toContain('checkedAt');
+    expect(text).not.toContain('sbp_');
+    for (const row of body?.tenants ?? []) {
+      expect(Object.keys(row.database).sort()).toEqual(['schema', 'state', 'token']);
+      if (row.database.token) expect(Object.keys(row.database.token)).toEqual(['state']);
+    }
+    for (const cell of grid) {
+      if (cell.expiresAt) expect(text).not.toContain(cell.expiresAt);
+    }
+  });
 });
