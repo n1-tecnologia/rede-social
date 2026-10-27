@@ -26,6 +26,7 @@ import { adminSql, provisionTenantOnB, type TenantOnB } from './setup';
 const spy = vi.hoisted(() => ({
   adds: [] as Array<{ projectId: string; host: string }>,
   failFor: new Set<string>(),
+  failHosts: new Set<string>(),
   delayMs: 0,
   active: new Map<string, number>(),
   maxActive: new Map<string, number>(),
@@ -42,6 +43,7 @@ vi.mock('@rede-social/core/server/domains/index', async (importOriginal) => {
         async add(host: string) {
           spy.adds.push({ projectId: project.id, host });
           if (spy.failFor.has(project.id)) throw new Error('management api unreachable');
+          if (spy.failHosts.has(host)) throw new Error('management api unreachable');
           const now = (spy.active.get(project.id) ?? 0) + 1;
           spy.active.set(project.id, now);
           spy.maxActive.set(project.id, Math.max(spy.maxActive.get(project.id) ?? 0, now));
@@ -73,6 +75,7 @@ const extraDomains: string[] = [];
 const resetSpy = () => {
   spy.adds.length = 0;
   spy.failFor.clear();
+  spy.failHosts.clear();
   spy.delayMs = 0;
   spy.active.clear();
   spy.maxActive.clear();
@@ -321,5 +324,75 @@ describe('one list per project (09.2-11, DBT-42)', () => {
       false,
     );
     expect(spy.adds.filter((a) => a.host === host).map((a) => a.projectId)).toEqual([c.projectId]);
+  });
+});
+
+describe('reconcileProjectAllowList clears only the allow_list errors that now succeed (09.4-10, CTK-27)', () => {
+  const lastErrors = async (hosts: string[]): Promise<Record<string, string | null>> => {
+    const rows = await adminSql<{ host: string; last_error: string | null }[]>`
+      select host, last_error from public.tenant_domains where host = any(${hosts}::text[])`;
+    return Object.fromEntries(rows.map((row) => [row.host, row.last_error]));
+  };
+  const setError = (host: string, value: string | null) =>
+    adminSql`update public.tenant_domains set last_error = ${value} where host = ${host}`;
+
+  it('clears last_error = allow_list on the hosts that succeed, leaves every other error alone, and visits every host', async () => {
+    resetSpy();
+    const { reconcileProjectAllowList } = await import(
+      '@rede-social/core/server/platform/reconcile-allow-list'
+    );
+    const stuck = `alr-clear-a-${RUN}.cliente.test`;
+    const other = `alr-clear-b-${RUN}.cliente.test`;
+    await tenantOn(c.projectId, `alr-ca-${RUN}`.slice(0, 40), stuck);
+    await tenantOn(c.projectId, `alr-cb-${RUN}`.slice(0, 40), other);
+    await setError(stuck, 'allow_list');
+    await setError(other, 'invite');
+    await setError(c.host, 'allow_list');
+
+    const result = await reconcileProjectAllowList(c.projectId);
+
+    expect(result).toMatchObject({ failed: 0 });
+    expect(result.added).toBe(result.hosts);
+    expect(await lastErrors([stuck, other, c.host])).toEqual({
+      [stuck]: null,
+      [other]: 'invite',
+      [c.host]: null,
+    });
+    expect(localAllowListByProject.get(c.projectId)?.has(allowListEntry(other))).toBe(true);
+  });
+
+  it('a host whose adapter still fails keeps allow_list, is counted failed and does not stop the next host', async () => {
+    resetSpy();
+    const { reconcileProjectAllowList } = await import(
+      '@rede-social/core/server/platform/reconcile-allow-list'
+    );
+    const failing = `alr-0fail-${RUN}.cliente.test`;
+    await tenantOn(c.projectId, `alr-cf-${RUN}`.slice(0, 40), failing);
+    await setError(failing, 'allow_list');
+    await setError(c.host, 'allow_list');
+    spy.failHosts.add(failing);
+
+    const result = await reconcileProjectAllowList(c.projectId);
+
+    expect(result.failed).toBe(1);
+    expect(result.added).toBe(result.hosts - 1);
+    // Hosts are visited ascending: the failing one came before the host that must still be served.
+    const order = spy.adds.filter((a) => a.projectId === c.projectId).map((a) => a.host);
+    expect(order.indexOf(failing)).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf(failing)).toBeLessThan(order.indexOf(c.host));
+    expect(await lastErrors([failing, c.host])).toEqual({
+      [failing]: 'allow_list',
+      [c.host]: null,
+    });
+  });
+
+  it('the reconcile without the option never clears an error', async () => {
+    resetSpy();
+    await setError(c.host, 'allow_list');
+
+    const result = await reconcileAuthAllowList({ projectId: c.projectId });
+
+    expect(result.failed).toBe(0);
+    expect((await lastErrors([c.host]))[c.host]).toBe('allow_list');
   });
 });
