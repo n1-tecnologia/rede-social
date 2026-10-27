@@ -139,10 +139,16 @@ type CallOptions<T> = {
 };
 
 export type SupabaseProjectProviderOptions = {
-  /** The platform personal access token. Never logged, never part of a message. */
+  /** The personal access token (platform, or the scoped token of one customer project). Never logged, never part of a message. */
   pat: string;
-  /** The organisation the platform is pinned to (`SUPABASE_ORG_SLUG`). */
-  orgSlug: string;
+  /**
+   * Whose token this is (09.4-05, D-570..D-573). `platform` (default) is pinned to `SUPABASE_ORG_SLUG` and is
+   * byte for byte the 09.2 behaviour; `customer` refines 401/403 into token codes, owns its limiter and may
+   * omit `orgSlug` (LEARN mode: the first `describe` pins the organisation of the project).
+   */
+  tokenKind?: 'platform' | 'customer';
+  /** The organisation the provider is pinned to (`SUPABASE_ORG_SLUG`). Required for `platform`. */
+  orgSlug?: string;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   /** Share one limiter across providers; default: the process-wide limiter (or one built on `now`/`sleep`). */
@@ -171,6 +177,13 @@ function kindOfStatus(status: number): ProjectProviderErrorKind {
   if (status === 408) return 'timeout';
   if (status >= 500) return 'unavailable';
   return 'invalid';
+}
+
+/** The refinement of a 401 and a 403 for a customer-token provider (D-573); every other status has none. */
+function tokenCodeOf(status: number): 'token_invalid' | 'token_forbidden' | undefined {
+  if (status === 401) return 'token_invalid';
+  if (status === 403) return 'token_forbidden';
+  return undefined;
 }
 
 function assertBaseUrl(baseUrl: string): string {
@@ -252,17 +265,23 @@ export function pickKey(keys: readonly ApiKey[], kinds: readonly ApiKeyKind[]): 
 export function createSupabaseProjectProvider(
   options: SupabaseProjectProviderOptions,
 ): ProjectProvider {
+  const customer = options.tokenKind === 'customer';
   if (!options.pat) throw new TypeError('project provider: pat is required');
-  if (!options.orgSlug) throw new TypeError('project provider: orgSlug is required');
+  if (!customer && !options.orgSlug) throw new TypeError('project provider: orgSlug is required');
   const pat = options.pat;
-  const orgSlug = options.orgSlug;
+  /** The pinned organisation; a customer provider without one learns it from its first `describe` (D-571). */
+  let pinnedOrg: string | undefined = options.orgSlug || undefined;
   const baseUrl = assertBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL);
   const fetchImpl = options.fetchImpl ?? fetch;
+  // A customer provider never touches the process-wide limiter: a 429 on one token pauses only that token
+  // (CTK-23; the per-project map of providers is plan 06).
   const limiter =
     options.limiter ??
-    (options.now || options.sleep
-      ? createLimiter({ now: options.now, sleep: options.sleep })
-      : defaultProcessLimiter());
+    (customer
+      ? createLimiter({ perMinute: 100, now: options.now, sleep: options.sleep })
+      : options.now || options.sleep
+        ? createLimiter({ now: options.now, sleep: options.sleep })
+        : defaultProcessLimiter());
   const jitter = options.jitter ?? (() => Math.floor(Math.random() * (MAX_JITTER_MS + 1)));
 
   /** Refs already confirmed to belong to the pinned organisation by this instance. */
@@ -289,7 +308,8 @@ export function createSupabaseProjectProvider(
     let path = template.replace('{ref}', encodeURIComponent(opts.params.ref));
     if (template.includes('{id}')) {
       const id = opts.params.id;
-      if (id === undefined || !ID_PATTERN.test(id)) throw new ProjectProviderError('invalid', 0);
+      if (id === undefined || !ID_PATTERN.test(id))
+        throw new ProjectProviderError('invalid', 0, undefined, customer);
       path = path.replace('{id}', encodeURIComponent(id));
     }
     const query = opts.query ? `?${new URLSearchParams(opts.query).toString()}` : '';
@@ -316,13 +336,17 @@ export function createSupabaseProjectProvider(
         throw new ProjectProviderError(
           name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'unavailable',
           0,
+          undefined,
+          customer,
         );
       }
 
       if (response.status === 429) {
         const reset = response.headers.get('X-RateLimit-Reset');
         await discard(response);
-        if (attempt === MAX_ATTEMPTS) throw new ProjectProviderError('rate_limited', 429);
+        if (attempt === MAX_ATTEMPTS) {
+          throw new ProjectProviderError('rate_limited', 429, undefined, customer);
+        }
         // The jitter is added AFTER the rounding so a retry is never early (P42); the pause holds every
         // other caller for the same window instead of each one discovering the limit (P43).
         limiter.pause(limiter.now() + resetDelayMs(reset) + jitter());
@@ -331,7 +355,12 @@ export function createSupabaseProjectProvider(
 
       if (!response.ok) {
         await discard(response);
-        throw new ProjectProviderError(kindOfStatus(response.status), response.status);
+        throw new ProjectProviderError(
+          kindOfStatus(response.status),
+          response.status,
+          customer ? tokenCodeOf(response.status) : undefined,
+          customer,
+        );
       }
 
       if (opts.schema === undefined) {
@@ -342,23 +371,24 @@ export function createSupabaseProjectProvider(
       try {
         text = await response.text();
       } catch {
-        throw new ProjectProviderError('unavailable', response.status);
+        throw new ProjectProviderError('unavailable', response.status, undefined, customer);
       }
       if (text.trim() === '') {
         if (opts.allowEmpty) return undefined as T;
-        throw new ProjectProviderError('unavailable', response.status);
+        throw new ProjectProviderError('unavailable', response.status, undefined, customer);
       }
       let json: unknown;
       try {
         json = JSON.parse(text);
       } catch {
-        throw new ProjectProviderError('unavailable', response.status);
+        throw new ProjectProviderError('unavailable', response.status, undefined, customer);
       }
       const parsed = opts.schema.safeParse(json);
-      if (!parsed.success) throw new ProjectProviderError('unavailable', response.status);
+      if (!parsed.success)
+        throw new ProjectProviderError('unavailable', response.status, undefined, customer);
       return parsed.data;
     }
-    throw new ProjectProviderError('rate_limited', 429);
+    throw new ProjectProviderError('rate_limited', 429, undefined, customer);
   }
 
   async function describe(ref: string): Promise<ProjectDescription> {
@@ -366,8 +396,11 @@ export function createSupabaseProjectProvider(
       params: { ref },
       schema: projectSchema,
     });
-    if (project.organization_slug !== orgSlug) {
-      throw new ProjectProviderError('forbidden', 403, 'org_mismatch');
+    if (pinnedOrg === undefined) {
+      // LEARN mode (customer only): the first read pins the organisation for the rest of the instance.
+      pinnedOrg = project.organization_slug;
+    } else if (project.organization_slug !== pinnedOrg) {
+      throw new ProjectProviderError('forbidden', 403, 'org_mismatch', customer);
     }
     if (pinned.size >= PIN_CACHE_MAX) pinned.clear();
     pinned.add(ref);
@@ -414,7 +447,7 @@ export function createSupabaseProjectProvider(
       schema: apiKeyItemSchema,
     });
     const created = toApiKey(item);
-    if (created === null) throw new ProjectProviderError('unavailable', 201);
+    if (created === null) throw new ProjectProviderError('unavailable', 201, undefined, customer);
     if (created.value !== undefined) return created;
     // The answer did not carry the value: read it back from the list.
     const again = (await listKeys(ref)).find((key) => key.id === created.id);
@@ -443,7 +476,7 @@ export function createSupabaseProjectProvider(
         entries.find((entry) => entry.database_type === 'PRIMARY') ??
         entries.find((entry) => entry.database_type !== 'READ_REPLICA');
       if (!primary || !HOST_PATTERN.test(primary.db_host)) {
-        throw new ProjectProviderError('unavailable', 200);
+        throw new ProjectProviderError('unavailable', 200, undefined, customer);
       }
       return {
         host: primary.db_host,
@@ -457,7 +490,7 @@ export function createSupabaseProjectProvider(
 
   async function setDatabasePassword(ref: string, password: string): Promise<void> {
     if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
-      throw new ProjectProviderError('invalid', 0);
+      throw new ProjectProviderError('invalid', 0, undefined, customer);
     }
     await guarded(ref, () =>
       call('PATCH', '/v1/projects/{ref}/database/password', {
@@ -567,7 +600,7 @@ export function createSupabaseProjectProvider(
       }),
     createSigningKey: (ref, algorithm = 'ES256') => {
       if (!SIGNING_ALGORITHMS.has(algorithm)) {
-        return Promise.reject(new ProjectProviderError('invalid', 0));
+        return Promise.reject(new ProjectProviderError('invalid', 0, undefined, customer));
       }
       return guarded(ref, async () =>
         toSigningKey(

@@ -39,20 +39,31 @@ export type ProjectProviderErrorKind =
 /**
  * The ONLY error shape a provider raises. The message carries the kind and the HTTP status (0 when no
  * answer was received) and nothing else: never a response body, a header, a key, a host or SQL (T-09.2-57).
- * `code` is a machine-readable refinement that is NOT part of the message (today only `org_mismatch`: the
- * project belongs to another organisation than the one the platform is pinned to).
+ * `code` is a machine-readable refinement that is NOT part of the message. `org_mismatch`: the project belongs
+ * to another organisation than the one the provider is pinned to. `token_invalid` and `token_forbidden`
+ * (09.4-05, D-573): the refinement of a 401 and a 403, raised ONLY by a customer-token provider, which marks
+ * every error it raises with `customerToken` so a caller can tell whose token failed. The kind stays
+ * `forbidden` for 401 and 403 either way, so every consumer that tests `kind` is unchanged, and a platform
+ * provider's errors carry no token code and `customerToken === false`.
  */
 export class ProjectProviderError extends Error {
   readonly kind: ProjectProviderErrorKind;
   readonly status: number;
-  readonly code: 'org_mismatch' | undefined;
+  readonly code: 'org_mismatch' | 'token_invalid' | 'token_forbidden' | undefined;
+  readonly customerToken: boolean;
 
-  constructor(kind: ProjectProviderErrorKind, status = 0, code?: 'org_mismatch') {
+  constructor(
+    kind: ProjectProviderErrorKind,
+    status = 0,
+    code?: 'org_mismatch' | 'token_invalid' | 'token_forbidden',
+    customerToken = false,
+  ) {
     super(`${kind} ${status}`);
     this.name = 'ProjectProviderError';
     this.kind = kind;
     this.status = status;
     this.code = code;
+    this.customerToken = customerToken;
   }
 }
 
