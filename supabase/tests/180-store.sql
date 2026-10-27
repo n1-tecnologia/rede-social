@@ -740,7 +740,17 @@ analyze public.feed_posts;
 -- community page its own index) and is an InitPlan; planner preference on a bloated table is not
 -- the property. With sequential scans disabled the planner still falls back to one when no index
 -- can serve the query, so the index-name and no-`Seq Scan` pins stay falsifiable and deterministic.
+--
+-- `enable_bitmapscan = off` joins it (09.3-06, P41 owner decision). Each restrictive gate clause of
+-- the form `community_id is null or community_id <> all (<InitPlan array>)` is estimated with a tiny
+-- selectivity, so the extra `feed_posts_deleted_community_gate` clause shrinks the merged feed's row
+-- estimate (78 to 30) and the planner then prefers `Bitmap Heap Scan` on `feed_posts_tenant_author_idx`
+-- plus a `Sort` over an ordered walk of `created_all_idx` under `limit 11`. That is cost preference on
+-- an estimate, not usability: the pin is about the index being walkable in order, so both bitmap and
+-- sequential plans are taken off the table and the name pin below stays falsifiable (a gate that made
+-- the ordered walk impossible would leave only an unordered scan + Sort, which this pin would not match).
 set local enable_seqscan = off;
+set local enable_bitmapscan = off;
 select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004');
 do $$
 declare
@@ -776,6 +786,7 @@ end
 $$;
 reset role;
 reset enable_seqscan;
+reset enable_bitmapscan;
 select matches(current_setting('tests.plan_merged'), 'InitPlan',
   'P41: the member-lane merged feed evaluates the gate as an InitPlan (once per statement, never per row)');
 select matches(current_setting('tests.plan_merged'), 'feed_posts_tenant_created_all_idx',
