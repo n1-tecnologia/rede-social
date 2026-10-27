@@ -378,7 +378,7 @@ Added by Phase 09.2 planning (2026-10-22). Each tenant runs on its own Supabase 
 - [x] **PEND-02**: A deleted event keeps its RSVPs and check-ins in the database untouched (D-214, D-550) and they keep counting for the member in the dashboards; no notification or push is sent (D-549), and reminders already scheduled for it are skipped.
 - [x] **PEND-03**: A deleted event's link, from a saved link, a push or an old bell notification, opens the existing not-found screen and the old notifications stay in the list (D-551); no new screen and no new API status.
 - [x] **PEND-04**: `DELETE /v1/communities/{id}` is accepted only for an archived community, from whoever manages communities, and soft-deletes it by filling `communities.deleted_at`; a community that is not archived answers a distinct refusal and another tenant's community answers 404.
-- [ ] **PEND-05**: The publications of a deleted community disappear from Início, Explorar, Reels, the community lists and the post page (404 on its link), and stay in the database.
+- [x] **PEND-05**: The publications of a deleted community disappear from Início, Explorar, Reels, the community lists and the post page (404 on its link), and stay in the database.
 - [x] **PEND-06**: `DELETE /v1/communities/{id}` is refused, with the product names in the answer, while an active Loja product still unlocks the community (archived products do not count); its highlights, pinned stories and membership rows are hidden by the read filters and nothing is erased (D-554, D-556).
 - [x] **PEND-07**: "Excluir evento" (the event form and the cancelled-event notice) and "Excluir comunidade" (the archived community's page and form) lose their "Em breve" badge and open the existing `ConfirmDialog` in pt-BR before calling the new route; after it the admin lands on the list, and a refusal reads as a catalog line (D-552, D-557).
 - [x] **PEND-08**: `EVENT_SCHEDULE_MAX_ITEMS` rises from 30 to 200 in the contract and the `events_schedule_chk` CHECK is replaced by a migration at 200 (D-558), so the form, the API and the database accept the same count; pgTAP covers 200 and one past it.
@@ -776,7 +776,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PEND-02 | Phase 09.3 | Complete |
 | PEND-03 | Phase 09.3 | Complete |
 | PEND-04 | Phase 09.3 | Complete |
-| PEND-05 | Phase 09.3 | Pending |
+| PEND-05 | Phase 09.3 | Complete |
 | PEND-06 | Phase 09.3 | Complete |
 | PEND-07 | Phase 09.3 | Complete |
 | PEND-08 | Phase 09.3 | Complete |
