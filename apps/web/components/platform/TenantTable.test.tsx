@@ -354,7 +354,7 @@ describe('TenantTable - the token pill (UI-D-560)', () => {
     ['valid', 'a Válido row'],
     ['unchecked', 'a Não verificado row'],
     [null, 'a platform row (no token)'],
-  ])('shows no token pill for %s: %s (E08 partial)', (token) => {
+  ])('shows no token pill for %s: %s (E08 partial)', (token, _what) => {
     const { container } = renderTable([withToken('a', token)]);
     expect(within(desktop(container)).queryByTestId('row-token-pill')).toBeNull();
     expect(within(mobile(container)).queryByTestId('row-token-pill')).toBeNull();

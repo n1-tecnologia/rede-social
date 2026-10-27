@@ -1,6 +1,6 @@
 'use client';
 
-import type { DatabaseState } from '@rede-social/contracts/projects';
+import type { DatabaseState, TokenState } from '@rede-social/contracts/projects';
 import { Button, Card, EmptyState, Skeleton, StatusPill } from '@rede-social/ui';
 import { Building2, ChevronRight, Plus, SearchX } from 'lucide-react';
 import Link from 'next/link';
@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl';
 import { useState, useTransition } from 'react';
 import { LinkButton } from '@/app/(auth)/LinkButton';
 import { DatabasePill } from '@/components/platform/DatabasePill';
+import { TokenPill, tokenNeedsAttention } from '@/components/platform/TokenPill';
 import type { TenantRowView } from '@/lib/platform';
 
 export type TenantListQuery = {
@@ -60,16 +61,33 @@ function statusTone(status: TenantRowView['status']): 'success' | 'danger' {
 /** The states whose list cell carries no schema line (UI-D-540): nothing is applied yet, or a move holds it. */
 const NO_SCHEMA_LINE: readonly DatabaseState[] = ['preparing', 'preparation_failed', 'moving'];
 
+/** The token state of a row when it earns a pill (`database.token` is absent or null for a platform row). */
+function tokenAttention(database: TenantRowView['database']): TokenState | null {
+  const state = database?.token?.state;
+  return state && tokenNeedsAttention(state) ? state : null;
+}
+
+/** The "Token: {state}" pill of a row, or nothing (the mobile card's pills line). */
+function RowTokenPill({ database }: { database: TenantRowView['database'] }) {
+  const state = tokenAttention(database);
+  return state ? <TokenPill state={state} prefixed data-testid="row-token-pill" /> : null;
+}
+
 /**
  * The Banco cell of a row (UI-D-540): the shared `DatabasePill` (UI-D-539, its words and tones come
  * from `databasePillProps`, never from here) and, under it, the schema line
  * "Esquema 147" or "Esquema 144 de 147". A row without the fact reads "Não verificado" (P103) and
  * the line stays out whenever a count is unknown, so nothing is invented. The list keeps the API's
  * order whatever the pill says (P102): this component only renders.
+ *
+ * 09.4-16 (UI-D-560, CTK-41): a customer project whose token needs attention gets a second pill, "Token:
+ * {state}", under the Banco pill and the schema line (`mt-1`); a platform row and a Válido or Não verificado
+ * token show none.
  */
 function DatabaseCell({ database }: { database: TenantRowView['database'] }) {
   const t = useTranslations('platform.list');
   const state: DatabaseState = database?.state ?? 'unchecked';
+  const tokenState = tokenAttention(database);
   const applied = database?.schema.applied ?? null;
   const required = database?.schema.required ?? null;
   const line =
@@ -88,6 +106,11 @@ function DatabaseCell({ database }: { database: TenantRowView['database'] }) {
         >
           {line}
         </p>
+      ) : null}
+      {tokenState ? (
+        <div className="mt-1">
+          <RowTokenPill database={database} />
+        </div>
       ) : null}
     </>
   );
@@ -284,6 +307,7 @@ export function TenantTable({
                 </div>
                 <div className="mt-1 flex flex-wrap gap-1">
                   <DatabasePill state={row.database?.state ?? 'unchecked'} />
+                  <RowTokenPill database={row.database} />
                 </div>
               </div>
               <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />

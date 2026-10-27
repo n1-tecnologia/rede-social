@@ -6,6 +6,7 @@ import { type ReactNode, Suspense } from 'react';
 import { databasePillProps } from '@/components/platform/DatabasePill';
 import { FlashToast } from '@/components/platform/FlashToast';
 import { TenantTabs } from '@/components/platform/TenantTabs';
+import { tokenNeedsAttention, tokenPillProps } from '@/components/platform/TokenPill';
 import {
   getTenantDatabase,
   primaryVerifiedHost,
@@ -19,6 +20,9 @@ import {
  * Marca · Módulos · Domínios · Admins · Banco · Status, each a sub-route the tab pages fill in.
  * When the tenant's database is not Pronto, a second non-interactive pill "Banco: {state}" follows
  * the status pill (09.2-20, UI-D-541); a failed read of that state renders the frame without it.
+ * A third, "Token: {state}", follows those (09.4-16, UI-D-560, CTK-41) ONLY for a customer project whose
+ * token needs attention (Vencendo, Vencido, Inválido, Sem permissão, Organização diferente): never for
+ * Válido or Não verificado, never for a platform project. It is read from the same overview.
  *
  * The detail comes from `requirePlatformTenantDetail` (non-uuid or unknown id → the segment's
  * not-found screen; refusals redirect), deduplicated with the active tab page by React `cache`.
@@ -32,19 +36,25 @@ export default async function TenantLayout({
   children: ReactNode;
 }) {
   const { id } = await params;
-  const [t, tStates, detail] = await Promise.all([
+  const [t, tStates, tTokenStates, detail] = await Promise.all([
     getTranslations('platform'),
     getTranslations('platform.database.states'),
+    getTranslations('platform.database.token.states'),
     requirePlatformTenantDetail(id),
   ]);
   const { tenant } = detail;
   // The same React-cached read the Banco and Status tabs make. The header is chrome: a failed read
   // (or a refused one, which the tab itself will surface) never blocks the tenant frame.
-  const database = await getTenantDatabase(tenant.id).then(
-    (overview) => overview.state,
+  const overview = await getTenantDatabase(tenant.id).then(
+    (value) => value,
     () => null,
   );
+  const database = overview?.state ?? null;
   const databasePill = database && database !== 'ready' ? databasePillProps(database) : null;
+  const tokenPill =
+    overview?.owner === 'customer' && overview.token && tokenNeedsAttention(overview.token.state)
+      ? tokenPillProps(overview.token.state)
+      : null;
   const host = primaryVerifiedHost(detail);
   const active = tenant.status === 'active';
 
@@ -74,6 +84,11 @@ export default async function TenantLayout({
         {databasePill ? (
           <StatusPill tone={databasePill.tone} data-testid="tenant-database-pill">
             {t('tenant.databasePill', { state: tStates(databasePill.labelKey) })}
+          </StatusPill>
+        ) : null}
+        {tokenPill ? (
+          <StatusPill tone={tokenPill.tone} data-testid="tenant-token-pill">
+            {t('tenant.tokenPill', { state: tTokenStates(tokenPill.labelKey) })}
           </StatusPill>
         ) : null}
       </div>

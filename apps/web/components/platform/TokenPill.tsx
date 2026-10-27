@@ -69,7 +69,21 @@ export function TokenPill({
   );
 }
 
-/** RED stub (09.4-16 Task 3). */
-export function tokenNeedsAttention(_state: TokenState): boolean {
-  return false;
+/** The states that need a person (or will, soon): the only ones that earn a pill on the header and the list. */
+const NEEDS_ATTENTION: ReadonlySet<TokenState> = new Set<TokenState>([
+  'expiring',
+  'expired',
+  'invalid',
+  'no_permission',
+  'org_mismatch',
+]);
+
+/**
+ * Whether a token state earns the "Token: {state}" pill on the tenant header and the list (09.4-16, UI-D-560,
+ * CTK-41). Vencendo, Vencido, Inválido, Sem permissão and Organização diferente do; Válido (nothing to do)
+ * and Não verificado (nothing is known yet) stay quiet. The "Banco com problema" chip matches the same five
+ * states on the API side.
+ */
+export function tokenNeedsAttention(state: TokenState): boolean {
+  return NEEDS_ATTENTION.has(state);
 }
