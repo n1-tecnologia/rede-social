@@ -840,3 +840,235 @@ describe('reactivating a product that links a deleted community (09.3 WR-03, D-5
     expect(await productRow(product.id)).toEqual(before);
   });
 });
+
+/** True when `pending` settles within `ms` (it does not stop the promise). */
+async function settlesWithin(pending: Promise<unknown>, ms: number): Promise<boolean> {
+  let settled = false;
+  pending.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, ms));
+  return settled;
+}
+
+describe('the reactivation guard across tenants, links and races (09.3 WR-03, T-qc8-01..03)', () => {
+  let restoreLabStore: () => Promise<void> = async () => {};
+
+  beforeAll(async () => {
+    restoreLabStore = await withStoreEnabled('lab');
+  });
+
+  afterAll(async () => {
+    await restoreLabStore();
+  });
+
+  it('16. cross-tenant: a foreign admin and a foreign id are the bare 404; the check is per tenant; a foreign link blocks nothing', async () => {
+    const { community: deletedCommunity, product } =
+      await archivedProductOfDeletedCommunity('inquilinos');
+    const before = await productRow(product.id);
+    expect(before?.status).toBe('archived');
+
+    // The lab admin and an unknown id: the same bare 404 as a random uuid.
+    const unknown = sansRequestId(
+      await expectBare404(await putProductStatus(randomUUID(), 'active'), 'unknown id'),
+    );
+    const asLab = await putProductStatus(product.id, 'active', tokens.labAdmin, HOSTS.lab);
+    const asLabRaw = await expectBare404(asLab, 'lab admin on a demo product');
+    expect(sansRequestId(asLabRaw)).toBe(unknown);
+    for (const needle of [product.id, product.name, deletedCommunity.id]) {
+      expect(asLabRaw).not.toContain(needle);
+    }
+    expect(await productRow(product.id)).toEqual(before);
+
+    // Lab rows, inserted the way test 12 does.
+    const [labAdmin] = await adminSql<{ id: string }[]>`
+      select u.id::text as id from public.users u where u.email = 'admin@rede-lab.local'`;
+    const labCommunityName = `${TEST_NAME_PREFIX} laboratorio apagada ${++counter}`;
+    const [labCommunity] = await adminSql<{ id: string }[]>`
+      insert into public.communities (tenant_id, created_by_user_id, name, slug, status, deleted_at)
+      values (${tenantIds.lab}::uuid, ${labAdmin?.id ?? ''}::uuid, ${labCommunityName},
+              ${`exclusao-lab-apagada-${counter}`}, 'archived', now())
+      returning id::text as id`;
+    const labCommunityId = labCommunity?.id ?? '';
+    const labProductName = productName('laboratorio reativar');
+    const [labProduct] = await adminSql<{ id: string }[]>`
+      insert into public.store_products (tenant_id, created_by_user_id, name, price_cents, status)
+      values (${tenantIds.lab}::uuid, ${labAdmin?.id ?? ''}::uuid, ${labProductName}, 990, 'archived')
+      returning id::text as id`;
+    const labProductId = labProduct?.id ?? '';
+    await adminSql`
+      insert into public.store_product_communities (tenant_id, product_id, community_id)
+      values (${tenantIds.lab}::uuid, ${labProductId}::uuid, ${labCommunityId}::uuid)`;
+    createdProducts.push(labProductId);
+
+    // The demo admin on the lab product: the same bare 404.
+    const asDemo = await putProductStatus(labProductId, 'active');
+    const asDemoRaw = await expectBare404(asDemo, 'demo admin on a lab product');
+    expect(sansRequestId(asDemoRaw)).toBe(unknown);
+    expect((await productRow(labProductId))?.status).toBe('archived');
+
+    // Per tenant: the lab admin reactivating its own product is the 409.
+    await expectCommunityDeleted(
+      await putProductStatus(labProductId, 'active', tokens.labAdmin, HOSTS.lab),
+      'lab own product',
+      [labProductId, labProductName, labCommunityId, labCommunityName],
+    );
+    expect((await productRow(labProductId))?.status).toBe('archived');
+
+    // Tenant B's deleted community does not block tenant A's product with a live community.
+    const live = await createCommunity(uniqueName('viva'));
+    const mine = await createProduct(productName('viva'), [live.id]);
+    await archiveProduct(mine.id);
+    await archive(live.id);
+    const ok = await putProductStatus(mine.id, 'active');
+    expect(ok.status, await ok.clone().text()).toBe(200);
+
+    // A foreign link row planted through the admin connection (the FK is single-column).
+    await archiveProduct(mine.id);
+    let planted = true;
+    try {
+      await adminSql`
+        insert into public.store_product_communities (tenant_id, product_id, community_id)
+        values (${tenantIds.demo}::uuid, ${mine.id}::uuid, ${labCommunityId}::uuid)`;
+    } catch (error) {
+      planted = false;
+      console.warn('foreign link rejected by the database:', (error as Error).message);
+    }
+    if (planted) {
+      const again = await putProductStatus(mine.id, 'active');
+      const raw = await again.clone().text();
+      expect(again.status, raw).toBe(200);
+      for (const needle of [labCommunityId, labCommunityName, tenantIds.lab]) {
+        expect(raw).not.toContain(needle);
+      }
+    }
+  });
+
+  it('17. several communities: one deleted among three refuses; two live ones (one archived) reactivate', async () => {
+    const a = await createCommunity(uniqueName('a'));
+    const b = await createCommunity(uniqueName('b'));
+    const c = await createCommunity(uniqueName('c'));
+    const refused = await createProduct(productName('tres'), [a.id, b.id, c.id]);
+    const allowed = await createProduct(productName('duas'), [a.id, b.id]);
+    await archiveProduct(refused.id);
+    await archiveProduct(allowed.id);
+    await archive(b.id);
+    await archive(c.id);
+    expect((await del(c.id)).status).toBe(204);
+
+    const before = await productRow(refused.id);
+    await expectCommunityDeleted(await putProductStatus(refused.id, 'active'), 'three links', [
+      refused.id,
+      c.id,
+      c.name,
+    ]);
+    expect(await productRow(refused.id)).toEqual(before);
+
+    const res = await putProductStatus(allowed.id, 'active');
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await productRow(allowed.id))?.status).toBe('active');
+  });
+
+  it('18. deterministic race: a reactivation waits for an in-flight delete, and a delete waits for an in-flight reactivation', async () => {
+    // a) the delete holds the community row first.
+    {
+      const community = await createCommunity(uniqueName('corrida a'));
+      const product = await createProduct(productName('corrida a'), [community.id]);
+      await archiveProduct(product.id);
+      await archive(community.id);
+
+      let release: () => void = () => {};
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let locked: () => void = () => {};
+      const lockedFirst = new Promise<void>((resolve) => {
+        locked = resolve;
+      });
+      const holder = adminSql.begin(async (tx) => {
+        await tx`select id from public.communities where id = ${community.id}::uuid for update`;
+        locked();
+        await barrier;
+        await tx`update public.communities set deleted_at = now() where id = ${community.id}::uuid`;
+      });
+
+      let pending: Promise<Response> | undefined;
+      try {
+        await lockedFirst;
+        pending = Promise.resolve(putProductStatus(product.id, 'active'));
+        expect(
+          await settlesWithin(pending, 400),
+          'the reactivation waits for the community lock',
+        ).toBe(false);
+      } finally {
+        release();
+        await holder;
+      }
+      if (!pending) throw new Error('the reactivation was never started');
+      await expectCommunityDeleted(await pending, '18a');
+      expect((await productRow(product.id))?.status).toBe('archived');
+    }
+
+    // b) the reactivation holds the community row first.
+    {
+      const community = await createCommunity(uniqueName('corrida b'));
+      const product = await createProduct(productName('corrida b'), [community.id]);
+      await archiveProduct(product.id);
+      await archive(community.id);
+
+      let release: () => void = () => {};
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let locked: () => void = () => {};
+      const lockedFirst = new Promise<void>((resolve) => {
+        locked = resolve;
+      });
+      const holder = adminSql.begin(async (tx) => {
+        await tx`select id from public.communities where id = ${community.id}::uuid for share`;
+        await tx`update public.store_products set status = 'active' where id = ${product.id}::uuid`;
+        locked();
+        await barrier;
+      });
+
+      let pending: Promise<Response> | undefined;
+      try {
+        await lockedFirst;
+        pending = Promise.resolve(del(community.id));
+        expect(await settlesWithin(pending, 400), 'the delete waits for the share lock').toBe(false);
+      } finally {
+        release();
+        await holder;
+      }
+      if (!pending) throw new Error('the delete was never started');
+      const refusal = await refusalOf(await pending);
+      expect(refusal.products).toEqual([{ id: product.id, name: product.name }]);
+      expect(await deletedAtOf(community.id)).toBeNull();
+    }
+  });
+
+  it('19. real race: a delete and a reactivation together end as 204/409 or 409/200, never an active product on a deleted community', async () => {
+    for (let round = 0; round < 3; round++) {
+      const community = await createCommunity(uniqueName(`disputa ${round}`));
+      const product = await createProduct(productName(`disputa ${round}`), [community.id]);
+      await archiveProduct(product.id);
+      await archive(community.id);
+
+      const [deleted, reactivated] = await Promise.all([
+        del(community.id),
+        putProductStatus(product.id, 'active'),
+      ]);
+      const pair = `${deleted.status}/${reactivated.status}`;
+      expect(['204/409', '409/200'], pair).toContain(pair);
+
+      const row = await productRow(product.id);
+      const deletedAt = await deletedAtOf(community.id);
+      expect(row?.status === 'active' && deletedAt != null, `${pair}: ${row?.status}`).toBe(false);
+    }
+  });
+});

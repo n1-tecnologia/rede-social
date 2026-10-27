@@ -322,7 +322,7 @@ const setProductStatusRoute = createRoute({
   responses: {
     200: {
       description:
-        'The product with its new status (idempotent: the status it already has answers the unchanged product). `archived` hides it from `filter=all` and refuses NEW purchases (409 `unavailable`); holders keep every community it opens and still see it under `filter=owned`. No link and no entitlement changes.',
+        'The product with its new status (idempotent: the status it already has answers the unchanged product). `archived` hides it from `filter=all` and refuses NEW purchases (409 `unavailable`); holders keep every community it opens and still see it under `filter=owned`. No link and no entitlement changes. A reactivation can be refused (409 `community_deleted`).',
       content: { 'application/json': { schema: productDetailSchema } },
     },
     400: {
@@ -333,6 +333,10 @@ const setProductStatusRoute = createRoute({
     404: {
       description:
         '`MODULE_DISABLED` when the store is off; otherwise the product is unknown or another tenant’s. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.store: community_deleted` (09.3 WR-03, D-554): the product is not active and any community it links is deleted, so it cannot be reactivated. Nothing is written. Re-sending the status the product already has stays 200, archiving is never refused, and an archived community that is not deleted does not block. The link to a deleted community cannot be removed by an edit, so such a product stays archived.',
     },
   },
 });
