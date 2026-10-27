@@ -169,8 +169,12 @@ function parseDraft(input: TenantDraftInput) {
   });
 }
 
-/** Pre-check reasons the form shows under the field (`unchecked` is the top alert instead). */
-const PRECHECK_FIELD_ERRORS: Record<Exclude<PrecheckReason, 'unchecked'>, DraftFieldError> = {
+/**
+ * Pre-check reasons the form shows under the field (`unchecked` is the top alert instead). The six token
+ * reasons of 09.4-03 only answer a customer body, which this form does not send yet; until plan 15 maps them
+ * to their own field errors they read as a check that could not run.
+ */
+const PRECHECK_FIELD_ERRORS: Partial<Record<PrecheckReason, DraftFieldError>> = {
   invalid: 'projectRefInvalid',
   not_found: 'projectNotFound',
   not_empty: 'projectNotEmpty',
@@ -217,8 +221,9 @@ async function precheckRef(ref: string): Promise<PrecheckOutcome> {
     }
     const answer = precheckAnswerSchema.parse(await res.json());
     if (answer.ok) return { kind: 'ok', manualAccess: answer.manualAccess };
-    if (answer.reason === 'unchecked') return { kind: 'unchecked' };
-    return { kind: 'refused', error: PRECHECK_FIELD_ERRORS[answer.reason] };
+    const fieldError = PRECHECK_FIELD_ERRORS[answer.reason];
+    if (!fieldError) return { kind: 'unchecked' };
+    return { kind: 'refused', error: fieldError };
   } catch (error) {
     console.error('platform.projects.precheck_failed', { error: String(error) });
     return { kind: 'unchecked' };

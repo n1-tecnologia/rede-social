@@ -71,7 +71,10 @@ export type BootstrapStepKey = (typeof BOOTSTRAP_STEP_KEYS)[number];
 export const BOOTSTRAP_STEP_STATUSES = ['pending', 'running', 'done', 'failed'] as const;
 export type BootstrapStepStatus = (typeof BOOTSTRAP_STEP_STATUSES)[number];
 
-/** The closed catalog of reason codes a step or a health check can report (UI A-UI-10). Never provider text. */
+/**
+ * The closed catalog of reason codes a step or a health check can report (UI A-UI-10). Never provider text.
+ * Thirteen since 09.4-03; the same thirteen, in the same order, are the core `BOOTSTRAP_REASONS` (plan 05).
+ */
 export const BOOTSTRAP_REASON_CODES = [
   'unreachable',
   'access_denied',
@@ -83,6 +86,10 @@ export const BOOTSTRAP_REASON_CODES = [
   'tenant_failed',
   'invite_failed',
   'unknown',
+  // 09.4-03 (D-573): the three codes of a customer-owned project, APPENDED so the first ten keep their order.
+  'token_invalid',
+  'token_forbidden',
+  'org_mismatch',
 ] as const;
 export type BootstrapReasonCode = (typeof BOOTSTRAP_REASON_CODES)[number];
 
@@ -255,6 +262,79 @@ export function tokenExpiryIsValid(expiresAt: string, today: string): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// The customer-owned project: owner, token inputs and the token-free summary (09.4-03, D-570..D-575)
+// ---------------------------------------------------------------------------------------------------------
+
+/** Who owns the Supabase project: the platform's organisation or the customer's own (D-570). */
+export const OWNERS = ['platform', 'customer'] as const;
+export type ProjectOwner = (typeof OWNERS)[number];
+
+/**
+ * The cap of every token INPUT. Scoped tokens are JWT-shaped, so this is the cap the access bodies already use.
+ * It deliberately amends the 256 of UI-D-550's `maxLength`.
+ */
+export const TOKEN_MAX_LENGTH = 4096;
+
+/**
+ * What an answer says about the token (UI-D-554): the derived state, the expiry the operator typed and when the
+ * last check ran. Nothing here can hold the token, its prefix, its hash or its length (UI-D-561).
+ */
+export const tokenSummarySchema = z
+  .object({
+    state: z.enum(TOKEN_STATES),
+    expiresAt: z.string().nullable(),
+    checkedAt: z.string().nullable(),
+  })
+  .strict();
+export type TokenSummary = z.infer<typeof tokenSummarySchema>;
+
+/**
+ * The customer-project fields shared by the pre-check body and the create body (write-only INPUT, never an
+ * answer): the owner, the token and the expiry the operator typed. The expiry SHAPE is checked by
+ * `tokenExpiryIsValid` in the kernel (it needs `today`), not here. The token is accepted here and nowhere in an
+ * answer (UI-D-561).
+ */
+export const customerProjectFields = {
+  owner: z.enum(OWNERS).optional(),
+  token: z.string().max(TOKEN_MAX_LENGTH).optional(),
+  tokenExpiresAt: z.string().max(10).optional(),
+};
+
+/**
+ * Cross-field rule of the customer fields, for `.superRefine` (STATIC messages only: a Zod issue is echoed by
+ * the platform hook, so no submitted value may reach it, T-09.4-10): `owner: 'customer'` needs a non-blank
+ * token; a token or an expiry with the owner absent or `platform` is refused.
+ */
+export function refineCustomerProject(
+  body: {
+    owner?: ProjectOwner | undefined;
+    token?: string | undefined;
+    tokenExpiresAt?: string | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const hasToken = (body.token ?? '').trim().length > 0;
+  const hasExpiry = (body.tokenExpiresAt ?? '').trim().length > 0;
+  if (body.owner === 'customer') {
+    if (!hasToken) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['token'],
+        message: 'Cole o token de acesso do projeto.',
+      });
+    }
+    return;
+  }
+  if (hasToken || hasExpiry) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['owner'],
+      message: 'O token só vale para um projeto do cliente.',
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Answers (strict: no field can carry a credential)
 // ---------------------------------------------------------------------------------------------------------
 
@@ -268,7 +348,16 @@ export type DatabaseSchemaCounts = z.infer<typeof schemaCountsSchema>;
 
 /** The `database` block of a row of `GET /v1/platform/tenants` (UI-D-540). */
 export const tenantDatabaseSummarySchema = z
-  .object({ state: z.enum(DATABASE_STATES), schema: schemaCountsSchema })
+  .object({
+    state: z.enum(DATABASE_STATES),
+    schema: schemaCountsSchema,
+    /** 09.4-03: the token state of a customer project, `null` or absent for a platform one (optional: expand-only). */
+    token: z
+      .object({ state: z.enum(TOKEN_STATES) })
+      .strict()
+      .nullable()
+      .optional(),
+  })
   .strict();
 export type TenantDatabaseSummary = z.infer<typeof tenantDatabaseSummarySchema>;
 
@@ -303,6 +392,14 @@ export const databaseOverviewSchema = z
     otherTenants: z.number().int().min(0),
     moving: z.boolean(),
     lastErrorCode: z.enum(BOOTSTRAP_REASON_CODES).nullable(),
+    /**
+     * 09.4-03 (D-570, D-573, UI-D-552, UI-D-554): who owns the project, the Supabase organisation slug and the
+     * token summary. All OPTIONAL on purpose, so a web deployed before or after the API still parses the other
+     * side's answer (expand-only); the panel reads `owner ?? 'platform'`. No field can hold the token itself.
+     */
+    owner: z.enum(OWNERS).optional(),
+    organization: z.string().nullable().optional(),
+    token: tokenSummarySchema.nullable().optional(),
   })
   .strict();
 export type DatabaseOverview = z.infer<typeof databaseOverviewSchema>;
@@ -319,11 +416,25 @@ export const PRECHECK_REASONS = [
   'in_use',
   'paused',
   'unchecked',
+  // 09.4-03 (D-570..D-572): the customer-token refusals, appended after the shipped six.
+  'token_invalid',
+  'token_forbidden',
+  'token_other_project',
+  'token_account_wide',
+  'token_expiry_invalid',
+  /** Reserved: the locked permission list cannot read the plan, so the server never emits it today (D-572). */
+  'not_pro',
 ] as const;
 export type PrecheckReason = (typeof PRECHECK_REASONS)[number];
 
-/** Body of `POST /v1/platform/projects/precheck`. The ref may be empty or malformed: that is an answer, not a 400. */
-export const precheckBodySchema = z.object({ projectRef: z.string().trim().max(200) }).strict();
+/**
+ * Body of `POST /v1/platform/projects/precheck`. The ref may be empty or malformed: that is an answer, not a 400.
+ * A customer project adds `owner`, the write-only `token` and the optional typed `tokenExpiresAt` (D-570, D-575).
+ */
+export const precheckBodySchema = z
+  .object({ projectRef: z.string().trim().max(200), ...customerProjectFields })
+  .strict()
+  .superRefine(refineCustomerProject);
 export type PrecheckBody = z.infer<typeof precheckBodySchema>;
 
 /** `ok: true` with `manualAccess` (the platform token cannot reveal the project's secrets), or `ok: false` with a reason. */
@@ -366,6 +477,22 @@ export type ReplaceCredentialsBody = z.infer<typeof replaceCredentialsBodySchema
 /** `PUT /v1/platform/tenants/{id}/database/credentials` answers only that it worked; no value comes back. */
 export const replaceCredentialsAnswerSchema = z.object({ ok: z.literal(true) }).strict();
 export type ReplaceCredentialsAnswer = z.infer<typeof replaceCredentialsAnswerSchema>;
+
+/**
+ * Body of `PUT /v1/platform/tenants/{id}/database/token` (D-575, UI-D-555): the new write-only token and the
+ * optional typed expiry. Strict; the date shape is checked by `tokenExpiryIsValid` in the kernel.
+ */
+export const replaceTokenBodySchema = z
+  .object({
+    token: z.string().trim().min(1).max(TOKEN_MAX_LENGTH),
+    tokenExpiresAt: z.string().max(10).optional(),
+  })
+  .strict();
+export type ReplaceTokenBody = z.infer<typeof replaceTokenBodySchema>;
+
+/** `PUT /v1/platform/tenants/{id}/database/token` answers only that it worked; the token never comes back. */
+export const replaceTokenAnswerSchema = z.object({ ok: z.literal(true) }).strict();
+export type ReplaceTokenAnswer = z.infer<typeof replaceTokenAnswerSchema>;
 
 /** The `?banco=` filter of the tenant list. */
 export const bancoFilterSchema = z.enum(['problema']);

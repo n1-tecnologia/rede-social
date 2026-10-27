@@ -10,7 +10,13 @@ import {
 import { tenantDomainSchema } from './domains';
 import { tenantInviteSchema } from './invites';
 import { REAL_TENANT_DEFAULT_MODULES, TOGGLEABLE_MODULES } from './modules';
-import { bancoFilterSchema, projectAccessSchema, tenantDatabaseSummarySchema } from './projects';
+import {
+  bancoFilterSchema,
+  customerProjectFields,
+  projectAccessSchema,
+  refineCustomerProject,
+  tenantDatabaseSummarySchema,
+} from './projects';
 
 /**
  * `GET /v1/platform/tenants` (ROLE-01, D-21). The ONE shape shared by the route, the platform-host
@@ -86,22 +92,29 @@ const brandSourceColorsSchema = z.object({
  *   look's own route validates it (`brandingLookBodySchema`, strict); absent, the tenant starts on
  *   the system's look.
  */
-export const createTenantBodySchema = z.object({
-  displayName: tenantDisplayNameSchema,
-  slug: slugSchema,
-  colors: brandSourceColorsSchema,
-  modules: z.array(realModuleKeySchema).default([...REAL_TENANT_DEFAULT_MODULES]),
-  adminEmail: z.string().trim().toLowerCase().pipe(z.email()),
-  look: brandingLookBodySchema.optional(),
-  /**
-   * 09.2-14 (D-541): the Supabase project that will hold the tenant's data, as a bare ref. Required when
-   * `PROJECT_PROVIDER=supabase`, optional otherwise (the default project serves the tenant). The SHAPE is
-   * validated by the kernel per provider (20 lower-case letters for `supabase`); the API never accepts a URL.
-   */
-  projectRef: z.string().trim().max(200).optional(),
-  /** Write-only manual access, needed only when the pre-check answered `manualAccess`; sealed, never echoed. */
-  access: projectAccessSchema.optional(),
-});
+export const createTenantBodySchema = z
+  .object({
+    displayName: tenantDisplayNameSchema,
+    slug: slugSchema,
+    colors: brandSourceColorsSchema,
+    modules: z.array(realModuleKeySchema).default([...REAL_TENANT_DEFAULT_MODULES]),
+    adminEmail: z.string().trim().toLowerCase().pipe(z.email()),
+    look: brandingLookBodySchema.optional(),
+    /**
+     * 09.2-14 (D-541): the Supabase project that will hold the tenant's data, as a bare ref. Required when
+     * `PROJECT_PROVIDER=supabase`, optional otherwise (the default project serves the tenant). The SHAPE is
+     * validated by the kernel per provider (20 lower-case letters for `supabase`); the API never accepts a URL.
+     */
+    projectRef: z.string().trim().max(200).optional(),
+    /** Write-only manual access, needed only when the pre-check answered `manualAccess`; sealed, never echoed. */
+    access: projectAccessSchema.optional(),
+    /**
+     * 09.4-03 (D-570, D-575): a customer-owned project adds `owner: 'customer'`, the write-only `token` and the
+     * optional typed `tokenExpiresAt`; absent, the project is the platform's, exactly as before.
+     */
+    ...customerProjectFields,
+  })
+  .superRefine(refineCustomerProject);
 export type CreateTenantBody = z.infer<typeof createTenantBodySchema>;
 
 /**

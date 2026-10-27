@@ -17,6 +17,10 @@ const REASON_KEYS = {
   tenant_failed: 'tenant',
   invite_failed: 'invite',
   unknown: 'unknown',
+  // 09.4-03: catalog KEYS only; the sentences arrive with the catalogs in plan 14.
+  token_invalid: 'tokenInvalid',
+  token_forbidden: 'tokenForbidden',
+  org_mismatch: 'orgMismatch',
 } as const satisfies Record<BootstrapReasonCode, string>;
 
 export type ReasonCatalogKey = (typeof REASON_KEYS)[BootstrapReasonCode];
