@@ -25,3 +25,8 @@ export function setProjectProviderForTests(provider: ProjectProvider | undefined
   }
   override = provider;
 }
+
+/** Read-only view of the test override (09.4-06): the per-project resolver asks whether a test pinned one. */
+export function peekProviderOverride(): ProjectProvider | undefined {
+  return override;
+}

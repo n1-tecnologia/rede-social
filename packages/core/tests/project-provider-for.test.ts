@@ -33,6 +33,7 @@ const target = (ref: string) => ({
 function fakeWorld() {
   return createFakeProjectProvider({
     targets: { [REF]: target(REF) },
+    orgSlug: 'acme',
     tokens: { [TOKEN_A]: { refs: 'all' }, [TOKEN_B]: { refs: 'all' } },
   });
 }
