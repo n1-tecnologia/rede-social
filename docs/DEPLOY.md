@@ -3342,6 +3342,241 @@ not run`. Every line depends on a hosted environment or a real phone, so none co
   cut with an ellipsis under its circle, checked at 320px on a real phone.
 - The PWA installed on a phone against homolog still starts after the release.
 
+## Phase 09.4 release (customer-owned Supabase project)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret, and a
+customer's token is typed only at a hidden prompt or in a write-only panel field: never in a command line, an
+environment variable, a file, a message or an issue. Phase 09.4 ships ON TOP of Phase 09.2 and 09.3. The
+proofs only a person with a second Supabase organisation can run are in the ledger
+`.planning/phases/09.4-projeto-do-tenant-no-supabase-do-cliente/09.4-HOSTED-PROOFS.md` (P1 to P8); it ships
+with every row `pending`, and a row becomes `passed` only with the evidence you paste and your own date.
+
+Phase 09.4 lets a tenant's Supabase project live in the CUSTOMER's Supabase account instead of the
+platform's. The platform reaches that one project with a token the customer creates, limited to that single
+project, which is stored sealed and is never shown again. Three journeys exist (D-566): a **new tenant**
+created on a customer project (the "Novo tenant" wizard), an **existing tenant moved** to a customer project
+(`platform:move-tenant`), and the **owner change** of a project Supabase itself transferred to the customer's
+account (`platform:set-owner`). The way back, customer project to platform project, is the existing move with
+a platform target.
+
+### What ships
+
+- **Two central migrations, both additive** (they are in the central set, `supabase/central/migrations`,
+  applied only to the central project; the tenant set is untouched):
+  - `20261027171040_project_owner_token.sql`: on `platform.projects` the columns `owner` (default
+    `platform`), `org_slug`, `mgmt_token_sealed` and `mgmt_token_expires_at` with their CHECKs; on
+    `platform.project_health` the columns `token_check` and `token_checked_at`; and the new table
+    `platform.project_token_events`.
+  - `20261027171238_project_token_events_hardening.sql`: the audit table is append-only (an update or a
+    delete raises), has RLS on with no policy, and only `service_role` holds privileges. It has no column
+    that can hold a token, a prefix, a hash or a length.
+  Every existing row satisfies the defaults, so an API of the previous revision keeps working on the new
+  database. No data is rewritten.
+- **The API and the worker:** the token is validated at registration (prefix, listing check, project read,
+  organisation pin) and again on a replacement; the health job checks the token as its own axis (`valid`,
+  `expiring`, `expired`, `invalid`, `noPermission`, `orgMismatch`) that never takes a tenant offline;
+  `PUT /v1/platform/tenants/{id}/database/token` replaces a token; after a replacement the system checks the
+  project and re-adds the project's verified domains to its allow-list. **The re-seal now covers a sixth
+  column** (`mgmt_token_sealed`): `pnpm platform:reseal` seals it under the new master key like the other
+  five.
+- **The web:** "Novo tenant" asks "Onde fica o projeto?" (Projeto da plataforma or Projeto do cliente); the
+  Banco screen shows Dono, Organização and, for a customer project, the "Token de acesso" card with
+  "Substituir token" and the helper "Como criar o token".
+- **Three operator commands** (all run from your own terminal, from the repository root):
+  `pnpm platform:probe --scoped --ref <ref>`, `pnpm platform:set-owner --tenant <slug> [--expires
+  YYYY-MM-DD] [--dry-run]` (and `--register --ref <ref>`), and the existing `pnpm platform:move-tenant`,
+  which gained `--owner customer [--expires YYYY-MM-DD]`.
+- **No environment variable, secret, cron or job is added.** There is nothing to seed. The platform token
+  (`SUPABASE_PAT`) keeps working for platform projects exactly as before.
+
+### Order: central migration, then the API and the worker together, then the web
+
+1. **Local checks first.** `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) rebuilds the local
+   second database, and the pgTAP file `supabase/tests/216-project-owner-token.sql` (run through `pnpm
+   supabase test db`) proves the columns, the CHECKs, the append-only audit table and the exposure. The
+   "local gate" note of the Phase 09.2 section applies.
+2. **The central migration through the central runner.** Locally `pnpm db:central` (`pnpm db:reset` already
+   runs it); in production the deploy's central step, which is the `migrate` Job of the Phase 09.2 section,
+   in the same pipeline order. The runner is idempotent: a project that is current applies nothing.
+3. **The API and the worker TOGETHER**, one image, as in the Phase 09.2 pipeline. The worker holds the
+   per-project health sweep and the allow-list reconcile that read the new columns.
+4. **The web LAST**, because its screens read fields the new API returns (`owner`, the organisation, the
+   token state).
+
+These steps are consecutive. **Why this order.** The migration only adds columns with defaults and a new
+table, so the previous API on the new database keeps working; the previous web on the new API simply does
+not show the new screens.
+
+### What a customer token needs
+
+The customer creates ONE token in their own Supabase account and gives it to you; you type it at a hidden
+prompt (commands) or in a write-only field (panel). It cannot be amended after creation, so a wrong list
+means a new token.
+
+- **Limited to ONE project**, the customer's, not to the whole account or organisation. A scoped token
+  starts with `sbp_fc`; a legacy full-access token (it shows a Legacy badge in the dashboard) does not, and
+  is refused.
+- **The thirteen permissions (D-569)**, with these levels: **Project Settings** (Read-write), **API Keys**
+  (Read-write), **API Key Secrets** (Read), **Connection Pooling** (Read), **Database** (Read), **Database
+  Config** (Read-write), **Migrations** (Read), **Storage** (Read), **Storage Config** (Read-write), **Auth
+  Config** (Read-write), **Auth Signing Keys** (Read-write), **Data API Config** (Read-write) and **Realtime
+  Config** (Read-write). One list serves creating, maintaining and the break-glass reissue; there is no
+  separate maintenance token. Because it includes API Key Secrets, a customer project never needs the
+  manual-access fallback.
+- **An expiry of at most one year.** The Supabase API does not let the platform read when a token expires,
+  so the date is TYPED by the operator ("Vence em", or `--expires`) and the Banco card walks through
+  Vencendo (inside 30 days) and Vencido from it. Without a typed date the card says "Sem data de vencimento
+  informada".
+- **Security note: Project Settings (Read-write) also unlocks pausing and deleting THAT ONE project.** A
+  leaked sealed token could therefore pause or delete the customer's project (and nothing else: it is
+  limited to one project). Mitigations: the token is sealed under the platform master key, write-only in the
+  panel and never returned or logged, and the platform's Management API adapter has no pause or delete
+  method (the code path does not exist). This is accepted, not removed.
+- **The plan (Free or Pro) is NOT read.** A token limited to one project cannot read the plan (billing is
+  organisation-level), so the Banco card says "Plano: Não informado" and nothing blocks. **Keeping a
+  customer project on Pro is the operator's responsibility** (D-543, D-572); a Free project pauses after a
+  week of inactivity and has Realtime and storage limits that break a tenant.
+- **If the person who created the token loses access to the customer's account, the token stops working**
+  (Supabase gives "token revoked" and "creator lost access" the same answer, both shown as Inválido).
+
+The same list, in short pt-BR, is the sentence of the "Como criar o token" helper (step 3), written from the
+probe's output (P1). Until the ledger signs P1, that sentence still carries its placeholder.
+
+### The commands
+
+All three ask for the token at a **hidden prompt**: nothing shows while you type or paste, which is correct.
+Each refuses a pipe or a here-string (exit 2, before any request) and has no token flag. They print one JSON
+line or object with codes, ids and counts, never a token, a prefix, a length, an organisation or a project
+ref.
+
+**Try every command first with a FAKE token** under `PROJECT_PROVIDER=fake` (a made-up string starting with
+`sbp_fc`, in a terminal): the fake provider accepts only the fake tokens it was told about, so the usual
+answer is `{"kind":"refused","code":"token_invalid"}`, which proves the prompt, the parser and the exit
+codes without a request to Supabase. `platform:probe --scoped` has no fake mode: it sends the token to the
+real Management API, so its first run is the real one.
+
+- **`pnpm platform:probe --scoped --ref <ref>`.** Read-only probe of the 21 operations the platform uses
+  plus the project listing and the organisation read, against ONE project with a throwaway token. Prints one
+  JSON object: per operation `allowed` or `denied`, the HTTP status and, for a denial, the missing
+  permission identifiers; the listing counts; the organisation read status; the response header names.
+  Writes are sent as invalid requests that validation answers (a `2xx` on a write row shows
+  `unexpectedSuccess: true`: stop and tell the team). It changes nothing in the project. Exit 0 printed, 2
+  usage or no terminal, 130 aborted. This is the hosted proof P1.
+- **`pnpm platform:set-owner --tenant <slug> [--expires YYYY-MM-DD] [--dry-run]`.** For a project Supabase
+  transferred to the customer's account (the tenant was created on a platform project; the dashboard
+  transfer is yours to do first). It validates the token against that project (reachable, scoped, the
+  organisation read), seals it, stores `owner = customer` and the organisation pin, bumps
+  `credential_version`, writes an audit row, and copies nothing. Run on a project that is already the
+  customer's, the same command re-pins: it reads the organisation again and stores the new one (the only way
+  to accept a legitimate organisation change). `--dry-run` validates exactly as the real run (it still asks
+  for the token) and writes nothing. Exit 0 done, 1 refused with a closed code (for example
+  `token_invalid`, `token_forbidden`, `token_account_wide`, `project_central`, `tenant_moving`), 2 usage or
+  no terminal, 130 aborted. Only platform to customer exists: a project still in the customer's account is
+  unreachable with the platform token, so there is no flag for the other direction.
+- **`pnpm platform:set-owner --register --ref <ref> [--expires YYYY-MM-DD]`.** Registers a customer project
+  the registry does not know yet, as a move target (no tenant bound, nothing moved). A ref already
+  registered is refused as `already_registered` before the prompt.
+- **`pnpm platform:move-tenant -- --tenant <slug> --to <ref> --owner customer [--expires YYYY-MM-DD]`.**
+  The existing move, now able to target a customer project. The hidden prompt appears ONLY for a ref the
+  registry does not know. **From the Cloud Run Job (`ROLE=move`, no terminal) the customer project must be
+  registered first** with `pnpm platform:set-owner --register --ref <ref>` from a laptop; otherwise the Job
+  answers `register_first` and stops before reading or writing anything. A registered customer target is
+  moved by the Job without asking for anything: it reads the sealed token.
+- **The way back** is a plain move to a platform project, with no `--owner`: `pnpm platform:move-tenant --
+  --tenant <slug> --to <platform ref>`. The platform project must already be in the platform's Supabase
+  organisation (the platform token cannot reach a project still in the customer's account). The move
+  makes no call on the customer's account and leaves the customer project's registry row untouched.
+
+**The sequence for a customer target.** (1) The customer creates the token as above. (2) From a laptop,
+`pnpm platform:set-owner --register --ref <ref>` and type the token at the prompt. (3) `pnpm
+platform:move-tenant -- --tenant <slug> --to <ref> --owner customer` (the same command, or the Job with
+`ROLE=move`). (4) Open the tenant's Banco screen and press "Verificar agora".
+
+### Advisories
+
+- **The listing check of D-570 (b): what one real run showed.** At registration, replacement and owner
+  change the platform lists the account's projects and refuses a token that lists any project other than
+  the target (`token_account_wide`); the `sbp_fc` prefix check is the other refusal, and both must pass. On
+  2026-10-27 the real probe (P1, run A, token limited to the scratch project with the thirteen permissions)
+  answered the listing with `200`, one project in total and none other than the target: the listing check
+  works with the thirteen permissions, a scoped token sees only its own project. **This rests on ONE run.**
+  Runs B and C were not run, and what an organisation-wide or legacy token answers has not been observed
+  (that is P3). Only P3 proves the refusal itself; do not rely on the listing check more than the ledger
+  records.
+- **No fourteenth permission.** The token holds the thirteen and nothing account-wide; adding Projects
+  (account-wide) is not planned (decided by Igor after P1).
+- **Organisation read.** The organisation endpoint answered `403` to the scoped token, so the organisation
+  slug is learned from the project's own response at registration and pinned per project; every later call
+  compares it (`org_mismatch`, the card says "Organização diferente").
+- **Replacing a token is not free.** Every replacement (the panel's "Substituir token", `platform:set-owner`
+  on a customer project) bumps `credential_version`, which recycles that project's database pools, admin
+  clients and job senders, and triggers a health check and an allow-list reconcile. Replace a token when it
+  expired, was revoked or is close to it, **never in a loop**.
+- **The expiry date is typed, not read.** If the typed date is wrong the card is wrong.
+- **What a dead token does NOT do (D-574).** Members sign in and use every screen, Storage, Realtime, the
+  schema migration fan-out and the worker's queues keep working: they use the sealed database access and the
+  Management API is not involved. What degrades: the paused-or-not fact, allow-list writes (new domains),
+  the break-glass reissue, registering a move target and a bootstrap step that calls the Management API. The
+  tenant is never suspended, never marked "Atrasado" and never shown a token message.
+- **A token state change leaves one structured log line** (`project.token.state_changed`: project id, from,
+  to; never the token), so a Cloud Logging alert can be built on it. Nothing e-mails or pushes the operator
+  yet.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only). Both are expand-only, and the previous API ignores
+  the new columns.
+- **Rolling the API (and the worker) back after a customer project exists** is NOT harmless: the old revision
+  does not know the customer owner, so it would reach that project with the PLATFORM token and fail its
+  Management API calls (`access_denied` or the organisation pin). That degrades health, new-domain
+  allow-list writes and the reissue for that tenant. **Members are unaffected**, because they use the sealed
+  database access (D-574). Before any customer project exists, rollback is safe. Roll the web back first,
+  then the API and the worker together.
+- **A move** is undone by `--rollback` as in the Phase 09.2 section; a customer project that was registered
+  keeps its registry row.
+
+### Smoke checks
+
+On homolog, once it serves this release (read-only unless said):
+
+- The central ledger holds the two new files: `select count(*) from
+  supabase_migrations.central_migrations;` grew by two, and
+  `select owner, count(*) from platform.projects group by owner;` shows `platform` for every existing
+  project.
+- The Banco of a PLATFORM tenant shows the new row **Dono: Plataforma** and nothing else new (no token card).
+- The Banco of a customer tenant shows Dono (Cliente), Organização and the "Token de acesso" card; "Verificar
+  agora" refreshes BOTH pills (the project's and the token's).
+- Revoking the token in the customer's Supabase turns the token pill to Inválido on the next check, while a
+  member of that tenant still signs in.
+- `pnpm platform:set-owner --tenant <slug> --dry-run` under `PROJECT_PROVIDER=fake` answers a refusal and
+  exit 1 (proves the command and the hidden prompt without a real token).
+
+### Manual UAT (hosted)
+
+Record each line in the ledger (P1 to P8, never `passed` unless you write it yourself); a line that is not
+run stays `pending`:
+
+- **P1** the scoped probe on the scratch project (CTK-06, CTK-07): the permission list and what a scoped
+  token answers.
+- **P2** "Novo tenant" with "Projeto do cliente" creates a tenant on the customer project; Banco shows Dono,
+  Organização and the token card; a platform tenant looks the same as before.
+- **P3** the wizard's refusal of a legacy token ("Este token vale para a conta inteira..."), of a made-up
+  string that starts with `sbp_fc` ("O Supabase não aceitou este token...") and, with run B's token, what
+  the listing check does. A made-up string WITHOUT the `sbp_fc` prefix gets the account-wide sentence
+  too (the prefix check runs first, before any request is made).
+- **P4** "Substituir token" accepts a good token, refuses one of another project, and the allow-list
+  reconcile still succeeds.
+- **P5** a revoked token shows Inválido after "Verificar agora" while a member still signs in; the typed
+  expiry walks the card through Vencendo and Vencido.
+- **P6** `platform:set-owner --tenant <slug>` after a real dashboard transfer; run again to re-pin.
+- **P7** `platform:set-owner --register --ref <ref>`, then `platform:move-tenant --owner customer`, and the
+  way back.
+- **P8** (optional) the organisation transfer between your two organisations and the re-pin.
+
+Hosted proofs are the only thing this phase leaves open: while any row is `pending` the phase closes
+`human_needed`.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
