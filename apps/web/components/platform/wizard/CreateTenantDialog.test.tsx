@@ -147,6 +147,8 @@ function stage(options: { draft?: Partial<TenantDraft>; logo?: boolean; icon?: b
     appIcon: null,
     access: { databasePassword: SECRET, serviceKey: '', publishableKey: '' },
     clearAccess: vi.fn(),
+    token: '',
+    clearToken: vi.fn(),
     update: vi.fn(),
     setConfirming: vi.fn(),
   };
@@ -589,5 +591,117 @@ describe('the confirmation — text safety and geometry', () => {
     await tick(10_000);
     expect(harness.read).toHaveBeenCalledTimes(reads);
     expect(harness.router.replace).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 09.4-15 Task 2 (UI-D-556, CTK-32, CTK-38, T-09.4-53, T-09.4-54): the customer project in the
+ * confirmation. The creation carries owner, token and date ONCE and only for a customer draft; the
+ * memory-only token is dropped the moment the API answers; a first-step failure of a customer project
+ * reads one of the three new sentences with its code; nothing of the token is ever in the markup.
+ */
+describe('the confirmation — the customer project', () => {
+  const TOKEN = 'sbp_s3cr3t-token-0001';
+  const customer = (extra: Partial<TenantDraft> = {}): Partial<TenantDraft> => ({
+    owner: 'customer',
+    tokenExpiresAt: '2027-03-01',
+    ...extra,
+  });
+  const stageCustomer = (extra: Partial<TenantDraft> = {}) => {
+    stage({ draft: customer(extra) });
+    Object.assign(harness.draft as object, { token: TOKEN });
+  };
+  const clearToken = () => (harness.draft as { clearToken: ReturnType<typeof vi.fn> }).clearToken;
+
+  it.each([
+    [
+      'token_invalid',
+      'O Supabase não aceitou o token de acesso. Substitua o token e tente de novo.',
+    ],
+    [
+      'token_forbidden',
+      'O token de acesso não tem permissão para esta etapa. Substitua por um token com as permissões certas.',
+    ],
+    ['org_mismatch', 'O projeto está em outra organização do Supabase. Nada foi alterado.'],
+  ])(
+    '3. the first-step failure %s reads its sentence and the code line',
+    async (reason, sentence) => {
+      stageCustomer();
+      harness.read.mockResolvedValue(reading({ done: 0, failed: true, reason }));
+      await start();
+      expect(row('database')?.dataset.state).toBe('failed');
+      expect(row('database')?.textContent).toContain(sentence);
+      expect(row('database')?.textContent).not.toContain('O Supabase recusou o acesso');
+      const dialog = document.querySelector('[data-create-dialog]') as HTMLElement;
+      expect(dialog.dataset.createDialog).toBe('partial');
+    },
+  );
+
+  it('3. a platform draft still reads the shipped access_denied sentence', async () => {
+    stage();
+    harness.read.mockResolvedValue(reading({ done: 2, failed: true, reason: 'access_denied' }));
+    await start();
+    expect(row('database')?.textContent).toContain(
+      'O Supabase recusou o acesso. Confira a senha e as chaves.',
+    );
+  });
+
+  it('1. sends owner, token and date ONCE with the creation, and drops the token when the API answers', async () => {
+    stageCustomer();
+    await start();
+    expect(harness.create).toHaveBeenCalledTimes(1);
+    expect(harness.create.mock.calls[0]?.[0]).toMatchObject({
+      owner: 'customer',
+      token: TOKEN,
+      tokenExpiresAt: '2027-03-01',
+    });
+    expect(clearToken()).toHaveBeenCalled();
+  });
+
+  it('1. a refusal with a field to blame drops the token too; a generic failure keeps it for the retry', async () => {
+    stageCustomer();
+    harness.create.mockResolvedValue({ ok: false, fieldErrors: { token: 'tokenInvalid' } });
+    await start();
+    expect(clearToken()).toHaveBeenCalled();
+
+    stageCustomer();
+    harness.create.mockResolvedValue({ ok: false, error: 'generic' });
+    await start();
+    expect(clearToken()).not.toHaveBeenCalled();
+  });
+
+  it('1. a platform draft sends no new field and has nothing to drop', async () => {
+    stage();
+    await start();
+    const sent = harness.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(sent).not.toHaveProperty('owner');
+    expect(sent).not.toHaveProperty('token');
+    expect(sent).not.toHaveProperty('tokenExpiresAt');
+  });
+
+  it('1. a refused token sends the operator back to Dados, where the field is', async () => {
+    stageCustomer();
+    harness.create.mockResolvedValue({ ok: false, fieldErrors: { token: 'tokenInvalid' } });
+    await start();
+    fireEvent.click(buttonNamed('Corrigir os dados') ?? document.body);
+    const update = (harness.draft as { update: ReturnType<typeof vi.fn> }).update;
+    expect(update).toHaveBeenCalledWith({
+      fieldErrors: { token: 'tokenInvalid' },
+      dataReady: false,
+    });
+    expect(harness.router.push).toHaveBeenCalledWith('/plataforma/novo');
+  });
+
+  it('5. nothing of the token is in the markup, a spy or a read', async () => {
+    stageCustomer();
+    harness.read.mockResolvedValue(reading({ done: 0, failed: true, reason: 'token_invalid' }));
+    const { container } = render(<CreateTenantDialog open onClose={() => {}} />);
+    expect(container.innerHTML).not.toContain(TOKEN);
+    fireEvent.click(document.querySelector('[data-create-confirm]') as HTMLElement);
+    await tick();
+    expect(document.body.innerHTML).not.toContain(TOKEN);
+    expect(document.body.textContent).not.toContain('s3cr3t');
+    expect(JSON.stringify(harness.read.mock.calls)).not.toContain(TOKEN);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(TOKEN);
   });
 });

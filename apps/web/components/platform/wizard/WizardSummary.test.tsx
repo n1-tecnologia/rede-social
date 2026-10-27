@@ -192,6 +192,8 @@ function stageDraft(initial?: Partial<TenantDraft>) {
     appIcon: null,
     access: { databasePassword: '', serviceKey: '', publishableKey: '' },
     clearAccess: vi.fn(),
+    token: '',
+    clearToken: vi.fn(),
     update: vi.fn(),
     setConfirming: vi.fn(),
   };
@@ -877,5 +879,80 @@ describe('the confirmation sends the project once', () => {
       expect(document.querySelector('[data-create-dialog="generic"]')).not.toBeNull(),
     );
     expect(kept).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 09.4-15 Task 2 (UI-D-556, E04, CTK-38, T-09.4-54): the owner row of the summary and of the
+ * confirmation. A customer project adds two 12/400 tertiary lines under the ref: a fixed sentence that a
+ * token was informed and, when typed, the expiry formatted from the typed string. Nothing secret is
+ * echoed, and the ref keeps `break-all` so the card never scrolls sideways at 320px.
+ */
+describe('the summary and the confirmation name the project owner', () => {
+  const REF = 'abcdefghijklmnopqrst';
+  const TOKEN = 'sbp_s3cr3t-token-0001';
+  const owner = (name: string) =>
+    Array.from(document.querySelectorAll('[data-summary-owner]')).find((node) =>
+      node.textContent?.includes(name),
+    );
+
+  it('a platform draft reads "Dono do projeto: Plataforma" and has no token line', () => {
+    stageDraft({ projectRef: REF });
+    render(<WizardSummary />);
+    const row = document.querySelector('[data-summary-owner]') as HTMLElement;
+    expect(row.textContent).toContain('Dono do projeto');
+    expect(row.textContent).toContain('Plataforma');
+    expect(document.body.textContent).not.toContain('Token informado');
+    expect(document.body.textContent).not.toContain('Vence em');
+  });
+
+  it('a customer draft reads "Cliente", the fixed token sentence and the date typed, without a timezone shift', () => {
+    stageDraft({ projectRef: REF, owner: 'customer', tokenExpiresAt: '2026-11-08' });
+    Object.assign(harness.draft as object, { token: TOKEN });
+    const { container } = render(<WizardSummary />);
+    expect(owner('Cliente')).toBeDefined();
+    const project = document.querySelector('[data-summary-project]') as HTMLElement;
+    const lines = Array.from(project.querySelectorAll('p')).map((p) => p.textContent);
+    expect(lines).toContain(REF);
+    expect(lines).toContain('Token informado, guardado com segurança');
+    expect(lines).toContain('Vence em 08/11/2026');
+    for (const p of Array.from(project.querySelectorAll('p')).slice(1)) {
+      expect(p.className).toContain('text-xs');
+      expect(p.className).toContain('text-text-tertiary');
+    }
+    expect(project.querySelector('p')?.className).toContain('break-all');
+    expect(container.innerHTML).not.toContain(TOKEN);
+    expect(document.body.textContent).not.toContain('s3cr3t');
+  });
+
+  it('an empty date adds no "Vence em" line', () => {
+    stageDraft({ projectRef: REF, owner: 'customer', tokenExpiresAt: '' });
+    render(<WizardSummary />);
+    expect(document.body.textContent).toContain('Token informado, guardado com segurança');
+    expect(document.body.textContent).not.toContain('Vence em');
+  });
+
+  it('the confirmation has "Dono do projeto" after Projeto, the token lines under the ref, and a breaking ref', () => {
+    stageDraft({ projectRef: REF, owner: 'customer', tokenExpiresAt: '2026-11-08' });
+    Object.assign(harness.draft as object, { token: TOKEN });
+    render(<CreateTenantDialog open onClose={() => {}} />);
+    const dts = Array.from(document.querySelectorAll('[data-create-dialog="review"] dt')).map(
+      (n) => n.textContent,
+    );
+    expect(dts.indexOf('Dono do projeto')).toBe(dts.indexOf('Projeto') + 1);
+    const dd = document.querySelector('[data-confirm-project]') as HTMLElement;
+    expect(dd.querySelector('span')?.className).toContain('break-all');
+    expect(dd.textContent).toContain('Token informado, guardado com segurança');
+    expect(dd.textContent).toContain('Vence em 08/11/2026');
+    const ownerDd = document.querySelector('[data-confirm-owner]') as HTMLElement;
+    expect(ownerDd.textContent).toBe('Cliente');
+    expect(document.body.innerHTML).not.toContain(TOKEN);
+  });
+
+  it('the confirmation of a platform draft says "Plataforma" and has no token line', () => {
+    stageDraft({ projectRef: REF });
+    render(<CreateTenantDialog open onClose={() => {}} />);
+    expect(document.querySelector('[data-confirm-owner]')?.textContent).toBe('Plataforma');
+    expect(document.body.textContent).not.toContain('Token informado');
   });
 });

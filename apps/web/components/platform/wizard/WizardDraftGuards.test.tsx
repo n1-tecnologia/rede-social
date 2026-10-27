@@ -137,3 +137,47 @@ describe('RequireDraftData need="project"', () => {
     expect(harness.replace).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 09.4-15 Task 2 (UI-D-550, A-UI-2, T-09.4-55): a customer draft's token is memory only, so a reload on
+ * a later step finds the owner and the ref without it; the gate sends that draft back to Dados, closed.
+ */
+describe('RequireDraftData need="project" — the customer token', () => {
+  const withToken = (token: string) => {
+    stage({ owner: 'customer' } as Partial<TenantDraft>);
+    Object.assign(harness.value as object, { token });
+  };
+
+  it('sends a customer draft without a token back to Dados, closed', () => {
+    withToken('');
+    render(<RequireDraftData need="project" />);
+    expect(harness.replace).toHaveBeenCalledExactlyOnceWith('/plataforma/novo');
+    expect(harness.update).toHaveBeenCalledWith({ dataReady: false });
+  });
+
+  it('treats a blank token as missing', () => {
+    withToken('   ');
+    render(<RequireDraftData need="project" />);
+    expect(harness.replace).toHaveBeenCalledExactlyOnceWith('/plataforma/novo');
+  });
+
+  it('lets a customer draft WITH a token through', () => {
+    withToken('sbp_token');
+    render(<RequireDraftData need="project" />);
+    expect(harness.replace).not.toHaveBeenCalled();
+  });
+
+  it('does not ask a platform draft for a token it never had', () => {
+    stage({ owner: 'platform' } as Partial<TenantDraft>);
+    Object.assign(harness.value as object, { token: '' });
+    render(<RequireDraftData need="project" />);
+    expect(harness.replace).not.toHaveBeenCalled();
+  });
+
+  it('waits while the confirmation is open, even after it dropped the token', () => {
+    stage({ owner: 'customer' } as Partial<TenantDraft>, { confirming: true });
+    Object.assign(harness.value as object, { token: '' });
+    render(<RequireDraftData need="project" />);
+    expect(harness.replace).not.toHaveBeenCalled();
+  });
+});

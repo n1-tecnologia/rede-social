@@ -444,3 +444,103 @@ describe('validateTenantDraftAction — the customer project', () => {
     spy.mockRestore();
   });
 });
+
+/**
+ * 09.4-15 Task 2 (UI-D-556, CTK-32, T-09.4-53): the customer project in the creation. The token goes
+ * once, in the creation body of a customer draft only; the answer and the logs never hold it; the
+ * API's closed codes land on their own field.
+ */
+describe('createTenantFromDraftAction — the customer project', () => {
+  const TOKEN = 'sbp_s3cr3t-token-0001';
+  const customer = (extra: Record<string, unknown> = {}) => ({
+    ...input(REF),
+    owner: 'customer' as const,
+    token: TOKEN,
+    tokenExpiresAt: '2027-03-01',
+    ...extra,
+  });
+  const created = {
+    tenant: { id: '0d9f1f0e-8c1a-4a53-9e8f-5f6d4c3b2a10', slug: 'ana-souza' },
+    domains: [],
+    invites: [],
+    admins: [],
+  };
+  const bodyOf = () => JSON.parse(api.apiFetch.mock.calls[0]?.[1].body);
+
+  it('sends owner, token and date once in the creation body, and answers the id without the token', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    api.apiFetch.mockResolvedValue(json(200, created));
+    const result = await createTenantFromDraftAction(customer());
+    expect(result).toEqual({ ok: true, id: created.tenant.id });
+    expect(api.apiFetch).toHaveBeenCalledTimes(1);
+    expect(bodyOf()).toMatchObject({
+      owner: 'customer',
+      token: TOKEN,
+      tokenExpiresAt: '2027-03-01',
+    });
+    expect(JSON.stringify(result)).not.toContain('s3cr3t');
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('s3cr3t');
+    spy.mockRestore();
+  });
+
+  it('a platform body carries none of the three, whatever stale token the input holds', async () => {
+    api.apiFetch.mockResolvedValue(json(200, created));
+    await createTenantFromDraftAction({ ...input(REF), owner: 'platform', token: TOKEN });
+    const body = bodyOf();
+    expect(body).not.toHaveProperty('owner');
+    expect(body).not.toHaveProperty('token');
+    expect(body).not.toHaveProperty('tokenExpiresAt');
+  });
+
+  it('an empty customer token is refused as "required" without a request', async () => {
+    const result = await createTenantFromDraftAction(customer({ token: '  ' }));
+    expect(result).toEqual({ ok: false, fieldErrors: { token: 'tokenRequired' } });
+    expect(api.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ token: 'token_invalid' }, { token: 'tokenInvalid' }],
+    [{ token: 'token_forbidden' }, { token: 'tokenForbidden' }],
+    [{ token: 'token_account_wide' }, { token: 'tokenAccountWide' }],
+    [{ token: 'not_found' }, { projectRef: 'projectNotFoundCustomer' }],
+    [{ tokenExpiresAt: 'token_expiry_invalid' }, { tokenExpiresAt: 'tokenExpiryInvalid' }],
+    [{ projectRef: 'not_found' }, { projectRef: 'projectNotFoundCustomer' }],
+    [{ projectRef: 'in_use' }, { projectRef: 'projectInUse' }],
+  ])('the API refusal %j is the field error %j', async (details, fieldErrors) => {
+    api.apiFetch.mockResolvedValue(json(400, { error: { code: 'VALIDATION_FAILED', details } }));
+    expect(await createTenantFromDraftAction(customer())).toEqual({ ok: false, fieldErrors });
+  });
+
+  it.each([['org_mismatch'], ['unchecked']])(
+    'the API code token:%s has no field to blame: a generic failure the operator can retry',
+    async (code) => {
+      api.apiFetch.mockResolvedValue(
+        json(400, { error: { code: 'VALIDATION_FAILED', details: { token: code } } }),
+      );
+      expect(await createTenantFromDraftAction(customer())).toEqual({
+        ok: false,
+        error: 'generic',
+      });
+    },
+  );
+
+  it('a platform draft keeps the platform wording for a missing project', async () => {
+    api.apiFetch.mockResolvedValue(
+      json(400, { error: { code: 'VALIDATION_FAILED', details: { projectRef: 'not_found' } } }),
+    );
+    expect(await createTenantFromDraftAction(input(REF))).toEqual({
+      ok: false,
+      fieldErrors: { projectRef: 'projectNotFound' },
+    });
+  });
+
+  it('never logs the token on a failed creation', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    api.apiFetch.mockResolvedValue(json(500, { error: { code: 'INTERNAL' } }));
+    await createTenantFromDraftAction(customer());
+    api.apiFetch.mockRejectedValue(new Error('ECONNRESET'));
+    await createTenantFromDraftAction(customer());
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('s3cr3t');
+    spy.mockRestore();
+  });
+});
