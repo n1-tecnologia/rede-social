@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   databaseOverviewSchema,
   platformTenantDetailSchema,
@@ -1683,5 +1685,82 @@ describe('GET /v1/platform/tenants/{id}/database for a customer project (09.4-13
     expect(b.state).not.toBe('unreachable');
     expect(b.lastErrorCode).toBeNull();
     expect(a.lastErrorCode).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-13 Task 3: the plan and the organisation are never read (CTK-14, D-572)
+// ---------------------------------------------------------------------------------------------------------
+
+describe('the plan is information and the organisations endpoint is never read (09.4-13, CTK-14, D-572)', () => {
+  const ORG = `acme-nplan-${RUN}`.slice(0, 40);
+  const TOKEN = `sbp_fc_fake_nplan_${RUN}_vvvvvvvvvvvvvvv`;
+  const REF = newRef('nplan');
+
+  /** Records the NAME of every provider method any code path calls, on the platform view and every token view. */
+  const methods: string[] = [];
+  const recording = <T extends object>(inner: T): T =>
+    new Proxy(inner, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (typeof value !== 'function' || typeof prop !== 'string') return value;
+        return (...args: unknown[]) => {
+          methods.push(prop);
+          return value.apply(target, args);
+        };
+      },
+    });
+
+  const makeWorld = (): FakeProjectProvider =>
+    makeProvider({
+      orgSlug: ORG,
+      targets: { [REF]: fakeTarget() } as never,
+      tokens: { [TOKEN]: { refs: [REF] } },
+    });
+
+  it('a pre-check, a creation and an overview call no organisation or plan method and the plan stays null: Plano: Não informado', async () => {
+    const world = makeWorld();
+    const watched = {
+      ...recording(world),
+      calls: world.calls,
+      forToken: (token: string, options?: { orgSlug?: string }) =>
+        recording(world.forToken(token, options)),
+    } as unknown as FakeProjectProvider;
+    setProjectProviderForTests(watched);
+    try {
+      const check = await platform('/projects/precheck', {
+        method: 'POST',
+        body: { projectRef: REF, owner: 'customer', token: TOKEN },
+      });
+      expect(precheckAnswerSchema.parse(await check.json())).toMatchObject({ ok: true });
+
+      const made = await createViaRoute(REF, { owner: 'customer', token: TOKEN });
+      expect(made.res.status).toBe(201);
+      const res = await platform(`/tenants/${made.detail?.tenant.id}/database`);
+      const overview = databaseOverviewSchema.parse(await res.json());
+      expect(overview.owner).toBe('customer');
+      expect(overview.plan).toBeNull();
+
+      // The calls are real (the flow reached the provider) and none of them names an organisation or a plan.
+      expect(methods.length).toBeGreaterThan(0);
+      expect(
+        methods.filter((name) => /organi[sz]ation|plan|billing|subscription/i.test(name)),
+      ).toEqual([]);
+      const surface = Object.keys(world).filter((name) =>
+        /organi[sz]ation|plan|billing/i.test(name),
+      );
+      expect(surface, 'the provider seam has no organisations or plan method').toEqual([]);
+    } finally {
+      setProjectProviderForTests(provider);
+    }
+  }, 180_000);
+
+  it('the management adapter has no organizations path, so a real run cannot read the plan either', () => {
+    const adapter = readFileSync(
+      join(import.meta.dirname, '../../../../packages/core/server/projects/management-api.ts'),
+      'utf8',
+    );
+    expect(adapter).not.toMatch(/\/organizations/i);
+    expect(adapter).not.toMatch(/\/billing/i);
   });
 });
