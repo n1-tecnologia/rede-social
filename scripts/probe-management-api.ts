@@ -4,6 +4,7 @@
  *   pnpm platform:probe --ref <ref>                    # the real provider (SUPABASE_PAT, SUPABASE_ORG_SLUG)
  *   pnpm platform:probe --ref <ref> --exercise-keys    # also tries the revealed service keys, read requests only
  *   pnpm platform:probe --fake                         # a fake provider with a built-in target, no network
+ *   pnpm platform:probe --scoped --ref <ref>           # a customer's scoped token, typed at a hidden prompt
  *
  * Igor runs it once against the EMPTY Pro project (plan 25). Its output decides two open questions before
  * the first real bootstrap: whether the token can reveal secrets (`recommendation`: `automatic` or
@@ -14,6 +15,11 @@
  * Output is ONE JSON object of shapes and booleans (statuses, key kinds present, counts, the pooler host
  * SHAPE, algorithms). It never prints a key, a password, a PAT, a host with credentials or a connection
  * string (T-09.2-60); `probe-management-api.test.ts` scans the output for secret-shaped strings.
+ *
+ * `--scoped` (Phase 09.4-01, D-567, D-578) probes ONE project with a customer's throwaway scoped token. The token
+ * is typed at a hidden terminal prompt (`scripts/lib/read-secret.ts`): there is no `--token` flag, it is not read
+ * from the environment, and it is held in memory for the call only. The mode is a customer-token tool: it never
+ * reads SUPABASE_PAT or SUPABASE_ORG_SLUG. See `runScopedProbe` for what it sends and what it never does.
  */
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +30,7 @@ import {
   type ProjectProvider,
   ProjectProviderError,
 } from '@rede-social/core/server/projects/types';
+import { NoTerminalError, readSecret, SecretAbortError } from './lib/read-secret';
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -36,20 +43,36 @@ async function settle<T>(work: () => Promise<T>): Promise<Settled<T>> {
   }
 }
 
-export type ProbeArgs = { ref: string | null; fake: boolean; exerciseKeys: boolean };
+export type ProbeArgs = {
+  ref: string | null;
+  fake: boolean;
+  exerciseKeys: boolean;
+  scoped: boolean;
+};
 
 export function parseArgs(argv: string[]): ProbeArgs {
-  const args: ProbeArgs = { ref: null, fake: false, exerciseKeys: false };
+  const args: ProbeArgs = { ref: null, fake: false, exerciseKeys: false, scoped: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--fake') args.fake = true;
     else if (arg === '--exercise-keys') args.exerciseKeys = true;
+    else if (arg === '--scoped') args.scoped = true;
     else if (arg === '--ref') {
       const value = argv[i + 1];
       if (!value || value.startsWith('--')) throw new Error('--ref needs a value');
       args.ref = value;
       i += 1;
     } else throw new Error(`unknown argument ${JSON.stringify(arg)}`);
+  }
+  if (args.scoped) {
+    if (args.ref === null) throw new Error('--scoped needs --ref <ref>');
+    if (args.fake) throw new Error('--scoped cannot be combined with --fake');
+    if (args.exerciseKeys) throw new Error('--scoped cannot be combined with --exercise-keys');
+    // Checked before any request exists, so a mistyped ref never reaches a URL.
+    if (!/^[a-z]{20}$/.test(args.ref)) {
+      throw new Error('--scoped: the ref must be the 20 lowercase letters of the project');
+    }
+    return args;
   }
   if (args.fake === (args.ref !== null)) {
     throw new Error('give exactly one of --ref <ref> or --fake');
@@ -102,6 +125,10 @@ export type ProbeDeps = {
   env?: Record<string, string | undefined>;
   /** The Supabase API origin of the project, for `--exercise-keys`. */
   apiUrlFor?: (ref: string) => string;
+  /** `--scoped` only: replaces the hidden terminal prompt (tests). */
+  readSecret?: (label: string) => Promise<string>;
+  /** `--scoped` only: the Management API origin. `http:` is accepted on loopback only (tests). */
+  baseUrl?: string;
 };
 
 const FAKE_REF = 'fake-probe';
@@ -148,8 +175,143 @@ async function exerciseKey(
   };
 }
 
-export async function runProbe(argv: string[], deps: ProbeDeps = {}): Promise<ProbeReport> {
+// ─── --scoped (Phase 09.4-01, D-567, D-578) ──────────────────────────────────────────────────────────────────
+
+const SCOPED_BASE_URL = 'https://api.supabase.com';
+const SCOPED_TIMEOUT_MS = 15_000;
+const SCOPED_PROMPT = 'Cole o token do projeto e tecle Enter (nada aparece na tela): ';
+
+export type ProbeKind = 'read';
+export type ProbeResult = 'allowed' | 'denied' | 'other';
+
+type PlanRow = {
+  op: string;
+  method: 'GET';
+  path: string;
+  kind: ProbeKind;
+};
+
+/** The operation table, in the order of the INTEGRATE list of 09.4 COVERAGE.md. */
+export const PROBE_PLAN: PlanRow[] = [
+  { op: 'GET /v1/projects/{ref}', method: 'GET', path: '/v1/projects/{ref}', kind: 'read' },
+];
+
+export type ScopedOperation = { op: string; result: ProbeResult; status: number };
+
+export type ScopedProbeReport = {
+  mode: 'scoped';
+  organisationLearned: boolean;
+  operations: ScopedOperation[];
+  listing: {
+    status: number | null;
+    projectsTotal: number | null;
+    projectsOtherThanTarget: number | null;
+  };
+  organisationRead: { status: number | null };
+  responseHeaderNames: string[];
+};
+
+/** `allowed` for a read 2xx, `denied` for 401 and 403, `other` for anything else. */
+export function classifyStatus(_kind: ProbeKind, status: number): ProbeResult {
+  if (status === 401 || status === 403) return 'denied';
+  return status >= 200 && status < 300 ? 'allowed' : 'other';
+}
+
+/** The same rule as `management-api.ts`: https, or http on loopback for a test stub. */
+function assertProbeBaseUrl(baseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new TypeError('platform:probe: baseUrl is not a URL');
+  }
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    throw new TypeError('platform:probe: baseUrl must be https (http only on loopback)');
+  }
+  return baseUrl.replace(/\/+$/, '');
+}
+
+const HEADER_NAME = /^[a-z0-9-]{1,64}$/;
+
+/**
+ * Probes ONE project with a customer's scoped token. The token is read only through the hidden prompt, lives in
+ * this function and is dropped when it returns. Output is codes, statuses and counts: never a key, a token, a
+ * project name, a host or any response text (T-09.2-60, T-09.4-02).
+ */
+export async function runScopedProbe(
+  args: ProbeArgs,
+  deps: ProbeDeps = {},
+): Promise<ScopedProbeReport> {
+  const ref = args.ref as string;
+  const baseUrl = assertProbeBaseUrl(deps.baseUrl ?? SCOPED_BASE_URL);
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  let token: string | null = await (deps.readSecret ?? readSecret)(SCOPED_PROMPT);
+
+  /** One request. The bearer header is built here and nowhere else; the token is in no returned value. */
+  async function probeRequest(
+    method: string,
+    path: string,
+  ): Promise<{ status: number; json?: unknown; headerNames: string[] }> {
+    try {
+      const response = await fetchImpl(`${baseUrl}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${token ?? ''}`, Accept: 'application/json' },
+        redirect: 'error',
+        signal: AbortSignal.timeout(SCOPED_TIMEOUT_MS),
+      });
+      const headerNames = [...response.headers.keys()]
+        .map((name) => name.toLowerCase())
+        .filter((name) => HEADER_NAME.test(name));
+      let json: unknown;
+      try {
+        json = JSON.parse(await response.text());
+      } catch {
+        json = undefined;
+      }
+      return { status: response.status, json, headerNames };
+    } catch {
+      return { status: 0, headerNames: [] };
+    }
+  }
+
+  try {
+    const operations: ScopedOperation[] = [];
+    let organisationSlug: string | null = null;
+    let headerNames: string[] = [];
+    for (const row of PROBE_PLAN) {
+      const answer = await probeRequest(row.method, row.path.replace('{ref}', ref));
+      operations.push({
+        op: row.op,
+        result: answer.status === 0 ? 'other' : classifyStatus(row.kind, answer.status),
+        status: answer.status,
+      });
+      if (row.op === 'GET /v1/projects/{ref}' && answer.status === 200) {
+        const slug = (answer.json as { organization_slug?: unknown } | undefined)
+          ?.organization_slug;
+        if (typeof slug === 'string' && /^[\w-]{1,128}$/.test(slug)) organisationSlug = slug;
+        headerNames = answer.headerNames;
+      }
+    }
+    return {
+      mode: 'scoped',
+      organisationLearned: organisationSlug !== null,
+      operations,
+      listing: { status: null, projectsTotal: null, projectsOtherThanTarget: null },
+      organisationRead: { status: null },
+      responseHeaderNames: [...new Set(headerNames)].sort(),
+    };
+  } finally {
+    token = null;
+  }
+}
+
+export async function runProbe(
+  argv: string[],
+  deps: ProbeDeps = {},
+): Promise<ProbeReport | ScopedProbeReport> {
   const args = parseArgs(argv);
+  if (args.scoped) return runScopedProbe(args, deps);
   const env = deps.env ?? process.env;
   const ref = args.ref ?? FAKE_REF;
   const fetchImpl = deps.fetchImpl ?? fetch;
@@ -284,8 +446,20 @@ async function main(): Promise<void> {
     const report = await runProbe(process.argv.slice(2));
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } catch (error) {
+    if (error instanceof SecretAbortError) {
+      process.stderr.write('platform:probe: aborted\n');
+      process.exit(130);
+    }
+    if (error instanceof NoTerminalError) {
+      process.stderr.write(
+        'platform:probe: --scoped asks for the token at a hidden prompt: run it in a terminal, not through a pipe\n',
+      );
+      process.exit(2);
+    }
     process.stderr.write(`platform:probe: ${error instanceof Error ? error.message : 'failed'}\n`);
-    process.stderr.write('usage: platform:probe (--ref <ref> | --fake) [--exercise-keys]\n');
+    process.stderr.write(
+      'usage: platform:probe (--ref <ref> | --fake) [--exercise-keys] | --scoped --ref <ref>\n',
+    );
     process.exit(2);
   }
 }
