@@ -482,3 +482,49 @@ export async function runTokenFollowUp(projectId: string): Promise<void> {
   }
   await reconcileProjectAllowList(projectId);
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// Changing the owner (D-566 journey 3, D-568, CTK-03, CTK-04)
+// ---------------------------------------------------------------------------------------------------------
+
+export type OwnerChangeCode = 'tenant_not_found' | 'project_central' | 'tenant_moving';
+
+/** A closed refusal of the owner-change command: the message is the code and nothing else. */
+export class OwnerChangeError extends Error {
+  readonly code: OwnerChangeCode;
+
+  constructor(code: OwnerChangeCode) {
+    super(code);
+    this.name = 'OwnerChangeError';
+    this.code = code;
+  }
+}
+
+export type OwnerTarget = {
+  tenantId: string;
+  projectId: string;
+  ref: string;
+  owner: string;
+  isCentral: boolean;
+};
+
+export async function findOwnerTarget(_tenantSlug: string): Promise<OwnerTarget> {
+  throw new Error('not implemented');
+}
+
+export type SetOwnerInput = {
+  tenantSlug: string;
+  token: string;
+  expiresAt: string | null;
+  actor: string;
+  dryRun?: boolean;
+  today?: string;
+  provider?: ProjectProvider;
+  afterChange?: (projectId: string) => unknown;
+};
+
+export async function setProjectOwner(
+  _input: SetOwnerInput,
+): Promise<{ projectId: string; repinned: boolean; dryRun: boolean }> {
+  throw new Error('not implemented');
+}
