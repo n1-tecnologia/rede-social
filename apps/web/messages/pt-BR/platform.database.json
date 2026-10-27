@@ -89,6 +89,17 @@
         "saving": "Salvando…",
         "saved": "Credenciais atualizadas."
       },
+      "token": {
+        "states": {
+          "valid": "Válido",
+          "expiring": "Vencendo",
+          "expired": "Vencido",
+          "invalid": "Inválido",
+          "noPermission": "Sem permissão",
+          "orgMismatch": "Organização diferente",
+          "unchecked": "Não verificado"
+        }
+      },
       "errors": {
         "title": "Algo deu errado",
         "load": "Não foi possível carregar o banco deste tenant. Tente novamente.",

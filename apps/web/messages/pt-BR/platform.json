@@ -133,7 +133,8 @@
       "notFoundCta": "Voltar para a lista",
       "tabPendingTitle": "Em breve",
       "tabPendingBody": "Esta aba está em construção.",
-      "databasePill": "Banco: {state}"
+      "databasePill": "Banco: {state}",
+      "tokenPill": "Token: {state}"
     },
     "admins": {
       "inviteTitle": "Convite do primeiro administrador",
