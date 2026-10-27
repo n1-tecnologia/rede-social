@@ -20,6 +20,7 @@ import { seal } from '@rede-social/core/server/secrets/sealed';
 import { centralProjectId, closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import { resolveTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import * as customerSetup from './projects-setup';
 import { API_URL, fakeProvider, fakeTarget } from './projects-setup';
 import { adminSql, api, ensureSecondDatabase, SEED_PASSWORD, signInAs } from './setup';
 
@@ -468,5 +469,168 @@ describe('platform.project-health (D-543)', () => {
     await expect(projectHealthJob.handler({})).resolves.toBeUndefined();
     expect(await healthOf(f.projectId)).toMatchObject({ status: 'unreachable' });
     expect((await jobs()).some((job) => job.singleton_key === PROJECT_HEALTH_SINGLETON)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-08 (D-573, D-574, UI-D-551, CTK-17, CTK-18): the token is its own axis, a dead token is not an outage
+// ---------------------------------------------------------------------------------------------------------
+
+const TOKEN = 'sbp_fc_fake_health_token';
+
+const tokenRowOf = async (projectId: string) => {
+  const [row] = await adminSql<
+    {
+      status: string;
+      detail_code: string | null;
+      token_check: string | null;
+      token_checked_at: Date | null;
+    }[]
+  >`
+    select status, detail_code, token_check, token_checked_at
+      from platform.project_health where project_id = ${projectId}::uuid`;
+  return row ?? null;
+};
+
+/** A CUSTOMER project (sealed token, pinned organisation) with the fake world that knows its token. */
+async function customerProject(
+  tag: string,
+  options: { orgSlug?: string; url?: string } = {},
+): Promise<{ fixture: Fixture; world: FakeProjectProvider }> {
+  const fixture = await project(tag, options.url ? { url: options.url } : {});
+  await customerSetup.makeCustomerProject(
+    fixture.projectId,
+    TOKEN,
+    options.orgSlug ?? customerSetup.CUSTOMER_ORG,
+  );
+  const world = customerSetup.customerFakeProvider({ [fixture.ref]: fakeTarget() }, TOKEN);
+  setProjectProviderForTests(world);
+  return { fixture, world };
+}
+
+describe('a dead management token is a token state, never an outage (D-573, UI-D-551, CTK-17)', () => {
+  it('a refused token (invalid) with a working pool stays healthy and records token_check invalid', async () => {
+    const { fixture, world } = await customerProject('tok-dead');
+    await checkProject(fixture.projectId);
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({
+      status: 'healthy',
+      token_check: 'ok',
+    });
+
+    world.setTokenState(TOKEN, 'dead');
+    const result = await checkProject(fixture.projectId);
+    expect(result).toMatchObject({ status: 'healthy', detailCode: null, changed: false });
+    const row = await tokenRowOf(fixture.projectId);
+    expect(row).toMatchObject({ status: 'healthy', detail_code: null, token_check: 'invalid' });
+    expect(row?.token_checked_at).toBeInstanceOf(Date);
+  });
+
+  it('a forbidden token and an organisation mismatch are recorded and stay healthy', async () => {
+    const { fixture, world } = await customerProject('tok-forb');
+    world.setTokenState(TOKEN, 'forbidden');
+    expect(await checkProject(fixture.projectId)).toMatchObject({ status: 'healthy' });
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({
+      status: 'healthy',
+      token_check: 'forbidden',
+    });
+
+    const other = await customerProject('tok-org', { orgSlug: 'another-organisation' });
+    expect(await checkProject(other.fixture.projectId)).toMatchObject({ status: 'healthy' });
+    expect(await tokenRowOf(other.fixture.projectId)).toMatchObject({
+      status: 'healthy',
+      detail_code: null,
+      token_check: 'org_mismatch',
+    });
+  });
+
+  it('a working token writes token_check ok, and a paused project with a working token is paused as today', async () => {
+    const { fixture } = await customerProject('tok-ok');
+    expect(await checkProject(fixture.projectId)).toMatchObject({ status: 'healthy' });
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({ token_check: 'ok' });
+
+    const paused = await customerProject('tok-paused-x');
+    expect(await checkProject(paused.fixture.projectId)).toMatchObject({ status: 'paused' });
+    expect(await tokenRowOf(paused.fixture.projectId)).toMatchObject({
+      status: 'paused',
+      token_check: 'ok',
+    });
+  });
+
+  it('a describe TIMEOUT on a customer project is unreachable and leaves token_check as it was', async () => {
+    const { fixture, world } = await customerProject('tok-slow');
+    await checkProject(fixture.projectId);
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({ token_check: 'ok' });
+
+    world.setTokenState(TOKEN, 'dead');
+    await checkProject(fixture.projectId);
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({ token_check: 'invalid' });
+
+    const hanging = wrap(world, { describe: () => new Promise(() => undefined) });
+    const result = await checkProject(fixture.projectId, { provider: hanging, timeoutMs: 60 });
+    expect(result).toMatchObject({ status: 'unreachable', detailCode: 'unreachable' });
+    // A timeout is not a token verdict: the stored `invalid` is neither rewritten nor cleared.
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({
+      status: 'unreachable',
+      token_check: 'invalid',
+    });
+  });
+
+  it('a dead token AND a failing pool is unreachable with code unreachable, never access_denied', async () => {
+    const { fixture, world } = await customerProject('tok-pool', { url: TX_CLOSED });
+    world.setTokenState(TOKEN, 'dead');
+    expect(await checkProject(fixture.projectId)).toMatchObject({
+      status: 'unreachable',
+      detailCode: 'unreachable',
+    });
+    expect(await tokenRowOf(fixture.projectId)).toMatchObject({
+      status: 'unreachable',
+      detail_code: 'unreachable',
+      token_check: 'invalid',
+    });
+  });
+
+  it('a PLATFORM project refused with a forbidden error is still access_denied and writes no token_check', async () => {
+    const f = await project('tok-plat');
+    const refused = wrap(fakeProvider({ [f.ref]: fakeTarget() }), {
+      describe: async () => {
+        throw new ProjectProviderError('forbidden', 403);
+      },
+    });
+    expect(await checkProject(f.projectId, { provider: refused })).toMatchObject({
+      status: 'unreachable',
+      detailCode: 'access_denied',
+    });
+    expect(await tokenRowOf(f.projectId)).toMatchObject({
+      detail_code: 'access_denied',
+      token_check: null,
+      token_checked_at: null,
+    });
+  });
+
+  it('a token-only change invalidates neither the binding nor the host answer; a status change still does (D-574)', async () => {
+    const { fixture, world } = await customerProject('tok-inval');
+    await checkProject(fixture.projectId);
+    spies.host.mockClear();
+    spies.project.mockClear();
+
+    world.setTokenState(TOKEN, 'dead');
+    const result = await checkProject(fixture.projectId);
+    expect(result).toMatchObject({ status: 'healthy', changed: false });
+    expect(spies.host).not.toHaveBeenCalled();
+    expect(spies.project).not.toHaveBeenCalled();
+    expect(await resolveTenantHost(fixture.host)).toMatchObject({
+      kind: 'tenant',
+      status: 'active',
+    });
+
+    // The database state is what moves the shell: a closed pool is a status change and invalidates.
+    await adminSql`
+      update platform.projects
+         set database_url_tx_sealed = ${seal(TX_CLOSED, `${fixture.projectId}:database_url_tx`)}
+       where id = ${fixture.projectId}::uuid`;
+    const worse = await checkProject(fixture.projectId);
+    expect(worse).toMatchObject({ status: 'unreachable', changed: true });
+    expect(spies.host).toHaveBeenCalledWith(fixture.host);
+    expect(spies.project).toHaveBeenCalled();
   });
 });
