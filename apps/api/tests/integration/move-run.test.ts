@@ -382,7 +382,8 @@ async function rowsAbout(ref: string, tenantId: string) {
 }
 
 describe('an unknown customer target (09.4-12, CTK-02, D-567, D-571)', () => {
-  const ASKED = '2999-12-31';
+  // The typed expiry rule: after today and within a year.
+  const ASKED = new Date(Date.now() + 100 * 86_400_000).toISOString().slice(0, 10);
 
   it('registers the project, its sealed token and the move in one transaction, from the injected prompt', async () => {
     const c = await customerCase('reg', { register: false });
@@ -521,8 +522,8 @@ describe('an unknown customer target (09.4-12, CTK-02, D-567, D-571)', () => {
 
   it('a resume of an interrupted move finds the target registered and prompts for nothing', async () => {
     const c = await customerCase('resume', { register: false });
-    // The target cannot be prepared: the start registers it (one prompt), then stops at the bootstrap.
-    c.ch.provider.arm({ step: 'verify', times: 'always' });
+    // The target cannot be prepared: the start registers it (one prompt), then stops at the schema step.
+    c.ch.provider.arm({ step: 'schema', times: 'always' });
     const first = vt.vi.fn(async () => c.token);
     const base = {
       tenantSlug: c.t.slug,

@@ -4,6 +4,9 @@
  *
  *   pnpm platform:move-tenant -- --tenant <slug> --to <ref> --dry-run     # the plan; writes NOTHING
  *   pnpm platform:move-tenant -- --tenant <slug> --to <ref>               # suspend, copy, verify, repoint
+ *   pnpm platform:move-tenant -- --tenant <slug> --to <ref> --owner customer [--expires YYYY-MM-DD]
+ *                                         # a project of the customer's account; the token is asked for at a
+ *                                         # hidden prompt when the ref is new (09.4-12), never as an argument
  *   pnpm platform:move-tenant -- --tenant <slug> --resume                 # continue from the recorded state
  *   pnpm platform:move-tenant -- --tenant <slug> --status                 # the move and its trail (read only)
  *   pnpm platform:move-tenant -- --tenant <slug> --rollback [--accept-loss]
@@ -22,6 +25,11 @@ const envFile = resolve(process.cwd(), 'apps/api/.env.local');
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 const { runMoveCli } = await import('../apps/api/src/move');
+// The hidden prompt exists only here: the API image (the Job) never imports `scripts/`, so it cannot ask.
+const { readSecret } = await import('./lib/read-secret');
 
-const code = await runMoveCli(process.argv.slice(2).filter((arg) => arg !== '--'));
+const code = await runMoveCli(
+  process.argv.slice(2).filter((arg) => arg !== '--'),
+  { readSecret },
+);
 process.exit(code);

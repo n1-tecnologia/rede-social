@@ -3,12 +3,15 @@ import type { Sql } from 'postgres';
 import { projects, tenantMoveEvents, tenantMoves, tenantProjects } from '../../../db/central';
 import { withPlatformTx } from '../../../db/platform-tx';
 import { env } from '../../env';
+import { processKeyring } from '../../secrets/sealed';
 import { resolveProjectById } from '../../tenancy/project-registry';
 import { apiUrlFor } from '../access';
 import { type BootstrapDeps, listSteps, runBootstrap } from '../bootstrap';
 import { precheckProject } from '../precheck';
 import { getProjectProvider } from '../provider-access';
+import { createRequestTokenProvider } from '../provider-for';
 import { readAppliedSchema } from '../schema-state';
+import { recordTokenEvent, sealManagementToken } from '../token';
 import type { ProjectProvider } from '../types';
 import { type MoveRow, openMoveOf, recordEvent, toMoveRow } from './state';
 import { MoveError } from './types';
@@ -108,12 +111,17 @@ export async function registerMoveTarget(
   if (await openMoveOf(input.tenantId)) throw new MoveError('move_in_progress');
 
   const production = deps.production ?? env.NODE_ENV === 'production';
-  const provider = deps.provider ?? (await getProjectProvider());
 
   // Outbound work first, OUTSIDE any transaction: a project the registry does not know yet is checked.
   const known = await withPlatformTx((tx) => projectFacts(tx, input.ref, input.tenantId));
   if (known) assertOwnerAgrees(known.owner, input.owner);
-  if (!known) {
+  let provider: ProjectProvider | undefined;
+  let customer: CustomerTarget | undefined; // holds the token for this call only
+  if (!known && input.owner === 'customer') {
+    customer = await checkCustomerTarget(input, deps, production);
+    provider = customer.provider;
+  } else if (!known) {
+    provider = deps.provider ?? (await getProjectProvider());
     const check = await precheckProject(input.ref, {
       tenantId: input.tenantId,
       production,
@@ -142,7 +150,32 @@ export async function registerMoveTarget(
           throw new MoveError('target_not_ready', ['in_use']);
         }
         projectId = row.id;
-      } else {
+      } else if (customer && provider) {
+        // The unknown customer project, its sealed token, its audit event and the move row: ONE transaction
+        // under the project lock (D-571), so a refusal or a crash leaves neither half behind.
+        projectId = newProjectId;
+        await tx.insert(projects).values({
+          id: projectId,
+          ref: input.ref,
+          provider: provider.name,
+          owner: 'customer',
+          orgSlug: customer.orgSlug,
+          mgmtTokenSealed: sealManagementToken(customer.token, projectId),
+          mgmtTokenExpiresAt: customer.expiresAt,
+          credentialSource: 'sealed',
+          apiUrl: apiUrlFor(provider, input.ref),
+          state: 'preparing',
+          secretKeyId: processKeyring().currentId,
+        });
+        await recordTokenEvent(tx, {
+          kind: 'registered',
+          projectId,
+          projectRef: input.ref,
+          actor: input.actor,
+          outcome: 'ok',
+        });
+        registered = true;
+      } else if (provider) {
         projectId = newProjectId;
         await tx.insert(projects).values({
           id: projectId,
@@ -153,6 +186,10 @@ export async function registerMoveTarget(
           state: 'preparing',
         });
         registered = true;
+      } else {
+        // Registered by someone else between the check and the lock is the `row` branch; no provider means
+        // the project vanished again, which a move cannot use.
+        throw new MoveError('target_not_ready', ['unregistered']);
       }
 
       const [inserted] = await tx
@@ -175,6 +212,48 @@ export async function registerMoveTarget(
     if (isOpenMoveViolation(error)) throw new MoveError('move_in_progress');
     throw error;
   }
+}
+
+/** What the checks of an unknown customer target learned, held for the registration's transaction only. */
+type CustomerTarget = {
+  token: string;
+  orgSlug: string;
+  expiresAt: string | null;
+  provider: ProjectProvider;
+};
+
+/**
+ * An unknown customer target (09.4-12, D-567, D-571): the token comes ONLY from `deps.readToken`, which the
+ * local wrapper wires to the hidden prompt. With no `readToken` (the Job has no terminal), or a prompt that
+ * fails (no terminal, Ctrl-C), the answer is `register_first` before anything is read or written: the project
+ * is registered ahead of time by `platform:set-owner --register`. The pre-check then runs on a provider built
+ * from the typed token (never the platform's) and its closed reason is the detail of `target_not_ready`.
+ */
+async function checkCustomerTarget(
+  input: RegisterInput,
+  deps: TargetDeps,
+  production: boolean,
+): Promise<CustomerTarget> {
+  let token: string;
+  try {
+    if (!deps.readToken) throw new MoveError('target_not_ready', ['register_first']);
+    token = await deps.readToken();
+  } catch {
+    throw new MoveError('target_not_ready', ['register_first']);
+  }
+  const provider = await createRequestTokenProvider({ token });
+  const check = await precheckProject(input.ref, {
+    tenantId: input.tenantId,
+    production,
+    owner: 'customer',
+    token,
+    tokenExpiresAt: input.tokenExpiresAt ?? null,
+    provider,
+  });
+  if (!check.ok) throw new MoveError('target_not_ready', [check.reason]);
+  if (check.manualAccess) throw new MoveError('target_not_ready', ['manual_access']);
+  if (!check.learned) throw new MoveError('target_not_ready', ['unchecked']);
+  return { token, orgSlug: check.learned.orgSlug, expiresAt: check.learned.expiresAt, provider };
 }
 
 /** Postgres `23505` on the one-open-move index, possibly wrapped by drizzle's query error. */
