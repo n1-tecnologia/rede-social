@@ -49,10 +49,12 @@ const precheckRoute = createRoute({
   responses: {
     200: {
       description:
-        'The read-only pre-check of a project ref: `{ ok: true, manualAccess }` or `{ ok: false, reason }` with reason invalid, not_found, not_empty, in_use, paused or unchecked. A check that could not run is an answer (`unchecked`), not an error',
+        'The read-only pre-check of a project ref: `{ ok: true, manualAccess }` or `{ ok: false, reason }` with reason invalid, not_found, not_empty, in_use, paused or unchecked, plus token_invalid, token_forbidden, token_account_wide and token_expiry_invalid for a customer token. A check that could not run is an answer (`unchecked`), not an error',
       content: { 'application/json': { schema: precheckAnswerSchema } },
     },
-    400: envelope('VALIDATION_FAILED — a body that is not { projectRef }'),
+    400: envelope(
+      'VALIDATION_FAILED — a body that is not { projectRef } or { projectRef, owner: customer, token, tokenExpiresAt? }',
+    ),
     403: envelope('Not a platform admin'),
   },
 });
@@ -134,15 +136,31 @@ export async function overviewOr404(tenantId: string): Promise<DatabaseOverview>
 export const projectsRoutes = projectsRouter
   .openapi(precheckRoute, async (c) => {
     const { userId, requestId } = c.get('platformCtx');
-    const { projectRef } = c.req.valid('json');
+    const { projectRef, owner, token, tokenExpiresAt } = c.req.valid('json');
 
-    const answer: PrecheckAnswer = await precheckProject(projectRef);
+    // 09.4-09 (D-566): a customer body adds the token (write-only, used once by the pre-check and never
+    // returned or logged). A platform body is exactly what it was.
+    const result =
+      owner === 'customer'
+        ? await precheckProject(projectRef, {
+            owner,
+            ...(token === undefined ? {} : { token }),
+            ...(tokenExpiresAt === undefined || tokenExpiresAt.trim() === ''
+              ? {}
+              : { tokenExpiresAt: tokenExpiresAt.trim() }),
+          })
+        : await precheckProject(projectRef);
+    // Built EXPLICITLY from the closed fields, so nothing internal the kernel returns can reach the response.
+    const answer: PrecheckAnswer = result.ok
+      ? { ok: true, manualAccess: result.manualAccess }
+      : { ok: false, reason: result.reason };
 
     c.get('logger').info(
       {
         event: 'platform.projects.precheck',
         userId,
         requestId,
+        owner: owner ?? 'platform',
         ok: answer.ok,
         ...(answer.ok ? { manualAccess: answer.manualAccess } : { reason: answer.reason }),
       },
