@@ -3206,6 +3206,142 @@ stays `blocked — not run`. Every line depends on a hosted environment, so none
 - Open items you may want to decide: a command for the orphan routes (above), a tool to enable the access
   hooks in a tenant project (above), and a column in the move report for the rows copied per table.
 
+## Phase 09.3 release (corrections of the FRONT.pdf)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret.
+Phase 09.3 ships ON TOP of Phase 09.2 (its five migrations were generated after the last 09.2 file) and
+carries the five backend corrections of the client's FRONT.pdf (items 3 and 11 to 14 of
+`docs/pendencias-backend.md`). It supersedes the numbers 30 and 15 of the "Event schedule" section
+below, which keeps its history untouched.
+
+### What ships
+
+- **Five migrations, applied in timestamp order, all additive** (two CHECKs re-added wider, one function
+  replaced, one function added and replaced, one policy; none rewrites a row):
+  - `20261026203621_event_schedule_limit.sql`: the CHECK `events_schedule_chk` from 30 to 200 moments.
+  - `20261026205650_story_highlight_title_limit.sql`: the CHECK `story_highlights_title_chk` from 15 to
+    50 characters (the trim rule stays).
+  - `20261026211152_dashboard_activity_keeps_deleted_events.sql`: `create or replace` of
+    `app.dashboard_member_activity(date)`; the member's "Sua atividade" attendance keeps counting a
+    deleted event (a cancelled one still does not count).
+  - `20261026213756_community_soft_delete_gate.sql`: the new `app.community_deleted_ids()` and the
+    replaced `app.feed_locked_post_community(uuid)`, so a deleted community's post answers 404 and never
+    `403 community_locked`.
+  - `20261026213816_feed_posts_deleted_community_gate.sql`: the RESTRICTIVE select policy
+    `feed_posts_deleted_community_gate` on `feed_posts`, the structural backstop that hides a deleted
+    community's posts (and, through them, its comments and likes) from every tenant lane.
+- **The API:** `DELETE /v1/events/{eventId}` (silent soft delete of any event of the tenant; answers and
+  check-ins are kept) and `DELETE /v1/communities/{communityId}` (archived only; `409` with `not_archived`,
+  or `unlock_active` with up to five product names and the total while an active Loja product still unlocks
+  the community); the upload kind `icon_art` and the branding field `iconOwnArt`; the caps 200 moments and
+  50 characters read from the contracts (`EVENT_SCHEDULE_MAX_ITEMS`, `STORY_HIGHLIGHT_MAX_TITLE`).
+- **The worker:** `deriveIconSet` fills the whole `maskable512` square when the source is a marked own icon
+  with no transparent pixel; every other source keeps the 80% margin over the primary colour.
+- **The web:** the two live "Excluir" controls (event: the form and the cancelled notice; community: the
+  archived page and form) with their confirmations and the Loja refusal dialog, and the limits read from the
+  contracts (the form and the highlight sheets follow by themselves; a long highlight name is one line with
+  an ellipsis under its circle and wraps in the opened viewer).
+- **No environment variable, secret, cron, job or data step is added.** There is nothing to seed.
+
+### Order: migrations on every tenant project, then the API and the worker together, then the web
+
+1. **Local checks first.** `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole
+   tenant set, the five files above included, to an empty local second database, as a new project would
+   get it; its ledger holds one row per file. `pnpm db:migrate-all -- --dry-run` lists what is pending per
+   project without applying anything. The "local gate" note of the Phase 09.2 section applies.
+2. **The five migrations reach EVERY tenant project through the ledgered `migrateAll`** (the Phase 09.2
+   Cloud Run Job, D-544: databases before API and worker). The runner serialises per database with an
+   advisory lock and is idempotent: a project that is current applies nothing, so a re-run is safe. There
+   is no data step, nothing to seed and nothing to convert: the files only widen two CHECKs and add two
+   functions and one policy.
+3. **The API and the worker TOGETHER**, one image. The worker holds the icon rule, and a revision of the
+   API or of the worker that does not know `iconOwnArt` drops the marker on its next colour save, so the
+   two must not ship apart, and the worker must not ship alone or last.
+4. **The web LAST**, because its forms accept more the moment the constants change (200 moments, 50
+   characters) and its delete buttons need the two routes.
+
+These four steps are consecutive; nothing else belongs between them. **Why this order (D-561).** The two
+limit migrations only widen a CHECK, so an old API on the new database keeps working: it still caps at 30
+and 15 itself, and the new functions and the policy are additive. While a new database still serves the
+previous API revision nothing breaks; that revision simply keeps the old caps and has no delete routes.
+Releasing the API and the worker together means no revision pair derives icons with a stale marker rule.
+
+### The client notice (Android icon)
+
+For the client, in plain words:
+
+- The new icon rule is NOT applied to the tenants that already exist. Nothing is re-derived, marked or
+  cropped at the deploy (D-564): a tenant that already has an own icon keeps today's margin until its admin
+  opens the app icon editor ("Personalizar ícone" or "Editar ícone", in Marca) and saves it again.
+- An installed Android app shows the new icon only when Chrome refreshes the installed app, which can take a
+  day or more; reinstalling the app forces it.
+- An icon with transparency, or derived from the logo, keeps the margin on purpose.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only). The two CHECKs cannot go back to 30 and 15 over rows
+  that already pass the new caps without a data decision first about what happens to the moments and the
+  characters past the old cap (D-558, D-559). Roll forward with a fix instead.
+- **Rolling the WEB back to a pre-09.3 revision** brings back an old editor whose `normaliseEventSchedule`
+  slices a schedule at 30 moments and whose highlight field clips a name at 15 characters. Saving an event
+  with more than 30 moments, or renaming a highlight longer than 15, from the old web LOSES data until the
+  web is forward again: do not edit such events or highlights meanwhile.
+- **Rolling the API back** removes the two delete routes (the new web's delete controls then fail with their
+  error toast), brings the old caps back at the contract (events and highlights over the cap still read
+  fine, they just cannot be re-saved) and drops `iconOwnArt` on the next colour save. Roll the API and the
+  worker back together, and roll the web back first.
+
+### Smoke checks
+
+Read-only SQL on a tenant project, after the Job:
+
+```sql
+select conname, pg_get_constraintdef(oid) from pg_constraint
+ where conname in ('events_schedule_chk', 'story_highlights_title_chk');
+-- two rows: the first contains jsonb_array_length(schedule) <= 200, the second char_length(title) >= 1
+-- and char_length(title) <= 50 (Postgres prints between 1 and 50 that way)
+select policyname, permissive from pg_policies
+ where tablename = 'feed_posts' and policyname = 'feed_posts_deleted_community_gate';
+-- one row, RESTRICTIVE
+select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and proname in ('community_deleted_ids', 'feed_locked_post_community');
+-- two rows
+```
+
+And the central check of the Phase 09.2 section: the Job's step summary shows exit code `0` and every
+project `current`.
+
+### Known side effects
+
+- The policy also hides a deleted community's posts from the owner dashboard's post lists, while the
+  dashboard's snapshot counts keep counting them (accepted, T-09.3-36).
+- A media file of a hidden post is still fetchable by its unguessable id; without the post it cannot be
+  discovered (accepted, T-09.3-35).
+- Items 1, 2, 4, 5, 6 and 8 of `docs/pendencias-backend.md` stay open (D-565). The `iconOwnArt` field is
+  where the saved choices of item 4 can live later.
+
+### Manual UAT (hosted)
+
+Record each line in the Phase 09.3 UAT (`/gsd-verify-work 09.3`); a line that is not run stays `blocked —
+not run`. Every line depends on a hosted environment or a real phone, so none counts without your evidence:
+
+- After the client re-saves the icon in Marca, the installed Android app shows the art filling the whole
+  circle once Chrome refreshes it.
+- As a tenant admin, delete an archived community with no products on a phone: the list is the landing, its
+  publications are gone from Início, Reels and the old post link (not found).
+- The refusal on a community linked to an active product: the dialog names the products and "Ver produtos"
+  opens the Loja. Record the way out as an owner decision for a later phase: the Loja keeps links to archived
+  communities and the product form cannot list them, so for a community archived while an active product
+  links it the way out is to reactivate the community, remove it from the product in the product form,
+  archive it again and delete it. The approved copy "Tire a comunidade dele primeiro" does not say
+  "reactivate first".
+- Delete an event from its form and from the cancelled notice: the member's old link opens the not-found
+  screen and no push or bell notification arrives.
+- A schedule with more than 30 moments saves and renders, and a 50-character highlight name saves and shows
+  cut with an ellipsis under its circle, checked at 320px on a real phone.
+- The PWA installed on a phone against homolog still starts after the release.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
