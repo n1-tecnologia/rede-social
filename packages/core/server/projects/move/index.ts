@@ -115,6 +115,7 @@ export {
 export {
   assertTargetReady,
   bootstrapTarget,
+  type RegisterInput,
   registerMoveTarget,
   type TargetDeps,
 } from './target';

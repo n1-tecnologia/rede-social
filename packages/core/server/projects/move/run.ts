@@ -74,6 +74,10 @@ export type MoveOptions = {
   acceptLoss?: boolean | undefined;
   /** `confirm-delete`: the slug typed again. */
   confirmSlug?: string | undefined;
+  /** `start` (09.4-12): whose project the target is; absent lets the registry say, `platform` is the old path. */
+  owner?: 'platform' | 'customer' | undefined;
+  /** `start` with `owner: 'customer'`: the typed expiry of the token the move registers. */
+  tokenExpiresAt?: string | null | undefined;
 };
 
 export type MoveLine = Record<

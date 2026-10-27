@@ -1,9 +1,19 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createFakeProjectProvider } from '@rede-social/core/server/projects/fake';
-import type { MoveDeps, StoragePort } from '@rede-social/core/server/projects/move/index';
+import {
+  createFakeProjectProvider,
+  type FakeProjectProvider,
+  type FakeTarget,
+  type FakeTokenScope,
+} from '@rede-social/core/server/projects/fake';
+import {
+  defaultBossFor,
+  type MoveDeps,
+  type StoragePort,
+} from '@rede-social/core/server/projects/move/index';
 import { defaultSecrets } from '@rede-social/core/server/projects/steps';
+import { registerCustomerProject } from '@rede-social/core/server/projects/token';
 import postgres from 'postgres';
 import { adminSql, authAdmin, SEED_PASSWORD, signInAs } from './setup';
 
@@ -111,20 +121,37 @@ export type Harness = {
 export function harness(options: { targetApiUrl?: string } = {}): Harness {
   const ref = `mv-${randomBytes(6).toString('hex')}`;
   const provider = createFakeProjectProvider({
-    targets: {
-      [ref]: {
-        apiUrl: options.targetApiUrl ?? SUPABASE_URL,
-        host: '127.0.0.1',
-        port: 54322,
-        txPort: 54322,
-        dbName: 'rede_tenant_b',
-        buckets: [
-          { id: 'branding', name: 'branding', public: true },
-          { id: 'media', name: 'media', public: false },
-        ],
-      },
-    },
+    targets: { [ref]: moveTarget(options.targetApiUrl) },
   });
+  const { deps, storageOf } = moveDeps(provider, provider);
+  return { ref, deps, storageOf };
+}
+
+/** The fake target of a ref: `rede_tenant_b` on the local cluster, with the two buckets the tenant set creates. */
+function moveTarget(apiUrl?: string): FakeTarget {
+  return {
+    apiUrl: apiUrl ?? SUPABASE_URL,
+    host: '127.0.0.1',
+    port: 54322,
+    txPort: 54322,
+    dbName: 'rede_tenant_b',
+    buckets: [
+      { id: 'branding', name: 'branding', public: true },
+      { id: 'media', name: 'media', public: false },
+    ],
+  };
+}
+
+/**
+ * The seams of the move over the local cluster. `provider` is the one `registerMoveTarget` uses; `bootstrap`
+ * is the provider the bootstrap engine is handed, or `undefined` to leave it unset so the engine resolves ONE
+ * PER PROJECT (09.4-06: a customer project runs on its own token).
+ */
+function moveDeps(
+  provider: FakeProjectProvider,
+  bootstrapProvider: FakeProjectProvider | undefined,
+  extra: { sourceRefs?: readonly string[]; deleteAccounts?: boolean } = {},
+): { deps: MoveDeps; storageOf: (projectId: string) => MemoryStorage } {
   const stores = new Map<string, MemoryStorage>();
   const storageOf = (projectId: string): MemoryStorage => {
     const hit = stores.get(projectId);
@@ -133,13 +160,14 @@ export function harness(options: { targetApiUrl?: string } = {}): Harness {
     stores.set(projectId, made);
     return made;
   };
+  const sourceRefs = extra.sourceRefs ?? [];
   const deps: MoveDeps = {
     target: {
       provider,
       production: false,
       sleep: async () => undefined,
       bootstrap: {
-        provider,
+        ...(bootstrapProvider ? { provider: bootstrapProvider } : {}),
         connect: (kind, url) =>
           postgres(kind === 'ddl' ? TGT_URL : url, {
             max: 1,
@@ -160,7 +188,10 @@ export function harness(options: { targetApiUrl?: string } = {}): Harness {
       },
     },
     openSql: (project, { readOnly }) => {
-      const url = project.isCentral || project.credentialSource === 'env' ? SRC_URL : TGT_URL;
+      const url =
+        project.isCentral || project.credentialSource === 'env' || sourceRefs.includes(project.ref)
+          ? SRC_URL
+          : TGT_URL;
       const client = postgres(url, {
         max: 1,
         prepare: false,
@@ -179,7 +210,45 @@ export function harness(options: { targetApiUrl?: string } = {}): Harness {
     purgeStorage: (project, bucket, keys) => storageOf(project.id).remove(bucket, keys),
     sleep: async () => undefined,
   };
-  return { ref, deps, storageOf };
+  if (sourceRefs.length > 0) {
+    // A "customer project" whose data physically lives in project 0's database has no transaction URL of its
+    // own: its queue is project 0's, and no account of it is ever removed.
+    deps.bossFor = (project) =>
+      defaultBossFor(sourceRefs.includes(project.ref) ? { ...project, isCentral: true } : project);
+  }
+  if (extra.deleteAccounts === false) deps.deleteAccount = async () => undefined;
+  return { deps, storageOf };
+}
+
+export type CustomerHarness = Harness & {
+  /** The token-aware fake world: its `calls.tokenUses` says which kind of token touched which ref. */
+  provider: FakeProjectProvider;
+};
+
+/**
+ * 09.4-12: a move over a token-aware fake. `refs` all map to `rede_tenant_b`; `sourceRefs` are refs whose data
+ * physically lives in project 0's database (they play the SOURCE of a way-back move). `bootstrap: 'per-project'`
+ * hands the engine no provider, so each project resolves its own (the test must pin the fake with
+ * `setProjectProviderForTests`); `'platform'` hands it the base fake, whose uses are recorded as `platform`.
+ */
+export function customerHarness(options: {
+  refs: readonly string[];
+  tokens: Record<string, FakeTokenScope>;
+  orgSlug?: string;
+  sourceRefs?: readonly string[];
+  bootstrap: 'per-project' | 'platform';
+}): CustomerHarness {
+  const provider = createFakeProjectProvider({
+    targets: Object.fromEntries(options.refs.map((ref) => [ref, moveTarget()])),
+    orgSlug: options.orgSlug ?? 'acme-customer',
+    tokens: options.tokens,
+  });
+  const { deps, storageOf } = moveDeps(
+    provider,
+    options.bootstrap === 'platform' ? provider : undefined,
+    { sourceRefs: options.sourceRefs ?? [], deleteAccounts: false },
+  );
+  return { ref: options.refs[0] ?? '', deps, storageOf, provider };
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -298,6 +367,34 @@ export async function createMoveTenant(
       await adminSql`delete from public.access_grants where email in (${email}, ${`x-${email}`})`;
     },
   };
+}
+
+/**
+ * Registers a project of the customer's account the way `platform:set-owner --register` does (plan 11): the
+ * token is validated through the token-aware fake, sealed under `<id>:mgmt_token` and the organisation pin is
+ * learned. Returns the registry id. The token is a fake string.
+ */
+export async function registerCustomerTarget(
+  h: CustomerHarness,
+  ref: string,
+  token: string,
+): Promise<string> {
+  const { projectId } = await registerCustomerProject({
+    ref,
+    token,
+    expiresAt: null,
+    actor: 'tester',
+    provider: h.provider.forToken(token),
+  });
+  return projectId;
+}
+
+/** Makes a registered project the SOURCE of a tenant: `ready`, and the tenant's binding points at it. */
+export async function adoptAsSource(tenantId: string, projectId: string): Promise<void> {
+  await adminSql`update platform.projects set state = 'ready' where id = ${projectId}::uuid`;
+  await adminSql`
+    update platform.tenant_projects set project_id = ${projectId}::uuid
+     where tenant_id = ${tenantId}::uuid`;
 }
 
 /** Removes the registry rows a move target left behind (the project and its steps cascade). */

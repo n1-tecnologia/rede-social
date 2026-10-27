@@ -1,20 +1,31 @@
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
-import { eventsOf, latestMoveOf, runMove } from '@rede-social/core/server/projects/move/index';
+import {
+  eventsOf,
+  latestMoveOf,
+  MoveError,
+  type RegisterInput,
+  registerMoveTarget,
+  runMove,
+} from '@rede-social/core/server/projects/move/index';
 import { isTenantMoving } from '@rede-social/core/server/projects/moving';
+import { setProjectProviderForTests } from '@rede-social/core/server/projects/provider-access';
 import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry';
 import {
   invalidateTenantHost,
   resolveTenantHost,
 } from '@rede-social/core/server/tenancy/tenant-host';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  type CustomerHarness,
   closeHelperClients,
   connect,
   createMoveTenant,
+  customerHarness,
   footprint,
   harness,
   type MoveTenant,
+  registerCustomerTarget,
   removeTargetProject,
   resetB,
   SRC_URL,
@@ -172,5 +183,173 @@ describe('the tracer: one command moves a tenant to its own database', () => {
     expect(text).not.toContain('eyJ');
     expect(text).not.toContain('postgres://');
     expect(text).not.toContain('sb_secret_');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 09.4-12: the second journey of D-566, a tenant moved to a project of the customer's account
+// ---------------------------------------------------------------------------------------------------------
+
+type CustomerCase = {
+  t: MoveTenant;
+  ch: CustomerHarness;
+  /** The customer project, registered ahead of time (plan 11). */
+  customerRef: string;
+  customerId: string;
+  /** A second ref the fake maps, for the platform-owned target cases. */
+  platformRef: string;
+  token: string;
+  centralId: string;
+};
+
+const customerCases: CustomerCase[] = [];
+
+async function customerCase(label: string): Promise<CustomerCase> {
+  resetB('bare');
+  const suffix = `${label}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const customerRef = `mvc-${suffix}`;
+  const platformRef = `mvp-${suffix}`;
+  const token = `sbp_fc_fake_mv12_${suffix}`;
+  const ch = customerHarness({
+    refs: [customerRef, platformRef],
+    tokens: { [token]: { refs: [customerRef] } },
+    bootstrap: 'per-project',
+  });
+  // The per-project resolver builds the customer view from the pinned fake.
+  setProjectProviderForTests(ch.provider);
+  const t = await createMoveTenant(`mv12-${suffix}`.slice(0, 40));
+  const customerId = await registerCustomerTarget(ch, customerRef, token);
+  const [central] = await adminSql<
+    { id: string }[]
+  >`select id from platform.projects where is_central`;
+  const made = { t, ch, customerRef, customerId, platformRef, token, centralId: central?.id ?? '' };
+  customerCases.push(made);
+  return made;
+}
+
+afterEach(async () => {
+  setProjectProviderForTests(undefined);
+  for (const made of customerCases.splice(0)) {
+    await made.t.cleanup().catch(() => undefined);
+    await removeTargetProject(made.customerRef).catch(() => undefined);
+    await removeTargetProject(made.platformRef).catch(() => undefined);
+  }
+});
+
+const refusalOf = async (work: Promise<unknown>): Promise<unknown> => {
+  try {
+    await work;
+  } catch (error) {
+    return error;
+  }
+  return null;
+};
+
+const startInput = (
+  c: CustomerCase,
+  ref: string,
+  owner?: 'platform' | 'customer',
+): RegisterInput => ({
+  tenantId: c.t.tenantId,
+  ref,
+  actor: ACTOR,
+  statusBefore: 'active',
+  fromProjectId: c.centralId,
+  owner,
+});
+
+async function dropOpenMove(tenantId: string): Promise<void> {
+  await adminSql`
+    delete from platform.tenant_move_events
+     where move_id in (select id from platform.tenant_moves where tenant_id = ${tenantId}::uuid)`;
+  await adminSql`delete from platform.tenant_moves where tenant_id = ${tenantId}::uuid`;
+}
+
+const moveRowsOf = async (tenantId: string): Promise<number> => {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from platform.tenant_moves where tenant_id = ${tenantId}::uuid`;
+  return row?.n ?? -1;
+};
+
+describe('a registered customer target (09.4-12, CTK-02, D-566 journey 2)', () => {
+  it('tracer: moves a tenant to a customer project on the sealed token and asks for nothing', async () => {
+    const c = await customerCase('trace');
+    const readToken = vi.fn(async () => {
+      throw new Error('the prompt must not be called');
+    });
+    const result = await runMove(
+      {
+        mode: 'start',
+        tenantSlug: c.t.slug,
+        toRef: c.customerRef,
+        owner: 'customer',
+        actor: ACTOR,
+        quiesceMs: 0,
+        registryWaitMs: 0,
+      },
+      { ...c.ch.deps, target: { ...c.ch.deps.target, readToken } },
+    );
+    expect(result.outcome).toBe('moved');
+    expect(result.state).toBe('done');
+    expect(readToken).not.toHaveBeenCalled();
+
+    // The target was bootstrapped by the SAME engine with the customer's own token, never the platform's.
+    const uses = c.ch.provider.calls.tokenUses.filter((use) => use.ref === c.customerRef);
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.filter((use) => use.kind === 'platform')).toEqual([]);
+
+    const [binding] = await adminSql<{ project_id: string }[]>`
+      select project_id from platform.tenant_projects where tenant_id = ${c.t.tenantId}::uuid`;
+    expect(binding?.project_id).toBe(c.customerId);
+    const [project] = await adminSql<{ state: string; owner: string }[]>`
+      select state, owner from platform.projects where id = ${c.customerId}::uuid`;
+    expect(project).toEqual({ state: 'ready', owner: 'customer' });
+  }, 240_000);
+
+  it('an explicit platform owner on a new target registers a platform project (the old path)', async () => {
+    const c = await customerCase('plat');
+    const registered = await registerMoveTarget(
+      startInput(c, c.platformRef, 'platform'),
+      c.ch.deps.target,
+    );
+    expect(registered.registered).toBe(true);
+    const [row] = await adminSql<{ owner: string; mgmt_token_sealed: string | null }[]>`
+      select owner, mgmt_token_sealed from platform.projects where id = ${registered.projectId}::uuid`;
+    expect(row).toEqual({ owner: 'platform', mgmt_token_sealed: null });
+  });
+
+  it('refuses a known PLATFORM project asked for as a customer target and writes nothing', async () => {
+    const c = await customerCase('refuse');
+    await registerMoveTarget(startInput(c, c.platformRef, 'platform'), c.ch.deps.target);
+    await dropOpenMove(c.t.tenantId);
+
+    const error = await refusalOf(
+      registerMoveTarget(startInput(c, c.platformRef, 'customer'), c.ch.deps.target),
+    );
+    expect(error).toBeInstanceOf(MoveError);
+    expect((error as MoveError).code).toBe('target_not_ready');
+    expect((error as MoveError).tables).toEqual(['owner']);
+    expect(await moveRowsOf(c.t.tenantId)).toBe(0);
+  });
+
+  it('accepts a known CUSTOMER project without an owner (the registry says what it is)', async () => {
+    const c = await customerCase('known');
+    const readToken = vi.fn(async () => 'never');
+    const accepted = await registerMoveTarget(startInput(c, c.customerRef), {
+      ...c.ch.deps.target,
+      readToken,
+    });
+    expect(accepted.registered).toBe(false);
+    expect(accepted.projectId).toBe(c.customerId);
+    expect(readToken).not.toHaveBeenCalled();
+    expect(await moveRowsOf(c.t.tenantId)).toBe(1);
+
+    // The same project asked for as a platform one is refused, and nothing more is written.
+    await dropOpenMove(c.t.tenantId);
+    const error = await refusalOf(
+      registerMoveTarget(startInput(c, c.customerRef, 'platform'), c.ch.deps.target),
+    );
+    expect((error as MoveError).tables).toEqual(['owner']);
+    expect(await moveRowsOf(c.t.tenantId)).toBe(0);
   });
 });

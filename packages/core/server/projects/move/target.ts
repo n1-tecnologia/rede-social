@@ -32,6 +32,12 @@ export type TargetDeps = {
   production?: boolean | undefined;
   bootstrap?: BootstrapDeps | undefined;
   sleep?: ((ms: number) => Promise<void>) | undefined;
+  /**
+   * 09.4-12 (D-567): how a customer token is obtained for a target the registry does not know yet. Only the
+   * local wrapper (`scripts/move-tenant.ts`) injects it, wired to the hidden prompt; the Cloud Run Job and any
+   * caller without a terminal leave it unset and fail closed with `register_first`.
+   */
+  readToken?: (() => Promise<string>) | undefined;
 };
 
 /** The API origin of a project the platform registers: `https://<ref>.supabase.co`, or the fake's target. */
@@ -81,6 +87,10 @@ export type RegisterInput = {
   actor: string;
   statusBefore: 'active' | 'suspended';
   fromProjectId: string;
+  /** 09.4-12: whose project the target is. Absent leaves the registry to say; `platform` is the old path. */
+  owner?: 'platform' | 'customer' | undefined;
+  /** 09.4-12: the typed token expiry (`YYYY-MM-DD`) of a customer target registered by this move. */
+  tokenExpiresAt?: string | null | undefined;
 };
 
 /**
