@@ -1128,3 +1128,143 @@ describe('Reason catalog (DBT-20, UI A-UI-10)', () => {
     expect(reasonOf(new Error('secret sb_secret_X'), 'auth')).not.toContain('secret');
   });
 });
+
+describe('customer token provider (09.4-05, D-571, D-573, CTK-12, CTK-15, CTK-23)', () => {
+  const CUSTOMER_PAT = 'sbp_CUSTOMER-scoped-token-0002';
+  const REF2 = 'tsrqponmlkjihgfedcba';
+  const customer = (
+    baseUrl: string,
+    extra: Partial<Parameters<typeof createSupabaseProjectProvider>[0]> = {},
+  ) =>
+    createSupabaseProjectProvider({
+      pat: CUSTOMER_PAT,
+      tokenKind: 'customer',
+      baseUrl,
+      limiter: createLimiter({ perMinute: 10_000 }),
+      jitter: () => 0,
+      ...extra,
+    });
+
+  it('learns the organisation from the first describe, pins it, and refuses another one', async () => {
+    const stub = await startStub((r) => {
+      if (r.path === P) return { status: 200, body: projectBody() };
+      if (r.path === `/v1/projects/${REF2}`) {
+        return {
+          status: 200,
+          body: projectBody({ ref: REF2, id: REF2, organization_slug: 'other-org' }),
+        };
+      }
+      return undefined;
+    });
+    const api = customer(stub.baseUrl);
+
+    expect(await api.describe(REF)).toMatchObject({ ref: REF, orgSlug: ORG });
+    const failure = await api.describe(REF2).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(ProjectProviderError);
+    expect(failure).toMatchObject({
+      kind: 'forbidden',
+      status: 403,
+      code: 'org_mismatch',
+      customerToken: true,
+    });
+    expect((failure as Error).message).toBe('forbidden 403');
+  });
+
+  it('refuses the first describe of a project that reports another organisation than the given pin', async () => {
+    const stub = await startStub(readRoutes);
+    const api = customer(stub.baseUrl, { orgSlug: 'pinned-elsewhere' });
+    await expect(api.describe(REF)).rejects.toMatchObject({
+      kind: 'forbidden',
+      status: 403,
+      code: 'org_mismatch',
+      customerToken: true,
+    });
+    await expect(api.listApiKeys(REF)).rejects.toMatchObject({ code: 'org_mismatch' });
+    expect(stub.requests.some((r) => r.path.endsWith('/api-keys'))).toBe(false);
+  });
+
+  it('refines 401 and 403 into token codes on a customer provider only, keeping kind and message', async () => {
+    for (const [status, code] of [
+      [401, 'token_invalid'],
+      [403, 'token_forbidden'],
+    ] as const) {
+      const stub = await startStub(() => ({ status, body: { message: `leak ${CUSTOMER_PAT}` } }));
+      const failure = (await customer(stub.baseUrl)
+        .describe(REF)
+        .catch((e: unknown) => e)) as ProjectProviderError;
+      expect(failure).toMatchObject({ kind: 'forbidden', status, code, customerToken: true });
+      expect(failure.message).toBe(`forbidden ${status}`);
+      expect(JSON.stringify({ ...failure, message: failure.message })).not.toContain('sbp_');
+
+      const platformStub = await startStub(() => ({ status, body: {} }));
+      const platformFailure = (await provider(platformStub.baseUrl)
+        .describe(REF)
+        .catch((e: unknown) => e)) as ProjectProviderError;
+      expect(platformFailure).toMatchObject({
+        kind: 'forbidden',
+        status,
+        code: undefined,
+        customerToken: false,
+      });
+      expect(platformFailure.message).toBe(`forbidden ${status}`);
+    }
+  });
+
+  it('marks every other non-2xx of a customer provider with customerToken but no code', async () => {
+    for (const status of [404, 409, 500]) {
+      const stub = await startStub(() => ({ status, body: {} }));
+      const failure = (await customer(stub.baseUrl)
+        .describe(REF)
+        .catch((e: unknown) => e)) as ProjectProviderError;
+      expect(failure.status).toBe(status);
+      expect(failure.code).toBeUndefined();
+      expect(failure.customerToken).toBe(true);
+    }
+  });
+
+  it('still requires orgSlug of a platform provider, and a pat of a customer provider', () => {
+    expect(() => createSupabaseProjectProvider({ pat: PAT, orgSlug: '' })).toThrow(
+      new TypeError('project provider: orgSlug is required'),
+    );
+    expect(() =>
+      createSupabaseProjectProvider({
+        pat: PAT,
+        tokenKind: 'platform',
+        orgSlug: undefined as unknown as string,
+      }),
+    ).toThrow(new TypeError('project provider: orgSlug is required'));
+    expect(() => createSupabaseProjectProvider({ pat: '', tokenKind: 'customer' })).toThrow(
+      new TypeError('project provider: pat is required'),
+    );
+    expect(() =>
+      createSupabaseProjectProvider({ pat: CUSTOMER_PAT, tokenKind: 'customer' }),
+    ).not.toThrow();
+  });
+
+  it('owns its limiter: a 429 on one customer provider pauses only that provider', async () => {
+    let clock = 0;
+    const sleeps: number[] = [];
+    let hits = 0;
+    const stub = await startStub((r) => {
+      if (r.path !== P) return undefined;
+      hits += 1;
+      return hits === 1
+        ? { status: 429, headers: { 'X-RateLimit-Reset': '2' }, body: {} }
+        : { status: 200, body: projectBody() };
+    });
+    let other: ReturnType<typeof customer> | undefined;
+    let otherAnswer: unknown;
+    const sleep = async (ms: number) => {
+      sleeps.push(ms);
+      // While the first provider is paused, the second one asks: it must not wait for the first one's window.
+      if (sleeps.length === 1 && other) otherAnswer = await other.describe(REF);
+      clock += ms;
+    };
+    const first = customer(stub.baseUrl, { limiter: undefined, now: () => clock, sleep });
+    other = customer(stub.baseUrl, { limiter: undefined, now: () => clock, sleep });
+
+    await first.describe(REF);
+    expect(sleeps).toEqual([2000]);
+    expect(otherAnswer).toMatchObject({ ref: REF });
+  });
+});
