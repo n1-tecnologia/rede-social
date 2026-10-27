@@ -1747,11 +1747,12 @@ describe('GET /v1/platform/tenants: the token state of each row and the Banco fi
     expect(new Set(slugs).size).toBe(slugs?.length);
   });
 
-  it('each row carries database.token { state } for a customer project and null for a platform one, and database.state ignores it', async () => {
+  it('each row carries database.token { state } for a customer project and none for a platform one, and database.state ignores it', async () => {
     const { body } = await list(`q=${gridPrefix}&limit=100`);
     const rows = new Map(body?.tenants.map((t) => [t.slug, t.database]));
     const plat = rows.get(`${gridPrefix}plat`);
-    expect(plat?.token).toBeNull();
+    // Absent on the wire for a platform project (it renders as before); read as no token state.
+    expect(plat?.token ?? null).toBeNull();
     const dbStates = new Set<string>();
     for (const cell of grid) {
       const database = rows.get(cell.slug);
@@ -1792,11 +1793,14 @@ describe('GET /v1/platform/tenants: the token state of each row and the Banco fi
     expect(text).not.toContain('checkedAt');
     expect(text).not.toContain('sbp_');
     for (const row of body?.tenants ?? []) {
-      expect(Object.keys(row.database).sort()).toEqual(['schema', 'state', 'token']);
+      expect(Object.keys(row.database).sort()).toEqual(
+        row.slug.endsWith('-plat') ? ['schema', 'state'] : ['schema', 'state', 'token'],
+      );
       if (row.database.token) expect(Object.keys(row.database.token)).toEqual(['state']);
     }
     for (const cell of grid) {
-      if (cell.expiresAt) expect(text).not.toContain(cell.expiresAt);
+      // Quoted, so a row's createdAt timestamp of the same day is not mistaken for an expiry value.
+      if (cell.expiresAt) expect(text).not.toContain(`"${cell.expiresAt}"`);
     }
   });
 });

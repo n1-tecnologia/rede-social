@@ -20,6 +20,7 @@ import {
   ACCESS_FIELDS,
   isProjectRef,
   type TenantDatabaseSummary,
+  TOKEN_EXPIRING_WINDOW_DAYS,
 } from '@rede-social/contracts/projects';
 import {
   and,
@@ -72,7 +73,8 @@ import { summarizeDatabase } from '../projects/overview';
 import { precheckProject } from '../projects/precheck';
 import { getProjectProvider } from '../projects/provider-access';
 import { createRequestTokenProvider } from '../projects/provider-for';
-import { recordTokenEvent, sealManagementToken } from '../projects/token';
+import { recordTokenEvent, sealManagementToken, todayInSaoPaulo } from '../projects/token';
+import { tokenStateOf } from '../projects/token-state';
 import type { ProjectProvider } from '../projects/types';
 import { processKeyring, seal } from '../secrets/sealed';
 import { pushToCentral, pushToTenant } from '../tenancy/mirror';
@@ -155,6 +157,13 @@ export async function listPlatformTenants(
   // `banco=problema` (UI-D-540): Preparação falhou, Atrasado, Pausado or Inacessível, decided in SQL from the
   // same facts `summarizeDatabase` reads, so the filter and the pill cannot disagree. A move (plan 23) is a
   // fifth fact; until then nothing is moving.
+  //
+  // 09.4-13 (CTK-41, UI-D-560, D-573): a CUSTOMER project also matches when its token needs attention, the same
+  // five states the contracts `tokenState` calls attention-worthy: a stored refusal (`invalid`, `forbidden`,
+  // `org_mismatch`) or a typed expiry inside the window (`expiring`) or behind us (`expired`). `unchecked` and
+  // `valid` never match. The window is the contracts constant; the calendar day is the operator's, the same one
+  // `todayInSaoPaulo` gives the function, and a parity test walks a grid of cases through both. The token is
+  // its own axis: it adds a disjunct to the filter and moves no `database.state`.
   if (query.banco === 'problema') {
     const required = getRequiredTenantSchema();
     const behind = required
@@ -165,6 +174,11 @@ export async function listPlatformTenants(
                where s.project_id = ${projects.id} and s.status = 'failed')
       or (${projects.state} = 'ready'
           and (coalesce(${projectHealth.status}, 'unknown') in ('unreachable', 'paused') or ${behind}))
+      or (${projects.owner} = 'customer'
+          and (${projectHealth.tokenCheck} in ('invalid', 'forbidden', 'org_mismatch')
+               or (${projects.mgmtTokenExpiresAt} is not null
+                   and ${projects.mgmtTokenExpiresAt}
+                       <= ((now() at time zone 'America/Sao_Paulo')::date + ${TOKEN_EXPIRING_WINDOW_DAYS}::int))))
     )`);
   }
 
@@ -215,6 +229,9 @@ export async function listPlatformTenants(
         projectState: projects.state,
         healthStatus: projectHealth.status,
         appliedCount: projectSchemaState.appliedCount,
+        owner: projects.owner,
+        tokenCheck: projectHealth.tokenCheck,
+        expiresAt: projects.mgmtTokenExpiresAt,
         failed: sql<boolean>`exists (
           select 1 from ${projectBootstrapSteps} s
            where s.project_id = ${projects.id} and s.status = 'failed')`,
@@ -230,17 +247,32 @@ export async function listPlatformTenants(
 
   const page = tenantRows.slice(0, limit);
   const moving = await tenantsMoving(page.map((t) => t.id));
+  const today = todayInSaoPaulo();
   const databases = new Map(
-    databaseRows.map((row) => [
-      row.tenantId,
-      summarizeDatabase({
-        projectState: row.projectState,
-        steps: row.failed ? [{ status: 'failed' }] : [],
-        healthStatus: row.healthStatus,
-        appliedCount: row.appliedCount,
-        moving: moving.has(row.tenantId),
-      }),
-    ]),
+    databaseRows.map((row) => {
+      // The token state is its own axis (D-573, D-574): derived apart from the database state, `{ state }` only
+      // (never the expiry, the organisation or the check time, UI-D-561), absent for a platform project.
+      const token = tokenStateOf({
+        owner: row.owner,
+        tokenCheck: row.tokenCheck,
+        expiresAt: row.expiresAt,
+        today,
+      });
+      return [
+        row.tenantId,
+        {
+          ...summarizeDatabase({
+            projectState: row.projectState,
+            steps: row.failed ? [{ status: 'failed' }] : [],
+            healthStatus: row.healthStatus,
+            appliedCount: row.appliedCount,
+            moving: moving.has(row.tenantId),
+          }),
+          // A platform row carries no `token` key at all, so it renders byte for byte as before (D-566).
+          ...(token ? { token: { state: token } } : {}),
+        },
+      ];
+    }),
   );
 
   const byTenant = new Map<string, ModuleKey[]>();
