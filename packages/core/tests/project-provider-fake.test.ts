@@ -320,3 +320,139 @@ describe('fake project provider: recorded writes and deterministic answers', () 
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('fake project provider: customer tokens (09.4-05, CTK-30)', () => {
+  const ALPHA = 'alpha-ref';
+  const BETA = 'beta-ref';
+  const TOKEN = 'sbp_fc_fake_a';
+  const both = { [ALPHA]: target(ALPHA), [BETA]: target(BETA) };
+
+  it('an unknown token is token_invalid on every method; a ref outside the scope is token_forbidden', async () => {
+    const fake = createFakeProjectProvider({
+      targets: both,
+      tokens: { [TOKEN]: { refs: [ALPHA] } },
+    });
+    const stranger = fake.forToken('sbp_fc_fake_unknown');
+    const expected = { kind: 'forbidden', status: 401, code: 'token_invalid', customerToken: true };
+    await expect(stranger.describe(ALPHA)).rejects.toMatchObject(expected);
+    await expect(stranger.health(ALPHA)).rejects.toMatchObject(expected);
+    await expect(stranger.listApiKeys(ALPHA)).rejects.toMatchObject(expected);
+    await expect(stranger.listProjects()).rejects.toMatchObject(expected);
+
+    const view = fake.forToken(TOKEN);
+    await expect(view.describe(ALPHA)).resolves.toMatchObject({ ref: ALPHA });
+    await expect(view.describe(BETA)).rejects.toMatchObject({
+      kind: 'forbidden',
+      status: 403,
+      code: 'token_forbidden',
+      customerToken: true,
+    });
+    await expect(view.listApiKeys(BETA)).rejects.toMatchObject({ code: 'token_forbidden' });
+    const failure = (await view.describe(BETA).catch((e: unknown) => e)) as ProjectProviderError;
+    expect(failure.message).toBe('forbidden 403');
+    expect(JSON.stringify({ ...failure, message: failure.message })).not.toContain('sbp_');
+  });
+
+  it('learns the organisation like the real adapter and pins it', async () => {
+    const orgs = { [ALPHA]: 'acme', [BETA]: 'other' };
+    const fake = createFakeProjectProvider({
+      targets: both,
+      orgs,
+      tokens: { [TOKEN]: { refs: 'all' } },
+    });
+    const learning = fake.forToken(TOKEN);
+    await expect(learning.describe(ALPHA)).resolves.toMatchObject({ orgSlug: 'acme' });
+    await expect(learning.describe(BETA)).rejects.toMatchObject({
+      kind: 'forbidden',
+      status: 403,
+      code: 'org_mismatch',
+      customerToken: true,
+    });
+    // The pin also covers the reads of secrets.
+    await expect(learning.ensureKeys(BETA)).rejects.toMatchObject({ code: 'org_mismatch' });
+
+    const pinned = fake.forToken(TOKEN, { orgSlug: 'acme' });
+    await expect(pinned.describe(BETA)).rejects.toMatchObject({ code: 'org_mismatch' });
+    // The platform fake does not pin: its describe answers the ref's organisation.
+    await expect(fake.describe(BETA)).resolves.toMatchObject({ orgSlug: 'other' });
+  });
+
+  it('setTokenState makes the next call token_invalid or token_forbidden; the base fake is unaffected', async () => {
+    const fake = createFakeProjectProvider({
+      targets: both,
+      tokens: { [TOKEN]: { refs: 'all' } },
+    });
+    const view = fake.forToken(TOKEN);
+    await expect(view.describe(ALPHA)).resolves.toBeDefined();
+    fake.setTokenState(TOKEN, 'dead');
+    await expect(view.describe(ALPHA)).rejects.toMatchObject({
+      status: 401,
+      code: 'token_invalid',
+    });
+    fake.setTokenState(TOKEN, 'forbidden');
+    await expect(view.describe(ALPHA)).rejects.toMatchObject({
+      status: 403,
+      code: 'token_forbidden',
+    });
+    fake.setTokenState(TOKEN, 'ok');
+    await expect(view.describe(ALPHA)).resolves.toBeDefined();
+    fake.setTokenState(TOKEN, 'dead');
+    await expect(fake.describe(ALPHA)).resolves.toBeDefined();
+  });
+
+  it('listProjects returns the refs in the token scope, and every target for the platform fake and for all', async () => {
+    const fake = createFakeProjectProvider({
+      targets: both,
+      tokens: { one: { refs: [ALPHA] }, everything: { refs: 'all' } },
+    });
+    await expect(fake.forToken('one').listProjects()).resolves.toEqual([{ ref: ALPHA }]);
+    await expect(fake.forToken('everything').listProjects()).resolves.toEqual([
+      { ref: ALPHA },
+      { ref: BETA },
+    ]);
+    await expect(fake.listProjects()).resolves.toEqual([{ ref: ALPHA }, { ref: BETA }]);
+  });
+
+  it('records the token kind of every call that names a ref', async () => {
+    const fake = createFakeProjectProvider({
+      targets: both,
+      tokens: { [TOKEN]: { refs: [ALPHA] } },
+    });
+    await fake.describe(BETA);
+    await fake.ensureKeys(BETA);
+    const view = fake.forToken(TOKEN);
+    await view.describe(ALPHA);
+    await view.listApiKeys(ALPHA);
+    await view.describe(BETA).catch(() => undefined);
+    await view.listProjects();
+    expect(fake.calls.tokenUses).toEqual([
+      { ref: BETA, kind: 'platform' },
+      { ref: BETA, kind: 'platform' },
+      { ref: ALPHA, kind: 'customer' },
+      { ref: ALPHA, kind: 'customer' },
+      { ref: BETA, kind: 'customer' },
+    ]);
+    expect(JSON.stringify(fake.calls)).not.toContain(TOKEN);
+  });
+
+  it('the view shares one world with the base fake: polls, recorded writes and failAt', async () => {
+    const fake = createFakeProjectProvider({
+      targets: both,
+      comingUpPolls: 1,
+      tokens: { [TOKEN]: { refs: 'all' } },
+      failAt: { step: 'auth', times: 1 },
+    });
+    const view = fake.forToken(TOKEN);
+    expect((await view.describe(ALPHA)).status).toBe('COMING_UP');
+    expect((await fake.describe(ALPHA)).status).toBe('ACTIVE_HEALTHY');
+    await expect(
+      view.patchAuthConfig(ALPHA, { site_url: 'https://x.example' }),
+    ).rejects.toMatchObject({
+      kind: 'unavailable',
+    });
+    await view.patchAuthConfig(ALPHA, { site_url: 'https://x.example' });
+    expect(fake.calls.patches[ALPHA]).toEqual([
+      { target: 'auth', body: { site_url: 'https://x.example' } },
+    ]);
+  });
+});
