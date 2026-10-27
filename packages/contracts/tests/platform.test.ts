@@ -313,6 +313,37 @@ describe('platformTenantsQuerySchema (GET /v1/platform/tenants)', () => {
   });
 });
 
+describe('the tenant list row carries the token state only as an optional, token-free summary (09.4-03)', () => {
+  const row = {
+    id: UUID,
+    slug: 'sao-jose',
+    displayName: 'Associação São José',
+    status: 'active',
+    createdAt: ISO,
+    enabledModules: ['feed'],
+    primaryHost: null,
+  };
+  const withDatabase = (database: unknown) =>
+    platformTenantsSchema.safeParse({ tenants: [{ ...row, database }], nextCursor: null });
+  const base = { state: 'ready', schema: { applied: 1, required: 1 } };
+
+  it('an old API row (no token) and a new one (token state) both parse', () => {
+    expect(withDatabase(base).success).toBe(true);
+    expect(withDatabase({ ...base, token: null }).success).toBe(true);
+    expect(withDatabase({ ...base, token: { state: 'expiring' } }).success).toBe(true);
+  });
+
+  it('nothing but the state can ride in the token block', () => {
+    expect(withDatabase({ ...base, token: { state: 'valid', token: 'sbp_x' } }).success).toBe(
+      false,
+    );
+    expect(withDatabase({ ...base, token: { state: 'valid', tokenPrefix: 'sbp_' } }).success).toBe(
+      false,
+    );
+    expect(withDatabase({ ...base, tokenLength: 44 }).success).toBe(false);
+  });
+});
+
 describe('platformTenantDetailSchema (GET /v1/platform/tenants/{id})', () => {
   const colors = deriveBrandColors({ primary: '#7c3aed', secondary: '#a78bfa' });
   const fixture = {

@@ -12,10 +12,15 @@ import {
   localProjectRefSchema,
   normalizeProjectRef,
   platformTenantsQuerySchema,
+  PRECHECK_REASONS,
   precheckAnswerSchema,
   precheckBodySchema,
   projectRefSchema,
   replaceCredentialsBodySchema,
+  replaceTokenAnswerSchema,
+  replaceTokenBodySchema,
+  tenantDatabaseSummarySchema,
+  tokenSummarySchema,
   TOKEN_CHECKS,
   TOKEN_EXPIRING_WINDOW_DAYS,
   TOKEN_STATES,
@@ -197,7 +202,7 @@ describe('databaseState (UI-D-539): the precedence moving > preparation_failed >
       'tenant',
       'invite',
     ]);
-    expect(BOOTSTRAP_REASON_CODES).toHaveLength(10);
+    expect(BOOTSTRAP_REASON_CODES).toHaveLength(13);
   });
 });
 
@@ -476,5 +481,336 @@ describe('the token state is its own axis (D-573, D-574, UI-D-551)', () => {
     }
     expect(DATABASE_STATES).not.toContain('invalid');
     expect(DATABASE_STATES).not.toContain('org_mismatch');
+  });
+});
+
+describe('reason codes widened for the customer token (D-570..D-573), appended and never reordered', () => {
+  it('BOOTSTRAP_REASON_CODES is the old ten in order, then token_invalid, token_forbidden, org_mismatch', () => {
+    expect([...BOOTSTRAP_REASON_CODES]).toEqual([
+      'unreachable',
+      'access_denied',
+      'not_empty',
+      'migration_failed',
+      'auth_config_failed',
+      'storage_failed',
+      'realtime_failed',
+      'tenant_failed',
+      'invite_failed',
+      'unknown',
+      'token_invalid',
+      'token_forbidden',
+      'org_mismatch',
+    ]);
+  });
+
+  it('PRECHECK_REASONS is the old six in order, then the six token reasons (not_pro is reserved)', () => {
+    expect([...PRECHECK_REASONS]).toEqual([
+      'invalid',
+      'not_found',
+      'not_empty',
+      'in_use',
+      'paused',
+      'unchecked',
+      'token_invalid',
+      'token_forbidden',
+      'token_other_project',
+      'token_account_wide',
+      'token_expiry_invalid',
+      'not_pro',
+    ]);
+    for (const reason of PRECHECK_REASONS) {
+      expect(precheckAnswerSchema.safeParse({ ok: false, reason }).success).toBe(true);
+    }
+  });
+});
+
+describe('the token exists only in INPUT bodies, strict and bounded (CTK-26, T-09.4-10, T-09.4-11)', () => {
+  const TOKEN = 'sbp_0123456789abcdef0123456789abcdef01234567';
+
+  it('precheckBodySchema keeps the platform body and accepts the customer body', () => {
+    expect(precheckBodySchema.safeParse({ projectRef: REF }).success).toBe(true);
+    expect(precheckBodySchema.safeParse({ projectRef: REF, owner: 'platform' }).success).toBe(true);
+    const customer = precheckBodySchema.parse({
+      projectRef: REF,
+      owner: 'customer',
+      token: TOKEN,
+      tokenExpiresAt: '2027-01-02',
+    });
+    expect(customer.owner).toBe('customer');
+    expect(customer.token).toBe(TOKEN);
+    expect(customer.tokenExpiresAt).toBe('2027-01-02');
+    expect(
+      precheckBodySchema.safeParse({ projectRef: REF, owner: 'customer', token: TOKEN }).success,
+    ).toBe(true);
+  });
+
+  it('a customer body needs a non-blank token; a platform body cannot carry a token or an expiry', () => {
+    for (const body of [
+      { projectRef: REF, owner: 'customer' },
+      { projectRef: REF, owner: 'customer', token: '' },
+      { projectRef: REF, owner: 'customer', token: '   ' },
+      { projectRef: REF, owner: 'platform', token: TOKEN },
+      { projectRef: REF, token: TOKEN },
+      { projectRef: REF, tokenExpiresAt: '2027-01-02' },
+      { projectRef: REF, owner: 'platform', tokenExpiresAt: '2027-01-02' },
+    ]) {
+      expect(precheckBodySchema.safeParse(body).success, JSON.stringify(Object.keys(body))).toBe(
+        false,
+      );
+    }
+    const missing = precheckBodySchema.safeParse({ projectRef: REF, owner: 'customer' });
+    expect(missing.error?.issues.some((issue) => issue.path[0] === 'token')).toBe(true);
+    const stray = precheckBodySchema.safeParse({
+      projectRef: REF,
+      owner: 'platform',
+      token: TOKEN,
+    });
+    expect(stray.error?.issues.some((issue) => issue.path[0] === 'owner')).toBe(true);
+  });
+
+  it('refuses an unknown key, an unknown owner and a token longer than 4096', () => {
+    expect(
+      precheckBodySchema.safeParse({ projectRef: REF, owner: 'customer', token: TOKEN, url: 'x' })
+        .success,
+    ).toBe(false);
+    expect(
+      precheckBodySchema.safeParse({ projectRef: REF, owner: 'partner', token: TOKEN }).success,
+    ).toBe(false);
+    expect(
+      precheckBodySchema.safeParse({ projectRef: REF, owner: 'customer', token: 'a'.repeat(4096) })
+        .success,
+    ).toBe(true);
+    expect(
+      precheckBodySchema.safeParse({ projectRef: REF, owner: 'customer', token: 'a'.repeat(4097) })
+        .success,
+    ).toBe(false);
+    expect(
+      precheckBodySchema.safeParse({
+        projectRef: REF,
+        owner: 'customer',
+        token: TOKEN,
+        tokenExpiresAt: '2027-01-02T00:00',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('the refusal messages are static: no issue contains any part of the submitted token', () => {
+    const secret = 'sbp_SECRETSECRETSECRET0123456789';
+    const results = [
+      precheckBodySchema.safeParse({ projectRef: REF, owner: 'platform', token: secret }),
+      precheckBodySchema.safeParse({ projectRef: REF, token: secret, tokenExpiresAt: secret }),
+      precheckBodySchema.safeParse({
+        projectRef: REF,
+        owner: 'customer',
+        token: secret.repeat(200),
+      }),
+      precheckBodySchema.safeParse({
+        projectRef: REF,
+        owner: 'customer',
+        token: secret,
+        extra: secret,
+      }),
+      replaceTokenBodySchema.safeParse({ token: secret, tokenExpiresAt: `${secret}${secret}` }),
+      replaceTokenBodySchema.safeParse({ token: secret, other: secret }),
+      createTenantBodySchema.safeParse({ ...tenantBody, owner: 'platform', token: secret }),
+      createTenantBodySchema.safeParse({ ...tenantBody, token: secret }),
+    ];
+    for (const result of results) {
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error?.issues)).not.toContain('SECRET');
+      expect(JSON.stringify(result.error?.issues)).not.toContain('sbp_');
+    }
+  });
+});
+
+const tenantBody = {
+  displayName: 'Comunidade',
+  slug: 'comunidade',
+  colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+  adminEmail: 'admin@cliente.com.br',
+};
+
+describe('createTenantBodySchema carries the customer project fields', () => {
+  const TOKEN = 'sbp_0123456789abcdef0123456789abcdef01234567';
+
+  it('accepts the old body unchanged and the customer body', () => {
+    expect(createTenantBodySchema.safeParse(tenantBody).success).toBe(true);
+    expect(
+      createTenantBodySchema.safeParse({ ...tenantBody, projectRef: REF, owner: 'platform' })
+        .success,
+    ).toBe(true);
+    const parsed = createTenantBodySchema.parse({
+      ...tenantBody,
+      projectRef: REF,
+      owner: 'customer',
+      token: TOKEN,
+      tokenExpiresAt: '2027-01-02',
+    });
+    expect(parsed.owner).toBe('customer');
+    expect(parsed.token).toBe(TOKEN);
+    expect(parsed.tokenExpiresAt).toBe('2027-01-02');
+  });
+
+  it('a customer body needs a token, a platform body cannot have one, and the token is bounded', () => {
+    expect(
+      createTenantBodySchema.safeParse({ ...tenantBody, projectRef: REF, owner: 'customer' })
+        .success,
+    ).toBe(false);
+    expect(
+      createTenantBodySchema.safeParse({
+        ...tenantBody,
+        projectRef: REF,
+        owner: 'customer',
+        token: '  ',
+      }).success,
+    ).toBe(false);
+    expect(
+      createTenantBodySchema.safeParse({
+        ...tenantBody,
+        projectRef: REF,
+        owner: 'platform',
+        token: TOKEN,
+      }).success,
+    ).toBe(false);
+    expect(
+      createTenantBodySchema.safeParse({
+        ...tenantBody,
+        projectRef: REF,
+        owner: 'customer',
+        token: 'a'.repeat(4097),
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('the answers stay strict and token-free; the additions are optional (expand-only)', () => {
+  const overview = {
+    ref: REF,
+    plan: 'pro',
+    state: 'ready',
+    steps: BOOTSTRAP_STEP_KEYS.map((step) => ({
+      step,
+      status: 'done',
+      attempt: 1,
+      reasonCode: null,
+      startedAt: '2026-10-23T00:00:00.000Z',
+      finishedAt: '2026-10-23T00:00:01.000Z',
+    })),
+    schema: { applied: 147, required: 147 },
+    lastCheckedAt: '2026-10-23T00:05:00.000Z',
+    preparationFinishedAt: '2026-10-23T00:00:01.000Z',
+    credentials: { held: true, updatedAt: '2026-10-23T00:00:01.000Z' },
+    otherTenants: 0,
+    moving: false,
+    lastErrorCode: null,
+  };
+  const customerToken = {
+    state: 'expiring',
+    expiresAt: '2026-11-08',
+    checkedAt: '2026-10-27T00:00:00.000Z',
+  };
+
+  it('parses the old shape (no owner, organization or token) and the new one', () => {
+    expect(databaseOverviewSchema.safeParse(overview).success).toBe(true);
+    const parsed = databaseOverviewSchema.parse({
+      ...overview,
+      owner: 'customer',
+      organization: 'acme-org',
+      token: customerToken,
+    });
+    expect(parsed.owner).toBe('customer');
+    expect(parsed.organization).toBe('acme-org');
+    expect(parsed.token).toEqual(customerToken);
+    expect(
+      databaseOverviewSchema.safeParse({
+        ...overview,
+        owner: 'customer',
+        organization: null,
+        token: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      databaseOverviewSchema.safeParse({ ...overview, lastErrorCode: 'org_mismatch' }).success,
+    ).toBe(true);
+  });
+
+  it('refuses every key that could hold a token, its prefix, its hash or its length', () => {
+    for (const key of ['token', 'mgmtToken', 'tokenPrefix', 'tokenLength', 'tokenHash']) {
+      expect(databaseOverviewSchema.safeParse({ ...overview, [key]: 'sbp_x' }).success, key).toBe(
+        false,
+      );
+      expect(
+        databaseOverviewSchema.safeParse({
+          ...overview,
+          owner: 'customer',
+          token: { ...customerToken, [key]: 'sbp_x' },
+        }).success,
+        `token.${key}`,
+      ).toBe(false);
+    }
+    // `token` is the summary object, never a string.
+    expect(databaseOverviewSchema.safeParse({ ...overview, token: 'sbp_x' }).success).toBe(false);
+  });
+
+  it('the token summary has only state, expiresAt and checkedAt', () => {
+    expect(tokenSummarySchema.safeParse(customerToken).success).toBe(true);
+    expect(
+      tokenSummarySchema.safeParse({ state: 'valid', expiresAt: null, checkedAt: null }).success,
+    ).toBe(true);
+    expect(tokenSummarySchema.safeParse({ ...customerToken, state: 'dead' }).success).toBe(false);
+    expect(tokenSummarySchema.safeParse({ state: 'valid', expiresAt: null }).success).toBe(false);
+    expect(Object.keys(tokenSummarySchema.shape).sort()).toEqual([
+      'checkedAt',
+      'expiresAt',
+      'state',
+    ]);
+  });
+
+  it('the list summary takes an optional token state and nothing more', () => {
+    const base = { state: 'ready', schema: { applied: 1, required: 1 } };
+    expect(tenantDatabaseSummarySchema.safeParse(base).success).toBe(true);
+    expect(tenantDatabaseSummarySchema.safeParse({ ...base, token: null }).success).toBe(true);
+    expect(
+      tenantDatabaseSummarySchema.safeParse({ ...base, token: { state: 'invalid' } }).success,
+    ).toBe(true);
+    expect(
+      tenantDatabaseSummarySchema.safeParse({
+        ...base,
+        token: { state: 'invalid', expiresAt: '2026-11-08' },
+      }).success,
+    ).toBe(false);
+    expect(
+      tenantDatabaseSummarySchema.safeParse({ ...base, token: { state: 'dead' } }).success,
+    ).toBe(false);
+  });
+});
+
+describe('replaceTokenBodySchema (D-575, UI-D-555)', () => {
+  it('accepts a token with or without an expiry, strict and trimmed', () => {
+    expect(replaceTokenBodySchema.safeParse({ token: 'sbp_abc' }).success).toBe(true);
+    expect(
+      replaceTokenBodySchema.safeParse({ token: 'sbp_abc', tokenExpiresAt: '2027-01-02' }).success,
+    ).toBe(true);
+    expect(replaceTokenBodySchema.parse({ token: '  sbp_abc  ' }).token).toBe('sbp_abc');
+  });
+
+  it('refuses an empty or whitespace token, an extra key, a long token and a malformed date', () => {
+    expect(replaceTokenBodySchema.safeParse({}).success).toBe(false);
+    expect(replaceTokenBodySchema.safeParse({ token: '' }).success).toBe(false);
+    expect(replaceTokenBodySchema.safeParse({ token: '   ' }).success).toBe(false);
+    expect(replaceTokenBodySchema.safeParse({ token: 'sbp_abc', owner: 'customer' }).success).toBe(
+      false,
+    );
+    expect(replaceTokenBodySchema.safeParse({ token: 'a'.repeat(4097) }).success).toBe(false);
+    expect(
+      replaceTokenBodySchema.safeParse({ token: 'sbp_abc', tokenExpiresAt: '2027-01-02T00:00:00Z' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('the answer says only that it worked', () => {
+    expect(replaceTokenAnswerSchema.safeParse({ ok: true }).success).toBe(true);
+    expect(replaceTokenAnswerSchema.safeParse({ ok: true, token: 'x' }).success).toBe(false);
+    expect(replaceTokenAnswerSchema.safeParse({ ok: false }).success).toBe(false);
   });
 });
