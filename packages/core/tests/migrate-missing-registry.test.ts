@@ -271,11 +271,11 @@ describe('a central database without the platform registry', () => {
   });
 });
 
-describe('an error that is not undefined_table', () => {
+describe('an error that is neither undefined_table nor undefined_column', () => {
   const failures: [string, () => Error][] = [
     ['a plain error', () => new Error('boom')],
-    ['undefined_column', () => drizzleError('42703')],
     ['cannot_connect_now', () => drizzleError('57P03')],
+    ['insufficient_privilege', () => drizzleError('42501')],
   ];
 
   it.each(failures)('b: the registry list rejects with the same error (%s)', async (_n, make) => {
@@ -305,6 +305,150 @@ describe('an error that is not undefined_table', () => {
     await expect(migrateAll({ tenantSlug: 'acme', deps: t.deps })).rejects.toBe(error);
     expect(t.apply).not.toHaveBeenCalled();
     expect(t.ensureProjectZero).not.toHaveBeenCalled();
+    expect(t.connectCentral).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A registry that exists but is one release behind this code (production run 40610340816, attempt 2, Cloud Run job
+ * execution migrate-6tvlf, 2026-10-28: `column "owner" does not exist`, PostgreSQL 42703). The registry read names
+ * the columns of the CURRENT schema; the 09.4 release added four columns to `platform.projects` in a central
+ * migration, and the Job read the registry BEFORE applying the central set, so it died on its first query and the
+ * API and worker never deployed. Local stacks and CI always have the current schema, which is why nothing covered
+ * this. Rule pinned here: 42703 on a first-pass registry read is handled like 42P01 (the central set runs first,
+ * then a strict re-read); every later 42703 is still loud.
+ */
+describe('a registry one release behind the code (undefined_column)', () => {
+  const behind = (): Error => drizzleError('42703');
+
+  function behindHarness(overrides: Partial<MigrateDeps> = {}) {
+    const t = harness({ overrides: {} });
+    const list = vi.fn(async () => {
+      if (!t.calls.includes('apply:central')) {
+        t.calls.push('list:behind');
+        throw behind();
+      }
+      t.calls.push('list:ok');
+      return [BETA, ALPHA];
+    });
+    const deps = { ...t.deps, listProjects: list, ...overrides } as MigrateDeps;
+    return { ...t, deps, list };
+  }
+
+  it('i: applies the central set first, re-reads the registry strictly and fans out in ascending ref', async () => {
+    const t = behindHarness();
+    const result = await migrateAll({ concurrency: 1, deps: t.deps });
+
+    expect(t.calls).toEqual([
+      'list:behind',
+      'ensureProjectZero',
+      'apply:central',
+      'list:ok',
+      'apply:tenant:alpha-proj',
+      'apply:tenant:beta-proj',
+    ]);
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(kinds(result.lines)).toEqual(['central', 'project', 'project', 'summary']);
+    expect(result.lines[3]).toMatchObject({ kind: 'summary', central: 'ok', projects: 2 });
+
+    const text = JSON.stringify(result.lines);
+    for (const forbidden of ['Failed query', 'does not exist', 'platform.projects', 'owner']) {
+      expect(text).not.toContain(forbidden);
+    }
+  });
+
+  it('i2: the cause chain is walked (a wrapper above the Drizzle error)', async () => {
+    const t = behindHarness();
+    const outer = new Error('outer', { cause: behind() });
+    const list = vi.fn(async () => {
+      if (!t.calls.includes('apply:central')) {
+        t.calls.push('list:behind');
+        throw outer;
+      }
+      t.calls.push('list:ok');
+      return [BETA, ALPHA];
+    });
+    const result = await migrateAll({
+      concurrency: 1,
+      deps: { ...t.deps, listProjects: list } as MigrateDeps,
+    });
+
+    expect(t.calls.slice(0, 4)).toEqual([
+      'list:behind',
+      'ensureProjectZero',
+      'apply:central',
+      'list:ok',
+    ]);
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('i3: with a tenant slug the lookup is repeated after the central set', async () => {
+    const t = behindHarness();
+    const lookup = vi.fn(async (): Promise<string | null> => {
+      if (!t.calls.includes('apply:central')) {
+        t.calls.push('tenantOf:behind');
+        throw behind();
+      }
+      t.calls.push('tenantOf:ok');
+      return BETA.id;
+    });
+    const result = await migrateAll({
+      concurrency: 1,
+      tenantSlug: 'acme',
+      deps: { ...t.deps, projectIdOfTenant: lookup } as MigrateDeps,
+    });
+
+    expect(t.calls).toEqual([
+      'tenantOf:behind',
+      'ensureProjectZero',
+      'apply:central',
+      'tenantOf:ok',
+      'list:ok',
+      'apply:tenant:beta-proj',
+    ]);
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('i4: a dry run reports the central set as pending, writes nothing and exits 0', async () => {
+    const t = behindHarness();
+    const result = await migrateAll({ dryRun: true, deps: t.deps });
+
+    expect(t.ensureProjectZero).not.toHaveBeenCalled();
+    expect(t.calls).toEqual(['list:behind', 'apply:central']);
+    expect(result.exitCode).toBe(0);
+    expect(result.lines[0]).toMatchObject({ kind: 'central', dryRun: true, status: 'ok' });
+  });
+
+  it('i5: a registry still behind after the central set rejects with the original error', async () => {
+    const error = behind();
+    const t = harness({
+      overrides: {
+        listProjects: vi.fn(async () => {
+          throw error;
+        }),
+      },
+    });
+    const list = t.deps.listProjects as ReturnType<typeof vi.fn>;
+
+    await expect(migrateAll({ deps: t.deps })).rejects.toBe(error);
+    expect(t.apply).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(t.connect).not.toHaveBeenCalled();
+  });
+
+  it('i6: the retry path (projectIds) stays strict and applies nothing', async () => {
+    const error = behind();
+    const t = harness({
+      overrides: {
+        listProjects: vi.fn(async () => {
+          throw error;
+        }),
+      },
+    });
+
+    await expect(migrateAll({ projectIds: [ALPHA.id], deps: t.deps })).rejects.toBe(error);
+    expect(t.apply).not.toHaveBeenCalled();
     expect(t.connectCentral).not.toHaveBeenCalled();
   });
 });

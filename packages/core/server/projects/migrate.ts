@@ -152,17 +152,23 @@ const usage = (message: string): MigrateResult => ({
 });
 
 /**
- * True when the error, or any link of its `.cause` chain, carries PostgreSQL code 42P01 (undefined_table). The
- * driver error is wrapped by the query builder, so the code sits on the cause, not on the thrown error. Only the
- * `code` strings are read; the message (it holds the statement) is never read or kept (PR-4).
+ * True when the error, or any link of its `.cause` chain, carries PostgreSQL code 42P01 (undefined_table) or
+ * 42703 (undefined_column). The first means the registry has never existed (the first release), the second that
+ * it exists but is one release behind this code: the registry read names the columns of the CURRENT schema, so a
+ * release that adds a column to `platform.projects` cannot read it before the central set has added it (the 09.4
+ * release, 2026-10-28: "column owner does not exist"). Either way the central set must run before the registry
+ * can be read strictly. The driver error is wrapped by the query builder, so the code sits on the cause, not on
+ * the thrown error. Only the `code` strings are read; the message (it holds the statement) is never read or kept
+ * (PR-4).
  */
-function isUndefinedTable(error: unknown): boolean {
+function isRegistryNotCurrent(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
   for (let depth = 0; depth < 8; depth += 1) {
     if (typeof current !== 'object' || current === null || seen.has(current)) return false;
     seen.add(current);
-    if ((current as { code?: unknown }).code === '42P01') return true;
+    const code = (current as { code?: unknown }).code;
+    if (code === '42P01' || code === '42703') return true;
     current = (current as { cause?: unknown }).cause;
   }
   return false;
@@ -195,7 +201,7 @@ async function selectTargets(
     }
     ready = await deps.listProjects();
   } catch (error) {
-    if (tolerant && isUndefinedTable(error)) return { kind: 'registry_missing' };
+    if (tolerant && isRegistryNotCurrent(error)) return { kind: 'registry_missing' };
     throw error;
   }
 
