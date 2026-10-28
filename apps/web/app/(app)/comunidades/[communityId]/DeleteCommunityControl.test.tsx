@@ -215,7 +215,10 @@ describe('DeleteCommunityControl — the refusal dialog (D-554)', () => {
     remove.mockResolvedValue(refusal([product(0), product(1), product(2)], 3));
     const dialog = await openRefusal();
 
-    expect(screen.queryByRole('dialog', { name: C.confirm.delete.title })).toBeNull();
+    // The delete dialog leaves with an exit animation; a slower runner still has it mounted on the first read.
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: C.confirm.delete.title })).toBeNull(),
+    );
     expect(dialog.textContent).toContain('Não é possível excluir');
     expect(dialog.textContent).toContain(PLURAL_BODY);
     const items = [...dialog.querySelectorAll('li')].map((li) => li.textContent);
