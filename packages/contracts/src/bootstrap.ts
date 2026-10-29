@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { tenantBrandingSchema } from './branding';
 import { TENANT_ROLES, TOGGLEABLE_MODULES } from './modules';
+import { profileFormBootstrapSchema } from './profile-form';
 
 /** `GET /v1/me/bootstrap` (ARCHITECTURE §Pattern 3). `modules`/`permissions` are filled by plan 01-06. */
 export const bootstrapSchema = z.object({
@@ -74,6 +75,10 @@ export const bootstrapSchema = z.object({
     // bootstrap field follows this rule: `.default(...)` or `.optional()`, never required.
     conversationsBadge: z.enum(['dot', 'count']).default('count'),
   }),
+  // 12-05 (PFORM-12, D-581): ADDITIVE and optional, per the rule above. Absent when the module is off or the
+  // role is not `member`; the API sends it only then, read live from the same SQL rule the gate uses. An API
+  // revision older than the web does not send it, which reads as "no form".
+  profileForm: profileFormBootstrapSchema.optional(),
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
 

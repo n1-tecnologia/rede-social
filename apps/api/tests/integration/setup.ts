@@ -698,6 +698,109 @@ export async function withPaymentsGate<T>(
 }
 
 /**
+ * 12-05 (PFORM-09, D-589): runs `fn` with the tenant's `profile_form` module row ON, then puts the previous
+ * row back (or deletes the one it created) in a `finally`. The seed does NOT enable the module, so every
+ * suite of the form turns it on here. `enabled: false` writes the row off (a module that is off but present).
+ * The gate and the bootstrap block read the row live, so nothing is invalidated; the flags cache is dropped
+ * only because `requireModule` (the admin routes of later plans) reads it.
+ */
+export async function withProfileForm<T>(
+  tenantId: string,
+  fn: () => Promise<T>,
+  options: { enabled?: boolean } = {},
+): Promise<T> {
+  const [previous] = await adminSql<{ enabled: boolean }[]>`
+    select enabled from public.tenant_modules
+     where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+  const write = async (enabled: boolean) => {
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${tenantId}::uuid, 'profile_form', ${enabled})
+      on conflict (tenant_id, module_key)
+      do update set enabled = excluded.enabled, updated_at = now()`;
+    moduleFlags.invalidate(tenantId);
+  };
+  await write(options.enabled ?? true);
+  try {
+    return await fn();
+  } finally {
+    if (previous) {
+      await write(previous.enabled);
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+      moduleFlags.invalidate(tenantId);
+    }
+  }
+}
+
+/**
+ * 12-05: one profile-form question through the admin SQL (the migration role, RLS off). Choice types need
+ * two options, which this helper adds when the caller does not pass any. Returns the new id.
+ */
+export async function seedProfileFormQuestion(input: {
+  tenantId: string;
+  adminUserId: string;
+  type?: string;
+  title: string;
+  required?: boolean;
+  archived?: boolean;
+  position?: number;
+  options?: { id: string; label: string }[];
+  listedAt?: Date;
+}): Promise<string> {
+  const type = input.type ?? 'short_text';
+  const isChoice = ['dropdown', 'multiple_choice', 'single_choice'].includes(type);
+  const options =
+    input.options ??
+    (isChoice
+      ? [
+          { id: crypto.randomUUID(), label: 'Sim' },
+          { id: crypto.randomUUID(), label: 'Não' },
+        ]
+      : []);
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.profile_form_questions
+      (tenant_id, type, title, required, position, options, archived_at, listed_at, created_by_user_id)
+    values (${input.tenantId}::uuid, ${type}, ${input.title}, ${input.required ?? false},
+            ${input.position ?? 0}, ${adminSql.json(options as never)},
+            ${input.archived ? adminSql`now()` : null},
+            ${input.listedAt ?? adminSql`now()`}, ${input.adminUserId}::uuid)
+    returning id::text as id`;
+  if (!row) throw new Error('seedProfileFormQuestion: no row returned');
+  return row.id;
+}
+
+/** 12-05: one answer of a member (by user id) to a question, through the admin SQL. Returns the answer id. */
+export async function seedProfileFormAnswer(input: {
+  tenantId: string;
+  questionId: string;
+  userId: string;
+  value?: unknown;
+}): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+    select m.tenant_id, ${input.questionId}::uuid, m.id, m.user_id,
+           ${adminSql.json((input.value ?? 'resposta') as never)}
+      from public.memberships m
+     where m.tenant_id = ${input.tenantId}::uuid and m.user_id = ${input.userId}::uuid
+       and m.deleted_at is null
+    returning id::text as id`;
+  if (!row) throw new Error('seedProfileFormAnswer: the member has no membership in that tenant');
+  return row.id;
+}
+
+/** 12-05: deletes the answers, then the questions, whose question title starts with `prefix` (idempotent). */
+export async function removeProfileFormByPrefix(prefix: string): Promise<void> {
+  await adminSql`
+    delete from public.profile_form_answers
+     where question_id in (select id from public.profile_form_questions
+                            where title like ${`${prefix}%`})`;
+  await adminSql`delete from public.profile_form_questions where title like ${`${prefix}%`}`;
+}
+
+/**
  * 09.1-05 (D-486): a tenant's payment integration, seeded the way the Pagamentos screen will create it:
  * a uuid the application chooses BEFORE the insert (the sealed token is bound to it), the token sealed
  * with the same `sealSecret` the route opens it with, written through the migration role. Returns the

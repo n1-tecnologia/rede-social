@@ -22,6 +22,7 @@ import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { getSubscriptionStatus } from '@rede-social/core/server/payments/status';
+import { bootstrapBlock } from '@rede-social/core/server/profile-form/member';
 import {
   dismissNudge,
   getOwnProfile,
@@ -189,10 +190,13 @@ export const meRoutes = me
         // D-40: the badge counters, composed from the EFFECTIVE modules' manifests in this same
         // transaction (07-01), so the bell and the rest of the bootstrap are one snapshot.
         const counters = await countersFor(tx, ctx, flags);
-        return { tenant, user, membership, profile, counters };
+        // 12-05 (PFORM-12): the form block, from the same SQL rule the gate uses and a LIVE module read (never
+        // the flags cache above), in this same transaction. `undefined` for staff and for a module that is off.
+        const profileForm = await bootstrapBlock(tx, ctx);
+        return { tenant, user, membership, profile, counters, profileForm };
       });
 
-      const { tenant, user, membership, profile, counters } = data;
+      const { tenant, user, membership, profile, counters, profileForm } = data;
       if (!tenant || !user || !membership) throw new ApiError(500, 'INTERNAL');
       if (!isTenantRole(membership.role) || !isStatus(membership.status)) {
         throw new ApiError(500, 'INTERNAL');
@@ -221,6 +225,8 @@ export const meRoutes = me
         modules: enabledModulesForBootstrap(flags.keys, flags.settings),
         permissions: permissionsFor(membership.role, flags.keys, flags.settings),
         counters,
+        // Additive: the key is absent (not null) when there is no form to answer.
+        ...(profileForm ? { profileForm } : {}),
       };
       return c.json(body, 200);
     },
