@@ -746,26 +746,31 @@ export async function seedProfileFormQuestion(input: {
   title: string;
   required?: boolean;
   archived?: boolean;
+  /** An explicit archive instant; wins over `archived`. */
+  archivedAt?: Date;
   position?: number;
-  options?: { id: string; label: string }[];
+  /** Option ids are generated (a random uuid each) when an option carries none. */
+  options?: { id?: string; label: string }[];
+  /** `{ min?, max? }` for a number (numbers) or a date (ISO days) question. */
+  limits?: { min?: number | string; max?: number | string };
+  allowOther?: boolean;
+  showOnProfile?: boolean;
   listedAt?: Date;
 }): Promise<string> {
   const type = input.type ?? 'short_text';
   const isChoice = ['dropdown', 'multiple_choice', 'single_choice'].includes(type);
-  const options =
-    input.options ??
-    (isChoice
-      ? [
-          { id: crypto.randomUUID(), label: 'Sim' },
-          { id: crypto.randomUUID(), label: 'Não' },
-        ]
-      : []);
+  const options = (input.options ?? (isChoice ? [{ label: 'Sim' }, { label: 'Não' }] : [])).map(
+    (option) => ({ id: option.id ?? crypto.randomUUID(), label: option.label }),
+  );
+  const archivedAt = input.archivedAt ?? (input.archived ? new Date() : null);
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.profile_form_questions
-      (tenant_id, type, title, required, position, options, archived_at, listed_at, created_by_user_id)
+      (tenant_id, type, title, required, position, options, limits, allow_other, show_on_profile,
+       archived_at, listed_at, created_by_user_id)
     values (${input.tenantId}::uuid, ${type}, ${input.title}, ${input.required ?? false},
             ${input.position ?? 0}, ${adminSql.json(options as never)},
-            ${input.archived ? adminSql`now()` : null},
+            ${adminSql.json((input.limits ?? {}) as never)}, ${input.allowOther ?? false},
+            ${input.showOnProfile ?? false}, ${archivedAt},
             ${input.listedAt ?? adminSql`now()`}, ${input.adminUserId}::uuid)
     returning id::text as id`;
   if (!row) throw new Error('seedProfileFormQuestion: no row returned');
