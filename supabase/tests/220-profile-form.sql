@@ -12,11 +12,14 @@ begin;
 -- 3. EXPOSURE: RLS on and not forced, the exact policy names, no privilege for `anon`.
 -- 4. POLICIES x TWO TENANTS: admin, support, member and a lane without a real role, each reading and writing in its own
 --    tenant and nothing in the other, every negative beside its positive control, every comparison a SET.
--- 5. FOREIGN KEY and CASCADE: an answered question cannot be deleted (RESTRICT), an unanswered one can, an answer goes
+-- 6. THE GATE RULE: `app.profile_form_missing` for every state, its session variant and the `_gate` twins.
+-- 7. THE GUARD TRIGGER: PF001 to PF005 on an answered question, the same edits allowed on a never-answered one.
+-- 8. HARDENING: who may execute what, definer functions with an empty search_path, no TRUNCATE for the tenant lane.
+-- 5. (last, because it deletes memberships and an identity) FOREIGN KEY and CASCADE: an answered question cannot be deleted (RESTRICT), an unanswered one can, an answer goes
 --    with its membership and with its identity, the dismissal column, the widened moderation log CHECK.
 --
 -- Fixture ids use the `22000000-…` prefix, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(135);
+select plan(205);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-pform-a', 'Pform A', '22000000-0000-4000-8000-000000000001');
@@ -562,6 +565,302 @@ select tests.as_tenant('22000000-0000-4000-8000-000000000003', '22000000-0000-40
 select is_empty($$ select 1 from public.profile_form_questions $$, 'PFORM-08 empty: a tenant with no questions reads zero question rows');
 select is_empty($$ select 1 from public.profile_form_answers $$, 'PFORM-08 empty: and zero answer rows');
 reset role;
+
+-- ── (6) the gate rule ──────────────────────────────────────────────────────────────────────────
+-- Tenant D has its own members so the counts below never touch the fixtures of sections 4 and 5.
+select tests.tenant('pgtap-pform-d', 'Pform D', '22000000-0000-4000-8000-000000000004');
+select tests.auth_user('admin@pform-d.local', '22000000-0000-4000-8000-0000000000d1');
+select tests.auth_user('support@pform-d.local', '22000000-0000-4000-8000-0000000000d2');
+select tests.auth_user('member1@pform-d.local', '22000000-0000-4000-8000-0000000000d3');
+select tests.auth_user('member2@pform-d.local', '22000000-0000-4000-8000-0000000000d4');
+select tests.auth_user('gone@pform-d.local', '22000000-0000-4000-8000-0000000000d5');
+insert into public.memberships (id, tenant_id, user_id, role, status, deleted_at) values
+  ('22000000-0000-4000-8000-0000000001d1', '22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d1', 'admin_tenant', 'active', null),
+  ('22000000-0000-4000-8000-0000000001d2', '22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d2', 'support_tenant', 'active', null),
+  ('22000000-0000-4000-8000-0000000001d3', '22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d3', 'member', 'active', null),
+  ('22000000-0000-4000-8000-0000000001d4', '22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d4', 'member', 'active', null),
+  ('22000000-0000-4000-8000-0000000001d5', '22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d5', 'member', 'active', now());
+-- member1 of D is ALSO a member of A (the second tenant of the lookup that lists every membership).
+insert into public.memberships (id, tenant_id, user_id, role, status) values
+  ('22000000-0000-4000-8000-0000000001d6', '22000000-0000-4000-8000-000000000001', '22000000-0000-4000-8000-0000000000d3', 'member', 'active');
+
+-- D1 required short text, D2 required single choice, D3 optional, D4 required but ARCHIVED.
+insert into public.profile_form_questions (id, tenant_id, type, title, required, options, position, archived_at, created_by_user_id) values
+  ('22000000-0000-4000-8000-0000000006d1', '22000000-0000-4000-8000-000000000004', 'short_text', 'Obrigatoria 1', true, '[]'::jsonb, 1, null, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000006d2', '22000000-0000-4000-8000-000000000004', 'single_choice', 'Obrigatoria 2', true,
+     '[{"id":"x1","label":"Sim"},{"id":"x2","label":"Nao"}]'::jsonb, 2, null, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000006d3', '22000000-0000-4000-8000-000000000004', 'short_text', 'Opcional', false, '[]'::jsonb, 3, null, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000006d4', '22000000-0000-4000-8000-000000000004', 'short_text', 'Arquivada obrigatoria', true, '[]'::jsonb, 4, now(), '22000000-0000-4000-8000-0000000000d1');
+
+-- PFORM-09 empty: no tenant_modules row at all.
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 0,
+  'PFORM-09 empty: no tenant_modules row gives 0 even with two required questions open');
+insert into public.tenant_modules (tenant_id, module_key, enabled) values ('22000000-0000-4000-8000-000000000004', 'profile_form', false);
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 0,
+  'D-589: the module row present but disabled gives 0');
+update public.tenant_modules set enabled = true where tenant_id = '22000000-0000-4000-8000-000000000004' and module_key = 'profile_form';
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 2,
+  'PFORM-09 adjacency: module on, a member with nothing answered owes the two ACTIVE required questions (optional and archived not counted)');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d4'), 2,
+  'the other member owes the same two (answers are per membership)');
+insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value) values
+  ('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000006d1', '22000000-0000-4000-8000-0000000001d3', '22000000-0000-4000-8000-0000000000d3', '"Ana"'::jsonb);
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 1,
+  'PFORM-09 adjacency: one required question answered leaves 1 missing');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d4'), 2,
+  'and the other member is still at 2');
+insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value) values
+  ('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000006d2', '22000000-0000-4000-8000-0000000001d3', '22000000-0000-4000-8000-0000000000d3', '{"optionId":"x1","otherText":null}'::jsonb);
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 0,
+  'PFORM-09 adjacency: every required question answered gives 0');
+-- No cache: a required question inserted a moment ago counts immediately.
+insert into public.profile_form_questions (id, tenant_id, type, title, required, options, position, created_by_user_id) values
+  ('22000000-0000-4000-8000-0000000006d5', '22000000-0000-4000-8000-000000000004', 'short_text', 'Nova obrigatoria', true, '[]'::jsonb, 5, '22000000-0000-4000-8000-0000000000d1');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 1,
+  'PFORM-09: a required question inserted a moment ago counts at once (no cache, no stored flag)');
+update public.profile_form_questions set required = false where id = '22000000-0000-4000-8000-0000000006d5';
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 0,
+  'D-585: making it optional frees the member');
+update public.profile_form_questions set required = true where id = '22000000-0000-4000-8000-0000000006d5';
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 1,
+  'D-585: making it required again reopens the form for the member');
+update public.profile_form_questions set archived_at = now() where id = '22000000-0000-4000-8000-0000000006d5';
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 0,
+  'PFORM-09: archiving it frees the member (an archived required question is not counted)');
+update public.profile_form_questions set archived_at = null where id = '22000000-0000-4000-8000-0000000006d5';
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 1,
+  'D-585: reactivating it reopens the form');
+-- PFORM-09 ordering: positions reversed, the count is the same.
+update public.profile_form_questions set position = 100 - position where tenant_id = '22000000-0000-4000-8000-000000000004';
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d3'), 1,
+  'PFORM-09 ordering: the count does not depend on question position');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d4'), 3,
+  'PFORM-09 ordering: nor on creation order (the other member owes the three active required questions)');
+-- PFORM-09 empty: staff, another tenant's membership, a soft-deleted membership.
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d1'), 0,
+  'D-584: an admin_tenant is never held');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d2'), 0,
+  'D-584: a support_tenant is never held');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d6'), 0,
+  'PFORM-09 empty: a membership of ANOTHER tenant asked against this tenant gives 0');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d5'), 0,
+  'PFORM-09 empty: a soft-deleted membership gives 0');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', gen_random_uuid()), 0,
+  'PFORM-09 empty: an unknown membership gives 0');
+update public.profile_form_questions set archived_at = now()
+ where tenant_id = '22000000-0000-4000-8000-000000000004' and required and archived_at is null;
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d4'), 0,
+  'PFORM-09 empty: with every required question archived nobody is held (D-589)');
+update public.profile_form_questions set archived_at = null
+ where id in ('22000000-0000-4000-8000-0000000006d1', '22000000-0000-4000-8000-0000000006d2', '22000000-0000-4000-8000-0000000006d5');
+select is(app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d4'), 3,
+  'D-585: reactivating them reopens the form for the member who had answered none');
+
+-- The session variant: the membership comes from the claims, never from an argument (T-12-08).
+select tests.as_tenant('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d4', 'member');
+select is(app.profile_form_missing_self(), 3, 'T-12-08: a member session reads its OWN pending count through the no-argument variant');
+reset role;
+select tests.as_tenant('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d3', 'member');
+select is(app.profile_form_missing_self(), 1, 'and member1 reads hers (a different number from the same function)');
+reset role;
+select tests.as_tenant('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d1', 'admin_tenant');
+select is(app.profile_form_missing_self(), 0, 'an admin_tenant session reads 0');
+reset role;
+select tests.as_tenant('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000a3', 'member');
+select is(app.profile_form_missing_self(), 0, 'a session of tenant D whose user has no membership there reads 0');
+reset role;
+select tests.as_tenant_without_claims();
+select is(app.profile_form_missing_self(), 0, 'a lane with NO claims reads 0');
+reset role;
+
+-- The `_gate` twins return the seven columns of the `_gated` twins, row by row, plus the count.
+select results_eq(
+  $$ select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state
+       from app.membership_in_tenant_gate('22000000-0000-4000-8000-0000000000d3', '22000000-0000-4000-8000-000000000004') $$,
+  $$ select * from app.membership_in_tenant_gated('22000000-0000-4000-8000-0000000000d3', '22000000-0000-4000-8000-000000000004') $$,
+  'PFORM-25: membership_in_tenant_gate returns the _gated columns row by row');
+select is(
+  (select profile_form_missing from app.membership_in_tenant_gate('22000000-0000-4000-8000-0000000000d3', '22000000-0000-4000-8000-000000000004')),
+  1, 'D-581: and carries the pending count in the same statement');
+select is(
+  (select profile_form_missing from app.membership_in_tenant_gate('22000000-0000-4000-8000-0000000000d1', '22000000-0000-4000-8000-000000000004')),
+  0, 'an admin_tenant row carries 0');
+select is_empty(
+  $$ select 1 from app.membership_in_tenant_gate('22000000-0000-4000-8000-0000000000d3', '22000000-0000-4000-8000-000000000002') $$,
+  'a user with no membership in the asked tenant gets no row');
+select results_eq(
+  $$ select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state
+       from app.memberships_of_user_gate('22000000-0000-4000-8000-0000000000d3') $$,
+  $$ select * from app.memberships_of_user_gated('22000000-0000-4000-8000-0000000000d3') $$,
+  'PFORM-25: memberships_of_user_gate returns the _gated columns row by row, in the same (slug) order');
+select results_eq(
+  $$ select tenant_slug, profile_form_missing from app.memberships_of_user_gate('22000000-0000-4000-8000-0000000000d3') $$,
+  $$ values ('pgtap-pform-a'::text, 0), ('pgtap-pform-d'::text, 1) $$,
+  'the list lookup carries each tenant''s own count: A has the module off (0), D has one question missing');
+select is(
+  pg_get_function_result('app.membership_in_tenant_gated(uuid,uuid)'::regprocedure) !~ 'profile_form_missing',
+  true, 'PFORM-25: the old _gated function is untouched (its result still has no profile_form_missing)');
+
+-- ── (7) the guard trigger ──────────────────────────────────────────────────────────────────────
+-- 7a1 number, 7a2 date, 7a3 multiple choice with Outro, 7a4 single choice, 7a5 private text, 7a7 public text: all ANSWERED below.
+-- 7b1 text, 7b2 multiple choice with Outro, 7b3 number: never answered, so the same edits must pass.
+insert into public.profile_form_questions (id, tenant_id, type, title, show_on_profile, allow_other, options, limits, position, created_by_user_id) values
+  ('22000000-0000-4000-8000-0000000007a1', '22000000-0000-4000-8000-000000000004', 'number', 'Numero', false, false, '[]'::jsonb, '{"min":1,"max":10}'::jsonb, 11, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000007a2', '22000000-0000-4000-8000-000000000004', 'date', 'Data', false, false, '[]'::jsonb, '{"min":"2026-01-01","max":"2026-12-31"}'::jsonb, 12, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000007a3', '22000000-0000-4000-8000-000000000004', 'multiple_choice', 'Varias', false, true,
+     '[{"id":"o1","label":"Um"},{"id":"o2","label":"Dois"},{"id":"o3","label":"Tres"}]'::jsonb, '{}'::jsonb, 13, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000007a4', '22000000-0000-4000-8000-000000000004', 'single_choice', 'Uma', false, false,
+     '[{"id":"s1","label":"A"},{"id":"s2","label":"B"}]'::jsonb, '{}'::jsonb, 14, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000007a5', '22000000-0000-4000-8000-000000000004', 'short_text', 'Privada', false, false, '[]'::jsonb, '{}'::jsonb, 15, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000007a7', '22000000-0000-4000-8000-000000000004', 'short_text', 'Publica', true, false, '[]'::jsonb, '{}'::jsonb, 17, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000007b1', '22000000-0000-4000-8000-000000000004', 'short_text', 'Livre', false, false, '[]'::jsonb, '{}'::jsonb, 21, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000007b2', '22000000-0000-4000-8000-000000000004', 'multiple_choice', 'Livre escolha', false, true,
+     '[{"id":"o1","label":"Um"},{"id":"o2","label":"Dois"},{"id":"o3","label":"Tres"}]'::jsonb, '{}'::jsonb, 22, '22000000-0000-4000-8000-0000000000d1'),
+  ('22000000-0000-4000-8000-0000000007b3', '22000000-0000-4000-8000-000000000004', 'number', 'Livre numero', false, false, '[]'::jsonb, '{"min":1,"max":10}'::jsonb, 23, '22000000-0000-4000-8000-0000000000d1');
+insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+select '22000000-0000-4000-8000-000000000004', q, '22000000-0000-4000-8000-0000000001d4', '22000000-0000-4000-8000-0000000000d4', v
+  from (values
+    ('22000000-0000-4000-8000-0000000007a1'::uuid, '5'::jsonb),
+    ('22000000-0000-4000-8000-0000000007a2'::uuid, '"2026-06-01"'::jsonb),
+    ('22000000-0000-4000-8000-0000000007a3'::uuid, '{"optionIds":["o1"],"otherText":"Meu"}'::jsonb),
+    ('22000000-0000-4000-8000-0000000007a4'::uuid, '{"optionId":"s1","otherText":null}'::jsonb),
+    ('22000000-0000-4000-8000-0000000007a5'::uuid, '"segredo"'::jsonb),
+    ('22000000-0000-4000-8000-0000000007a7'::uuid, '"aberto"'::jsonb)
+  ) as t(q, v);
+
+select throws_ok(
+  $$ update public.profile_form_questions set type = 'long_text' where id = '22000000-0000-4000-8000-0000000007a5' $$,
+  'PF001', null, 'D-587/PF001: the type of an answered question cannot change');
+select lives_ok(
+  $$ update public.profile_form_questions set type = 'long_text' where id = '22000000-0000-4000-8000-0000000007b1' $$,
+  'PF001: the same edit passes on a never-answered question');
+select throws_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"o2","label":"Dois"},{"id":"o3","label":"Tres"}]'::jsonb where id = '22000000-0000-4000-8000-0000000007a3' $$,
+  'PF002', null, 'D-587/PF002: an option that has answers cannot be removed');
+select throws_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"o1","label":"Primeiro"},{"id":"o2","label":"Dois"},{"id":"o3","label":"Tres"}]'::jsonb where id = '22000000-0000-4000-8000-0000000007a3' $$,
+  'PF002', null, 'D-587/PF002: an option that has answers cannot be relabelled');
+select throws_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"s2","label":"B"},{"id":"s3","label":"C"}]'::jsonb where id = '22000000-0000-4000-8000-0000000007a4' $$,
+  'PF002', null, 'PF002: the single-choice answer (optionId) locks its option too');
+select lives_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"o2","label":"Dois"},{"id":"o3","label":"Tres"}]'::jsonb where id = '22000000-0000-4000-8000-0000000007b2' $$,
+  'PF002: the same removal passes on a never-answered question');
+select lives_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"o1","label":"Um"},{"id":"o2","label":"Segundo"},{"id":"o3","label":"Tres"}]'::jsonb where id = '22000000-0000-4000-8000-0000000007a3' $$,
+  'D-587: relabelling an option that has NO answers passes on an answered question');
+select lives_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"o1","label":"Um"},{"id":"o2","label":"Segundo"},{"id":"o3","label":"Tres"},{"id":"o4","label":"Quatro"}]'::jsonb where id = '22000000-0000-4000-8000-0000000007a3' $$,
+  'D-587: ADDING an option to an answered question passes');
+select lives_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"o1","label":"Um"},{"id":"o2","label":"Segundo"}]'::jsonb where id = '22000000-0000-4000-8000-0000000007a3' $$,
+  'D-587: removing options that have no answers (o3, o4) passes on an answered question');
+select throws_ok(
+  $$ update public.profile_form_questions set allow_other = false where id = '22000000-0000-4000-8000-0000000007a3' $$,
+  'PF003', null, 'D-587/PF003: Outro cannot be turned off while an Outro answer exists');
+select lives_ok(
+  $$ update public.profile_form_questions set allow_other = false where id = '22000000-0000-4000-8000-0000000007b2' $$,
+  'PF003: the same edit passes on a never-answered question');
+select throws_ok(
+  $$ update public.profile_form_questions set show_on_profile = true where id = '22000000-0000-4000-8000-0000000007a5' $$,
+  'PF004', null, 'D-587/PF004: a private answered question cannot become public (T-12-09, PU-1)');
+select lives_ok(
+  $$ update public.profile_form_questions set show_on_profile = true where id = '22000000-0000-4000-8000-0000000007b1' $$,
+  'PF004: the same edit passes on a never-answered question');
+select lives_ok(
+  $$ update public.profile_form_questions set show_on_profile = false where id = '22000000-0000-4000-8000-0000000007a7' $$,
+  'D-587: public to private is always allowed, answers or not (the ratchet turns one way)');
+select throws_ok(
+  $$ update public.profile_form_questions set limits = '{"min":2,"max":10}'::jsonb where id = '22000000-0000-4000-8000-0000000007a1' $$,
+  'PF005', null, 'D-587/PF005: a number minimum that rises is refused');
+select throws_ok(
+  $$ update public.profile_form_questions set limits = '{"min":1,"max":9}'::jsonb where id = '22000000-0000-4000-8000-0000000007a1' $$,
+  'PF005', null, 'PF005: a number maximum that falls is refused');
+select throws_ok(
+  $$ update public.profile_form_questions set limits = '{"min":"2026-02-01","max":"2026-12-31"}'::jsonb where id = '22000000-0000-4000-8000-0000000007a2' $$,
+  'PF005', null, 'PF005: a date minimum that rises is refused');
+select throws_ok(
+  $$ update public.profile_form_questions set limits = '{"min":"2026-01-01","max":"2026-11-30"}'::jsonb where id = '22000000-0000-4000-8000-0000000007a2' $$,
+  'PF005', null, 'PF005: a date maximum that falls is refused');
+select lives_ok(
+  $$ update public.profile_form_questions set limits = '{"min":2,"max":9}'::jsonb where id = '22000000-0000-4000-8000-0000000007b3' $$,
+  'PF005: the same narrowing passes on a never-answered question');
+select lives_ok(
+  $$ update public.profile_form_questions set limits = '{"min":0,"max":20}'::jsonb where id = '22000000-0000-4000-8000-0000000007a1' $$,
+  'D-587: WIDENING a number limit on an answered question passes');
+select throws_ok(
+  $$ update public.profile_form_questions set limits = '{"min":3}'::jsonb where id = '22000000-0000-4000-8000-0000000007a1' $$,
+  'PF005', null, 'PF005: after widening to 0..20 a minimum of 3 is a narrowing again (the comparison is against the CURRENT limits)');
+select lives_ok(
+  $$ update public.profile_form_questions set limits = '{}'::jsonb where id = '22000000-0000-4000-8000-0000000007a1' $$,
+  'D-587: removing a number limit altogether (the widest) passes');
+select lives_ok(
+  $$ update public.profile_form_questions set limits = '{"min":"2025-06-01"}'::jsonb where id = '22000000-0000-4000-8000-0000000007a2' $$,
+  'D-587: widening a date limit (earlier minimum, no maximum) passes');
+select lives_ok(
+  $$ update public.profile_form_questions set title = 'Titulo novo', help_text = 'Ajuda', required = true, position = 99 where id = '22000000-0000-4000-8000-0000000007a5' $$,
+  'D-587: title, help text, required and position stay free on an answered question');
+select lives_ok(
+  $$ update public.profile_form_questions set archived_at = now(), revision = revision + 1 where id = '22000000-0000-4000-8000-0000000007a5' $$,
+  'D-587: archiving and the revision bump stay free on an answered question');
+
+-- ── (8) hardening ──────────────────────────────────────────────────────────────────────────────
+select ok(
+  not (has_function_privilege('anon', 'app.profile_form_missing(uuid,uuid)', 'execute')
+    or has_function_privilege('authenticated', 'app.profile_form_missing(uuid,uuid)', 'execute')),
+  'T-12-08: anon and authenticated cannot execute the two-argument rule');
+select ok(
+  not (has_function_privilege('anon', 'app.membership_in_tenant_gate(uuid,uuid)', 'execute')
+    or has_function_privilege('authenticated', 'app.membership_in_tenant_gate(uuid,uuid)', 'execute')
+    or has_function_privilege('anon', 'app.memberships_of_user_gate(uuid)', 'execute')
+    or has_function_privilege('authenticated', 'app.memberships_of_user_gate(uuid)', 'execute')),
+  'anon and authenticated cannot execute the two _gate twins');
+select ok(
+  has_function_privilege('api_user', 'app.profile_form_missing(uuid,uuid)', 'execute')
+    and has_function_privilege('service_role', 'app.profile_form_missing(uuid,uuid)', 'execute')
+    and has_function_privilege('api_user', 'app.membership_in_tenant_gate(uuid,uuid)', 'execute')
+    and has_function_privilege('api_user', 'app.memberships_of_user_gate(uuid)', 'execute')
+    and has_function_privilege('service_role', 'app.membership_in_tenant_gate(uuid,uuid)', 'execute')
+    and has_function_privilege('service_role', 'app.memberships_of_user_gate(uuid)', 'execute'),
+  'api_user and service_role can execute the rule and both twins');
+select ok(
+  has_function_privilege('authenticated', 'app.profile_form_missing_self()', 'execute')
+    and has_function_privilege('api_user', 'app.profile_form_missing_self()', 'execute')
+    and has_function_privilege('service_role', 'app.profile_form_missing_self()', 'execute')
+    and not has_function_privilege('anon', 'app.profile_form_missing_self()', 'execute'),
+  'authenticated can execute the no-argument _self variant; anon cannot');
+select ok(
+  not (has_function_privilege('anon', 'app.profile_form_question_guard()', 'execute')
+    or has_function_privilege('authenticated', 'app.profile_form_question_guard()', 'execute')
+    or has_function_privilege('api_user', 'app.profile_form_question_guard()', 'execute')
+    or has_function_privilege('service_role', 'app.profile_form_question_guard()', 'execute')),
+  'the guard function is granted to nobody');
+select tests.as_tenant('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000000d3', 'member');
+select throws_ok(
+  $$ select app.profile_form_missing('22000000-0000-4000-8000-000000000004', '22000000-0000-4000-8000-0000000001d4') $$,
+  '42501', null, 'T-12-08: a tenant session cannot probe another member''s pending count (42501)');
+select throws_ok(
+  $$ select * from app.membership_in_tenant_gate('22000000-0000-4000-8000-0000000000d4', '22000000-0000-4000-8000-000000000004') $$,
+  '42501', null, 'a tenant session cannot call the _gate lookup for another user (42501)');
+select lives_ok($$ select app.profile_form_missing_self() $$, 'a tenant session can call the no-argument variant');
+reset role;
+select is(
+  (select count(*)::int from pg_proc
+    where oid in ('app.profile_form_missing(uuid,uuid)'::regprocedure, 'app.profile_form_missing_self()'::regprocedure,
+                  'app.membership_in_tenant_gate(uuid,uuid)'::regprocedure, 'app.memberships_of_user_gate(uuid)'::regprocedure,
+                  'app.profile_form_question_guard()'::regprocedure)
+      and prosecdef and proconfig @> array['search_path=""']),
+  5, 'all five functions are SECURITY DEFINER with an empty search_path (catalogue)');
+select ok(
+  not (has_table_privilege('authenticated', 'public.profile_form_questions', 'truncate')
+    or has_table_privilege('authenticated', 'public.profile_form_answers', 'truncate')),
+  'T-12-06: authenticated holds no TRUNCATE on either table (RLS does not see it)');
+select trigger_is('public', 'profile_form_questions', 'profile_form_questions_guard', 'app', 'profile_form_question_guard',
+  'D-587: the guard trigger is attached to profile_form_questions');
+select is(
+  (select tgtype & 2 = 2 and tgtype & 1 = 1 and tgtype & 16 = 16 from pg_trigger
+    where tgname = 'profile_form_questions_guard' and tgrelid = 'public.profile_form_questions'::regclass),
+  true, 'the guard is a BEFORE UPDATE ROW trigger');
 
 -- ── (5) foreign key and cascade ────────────────────────────────────────────────────────────────
 select is(
