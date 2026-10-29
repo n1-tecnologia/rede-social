@@ -1,7 +1,8 @@
 ---
 phase: "12"
 slug: "formulario-de-perfil-do-tenant"
-status: draft
+status: approved
+reviewed_at: "2026-10-29"
 shadcn_initialized: false
 preset: none
 created: "2026-10-29"
@@ -543,7 +544,7 @@ Reorder mode: the chevron of each row becomes `[↑][↓]`, the top button reads
 
 > Populated by the ui-phase UI-consideration probe (Step 9.5) and lifted by plan-phase's `## UI Considerations` lift rule. Empty-state and error-state COPY live in `## Copywriting Contract` above; this section covers state coverage and REFERENCES those rows.
 
-Applicable state considerations resolved: **57 covered, 6 backstop, 2 dismissed, 0 unresolved** (65 rows). **This session was non-interactive: the compiled probe engine was not run and the element kinds below are the researcher's draft, not confirmed by the product owner** (PU-14). Every consideration the draft raises is resolved below. Re-running the probe replaces these rows (idempotent).
+Applicable state considerations resolved: **60 covered, 8 backstop, 2 dismissed, 0 unresolved** (70 rows). The compiled probe engine was run on 2026-10-29 over E01-E11 with the element kinds below as the authored override (confirmed by the product owner in `/gsd-ui-phase 12`, PU-14): it raised 68 applicable considerations, 63 of them already answered by the researcher's draft; the 5 that were missing (E04 loading, E05 partial, E06 long-text, E09 populated, E10 long-text) are resolved in the rows below, and 2 extra rows the draft added on E07 (overflow, zero-one-many) are kept. Re-running the probe replaces these rows (idempotent).
 
 **Element inventory** (ids scoped to this document):
 
@@ -587,6 +588,7 @@ Applicable state considerations resolved: **57 covered, 6 backstop, 2 dismissed,
 | overflow | E04 | ✅ covered | Up to 20 rows plus "Outro"; the sheet scrolls and "Adicionar opção" disables at the limit (UI-D-599) |
 | zero-one-many | E04 | ✅ covered | The remove button is disabled at two options; the answer-count caption uses plural copy (UI-D-571, UI-D-574) |
 | long-text | E04 | 🧪 backstop | An 80-character option label wraps inside its input or truncates visually without clipping the buttons at 320px; a visual UI-state test |
+| loading | E04 | ✅ covered | The options have no read of their own: in edit mode they arrive with the question, and while the sheet saves, the sheet's "Salvando…" state locks the rows (UI-D-569) |
 | empty | E05 | ✅ covered | "Nenhuma pergunta arquivada" (UI-D-578) |
 | loading | E05 | ✅ covered | Three row skeletons (UI-D-595) |
 | error | E05 | ✅ covered | The "Algo deu errado" card; a failed "Reativar" toasts and changes nothing (UI-D-578) |
@@ -594,8 +596,10 @@ Applicable state considerations resolved: **57 covered, 6 backstop, 2 dismissed,
 | overflow | E05 | ✅ covered | The archived list grows with the tenant's history and scrolls with the page; no cap is imposed on it |
 | zero-one-many | E05 | ✅ covered | "Sem respostas guardadas" / "1 resposta guardada" / "{n} respostas guardadas" (UI-D-578) |
 | long-text | E05 | ✅ covered | Titles wrap (`break-words`); the button stays on its own line below at 320px |
+| partial | E05 | ✅ covered | Rows differ in how much was kept: an archived question with answers shows the count, one never answered reads "Sem respostas guardadas" (UI-D-578) |
 | loading | E06 | ✅ covered | The confirm button spins and both buttons disable while the action runs (shipped `ConfirmDialog`); the impact read happens before the dialog opens and a failure blocks the write (UI-D-576) |
 | error | E06 | ✅ covered | Every failure is a toast with the documented copy and no state change; the 403 case refreshes (UI-D-576, UI-D-577, UI-D-579) |
+| long-text | E06 | 🧪 backstop | A 120-character question title inside a dialog title or body wraps (`break-words`) and the buttons stay below it at 320px; a visual UI-state test |
 | empty | E07 | ✅ covered | Nothing to answer: "Não há perguntas para responder" (UI-D-588); a blank first-time form is not flagged (UI-D-582) |
 | loading | E07 | ✅ covered | `loading.tsx` skeleton; "Salvando…" locks the controls (UI-D-587, UI-D-588) |
 | error | E07 | ✅ covered | Field errors, the summary, the save-failure alert, the form-changed alert and the load-failure card (UI-D-586, UI-D-587, UI-D-588) |
@@ -618,6 +622,7 @@ Applicable state considerations resolved: **57 covered, 6 backstop, 2 dismissed,
 | overflow | E09 | ✅ covered | The `dl` grows with the public questions and scrolls with the page |
 | zero-one-many | E09 | ✅ covered | One row renders the same `dl` (UI-D-592) |
 | long-text | E09 | 🧪 backstop | Long answers and a Link answer with a long URL wrap without horizontal scroll at 320px; a visual UI-state test |
+| populated | E09 | ✅ covered | One row per public answered question in a description list, term then rendered answer (UI-D-592) |
 | empty | E10 | ✅ covered | "Esta pessoa ainda não respondeu o formulário." (UI-D-593) |
 | loading | E10 | ✅ covered | Three-row skeleton in its own `Suspense` (UI-D-593) |
 | error | E10 | ✅ covered | The same small error row as E09 (UI-D-593) |
@@ -625,6 +630,7 @@ Applicable state considerations resolved: **57 covered, 6 backstop, 2 dismissed,
 | partial | E10 | ✅ covered | Unanswered questions read "Sem resposta"; archived rows carry the "Arquivada" pill (UI-D-593) |
 | overflow | E10 | ✅ covered | Active (at most 30) plus the archived history scroll with the page |
 | zero-one-many | E10 | ✅ covered | With no archived question the sub-heading is absent (UI-D-593) |
+| long-text | E10 | 🧪 backstop | A 1000-character long-text answer wraps at 320px with the paragraph breaks kept (the shared mapper of UI-D-591) and does not break the card; a visual UI-state test |
 | loading | E11 | ✅ covered | The shipped `Switch` `busy` state while the module write runs |
 | error | E11 | ✅ covered | The shipped "Algo deu errado. Tente novamente." toast and the switch returns (UI-D-594) |
 | long-text | E11 | ⚪ dismissed | The tenant name appears only in the dialog title, which wraps in the shipped dialog |
@@ -665,7 +671,7 @@ The researcher ran non-interactively and applied the default below to each; none
 | **PU-11** | The admin-side label for the public switch: "Mostrar no perfil do membro" instead of D-593's "mostrar no meu perfil". | **"Mostrar no perfil do membro"** (admin voice); the member reads "Esta resposta aparece no seu perfil." | Wording only. |
 | **PU-12** | Confirm before the `super_admin` turns the module OFF (UI-D-594)? | **Yes**, the shipped `confirmDisable` (danger tone), because it frees every gated member and hides the admin's builder. | Dropping it removes one extras entry and one catalog block. |
 | **PU-13** | The limits of UI-D-599 (30 questions, 20 options, 120/300/80/120/120/1000 characters). | **These defaults**, one constant each. | Constants and the sentences that quote `{max}` only. |
-| **PU-14** | Confirm the researcher's element kinds in "UI Considerations" (the probe engine was not run). | **Accept the draft** (E01-E11). | A re-run could raise further considerations (for example on E07's controls) that this table already resolves; any new row replaces the draft. |
+| **PU-14** | Confirm the researcher's element kinds in "UI Considerations". | **Confirmed by the product owner on 2026-10-29** in `/gsd-ui-phase 12` ("Aceitar assim"): E01-E11 kinds as listed, 5 gaps resolved as above. | The probe engine was run with these kinds as the authored override (68 applicable considerations, all resolved). |
 
 ---
 
@@ -680,14 +686,14 @@ The researcher ran non-interactively and applied the default below to each; none
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: FLAG (non-blocking: the generic dismiss label "Cancelar" in the archive, delete, export and platform dialogs, and in edit-mode; where a dialog action is not locked a specific dismiss such as "Voltar" or "Manter a pergunta" is preferable; the single-word "Salvar" is locked by D-582)
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: FLAG (non-blocking: the inherited 12px step, a multiple of 4 justified as the notice-row padding fixed in sketches 013-015; the 44px target, 40px disc and 56px tile are declared component sizes)
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
-**Approval:** pending
+**Approval:** approved by gsd-ui-checker on 2026-10-29 (`UI-SPEC VERIFIED`, 5 PASS and 2 non-blocking FLAGs, 0 blocking). The Step 9.5 probe was run and reconciled with the product owner the same day (element kinds confirmed, 70 rows).
 
 **Not approved by this sign-off:** the sketch gate (PU-10). If it is kept, `.planning/sketches/016-phase-12-designed-screens/README.md` needs `approved: true` pasted by the user (D-417; an agent never writes it).
