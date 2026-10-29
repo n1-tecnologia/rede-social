@@ -50,7 +50,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 09.4: Projeto do tenant no Supabase do cliente (INSERTED)** - A tenant can run on a Supabase project in its own account: a scoped access token limited to that one project is stored sealed per project and used for every Management API call about it, with the organisation pin, the allow-list, the rate limiter, the health and the panel working per project
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
-- [ ] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it at sign-up, members without a completed profile and members who had completed it before the form existed answer it too
+- [ ] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 
 **MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the go-live gate (D-344, 2026-10-01: Phase 8 runs the full gate, and the MVP is declared closed at 08.1's exit gate). It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
 
@@ -1547,14 +1547,15 @@ Plans:
 
 ### Phase 12: Formulário de perfil do tenant
 
-**Goal**: The tenant admin builds the profile form of their own community (a list of questions of several types), and every member of that tenant answers it to complete their profile: new members at sign-up, existing members who never completed their profile, and members who had already completed it when the admin creates the form or later adds a question that needs an answer.
+**Goal**: The tenant admin builds the profile form of their own community (a list of questions of several types), and every member of that tenant answers it to complete their profile: new members right after their first login, existing members who never completed their profile, and members who had already completed it when the admin creates the form or later adds a question that needs an answer.
 **Scope**: Post-MVP, independent of the "Rede social" module (Phases 9-11): it reuses Phase 3's member profile, Phase 8's tenant admin panel and Phase 08.1's sign-up/join flow, and no "Rede social" phase depends on it.
 **Depends on**: Phase 3 (member profile), Phase 8 (tenant admin panel), Phase 08.1 (sign-up and join by host), Phase 08.7 (profile screens)
-**Requirements**: TBD (new PFORM-*; the researcher drafts PFORM-01..NN in `/gsd-discuss-phase 12`)
+**Requirements**: PFORM-01, PFORM-02, PFORM-03, PFORM-04, PFORM-05, PFORM-06, PFORM-07, PFORM-08, PFORM-09, PFORM-10, PFORM-11, PFORM-12, PFORM-13, PFORM-14, PFORM-15, PFORM-16, PFORM-17, PFORM-18, PFORM-19, PFORM-20, PFORM-21, PFORM-22, PFORM-23, PFORM-24, PFORM-25, PFORM-26 (plus UI-04 for the sketch gate)
+**Plans:** 0/18 plans executed (planned 2026-10-29; STATE stays on Phase 09.4, the plans execute only when Igor starts this phase)
 **Success Criteria** (what must be TRUE):
 
-  1. A tenant admin (`admin_tenant`) opens a "Formulário de perfil" panel in the tenant admin and builds the form: adds, edits, reorders, marks as required or optional, and removes questions. Each question has a title, an optional help text and one type: short text, long text, dropdown, multiple choice (several answers), single choice (radio) and the other types decided in discuss-phase (see Notes). Choice types carry the admin's list of options.
-  2. A new member who signs up on a tenant that has a form answers it as part of creating the account, before reaching the app; a tenant with no form signs members up exactly as today.
+  1. A tenant admin (`admin_tenant`) opens a "Formulário de perfil" panel in the tenant admin and builds the form: adds, edits, reorders, marks as required or optional, and archives questions (an archived question stops being asked but its answers are kept, can be reactivated and is included in the export; only a question nobody has answered can be deleted, D-588). Each question has a title, an optional help text and one type: short text, long text, dropdown, multiple choice (several answers), single choice (radio) and the other types decided in discuss-phase (see Notes). Choice types carry the admin's list of options.
+  2. A new member who joins a tenant that has a required question is taken to the profile form right after the first login, on the same screen existing members use, before reaching the app (D-580; sign-up and join themselves do not change); a tenant with no form signs members up and lets them in exactly as today.
   3. A member who already exists and has not completed the profile is taken through the form the next time they open the app; a member can reach and edit their answers later from their profile.
   4. A member who had already completed their profile with what exists today (photo, bio, Instagram) is asked again when the admin creates the form, and again whenever the admin adds or changes a question that needs an answer, answering only what is new or missing; a form change never discards answers already given.
   5. The answers are stored per member and per tenant with RLS and a two-tenant negative test (a tenant's questions and answers are never visible to another tenant); the API validates every answer against its question's type, options and required flag, and rejects an answer to a question that is not part of the member's tenant.
@@ -1566,11 +1567,66 @@ Plans:
 
 Decided in `/gsd-discuss-phase 12` on 2026-10-29 (`12-CONTEXT.md`, D-580..D-596): new members answer after login on the same screen as existing members; a hard gate like the payment cut, for the role `member` only; completeness is computed (a new required question reopens the form for everyone, an optional one only shows a dismissible notice); a question with answers locks its type and options and is archived, never deleted; thirteen types (the five asked plus number, date, phone, e-mail, link, yes/no, acceptance, rating 1-5; state/city and file are deferred); "Outro" per choice question; answers private by default with a per-question "show on profile"; CSV export for `admin_tenant`; toggleable module off by default.
 
-Left to research and the planner: how the gate rides the single `requireAuth` membership lookup without a second round trip, the module key and error code names, limits, builder ergonomics (UI-SPEC), and freezing the "show on profile" switch once a question has answers.
+Left to research and the planner: how the gate rides the single `requireAuth` membership lookup without a second round trip, the module key and error code names, limits, builder ergonomics (UI-SPEC), and freezing the "show on profile" switch once a question has answers. Planned 2026-10-29: the gate rides the lookup as a successor `_gate` SQL pair (the old `_gated` pair stays one release, its drop is a deferred follow-up); the names (`profile_form`, `PROFILE_FORM_PENDING`) are confirmed once at the 12-02 checkpoint; the limits are in `PROFILE_FORM_LIMITS` (30 questions, 20 options); "show on profile" is a one-way ratchet toward private once a question has answers.
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 12 to break down)
+**Wave 1** *(independent: the sketch gate, the module key and the answer contract; planned 2026-10-29)*
+
+- [ ] 12-01-PLAN.md — Sketch 016: the 51 prototype-less frames of the builder, the editor, the member screen and the profile blocks, the README with `approved: false` and Igor's recorded approval (UI-04, `autonomous: false`)
+- [ ] 12-02-PLAN.md — The module key `profile_form` appended last, the widened `tenant_modules_key_chk`, the registered manifest with `manage` (admin only) and `read`, the platform catalog names, and the ONE checkpoint that confirms the phase's names (PFORM-01, PFORM-25, tracer, `autonomous: false`)
+- [ ] 12-03-PLAN.md — The answer contract `@rede-social/contracts/profile-form`: thirteen types, one constant per limit, the closed refusal list, `parseAnswer` and every request and response schema (PFORM-02, PFORM-04, PFORM-05, PFORM-06, tracer)
+
+**Wave 2** *(blocked on the key and the contract)*
+
+- [ ] 12-04-PLAN.md — The questions and answers tables with RLS, the pending-count rule, the `_gate` lookup twins, the lock trigger, the widened moderation-log CHECK, pgTAP 220 and the [BLOCKING schema] gate (PFORM-03, PFORM-05, PFORM-08, PFORM-09, PFORM-17, PFORM-18, PFORM-22, PFORM-25, tracer)
+
+**Wave 3** *(blocked on the schema)*
+
+- [ ] 12-05-PLAN.md — The hard gate: `Membership.profileFormMissing`, `PROFILE_FORM_PENDING` last in `requireAuth`, the bootstrap `profileForm` block and the gate proven on the live stack (PFORM-09, PFORM-10, PFORM-11, PFORM-12, tracer)
+
+**Wave 4** *(the member API, and the web plumbing once the sketch is approved)*
+
+- [ ] 12-06-PLAN.md — The member API: read the whole form, save the whole screen with per-type validation and no partial write, dismiss the new-optional notice, the isolation entries and the two-connection race with an admin edit (PFORM-06, PFORM-07, PFORM-09, PFORM-13, PFORM-14, PFORM-16, PFORM-24, tracer)
+- [ ] 12-11-PLAN.md — The web plumbing: `safeNextPath`, the `x-rede-path` header from the proxy, the bootstrap redirect, the counters refusal for an open app, "Sair" under the gate and the platform row's disable dialog (PFORM-01, PFORM-12, PFORM-15, PFORM-26, tracer)
+
+**Wave 5**
+
+- [ ] 12-07-PLAN.md — Answers read: the public-flagged payload for members, every answer for the staff, one indistinguishable 404 (PFORM-08, PFORM-18, PFORM-19, tracer)
+- [ ] 12-12-PLAN.md — The completion screen `/completar-perfil`: one scrollable card, every state, the validated destination (PFORM-13, PFORM-14, PFORM-26, tracer)
+
+**Wave 6**
+
+- [ ] 12-08-PLAN.md — The builder API: create, list with answer counts, edit under the D-587 lock rules and an optimistic revision, reorder, behind the module guard chain (PFORM-01, PFORM-02, PFORM-17, PFORM-24, tracer)
+- [ ] 12-13-PLAN.md — The five format controls: phone mask and paste, pt-BR numbers, link normalisation, blur validation (PFORM-14, PFORM-26, tracer)
+
+**Wave 7**
+
+- [ ] 12-09-PLAN.md — The lifecycle API: archive, reactivate, delete, atomic replace, summary and impact, and the two-connection suite for the admin side (PFORM-03, PFORM-08, PFORM-17, PFORM-23, PFORM-24, tracer)
+- [ ] 12-14-PLAN.md — The profile surfaces: "Minhas respostas", the "Há perguntas novas" notice, the public block and the staff view of every answer (PFORM-16, PFORM-18, PFORM-19, PFORM-20, PFORM-26, tracer)
+
+**Wave 8**
+
+- [ ] 12-10-PLAN.md — The moderation log learns `profile_form_exported`, the CSV writer with its OWASP suite and the streamed, logged, admin-only export (PFORM-08, PFORM-21, tracer)
+- [ ] 12-15-PLAN.md — The builder page: the settings row, the two tabs, the summary card, the list with reorder mode, the archived list with "Reativar" and the impact dialog (PFORM-02, PFORM-03, PFORM-23, PFORM-26, tracer)
+
+**Wave 9**
+
+- [ ] 12-16-PLAN.md — The question editor sheet: the 13-type picker, options and "Outro", limits, switches, the LGPD warning, every lock, replace, archive and delete (PFORM-02, PFORM-06, PFORM-17, PFORM-22, PFORM-26, tracer)
+
+**Wave 10**
+
+- [ ] 12-17-PLAN.md — The export relay and dialog, the preview of the real form and the dialog and accessibility floor of the builder (PFORM-21, PFORM-23, PFORM-26, tracer)
+
+**Wave 11** *(release and close)*
+
+- [ ] 12-18-PLAN.md — The Playwright proof of the gate, the member and admin stories and the 320/390px backstops, the fan-out test, the `docs/DEPLOY.md` "Phase 12 release" section, the manual-proofs ledger and the exit gate (PFORM-12, PFORM-13, PFORM-14, PFORM-20, PFORM-25, PFORM-26, tracer)
+
+**Cross-cutting constraints:**
+
+- Names (`profile_form`, `PROFILE_FORM_PENDING`, `profile_form.manage|read`, `/v1/profile_form`) are confirmed once in 12-02 and read from its SUMMARY by every later plan; D-596 is the phase's one-way decision.
+- The API plans (04 to 10) never depend on the sketch gate; every web plan (11 to 18) carries `grep -q '^approved: true' .planning/sketches/016-phase-12-designed-screens/README.md` and the executor never writes the approval. When the approval is late, the API plans run first and the web plans stop at their precondition guard; no `depends_on` or wave changes.
+- Production deploys and hosted proofs are Igor's (`12-MANUAL-PROOFS.md`); the old `_gated` SQL pair is dropped by a later cleanup migration, not in this phase.
 
 ## Progress
 
@@ -1600,7 +1656,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
-| 12. Formulário de perfil do tenant | 0/TBD | Not started | - |
+| 12. Formulário de perfil do tenant | 0/18 | Planned | - |
 
 ---
 *Roadmap created: 2026-09-11*
