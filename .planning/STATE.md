@@ -4,16 +4,16 @@ current_phase: 12
 current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: "Completed 12-03-PLAN.md (answer contract @rede-social/contracts/profile-form: 13 validators, limits, issue codes, wire schemas; 12-01 still waits for Igor's sketch 016 approval)"
-last_updated: "2026-10-29T23:22:45.010Z"
+stopped_at: Completed 12-04-PLAN.md (profile form tables, RLS, gate rule, _gate twins, PF001-PF005 guard, pgTAP 220; 12-01 still waits for Igor's sketch 016 approval)
+last_updated: "2026-10-29T23:38:10.758Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: e0503154e3fb935aa40a4721d1ae07e5d8afdc3b
+state_head: 8724e9ee09465847fc52fec2060c5c8c86e52fae
 progress:
   total_phases: 27
   completed_phases: 0
   total_plans: 312
-  completed_plans: 287
+  completed_plans: 288
   percent: 0
 ---
 
@@ -326,6 +326,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.3 P08 | 8 min | 2 tasks | 14 files |
 | Phase 12 P02 | 5 min | 3 tasks | 23 files |
 | Phase 12 P03 | 6 min | 2 tasks | 3 files |
+| Phase 12 P04 | 13 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -1059,6 +1060,7 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-24: the connection budget is restated per project from the shipped defaults (PROJECT_POOL_MAX 3, not 4): a tenant project reads 192 of 400 on Small and 192 of 200 on Micro, the central project 352 of 400, so no workflow --max-instances changed; the production move is documented as a ROLE=move execution of the migrate Job with an override syntax that is unproven (hosted proofs H5 and H6); the hosted-proofs ledger ships pending with contract_gate closed — The arithmetic holds with the shipped values, so the budget needed no workflow change; the Job override follows from the image CMD without an entrypoint and has never run; nothing in the ledger can become passed without Igor's pasted evidence, and the Phase 08.1 removal waits for his contract_gate edit
 - [Phase 12]: Phase 12 one-way names confirmed by Igor on 2026-10-29: module key profile_form, gate error code PROFILE_FORM_PENDING, permissions profile_form.manage and profile_form.read, admin mount /v1/profile_form — Researcher defaults kept (D-596); the key is stored in tenant_modules and the CHECK, the rest are published contracts
 - [Phase 12]: 12-03: parseAnswer is a pure function of the stored question (T-12-05); body refusals reuse the closed PROFILE_FORM_ISSUES list; other_required is raised by the web, never by the server parser — A client-claimed type or limit is never read; the raw value cannot say Outro was chosen without text
+- [Phase 12]: 12-04: completeness is a computed SQL anti-join (app.profile_form_missing) behind the _gate lookup twins; answers are kept by an ON DELETE RESTRICT composite key and a PF001..PF005 guard trigger; read policies fail closed on a null role and TRUNCATE is revoked from authenticated — The old _gated pair stays one release (its drop is a deferred cleanup migration); the rule measured 0.056 ms for a complete member on 800,000 answer rows
 
 ### Pending Todos
 
@@ -1177,6 +1179,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-29T23:22:44.772Z
-Stopped at: Completed 12-03-PLAN.md (answer contract @rede-social/contracts/profile-form: 13 validators, limits, issue codes, wire schemas; 12-01 still waits for Igor's sketch 016 approval)
+Last session: 2026-10-29T23:38:10.514Z
+Stopped at: Completed 12-04-PLAN.md (profile form tables, RLS, gate rule, _gate twins, PF001-PF005 guard, pgTAP 220; 12-01 still waits for Igor's sketch 016 approval)
 Resume file: None
