@@ -165,7 +165,7 @@ None - no external service configuration required.
 
 - Plan 04 builds the `type` CHECK from `PROFILE_FORM_TYPES` and the length CHECKs from `PROFILE_FORM_LIMITS` (title 120, help 300, options 20, value 4096 bytes); the TypeScript half of PFORM-05 is pinned here.
 - Plans 05 to 11 import everything from `@rede-social/contracts/profile-form`. The route hook can lift Zod messages with `PROFILE_FORM_ISSUE_SET`, as the payments module does with `PAYMENTS_ISSUE_SET`.
-- The service enforces the 30-active-question limit (`limit_reached`), `type_locked`, `option_locked`, `stale_revision`, `form_changed`, and emits `unknown_question` and `other_required`-free field errors keyed by question id; those are not decided by the contract.
+- The service enforces the 30-active-question limit (`limit_reached`), `type_locked`, `option_locked`, `stale_revision`, `form_changed`, and raises `unknown_question` (an answer keyed by an id that is not in the form); those are not decided by the contract. The server never raises `other_required`; the web does.
 - Plan 12-01 (sketch 016, Igor's design-gate review) still has no SUMMARY and was not touched.
 
 ---
