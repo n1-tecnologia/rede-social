@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminQuestionSchema,
+  answerEtag,
   answerValueSchema,
+  archivedQuestionSchema,
+  createQuestionBodySchema,
+  dismissNoticeResultSchema,
+  impactQuerySchema,
+  impactResultSchema,
+  memberFormSchema,
   missingIssue,
   normalizeOptionLabel,
   PROFILE_FORM_CHOICE_TYPES,
@@ -12,6 +20,15 @@ import {
   type ProfileFormQuestionDef,
   type ProfileFormType,
   parseAnswer,
+  profileFormBootstrapSchema,
+  profileFormSummarySchema,
+  publicAnswersSchema,
+  reorderBodySchema,
+  replaceQuestionBodySchema,
+  saveAnswersBodySchema,
+  saveAnswersResultSchema,
+  staffAnswersSchema,
+  updateQuestionBodySchema,
 } from '../src/profile-form';
 
 /**
@@ -549,5 +566,479 @@ describe('12-03 - the server never trusts a claimed type (T-12-05)', () => {
 
   it('a forged type key in the raw value changes nothing', () => {
     expect(issueOf(q('number'), { type: 'short_text', value: 'x' })).toBe('invalid');
+  });
+});
+
+// ── Task 2: the wire schemas ─────────────────────────────────────────────────────────────────
+
+const issuesOf = (
+  schema: {
+    safeParse: (v: unknown) => {
+      success: boolean;
+      error?: { issues: { message: string; path: PropertyKey[] }[] };
+    };
+  },
+  body: unknown,
+) => {
+  const result = schema.safeParse(body);
+  if (result.success) throw new Error('expected a refusal');
+  return (result.error?.issues ?? []).map((i) => i.message);
+};
+
+const label = (n: number) => ({ label: `Opção ${n}` });
+const labels = (n: number) => Array.from({ length: n }, (_, i) => label(i + 1));
+
+describe('12-03 - createQuestionBodySchema (PFORM-02, PFORM-06)', () => {
+  it('accepts a minimal text question and fills the defaults', () => {
+    const parsed = createQuestionBodySchema.parse({ type: 'short_text', title: '  Cidade  ' });
+    expect(parsed).toEqual({
+      type: 'short_text',
+      title: 'Cidade',
+      helpText: null,
+      required: false,
+      showOnProfile: false,
+      allowOther: false,
+      options: [],
+      limits: {},
+    });
+  });
+
+  it('accepts a choice question with 2 to 20 options and "Outro"', () => {
+    expect(
+      createQuestionBodySchema.safeParse({ type: 'dropdown', title: 'Estado', options: labels(2) })
+        .success,
+    ).toBe(true);
+    expect(
+      createQuestionBodySchema.safeParse({
+        type: 'multiple_choice',
+        title: 'Interesses',
+        allowOther: true,
+        options: labels(20),
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a choice question with 0 or 1 option (empty)', () => {
+    for (const n of [0, 1]) {
+      const codes = issuesOf(createQuestionBodySchema, {
+        type: 'single_choice',
+        title: 'x',
+        options: labels(n),
+      });
+      expect(codes).toContain('invalid');
+    }
+  });
+
+  it('refuses 21 options with limit_reached (boundary)', () => {
+    expect(
+      issuesOf(createQuestionBodySchema, { type: 'dropdown', title: 'x', options: labels(21) }),
+    ).toContain('limit_reached');
+  });
+
+  it('refuses labels that collide after trimming, NFC and case folding (adjacency, encoding)', () => {
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'single_choice',
+        title: 'x',
+        options: [{ label: 'Sim' }, { label: ' sim ' }],
+      }),
+    ).toContain('invalid');
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'single_choice',
+        title: 'x',
+        options: [{ label: 'Ação' }, { label: 'AÇÃO' }],
+      }),
+    ).toContain('invalid');
+  });
+
+  it('refuses an empty option label and an option label over 80 code points', () => {
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'single_choice',
+        title: 'x',
+        options: [{ label: 'a' }, { label: '   ' }],
+      }),
+    ).toContain('required');
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'single_choice',
+        title: 'x',
+        options: [{ label: 'a' }, { label: 'b'.repeat(81) }],
+      }),
+    ).toContain('too_long');
+    expect(
+      createQuestionBodySchema.safeParse({
+        type: 'single_choice',
+        title: 'x',
+        options: [{ label: 'a' }, { label: '😀'.repeat(80) }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses options on a non-choice question and allowOther on a text question', () => {
+    expect(
+      issuesOf(createQuestionBodySchema, { type: 'number', title: 'x', options: labels(2) }),
+    ).toContain('invalid');
+    expect(
+      issuesOf(createQuestionBodySchema, { type: 'short_text', title: 'x', allowOther: true }),
+    ).toContain('other_not_allowed');
+  });
+
+  it('accepts limits only on number and date, finite and with min <= max', () => {
+    expect(
+      createQuestionBodySchema.safeParse({
+        type: 'number',
+        title: 'x',
+        limits: { min: 1, max: 1 },
+      }).success,
+    ).toBe(true);
+    expect(
+      createQuestionBodySchema.safeParse({
+        type: 'date',
+        title: 'x',
+        limits: { min: '2026-01-01', max: '2026-01-01' },
+      }).success,
+    ).toBe(true);
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'number',
+        title: 'x',
+        limits: { min: 5, max: 4 },
+      }),
+    ).toContain('out_of_range');
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'date',
+        title: 'x',
+        limits: { min: '2026-02-01', max: '2026-01-01' },
+      }),
+    ).toContain('out_of_range');
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'date',
+        title: 'x',
+        limits: { min: '2026-02-30' },
+      }),
+    ).toContain('invalid');
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'number',
+        title: 'x',
+        limits: { min: Number.POSITIVE_INFINITY },
+      }),
+    ).toContain('invalid');
+    expect(
+      issuesOf(createQuestionBodySchema, { type: 'number', title: 'x', limits: { min: '1' } }),
+    ).toContain('invalid');
+    expect(
+      issuesOf(createQuestionBodySchema, { type: 'short_text', title: 'x', limits: { max: 5 } }),
+    ).toContain('invalid');
+  });
+
+  it('title is 1 to 120 and help text at most 300 code points (boundary)', () => {
+    expect(
+      createQuestionBodySchema.safeParse({ type: 'short_text', title: 'a'.repeat(120) }).success,
+    ).toBe(true);
+    expect(
+      issuesOf(createQuestionBodySchema, { type: 'short_text', title: 'a'.repeat(121) }),
+    ).toEqual(['too_long']);
+    expect(issuesOf(createQuestionBodySchema, { type: 'short_text', title: '   ' })).toEqual([
+      'required',
+    ]);
+    expect(
+      createQuestionBodySchema.safeParse({
+        type: 'short_text',
+        title: 'x',
+        helpText: 'a'.repeat(300),
+      }).success,
+    ).toBe(true);
+    expect(
+      issuesOf(createQuestionBodySchema, {
+        type: 'short_text',
+        title: 'x',
+        helpText: 'a'.repeat(301),
+      }),
+    ).toEqual(['too_long']);
+    expect(
+      createQuestionBodySchema.parse({ type: 'short_text', title: 'x', helpText: '   ' }).helpText,
+    ).toBeNull();
+  });
+
+  it('required and showOnProfile are free on every type', () => {
+    for (const type of PROFILE_FORM_TYPES) {
+      const options = PROFILE_FORM_CHOICE_TYPES.includes(type as never) ? labels(2) : [];
+      expect(
+        createQuestionBodySchema.safeParse({
+          type,
+          title: 'x',
+          required: true,
+          showOnProfile: true,
+          options,
+        }).success,
+        type,
+      ).toBe(true);
+    }
+  });
+
+  it('every message of a refused body is a code of the closed list', () => {
+    const bodies: unknown[] = [
+      {},
+      { type: 'nope', title: 'x' },
+      { type: 'short_text', title: 5 },
+      { type: 'short_text', title: 'x', required: 'yes' },
+      { type: 'dropdown', title: 'x', options: [{ label: 5 }, { label: 6 }] },
+      { type: 'dropdown', title: 'x', options: labels(30) },
+      { type: 'number', title: 'x', limits: { min: 3, max: 1 } },
+    ];
+    for (const body of bodies) {
+      const result = createQuestionBodySchema.safeParse(body);
+      expect(result.success).toBe(false);
+      for (const issue of result.error?.issues ?? []) {
+        if (issue.code === 'unrecognized_keys') continue;
+        expect(PROFILE_FORM_ISSUE_SET.has(issue.message), issue.message).toBe(true);
+      }
+    }
+  });
+
+  it('refuses an unknown key (strict)', () => {
+    expect(
+      createQuestionBodySchema.safeParse({ type: 'short_text', title: 'x', position: 3 }).success,
+    ).toBe(false);
+  });
+});
+
+describe('12-03 - updateQuestionBodySchema, reorder and replace (PFORM-02, PFORM-17)', () => {
+  it('needs the revision and accepts a partial edit with kept and new options', () => {
+    expect(updateQuestionBodySchema.safeParse({ title: 'x' }).success).toBe(false);
+    expect(updateQuestionBodySchema.safeParse({ revision: 0 }).success).toBe(false);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1 }).success).toBe(true);
+    expect(
+      updateQuestionBodySchema.safeParse({
+        revision: 3,
+        title: 'Novo',
+        required: true,
+        options: [{ id: A, label: 'a' }, { label: 'nova' }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('keeps the option rules on an edit', () => {
+    expect(
+      issuesOf(updateQuestionBodySchema, { revision: 1, options: [{ label: 'a' }] }),
+    ).toContain('invalid');
+    expect(
+      issuesOf(updateQuestionBodySchema, {
+        revision: 1,
+        options: [{ label: 'a' }, { label: 'A ' }],
+      }),
+    ).toContain('invalid');
+    expect(
+      issuesOf(updateQuestionBodySchema, { revision: 1, limits: { min: 2, max: 1 } }),
+    ).toContain('out_of_range');
+  });
+
+  it('reorder takes 1 to 30 unique ids', () => {
+    expect(reorderBodySchema.safeParse({ ids: [A, B] }).success).toBe(true);
+    expect(issuesOf(reorderBodySchema, { ids: [] })).toContain('order_mismatch');
+    expect(issuesOf(reorderBodySchema, { ids: [A, A] })).toContain('order_mismatch');
+    expect(issuesOf(reorderBodySchema, { ids: ['x'] })).toContain('order_mismatch');
+    const ids = Array.from(
+      { length: 31 },
+      (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    );
+    expect(reorderBodySchema.safeParse({ ids: ids.slice(0, 30) }).success).toBe(true);
+    expect(reorderBodySchema.safeParse({ ids }).success).toBe(false);
+  });
+
+  it('replace is the create body plus the replaced id, with the same definition rules', () => {
+    expect(
+      replaceQuestionBodySchema.safeParse({ type: 'short_text', title: 'x', replaces: A }).success,
+    ).toBe(true);
+    expect(replaceQuestionBodySchema.safeParse({ type: 'short_text', title: 'x' }).success).toBe(
+      false,
+    );
+    expect(
+      issuesOf(replaceQuestionBodySchema, {
+        type: 'dropdown',
+        title: 'x',
+        replaces: A,
+        options: [],
+      }),
+    ).toContain('invalid');
+  });
+});
+
+const memberQuestion = {
+  id: A,
+  type: 'multiple_choice',
+  title: 'Interesses',
+  helpText: null,
+  required: true,
+  showOnProfile: true,
+  options: [
+    { id: B, label: 'a' },
+    { id: C, label: 'b' },
+  ],
+  allowOther: true,
+  limits: {},
+  answer: { optionIds: [B], otherText: null },
+};
+
+describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
+  it('memberFormSchema round-trips a sample, answered and unanswered', () => {
+    const sample = {
+      mode: 'returning',
+      missingRequired: 1,
+      formEtag: 'abc',
+      questions: [
+        memberQuestion,
+        { ...memberQuestion, id: B, type: 'rating', options: [], allowOther: false, answer: null },
+        {
+          ...memberQuestion,
+          id: C,
+          type: 'number',
+          options: [],
+          allowOther: false,
+          limits: { min: 1, max: 9 },
+          answer: 4.5,
+        },
+      ],
+    };
+    expect(memberFormSchema.parse(sample)).toEqual(sample);
+    expect(memberFormSchema.safeParse({ ...sample, mode: 'other' }).success).toBe(false);
+  });
+
+  it('saveAnswersBodySchema keys the answers by question id, at most 30 keys', () => {
+    expect(
+      saveAnswersBodySchema.safeParse({ formEtag: 'e', answers: { [A]: 'x', [B]: null, [C]: [1] } })
+        .success,
+    ).toBe(true);
+    expect(saveAnswersBodySchema.safeParse({ formEtag: 'e', answers: { nope: 'x' } }).success).toBe(
+      false,
+    );
+    expect(saveAnswersBodySchema.safeParse({ answers: {} }).success).toBe(false);
+    const thirtyOne = Object.fromEntries(
+      Array.from({ length: 31 }, (_, i) => [
+        `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+        'x',
+      ]),
+    );
+    expect(issuesOf(saveAnswersBodySchema, { formEtag: 'e', answers: thirtyOne })).toContain(
+      'limit_reached',
+    );
+  });
+
+  it('the small result shapes round-trip', () => {
+    expect(saveAnswersResultSchema.parse({ missingRequired: 0 })).toEqual({ missingRequired: 0 });
+    expect(dismissNoticeResultSchema.parse({ newOptional: 2 })).toEqual({ newOptional: 2 });
+    expect(profileFormBootstrapSchema.parse({ pendingRequired: 1, newOptional: 0 })).toEqual({
+      pendingRequired: 1,
+      newOptional: 0,
+    });
+    expect(
+      profileFormBootstrapSchema.safeParse({ pendingRequired: -1, newOptional: 0 }).success,
+    ).toBe(false);
+  });
+});
+
+const adminQuestion = {
+  id: A,
+  type: 'dropdown',
+  title: 'Estado',
+  helpText: 'Onde mora',
+  required: false,
+  showOnProfile: true,
+  options: [
+    { id: B, label: 'SP', answerCount: 3 },
+    { id: C, label: 'RJ', answerCount: 0 },
+  ],
+  allowOther: false,
+  limits: {},
+  position: 1,
+  revision: 2,
+  answerCount: 3,
+  createdAt: '2026-10-29T10:00:00.000Z',
+  listedAt: '2026-10-29T10:00:00.000Z',
+};
+
+describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)', () => {
+  it('adminQuestionSchema and archivedQuestionSchema round-trip', () => {
+    expect(adminQuestionSchema.parse(adminQuestion)).toEqual(adminQuestion);
+    const archived = { ...adminQuestion, archivedAt: '2026-10-30T10:00:00.000Z' };
+    expect(archivedQuestionSchema.parse(archived)).toEqual(archived);
+    expect(archivedQuestionSchema.safeParse(adminQuestion).success).toBe(false);
+  });
+
+  it('the summary and the impact shapes round-trip; the impact query names one of four changes', () => {
+    expect(profileFormSummarySchema.parse({ total: 10, complete: 4, hasRequired: true })).toEqual({
+      total: 10,
+      complete: 4,
+      hasRequired: true,
+    });
+    expect(impactResultSchema.parse({ members: 7 })).toEqual({ members: 7 });
+    for (const change of ['create_required', 'make_required', 'reactivate', 'replace']) {
+      expect(impactQuerySchema.safeParse({ change }).success).toBe(true);
+    }
+    expect(impactQuerySchema.safeParse({ change: 'archive' }).success).toBe(false);
+    expect(impactQuerySchema.safeParse({ change: 'replace', questionId: A }).success).toBe(true);
+    expect(impactQuerySchema.safeParse({ change: 'replace', questionId: 'x' }).success).toBe(false);
+  });
+
+  it('publicAnswersSchema rejects an unknown key at either level (strictness)', () => {
+    const row = {
+      questionId: A,
+      title: 'Estado',
+      type: 'dropdown',
+      options: [{ id: B, label: 'SP' }],
+      value: { optionId: B, otherText: null },
+    };
+    const sample = { kind: 'member', answers: [row] };
+    expect(publicAnswersSchema.parse(sample)).toEqual(sample);
+    expect(publicAnswersSchema.safeParse({ ...sample, extra: 1 }).success).toBe(false);
+    expect(
+      publicAnswersSchema.safeParse({ kind: 'member', answers: [{ ...row, showOnProfile: true }] })
+        .success,
+    ).toBe(false);
+    expect(
+      publicAnswersSchema.safeParse({ kind: 'member', answers: [{ ...row, email: 'a@b.co' }] })
+        .success,
+    ).toBe(false);
+    expect(publicAnswersSchema.safeParse({ kind: 'staff', answers: [] }).success).toBe(false);
+  });
+
+  it('staffAnswersSchema carries the flags staff need and stays strict', () => {
+    const row = {
+      questionId: A,
+      title: 'Estado',
+      type: 'dropdown',
+      options: [{ id: B, label: 'SP' }],
+      value: null,
+      showOnProfile: false,
+      position: 2,
+      archivedAt: null,
+      answered: false,
+      required: true,
+    };
+    const sample = { kind: 'staff', answers: [row] };
+    expect(staffAnswersSchema.parse(sample)).toEqual(sample);
+    expect(
+      staffAnswersSchema.safeParse({ kind: 'staff', answers: [{ ...row, extra: 1 }] }).success,
+    ).toBe(false);
+  });
+});
+
+describe('12-03 - answerEtag', () => {
+  it('is the id:revision pairs in list order, and changes with a revision or the order', () => {
+    const list = [
+      { id: A, revision: 1 },
+      { id: B, revision: 4 },
+    ];
+    expect(answerEtag(list)).toBe(`${A}:1|${B}:4`);
+    expect(answerEtag([{ id: A, revision: 2 }, list[1] as (typeof list)[number]])).not.toBe(
+      answerEtag(list),
+    );
+    expect(answerEtag([...list].reverse())).not.toBe(answerEtag(list));
+    expect(answerEtag([])).toBe('');
   });
 });

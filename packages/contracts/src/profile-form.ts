@@ -322,3 +322,341 @@ export const answerValueSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('rating'), value: z.number().int().min(1).max(5) }),
 ]);
 export type AnswerValue = z.infer<typeof answerValueSchema>;
+
+// ── 12-03 Task 2: the wire schemas of every route ─────────────────────────────────────────────
+
+const CHOICE_SET: ReadonlySet<string> = new Set(PROFILE_FORM_CHOICE_TYPES);
+const isChoiceType = (type: string): boolean => CHOICE_SET.has(type);
+
+const typeField = z.enum(PROFILE_FORM_TYPES, { error: 'invalid' });
+
+/** A trimmed text of 1 to `max` code points; an empty value is `required`, a long one `too_long`. */
+const requiredText = (max: number) =>
+  z
+    .string({ error: 'invalid' })
+    .trim()
+    .min(1, 'required')
+    .refine((value) => codePoints(value) <= max, 'too_long');
+
+/** Help text: trimmed, at most 300 code points, an empty value means "none" (`null`). */
+const helpTextField = z
+  .string({ error: 'invalid' })
+  .trim()
+  .refine((value) => codePoints(value) <= PROFILE_FORM_LIMITS.helpText, 'too_long')
+  .transform((value) => (value === '' ? null : value))
+  .nullable();
+
+/** `min` and `max` of a number question (numbers) or a date question (ISO days). */
+const limitValue = z.union([z.number(), z.string()], { error: 'invalid' });
+const limitsSchema = z.object({ min: limitValue.optional(), max: limitValue.optional() }).strict();
+export type ProfileFormLimits = z.infer<typeof limitsSchema>;
+
+type DefinitionIssueCtx = z.core.$RefinementCtx;
+
+/** The limits rules that do not depend on the type: finite numbers or ISO days, `min <= max`. */
+function checkLimitValues(limits: ProfileFormLimits, ctx: DefinitionIssueCtx): void {
+  const { min, max } = limits;
+  for (const [key, value] of [
+    ['min', min],
+    ['max', max],
+  ] as const) {
+    if (value === undefined) continue;
+    const valid =
+      typeof value === 'number'
+        ? Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER
+        : isoDay.safeParse(value).success;
+    if (!valid) ctx.addIssue({ code: 'custom', message: 'invalid', path: ['limits', key] });
+  }
+  if (min !== undefined && max !== undefined) {
+    if (typeof min !== typeof max) {
+      ctx.addIssue({ code: 'custom', message: 'invalid', path: ['limits', 'max'] });
+    } else if (min > max) {
+      ctx.addIssue({ code: 'custom', message: 'out_of_range', path: ['limits', 'min'] });
+    }
+  }
+}
+
+/** The option rules: 2 to 20, unique after `normalizeOptionLabel`, each label 1 to 80 code points. */
+function checkOptionList(options: { label: string }[], ctx: DefinitionIssueCtx): void {
+  if (options.length < 2) {
+    ctx.addIssue({ code: 'custom', message: 'invalid', path: ['options'] });
+  } else if (options.length > PROFILE_FORM_LIMITS.options) {
+    ctx.addIssue({ code: 'custom', message: 'limit_reached', path: ['options'] });
+  }
+  const seen = new Set<string>();
+  options.forEach((option, index) => {
+    const label = option.label.trim();
+    if (label === '') {
+      ctx.addIssue({ code: 'custom', message: 'required', path: ['options', index, 'label'] });
+      return;
+    }
+    if (codePoints(label) > PROFILE_FORM_LIMITS.optionLabel) {
+      ctx.addIssue({ code: 'custom', message: 'too_long', path: ['options', index, 'label'] });
+    }
+    const key = normalizeOptionLabel(label);
+    if (seen.has(key)) {
+      ctx.addIssue({ code: 'custom', message: 'invalid', path: ['options', index, 'label'] });
+    }
+    seen.add(key);
+  });
+}
+
+type QuestionDefinitionBody = {
+  type: ProfileFormType;
+  options: { label: string }[];
+  allowOther: boolean;
+  limits: ProfileFormLimits;
+};
+
+/** The cross-field rules of a question definition (create and replace share them). */
+function checkDefinition(body: QuestionDefinitionBody, ctx: DefinitionIssueCtx): void {
+  const choice = isChoiceType(body.type);
+  if (choice) {
+    checkOptionList(body.options, ctx);
+  } else if (body.options.length > 0) {
+    ctx.addIssue({ code: 'custom', message: 'invalid', path: ['options'] });
+  }
+  if (body.allowOther && !choice) {
+    ctx.addIssue({ code: 'custom', message: 'other_not_allowed', path: ['allowOther'] });
+  }
+  const limitKeys = Object.values(body.limits).filter((value) => value !== undefined);
+  if (body.type === 'number' || body.type === 'date') {
+    checkLimitValues(body.limits, ctx);
+    for (const [key, value] of Object.entries(body.limits)) {
+      if (value === undefined) continue;
+      const rightKind =
+        body.type === 'number' ? typeof value === 'number' : typeof value === 'string';
+      if (!rightKind) ctx.addIssue({ code: 'custom', message: 'invalid', path: ['limits', key] });
+    }
+  } else if (limitKeys.length > 0) {
+    ctx.addIssue({ code: 'custom', message: 'invalid', path: ['limits'] });
+  }
+}
+
+const createQuestionShape = z
+  .object({
+    type: typeField,
+    title: requiredText(PROFILE_FORM_LIMITS.title),
+    helpText: helpTextField.default(null),
+    required: z.boolean({ error: 'invalid' }).default(false),
+    showOnProfile: z.boolean({ error: 'invalid' }).default(false),
+    allowOther: z.boolean({ error: 'invalid' }).default(false),
+    options: z
+      .array(z.object({ label: z.string({ error: 'invalid' }) }).strict())
+      .max(PROFILE_FORM_LIMITS.options + 1, 'limit_reached')
+      .default([]),
+    limits: limitsSchema.default({}),
+  })
+  .strict();
+
+/** `POST /questions` (PFORM-02, PFORM-06): the definition of a new question. */
+export const createQuestionBodySchema = createQuestionShape.superRefine(checkDefinition);
+export type CreateQuestionBody = z.infer<typeof createQuestionBodySchema>;
+
+/**
+ * `PUT /questions/{id}` (PFORM-17): `revision` is the optimistic lock; every other key is optional.
+ * An option with an `id` keeps a stored option, one without adds a new one. `type` is accepted here and
+ * refused by the service with `type_locked` once the question has answers.
+ */
+export const updateQuestionBodySchema = z
+  .object({
+    revision: z.number({ error: 'invalid' }).int('invalid').min(1, 'invalid'),
+    type: typeField.optional(),
+    title: requiredText(PROFILE_FORM_LIMITS.title).optional(),
+    helpText: helpTextField.optional(),
+    required: z.boolean({ error: 'invalid' }).optional(),
+    showOnProfile: z.boolean({ error: 'invalid' }).optional(),
+    allowOther: z.boolean({ error: 'invalid' }).optional(),
+    options: z
+      .array(
+        z
+          .object({
+            id: z.uuid({ error: 'invalid' }).optional(),
+            label: z.string({ error: 'invalid' }),
+          })
+          .strict(),
+      )
+      .max(PROFILE_FORM_LIMITS.options + 1, 'limit_reached')
+      .optional(),
+    limits: limitsSchema.optional(),
+  })
+  .strict()
+  .superRefine((body, ctx) => {
+    if (body.options !== undefined) checkOptionList(body.options, ctx);
+    if (body.limits !== undefined) checkLimitValues(body.limits, ctx);
+  });
+export type UpdateQuestionBody = z.infer<typeof updateQuestionBodySchema>;
+
+/** `PUT /questions/order`: the whole active list, ids unique. */
+export const reorderBodySchema = z
+  .object({
+    ids: z
+      .array(z.uuid({ error: 'order_mismatch' }), { error: 'order_mismatch' })
+      .min(1, 'order_mismatch')
+      .max(PROFILE_FORM_LIMITS.activeQuestions),
+  })
+  .strict()
+  .refine((body) => new Set(body.ids).size === body.ids.length, 'order_mismatch');
+export type ReorderBody = z.infer<typeof reorderBodySchema>;
+
+/** `POST /questions/replace` (PFORM-17): a new question that takes the place of `replaces`. */
+export const replaceQuestionBodySchema = createQuestionShape
+  .extend({ replaces: z.uuid({ error: 'invalid' }) })
+  .superRefine(checkDefinition);
+export type ReplaceQuestionBody = z.infer<typeof replaceQuestionBodySchema>;
+
+const optionSchema = z.object({ id: z.string(), label: z.string() });
+
+const questionCore = {
+  id: z.uuid(),
+  type: typeField,
+  title: z.string(),
+  helpText: z.string().nullable(),
+  required: z.boolean(),
+  showOnProfile: z.boolean(),
+  allowOther: z.boolean(),
+  limits: limitsSchema,
+};
+
+/** The stored answer as the member read returns it: the loose shape of any type, or `null`. */
+const storedValueSchema = z.union([z.string(), z.number(), z.boolean(), choiceOne, choiceMany]);
+
+/** One question of the member form (`GET /v1/me/profile-form`). */
+export const memberQuestionSchema = z.object({
+  ...questionCore,
+  options: z.array(optionSchema),
+  answer: storedValueSchema.nullable(),
+});
+export type MemberQuestion = z.infer<typeof memberQuestionSchema>;
+
+/** `GET /v1/me/profile-form`: staff and a module that is off get `mode: 'none'` and no questions. */
+export const memberFormSchema = z.object({
+  mode: z.enum(PROFILE_FORM_MODES),
+  missingRequired: z.number().int().min(0),
+  formEtag: z.string(),
+  questions: z.array(memberQuestionSchema),
+});
+export type MemberForm = z.infer<typeof memberFormSchema>;
+
+/** `PUT /v1/me/profile-form/answers`: the whole screen at once, keyed by question id. */
+export const saveAnswersBodySchema = z
+  .object({
+    formEtag: z.string().min(1).max(256),
+    answers: z
+      .record(z.uuid(), z.unknown())
+      .refine(
+        (answers) => Object.keys(answers).length <= PROFILE_FORM_LIMITS.activeQuestions,
+        'limit_reached',
+      ),
+  })
+  .strict();
+export type SaveAnswersBody = z.infer<typeof saveAnswersBodySchema>;
+
+export const saveAnswersResultSchema = z.object({ missingRequired: z.number().int().min(0) });
+export type SaveAnswersResult = z.infer<typeof saveAnswersResultSchema>;
+
+export const dismissNoticeResultSchema = z.object({ newOptional: z.number().int().min(0) });
+export type DismissNoticeResult = z.infer<typeof dismissNoticeResultSchema>;
+
+/** The block `GET /v1/me/bootstrap` gains (plan 05): what the redirect and the notice need. */
+export const profileFormBootstrapSchema = z.object({
+  pendingRequired: z.number().int().min(0),
+  newOptional: z.number().int().min(0),
+});
+export type ProfileFormBootstrap = z.infer<typeof profileFormBootstrapSchema>;
+
+const adminCore = {
+  ...questionCore,
+  options: z.array(optionSchema.extend({ answerCount: z.number().int().min(0) })),
+  position: z.number().int(),
+  revision: z.number().int().min(1),
+  answerCount: z.number().int().min(0),
+  createdAt: z.string(),
+  listedAt: z.string(),
+};
+
+/** One row of the builder's active list: the member fields without `answer`, plus counts. */
+export const adminQuestionSchema = z.object(adminCore);
+export type AdminQuestion = z.infer<typeof adminQuestionSchema>;
+
+export const archivedQuestionSchema = z.object({ ...adminCore, archivedAt: z.string() });
+export type ArchivedQuestion = z.infer<typeof archivedQuestionSchema>;
+
+export const profileFormSummarySchema = z.object({
+  total: z.number().int().min(0),
+  complete: z.number().int().min(0),
+  hasRequired: z.boolean(),
+});
+export type ProfileFormSummary = z.infer<typeof profileFormSummarySchema>;
+
+export const PROFILE_FORM_IMPACT_CHANGES = [
+  'create_required',
+  'make_required',
+  'reactivate',
+  'replace',
+] as const;
+export type ProfileFormImpactChange = (typeof PROFILE_FORM_IMPACT_CHANGES)[number];
+
+/** `GET /impact`: how many members a change would ask to answer. */
+export const impactQuerySchema = z
+  .object({ change: z.enum(PROFILE_FORM_IMPACT_CHANGES), questionId: z.uuid().optional() })
+  .strict();
+export type ImpactQuery = z.infer<typeof impactQuerySchema>;
+
+export const impactResultSchema = z.object({ members: z.number().int().min(0) });
+export type ImpactResult = z.infer<typeof impactResultSchema>;
+
+/**
+ * `GET /v1/members/{id}/profile-answers` for a member viewer: public and answered rows only. **Strict
+ * on purpose (PFORM-18):** an extra key (a private flag, an e-mail, a question the member left blank)
+ * is a contract change a reviewer sees.
+ */
+export const publicAnswersSchema = z
+  .object({
+    kind: z.literal('member'),
+    answers: z.array(
+      z
+        .object({
+          questionId: z.uuid(),
+          title: z.string(),
+          type: typeField,
+          options: z.array(optionSchema),
+          value: storedValueSchema,
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type PublicAnswers = z.infer<typeof publicAnswersSchema>;
+
+/** The same read for staff (PFORM-19): every row, archived included, with the flags staff need. */
+export const staffAnswersSchema = z
+  .object({
+    kind: z.literal('staff'),
+    answers: z.array(
+      z
+        .object({
+          questionId: z.uuid(),
+          title: z.string(),
+          type: typeField,
+          options: z.array(optionSchema),
+          value: storedValueSchema.nullable(),
+          showOnProfile: z.boolean(),
+          position: z.number().int(),
+          archivedAt: z.string().nullable(),
+          answered: z.boolean(),
+          required: z.boolean(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type StaffAnswers = z.infer<typeof staffAnswersSchema>;
+
+/**
+ * The canonical text of a form's identity: `id:revision` pairs in list order. The server hashes it into
+ * `formEtag`, so a member who opened the form before an admin edit is told it changed (`form_changed`).
+ */
+export function answerEtag(questions: readonly { id: string; revision: number }[]): string {
+  return questions.map((question) => `${question.id}:${question.revision}`).join('|');
+}
