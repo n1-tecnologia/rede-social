@@ -1161,6 +1161,7 @@ None yet.
 - Phase 09.2 inserted after Phase 9: Banco por Tenant: one Supabase project per tenant (provisioning, migration fan-out, per-tenant routing); runs after 09.1, before 10; 10 open decisions listed in the ROADMAP notes
 - Phase 09.3 inserted after Phase 9: Pendências de backend do FRONT.pdf (delete event/community, limits, Android icon); placed after 09.2 by hand, STATE stays on 09.2
 - Phase 09.4 inserted after Phase 09.3: Projeto do tenant no Supabase do cliente: token com escopo por projeto (decided with Igor 2026-10-27; numbered 09.4 by hand, STATE stays on 09.2 plan 25)
+- Phase 12 added: Formulário de perfil do tenant: admin-built profile form (short/long text, dropdown, multiple choice, radio, more types) answered at sign-up, by members without a completed profile and again by members who had completed it before the form existed; requested by Igor 2026-10-29, no dependency on 10-11, STATE stays on 09.4
 
 ## Deferred Items
 
