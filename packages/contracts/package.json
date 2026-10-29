@@ -17,6 +17,7 @@
     "./money": "./src/money.ts",
     "./moderation": "./src/moderation.ts",
     "./payments": "./src/payments.ts",
+    "./profile-form": "./src/profile-form.ts",
     "./profiles": "./src/profiles.ts",
     "./projects": "./src/projects.ts",
     "./realtime": "./src/realtime.ts",
