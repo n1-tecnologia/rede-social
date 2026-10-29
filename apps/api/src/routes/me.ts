@@ -12,6 +12,12 @@ import {
 } from '@rede-social/contracts';
 import { subscriptionStatusSchema } from '@rede-social/contracts/payments';
 import {
+  dismissNoticeResultSchema,
+  memberFormSchema,
+  saveAnswersBodySchema,
+  saveAnswersResultSchema,
+} from '@rede-social/contracts/profile-form';
+import {
   ownProfileSchema,
   type ProfileIssue,
   updateProfileBodySchema,
@@ -22,7 +28,12 @@ import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { getSubscriptionStatus } from '@rede-social/core/server/payments/status';
-import { bootstrapBlock } from '@rede-social/core/server/profile-form/member';
+import {
+  bootstrapBlock,
+  dismissNotice,
+  getMemberForm,
+  saveAnswers,
+} from '@rede-social/core/server/profile-form/member';
 import {
   dismissNudge,
   getOwnProfile,
@@ -386,6 +397,109 @@ export const meRoutes = me
       );
       c.header('Cache-Control', 'no-store');
       return c.json(profile, 200);
+    },
+  )
+  /**
+   * `GET /v1/me/profile-form` (D-582): ONE read for the first answer, the return after a form change and the
+   * later edit. Every active question in the admin's order, pre-filled with the caller's own answers, plus
+   * `mode`, `missingRequired` and `formEtag`, all decided by the server from the data. A KERNEL route with no
+   * `requireModule`: staff and a module that is off get `mode: 'none'`.
+   */
+  .openapi(
+    createRoute({
+      method: 'get',
+      path: '/profile-form',
+      responses: {
+        200: {
+          description: 'The caller’s profile form, pre-filled',
+          content: { 'application/json': { schema: memberFormSchema } },
+        },
+      },
+    }),
+    async (c) => {
+      const form = await getMemberForm(c.get('ctx'));
+      c.header('Cache-Control', 'no-store');
+      return c.json(form, 200);
+    },
+  )
+  /**
+   * `PUT /v1/me/profile-form/answers` (D-585, PFORM-07, PFORM-24): the single save for the whole screen. Every
+   * value is validated against the question's CURRENT stored definition in one transaction, with no partial
+   * write. Logs ids and a count only, never a value (T-12-15).
+   */
+  .openapi(
+    createRoute({
+      method: 'put',
+      path: '/profile-form/answers',
+      request: {
+        body: {
+          content: { 'application/json': { schema: saveAnswersBodySchema } },
+          required: true,
+        },
+      },
+      responses: {
+        200: {
+          description: 'Saved; the number of required questions still unanswered (0)',
+          content: { 'application/json': { schema: saveAnswersResultSchema } },
+        },
+        400: envelope(
+          'VALIDATION_FAILED with details.profileForm "answers_invalid" and details.errors keyed by question id',
+        ),
+        403: envelope('FORBIDDEN: staff roles do not answer the form'),
+        409: envelope(
+          'CONFLICT with details.profileForm "form_changed" and details.form, the fresh form; nothing was written',
+        ),
+      },
+    }),
+    async (c) => {
+      const ctx = c.get('ctx');
+      const body = c.req.valid('json');
+      const result = await saveAnswers(ctx, body);
+      c.get('logger').info(
+        {
+          event: 'profile_form.saved',
+          userId: ctx.userId,
+          tenantId: ctx.tenantId,
+          requestId: ctx.requestId,
+          count: Object.keys(body.answers).length,
+        },
+        'profile form answers saved',
+      );
+      c.header('Cache-Control', 'no-store');
+      return c.json(result, 200);
+    },
+  )
+  /**
+   * `POST /v1/me/profile-form/dismiss-notice` (D-586): "Agora não" on the new-optional-questions notice. Server
+   * state (batch granularity), so it survives a reinstall and another device. Deliberately NOT on the gate's
+   * allow-list: an optional-only form never gates, and a gated member answers the required questions first.
+   */
+  .openapi(
+    createRoute({
+      method: 'post',
+      path: '/profile-form/dismiss-notice',
+      responses: {
+        200: {
+          description: 'Dismissed; the number of new optional questions still counted (0)',
+          content: { 'application/json': { schema: dismissNoticeResultSchema } },
+        },
+        403: envelope('FORBIDDEN: staff roles have no notice'),
+      },
+    }),
+    async (c) => {
+      const ctx = c.get('ctx');
+      const result = await dismissNotice(ctx);
+      c.get('logger').info(
+        {
+          event: 'profile_form.notice_dismissed',
+          userId: ctx.userId,
+          tenantId: ctx.tenantId,
+          requestId: ctx.requestId,
+        },
+        'profile form notice dismissed',
+      );
+      c.header('Cache-Control', 'no-store');
+      return c.json(result, 200);
     },
   )
   .openapi(inviteContextRoute, async (c) => {
