@@ -200,6 +200,12 @@ function kernelSpecifiersIn(sources: readonly string[]): Set<string> {
 
 const read = (path: string) => readFileSync(path, 'utf8');
 
+/**
+ * A module's package directory is its key in kebab-case: `profile_form` lives in `profile-form`
+ * (12-02: the first key with an underscore; every earlier key is a single word, so the two agreed).
+ */
+const moduleDirName = (key: string) => key.replaceAll('_', '-');
+
 describe('module READMEs cannot drift (MOD-05, D-347)', () => {
   const entries = Object.entries(MODULE_REGISTRY);
 
@@ -207,13 +213,13 @@ describe('module READMEs cannot drift (MOD-05, D-347)', () => {
     const packages = readdirSync(MODULES_DIR).filter((entry) =>
       existsSync(join(MODULES_DIR, entry, 'module.ts')),
     );
-    expect(entries.map(([key]) => key).sort()).toEqual(packages.sort());
+    expect(entries.map(([key]) => moduleDirName(key)).sort()).toEqual(packages.sort());
   });
 
   it.each(entries)(
     '2. %s: README matches its manifest, its emits and its kernel imports',
     (key, manifest) => {
-      const dir = join(MODULES_DIR, key);
+      const dir = join(MODULES_DIR, moduleDirName(key));
       const readmePath = join(dir, 'README.md');
       expect(existsSync(readmePath), `${key}/README.md exists`).toBe(true);
       const emitted = emittedNamesIn(filesUnder(join(dir, 'server'), ['.ts']).map(read));

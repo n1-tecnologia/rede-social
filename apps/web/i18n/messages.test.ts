@@ -3832,6 +3832,33 @@ describe('09.1-02 - the payments module has a name and a description in the plat
   });
 });
 
+describe('12-02 - the profile form module has a name and a description in the platform catalog (UI-D-594)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it('platform.profile_form.json declares exactly the `platform` root', () => {
+    const own = JSON.parse(
+      readFileSync(path.join(catalogDir, 'platform.profile_form.json'), 'utf8'),
+    ) as object;
+    expect(Object.keys(own)).toEqual(['platform']);
+  });
+
+  it.each([
+    ['platform.moduleNames.profile_form', 'Formulário de perfil'],
+    [
+      'platform.moduleDescriptions.profile_form',
+      'O admin monta perguntas que os membros respondem para completar o perfil. Perguntas obrigatórias seguram o acesso até serem respondidas.',
+    ],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+});
+
 /**
  * 09-08 (UI-D-491, UI-D-492, UI-D-494, UI-D-512) - the new `social.json` catalog (root key `social`,
  * one root per file): the Início / Explorar chip row, the "Encontrar pessoas" entry and the three

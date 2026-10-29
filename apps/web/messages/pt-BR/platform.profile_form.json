@@ -1,0 +1,10 @@
+{
+  "platform": {
+    "moduleNames": {
+      "profile_form": "Formulário de perfil"
+    },
+    "moduleDescriptions": {
+      "profile_form": "O admin monta perguntas que os membros respondem para completar o perfil. Perguntas obrigatórias seguram o acesso até serem respondidas."
+    }
+  }
+}
