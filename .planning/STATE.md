@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "09.4"
-current_phase_name: Projeto do tenant no Supabase do cliente (INSERTED)
+current_phase: 12
+current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: Completed 09.4-17-PLAN.md (17/17 plans; plan 17 task 3 ran on Igor's "pode dar deploy para o branch master" with P1 still pending: catalog bda792a7, SUMMARY 4323c772; full pnpm verify stopped at Playwright e2e on disk, everything before it green incl. 119 integration files / 2288 tests). Earlier: Completed 09.4-12-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01, 11, 12 done = 16/17; plan 17 tasks 1-2 done (46fbb7fa DEPLOY.md section + ledger steps, 7f3f1860 comment; all static gates, pgTAP 2920, 15 integration files, core 1268, contracts 258, web 5810 green except the one expected-red 'permission list written'), task 3 waits for Igor to sign P1). Code review gate ran (09.4-REVIEW.md: 0 critical, 6 warnings, 8 info); WR-01..05 fixed (734cdb30, afc6a907, 4a1030f8, 0f3364fb, 8886729b, 9be8f0fd), WR-06 is the [PENDENTE-PERMISSÕES] placeholder for task 3; REVIEW-FIX.md committed; Info IN-01..IN-08 open. Regression gate (turbo test, 18 tasks) found one real regression, the new PUT .../database/token route missing from apps/api/tests/isolation-inventory.ts, fixed in f4f2c3e1; the only red test left is the expected 'permission list written'. Plan 12: move to a customer project registers an unknown target from the local hidden prompt, fails closed with register_first in the Job, the way back is a normal move (pgTAP 2920, move-run 15, move-guard 22); P7 hosted proof is Igor's. Plan 11: `platform:set-owner` (hidden prompt, 41/41 integration, pgTAP 2920 pass); P6 hosted proof is Igor's. Probe run A ran on Igor's terminal on 2026-10-27 (21/21 allowed with the thirteen permissions) and was pasted into ledger P1 at his word, P1 Status still pending (his line); ruling 1 resolved: Igor said the token only had access to the specific project, so the 13 stay. Igor approved sketch 015 and the orchestrator wrote the approval on his explicit word (aea382b2). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
-last_updated: "2026-10-27T16:36:21.752Z"
-last_activity: 2026-10-27
-last_activity_desc: Phase 09.4 all 17 plans done and DEPLOYED to production on 2026-10-28 (api-00026, central +2 migrations, 09.3's 5 on project 0); verifier, secure-phase and phase close still to run (human_needed expected)
-state_head: 79c11da34733d016bac4ecde1abeee8c955cb1f0
+stopped_at: Completed 12-02-PLAN.md (profile_form key, widened CHECK, registered manifest, catalog; 12-01 still waits for Igor's sketch 016 approval)
+last_updated: "2026-10-29T23:15:12.503Z"
+last_activity: 2026-10-29
+last_activity_desc: Phase 12 execution started
+state_head: a5cb3d02116386541c7b5e87871f36f002b8e903
 progress:
-  total_phases: 26
+  total_phases: 27
   completed_phases: 0
-  total_plans: 294
-  completed_plans: 268
+  total_plans: 312
+  completed_plans: 286
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 09.4 — Projeto do tenant no Supabase do cliente (INSERTED)
+**Current focus:** Phase 12 — Formulário de perfil do tenant
 
 ## Current Position
 
-Phase: 09.4 (Projeto do tenant no Supabase do cliente (INSERTED)) — EXECUTING
+Phase: 12 (Formulário de perfil do tenant) — EXECUTING
 Current Plan: 1
-Total Plans in Phase: 17
-Plan: 16 of 17 done (03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01, 11, 12); 17 next; its task 3 waits for P1 signed by Igor, and hosted proofs P2..P8 stay his
-Status: Executing Phase 09.4
-Last activity: 2026-10-27 — Phase 09.4 plan 17 done (17/17); the thirteen permissions written in the catalog on Igor's deploy instruction (P1 still pending); pushed to master
+Total Plans in Phase: 18
+Plan: 1 of 18
+Status: Executing Phase 12
+Last activity: 2026-10-29 — Phase 12 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -324,6 +324,7 @@ Progress: [███████████████████░] 160/162
 | Phase 09.3 P05 | 7 min | 2 tasks | 10 files |
 | Phase 09.3 P07 | 28 min | 2 tasks | 11 files |
 | Phase 09.3 P08 | 8 min | 2 tasks | 14 files |
+| Phase 12 P02 | 5 min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -1055,6 +1056,7 @@ Recent decisions affecting current work:
 - [Phase 09.2]: 09.2-23: a move advances only by compare-and-set with a 15-minute row lease and an append-only event trail; the tool bootstraps its own target inline; only delete-source.ts deletes from the source (grep-guarded); a rollback after the flip holds the tenant, counts the writes since cutover_at and refuses unless --accept-loss; the HTTP TENANT_MOVING guard sits on the parent platform router and setTenantStatus needs the move id — D-535, D-536, D-534, T-09.2-101..108
 - [Phase 09.2]: 09.2-21: the held-out host states live in one env-free table (lib/held-out.ts); TENANT_UPDATING, TENANT_PREPARING and TENANT_UNAVAILABLE go straight to public screens and never through the session-clearing /auth/suspended, so a migration is not a logout; paused and unreachable read byte-identical to a suspension; a generic host reads the slug route's 503 code — D-535, D-545, UI-D-542, A-UI-8, T-09.2-94, T-09.2-95
 - [Phase 09.2]: 09.2-24: the connection budget is restated per project from the shipped defaults (PROJECT_POOL_MAX 3, not 4): a tenant project reads 192 of 400 on Small and 192 of 200 on Micro, the central project 352 of 400, so no workflow --max-instances changed; the production move is documented as a ROLE=move execution of the migrate Job with an override syntax that is unproven (hosted proofs H5 and H6); the hosted-proofs ledger ships pending with contract_gate closed — The arithmetic holds with the shipped values, so the budget needed no workflow change; the Job override follows from the image CMD without an entrypoint and has never run; nothing in the ledger can become passed without Igor's pasted evidence, and the Phase 08.1 removal waits for his contract_gate edit
+- [Phase 12]: Phase 12 one-way names confirmed by Igor on 2026-10-29: module key profile_form, gate error code PROFILE_FORM_PENDING, permissions profile_form.manage and profile_form.read, admin mount /v1/profile_form — Researcher defaults kept (D-596); the key is stored in tenant_modules and the CHECK, the rest are published contracts
 
 ### Pending Todos
 
@@ -1173,6 +1175,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-26T17:44:29.129Z
-Stopped at: Completed 09.2-24-PLAN.md (plans 01, 02, 03, 04, 12, 05, 06, 08, 07, 09, 13, 10, 11, 14, 17, 15, 18, 19, 22, 16, 20, 23, 21, 24 done; wave 13 complete); next is 09.2-25 (wave 14, human gates, autonomous false, 4 checkpoints for Igor). Phase 09.3 context gathered, UI-SPEC approved and planned (9 plans, 6 waves, plan checker passed) 2026-10-26 on the side; execute-phase 09.3 waits for 09.2 to close.
+Last session: 2026-10-29T23:15:12.243Z
+Stopped at: Completed 12-02-PLAN.md (profile_form key, widened CHECK, registered manifest, catalog; 12-01 still waits for Igor's sketch 016 approval)
 Resume file: None
