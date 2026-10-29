@@ -75,6 +75,13 @@ export const memberProfiles = pgTable(
     }),
     /** D-02/R-13: the first-access nudge is server state, so a reinstall does not re-nag. */
     nudgeDismissedAt: timestamp('nudge_dismissed_at', { withTimezone: true }),
+    /**
+     * Phase 12 (D-586): "Agora não" on the "Há perguntas novas" notice. Server state with BATCH
+     * granularity (one instant, PU-5): a new optional question listed after it brings the notice back.
+     */
+    profileFormNoticeDismissedAt: timestamp('profile_form_notice_dismissed_at', {
+      withTimezone: true,
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

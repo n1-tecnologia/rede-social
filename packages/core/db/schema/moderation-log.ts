@@ -6,7 +6,8 @@ import { tenants } from './tenants';
 /**
  * The moderation log (MODER-03, D-337): the tenant's audit record of every moderator action — a
  * comment removed (08-01, 08-03), a membership blocked or unblocked (08-04), a role changed (08-05)
- * and, from 09-07 (D-475), a member's post removed. Moderation is a KERNEL capability with no flag (SCHEMA-CONVENTIONS §(f).2), so the table
+ * and, from 09-07 (D-475), a member's post removed and, from Phase 12 (D-595), a profile-form answers
+ * export (`profile_form_exported`, the exporting admin as actor AND target, no subject). Moderation is a KERNEL capability with no flag (SCHEMA-CONVENTIONS §(f).2), so the table
  * lives here and every owning module writes it through ONE function,
  * `packages/core/server/moderation/log.ts`'s `recordModerationAction(tx, ctx, entry)`, inside the
  * module's own transaction. A removal and its log row therefore commit together or not at all; the
@@ -48,8 +49,8 @@ export const moderationLog = pgTable(
     /** The database clock inside the writing transaction, never a client one. */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /**
-     * 'comment_removed' | 'member_blocked' | 'member_unblocked' | 'role_changed' | 'post_removed' — see
-     * the CHECK.
+     * 'comment_removed' | 'member_blocked' | 'member_unblocked' | 'role_changed' | 'post_removed' |
+     * 'profile_form_exported' — see the CHECK.
      */
     action: text().notNull(),
     /** No FK (see above). Pinned to `app.user_id()` by the insert policy in the tenant lane. */
@@ -84,7 +85,7 @@ export const moderationLog = pgTable(
     ),
     check(
       'moderation_log_action_chk',
-      sql`${t.action} in ('comment_removed','member_blocked','member_unblocked','role_changed','post_removed')`,
+      sql`${t.action} in ('comment_removed','member_blocked','member_unblocked','role_changed','post_removed','profile_form_exported')`,
     ),
     // A removal names what it removed; nothing else names a subject (a comment removal a comment, a
     // post removal a post — 09-07, D-475). Each comparison is guarded so the CHECK can never be
