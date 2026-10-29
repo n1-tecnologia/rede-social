@@ -1,0 +1,30 @@
+{
+  "name": "@rede-social/module-profile-form",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Profile form module (PFORM-01..): the tenant admin's builder of the questions members answer to complete their profile, the answers export and the gate that holds a member out until the required ones are answered. The tables, the gate and the member routes are kernel code.",
+  "exports": {
+    "./module": "./module.ts",
+    "./contracts": "./contracts/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
+    "@rede-social/contracts": "workspace:*",
+    "@rede-social/core": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.7",
+    "pino": "10.3.1",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@rede-social/config": "workspace:*",
+    "@types/node": "24.13.4",
+    "vitest": "5.0.0"
+  }
+}

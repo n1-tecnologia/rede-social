@@ -212,6 +212,8 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(modules.find((m) => m.module_key === 'store')?.enabled).toBe(false);
     // 08.3 (COURSE-01, P03): nine keys now; `courses` exists for the new tenant and is OFF.
     expect(modules.find((m) => m.module_key === 'courses')?.enabled).toBe(false);
+    // 12-02 (D-596, PFORM-01): `profile_form` gets its row like every key, DISABLED.
+    expect(modules.find((m) => m.module_key === 'profile_form')).toMatchObject({ enabled: false });
     const enabled = modules.filter((m) => m.enabled).map((m) => m.module_key);
     expect(enabled.sort()).toEqual(['events', 'feed']);
 

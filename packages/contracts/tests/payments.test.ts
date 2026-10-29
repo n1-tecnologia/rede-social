@@ -23,8 +23,9 @@ describe('09.1 - the cut error code (D-497)', () => {
 });
 
 describe('09.1 - the payments module key (D-501)', () => {
-  it('is appended LAST to TOGGLEABLE_MODULES', () => {
-    expect(TOGGLEABLE_MODULES[TOGGLEABLE_MODULES.length - 1]).toBe('payments');
+  it('was appended LAST by Phase 09.1 and is now the key directly before the last one', () => {
+    // 12-02 (D-596) appends `profile_form` after it; the record of its position must survive.
+    expect(TOGGLEABLE_MODULES[TOGGLEABLE_MODULES.length - 2]).toBe('payments');
   });
 
   it('is not part of the default set of a new real tenant', () => {

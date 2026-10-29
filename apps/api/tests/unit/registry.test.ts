@@ -13,6 +13,7 @@ import {
   PUSH_SEND_JOB_CONCURRENCY,
 } from '@rede-social/module-notifications/contracts';
 import { PAYMENTS_PERMISSIONS } from '@rede-social/module-payments/contracts';
+import { PROFILE_FORM_PERMISSIONS } from '@rede-social/module-profile-form/contracts';
 import { SOCIAL_MAX_PHOTOS_PER_POST } from '@rede-social/module-social/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { describe, expect, it } from 'vitest';
@@ -73,7 +74,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
     // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
     // `stories`, 05.3-01 added `reels`, 06-01 added `events`, 07-01 `notifications`, 07-08 `chat`,
-    // 08.2-01 `store`, 08.3-01 `courses`, 09-01 `social` and 09.1-09 `payments`. The list is sorted so a new entry is one line, and this
+    // 08.2-01 `store`, 08.3-01 `courses`, 09-01 `social`, 09.1-09 `payments` and 12-02 `profile_form`. The list is sorted so a new entry is one line, and this
     // assertion is what makes a silently-dropped registration fail rather than pass.
     expect(keys.sort()).toEqual([
       'chat',
@@ -83,6 +84,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       'feed',
       'notifications',
       'payments',
+      'profile_form',
       'reels',
       'social',
       'store',
@@ -218,7 +220,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     ).toEqual(['communities', 'feed', 'notifications', 'stories']);
   });
 
-  it('4. the key VOCABULARY is the seven default modules plus store, courses, social and payments, and it refuses an unknown key', () => {
+  it('4. the key VOCABULARY is the seven default modules plus store, courses, social, payments and profile_form, and it refuses an unknown key', () => {
     expect(REAL_TENANT_DEFAULT_MODULES).toHaveLength(7);
     expect([...REAL_TENANT_DEFAULT_MODULES].sort()).toEqual([
       'chat',
@@ -237,14 +239,23 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // is the second, appended LAST so the generated `tenant_modules_key_chk` keeps the list's order.
     // 09-01 (D-482, SOCIAL-01, EP-03): `social` is the third, appended LAST in turn and absent from
     // the default list, so a new tenant starts with it off and no existing tenant gets a row.
-    // 09.1-02 (D-501): `payments` is the fourth, appended LAST the same way.
+    // 09.1-02 (D-501): `payments` is the fourth, appended LAST the same way. 12-02 (D-596):
+    // `profile_form` is the fifth.
     expect([...TOGGLEABLE_MODULES].sort()).toEqual(
-      [...REAL_TENANT_DEFAULT_MODULES, 'store', 'courses', 'social', 'payments'].sort(),
+      [
+        ...REAL_TENANT_DEFAULT_MODULES,
+        'store',
+        'courses',
+        'social',
+        'payments',
+        'profile_form',
+      ].sort(),
     );
-    expect(TOGGLEABLE_MODULES.at(-1)).toBe('payments');
+    expect(TOGGLEABLE_MODULES.at(-1)).toBe('profile_form');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('store');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('courses');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('social');
+    expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('profile_form');
     expect(() => defineModule({ key: 'nao-existe' as unknown as ModuleKey })).toThrow(
       /unknown module key/,
     );
@@ -645,5 +656,35 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     expect(bootstrapAfter.filter((entry) => entry.key === 'payments')).toEqual([
       { key: 'payments', settings: {} },
     ]);
+  });
+  it('22. 12-02 D-596/T-12-03: profile_form.manage is admin_tenant ONLY, profile_form.read is both staff roles, and nothing while the module is off', () => {
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    const withoutForm = new Set<ModuleKey>(
+      TOGGLEABLE_MODULES.filter((key) => key !== 'profile_form'),
+    );
+    const generous = settingsFor([['profile_form', { managers: ['support_tenant', 'member'] }]]);
+    for (const role of TENANT_ROLES) {
+      for (const settings of [new Map<ModuleKey, Record<string, unknown>>(), generous]) {
+        const composed = permissionsFor(role, everything, settings);
+        expect(composed.includes(PROFILE_FORM_PERMISSIONS.manage), `${role}: manage`).toBe(
+          role === 'admin_tenant',
+        );
+        expect(composed.includes(PROFILE_FORM_PERMISSIONS.read), `${role}: read`).toBe(
+          role === 'admin_tenant' || role === 'support_tenant',
+        );
+      }
+      // Off (a missing row reads as disabled): neither permission is composed, even for the admin.
+      const off = permissionsFor(role, withoutForm);
+      expect(off.includes(PROFILE_FORM_PERMISSIONS.manage)).toBe(false);
+      expect(off.includes(PROFILE_FORM_PERMISSIONS.read)).toBe(false);
+    }
+    const manifest = MODULE_REGISTRY.profile_form;
+    expect(manifest?.key).toBe('profile_form');
+    expect(manifest).not.toHaveProperty('nav');
+    expect(manifest?.requires).toBeUndefined();
+    // `permissionsFor('admin_tenant', {profile_form})` is the tracer's last hop.
+    expect(permissionsFor('admin_tenant', new Set<ModuleKey>(['profile_form']))).toEqual(
+      expect.arrayContaining([PROFILE_FORM_PERMISSIONS.manage, PROFILE_FORM_PERMISSIONS.read]),
+    );
   });
 });

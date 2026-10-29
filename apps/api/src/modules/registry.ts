@@ -37,6 +37,7 @@ import { feedModule } from '@rede-social/module-feed/module';
 import { notificationsModule } from '@rede-social/module-notifications/module';
 import { notificationsSink } from '@rede-social/module-notifications/server';
 import { paymentsModule } from '@rede-social/module-payments/module';
+import { profileFormModule } from '@rede-social/module-profile-form/module';
 import { reelsModule } from '@rede-social/module-reels/module';
 import {
   SOCIAL_SETTINGS_DEFAULTS,
@@ -63,6 +64,7 @@ export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
   feed: feedModule,
   notifications: notificationsModule,
   payments: paymentsModule,
+  profile_form: profileFormModule,
   reels: reelsModule,
   social: socialModule,
   store: storeModule,

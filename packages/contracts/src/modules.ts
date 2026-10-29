@@ -2,7 +2,7 @@
  * Feature modules that can be toggled per tenant (rows in `tenant_modules`, D-16). Seven since 05.3
  * appended the `reels` key (D-122); eight since 08.2 appended `store` (STORE-01); nine since 08.3
  * appended `courses` (COURSE-01, D-400); ten since Phase 9 appended `social` (SOCIAL-01, D-482); eleven since Phase 09.1 appended
- * `payments` (D-501).
+ * `payments` (D-501); twelve since Phase 12 appended `profile_form` (D-596).
  * `tenant_modules_key_chk` is GENERATED from this list in this order, so a new key is appended LAST
  * and ships with the migration that widens the CHECK.
  */
@@ -18,6 +18,7 @@ export const TOGGLEABLE_MODULES = [
   'courses',
   'social',
   'payments',
+  'profile_form',
 ] as const;
 export type ModuleKey = (typeof TOGGLEABLE_MODULES)[number];
 
@@ -33,7 +34,8 @@ export type ModuleKey = (typeof TOGGLEABLE_MODULES)[number];
  * off by default for a new tenant, no existing tenant gets a row, and the platform panel turns it on
  * per tenant after the terms review of D-478. 09.1-02 adds `payments` the same way (D-501): off by
  * default for a new tenant, no existing tenant gets a row, and its `settings.gate` switch (D-491) is
- * off until the tenant's admin turns it on. The other seven, `reels` included (D-122: on by
+ * off until the tenant's admin turns it on. Phase 12 adds `profile_form` the same way (D-596): off by
+ * default, no backfill, turned on per tenant by the super_admin. The other seven, `reels` included (D-122: on by
  * default, backfilled by the `reels_module` migration), are still offered to every new tenant.
  */
 export const REAL_TENANT_DEFAULT_MODULES: readonly ModuleKey[] = [
