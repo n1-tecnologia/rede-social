@@ -24,9 +24,11 @@ import {
   removeIdentitiesByPrefix,
   removePaymentIntegrations,
   removePaymentMappings,
+  removeProfileFormByPrefix,
   SEED_PASSWORD,
   seedPaymentIntegration,
   seedPaymentMapping,
+  seedProfileFormQuestion,
   setPaymentsRow,
   signInAs,
   uploadAvatar,
@@ -6082,6 +6084,129 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
           await adminSql`
             delete from public.tenant_modules
              where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
+  it('phase 12 sweep: profile form member — a rede-lab member on the rede-demo host is refused with TENANT_HOST_MISMATCH on the read, the save and the dismissal, a rede-demo question id in her save is unknown_question and writes nothing in either tenant, and her read names no rede-demo question, each beside her own rede-lab answer (12-06, PFORM-07, PFORM-08, T-12-14)', async () => {
+    // | Route                                   | Negative asserted here                                                  |
+    // |-----------------------------------------|-------------------------------------------------------------------------|
+    // | GET  /v1/me/profile-form                | lab member on the demo host: 403 TENANT_HOST_MISMATCH; the lab read names |
+    // |                                         | the lab question only, never the demo one (same title, different id)     |
+    // | PUT  /v1/me/profile-form/answers        | demo host: 403; a demo question id in a lab save: unknown_question, no   |
+    // |                                         | row in either tenant; the lab save of the lab id is 200 beside it        |
+    // | POST /v1/me/profile-form/dismiss-notice | demo host: 403; the lab call is 200                                      |
+    const PREFIX12 = `iso1206-${RUN}`;
+    const TITLE12 = `${PREFIX12} `;
+    const prior = new Map<string, boolean | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean }[]>`
+        select enabled from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+      prior.set(tenantId, row?.enabled ?? null);
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'profile_form', true)
+        on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweep12 = async () => {
+      await removeProfileFormByPrefix(TITLE12);
+      await removeIdentitiesByPrefix(PREFIX12);
+    };
+    await sweep12();
+    try {
+      const [creator] = await adminSql<{ user_id: string }[]>`
+        select user_id::text as user_id from public.memberships
+         where tenant_id = ${tenantIds.lab}::uuid and role = 'admin_tenant' and deleted_at is null
+         limit 1`;
+      if (!creator) throw new Error('the lab tenant has no admin to author the fixture question');
+      // The SAME title in both tenants (adjacency): only the id can tell them apart.
+      const labQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: creator.user_id,
+        title: `${TITLE12}Mesmo título`,
+      });
+      const demoQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.demo,
+        adminUserId: creator.user_id,
+        title: `${TITLE12}Mesmo título`,
+      });
+      const identity = await createSharedIdentity({
+        prefix: PREFIX12,
+        memberships: [{ host: 'lab', role: 'member', status: 'active' }],
+      });
+      const token = await signInAs(identity.email, identity.password);
+      const call = (method: string, path: string, host: string, body?: unknown) =>
+        api.request(path, {
+          method,
+          headers: {
+            authorization: `Bearer ${token}`,
+            [TENANT_HOST_HEADER]: host,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+      const rowsOf = async (questionId: string) => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.profile_form_answers where question_id = ${questionId}::uuid`;
+        return row?.n ?? 0;
+      };
+
+      // Positive control: the lab member reads her own form, which names the lab question only.
+      const read = await call('GET', '/v1/me/profile-form', HOSTS.lab);
+      expect(read.status).toBe(200);
+      const form = (await read.json()) as { formEtag: string; questions: { id: string }[] };
+      expect(form.questions.map((q) => q.id)).toEqual([labQuestion]);
+      expect(JSON.stringify(form)).not.toContain(demoQuestion);
+
+      // The wrong host: all three routes refuse before anything runs.
+      for (const [method, path, body] of [
+        ['GET', '/v1/me/profile-form', undefined],
+        ['PUT', '/v1/me/profile-form/answers', { formEtag: form.formEtag, answers: {} }],
+        ['POST', '/v1/me/profile-form/dismiss-notice', undefined],
+      ] as const) {
+        const res = await call(method, path, HOSTS.demo, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await code(res), `${method} ${path}`).toBe('TENANT_HOST_MISMATCH');
+      }
+
+      // A demo question id in a lab save is unknown, and writes nothing in either tenant.
+      const crossed = await call('PUT', '/v1/me/profile-form/answers', HOSTS.lab, {
+        formEtag: form.formEtag,
+        answers: { [labQuestion]: 'valido', [demoQuestion]: 'x' },
+      });
+      expect(crossed.status).toBe(400);
+      expect(((await crossed.json()) as Envelope).error.details).toEqual({
+        profileForm: 'answers_invalid',
+        errors: { [demoQuestion]: 'unknown_question' },
+      });
+      expect(await rowsOf(labQuestion)).toBe(0);
+      expect(await rowsOf(demoQuestion)).toBe(0);
+
+      // Positive control: her own id saves, and the dismissal answers.
+      const own = await call('PUT', '/v1/me/profile-form/answers', HOSTS.lab, {
+        formEtag: form.formEtag,
+        answers: { [labQuestion]: 'valido' },
+      });
+      expect(own.status).toBe(200);
+      expect(await rowsOf(labQuestion)).toBe(1);
+      expect(await rowsOf(demoQuestion)).toBe(0);
+      const dismissed = await call('POST', '/v1/me/profile-form/dismiss-notice', HOSTS.lab);
+      expect(dismissed.status).toBe(200);
+    } finally {
+      await sweep12();
+      for (const [tenantId, enabled] of prior) {
+        if (enabled === null) {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        } else {
+          await adminSql`
+            update public.tenant_modules set enabled = ${enabled}
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
         }
         moduleFlags.invalidate(tenantId);
       }

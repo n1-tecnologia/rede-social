@@ -15,6 +15,10 @@ const SEVERITY: Record<string, string> = {
  * The names under which a credential can sit in a log object (09.2-14, T-09.2-67). A key is matched at the top
  * level and one level down (`*.key`), which is how every call in the kernel nests its fields. pino's redaction
  * takes whole path segments, not prefixes, so the family `secret*` is spelled out.
+ *
+ * 12-06 (T-12-15): `answers` is not a credential but it is member content, a profile form body keyed by question
+ * id. No handler logs it (they log ids and a count), and this entry makes sure a future `{ body }` or `{ answers }`
+ * field cannot put one into a log line either.
  */
 const CREDENTIAL_KEYS = [
   'databaseUrl',
@@ -37,6 +41,7 @@ const CREDENTIAL_KEYS = [
   'mgmtToken',
   'projectToken',
   'managementToken',
+  'answers',
 ] as const;
 
 /** The pino `redact` option of the root logger; exported so a test can build a logger with the same one. */

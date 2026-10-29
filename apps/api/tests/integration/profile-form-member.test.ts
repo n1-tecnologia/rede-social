@@ -714,3 +714,99 @@ describe('12-06 the form changed, the module moved, the role and the host (PFORM
     });
   });
 });
+
+// ── 12-06 Task 3: the notice dismissal (PFORM-16, D-586) ─────────────────────────────────────────
+
+type BootstrapBlock = { pendingRequired: number; newOptional: number } | undefined;
+const bootstrapBlock = async (p: Person): Promise<BootstrapBlock> => {
+  const res = await call(p, 'GET', '/v1/me/bootstrap');
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { profileForm?: BootstrapBlock }).profileForm;
+};
+
+const dismissedAt = async (userId: string): Promise<string | null> => {
+  const [row] = await adminSql<{ at: string | null }[]>`
+    select profile_form_notice_dismissed_at::text as at from public.member_profiles
+     where user_id = ${userId}::uuid and tenant_id = ${labTenantId}::uuid`;
+  return row?.at ?? null;
+};
+
+describe('12-06 "Agora não": the notice is dismissed on the server (D-586)', () => {
+  it('a new optional question never gates; dismissing it survives a fresh login; a later question brings the notice back', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      await question({ required: false, position: 0 });
+      // An optional question never gates: the member passes and the bootstrap only counts it.
+      expect((await call(member, 'GET', '/v1/me/profile')).status).toBe(200);
+      expect(await bootstrapBlock(member)).toEqual({ pendingRequired: 0, newOptional: 1 });
+      expect((await readForm(member)).mode).toBe('edit');
+
+      const dismissed = await call(member, 'POST', '/v1/me/profile-form/dismiss-notice');
+      expect(dismissed.status).toBe(200);
+      expect(await dismissed.json()).toEqual({ newOptional: 0 });
+      expect(await bootstrapBlock(member)).toEqual({ pendingRequired: 0, newOptional: 0 });
+      expect(await dismissedAt(member.userId)).not.toBeNull();
+
+      // Server state: a brand-new login (a reinstall, another device) still reads 0.
+      const fresh: Person = { ...member, token: await signInAs(member.email, member.password) };
+      expect(await bootstrapBlock(fresh)).toEqual({ pendingRequired: 0, newOptional: 0 });
+
+      // A question listed after the dismissal brings the notice back, counted from that instant.
+      await question({ required: false, position: 1 });
+      expect(await bootstrapBlock(member)).toEqual({ pendingRequired: 0, newOptional: 1 });
+    });
+  });
+
+  it('dismissing twice is idempotent in effect, and the later dismissal moves the instant forward', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      await question({ required: false });
+      await call(member, 'POST', '/v1/me/profile-form/dismiss-notice');
+      const first = await dismissedAt(member.userId);
+      // A question listed in between, then a second dismissal.
+      await question({ required: false, position: 1 });
+      expect(await bootstrapBlock(member)).toEqual({ pendingRequired: 0, newOptional: 1 });
+      const second = await call(member, 'POST', '/v1/me/profile-form/dismiss-notice');
+      expect(second.status).toBe(200);
+      expect(await second.json()).toEqual({ newOptional: 0 });
+      const moved = await dismissedAt(member.userId);
+      expect(moved).not.toBeNull();
+      expect(new Date(moved ?? 0).getTime()).toBeGreaterThan(new Date(first ?? 0).getTime());
+      // A repeat with nothing new changes nothing visible.
+      const third = await call(member, 'POST', '/v1/me/profile-form/dismiss-notice');
+      expect(await third.json()).toEqual({ newOptional: 0 });
+      expect(await bootstrapBlock(member)).toEqual({ pendingRequired: 0, newOptional: 0 });
+    });
+  });
+
+  it('a required question never counts in newOptional, and an answered optional question never counts either', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const required = await question({ required: true, position: 0 });
+      const optional = await question({ required: false, position: 1 });
+      expect(await bootstrapBlock(member)).toEqual({ pendingRequired: 1, newOptional: 1 });
+
+      const form = await readForm(member);
+      const res = await save(member, form, { [required]: 'resposta', [optional]: 'outra' });
+      expect(res.status).toBe(200);
+      expect(await bootstrapBlock(member)).toEqual({ pendingRequired: 0, newOptional: 0 });
+    });
+  });
+
+  it('with the module off the dismissal is a no-op that stores nothing', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      await question({ required: false });
+      await withProfileForm(
+        labTenantId,
+        async () => {
+          const res = await call(member, 'POST', '/v1/me/profile-form/dismiss-notice');
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual({ newOptional: 0 });
+          expect(await dismissedAt(member.userId)).toBeNull();
+        },
+        { enabled: false },
+      );
+    });
+  });
+});

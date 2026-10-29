@@ -145,6 +145,32 @@ describe('credential redaction', () => {
     expect(line).toContain('"keep":"visible"');
   });
 
+  it('12-06 (T-12-15): the answers of the profile form are censored at the top level and one level down', () => {
+    const line = logged({
+      answers: { 'q-1': 'meu telefone 11987654321' },
+      body: { answers: { 'q-2': 'resposta privada' } },
+      count: 2,
+    });
+    for (const value of ['11987654321', 'resposta privada', 'meu telefone']) {
+      expect(line, value).not.toContain(value);
+    }
+    expect(line).toContain('"answers":"[redacted]"');
+    expect(line).toContain('"count":2');
+  });
+
+  it('12-06 (T-12-15): the member profile form code never hands an answer to a logger', () => {
+    const member = readFileSync(
+      new URL('../server/profile-form/member.ts', import.meta.url),
+      'utf8',
+    );
+    // The kernel file logs nothing at all: no logger import, no console, no log call.
+    expect(member).not.toMatch(/from '\.\.\/logging'|rootLogger|moduleLogger|console\.|logger\./);
+    // Errors carry issue codes keyed by question id, never a value: the only interpolation in a thrown
+    // message is the fixed label of a count (`${what}`).
+    const thrown = member.split('\n').filter((line) => /new (?:Api)?Error\(/.test(line));
+    for (const line of thrown) expect(line.replace(/\$\{what\}/g, '')).not.toContain('${');
+  });
+
   it('redactDbError strips a connection string out of a plain error, its stack and its cause', () => {
     const inner = new Error(`connect failed for ${URL_WITH_PASSWORD}`);
     const outer = new Error(`could not open ${URL_WITH_PASSWORD} (retry)`, { cause: inner });

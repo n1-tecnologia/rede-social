@@ -77,6 +77,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/me/profile': { case: 'inventory sweep: me and media' },
   'PATCH /v1/me/profile': { case: 'o' },
   'POST /v1/me/profile/dismiss-nudge': { case: 'inventory sweep: me and media' },
+  'GET /v1/me/profile-form': { case: 'phase 12 sweep: profile form member' },
+  'PUT /v1/me/profile-form/answers': { case: 'phase 12 sweep: profile form member' },
+  'POST /v1/me/profile-form/dismiss-notice': { case: 'phase 12 sweep: profile form member' },
   'POST /v1/me/accept-invite': { case: 'inventory sweep: me and media' },
   // 09.1-10 (PAY-15, D-302, T-09.1-51): the cut screen's read names only the session's tenant and its own
   // stored link; a session of the other tenant on this host is refused with TENANT_HOST_MISMATCH.
