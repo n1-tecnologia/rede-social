@@ -50,6 +50,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 09.4: Projeto do tenant no Supabase do cliente (INSERTED)** - A tenant can run on a Supabase project in its own account: a scoped access token limited to that one project is stored sealed per project and used for every Management API call about it, with the organisation pin, the allow-list, the rate limiter, the health and the panel working per project
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
+- [ ] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it at sign-up, members without a completed profile and members who had completed it before the form existed answer it too
 
 **MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the go-live gate (D-344, 2026-10-01: Phase 8 runs the full gate, and the MVP is declared closed at 08.1's exit gate). It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
 
@@ -1544,10 +1545,37 @@ Plans:
 
 - [ ] TBD (run /gsd-plan-phase 11 to break down)
 
+### Phase 12: Formulário de perfil do tenant
+
+**Goal**: The tenant admin builds the profile form of their own community (a list of questions of several types), and every member of that tenant answers it to complete their profile: new members at sign-up, existing members who never completed their profile, and members who had already completed it when the admin creates the form or later adds a question that needs an answer.
+**Scope**: Post-MVP, independent of the "Rede social" module (Phases 9-11): it reuses Phase 3's member profile, Phase 8's tenant admin panel and Phase 08.1's sign-up/join flow, and no "Rede social" phase depends on it.
+**Depends on**: Phase 3 (member profile), Phase 8 (tenant admin panel), Phase 08.1 (sign-up and join by host), Phase 08.7 (profile screens)
+**Requirements**: TBD (new PFORM-*; the researcher drafts PFORM-01..NN in `/gsd-discuss-phase 12`)
+**Success Criteria** (what must be TRUE):
+
+  1. A tenant admin (`admin_tenant`) opens a "Formulário de perfil" panel in the tenant admin and builds the form: adds, edits, reorders, marks as required or optional, and removes questions. Each question has a title, an optional help text and one type: short text, long text, dropdown, multiple choice (several answers), single choice (radio) and the other types decided in discuss-phase (see Notes). Choice types carry the admin's list of options.
+  2. A new member who signs up on a tenant that has a form answers it as part of creating the account, before reaching the app; a tenant with no form signs members up exactly as today.
+  3. A member who already exists and has not completed the profile is taken through the form the next time they open the app; a member can reach and edit their answers later from their profile.
+  4. A member who had already completed their profile with what exists today (photo, bio, Instagram) is asked again when the admin creates the form, and again whenever the admin adds or changes a question that needs an answer, answering only what is new or missing; a form change never discards answers already given.
+  5. The answers are stored per member and per tenant with RLS and a two-tenant negative test (a tenant's questions and answers are never visible to another tenant); the API validates every answer against its question's type, options and required flag, and rejects an answer to a question that is not part of the member's tenant.
+  6. The admin (and support) sees each member's answers on the member's page and can export them as CSV; other members see only the answers of questions the admin marked "show on profile"; the screens are mobile-first and fully pt-BR, ported in the prototype's language (UI-04).
+
+**UI hint**: yes — admin form builder (list of questions, question editor by type, option list, reorder, preview), member completion screen (sign-up step and the return gate for existing members), "Minhas respostas" on the member's profile, answers on the admin's member view. The prototype has no such screen, so a UI-SPEC and a sketch gate come first (`/gsd-ui-phase 12`).
+**Research needed**: Medium — the model of versioned or additive questions, answers typed as JSON validated per type, and how the return gate hooks into the existing sign-up and session flow.
+**Notes**: Requested by Igor on 2026-10-29. Numbered 12 by `phase.add` (the post-MVP "Rede social" phases 10-11 are not started); it can run before them, because nothing in 10-11 is a dependency. Today "perfil completo" is not a gate: it is the `ProfileCompletenessCard` (photo, bio, Instagram; `profileCompleteness` in `apps/web/lib/profile-activity-view.ts`) and `member_profiles.nudge_dismissed_at`, so this phase introduces the first required profile step.
+
+Decided in `/gsd-discuss-phase 12` on 2026-10-29 (`12-CONTEXT.md`, D-580..D-596): new members answer after login on the same screen as existing members; a hard gate like the payment cut, for the role `member` only; completeness is computed (a new required question reopens the form for everyone, an optional one only shows a dismissible notice); a question with answers locks its type and options and is archived, never deleted; thirteen types (the five asked plus number, date, phone, e-mail, link, yes/no, acceptance, rating 1-5; state/city and file are deferred); "Outro" per choice question; answers private by default with a per-question "show on profile"; CSV export for `admin_tenant`; toggleable module off by default.
+
+Left to research and the planner: how the gate rides the single `requireAuth` membership lookup without a second round trip, the module key and error code names, limits, builder ergonomics (UI-SPEC), and freezing the "show on profile" switch once a question has answers.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 12 to break down)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14) -> 08.5 (member-side course and live unlock, inserted 2026-10-15) -> 08.6 (member area, inserted 2026-10-16) -> 08.7 (real profile data, inserted 2026-10-16), then the post-MVP "Rede social" phases 9, then 09.1 -> 09.2 -> 09.3 (FRONT.pdf backend pendencies, inserted 2026-10-26), then 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14) -> 08.5 (member-side course and live unlock, inserted 2026-10-15) -> 08.6 (member area, inserted 2026-10-16) -> 08.7 (real profile data, inserted 2026-10-16), then the post-MVP "Rede social" phases 9, then 09.1 -> 09.2 -> 09.3 (FRONT.pdf backend pendencies, inserted 2026-10-26), then 10 -> 11, then 12 (tenant profile form, added 2026-10-29; no dependency on 10-11, so it can run first if Igor chooses). Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -1572,6 +1600,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
+| 12. Formulário de perfil do tenant | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-09-11*
