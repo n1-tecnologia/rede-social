@@ -18,6 +18,7 @@ const row = (
   status,
   tenantStatus: 'active',
   accessState: 'open',
+  profileFormMissing: 0,
 });
 
 const demo = row('rede-demo');

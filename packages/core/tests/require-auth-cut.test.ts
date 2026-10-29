@@ -52,6 +52,7 @@ const membership = (accessState: Membership['accessState'], over: Partial<Member
     status: 'active',
     tenantStatus: 'active',
     accessState,
+    profileFormMissing: 0,
     ...over,
   }) satisfies Membership;
 

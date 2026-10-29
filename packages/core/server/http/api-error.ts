@@ -22,6 +22,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   EMAIL_NOT_ALLOWED: 'Seu acesso ainda não foi liberado.',
   TENANT_NOT_FOUND: 'Comunidade não encontrada.',
   SUBSCRIPTION_PENDING: 'Sua assinatura não está ativa.',
+  PROFILE_FORM_PENDING: 'Complete seu perfil para continuar.',
   TENANT_PROJECT_UNBOUND: 'Esta comunidade não está disponível agora.',
   TENANT_UNAVAILABLE: 'Esta comunidade não está disponível agora.',
   TENANT_PREPARING: 'Esta comunidade ainda está sendo preparada.',

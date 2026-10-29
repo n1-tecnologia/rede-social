@@ -106,9 +106,23 @@ const INVITED_ALLOWED_PATHS = new Set([
 export const CUT_ALLOWED_PATHS = new Set(['/v1/me/subscription']);
 
 /**
+ * The only tenant-lane paths a member with an unanswered REQUIRED profile-form question may reach
+ * (12, D-581): the bootstrap (so the web can explain and redirect), the form's own read and the form's
+ * own answers write. `/v1/me/counters` is deliberately absent. Compared like `INVITED_ALLOWED_PATHS`,
+ * against `c.req.path` with trailing slashes stripped, so `/answers/x` and `/profile-form-x` are refused.
+ * Sign-out is a Supabase Auth call from a web server action and never touches the API, so it keeps working.
+ */
+export const PROFILE_FORM_ALLOWED_PATHS = new Set([
+  '/v1/me/bootstrap',
+  '/v1/me/profile-form',
+  '/v1/me/profile-form/answers',
+]);
+
+/**
  * Host FIRST, then the membership (08.1, D-307). Order is fixed:
  *   bearer present -> resolve host -> host status gate (09.2-08) -> verify against the host's project ->
- *   select the membership -> tenant suspended -> blocked -> invited scope -> the payment access state (09.1-02).
+ *   select the membership -> tenant suspended -> blocked -> invited scope -> the payment access state (09.1-02)
+ *   -> the profile form (12, D-581), always last.
  *
  * Selection:
  * - On a registered tenant host the request's membership is `app.membership_in_tenant(user, host
@@ -134,6 +148,12 @@ export const CUT_ALLOWED_PATHS = new Set(['/v1/me/subscription']);
  * cache, no claim): `blocked` (a manual block while the gate is on, A-P10) answers MEMBERSHIP_BLOCKED;
  * `cut` answers SUBSCRIPTION_PENDING on every path except `CUT_ALLOWED_PATHS`. A cut never writes
  * `memberships.status`, the profile or any content, and never revokes the Supabase session (D-498).
+ *
+ * Then, last of all, the profile form (12, D-581, D-584, D-585): a `member` with at least one unanswered
+ * required question (`membership.profileFormMissing`, from the same lookup row) answers PROFILE_FORM_PENDING
+ * on every path except `PROFILE_FORM_ALLOWED_PATHS`. A member who is cut is told to pay first. The refusal
+ * is a thrown ApiError before `ctx` is set: it writes nothing and revokes nothing (D-498), and its details
+ * carry the tenant's display name only (no counts, no question titles).
  */
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   // 09.2-08 (D-538, D-542, D-545): bearer present -> the host selects the project and says whether the tenant
@@ -193,6 +213,15 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   }
   if (membership.accessState === 'cut' && !CUT_ALLOWED_PATHS.has(c.req.path.replace(/\/+$/, ''))) {
     throw new ApiError(403, 'SUBSCRIPTION_PENDING', { tenantName: membership.tenantDisplayName });
+  }
+  // An `invited` membership that got this far is on one of the two onboarding paths: it must be able to
+  // accept first, so the form (unreachable to it anyway) is asked only of an `active` membership.
+  if (
+    membership.status === 'active' &&
+    membership.profileFormMissing > 0 &&
+    !PROFILE_FORM_ALLOWED_PATHS.has(c.req.path.replace(/\/+$/, ''))
+  ) {
+    throw new ApiError(403, 'PROFILE_FORM_PENDING', { tenantName: membership.tenantDisplayName });
   }
 
   c.set('ctx', {

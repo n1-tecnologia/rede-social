@@ -15,9 +15,11 @@ import { resolveProject } from './project-registry';
  *
  * The lifecycle rules (`deleted_at` -> no row, `blocked_at` -> `status = 'blocked'`) live ONLY in SQL
  * (WR-08, migrations 20260914171114 and 20261006195913) — do not re-implement them in TypeScript.
- * So does the payment-cut rule (09.1-02, D-496): the lookups read the `_gated` twins, which return the
- * same six columns plus `access_state` from `app.access_state`, in the SAME statement, so the
- * membership and the cut decision share one round trip and one snapshot.
+ * So does the payment-cut rule (09.1-02, D-496): the lookups read the `_gate` twins, which return the
+ * same six columns plus `access_state` from `app.access_state` and, since Phase 12 (D-585),
+ * `profile_form_missing` from `app.profile_form_missing`, in the SAME statement, so the membership,
+ * the cut decision and the form decision share one round trip and one snapshot. The older `_gated`
+ * pair (no form count) stays in the database for one release for a still-serving API revision.
  * The one rule that does live here is `pickGenericMembership`, a pure choice among rows the database
  * already filtered.
  */
@@ -36,6 +38,13 @@ export type Membership = {
    * on) or `cut`. Computed by `app.access_state` in the lookup itself, per request, never cached.
    */
   accessState: AccessState;
+  /**
+   * 12 (D-585, D-584): how many ACTIVE REQUIRED profile-form questions this member has not answered, as
+   * `app.profile_form_missing` computed in the lookup's own statement. 0 for every non-member role and
+   * for a tenant whose module is off. REQUIRED on purpose: a fixture that forgets it fails to compile
+   * instead of reading as "not pending".
+   */
+  profileFormMissing: number;
 };
 
 type Row = {
@@ -46,6 +55,7 @@ type Row = {
   status: string;
   tenant_status: string;
   access_state: string;
+  profile_form_missing: number | string;
 };
 
 const isTenantRole = (value: string): value is TenantRole =>
@@ -65,6 +75,16 @@ function toMembership(row: Row, source: string, userId: string): Membership {
   if (!isTenantRole(row.role) || !isStatus(row.status) || !isAccessState(row.access_state)) {
     throw new Error(`${source} returned an unexpected role/status/access for user ${userId}`);
   }
+  // D-585: a non-negative integer or a broken invariant (a 500), never "not pending". `Number(null)` is 0
+  // and `Number('')` is 0, so those are refused before the conversion.
+  const rawMissing = row.profile_form_missing;
+  const profileFormMissing =
+    typeof rawMissing === 'number' || (typeof rawMissing === 'string' && rawMissing.trim() !== '')
+      ? Number(rawMissing)
+      : Number.NaN;
+  if (!Number.isInteger(profileFormMissing) || profileFormMissing < 0) {
+    throw new Error(`${source} returned an unexpected profile form count for user ${userId}`);
+  }
   return {
     tenantId: row.tenant_id,
     tenantSlug: row.tenant_slug,
@@ -73,12 +93,13 @@ function toMembership(row: Row, source: string, userId: string): Membership {
     status: row.status,
     tenantStatus: row.tenant_status,
     accessState: row.access_state,
+    profileFormMissing,
   };
 }
 
 /**
  * D-307: the caller's membership in the tenant the request's VERIFIED host resolved to, or `null`.
- * `app.membership_in_tenant_gated` returns at most one row (`memberships_tenant_user_uq`); `null` is the
+ * `app.membership_in_tenant_gate` returns at most one row (`memberships_tenant_user_uq`); `null` is the
  * tenant-host `TENANT_HOST_MISMATCH` — the host selects among the user's own memberships, never grants
  * one (D-23).
  */
@@ -91,8 +112,9 @@ export async function membershipInTenant(
   const project = await resolveProject(tenantId);
   const rows = await withHandle(project, (handle) =>
     handle.db.execute<Row>(
-      sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state
-          from app.membership_in_tenant_gated(${userId}::uuid, ${tenantId}::uuid)`,
+      sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state,
+                 profile_form_missing
+          from app.membership_in_tenant_gate(${userId}::uuid, ${tenantId}::uuid)`,
     ),
   );
   const row = rows[0];
@@ -109,8 +131,9 @@ export async function membershipInTenant(
  */
 export async function membershipsOfUser(userId: string): Promise<Membership[]> {
   const rows = await db.execute<Row>(
-    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state
-        from app.memberships_of_user_gated(${userId}::uuid)`,
+    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state,
+               profile_form_missing
+        from app.memberships_of_user_gate(${userId}::uuid)`,
   );
   return Array.from(rows, (row) => toMembership(row, 'memberships_of_user', userId));
 }

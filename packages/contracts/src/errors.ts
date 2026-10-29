@@ -13,6 +13,7 @@ import { z } from 'zod';
  * is the same shape for the first-admin invite (`details.reason` from `INVITE_STATE_REASONS`).
  * `EMAIL_NOT_ALLOWED` (quick 261018-owq) is an e-mail that is not on the global allowlist.
  * `SUBSCRIPTION_PENDING` (09.1-02, D-497) is the payment-cut refusal of `requireAuth`.
+ * `PROFILE_FORM_PENDING` (12-05, D-581) is the unanswered-required-question refusal, last in the chain.
  */
 export const ERROR_CODES = [
   'UNAUTHENTICATED',
@@ -41,6 +42,10 @@ export const ERROR_CODES = [
   // member's profile, content or session is touched. `details.tenantName` only (the host's tenant,
   // D-302). One-way: the web app branches on this literal.
   'SUBSCRIPTION_PENDING',
+  // 12-05 (D-581): the profile form's refusal of `requireAuth`, a sibling of the payment cut, NEVER a
+  // membership status: nothing of the member's profile, content or session is touched. `details.tenantName`
+  // only. One-way once released: the web app branches on this literal.
+  'PROFILE_FORM_PENDING',
   // 09.2-03 (D-538, D-537): the routing seam failed CLOSED. `TENANT_PROJECT_UNBOUND`: the tenant has no
   // `platform.tenant_projects` row; `TENANT_UNAVAILABLE`: the tenant's project cannot be reached right now
   // (breaker open, connection refused, or the registry unreadable with no fresh enough binding). Both are
