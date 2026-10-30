@@ -6,7 +6,8 @@
   "description": "Profile form module (PFORM-01..): the tenant admin's builder of the questions members answer to complete their profile, the answers export and the gate that holds a member out until the required ones are answered. The tables, the gate and the member routes are kernel code.",
   "exports": {
     "./module": "./module.ts",
-    "./contracts": "./contracts/index.ts"
+    "./contracts": "./contracts/index.ts",
+    "./server": "./server/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

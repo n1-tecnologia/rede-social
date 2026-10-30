@@ -579,6 +579,19 @@ const adminCore = {
 export const adminQuestionSchema = z.object(adminCore);
 export type AdminQuestion = z.infer<typeof adminQuestionSchema>;
 
+/**
+ * `GET /v1/profile_form/questions`: the builder's active list in the admin's order, with the aggregate counts.
+ * `activeCount` is the number of active questions and `limit` the most the tenant may have
+ * (`PROFILE_FORM_LIMITS.activeQuestions`). **Aggregates only (D-593, PFORM-23):** no field of this payload is
+ * ever an individual member's answer.
+ */
+export const adminQuestionListSchema = z.object({
+  questions: z.array(adminQuestionSchema),
+  activeCount: z.number().int().min(0),
+  limit: z.number().int().min(1),
+});
+export type AdminQuestionList = z.infer<typeof adminQuestionListSchema>;
+
 export const archivedQuestionSchema = z.object({ ...adminCore, archivedAt: z.string() });
 export type ArchivedQuestion = z.infer<typeof archivedQuestionSchema>;
 

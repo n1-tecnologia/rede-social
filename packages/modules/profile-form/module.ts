@@ -9,9 +9,9 @@ import { PROFILE_FORM_PERMISSIONS } from './contracts/index';
  * `REAL_TENANT_DEFAULT_MODULES`, D-596) and no existing tenant gets a row: turning it on is the
  * super_admin's explicit per-tenant act, because the form can hold members out of the app.
  *
- * **No `routes` yet** (plan 08 adds the admin routes at `/v1/profile_form`). **No tables or jobs of its
- * own** (D-501 split): the tables and the services are KERNEL code, because the gate reads them on every
- * request.
+ * **`routes`** are the builder's admin API, mounted at `/v1/profile_form` with the module's own guard chain
+ * (plan 08). **No tables or jobs of its own** (D-501 split): the tables and the services are KERNEL code,
+ * because the gate reads them on every request.
  *
  * **`profile_form.manage` is admin-only BY CONSTRUCTION** (the payments and store rule): composed for
  * `admin_tenant` only, since the database authorises the builder by the `admin_tenant` claim. Composing it
@@ -21,6 +21,7 @@ import { PROFILE_FORM_PERMISSIONS } from './contracts/index';
  */
 export const profileFormModule = defineModule({
   key: 'profile_form',
+  routes: () => import('./server/routes').then((m) => m.profileFormRoutes),
   defaultRolePermissions: {
     admin_tenant: [PROFILE_FORM_PERMISSIONS.manage, PROFILE_FORM_PERMISSIONS.read],
     support_tenant: [PROFILE_FORM_PERMISSIONS.read],

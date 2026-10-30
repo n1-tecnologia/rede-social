@@ -11,6 +11,7 @@ import { eventsRoutes } from '@rede-social/module-events/server';
 import { feedRoutes } from '@rede-social/module-feed/server';
 import { notificationsRoutes } from '@rede-social/module-notifications/server';
 import { paymentsRoutes } from '@rede-social/module-payments/server';
+import { profileFormRoutes } from '@rede-social/module-profile-form/server';
 import { socialRoutes } from '@rede-social/module-social/server';
 import { storeRoutes } from '@rede-social/module-store/server';
 import { storiesRoutes } from '@rede-social/module-stories/server';
@@ -138,6 +139,11 @@ const routes = app
   // chain and `requirePermission('payments.manage')` on every route. `payments` is OFF by default, so
   // every route below 404s until a tenant turns it on.
   .route('/v1/payments', paymentsRoutes)
+  // 12-08 (D-596): the profile form module carries its own `requireAuth` plus `requireModule('profile_form')`
+  // and `requirePermission('profile_form.manage')` on EVERY route (the builder, admin only). `profile_form` is
+  // OFF by default and declares no nav, so every route below 404s until the platform turns it on for a tenant.
+  // The underscore in the path is the module key, as `mounts.test.ts` asserts (`/v1/<key>`).
+  .route('/v1/profile_form', profileFormRoutes)
   // Same shape (08.3-01): the courses module carries its own `requireAuth` + `requireModule('courses')`
   // chain plus `requirePermission('courses.manage')` on EVERY route (admin-first, D-403: no member
   // route exists yet). `courses` is OFF by default (COURSE-01) and declares no nav (D-401), so every
