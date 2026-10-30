@@ -141,3 +141,83 @@ describe('verbatim strings of the Copywriting Contract', () => {
     expect(text).not.toMatch(/\b(survey|questionário|deletar|template)\b/i);
   });
 });
+
+/**
+ * 12-14 — the profile surfaces' catalog (UI-D-589..UI-D-593): `profileForm.profile.json` declares the
+ * `profileForm` root with the `profile` branch and pins the approved Copywriting Contract lines of
+ * "Member and staff profile surfaces", through the real merged catalog and the real formatter.
+ */
+const p = createTranslator({
+  locale: 'pt-BR',
+  messages,
+  namespace: 'profileForm.profile',
+}) as unknown as (key: string, values?: Record<string, string | number>) => string;
+
+describe('profileForm.profile.json (12-14)', () => {
+  it('declares exactly the profileForm root, with the profile branch', () => {
+    const parsed = JSON.parse(readFileSync(join(dir, 'profileForm.profile.json'), 'utf8'));
+    expect(Object.keys(parsed)).toEqual(['profileForm']);
+    expect(Object.keys(parsed.profileForm)).toEqual(['profile']);
+  });
+
+  it('merges into the catalog next to the member branch', () => {
+    const root = messages.profileForm as Record<string, unknown>;
+    expect(root.member).toBeTypeOf('object');
+    expect(root.profile).toBeTypeOf('object');
+  });
+
+  it('pins the Minhas respostas, answer-value, public and staff strings verbatim', () => {
+    const plain: [string, string][] = [
+      ['answers.title', 'Minhas respostas'],
+      ['answers.edit', 'Editar'],
+      ['answers.editLabel', 'Editar minhas respostas'],
+      ['answers.visible', 'Visível no seu perfil'],
+      ['answers.none', 'Sem resposta'],
+      ['answers.showLess', 'Mostrar menos'],
+      ['answers.empty.title', 'Você ainda não respondeu'],
+      ['answers.empty.action', 'Responder'],
+      ['answers.error.title', 'Algo deu errado'],
+      ['answers.error.body', 'Não foi possível carregar suas respostas agora.'],
+      ['answers.error.retry', 'Tentar novamente'],
+      ['values.yes', 'Sim'],
+      ['values.no', 'Não'],
+      ['values.accepted', 'Aceito'],
+      ['newQuestions.title', 'Há perguntas novas no seu perfil'],
+      ['newQuestions.answer', 'Responder'],
+      ['newQuestions.dismiss', 'Agora não'],
+      ['newQuestions.dismissFailed', 'Não foi possível dispensar o aviso agora. Tente de novo.'],
+      ['public.error', 'Não foi possível carregar as respostas agora.'],
+      ['public.retry', 'Tentar novamente'],
+      ['staff.title', 'Respostas do formulário'],
+      ['staff.public', 'Público no perfil'],
+      ['staff.archivedTitle', 'Perguntas arquivadas'],
+      ['staff.archived', 'Arquivada'],
+      ['staff.empty', 'Esta pessoa ainda não respondeu o formulário.'],
+    ];
+    for (const [key, text] of plain) expect(p(key), key).toBe(text);
+  });
+
+  it('interpolates the tenant, the name, the count and the rating', () => {
+    expect(p('answers.empty.body', { tenant: 'Ana Mentoria' })).toBe(
+      'Responda as perguntas de Ana Mentoria para completar seu perfil.',
+    );
+    expect(p('answers.showAll', { count: 6 })).toBe('Ver todas (6)');
+    expect(p('public.title', { name: 'Carla Menezes' })).toBe('Sobre Carla Menezes');
+    expect(p('values.rating', { n: 4 })).toBe('4 de 5');
+    expect(p('values.other', { text: 'Mentoria' })).toBe('Outro: Mentoria');
+  });
+
+  it('pluralises the new-questions notice', () => {
+    expect(p('newQuestions.body', { tenant: 'Ana Mentoria', count: 1 })).toBe(
+      'Ana Mentoria acrescentou 1 pergunta opcional.',
+    );
+    expect(p('newQuestions.body', { tenant: 'Ana Mentoria', count: 2 })).toBe(
+      'Ana Mentoria acrescentou 2 perguntas opcionais.',
+    );
+  });
+
+  it('keeps the vocabulary rules on the profile branch', () => {
+    const text = JSON.stringify((messages.profileForm as Record<string, unknown>).profile);
+    expect(text).not.toMatch(/\b(survey|questionário|deletar|template)\b/i);
+  });
+});

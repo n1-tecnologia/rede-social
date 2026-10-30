@@ -1,0 +1,52 @@
+{
+  "profileForm": {
+    "profile": {
+      "answers": {
+        "title": "Minhas respostas",
+        "edit": "Editar",
+        "editLabel": "Editar minhas respostas",
+        "visible": "Visível no seu perfil",
+        "none": "Sem resposta",
+        "showAll": "Ver todas ({count})",
+        "showLess": "Mostrar menos",
+        "loading": "Carregando suas respostas",
+        "empty": {
+          "title": "Você ainda não respondeu",
+          "body": "Responda as perguntas de {tenant} para completar seu perfil.",
+          "action": "Responder"
+        },
+        "error": {
+          "title": "Algo deu errado",
+          "body": "Não foi possível carregar suas respostas agora.",
+          "retry": "Tentar novamente"
+        }
+      },
+      "values": {
+        "yes": "Sim",
+        "no": "Não",
+        "accepted": "Aceito",
+        "rating": "{n} de 5",
+        "other": "Outro: {text}"
+      },
+      "newQuestions": {
+        "title": "Há perguntas novas no seu perfil",
+        "body": "{count, plural, one {{tenant} acrescentou # pergunta opcional.} other {{tenant} acrescentou # perguntas opcionais.}}",
+        "answer": "Responder",
+        "dismiss": "Agora não",
+        "dismissFailed": "Não foi possível dispensar o aviso agora. Tente de novo."
+      },
+      "public": {
+        "title": "Sobre {name}",
+        "error": "Não foi possível carregar as respostas agora.",
+        "retry": "Tentar novamente"
+      },
+      "staff": {
+        "title": "Respostas do formulário",
+        "public": "Público no perfil",
+        "archivedTitle": "Perguntas arquivadas",
+        "archived": "Arquivada",
+        "empty": "Esta pessoa ainda não respondeu o formulário."
+      }
+    }
+  }
+}

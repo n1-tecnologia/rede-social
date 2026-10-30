@@ -8,6 +8,7 @@ import { ActivitySkeleton } from '@/components/profile/activity/ActivitySkeleton
 import { ProfileCompletenessCard } from '@/components/profile/ProfileCompletenessCard';
 import { ProfileHero, ProfileHeroAction } from '@/components/profile/ProfileHero';
 import { ProfileRailSkeleton, ProfileSection } from '@/components/profile/ProfileSection';
+import { MyAnswersSection, MyAnswersSkeleton } from '@/components/profile-form/MyAnswersSection';
 import { SocialProfileBlock } from '@/components/social/SocialProfileBlock';
 import { adminIconFor } from '@/lib/admin-icon';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
@@ -184,6 +185,15 @@ export default async function ProfilePage({
             cta={{ href: '/perfil/editar', label: t('completeness.cta') }}
           />
         </div>
+      ) : null}
+
+      {/* 12-14 (D-584, UI-D-590): "Minhas respostas", for the member role with the module on only
+          (the bootstrap carries `profileForm` then), in its own Suspense so a slow or failing read
+          never delays or blanks the profile. It renders nothing without an active question. */}
+      {role === 'member' && bootstrap.profileForm ? (
+        <Suspense fallback={<MyAnswersSkeleton />}>
+          <MyAnswersSection tenantName={bootstrap.tenant.displayName} />
+        </Suspense>
       ) : null}
 
       {role === 'member' ? (
