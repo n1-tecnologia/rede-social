@@ -96,11 +96,20 @@ test('1. a deep link meets the form, the answer lands on the same post (tracer)'
     // Signed in while nothing gates her.
     await signInToLab(page, answeredMember);
 
+    // The app is closed before the gate appears, so the deep link below is a COLD open: the case D-583
+    // describes (a link opened before the gate caught her) and the one the server decides. A shell
+    // left open on /inicio answers its own first-join counters refetch with the bare form (an open-app
+    // redirect carries no destination, 12-11) and cancels the navigation in flight: the traces of the
+    // first measured run (4 of 6 repeats) show this goto ending in net::ERR_ABORTED 30 ms after it
+    // started, with /post/{id} never rendered by the server.
+    await page.goto('about:blank');
+
     // The admin turns the module on and requires an answer.
     await enableProfileForm();
     required = await seedQuestion({ title: titleOf('Qual e o seu cargo'), required: true });
 
-    await gotoWhileRedirected(page, `${hosts.lab}/post/${postId}`);
+    // A plain goto on purpose: nothing may cancel it now, and an abort must fail the row, not be absorbed.
+    await page.goto(`${hosts.lab}/post/${postId}`);
     await expect(page).toHaveURL(/\/completar-perfil\?/, { timeout: 30_000 });
     // The destination travels in the URL as the validated `next`.
     expect(new URL(page.url()).searchParams.get('next')).toBe(`/post/${postId}`);
