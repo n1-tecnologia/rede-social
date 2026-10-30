@@ -9,6 +9,7 @@ import { ProfileCompletenessCard } from '@/components/profile/ProfileCompletenes
 import { ProfileHero, ProfileHeroAction } from '@/components/profile/ProfileHero';
 import { ProfileRailSkeleton, ProfileSection } from '@/components/profile/ProfileSection';
 import { MyAnswersSection, MyAnswersSkeleton } from '@/components/profile-form/MyAnswersSection';
+import { NewQuestionsNotice } from '@/components/profile-form/NewQuestionsNotice';
 import { SocialProfileBlock } from '@/components/social/SocialProfileBlock';
 import { adminIconFor } from '@/lib/admin-icon';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
@@ -22,6 +23,7 @@ import {
   profileCompleteness,
   readsCommunityAccess,
 } from '@/lib/profile-activity-view';
+import { profileFormSurfaces } from '@/lib/profile-form/profile-surfaces';
 import { splitProfileBio } from '@/lib/profile-instagram';
 import { getHostTenant } from '@/lib/tenant-host';
 import { ProfileActivity } from './ProfileActivity';
@@ -129,6 +131,9 @@ export default async function ProfilePage({
   });
   const tz = bootstrap.tenant.timezone;
   const nowMs = Date.now();
+  // 12-14: the profile form's two surfaces, for the member role with the module on only.
+  const formSurfaces = profileFormSurfaces(role, bootstrap.profileForm);
+  const showCompleteness = completeness.done < completeness.total;
 
   return (
     <div className="flex flex-col gap-8 pb-6">
@@ -164,33 +169,44 @@ export default async function ProfilePage({
         />
       </div>
 
-      {completeness.done < completeness.total ? (
-        <div className="px-4">
-          <ProfileCompletenessCard
-            percent={completeness.percent}
-            percentLabel={t('completeness.percent', { percent: completeness.percent })}
-            title={t('completeness.title')}
-            progress={t('completeness.progress', {
-              done: completeness.done,
-              total: completeness.total,
-            })}
-            items={completeness.items.map((item) => ({
-              key: item.key,
-              label: t(`completeness.items.${item.key}`),
-              done: item.done,
-              stateLabel: item.done
-                ? t('completeness.state.done')
-                : t('completeness.state.missing'),
-            }))}
-            cta={{ href: '/perfil/editar', label: t('completeness.cta') }}
-          />
+      {/* The completeness card and, directly under it (or in its place when it is not shown), the
+          "Há perguntas novas" notice (12-14, D-586, UI-D-589): a member with news about optional
+          questions only; the notice dismisses itself on the server. */}
+      {showCompleteness || formSurfaces.noticeCount > 0 ? (
+        <div className="flex flex-col gap-3 px-4">
+          {showCompleteness ? (
+            <ProfileCompletenessCard
+              percent={completeness.percent}
+              percentLabel={t('completeness.percent', { percent: completeness.percent })}
+              title={t('completeness.title')}
+              progress={t('completeness.progress', {
+                done: completeness.done,
+                total: completeness.total,
+              })}
+              items={completeness.items.map((item) => ({
+                key: item.key,
+                label: t(`completeness.items.${item.key}`),
+                done: item.done,
+                stateLabel: item.done
+                  ? t('completeness.state.done')
+                  : t('completeness.state.missing'),
+              }))}
+              cta={{ href: '/perfil/editar', label: t('completeness.cta') }}
+            />
+          ) : null}
+          {formSurfaces.noticeCount > 0 ? (
+            <NewQuestionsNotice
+              tenantName={bootstrap.tenant.displayName}
+              count={formSurfaces.noticeCount}
+            />
+          ) : null}
         </div>
       ) : null}
 
       {/* 12-14 (D-584, UI-D-590): "Minhas respostas", for the member role with the module on only
           (the bootstrap carries `profileForm` then), in its own Suspense so a slow or failing read
           never delays or blanks the profile. It renders nothing without an active question. */}
-      {role === 'member' && bootstrap.profileForm ? (
+      {formSurfaces.showAnswers ? (
         <Suspense fallback={<MyAnswersSkeleton />}>
           <MyAnswersSection tenantName={bootstrap.tenant.displayName} />
         </Suspense>
