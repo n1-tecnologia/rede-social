@@ -52,6 +52,13 @@ import {
 test.describe.configure({ mode: 'serial', timeout: 240_000 });
 test.use({ serviceWorkers: 'block' });
 
+/**
+ * "Minhas respostas" on /perfil. `ProfileSection id="respostas"` renders `data-profile-section="respostas"`
+ * (and the heading id `profile-respostas-title`), never an `id="respostas"`, so a spec addresses it by the
+ * attribute, like the other /perfil sections in `profile.spec.ts`.
+ */
+const MY_ANSWERS = '[data-profile-section="respostas"]';
+
 const prefix = newRunPrefix();
 const email = (tag: string) => `${prefix}-${tag}@rede-lab.local`;
 const title = (tag: string) => `${prefix} ${tag}`;
@@ -358,7 +365,7 @@ test('4. "Minhas respostas" on /perfil, "Editar", the public row and the new-que
   try {
     await signInToLab(page, profileOwner);
     await gotoWhileRedirected(page, `${hosts.lab}/perfil`);
-    const section = page.locator('#respostas');
+    const section = page.locator(MY_ANSWERS);
     await expect(section).toContainText('Analista');
     await expect(section).toContainText(privateAnswer);
     // Only the public question's row carries the marker; the archived one is not listed.
@@ -375,7 +382,7 @@ test('4. "Minhas respostas" on /perfil, "Editar", the public row and the new-que
     await questionBlock(page, publicQ.id).getByRole('textbox').fill('Diretora');
     await page.getByRole('button', { name: 'Salvar', exact: true }).click();
     await expect(page).toHaveURL(/\/perfil$/, { timeout: 30_000 });
-    await expect(page.locator('#respostas')).toContainText('Diretora');
+    await expect(page.locator(MY_ANSWERS)).toContainText('Diretora');
     expect(await storedAnswer(profileOwner, publicQ.id)).toBe('Diretora');
 
     // An optional question added later raises the notice; "Agora não" keeps it away after a reload.
@@ -392,7 +399,7 @@ test('4. "Minhas respostas" on /perfil, "Editar", the public row and the new-que
       })
       .toBe(true);
     await page.reload();
-    await expect(page.locator('#respostas')).toBeVisible();
+    await expect(page.locator(MY_ANSWERS)).toBeVisible();
     await expect(page.locator('[data-new-questions-notice]')).toHaveCount(0);
   } finally {
     await context.close();
@@ -547,11 +554,9 @@ for (const width of BACKSTOP_WIDTHS) {
     try {
       await signInToLab(own.page, subject);
       await gotoWhileRedirected(own.page, `${hosts.lab}/perfil`);
-      await expect(own.page.locator('#respostas')).toBeVisible();
+      await expect(own.page.locator(MY_ANSWERS)).toBeVisible();
       await expectScreenFits(own.page, `E08 ${width}px Minhas respostas`, {
-        Editar: own.page
-          .locator('#respostas')
-          .getByRole('link', { name: 'Editar minhas respostas' }),
+        Editar: own.page.locator(MY_ANSWERS).getByRole('link', { name: 'Editar minhas respostas' }),
       });
     } finally {
       await own.context.close();
