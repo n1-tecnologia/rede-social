@@ -122,7 +122,7 @@ No accepted risks. T-12-02 stays open (below the block threshold) until Igor edi
 
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
-| 2026-10-30 | 40 | 39 | 1 (T-12-02, medium, non-blocking) | gsd-security-auditor (read-only), orchestrated by Claude |
+| 2026-10-30 | 40 | 39 | 1 (T-12-02, medium, non-blocking) | gsd-security-auditor (read-only agent run) |
 
 ---
 
