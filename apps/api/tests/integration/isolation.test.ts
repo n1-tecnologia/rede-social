@@ -28,6 +28,7 @@ import {
   SEED_PASSWORD,
   seedPaymentIntegration,
   seedPaymentMapping,
+  seedProfileFormAnswer,
   seedProfileFormQuestion,
   setPaymentsRow,
   signInAs,
@@ -6196,6 +6197,148 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(await rowsOf(demoQuestion)).toBe(0);
       const dismissed = await call('POST', '/v1/me/profile-form/dismiss-notice', HOSTS.lab);
       expect(dismissed.status).toBe(200);
+    } finally {
+      await sweep12();
+      for (const [tenantId, enabled] of prior) {
+        if (enabled === null) {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        } else {
+          await adminSql`
+            update public.tenant_modules set enabled = ${enabled}
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
+  it('phase 12 sweep: profile form answers — a rede-lab session never reads a rede-demo member’s answers and a rede-demo session never reads a rede-lab member’s, the wrong host is TENANT_HOST_MISMATCH and the foreign id is the bare 404 for member and staff alike, each beside its same-tenant positive control (12-07, PFORM-08, PFORM-18, PFORM-19, T-12-17, T-12-18)', async () => {
+    // | Route                                          | Negative asserted here                                           |
+    // |------------------------------------------------|------------------------------------------------------------------|
+    // | GET /v1/members/{id}/profile-answers (member)  | demo member asking a lab member id: bare 404, no lab question id |
+    // |                                                | or value in the body; lab member on the demo host: 403           |
+    // | GET /v1/members/{id}/profile-answers (staff)   | lab admin asking a demo member id: the same bare 404             |
+    // Both tenants get the SAME question title; only the id and the value tell them apart.
+    const PREFIX12 = `iso1207-${RUN}`;
+    const TITLE12 = `${PREFIX12} `;
+    const prior = new Map<string, boolean | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean }[]>`
+        select enabled from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+      prior.set(tenantId, row?.enabled ?? null);
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'profile_form', true)
+        on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweep12 = async () => {
+      await removeProfileFormByPrefix(TITLE12);
+      await removeIdentitiesByPrefix(PREFIX12);
+    };
+    await sweep12();
+    try {
+      const [creator] = await adminSql<{ user_id: string }[]>`
+        select user_id::text as user_id from public.memberships
+         where tenant_id = ${tenantIds.lab}::uuid and role = 'admin_tenant' and deleted_at is null
+         limit 1`;
+      if (!creator) throw new Error('the lab tenant has no admin to author the fixture question');
+      const labQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: creator.user_id,
+        title: `${TITLE12}Mesmo título`,
+        showOnProfile: true,
+      });
+      const demoQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.demo,
+        adminUserId: creator.user_id,
+        title: `${TITLE12}Mesmo título`,
+        showOnProfile: true,
+      });
+      const make = async (host: 'lab' | 'demo', role: 'member' | 'admin_tenant') => {
+        const identity = await createSharedIdentity({
+          prefix: PREFIX12,
+          memberships: [{ host, role, status: 'active' }],
+        });
+        const [row] = await adminSql<{ id: string }[]>`
+          select id::text as id from public.memberships
+           where user_id = ${identity.userId}::uuid and deleted_at is null`;
+        return {
+          ...identity,
+          membershipId: row?.id ?? '',
+          token: await signInAs(identity.email, identity.password),
+        };
+      };
+      const labOwner = await make('lab', 'member');
+      const labViewer = await make('lab', 'member');
+      const labAdmin = await make('lab', 'admin_tenant');
+      const demoOwner = await make('demo', 'member');
+      const demoViewer = await make('demo', 'member');
+      await seedProfileFormAnswer({
+        tenantId: tenantIds.lab,
+        questionId: labQuestion,
+        userId: labOwner.userId,
+        value: 'RESPOSTA-LAB',
+      });
+      await seedProfileFormAnswer({
+        tenantId: tenantIds.demo,
+        questionId: demoQuestion,
+        userId: demoOwner.userId,
+        value: 'RESPOSTA-DEMO',
+      });
+      const ask = (who: { token: string }, membershipId: string, host: string) =>
+        api.request(`/v1/members/${membershipId}/profile-answers`, {
+          headers: { authorization: `Bearer ${who.token}`, [TENANT_HOST_HEADER]: host },
+        });
+
+      // Positive controls: each tenant reads its own member, and only its own answer.
+      const labRead = await ask(labViewer, labOwner.membershipId, HOSTS.lab);
+      expect(labRead.status).toBe(200);
+      const labText = await labRead.text();
+      expect(labText).toContain(labQuestion);
+      expect(labText).toContain('RESPOSTA-LAB');
+      expect(labText).not.toContain(demoQuestion);
+      expect(labText).not.toContain('RESPOSTA-DEMO');
+      const demoRead = await ask(demoViewer, demoOwner.membershipId, HOSTS.demo);
+      expect(demoRead.status).toBe(200);
+      const demoText = await demoRead.text();
+      expect(demoText).toContain('RESPOSTA-DEMO');
+      expect(demoText).not.toContain('RESPOSTA-LAB');
+      const staffRead = await ask(labAdmin, labOwner.membershipId, HOSTS.lab);
+      expect(staffRead.status).toBe(200);
+      expect(((await staffRead.json()) as { kind: string }).kind).toBe('staff');
+
+      // The wrong host refuses before anything runs, in both directions.
+      for (const [who, id, host] of [
+        [labViewer, labOwner.membershipId, HOSTS.demo],
+        [demoViewer, demoOwner.membershipId, HOSTS.lab],
+        [labAdmin, labOwner.membershipId, HOSTS.demo],
+      ] as const) {
+        const res = await ask(who, id, host);
+        expect(res.status).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+
+      // The foreign id on the caller's own host is the bare 404 for member and staff alike, naming nothing.
+      const crossed = [
+        await ask(demoViewer, labOwner.membershipId, HOSTS.demo),
+        await ask(labViewer, demoOwner.membershipId, HOSTS.lab),
+        await ask(labAdmin, demoOwner.membershipId, HOSTS.lab),
+      ];
+      const texts: string[] = [];
+      for (const res of crossed) {
+        expect(res.status).toBe(404);
+        const text = await res.text();
+        expect(JSON.parse(text)).toMatchObject({ error: { code: 'NOT_FOUND' } });
+        expect(text).not.toContain('RESPOSTA');
+        expect(text).not.toContain(labQuestion);
+        expect(text).not.toContain(demoQuestion);
+        texts.push(text.replace(/"requestId":"[^"]*"/, ''));
+      }
+      expect(new Set(texts).size).toBe(1);
     } finally {
       await sweep12();
       for (const [tenantId, enabled] of prior) {

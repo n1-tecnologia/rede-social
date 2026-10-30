@@ -107,6 +107,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // ── /v1/members (the member directory) ──────────────────────────────────────────────────────
   'GET /v1/members': { case: 'n' },
   'GET /v1/members/:membershipId': { case: 'n' },
+  // 12-07 (PFORM-08, PFORM-18, PFORM-19, T-12-17, T-12-18): another tenant's member is the same bare 404 as an
+  // unknown id and the wrong host is TENANT_HOST_MISMATCH, each beside a same-tenant positive control.
+  'GET /v1/members/:membershipId/profile-answers': { case: 'phase 12 sweep: profile form answers' },
 
   // ── /v1/admin (Phase 8, the tenant admin panel) ─────────────────────────────────────────────
   'GET /v1/admin/moderation-log': { case: 'phase 8 sweep' },
