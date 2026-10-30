@@ -1,0 +1,88 @@
+{
+  "profileForm": {
+    "member": {
+      "first": {
+        "title": "Complete seu perfil",
+        "intro": "{tenant} pede estas informações para você continuar. As perguntas marcadas como “Obrigatória” precisam de resposta."
+      },
+      "returning": {
+        "title": "Faltam algumas respostas",
+        "intro": "{tenant} acrescentou perguntas novas. Responda as marcadas para continuar."
+      },
+      "edit": {
+        "title": "Minhas respostas",
+        "intro": "Atualize suas respostas quando quiser."
+      },
+      "missing": {
+        "notice": "{n, plural, one {Falta # pergunta obrigatória.} other {Faltam # perguntas obrigatórias.}} O que você já respondeu continua guardado.",
+        "jump": "Ir para a primeira"
+      },
+      "required": "Obrigatória",
+      "optional": "Opcional",
+      "flag": "Falta responder",
+      "public": "Esta resposta aparece no seu perfil.",
+      "controls": {
+        "select": "Selecione",
+        "other": "Qual?",
+        "otherOption": "Outro",
+        "yes": "Sim",
+        "no": "Não",
+        "ratingOf": "{n} de 5",
+        "star": "{n, plural, one {# estrela} other {# estrelas}}",
+        "clear": "Limpar resposta",
+        "phonePlaceholder": "(11) 91234-5678",
+        "emailPlaceholder": "nome@exemplo.com.br",
+        "linkPlaceholder": "https://",
+        "between": "Entre {min} e {max}.",
+        "from": "A partir de {min}.",
+        "until": "Até {max}."
+      },
+      "errors": {
+        "required": "Responda esta pergunta.",
+        "acceptance": "Marque a caixa para continuar.",
+        "choice": "Escolha uma opção.",
+        "multiple": "Escolha pelo menos uma opção.",
+        "otherRequired": "Escreva qual é a outra resposta.",
+        "tooLong": "Use até {max} caracteres.",
+        "numberInvalid": "Informe um número.",
+        "numberRange": "Informe um valor entre {min} e {max}.",
+        "numberMin": "Informe um valor a partir de {min}.",
+        "numberMax": "Informe um valor até {max}.",
+        "dateInvalid": "Informe uma data válida.",
+        "dateRange": "Informe uma data entre {min} e {max}.",
+        "dateMin": "Informe uma data a partir de {min}.",
+        "dateMax": "Informe uma data até {max}.",
+        "phone": "Informe um telefone com DDD, como (11) 91234-5678.",
+        "email": "Informe um e-mail válido, como nome@exemplo.com.br.",
+        "link": "Informe um link válido, como https://exemplo.com.br.",
+        "generic": "Esta resposta não pôde ser aceita. Confira e tente de novo."
+      },
+      "summary": {
+        "title": "{n, plural, one {Revise # campo antes de salvar.} other {Revise # campos antes de salvar.}}",
+        "jump": "Ir para o primeiro"
+      },
+      "save": "Salvar",
+      "saving": "Salvando…",
+      "saved": "Respostas salvas.",
+      "offline": "Você está sem conexão. Suas respostas continuam aqui; salve quando voltar.",
+      "saveFailed": "Não foi possível salvar agora. Suas respostas continuam aqui. Tente de novo.",
+      "changed": "O formulário mudou enquanto você respondia. Atualizamos a lista; confira e salve de novo.",
+      "cancel": "Cancelar",
+      "home": "Ir para o início",
+      "retry": "Tentar de novo",
+      "none": {
+        "title": "Não há perguntas para responder",
+        "body": "Você já está com tudo em dia."
+      },
+      "loadFailed": {
+        "title": "Algo deu errado",
+        "body": "Não foi possível carregar as perguntas agora."
+      },
+      "tenantFallback": "Sua comunidade",
+      "preview": {
+        "banner": "Prévia: nada do que você preencher aqui é salvo.",
+        "close": "Fechar"
+      }
+    }
+  }
+}
