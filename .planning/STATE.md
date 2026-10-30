@@ -5,10 +5,10 @@ current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
 stopped_at: "Completed 12-18-PLAN.md (partial: browser specs written, not run; phase 12 ready for verification, human_needed)"
-last_updated: "2026-10-30T14:46:53.176Z"
-last_activity: 2026-10-29
+last_updated: "2026-10-30T15:46:07.078Z"
+last_activity: 2026-10-30
 last_activity_desc: Phase 12 execution started
-state_head: b2f924b781984c14767167f8c9adf17c136067aa
+state_head: 18d9f0f8e4926de329605007242c52b40bb42971
 progress:
   total_phases: 27
   completed_phases: 0
@@ -33,7 +33,7 @@ Current Plan: 1
 Total Plans in Phase: 18
 Plan: 1 of 18
 Status: Executing Phase 12
-Last activity: 2026-10-30 - Completed quick task 261030-g1y: gate deep-link destination kept when a loader refusal wins the race (Phase 12 browser run found it)
+Last activity: 2026-10-30 - Completed quick task 261030-hh2: 44px hit area of sm buttons centred in the Button primitive (Phase 12 browser run found it)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1163,6 +1163,7 @@ None yet.
 | 261024-lcq | `migrateAll` now tolerates a central database that has no `platform` schema yet (PostgreSQL 42P01 on the first registry read, found along the `.cause` chain), applies the central set, then reads the registry strictly and fans the tenant set out; the retry path and every other error behave as before. Found by the FIRST PRODUCTION RUN of the 09.2 release on 2026-10-24 (Actions run 40043498712 attempt 4, execution migrate-5gs9z crashed with `relation platform.projects does not exist`); CI never covered a central database without the platform schema. 21 hermetic cases (12 red before, all green after); integration suite NOT run locally, the next CI run is the proof | 2026-10-24 | 942ea89b | complete | [261024-lcq-migrateall-must-tolerate-a-central-datab](./quick/261024-lcq-migrateall-must-tolerate-a-central-datab/) |
 | 261027-c8f | Phase 09.3 WR-03: setProductStatus refuses (409) to reactivate a product linked to a soft-deleted community | 2026-10-27 | 2939d5a3 | — | [261027-c8f-phase-09-3-wr-03-setproductstatus-refuse](./quick/261027-c8f-phase-09-3-wr-03-setproductstatus-refuse/) |
 | 261030-g1y | Keep the validated deep-link destination when a data loader's profile-form refusal wins the race; pick one replace button in the admin spec | 2026-10-30 | 87f701d9 | complete | [261030-g1y-fix-profile-form-gate-deep-link-race-kee](./quick/261030-g1y-fix-profile-form-gate-deep-link-race-kee/) |
+| 261030-hh2 | Centre the 44px hit area of sm buttons so a 1px border no longer shaves it to 42px (shared Button primitive) | 2026-10-30 | 18d9f0f8 | complete | [261030-hh2-fix-the-44px-touch-target-of-bordered-ou](./quick/261030-hh2-fix-the-44px-touch-target-of-bordered-ou/) |
 
 ### Roadmap Evolution
 
