@@ -609,3 +609,29 @@ describe('profileForm.admin: the locked states, archive and delete (12-16 Task 3
     expect(text).not.toMatch(/\b(survey|questionário|deletar|template)\b/i);
   });
 });
+
+describe('profileForm.admin.export (12-17 Task 1, D-595, UI-D-579)', () => {
+  const x = createTranslator({
+    locale: 'pt-BR',
+    messages,
+    namespace: 'profileForm.admin.export',
+  }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+
+  it('pins the export button, helper, dialog and toasts verbatim', () => {
+    const plain: [string, string][] = [
+      ['button', 'Exportar respostas (CSV)'],
+      ['noMembers', 'Ainda não há membros para exportar.'],
+      ['title', 'Exportar respostas?'],
+      [
+        'body',
+        'O arquivo traz uma linha por membro, com nome, e-mail e as respostas, inclusive das perguntas arquivadas. Ele contém dados pessoais: guarde com cuidado. A exportação fica registrada no histórico de moderação.',
+      ],
+      ['confirm', 'Exportar'],
+      ['pending', 'Preparando…'],
+      ['cancel', 'Cancelar'],
+      ['done', 'Arquivo gerado. O download começou.'],
+      ['failed', 'Não foi possível exportar agora. Tente de novo.'],
+    ];
+    for (const [key, text] of plain) expect(x(key), key).toBe(text);
+  });
+});

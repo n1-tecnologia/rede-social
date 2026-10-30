@@ -206,6 +206,21 @@
           "saveFailed": "Não foi possível salvar a pergunta agora. Suas alterações continuam aqui. Tente de novo.",
           "conflict": "Esta pergunta foi alterada enquanto você editava. Feche e abra de novo para ver a versão atual."
         }
+      },
+      "export": {
+        "button": "Exportar respostas (CSV)",
+        "noMembers": "Ainda não há membros para exportar.",
+        "title": "Exportar respostas?",
+        "body": "O arquivo traz uma linha por membro, com nome, e-mail e as respostas, inclusive das perguntas arquivadas. Ele contém dados pessoais: guarde com cuidado. A exportação fica registrada no histórico de moderação.",
+        "confirm": "Exportar",
+        "pending": "Preparando…",
+        "cancel": "Cancelar",
+        "done": "Arquivo gerado. O download começou.",
+        "failed": "Não foi possível exportar agora. Tente de novo."
+      },
+      "preview": {
+        "open": "Ver como o membro vê",
+        "title": "Como o membro vê"
       }
     },
     "types": {

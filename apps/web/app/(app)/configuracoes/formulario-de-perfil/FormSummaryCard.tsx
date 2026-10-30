@@ -2,6 +2,7 @@ import type { ProfileFormSummary } from '@rede-social/contracts/profile-form';
 import { Card } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { ProgressRing } from '@/components/profile/ProgressRing';
+import { ExportAction } from './ExportDialog';
 
 export interface FormSummaryCardProps {
   summary: ProfileFormSummary;
@@ -23,8 +24,11 @@ function percentOf(summary: ProfileFormSummary): number {
  * não há membros", checked first because it is the stronger fact) and no required question ("Nenhuma
  * pergunta obrigatória"). The page hides the card altogether when no question exists at all.
  *
- * Aggregates only (PFORM-23): the card receives counts, never an answer. The export button joins the card
- * in plan 17. The text wraps and the card holds at 320px (`min-w-0`, `break-words`).
+ * Aggregates only (PFORM-23): the card receives counts, never an answer. The "Exportar respostas (CSV)"
+ * button (12-17, D-595, UI-D-579) sits under the text and moves to the right edge from `md`; it is the one
+ * door through which personal data leaves, through the logged API route, and it stays in both degenerate
+ * states (disabled with its helper when no member exists). The text wraps and the card holds at 320px
+ * (`min-w-0`, `break-words`).
  */
 export function FormSummaryCard({ summary }: FormSummaryCardProps) {
   const t = useTranslations('profileForm.admin.summary');
@@ -47,14 +51,17 @@ export function FormSummaryCard({ summary }: FormSummaryCardProps) {
         : t('definition');
 
   return (
-    <Card data-form-summary className="flex items-center gap-4 p-4">
-      {noMembers || noRequired ? null : (
-        <ProgressRing percent={percent} size={64} label={t('percent', { percent })} />
-      )}
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <h2 className="break-words text-sm font-bold text-text">{title}</h2>
-        <p className="break-words text-xs font-normal text-text-secondary">{line}</p>
+    <Card data-form-summary className="flex flex-col gap-3 p-4 md:flex-row md:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-4">
+        {noMembers || noRequired ? null : (
+          <ProgressRing percent={percent} size={64} label={t('percent', { percent })} />
+        )}
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <h2 className="break-words text-sm font-bold text-text">{title}</h2>
+          <p className="break-words text-xs font-normal text-text-secondary">{line}</p>
+        </div>
       </div>
+      <ExportAction memberTotal={summary.total} />
     </Card>
   );
 }
