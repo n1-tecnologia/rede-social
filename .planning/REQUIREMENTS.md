@@ -463,7 +463,7 @@ Phase 12. The tenant admin builds the profile form of their community; members a
 - [ ] **PFORM-21**: `admin_tenant` exports the answers as CSV (one row per live `member`-role membership, active and blocked, invited, staff and deleted excluded: name, e-mail, one column per question, archived included); the response is streamed in keyset pages; every cell beginning with `=`, `+`, `-`, `@`, tab or carriage return is neutralised; one `moderation_log` row (`profile_form_exported`) is committed before the first byte; `support_tenant` and `member` are refused 403. *(D-595)*
 - [ ] **PFORM-22**: Answers carry `membership_id` and `user_id` with `on delete cascade`, so deleting the membership or the identity removes them with no extra path; the builder shows the LGPD warning when a question is created and has no purpose field. *(D-594)*
 - [ ] **PFORM-23**: The builder reads aggregates only (answers per question and per option, `{ total, complete }`, and the "N membros vão precisar responder" impact for a change that reopens the form); it never returns an individual member's answer; a failed impact read blocks the write. *(D-585, UI-D-576)*
-- [ ] **PFORM-24**: Two admins editing the same form do not overwrite each other (a per-question `revision`, 409 on mismatch; all admin writes of one tenant serialise on an advisory lock), and a member save locks the questions it answers `FOR SHARE`, so a type, option or visibility change and an answer never interleave.
+- [x] **PFORM-24**: Two admins editing the same form do not overwrite each other (a per-question `revision`, 409 on mismatch; all admin writes of one tenant serialise on an advisory lock), and a member save locks the questions it answers `FOR SHARE`, so a type, option or visibility change and an answer never interleave.
 - [ ] **PFORM-25**: The migrations are additive and fan out: the new tables, functions and CHECK widenings live in `supabase/migrations` only, apply idempotently through `migrateAll` to every project, a project behind the image is held out (`updating`) until current, the old `_gated` functions stay for one release (their drop is a deferred follow-up migration), and no tenant is backfilled. *(D-596)*
 - [ ] **PFORM-26**: Every new screen is mobile-first (390px design, 320px must not break), fully pt-BR from the catalog, 44px targets, in the prototype's language, and no UI task starts before sketch gate `016` carries `approved: true` pasted by the user. The one exemption is the export's Moderação log copy and nothing else: the row sentence and the "Exportações" filter chip (two catalog lines) plus the icon and map entries for `profile_form_exported` in the web's exhaustive maps, which add no layout and without which those maps stop compiling (planner assumption A-12-MOD); Igor still reviews them as manual row M6 before the phase closes. *(UI-04 as a gate reference only, D-417)*
 
@@ -929,7 +929,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PFORM-21 | Phase 12 (plans 10, 17) | Pending |
 | PFORM-22 | Phase 12 (plans 04, 16) | Pending |
 | PFORM-23 | Phase 12 (plans 09, 15, 17) | Pending |
-| PFORM-24 | Phase 12 (plans 06, 08, 09) | Pending |
+| PFORM-24 | Phase 12 (plans 06, 08, 09) | Complete |
 | PFORM-25 | Phase 12 (plans 02, 04, 18) | Pending |
 | PFORM-26 | Phase 12 (plans 01, 11-18) | Pending |
 | MEDIA-01 | Phase 3 | Complete |

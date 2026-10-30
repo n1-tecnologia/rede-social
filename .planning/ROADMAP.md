@@ -1551,7 +1551,7 @@ Plans:
 **Scope**: Post-MVP, independent of the "Rede social" module (Phases 9-11): it reuses Phase 3's member profile, Phase 8's tenant admin panel and Phase 08.1's sign-up/join flow, and no "Rede social" phase depends on it.
 **Depends on**: Phase 3 (member profile), Phase 8 (tenant admin panel), Phase 08.1 (sign-up and join by host), Phase 08.7 (profile screens)
 **Requirements**: PFORM-01, PFORM-02, PFORM-03, PFORM-04, PFORM-05, PFORM-06, PFORM-07, PFORM-08, PFORM-09, PFORM-10, PFORM-11, PFORM-12, PFORM-13, PFORM-14, PFORM-15, PFORM-16, PFORM-17, PFORM-18, PFORM-19, PFORM-20, PFORM-21, PFORM-22, PFORM-23, PFORM-24, PFORM-25, PFORM-26 (plus UI-04 for the sketch gate)
-**Plans:** 7/18 plans executed (planned 2026-10-29; STATE stays on Phase 09.4, the plans execute only when Igor starts this phase)
+**Plans:** 8/18 plans executed (planned 2026-10-29; STATE stays on Phase 09.4, the plans execute only when Igor starts this phase)
 **Success Criteria** (what must be TRUE):
 
   1. A tenant admin (`admin_tenant`) opens a "Formulário de perfil" panel in the tenant admin and builds the form: adds, edits, reorders, marks as required or optional, and archives questions (an archived question stops being asked but its answers are kept, can be reactivated and is included in the export; only a question nobody has answered can be deleted, D-588). Each question has a title, an optional help text and one type: short text, long text, dropdown, multiple choice (several answers), single choice (radio) and the other types decided in discuss-phase (see Notes). Choice types carry the admin's list of options.
@@ -1602,7 +1602,7 @@ Plans:
 
 **Wave 7**
 
-- [ ] 12-09-PLAN.md — The lifecycle API: archive, reactivate, delete, atomic replace, summary and impact, and the two-connection suite for the admin side (PFORM-03, PFORM-08, PFORM-17, PFORM-23, PFORM-24, tracer)
+- [x] 12-09-PLAN.md — The lifecycle API: archive, reactivate, delete, atomic replace, summary and impact, and the two-connection suite for the admin side (PFORM-03, PFORM-08, PFORM-17, PFORM-23, PFORM-24, tracer)
 - [ ] 12-14-PLAN.md — The profile surfaces: "Minhas respostas", the "Há perguntas novas" notice, the public block and the staff view of every answer (PFORM-16, PFORM-18, PFORM-19, PFORM-20, PFORM-26, tracer)
 
 **Wave 8**
@@ -1656,7 +1656,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
-| 12. Formulário de perfil do tenant | 7/18 | In Progress|  |
+| 12. Formulário de perfil do tenant | 8/18 | In Progress|  |
 
 ---
 *Roadmap created: 2026-09-11*
