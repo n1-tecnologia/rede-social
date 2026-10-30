@@ -114,7 +114,10 @@ describe('safeNextPath: the exclusions', () => {
   });
 
   it('refuses every route folder under app/(auth): the list is derived from the folders', () => {
+    // The form's own folder (12-12) is excluded through PROFILE_FORM_PATH, with sub-paths and queries
+    // (pinned above), so it is the one (auth) folder that is not in the prefix list.
     const missing = folders('(auth)')
+      .filter((name) => `/${name}` !== PROFILE_FORM_PATH)
       .filter((name) => !AUTH_PATH_PREFIXES.includes(`/${name}`))
       .map((name) => `/${name}`);
     expect(missing, 'a (auth) folder is missing from AUTH_PATH_PREFIXES').toEqual([]);
