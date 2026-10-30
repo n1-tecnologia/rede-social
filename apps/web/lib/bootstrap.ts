@@ -1,7 +1,9 @@
 import { type ApiErrorEnvelope, type Bootstrap, bootstrapSchema } from '@rede-social/contracts';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
 import { apiFetch } from '@/lib/api';
+import { PROFILE_FORM_PATH, REQUEST_PATH_HEADER, safeNextPath } from '@/lib/safe-next-path';
 
 /** Non-2xx API answer, carrying the stable envelope code every screen switches on (D-09). */
 export class ApiClientError extends Error {
@@ -87,6 +89,12 @@ export async function loadOrRedirect<T>(
  *   flow — nothing clears the session: the Supabase identity is shared across communities, so only "Sair"
  *   signs out. The tenant name rides along only as the fallback text for a failed read of the screen's own
  *   data; the checkout link is never carried in the URL.
+ * - `PROFILE_FORM_PENDING` (12-11, D-581, PFORM-12): the member owes an answer the tenant made required, so
+ *   every refused route sends them to `/completar-perfil`. Like the payment cut, nothing clears the session
+ *   ("Sair" stays reachable). The tenant name rides along only as the fallback text for a failed read of
+ *   the screen's own data. This mapping carries NO destination: a refusal that is not a render (the
+ *   counters BFF of an open app) lands on `/inicio` after saving; the destination of a render travels in
+ *   `requireBootstrap` through the validated `x-rede-path` header instead.
  * - `TENANT_SUSPENDED` (D-32): the TENANT, not the member, is unavailable; the device is signed out
  *   like D-09 and lands on the branded public screen `/comunidade-indisponivel`. No query — the brand
  *   comes from the host and the copy names no tenant, reason or timestamp.
@@ -117,6 +125,8 @@ export function bootstrapRedirectPath(error: ApiClientError): string | null {
       return `/auth/blocked?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
     case 'SUBSCRIPTION_PENDING':
       return `/assinatura-pendente?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
+    case 'PROFILE_FORM_PENDING':
+      return `${PROFILE_FORM_PATH}?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
     case 'TENANT_SUSPENDED':
       return '/auth/suspended';
     case 'TENANT_UPDATING':
@@ -158,9 +168,20 @@ export function acceptInviteRedirectPath(error: ApiClientError): string | null {
  * tenant rules and the platform's terms is routed to `/aceitar-convite` — the API answers the bootstrap with
  * `membership.status = 'invited'`, and the guard lives here so no `(app)` segment needs to know.
  * `redirect()` is called outside any try/catch (Next 16 rule).
+ *
+ * 12-11 (D-581, D-583): a member whose bootstrap carries `profileForm.pendingRequired > 0` is sent to the
+ * form BEFORE any `(app)` segment renders, so the first paint after login is the form and not a flash of
+ * Início. The destination they were headed for is the `x-rede-path` request header `proxy.ts` sets from
+ * the request's own URL; it is validated by `safeNextPath` here and again by the form's page, and a
+ * rejected value is simply left out. The completion page itself never calls this function (it would
+ * redirect to itself, RESEARCH Pitfall 2).
  */
 export async function requireBootstrap(): Promise<Bootstrap> {
   const bootstrap = await loadOrRedirect(getBootstrap, bootstrapRedirectPath);
   if (bootstrap.membership.status === 'invited') redirect('/aceitar-convite');
+  if ((bootstrap.profileForm?.pendingRequired ?? 0) > 0) {
+    const next = safeNextPath((await headers()).get(REQUEST_PATH_HEADER));
+    redirect(next ? `${PROFILE_FORM_PATH}?next=${encodeURIComponent(next)}` : PROFILE_FORM_PATH);
+  }
   return bootstrap;
 }

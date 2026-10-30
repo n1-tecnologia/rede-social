@@ -5,6 +5,7 @@ import { authLinkForwardTarget } from '@/lib/auth-link-forward';
 import { CONTINUE_COOKIE, CONTINUE_MAX_AGE_S, isContinuablePath } from '@/lib/continue-path';
 import { CSP_REPORT_PATH, cspFor, cspHeaderName, NONCE_HEADER, newNonce } from '@/lib/csp';
 import { env } from '@/lib/env';
+import { REQUEST_PATH_HEADER } from '@/lib/safe-next-path';
 import { sessionCookieOptions } from '@/lib/supabase/cookie-options';
 import { getSupabaseCoordinates, staleAuthCookieNames } from '@/lib/supabase-coordinates';
 import {
@@ -88,6 +89,12 @@ function withCsp<T extends NextResponse>(response: T, csp: Csp): T {
  * (`x-tenant-mode`, `x-tenant-host`, `x-tenant-slug`, `x-tenant-name`) are ALWAYS overwritten (a client
  * must never be able to claim a mode). Rebuilt after cookie refreshes so the forwarded `cookie` header
  * carries the rotated session.
+ *
+ * 12-11 (D-583, T-12-27): `x-rede-path` carries THIS request's own pathname and search to the server
+ * components, so `requireBootstrap()` can send a member who still owes a required answer to the form
+ * with the destination remembered. Any inbound copy is deleted first and the value is derived per
+ * request from its URL, so a client can neither choose its own destination nor share one with a
+ * parallel request. It is still validated by `safeNextPath` where it is used.
  */
 function buildRequestHeaders(request: NextRequest, hostTenant: HostTenant, csp: Csp): Headers {
   const h = new Headers(request.headers);
@@ -97,6 +104,8 @@ function buildRequestHeaders(request: NextRequest, hostTenant: HostTenant, csp: 
   // Next reads is always this request's.
   h.delete('content-security-policy');
   h.delete('content-security-policy-report-only');
+  h.delete(REQUEST_PATH_HEADER);
+  h.set(REQUEST_PATH_HEADER, request.nextUrl.pathname + request.nextUrl.search);
   h.set(NONCE_HEADER, csp.nonce);
   h.set(csp.header, csp.policy);
   h.set(TENANT_MODE_HEADER, hostTenant.mode);

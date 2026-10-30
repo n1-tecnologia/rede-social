@@ -611,3 +611,55 @@ describe('proxy.ts — a tenant of another project (09.2-17)', () => {
     );
   });
 });
+
+/**
+ * 12-11 (D-583, PFORM-15, T-12-27): the destination a gated member was headed for travels as the
+ * `x-rede-path` request header, derived per request from its own URL; a client cannot choose it.
+ */
+describe('proxy.ts — the x-rede-path request header (12-11)', () => {
+  const FORWARDED = 'x-middleware-request-x-rede-path';
+
+  beforeEach(() => {
+    resolve.mockReset();
+    refresh.on = false;
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+  });
+
+  it('31. the forwarded request carries the pathname plus the search of the request itself', async () => {
+    const res = await proxy(
+      request('http://primary.example/entrar?x=1&y=%C3%A7', { host: 'primary.example' }),
+    );
+    expect(res.headers.get(FORWARDED)).toBe('/entrar?x=1&y=%C3%A7');
+  });
+
+  it('32. an inbound x-rede-path from the client is replaced, never forwarded', async () => {
+    const res = await proxy(
+      request('http://primary.example/entrar', {
+        host: 'primary.example',
+        'x-rede-path': '//evil.com',
+      }),
+    );
+    expect(res.headers.get(FORWARDED)).toBe('/entrar');
+  });
+
+  it("33. the session-refresh rebuild keeps this request's own destination", async () => {
+    refresh.on = true;
+    const res = await proxy(
+      request('http://primary.example/post/abc?x=1', {
+        host: 'primary.example',
+        'x-rede-path': '/forged',
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get(FORWARDED)).toBe('/post/abc?x=1');
+  });
+
+  it('34. two parallel requests never share a destination', async () => {
+    const [a, b] = await Promise.all([
+      proxy(request('http://primary.example/entrar?a=1', { host: 'primary.example' })),
+      proxy(request('http://primary.example/entrar?b=2', { host: 'primary.example' })),
+    ]);
+    expect(a.headers.get(FORWARDED)).toBe('/entrar?a=1');
+    expect(b.headers.get(FORWARDED)).toBe('/entrar?b=2');
+  });
+});
