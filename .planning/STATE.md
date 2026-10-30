@@ -4,16 +4,16 @@ current_phase: 12
 current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: Completed 12-17-PLAN.md
-last_updated: "2026-10-30T03:06:20.271Z"
+stopped_at: "Completed 12-18-PLAN.md (partial: browser specs written, not run; phase 12 ready for verification, human_needed)"
+last_updated: "2026-10-30T09:08:36.299Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: 34cf3ce1e33611922c02b134e398c391862b55b1
+state_head: 95a4e7596e8bb726b0b4040886b087d803df1601
 progress:
   total_phases: 27
   completed_phases: 0
   total_plans: 312
-  completed_plans: 302
+  completed_plans: 303
   percent: 0
 ---
 
@@ -341,6 +341,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P15 | 14min | 3 tasks | 23 files |
 | Phase 12 P16 | 22min | 3 tasks | 22 files |
 | Phase 12 P17 | 11 min | 3 tasks | 14 files |
+| Phase 12 P18 | 35min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -1086,6 +1087,8 @@ Recent decisions affecting current work:
 - [Phase 12]: 12-14: answerView takes the catalog words as a third argument so the one mapper holds no pt-BR copy; a block renders only when the viewer's role and the payload kind agree; Minhas respostas' skeleton has no title so an empty tenant never flashes a heading; loaders log an error class only — T-12-32: an answer becomes an anchor only for a validated http(s) Link answer, everything else is React text — T-12-32 and T-12-30
 - [Phase 12]: 12-15: the builder pages gate on the literal 'profile_form.manage' (apps/web does not depend on the module package), pinned to the module's contract by a test — Adding the dependency would change package.json and the lockfile; a test reads the module's contracts file instead
 - [Phase 12]: 12-15: a reopening write follows a successful impact read only; readImpactAction ok:false (any code) means no write, and 403/404 end in a refresh into notFound() — T-12-34: never apply a change on a guess of how many members it holds out
+- [Phase 12]: 12-18 ran without Playwright (Igor, 2026-10-30, disk 3.9 GiB vs the 10 GiB guard): the three browser specs are written, type-checked and listed (20 tests) but not executed; PFORM-12, 13, 14, 20, 25 and 26 are not marked complete; the phase closes human_needed (ledger row M8 runs them). — The browser proof is missing; marking the requirements complete would claim a proof that was never made.
+- [Phase 12]: Deferred follow-up: a later cleanup migration drops app.membership_in_tenant_gated and app.memberships_of_user_gated, one release after the API that calls the _gate twins is live (docs/DEPLOY.md Phase 12 release, 12-MANUAL-PROOFS.md). — The old pair stays one release so the API revision still serving during the fan-out keeps working.
 
 ### Pending Todos
 
@@ -1204,6 +1207,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T03:06:20.028Z
-Stopped at: Completed 12-17-PLAN.md
+Last session: 2026-10-30T09:08:36.018Z
+Stopped at: Completed 12-18-PLAN.md (partial: browser specs written, not run; phase 12 ready for verification, human_needed)
 Resume file: None
