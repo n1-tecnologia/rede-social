@@ -36,8 +36,20 @@ individual member's answer, only counts.
 |---|---|
 | `GET /questions` | the ACTIVE questions in the order members see them, each with `answerCount` and a per-option `answerCount`, plus `activeCount` and `limit` (30) |
 | `POST /questions` | creates a question at the end of the list (`position` last + 1, `revision` 1, a server-made id for every option); the 31st active question is `409 limit_reached` |
+| `PATCH /questions/{id}` | edits any subset of title, help text, `required`, show-on-profile, type, options, "Outro" and limits; `revision` (the one the caller read) is required and a mismatch is `409 stale_revision`; an archived question is `409 already_archived`; an unknown or another tenant's id is the bare `404`; a body that changes nothing answers `200` and does not bump the revision |
+| `PUT /order` | `{ ids }`, the WHOLE active list in its new order; the stored `position` is renumbered 1..n in one statement and no revision changes; anything that is not exactly the set of active ids (a missing one, an extra, a repeat, an archived one, another tenant's) is `409 order_mismatch` |
 
-**Lock rules and concurrency.** Every write of a tenant first takes
+**Lock rules (D-587).** Once a question has answers, title, help text and `required` stay free, options may be
+added and reordered, widening a limit and turning "show on profile" off are allowed; everything that would
+reinterpret or expose a stored answer is refused with a coded `409 CONFLICT` and `details.profileForm`:
+`type_locked`, `option_locked` (an option that has answers cannot be removed or relabelled, even by case),
+`other_locked` ("Outro" off while an "Outro" answer exists), `visibility_locked` (private to public) and
+`limits_locked` (narrowing a number or date limit). The pure rules live in
+`@rede-social/core/server/profile-form/lock-rules` (`checkLocks`) and decide first; the database trigger of
+plan 04 (SQLSTATE PF001..PF005) is the backstop and maps to the same codes. Answers name option ids, never
+positions, so reordering options never changes what a stored answer means.
+
+**Concurrency.** Every write of a tenant first takes
 `pg_advisory_xact_lock(hashtextextended('profile_form:' || tenant_id, 0))`, so two admins' writes and the
 30-question count never interleave, then re-reads the live module row, then locks the rows it changes
 `FOR UPDATE` in the canonical order `position, created_at, id` (the order the member's save locks in).

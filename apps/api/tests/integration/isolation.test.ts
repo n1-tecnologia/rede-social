@@ -6356,6 +6356,189 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 12 sweep: profile form admin — a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH on the list, the create, the edit and the reorder, his own list names no rede-lab question, a rede-lab question id in his edit is the bare 404 and in his reorder is order_mismatch, and nothing of rede-lab changes, each beside the rede-lab admin’s own positive control (12-08, PFORM-01, PFORM-02, PFORM-17, T-12-19)', async () => {
+    // | Route                                  | Negative asserted here                                              |
+    // |----------------------------------------|---------------------------------------------------------------------|
+    // | GET   /v1/profile_form/questions       | demo admin on the lab host: 403 TENANT_HOST_MISMATCH; his own list  |
+    // |                                        | (same title in both tenants) names the demo question only           |
+    // | POST  /v1/profile_form/questions       | lab host: 403, no row; on his own host the row lands in demo only   |
+    // | PATCH /v1/profile_form/questions/{id}  | lab host: 403; a lab id on the demo host: the bare 404, lab row     |
+    // |                                        | unchanged (title and revision)                                      |
+    // | PUT   /v1/profile_form/order           | lab host: 403; lab ids on the demo host: 409 order_mismatch, lab    |
+    // |                                        | positions unchanged                                                 |
+    const PREFIX12 = `iso1208-${RUN}`;
+    const TITLE12 = `${PREFIX12} `;
+    const prior = new Map<string, boolean | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean }[]>`
+        select enabled from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+      prior.set(tenantId, row?.enabled ?? null);
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'profile_form', true)
+        on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweep12 = async () => {
+      await removeProfileFormByPrefix(TITLE12);
+      await removeIdentitiesByPrefix(PREFIX12);
+    };
+    await sweep12();
+    try {
+      const make = async (host: 'lab' | 'demo') => {
+        const identity = await createSharedIdentity({
+          prefix: PREFIX12,
+          memberships: [{ host, role: 'admin_tenant', status: 'active' }],
+        });
+        return { ...identity, token: await signInAs(identity.email, identity.password) };
+      };
+      const labAdmin = await make('lab');
+      const demoAdmin = await make('demo');
+      // The SAME title in both tenants (adjacency): only the id can tell them apart.
+      const labA = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE12}Mesmo título`,
+        position: 1,
+      });
+      const labB = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE12}Outro título`,
+        position: 2,
+      });
+      const demoQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.demo,
+        adminUserId: demoAdmin.userId,
+        title: `${TITLE12}Mesmo título`,
+        position: 1,
+      });
+      const send = (
+        who: { token: string },
+        method: string,
+        path: string,
+        host: string,
+        body?: unknown,
+      ) =>
+        api.request(path, {
+          method,
+          headers: {
+            authorization: `Bearer ${who.token}`,
+            [TENANT_HOST_HEADER]: host,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+      const labState = async () =>
+        adminSql<{ id: string; title: string; position: number; revision: number }[]>`
+          select id::text as id, title, position, revision from public.profile_form_questions
+           where tenant_id = ${tenantIds.lab}::uuid and title like ${`${TITLE12}%`}
+           order by position, id`;
+      const before = await labState();
+
+      // Positive controls: each admin reads his own list, and only his own question.
+      const labList = await send(labAdmin, 'GET', '/v1/profile_form/questions', HOSTS.lab);
+      expect(labList.status).toBe(200);
+      const labText = await labList.text();
+      expect(labText).toContain(labA);
+      expect(labText).not.toContain(demoQuestion);
+      const demoList = await send(demoAdmin, 'GET', '/v1/profile_form/questions', HOSTS.demo);
+      expect(demoList.status).toBe(200);
+      const demoText = await demoList.text();
+      expect(demoText).toContain(demoQuestion);
+      expect(demoText).not.toContain(labA);
+      expect(demoText).not.toContain(labB);
+
+      // The wrong host refuses before anything runs, on all four routes.
+      for (const [method, path, body] of [
+        ['GET', '/v1/profile_form/questions', undefined],
+        ['POST', '/v1/profile_form/questions', { type: 'short_text', title: `${TITLE12}intruso` }],
+        [
+          'PATCH',
+          `/v1/profile_form/questions/${labA}`,
+          { revision: 1, title: `${TITLE12}sequestrada` },
+        ],
+        ['PUT', '/v1/profile_form/order', { ids: [labB, labA] }],
+      ] as const) {
+        const res = await send(demoAdmin, method, path, HOSTS.lab, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await code(res), `${method} ${path}`).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await labState()).toEqual(before);
+
+      // A lab question id on the demo host is the bare 404 (no details), and the lab row is untouched.
+      const foreign = await send(
+        demoAdmin,
+        'PATCH',
+        `/v1/profile_form/questions/${labA}`,
+        HOSTS.demo,
+        { revision: 1, title: `${TITLE12}sequestrada` },
+      );
+      expect(foreign.status).toBe(404);
+      const foreignBody = (await foreign.json()) as Envelope;
+      expect(foreignBody.error.code).toBe('NOT_FOUND');
+      expect(foreignBody.error.details).toBeUndefined();
+      expect(JSON.stringify(foreignBody)).not.toContain(labA);
+
+      // Lab ids in a demo reorder are a set mismatch, which renumbers nothing in either tenant.
+      const crossed = await send(demoAdmin, 'PUT', '/v1/profile_form/order', HOSTS.demo, {
+        ids: [labB, labA],
+      });
+      expect(crossed.status).toBe(409);
+      expect(((await crossed.json()) as Envelope).error.details).toEqual({
+        profileForm: 'order_mismatch',
+      });
+      const mixed = await send(demoAdmin, 'PUT', '/v1/profile_form/order', HOSTS.demo, {
+        ids: [demoQuestion, labA],
+      });
+      expect(mixed.status).toBe(409);
+      expect(await labState()).toEqual(before);
+
+      // A create on his own host lands in demo and nowhere else.
+      const made = await send(demoAdmin, 'POST', '/v1/profile_form/questions', HOSTS.demo, {
+        type: 'short_text',
+        title: `${TITLE12}criada no demo`,
+      });
+      expect(made.status).toBe(201);
+      const [landed] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text as tenant_id from public.profile_form_questions
+         where title = ${`${TITLE12}criada no demo`}`;
+      expect(landed?.tenant_id).toBe(tenantIds.demo);
+      expect(await labState()).toEqual(before);
+
+      // Positive controls: the lab admin edits and reorders his own.
+      const own = await send(labAdmin, 'PATCH', `/v1/profile_form/questions/${labA}`, HOSTS.lab, {
+        revision: 1,
+        title: `${TITLE12}editada no lab`,
+      });
+      expect(own.status).toBe(200);
+      const reordered = await send(labAdmin, 'PUT', '/v1/profile_form/order', HOSTS.lab, {
+        ids: [labB, labA],
+      });
+      expect(reordered.status).toBe(200);
+      const created = await send(labAdmin, 'POST', '/v1/profile_form/questions', HOSTS.lab, {
+        type: 'short_text',
+        title: `${TITLE12}criada no lab`,
+      });
+      expect(created.status).toBe(201);
+    } finally {
+      await sweep12();
+      for (const [tenantId, enabled] of prior) {
+        if (enabled === null) {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        } else {
+          await adminSql`
+            update public.tenant_modules set enabled = ${enabled}
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

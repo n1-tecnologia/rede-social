@@ -471,3 +471,49 @@ async function otherAnswered(tx: Tx, tenantId: string, questionId: string): Prom
          and a.value ->> 'otherText' is not null) as found`);
   return row?.found === true;
 }
+
+/**
+ * `PUT /v1/profile_form/order` (PFORM-02, PFORM-24; D-582): the whole active list in its new order. The stored
+ * `position` IS the order members see, so the rewrite renumbers `1..n` in ONE set-based statement.
+ *
+ *   1. `adminLock`, the live module check, then EVERY active row `FOR UPDATE` in the canonical order
+ *      `position, created_at, id` (the order the member's save locks in, so the two can never deadlock);
+ *   2. the submitted ids must be EXACTLY the set of active ids (no missing one, no extra, no repeat, no
+ *      archived one, none of another tenant): anything else is 409 `order_mismatch` and nothing changes. An id
+ *      of another tenant is just an id that is not in the set, so it leaks nothing;
+ *   3. the `revision` is NOT bumped: the member's `formEtag` already depends on the id sequence.
+ *
+ * Answers the refreshed list.
+ */
+export async function reorderQuestions(
+  ctx: AdminCtx,
+  ids: readonly string[],
+): Promise<AdminQuestionList> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const locked = await tx.execute<{ id: string }>(sql`
+      select q.id::text as id
+        from public.profile_form_questions q
+       where q.tenant_id = ${ctx.tenantId}::uuid and q.archived_at is null
+       order by q.position, q.created_at, q.id
+         for update`);
+    const active = new Set(locked.map((row) => row.id));
+    const wanted = ids.map((id) => id.toLowerCase());
+    if (
+      wanted.length !== active.size ||
+      new Set(wanted).size !== wanted.length ||
+      wanted.some((id) => !active.has(id))
+    ) {
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'order_mismatch' });
+    }
+
+    await tx.execute(sql`
+      update public.profile_form_questions q
+         set position = o.ord::int, updated_at = now()
+        from jsonb_array_elements_text(${JSON.stringify(wanted)}::jsonb) with ordinality as o(id, ord)
+       where q.id = o.id::uuid and q.tenant_id = ${ctx.tenantId}::uuid`);
+    return listInTx(tx, ctx.tenantId);
+  });
+}

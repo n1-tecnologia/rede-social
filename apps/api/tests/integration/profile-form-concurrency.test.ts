@@ -22,8 +22,8 @@ import {
  *      because an answer now exists;
  *   2. admin holds, member waits: the save queues behind the update, and the stale etag answers 409;
  *   3. two saves of one member racing end with one row per question, all from one save, and no 500;
- *   4. locks are taken in ONE canonical order, so a save racing an admin edit of the second question and then
- *      the first (written in the canonical order) never deadlocks.
+ *   4. locks are taken in ONE canonical order, so a save racing the real admin reorder
+ *      (`PUT /v1/profile_form/order`, 12-08, which writes every active row) never deadlocks.
  *
  * EVERY identity is a throwaway (prefix `pfc`); questions carry the title prefix `pfc `.
  */
@@ -37,6 +37,7 @@ type Form = { formEtag: string; questions: { id: string }[] };
 
 let labTenantId = '';
 let adminUserId = '';
+let adminPerson: Person | null = null;
 
 // Two extra connections (the shared `adminSql` has one): the "member" side that holds a transaction open and
 // the "admin" side that edits.
@@ -107,7 +108,8 @@ beforeAll(async () => {
   if (!lab) throw new Error('seed tenants are missing, run pnpm db:seed first');
   labTenantId = lab.id;
   await sweep();
-  adminUserId = (await person('admin_tenant')).userId;
+  adminPerson = await person('admin_tenant');
+  adminUserId = adminPerson.userId;
 });
 
 afterEach(async () => {
@@ -256,43 +258,46 @@ describe('12-06 the member’s save and an admin’s edit never interleave (T-12
     });
   }, 30_000);
 
-  it('4. the locks are taken in one canonical order: a save racing an admin edit of the second then the first never deadlocks', async () => {
+  it('4. the locks are taken in one canonical order: a save racing the REAL admin reorder (PUT /v1/profile_form/order) never deadlocks', async () => {
     const member = await person();
+    const admin = adminPerson;
+    if (!admin) throw new Error('the admin identity is missing');
     await withProfileForm(labTenantId, async () => {
-      const first = await question({ position: 0 });
-      const second = await question({ position: 1 });
+      const first = await question({ position: 1 });
+      const second = await question({ position: 2 });
 
+      // 12-08 converts the 12-06 simulation: the admin side is now the real route, which takes the
+      // per-tenant advisory lock and then every active row FOR UPDATE in `position, created_at, id` order
+      // and rewrites both positions in one statement.
+      let order = [first, second];
       const outcomes: string[] = [];
-      for (let round = 0; round < 5; round++) {
+      for (let round = 0; round < 6; round++) {
         const form = await readForm(member);
-        // The admin side follows the shared rule: lock every active row in `position, created_at, id`
-        // order first, then write the second and then the first question.
-        const adminTx = editorSql
-          .begin(async (tx) => {
-            await tx`
-              select id from public.profile_form_questions
-               where tenant_id = ${labTenantId}::uuid and archived_at is null
-               order by position, created_at, id for update`;
-            await sleep(150);
-            await tx`update public.profile_form_questions set title = ${`${TITLE}b${round}`}, revision = revision + 1 where id = ${second}::uuid`;
-            await tx`update public.profile_form_questions set title = ${`${TITLE}a${round}`}, revision = revision + 1 where id = ${first}::uuid`;
-          })
-          .then(
-            () => 'admin-ok',
-            (error: { code?: string }) => `admin-${error.code ?? 'error'}`,
-          );
-        await sleep(30);
+        order = [...order].reverse();
+        const reordering = Promise.resolve(
+          call(admin, 'PUT', '/v1/profile_form/order', { ids: order }),
+        ).then(
+          (res) => `admin-${res.status}`,
+          () => 'admin-error',
+        );
+        // Alternate who starts first, so both interleavings are hit.
+        if (round % 2 === 0) await sleep(30);
         const saving = save(member, form, { [first]: `r${round}`, [second]: `r${round}` }).then(
           async (res) => `save-${res.status}`,
           () => 'save-error',
         );
-        const [adminResult, saveResult] = await Promise.all([adminTx, saving]);
+        const [adminResult, saveResult] = await Promise.all([reordering, saving]);
         outcomes.push(adminResult, saveResult);
-        // The stale etag of `form` is answered 409, a save that won the race 200; never a 500.
-        expect(adminResult, `round ${round}`).toBe('admin-ok');
+        // The admin always wins its own order; the save is 200 when it ran before the reorder and 409
+        // (the form changed under it) after; never a 500, never a deadlock.
+        expect(adminResult, `round ${round}`).toBe('admin-200');
         expect(['save-200', 'save-409'], `round ${round}`).toContain(saveResult);
       }
       expect(outcomes.filter((outcome) => outcome.includes('40P01'))).toEqual([]);
+      const rows = await adminSql<{ id: string; position: number }[]>`
+        select id::text as id, position from public.profile_form_questions
+         where id in (${first}::uuid, ${second}::uuid) order by position`;
+      expect(rows.map((row) => row.position)).toEqual([1, 2]);
     });
-  }, 40_000);
+  }, 60_000);
 });

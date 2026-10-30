@@ -456,6 +456,16 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/payments/events/:eventId/grant': {
     case: 'phase 09.1 sweep: payments access and events',
   },
+  // ── /v1/profile_form (12-08, the profile form builder API) ───────────────────────────────────
+  // 12-08 (PFORM-01, PFORM-02, PFORM-17, T-12-19): the list names nothing of the other tenant, a create
+  // lands only in the caller's tenant, an edit of another tenant's question id is the bare 404 and a
+  // reorder that names another tenant's ids is `order_mismatch` renumbering nothing; a session of the
+  // other tenant on this host is refused with TENANT_HOST_MISMATCH. Every route takes the tenant from the
+  // session, never from the path or body.
+  'GET /v1/profile_form/questions': { case: 'phase 12 sweep: profile form admin' },
+  'POST /v1/profile_form/questions': { case: 'phase 12 sweep: profile form admin' },
+  'PATCH /v1/profile_form/questions/:id': { case: 'phase 12 sweep: profile form admin' },
+  'PUT /v1/profile_form/order': { case: 'phase 12 sweep: profile form admin' },
 };
 
 /**

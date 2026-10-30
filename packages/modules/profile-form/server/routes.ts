@@ -6,6 +6,7 @@ import { requireModule } from '@rede-social/core/server/modules/require-module';
 import {
   createQuestion,
   listQuestions,
+  reorderQuestions,
   updateQuestion,
 } from '@rede-social/core/server/profile-form/admin';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
@@ -14,6 +15,7 @@ import {
   adminQuestionSchema,
   createQuestionBodySchema,
   PROFILE_FORM_ISSUE_SET,
+  reorderBodySchema,
   updateQuestionBodySchema,
 } from '../contracts/index';
 
@@ -43,6 +45,11 @@ const profileForm = new OpenAPIHono<AppEnv>({
       const issue = result.error.issues
         .map((candidate) => candidate.message)
         .find((message) => PROFILE_FORM_ISSUE_SET.has(message));
+      // A reorder list that is not exactly the set of active ids (empty, a repeat, a non-uuid) is a mismatch
+      // of the SET, the same answer as a list that names a missing or foreign id: 409, not a 400.
+      if (issue === 'order_mismatch') {
+        throw new ApiError(409, 'CONFLICT', { profileForm: 'order_mismatch' });
+      }
       if (issue) throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: issue });
       throw new ApiError(400, 'VALIDATION_FAILED', {
         issues: result.error.issues.map((candidate) => ({
@@ -129,6 +136,28 @@ const updateQuestionRoute = createRoute({
   },
 });
 
+const reorderRoute = createRoute({
+  method: 'put',
+  path: '/order',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: reorderBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'Stores the new order of the WHOLE active list (`ids`, first to last) and answers the refreshed list. The stored `position` is the order members see; it is renumbered 1..n in one statement and no revision changes. A list of one is accepted when the tenant has one active question.',
+      content: { 'application/json': { schema: adminQuestionListSchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm: order_mismatch`: the ids are not exactly the set of active questions of this tenant (one missing, an extra one, a repeat, an archived one, another tenant’s, or an empty list). Nothing changes, and the body never says which.',
+    },
+  },
+});
+
 export const profileFormRoutes = profileForm
   .openapi(listRoute, async (c) => c.json(await listQuestions(c.get('ctx')), 200))
   .openapi(createQuestionRoute, async (c) =>
@@ -136,4 +165,7 @@ export const profileFormRoutes = profileForm
   )
   .openapi(updateQuestionRoute, async (c) =>
     c.json(await updateQuestion(c.get('ctx'), c.req.valid('param').id, c.req.valid('json')), 200),
+  )
+  .openapi(reorderRoute, async (c) =>
+    c.json(await reorderQuestions(c.get('ctx'), c.req.valid('json').ids), 200),
   );

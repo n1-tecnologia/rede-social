@@ -91,11 +91,15 @@ const listOf = async (p: Person, host: string = HOSTS.lab): Promise<QuestionList
   return (await res.json()) as QuestionList;
 };
 
-const create = (p: Person, body: Record<string, unknown>) =>
-  call(p, 'POST', '/v1/profile_form/questions', body);
+const create = (p: Person, body: Record<string, unknown>, host: string = HOSTS.lab) =>
+  call(p, 'POST', '/v1/profile_form/questions', body, host);
 
-const created = async (p: Person, body: Record<string, unknown>): Promise<AdminQuestion> => {
-  const res = await create(p, body);
+const created = async (
+  p: Person,
+  body: Record<string, unknown>,
+  host: string = HOSTS.lab,
+): Promise<AdminQuestion> => {
+  const res = await create(p, body, host);
   expect(res.status, JSON.stringify(await res.clone().json())).toBe(201);
   return (await res.json()) as AdminQuestion;
 };
@@ -987,4 +991,190 @@ describe('12-08 an answer racing the edit is stopped by the row lock taken first
       expect(row.revision).toBe(1);
     });
   }, 60_000);
+});
+
+// ── Task 3: the reorder ──────────────────────────────────────────────────────────────────────────────────
+
+const reorder = (p: Person, ids: unknown, host: string = HOSTS.lab) =>
+  call(p, 'PUT', '/v1/profile_form/order', { ids }, host);
+
+const positionsOf = async (): Promise<{ id: string; position: number }[]> =>
+  adminSql<{ id: string; position: number }[]>`
+    select id::text as id, position from public.profile_form_questions
+     where tenant_id = ${labTenantId}::uuid and archived_at is null and title like ${`${TITLE}%`}
+     order by position, created_at, id`;
+
+describe('12-08 reordering the form (PFORM-02, D-582)', () => {
+  it('renumbers the whole active list 1..n and the member’s form follows the new order, with no revision bump', async () => {
+    const admin = await person('admin_tenant');
+    const member = await person('member');
+    await withProfileForm(labTenantId, async () => {
+      const a = await created(admin, { type: 'short_text', title: `${TITLE}A` });
+      const b = await created(admin, { type: 'short_text', title: `${TITLE}B` });
+      const c = await created(admin, { type: 'short_text', title: `${TITLE}C` });
+      await answered(a.id, 'resposta de A');
+
+      const res = await reorder(admin, [c.id, a.id, b.id]);
+      expect(res.status).toBe(200);
+      const list = (await res.json()) as QuestionList;
+      expect(list.questions.map((q) => q.id)).toEqual([c.id, a.id, b.id]);
+      expect(list.questions.map((q) => q.position)).toEqual([1, 2, 3]);
+      expect(list.questions.map((q) => q.revision)).toEqual([1, 1, 1]);
+      expect(list.activeCount).toBe(3);
+      expect(list.questions.find((q) => q.id === a.id)?.answerCount).toBe(1);
+
+      const form = await call(member, 'GET', '/v1/me/profile-form');
+      const payload = (await form.json()) as { questions: { id: string }[] };
+      expect(payload.questions.map((q) => q.id)).toEqual([c.id, a.id, b.id]);
+      expect((await listOf(admin)).questions.map((q) => q.id)).toEqual([c.id, a.id, b.id]);
+    });
+  }, 60_000);
+
+  it('a list of one is accepted for a tenant with one active question; an archived question keeps its place out of the list', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const only = await created(admin, { type: 'short_text', title: `${TITLE}única` });
+      const archived = await question({ position: 7, archived: true });
+      const res = await reorder(admin, [only.id]);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as QuestionList).questions.map((q) => q.position)).toEqual([1]);
+      const [row] = await adminSql<{ position: number }[]>`
+        select position from public.profile_form_questions where id = ${archived}::uuid`;
+      expect(row?.position).toBe(7);
+    });
+  }, 60_000);
+
+  it('a list that is not exactly the active set is 409 order_mismatch and changes nothing', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const a = await created(admin, { type: 'short_text', title: `${TITLE}A` });
+      const b = await created(admin, { type: 'short_text', title: `${TITLE}B` });
+      const archived = await question({ position: 9, archived: true });
+      const before = await positionsOf();
+      const cases: [string, unknown][] = [
+        ['one id missing', [a.id]],
+        ['an unknown extra id', [b.id, a.id, crypto.randomUUID()]],
+        ['a duplicate', [a.id, a.id]],
+        ['a duplicate that hides a missing id', [a.id, a.id, b.id]],
+        ['an archived id in place of an active one', [a.id, archived]],
+        ['an archived id besides the active ones', [b.id, a.id, archived]],
+        ['an empty list', []],
+        ['an id that is not a uuid', [a.id, 'nope']],
+        ['the same ids in upper case still need to be a set', [a.id.toUpperCase(), a.id]],
+      ];
+      for (const [name, ids] of cases) {
+        const res = await reorder(admin, ids);
+        expect(res.status, name).toBe(409);
+        expect(await details(res), name).toEqual({ profileForm: 'order_mismatch' });
+      }
+      expect(await positionsOf()).toEqual(before);
+      // The same ids in upper case are the same set: they are accepted.
+      const upper = await reorder(admin, [b.id.toUpperCase(), a.id.toUpperCase()]);
+      expect(upper.status).toBe(200);
+      expect(((await upper.json()) as QuestionList).questions.map((q) => q.id)).toEqual([
+        b.id,
+        a.id,
+      ]);
+    });
+  }, 60_000);
+
+  it('another tenant’s ids are order_mismatch, never a leak, and are never renumbered', async () => {
+    const labAdmin = await person('admin_tenant');
+    const demoAdmin = await person('admin_tenant', 'demo');
+    await withProfileForm(labTenantId, async () => {
+      await withProfileForm(demoTenantId, async () => {
+        const mine = await created(labAdmin, { type: 'short_text', title: `${TITLE}minha` });
+        const mine2 = await created(labAdmin, { type: 'short_text', title: `${TITLE}minha 2` });
+        const theirs = await created(
+          demoAdmin,
+          { type: 'short_text', title: `${TITLE}deles` },
+          HOSTS.demo,
+        );
+        const before = await positionsOf();
+
+        // The demo admin names the lab ids on his own host, and the lab admin names the demo id.
+        const fromDemo = await reorder(demoAdmin, [mine2.id, mine.id], HOSTS.demo);
+        expect(fromDemo.status).toBe(409);
+        expect(await details(fromDemo)).toEqual({ profileForm: 'order_mismatch' });
+        const fromLab = await reorder(labAdmin, [mine2.id, mine.id, theirs.id]);
+        expect(fromLab.status).toBe(409);
+        expect(await positionsOf()).toEqual(before);
+        const [demoRow] = await adminSql<{ position: number }[]>`
+          select position from public.profile_form_questions where id = ${theirs.id}::uuid`;
+        expect(demoRow?.position).toBe(1);
+
+        // Positive controls: each reorders its own.
+        expect((await reorder(labAdmin, [mine2.id, mine.id])).status).toBe(200);
+        expect((await reorder(demoAdmin, [theirs.id], HOSTS.demo)).status).toBe(200);
+      });
+    });
+  }, 60_000);
+
+  it('support, member and the module off are refused like every other route', async () => {
+    const admin = await person('admin_tenant');
+    const support = await person('support_tenant');
+    const member = await person('member');
+    await withProfileForm(labTenantId, async () => {
+      const a = await created(admin, { type: 'short_text', title: `${TITLE}A` });
+      for (const who of [support, member]) {
+        expect((await reorder(who, [a.id])).status).toBe(403);
+      }
+      await withProfileForm(
+        labTenantId,
+        async () => {
+          const res = await reorder(admin, [a.id]);
+          expect(res.status).toBe(404);
+          expect(await code(res)).toBe('MODULE_DISABLED');
+        },
+        { enabled: false },
+      );
+    });
+  }, 60_000);
+
+  it('a reorder racing a create ends with a consistent 1..n numbering and one holder of the last slot', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const a = await created(admin, { type: 'short_text', title: `${TITLE}A` });
+      const b = await created(admin, { type: 'short_text', title: `${TITLE}B` });
+      let order = [a.id, b.id];
+      for (let round = 0; round < 6; round++) {
+        const swapped = [...order].reverse();
+        const [moved, made] = await Promise.all([
+          reorder(admin, swapped),
+          create(admin, { type: 'short_text', title: `${TITLE}nova ${round}` }),
+        ]);
+        expect(made.status, `round ${round}`).toBe(201);
+        // The reorder either ran first (200) or saw the new question and found the set changed (409).
+        expect([200, 409], `round ${round}`).toContain(moved.status);
+        const rows = await positionsOf();
+        expect(
+          rows.map((row) => row.position),
+          `round ${round}`,
+        ).toEqual(rows.map((_row, i) => i + 1));
+        order = rows.map((row) => row.id);
+      }
+      expect(order).toHaveLength(8);
+    });
+  }, 90_000);
+
+  it('a reorder racing a reorder leaves one complete order, never a mix', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const ids = [
+        (await created(admin, { type: 'short_text', title: `${TITLE}A` })).id,
+        (await created(admin, { type: 'short_text', title: `${TITLE}B` })).id,
+        (await created(admin, { type: 'short_text', title: `${TITLE}C` })).id,
+      ];
+      const forward = [...ids];
+      const backward = [...ids].reverse();
+      for (let round = 0; round < 5; round++) {
+        const [one, two] = await Promise.all([reorder(admin, forward), reorder(admin, backward)]);
+        expect([one.status, two.status]).toEqual([200, 200]);
+        const rows = await positionsOf();
+        expect(rows.map((row) => row.position)).toEqual([1, 2, 3]);
+        const order = rows.map((row) => row.id);
+        expect([forward, backward]).toContainEqual(order);
+      }
+    });
+  }, 90_000);
 });
