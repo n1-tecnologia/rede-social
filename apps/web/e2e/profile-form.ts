@@ -520,6 +520,22 @@ export async function openBuilder(page: Page, aba?: 'arquivadas'): Promise<void>
   );
 }
 
+/**
+ * Opens `/membros/{membershipId}` as a staff user until the "Respostas do formulário" block is on screen.
+ *
+ * The staff read (`GET /v1/members/{id}/profile-answers`) is authorised by the composed permission
+ * `profile_form.read`, which comes from the API's 30 s module-flag cache; the member's public read and the
+ * gate read the row live. A spec writes the row with direct SQL, which cannot invalidate that cache, so
+ * when another spec of the same run loaded the cache BEFORE the module went on (the gate spec signs a
+ * member in first), the staff read answers its bare 404 until the entry expires and the screen shows the
+ * base profile with no block and no error row. Repeating the goto absorbs the lag, like `openBuilder`.
+ */
+export async function openMemberAsStaff(page: Page, membershipId: string): Promise<void> {
+  await openUntilReady(page, `${hosts.lab}/membros/${membershipId}`, () =>
+    page.locator('[data-member-answers="staff"]'),
+  );
+}
+
 /** The row of the builder's list for a question title (the whole row is one button). */
 export function builderRow(page: Page, title: string): Locator {
   return page.getByRole('button', { name: `Editar pergunta: ${title}` });

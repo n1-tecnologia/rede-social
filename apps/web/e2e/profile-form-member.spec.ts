@@ -16,6 +16,7 @@ import {
   newPhonePage,
   newRunPrefix,
   noticeDismissedAt,
+  openMemberAsStaff,
   PASSWORD,
   PHONE_PROJECT,
   PROFILE_FORM_NAMESPACE,
@@ -443,7 +444,8 @@ test('5. another member sees only the public answers; the staff see every answer
     const staff = await newPhonePage(browser);
     try {
       await login(staff.page, who, password, hosts.lab);
-      await gotoWhileRedirected(staff.page, `${hosts.lab}/membros/${ownerMembership}`);
+      // Repeated until the API's module-flag cache has seen the module on (see `openMemberAsStaff`).
+      await openMemberAsStaff(staff.page, ownerMembership);
       const blockStaff = staff.page.locator('[data-member-answers="staff"]');
       await expect(blockStaff).toBeVisible();
       await expect(blockStaff).toContainText('Respostas do formulário');
@@ -575,7 +577,7 @@ for (const width of BACKSTOP_WIDTHS) {
     const staff = await newPhonePage(browser, width);
     try {
       await login(staff.page, users.labAdmin, SEED_PASSWORD, hosts.lab);
-      await gotoWhileRedirected(staff.page, `${hosts.lab}/membros/${subjectMembership}`);
+      await openMemberAsStaff(staff.page, subjectMembership);
       await expect(staff.page.locator('[data-member-answers="staff"]')).toBeVisible();
       await expectNoHorizontalScroll(staff.page, `E10 ${width}px staff answers`);
     } finally {
