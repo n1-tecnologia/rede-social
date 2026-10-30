@@ -8,8 +8,8 @@ tenant gets a row (D-596); turning it on is the platform super_admin's explicit 
 
 **This package holds no tables and no jobs of its own.** The tables, the gate and the member routes are
 KERNEL code, because `requireAuth` reads the gate on every request (the D-501 split, as in payments).
-The package owns the builder's admin routes (plan 12-08), their contracts and the manifest; the export
-arrives in a later plan. The services the routes call live in the kernel
+The package owns the builder's admin routes (plans 12-08 and 12-09), the answers export (plan 12-10), their
+contracts and the manifest. The services the routes call live in the kernel
 (`@rede-social/core/server/profile-form/*`), where the pure lock rules and the per-tenant advisory lock are
 visible to the tests; a route never opens the admin lane.
 
@@ -29,8 +29,8 @@ composed for `admin_tenant` and `support_tenant`. A `member` never gets either.
 Routes (`/v1/profile_form`), every one behind `requireAuth`, `requireModule('profile_form')` and
 `requirePermission('profile_form.manage')` (`admin_tenant` only, by construction, see `module.ts`). With the
 module off every route answers `404 MODULE_DISABLED`; the service re-checks the live module row in its own
-transaction, because the 30-second flags cache is never the authority of a write. No route ever returns an
-individual member's answer, only counts.
+transaction, because the 30-second flags cache is never the authority of a write. No route returns an
+individual member's answer, only counts, EXCEPT `GET /export` below.
 
 | Route | What |
 |---|---|
@@ -45,6 +45,21 @@ individual member's answer, only counts.
 | `POST /questions/replace` | `{ replaces, ...a create body }`: the new question and the archive of `replaces` in ONE transaction; the new question takes the old one's `position`, the old one keeps its answers; allowed at 30 active questions (the count does not grow); a question that is not active is `409 already_archived`; any failure leaves the old question active and creates nothing |
 | `GET /summary` | `{ total, complete, hasRequired }` over the live, active, non-blocked `member` memberships of the tenant (staff, blocked and invited are in no number); `complete` is the members with an answer to every active required question |
 | `GET /impact` | `?change=create_required\|make_required\|reactivate\|replace[&questionId]` answers `{ members }`: how many members the change would ask to answer if applied now; `make_required` and `reactivate` need `questionId` (400 without it, bare 404 for an unknown or foreign one) and answer 0 when nobody would be asked (an optional or already active question, an already required one) |
+| `GET /export` | the answers as a CSV attachment `respostas-perfil-AAAA-MM-DD.csv` (date in the tenant's time zone), `Cache-Control: no-store`, `admin_tenant` only (a `support_tenant` and a `member` are `403`, the module off is `404 MODULE_DISABLED`); see "The export" below |
+
+**The export (D-595, PFORM-21).** The one door through which a member's answer leaves the app, so it is
+logged, never cached and admin-only. ONE `profile_form_exported` row of the append-only `moderation_log` is
+written and COMMITTED before the first byte of the file (the exporting admin is both actor and target; the
+row holds no answer, e-mail or member list), so a mid-stream failure cannot roll it back. The row set is every
+live `member`-role membership, `active` and `blocked` (invited, staff and soft-deleted ones are left out;
+assumption A-12-02, to confirm with the product owner). Columns: name, e-mail, then one per question (active
+ones in the admin's order, then archived ones by `archived_at`). Spreadsheet-friendly for pt-BR: UTF-8 with a
+byte-order mark, `;` delimiter, CRLF, numbers with a comma decimal. Every cell, header cells included, that
+begins with `=`, `+`, `-`, `@`, a tab, a CR, a LF or a full-width form of the first four is prefixed with a
+single quote (OWASP CSV injection); only the stored JSON number of a `number` question is written as data. The
+file is streamed in keyset pages of 500 memberships by id, so memory is bounded by a page. The e-mail lives in
+`users`, readable only in the admin lane, so the export (and only the export) reads there, with an explicit
+`tenant_id` predicate on every statement; its site is in the admin-lane inventory.
 
 **Lock rules (D-587).** Once a question has answers, title, help text and `required` stay free, options may be
 added and reordered, widening a limit and turning "show on profile" off are allowed; everything that would
@@ -92,6 +107,7 @@ so a missing row reads as disabled.
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/profile-form/admin`
+- `@rede-social/core/server/profile-form/export`
 - `@rede-social/core/server/rbac/permissions`
 
 ## Navigation

@@ -16,6 +16,7 @@ import {
   replaceQuestion,
   updateQuestion,
 } from '@rede-social/core/server/profile-form/admin';
+import { exportAnswers } from '@rede-social/core/server/profile-form/export';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   adminQuestionListSchema,
@@ -45,7 +46,8 @@ import {
  * the tenant ONLY from `ctx.tenantId`, and re-checks the live module row in its own transaction (the 30-second
  * flags cache is never the authority of a write).
  *
- * No route here ever returns an individual member's answer: only counts (D-593, PFORM-23).
+ * No route here returns an individual member's answer EXCEPT `GET /export` (D-595): the one logged, no-store,
+ * attachment response through which personal data leaves the app. Everything else returns counts (D-593, PFORM-23).
  */
 
 /**
@@ -320,6 +322,21 @@ const impactRoute = createRoute({
   },
 });
 
+const exportRoute = createRoute({
+  method: 'get',
+  path: '/export',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  responses: {
+    200: {
+      description:
+        'The answers of every `member`-role membership (active and blocked; not invited, staff or deleted) as a CSV attachment `respostas-perfil-AAAA-MM-DD.csv` (date in the tenant time zone), `Cache-Control: no-store`: UTF-8 with a byte-order mark, `;` delimiter, CRLF line ends, one row per member (name, e-mail, then one column per question: active ones in the admin order, then archived ones by `archived_at`), numbers with a comma decimal. Every cell that would start a spreadsheet formula (`=`, `+`, `-`, `@`, tab, CR, LF, full-width forms) is prefixed with a quote, header cells included. EXACTLY ONE `profile_form_exported` moderation-log row is committed BEFORE the first byte. Streamed in pages of 500 members.',
+      content: { 'text/csv': { schema: z.string() } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+  },
+});
+
 export const profileFormRoutes = profileForm
   .openapi(listRoute, async (c) => c.json(await listQuestions(c.get('ctx')), 200))
   .openapi(createQuestionRoute, async (c) =>
@@ -347,4 +364,13 @@ export const profileFormRoutes = profileForm
   .openapi(summaryRoute, async (c) => c.json(await getSummary(c.get('ctx')), 200))
   .openapi(impactRoute, async (c) =>
     c.json(await getImpact(c.get('ctx'), c.req.valid('query')), 200),
-  );
+  )
+  .openapi(exportRoute, async (c) => {
+    // The audit row is awaited INSIDE `exportAnswers`, before the stream (and so the response) exists.
+    const { fileName, body } = await exportAnswers(c.get('ctx'));
+    return c.body(body, 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Cache-Control': 'no-store',
+    });
+  });

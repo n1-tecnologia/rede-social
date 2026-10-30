@@ -6774,6 +6774,126 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 12 sweep: profile form export — a rede-demo admin receives no rede-lab member or answer and the rede-lab admin none of rede-demo’s, a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH and writes no log row, each beside its same-tenant positive control (12-10, PFORM-08, PFORM-21, T-12-25)', async () => {
+    // | Route                          | Negative asserted here                                                  |
+    // |--------------------------------|-------------------------------------------------------------------------|
+    // | GET /v1/profile_form/export    | demo admin on the lab host: 403 TENANT_HOST_MISMATCH, no log row; his   |
+    // |                                | own file (same question title in both tenants) holds the demo member    |
+    // |                                | and answer only, the lab admin's file the lab member and answer only    |
+    //
+    // The exporters are the SEEDED admins: the audit row is append-only and a throwaway admin would orphan it.
+    const PREFIX12 = `iso1210-${RUN}`;
+    const TITLE12 = `${PREFIX12} `;
+    const prior = new Map<string, boolean | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean }[]>`
+        select enabled from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+      prior.set(tenantId, row?.enabled ?? null);
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'profile_form', true)
+        on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweep12 = async () => {
+      await removeProfileFormByPrefix(TITLE12);
+      await removeIdentitiesByPrefix(PREFIX12);
+    };
+    await sweep12();
+    try {
+      const seeded = async (email: string) => {
+        const [row] = await adminSql<{ id: string }[]>`
+          select id::text as id from auth.users where email = ${email}`;
+        return { userId: row?.id ?? '', token: await signInAs(email, SEED_PASSWORD) };
+      };
+      const labAdmin = await seeded('admin@rede-lab.local');
+      const demoAdmin = await seeded('admin@rede-demo.local');
+      const labMember = await createSharedIdentity({
+        prefix: PREFIX12,
+        memberships: [{ host: 'lab', role: 'member', status: 'active' }],
+      });
+      const demoMember = await createSharedIdentity({
+        prefix: PREFIX12,
+        memberships: [{ host: 'demo', role: 'member', status: 'active' }],
+      });
+      const labQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE12}Mesmo título`,
+        position: 1,
+      });
+      const demoQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.demo,
+        adminUserId: demoAdmin.userId,
+        title: `${TITLE12}Mesmo título`,
+        position: 1,
+      });
+      await seedProfileFormAnswer({
+        tenantId: tenantIds.lab,
+        questionId: labQuestion,
+        userId: labMember.userId,
+        value: `${PREFIX12}-resposta-lab`,
+      });
+      await seedProfileFormAnswer({
+        tenantId: tenantIds.demo,
+        questionId: demoQuestion,
+        userId: demoMember.userId,
+        value: `${PREFIX12}-resposta-demo`,
+      });
+      const send = (who: { token: string }, host: string) =>
+        api.request('/v1/profile_form/export', {
+          method: 'GET',
+          headers: { authorization: `Bearer ${who.token}`, [TENANT_HOST_HEADER]: host },
+        });
+      const logRows = async (userId: string) =>
+        (
+          await adminSql<{ n: number }[]>`
+            select count(*)::int as n from public.moderation_log
+             where action = 'profile_form_exported' and actor_user_id = ${userId}::uuid`
+        )[0]?.n ?? 0;
+
+      // The wrong host refuses before anything runs: no file, no audit row.
+      const demoRowsBefore = await logRows(demoAdmin.userId);
+      const refused = await send(demoAdmin, HOSTS.lab);
+      expect(refused.status).toBe(403);
+      expect(await code(refused)).toBe('TENANT_HOST_MISMATCH');
+      expect(await logRows(demoAdmin.userId)).toBe(demoRowsBefore);
+
+      // Positive controls: each admin's own file holds his tenant's member and answer, and nothing of the other.
+      const demoOwn = await send(demoAdmin, HOSTS.demo);
+      expect(demoOwn.status).toBe(200);
+      const demoFile = await demoOwn.text();
+      expect(demoFile).toContain(demoMember.email);
+      expect(demoFile).toContain(`${PREFIX12}-resposta-demo`);
+      expect(demoFile).not.toContain(labMember.email);
+      expect(demoFile).not.toContain(`${PREFIX12}-resposta-lab`);
+      expect(await logRows(demoAdmin.userId)).toBe(demoRowsBefore + 1);
+
+      const labOwn = await send(labAdmin, HOSTS.lab);
+      expect(labOwn.status).toBe(200);
+      const labFile = await labOwn.text();
+      expect(labFile).toContain(labMember.email);
+      expect(labFile).toContain(`${PREFIX12}-resposta-lab`);
+      expect(labFile).not.toContain(demoMember.email);
+      expect(labFile).not.toContain(`${PREFIX12}-resposta-demo`);
+    } finally {
+      await sweep12();
+      for (const [tenantId, enabled] of prior) {
+        if (enabled === null) {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        } else {
+          await adminSql`
+            update public.tenant_modules set enabled = ${enabled}
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

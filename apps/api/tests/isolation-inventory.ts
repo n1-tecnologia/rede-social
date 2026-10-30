@@ -479,6 +479,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/profile_form/questions/replace': { case: 'phase 12 sweep: profile form lifecycle' },
   'GET /v1/profile_form/summary': { case: 'phase 12 sweep: profile form lifecycle' },
   'GET /v1/profile_form/impact': { case: 'phase 12 sweep: profile form lifecycle' },
+  // 12-10 (PFORM-08, PFORM-21, D-595, T-12-25): the export reads the admin lane with an explicit tenant predicate.
+  // A rede-demo admin never receives a rede-lab member or answer, and on the rede-lab host he is refused with
+  // TENANT_HOST_MISMATCH.
+  'GET /v1/profile_form/export': { case: 'phase 12 sweep: profile form export' },
 };
 
 /**
