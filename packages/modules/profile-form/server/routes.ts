@@ -4,18 +4,31 @@ import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { requireModule } from '@rede-social/core/server/modules/require-module';
 import {
+  archiveQuestion,
   createQuestion,
+  deleteQuestion,
+  getImpact,
+  getSummary,
+  listArchived,
   listQuestions,
+  reactivateQuestion,
   reorderQuestions,
+  replaceQuestion,
   updateQuestion,
 } from '@rede-social/core/server/profile-form/admin';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   adminQuestionListSchema,
   adminQuestionSchema,
+  archivedQuestionListSchema,
+  archivedQuestionSchema,
   createQuestionBodySchema,
+  impactQuerySchema,
+  impactResultSchema,
   PROFILE_FORM_ISSUE_SET,
+  profileFormSummarySchema,
   reorderBodySchema,
+  replaceQuestionBodySchema,
   updateQuestionBodySchema,
 } from '../contracts/index';
 
@@ -158,6 +171,155 @@ const reorderRoute = createRoute({
   },
 });
 
+const archivedListRoute = createRoute({
+  method: 'get',
+  path: '/archived',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  responses: {
+    200: {
+      description:
+        'The ARCHIVED questions, newest archive first (then id), each with `archivedAt`, `required` and its exact `answerCount` (also per option). Archived questions keep every answer. A tenant with none answers `{ questions: [] }`. Aggregates only.',
+      content: { 'application/json': { schema: archivedQuestionListSchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+  },
+});
+
+const archiveRoute = createRoute({
+  method: 'post',
+  path: '/questions/{id}/archive',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: { params: questionParamSchema },
+  responses: {
+    200: {
+      description:
+        'Archives the question: it leaves the form and stops being asked, every answer stays. Archiving the last required question releases every held member. Idempotent: an already archived question answers 200 with `archivedAt` unchanged.',
+      content: { 'application/json': { schema: archivedQuestionSchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the question is unknown or another tenant’s. One bare `NOT_FOUND`.',
+    },
+  },
+});
+
+const reactivateRoute = createRoute({
+  method: 'post',
+  path: '/questions/{id}/reactivate',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: { params: questionParamSchema },
+  responses: {
+    200: {
+      description:
+        'Puts an archived question back at the END of the active list (`position` last + 1). A required one holds again every member who lacks its answer. Idempotent: an active question answers 200 unchanged.',
+      content: { 'application/json': { schema: adminQuestionSchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the question is unknown or another tenant’s.',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm: limit_reached`: the tenant already has 30 active questions. Nothing changes.',
+    },
+  },
+});
+
+const deleteRoute = createRoute({
+  method: 'delete',
+  path: '/questions/{id}',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: { params: questionParamSchema },
+  responses: {
+    200: {
+      description: 'Deletes a question nobody ever answered. A second delete is the bare 404.',
+      content: { 'application/json': { schema: z.object({ deleted: z.literal(true) }) } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the question is unknown, already deleted or another tenant’s.',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm: has_answers`: at least one answer exists, so the question can only be archived. Nothing is deleted.',
+    },
+  },
+});
+
+const replaceRoute = createRoute({
+  method: 'post',
+  path: '/questions/replace',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: {
+    body: {
+      content: { 'application/json': { schema: replaceQuestionBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    201: {
+      description:
+        'Creates the new question and archives the one named by `replaces` in ONE transaction. The new question takes the old one’s position; the old one keeps its answers. Allowed at 30 active questions (the count does not grow).',
+      content: { 'application/json': { schema: adminQuestionSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.profileForm`: the new question is one a create would refuse.',
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise `replaces` is unknown or another tenant’s.',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm: already_archived`: the question to replace is not active. Nothing is created.',
+    },
+  },
+});
+
+const summaryRoute = createRoute({
+  method: 'get',
+  path: '/summary',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  responses: {
+    200: {
+      description:
+        '`{ total, complete, hasRequired }` over the tenant’s active `member` memberships (staff, blocked and invited are in no number): `complete` is the members with an answer to every active required question. Counts only.',
+      content: { 'application/json': { schema: profileFormSummarySchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+  },
+});
+
+const impactRoute = createRoute({
+  method: 'get',
+  path: '/impact',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: { query: impactQuerySchema },
+  responses: {
+    200: {
+      description:
+        '`{ members }`: how many members a change (`create_required`, `make_required`, `reactivate`, `replace`) would ask to answer if applied now. `make_required` and `reactivate` need `questionId`. A count only.',
+      content: { 'application/json': { schema: impactResultSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: an unknown `change`, or a `questionId` missing where it is needed.',
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise `questionId` is unknown or another tenant’s.',
+    },
+  },
+});
+
 export const profileFormRoutes = profileForm
   .openapi(listRoute, async (c) => c.json(await listQuestions(c.get('ctx')), 200))
   .openapi(createQuestionRoute, async (c) =>
@@ -168,4 +330,21 @@ export const profileFormRoutes = profileForm
   )
   .openapi(reorderRoute, async (c) =>
     c.json(await reorderQuestions(c.get('ctx'), c.req.valid('json').ids), 200),
+  )
+  .openapi(archivedListRoute, async (c) => c.json(await listArchived(c.get('ctx')), 200))
+  .openapi(archiveRoute, async (c) =>
+    c.json(await archiveQuestion(c.get('ctx'), c.req.valid('param').id), 200),
+  )
+  .openapi(reactivateRoute, async (c) =>
+    c.json(await reactivateQuestion(c.get('ctx'), c.req.valid('param').id), 200),
+  )
+  .openapi(deleteRoute, async (c) =>
+    c.json(await deleteQuestion(c.get('ctx'), c.req.valid('param').id), 200),
+  )
+  .openapi(replaceRoute, async (c) =>
+    c.json(await replaceQuestion(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(summaryRoute, async (c) => c.json(await getSummary(c.get('ctx')), 200))
+  .openapi(impactRoute, async (c) =>
+    c.json(await getImpact(c.get('ctx'), c.req.valid('query')), 200),
   );

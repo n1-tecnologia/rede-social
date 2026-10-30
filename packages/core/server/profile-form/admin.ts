@@ -1,12 +1,18 @@
 import {
   type AdminQuestion,
   type AdminQuestionList,
+  type ArchivedQuestion,
+  type ArchivedQuestionList,
   type CreateQuestionBody,
   createQuestionBodySchema,
+  type ImpactQuery,
+  type ImpactResult,
   PROFILE_FORM_CHOICE_TYPES,
   PROFILE_FORM_ISSUE_SET,
   PROFILE_FORM_LIMITS,
+  type ProfileFormSummary,
   type ProfileFormType,
+  type ReplaceQuestionBody,
   type UpdateQuestionBody,
 } from '@rede-social/contracts/profile-form';
 import { sql } from 'drizzle-orm';
@@ -251,26 +257,40 @@ export async function createQuestion(
       throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
     }
 
-    const options = isChoiceType(body.type)
-      ? body.options.map((option) => ({ id: crypto.randomUUID(), label: option.label.trim() }))
-      : [];
-    const [created] = await tx.execute<{ id: string }>(sql`
-      insert into public.profile_form_questions
-        (tenant_id, type, title, help_text, required, show_on_profile, allow_other, options, limits,
-         position, revision, listed_at, created_by_user_id)
-      values (${ctx.tenantId}::uuid, ${body.type}, ${body.title}, ${body.helpText}, ${body.required},
-              ${body.showOnProfile}, ${body.allowOther}, ${JSON.stringify(options)}::jsonb,
-              ${JSON.stringify(body.limits)}::jsonb,
+    return insertQuestion(tx, ctx, body, null);
+  });
+}
+
+/**
+ * The insert a create and a replace share: server-made option ids, `revision` 1, `listed_at` now and the caller
+ * as the author. `position` is the given one, or (null) the last active position plus one.
+ */
+async function insertQuestion(
+  tx: Tx,
+  ctx: AdminCtx,
+  body: CreateQuestionBody,
+  position: number | null,
+): Promise<AdminQuestion> {
+  const options = isChoiceType(body.type)
+    ? body.options.map((option) => ({ id: crypto.randomUUID(), label: option.label.trim() }))
+    : [];
+  const [created] = await tx.execute<{ id: string }>(sql`
+    insert into public.profile_form_questions
+      (tenant_id, type, title, help_text, required, show_on_profile, allow_other, options, limits,
+       position, revision, listed_at, created_by_user_id)
+    values (${ctx.tenantId}::uuid, ${body.type}, ${body.title}, ${body.helpText}, ${body.required},
+            ${body.showOnProfile}, ${body.allowOther}, ${JSON.stringify(options)}::jsonb,
+            ${JSON.stringify(body.limits)}::jsonb,
+            coalesce(${position}::int,
               (select coalesce(max(position), 0) + 1
                  from public.profile_form_questions
-                where tenant_id = ${ctx.tenantId}::uuid and archived_at is null),
-              1, now(), ${ctx.userId}::uuid)
-      returning id::text as id`);
-    if (!created) throw new Error('createQuestion: the insert returned no row');
-    const row = await readOne(tx, ctx.tenantId, created.id);
-    if (!row) throw new Error('createQuestion: the new question is not readable');
-    return adminQuestionOf(tx, ctx.tenantId, row);
-  });
+                where tenant_id = ${ctx.tenantId}::uuid and archived_at is null)),
+            1, now(), ${ctx.userId}::uuid)
+    returning id::text as id`);
+  if (!created) throw new Error('insertQuestion: the insert returned no row');
+  const row = await readOne(tx, ctx.tenantId, created.id);
+  if (!row) throw new Error('insertQuestion: the new question is not readable');
+  return adminQuestionOf(tx, ctx.tenantId, row);
 }
 
 /** The part of a question an edit can change, in the shape the lock rules and the update statement share. */
@@ -515,5 +535,287 @@ export async function reorderQuestions(
         from jsonb_array_elements_text(${JSON.stringify(wanted)}::jsonb) with ordinality as o(id, ord)
        where q.id = o.id::uuid and q.tenant_id = ${ctx.tenantId}::uuid`);
     return listInTx(tx, ctx.tenantId);
+  });
+}
+
+// ── The lifecycle of a question (Phase 12-09, D-585, D-588, D-589; PFORM-03, PFORM-17, PFORM-23) ──────────────
+//
+// NOTHING BELOW EVER WRITES AN ANSWER ROW. Archiving keeps every answer (D-588: "kept" is a promise to members
+// and to the export); a question that has answers is never deleted (`has_answers`, with the RESTRICT foreign
+// key of plan 04 as the floor). Whether a member is held is NOT stored: the gate reads the SQL rule
+// (`app.profile_form_missing`), so reactivating or creating a required question reopens the form for whoever
+// lacks the answer, and archiving one frees them, with nothing to recompute (D-585).
+
+const archivedAtOf = (row: StoredQuestion): string => iso(row.archived_at ?? row.created_at);
+
+/** Whether the error, or anything in its cause chain, carries the given SQLSTATE. */
+function hasSqlState(error: unknown, state: string): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const { code, cause } = current as { code?: unknown; cause?: unknown };
+    if (code === state) return true;
+    current = cause;
+  }
+  return false;
+}
+
+/** How many ACTIVE questions the tenant has (counted under the advisory lock, so a create cannot slip in). */
+async function activeCountOf(tx: Tx, tenantId: string): Promise<number> {
+  const [counted] = await tx.execute<{ n: number | string }>(sql`
+    select count(*)::int as n
+      from public.profile_form_questions
+     where tenant_id = ${tenantId}::uuid and archived_at is null`);
+  return Number(counted?.n ?? 0);
+}
+
+/** One question archived, with its counts, as the archived list shows it. */
+async function archivedQuestionOf(
+  tx: Tx,
+  tenantId: string,
+  row: StoredQuestion,
+): Promise<ArchivedQuestion> {
+  return { ...(await adminQuestionOf(tx, tenantId, row)), archivedAt: archivedAtOf(row) };
+}
+
+/**
+ * `POST /v1/profile_form/questions/{id}/archive` (D-588, D-589): the question leaves the form and stops being
+ * asked; every answer stays. Idempotent: an already archived question is answered unchanged (`archived_at` is
+ * not touched). Unknown or another tenant's id: the bare 404. The row lock waits for a member's save that
+ * holds the question `FOR SHARE`, so after both commit no answer can name a question archived before the save's
+ * lock (the save then answers `unknown_question`).
+ */
+export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<ArchivedQuestion> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const row = await readOne(tx, ctx.tenantId, id, true);
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    if (row.archived_at !== null) return archivedQuestionOf(tx, ctx.tenantId, row);
+
+    await tx.execute(sql`
+      update public.profile_form_questions
+         set archived_at = now(), revision = revision + 1, updated_at = now()
+       where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    const archived = await readOne(tx, ctx.tenantId, row.id);
+    if (!archived) throw new Error('archiveQuestion: the archived question is not readable');
+    return archivedQuestionOf(tx, ctx.tenantId, archived);
+  });
+}
+
+/**
+ * `POST /v1/profile_form/questions/{id}/reactivate` (D-585, D-588): an archived question goes back to the END of
+ * the active list (`position` = last active + 1, `listed_at` now, so members see it as new). Idempotent: an
+ * active question is answered unchanged. At 30 active questions it is 409 `limit_reached`. Its old answers are
+ * still there, so a member who had answered it is not held again.
+ */
+export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<AdminQuestion> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const row = await readOne(tx, ctx.tenantId, id, true);
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    if (row.archived_at === null) return adminQuestionOf(tx, ctx.tenantId, row);
+    if ((await activeCountOf(tx, ctx.tenantId)) >= PROFILE_FORM_LIMITS.activeQuestions) {
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
+    }
+
+    await tx.execute(sql`
+      update public.profile_form_questions
+         set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now(),
+             position = (select coalesce(max(position), 0) + 1
+                           from public.profile_form_questions
+                          where tenant_id = ${ctx.tenantId}::uuid and archived_at is null)
+       where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    const active = await readOne(tx, ctx.tenantId, row.id);
+    if (!active) throw new Error('reactivateQuestion: the reactivated question is not readable');
+    return adminQuestionOf(tx, ctx.tenantId, active);
+  });
+}
+
+/**
+ * `GET /v1/profile_form/archived`: the archived questions with `archivedAt`, `required`, `answerCount`, newest
+ * archive first then id. A tenant with none is `{ questions: [] }`. Counts are exact `count(*)` at read time.
+ */
+export async function listArchived(ctx: AdminCtx): Promise<ArchivedQuestionList> {
+  return withTenantTx(ctx, async (tx) => {
+    await requireModuleOn(tx, ctx);
+    const rows = await tx.execute<StoredQuestion>(sql`
+      select ${COLUMNS}
+        from public.profile_form_questions q
+       where q.tenant_id = ${ctx.tenantId}::uuid and q.archived_at is not null
+       order by q.archived_at desc, q.id`);
+    const counts = await countsFor(
+      tx,
+      ctx.tenantId,
+      rows.map((row) => row.id),
+    );
+    return {
+      questions: rows.map((row) => ({
+        ...toAdminQuestion(row, counts),
+        archivedAt: archivedAtOf(row),
+      })),
+    };
+  });
+}
+
+/**
+ * `DELETE /v1/profile_form/questions/{id}` (D-588): only a question nobody ever answered. One answer makes it
+ * 409 `has_answers`, whatever its state; the RESTRICT foreign key of plan 04 refuses the same delete in SQL and
+ * its SQLSTATE 23503 maps to the same code. A second delete is the bare 404.
+ */
+export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ deleted: true }> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const row = await readOne(tx, ctx.tenantId, id, true);
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    const [answered] = await tx.execute<{ found: boolean }>(sql`
+      select exists (
+        select 1 from public.profile_form_answers a
+         where a.tenant_id = ${ctx.tenantId}::uuid and a.question_id = ${row.id}::uuid) as found`);
+    if (answered?.found === true)
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'has_answers' });
+
+    try {
+      await tx.execute(sql`
+        delete from public.profile_form_questions
+         where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    } catch (error) {
+      if (hasSqlState(error, '23503')) {
+        throw new ApiError(409, 'CONFLICT', { profileForm: 'has_answers' });
+      }
+      throw error;
+    }
+    return { deleted: true };
+  });
+}
+
+/**
+ * `POST /v1/profile_form/questions/replace` (PFORM-17): the new question and the archive of the old one in ONE
+ * transaction. The new question takes the old one's `position`; the old one keeps its answers, archived. The
+ * active count does not grow, so the 30-question limit is not re-checked. An old question that is not active
+ * is 409 `already_archived`; unknown or another tenant's id is the bare 404. Any failure of either half rolls
+ * both back: the old question stays active and nothing is created.
+ */
+export async function replaceQuestion(
+  ctx: AdminCtx,
+  body: ReplaceQuestionBody,
+): Promise<AdminQuestion> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const old = await readOne(tx, ctx.tenantId, body.replaces, true);
+    if (!old) throw new ApiError(404, 'NOT_FOUND');
+    if (old.archived_at !== null) {
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'already_archived' });
+    }
+
+    const created = await insertQuestion(tx, ctx, body, old.position);
+    await tx.execute(sql`
+      update public.profile_form_questions
+         set archived_at = now(), revision = revision + 1, updated_at = now()
+       where id = ${old.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    return created;
+  });
+}
+
+/**
+ * The members the builder's numbers are about: live `member`-role memberships of the tenant whose status is
+ * `active` and not blocked (D-584: staff are in no number; a blocked or invited member is not asked yet). The
+ * fold of `status`/`blocked_at` is the one the members list uses.
+ */
+const ACTIVE_MEMBERS = (tenantId: string) => sql`
+  select m.id
+    from public.memberships m
+   where m.tenant_id = ${tenantId}::uuid
+     and m.role = 'member'
+     and m.status = 'active'
+     and m.blocked_at is null
+     and m.deleted_at is null`;
+
+/**
+ * `GET /v1/profile_form/summary` (PFORM-23): `{ total, complete, hasRequired }` in ONE set-based statement.
+ * `complete` is the members with an answer to EVERY active required question (all of them when there is no
+ * required question). Counts only: no answer is selected.
+ */
+export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
+  return withTenantTx(ctx, async (tx) => {
+    await requireModuleOn(tx, ctx);
+    const [row] = await tx.execute<{
+      total: number | string;
+      complete: number | string;
+      has_required: boolean;
+    }>(
+      sql`
+      with members as (${ACTIVE_MEMBERS(ctx.tenantId)}),
+      req as (
+        select q.id
+          from public.profile_form_questions q
+         where q.tenant_id = ${ctx.tenantId}::uuid and q.required and q.archived_at is null),
+      answered as (
+        select a.membership_id, count(*) as n
+          from public.profile_form_answers a
+          join req r on r.id = a.question_id
+         where a.tenant_id = ${ctx.tenantId}::uuid
+         group by a.membership_id)
+      select (select count(*) from members)::int as total,
+             (select count(*)
+                from members m
+                left join answered x on x.membership_id = m.id
+               where coalesce(x.n, 0) = (select count(*) from req))::int as complete,
+             exists (select 1 from req) as has_required`,
+    );
+    return {
+      total: Number(row?.total ?? 0),
+      complete: Number(row?.complete ?? 0),
+      hasRequired: row?.has_required === true,
+    };
+  });
+}
+
+/**
+ * `GET /v1/profile_form/impact` (D-585, PFORM-23): how many members a change would ask to answer, were it
+ * applied now. `create_required` and `replace` count every member; `make_required` and `reactivate` count the
+ * members with no answer to `questionId`. A change that asks nobody is 0: a `reactivate` of an optional or an
+ * active question, a `make_required` of a question that is already required or archived. `questionId` is
+ * needed by those two (400 `invalid` without it) and an unknown or foreign one is the bare 404. A count only.
+ */
+export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<ImpactResult> {
+  return withTenantTx(ctx, async (tx) => {
+    await requireModuleOn(tx, ctx);
+
+    if (query.change === 'create_required' || query.change === 'replace') {
+      const [row] = await tx.execute<{ n: number | string }>(
+        sql`select count(*)::int as n from (${ACTIVE_MEMBERS(ctx.tenantId)}) members`,
+      );
+      return { members: Number(row?.n ?? 0) };
+    }
+
+    if (query.questionId === undefined) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'invalid' });
+    }
+    const row = await readOne(tx, ctx.tenantId, query.questionId);
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    const asksNobody =
+      query.change === 'reactivate'
+        ? row.archived_at === null || !row.required
+        : row.archived_at !== null || row.required;
+    if (asksNobody) return { members: 0 };
+
+    const [counted] = await tx.execute<{ n: number | string }>(sql`
+      select count(*)::int as n
+        from (${ACTIVE_MEMBERS(ctx.tenantId)}) members
+       where not exists (
+         select 1 from public.profile_form_answers a
+          where a.tenant_id = ${ctx.tenantId}::uuid
+            and a.membership_id = members.id
+            and a.question_id = ${row.id}::uuid)`);
+    return { members: Number(counted?.n ?? 0) };
   });
 }

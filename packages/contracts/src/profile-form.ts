@@ -595,6 +595,10 @@ export type AdminQuestionList = z.infer<typeof adminQuestionListSchema>;
 export const archivedQuestionSchema = z.object({ ...adminCore, archivedAt: z.string() });
 export type ArchivedQuestion = z.infer<typeof archivedQuestionSchema>;
 
+/** `GET /v1/profile_form/archived`: the archived questions, newest archive first. Aggregates only. */
+export const archivedQuestionListSchema = z.object({ questions: z.array(archivedQuestionSchema) });
+export type ArchivedQuestionList = z.infer<typeof archivedQuestionListSchema>;
+
 export const profileFormSummarySchema = z.object({
   total: z.number().int().min(0),
   complete: z.number().int().min(0),
