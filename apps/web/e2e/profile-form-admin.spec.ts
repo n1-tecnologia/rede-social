@@ -51,7 +51,7 @@ import {
  * visit of the builder polls (`openBuilder`).
  *
  * Written under Igor's decision of 2026-10-30 (the disk could not hold a Next server and a browser) and
- * NOT executed by plan 12-18: the first run is recorded in `12-MANUAL-PROOFS.md` (rows M8, M9).
+ * NOT executed by plan 12-18: the first run is recorded in `12-MANUAL-PROOFS.md` (row M8).
  */
 
 test.describe.configure({ mode: 'serial', timeout: 240_000 });
