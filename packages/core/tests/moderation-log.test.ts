@@ -92,3 +92,52 @@ describe('recordModerationAction: post_removed (D-475)', () => {
     expect(inserts[0]?.params[9]).toBeNull();
   });
 });
+
+describe('recordModerationAction: profile_form_exported (D-595)', () => {
+  // The fake transaction answers EVERY membership lookup with this id.
+  const SELF_MEMBERSHIP = '66666666-6666-4666-8666-666666666666';
+
+  it('writes the caller as BOTH actor and target, with no subject, excerpt, reason or details', async () => {
+    const { tx, inserts } = fakeTx();
+    await recordModerationAction(tx, ctx, {
+      action: 'profile_form_exported',
+      actorMembershipId: SELF_MEMBERSHIP,
+    });
+    expect(inserts).toHaveLength(1);
+    const params = inserts[0]?.params ?? [];
+    expect(params[0]).toBe(TENANT);
+    expect(params[1]).toBe('profile_form_exported');
+    // actor user, actor membership, target user, target membership: the same person twice.
+    expect(params[2]).toBe(ACTOR);
+    expect(params[3]).toBe(SELF_MEMBERSHIP);
+    expect(params[4]).toBe(ACTOR);
+    expect(params[5]).toBe(SELF_MEMBERSHIP);
+    // subject type, subject id, reason, excerpt, details: all null.
+    for (const index of [6, 7, 8, 9, 10]) expect(params[index]).toBeNull();
+  });
+
+  it('refuses an actor membership that is not the caller own in this tenant, and writes nothing', async () => {
+    const { tx, inserts } = fakeTx();
+    await expect(
+      recordModerationAction(tx, ctx, {
+        action: 'profile_form_exported',
+        actorMembershipId: '77777777-7777-4777-8777-777777777777',
+      }),
+    ).rejects.toThrow(/caller membership/);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('a subject cannot be supplied: the variant has no such field (type level) and the row carries none', async () => {
+    const { tx, inserts } = fakeTx();
+    await recordModerationAction(tx, ctx, {
+      action: 'profile_form_exported',
+      actorMembershipId: SELF_MEMBERSHIP,
+      // @ts-expect-error an export names no subject
+      subjectType: 'feed_post',
+      subjectId: POST,
+    });
+    // Even if a caller forced the fields past the compiler, the writer never reads them.
+    expect(inserts[0]?.params[6]).toBeNull();
+    expect(inserts[0]?.params[7]).toBeNull();
+  });
+});

@@ -23,6 +23,8 @@ export type ModerationLogLabels = {
     commentRemoved: string;
     /** 09-07 (UI-D-507): "{actor} removeu uma publicação de {target}" */
     postRemoved: string;
+    /** Phase 12 (D-595, A-12-MOD): "{actor} exportou as respostas do formulário de perfil" (no target) */
+    exported: string;
     blocked: string;
     unblocked: string;
     roleChanged: string;
@@ -52,7 +54,7 @@ export function parseModerationAction(raw: string | string[] | undefined): Moder
 /** The chip row, in UI-D-277's order: "Tudo" first (`null`), then one chip per action. */
 export const MODERATION_LOG_FILTERS: readonly {
   action: ModerationAction | null;
-  key: 'all' | 'comments' | 'posts' | 'blocks' | 'unblocks' | 'roles';
+  key: 'all' | 'comments' | 'posts' | 'blocks' | 'unblocks' | 'roles' | 'exports';
 }[] = [
   { action: null, key: 'all' },
   { action: 'comment_removed', key: 'comments' },
@@ -61,6 +63,8 @@ export const MODERATION_LOG_FILTERS: readonly {
   { action: 'member_blocked', key: 'blocks' },
   { action: 'member_unblocked', key: 'unblocks' },
   { action: 'role_changed', key: 'roles' },
+  // Phase 12 (D-595, A-12-MOD): the profile-form export, last so the earlier chips keep their slots.
+  { action: 'profile_form_exported', key: 'exports' },
 ];
 
 /** What `moderationLogLabels` needs from a `next-intl` translator scoped to `moderation.log`. */
@@ -79,6 +83,7 @@ export function moderationLogLabels(t: ModerationLogTranslator): ModerationLogLa
     rows: {
       commentRemoved: String(t.raw('rows.commentRemoved')),
       postRemoved: String(t.raw('rows.postRemoved')),
+      exported: String(t.raw('rows.exported')),
       blocked: String(t.raw('rows.blocked')),
       unblocked: String(t.raw('rows.unblocked')),
       roleChanged: String(t.raw('rows.roleChanged')),
@@ -121,6 +126,7 @@ export type ModerationLogRowView = {
 const TEMPLATE_KEY: Record<ModerationAction, keyof ModerationLogLabels['rows']> = {
   comment_removed: 'commentRemoved',
   post_removed: 'postRemoved',
+  profile_form_exported: 'exported',
   member_blocked: 'blocked',
   member_unblocked: 'unblocked',
   role_changed: 'roleChanged',

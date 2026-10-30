@@ -23,6 +23,10 @@ import { TENANT_ROLES } from './modules';
  * `moderation.manage` removes a MEMBER's post (MODER-04 is split: member posts here, member stories,
  * communities and "block author from a report" in Phase 11). Values are appended, never inserted, so
  * the order the filter chips read stays put.
+ *
+ * Phase 12 (D-595) appends the third value, `profile_form_exported`: a TENANT-LEVEL row. The exporting
+ * admin is BOTH the actor and the target (the table's membership columns are NOT NULL), and the row
+ * carries no subject, no excerpt, no reason and no details; it names no answer, e-mail or member.
  */
 
 /** Every `moderation_log.action` value — the `moderation_log_action_chk` list, verbatim. */
@@ -32,6 +36,7 @@ export const MODERATION_ACTIONS = [
   'member_unblocked',
   'role_changed',
   'post_removed',
+  'profile_form_exported',
 ] as const;
 export type ModerationAction = (typeof MODERATION_ACTIONS)[number];
 

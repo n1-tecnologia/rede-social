@@ -32,7 +32,7 @@ import { MEMBERS_MAX_QUERY_LENGTH } from '../src/profiles';
  * costly). These assertions pin the exact lists so a widening has to touch the migration AND this file.
  */
 describe('moderation vocabulary', () => {
-  it('fixes the five actions and the three subject types the table CHECKs carry', () => {
+  it('fixes the six actions and the three subject types the table CHECKs carry', () => {
     // 09-07 (D-475): `post_removed` and `feed_post` are appended, never inserted, so the order of the
     // four earlier values (the filter chips read it) is unchanged.
     expect(MODERATION_ACTIONS).toEqual([
@@ -41,7 +41,10 @@ describe('moderation vocabulary', () => {
       'member_unblocked',
       'role_changed',
       'post_removed',
+      'profile_form_exported',
     ]);
+    // Phase 12 (D-595): the export action is appended LAST, so the filter chips keep their order.
+    expect(MODERATION_ACTIONS.at(-1)).toBe('profile_form_exported');
     expect(MODERATION_SUBJECT_TYPES).toEqual(['post_comment', 'story_comment', 'feed_post']);
     expect(MODERATION_EXCERPT_MAX).toBe(280);
     expect(MODERATION_REASON_MAX).toBe(500);
@@ -86,6 +89,10 @@ describe('moderationLogQuerySchema', () => {
     expect(moderationLogQuerySchema.parse({ action: 'comment_removed' }).action).toBe(
       'comment_removed',
     );
+    // Phase 12 (D-595): the export action is a valid filter value.
+    expect(moderationLogQuerySchema.parse({ action: 'profile_form_exported' }).action).toBe(
+      'profile_form_exported',
+    );
     expect(moderationLogQuerySchema.safeParse({ action: 'everything' }).success).toBe(false);
     expect(moderationLogQuerySchema.safeParse({ extra: '1' }).success).toBe(false);
   });
@@ -119,6 +126,25 @@ describe('moderationLogPageSchema', () => {
       1,
     );
     expect(moderationLogEntrySchema.safeParse({ ...entry, body: 'x' }).success).toBe(false);
+  });
+
+  it('12-10 (D-595): an export row is tenant-level: actor and target are the same membership, no subject, excerpt, reason or details', () => {
+    const membershipId = '1a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d';
+    const exported = {
+      ...entry,
+      action: 'profile_form_exported',
+      target: { membershipId, displayName: 'Ana' },
+      subjectType: null,
+      excerpt: null,
+    };
+    const parsed = moderationLogEntrySchema.parse(exported);
+    expect(parsed.action).toBe('profile_form_exported');
+    expect(parsed.actor.membershipId).toBe(parsed.target.membershipId);
+    expect(parsed.subjectType).toBeNull();
+    expect(parsed.details).toBeNull();
+    // The wire row never grows an answer, an e-mail or a member list.
+    expect(moderationLogEntrySchema.safeParse({ ...exported, members: [] }).success).toBe(false);
+    expect(moderationLogEntrySchema.safeParse({ ...exported, email: 'a@b.c' }).success).toBe(false);
   });
 
   it('a role change carries roles from the tenant role list only', () => {

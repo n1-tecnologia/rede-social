@@ -26,11 +26,13 @@
         "posts": "Publicações",
         "blocks": "Bloqueios",
         "unblocks": "Desbloqueios",
-        "roles": "Papéis"
+        "roles": "Papéis",
+        "exports": "Exportações"
       },
       "rows": {
         "commentRemoved": "{actor} removeu um comentário de {target}",
         "postRemoved": "{actor} removeu uma publicação de {target}",
+        "exported": "{actor} exportou as respostas do formulário de perfil",
         "blocked": "{actor} bloqueou o acesso de {target}",
         "unblocked": "{actor} desbloqueou o acesso de {target}",
         "roleChanged": "{actor} mudou o papel de {target} de {from} para {to}"

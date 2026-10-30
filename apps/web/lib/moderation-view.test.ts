@@ -114,6 +114,34 @@ describe('toModerationLogView', () => {
     expect(view.context).toBe('Publicação removida');
   });
 
+  it('12-10 (D-595, A-12-MOD): an export reads with the actor only, no target, no context, no excerpt', () => {
+    const exported = entry({
+      action: 'profile_form_exported',
+      subjectType: null,
+      excerpt: null,
+      // Actor and target are the same membership: the row names no one else.
+      target: { membershipId: entry().actor.membershipId, displayName: 'Ana Souza' },
+    });
+    const view = toModerationLogView(exported, { timezone: TZ, labels: LABELS });
+    expect(sentence(view)).toBe('**Você** exportou as respostas do formulário de perfil');
+    expect(view.action).toBe('profile_form_exported');
+    expect(view.context).toBeNull();
+    expect(view.excerpt).toBeNull();
+    expect(view.reason).toBeNull();
+    const other = toModerationLogView(
+      { ...exported, actor: { ...exported.actor, isViewer: false } },
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(other)).toBe('**Ana Souza** exportou as respostas do formulário de perfil');
+    const departed = toModerationLogView(
+      { ...exported, actor: { ...exported.actor, isViewer: false, displayName: null } },
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(departed)).toBe(
+      '**Membro removido** exportou as respostas do formulário de perfil',
+    );
+  });
+
   it('a block carries its reason and no context or excerpt', () => {
     const view = toModerationLogView(
       entry({
@@ -239,13 +267,14 @@ describe('08-03 — every row variant and the filter', () => {
     );
   });
 
-  it('parseModerationAction: the five API values pass; anything else reads as "Tudo"', () => {
+  it('parseModerationAction: the six API values pass; anything else reads as "Tudo"', () => {
     for (const action of [
       'comment_removed',
       'member_blocked',
       'member_unblocked',
       'role_changed',
       'post_removed',
+      'profile_form_exported',
     ])
       expect(parseModerationAction(action)).toBe(action);
     for (const raw of [
@@ -255,13 +284,15 @@ describe('08-03 — every row variant and the filter', () => {
       'COMMENT_REMOVED',
       'comentarios',
       'POST_REMOVED',
+      'PROFILE_FORM_EXPORTED',
+      'exportacoes',
       'post_hidden',
       ['member_blocked'],
     ])
       expect(parseModerationAction(raw)).toBeNull();
   });
 
-  it('the chip row is "Tudo · Comentários · Publicações · Bloqueios · Desbloqueios · Papéis", in that order', () => {
+  it('the chip row is "Tudo · Comentários · Publicações · Bloqueios · Desbloqueios · Papéis · Exportações", in that order', () => {
     expect(MODERATION_LOG_FILTERS.map((filter) => log.filters[filter.key])).toEqual([
       'Tudo',
       'Comentários',
@@ -269,6 +300,7 @@ describe('08-03 — every row variant and the filter', () => {
       'Bloqueios',
       'Desbloqueios',
       'Papéis',
+      'Exportações',
     ]);
     expect(MODERATION_LOG_FILTERS.map((filter) => filter.action)).toEqual([
       null,
@@ -277,6 +309,7 @@ describe('08-03 — every row variant and the filter', () => {
       'member_blocked',
       'member_unblocked',
       'role_changed',
+      'profile_form_exported',
     ]);
   });
 

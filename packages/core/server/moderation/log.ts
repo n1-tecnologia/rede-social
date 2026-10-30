@@ -70,6 +70,17 @@ export type ModerationEntry =
       targetUserId: string;
       targetMembershipId: string;
       details: { from: TenantRole; to: TenantRole };
+    }
+  | {
+      /**
+       * Phase 12 (D-595): an admin exported the profile-form answers. A TENANT-LEVEL row: the exporting
+       * admin's membership is BOTH the actor and the target (the table's membership columns are NOT
+       * NULL) and the row carries no subject, no excerpt, no reason and no details — it must never
+       * name an answer, an e-mail or a member list. `actorMembershipId` is the caller's own membership
+       * (the writer verifies it belongs to `ctx.tenantId` and to `ctx.userId`).
+       */
+      action: 'profile_form_exported';
+      actorMembershipId: string;
     };
 
 const ELLIPSIS = '…';
@@ -128,9 +139,17 @@ export async function recordModerationAction(
   ctx: Pick<RequestContext, 'tenantId' | 'userId' | 'requestId'>,
   entry: ModerationEntry,
 ): Promise<string> {
+  const exported = entry.action === 'profile_form_exported';
   const actorMembershipId = await membershipIdOf(tx, ctx.tenantId, ctx.userId);
-  const targetMembershipId =
-    'targetMembershipId' in entry
+  if (exported && entry.actorMembershipId !== actorMembershipId) {
+    // The caller named a membership that is not its own in this tenant: refuse, roll back.
+    throw new Error('moderation log: the export actor is not the caller membership of this tenant');
+  }
+  // An export has no other party: the actor is also the target.
+  const targetUserId = exported ? ctx.userId : entry.targetUserId;
+  const targetMembershipId = exported
+    ? actorMembershipId
+    : 'targetMembershipId' in entry
       ? entry.targetMembershipId
       : await membershipIdOf(tx, ctx.tenantId, entry.targetUserId);
 
@@ -139,7 +158,7 @@ export async function recordModerationAction(
   const subjectType = removal ? entry.subjectType : null;
   const subjectId = removal ? entry.subjectId : null;
   const excerpt = removal ? moderationExcerpt(entry.excerptSource) : null;
-  const rawReason = entry.action === 'role_changed' ? null : entry.reason;
+  const rawReason = entry.action === 'role_changed' || exported ? null : entry.reason;
   const reason = rawReason === null ? null : rawReason.trim() === '' ? null : rawReason.trim();
   const details = entry.action === 'role_changed' ? JSON.stringify(entry.details) : null;
 
@@ -149,7 +168,7 @@ export async function recordModerationAction(
       subject_type, subject_id, reason, excerpt, details
     ) values (
       ${ctx.tenantId}::uuid, ${entry.action}, ${ctx.userId}::uuid, ${actorMembershipId}::uuid,
-      ${entry.targetUserId}::uuid, ${targetMembershipId}::uuid,
+      ${targetUserId}::uuid, ${targetMembershipId}::uuid,
       ${subjectType}, ${subjectId}::uuid, ${reason}, ${excerpt}, ${details}::jsonb
     )
     returning id`);

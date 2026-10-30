@@ -24,9 +24,15 @@ begin;
 --    the admin lane and for the owner) hold on a `post_removed` row. Every earlier assertion above is
 --    untouched.
 --
+-- 12-10 (D-595, PFORM-21): the tenant-level export action `profile_form_exported` (the plan-04 CHECK
+--    already accepts it). The exporting admin is the actor AND the target, no subject, no details: a
+--    tenant-lane admin appends it under the SAME insert policy, a subject or details on it is refused
+--    by the CHECKs (23514), and the immutability facts hold on its row in the tenant lane, the admin
+--    lane and for the owner.
+--
 -- Fixture ids use the `15400000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(41);
+select plan(48);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ml-a', 'Moderacao A', '15400000-0000-4000-8000-000000000001');
@@ -72,6 +78,15 @@ values
    '15400000-0000-4000-8000-0000000000b1', '15400000-0000-4000-8000-0000000001b1',
    '15400000-0000-4000-8000-0000000000b2', '15400000-0000-4000-8000-0000000001b2',
    'feed_post', '15400000-0000-4000-8000-0000000003b3', 'legenda igual');
+
+-- 12-10: one export row for A, written as the migration role (actor = target = A's admin).
+insert into public.moderation_log
+  (id, tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id)
+values
+  ('15400000-0000-4000-8000-0000000002a8', '15400000-0000-4000-8000-000000000001',
+   'profile_form_exported',
+   '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+   '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1');
 
 -- ── 0. policy shape ───────────────────────────────────────────────────────────────────────────
 select results_eq(
@@ -222,6 +237,29 @@ select results_eq(
   ARRAY['15400000-0000-4000-8000-000000000001'],
   'fact 6: adjacency — identical post_removed excerpts on both sides, the lane returns only A''s row'
 );
+-- 12-10: an export rides the same insert policy, as its own actor AND target, with no subject and no
+-- details; the immutability holds on its row.
+select lives_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id)
+     values ('15400000-0000-4000-8000-000000000001', 'profile_form_exported',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1') $$,
+  'fact 7: the tenant lane appends a profile_form_exported row, actor = target, no subject, no details'
+);
+select throws_ok(
+  $$ update public.moderation_log set reason = 'reescrito'
+      where id = '15400000-0000-4000-8000-0000000002a8' $$,
+  '42501',
+  null,
+  'fact 7: the lane cannot UPDATE a profile_form_exported row'
+);
+select throws_ok(
+  $$ delete from public.moderation_log where id = '15400000-0000-4000-8000-0000000002a8' $$,
+  '42501',
+  null,
+  'fact 7: the lane cannot DELETE a profile_form_exported row'
+);
 select is_empty(
   $$ select id from public.moderation_log
       where tenant_id = '15400000-0000-4000-8000-000000000011' $$,
@@ -262,6 +300,12 @@ select throws_ok(
   null,
   'fact 6: service_role cannot UPDATE a post_removed row'
 );
+select throws_ok(
+  $$ delete from public.moderation_log where id = '15400000-0000-4000-8000-0000000002a8' $$,
+  '42501',
+  null,
+  'fact 7: service_role cannot DELETE a profile_form_exported row'
+);
 reset role;
 
 select throws_ok(
@@ -295,6 +339,13 @@ select throws_ok(
   '42501',
   'moderation_log is append-only',
   'fact 6: the table owner cannot DELETE a post_removed row (the row trigger)'
+);
+select throws_ok(
+  $$ update public.moderation_log set reason = 'reescrito'
+      where id = '15400000-0000-4000-8000-0000000002a8' $$,
+  '42501',
+  'moderation_log is append-only',
+  'fact 7: the table owner cannot UPDATE a profile_form_exported row (the row trigger)'
 );
 
 -- ── 4. the CHECKs ──────────────────────────────────────────────────────────────────────────────
@@ -402,6 +453,32 @@ select throws_ok(
   '23514',
   null,
   'fact 6: an unknown action is still refused (moderation_log_action_chk)'
+);
+
+-- 12-10: an export names no subject and no details (the subject and details CHECKs).
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id)
+     values ('15400000-0000-4000-8000-000000000001', 'profile_form_exported',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             'feed_post', '15400000-0000-4000-8000-0000000003b1') $$,
+  '23514',
+  null,
+  'fact 7: a subject on a profile_form_exported row is refused (moderation_log_subject_chk)'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        details)
+     values ('15400000-0000-4000-8000-000000000001', 'profile_form_exported',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '{"from":"member","to":"admin_tenant"}'::jsonb) $$,
+  '23514',
+  null,
+  'fact 7: details on a profile_form_exported row are refused (moderation_log_details_chk)'
 );
 
 -- ── 5. invariant: both parties are memberships of the row's own tenant ─────────────────────────

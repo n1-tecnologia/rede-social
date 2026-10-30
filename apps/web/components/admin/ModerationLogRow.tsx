@@ -1,6 +1,6 @@
 import type { ModerationAction } from '@rede-social/contracts/moderation';
 import { Skeleton } from '@rede-social/ui';
-import { Ban, LockOpen, type LucideIcon, Trash2, UserCog } from 'lucide-react';
+import { Ban, FileDown, LockOpen, type LucideIcon, Trash2, UserCog } from 'lucide-react';
 import type { ModerationLogRowView } from '@/lib/moderation-view';
 
 /**
@@ -22,6 +22,8 @@ const GLYPHS: Record<ModerationAction, LucideIcon> = {
   member_blocked: Ban,
   member_unblocked: LockOpen,
   role_changed: UserCog,
+  // Phase 12 (D-595): a profile-form answers export — a tenant-level row with no target.
+  profile_form_exported: FileDown,
 };
 
 export function ModerationLogRow({ view }: { view: ModerationLogRowView }) {
