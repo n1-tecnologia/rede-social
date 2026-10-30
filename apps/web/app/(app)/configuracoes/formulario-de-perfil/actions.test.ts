@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { uuid } from '@/lib/profile-form/test-fixtures';
+import { adminQuestion, uuid } from '@/lib/profile-form/test-fixtures';
 
 /**
  * 12-15 — the builder's server actions (D-582; T-12-33, T-12-34). The API boundary is stubbed. Asserted:
@@ -17,9 +17,8 @@ vi.mock('next/navigation', () => ({
   },
 }));
 
-const { reactivateQuestionAction, readImpactAction, reorderQuestionsAction } = await import(
-  './actions'
-);
+const { createQuestionAction, reactivateQuestionAction, readImpactAction, reorderQuestionsAction } =
+  await import('./actions');
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -212,5 +211,147 @@ describe('reactivateQuestionAction', () => {
   it('follows the shipped navigation for a refused session', async () => {
     mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
     await expect(reactivateQuestionAction(IDS[1] as string)).rejects.toThrow(/^REDIRECT /);
+  });
+});
+
+describe('createQuestionAction (12-16, PFORM-02)', () => {
+  const body = {
+    type: 'short_text',
+    title: '  Cargo  ',
+    helpText: '',
+    required: true,
+    showOnProfile: false,
+    allowOther: false,
+    options: [],
+    limits: {},
+  };
+  const stored = adminQuestion('short_text', { title: 'Cargo', required: true });
+
+  it('POSTs the contract body, trimmed, to /v1/profile_form/questions and returns the stored question', async () => {
+    mocks.apiFetch.mockResolvedValue(json(201, stored));
+    const result = await createQuestionAction(body);
+    expect(result).toEqual({ ok: true, question: stored, pending: null });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/v1/profile_form/questions');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      type: 'short_text',
+      title: 'Cargo',
+      helpText: null,
+      required: true,
+    });
+  });
+
+  it('reads the SERVER summary after a reopening write and reports total minus complete', async () => {
+    mocks.apiFetch.mockImplementation(async (path: string) =>
+      path === '/v1/profile_form/summary'
+        ? json(200, { total: 10, complete: 7, hasRequired: true })
+        : json(201, stored),
+    );
+    expect(await createQuestionAction(body, { reopens: true })).toEqual({
+      ok: true,
+      question: stored,
+      pending: 3,
+    });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the write when the summary read fails: the count is just unknown', async () => {
+    mocks.apiFetch.mockImplementation(async (path: string) =>
+      path === '/v1/profile_form/summary' ? json(500, {}) : json(201, stored),
+    );
+    expect(await createQuestionAction(body, { reopens: true })).toEqual({
+      ok: true,
+      question: stored,
+      pending: null,
+    });
+  });
+
+  it('does not read the summary for a write that cannot hold members back', async () => {
+    mocks.apiFetch.mockResolvedValue(json(201, stored));
+    await createQuestionAction(body, { reopens: false });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('never leaves the server tier with a body the contract refuses, and names the field', async () => {
+    expect(await createQuestionAction({ ...body, title: '  ' })).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { title: 'required' },
+    });
+    expect(
+      await createQuestionAction({ ...body, type: 'dropdown', options: [{ label: 'só uma' }] }),
+    ).toEqual({ ok: false, code: 'invalid', fields: { options: 'invalid' } });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('maps a 400 with issue paths to its fields', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(400, 'VALIDATION_FAILED', {
+        issues: [
+          { path: 'title', message: 'too_long' },
+          { path: 'options.1.label', message: 'invalid' },
+        ],
+      }),
+    );
+    expect(await createQuestionAction(body)).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { title: 'too_long', options: 'invalid' },
+    });
+  });
+
+  it('places a lifted 400 code under the title for required and too_long, else on the form', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(400, 'VALIDATION_FAILED', { profileForm: 'too_long' }),
+    );
+    expect(await createQuestionAction(body)).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { title: 'too_long' },
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(400, 'VALIDATION_FAILED', { profileForm: 'invalid' }));
+    expect(await createQuestionAction(body)).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { form: 'invalid' },
+    });
+  });
+
+  it('maps 409 limit_reached, 403, MODULE_DISABLED and a plain 409 to their own codes', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'limit_reached' }));
+    expect(await createQuestionAction(body)).toEqual({ ok: false, code: 'limit' });
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await createQuestionAction(body)).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await createQuestionAction(body)).toEqual({ ok: false, code: 'moduleOff' });
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'stale_revision' }));
+    expect(await createQuestionAction(body)).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'stale_revision',
+    });
+  });
+
+  it('maps anything else, a broken body and a thrown request to failed', async () => {
+    mocks.apiFetch.mockResolvedValue(json(500, {}));
+    expect(await createQuestionAction(body)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockResolvedValue(json(201, { nope: true }));
+    expect(await createQuestionAction(body)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await createQuestionAction(body)).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('follows the shipped navigation for a refused session, outside the catch', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(createQuestionAction(body)).rejects.toThrow(/^REDIRECT /);
+  });
+
+  it('logs no more than a status and a code', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.apiFetch.mockResolvedValue(refusal(500, 'INTERNAL'));
+    await createQuestionAction({ ...body, title: 'Segredo do Joao' });
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('Segredo');
   });
 });

@@ -2,11 +2,11 @@
 
 import type { AdminQuestion } from '@rede-social/contracts/profile-form';
 import { Button, Card, IconButton, SectionTitle, StatusPill, useToast } from '@rede-social/ui';
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Eye, Lock } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Eye, Lock, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { typeNameKey } from '@/lib/profile-form/type-key';
+import { typeNameKey } from '@/lib/profile-form/question-types';
 import { type ReorderResult, reorderQuestionsAction } from './actions';
 
 export interface QuestionListProps {
@@ -19,6 +19,8 @@ export interface QuestionListProps {
    * button that takes no click handler of its own.
    */
   onOpen?: (question: AdminQuestion) => void;
+  /** Opens the editor for a new question (12-16). Without it the list shows no "Adicionar pergunta". */
+  onAdd?: () => void;
 }
 
 type Direction = 'up' | 'down';
@@ -160,8 +162,8 @@ function ReorderRow({ question, index, total, busy, register, onMove }: ReorderR
 }
 
 /**
- * The active list of the Perguntas tab (12-15, D-582, UI-D-565..UI-D-567): the actions row ("Reordenar"
- * now; "Adicionar pergunta" and the preview join it in plans 16 and 17), the limit line, the "Perguntas
+ * The active list of the Perguntas tab (12-15, D-582, UI-D-565..UI-D-567): the actions row ("Adicionar pergunta",
+ * "Reordenar"; the preview joins it in plan 17), the limit line, the "Perguntas
  * ativas (n)" micro-title and the rows in the admin's order, which is the order members see.
  *
  * **Reorder is a mode with buttons, never a drag** (a drag fights the scroll of a mobile page, and the
@@ -176,7 +178,7 @@ function ReorderRow({ question, index, total, busy, register, onMove }: ReorderR
  * order only while a write is in flight, and the page refreshes when the mode ends. It shows aggregate
  * counts only (PFORM-23): never an individual member's answer, and it makes no request of its own.
  */
-export function QuestionList({ questions, limit, onOpen }: QuestionListProps) {
+export function QuestionList({ questions, limit, onOpen, onAdd }: QuestionListProps) {
   const t = useTranslations('profileForm');
   const tAdmin = useTranslations('admin');
   const router = useRouter();
@@ -273,6 +275,12 @@ export function QuestionList({ questions, limit, onOpen }: QuestionListProps) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
+        {onAdd ? (
+          <Button size="md" disabled={items.length >= limit} onClick={onAdd}>
+            <Plus aria-hidden size={18} />
+            {t('admin.actions.add')}
+          </Button>
+        ) : null}
         <Button variant="outline" size="md" aria-pressed={reordering} onClick={toggleReordering}>
           <ArrowUpDown aria-hidden size={18} />
           {reordering ? t('admin.actions.reorderDone') : t('admin.actions.reorder')}

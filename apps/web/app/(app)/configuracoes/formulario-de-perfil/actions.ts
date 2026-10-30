@@ -1,9 +1,14 @@
 'use server';
 
 import {
+  type AdminQuestion,
+  adminQuestionSchema,
+  type CreateQuestionBody,
+  createQuestionBodySchema,
   impactQuerySchema,
   impactResultSchema,
   type ProfileFormImpactChange,
+  profileFormSummarySchema,
   reorderBodySchema,
 } from '@rede-social/contracts/profile-form';
 import { redirect } from 'next/navigation';
@@ -208,4 +213,163 @@ export async function reactivateQuestionAction(id: string): Promise<ReactivateRe
 
   if (refusal) redirect(refusal);
   return result;
+}
+
+// ── 12-16: the question editor's writes ────────────────────────────────────────────────────────────
+
+/** The field of the sheet a refusal of a write belongs to; `form` is a refusal no single field owns. */
+export type SaveFieldKey = 'title' | 'helpText' | 'options' | 'limits' | 'form';
+
+/**
+ * What a write of a question returns (UI-D-569). `invalid` is a 400: the issue code per field, which the
+ * sheet renders under that field. `conflict` is a 409 other than the limit: a stale revision, one of the
+ * five D-587 locks, an already archived question, or a question that is gone (`issue` is the API's code,
+ * `not_found` for the last). `limit` is 409 `limit_reached`. `pending` is the SERVER's count of members
+ * still held by the form after a write that reopened it (`GET /summary`), never the preview's number.
+ */
+export type SaveQuestionResult =
+  | { ok: true; question: AdminQuestion; pending: number | null }
+  | { ok: false; code: 'invalid'; fields: Partial<Record<SaveFieldKey, string>> }
+  | { ok: false; code: 'conflict'; issue: string }
+  | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };
+
+type Sent =
+  | { kind: 'ok'; body: unknown }
+  | { kind: 'error'; status: number; envelope: ErrorBody | null }
+  | { kind: 'thrown' };
+
+/** One request to the builder API; it never throws, so the caller's `redirect()` stays outside any catch. */
+async function send(label: string, path: string, init?: RequestInit): Promise<Sent> {
+  try {
+    const res = await apiFetch(path, init);
+    if (res.ok) {
+      let body: unknown = null;
+      try {
+        body = await res.json();
+      } catch {
+        body = null;
+      }
+      return { kind: 'ok', body };
+    }
+    const envelope = await readEnvelope(res);
+    return { kind: 'error', status: res.status, envelope };
+  } catch (error) {
+    console.error(`profile_form.${label}_failed`, {
+      error: error instanceof Error ? error.name : 'unknown',
+    });
+    return { kind: 'thrown' };
+  }
+}
+
+/** The issue codes a 400 can name that belong to the title rather than to the whole form. */
+const TITLE_ISSUES: ReadonlySet<string> = new Set(['required', 'too_long']);
+
+/** The field of a contract issue's path. */
+function fieldOf(path: PropertyKey[]): SaveFieldKey {
+  const head = path[0];
+  if (head === 'title' || head === 'helpText' || head === 'options' || head === 'limits') {
+    return head;
+  }
+  return 'form';
+}
+
+/** A body the contract refuses, as per-field issue codes (the first issue of a field wins). */
+function fieldsOf(issues: readonly { path: PropertyKey[]; message: string }[]) {
+  const fields: Partial<Record<SaveFieldKey, string>> = {};
+  for (const issue of issues) {
+    const key = fieldOf(issue.path);
+    if (fields[key] === undefined) fields[key] = issue.message;
+  }
+  return fields;
+}
+
+/**
+ * The closed vocabulary of a failed write, shared by every question write. A 401 or a session-level 403
+ * is the `(app)` navigation (`navigate`), done by the caller OUTSIDE any try/catch; the rest is a result.
+ */
+function failureOf(
+  label: string,
+  sent: Exclude<Sent, { kind: 'ok' }>,
+): { result: Extract<SaveQuestionResult, { ok: false }>; navigate: string | null } {
+  if (sent.kind === 'thrown') return { result: { ok: false, code: 'failed' }, navigate: null };
+  const { status, envelope } = sent;
+  const detail = envelope?.details?.profileForm;
+  const issue = typeof detail === 'string' ? detail : null;
+
+  const refusal = refusalOf(status, envelope);
+  if (refusal === 'forbidden' || refusal === 'moduleOff' || refusal === 'limit') {
+    return { result: { ok: false, code: refusal }, navigate: null };
+  }
+  if (status === 409) {
+    return { result: { ok: false, code: 'conflict', issue: issue ?? 'conflict' }, navigate: null };
+  }
+  if (status === 404 && envelope?.code === 'NOT_FOUND') {
+    return { result: { ok: false, code: 'conflict', issue: 'not_found' }, navigate: null };
+  }
+  if (status === 400 && envelope?.code === 'VALIDATION_FAILED') {
+    const issues = envelope.details?.issues;
+    if (Array.isArray(issues)) {
+      const fields: Partial<Record<SaveFieldKey, string>> = {};
+      for (const entry of issues as { path?: unknown; message?: unknown }[]) {
+        const head = typeof entry.path === 'string' ? entry.path.split('.')[0] : undefined;
+        const key = fieldOf(head === undefined ? [] : [head]);
+        if (fields[key] === undefined) fields[key] = String(entry.message ?? 'invalid');
+      }
+      return { result: { ok: false, code: 'invalid', fields }, navigate: null };
+    }
+    // The route lifts the first issue code to `details.profileForm`: the path is lost, so a title issue is
+    // best placed under the title and anything else is the whole form's.
+    const key: SaveFieldKey = issue !== null && TITLE_ISSUES.has(issue) ? 'title' : 'form';
+    return {
+      result: { ok: false, code: 'invalid', fields: { [key]: issue ?? 'invalid' } },
+      navigate: null,
+    };
+  }
+  const navigate = navigationFor(status, envelope);
+  if (!navigate) console.error(`profile_form.${label}_failed`, { status, code: envelope?.code });
+  return { result: { ok: false, code: 'failed' }, navigate };
+}
+
+/**
+ * After a write that REOPENED the form: how many members the form now holds, from `GET /summary`
+ * (`total - complete`). A read that fails is `null` and the toast simply omits the count: the write
+ * already happened and is not undone by a missing figure.
+ */
+async function pendingMembers(): Promise<number | null> {
+  const sent = await send('summary', '/v1/profile_form/summary');
+  if (sent.kind !== 'ok') return null;
+  const parsed = profileFormSummarySchema.safeParse(sent.body);
+  return parsed.success ? Math.max(parsed.data.total - parsed.data.complete, 0) : null;
+}
+
+/** The answer of a successful question write: the stored question and, when asked, the server's pending count. */
+async function savedQuestion(body: unknown, reopens: boolean): Promise<SaveQuestionResult> {
+  const question = adminQuestionSchema.safeParse(body);
+  if (!question.success) return { ok: false, code: 'failed' };
+  return { ok: true, question: question.data, pending: reopens ? await pendingMembers() : null };
+}
+
+/**
+ * `POST /v1/profile_form/questions`: a new question at the END of the list. The body is validated here with
+ * the contract's own schema first, so a malformed body never leaves the server tier and comes back per field.
+ * `reopens` says the write may hold members back (a required question): the result then carries the server's
+ * pending count for the toast.
+ */
+export async function createQuestionAction(
+  body: unknown,
+  options: { reopens?: boolean } = {},
+): Promise<SaveQuestionResult> {
+  const parsed = createQuestionBodySchema.safeParse(body);
+  if (!parsed.success) return { ok: false, code: 'invalid', fields: fieldsOf(parsed.error.issues) };
+
+  const sent = await send('create', '/v1/profile_form/questions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parsed.data satisfies CreateQuestionBody),
+  });
+  if (sent.kind === 'ok') return savedQuestion(sent.body, options.reopens === true);
+
+  const failure = failureOf('create', sent);
+  if (failure.navigate) redirect(failure.navigate);
+  return failure.result;
 }

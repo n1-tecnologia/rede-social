@@ -32,6 +32,7 @@ vi.mock('./actions', () => ({
   reorderQuestionsAction: (ids: string[]) => mocks.reorder(ids),
   readImpactAction: (input: unknown) => mocks.impact(input),
   reactivateQuestionAction: (id: string) => mocks.reactivate(id),
+  createQuestionAction: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -43,6 +44,7 @@ vi.mock('@rede-social/ui', async (importOriginal) => ({
 
 const { QuestionList } = await import('./QuestionList');
 const { ArchivedList } = await import('./ArchivedList');
+const { QuestionBuilder } = await import('./QuestionBuilder');
 
 const A = adminQuestion('short_text', { title: 'Cargo' });
 const B = adminQuestion('dropdown', { title: 'Origem' });
@@ -633,5 +635,62 @@ describe('ArchivedList: the active limit', () => {
       tone: 'error',
       message: 'Você chegou ao limite de 30 perguntas ativas. Arquive uma para adicionar outra.',
     });
+  });
+});
+
+describe('"Adicionar pergunta" (12-16, UI-D-565)', () => {
+  function showWithAdd(questions = [A, B, C], limit = 30) {
+    const onAdd = vi.fn();
+    render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionList questions={questions} limit={limit} onAdd={onAdd} />
+      </NextIntlClientProvider>,
+    );
+    return onAdd;
+  }
+  const addButton = () => screen.getByRole('button', { name: 'Adicionar pergunta' });
+
+  it('joins the actions row as the brand button and calls onAdd', () => {
+    const onAdd = showWithAdd();
+    expect(addButton().className).toContain('bg-button');
+    fireEvent.click(addButton());
+    expect(onAdd).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled at the active limit, where the limit line is shown', () => {
+    showWithAdd([A, B, C], 3);
+    expect((addButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(document.querySelector('[data-limit-line]')).not.toBeNull();
+  });
+
+  it('is absent when the host gives no onAdd', () => {
+    show();
+    expect(screen.queryByRole('button', { name: 'Adicionar pergunta' })).toBeNull();
+  });
+});
+
+describe('QuestionBuilder: the host of the list, the empty state and the editor sheet (12-16)', () => {
+  function host(questions = [A, B, C]) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionBuilder questions={questions} limit={30} tenantName="Ana Mentoria" />
+      </NextIntlClientProvider>,
+    );
+  }
+
+  it('makes "Adicionar pergunta" the call to action of the empty state and opens the sheet', () => {
+    host([]);
+    expect(screen.getByText('Seu formulário ainda está vazio')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar pergunta' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Nova pergunta')).toBeTruthy();
+  });
+
+  it('opens a fresh create sheet from the list action each time', () => {
+    host();
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar pergunta' }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Tipo de resposta' })).toBeTruthy();
   });
 });

@@ -21,7 +21,8 @@
       },
       "actions": {
         "reorder": "Reordenar",
-        "reorderDone": "Concluir"
+        "reorderDone": "Concluir",
+        "add": "Adicionar pergunta"
       },
       "list": {
         "title": "Perguntas ativas ({count})",
@@ -83,6 +84,53 @@
         "cancel": "Voltar",
         "kept": "As respostas guardadas continuam valendo.",
         "previewFailed": "Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo."
+      },
+      "editor": {
+        "createTitle": "Nova pergunta",
+        "editTitle": "Editar pergunta",
+        "replaceTitle": "Substituir pergunta",
+        "close": "Fechar",
+        "lgpd": "Peça só o que precisa. {tenant} responde pelos dados que coletar, conforme a LGPD.",
+        "replaceBanner": "“{title}” será arquivada quando você salvar esta. As respostas dela continuam guardadas.",
+        "type": {
+          "legend": "Tipo de resposta",
+          "current": "Tipo: {type}",
+          "change": "Trocar tipo",
+          "dropOptions": "As opções serão removidas ao trocar para este tipo."
+        },
+        "fields": {
+          "title": "Pergunta",
+          "acceptanceTitle": "Texto do aceite",
+          "titlePlaceholder": "Ex.: Qual é o seu cargo?",
+          "acceptancePlaceholder": "Ex.: Li e aceito o regulamento do grupo",
+          "help": "Texto de apoio (opcional)",
+          "helpPlaceholder": "Explique como responder, se precisar."
+        },
+        "required": {
+          "label": "Obrigatória",
+          "helper": "Quem ainda não respondeu precisa responder antes de usar a comunidade."
+        },
+        "public": {
+          "label": "Mostrar no perfil do membro",
+          "helper": "Os outros membros veem esta resposta no perfil de quem respondeu. O membro é avisado no formulário."
+        },
+        "save": "Salvar pergunta",
+        "saving": "Salvando…",
+        "discard": {
+          "title": "Descartar as alterações?",
+          "body": "As mudanças desta pergunta ainda não foram salvas.",
+          "confirm": "Descartar",
+          "cancel": "Continuar editando"
+        },
+        "toasts": {
+          "added": "Pergunta adicionada."
+        },
+        "errors": {
+          "titleRequired": "Escreva a pergunta.",
+          "tooLong": "Use até {max} caracteres.",
+          "saveFailed": "Não foi possível salvar a pergunta agora. Suas alterações continuam aqui. Tente de novo.",
+          "conflict": "Esta pergunta foi alterada enquanto você editava. Feche e abra de novo para ver a versão atual."
+        }
       }
     },
     "types": {

@@ -1,5 +1,5 @@
 import { buttonClasses, EmptyState, PageHeader } from '@rede-social/ui';
-import { CircleAlert, ClipboardList } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -9,7 +9,7 @@ import { loadAdminForm, loadArchived } from '@/lib/profile-form/admin-reads';
 import { ArchivedList } from './ArchivedList';
 import { FormSummaryCard } from './FormSummaryCard';
 import { ProfileFormTabs } from './ProfileFormTabs';
-import { QuestionList } from './QuestionList';
+import { QuestionBuilder } from './QuestionBuilder';
 import { PROFILE_FORM_TABS, parseTab, profileFormTabHref } from './tabs';
 
 /**
@@ -82,17 +82,9 @@ export default async function ProfileFormPage({
     if (loaded.status === 'error') {
       body = readFailed;
     } else {
-      // The empty state carries the one brand fill once plan 16 gives it "Adicionar pergunta"; it is
-      // shown when no question is active, and the summary card stays above it only when archived
-      // questions exist (their answers are kept, so there is progress to report).
-      const empty = (
-        <EmptyState
-          variant="card"
-          icon={ClipboardList}
-          title={t('empty.title')}
-          body={t('empty.body')}
-        />
-      );
+      // The builder shows the empty state (with its one brand call to action) when no question is active;
+      // the summary card stays above it only when archived questions exist (their answers are kept, so
+      // there is progress to report).
       const hasQuestions = loaded.questions.length > 0;
       const hasArchived = (loaded.archivedCount ?? 0) > 0;
       body = (
@@ -101,11 +93,11 @@ export default async function ProfileFormPage({
             {t('intro', { tenant: bootstrap.tenant.displayName })}
           </p>
           {hasQuestions || hasArchived ? <FormSummaryCard summary={loaded.summary} /> : null}
-          {hasQuestions ? (
-            <QuestionList questions={loaded.questions} limit={loaded.limit} />
-          ) : (
-            empty
-          )}
+          <QuestionBuilder
+            questions={loaded.questions}
+            limit={loaded.limit}
+            tenantName={bootstrap.tenant.displayName}
+          />
         </>
       );
     }

@@ -406,3 +406,72 @@ describe('profileForm.admin.json (12-15)', () => {
     expect(text).not.toMatch(/\b(survey|questionário|deletar|template)\b/i);
   });
 });
+
+/**
+ * 12-16 — the question editor's catalog (UI-D-569..UI-D-573): `profileForm.admin.editor` and
+ * `profileForm.admin.actions.add`, pinned string by string against the approved Copywriting Contract
+ * ("Admin: the editor sheet"). The `types` branch stays 12-15's; this plan declares no leaf twice.
+ */
+describe('profileForm.admin.editor (12-16)', () => {
+  const e = createTranslator({
+    locale: 'pt-BR',
+    messages,
+    namespace: 'profileForm.admin.editor',
+  }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+
+  it('adds the "Adicionar pergunta" action to the builder actions', () => {
+    expect(a('actions.add')).toBe('Adicionar pergunta');
+  });
+
+  it('pins the sheet titles, the type picker, the fields and the switches verbatim', () => {
+    const plain: [string, string][] = [
+      ['createTitle', 'Nova pergunta'],
+      ['editTitle', 'Editar pergunta'],
+      ['replaceTitle', 'Substituir pergunta'],
+      ['type.legend', 'Tipo de resposta'],
+      ['type.change', 'Trocar tipo'],
+      ['type.dropOptions', 'As opções serão removidas ao trocar para este tipo.'],
+      ['fields.title', 'Pergunta'],
+      ['fields.acceptanceTitle', 'Texto do aceite'],
+      ['fields.titlePlaceholder', 'Ex.: Qual é o seu cargo?'],
+      ['fields.acceptancePlaceholder', 'Ex.: Li e aceito o regulamento do grupo'],
+      ['fields.help', 'Texto de apoio (opcional)'],
+      ['fields.helpPlaceholder', 'Explique como responder, se precisar.'],
+      ['required.label', 'Obrigatória'],
+      ['required.helper', 'Quem ainda não respondeu precisa responder antes de usar a comunidade.'],
+      ['public.label', 'Mostrar no perfil do membro'],
+      [
+        'public.helper',
+        'Os outros membros veem esta resposta no perfil de quem respondeu. O membro é avisado no formulário.',
+      ],
+      ['save', 'Salvar pergunta'],
+      ['saving', 'Salvando…'],
+      ['discard.title', 'Descartar as alterações?'],
+      ['discard.body', 'As mudanças desta pergunta ainda não foram salvas.'],
+      ['discard.confirm', 'Descartar'],
+      ['discard.cancel', 'Continuar editando'],
+      ['toasts.added', 'Pergunta adicionada.'],
+      ['errors.titleRequired', 'Escreva a pergunta.'],
+      [
+        'errors.saveFailed',
+        'Não foi possível salvar a pergunta agora. Suas alterações continuam aqui. Tente de novo.',
+      ],
+      [
+        'errors.conflict',
+        'Esta pergunta foi alterada enquanto você editava. Feche e abra de novo para ver a versão atual.',
+      ],
+    ];
+    for (const [key, text] of plain) expect(e(key), key).toBe(text);
+  });
+
+  it('interpolates the tenant, the type, the title and the length caps', () => {
+    expect(e('lgpd', { tenant: 'Ana Mentoria' })).toBe(
+      'Peça só o que precisa. Ana Mentoria responde pelos dados que coletar, conforme a LGPD.',
+    );
+    expect(e('type.current', { type: 'Escolha única' })).toBe('Tipo: Escolha única');
+    expect(e('replaceBanner', { title: 'Cargo' })).toBe(
+      '“Cargo” será arquivada quando você salvar esta. As respostas dela continuam guardadas.',
+    );
+    expect(e('errors.tooLong', { max: 120 })).toBe('Use até 120 caracteres.');
+  });
+});

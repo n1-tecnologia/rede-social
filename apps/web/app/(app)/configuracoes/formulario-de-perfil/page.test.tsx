@@ -54,6 +54,7 @@ vi.mock('./actions', () => ({
   reorderQuestionsAction: vi.fn(),
   readImpactAction: vi.fn(),
   reactivateQuestionAction: vi.fn(),
+  createQuestionAction: vi.fn(),
 }));
 vi.mock('@rede-social/ui', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@rede-social/ui')>()),
