@@ -4,16 +4,16 @@ current_phase: 12
 current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: "Completed 12-06-PLAN.md (member profile form API: read, save, dismiss-notice, FOR SHARE lock function, concurrency proofs; 12-01 still waits for Igor's sketch 016 approval)"
-last_updated: "2026-10-30T00:01:18.557Z"
+stopped_at: Completed 12-07-PLAN.md (member and staff profile answers read route, indistinguishable 404, isolation case; 12-01 still waits for Igor's sketch 016 approval)
+last_updated: "2026-10-30T00:08:34.344Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: 2483154f7f27ea698617023a9c1459791bffeed3
+state_head: a62b59c1cf2930ff02d0008e0a598a0d2fc55ddc
 progress:
   total_phases: 27
   completed_phases: 0
   total_plans: 312
-  completed_plans: 290
+  completed_plans: 291
   percent: 0
 ---
 
@@ -329,6 +329,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P04 | 13 min | 3 tasks | 11 files |
 | Phase 12 P05 | 17 min | 2 tasks | 12 files |
 | Phase 12 P06 | 14 min | 3 tasks | 12 files |
+| Phase 12 P07 | 13 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -1065,6 +1066,7 @@ Recent decisions affecting current work:
 - [Phase 12]: 12-04: completeness is a computed SQL anti-join (app.profile_form_missing) behind the _gate lookup twins; answers are kept by an ON DELETE RESTRICT composite key and a PF001..PF005 guard trigger; read policies fail closed on a null role and TRUNCATE is revoked from authenticated — The old _gated pair stays one release (its drop is a deferred cleanup migration); the rule measured 0.056 ms for a complete member on 800,000 answer rows
 - [Phase 12]: 12-05: requireAuth refuses an active member with an unanswered required question as its last check (PROFILE_FORM_PENDING, tenantName only, exact-path allow-list) from profile_form_missing on the lookup row; the bootstrap profileForm block comes from the same SQL rule and a live module read — The form is asked only of an active membership so an invited one can still accept; a null, blank or negative count is a 500, never not pending; the old _gated pair stays one release
 - [Phase 12]: 12-06: the member save locks the active questions FOR SHARE through app.profile_form_lock_active(), a definer function, because a member's own FOR SHARE locks nothing under RLS; answers: {} is a no-op that reports the current missingRequired, a non-empty save that leaves a required question unanswered is refused after the SQL recount, and a form that grew under the save is a 409 form_changed — The lock function takes the tenant from the session claims and orders position, created_at, id so admin multi-row writes of plans 08 and 09 must lock in the same order; an oversized value is too_long, not a 500; other_required stays a vocabulary word the server parser never raises
+- [Phase 12]: 12-07: GET /v1/members/{membershipId}/profile-answers is deliberately not behind requireModule, so the module off is the same bare 404 as every other miss; a member viewer gets only answered, show_on_profile, non-archived rows, the staff path needs the composed permission profile_form.read, and a staff target or the caller's own membership is a 404 — Seven miss cases compare byte for byte (only requestId stripped) so the route cannot probe which memberships exist or are staff; the explicit show_on_profile and archived_at predicates sit beside the public RLS policy as layer 2
 
 ### Pending Todos
 
@@ -1183,6 +1185,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T00:01:18.309Z
-Stopped at: Completed 12-06-PLAN.md (member profile form API: read, save, dismiss-notice, FOR SHARE lock function, concurrency proofs; 12-01 still waits for Igor's sketch 016 approval)
+Last session: 2026-10-30T00:08:29.560Z
+Stopped at: Completed 12-07-PLAN.md (member and staff profile answers read route, indistinguishable 404, isolation case; 12-01 still waits for Igor's sketch 016 approval)
 Resume file: None
