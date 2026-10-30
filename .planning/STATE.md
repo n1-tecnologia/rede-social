@@ -5,10 +5,10 @@ current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
 stopped_at: "Completed 12-18-PLAN.md (partial: browser specs written, not run; phase 12 ready for verification, human_needed)"
-last_updated: "2026-10-30T09:08:36.299Z"
+last_updated: "2026-10-30T14:46:53.176Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: 95a4e7596e8bb726b0b4040886b087d803df1601
+state_head: b2f924b781984c14767167f8c9adf17c136067aa
 progress:
   total_phases: 27
   completed_phases: 0
@@ -33,7 +33,7 @@ Current Plan: 1
 Total Plans in Phase: 18
 Plan: 1 of 18
 Status: Executing Phase 12
-Last activity: 2026-10-29 — Phase 12 execution started
+Last activity: 2026-10-30 - Completed quick task 261030-g1y: gate deep-link destination kept when a loader refusal wins the race (Phase 12 browser run found it)
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1162,6 +1162,7 @@ None yet.
 | 261023-t3x | Make `two-database-routing.test.ts` survive a slow test on the CI runner: the breaker test's probe now `resetAndDestroy()`s (Linux can turn `destroy()` into a clean FIN, which postgres.js 3.4.9 reconnects on forever with no error), teardown is registered and drained in `afterEach`/`afterAll` so a timeout cannot leave a tenant bound to an unreachable project (the residue that failed ten other integration tests in CI run 40039284864); biome, api typecheck and guards green; the integration suite was NOT run locally, the next CI run is the proof; deferred PRODUCT finding: `connectProject` has no total deadline | 2026-10-23 | c9d0e955 | complete | [261023-t3x-make-the-two-database-routing-integratio](./quick/261023-t3x-make-the-two-database-routing-integratio/) |
 | 261024-lcq | `migrateAll` now tolerates a central database that has no `platform` schema yet (PostgreSQL 42P01 on the first registry read, found along the `.cause` chain), applies the central set, then reads the registry strictly and fans the tenant set out; the retry path and every other error behave as before. Found by the FIRST PRODUCTION RUN of the 09.2 release on 2026-10-24 (Actions run 40043498712 attempt 4, execution migrate-5gs9z crashed with `relation platform.projects does not exist`); CI never covered a central database without the platform schema. 21 hermetic cases (12 red before, all green after); integration suite NOT run locally, the next CI run is the proof | 2026-10-24 | 942ea89b | complete | [261024-lcq-migrateall-must-tolerate-a-central-datab](./quick/261024-lcq-migrateall-must-tolerate-a-central-datab/) |
 | 261027-c8f | Phase 09.3 WR-03: setProductStatus refuses (409) to reactivate a product linked to a soft-deleted community | 2026-10-27 | 2939d5a3 | — | [261027-c8f-phase-09-3-wr-03-setproductstatus-refuse](./quick/261027-c8f-phase-09-3-wr-03-setproductstatus-refuse/) |
+| 261030-g1y | Keep the validated deep-link destination when a data loader's profile-form refusal wins the race; pick one replace button in the admin spec | 2026-10-30 | 87f701d9 | complete | [261030-g1y-fix-profile-form-gate-deep-link-race-kee](./quick/261030-g1y-fix-profile-form-gate-deep-link-race-kee/) |
 
 ### Roadmap Evolution
 
