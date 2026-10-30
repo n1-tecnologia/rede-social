@@ -1,15 +1,20 @@
-import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
+import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { requireModule } from '@rede-social/core/server/modules/require-module';
-import { createQuestion, listQuestions } from '@rede-social/core/server/profile-form/admin';
+import {
+  createQuestion,
+  listQuestions,
+  updateQuestion,
+} from '@rede-social/core/server/profile-form/admin';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   adminQuestionListSchema,
   adminQuestionSchema,
   createQuestionBodySchema,
   PROFILE_FORM_ISSUE_SET,
+  updateQuestionBodySchema,
 } from '../contracts/index';
 
 /**
@@ -92,8 +97,43 @@ const createQuestionRoute = createRoute({
   },
 });
 
+const questionParamSchema = z.object({ id: z.uuid() });
+
+const updateQuestionRoute = createRoute({
+  method: 'patch',
+  path: '/questions/{id}',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: {
+    params: questionParamSchema,
+    body: { content: { 'application/json': { schema: updateQuestionBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The edited question. `revision` (the one the caller read) is required and is the optimistic lock; every other key is optional and only the keys sent change. Title, help text and `required` are always free. Once the question has answers the TYPE, every option that has answers (not removable, not relabelled; options may be added and reordered), switching "Outro" off while an "Outro" answer exists, narrowing a number or date limit, and private-to-public are locked. A body that changes nothing answers 200 and does NOT bump the revision.',
+      content: { 'application/json': { schema: adminQuestionSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.profileForm` (`required`, `too_long`, `invalid`, `out_of_range`, `limit_reached`, `other_not_allowed`, `unknown_option`): the merged question is one a create would refuse. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the question is unknown or another tenant’s. One bare `NOT_FOUND`, no details.',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm`: `stale_revision` (the stored revision moved on), `already_archived` (read-only until reactivated) or the D-587 lock that was hit: `type_locked`, `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`. Nothing is written.',
+    },
+  },
+});
+
 export const profileFormRoutes = profileForm
   .openapi(listRoute, async (c) => c.json(await listQuestions(c.get('ctx')), 200))
   .openapi(createQuestionRoute, async (c) =>
     c.json(await createQuestion(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(updateQuestionRoute, async (c) =>
+    c.json(await updateQuestion(c.get('ctx'), c.req.valid('param').id, c.req.valid('json')), 200),
   );

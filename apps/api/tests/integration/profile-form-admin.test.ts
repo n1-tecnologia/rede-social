@@ -1,3 +1,4 @@
+import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -6,6 +7,7 @@ import {
   HOSTS,
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
+  seedProfileFormAnswer,
   seedProfileFormQuestion,
   signInAs,
   withProfileForm,
@@ -44,6 +46,11 @@ const TITLE = 'pfd ';
 let labTenantId = '';
 let demoTenantId = '';
 let adminUserId = '';
+
+const DB_URL = 'postgres://postgres:postgres@127.0.0.1:54322/postgres';
+// A second connection for the cases that hold a member's transaction open.
+const memberSql = postgres(DB_URL, { prepare: false, max: 1 });
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type Person = { userId: string; email: string; password: string; token: string };
 
@@ -126,6 +133,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
+  await memberSql.end({ timeout: 2 });
   await sweep();
   // The seed has no `profile_form` row and `withProfileForm` restores that, so none must remain.
   await adminSql`
@@ -422,4 +430,561 @@ describe('12-08 the limits and the encoding of a new question (PFORM-02)', () =>
       }
     });
   }, 30_000);
+});
+
+// ── Task 2: the edit, the lock rules and the optimistic revision ────────────────────────────────────────
+
+const patch = (p: Person, id: string, body: Record<string, unknown>, host: string = HOSTS.lab) =>
+  call(p, 'PATCH', `/v1/profile_form/questions/${id}`, body, host);
+
+const edited = async (p: Person, id: string, body: Record<string, unknown>) => {
+  const res = await patch(p, id, body);
+  expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+  return (await res.json()) as AdminQuestion;
+};
+
+/** The stored row, straight from SQL, to prove a refused edit changed nothing. */
+const stored = async (id: string) => {
+  const [row] = await adminSql<
+    { type: string; title: string; revision: number; options: unknown; limits: unknown }[]
+  >`select type, title, revision, options, limits from public.profile_form_questions where id = ${id}::uuid`;
+  if (!row) throw new Error('question is gone');
+  return row;
+};
+
+/** One member answers one question through SQL. Returns the member. */
+const answered = async (questionId: string, value: unknown): Promise<Person> => {
+  const member = await person('member');
+  await seedProfileFormAnswer({ tenantId: labTenantId, questionId, userId: member.userId, value });
+  return member;
+};
+
+const conflict = async (res: Response) => {
+  expect(res.status).toBe(409);
+  const body = (await res.json()) as Envelope;
+  expect(body.error.code).toBe('CONFLICT');
+  return body.error.details?.profileForm;
+};
+
+describe('12-08 the list counts answers per question and per option (aggregates only)', () => {
+  it('counts a single-valued option, a multiple-choice option and an Outro answer', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const single = await created(admin, {
+        type: 'single_choice',
+        title: `${TITLE}única`,
+        options: [{ label: 'Alfa' }, { label: 'Beta' }],
+        allowOther: true,
+      });
+      const multi = await created(admin, {
+        type: 'multiple_choice',
+        title: `${TITLE}várias`,
+        options: [{ label: 'Um' }, { label: 'Dois' }, { label: 'Três' }],
+      });
+      const [sa, sb] = single.options;
+      const [m1, m2] = multi.options;
+      await answered(single.id, { optionId: sa?.id, otherText: null });
+      await answered(single.id, { optionId: sa?.id, otherText: null });
+      await answered(single.id, { optionId: sb?.id, otherText: null });
+      await answered(single.id, { optionId: null, otherText: 'Outra coisa' });
+      await answered(multi.id, { optionIds: [m1?.id, m2?.id], otherText: null });
+      await answered(multi.id, { optionIds: [m1?.id], otherText: null });
+      const list = await listOf(admin);
+      const s = list.questions.find((q) => q.id === single.id);
+      const m = list.questions.find((q) => q.id === multi.id);
+      expect(s?.answerCount).toBe(4);
+      expect(s?.options.map((o) => o.answerCount)).toEqual([2, 1]);
+      expect(m?.answerCount).toBe(2);
+      expect(m?.options.map((o) => o.answerCount)).toEqual([2, 1, 0]);
+      // No answer text travels in the list (D-593).
+      expect(JSON.stringify(list)).not.toContain('Outra coisa');
+    });
+  }, 60_000);
+});
+
+describe('12-08 what is free on an answered question (D-587)', () => {
+  it('title, help text and required change freely and each edit bumps the revision once', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, { type: 'short_text', title: `${TITLE}livre` });
+      await answered(made.id, 'resposta');
+      const after = await edited(admin, made.id, {
+        revision: made.revision,
+        title: `${TITLE}livre 2`,
+        helpText: '  nova ajuda ',
+        required: true,
+      });
+      expect(after).toMatchObject({
+        title: `${TITLE}livre 2`,
+        helpText: 'nova ajuda',
+        required: true,
+        revision: 2,
+        answerCount: 1,
+      });
+      const cleared = await edited(admin, made.id, { revision: 2, helpText: '' });
+      expect(cleared.helpText).toBeNull();
+      expect(cleared.revision).toBe(3);
+    });
+  }, 30_000);
+
+  it('with zero answers every field is free, the type included; with exactly one answer the type is locked', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, { type: 'short_text', title: `${TITLE}tipo` });
+      const toNumber = await edited(admin, made.id, {
+        revision: 1,
+        type: 'number',
+        limits: { min: 1 },
+      });
+      expect(toNumber).toMatchObject({ type: 'number', limits: { min: 1 }, revision: 2 });
+      // A type change drops what the new type cannot carry.
+      const toChoice = await edited(admin, made.id, {
+        revision: 2,
+        type: 'dropdown',
+        options: [{ label: 'A' }, { label: 'B' }],
+      });
+      expect(toChoice).toMatchObject({ type: 'dropdown', limits: {} });
+      expect(toChoice.options).toHaveLength(2);
+      const toText = await edited(admin, made.id, { revision: 3, type: 'short_text' });
+      expect(toText).toMatchObject({
+        type: 'short_text',
+        options: [],
+        allowOther: false,
+        limits: {},
+      });
+
+      await answered(made.id, 'uma resposta');
+      const res = await patch(admin, made.id, { revision: 4, type: 'long_text' });
+      expect(await conflict(res)).toBe('type_locked');
+      expect((await stored(made.id)).type).toBe('short_text');
+    });
+  }, 60_000);
+});
+
+describe('12-08 each D-587 lock, through HTTP, with its allowed counterpart', () => {
+  it('option_locked: an answered option cannot be renamed (even by case or inner whitespace) or removed; an unanswered one can; adding and reordering work', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, {
+        type: 'single_choice',
+        title: `${TITLE}opções`,
+        options: [{ label: 'Alfa' }, { label: 'Beta' }],
+      });
+      const [a, b] = made.options;
+      if (!a || !b) throw new Error('options missing');
+      await answered(made.id, { optionId: a.id, otherText: null });
+
+      for (const label of ['Alfa 2', 'alfa', 'Alfa ', 'Al fa']) {
+        // `Alfa ` is trimmed by the schema to `Alfa`: that one is no rename at all.
+        const res = await patch(admin, made.id, {
+          revision: 1,
+          options: [
+            { id: a.id, label },
+            { id: b.id, label: b.label },
+          ],
+        });
+        if (label === 'Alfa ') {
+          expect(res.status).toBe(200);
+        } else {
+          expect(await conflict(res), label).toBe('option_locked');
+        }
+      }
+      const unchanged = await stored(made.id);
+      expect(unchanged.revision).toBe(1);
+
+      // Removing the answered option.
+      const removed = await patch(admin, made.id, {
+        revision: 1,
+        options: [{ id: b.id, label: b.label }, { label: 'Nova' }],
+      });
+      expect(await conflict(removed)).toBe('option_locked');
+
+      // The unanswered one renames, a new one is added beside them, and the order changes.
+      const renamed = await edited(admin, made.id, {
+        revision: 1,
+        options: [{ id: a.id, label: a.label }, { id: b.id, label: 'Beta 2' }, { label: 'Gama' }],
+      });
+      expect(renamed.options.map((o) => o.label)).toEqual(['Alfa', 'Beta 2', 'Gama']);
+      expect(renamed.revision).toBe(2);
+      const [, , gama] = renamed.options;
+      if (!gama) throw new Error('new option missing');
+      expect(gama.id).toMatch(/^[0-9a-f-]{36}$/);
+
+      // Reordering never changes what a stored answer means: answers name ids, never positions.
+      const reordered = await edited(admin, made.id, {
+        revision: 2,
+        options: [
+          { id: gama.id, label: 'Gama' },
+          { id: b.id, label: 'Beta 2' },
+          { id: a.id, label: 'Alfa' },
+        ],
+      });
+      expect(reordered.options.map((o) => o.label)).toEqual(['Gama', 'Beta 2', 'Alfa']);
+      expect(reordered.options.find((o) => o.id === a.id)?.answerCount).toBe(1);
+      expect(reordered.answerCount).toBe(1);
+    });
+  }, 60_000);
+
+  it('an option list can never be emptied below two, answered or not; a foreign or repeated option id is refused', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, {
+        type: 'dropdown',
+        title: `${TITLE}mínimo`,
+        options: [{ label: 'Alfa' }, { label: 'Beta' }],
+      });
+      for (const options of [[], [{ label: 'Só uma' }]]) {
+        const res = await patch(admin, made.id, { revision: 1, options });
+        expect(res.status).toBe(400);
+        expect(await details(res)).toEqual({ profileForm: 'invalid' });
+      }
+      const [a] = made.options;
+      if (!a) throw new Error('options missing');
+      for (const options of [
+        [{ id: crypto.randomUUID(), label: 'Alfa' }, { label: 'Beta' }],
+        [
+          { id: a.id, label: 'Alfa' },
+          { id: a.id, label: 'Beta' },
+        ],
+      ]) {
+        const res = await patch(admin, made.id, { revision: 1, options });
+        expect(res.status).toBe(400);
+        expect(await details(res)).toEqual({ profileForm: 'unknown_option' });
+      }
+      await answered(made.id, { optionId: a.id, otherText: null });
+      const res = await patch(admin, made.id, { revision: 1, options: [] });
+      expect(res.status).toBe(400);
+      expect((await stored(made.id)).revision).toBe(1);
+    });
+  }, 60_000);
+
+  it('other_locked: Outro cannot be switched off while an Outro answer exists, and can without one', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const withOther = await created(admin, {
+        type: 'single_choice',
+        title: `${TITLE}outro`,
+        options: [{ label: 'Alfa' }, { label: 'Beta' }],
+        allowOther: true,
+      });
+      const [a] = withOther.options;
+      await answered(withOther.id, { optionId: a?.id, otherText: null });
+      // An option answer is not an Outro answer: switching off is still allowed...
+      const off = await edited(admin, withOther.id, { revision: 1, allowOther: false });
+      expect(off.allowOther).toBe(false);
+      // ...but with an Outro answer present it is not.
+      const locked = await created(admin, {
+        type: 'single_choice',
+        title: `${TITLE}outro 2`,
+        options: [{ label: 'Alfa' }, { label: 'Beta' }],
+        allowOther: true,
+      });
+      await answered(locked.id, { optionId: null, otherText: 'Minha resposta' });
+      const res = await patch(admin, locked.id, { revision: 1, allowOther: false });
+      expect(await conflict(res)).toBe('other_locked');
+      expect((await edited(admin, locked.id, { revision: 1, allowOther: true })).revision).toBe(1);
+    });
+  }, 60_000);
+
+  it('visibility_locked: private to public is refused once answered; public to private stays allowed', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const privateOne = await created(admin, { type: 'short_text', title: `${TITLE}privada` });
+      await answered(privateOne.id, 'segredo');
+      const res = await patch(admin, privateOne.id, { revision: 1, showOnProfile: true });
+      expect(await conflict(res)).toBe('visibility_locked');
+
+      const publicOne = await created(admin, {
+        type: 'short_text',
+        title: `${TITLE}pública`,
+        showOnProfile: true,
+      });
+      await answered(publicOne.id, 'aberto');
+      const down = await edited(admin, publicOne.id, { revision: 1, showOnProfile: false });
+      expect(down.showOnProfile).toBe(false);
+      // And once private again it cannot go back to public.
+      const back = await patch(admin, publicOne.id, { revision: 2, showOnProfile: true });
+      expect(await conflict(back)).toBe('visibility_locked');
+    });
+  }, 60_000);
+
+  it('limits_locked: a number limit cannot narrow, equal is accepted, widening is accepted; decimals compare exactly', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, {
+        type: 'number',
+        title: `${TITLE}número`,
+        limits: { min: 1, max: 10 },
+      });
+      await answered(made.id, 5);
+      for (const limits of [
+        { min: 2, max: 10 },
+        { min: 1, max: 9 },
+      ]) {
+        const res = await patch(admin, made.id, { revision: 1, limits });
+        expect(await conflict(res)).toBe('limits_locked');
+      }
+      // The same limits: no change, 200, the revision stays.
+      const same = await edited(admin, made.id, { revision: 1, limits: { min: 1, max: 10 } });
+      expect(same.revision).toBe(1);
+      // Widened, and one bound removed.
+      const wide = await edited(admin, made.id, { revision: 1, limits: { min: 0, max: 11 } });
+      expect(wide).toMatchObject({ limits: { min: 0, max: 11 }, revision: 2 });
+      const open = await edited(admin, made.id, { revision: 2, limits: { min: 0 } });
+      expect(open.limits).toEqual({ min: 0 });
+      // A bound that did not exist is a narrowing.
+      const bound = await patch(admin, made.id, { revision: 3, limits: { min: 0, max: 100 } });
+      expect(await conflict(bound)).toBe('limits_locked');
+
+      const decimal = await created(admin, {
+        type: 'number',
+        title: `${TITLE}decimal`,
+        limits: { min: 0.1 },
+      });
+      await answered(decimal.id, 0.5);
+      const narrow = await patch(admin, decimal.id, { revision: 1, limits: { min: 0.2 } });
+      expect(await conflict(narrow)).toBe('limits_locked');
+    });
+  }, 60_000);
+
+  it('limits_locked: a date limit cannot narrow, compared as calendar days', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, {
+        type: 'date',
+        title: `${TITLE}data`,
+        limits: { min: '2026-01-01', max: '2026-12-31' },
+      });
+      await answered(made.id, '2026-05-01');
+      for (const limits of [
+        { min: '2026-01-02', max: '2026-12-31' },
+        { min: '2026-01-01', max: '2026-12-30' },
+      ]) {
+        const res = await patch(admin, made.id, { revision: 1, limits });
+        expect(await conflict(res)).toBe('limits_locked');
+      }
+      const same = await edited(admin, made.id, {
+        revision: 1,
+        limits: { min: '2026-01-01', max: '2026-12-31' },
+      });
+      expect(same.revision).toBe(1);
+      const wide = await edited(admin, made.id, {
+        revision: 1,
+        limits: { min: '2025-12-31', max: '2027-01-01' },
+      });
+      expect(wide.revision).toBe(2);
+    });
+  }, 60_000);
+
+  it('limits: {} is accepted, and setting only a min is accepted, when nothing is answered', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, { type: 'number', title: `${TITLE}vazio`, limits: {} });
+      const onlyMin = await edited(admin, made.id, { revision: 1, limits: { min: 3 } });
+      expect(onlyMin.limits).toEqual({ min: 3 });
+      const none = await edited(admin, made.id, { revision: 2, limits: {} });
+      expect(none.limits).toEqual({});
+      // min greater than max is a validation error, not a lock.
+      const bad = await patch(admin, made.id, { revision: 3, limits: { min: 9, max: 2 } });
+      expect(bad.status).toBe(400);
+      expect(await details(bad)).toEqual({ profileForm: 'out_of_range' });
+    });
+  }, 60_000);
+});
+
+describe('12-08 the optimistic revision and the idempotency of an edit (PFORM-24, T-12-21)', () => {
+  it('a stale revision is 409 and changes nothing; the same patch twice is 200 then 409; an unchanged body keeps the revision', async () => {
+    const admin = await person('admin_tenant');
+    const other = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, { type: 'short_text', title: `${TITLE}revisão` });
+      const body = { revision: 1, title: `${TITLE}revisão B` };
+      expect((await edited(admin, made.id, body)).revision).toBe(2);
+      // The second admin still holds revision 1.
+      const stale = await patch(other, made.id, { revision: 1, title: `${TITLE}revisão C` });
+      expect(await conflict(stale)).toBe('stale_revision');
+      expect((await stored(made.id)).title).toBe(`${TITLE}revisão B`);
+      // Replaying the same body with the same revision.
+      const replay = await patch(admin, made.id, body);
+      expect(await conflict(replay)).toBe('stale_revision');
+      // An unchanged body with the fresh revision.
+      const noop = await edited(admin, made.id, { revision: 2, title: `${TITLE}revisão B` });
+      expect(noop.revision).toBe(2);
+      const bare = await edited(admin, made.id, { revision: 2 });
+      expect(bare.revision).toBe(2);
+      expect((await stored(made.id)).revision).toBe(2);
+    });
+  }, 60_000);
+
+  it('two admins patching at once with the same revision: one wins, one is stale_revision', async () => {
+    const one = await person('admin_tenant');
+    const two = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(one, { type: 'short_text', title: `${TITLE}corrida` });
+      const results = await Promise.all([
+        patch(one, made.id, { revision: 1, title: `${TITLE}um` }),
+        patch(two, made.id, { revision: 1, title: `${TITLE}dois` }),
+      ]);
+      expect(results.map((res) => res.status).sort()).toEqual([200, 409]);
+      const loser = results.find((res) => res.status === 409);
+      expect(await conflict(loser as Response)).toBe('stale_revision');
+      const row = await stored(made.id);
+      expect(row.revision).toBe(2);
+    });
+  }, 60_000);
+
+  it('an archived question is read-only: 409 already_archived', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, { type: 'short_text', title: `${TITLE}arquivada` });
+      await adminSql`update public.profile_form_questions set archived_at = now() where id = ${made.id}::uuid`;
+      const res = await patch(admin, made.id, { revision: 1, title: `${TITLE}nova` });
+      expect(await conflict(res)).toBe('already_archived');
+      expect((await stored(made.id)).title).toBe(`${TITLE}arquivada`);
+    });
+  }, 60_000);
+});
+
+describe('12-08 the guard chain on the edit, and the bare 404 (T-12-19)', () => {
+  it('another tenant’s id and an unknown id are the same bare 404; support and member are 403; the module off is MODULE_DISABLED', async () => {
+    const labAdmin = await person('admin_tenant');
+    const demoAdmin = await person('admin_tenant', 'demo');
+    const support = await person('support_tenant');
+    const member = await person('member');
+    await withProfileForm(labTenantId, async () => {
+      await withProfileForm(demoTenantId, async () => {
+        const made = await created(labAdmin, { type: 'short_text', title: `${TITLE}minha` });
+        const foreign = await patch(
+          demoAdmin,
+          made.id,
+          { revision: 1, title: `${TITLE}x` },
+          HOSTS.demo,
+        );
+        const unknown = await patch(
+          demoAdmin,
+          crypto.randomUUID(),
+          { revision: 1, title: `${TITLE}x` },
+          HOSTS.demo,
+        );
+        expect(foreign.status).toBe(404);
+        expect(unknown.status).toBe(404);
+        const strip = async (res: Response) => {
+          const { requestId: _requestId, ...rest } = (await res.json()) as Envelope & {
+            requestId?: unknown;
+          } as Record<string, unknown>;
+          const error = rest.error as Record<string, unknown> | undefined;
+          if (error) delete error.requestId;
+          return rest;
+        };
+        expect(await strip(foreign)).toEqual(await strip(unknown));
+        expect((await stored(made.id)).title).toBe(`${TITLE}minha`);
+
+        // This tenant's host with the other tenant's session is refused before the route.
+        const wrongHost = await patch(demoAdmin, made.id, { revision: 1, title: `${TITLE}x` });
+        expect(wrongHost.status).toBe(403);
+        expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+
+        for (const who of [support, member]) {
+          const res = await patch(who, made.id, { revision: 1, title: `${TITLE}x` });
+          expect(res.status).toBe(403);
+        }
+      });
+    });
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, { type: 'short_text', title: `${TITLE}desligado` });
+      await withProfileForm(
+        labTenantId,
+        async () => {
+          const res = await patch(admin, made.id, { revision: 1, title: `${TITLE}x` });
+          expect(res.status).toBe(404);
+          expect(await code(res)).toBe('MODULE_DISABLED');
+        },
+        { enabled: false },
+      );
+    });
+  }, 60_000);
+
+  it('the body cannot reach the columns the edit does not own', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, { type: 'short_text', title: `${TITLE}fixa` });
+      for (const extra of [
+        { archivedAt: new Date().toISOString() },
+        { position: 9 },
+        { listedAt: new Date().toISOString() },
+        { tenantId: demoTenantId },
+        { id: crypto.randomUUID() },
+      ]) {
+        const res = await patch(admin, made.id, { revision: 1, ...extra });
+        expect(res.status).toBe(400);
+      }
+      const [row] = await adminSql<{ archived_at: unknown; position: number; tenant_id: string }[]>`
+        select archived_at, position, tenant_id::text as tenant_id from public.profile_form_questions where id = ${made.id}::uuid`;
+      expect(row?.archived_at).toBeNull();
+      expect(row?.tenant_id).toBe(labTenantId);
+    });
+  }, 60_000);
+});
+
+describe('12-08 an answer racing the edit is stopped by the row lock taken first (PFORM-17, T-12-20)', () => {
+  it('the member’s transaction holds the question and an answer; the admin’s type change waits, then is refused type_locked and never a 500', async () => {
+    const admin = await person('admin_tenant');
+    const member = await person('member');
+    await withProfileForm(labTenantId, async () => {
+      const made = await created(admin, {
+        type: 'short_text',
+        title: `${TITLE}corrida de resposta`,
+      });
+
+      let release: () => void = () => {};
+      let held: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holding = new Promise<void>((resolve) => {
+        held = resolve;
+      });
+      const claims = JSON.stringify({
+        sub: member.userId,
+        role: 'authenticated',
+        tenant_id: labTenantId,
+        tenant_role: 'member',
+      });
+      // What a member's save does first: claims, the authenticated role, the FOR SHARE lock through the
+      // definer function, then the answer; the transaction stays open until we let it commit.
+      const memberTx = memberSql.begin(async (tx) => {
+        await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+        await tx.unsafe('set local role authenticated');
+        const locked = await tx`select id::text as id from app.profile_form_lock_active()`;
+        expect(locked.map((row) => row.id)).toEqual([made.id]);
+        await tx`
+          insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+          select m.tenant_id, ${made.id}::uuid, m.id, m.user_id, ${tx.json('resposta')}
+            from public.memberships m
+           where m.tenant_id = ${labTenantId}::uuid and m.user_id = ${member.userId}::uuid`;
+        held();
+        await gate;
+      });
+      await holding;
+
+      let done = false;
+      const edit = Promise.resolve(patch(admin, made.id, { revision: 1, type: 'long_text' })).then(
+        (res) => {
+          done = true;
+          return res;
+        },
+      );
+      await sleep(600);
+      expect(done, 'the edit waited for the member’s lock').toBe(false);
+
+      release();
+      await memberTx;
+      const res = await edit;
+      expect(await conflict(res)).toBe('type_locked');
+      const row = await stored(made.id);
+      expect(row.type).toBe('short_text');
+      expect(row.revision).toBe(1);
+    });
+  }, 60_000);
 });

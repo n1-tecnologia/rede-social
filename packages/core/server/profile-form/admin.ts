@@ -2,14 +2,18 @@ import {
   type AdminQuestion,
   type AdminQuestionList,
   type CreateQuestionBody,
+  createQuestionBodySchema,
   PROFILE_FORM_CHOICE_TYPES,
+  PROFILE_FORM_ISSUE_SET,
   PROFILE_FORM_LIMITS,
   type ProfileFormType,
+  type UpdateQuestionBody,
 } from '@rede-social/contracts/profile-form';
 import { sql } from 'drizzle-orm';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { ApiError } from '../http/api-error';
+import { checkLocks, guardIssueOf, type LockDefinition } from './lock-rules';
 import { liveModuleOn } from './member';
 
 /**
@@ -267,4 +271,203 @@ export async function createQuestion(
     if (!row) throw new Error('createQuestion: the new question is not readable');
     return adminQuestionOf(tx, ctx.tenantId, row);
   });
+}
+
+/** The part of a question an edit can change, in the shape the lock rules and the update statement share. */
+type Definition = LockDefinition & {
+  type: ProfileFormType;
+  title: string;
+  helpText: string | null;
+  required: boolean;
+};
+
+const definitionOf = (row: StoredQuestion): Definition => ({
+  type: row.type,
+  title: row.title,
+  helpText: row.help_text,
+  required: row.required,
+  showOnProfile: row.show_on_profile,
+  allowOther: row.allow_other,
+  options: row.options,
+  limits: row.limits,
+});
+
+/**
+ * The definition the edit asks for. A body option with an `id` keeps that stored option (its label may change,
+ * the lock rules decide whether that is allowed); one without gets a fresh server-made id. An id the question
+ * does not hold, or one named twice, is a `VALIDATION_FAILED` (it would otherwise be a new option wearing a
+ * client-chosen id). A type change on a never-answered question drops what the new type cannot carry: the
+ * options of a non-choice type, "Outro" and the limits (unless the body sends them).
+ */
+function nextDefinition(current: StoredQuestion, body: UpdateQuestionBody): Definition {
+  const type = body.type ?? current.type;
+  const typeChanged = type !== current.type;
+
+  let options: { id: string; label: string }[];
+  if (body.options !== undefined) {
+    const stored = new Set(current.options.map((option) => option.id));
+    const seen = new Set<string>();
+    options = body.options.map((option) => {
+      const label = option.label.trim();
+      if (option.id === undefined) return { id: crypto.randomUUID(), label };
+      if (!stored.has(option.id) || seen.has(option.id)) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'unknown_option' });
+      }
+      seen.add(option.id);
+      return { id: option.id, label };
+    });
+  } else if (typeChanged && !isChoiceType(type)) {
+    options = [];
+  } else {
+    options = current.options;
+  }
+
+  const limits: LockDefinition['limits'] =
+    body.limits !== undefined
+      ? {
+          ...(body.limits.min !== undefined ? { min: body.limits.min } : {}),
+          ...(body.limits.max !== undefined ? { max: body.limits.max } : {}),
+        }
+      : typeChanged
+        ? {}
+        : current.limits;
+
+  return {
+    type,
+    title: body.title ?? current.title,
+    helpText: body.helpText !== undefined ? body.helpText : current.help_text,
+    required: body.required ?? current.required,
+    showOnProfile: body.showOnProfile ?? current.show_on_profile,
+    allowOther:
+      body.allowOther ?? (typeChanged && !isChoiceType(type) ? false : current.allow_other),
+    options,
+    limits,
+  };
+}
+
+/**
+ * The cross-field rules of a whole definition, by the SAME schema a create runs (2 to 20 distinct options for
+ * a choice type and none for another, "Outro" only on a choice type, limits of the right kind and
+ * `min <= max`). An edit that merges into something a create would refuse is a 400 here, never a database
+ * CHECK failing as a 500.
+ */
+function assertValidDefinition(next: Definition): void {
+  const parsed = createQuestionBodySchema.safeParse({
+    type: next.type,
+    title: next.title,
+    helpText: next.helpText,
+    required: next.required,
+    showOnProfile: next.showOnProfile,
+    allowOther: next.allowOther,
+    options: next.options.map((option) => ({ label: option.label })),
+    limits: next.limits,
+  });
+  if (parsed.success) return;
+  const issue = parsed.error.issues
+    .map((candidate) => candidate.message)
+    .find((message) => PROFILE_FORM_ISSUE_SET.has(message));
+  throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: issue ?? 'invalid' });
+}
+
+const sameOptions = (
+  a: readonly { id: string; label: string }[],
+  b: readonly { id: string; label: string }[],
+) =>
+  a.length === b.length &&
+  a.every((option, i) => option.id === b[i]?.id && option.label === b[i]?.label);
+
+const sameLimits = (a: LockDefinition['limits'], b: LockDefinition['limits']) =>
+  a.min === b.min && a.max === b.max;
+
+const unchanged = (a: Definition, b: Definition) =>
+  a.type === b.type &&
+  a.title === b.title &&
+  a.helpText === b.helpText &&
+  a.required === b.required &&
+  a.showOnProfile === b.showOnProfile &&
+  a.allowOther === b.allowOther &&
+  sameOptions(a.options, b.options) &&
+  sameLimits(a.limits, b.limits);
+
+/**
+ * `PATCH /v1/profile_form/questions/{id}` (PFORM-17, PFORM-24; D-587, D-582): edits one question under the
+ * lock rules and an optimistic `revision`.
+ *
+ *   1. `adminLock`, the live module check, then the row `FOR UPDATE`: no row (unknown, another tenant's) is
+ *      the bare 404; an archived question is 409 `already_archived` (read-only until reactivated); a
+ *      `revision` that is not the stored one is 409 `stale_revision` and nothing changes;
+ *   2. AFTER the row lock, in a separate statement, the answer facts are read, so an answer that committed
+ *      while this edit waited for the lock is seen; a member's save locks the questions `FOR SHARE` first, so
+ *      it cannot slip an answer in between the facts and the update;
+ *   3. the pure `checkLocks` decides FIRST (409 `CONFLICT` with `details.profileForm` in `type_locked`,
+ *      `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`); the plan-04 trigger is the
+ *      backstop and its PF001..PF005 map to the same codes;
+ *   4. the merged definition must be one a create would accept (400 otherwise);
+ *   5. a change that alters nothing answers 200 and does NOT bump the revision; otherwise the revision is
+ *      bumped by one in the same statement.
+ */
+export async function updateQuestion(
+  ctx: AdminCtx,
+  id: string,
+  body: UpdateQuestionBody,
+): Promise<AdminQuestion> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const row = await readOne(tx, ctx.tenantId, id, true);
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    if (row.archived_at !== null) {
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'already_archived' });
+    }
+    if (body.revision !== row.revision) {
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'stale_revision' });
+    }
+
+    const counts = await countsFor(tx, ctx.tenantId, [row.id]);
+    const current = definitionOf(row);
+    const next = nextDefinition(row, body);
+
+    const locked = checkLocks({
+      current,
+      next,
+      answerCount: counts.perQuestion.get(row.id) ?? 0,
+      answeredOptionIds: new Set(counts.perOption.get(row.id)?.keys() ?? []),
+      otherAnswered: await otherAnswered(tx, ctx.tenantId, row.id),
+    });
+    if (locked) throw new ApiError(409, 'CONFLICT', { profileForm: locked });
+
+    assertValidDefinition(next);
+    if (unchanged(current, next)) return toAdminQuestion(row, counts);
+
+    try {
+      await tx.execute(sql`
+        update public.profile_form_questions
+           set type = ${next.type}, title = ${next.title}, help_text = ${next.helpText},
+               required = ${next.required}, show_on_profile = ${next.showOnProfile},
+               allow_other = ${next.allowOther}, options = ${JSON.stringify(next.options)}::jsonb,
+               limits = ${JSON.stringify(next.limits)}::jsonb,
+               revision = revision + 1, updated_at = now()
+         where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    } catch (error) {
+      // The trigger is the backstop of a race that got past `checkLocks`: the same coded 409, never a 500.
+      const issue = guardIssueOf(error);
+      if (issue) throw new ApiError(409, 'CONFLICT', { profileForm: issue });
+      throw error;
+    }
+    const updated = await readOne(tx, ctx.tenantId, row.id);
+    if (!updated) throw new Error('updateQuestion: the edited question is not readable');
+    return adminQuestionOf(tx, ctx.tenantId, updated);
+  });
+}
+
+/** Whether at least one answer of the question carries an "Outro" text (a boolean, never the text). */
+async function otherAnswered(tx: Tx, tenantId: string, questionId: string): Promise<boolean> {
+  const [row] = await tx.execute<{ found: boolean }>(sql`
+    select exists (
+      select 1 from public.profile_form_answers a
+       where a.tenant_id = ${tenantId}::uuid
+         and a.question_id = ${questionId}::uuid
+         and a.value ->> 'otherText' is not null) as found`);
+  return row?.found === true;
 }
