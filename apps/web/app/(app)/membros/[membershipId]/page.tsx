@@ -5,6 +5,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ProfileAdminTrigger } from '@/components/admin/ProfileAdminTrigger';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
+import { MemberAnswersBlock } from '@/components/profile-form/MemberAnswersBlock';
 import { SocialProfileBlock } from '@/components/social/SocialProfileBlock';
 import { loadAdminMemberForProfile } from '@/lib/admin-members';
 import { requireBootstrap } from '@/lib/bootstrap';
@@ -28,6 +29,13 @@ import { getHostTenant } from '@/lib/tenant-host';
  * request is made: the screen is D-45's, byte for byte. No post list, no post count, no "Mensagem". The member's Instagram
  * (2026-10-09) is not a new field: it is a line of the bio (`lib/profile-instagram.ts`), split here
  * into the text and a link under the name, the link their posts carry (`instagramLinkView`).
+ *
+ * **Since 12-14 (D-593, UI-D-592, UI-D-593) the form's answers sit under the same header**
+ * (`MemberAnswersBlock`): for a member viewer "Sobre {name}" with ONLY the answers the admin made public
+ * (absent when there is nothing to show), for `admin_tenant` and `support_tenant` "Respostas do
+ * formulário" with every answer and the privacy markers. Like the social block it is its own read in its
+ * own `Suspense` after the base profile, so a slow or failing read never delays or blanks the profile
+ * (a small error row with a retry), and the API's bare 404 (module off, staff target) is no block at all.
  *
  * `PageHeader` carries no title on purpose: the display name IS this screen's single `h1`
  * (`headingLevel={1}`), matching the Phase 2 one-h1 rule.
@@ -139,6 +147,12 @@ export default async function MemberProfilePage({
         membershipId={membershipId}
         name={result.member.displayName}
         permissions={bootstrap.permissions}
+        retryHref={`/membros/${encodeURIComponent(membershipId)}`}
+      />
+      <MemberAnswersBlock
+        membershipId={membershipId}
+        name={result.member.displayName}
+        role={bootstrap.membership.role}
         retryHref={`/membros/${encodeURIComponent(membershipId)}`}
       />
     </div>
