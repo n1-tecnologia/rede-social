@@ -186,7 +186,7 @@ function ClearButton({ onClick, disabled }: { onClick: () => void; disabled: boo
       disabled={disabled}
       className="min-h-11 self-start text-xs font-bold text-text-secondary hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
     >
-      {t('clear')}
+      {t('controls.clear')}
     </button>
   );
 }
