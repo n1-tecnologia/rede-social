@@ -46,7 +46,8 @@
         "members": "Membros",
         "rules": "Regras da comunidade",
         "moderation": "Moderação",
-        "payments": "Pagamentos"
+        "payments": "Pagamentos",
+        "profileForm": "Formulário de perfil"
       },
       "soon": "Em breve",
       "logoutFailed": "Algo deu errado. Tente novamente."

@@ -1,4 +1,6 @@
 import type {
+  AdminQuestion,
+  ArchivedQuestion,
   MemberForm,
   MemberQuestion,
   ProfileFormType,
@@ -45,6 +47,47 @@ export function form(questions: MemberQuestion[], overrides: Partial<MemberForm>
     missingRequired: questions.filter((q) => q.required && q.answer === null).length,
     formEtag: 'etag-1',
     questions,
+    ...overrides,
+  };
+}
+
+/**
+ * Builders for the BUILDER's tests (12-15): a row of `GET /v1/profile_form/questions` and of
+ * `GET /v1/profile_form/archived`. Counts only, never an answer (PFORM-23).
+ */
+let adminCounter = 0;
+
+export function adminQuestion(
+  type: ProfileFormType,
+  overrides: Partial<AdminQuestion> = {},
+): AdminQuestion {
+  adminCounter += 1;
+  return {
+    id: uuid(500 + adminCounter),
+    type,
+    title: `Pergunta do admin ${adminCounter}`,
+    helpText: null,
+    required: false,
+    showOnProfile: false,
+    allowOther: false,
+    limits: {},
+    options: [],
+    position: adminCounter,
+    revision: 1,
+    answerCount: 0,
+    createdAt: '2026-10-01T12:00:00.000Z',
+    listedAt: '2026-10-01T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+export function archivedQuestion(
+  type: ProfileFormType,
+  overrides: Partial<ArchivedQuestion> = {},
+): ArchivedQuestion {
+  return {
+    ...adminQuestion(type),
+    archivedAt: '2026-10-20T15:30:00.000Z',
     ...overrides,
   };
 }

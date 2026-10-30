@@ -221,3 +221,188 @@ describe('profileForm.profile.json (12-14)', () => {
     expect(text).not.toMatch(/\b(survey|questionário|deletar|template)\b/i);
   });
 });
+
+/**
+ * 12-15 — the builder's catalog (UI-D-564..UI-D-568, UI-D-576, UI-D-578): `profileForm.admin.json`
+ * declares the `profileForm` root with the `admin` and `types` branches and pins the approved
+ * Copywriting Contract lines of "Admin: page, summary, list, reorder", "Admin: the 13 types" and
+ * "Admin: confirmations, archived", through the real merged catalog and the real formatter.
+ */
+const a = createTranslator({
+  locale: 'pt-BR',
+  messages,
+  namespace: 'profileForm.admin',
+}) as unknown as (key: string, values?: Record<string, string | number>) => string;
+const ty = createTranslator({
+  locale: 'pt-BR',
+  messages,
+  namespace: 'profileForm.types',
+}) as unknown as (key: string, values?: Record<string, string | number>) => string;
+
+describe('profileForm.admin.json (12-15)', () => {
+  it('declares exactly the profileForm root, with the admin and types branches', () => {
+    const parsed = JSON.parse(readFileSync(join(dir, 'profileForm.admin.json'), 'utf8'));
+    expect(Object.keys(parsed)).toEqual(['profileForm']);
+    expect(Object.keys(parsed.profileForm)).toEqual(['admin', 'types']);
+  });
+
+  it('merges into the catalog next to the member and profile branches', () => {
+    const root = messages.profileForm as Record<string, unknown>;
+    expect(root.admin).toBeTypeOf('object');
+    expect(root.types).toBeTypeOf('object');
+    expect(root.member).toBeTypeOf('object');
+    expect(root.profile).toBeTypeOf('object');
+  });
+
+  it('adds the Configurações row label', () => {
+    const app = createTranslator({ locale: 'pt-BR', messages, namespace: 'app' }) as unknown as (
+      key: string,
+    ) => string;
+    expect(app('settings.rows.profileForm')).toBe('Formulário de perfil');
+  });
+
+  it('pins the page, tabs, summary, list, reorder, state and archived strings verbatim', () => {
+    const plain: [string, string][] = [
+      ['title', 'Formulário de perfil'],
+      ['back', 'Voltar'],
+      ['tabs.label', 'Áreas do Formulário de perfil'],
+      ['tabs.questions', 'Perguntas'],
+      ['tabs.archived', 'Arquivadas'],
+      ['summary.noRequired', 'Nenhuma pergunta obrigatória'],
+      ['summary.noMembers', 'Ainda não há membros'],
+      ['summary.definition', 'Completo é quem respondeu todas as perguntas obrigatórias.'],
+      [
+        'summary.noRequiredBody',
+        'Ninguém precisa responder para continuar. As respostas são opcionais.',
+      ],
+      ['summary.noMembersBody', 'Quando alguém entrar, o andamento aparece aqui.'],
+      ['actions.reorder', 'Reordenar'],
+      ['actions.reorderDone', 'Concluir'],
+      ['row.required', 'Obrigatória'],
+      ['row.optional', 'Opcional'],
+      ['row.onProfile', 'No perfil'],
+      ['row.locked', 'Tipo bloqueado'],
+      ['reorder.failed', 'Não foi possível salvar a nova ordem. A lista voltou como estava.'],
+      ['empty.title', 'Seu formulário ainda está vazio'],
+      [
+        'empty.body',
+        'Crie perguntas para conhecer melhor os membros. Se marcar alguma como obrigatória, todos precisam respondê-la para continuar usando a comunidade.',
+      ],
+      ['errors.title', 'Algo deu errado'],
+      ['errors.body', 'Não foi possível carregar o formulário agora.'],
+      ['errors.retry', 'Tentar novamente'],
+      ['errors.moduleOff', 'O Formulário de perfil foi desativado para esta comunidade.'],
+      [
+        'archived.noteArchived',
+        'Perguntas arquivadas não são mais feitas aos membros. As respostas continuam guardadas e entram na exportação.',
+      ],
+      [
+        'archived.noteReactivate',
+        'Ao reativar uma pergunta obrigatória, quem ainda não a respondeu volta a ser chamado para responder.',
+      ],
+      ['archived.wasRequired', 'Era obrigatória'],
+      ['archived.wasOptional', 'Era opcional'],
+      ['archived.reactivate', 'Reativar'],
+      ['archived.confirmTitle', 'Reativar pergunta?'],
+      [
+        'archived.confirmBody',
+        'Ela volta ao fim do formulário e as respostas guardadas voltam a valer.',
+      ],
+      ['archived.confirm', 'Reativar'],
+      ['archived.done', 'Pergunta reativada.'],
+      ['archived.failed', 'Não foi possível reativar agora. Tente de novo.'],
+      ['archived.empty.title', 'Nenhuma pergunta arquivada'],
+      [
+        'archived.empty.body',
+        'Quando você arquivar uma pergunta, ela aparece aqui com as respostas guardadas.',
+      ],
+      ['impact.addTitle', 'Adicionar pergunta obrigatória?'],
+      ['impact.makeTitle', 'Tornar a pergunta obrigatória?'],
+      ['impact.reactivateTitle', 'Reativar pergunta obrigatória?'],
+      ['impact.replaceTitle', 'Substituir a pergunta?'],
+      ['impact.addConfirm', 'Adicionar e exigir'],
+      ['impact.makeConfirm', 'Tornar obrigatória'],
+      ['impact.reactivateConfirm', 'Reativar e exigir'],
+      ['impact.replaceConfirm', 'Substituir'],
+      ['impact.cancel', 'Voltar'],
+      ['impact.kept', 'As respostas guardadas continuam valendo.'],
+      [
+        'impact.previewFailed',
+        'Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.',
+      ],
+    ];
+    for (const [key, text] of plain) expect(a(key), key).toBe(text);
+  });
+
+  it('interpolates the tenant, the title, the count, the position and the limit', () => {
+    expect(a('intro', { tenant: 'Ana Mentoria' })).toBe(
+      'Monte as perguntas que os membros de Ana Mentoria respondem. As alterações valem assim que você salva.',
+    );
+    expect(a('summary.percent', { percent: 38 })).toBe('38%');
+    expect(a('list.title', { count: 3 })).toBe('Perguntas ativas (3)');
+    expect(a('list.limit', { max: 30 })).toBe(
+      'Você chegou ao limite de 30 perguntas ativas. Arquive uma para adicionar outra.',
+    );
+    expect(a('row.edit', { title: 'Qual é o seu cargo?' })).toBe(
+      'Editar pergunta: Qual é o seu cargo?',
+    );
+    expect(a('row.position', { position: 2, total: 5 })).toBe('Pergunta 2 de 5');
+    expect(a('reorder.up', { title: 'Cargo' })).toBe('Subir “Cargo”');
+    expect(a('reorder.down', { title: 'Cargo' })).toBe('Descer “Cargo”');
+    expect(a('reorder.moved', { title: 'Cargo', position: 2, total: 5 })).toBe(
+      '“Cargo” agora é a pergunta 2 de 5.',
+    );
+    expect(a('archived.reactivateLabel', { title: 'Cargo' })).toBe('Reativar pergunta: Cargo');
+  });
+
+  it('pluralises the summary title, the pending line, the answer count and the archived line', () => {
+    expect(a('summary.title', { done: 1, total: 1 })).toBe('1 de 1 membro completo');
+    expect(a('summary.title', { done: 3, total: 8 })).toBe('3 de 8 membros completos');
+    expect(a('summary.pending', { pending: 1 })).toBe('1 membro ainda precisa responder.');
+    expect(a('summary.pending', { pending: 5 })).toBe('5 membros ainda precisam responder.');
+    expect(a('row.answers', { count: 0 })).toBe('Sem respostas');
+    expect(a('row.answers', { count: 1 })).toBe('1 resposta');
+    expect(a('row.answers', { count: 12 })).toBe('12 respostas');
+    expect(a('archived.meta', { date: '20/10/2026', count: 0 })).toBe(
+      'Arquivada em 20/10/2026 · Sem respostas guardadas',
+    );
+    expect(a('archived.meta', { date: '20/10/2026', count: 1 })).toBe(
+      'Arquivada em 20/10/2026 · 1 resposta guardada',
+    );
+    expect(a('archived.meta', { date: '20/10/2026', count: 9 })).toBe(
+      'Arquivada em 20/10/2026 · 9 respostas guardadas',
+    );
+    expect(a('impact.body', { n: 1 })).toBe(
+      '1 membro vai precisar responder antes de continuar usando a comunidade. Quem já respondeu as outras perguntas responde só esta.',
+    );
+    expect(a('impact.body', { n: 12 })).toBe(
+      '12 membros vão precisar responder antes de continuar usando a comunidade. Quem já respondeu as outras perguntas responde só esta.',
+    );
+  });
+
+  it('names the 13 types as the Copywriting Contract does', () => {
+    const names: [string, string][] = [
+      ['shortText', 'Texto curto'],
+      ['longText', 'Texto longo'],
+      ['dropdown', 'Lista suspensa'],
+      ['multiChoice', 'Múltipla escolha'],
+      ['singleChoice', 'Escolha única'],
+      ['yesNo', 'Sim ou não'],
+      ['acceptance', 'Aceite'],
+      ['number', 'Número'],
+      ['rating', 'Avaliação'],
+      ['date', 'Data'],
+      ['phone', 'Telefone'],
+      ['email', 'E-mail'],
+      ['link', 'Link'],
+    ];
+    expect(names).toHaveLength(13);
+    for (const [key, name] of names) expect(ty(`${key}.name`), key).toBe(name);
+    expect(ty('rating.hint')).toBe('De 1 a 5 estrelas');
+  });
+
+  it('keeps the vocabulary rules: no "survey", "questionário", "deletar" or "template"', () => {
+    const text = JSON.stringify(messages.profileForm);
+    expect(text).not.toMatch(/\b(survey|questionário|deletar|template)\b/i);
+  });
+});

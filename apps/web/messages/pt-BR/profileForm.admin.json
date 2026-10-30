@@ -1,0 +1,104 @@
+{
+  "profileForm": {
+    "admin": {
+      "title": "Formulário de perfil",
+      "back": "Voltar",
+      "tabs": {
+        "label": "Áreas do Formulário de perfil",
+        "questions": "Perguntas",
+        "archived": "Arquivadas"
+      },
+      "intro": "Monte as perguntas que os membros de {tenant} respondem. As alterações valem assim que você salva.",
+      "summary": {
+        "title": "{done} de {total, plural, one {# membro completo} other {# membros completos}}",
+        "noRequired": "Nenhuma pergunta obrigatória",
+        "noMembers": "Ainda não há membros",
+        "definition": "Completo é quem respondeu todas as perguntas obrigatórias.",
+        "pending": "{pending, plural, one {# membro ainda precisa responder.} other {# membros ainda precisam responder.}}",
+        "noRequiredBody": "Ninguém precisa responder para continuar. As respostas são opcionais.",
+        "noMembersBody": "Quando alguém entrar, o andamento aparece aqui.",
+        "percent": "{percent}%"
+      },
+      "actions": {
+        "reorder": "Reordenar",
+        "reorderDone": "Concluir"
+      },
+      "list": {
+        "title": "Perguntas ativas ({count})",
+        "limit": "Você chegou ao limite de {max} perguntas ativas. Arquive uma para adicionar outra."
+      },
+      "row": {
+        "edit": "Editar pergunta: {title}",
+        "required": "Obrigatória",
+        "optional": "Opcional",
+        "answers": "{count, plural, =0 {Sem respostas} one {# resposta} other {# respostas}}",
+        "onProfile": "No perfil",
+        "locked": "Tipo bloqueado",
+        "position": "Pergunta {position} de {total}"
+      },
+      "reorder": {
+        "up": "Subir “{title}”",
+        "down": "Descer “{title}”",
+        "moved": "“{title}” agora é a pergunta {position} de {total}.",
+        "failed": "Não foi possível salvar a nova ordem. A lista voltou como estava."
+      },
+      "empty": {
+        "title": "Seu formulário ainda está vazio",
+        "body": "Crie perguntas para conhecer melhor os membros. Se marcar alguma como obrigatória, todos precisam respondê-la para continuar usando a comunidade."
+      },
+      "errors": {
+        "title": "Algo deu errado",
+        "body": "Não foi possível carregar o formulário agora.",
+        "retry": "Tentar novamente",
+        "moduleOff": "O Formulário de perfil foi desativado para esta comunidade."
+      },
+      "archived": {
+        "noteArchived": "Perguntas arquivadas não são mais feitas aos membros. As respostas continuam guardadas e entram na exportação.",
+        "noteReactivate": "Ao reativar uma pergunta obrigatória, quem ainda não a respondeu volta a ser chamado para responder.",
+        "meta": "Arquivada em {date} · {count, plural, =0 {Sem respostas guardadas} one {# resposta guardada} other {# respostas guardadas}}",
+        "wasRequired": "Era obrigatória",
+        "wasOptional": "Era opcional",
+        "reactivate": "Reativar",
+        "reactivateLabel": "Reativar pergunta: {title}",
+        "confirmTitle": "Reativar pergunta?",
+        "confirmBody": "Ela volta ao fim do formulário e as respostas guardadas voltam a valer.",
+        "confirm": "Reativar",
+        "done": "Pergunta reativada.",
+        "failed": "Não foi possível reativar agora. Tente de novo.",
+        "empty": {
+          "title": "Nenhuma pergunta arquivada",
+          "body": "Quando você arquivar uma pergunta, ela aparece aqui com as respostas guardadas."
+        }
+      },
+      "impact": {
+        "addTitle": "Adicionar pergunta obrigatória?",
+        "makeTitle": "Tornar a pergunta obrigatória?",
+        "reactivateTitle": "Reativar pergunta obrigatória?",
+        "replaceTitle": "Substituir a pergunta?",
+        "body": "{n, plural, one {# membro vai precisar responder antes de continuar usando a comunidade.} other {# membros vão precisar responder antes de continuar usando a comunidade.}} Quem já respondeu as outras perguntas responde só esta.",
+        "addConfirm": "Adicionar e exigir",
+        "makeConfirm": "Tornar obrigatória",
+        "reactivateConfirm": "Reativar e exigir",
+        "replaceConfirm": "Substituir",
+        "cancel": "Voltar",
+        "kept": "As respostas guardadas continuam valendo.",
+        "previewFailed": "Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo."
+      }
+    },
+    "types": {
+      "shortText": { "name": "Texto curto", "hint": "Uma linha" },
+      "longText": { "name": "Texto longo", "hint": "Vários parágrafos" },
+      "dropdown": { "name": "Lista suspensa", "hint": "Escolhe uma opção da lista" },
+      "multiChoice": { "name": "Múltipla escolha", "hint": "Marca várias opções" },
+      "singleChoice": { "name": "Escolha única", "hint": "Marca uma só opção" },
+      "yesNo": { "name": "Sim ou não", "hint": "Duas respostas" },
+      "acceptance": { "name": "Aceite", "hint": "Caixa que precisa ser marcada" },
+      "number": { "name": "Número", "hint": "Valor numérico" },
+      "rating": { "name": "Avaliação", "hint": "De 1 a 5 estrelas" },
+      "date": { "name": "Data", "hint": "Dia, mês e ano" },
+      "phone": { "name": "Telefone", "hint": "Com DDD" },
+      "email": { "name": "E-mail", "hint": "Endereço de e-mail" },
+      "link": { "name": "Link", "hint": "Endereço de site ou rede" }
+    }
+  }
+}

@@ -134,6 +134,10 @@ export default async function SettingsPage({
   // API's `requirePermission('payments.manage')` reads, composed for `admin_tenant` only while the
   // payments module is on — never on the role; absent from the DOM without it.
   let canManagePayments = false;
+  // 12-15 (D-596, UI-D-564): the Formulário de perfil row, gated on the composed PERMISSION — the value
+  // the API's `requirePermission('profile_form.manage')` reads, composed for `admin_tenant` only while
+  // the profile_form module is on — never on the role; absent from the DOM without it.
+  let canManageProfileForm = false;
   let tenantName = '';
   if (platform) await requirePlatformTenants();
   else {
@@ -147,11 +151,12 @@ export default async function SettingsPage({
     canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
     canManageCourses = bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
     canManagePayments = bootstrap.permissions.includes(PAYMENTS_PERMISSIONS.manage);
+    canManageProfileForm = bootstrap.permissions.includes('profile_form.manage');
     notificationsOn = bootstrap.modules.some((module) => module.key === 'notifications');
   }
 
   // E7/partial + E7/zero-one-many: the whole group — its `SectionTitle` included — is ABSENT from
-  // the DOM unless one of its rows renders (Marca, Membros, Regras da comunidade, Moderação, Loja, Pagamentos, Cursos, Mídia, Seus stories), never rendered-and-disabled. A member must not learn
+  // the DOM unless one of its rows renders (Marca, Membros, Regras da comunidade, Formulário de perfil, Moderação, Loja, Pagamentos, Cursos, Mídia, Seus stories), never rendered-and-disabled. A member must not learn
   // that an admin media screen exists, which is also why `/configuracoes/midia` itself answers
   // `notFound()` rather than a 403 screen.
   const isTenantAdmin = role === 'admin_tenant';
@@ -208,9 +213,11 @@ export default async function SettingsPage({
         canManageBrand ||
         canManageStore ||
         canManagePayments ||
+        canManageProfileForm ||
         canManageCourses ? (
           <Group title={t('settings.groups.admin')}>
-            {/* UI-D-269 order: Marca, Membros, Regras da comunidade, Moderação, then (08.2-07,
+            {/* UI-D-269 order: Marca, Membros, Regras da comunidade, then (12-15, UI-D-564) Formulário
+                de perfil, Moderação, then (08.2-07,
                 UI-D-382) Loja, then (09.1-13, UI-D-513) Pagamentos, then (08.3-06, UI-D-389)
                 Cursos, then the shipped Mídia and Seus stories rows. */}
             {canManageBrand ? (
@@ -235,6 +242,16 @@ export default async function SettingsPage({
                 icon="scroll-text"
                 label={t('settings.rows.rules')}
                 href="/configuracoes/regras"
+                trailing={null}
+              />
+            ) : null}
+            {/* 12-15 (UI-D-564, D-596): beside Regras, because both are "what a newcomer is told and
+                asked". Same `profile_form.manage` gate as the screen's own `notFound()`. */}
+            {canManageProfileForm ? (
+              <Row
+                icon="clipboard-list"
+                label={t('settings.rows.profileForm')}
+                href="/configuracoes/formulario-de-perfil"
                 trailing={null}
               />
             ) : null}
