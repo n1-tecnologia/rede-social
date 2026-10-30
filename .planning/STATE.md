@@ -4,16 +4,16 @@ current_phase: 12
 current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: "Completed 12-12-PLAN.md (member completion screen /completar-perfil: ProfileForm, thirteen controls, validated destination)"
-last_updated: "2026-10-30T01:52:36.494Z"
+stopped_at: "Completed 12-13-PLAN.md (five format controls: phone mask and paste, pt-BR numbers, link normalisation, blur validation)"
+last_updated: "2026-10-30T02:01:09.136Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: f3ed5312e9837d980d01adb3a7103e1d562de148
+state_head: c4b98046ef2f43bf4f65eae2a6b715ba56c16228
 progress:
   total_phases: 27
   completed_phases: 0
   total_plans: 312
-  completed_plans: 297
+  completed_plans: 298
   percent: 0
 ---
 
@@ -336,6 +336,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P01 | 2h20m (incl. review wait) | 3 tasks | 3 files |
 | Phase 12 P11 | 6 min | 3 tasks | 17 files |
 | Phase 12 P12 | 16 min | 3 tasks | 17 files |
+| Phase 12 P13 | 22 min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -1077,6 +1078,7 @@ Recent decisions affecting current work:
 - [Phase 12]: 12-09: the question lifecycle never writes an answer row (archive keeps every answer, delete is refused with has_answers once one exists, replace is one transaction that archives the old question); the summary and impact are set-based counts over live active member memberships and answer 0 where nobody would be asked — A member's save locks every active question FOR SHARE, so an edit of any active question waits for a save in flight while create, reactivate and the reads never do; replace atomicity is proven with an injected trigger failure; the summary ran in 17 ms on 20,004 members
 - [Phase 12]: 12-10: the answers export commits its moderation_log row (profile_form_exported, the admin as actor and target) in its own tenant transaction before the CSV stream exists, then pages members in the admin lane by keyset of 500 with explicit tenant predicates; every cell including headers is neutralised against formula injection, and only a stored number of a number question is left alone, and only when its text is a plain pt-BR number — Seeded admins are the exporters in the integration suite because the audit row is immutable and a throwaway admin would orphan it (pgTAP 154 test 41); the file includes blocked members and excludes invited, staff and deleted ones (A-12-02, to confirm with Igor); the Moderacao copy and chip are assumption A-12-MOD (manual row M6); the writer verifies the supplied actor membership is the caller's own
 - [Phase 12]: 12-01: sketch 016 approval recorded as provisional; the README edit was made by the orchestrator on Igor's instruction (pode fazer voce mesmo, 2026-10-30), not by his hand; answers to questions (a)-(f) not given — Releases web plans 11-18 past their approved: true guard; verify-work should confirm the approval with Igor
+- [Phase 12]: 12-13: pt-BR number rule (comma decimal; thousands dots only when well formed, first group not starting with 0); a number is shown back as parsed on blur; a twelfth phone digit is refused, never cut; a country code 55 is removed only from a paste or a bulk insert into an empty field — T-12-31: the mask and parsers must not silently turn what was typed into a different valid value; parseAnswer stays the only judge
 
 ### Pending Todos
 
@@ -1195,6 +1197,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T01:52:36.256Z
-Stopped at: Completed 12-12-PLAN.md (member completion screen /completar-perfil: ProfileForm, thirteen controls, validated destination)
+Last session: 2026-10-30T02:01:08.895Z
+Stopped at: Completed 12-13-PLAN.md (five format controls: phone mask and paste, pt-BR numbers, link normalisation, blur validation)
 Resume file: None
