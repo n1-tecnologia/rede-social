@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MemberForm } from '@rede-social/contracts/profile-form';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -351,5 +352,175 @@ describe('answers never leave component state (T-12-30)', () => {
     expect(stored).not.toContain(secret);
     expect(window.location.href).toBe(href);
     expect(JSON.stringify(mocks.flash.mock.calls)).not.toContain(secret);
+  });
+});
+
+describe('the preview sends nothing (UI-D-580)', () => {
+  const everyKind = () => {
+    const opts = options('A', 'B');
+    return [
+      question('short_text', { title: 'Texto curto', answer: 'guardado' }),
+      question('long_text', { title: 'Texto longo' }),
+      question('dropdown', { title: 'Lista', options: opts, allowOther: true }),
+      question('multiple_choice', { title: 'Várias', options: opts }),
+      question('single_choice', { title: 'Uma', options: opts }),
+      question('number', { title: 'Número' }),
+      question('date', { title: 'Data' }),
+      question('phone', { title: 'Telefone' }),
+      question('email', { title: 'E-mail' }),
+      question('link', { title: 'Link' }),
+      question('yes_no', { title: 'Sim ou não' }),
+      question('acceptance', { title: 'Aceite', required: true }),
+      question('rating', { title: 'Nota', required: true }),
+    ];
+  };
+
+  it('every control is live, the action is never called, and Fechar closes', async () => {
+    const onClose = vi.fn();
+    const { container } = show(form(everyKind(), { mode: 'returning', missingRequired: 2 }), {
+      preview: true,
+      onClose,
+    });
+    fireEvent.change(screen.getByLabelText('Texto curto'), { target: { value: 'novo' } });
+    fireEvent.change(screen.getByLabelText('Texto longo'), { target: { value: 'longo' } });
+    fireEvent.change(screen.getByLabelText('Lista'), { target: { value: '__other__' } });
+    fireEvent.change(screen.getByLabelText('Qual?'), { target: { value: 'outra' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'A' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'B' }));
+    fireEvent.change(screen.getByLabelText('Número'), { target: { value: '12,5' } });
+    fireEvent.change(screen.getByLabelText('Data'), { target: { value: '2026-05-01' } });
+    fireEvent.change(screen.getByLabelText('Telefone'), { target: { value: '11912345678' } });
+    fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'a@b.co' } });
+    fireEvent.change(screen.getByLabelText('Link'), { target: { value: 'https://x.co' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sim' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Aceite' }));
+    fireEvent.click(screen.getByRole('radio', { name: '4 estrelas' }));
+    expect((screen.getByLabelText('Texto curto') as HTMLInputElement).value).toBe('novo');
+    await act(async () => {
+      fireEvent.submit(formEl(container));
+    });
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.flash).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the banner, no Salvar, no heading, nothing pre-filled and nothing flagged', () => {
+    show(form(everyKind(), { mode: 'returning', missingRequired: 2 }), { preview: true });
+    expect(screen.getByText('Prévia: nada do que você preencher aqui é salvo.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Salvar' })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByText('Falta responder')).toBeNull();
+    expect((screen.getByLabelText('Texto curto') as HTMLInputElement).value).toBe('');
+  });
+
+  it('the required rule and the errors still read as the member sees them, and Fechar is the only button action', () => {
+    show(form(everyKind()), { preview: true });
+    expect(screen.getAllByText('Obrigatória')).toHaveLength(2);
+    expect(screen.getAllByText('Opcional').length).toBeGreaterThan(5);
+    expect(screen.getByRole('button', { name: 'Fechar' }).getAttribute('type')).toBe('button');
+  });
+});
+
+describe('the accessibility floor (UI-D-596, PFORM-26)', () => {
+  it('the page heading takes focus on mount', () => {
+    show(form([question('short_text')]), { title: 'Complete seu perfil', intro: 'Introdução' });
+    const heading = screen.getByRole('heading', { level: 1, name: 'Complete seu perfil' });
+    expect(heading.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(heading);
+  });
+
+  it('every control has an accessible name from a label or a legend', () => {
+    const opts = options('A', 'B');
+    const questions = [
+      question('short_text', { title: 'Q texto' }),
+      question('long_text', { title: 'Q longo' }),
+      question('dropdown', { title: 'Q lista', options: opts }),
+      question('multiple_choice', { title: 'Q várias', options: opts }),
+      question('single_choice', { title: 'Q uma', options: opts }),
+      question('number', { title: 'Q número' }),
+      question('date', { title: 'Q data' }),
+      question('phone', { title: 'Q telefone' }),
+      question('email', { title: 'Q email' }),
+      question('link', { title: 'Q link' }),
+      question('yes_no', { title: 'Q simnao' }),
+      question('acceptance', { title: 'Q aceite' }),
+      question('rating', { title: 'Q nota' }),
+    ];
+    const { container } = show(form(questions));
+    for (const title of [
+      'Q texto',
+      'Q longo',
+      'Q número',
+      'Q data',
+      'Q telefone',
+      'Q email',
+      'Q link',
+    ]) {
+      expect(screen.getByLabelText(title)).toBeTruthy();
+    }
+    expect(screen.getByRole('combobox', { name: /Q lista/ })).toBeTruthy();
+    expect(screen.getByRole('group', { name: /Q várias/ })).toBeTruthy();
+    expect(screen.getByRole('radiogroup', { name: /Q uma/ })).toBeTruthy();
+    expect(screen.getAllByRole('group', { name: /Q simnao/ }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('checkbox', { name: 'Q aceite' })).toBeTruthy();
+    expect(screen.getByRole('radiogroup', { name: /Q nota/ })).toBeTruthy();
+    // No control is left without a name: every input, select and textarea resolves one.
+    for (const control of container.querySelectorAll('input, select, textarea')) {
+      const named =
+        control.getAttribute('aria-label') ||
+        control.getAttribute('aria-labelledby') ||
+        (control.id && container.querySelector(`label[for="${control.id}"]`)) ||
+        control.closest('label') ||
+        control.closest('fieldset');
+      expect(named, control.outerHTML).toBeTruthy();
+    }
+  });
+
+  it('aria-invalid and aria-describedby point at the error line, on a single field and on a group', async () => {
+    const a = question('short_text', { title: 'Cargo', required: true });
+    const b = question('single_choice', {
+      title: 'Origem',
+      required: true,
+      options: options('A', 'B'),
+    });
+    const { container } = show(form([a, b]));
+    await save(container);
+    const input = screen.getByLabelText('Cargo');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    const inputError = document.getElementById(input.getAttribute('aria-describedby') ?? '');
+    expect(inputError?.textContent).toBe('Responda esta pergunta.');
+    const group = screen.getByRole('radiogroup', { name: /Origem/ });
+    expect(group.getAttribute('aria-invalid')).toBe('true');
+    const groupError = document.getElementById(group.getAttribute('aria-describedby') ?? '');
+    expect(groupError?.textContent).toBe('Escolha uma opção.');
+  });
+
+  it('renders everything a person typed or an admin wrote as React text, never as HTML (UI-D-598)', () => {
+    const hostile = '<img src=x onerror=alert(1)><b>negrito</b>';
+    const q = question('short_text', { title: hostile, helpText: hostile, answer: hostile });
+    const { container } = show(form([q], { mode: 'edit', missingRequired: 0 }), {
+      title: hostile,
+      intro: hostile,
+    });
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('b')).toBeNull();
+    expect(container.textContent).toContain(hostile);
+    expect((container.querySelector('input') as HTMLInputElement).value).toBe(hostile);
+  });
+
+  it('no profile-form component injects raw HTML or touches the browser storage', () => {
+    const dir = join(__dirname);
+    const sources = readdirSync(dir).filter(
+      (file) => file.endsWith('.tsx') && !file.includes('.test.'),
+    );
+    expect(sources.length).toBeGreaterThanOrEqual(3);
+    for (const file of sources) {
+      const text = readFileSync(join(dir, file), 'utf8');
+      expect(text, file).not.toContain(['dangerously', 'SetInnerHTML'].join(''));
+      expect(text, file).not.toMatch(/local(Storage)|session(Storage)/);
+    }
   });
 });
