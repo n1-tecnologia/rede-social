@@ -4,16 +4,16 @@ current_phase: 12
 current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: "Completed 12-13-PLAN.md (five format controls: phone mask and paste, pt-BR numbers, link normalisation, blur validation)"
-last_updated: "2026-10-30T02:01:09.136Z"
+stopped_at: "Completed 12-14-PLAN.md (profile surfaces: Minhas respostas, the new-questions notice, public and staff answers blocks)"
+last_updated: "2026-10-30T02:13:46.141Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: c4b98046ef2f43bf4f65eae2a6b715ba56c16228
+state_head: c0f91d129fb400152c8b8ff28e0a9daa6e847966
 progress:
   total_phases: 27
   completed_phases: 0
   total_plans: 312
-  completed_plans: 298
+  completed_plans: 299
   percent: 0
 ---
 
@@ -337,6 +337,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P11 | 6 min | 3 tasks | 17 files |
 | Phase 12 P12 | 16 min | 3 tasks | 17 files |
 | Phase 12 P13 | 22 min | 2 tasks | 12 files |
+| Phase 12 P14 | 13min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -1079,6 +1080,7 @@ Recent decisions affecting current work:
 - [Phase 12]: 12-10: the answers export commits its moderation_log row (profile_form_exported, the admin as actor and target) in its own tenant transaction before the CSV stream exists, then pages members in the admin lane by keyset of 500 with explicit tenant predicates; every cell including headers is neutralised against formula injection, and only a stored number of a number question is left alone, and only when its text is a plain pt-BR number — Seeded admins are the exporters in the integration suite because the audit row is immutable and a throwaway admin would orphan it (pgTAP 154 test 41); the file includes blocked members and excludes invited, staff and deleted ones (A-12-02, to confirm with Igor); the Moderacao copy and chip are assumption A-12-MOD (manual row M6); the writer verifies the supplied actor membership is the caller's own
 - [Phase 12]: 12-01: sketch 016 approval recorded as provisional; the README edit was made by the orchestrator on Igor's instruction (pode fazer voce mesmo, 2026-10-30), not by his hand; answers to questions (a)-(f) not given — Releases web plans 11-18 past their approved: true guard; verify-work should confirm the approval with Igor
 - [Phase 12]: 12-13: pt-BR number rule (comma decimal; thousands dots only when well formed, first group not starting with 0); a number is shown back as parsed on blur; a twelfth phone digit is refused, never cut; a country code 55 is removed only from a paste or a bulk insert into an empty field — T-12-31: the mask and parsers must not silently turn what was typed into a different valid value; parseAnswer stays the only judge
+- [Phase 12]: 12-14: answerView takes the catalog words as a third argument so the one mapper holds no pt-BR copy; a block renders only when the viewer's role and the payload kind agree; Minhas respostas' skeleton has no title so an empty tenant never flashes a heading; loaders log an error class only — T-12-32: an answer becomes an anchor only for a validated http(s) Link answer, everything else is React text — T-12-32 and T-12-30
 
 ### Pending Todos
 
@@ -1197,6 +1199,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T02:01:08.895Z
-Stopped at: Completed 12-13-PLAN.md (five format controls: phone mask and paste, pt-BR numbers, link normalisation, blur validation)
+Last session: 2026-10-30T02:13:45.897Z
+Stopped at: Completed 12-14-PLAN.md (profile surfaces: Minhas respostas, the new-questions notice, public and staff answers blocks)
 Resume file: None
