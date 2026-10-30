@@ -4,16 +4,16 @@ current_phase: 12
 current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: "Completed 12-09-PLAN.md (profile form lifecycle API: archive, reactivate, delete, atomic replace, summary and impact, admin side of the two-connection suite; 12-01 still waits for Igor's sketch 016 approval)"
-last_updated: "2026-10-30T00:38:00.009Z"
+stopped_at: "Completed 12-10-PLAN.md (profile form answers export: audit row first, streamed injection-safe CSV, Moderacao row; 12-01 still waits for Igor's sketch 016 approval)"
+last_updated: "2026-10-30T00:51:56.943Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: 84a67f0474c255294fea26e65673aee8b6e39014
+state_head: dbfc0049ccb0094fe5a714fe2a072b266531b1ed
 progress:
   total_phases: 27
   completed_phases: 0
   total_plans: 312
-  completed_plans: 293
+  completed_plans: 294
   percent: 0
 ---
 
@@ -332,6 +332,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P07 | 13 min | 2 tasks | 5 files |
 | Phase 12 P08 | 15 min | 3 tasks | 15 files |
 | Phase 12 P09 | 13 min | 3 tasks | 9 files |
+| Phase 12 P10 | 12 min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -1071,6 +1072,7 @@ Recent decisions affecting current work:
 - [Phase 12]: 12-07: GET /v1/members/{membershipId}/profile-answers is deliberately not behind requireModule, so the module off is the same bare 404 as every other miss; a member viewer gets only answered, show_on_profile, non-archived rows, the staff path needs the composed permission profile_form.read, and a staff target or the caller's own membership is a 404 — Seven miss cases compare byte for byte (only requestId stripped) so the route cannot probe which memberships exist or are staff; the explicit show_on_profile and archived_at predicates sit beside the public RLS policy as layer 2
 - [Phase 12]: 12-08: the builder API runs on the module's own guard chain; every write takes a per-tenant advisory lock, re-reads the live module row with a plain select (FOR SHARE locks nothing under the tenant lane) and locks rows FOR UPDATE in position, created_at, id order before it reads the answer facts; checkLocks decides the five D-587 locks first and the PF001..PF005 trigger is the backstop with the same codes; a reorder body that is not exactly the active set is a 409 order_mismatch — An edit that breaks a lock answers the lock code even when the merged definition is also invalid; the merged definition is validated by the create schema so no CHECK surfaces as a 500; an option id the question does not hold is a 400 unknown_option; the 12-06 concurrency case 4 now races the real reorder route
 - [Phase 12]: 12-09: the question lifecycle never writes an answer row (archive keeps every answer, delete is refused with has_answers once one exists, replace is one transaction that archives the old question); the summary and impact are set-based counts over live active member memberships and answer 0 where nobody would be asked — A member's save locks every active question FOR SHARE, so an edit of any active question waits for a save in flight while create, reactivate and the reads never do; replace atomicity is proven with an injected trigger failure; the summary ran in 17 ms on 20,004 members
+- [Phase 12]: 12-10: the answers export commits its moderation_log row (profile_form_exported, the admin as actor and target) in its own tenant transaction before the CSV stream exists, then pages members in the admin lane by keyset of 500 with explicit tenant predicates; every cell including headers is neutralised against formula injection, and only a stored number of a number question is left alone, and only when its text is a plain pt-BR number — Seeded admins are the exporters in the integration suite because the audit row is immutable and a throwaway admin would orphan it (pgTAP 154 test 41); the file includes blocked members and excludes invited, staff and deleted ones (A-12-02, to confirm with Igor); the Moderacao copy and chip are assumption A-12-MOD (manual row M6); the writer verifies the supplied actor membership is the caller's own
 
 ### Pending Todos
 
@@ -1189,6 +1191,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T00:37:59.769Z
-Stopped at: Completed 12-09-PLAN.md (profile form lifecycle API: archive, reactivate, delete, atomic replace, summary and impact, admin side of the two-connection suite; 12-01 still waits for Igor's sketch 016 approval)
+Last session: 2026-10-30T00:51:49.155Z
+Stopped at: Completed 12-10-PLAN.md (profile form answers export: audit row first, streamed injection-safe CSV, Moderacao row; 12-01 still waits for Igor's sketch 016 approval)
 Resume file: None
