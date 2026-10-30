@@ -6,7 +6,7 @@ import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { adminQuestion, archivedQuestion } from '@/lib/profile-form/test-fixtures';
+import { adminQuestion, archivedQuestion, uuid } from '@/lib/profile-form/test-fixtures';
 import type { ImpactActionResult, ReactivateResult, ReorderResult } from './actions';
 
 /**
@@ -692,5 +692,46 @@ describe('QuestionBuilder: the host of the list, the empty state and the editor 
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar pergunta' }));
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Tipo de resposta' })).toBeTruthy();
+  });
+
+  it("opens the sheet in edit mode with the row's data when a row is tapped", () => {
+    host();
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Origem' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Editar pergunta' })).toBeTruthy();
+    expect((within(dialog).getByLabelText('Pergunta') as HTMLInputElement).value).toBe('Origem');
+    expect(within(dialog).getByText('Tipo: Lista suspensa')).toBeTruthy();
+  });
+
+  it('re-opens the same question with a fresh draft after the sheet was closed', () => {
+    host();
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Cargo' }));
+    fireEvent.change(screen.getByLabelText('Pergunta'), { target: { value: 'Mexi' } });
+    fireEvent.click(screen.getByRole('dialog').previousElementSibling as HTMLElement);
+    expect(screen.getByText('Descartar as alterações?')).toBeTruthy();
+  });
+
+  it('moves from an answered question to the replace flow, with the old data copied', () => {
+    const answered = adminQuestion('single_choice', {
+      title: 'Como conheceu?',
+      answerCount: 5,
+      options: [
+        { id: uuid(9301), label: 'Instagram', answerCount: 3 },
+        { id: uuid(9302), label: 'Indicação', answerCount: 2 },
+      ],
+    });
+    host([answered]);
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Como conheceu?' }));
+    fireEvent.click(
+      screen.getAllByRole('button', {
+        name: 'Criar nova pergunta e arquivar esta',
+      })[0] as HTMLElement,
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Substituir pergunta' })).toBeTruthy();
+    expect(within(dialog).getByRole('group', { name: 'Tipo de resposta' })).toBeTruthy();
+    expect(
+      within(dialog).getByText(/“Como conheceu\?” será arquivada quando você salvar esta/),
+    ).toBeTruthy();
   });
 });

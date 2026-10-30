@@ -88,6 +88,24 @@
         "pending": "{n, plural, =0 {} one {1 membro vai precisar responder.} other {# membros vão precisar responder.}}",
         "replaceBody": "“{title}” será arquivada, com as respostas guardadas, e a nova entra no formulário."
       },
+      "archive": {
+        "title": "Arquivar esta pergunta?",
+        "body": "Ela deixa de ser feita aos membros. {n, plural, one {A # resposta continua guardada e entra na exportação.} other {As # respostas continuam guardadas e entram na exportação.}} Você pode reativar depois.",
+        "requiredNote": "Quem ainda não respondeu deixa de precisar.",
+        "confirm": "Arquivar",
+        "cancel": "Cancelar",
+        "done": "Pergunta arquivada.",
+        "failed": "Não foi possível arquivar agora. Tente de novo."
+      },
+      "delete": {
+        "title": "Excluir esta pergunta?",
+        "body": "Ninguém respondeu esta pergunta ainda. A exclusão não pode ser desfeita.",
+        "confirm": "Excluir",
+        "cancel": "Cancelar",
+        "done": "Pergunta excluída.",
+        "hasAnswers": "Esta pergunta recebeu respostas. Arquive em vez de excluir.",
+        "failed": "Não foi possível excluir agora. Tente de novo."
+      },
       "editor": {
         "createTitle": "Nova pergunta",
         "editTitle": "Editar pergunta",
@@ -152,10 +170,24 @@
         },
         "public": {
           "label": "Mostrar no perfil do membro",
-          "helper": "Os outros membros veem esta resposta no perfil de quem respondeu. O membro é avisado no formulário."
+          "helper": "Os outros membros veem esta resposta no perfil de quem respondeu. O membro é avisado no formulário.",
+          "frozen": "Esta pergunta já tem respostas privadas, então não pode passar a ser pública. Para mostrar no perfil, crie uma nova pergunta e arquive esta.",
+          "ratchet": "Se você desligar, não poderá ligar de novo enquanto houver respostas."
+        },
+        "locked": {
+          "type": "Esta pergunta já tem {n, plural, one {# resposta} other {# respostas}}, então o tipo não pode mudar. Para usar outro tipo, crie uma nova pergunta e arquive esta.",
+          "replace": "Criar nova pergunta e arquivar esta",
+          "options": "As opções que já têm respostas não podem ser removidas nem renomeadas. Você pode adicionar novas e mudar a ordem.",
+          "option": "Opção bloqueada: já tem respostas",
+          "optionAnswers": "{n, plural, one {# resposta} other {# respostas}}",
+          "other": "Já existem respostas “Outro”. Não dá para desligar.",
+          "limits": "Como já há respostas, só dá para ampliar o intervalo.",
+          "limitsRefused": "Esse intervalo deixaria respostas fora do limite. Só é possível ampliar."
         },
         "save": "Salvar pergunta",
         "saving": "Salvando…",
+        "archive": "Arquivar pergunta",
+        "delete": "Excluir pergunta",
         "discard": {
           "title": "Descartar as alterações?",
           "body": "As mudanças desta pergunta ainda não foram salvas.",
@@ -163,7 +195,9 @@
           "cancel": "Continuar editando"
         },
         "toasts": {
-          "added": "Pergunta adicionada."
+          "added": "Pergunta adicionada.",
+          "updated": "Pergunta atualizada.",
+          "replaced": "Pergunta substituída."
         },
         "errors": {
           "titleRequired": "Escreva a pergunta.",

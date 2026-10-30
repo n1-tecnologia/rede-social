@@ -343,6 +343,28 @@ describe('the question rows (UI-D-566)', () => {
   });
 });
 
+describe('the actions row (12-16, UI-D-565)', () => {
+  it('shows "Adicionar pergunta" next to "Reordenar" when questions exist', async () => {
+    serve({
+      questions: list([adminQuestion('short_text', { title: 'Cargo' })]),
+      summary: { total: 2, complete: 1, hasRequired: true },
+    });
+    const text = textOf(await html());
+    expect(text).toContain('Adicionar pergunta');
+    expect(text).toContain('Reordenar');
+  });
+
+  it('disables "Adicionar pergunta" at the limit', async () => {
+    const make = (n: number) => Array.from({ length: n }, () => adminQuestion('short_text'));
+    serve({
+      questions: list(make(30)),
+      summary: { total: 2, complete: 1, hasRequired: true },
+    });
+    const out = await html();
+    expect(out).toMatch(/<button[^>]*disabled[^>]*>(?:(?!<\/button>).)*Adicionar pergunta/s);
+  });
+});
+
 describe('the states (UI-D-568)', () => {
   it('shows the empty state, with no summary card, when no question exists at all', async () => {
     serve({
@@ -354,6 +376,8 @@ describe('the states (UI-D-568)', () => {
     const text = textOf(out);
     expect(text).toContain('Seu formulário ainda está vazio');
     expect(text).toContain('Crie perguntas para conhecer melhor os membros.');
+    // 12-16: the empty state's call to action opens the editor
+    expect(text).toContain('Adicionar pergunta');
     expect(out).not.toContain('data-form-summary');
     expect(out).not.toContain('Perguntas ativas');
   });

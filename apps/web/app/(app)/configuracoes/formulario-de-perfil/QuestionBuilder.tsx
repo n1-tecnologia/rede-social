@@ -27,8 +27,9 @@ interface Opening {
 
 /**
  * The Perguntas tab's interactive body (12-16): the list, or the empty state, and the ONE editor sheet
- * both open. The list's rows open the sheet in edit mode and "Adicionar pergunta" (the list's actions row,
- * or the empty state's call to action) in create mode. The page reads on the server; this holds only which
+ * they open. The list's rows open the sheet in edit mode, "Adicionar pergunta" (the list's actions row, or
+ * the empty state's call to action) in create mode, and the locked states' "Criar nova pergunta e arquivar
+ * esta" in replace mode. The page reads on the server; this holds only which
  * opening is showing, and the page refreshes after every write.
  */
 export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilderProps) {
@@ -41,12 +42,20 @@ export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilde
     setOpening((current) => ({ id: (current?.id ?? 0) + 1, mode: 'create', question: null }));
     setOpen(true);
   }, []);
+  const openEdit = useCallback((question: AdminQuestion) => {
+    setOpening((current) => ({ id: (current?.id ?? 0) + 1, mode: 'edit', question }));
+    setOpen(true);
+  }, []);
+  const openReplace = useCallback((question: AdminQuestion) => {
+    setOpening((current) => ({ id: (current?.id ?? 0) + 1, mode: 'replace', question }));
+    setOpen(true);
+  }, []);
   const close = useCallback(() => setOpen(false), []);
 
   return (
     <>
       {questions.length > 0 ? (
-        <QuestionList questions={questions} limit={limit} onAdd={openCreate} />
+        <QuestionList questions={questions} limit={limit} onOpen={openEdit} onAdd={openCreate} />
       ) : (
         <EmptyState
           variant="card"
@@ -66,9 +75,11 @@ export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilde
           key={opening.id}
           open={open}
           mode={opening.mode}
+          question={opening.question}
           tenantName={tenantName}
           limit={limit}
           onClose={close}
+          onReplace={openReplace}
         />
       ) : null}
     </>

@@ -17,8 +17,16 @@ vi.mock('next/navigation', () => ({
   },
 }));
 
-const { createQuestionAction, reactivateQuestionAction, readImpactAction, reorderQuestionsAction } =
-  await import('./actions');
+const {
+  archiveQuestionAction,
+  createQuestionAction,
+  deleteQuestionAction,
+  reactivateQuestionAction,
+  readImpactAction,
+  reorderQuestionsAction,
+  replaceQuestionAction,
+  updateQuestionAction,
+} = await import('./actions');
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -353,5 +361,191 @@ describe('createQuestionAction (12-16, PFORM-02)', () => {
     mocks.apiFetch.mockResolvedValue(refusal(500, 'INTERNAL'));
     await createQuestionAction({ ...body, title: 'Segredo do Joao' });
     expect(JSON.stringify(spy.mock.calls)).not.toContain('Segredo');
+  });
+});
+
+describe('updateQuestionAction (12-16, PFORM-17)', () => {
+  const id = uuid(7);
+  const stored = adminQuestion('short_text', { title: 'Cargo', revision: 5 });
+
+  it('PATCHes /questions/{id} with the revision and the keys that changed, and returns the question', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, stored));
+    const result = await updateQuestionAction(id, { revision: 4, title: ' Cargo ' });
+    expect(result).toEqual({ ok: true, question: stored, pending: null });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/questions/${id}`);
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ revision: 4, title: 'Cargo' });
+  });
+
+  it('reads the server summary after a reopening edit', async () => {
+    mocks.apiFetch.mockImplementation(async (path: string) =>
+      path === '/v1/profile_form/summary'
+        ? json(200, { total: 4, complete: 4, hasRequired: true })
+        : json(200, stored),
+    );
+    expect(
+      await updateQuestionAction(id, { revision: 4, required: true }, { reopens: true }),
+    ).toEqual({
+      ok: true,
+      question: stored,
+      pending: 0,
+    });
+  });
+
+  it('refuses a body without a revision before any request', async () => {
+    expect(await updateQuestionAction(id, { title: 'x' })).toMatchObject({
+      ok: false,
+      code: 'invalid',
+    });
+    expect(await updateQuestionAction('not-a-uuid', { revision: 1 })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'stale_revision',
+    'type_locked',
+    'option_locked',
+    'other_locked',
+    'visibility_locked',
+    'limits_locked',
+    'already_archived',
+  ])('maps the 409 %s to a conflict carrying the code', async (issue) => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: issue }));
+    expect(await updateQuestionAction(id, { revision: 4, title: 'x' })).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue,
+    });
+  });
+
+  it('maps a question that is gone (404 NOT_FOUND) to a conflict, not to module-off', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'NOT_FOUND'));
+    expect(await updateQuestionAction(id, { revision: 4, title: 'x' })).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'not_found',
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await updateQuestionAction(id, { revision: 4, title: 'x' })).toEqual({
+      ok: false,
+      code: 'moduleOff',
+    });
+  });
+
+  it('maps 403 and 500 and a thrown request, and follows the session navigation', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await updateQuestionAction(id, { revision: 4, title: 'x' })).toEqual({
+      ok: false,
+      code: 'forbidden',
+    });
+    mocks.apiFetch.mockResolvedValue(json(500, {}));
+    expect(await updateQuestionAction(id, { revision: 4, title: 'x' })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await updateQuestionAction(id, { revision: 4, title: 'x' })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(updateQuestionAction(id, { revision: 4, title: 'x' })).rejects.toThrow(
+      /^REDIRECT /,
+    );
+  });
+});
+
+describe('replaceQuestionAction (12-16, PFORM-17)', () => {
+  const stored = adminQuestion('email', { title: 'E-mail' });
+  const body = {
+    type: 'email',
+    title: 'E-mail',
+    helpText: null,
+    required: false,
+    showOnProfile: false,
+    allowOther: false,
+    options: [],
+    limits: {},
+    replaces: uuid(8),
+  };
+
+  it('POSTs ONE request to /questions/replace carrying `replaces`', async () => {
+    mocks.apiFetch.mockResolvedValue(json(201, stored));
+    expect(await replaceQuestionAction(body)).toEqual({
+      ok: true,
+      question: stored,
+      pending: null,
+    });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/v1/profile_form/questions/replace');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toMatchObject({ replaces: uuid(8), type: 'email' });
+  });
+
+  it('refuses a body without `replaces` before any request and maps the shared refusals', async () => {
+    expect(await replaceQuestionAction({ ...body, replaces: 'nope' })).toMatchObject({
+      ok: false,
+      code: 'invalid',
+    });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'already_archived' }));
+    expect(await replaceQuestionAction(body)).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'already_archived',
+    });
+    mocks.apiFetch.mockResolvedValue(json(500, {}));
+    expect(await replaceQuestionAction(body)).toEqual({ ok: false, code: 'failed' });
+  });
+});
+
+describe('archiveQuestionAction and deleteQuestionAction (12-16, D-588)', () => {
+  const id = uuid(9);
+
+  it('archive POSTs to /questions/{id}/archive', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, {}));
+    expect(await archiveQuestionAction(id)).toEqual({ ok: true });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/questions/${id}/archive`);
+    expect(init.method).toBe('POST');
+  });
+
+  it('delete sends DELETE to /questions/{id}', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { deleted: true }));
+    expect(await deleteQuestionAction(id)).toEqual({ ok: true });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/questions/${id}`);
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('maps 409 has_answers to hasAnswers (an answer arrived since the page was read)', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'has_answers' }));
+    expect(await deleteQuestionAction(id)).toEqual({ ok: false, code: 'hasAnswers' });
+  });
+
+  it('maps 404 NOT_FOUND to gone, 403, MODULE_DISABLED and anything else', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'NOT_FOUND'));
+    expect(await archiveQuestionAction(id)).toEqual({ ok: false, code: 'gone' });
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await archiveQuestionAction(id)).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await deleteQuestionAction(id)).toEqual({ ok: false, code: 'moduleOff' });
+    mocks.apiFetch.mockResolvedValue(json(500, {}));
+    expect(await deleteQuestionAction(id)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await archiveQuestionAction(id)).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('never leaves the server tier with a malformed id and follows the session navigation', async () => {
+    expect(await archiveQuestionAction('nope')).toEqual({ ok: false, code: 'failed' });
+    expect(await deleteQuestionAction('nope')).toEqual({ ok: false, code: 'failed' });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(archiveQuestionAction(id)).rejects.toThrow(/^REDIRECT /);
   });
 });

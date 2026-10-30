@@ -1,7 +1,9 @@
 import {
+  type AdminQuestion,
   codePoints,
   normalizeOptionLabel,
   PROFILE_FORM_LIMITS,
+  type ProfileFormIssue,
   type ProfileFormLimits,
   type ProfileFormType,
 } from '@rede-social/contracts/profile-form';
@@ -92,6 +94,39 @@ export function changeType(draft: QuestionDraft, next: ProfileFormType): Questio
   };
 }
 
+/** The draft of a stored question: its options keep their server ids, its limits are shown as text. */
+export function draftFromQuestion(question: AdminQuestion): QuestionDraft {
+  return {
+    type: question.type,
+    title: question.title,
+    helpText: question.helpText ?? '',
+    required: question.required,
+    showOnProfile: question.showOnProfile,
+    allowOther: question.allowOther,
+    options: question.options.map((option) => ({
+      key: option.id,
+      id: option.id,
+      label: option.label,
+    })),
+    min: limitText(question.limits.min),
+    max: limitText(question.limits.max),
+  };
+}
+
+/**
+ * The draft of a replacement (UI-D-574): the old title, help text, `required` and `showOnProfile` are
+ * copied and nothing else, so the admin picks the new type from an open grid. The old answers are not read.
+ */
+export function replaceDraftFrom(question: AdminQuestion): QuestionDraft {
+  return {
+    ...blankDraft(),
+    title: question.title,
+    helpText: question.helpText ?? '',
+    required: question.required,
+    showOnProfile: question.showOnProfile,
+  };
+}
+
 /** A limit as the field shows it: pt-BR text for a number, the ISO day for a date. */
 export function limitText(value: number | string | undefined): string {
   if (typeof value === 'number') return formatNumberPtBr(value);
@@ -151,6 +186,72 @@ export function toCreateBody(draft: QuestionDraft): CreateBody {
     options: choice ? draft.options.map((option) => ({ label: option.label.trim() })) : [],
     limits: parseLimits(draft).limits,
   };
+}
+
+/** The body of `PATCH /questions/{id}`: `revision` (the optimistic lock) and only the keys that changed. */
+export interface UpdateBody {
+  revision: number;
+  type?: ProfileFormType;
+  title?: string;
+  helpText?: string | null;
+  required?: boolean;
+  showOnProfile?: boolean;
+  allowOther?: boolean;
+  options?: { id?: string; label: string }[];
+  limits?: ProfileFormLimits;
+}
+
+const sameLimits = (a: ProfileFormLimits, b: ProfileFormLimits) =>
+  a.min === b.min && a.max === b.max;
+
+/**
+ * The edit as the API wants it: `revision` always, then ONLY what differs from the stored question. An
+ * option row that has a server id travels as `{ id, label }` (a rename or a reorder keeps what stored answers
+ * mean), a new row as `{ label }`. A type change also sends the options, "Outro" and limits of the new type,
+ * because the server drops what the new type cannot carry and keeps what the body does not name.
+ */
+export function toUpdateBody(question: AdminQuestion, draft: QuestionDraft): UpdateBody {
+  if (draft.type === null) throw new Error('A question body needs a type');
+  const body: UpdateBody = { revision: question.revision };
+  const typeChanged = draft.type !== question.type;
+  if (typeChanged) body.type = draft.type;
+
+  const title = draft.title.trim();
+  if (title !== question.title) body.title = title;
+  const help = draft.helpText.trim() === '' ? null : draft.helpText.trim();
+  if (help !== question.helpText) body.helpText = help;
+  if (draft.required !== question.required) body.required = draft.required;
+  if (draft.showOnProfile !== question.showOnProfile) body.showOnProfile = draft.showOnProfile;
+
+  const choice = isChoiceType(draft.type);
+  const allowOther = choice && draft.allowOther;
+  if (allowOther !== question.allowOther) body.allowOther = allowOther;
+
+  if (choice) {
+    const next = draft.options.map((option) => ({
+      ...(option.id === undefined ? {} : { id: option.id }),
+      label: option.label.trim(),
+    }));
+    const same =
+      next.length === question.options.length &&
+      next.every(
+        (option, index) =>
+          option.id === question.options[index]?.id &&
+          option.label === question.options[index]?.label,
+      );
+    if (typeChanged || !same) body.options = next;
+  }
+
+  if (isRangeType(draft.type)) {
+    const { limits } = parseLimits(draft);
+    if (typeChanged || !sameLimits(limits, question.limits)) body.limits = limits;
+  }
+  return body;
+}
+
+/** Whether an update body names anything besides the revision (otherwise there is nothing to save). */
+export function hasChanges(body: UpdateBody): boolean {
+  return Object.keys(body).some((key) => key !== 'revision');
 }
 
 /** What a draft compares on: the user-visible content, without the client row keys. */
@@ -242,7 +343,7 @@ export function validateOptions(options: readonly OptionDraft[]): OptionsErrors 
  * type and a minimum that is not above the maximum. The type is not an error here (the save button stays
  * disabled until one is chosen). The server repeats every rule.
  */
-export function validateDraft(draft: QuestionDraft): DraftErrors {
+export function validateDraft(draft: QuestionDraft, question?: AdminQuestion | null): DraftErrors {
   const errors: DraftErrors = {};
   const title = draft.title.trim();
   if (title === '') errors.title = { key: 'errors.titleRequired' };
@@ -265,6 +366,16 @@ export function validateDraft(draft: QuestionDraft): DraftErrors {
     const { min, max } = limits;
     if (min !== undefined && max !== undefined && min > max) {
       errors.limits = { key: draft.type === 'number' ? 'limits.errNumber' : 'limits.errDate' };
+    }
+    // A stored question with answers may only widen its limits (D-587): refused before any request.
+    if (
+      !errors.limits &&
+      !errors.min &&
+      !errors.max &&
+      question &&
+      draftLock(question, draft) === 'limits_locked'
+    ) {
+      errors.limits = { key: 'locked.limitsRefused' };
     }
   }
   return errors;
@@ -368,4 +479,161 @@ export function renameOptionRow(
   label: string,
 ): OptionDraft[] {
   return options.map((option) => (option.key === key ? { ...option, label } : option));
+}
+
+// ── The D-587 locks, mirrored (UI-D-574, UI-D-575, T-12-36) ───────────────────────────────────────
+
+/** The part of a question the lock rules look at (the shape of `packages/core/server/profile-form/lock-rules.ts`). */
+export interface LockDefinition {
+  type: string;
+  showOnProfile: boolean;
+  allowOther: boolean;
+  options: readonly { id: string; label: string }[];
+  limits: { min?: number | string; max?: number | string };
+}
+
+export interface LockInput {
+  current: LockDefinition;
+  next: LockDefinition;
+  answerCount: number;
+  answeredOptionIds: ReadonlySet<string> | readonly string[];
+  otherAnswered: boolean;
+}
+
+/**
+ * A bound that did not exist and now does is a narrowing; so is a minimum that rises or a maximum that
+ * falls. Numbers compare as numbers, dates as calendar days (ISO days order as text). A bound whose kind
+ * does not match the type is not a bound. Same rule as the server's `narrows`.
+ */
+export function narrowsLimits(
+  type: string,
+  current: LockDefinition['limits'],
+  next: LockDefinition['limits'],
+): boolean {
+  const isBound =
+    type === 'number'
+      ? (value: unknown): value is number => typeof value === 'number'
+      : type === 'date'
+        ? (value: unknown): value is string => typeof value === 'string'
+        : null;
+  if (isBound === null) return false;
+  const lowers = (a: unknown, b: unknown) => (a as number | string) < (b as number | string);
+  const raises = (a: unknown, b: unknown) => (a as number | string) > (b as number | string);
+  if (isBound(next.min) && (!isBound(current.min) || raises(next.min, current.min))) return true;
+  if (isBound(next.max) && (!isBound(current.max) || lowers(next.max, current.max))) return true;
+  return false;
+}
+
+/**
+ * The first D-587 rule the change breaks, or `null`: **a port of the server's `checkLocks`**
+ * (`packages/core/server/profile-form/lock-rules.ts`) in the same check order (type, answered option,
+ * "Outro", visibility, limits). `editor-state.test.ts` feeds it the same cases as
+ * `packages/core/tests/profile-form-lock-rules.test.ts`, so the two cannot drift apart unseen. The server,
+ * and the trigger behind it, stay the authority; this only keeps the sheet from offering what they refuse.
+ */
+export function checkDraftLocks(input: LockInput): ProfileFormIssue | null {
+  const { current, next, answerCount, otherAnswered } = input;
+  if (answerCount <= 0) return null;
+  const answered =
+    input.answeredOptionIds instanceof Set
+      ? input.answeredOptionIds
+      : new Set(input.answeredOptionIds);
+
+  if (next.type !== current.type) return 'type_locked';
+
+  for (const option of current.options) {
+    if (!answered.has(option.id)) continue;
+    const kept = next.options.find((candidate) => candidate.id === option.id);
+    if (!kept || kept.label !== option.label) return 'option_locked';
+  }
+
+  if (current.allowOther && !next.allowOther && otherAnswered) return 'other_locked';
+  if (!current.showOnProfile && next.showOnProfile) return 'visibility_locked';
+  if (narrowsLimits(current.type, current.limits, next.limits)) return 'limits_locked';
+  return null;
+}
+
+/** What the sheet locks or explains for a stored question that has answers (all `false` for a new one). */
+export interface LockFlags {
+  answerCount: number;
+  /** The type picker is a read-only row. */
+  typeLocked: boolean;
+  /** Option id to its answer count, only for options with at least one answer: shown read-only, no remove. */
+  lockedOptions: ReadonlyMap<string, number>;
+  /** The "Outro" switch is locked on. */
+  otherLocked: boolean;
+  /** A number or date pair may only widen. */
+  limitsWidenOnly: boolean;
+  /** A private question cannot become public: the switch is disabled and off. */
+  visibilityFrozen: boolean;
+  /** A public question may be turned off but not on again: the warning line. */
+  visibilityRatchet: boolean;
+}
+
+const NO_LOCKS: LockFlags = {
+  answerCount: 0,
+  typeLocked: false,
+  lockedOptions: new Map(),
+  otherLocked: false,
+  limitsWidenOnly: false,
+  visibilityFrozen: false,
+  visibilityRatchet: false,
+};
+
+/**
+ * The locks of a stored question, from the data the builder already reads (`answerCount` per question and per
+ * option). One fact is not in that read: whether an "Outro" answer exists. A question that has answers and
+ * allows "Outro" is therefore shown locked on, which is the safe side: the admin is never offered a switch the
+ * server (`other_locked`) might refuse. The server stays the authority and the 409 alert explains a race.
+ */
+export function lockFlags(question: AdminQuestion | null): LockFlags {
+  if (!question || question.answerCount <= 0) return NO_LOCKS;
+  return {
+    answerCount: question.answerCount,
+    typeLocked: true,
+    lockedOptions: new Map(
+      question.options.filter((option) => option.answerCount > 0).map((o) => [o.id, o.answerCount]),
+    ),
+    otherLocked: question.allowOther,
+    limitsWidenOnly: isRangeType(question.type),
+    visibilityFrozen: !question.showOnProfile,
+    visibilityRatchet: question.showOnProfile,
+  };
+}
+
+/** The stored question as the lock rules see it. */
+export function lockDefinitionOf(question: AdminQuestion): LockDefinition {
+  return {
+    type: question.type,
+    showOnProfile: question.showOnProfile,
+    allowOther: question.allowOther,
+    options: question.options.map(({ id, label }) => ({ id, label })),
+    limits: question.limits,
+  };
+}
+
+/** The draft as the lock rules see it (option labels trimmed, as the server stores them). */
+function lockDefinitionOfDraft(draft: QuestionDraft): LockDefinition {
+  return {
+    type: draft.type ?? '',
+    showOnProfile: draft.showOnProfile,
+    allowOther: isChoiceType(draft.type) && draft.allowOther,
+    options: draft.options.map((option) => ({ id: option.id ?? '', label: option.label.trim() })),
+    limits: parseLimits(draft).limits,
+  };
+}
+
+/**
+ * The first lock the draft would break for this stored question, by the mirrored rules. The sheet has no
+ * control that can break the first four (they are disabled or read-only); the limits one is real, because the
+ * pair is free text, and is turned into the "só é possível ampliar" sentence before any request.
+ */
+export function draftLock(question: AdminQuestion, draft: QuestionDraft): ProfileFormIssue | null {
+  return checkDraftLocks({
+    current: lockDefinitionOf(question),
+    next: lockDefinitionOfDraft(draft),
+    answerCount: question.answerCount,
+    answeredOptionIds: question.options.filter((o) => o.answerCount > 0).map((o) => o.id),
+    otherAnswered: question.allowOther,
+  });
 }

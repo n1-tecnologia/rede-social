@@ -2,7 +2,7 @@
 
 import { PROFILE_FORM_LIMITS } from '@rede-social/contracts/profile-form';
 import { Button, IconButton, Input, Switch } from '@rede-social/ui';
-import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Lock, Plus, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useLayoutEffect, useRef } from 'react';
 import {
@@ -21,6 +21,13 @@ export interface OptionsEditorProps {
   errors?: OptionsErrors;
   onChange: (options: OptionDraft[]) => void;
   onAllowOtherChange: (value: boolean) => void;
+  /**
+   * Option id to its answer count, for the options that have answers (D-587, UI-D-574): shown as read-only
+   * rows with the count, no remove, reorder still working.
+   */
+  lockedCounts?: ReadonlyMap<string, number>;
+  /** "Outro" is locked on because the question has answers. */
+  otherLocked?: boolean;
 }
 
 const rowId = (key: string) => `pf-option-${key}`;
@@ -44,6 +51,8 @@ export function OptionsEditor({
   errors,
   onChange,
   onAllowOtherChange,
+  lockedCounts,
+  otherLocked = false,
 }: OptionsEditorProps) {
   const t = useTranslations('profileForm.admin.editor');
   const max = PROFILE_FORM_LIMITS.options;
@@ -85,23 +94,45 @@ export function OptionsEditor({
         {t('options.legend')}
       </legend>
 
+      {lockedCounts && lockedCounts.size > 0 ? (
+        <p className="text-xs font-normal text-text-secondary">{t('locked.options')}</p>
+      ) : null}
+
       <ul className="flex flex-col gap-2">
         {options.map((option, index) => {
           const invalid = errors?.rows[option.key] !== undefined;
+          const answers = option.id === undefined ? undefined : lockedCounts?.get(option.id);
+          const locked = answers !== undefined;
           return (
             <li key={option.key} className="flex flex-wrap items-center gap-2">
-              <Input
-                id={rowId(option.key)}
-                aria-label={t('options.label', { n: index + 1 })}
-                placeholder={t('options.placeholder')}
-                maxLength={PROFILE_FORM_LIMITS.optionLabel}
-                value={option.label}
-                aria-invalid={invalid || undefined}
-                containerClassName="min-w-32 flex-1"
-                onChange={(event) =>
-                  onChange(renameOptionRow(options, option.key, event.target.value))
-                }
-              />
+              {locked ? (
+                <span
+                  data-option-locked
+                  className="flex min-h-11 min-w-32 flex-1 items-center gap-2 rounded-xl border border-border bg-bg-tertiary px-3 py-2"
+                >
+                  <Lock aria-hidden size={14} className="shrink-0 text-text-secondary" />
+                  <span className="sr-only">{t('locked.option')}</span>
+                  <span className="min-w-0 flex-1 break-words text-base text-text">
+                    {option.label}
+                  </span>
+                  <span className="shrink-0 text-xs font-normal text-text-tertiary">
+                    {t('locked.optionAnswers', { n: answers })}
+                  </span>
+                </span>
+              ) : (
+                <Input
+                  id={rowId(option.key)}
+                  aria-label={t('options.label', { n: index + 1 })}
+                  placeholder={t('options.placeholder')}
+                  maxLength={PROFILE_FORM_LIMITS.optionLabel}
+                  value={option.label}
+                  aria-invalid={invalid || undefined}
+                  containerClassName="min-w-32 flex-1"
+                  onChange={(event) =>
+                    onChange(renameOptionRow(options, option.key, event.target.value))
+                  }
+                />
+              )}
               <span className="flex shrink-0 items-center">
                 <IconButton
                   id={buttonId(option.key, 'up')}
@@ -119,13 +150,15 @@ export function OptionsEditor({
                   disabled={index === options.length - 1}
                   onClick={() => move(option.key, 'down')}
                 />
-                <IconButton
-                  icon={X}
-                  size={18}
-                  label={t('options.remove', { n: index + 1 })}
-                  disabled={atMin}
-                  onClick={() => onChange(removeOptionRow(options, option.key))}
-                />
+                {locked ? null : (
+                  <IconButton
+                    icon={X}
+                    size={18}
+                    label={t('options.remove', { n: index + 1 })}
+                    disabled={atMin}
+                    onClick={() => onChange(removeOptionRow(options, option.key))}
+                  />
+                )}
               </span>
             </li>
           );
@@ -154,7 +187,7 @@ export function OptionsEditor({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="break-words text-sm font-bold text-text">{t('other.label')}</span>
           <span id="pf-other-helper" className="text-xs font-normal text-text-tertiary">
-            {t('other.helper')}
+            {otherLocked ? t('locked.other') : t('other.helper')}
           </span>
         </div>
         <Switch
@@ -162,6 +195,7 @@ export function OptionsEditor({
           label={t('other.label')}
           aria-describedby="pf-other-helper"
           checked={allowOther}
+          disabled={otherLocked}
           onChange={onAllowOtherChange}
         />
       </div>

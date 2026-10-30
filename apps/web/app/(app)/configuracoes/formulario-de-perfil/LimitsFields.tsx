@@ -16,6 +16,8 @@ export interface LimitsFieldsProps {
   maxError?: FieldError;
   /** The pair rule: the minimum is above the maximum. */
   pairError?: FieldError;
+  /** The question has answers: the pair may only widen (D-587), and a note says so. */
+  widenOnly?: boolean;
 }
 
 /** The one-line note of each type that has no field of its own (UI-D-572). Text types carry their fixed cap. */
@@ -45,6 +47,7 @@ export function LimitsFields({
   minError,
   maxError,
   pairError,
+  widenOnly = false,
 }: LimitsFieldsProps) {
   const t = useTranslations('profileForm.admin.editor');
 
@@ -74,6 +77,9 @@ export function LimitsFields({
             onChange={(event) => onMaxChange(event.target.value)}
           />
         </div>
+        {widenOnly ? (
+          <p className="text-xs font-normal text-text-secondary">{t('locked.limits')}</p>
+        ) : null}
         {pairError ? (
           <p role="alert" className="text-sm text-danger">
             {t(pairError.key, pairError.values)}

@@ -10,6 +10,8 @@ import {
   type ProfileFormImpactChange,
   profileFormSummarySchema,
   reorderBodySchema,
+  replaceQuestionBodySchema,
+  updateQuestionBodySchema,
 } from '@rede-social/contracts/profile-form';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
@@ -372,4 +374,101 @@ export async function createQuestionAction(
   const failure = failureOf('create', sent);
   if (failure.navigate) redirect(failure.navigate);
   return failure.result;
+}
+
+/**
+ * `PATCH /v1/profile_form/questions/{id}`: an edit under the five D-587 locks and an optimistic `revision`.
+ * The server answers `conflict` (`stale_revision`, one of the lock codes, `already_archived`) and the sheet
+ * explains it; a body that changes nothing is a 200 that does not bump the revision.
+ */
+export async function updateQuestionAction(
+  id: string,
+  body: unknown,
+  options: { reopens?: boolean } = {},
+): Promise<SaveQuestionResult> {
+  if (!z.uuid().safeParse(id).success) return { ok: false, code: 'failed' };
+  const parsed = updateQuestionBodySchema.safeParse(body);
+  if (!parsed.success) return { ok: false, code: 'invalid', fields: fieldsOf(parsed.error.issues) };
+
+  const sent = await send('update', `/v1/profile_form/questions/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parsed.data),
+  });
+  if (sent.kind === 'ok') return savedQuestion(sent.body, options.reopens === true);
+
+  const failure = failureOf('update', sent);
+  if (failure.navigate) redirect(failure.navigate);
+  return failure.result;
+}
+
+/**
+ * `POST /v1/profile_form/questions/replace`: the new question and the archive of the old one as ONE server
+ * operation, so a failure leaves the old question active (D-587, UI-D-574). The body is the create body plus
+ * `replaces`; it is validated here with the contract's own schema first.
+ */
+export async function replaceQuestionAction(
+  body: unknown,
+  options: { reopens?: boolean } = {},
+): Promise<SaveQuestionResult> {
+  const parsed = replaceQuestionBodySchema.safeParse(body);
+  if (!parsed.success) return { ok: false, code: 'invalid', fields: fieldsOf(parsed.error.issues) };
+
+  const sent = await send('replace', '/v1/profile_form/questions/replace', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parsed.data),
+  });
+  if (sent.kind === 'ok') return savedQuestion(sent.body, options.reopens === true);
+
+  const failure = failureOf('replace', sent);
+  if (failure.navigate) redirect(failure.navigate);
+  return failure.result;
+}
+
+/**
+ * What archive and delete answer: `hasAnswers` (409 `has_answers`: an answer arrived between the page read
+ * and the tap, D-588), `gone` (404: the question is no longer there), and the shared codes.
+ */
+export type RemoveResult =
+  | { ok: true }
+  | { ok: false; code: 'hasAnswers' | 'gone' | 'forbidden' | 'moduleOff' | 'failed' };
+
+async function remove(
+  label: 'archive' | 'delete',
+  id: string,
+  path: string,
+  init: RequestInit,
+): Promise<RemoveResult> {
+  if (!z.uuid().safeParse(id).success) return { ok: false, code: 'failed' };
+  const sent = await send(label, path, init);
+  if (sent.kind === 'ok') return { ok: true };
+
+  const failure = failureOf(label, sent);
+  if (failure.navigate) redirect(failure.navigate);
+  const result = failure.result;
+  if (result.ok) return { ok: false, code: 'failed' };
+  if (result.code === 'conflict') {
+    return { ok: false, code: result.issue === 'has_answers' ? 'hasAnswers' : 'gone' };
+  }
+  if (result.code === 'forbidden' || result.code === 'moduleOff') {
+    return { ok: false, code: result.code };
+  }
+  return { ok: false, code: 'failed' };
+}
+
+/**
+ * `POST /v1/profile_form/questions/{id}/archive`: the question leaves the form and every answer stays
+ * (D-588). Idempotent on the server. It frees members, so it needs no impact count.
+ */
+export async function archiveQuestionAction(id: string): Promise<RemoveResult> {
+  return remove('archive', id, `/v1/profile_form/questions/${id}/archive`, { method: 'POST' });
+}
+
+/**
+ * `DELETE /v1/profile_form/questions/{id}`: only a question nobody ever answered. If an answer arrived since
+ * the page was read the server refuses with `has_answers` and the screen offers "Arquivar" instead (D-588).
+ */
+export async function deleteQuestionAction(id: string): Promise<RemoveResult> {
+  return remove('delete', id, `/v1/profile_form/questions/${id}`, { method: 'DELETE' });
 }

@@ -535,3 +535,77 @@ describe('profileForm.admin.editor: options, limits, notes and the impact extras
     );
   });
 });
+
+describe('profileForm.admin: the locked states, archive and delete (12-16 Task 3)', () => {
+  const e = createTranslator({
+    locale: 'pt-BR',
+    messages,
+    namespace: 'profileForm.admin.editor',
+  }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+
+  it('pins the locked-state and visibility-ratchet sentences verbatim', () => {
+    const plain: [string, string][] = [
+      ['locked.replace', 'Criar nova pergunta e arquivar esta'],
+      [
+        'locked.options',
+        'As opções que já têm respostas não podem ser removidas nem renomeadas. Você pode adicionar novas e mudar a ordem.',
+      ],
+      ['locked.option', 'Opção bloqueada: já tem respostas'],
+      ['locked.other', 'Já existem respostas “Outro”. Não dá para desligar.'],
+      ['locked.limits', 'Como já há respostas, só dá para ampliar o intervalo.'],
+      [
+        'locked.limitsRefused',
+        'Esse intervalo deixaria respostas fora do limite. Só é possível ampliar.',
+      ],
+      [
+        'public.frozen',
+        'Esta pergunta já tem respostas privadas, então não pode passar a ser pública. Para mostrar no perfil, crie uma nova pergunta e arquive esta.',
+      ],
+      ['public.ratchet', 'Se você desligar, não poderá ligar de novo enquanto houver respostas.'],
+      ['archive', 'Arquivar pergunta'],
+      ['delete', 'Excluir pergunta'],
+      ['toasts.updated', 'Pergunta atualizada.'],
+      ['toasts.replaced', 'Pergunta substituída.'],
+    ];
+    for (const [key, text] of plain) expect(e(key), key).toBe(text);
+  });
+
+  it('pluralises the locked type explanation and the option answer caption', () => {
+    expect(e('locked.type', { n: 1 })).toBe(
+      'Esta pergunta já tem 1 resposta, então o tipo não pode mudar. Para usar outro tipo, crie uma nova pergunta e arquive esta.',
+    );
+    expect(e('locked.type', { n: 12 })).toBe(
+      'Esta pergunta já tem 12 respostas, então o tipo não pode mudar. Para usar outro tipo, crie uma nova pergunta e arquive esta.',
+    );
+    expect(e('locked.optionAnswers', { n: 1 })).toBe('1 resposta');
+    expect(e('locked.optionAnswers', { n: 8 })).toBe('8 respostas');
+  });
+
+  it('pins the archive and delete dialogs verbatim, with the plural kept-answers sentence', () => {
+    const plain: [string, string][] = [
+      ['archive.title', 'Arquivar esta pergunta?'],
+      ['archive.requiredNote', 'Quem ainda não respondeu deixa de precisar.'],
+      ['archive.confirm', 'Arquivar'],
+      ['archive.cancel', 'Cancelar'],
+      ['archive.done', 'Pergunta arquivada.'],
+      ['delete.title', 'Excluir esta pergunta?'],
+      ['delete.body', 'Ninguém respondeu esta pergunta ainda. A exclusão não pode ser desfeita.'],
+      ['delete.confirm', 'Excluir'],
+      ['delete.cancel', 'Cancelar'],
+      ['delete.done', 'Pergunta excluída.'],
+      ['delete.hasAnswers', 'Esta pergunta recebeu respostas. Arquive em vez de excluir.'],
+    ];
+    for (const [key, text] of plain) expect(a(key), key).toBe(text);
+    expect(a('archive.body', { n: 1 })).toBe(
+      'Ela deixa de ser feita aos membros. A 1 resposta continua guardada e entra na exportação. Você pode reativar depois.',
+    );
+    expect(a('archive.body', { n: 12 })).toBe(
+      'Ela deixa de ser feita aos membros. As 12 respostas continuam guardadas e entram na exportação. Você pode reativar depois.',
+    );
+  });
+
+  it('keeps the vocabulary rules in the editor too', () => {
+    const text = JSON.stringify((messages.profileForm as Record<string, unknown>).admin);
+    expect(text).not.toMatch(/\b(survey|questionário|deletar|template)\b/i);
+  });
+});

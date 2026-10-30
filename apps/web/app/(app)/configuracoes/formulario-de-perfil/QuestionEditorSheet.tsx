@@ -14,32 +14,43 @@ import {
   useMediaQuery,
   useToast,
 } from '@rede-social/ui';
-import { CircleAlert } from 'lucide-react';
+import { Archive, CircleAlert, Info, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type FormEvent, useCallback, useRef, useState } from 'react';
 import { isChoiceType } from '@/lib/profile-form/question-types';
+import { ArchiveDialog, type ArchiveKind } from './ArchiveDialog';
 import {
+  archiveQuestionAction,
   createQuestionAction,
+  deleteQuestionAction,
   type ImpactActionResult,
+  type RemoveResult,
   readImpactAction,
+  replaceQuestionAction,
   type SaveQuestionResult,
+  updateQuestionAction,
 } from './actions';
 import {
   blankDraft,
   canSave,
   changeType,
   type DraftErrors,
+  draftFromQuestion,
   type EditorMode,
+  hasChanges,
   hasErrors,
   isDirty,
+  lockFlags,
   type QuestionDraft,
   type Reopening,
   reopeningOf,
+  replaceDraftFrom,
   serverFieldError,
   serverLimitsError,
   serverOptionsErrors,
   toCreateBody,
+  toUpdateBody,
   validateDraft,
 } from './editor-state';
 import { ImpactDialog } from './ImpactDialog';
@@ -59,6 +70,8 @@ export interface QuestionEditorSheetProps {
   limit: number;
   /** MUST be stable (`useCallback`): the shipped focus trap re-arms when it changes. */
   onClose: () => void;
+  /** "Criar nova pergunta e arquivar esta": the host re-opens the sheet in replace mode for this question. */
+  onReplace?: (question: AdminQuestion) => void;
 }
 
 const TITLE_ID = 'pf-title';
@@ -66,10 +79,16 @@ const HELP_ID = 'pf-help';
 
 /**
  * The question editor (12-16, D-585, D-590, D-593, D-594, UI-D-569..UI-D-573; PFORM-02, PFORM-22): ONE
- * `BottomSheet` (the centred card from `md`) to create a question. The order of the sheet is the order of
- * the contract: the LGPD notice first (never dismissible, no purpose field, no blocking of titles or
- * types), the type (nothing below the grid until a tile is chosen), the title and the help text with live
- * counters, the two switches and "Salvar pergunta".
+ * `BottomSheet` (the centred card from `md`) with three modes: create, edit and replace. The order of the
+ * sheet is the order of the contract: the LGPD notice first (create and replace only; never dismissible, no
+ * purpose field, no blocking of titles or types), the replace banner, the type (nothing below the grid
+ * until a tile is chosen), the title and the help text with live counters, the type-specific block, the two
+ * switches, "Salvar pergunta" and, in edit mode, "Arquivar pergunta" or "Excluir pergunta".
+ *
+ * **Locks (D-587, D-593).** For a stored question with answers the sheet only explains what the server
+ * refuses: a read-only type row, locked options, "Outro" locked on, widen-only limits, a private question
+ * that cannot become public. Each shows its reason and its way out (one tap to "Criar nova pergunta e
+ * arquivar esta"). A race the sheet could not see comes back as a coded 409 and is shown in the sheet.
  *
  * **It cannot be closed while it saves**, and a close with unsaved edits asks first (the dirty guard):
  * backdrop, handle and Escape all reach `requestClose`. The fields are one disabled `fieldset` while the
@@ -86,6 +105,7 @@ export function QuestionEditorSheet({
   tenantName,
   limit,
   onClose,
+  onReplace,
 }: QuestionEditorSheetProps) {
   const t = useTranslations('profileForm.admin');
   const te = useTranslations('profileForm.admin.editor');
@@ -94,12 +114,25 @@ export function QuestionEditorSheet({
   const toast = useToast();
   const desktop = useMediaQuery('(min-width: 768px)');
 
-  const [initial] = useState<QuestionDraft>(() => blankDraft());
+  const [initial] = useState<QuestionDraft>(() => {
+    if (mode === 'edit' && question) return draftFromQuestion(question);
+    if (mode === 'replace' && question) return replaceDraftFrom(question);
+    return blankDraft();
+  });
+  const stored = mode === 'edit' ? (question ?? null) : null;
+  const locks = lockFlags(stored);
   const [draft, setDraft] = useState<QuestionDraft>(initial);
   const [errors, setErrors] = useState<DraftErrors>({});
   const [saving, setSaving] = useState(false);
   const [gridOpen, setGridOpen] = useState(draft.type === null);
   const [discardOpen, setDiscardOpen] = useState(false);
+  // What a confirmed discard does: close the sheet, or leave for the replace flow.
+  const [afterDiscard, setAfterDiscard] = useState<'close' | 'replace'>('close');
+  // The 409 of the truth: another admin changed the question, or answers arrived and a lock now applies.
+  const [conflict, setConflict] = useState(false);
+  // The archive or delete confirmation; `removeKind` is kept for the dialog's exit animation.
+  const [removeKind, setRemoveKind] = useState<ArchiveKind>('archive');
+  const [removeOpen, setRemoveOpen] = useState(false);
   // `impact` keeps the figure for the dialog's exit animation; `impactOpen` is what the dialog follows.
   const [impact, setImpact] = useState<{ members: number; kind: Reopening['kind'] } | null>(null);
   const [impactOpen, setImpactOpen] = useState(false);
@@ -112,9 +145,22 @@ export function QuestionEditorSheet({
   const requestClose = useCallback(() => {
     const { dirty: unsaved, saving: busy, onClose: close } = latest.current;
     if (busy) return;
-    if (unsaved) setDiscardOpen(true);
-    else close();
+    if (unsaved) {
+      setAfterDiscard('close');
+      setDiscardOpen(true);
+    } else close();
   }, []);
+
+  /** The replace flow starts from the stored question; unsaved edits are asked about first. */
+  function startReplace() {
+    if (!question || !onReplace) return;
+    if (dirty) {
+      setAfterDiscard('replace');
+      setDiscardOpen(true);
+      return;
+    }
+    onReplace(question);
+  }
 
   function patch(change: Partial<QuestionDraft>) {
     setDraft((current) => ({ ...current, ...change }));
@@ -157,6 +203,11 @@ export function QuestionEditorSheet({
       case 'limit':
         toast.show({ tone: 'error', message: t('list.limit', { max: limit }) });
         return;
+      case 'conflict':
+        // Nothing was saved. The page is refreshed so reopening the question shows the current version.
+        setConflict(true);
+        router.refresh();
+        return;
       case 'invalid': {
         const found: DraftErrors = {};
         for (const field of ['title', 'helpText'] as const) {
@@ -188,7 +239,18 @@ export function QuestionEditorSheet({
     setSaving(true);
     let result: SaveQuestionResult = { ok: false, code: 'failed' };
     try {
-      result = await createQuestionAction(toCreateBody(draft), { reopens });
+      if (mode === 'edit' && question) {
+        result = await updateQuestionAction(question.id, toUpdateBody(question, draft), {
+          reopens,
+        });
+      } else if (mode === 'replace' && question) {
+        result = await replaceQuestionAction(
+          { ...toCreateBody(draft), replaces: question.id },
+          { reopens },
+        );
+      } else {
+        result = await createQuestionAction(toCreateBody(draft), { reopens });
+      }
     } catch {
       // A thrown request reads like any other failed write: the sheet stays open with the draft.
     } finally {
@@ -199,10 +261,19 @@ export function QuestionEditorSheet({
       return;
     }
     // The count in the toast is the SERVER's, read after the write; the preview was only a snapshot.
-    toast.show({
-      tone: 'success',
-      message: reopens ? t('impact.added', { n: result.pending ?? 0 }).trim() : te('toasts.added'),
-    });
+    const done =
+      mode === 'edit'
+        ? te('toasts.updated')
+        : mode === 'replace'
+          ? te('toasts.replaced')
+          : te('toasts.added');
+    const message =
+      reopens && mode === 'create'
+        ? t('impact.added', { n: result.pending ?? 0 }).trim()
+        : reopens
+          ? `${done} ${t('impact.pending', { n: result.pending ?? 0 })}`.trim()
+          : done;
+    toast.show({ tone: 'success', message });
     router.refresh();
     onClose();
   }
@@ -239,13 +310,63 @@ export function QuestionEditorSheet({
     setImpactOpen(true);
   }
 
+  /** Archive or delete the stored question (D-588). Both free members, so neither reads an impact. */
+  async function remove(kind: ArchiveKind) {
+    if (!question) return;
+    let result: RemoveResult = { ok: false, code: 'failed' };
+    try {
+      result =
+        kind === 'archive'
+          ? await archiveQuestionAction(question.id)
+          : await deleteQuestionAction(question.id);
+    } catch {
+      // Falls through to the failure toast: the question was not changed as far as this screen knows.
+    }
+    if (result.ok) {
+      toast.show({ tone: 'success', message: t(`${kind}.done`) });
+      router.refresh();
+      onClose();
+      return;
+    }
+    switch (result.code) {
+      case 'hasAnswers':
+        // An answer arrived between the page read and the tap: archive instead (D-588).
+        toast.show({ tone: 'error', message: t('delete.hasAnswers') });
+        router.refresh();
+        onClose();
+        return;
+      case 'forbidden':
+        lostPermission(tAdmin('errors.forbidden'));
+        return;
+      case 'moduleOff':
+        lostPermission(t('errors.moduleOff'));
+        return;
+      case 'gone':
+        setConflict(true);
+        router.refresh();
+        return;
+      default:
+        toast.show({ tone: 'error', message: t(`${kind}.failed`) });
+    }
+  }
+
+  function askRemove(kind: ArchiveKind) {
+    setRemoveKind(kind);
+    setRemoveOpen(true);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving || !canSave(draft)) return;
-    const found = validateDraft(draft);
+    const found = validateDraft(draft, stored);
     setErrors(found);
     if (hasErrors(found)) {
       focusFirst(found);
+      return;
+    }
+    // An edit that changes nothing has nothing to send: the sheet simply closes.
+    if (stored && !hasChanges(toUpdateBody(stored, draft))) {
+      onClose();
       return;
     }
     const reopening = reopeningOf(mode, draft, question ?? null);
@@ -282,11 +403,31 @@ export function QuestionEditorSheet({
               </div>
             ) : null}
 
+            {mode === 'replace' && question ? (
+              <div
+                data-replace-banner
+                className="flex items-start gap-2 rounded-xl bg-bg-tertiary px-3 py-3 text-xs font-normal text-text"
+              >
+                <Info aria-hidden size={16} className="mt-px shrink-0 text-text-secondary" />
+                <span className="min-w-0 flex-1 break-words">
+                  {te('replaceBanner', { title: question.title })}
+                </span>
+              </div>
+            ) : null}
+
             <TypePicker
               value={draft.type}
               onChange={(type) => setDraft((current) => changeType(current, type))}
               gridOpen={gridOpen}
               onGridOpenChange={setGridOpen}
+              lock={
+                locks.typeLocked && onReplace
+                  ? { answerCount: locks.answerCount, onReplace: startReplace }
+                  : undefined
+              }
+              droppedOptions={
+                stored !== null && isChoiceType(stored.type) && !isChoiceType(draft.type)
+              }
             />
 
             {draft.type !== null ? (
@@ -336,6 +477,8 @@ export function QuestionEditorSheet({
                     options={draft.options}
                     allowOther={draft.allowOther}
                     errors={errors.options}
+                    lockedCounts={locks.lockedOptions}
+                    otherLocked={locks.otherLocked}
                     onChange={(options) => {
                       patch({ options });
                       clear('options');
@@ -350,6 +493,7 @@ export function QuestionEditorSheet({
                     minError={errors.min}
                     maxError={errors.max}
                     pairError={errors.limits}
+                    widenOnly={locks.limitsWidenOnly}
                     onMinChange={(min) => {
                       patch({ min });
                       clear('min');
@@ -368,14 +512,60 @@ export function QuestionEditorSheet({
                   showOnProfile={draft.showOnProfile}
                   onRequiredChange={(required) => patch({ required })}
                   onShowOnProfileChange={(showOnProfile) => patch({ showOnProfile })}
+                  lock={
+                    locks.visibilityFrozen || locks.visibilityRatchet
+                      ? {
+                          frozen: locks.visibilityFrozen,
+                          ratchet: locks.visibilityRatchet,
+                          onReplace: startReplace,
+                        }
+                      : undefined
+                  }
                 />
               </>
             ) : null}
           </fieldset>
 
+          {conflict ? (
+            <div
+              role="alert"
+              data-conflict-alert
+              className="rounded-xl border border-danger/40 bg-danger/5 p-4 text-sm text-danger"
+            >
+              {te('errors.conflict')}
+            </div>
+          ) : null}
+
           <Button type="submit" fullWidth size="lg" loading={saving} disabled={!canSave(draft)}>
             {saving ? te('saving') : te('save')}
           </Button>
+
+          {stored ? (
+            <div className="flex flex-col gap-3 border-t border-divider pt-4" data-remove-block>
+              {stored.answerCount > 0 ? (
+                <Button
+                  variant="outline"
+                  fullWidth
+                  disabled={saving}
+                  onClick={() => askRemove('archive')}
+                >
+                  <Archive aria-hidden size={18} />
+                  {te('archive')}
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  fullWidth
+                  className="text-danger"
+                  disabled={saving}
+                  onClick={() => askRemove('delete')}
+                >
+                  <Trash2 aria-hidden size={18} />
+                  {te('delete')}
+                </Button>
+              )}
+            </div>
+          ) : null}
         </form>
       </BottomSheet>
 
@@ -385,6 +575,11 @@ export function QuestionEditorSheet({
         open={impactOpen}
         kind={impact?.kind ?? 'add'}
         members={impact?.members ?? 0}
+        note={
+          impact?.kind === 'replace' && question
+            ? t('impact.replaceBody', { title: question.title })
+            : undefined
+        }
         onConfirm={() => write(true)}
         onClose={() => setImpactOpen(false)}
       />
@@ -395,9 +590,22 @@ export function QuestionEditorSheet({
         body={te('discard.body')}
         confirmLabel={te('discard.confirm')}
         cancelLabel={te('discard.cancel')}
-        onConfirm={() => onClose()}
+        onConfirm={() => {
+          if (afterDiscard === 'replace' && question) onReplace?.(question);
+          else onClose();
+        }}
         onClose={() => setDiscardOpen(false)}
       />
+      {stored ? (
+        <ArchiveDialog
+          open={removeOpen}
+          kind={removeKind}
+          answerCount={stored.answerCount}
+          required={stored.required}
+          onConfirm={() => remove(removeKind)}
+          onClose={() => setRemoveOpen(false)}
+        />
+      ) : null}
     </>
   );
 }

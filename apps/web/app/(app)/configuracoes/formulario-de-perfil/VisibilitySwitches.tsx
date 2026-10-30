@@ -1,6 +1,6 @@
 'use client';
 
-import { Switch } from '@rede-social/ui';
+import { Button, Switch } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import type { ReactNode } from 'react';
 
@@ -9,6 +9,12 @@ export interface VisibilitySwitchesProps {
   showOnProfile: boolean;
   onRequiredChange: (value: boolean) => void;
   onShowOnProfileChange: (value: boolean) => void;
+  /**
+   * The ratchet toward private once the question has answers (D-593, PU-1, UI-D-575). `frozen`: the question is
+   * private, so the switch is disabled and off, with the reason and the way out. `ratchet`: it is public, so it
+   * may be turned off, and a line warns it cannot be turned on again while answers exist.
+   */
+  lock?: { frozen: boolean; ratchet: boolean; onReplace: () => void };
 }
 
 interface RowProps {
@@ -55,6 +61,7 @@ export function VisibilitySwitches({
   showOnProfile,
   onRequiredChange,
   onShowOnProfileChange,
+  lock,
 }: VisibilitySwitchesProps) {
   const t = useTranslations('profileForm.admin.editor');
   return (
@@ -69,8 +76,23 @@ export function VisibilitySwitches({
       <SwitchRow
         id="pf-public"
         label={t('public.label')}
-        helper={<p>{t('public.helper')}</p>}
-        checked={showOnProfile}
+        helper={
+          lock?.frozen ? (
+            <>
+              <p>{t('public.frozen')}</p>
+              <Button variant="outline" fullWidth onClick={lock.onReplace}>
+                {t('locked.replace')}
+              </Button>
+            </>
+          ) : (
+            <>
+              <p>{t('public.helper')}</p>
+              {lock?.ratchet && showOnProfile ? <p>{t('public.ratchet')}</p> : null}
+            </>
+          )
+        }
+        checked={lock?.frozen ? false : showOnProfile}
+        disabled={lock?.frozen}
         onChange={onShowOnProfileChange}
       />
     </div>

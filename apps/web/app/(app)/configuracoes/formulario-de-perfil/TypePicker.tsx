@@ -1,7 +1,8 @@
 'use client';
 
 import type { ProfileFormType } from '@rede-social/contracts/profile-form';
-import { cn } from '@rede-social/ui';
+import { Button, cn } from '@rede-social/ui';
+import { Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import {
   orderedTypes,
@@ -17,6 +18,13 @@ export interface TypePickerProps {
   /** Whether the 13 tiles are showing. With a type chosen and the grid closed the picker is one summary row. */
   gridOpen: boolean;
   onGridOpenChange: (open: boolean) => void;
+  /**
+   * The stored question has answers (D-587, UI-D-574): the picker is a read-only row with the plural
+   * explanation and the way out, "Criar nova pergunta e arquivar esta".
+   */
+  lock?: { answerCount: number; onReplace: () => void };
+  /** The choice options were dropped by the last type change: say so in a plain note (UI-D-570). */
+  droppedOptions?: boolean;
 }
 
 /**
@@ -27,23 +35,52 @@ export interface TypePickerProps {
  *
  * Once a tile is chosen the grid collapses into "Tipo: {name}" and a ghost "Trocar tipo", which re-opens it.
  */
-export function TypePicker({ value, onChange, gridOpen, onGridOpenChange }: TypePickerProps) {
+export function TypePicker({
+  value,
+  onChange,
+  gridOpen,
+  onGridOpenChange,
+  lock,
+  droppedOptions = false,
+}: TypePickerProps) {
   const t = useTranslations('profileForm');
   const te = useTranslations('profileForm.admin.editor');
 
-  if (value !== null && !gridOpen) {
+  if (lock && value !== null) {
     return (
-      <div className="flex items-center justify-between gap-3">
-        <p className="min-w-0 break-words text-sm font-bold text-text">
+      <div className="flex flex-col gap-3" data-type-locked>
+        <p className="flex min-w-0 items-center gap-2 break-words text-sm font-bold text-text">
+          <Lock aria-hidden size={16} className="shrink-0 text-text-secondary" />
           {te('type.current', { type: t(typeNameKey(value)) })}
         </p>
-        <button
-          type="button"
-          onClick={() => onGridOpenChange(true)}
-          className="inline-flex min-h-11 shrink-0 items-center px-2 text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          {te('type.change')}
-        </button>
+        <p className="text-xs font-normal text-text-secondary">
+          {te('locked.type', { n: lock.answerCount })}
+        </p>
+        <Button variant="outline" fullWidth onClick={lock.onReplace}>
+          {te('locked.replace')}
+        </Button>
+      </div>
+    );
+  }
+
+  if (value !== null && !gridOpen) {
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-3">
+          <p className="min-w-0 break-words text-sm font-bold text-text">
+            {te('type.current', { type: t(typeNameKey(value)) })}
+          </p>
+          <button
+            type="button"
+            onClick={() => onGridOpenChange(true)}
+            className="inline-flex min-h-11 shrink-0 items-center px-2 text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            {te('type.change')}
+          </button>
+        </div>
+        {droppedOptions ? (
+          <p className="text-xs font-normal text-text-secondary">{te('type.dropOptions')}</p>
+        ) : null}
       </div>
     );
   }

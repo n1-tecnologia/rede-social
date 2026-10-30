@@ -6,7 +6,7 @@ import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { adminQuestion } from '@/lib/profile-form/test-fixtures';
+import { adminQuestion, uuid } from '@/lib/profile-form/test-fixtures';
 import type { SaveQuestionResult } from './actions';
 import type { EditorMode } from './editor-state';
 
@@ -21,6 +21,10 @@ import type { EditorMode } from './editor-state';
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
+  update: vi.fn(),
+  replace: vi.fn(),
+  archive: vi.fn(),
+  remove: vi.fn(),
   impact: vi.fn(),
   refresh: vi.fn(),
   show: vi.fn(),
@@ -32,6 +36,11 @@ const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
 vi.mock('./actions', () => ({
   createQuestionAction: (body: unknown, options: unknown) => mocks.create(body, options),
   readImpactAction: (input: unknown) => mocks.impact(input),
+  updateQuestionAction: (id: string, body: unknown, options: unknown) =>
+    mocks.update(id, body, options),
+  replaceQuestionAction: (body: unknown, options: unknown) => mocks.replace(body, options),
+  archiveQuestionAction: (id: string) => mocks.archive(id),
+  deleteQuestionAction: (id: string) => mocks.remove(id),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -44,6 +53,7 @@ vi.mock('@rede-social/ui', async (importOriginal) => ({
 const { QuestionEditorSheet } = await import('./QuestionEditorSheet');
 
 const onClose = vi.fn();
+const onReplace = vi.fn();
 
 function mount(
   props: { mode?: EditorMode; question?: ReturnType<typeof adminQuestion> | null } = {},
@@ -53,9 +63,11 @@ function mount(
       <QuestionEditorSheet
         open
         mode={props.mode ?? 'create'}
+        question={props.question ?? null}
         tenantName="Ana Mentoria"
         limit={30}
         onClose={onClose}
+        onReplace={onReplace}
       />
     </NextIntlClientProvider>,
   );
@@ -81,6 +93,7 @@ function typeTitle(value: string) {
 beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
   onClose.mockReset();
+  onReplace.mockReset();
   mocks.impact.mockResolvedValue({ ok: true, members: 0 });
   mocks.create.mockResolvedValue({
     ok: true,
@@ -820,5 +833,623 @@ describe('the impact before a reopening save (D-585, UI-D-576, T-12-34)', () => 
     expect(mocks.create).toHaveBeenCalledTimes(0);
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Task 3: edit mode, the locks, replace, archive and delete ─────────────────────────────────────
+
+const OPT_A = { id: uuid(9101), label: 'Instagram', answerCount: 8 };
+const OPT_B = { id: uuid(9102), label: 'Indicação', answerCount: 4 };
+const OPT_C = { id: uuid(9103), label: 'Evento', answerCount: 0 };
+
+function answered(over: Partial<ReturnType<typeof adminQuestion>> = {}) {
+  return adminQuestion('single_choice', {
+    title: 'Como conheceu?',
+    helpText: 'Escolha uma',
+    revision: 3,
+    answerCount: 12,
+    options: [OPT_A, OPT_B, OPT_C],
+    ...over,
+  });
+}
+function unanswered(over: Partial<ReturnType<typeof adminQuestion>> = {}) {
+  return adminQuestion('short_text', {
+    title: 'Cargo',
+    revision: 2,
+    answerCount: 0,
+    options: [],
+    ...over,
+  });
+}
+const edit = (question: ReturnType<typeof adminQuestion>) => mount({ mode: 'edit', question });
+const replaceButtons = () =>
+  screen.queryAllByRole('button', { name: 'Criar nova pergunta e arquivar esta' });
+
+describe('edit mode, nothing locked (UI-D-569)', () => {
+  it('opens "Editar pergunta" with the stored data, no LGPD notice, the collapsed type and "Trocar tipo"', () => {
+    edit(unanswered({ helpText: 'Seu cargo' }));
+    expect(screen.getByRole('heading', { name: 'Editar pergunta' })).toBeTruthy();
+    expect(dialog().querySelector('[data-lgpd-notice]')).toBeNull();
+    expect(screen.getByText('Tipo: Texto curto')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Trocar tipo' })).toBeTruthy();
+    expect(titleField().value).toBe('Cargo');
+    expect((screen.getByLabelText('Texto de apoio (opcional)') as HTMLTextAreaElement).value).toBe(
+      'Seu cargo',
+    );
+    expect(screen.getByText('5/120')).toBeTruthy();
+  });
+
+  it('is clean until something changes, then asks before closing', () => {
+    edit(unanswered());
+    closeSheet();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    onClose.mockReset();
+    typeTitle('Cargo atual');
+    closeSheet();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText('Descartar as alterações?')).toBeTruthy();
+  });
+
+  it('closes without a request when nothing changed', async () => {
+    edit(unanswered());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the revision and only the changed keys, then toasts "Pergunta atualizada."', async () => {
+    const question = unanswered();
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    edit(question);
+    typeTitle('Cargo atual');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.update.mock.calls[0]?.[0]).toBe(question.id);
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({ revision: 2, title: 'Cargo atual' });
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Pergunta atualizada.' });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('lets a never-answered question change type, keeping choice options between choice types', async () => {
+    const question = unanswered({
+      type: 'dropdown',
+      options: [OPT_C, { ...OPT_C, id: uuid(9104), label: 'Feira' }],
+    });
+    edit(question);
+    fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
+    pick('Múltipla escolha');
+    expect(screen.getAllByLabelText(/^Opção \d+$/)).toHaveLength(2);
+    expect(screen.queryByText('As opções serão removidas ao trocar para este tipo.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
+    pick('Texto curto');
+    expect(screen.getByText('As opções serão removidas ao trocar para este tipo.')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Opções' })).toBeNull();
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update.mock.calls[0]?.[1]).toMatchObject({ revision: 2, type: 'short_text' });
+  });
+
+  it('reads the impact for an optional question turned required, and only then writes', async () => {
+    const question = unanswered();
+    mocks.impact.mockResolvedValue({ ok: true, members: 5 });
+    mocks.update.mockResolvedValue({ ok: true, question, pending: 4 });
+    edit(question);
+    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).toHaveBeenCalledWith({ change: 'make_required', questionId: question.id });
+    expect(screen.getByText('Tornar a pergunta obrigatória?')).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Tornar obrigatória' }));
+    });
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Pergunta atualizada. 4 membros vão precisar responder.',
+    });
+  });
+
+  it('does not read the impact when a required question stays required or becomes optional', async () => {
+    const question = unanswered({ required: true });
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    edit(question);
+    typeTitle('Outro cargo');
+    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a question WITH answers: every lock shows its reason and its way out (D-587, UI-D-574)', () => {
+  it('replaces the type picker by a read-only row with the plural explanation and the outline replace button', () => {
+    edit(answered());
+    expect(screen.getByText('Tipo: Escolha única')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Tipo de resposta' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Trocar tipo' })).toBeNull();
+    expect(
+      screen.getByText(
+        'Esta pergunta já tem 12 respostas, então o tipo não pode mudar. Para usar outro tipo, crie uma nova pergunta e arquive esta.',
+      ),
+    ).toBeTruthy();
+    const button = replaceButtons()[0] as HTMLElement;
+    expect(button.className).toContain('border-border-secondary');
+  });
+
+  it('says "1 resposta" in the singular', () => {
+    edit(answered({ answerCount: 1 }));
+    expect(screen.getByText(/^Esta pergunta já tem 1 resposta, então/)).toBeTruthy();
+  });
+
+  it('keeps the title and help text free', async () => {
+    const question = answered();
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    edit(question);
+    expect(titleField().disabled).toBe(false);
+    typeTitle('Como nos conheceu?');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({ revision: 3, title: 'Como nos conheceu?' });
+  });
+
+  it('shows answered options read-only with a lock, a count and no remove, unanswered ones editable', () => {
+    edit(answered());
+    expect(
+      screen.getByText(
+        'As opções que já têm respostas não podem ser removidas nem renomeadas. Você pode adicionar novas e mudar a ordem.',
+      ),
+    ).toBeTruthy();
+    const locked = document.querySelectorAll('[data-option-locked]');
+    expect(locked).toHaveLength(2);
+    expect(locked[0]?.textContent).toContain('Instagram');
+    expect(locked[0]?.textContent).toContain('8 respostas');
+    expect(locked[0]?.textContent).toContain('Opção bloqueada: já tem respostas');
+    expect(locked[1]?.textContent).toContain('4 respostas');
+    // the unanswered third option is an ordinary row
+    expect((screen.getByLabelText('Opção 3') as HTMLInputElement).value).toBe('Evento');
+    expect(screen.queryByLabelText('Opção 1')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remover opção 1' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remover opção 2' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remover opção 3' })).toBeTruthy();
+  });
+
+  it('keeps the reorder buttons of a locked option working, and sends the ids in the new order', async () => {
+    const question = answered();
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    edit(question);
+    fireEvent.click(screen.getByRole('button', { name: 'Descer opção 1' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+      revision: 3,
+      options: [
+        { id: OPT_B.id, label: 'Indicação' },
+        { id: OPT_A.id, label: 'Instagram' },
+        { id: OPT_C.id, label: 'Evento' },
+      ],
+    });
+  });
+
+  it('lets the admin add new options and remove an unanswered one', async () => {
+    const question = answered();
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    edit(question);
+    fireEvent.click(screen.getByRole('button', { name: 'Remover opção 3' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar opção' }));
+    fireEvent.change(screen.getByLabelText('Opção 3'), { target: { value: 'Feira' } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+      revision: 3,
+      options: [
+        { id: OPT_A.id, label: 'Instagram' },
+        { id: OPT_B.id, label: 'Indicação' },
+        { label: 'Feira' },
+      ],
+    });
+  });
+
+  it('locks "Outro" on with its reason when the question allows it', () => {
+    edit(answered({ allowOther: true }));
+    const other = screen.getByRole('switch', {
+      name: 'Incluir a opção “Outro”',
+    }) as HTMLButtonElement;
+    expect(other.getAttribute('aria-checked')).toBe('true');
+    expect(other.disabled).toBe(true);
+    expect(screen.getByText('Já existem respostas “Outro”. Não dá para desligar.')).toBeTruthy();
+  });
+
+  it('leaves "Outro" free to turn on when the question does not allow it yet', () => {
+    edit(answered({ allowOther: false }));
+    const other = screen.getByRole('switch', {
+      name: 'Incluir a opção “Outro”',
+    }) as HTMLButtonElement;
+    expect(other.disabled).toBe(false);
+  });
+
+  it('shows the widen-only note and refuses a narrowed number pair before any request', async () => {
+    const question = adminQuestion('number', {
+      title: 'Idade',
+      answerCount: 3,
+      options: [],
+      revision: 1,
+      limits: { min: 1, max: 10 },
+    });
+    edit(question);
+    expect(screen.getByText('Como já há respostas, só dá para ampliar o intervalo.')).toBeTruthy();
+    expect((screen.getByLabelText('Valor mínimo (opcional)') as HTMLInputElement).value).toBe('1');
+    fireEvent.change(screen.getByLabelText('Valor máximo (opcional)'), { target: { value: '9' } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Esse intervalo deixaria respostas fora do limite. Só é possível ampliar.',
+    );
+  });
+
+  it('lets a widened pair through', async () => {
+    const question = adminQuestion('number', {
+      title: 'Idade',
+      answerCount: 3,
+      options: [],
+      revision: 1,
+      limits: { min: 1, max: 10 },
+    });
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    edit(question);
+    fireEvent.change(screen.getByLabelText('Valor máximo (opcional)'), { target: { value: '20' } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({ revision: 1, limits: { min: 1, max: 20 } });
+  });
+
+  it('freezes a PRIVATE question: the switch is disabled and off, with the reason and the replace button', () => {
+    edit(answered({ showOnProfile: false }));
+    const open = screen.getByRole('switch', {
+      name: 'Mostrar no perfil do membro',
+    }) as HTMLButtonElement;
+    expect(open.disabled).toBe(true);
+    expect(open.getAttribute('aria-checked')).toBe('false');
+    expect(
+      screen.getByText(
+        'Esta pergunta já tem respostas privadas, então não pode passar a ser pública. Para mostrar no perfil, crie uma nova pergunta e arquive esta.',
+      ),
+    ).toBeTruthy();
+    expect(replaceButtons()).toHaveLength(2);
+  });
+
+  it('lets a PUBLIC question be turned off and warns it cannot be turned on again', async () => {
+    const question = answered({ showOnProfile: true });
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    edit(question);
+    const open = screen.getByRole('switch', {
+      name: 'Mostrar no perfil do membro',
+    }) as HTMLButtonElement;
+    expect(open.disabled).toBe(false);
+    expect(open.getAttribute('aria-checked')).toBe('true');
+    expect(
+      screen.getByText('Se você desligar, não poderá ligar de novo enquanto houver respostas.'),
+    ).toBeTruthy();
+    fireEvent.click(open);
+    expect(
+      screen.queryByText('Se você desligar, não poderá ligar de novo enquanto houver respostas.'),
+    ).toBeNull();
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({ revision: 3, showOnProfile: false });
+  });
+
+  it('leaves the visibility switch free both ways when nobody answered', () => {
+    edit(unanswered({ showOnProfile: false }));
+    const open = screen.getByRole('switch', {
+      name: 'Mostrar no perfil do membro',
+    }) as HTMLButtonElement;
+    expect(open.disabled).toBe(false);
+    expect(
+      screen.queryByText('Se você desligar, não poderá ligar de novo enquanto houver respostas.'),
+    ).toBeNull();
+  });
+
+  it('keeps "Obrigatória" free on a question with answers', () => {
+    edit(answered());
+    expect(
+      (screen.getByRole('switch', { name: 'Obrigatória' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+});
+
+describe('the 409 of the truth: the sheet explains it and saves nothing (PFORM-17 web half)', () => {
+  it.each([
+    'stale_revision',
+    'type_locked',
+    'option_locked',
+    'other_locked',
+    'visibility_locked',
+    'limits_locked',
+  ])('shows the in-sheet alert for %s, keeps the draft and refreshes the list', async (issue) => {
+    mocks.update.mockResolvedValue({ ok: false, code: 'conflict', issue });
+    edit(unanswered());
+    typeTitle('Cargo atual');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    const alert = dialog().querySelector('[data-conflict-alert]') as HTMLElement;
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toBe(
+      'Esta pergunta foi alterada enquanto você editava. Feche e abra de novo para ver a versão atual.',
+    );
+    expect(alert.className).toContain('border-danger/40');
+    expect(titleField().value).toBe('Cargo atual');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mocks.show).not.toHaveBeenCalled();
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('replace (UI-D-574)', () => {
+  it('leaves the edit sheet for the replace flow straight away when nothing was edited', () => {
+    const question = answered();
+    edit(question);
+    fireEvent.click(replaceButtons()[0] as HTMLElement);
+    expect(onReplace).toHaveBeenCalledWith(question);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('asks before discarding unsaved edits, then leaves for the replace flow', async () => {
+    const question = answered();
+    edit(question);
+    typeTitle('Mudei');
+    fireEvent.click(replaceButtons()[0] as HTMLElement);
+    expect(onReplace).not.toHaveBeenCalled();
+    expect(screen.getByText('Descartar as alterações?')).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Descartar' }));
+    });
+    expect(onReplace).toHaveBeenCalledWith(question);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('opens "Substituir pergunta" with the old data copied, the grid open, the banner and the LGPD notice', () => {
+    const question = answered({ required: true, showOnProfile: true });
+    mount({ mode: 'replace', question });
+    expect(screen.getByRole('heading', { name: 'Substituir pergunta' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Tipo de resposta' })).toBeTruthy();
+    const form = dialog().querySelector('form') as HTMLFormElement;
+    const first = (form.querySelector('fieldset') as HTMLElement).firstElementChild as HTMLElement;
+    expect(first.hasAttribute('data-lgpd-notice')).toBe(true);
+    const banner = dialog().querySelector('[data-replace-banner]') as HTMLElement;
+    expect(banner.textContent).toBe(
+      '“Como conheceu?” será arquivada quando você salvar esta. As respostas dela continuam guardadas.',
+    );
+    pick('Texto curto');
+    expect(titleField().value).toBe('Como conheceu?');
+    expect((screen.getByLabelText('Texto de apoio (opcional)') as HTMLTextAreaElement).value).toBe(
+      'Escolha uma',
+    );
+    expect(screen.getByRole('switch', { name: 'Obrigatória' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    expect(
+      screen
+        .getByRole('switch', { name: 'Mostrar no perfil do membro' })
+        .getAttribute('aria-checked'),
+    ).toBe('true');
+    // nothing is locked on a replacement: it is a new question
+    expect(
+      (screen.getByRole('switch', { name: 'Mostrar no perfil do membro' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it('saves a REQUIRED replacement after the impact confirmation, through ONE atomic action call', async () => {
+    const question = answered({ required: true });
+    mocks.impact.mockResolvedValue({ ok: true, members: 7 });
+    mocks.replace.mockResolvedValue({ ok: true, question: adminQuestion('email'), pending: 7 });
+    mount({ mode: 'replace', question });
+    pick('E-mail');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).toHaveBeenCalledWith({ change: 'replace', questionId: question.id });
+    expect(screen.getByText('Substituir a pergunta?')).toBeTruthy();
+    expect(
+      screen.getByText(
+        /“Como conheceu\?” será arquivada, com as respostas guardadas, e a nova entra no formulário\./,
+      ),
+    ).toBeTruthy();
+    expect(mocks.replace).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Substituir' }));
+    });
+    expect(mocks.replace).toHaveBeenCalledTimes(1);
+    expect(mocks.replace.mock.calls[0]?.[0]).toMatchObject({
+      type: 'email',
+      title: 'Como conheceu?',
+      required: true,
+      replaces: question.id,
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.archive).not.toHaveBeenCalled();
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Pergunta substituída. 7 membros vão precisar responder.',
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves an OPTIONAL replacement with no impact read', async () => {
+    const question = answered({ required: false });
+    mocks.replace.mockResolvedValue({ ok: true, question: adminQuestion('email'), pending: null });
+    mount({ mode: 'replace', question });
+    pick('E-mail');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).not.toHaveBeenCalled();
+    expect(mocks.replace).toHaveBeenCalledTimes(1);
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Pergunta substituída.' });
+  });
+
+  it('keeps the old question and the draft when the atomic write fails', async () => {
+    const question = answered();
+    mocks.replace.mockResolvedValue({ ok: false, code: 'failed' });
+    mount({ mode: 'replace', question });
+    pick('E-mail');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(titleField().value).toBe('Como conheceu?');
+  });
+});
+
+describe('archive and delete (D-588, UI-D-577)', () => {
+  const removeBlock = () => dialog().querySelector('[data-remove-block]') as HTMLElement | null;
+
+  it('offers "Arquivar pergunta" for a question with answers and never "Excluir pergunta"', () => {
+    edit(answered());
+    expect(
+      within(removeBlock() as HTMLElement).getByRole('button', { name: 'Arquivar pergunta' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Excluir pergunta' })).toBeNull();
+  });
+
+  it('offers "Excluir pergunta" (ghost, danger) for a never-answered question and never "Arquivar"', () => {
+    edit(unanswered());
+    const button = within(removeBlock() as HTMLElement).getByRole('button', {
+      name: 'Excluir pergunta',
+    });
+    expect(button.className).toContain('text-danger');
+    expect(screen.queryByRole('button', { name: 'Arquivar pergunta' })).toBeNull();
+  });
+
+  it('offers neither in create or replace mode', () => {
+    mount();
+    expect(removeBlock()).toBeNull();
+    cleanup();
+    mount({ mode: 'replace', question: answered() });
+    expect(removeBlock()).toBeNull();
+  });
+
+  it('archives after a brand confirmation that says how many answers are kept', async () => {
+    const question = answered({ required: true });
+    mocks.archive.mockResolvedValue({ ok: true });
+    edit(question);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    expect(screen.getByText('Arquivar esta pergunta?')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Ela deixa de ser feita aos membros. As 12 respostas continuam guardadas e entram na exportação. Você pode reativar depois. Quem ainda não respondeu deixa de precisar.',
+      ),
+    ).toBeTruthy();
+    expect(mocks.archive).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Arquivar' }));
+    });
+    expect(mocks.archive).toHaveBeenCalledWith(question.id);
+    expect(mocks.impact).not.toHaveBeenCalled();
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Pergunta arquivada.' });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits the required sentence for an optional question and uses the singular for one answer', () => {
+    edit(answered({ required: false, answerCount: 1 }));
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    expect(
+      screen.getByText(
+        'Ela deixa de ser feita aos membros. A 1 resposta continua guardada e entra na exportação. Você pode reativar depois.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('deletes after a danger confirmation', async () => {
+    const question = unanswered();
+    mocks.remove.mockResolvedValue({ ok: true });
+    edit(question);
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir pergunta' }));
+    expect(screen.getByText('Excluir esta pergunta?')).toBeTruthy();
+    expect(
+      screen.getByText('Ninguém respondeu esta pergunta ainda. A exclusão não pode ser desfeita.'),
+    ).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Excluir' }));
+    });
+    expect(mocks.remove).toHaveBeenCalledWith(question.id);
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Pergunta excluída.' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers the race "an answer arrived" with the archive-instead toast and a refresh', async () => {
+    mocks.remove.mockResolvedValue({ ok: false, code: 'hasAnswers' });
+    edit(unanswered());
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir pergunta' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Excluir' }));
+    });
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Esta pergunta recebeu respostas. Arquive em vez de excluir.',
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels without a request', async () => {
+    edit(answered());
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    });
+    expect(mocks.archive).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('toasts a failure and keeps the sheet', async () => {
+    mocks.archive.mockResolvedValue({ ok: false, code: 'failed' });
+    edit(answered());
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Arquivar' }));
+    });
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível arquivar agora. Tente de novo.',
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('no raw HTML anywhere in the editor (T-12-35)', () => {
+  it('renders an admin-typed title, option label and help text as text', () => {
+    edit(
+      answered({
+        title: '<script>alert(1)</script>',
+        helpText: '<b>x</b>',
+        options: [{ ...OPT_A, label: '<img src=x onerror=alert(1)>' }, OPT_B],
+      }),
+    );
+    expect(dialog().querySelector('script, img, b')).toBeNull();
+    expect(titleField().value).toBe('<script>alert(1)</script>');
+    expect(dialog().textContent).toContain('<img src=x onerror=alert(1)>');
   });
 });
