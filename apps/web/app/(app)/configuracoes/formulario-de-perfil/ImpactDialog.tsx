@@ -12,6 +12,8 @@ export interface ImpactDialogProps {
   kind: ImpactKind;
   /** How many members the change will ask to answer: the server's count, read before this dialog opens. */
   members: number;
+  /** A sentence added after the impact one (replace: which question is archived). */
+  note?: string;
   /** The write. While it runs both buttons are disabled; the dialog closes when it settles. */
   onConfirm: () => Promise<void> | void;
   onClose: () => void;
@@ -24,9 +26,10 @@ export interface ImpactDialogProps {
  * succeeded; with 0 members there is no dialog and the write is direct.
  *
  * The body is the plural sentence of the Copywriting Contract; reactivating a question adds "As respostas
- * guardadas continuam valendo." Plan 16 reuses the dialog for the other three kinds.
+ * guardadas continuam valendo." Replace adds which question is archived (`note`). The editor sheet (12-16)
+ * reuses the dialog for the add, make and replace cases.
  */
-export function ImpactDialog({ open, kind, members, onConfirm, onClose }: ImpactDialogProps) {
+export function ImpactDialog({ open, kind, members, note, onConfirm, onClose }: ImpactDialogProps) {
   const t = useTranslations('profileForm.admin.impact');
   const body = t('body', { n: members });
   return (
@@ -35,7 +38,7 @@ export function ImpactDialog({ open, kind, members, onConfirm, onClose }: Impact
       tone="brand"
       icon={Users}
       title={t(`${kind}Title`)}
-      body={kind === 'reactivate' ? `${body} ${t('kept')}` : body}
+      body={kind === 'reactivate' ? `${body} ${t('kept')}` : note ? `${body} ${note}` : body}
       confirmLabel={t(`${kind}Confirm`)}
       cancelLabel={t('cancel')}
       onConfirm={onConfirm}

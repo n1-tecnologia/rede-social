@@ -21,6 +21,7 @@ import type { EditorMode } from './editor-state';
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
+  impact: vi.fn(),
   refresh: vi.fn(),
   show: vi.fn(),
 }));
@@ -30,6 +31,7 @@ const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
 
 vi.mock('./actions', () => ({
   createQuestionAction: (body: unknown, options: unknown) => mocks.create(body, options),
+  readImpactAction: (input: unknown) => mocks.impact(input),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -79,6 +81,7 @@ function typeTitle(value: string) {
 beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
   onClose.mockReset();
+  mocks.impact.mockResolvedValue({ ok: true, members: 0 });
   mocks.create.mockResolvedValue({
     ok: true,
     question: adminQuestion('short_text'),
@@ -231,6 +234,7 @@ describe('saving', () => {
       fireEvent.click(saveButton());
     });
     expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(mocks.impact).toHaveBeenCalledWith({ change: 'create_required' });
     expect(mocks.create.mock.calls[0]?.[0]).toEqual({
       type: 'short_text',
       title: 'Qual é o seu cargo?',
@@ -426,5 +430,395 @@ describe('no raw markup (T-12-35)', () => {
     typeTitle('<img src=x onerror=alert(1)>');
     expect(dialog().querySelector('img')).toBeNull();
     expect(titleField().value).toBe('<img src=x onerror=alert(1)>');
+  });
+});
+
+describe('the options editor (D-592, UI-D-571, UI-D-572)', () => {
+  const optionInput = (n: number) => screen.getByLabelText(`Opção ${n}`) as HTMLInputElement;
+  const rows = () => screen.queryAllByLabelText(/^Opção \d+$/) as HTMLInputElement[];
+
+  function chooseWithOptions(labels: string[], type = 'Escolha única') {
+    mount();
+    pick(type);
+    typeTitle('Como conheceu?');
+    labels.forEach((label, index) => {
+      if (index >= rows().length)
+        fireEvent.click(screen.getByRole('button', { name: 'Adicionar opção' }));
+      fireEvent.change(optionInput(index + 1), { target: { value: label } });
+    });
+  }
+
+  it('starts a choice question with two empty rows, a legend and the "Outro" switch off', () => {
+    mount();
+    pick('Lista suspensa');
+    expect(screen.getByRole('group', { name: 'Opções' })).toBeTruthy();
+    expect(rows()).toHaveLength(2);
+    expect(rows().every((input) => input.value === '' && input.maxLength === 80)).toBe(true);
+    expect(rows()[0]?.placeholder).toBe('Nome da opção');
+    const other = screen.getByRole('switch', { name: 'Incluir a opção “Outro”' });
+    expect(other.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('O membro escreve a própria resposta.')).toBeTruthy();
+  });
+
+  it('shows the options block for the three choice types and for no other', () => {
+    for (const choice of ['Lista suspensa', 'Múltipla escolha', 'Escolha única']) {
+      mount();
+      pick(choice);
+      expect(screen.queryByRole('group', { name: 'Opções' })).not.toBeNull();
+      cleanup();
+    }
+    for (const other of ['Texto curto', 'Número', 'Sim ou não']) {
+      mount();
+      pick(other);
+      expect(screen.queryByRole('group', { name: 'Opções' })).toBeNull();
+      expect(screen.queryByRole('switch', { name: 'Incluir a opção “Outro”' })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('names every row and button by its position, each icon button 44px', () => {
+    mount();
+    pick('Escolha única');
+    expect(screen.getByLabelText('Opção 1')).toBeTruthy();
+    for (const name of [
+      'Subir opção 1',
+      'Descer opção 1',
+      'Remover opção 1',
+      'Subir opção 2',
+      'Descer opção 2',
+      'Remover opção 2',
+    ]) {
+      const button = screen.getByRole('button', { name });
+      expect(button.className, name).toContain('min-h-[44px]');
+      expect(button.className, name).toContain('min-w-[44px]');
+    }
+  });
+
+  it('disables remove at two options and up/down at the edges', () => {
+    mount();
+    pick('Escolha única');
+    expect(
+      (screen.getByRole('button', { name: 'Remover opção 1' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: 'Remover opção 2' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: 'Subir opção 1' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: 'Descer opção 2' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it('adds a row and moves focus into it', () => {
+    mount();
+    pick('Escolha única');
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar opção' }));
+    expect(rows()).toHaveLength(3);
+    expect(document.activeElement).toBe(optionInput(3));
+    expect(
+      (screen.getByRole('button', { name: 'Remover opção 3' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it('removes a row and reorders rows, keeping focus on the pressed button', () => {
+    chooseWithOptions(['A', 'B', 'C']);
+    fireEvent.click(screen.getByRole('button', { name: 'Subir opção 3' }));
+    expect(rows().map((input) => input.value)).toEqual(['A', 'C', 'B']);
+    expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toBe(
+      'Subir opção 2',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Remover opção 1' }));
+    expect(rows().map((input) => input.value)).toEqual(['C', 'B']);
+  });
+
+  it('shows "Máximo de 20 opções." and disables "Adicionar opção" at twenty rows', () => {
+    mount();
+    pick('Escolha única');
+    for (let i = 0; i < 18; i += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'Adicionar opção' }));
+    }
+    expect(rows()).toHaveLength(20);
+    expect(
+      (screen.getByRole('button', { name: 'Adicionar opção' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getByText('Máximo de 20 opções.')).toBeTruthy();
+  });
+
+  it('refuses empty rows with the sentence under the list and focuses the first empty row', async () => {
+    mount();
+    pick('Escolha única');
+    typeTitle('Origem');
+    fireEvent.change(optionInput(1), { target: { value: 'Instagram' } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    const alerts = screen.getAllByRole('alert').map((node) => node.textContent);
+    expect(alerts).toContain('Preencha ou remova as opções vazias.');
+    expect(document.activeElement).toBe(optionInput(2));
+    expect(optionInput(2).getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('refuses a repeated label with its sentence', async () => {
+    chooseWithOptions(['Indicação', ' indicação ']);
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('alert').map((node) => node.textContent)).toContain(
+      'Já existe uma opção com este nome.',
+    );
+  });
+
+  it('clears the options error as soon as the list is edited', async () => {
+    mount();
+    pick('Escolha única');
+    typeTitle('Origem');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(screen.queryAllByRole('alert').length).toBeGreaterThan(0);
+    fireEvent.change(optionInput(1), { target: { value: 'A' } });
+    expect(screen.queryByText('Preencha ou remova as opções vazias.')).toBeNull();
+  });
+
+  it('sends the labels trimmed, no id for a new option and "Outro" when it is on', async () => {
+    chooseWithOptions([' Instagram ', 'Indicação']);
+    fireEvent.click(screen.getByRole('switch', { name: 'Incluir a opção “Outro”' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    const body = mocks.create.mock.calls[0]?.[0];
+    expect(body).toMatchObject({
+      type: 'single_choice',
+      allowOther: true,
+      options: [{ label: 'Instagram' }, { label: 'Indicação' }],
+    });
+    expect(JSON.stringify(body)).not.toContain('"id"');
+  });
+
+  it('keeps the rows between two choice types and drops them for another type', () => {
+    chooseWithOptions(['A', 'B']);
+    fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
+    pick('Lista suspensa');
+    expect(rows().map((input) => input.value)).toEqual(['A', 'B']);
+    fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
+    pick('Texto curto');
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('locks the rows while the sheet saves', async () => {
+    mocks.create.mockReturnValue(new Promise(() => {}));
+    chooseWithOptions(['A', 'B']);
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(optionInput(1).closest('form')?.querySelector('fieldset')?.disabled).toBe(true);
+  });
+});
+
+describe('the number and date limits and the type notes (UI-D-572)', () => {
+  it('shows the number pair with a decimal keyboard and parses it with the pt-BR rule', async () => {
+    mount();
+    pick('Número');
+    typeTitle('Idade');
+    const min = screen.getByLabelText('Valor mínimo (opcional)') as HTMLInputElement;
+    const max = screen.getByLabelText('Valor máximo (opcional)') as HTMLInputElement;
+    expect(min.inputMode).toBe('decimal');
+    fireEvent.change(min, { target: { value: '1.000,5' } });
+    fireEvent.change(max, { target: { value: '2000' } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create.mock.calls[0]?.[0]).toMatchObject({
+      type: 'number',
+      limits: { min: 1000.5, max: 2000 },
+    });
+  });
+
+  it('refuses a minimum above the maximum for numbers and for dates', async () => {
+    mount();
+    pick('Número');
+    typeTitle('Idade');
+    fireEvent.change(screen.getByLabelText('Valor mínimo (opcional)'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Valor máximo (opcional)'), { target: { value: '2' } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe('O mínimo não pode ser maior que o máximo.');
+    cleanup();
+
+    mount();
+    pick('Data');
+    typeTitle('Início');
+    const min = screen.getByLabelText('Data mínima (opcional)') as HTMLInputElement;
+    expect(min.type).toBe('date');
+    fireEvent.change(min, { target: { value: '2026-12-31' } });
+    fireEvent.change(screen.getByLabelText('Data máxima (opcional)'), {
+      target: { value: '2026-01-01' },
+    });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'A data mínima não pode ser depois da máxima.',
+    );
+  });
+
+  it('flags a limit text that is not a number under its field', async () => {
+    mount();
+    pick('Número');
+    typeTitle('Idade');
+    fireEvent.change(screen.getByLabelText('Valor mínimo (opcional)'), {
+      target: { value: 'abc' },
+    });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(screen.getByRole('alert').textContent).toBe('Informe um número.');
+    expect(document.activeElement).toBe(screen.getByLabelText('Valor mínimo (opcional)'));
+  });
+
+  it('gives rating, yes/no and acceptance their one-line note and no extra field', () => {
+    const notes: [string, string][] = [
+      ['Avaliação', 'O membro escolhe de 1 a 5 estrelas.'],
+      ['Sim ou não', 'O membro responde Sim ou Não.'],
+      [
+        'Aceite',
+        'O membro marca uma caixa. Se a pergunta for obrigatória, só conta como respondida quando a caixa está marcada.',
+      ],
+    ];
+    for (const [type, note] of notes) {
+      mount();
+      pick(type);
+      expect(screen.getByText(note), type).toBeTruthy();
+      expect(screen.queryByLabelText(/mínim|máxim/i), type).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('gives text, phone, e-mail and link a format note and never a mask, placeholder or cap field', () => {
+    const notes: [string, string][] = [
+      ['Telefone', 'O telefone é validado com DDD.'],
+      ['E-mail', 'O endereço de e-mail é validado.'],
+      ['Link', 'O link precisa começar com http:// ou https://.'],
+      ['Texto curto', 'O membro escreve uma linha, com até 120 caracteres.'],
+    ];
+    for (const [type, note] of notes) {
+      mount();
+      pick(type);
+      expect(screen.getByText(note), type).toBeTruthy();
+      expect(screen.queryByLabelText(/máscara|placeholder|limite de caracteres/i), type).toBeNull();
+      cleanup();
+    }
+  });
+});
+
+describe('the impact before a reopening save (D-585, UI-D-576, T-12-34)', () => {
+  async function fillRequired(required = true) {
+    mount();
+    pick('Texto curto');
+    typeTitle('Cargo');
+    if (required) fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+  }
+
+  it('writes NOTHING when the impact read fails, and says so', async () => {
+    mocks.impact.mockResolvedValue({ ok: false, code: 'failed' });
+    await fillRequired();
+    expect(mocks.impact).toHaveBeenCalledWith({ change: 'create_required' });
+    expect(mocks.create).toHaveBeenCalledTimes(0);
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message:
+        'Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.',
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Adicionar e exigir' })).toBeNull();
+  });
+
+  it('writes nothing when the impact read throws', async () => {
+    mocks.impact.mockRejectedValue(new Error('network'));
+    await fillRequired();
+    expect(mocks.create).toHaveBeenCalledTimes(0);
+    expect(mocks.show).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes directly, with no dialog, when the impact is zero', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+    mocks.create.mockResolvedValue({ ok: true, question: adminQuestion('short_text'), pending: 0 });
+    await fillRequired();
+    expect(screen.queryByText('Adicionar pergunta obrigatória?')).toBeNull();
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(mocks.create.mock.calls[0]?.[1]).toEqual({ reopens: true });
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Pergunta adicionada.' });
+  });
+
+  it('opens the dialog above zero and writes only when the admin confirms', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 12 });
+    mocks.create.mockResolvedValue({ ok: true, question: adminQuestion('short_text'), pending: 9 });
+    await fillRequired();
+    expect(screen.getByText('Adicionar pergunta obrigatória?')).toBeTruthy();
+    expect(
+      screen.getByText(/12 membros vão precisar responder antes de continuar usando a comunidade/),
+    ).toBeTruthy();
+    expect(mocks.create).toHaveBeenCalledTimes(0);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Adicionar e exigir' }));
+    });
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    // the toast reports the SERVER's count after the write (9), not the preview's (12)
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Pergunta adicionada. 9 membros vão precisar responder.',
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes nothing when the admin goes back from the dialog, and keeps the draft', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 3 });
+    await fillRequired();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Voltar' }));
+    });
+    expect(mocks.create).toHaveBeenCalledTimes(0);
+    expect(titleField().value).toBe('Cargo');
+  });
+
+  it('reports one member in the singular', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 1 });
+    mocks.create.mockResolvedValue({ ok: true, question: adminQuestion('short_text'), pending: 1 });
+    await fillRequired();
+    expect(screen.getByText(/^1 membro vai precisar responder antes/)).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Adicionar e exigir' }));
+    });
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Pergunta adicionada. 1 membro vai precisar responder.',
+    });
+  });
+
+  it('never reads the impact for an optional question', async () => {
+    await fillRequired(false);
+    expect(mocks.impact).not.toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(mocks.create.mock.calls[0]?.[1]).toEqual({ reopens: false });
+  });
+
+  it('ends in the not-found refresh when the read says the permission was lost', async () => {
+    mocks.impact.mockResolvedValue({ ok: false, code: 'forbidden' });
+    await fillRequired();
+    expect(mocks.create).toHaveBeenCalledTimes(0);
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

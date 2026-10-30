@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addOptionRow,
   blankDraft,
   canSave,
   changeType,
   hasErrors,
   isDirty,
+  moveOptionRow,
+  type OptionDraft,
   parseLimits,
+  removeOptionRow,
+  renameOptionRow,
+  reopeningOf,
   serverFieldError,
+  serverLimitsError,
+  serverOptionsErrors,
   toCreateBody,
   validateDraft,
+  validateOptions,
 } from './editor-state';
 
 /**
@@ -238,5 +247,160 @@ describe('serverFieldError', () => {
     });
     expect(serverFieldError('helpText', 'required')).toBeNull();
     expect(serverFieldError('title', 'invalid')).toBeNull();
+  });
+});
+
+const row = (key: string, label: string, id?: string): OptionDraft =>
+  id === undefined ? { key, label } : { key, label, id };
+
+describe('validateOptions (D-592, UI-D-571)', () => {
+  it('is clean for two or more distinct, filled rows', () => {
+    expect(validateOptions([row('a', 'Instagram'), row('b', 'Indicação')])).toBeUndefined();
+  });
+
+  it('flags fewer than two rows', () => {
+    expect(validateOptions([row('a', 'Só uma')])?.issues).toEqual(['min']);
+    expect(validateOptions([])?.issues).toEqual(['min']);
+  });
+
+  it('flags an empty or whitespace row and marks it', () => {
+    const errors = validateOptions([row('a', 'Instagram'), row('b', '   ')]);
+    expect(errors?.issues).toEqual(['empty']);
+    expect(errors?.rows).toEqual({ b: 'empty' });
+  });
+
+  it('flags a repeat after trimming, accents kept and pt-BR lower case, and marks both rows', () => {
+    const errors = validateOptions([row('a', 'Indicação'), row('b', '  INDICAÇÃO ')]);
+    expect(errors?.issues).toEqual(['duplicate']);
+    expect(errors?.rows).toEqual({ a: 'duplicate', b: 'duplicate' });
+    // a different accent is a different label
+    expect(validateOptions([row('a', 'Indicacao'), row('b', 'Indicação')])).toBeUndefined();
+  });
+
+  it('flags more than 20 rows, "Outro" not counted', () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => row(`k${i}`, `Opção ${i}`));
+    expect(validateOptions(twenty)).toBeUndefined();
+    expect(validateOptions([...twenty, row('x', 'Mais uma')])?.issues).toEqual(['max']);
+  });
+
+  it('lists every sentence that applies, in the order shown', () => {
+    expect(validateOptions([row('a', ''), row('b', 'x'), row('c', 'x')])?.issues).toEqual([
+      'empty',
+      'duplicate',
+    ]);
+  });
+});
+
+describe('validateDraft: options and limits', () => {
+  const choice = (options: OptionDraft[]) => ({
+    ...blankDraft(),
+    type: 'single_choice' as const,
+    title: 'Origem',
+    options,
+  });
+
+  it('reports the options errors of a choice draft only', () => {
+    expect(validateDraft(choice([row('a', ''), row('b', '')])).options?.issues).toEqual(['empty']);
+    expect(
+      validateDraft({ ...choice([row('a', '')]), type: 'short_text' }).options,
+    ).toBeUndefined();
+  });
+
+  it('reports a number text that is not a number and a minimum above the maximum', () => {
+    const base = { ...blankDraft(), type: 'number' as const, title: 'Idade' };
+    expect(validateDraft({ ...base, min: 'abc' }).min).toEqual({ key: 'errors.numberInvalid' });
+    expect(validateDraft({ ...base, max: '1,2,3' }).max).toEqual({ key: 'errors.numberInvalid' });
+    expect(validateDraft({ ...base, min: '10', max: '2' }).limits).toEqual({
+      key: 'limits.errNumber',
+    });
+    expect(hasErrors(validateDraft({ ...base, min: '2', max: '2' }))).toBe(false);
+    expect(hasErrors(validateDraft({ ...base, min: '0,5', max: '1.000' }))).toBe(false);
+  });
+
+  it('reports a date minimum after the maximum', () => {
+    const base = { ...blankDraft(), type: 'date' as const, title: 'Início' };
+    expect(validateDraft({ ...base, min: '2026-12-31', max: '2026-01-01' }).limits).toEqual({
+      key: 'limits.errDate',
+    });
+    expect(hasErrors(validateDraft({ ...base, min: '2026-01-01', max: '2026-01-01' }))).toBe(false);
+    expect(hasErrors(validateDraft({ ...base, min: '2026-01-01' }))).toBe(false);
+  });
+});
+
+describe('the option rows as pure moves', () => {
+  const rows = [row('a', 'A', 'id-a'), row('b', 'B'), row('c', 'C')];
+
+  it('adds an empty row without an id at the end', () => {
+    const next = addOptionRow(rows);
+    expect(next.options).toHaveLength(4);
+    expect(next.options[3]).toEqual({ key: next.key, label: '' });
+    expect(rows).toHaveLength(3);
+  });
+
+  it('removes a row but never below two', () => {
+    expect(removeOptionRow(rows, 'b').map((o) => o.key)).toEqual(['a', 'c']);
+    const two = [row('a', 'A'), row('b', 'B')];
+    expect(removeOptionRow(two, 'a')).toEqual(two);
+  });
+
+  it('moves a row one place and leaves the edges alone', () => {
+    expect(moveOptionRow(rows, 'b', -1).map((o) => o.key)).toEqual(['b', 'a', 'c']);
+    expect(moveOptionRow(rows, 'b', 1).map((o) => o.key)).toEqual(['a', 'c', 'b']);
+    expect(moveOptionRow(rows, 'a', -1).map((o) => o.key)).toEqual(['a', 'b', 'c']);
+    expect(moveOptionRow(rows, 'c', 1).map((o) => o.key)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps the server id when a stored option is moved or renamed', () => {
+    const moved = moveOptionRow(rows, 'a', 1);
+    expect(moved.find((o) => o.key === 'a')?.id).toBe('id-a');
+    const renamed = renameOptionRow(rows, 'a', 'Novo nome');
+    expect(renamed[0]).toEqual({ key: 'a', id: 'id-a', label: 'Novo nome' });
+  });
+});
+
+describe('reopeningOf (D-585, UI-D-576)', () => {
+  const optional = { id: 'q1', required: false };
+  const required = { id: 'q2', required: true };
+
+  it('a new required question reopens the form; an optional one does not', () => {
+    expect(reopeningOf('create', { required: true }, null)).toEqual({
+      change: 'create_required',
+      kind: 'add',
+    });
+    expect(reopeningOf('create', { required: false }, null)).toBeNull();
+  });
+
+  it('an optional question turned required reopens it, naming the question', () => {
+    expect(reopeningOf('edit', { required: true }, optional)).toEqual({
+      change: 'make_required',
+      kind: 'make',
+      questionId: 'q1',
+    });
+  });
+
+  it('a question that was already required, or that stays optional, reopens nothing', () => {
+    expect(reopeningOf('edit', { required: true }, required)).toBeNull();
+    expect(reopeningOf('edit', { required: false }, optional)).toBeNull();
+    expect(reopeningOf('edit', { required: false }, required)).toBeNull();
+  });
+
+  it('a required replacement reopens it, naming the question it replaces', () => {
+    expect(reopeningOf('replace', { required: true }, required)).toEqual({
+      change: 'replace',
+      kind: 'replace',
+      questionId: 'q2',
+    });
+    expect(reopeningOf('replace', { required: false }, required)).toBeNull();
+  });
+});
+
+describe('server refusals placed on the options and the limits', () => {
+  it('maps the codes with a single place and nothing else', () => {
+    expect(serverOptionsErrors('required')).toEqual({ issues: ['empty'], rows: {} });
+    expect(serverOptionsErrors('limit_reached')).toEqual({ issues: ['max'], rows: {} });
+    expect(serverOptionsErrors('invalid')).toBeNull();
+    expect(serverLimitsError('number', 'out_of_range')).toEqual({ key: 'limits.errNumber' });
+    expect(serverLimitsError('date', 'out_of_range')).toEqual({ key: 'limits.errDate' });
+    expect(serverLimitsError('number', 'invalid')).toBeNull();
   });
 });

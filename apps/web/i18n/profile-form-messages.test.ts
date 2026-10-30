@@ -475,3 +475,63 @@ describe('profileForm.admin.editor (12-16)', () => {
     expect(e('errors.tooLong', { max: 120 })).toBe('Use até 120 caracteres.');
   });
 });
+
+describe('profileForm.admin.editor: options, limits, notes and the impact extras (12-16 Task 2)', () => {
+  const e = createTranslator({
+    locale: 'pt-BR',
+    messages,
+    namespace: 'profileForm.admin.editor',
+  }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+
+  it('pins the options, "Outro", limits and type notes verbatim', () => {
+    const plain: [string, string][] = [
+      ['options.legend', 'Opções'],
+      ['options.placeholder', 'Nome da opção'],
+      ['options.add', 'Adicionar opção'],
+      ['options.err.min', 'Inclua pelo menos 2 opções.'],
+      ['options.err.empty', 'Preencha ou remova as opções vazias.'],
+      ['options.err.duplicate', 'Já existe uma opção com este nome.'],
+      ['other.label', 'Incluir a opção “Outro”'],
+      ['other.helper', 'O membro escreve a própria resposta.'],
+      ['limits.minNumber', 'Valor mínimo (opcional)'],
+      ['limits.maxNumber', 'Valor máximo (opcional)'],
+      ['limits.minDate', 'Data mínima (opcional)'],
+      ['limits.maxDate', 'Data máxima (opcional)'],
+      ['limits.errNumber', 'O mínimo não pode ser maior que o máximo.'],
+      ['limits.errDate', 'A data mínima não pode ser depois da máxima.'],
+      ['notes.rating', 'O membro escolhe de 1 a 5 estrelas.'],
+      ['notes.yesNo', 'O membro responde Sim ou Não.'],
+      [
+        'notes.acceptance',
+        'O membro marca uma caixa. Se a pergunta for obrigatória, só conta como respondida quando a caixa está marcada.',
+      ],
+      ['notes.phone', 'O telefone é validado com DDD.'],
+      ['notes.email', 'O endereço de e-mail é validado.'],
+      ['notes.link', 'O link precisa começar com http:// ou https://.'],
+      ['errors.numberInvalid', 'Informe um número.'],
+    ];
+    for (const [key, text] of plain) expect(e(key), key).toBe(text);
+  });
+
+  it('interpolates the option position and the option limit', () => {
+    expect(e('options.label', { n: 1 })).toBe('Opção 1');
+    expect(e('options.up', { n: 2 })).toBe('Subir opção 2');
+    expect(e('options.down', { n: 2 })).toBe('Descer opção 2');
+    expect(e('options.remove', { n: 3 })).toBe('Remover opção 3');
+    expect(e('options.err.max', { max: 20 })).toBe('Máximo de 20 opções.');
+  });
+
+  it('pluralises the pending sentence of a reopening save and drops it at zero', () => {
+    expect(a('impact.added', { n: 0 }).trim()).toBe('Pergunta adicionada.');
+    expect(a('impact.added', { n: 1 })).toBe(
+      'Pergunta adicionada. 1 membro vai precisar responder.',
+    );
+    expect(a('impact.added', { n: 9 })).toBe(
+      'Pergunta adicionada. 9 membros vão precisar responder.',
+    );
+    expect(a('impact.pending', { n: 4 })).toBe('4 membros vão precisar responder.');
+    expect(a('impact.replaceBody', { title: 'Cargo' })).toBe(
+      '“Cargo” será arquivada, com as respostas guardadas, e a nova entra no formulário.',
+    );
+  });
+});

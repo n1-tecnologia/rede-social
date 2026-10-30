@@ -1,5 +1,6 @@
 import {
   codePoints,
+  normalizeOptionLabel,
   PROFILE_FORM_LIMITS,
   type ProfileFormLimits,
   type ProfileFormType,
@@ -178,9 +179,24 @@ export interface FieldError {
   values?: Record<string, number | string>;
 }
 
+/** The four rules of the options list (UI-D-571), each with its own sentence. */
+export type OptionsIssue = 'min' | 'empty' | 'duplicate' | 'max';
+
+export interface OptionsErrors {
+  /** The list-level sentences, in the order they are shown. */
+  issues: OptionsIssue[];
+  /** The rows to mark invalid: an empty label or a repeated one. */
+  rows: Record<string, 'empty' | 'duplicate'>;
+}
+
 export interface DraftErrors {
   title?: FieldError;
   helpText?: FieldError;
+  options?: OptionsErrors;
+  /** The pair rule: the minimum above the maximum (number) or the earlier day after the later (date). */
+  limits?: FieldError;
+  min?: FieldError;
+  max?: FieldError;
 }
 
 /** Whether `validateDraft` found anything wrong. */
@@ -188,10 +204,43 @@ export function hasErrors(errors: DraftErrors): boolean {
   return Object.values(errors).some((value) => value !== undefined);
 }
 
+/** The options list rules: at least two rows, none empty, no repeat after `normalizeOptionLabel`, at most 20. */
+export function validateOptions(options: readonly OptionDraft[]): OptionsErrors | undefined {
+  const issues: OptionsIssue[] = [];
+  const rows: Record<string, 'empty' | 'duplicate'> = {};
+  if (options.length < 2) issues.push('min');
+
+  const seen = new Map<string, string>();
+  let duplicate = false;
+  let empty = false;
+  for (const option of options) {
+    const label = option.label.trim();
+    if (label === '') {
+      empty = true;
+      rows[option.key] = 'empty';
+      continue;
+    }
+    const normal = normalizeOptionLabel(label);
+    const first = seen.get(normal);
+    if (first !== undefined) {
+      duplicate = true;
+      rows[option.key] = 'duplicate';
+      rows[first] ??= 'duplicate';
+    } else {
+      seen.set(normal, option.key);
+    }
+  }
+  if (empty) issues.push('empty');
+  if (duplicate) issues.push('duplicate');
+  if (options.length > PROFILE_FORM_LIMITS.options) issues.push('max');
+  return issues.length > 0 ? { issues, rows } : undefined;
+}
+
 /**
- * The first-pass rules of the sheet: a title is required and capped at 120 code points, the help text at
- * 300. The type is not an error here (the save button stays disabled until one is chosen). Option and limit
- * rules are added by the editor's later tasks; the server repeats all of them.
+ * The rules of the sheet: a title is required and capped at 120 code points, the help text at 300; a
+ * choice question needs 2 to 20 distinct, non-empty options; a number or date pair needs values of its
+ * type and a minimum that is not above the maximum. The type is not an error here (the save button stays
+ * disabled until one is chosen). The server repeats every rule.
  */
 export function validateDraft(draft: QuestionDraft): DraftErrors {
   const errors: DraftErrors = {};
@@ -202,6 +251,21 @@ export function validateDraft(draft: QuestionDraft): DraftErrors {
   }
   if (codePoints(draft.helpText.trim()) > PROFILE_FORM_LIMITS.helpText) {
     errors.helpText = { key: 'errors.tooLong', values: { max: PROFILE_FORM_LIMITS.helpText } };
+  }
+
+  if (isChoiceType(draft.type)) {
+    const options = validateOptions(draft.options);
+    if (options) errors.options = options;
+  }
+
+  if (isRangeType(draft.type)) {
+    const { limits, invalid } = parseLimits(draft);
+    if (invalid.min) errors.min = { key: 'errors.numberInvalid' };
+    if (invalid.max) errors.max = { key: 'errors.numberInvalid' };
+    const { min, max } = limits;
+    if (min !== undefined && max !== undefined && min > max) {
+      errors.limits = { key: draft.type === 'number' ? 'limits.errNumber' : 'limits.errDate' };
+    }
   }
   return errors;
 }
@@ -223,4 +287,85 @@ export function serverFieldError(field: 'title' | 'helpText', code: string): Fie
     return { key: 'errors.tooLong', values: { max } };
   }
   return null;
+}
+
+/** The options sentence a server code stands for: an empty label, or more than 20 rows. Others have no single row. */
+export function serverOptionsErrors(code: string): OptionsErrors | null {
+  if (code === 'required') return { issues: ['empty'], rows: {} };
+  if (code === 'limit_reached') return { issues: ['max'], rows: {} };
+  return null;
+}
+
+/** The pair sentence a server code stands for: `out_of_range` on `limits.min` is the minimum above the maximum. */
+export function serverLimitsError(type: ProfileFormType | null, code: string): FieldError | null {
+  if (code !== 'out_of_range') return null;
+  return { key: type === 'date' ? 'limits.errDate' : 'limits.errNumber' };
+}
+
+/** What a reopening write is called by the impact read and the dialog, and which question it concerns. */
+export interface Reopening {
+  /** The `change` of `GET /impact`. */
+  change: 'create_required' | 'make_required' | 'replace';
+  /** The dialog's case (its title and confirm label). */
+  kind: 'add' | 'make' | 'replace';
+  questionId?: string;
+}
+
+/**
+ * Whether saving this draft REOPENS the form (D-585, UI-D-576): a new required question, an optional
+ * question turned required, or a replacement that is required. Making a required question optional,
+ * editing anything else, or replacing with an optional one frees members and needs no count.
+ */
+export function reopeningOf(
+  mode: EditorMode,
+  draft: Pick<QuestionDraft, 'required'>,
+  question: { id: string; required: boolean } | null,
+): Reopening | null {
+  if (!draft.required) return null;
+  if (mode === 'create') return { change: 'create_required', kind: 'add' };
+  if (!question) return null;
+  if (mode === 'replace') return { change: 'replace', kind: 'replace', questionId: question.id };
+  if (!question.required) return { change: 'make_required', kind: 'make', questionId: question.id };
+  return null;
+}
+
+// ── The options list, as pure moves ───────────────────────────────────────────────────────────────
+
+/** The list with one more empty row at the end (the sheet then moves focus into it). */
+export function addOptionRow(options: readonly OptionDraft[]): {
+  options: OptionDraft[];
+  key: string;
+} {
+  const key = newRowKey();
+  return { options: [...options, { key, label: '' }], key };
+}
+
+/** The list without the row; a list of two or fewer is returned as it came (remove is disabled there). */
+export function removeOptionRow(options: readonly OptionDraft[], key: string): OptionDraft[] {
+  if (options.length <= 2) return [...options];
+  return options.filter((option) => option.key !== key);
+}
+
+/** The list with the row moved one place; at an edge it is returned as it came. */
+export function moveOptionRow(
+  options: readonly OptionDraft[],
+  key: string,
+  delta: -1 | 1,
+): OptionDraft[] {
+  const from = options.findIndex((option) => option.key === key);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= options.length) return [...options];
+  const next = options.slice();
+  const [moved] = next.splice(from, 1);
+  if (moved) next.splice(to, 0, moved);
+  return next;
+}
+
+/** The list with one row's label replaced. */
+export function renameOptionRow(
+  options: readonly OptionDraft[],
+  key: string,
+  label: string,
+): OptionDraft[] {
+  return options.map((option) => (option.key === key ? { ...option, label } : option));
 }

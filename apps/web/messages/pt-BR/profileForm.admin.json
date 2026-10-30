@@ -83,7 +83,10 @@
         "replaceConfirm": "Substituir",
         "cancel": "Voltar",
         "kept": "As respostas guardadas continuam valendo.",
-        "previewFailed": "Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo."
+        "previewFailed": "Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.",
+        "added": "Pergunta adicionada. {n, plural, =0 {} one {1 membro vai precisar responder.} other {# membros vão precisar responder.}}",
+        "pending": "{n, plural, =0 {} one {1 membro vai precisar responder.} other {# membros vão precisar responder.}}",
+        "replaceBody": "“{title}” será arquivada, com as respostas guardadas, e a nova entra no formulário."
       },
       "editor": {
         "createTitle": "Nova pergunta",
@@ -105,6 +108,43 @@
           "acceptancePlaceholder": "Ex.: Li e aceito o regulamento do grupo",
           "help": "Texto de apoio (opcional)",
           "helpPlaceholder": "Explique como responder, se precisar."
+        },
+        "options": {
+          "legend": "Opções",
+          "label": "Opção {n}",
+          "placeholder": "Nome da opção",
+          "add": "Adicionar opção",
+          "up": "Subir opção {n}",
+          "down": "Descer opção {n}",
+          "remove": "Remover opção {n}",
+          "err": {
+            "min": "Inclua pelo menos 2 opções.",
+            "empty": "Preencha ou remova as opções vazias.",
+            "duplicate": "Já existe uma opção com este nome.",
+            "max": "Máximo de {max} opções."
+          }
+        },
+        "other": {
+          "label": "Incluir a opção “Outro”",
+          "helper": "O membro escreve a própria resposta."
+        },
+        "limits": {
+          "minNumber": "Valor mínimo (opcional)",
+          "maxNumber": "Valor máximo (opcional)",
+          "minDate": "Data mínima (opcional)",
+          "maxDate": "Data máxima (opcional)",
+          "errNumber": "O mínimo não pode ser maior que o máximo.",
+          "errDate": "A data mínima não pode ser depois da máxima."
+        },
+        "notes": {
+          "shortText": "O membro escreve uma linha, com até {max} caracteres.",
+          "longText": "O membro escreve um texto, com até {max} caracteres.",
+          "rating": "O membro escolhe de 1 a 5 estrelas.",
+          "yesNo": "O membro responde Sim ou Não.",
+          "acceptance": "O membro marca uma caixa. Se a pergunta for obrigatória, só conta como respondida quando a caixa está marcada.",
+          "phone": "O telefone é validado com DDD.",
+          "email": "O endereço de e-mail é validado.",
+          "link": "O link precisa começar com http:// ou https://."
         },
         "required": {
           "label": "Obrigatória",
@@ -128,6 +168,7 @@
         "errors": {
           "titleRequired": "Escreva a pergunta.",
           "tooLong": "Use até {max} caracteres.",
+          "numberInvalid": "Informe um número.",
           "saveFailed": "Não foi possível salvar a pergunta agora. Suas alterações continuam aqui. Tente de novo.",
           "conflict": "Esta pergunta foi alterada enquanto você editava. Feche e abra de novo para ver a versão atual."
         }
