@@ -108,3 +108,52 @@ describe('Módulos page - the payments row (UI-D-527)', () => {
     expect(extras.social?.confirmDisable).toBeUndefined();
   });
 });
+
+/**
+ * 12-11 (UI-D-594, D-596, PFORM-01): the `profile_form` row is listed last, off by default, requires
+ * nothing (no note, no lock), enabling is silent, and disabling carries the danger dialog with the
+ * UI-SPEC copy and the clipboard icon name. The tenant name is interpolated into the title only.
+ */
+describe('Módulos page - the profile_form row (UI-D-594)', () => {
+  it('lists Formulário de perfil with the catalog name and description, after Pagamentos', async () => {
+    const { rows } = await togglesProps();
+    const keys = rows.map((row) => row.key);
+    expect(keys.at(-1)).toBe('profile_form');
+    expect(keys.indexOf('profile_form')).toBeGreaterThan(keys.indexOf('payments'));
+    const row = rows.find((candidate) => candidate.key === 'profile_form');
+    expect(row?.name).toBe('Formulário de perfil');
+    expect(row?.description).toBe(
+      'O admin monta perguntas que os membros respondem para completar o perfil. Perguntas obrigatórias seguram o acesso até serem respondidas.',
+    );
+  });
+
+  it('carries only confirmDisable, with the UI-SPEC copy and the clipboard icon name', async () => {
+    mocks.enabled = ['profile_form'];
+    const { extras } = await togglesProps();
+    const row = extras.profile_form;
+    expect(row?.note).toBeUndefined();
+    expect(row?.disabled).toBeUndefined();
+    expect(row?.confirmEnable).toBeUndefined();
+    expect(row?.trailing).toBeUndefined();
+    expect(row?.confirmDisable).toEqual({
+      title: 'Desativar Formulário de perfil em Rede Demo?',
+      body: 'A aba some para o admin e os membros deixam de ser chamados a responder. As perguntas e as respostas ficam guardadas e voltam se você ativar de novo.',
+      confirm: 'Desativar Formulário de perfil',
+      cancel: 'Cancelar',
+      icon: 'clipboard-list',
+    });
+  });
+
+  it('carries the same extras while the module is off, so a later switch-on is silent', async () => {
+    mocks.enabled = [];
+    const { extras } = await togglesProps();
+    expect(extras.profile_form?.confirmDisable).toBeDefined();
+    expect(extras.profile_form?.confirmEnable).toBeUndefined();
+  });
+
+  it('leaves the payments row as it was', async () => {
+    mocks.enabled = ['store', 'payments'];
+    const { extras } = await togglesProps();
+    expect(extras.payments?.confirmDisable?.icon).toBe('credit-card');
+  });
+});

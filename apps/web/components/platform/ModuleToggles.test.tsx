@@ -309,3 +309,106 @@ describe('09.1-16 - ModuleToggles: the disable confirmation (confirmDisable)', (
     await waitFor(() => expect(paymentsSwitch().getAttribute('aria-checked')).toBe('true'));
   });
 });
+
+/**
+ * 12-11 (UI-D-594, D-596) - the `profile_form` row through the shipped `confirmDisable`: the dialog opens
+ * on OFF with the danger tone and the clipboard icon that `iconFor` learned, confirming writes once,
+ * cancelling writes nothing, switching ON is silent, and a failed write shows the shipped error toast
+ * and puts the switch back (E11 loading and error).
+ */
+describe('12-11 - ModuleToggles: the profile_form row (confirmDisable, clipboard icon)', () => {
+  const confirmDisable: NonNullable<ModuleRowExtras['confirmDisable']> = {
+    title: 'Desativar Formulário de perfil em Rede Demo?',
+    body: 'A aba some para o admin e os membros deixam de ser chamados a responder.',
+    confirm: 'Desativar Formulário de perfil',
+    cancel: 'Cancelar',
+    icon: 'clipboard-list',
+  };
+
+  function mountForm(enabled: boolean) {
+    return render(
+      <ModuleToggles
+        tenantId={TENANT}
+        rows={[
+          { key: 'payments', name: 'Pagamentos', description: 'Entrada', enabled: false },
+          {
+            key: 'profile_form',
+            name: 'Formulário de perfil',
+            description: 'Perguntas',
+            enabled,
+          },
+        ]}
+        labels={labels}
+        action={action}
+        extras={{ profile_form: { confirmDisable } }}
+      />,
+    );
+  }
+
+  const formSwitch = () =>
+    screen.getByRole('switch', { name: 'Ativar ou desativar Formulário de perfil' });
+
+  it('switching OFF opens the danger dialog with the clipboard icon and writes nothing yet', () => {
+    mountForm(true);
+    fireEvent.click(formSwitch());
+
+    expect(action).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: confirmDisable.title })).toBeTruthy();
+    expect(screen.getByText(confirmDisable.body)).toBeTruthy();
+    expect(screen.getByRole('button', { name: confirmDisable.confirm }).className).toContain(
+      'text-danger',
+    );
+    expect(screen.getByRole('dialog').querySelector('svg.lucide-clipboard-list')).not.toBeNull();
+  });
+
+  it('confirming runs the action once with (tenantId, profile_form, false)', async () => {
+    mountForm(true);
+    fireEvent.click(formSwitch());
+    fireEvent.click(screen.getByRole('button', { name: confirmDisable.confirm }));
+
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    expect(action).toHaveBeenCalledWith(TENANT, 'profile_form', false);
+  });
+
+  it('cancelling writes nothing and leaves the switch on', async () => {
+    mountForm(true);
+    fireEvent.click(formSwitch());
+    fireEvent.click(screen.getByRole('button', { name: confirmDisable.cancel }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(action).not.toHaveBeenCalled();
+    expect(formSwitch().getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('switching ON opens no dialog', async () => {
+    mountForm(false);
+    fireEvent.click(formSwitch());
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(action).toHaveBeenCalledWith(TENANT, 'profile_form', true));
+  });
+
+  it('E11 loading: the row is busy while the confirmed disable persists', async () => {
+    let settle: (value: SetModuleResult) => void = () => {};
+    action.mockReturnValue(new Promise<SetModuleResult>((resolve) => (settle = resolve)));
+    mountForm(true);
+    fireEvent.click(formSwitch());
+    fireEvent.click(screen.getByRole('button', { name: confirmDisable.confirm }));
+
+    await waitFor(() => expect(formSwitch().closest('li')?.getAttribute('aria-busy')).toBe('true'));
+    settle({ ok: true });
+    await waitFor(() => expect(formSwitch().closest('li')?.getAttribute('aria-busy')).toBeNull());
+  });
+
+  it('E11 error: a failed write shows the shipped error toast and the switch returns', async () => {
+    action.mockResolvedValue({ ok: false, code: 'UNKNOWN' });
+    mountForm(true);
+    fireEvent.click(formSwitch());
+    fireEvent.click(screen.getByRole('button', { name: confirmDisable.confirm }));
+
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: labels.error }),
+    );
+    await waitFor(() => expect(formSwitch().getAttribute('aria-checked')).toBe('true'));
+  });
+});

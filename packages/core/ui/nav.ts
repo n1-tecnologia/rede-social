@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Camera,
   ChevronRight,
+  ClipboardList,
   CreditCard,
   Film,
   GraduationCap,
@@ -354,6 +355,8 @@ const ICONS: Record<string, LucideIcon> = {
   'graduation-cap': GraduationCap,
   // 09.1-13 (UI-D-513): the Configurações "Pagamentos" row.
   'credit-card': CreditCard,
+  // 12-11 (UI-D-594): the platform Módulos row of the profile form module (danger `confirmDisable`).
+  'clipboard-list': ClipboardList,
 };
 
 export function iconFor(name: string): LucideIcon {

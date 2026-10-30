@@ -5,6 +5,14 @@
     },
     "moduleDescriptions": {
       "profile_form": "O admin monta perguntas que os membros respondem para completar o perfil. Perguntas obrigatórias seguram o acesso até serem respondidas."
+    },
+    "profile_form": {
+      "disableDialog": {
+        "title": "Desativar Formulário de perfil em {tenant}?",
+        "body": "A aba some para o admin e os membros deixam de ser chamados a responder. As perguntas e as respostas ficam guardadas e voltam se você ativar de novo.",
+        "confirm": "Desativar Formulário de perfil",
+        "cancel": "Cancelar"
+      }
     }
   }
 }

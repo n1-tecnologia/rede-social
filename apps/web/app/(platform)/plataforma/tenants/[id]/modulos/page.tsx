@@ -29,6 +29,10 @@ import { saveSocialLimitsAction, setModuleAction } from './actions';
  * enabling needs no confirmation, and DISABLING opens the danger `ConfirmDialog` naming the tenant and
  * what reopens (`confirmDisable`). The extras exist whether or not the module is on, so the dialog is
  * ready the moment the owner flips the switch.
+ *
+ * **The `profile_form` row (12-11, UI-D-594, D-596).** The same shape as `payments` without a note: it
+ * requires nothing, enabling is silent, and DISABLING opens the danger `ConfirmDialog` (clipboard icon)
+ * because it frees every gated member at once.
  */
 export default async function TenantModulesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -102,6 +106,19 @@ export default async function TenantModulesPage({ params }: { params: Promise<{ 
         confirm: tp('payments.disableDialog.confirm'),
         cancel: tp('payments.disableDialog.cancel'),
         icon: 'credit-card',
+      },
+    },
+    // 12-11 (UI-D-594, D-596): `profile_form` requires nothing and is off by default, so there is no note,
+    // no lock and enabling is silent (nothing exists yet, nobody is held). DISABLING frees every gated
+    // member at once and hides the admin's builder, so it confirms in the danger tone. The copy has no
+    // `{tenant}` in the body; only the title names the tenant.
+    profile_form: {
+      confirmDisable: {
+        title: tp('profile_form.disableDialog.title', { tenant: detail.tenant.displayName }),
+        body: tp('profile_form.disableDialog.body'),
+        confirm: tp('profile_form.disableDialog.confirm'),
+        cancel: tp('profile_form.disableDialog.cancel'),
+        icon: 'clipboard-list',
       },
     },
   };

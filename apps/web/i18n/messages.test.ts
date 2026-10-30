@@ -3854,6 +3854,14 @@ describe('12-02 - the profile form module has a name and a description in the pl
       'platform.moduleDescriptions.profile_form',
       'O admin monta perguntas que os membros respondem para completar o perfil. Perguntas obrigatórias seguram o acesso até serem respondidas.',
     ],
+    // 12-11 (UI-D-594): the disable dialog of the platform Módulos row, verbatim from the UI-SPEC.
+    ['platform.profile_form.disableDialog.title', 'Desativar Formulário de perfil em {tenant}?'],
+    [
+      'platform.profile_form.disableDialog.body',
+      'A aba some para o admin e os membros deixam de ser chamados a responder. As perguntas e as respostas ficam guardadas e voltam se você ativar de novo.',
+    ],
+    ['platform.profile_form.disableDialog.confirm', 'Desativar Formulário de perfil'],
+    ['platform.profile_form.disableDialog.cancel', 'Cancelar'],
   ])('%s reads "%s"', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });
