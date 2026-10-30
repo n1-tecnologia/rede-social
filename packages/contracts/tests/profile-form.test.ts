@@ -6,6 +6,7 @@ import {
   archivedQuestionSchema,
   createQuestionBodySchema,
   dismissNoticeResultSchema,
+  hasUnsafeChars,
   impactQuerySchema,
   impactResultSchema,
   memberFormSchema,
@@ -1040,5 +1041,72 @@ describe('12-03 - answerEtag', () => {
     );
     expect(answerEtag([...list].reverse())).not.toBe(answerEtag(list));
     expect(answerEtag([])).toBe('');
+  });
+});
+
+describe('12-REVIEW WR-02 - NUL and unpaired surrogates are refused as invalid, never thrown or stored', () => {
+  const NUL = 'a\u0000b';
+  const LONE_HIGH = 'a\uD83Db';
+  const LONE_LOW = 'a\uDE00b';
+
+  it('hasUnsafeChars flags NUL and lone surrogates and passes well-formed text, emoji included', () => {
+    expect(hasUnsafeChars(NUL)).toBe(true);
+    expect(hasUnsafeChars(LONE_HIGH)).toBe(true);
+    expect(hasUnsafeChars(LONE_LOW)).toBe(true);
+    expect(hasUnsafeChars('Ação 😀')).toBe(false);
+  });
+
+  it('a short or long text answer with a bad character is the keyed invalid, not a throw', () => {
+    for (const type of ['short_text', 'long_text'] as const) {
+      for (const bad of [NUL, LONE_HIGH, LONE_LOW, '\u0000']) {
+        expect(issueOf(q(type), bad), `${type} ${JSON.stringify(bad)}`).toBe('invalid');
+      }
+    }
+    expect(accepted(q('short_text'), 'Ação 😀').ok).toBe(true);
+  });
+
+  it('the "Outro" text of a choice answer is refused the same way', () => {
+    for (const bad of [NUL, LONE_HIGH]) {
+      expect(issueOf(choice('single_choice', { allowOther: true }), { otherText: bad })).toBe(
+        'invalid',
+      );
+      expect(
+        issueOf(choice('multiple_choice', { allowOther: true }), {
+          optionIds: [A],
+          otherText: bad,
+        }),
+      ).toBe('invalid');
+    }
+  });
+
+  it('a question title, help text and option label with a bad character fail with invalid', () => {
+    for (const bad of [NUL, LONE_HIGH]) {
+      expect(issuesOf(createQuestionBodySchema, { type: 'short_text', title: bad })).toContain(
+        'invalid',
+      );
+      expect(
+        issuesOf(createQuestionBodySchema, { type: 'short_text', title: 'x', helpText: bad }),
+      ).toContain('invalid');
+      expect(
+        issuesOf(createQuestionBodySchema, {
+          type: 'dropdown',
+          title: 'x',
+          options: [{ label: bad }, { label: 'ok' }],
+        }),
+      ).toContain('invalid');
+      expect(issuesOf(updateQuestionBodySchema, { revision: 1, title: bad })).toContain('invalid');
+      expect(issuesOf(updateQuestionBodySchema, { revision: 1, helpText: bad })).toContain(
+        'invalid',
+      );
+      expect(
+        issuesOf(updateQuestionBodySchema, {
+          revision: 1,
+          options: [{ label: bad }, { label: 'ok' }],
+        }),
+      ).toContain('invalid');
+      expect(
+        issuesOf(replaceQuestionBodySchema, { type: 'short_text', title: bad, replaces: A }),
+      ).toContain('invalid');
+    }
   });
 });

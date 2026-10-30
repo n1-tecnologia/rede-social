@@ -113,6 +113,16 @@ const fail = (issue: ProfileFormIssue): ParseAnswerResult => ({ ok: false, issue
 /** Length in Unicode code points (an emoji is one). */
 export const codePoints = (value: string): number => Array.from(value).length;
 
+/**
+ * True when a free-text value cannot be stored: a NUL (`jsonb` and `text` both refuse it) or an unpaired
+ * surrogate (not valid UTF-8). Such a value is refused as `invalid` instead of reaching the insert and
+ * becoming a 500 (review WR-02). A regex rather than `String.prototype.isWellFormed`, which the shared
+ * `lib` target (ES2023 for the web bundle) does not type.
+ */
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+export const hasUnsafeChars = (value: string): boolean =>
+  value.includes('\u0000') || UNPAIRED_SURROGATE.test(value);
+
 /** The duplicate rule for option labels: trim, Unicode NFC, then pt-BR lower case. */
 export function normalizeOptionLabel(label: string): string {
   return label.trim().normalize('NFC').toLocaleLowerCase('pt-BR');
@@ -137,6 +147,7 @@ function isNoAnswer(type: ProfileFormType, raw: unknown): boolean {
 function parseText(raw: unknown, max: number): ParseAnswerResult {
   if (typeof raw !== 'string') return fail('invalid');
   const text = raw.trim();
+  if (hasUnsafeChars(text)) return fail('invalid');
   return codePoints(text) > max ? fail('too_long') : ok(text);
 }
 
@@ -169,6 +180,7 @@ function parseChoice(question: ProfileFormQuestionDef, raw: unknown): ParseAnswe
     if (typeof rawOther !== 'string') return fail('invalid');
     const trimmed = rawOther.trim();
     if (trimmed !== '') {
+      if (hasUnsafeChars(trimmed)) return fail('invalid');
       if (!question.allowOther) return fail('other_not_allowed');
       if (codePoints(trimmed) > PROFILE_FORM_LIMITS.otherText) return fail('too_long');
       otherText = trimmed;
@@ -336,12 +348,14 @@ const requiredText = (max: number) =>
     .string({ error: 'invalid' })
     .trim()
     .min(1, 'required')
+    .refine((value) => !hasUnsafeChars(value), 'invalid')
     .refine((value) => codePoints(value) <= max, 'too_long');
 
 /** Help text: trimmed, at most 300 code points, an empty value means "none" (`null`). */
 const helpTextField = z
   .string({ error: 'invalid' })
   .trim()
+  .refine((value) => !hasUnsafeChars(value), 'invalid')
   .refine((value) => codePoints(value) <= PROFILE_FORM_LIMITS.helpText, 'too_long')
   .transform((value) => (value === '' ? null : value))
   .nullable();
@@ -388,6 +402,10 @@ function checkOptionList(options: { label: string }[], ctx: DefinitionIssueCtx):
     const label = option.label.trim();
     if (label === '') {
       ctx.addIssue({ code: 'custom', message: 'required', path: ['options', index, 'label'] });
+      return;
+    }
+    if (hasUnsafeChars(label)) {
+      ctx.addIssue({ code: 'custom', message: 'invalid', path: ['options', index, 'label'] });
       return;
     }
     if (codePoints(label) > PROFILE_FORM_LIMITS.optionLabel) {
