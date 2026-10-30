@@ -498,7 +498,14 @@ describe('Card and SectionTitle', () => {
 describe('buttonClasses', () => {
   const variants = ['brand', 'secondary', 'outline', 'ghost', 'danger'] as const;
   const sizes = ['sm', 'md', 'lg'] as const;
-  const HIT = ['relative', 'after:absolute', 'after:inset-x-0', 'after:-inset-y-1'];
+  const HIT = [
+    'relative',
+    'after:absolute',
+    'after:inset-x-0',
+    'after:top-1/2',
+    'after:h-11',
+    'after:-translate-y-1/2',
+  ];
   const tokens = (className: string) => className.split(/\s+/);
 
   it('is exactly what Button renders for every variant x size x fullWidth', () => {
@@ -533,6 +540,44 @@ describe('buttonClasses', () => {
     for (const token of HIT) expect(withHit).toContain(token);
     const without = tokens(buttonClasses({ variant: 'ghost', size: 'sm' }));
     for (const token of HIT) expect(without).not.toContain(token);
+  });
+
+  // The hit area is a 44px box CENTRED on the control, never an inset from its edges: an inset is
+  // measured from the padding box, which sits inside the border, so a 1px border (the outline
+  // variant) used to make the reach 34 + 4 + 4 = 42px (UI-D-443, quick 261030-hh2).
+  it('hitArea is a centred 44px box that does not depend on the border (UI-D-443)', () => {
+    const afterTokens = (className: string) =>
+      tokens(className)
+        .filter((token) => token.startsWith('after:'))
+        .sort();
+    const expected = [
+      'after:absolute',
+      'after:inset-x-0',
+      'after:top-1/2',
+      'after:h-11',
+      'after:-translate-y-1/2',
+    ].sort();
+    for (const variant of variants) {
+      const classes = buttonClasses({ variant, size: 'sm', hitArea: true });
+      expect(afterTokens(classes)).toEqual(expected);
+      expect(tokens(classes)).toContain('relative');
+      for (const token of tokens(classes)) expect(token).not.toMatch(/^after:-?inset-y-/);
+    }
+    const outline = tokens(buttonClasses({ variant: 'outline', size: 'sm', hitArea: true }));
+    expect(outline).toContain('border');
+    expect(outline).toContain('border-border-secondary');
+    expect(outline).toContain('h-9');
+    // A caller's own height, offset and translate are other class groups: they never strip the box.
+    const merged = tokens(
+      buttonClasses({
+        variant: 'outline',
+        size: 'sm',
+        hitArea: true,
+        className: 'h-10 top-2 translate-y-1',
+      }),
+    );
+    expect(afterTokens(merged.join(' '))).toEqual(expected);
+    for (const token of ['h-10', 'top-2', 'translate-y-1']) expect(merged).toContain(token);
   });
 
   it('lets a call-site className override the size defaults (tailwind-merge)', () => {

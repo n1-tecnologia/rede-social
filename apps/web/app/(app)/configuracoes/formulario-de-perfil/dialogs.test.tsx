@@ -881,7 +881,11 @@ describe('the list: names, live region, 44px targets and no raw HTML (UI-D-596)'
       </NextIntlClientProvider>,
     );
     const button = screen.getByRole('button', { name: 'Exportar respostas (CSV)' });
-    expect(button.className).toContain('after:-inset-y-1');
+    // An outline sm button: its 1px border must not shave the centred 44px box to 42px.
+    for (const token of ['border', 'after:top-1/2', 'after:h-11', 'after:-translate-y-1/2']) {
+      expect(button.className.split(/\s+/)).toContain(token);
+    }
+    expect(button.className).not.toMatch(/after:-?inset-y-/);
   });
 
   it('no element of the builder folder injects raw HTML (source scan)', () => {

@@ -41,12 +41,18 @@ export type ButtonVariant = keyof typeof variantStyles;
 export type ButtonSize = keyof typeof sizeStyles;
 
 /**
- * UI-D-443: every control is at least 44px. A transparent `::after` reaching 4px above and below
- * grows a 36px `sm` control to a 44px tap target without changing its look (nothing sideways, so it
- * never covers a neighbour in the row). Tailwind v4's `after:` variant supplies the empty
- * `content`. Only `sm` needs it: `md` is already 44px.
+ * UI-D-443: every control is at least 44px. A transparent `::after` grows a 36px `sm` control to a
+ * 44px tap target without changing its look. The box is 44px tall (`h-11`) and CENTRED on the
+ * control (`top-1/2` plus `-translate-y-1/2`), not an inset from its edges: an inset is measured
+ * from the padding box, which sits inside the border, so a 1px border (the outline variant) made
+ * the old form reach only 42px (quick 261030-hh2). Centred, it reaches 4px past the visible edge
+ * above and below whatever the border. Sideways it stays inside the control (`inset-x-0`), so it
+ * never covers a neighbour in the row. Tailwind v4 emits the translate as the `translate`
+ * property, not `transform`, so it composes with nothing else on the pseudo-element, and its
+ * `after:` variant supplies the empty `content`. Only `sm` needs it: `md` is already 44px.
  */
-const HIT_AREA = 'relative after:absolute after:inset-x-0 after:-inset-y-1';
+const HIT_AREA =
+  'relative after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2';
 
 export interface ButtonClassesOptions {
   variant?: ButtonVariant;
