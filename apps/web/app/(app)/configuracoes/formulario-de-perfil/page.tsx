@@ -5,7 +5,8 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { loadAdminForm } from '@/lib/profile-form/admin-reads';
+import { loadAdminForm, loadArchived } from '@/lib/profile-form/admin-reads';
+import { ArchivedList } from './ArchivedList';
 import { FormSummaryCard } from './FormSummaryCard';
 import { ProfileFormTabs } from './ProfileFormTabs';
 import { QuestionList } from './QuestionList';
@@ -61,7 +62,21 @@ export default async function ProfileFormPage({
   );
 
   let body: ReactNode = null;
-  if (tab === 'questions') {
+  if (tab === 'archived') {
+    const archived = await loadArchived();
+    if (archived.status === 'forbidden' || archived.status === 'moduleOff') notFound();
+    body =
+      archived.status === 'error' ? (
+        readFailed
+      ) : (
+        <ArchivedList
+          questions={archived.questions}
+          activeCount={archived.activeCount}
+          limit={archived.limit}
+          timeZone={bootstrap.tenant.timezone}
+        />
+      );
+  } else {
     const loaded = await loadAdminForm();
     if (loaded.status === 'forbidden' || loaded.status === 'moduleOff') notFound();
     if (loaded.status === 'error') {

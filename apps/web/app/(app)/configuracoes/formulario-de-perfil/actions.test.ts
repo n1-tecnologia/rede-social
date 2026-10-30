@@ -17,7 +17,9 @@ vi.mock('next/navigation', () => ({
   },
 }));
 
-const { reorderQuestionsAction } = await import('./actions');
+const { reactivateQuestionAction, readImpactAction, reorderQuestionsAction } = await import(
+  './actions'
+);
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -91,5 +93,124 @@ describe('reorderQuestionsAction', () => {
     const logged = JSON.stringify(spy.mock.calls);
     expect(logged).toContain('500');
     for (const id of IDS) expect(logged).not.toContain(id);
+  });
+});
+
+describe('readImpactAction (T-12-34)', () => {
+  it('GETs /impact with the change and the question id and returns the server count', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 12 }));
+    expect(await readImpactAction({ change: 'reactivate', questionId: IDS[0] })).toEqual({
+      ok: true,
+      members: 12,
+    });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit | undefined];
+    expect(path).toBe(`/v1/profile_form/impact?change=reactivate&questionId=${IDS[0]}`);
+    // a read: no method other than GET and no body
+    expect(init?.method ?? 'GET').toBe('GET');
+    expect(init?.body).toBeUndefined();
+  });
+
+  it('refuses a malformed query without a request', async () => {
+    expect(await readImpactAction({ change: 'reactivate', questionId: 'nope' })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    expect(
+      await readImpactAction({ change: 'delete' as unknown as 'reactivate', questionId: IDS[0] }),
+    ).toEqual({ ok: false, code: 'failed' });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('is ok:false when the API fails, the body breaks the contract, or the request throws', async () => {
+    mocks.apiFetch.mockResolvedValue(json(500, {}));
+    expect(await readImpactAction({ change: 'reactivate', questionId: IDS[0] })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockResolvedValue(json(200, { members: -1 }));
+    expect(await readImpactAction({ change: 'reactivate', questionId: IDS[0] })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockResolvedValue(json(200, { total: 3 }));
+    expect(await readImpactAction({ change: 'reactivate', questionId: IDS[0] })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await readImpactAction({ change: 'reactivate', questionId: IDS[0] })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+  });
+
+  it('keeps 403 and 404 apart so the screen can end in not-found', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await readImpactAction({ change: 'reactivate', questionId: IDS[0] })).toEqual({
+      ok: false,
+      code: 'forbidden',
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await readImpactAction({ change: 'reactivate', questionId: IDS[0] })).toEqual({
+      ok: false,
+      code: 'moduleOff',
+    });
+  });
+
+  it('follows the shipped navigation for a refused session', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(readImpactAction({ change: 'reactivate', questionId: IDS[0] })).rejects.toThrow(
+      /^REDIRECT /,
+    );
+  });
+});
+
+describe('reactivateQuestionAction', () => {
+  it('POSTs to /questions/{id}/reactivate', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, {}));
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({ ok: true });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/questions/${IDS[1]}/reactivate`);
+    expect(init.method).toBe('POST');
+  });
+
+  it('refuses a malformed id without a request', async () => {
+    expect(await reactivateQuestionAction('../../x')).toEqual({ ok: false, code: 'failed' });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('maps limit_reached (409), FORBIDDEN (403), MODULE_DISABLED (404) and the rest', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'limit_reached' }));
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({ ok: false, code: 'limit' });
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({
+      ok: false,
+      code: 'forbidden',
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({
+      ok: false,
+      code: 'moduleOff',
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'NOT_FOUND'));
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockResolvedValue(json(500, {}));
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+  });
+
+  it('follows the shipped navigation for a refused session', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(reactivateQuestionAction(IDS[1] as string)).rejects.toThrow(/^REDIRECT /);
   });
 });

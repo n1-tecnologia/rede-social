@@ -399,3 +399,63 @@ describe('aggregates only (PFORM-23)', () => {
     expect(paths.some((path) => path.includes('profile-answers'))).toBe(false);
   });
 });
+
+describe('the Arquivadas tab (UI-D-578)', () => {
+  it('lists the archived questions with Reativar and reads the archive and the active count', async () => {
+    serve({
+      questions: list([adminQuestion('short_text')]),
+      archived: {
+        questions: [
+          archivedQuestion('phone', { title: 'Telefone antigo', required: true, answerCount: 3 }),
+          archivedQuestion('link', { title: 'Site antigo', answerCount: 0 }),
+        ],
+      },
+    });
+    const out = await html('arquivadas');
+    const text = textOf(out);
+    expect(text).toContain('Telefone antigo');
+    expect(text).toContain('Site antigo');
+    expect(text).toContain('3 respostas guardadas');
+    expect(text).toContain('Sem respostas guardadas');
+    expect(text).toContain('Era obrigatória');
+    expect(out).toContain('aria-label="Reativar pergunta: Telefone antigo"');
+    // the tab reads the archive and the active list, never the summary or an answer
+    const paths = mocks.apiFetch.mock.calls.map((call) => String(call[0])).sort();
+    expect(paths).toEqual(['/v1/profile_form/archived', '/v1/profile_form/questions']);
+    // the Perguntas-only pieces are not on this tab
+    expect(out).not.toContain('data-form-summary');
+    expect(out).not.toContain('Perguntas ativas');
+  });
+
+  it('shows the empty state when nothing is archived', async () => {
+    serve({ questions: list([]), archived: { questions: [] } });
+    const text = textOf(await html('arquivadas'));
+    expect(text).toContain('Nenhuma pergunta arquivada');
+  });
+
+  it('shows the "Algo deu errado" card with a retry link to the archived tab when the read fails', async () => {
+    serve({ questions: list([]), archived: json(500, {}) });
+    const out = await html('arquivadas');
+    expect(textOf(out)).toContain('Algo deu errado');
+    expect(out).toMatch(
+      /<a[^>]*href="\/configuracoes\/formulario-de-perfil\?aba=arquivadas"[^>]*>[^<]*Tentar novamente/,
+    );
+  });
+
+  it('answers notFound for a 403 or a module turned off, like the Perguntas tab', async () => {
+    serve({ questions: list([]), archived: json(404, { error: { code: 'MODULE_DISABLED' } }) });
+    await expect(html('arquivadas')).rejects.toThrow('NOT_FOUND');
+    serve({ questions: list([]), archived: json(403, { error: { code: 'FORBIDDEN' } }) });
+    await expect(html('arquivadas')).rejects.toThrow('NOT_FOUND');
+  });
+
+  it('marks the Arquivadas tab as the selected one and Perguntas as not', async () => {
+    serve({ questions: list([]), archived: { questions: [] } });
+    const out = await html('arquivadas');
+    const tabs = [...out.matchAll(/<a[^>]*role="tab"[^>]*>.*?<\/a>/g)].map((match) => match[0]);
+    const selected = tabs.filter((tab) => tab.includes('aria-selected="true"'));
+    expect(selected).toHaveLength(1);
+    expect(selected[0]).toContain('Arquivadas');
+    expect(tabs.find((tab) => tab.includes('Perguntas'))).toContain('aria-selected="false"');
+  });
+});

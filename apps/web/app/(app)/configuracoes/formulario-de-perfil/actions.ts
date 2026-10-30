@@ -1,7 +1,13 @@
 'use server';
 
-import { reorderBodySchema } from '@rede-social/contracts/profile-form';
+import {
+  impactQuerySchema,
+  impactResultSchema,
+  type ProfileFormImpactChange,
+  reorderBodySchema,
+} from '@rede-social/contracts/profile-form';
 import { redirect } from 'next/navigation';
+import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 
@@ -32,6 +38,14 @@ export type BuilderRefusal = 'forbidden' | 'moduleOff' | 'mismatch' | 'limit' | 
 export type ReorderResult =
   | { ok: true }
   | { ok: false; code: 'forbidden' | 'moduleOff' | 'mismatch' | 'failed' };
+
+export type ImpactActionResult =
+  | { ok: true; members: number }
+  | { ok: false; code: 'forbidden' | 'moduleOff' | 'failed' };
+
+export type ReactivateResult =
+  | { ok: true }
+  | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };
 
 type ErrorBody = { code?: string; details?: Record<string, unknown>; requestId?: string };
 type Envelope = { error?: ErrorBody };
@@ -104,6 +118,90 @@ export async function reorderQuestionsAction(ids: string[]): Promise<ReorderResu
     }
   } catch (error) {
     console.error('profile_form.reorder_failed', {
+      error: error instanceof Error ? error.name : 'unknown',
+    });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * `GET /v1/profile_form/impact`: how many members a change would ask to answer (D-585, UI-D-576). It is a
+ * READ: nothing is written. `{ ok: false }` is the caller's signal that the count is unknown, and **the
+ * caller must then not write** (T-12-34): a reopening change is never applied on a guess of how many
+ * members it holds out. 403 and 404 carry their own code so the screen can end in `notFound()`; anything
+ * else, including a body that breaks the contract, is `failed`.
+ */
+export async function readImpactAction(input: {
+  change: ProfileFormImpactChange;
+  questionId?: string;
+}): Promise<ImpactActionResult> {
+  const query = impactQuerySchema.safeParse(input);
+  if (!query.success) return { ok: false, code: 'failed' };
+
+  const params = new URLSearchParams({ change: query.data.change });
+  if (query.data.questionId) params.set('questionId', query.data.questionId);
+
+  let refusal: string | null = null;
+  let result: ImpactActionResult = { ok: false, code: 'failed' };
+  try {
+    const res = await apiFetch(`/v1/profile_form/impact?${params.toString()}`);
+    if (res.ok) {
+      result = { ok: true, members: impactResultSchema.parse(await res.json()).members };
+    } else {
+      const envelope = await readEnvelope(res);
+      const code = refusalOf(res.status, envelope);
+      if (code === 'forbidden' || code === 'moduleOff') {
+        result = { ok: false, code };
+      } else {
+        refusal = navigationFor(res.status, envelope);
+        if (!refusal) {
+          console.error('profile_form.impact_failed', { status: res.status, code: envelope?.code });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('profile_form.impact_failed', {
+      error: error instanceof Error ? error.name : 'unknown',
+    });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * `POST /v1/profile_form/questions/{id}/reactivate`: an archived question returns at the END of the active
+ * list with its stored answers valid again (D-588). `limit` is 409 `limit_reached` (30 active questions).
+ * The action does not read the impact itself: the screen reads it first and decides whether to write.
+ */
+export async function reactivateQuestionAction(id: string): Promise<ReactivateResult> {
+  if (!z.uuid().safeParse(id).success) return { ok: false, code: 'failed' };
+
+  let refusal: string | null = null;
+  let result: ReactivateResult = { ok: false, code: 'failed' };
+  try {
+    const res = await apiFetch(`/v1/profile_form/questions/${id}/reactivate`, { method: 'POST' });
+    if (res.ok) {
+      result = { ok: true };
+    } else {
+      const envelope = await readEnvelope(res);
+      const code = refusalOf(res.status, envelope);
+      if (code === 'forbidden' || code === 'moduleOff' || code === 'limit') {
+        result = { ok: false, code };
+      } else {
+        refusal = navigationFor(res.status, envelope);
+        if (!refusal) {
+          console.error('profile_form.reactivate_failed', {
+            status: res.status,
+            code: envelope?.code,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('profile_form.reactivate_failed', {
       error: error instanceof Error ? error.name : 'unknown',
     });
   }
