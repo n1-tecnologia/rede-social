@@ -3583,6 +3583,150 @@ run stays `pending`:
 Hosted proofs are the only thing this phase leaves open: while any row is `pending` the phase closes
 `human_needed`.
 
+## Phase 12 release (tenant profile form)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing
+of Phase 12 has been pushed, deployed or applied to a hosted project, and auto mode blocks Claude from
+touching production. No command here prints a secret. Phase 12 ships ON TOP of Phase 09.4. The proofs only
+the owner can run (a real phone, one hosted tenant project, the file opened in Excel and Google Sheets, a
+large export through Cloud Run) are in the ledger
+`.planning/phases/12-formulario-de-perfil-do-tenant/12-MANUAL-PROOFS.md` (M1 to M9); it ships with every row
+`pending`, and a row becomes `passed` only with the evidence you paste and your own date.
+
+Phase 12 gives a tenant an optional **profile form**: the admin builds up to 30 questions of 13 types, marks
+some as required, and every member answers them. A member who owes a required answer is held at the "Complete
+seu perfil" screen until she answers; the answers show on the member's own profile ("Minhas respostas"),
+publicly on the profile when the admin made a question public, and in full to the staff.
+
+### What ships
+
+- **Four tenant migrations, applied in timestamp order, all expand-only** (new tables, one new nullable
+  column, one CHECK widened, new functions; no row is rewritten, no tenant is backfilled):
+  - `20261029230924_profile_form_module_key.sql`: `tenant_modules_key_chk` widened to end in `profile_form`.
+  - `20261029232606_profile_form_tables.sql`: the tables `profile_form_questions` and `profile_form_answers`
+    with their RLS policies, the nullable column `member_profiles.profile_form_notice_dismissed_at`, and
+    `moderation_log_action_chk` widened by `profile_form_exported`.
+  - `20261029233037_profile_form_functions.sql`: `app.profile_form_missing`, `app.profile_form_missing_self`,
+    the twin lookups `app.membership_in_tenant_gate` and `app.memberships_of_user_gate`, and the guard
+    trigger `profile_form_questions_guard` (a question with answers keeps its type, its answered options and
+    its privacy).
+  - `20261029234918_profile_form_lock_active.sql`: `app.profile_form_lock_active()`, the lock a member's save
+    takes on the active questions.
+- **The API:** the gate (`403 PROFILE_FORM_PENDING`, the last guard of the chain; the bootstrap and the form's
+  own routes are never refused by it), the member routes `GET /v1/me/profile-form`,
+  `PUT /v1/me/profile-form/answers` and `POST /v1/me/profile-form/dismiss-notice`, the `profileForm` block of
+  `GET /v1/me/bootstrap`, the admin routes under `/v1/profile_form` (`/questions`, `/order`, `/archived`,
+  `/summary`, `/impact`, `/export`), and `GET /v1/members/{membershipId}/profile-answers`. The gate calls the
+  `_gate` twins and the member's save calls `app.profile_form_lock_active()`.
+- **The web:** `/completar-perfil` (the completion screen, three modes), `/configuracoes/formulario-de-perfil`
+  (the builder, its archived tab, the editor sheet, the export and the preview), "Minhas respostas" and the
+  new-questions notice on `/perfil`, the answer blocks on `/membros/{id}`, the platform Módulos row, the
+  Moderação line for an export, and the **web relay `/api/profile-form/export`** that streams the CSV from the
+  API to the browser.
+- **The worker is not involved.** No job, cron, queue or schedule is added.
+- **No environment variable, secret or GitHub variable is added.** There is nothing to seed.
+- **The module is OFF for every tenant, new and existing.** A tenant gets it only when the `super_admin`
+  turns it on in the platform's Módulos tab for that tenant. Until then the gate answers nothing, the
+  bootstrap carries no `profileForm` block, and the builder is the not-found page. **No tenant is
+  backfilled** and no question exists anywhere until an admin writes one.
+
+### Order: migrations on every tenant project, then the API and the worker together, then the web
+
+1. **Local checks first.** `pnpm db:reset && pnpm db:seed` rebuilds the local stack; `bash
+   scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set, the four files above
+   included, to an empty local second database. `pnpm db:migrate-all -- --dry-run` lists what is pending per
+   project without applying anything. The integration case "Phase 12 (PFORM-25)" of
+   `apps/api/tests/integration/migrate-all.test.ts` proves, on the local second database, that the fan-out
+   applies the three files, that the ledger lists them and that a second run applies nothing. The "local gate"
+   note of the Phase 09.2 section applies.
+2. **The migrations reach EVERY tenant project through the ledgered `migrateAll`** (the Phase 09.2 Cloud Run
+   Job, D-544: databases before API and worker). The runner serialises per database with an advisory lock and
+   is idempotent: a project that is current applies nothing, so a re-run is safe. A project whose applied
+   schema is behind the image is held out as `updating` until it is current (the existing schema gate).
+   `20261029232606`, `20261029233037` and `20261029234918` **must be applied everywhere before the API that
+   calls the `_gate` lookups and `app.profile_form_lock_active()` serves**; the module-key file is the
+   fourth of the set and goes with them.
+3. **The API and the worker TOGETHER**, one image, as in the Phase 09.2 pipeline. The worker does not use the
+   form, but one image keeps the two revisions equal.
+4. **The web LAST**, because its screens read fields and routes the new API returns, and the module can only
+   be switched on once the web that shows the form is live.
+5. **Only then, per tenant, the `super_admin` turns "Formulário de perfil" on** in the platform Módulos tab.
+   Turning it off asks for a confirmation in a danger dialog; it keeps every question and answer and releases
+   every member at once (D-589).
+
+These steps are consecutive; nothing else belongs between them. **Why this order (T-12-40).** The migrations
+only add, so the previous API revision keeps working on the new database: it knows no `profile_form` module and
+never calls the new functions. The reverse is the dangerous one: the new API against a project that has not
+received the migrations calls functions that do not exist, and the schema gate holds that project out as
+`updating` instead of letting a member meet an error. Turning the module on before the web is live would hold
+members at a route that does not exist yet.
+
+### The old lookup pair stays one release
+
+`app.membership_in_tenant_gated` and `app.memberships_of_user_gated` are NOT touched by Phase 12, so the API
+revision still serving while the fan-out runs keeps working. The new revision calls the `_gate` twins.
+**Deferred follow-up (planner decision (d)):** a later cleanup migration drops the old `_gated` pair. Schedule
+it one release after the API that calls the `_gate` twins is live on every project (the 08.1-05
+`membership_for_user` precedent). It is NOT part of this release and no plan of Phase 12 writes it.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only). Roll forward with a fix instead.
+- **An older API revision against the new schema is harmless.** It does not know the module, the gate or the
+  routes, so nothing is gated and nothing breaks; a form that was already in use simply stops being asked.
+  Rolling the API back therefore releases every held member, with her answers kept in the table.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the
+  migrations reach every project.
+- **Rolling the web back** removes the screens; with the module still on, members who owe an answer are sent
+  by the API to a route the old web does not have. Turn the module off for the tenant first.
+- **The quickest release of every member** is the module switch (off) in the platform Módulos tab; archiving
+  the last required question also releases them. Neither deletes an answer.
+
+### The export and the 32 MiB body cap (assumption A2)
+
+The CSV is a streamed response (the API pages the admin lane and writes as it goes; the web relay passes the
+body through untouched, with `no-store`). The Cloud Run cap of 32 MiB applies to HTTP/1 **request and response
+bodies of non-streamed responses**; **assumption A2** is that a streamed (chunked) response is not subject to
+it. Sizes expected are a few MB. This is not proven on a hosted API: it is manual proof **M4** of the ledger
+(export a tenant with thousands of members through the hosted API and record the size and the outcome). If it
+fails, the mitigation is paging the export or a signed download, as a later change. The file is `;`
+separated, starts with a UTF-8 byte-order mark and writes numbers with a decimal comma (assumption A1); whether
+Excel and Google Sheets open it cleanly with accents is **M3**. Every export writes a row in the Moderação
+history ("{name} exportou as respostas do formulário de perfil"), and the file holds personal data: the
+confirmation dialog says so.
+
+### Smoke checks
+
+Read-only SQL on a tenant project, after the Job:
+
+```sql
+select to_regclass('public.profile_form_questions'), to_regclass('public.profile_form_answers');
+-- both non-null
+select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and proname in ('profile_form_missing', 'profile_form_missing_self',
+   'membership_in_tenant_gate', 'memberships_of_user_gate', 'profile_form_question_guard',
+   'profile_form_lock_active');
+-- six rows
+select tgname from pg_trigger where tgname = 'profile_form_questions_guard' and not tgisinternal;
+-- one row
+select version from supabase_migrations.schema_migrations
+ where version in ('20261029230924', '20261029232606', '20261029233037', '20261029234918') order by version;
+-- four rows
+select count(*) from public.tenant_modules where module_key = 'profile_form';
+-- 0 before any tenant is switched on: nothing is backfilled
+```
+
+And the central check of the Phase 09.2 section: the Job's step summary shows exit code `0` and every project
+`current`.
+
+### Manual proofs (hosted)
+
+The ledger lists them (M1 to M9). In short: the member path on a real phone after the homolog deploy, the
+migrations on one hosted tenant project, the CSV opened in Excel and Google Sheets with accents, a large
+export streamed through Cloud Run, your confirmation of the export's row set (active and blocked members) and
+of the Moderação wording, this release order itself, the browser specs that were written but not yet run
+(they need more than 10 GiB of free disk), and the pt-BR copy that was not in the approved design.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event

@@ -154,6 +154,13 @@ const REQUIRED_KEYS = [
   // state to every host, so a moved or prerendered route must fail this gate.
   '/(app)/configuracoes/pagamentos/page',
   '/(auth)/assinatura-pendente/page',
+  // 12-18 (PFORM-25): the profile form. The completion screen is where the gate sends a member who owes a
+  // required answer: it reads the session, the bootstrap and that member's own questions and answers per
+  // request, so a prerendered copy would serve one member's answers to every visitor. The builder reads the
+  // session, the composed `profile_form.manage` permission and the tenant's questions per request (a support
+  // user or a member gets the not-found page). A moved or prerendered route must fail this gate.
+  '/(auth)/completar-perfil/page',
+  '/(app)/configuracoes/formulario-de-perfil/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

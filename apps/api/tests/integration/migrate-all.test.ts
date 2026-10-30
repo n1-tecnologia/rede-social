@@ -667,3 +667,91 @@ describe('a dead management token never reaches the fan-out (D-574, CTK-19, T-09
     expect(calls).toEqual([]);
   }, 240_000);
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// Phase 12 (PFORM-25): the profile form migrations fan out to every project
+// ---------------------------------------------------------------------------------------------------------
+
+/** The three tenant migrations of the profile form, in the order the runner applies them. */
+const PROFILE_FORM_VERSIONS = ['20261029232606', '20261029233037', '20261029234918'] as const;
+
+/** Every function the two hand-written Phase 12 migrations create in the `app` schema. */
+const PROFILE_FORM_FUNCTIONS = [
+  'membership_in_tenant_gate',
+  'memberships_of_user_gate',
+  'profile_form_lock_active',
+  'profile_form_missing',
+  'profile_form_missing_self',
+  'profile_form_question_guard',
+] as const;
+
+describe('Phase 12 (PFORM-25): the profile form migrations reach the second project', () => {
+  it('applies the three migrations to a project that lacks them, and a second run applies nothing', async () => {
+    // B holds the tenant set up to the migration just before the first Phase 12 file; the three files are pending.
+    const all = await readMigrationDir(defaultMigrationDir('tenant'), 'tenant');
+    const first = all.findIndex((file) => file.version === PROFILE_FORM_VERSIONS[0]);
+    expect(first, 'the first Phase 12 migration is in the tenant set').toBeGreaterThanOrEqual(0);
+    expect(all.slice(first, first + 3).map((file) => file.version)).toEqual([
+      ...PROFILE_FORM_VERSIONS,
+    ]);
+    const behind = all.length - first;
+    const files = await laggingB(behind);
+    const f = await register('pform');
+
+    const missing = () =>
+      onB(async (b) => {
+        const [row] = await b<
+          { questions: string | null; answers: string | null; tr: number; fns: number }[]
+        >`
+          select to_regclass('public.profile_form_questions')::text as questions,
+                 to_regclass('public.profile_form_answers')::text as answers,
+                 (select count(*)::int from pg_trigger
+                   where tgname = 'profile_form_questions_guard' and not tgisinternal) as tr,
+                 (select count(*)::int
+                    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname = 'app' and p.proname = any(${[...PROFILE_FORM_FUNCTIONS]}::text[])) as fns`;
+        return row;
+      });
+
+    // Before: none of it exists in B.
+    expect(await missing()).toEqual({ questions: null, answers: null, tr: 0, fns: 0 });
+    expect((await ledgerOfB()).count).toBe(files.length - behind);
+
+    const run = await migrateAll({ concurrency: 2 });
+    expect(run.exitCode).toBe(0);
+    expect(lineOf(run.lines, f.ref)).toMatchObject({ status: 'current', applied: behind });
+
+    // After: both tables, the guard trigger and every function are there, and the ledger lists the three files.
+    expect(await missing()).toEqual({
+      questions: 'profile_form_questions',
+      answers: 'profile_form_answers',
+      tr: 1,
+      fns: PROFILE_FORM_FUNCTIONS.length,
+    });
+    const listed = await onB(async (b) => {
+      const rows = await b<{ version: string }[]>`
+        select version from supabase_migrations.schema_migrations
+         where version = any(${[...PROFILE_FORM_VERSIONS]}::text[]) order by version`;
+      return rows.map((row) => row.version);
+    });
+    expect(listed).toEqual([...PROFILE_FORM_VERSIONS]);
+    const head = files.at(-1)?.version;
+    expect(await ledgerOfB()).toEqual({ count: files.length, head });
+    expect(await stateOf(f.projectId)).toMatchObject({ status: 'current', error_code: null });
+
+    // A tenant of that database with no module row owes nothing: the lookup answers 0.
+    const owed = await onB(async (b) => {
+      const [row] = await b<{ n: number }[]>`
+        select app.profile_form_missing(gen_random_uuid(), gen_random_uuid()) as n`;
+      return row?.n;
+    });
+    expect(owed).toBe(0);
+
+    // The second run is a no-op: nothing applied, the ledger and the state are unchanged.
+    const second = await migrateAll({ concurrency: 2 });
+    expect(second.exitCode).toBe(0);
+    expect(lineOf(second.lines, f.ref)).toMatchObject({ status: 'current', applied: 0 });
+    expect(await ledgerOfB()).toEqual({ count: files.length, head });
+    expect(await stateOf(f.projectId)).toMatchObject({ status: 'current' });
+  }, 240_000);
+});
