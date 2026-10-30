@@ -40,6 +40,7 @@ export const ROUTE_HANDLER_INVENTORY: Record<string, RouteHandlerEntry> = {
   },
   'api/notifications/read-all/route.ts': { proxies: 'POST /v1/notifications/read-all' },
   'api/notifications/seen/route.ts': { proxies: 'POST /v1/notifications/seen' },
+  'api/profile-form/export/route.ts': { proxies: 'GET /v1/profile_form/export' },
   'api/push/subscriptions/route.ts': {
     proxies: [
       'POST /v1/notifications/push-subscriptions',
