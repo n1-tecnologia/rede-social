@@ -442,7 +442,7 @@ Phase 12. The tenant admin builds the profile form of their community; members a
 
 - [x] **PFORM-01**: The profile form is a toggleable module: its key `profile_form` is appended last to `TOGGLEABLE_MODULES`, the `tenant_modules_key_chk` CHECK widens in the same migration, the key is not in `REAL_TENANT_DEFAULT_MODULES`, no existing tenant gets a row, the `super_admin` switches it per tenant in the platform panel (with a confirmation before turning it off), and with it off every builder and answer-admin route answers 404 `MODULE_DISABLED` and the "Formulário de perfil" row is absent. *(D-596, D-589, UI-D-594)*
 - [ ] **PFORM-02**: `admin_tenant` (permission `profile_form.manage`, composed for `admin_tenant` only while the module is on) creates, edits (title, help text, required, show-on-profile) and reorders questions; the stored order is the order members see; a `support_tenant`, a `member` and another tenant's admin are refused; at most 30 active questions, title at most 120 and help text at most 300 characters, enforced by the API and by CHECKs. *(D-582, UI-D-599)*
-- [ ] **PFORM-03**: Removing a question archives it (`archived_at`), keeps its answers, lists it under "Arquivadas" with its answer count and includes it in the export; reactivation puts it at the end of the list and reopens the form per PFORM-09; a never-answered question may be hard-deleted and the database itself refuses to delete a question that has answers. *(D-588)*
+- [x] **PFORM-03**: Removing a question archives it (`archived_at`), keeps its answers, lists it under "Arquivadas" with its answer count and includes it in the export; reactivation puts it at the end of the list and reopens the form per PFORM-09; a never-answered question may be hard-deleted and the database itself refuses to delete a question that has answers. *(D-588)*
 - [x] **PFORM-04**: Each of the thirteen types has a validator in the discriminated Zod schema of `packages/contracts`: short text at most 120, long text at most 1000, dropdown and single choice (one option id, or "Outro" with text), multiple choice (at least one option id, optional "Outro" text), number (finite, within the admin's min/max), date (a real calendar day `YYYY-MM-DD` within min/max), phone (Brazilian, 10 or 11 digits, DDD 11-99, a leading 9 when 11 digits), e-mail, link (`http:`/`https:` only), yes/no (boolean), acceptance (only `true` counts), rating (integer 1-5). *(D-590)*
 - [x] **PFORM-05**: A new question type is added by one Zod variant and, at most, a widening of the `type` CHECK; the questions and answers tables are not rewritten, the answer value is a typed `jsonb`, and a contract test pins that the TypeScript type list and the CHECK list are the same ordered list. *(D-591)*
 - [ ] **PFORM-06**: Choice questions carry 2 to 20 options (label at most 80, unique per question) with stable ids; "Outro" is switched per question, is not counted in the 20, stores the member's text (at most 120) inside the answer, and an answer naming an option id that is not in the question is refused. *(D-592)*
@@ -908,7 +908,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PEND-14 | Phase 09.3 | Complete |
 | PFORM-01 | Phase 12 (plans 02, 08, 11) | Complete |
 | PFORM-02 | Phase 12 (plans 03, 08, 15, 16) | Pending |
-| PFORM-03 | Phase 12 (plans 04, 09, 15) | Pending |
+| PFORM-03 | Phase 12 (plans 04, 09, 15) | Complete |
 | PFORM-04 | Phase 12 (plan 03) | Complete |
 | PFORM-05 | Phase 12 (plans 03, 04) | Complete |
 | PFORM-06 | Phase 12 (plans 03, 06, 16) | Pending |

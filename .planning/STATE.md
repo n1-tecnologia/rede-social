@@ -4,16 +4,16 @@ current_phase: 12
 current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: "Completed 12-14-PLAN.md (profile surfaces: Minhas respostas, the new-questions notice, public and staff answers blocks)"
-last_updated: "2026-10-30T02:13:46.141Z"
+stopped_at: Completed 12-15-PLAN.md
+last_updated: "2026-10-30T02:30:33.972Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: c0f91d129fb400152c8b8ff28e0a9daa6e847966
+state_head: 9cc4dab76559dcedee774d25628ff53a2f09ef0e
 progress:
   total_phases: 27
   completed_phases: 0
   total_plans: 312
-  completed_plans: 299
+  completed_plans: 300
   percent: 0
 ---
 
@@ -338,6 +338,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P12 | 16 min | 3 tasks | 17 files |
 | Phase 12 P13 | 22 min | 2 tasks | 12 files |
 | Phase 12 P14 | 13min | 3 tasks | 23 files |
+| Phase 12 P15 | 14min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -1081,6 +1082,8 @@ Recent decisions affecting current work:
 - [Phase 12]: 12-01: sketch 016 approval recorded as provisional; the README edit was made by the orchestrator on Igor's instruction (pode fazer voce mesmo, 2026-10-30), not by his hand; answers to questions (a)-(f) not given — Releases web plans 11-18 past their approved: true guard; verify-work should confirm the approval with Igor
 - [Phase 12]: 12-13: pt-BR number rule (comma decimal; thousands dots only when well formed, first group not starting with 0); a number is shown back as parsed on blur; a twelfth phone digit is refused, never cut; a country code 55 is removed only from a paste or a bulk insert into an empty field — T-12-31: the mask and parsers must not silently turn what was typed into a different valid value; parseAnswer stays the only judge
 - [Phase 12]: 12-14: answerView takes the catalog words as a third argument so the one mapper holds no pt-BR copy; a block renders only when the viewer's role and the payload kind agree; Minhas respostas' skeleton has no title so an empty tenant never flashes a heading; loaders log an error class only — T-12-32: an answer becomes an anchor only for a validated http(s) Link answer, everything else is React text — T-12-32 and T-12-30
+- [Phase 12]: 12-15: the builder pages gate on the literal 'profile_form.manage' (apps/web does not depend on the module package), pinned to the module's contract by a test — Adding the dependency would change package.json and the lockfile; a test reads the module's contracts file instead
+- [Phase 12]: 12-15: a reopening write follows a successful impact read only; readImpactAction ok:false (any code) means no write, and 403/404 end in a refresh into notFound() — T-12-34: never apply a change on a guess of how many members it holds out
 
 ### Pending Todos
 
@@ -1199,6 +1202,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T02:13:45.897Z
-Stopped at: Completed 12-14-PLAN.md (profile surfaces: Minhas respostas, the new-questions notice, public and staff answers blocks)
+Last session: 2026-10-30T02:30:24.470Z
+Stopped at: Completed 12-15-PLAN.md
 Resume file: None

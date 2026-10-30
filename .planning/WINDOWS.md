@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 83
+open_count: 84
 waived_count: 0
 fixed_count: 60
-total_count: 143
-last_updated: 2026-10-23T13:42:21.020Z
+total_count: 144
+last_updated: 2026-10-30T02:28:58.647Z
 ---
 
 # Broken Windows Ledger
@@ -158,6 +158,7 @@ last_updated: 2026-10-23T13:42:21.020Z
 | 141 | 09.2 | deviation | packages/core/server/projects/move/rollback.ts |  | 09.2-23: a rollback from state done holds the tenant by suspending it, but the move is already closed then, so a platform admin could reactivate it between the suspension and the repoint; the closed state has no lease on the tenant | open |  | 2026-10-23T13:03:25.713Z |  |
 | 142 | 09.2 | unrun-verify | docs/DEPLOY.md |  | 09.2-24: the Cloud Run Job execution override that runs the tenant move (gcloud run jobs execute migrate --update-env-vars=ROLE=move --args=node,dist/main.js,...) is documented from the image's CMD and the gcloud flags and has never run; it is part of hosted proofs H5 and H6 | open |  | 2026-10-23T13:42:20.944Z |  |
 | 143 | 09.2 | todo | docs/DEPLOY.md |  | 09.2-24: the orphan-route cleanup (T-09.2-49, plan 10 handoff: payment_integration_routes, payment_product_routes, video_asset_routes rows of purged assets) is a manual read-then-delete procedure in DEPLOY.md; no command exists yet | open |  | 2026-10-23T13:42:21.020Z |  |
+| 144 | 12 | stub | apps/web/app/(app)/configuracoes/formulario-de-perfil/QuestionList.tsx |  | Question row button has no click handler until plan 12-16 supplies onOpen (the editor sheet); the builder empty state has no Adicionar pergunta action until plan 12-16 | open |  | 2026-10-30T02:28:58.647Z |  |
 
 ````json
 [
@@ -1875,6 +1876,18 @@ last_updated: 2026-10-23T13:42:21.020Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-23T13:42:21.020Z",
+    "resolved_at": null
+  },
+  {
+    "id": 144,
+    "kind": "stub",
+    "phase": "12",
+    "file": "apps/web/app/(app)/configuracoes/formulario-de-perfil/QuestionList.tsx",
+    "line": null,
+    "description": "Question row button has no click handler until plan 12-16 supplies onOpen (the editor sheet); the builder empty state has no Adicionar pergunta action until plan 12-16",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-30T02:28:58.647Z",
     "resolved_at": null
   }
 ]
