@@ -242,7 +242,12 @@ test('3. an answered question is locked; replace, archive and the impact of a re
     await builderRow(page, answered.title).click();
     const sheet = editor(page, 'Editar pergunta');
     await expect(sheet).toContainText('Esta pergunta já tem 1 resposta');
-    await sheet.getByRole('button', { name: 'Criar nova pergunta e arquivar esta' }).click();
+    // The dialog offers this action twice on purpose (the type picker's lock row and the visibility
+    // switches' lock row, both calling the same replace flow); take the first for strict mode.
+    await sheet
+      .getByRole('button', { name: 'Criar nova pergunta e arquivar esta' })
+      .first()
+      .click();
     const replacement = editor(page, 'Substituir pergunta');
     await expect(replacement).toBeVisible();
     await expect(replacement).toContainText(`${open(answered.title)} será arquivada`);
