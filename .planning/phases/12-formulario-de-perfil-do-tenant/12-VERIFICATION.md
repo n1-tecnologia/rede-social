@@ -1,8 +1,8 @@
 ---
 phase: 12-formulario-de-perfil-do-tenant
-verified: 2026-10-30T09:25:00Z
+verified: 2026-10-30T17:10:00Z
 status: human_needed
-score: 4/8 must-haves verified
+score: 7/8 must-haves verified
 covered_files:
   - ".planning/REQUIREMENTS.md"
   - ".planning/phases/12-formulario-de-perfil-do-tenant/12-01-PLAN.md"
@@ -133,6 +133,7 @@ covered_files:
   - "apps/web/e2e/profile-form.ts"
   - "apps/web/i18n/messages.test.ts"
   - "apps/web/i18n/profile-form-messages.test.ts"
+  - "apps/web/lib/bootstrap.destination.test.ts"
   - "apps/web/lib/bootstrap.test.ts"
   - "apps/web/lib/bootstrap.ts"
   - "apps/web/lib/moderation-view.test.ts"
@@ -204,6 +205,7 @@ covered_files:
   - "packages/core/tests/membership-pick.test.ts"
   - "packages/core/tests/moderation-log.test.ts"
   - "packages/core/tests/profile-form-csv.test.ts"
+  - "packages/core/tests/profile-form-export-guard.test.ts"
   - "packages/core/tests/profile-form-lock-rules.test.ts"
   - "packages/core/tests/require-auth-cut.test.ts"
   - "packages/core/tests/require-auth-form.test.ts"
@@ -218,6 +220,8 @@ covered_files:
   - "packages/modules/profile-form/tsconfig.json"
   - "packages/modules/profile-form/turbo.json"
   - "packages/modules/profile-form/vitest.config.ts"
+  - "packages/ui/src/primitives/buttonClasses.ts"
+  - "packages/ui/tests/button.test.tsx"
   - "scripts/check-static-routes.sh"
   - "supabase/migrations/20261029230924_profile_form_module_key.sql"
   - "supabase/migrations/20261029232606_profile_form_tables.sql"
@@ -230,72 +234,87 @@ covered_files:
   - "supabase/migrations/meta/_journal.json"
   - "supabase/tests/154-moderation-log.sql"
   - "supabase/tests/220-profile-form.sql"
-covered_digest: "v1:sha256:35ec01b7f601f4bb279a03dd05a6833be9ad8789e866c448df6d981e01605c36"
-behavior_unverified: 4
+covered_digest: "v1:sha256:e2a32c12bf5b2099e5e0b9cbe439ec723fef1c2abd9d0b0aa833af04bddb2866"
+behavior_unverified: 0
 overrides_applied: 0
-behavior_unverified_items:
-  - truth: "A new member who joins a tenant with a required question is taken to the profile form right after the first login, before reaching the app (SC2)"
-    test: "On a real phone against a deploy, sign up or join a tenant with one required question, log in, and open a deep link to a post"
-    expected: "The browser lands on /completar-perfil?next=<the post>; answering and saving lands on that same post; sign-up and join themselves are unchanged"
-    why_human: "The API half (403 PROFILE_FORM_PENDING, the allow-list, the bootstrap block) is proved on the live local stack (profile-form-gate 13 passed). The web hop (bootstrapRedirectPath, requireBootstrap, the validated next, the page) is proved only by jsdom/mocked unit tests. The gate spec that walks it in a browser was written and never run (ledger M8)."
-  - truth: "An existing member who never completed the profile is taken through the form the next time the app opens, and can reach and edit her answers later from her profile (SC3, PFORM-20)"
-    test: "As an existing member of a tenant that has just got a required question, open the app, answer, then open /perfil, 'Minhas respostas', 'Editar', change an answer and save"
-    expected: "She is held on /completar-perfil until the missing answer is saved; 'Editar' opens the same screen in edit mode with 'Cancelar'; a save returns to /perfil"
-    why_human: "Same split as above: the rule and the save route are proved live; the screens (MyAnswersSection, ProfileForm edit mode) are proved only by component tests, and profile-form-member.spec.ts was never run (M8, M1)."
-  - truth: "A member who had completed photo, bio and Instagram before the form existed is asked again when the admin creates the form or later adds a question that needs an answer, and answers only what is new (SC4)"
-    test: "With a completed member, create a required question as admin; as the member reopen the app; then add a second required question"
-    expected: "The member lands on the form each time, sees earlier answers pre-filled and only the new question flagged; a form change during typing returns the fresh list and keeps typed answers"
-    why_human: "app.profile_form_missing, the lifecycle (archive, reactivate, optional to required) and the 409 form_changed are proved against the live stack (profile-form-lifecycle 23, concurrency 12, member 48). The member-facing screen reaction is not proved in a browser (M8)."
-  - truth: "Every new screen is mobile-first (390px design, 320px must not break), fully pt-BR, 44px targets and in the prototype's language (PFORM-26, UI-04)"
-    test: "Open the builder, the editor sheet, the completion screen, 'Minhas respostas', the notice and the answer blocks at 320 and 390 px on a real phone and compare with sketch 016"
-    expected: "No horizontal overflow with 120-character titles, 80-character options and a 1000-character answer; targets at least 44px; brand colours applied; copy reads right"
-    why_human: "The pt-BR catalogs, the literal check and the unit pins pass, but no screen was ever rendered at 320/390 px (the 20 Playwright tests that do it are unrun) and the design gate approval is provisional."
+re_verification:
+  previous_status: human_needed
+  previous_score: 4/8
+  gaps_closed: []
+  gaps_remaining: []
+  regressions: []
+  truths_upgraded:
+    - "SC2 (new member meets the form after login): PRESENT_BEHAVIOR_UNVERIFIED to VERIFIED (browser)"
+    - "SC3 (existing member gated, edits from the profile): PRESENT_BEHAVIOR_UNVERIFIED to VERIFIED (browser)"
+    - "SC4 (completed member asked again, answers kept): PRESENT_BEHAVIOR_UNVERIFIED to VERIFIED (browser)"
+  truths_still_open:
+    - "SC6 screens: mechanical backstops now proved in a browser; sketch fidelity, copy and the design approval are still Igor's"
 human_verification:
-  - test: "M1: the member path on a real phone (deep link to completion screen to the same post; Minhas respostas with 'Visível no seu perfil' and 'Editar'; the 'Há perguntas novas' notice and 'Agora não' surviving a reopen)"
+  - test: "M1: the member path on a real phone against the homolog deploy (deep link to completion screen to the same post; Minhas respostas with 'Visivel no seu perfil' and 'Editar'; the 'Ha perguntas novas' notice and 'Agora nao' surviving a reopen)"
     expected: "Each step works as described in 12-MANUAL-PROOFS.md M1"
-    why_human: "Phones cannot reach *.localhost; needs the homolog deploy and a phone"
+    why_human: "Phones cannot reach *.localhost; needs the homolog deploy and a phone. The browser run covered the same path on an emulated iPhone 14 viewport, which is not a phone"
   - test: "M2: run migrateAll on one hosted tenant project and re-run it (four versions 20261029230924, 20261029232606, 20261029233037, 20261029234918)"
     expected: "Exit 0, project current, smoke SQL answers, second run applies nothing"
-    why_human: "The local second database is proved (migrate-all 18 passed); a hosted project is the owner's"
+    why_human: "A hosted project and its credentials are the owner's"
   - test: "M3: open the exported CSV in a pt-BR Excel and import it in Google Sheets"
     expected: "Columns split on ';', accents read right (BOM), a decimal number keeps its comma"
-    why_human: "The bytes (EF BB BF, ';', CRLF, comma decimals) are pinned by tests; what real spreadsheet programs do with them is not"
+    why_human: "The browser run proves the file downloads with the BOM bytes; it cannot prove what real spreadsheet programs do. Can be done locally"
   - test: "M4: export a tenant with thousands of members through the hosted Cloud Run API"
-    expected: "A complete file larger than 32 MiB if the tenant is large enough; the last row is a member and the file ends with a line break"
-    why_human: "Assumption A2 (no body cap on a streamed response) cannot be tested locally"
+    expected: "A complete file (larger than 32 MiB if the tenant is large enough); the last row is a member and the file ends with a line break"
+    why_human: "Assumption A2 (no body cap on a streamed response) needs the hosted API"
   - test: "M5: confirm the export row set (one row per active and blocked member; invited, staff and deleted left out)"
     expected: "Igor says keep, or asks for a filter"
     why_human: "Planner decision A-12-02 awaiting the owner"
-  - test: "M6: read the Moderação copy for the export (row 'exportou as respostas do formulário de perfil', chip 'Exportações', download icon)"
+  - test: "M6: read the Moderacao copy for the export (row, chip 'Exportacoes', download icon)"
     expected: "Keep, or the wording wanted"
     why_human: "Copy outside the approved design (A-12-MOD, the one exemption of PFORM-26)"
   - test: "M7: follow the production release order of docs/DEPLOY.md 'Phase 12 release (tenant profile form)'"
     expected: "Migrations on every project, then API and worker together, then web, then the module switched on per tenant; the old _gated pair is not dropped"
-    why_human: "Nothing was pushed or deployed; a release procedure is proved only by being followed"
-  - test: "M8: run the three Playwright specs (profile-form-gate, profile-form-member, profile-form-admin; 20 tests) with more than 10 GiB free"
-    expected: "20 passed on mobile-chromium, and each afterAll finds the module row and the run-prefixed rows put back"
-    why_human: "Written, type-checked, linted and listed, never executed (disk 3.9 GiB on 2026-10-30, Igor's decision). A first failure may be the spec as much as the product"
-  - test: "M9: read the pt-BR copy that was not in the approved design (editor notes for short and long text, 'Informe um número.', the archive and delete failure toasts, 'Fechar')"
+    why_human: "Nothing was pushed or deployed (local master is 112 commits ahead of origin); a release procedure is proved only by being followed"
+  - test: "M8 (ledger row, still pending by rule): confirm the browser pass in your own hand"
+    expected: "Igor flips the Status line of M8 after reading the evidence note in 12-UAT.md row 8, or re-runs the three specs"
+    why_human: "Only Igor flips a Status line in 12-MANUAL-PROOFS.md. The agent run is real evidence for this report but is not the ledger's pass"
+  - test: "M9: read the pt-BR copy that was not in the approved design (editor notes for short and long text, 'Informe um numero.', the archive and delete failure toasts, 'Fechar')"
     expected: "Keep per item, or the wording wanted"
     why_human: "Copy written by the planner and executor, not by the design team"
-  - test: "Visual fidelity of every Phase 12 screen against sketch 016 at 320 and 390 px, with the tenant brand colours, on a real device (mask, autofill and date picker behaviour of the phone, date and number controls)"
-    expected: "Matches the approved sketch; no overflow; native pickers behave"
-    why_human: "Visual and device behaviour cannot be checked by grep or jsdom"
+  - test: "Visual fidelity of every Phase 12 screen against sketch 016 at 320 and 390 px with the tenant brand colours on a real device (mask, autofill and date picker of the phone)"
+    expected: "Matches the approved sketch; native pickers behave"
+    why_human: "The browser run proves no overflow and 44 px targets on an emulated viewport; it does not compare against the sketch and it is not a device"
   - test: "Confirm sketch 016 (the design gate) in your own hand"
-    expected: "Igor pastes or confirms approved: true; Igor's answers to the README design questions (a) to (f) are recorded or waived"
-    why_human: "The approval in .planning/sketches/016-phase-12-designed-screens/README.md was recorded by the orchestrator on Igor's chat instruction (approval_kind: provisional), and PFORM-26 / UI-04 ask for the approval pasted by the user. The design questions (a) to (f) were never answered"
+    expected: "Igor pastes or confirms approved: true; the README design questions (a) to (f) are answered or waived"
+    why_human: "The approval was recorded by the orchestrator on Igor's chat instruction (approval_kind: provisional); PFORM-26 asks for the approval pasted by the user"
+  - test: "Server path of the deep-link destination slot (commit 87f701d9): a data loader on a page refused with PROFILE_FORM_PENDING before the guard's own bootstrap settles must still send the member to /completar-perfil?next=<post>"
+    expected: "The member lands on the form with next, saves, and lands on the post, on a route whose page runs a data loader beside requireBootstrap"
+    why_human: "Covered by 11 unit tests (bootstrap.destination.test.ts, 96 web tests re-run here) only; the browser never reached the loader-race branch"
+  - test: "Open-app window (decision 12-11, not fixed): with the app already open on a screen, flip the gate (admin adds a required question) and tap a link in that same moment"
+    expected: "Decide whether landing on /inicio instead of the tapped post is acceptable, or ask for a destination to travel in the open-app redirect"
+    why_human: "A narrow real window the browser run did not reach; an owner decision, not a defect to be proved"
+  - test: "Platform panel switch: turn the module on and off for a tenant from the platform panel with its confirm dialog (PFORM-01)"
+    expected: "The row toggles with confirm; routes answer 404 MODULE_DISABLED when off"
+    why_human: "The browser specs switch the module by SQL (their fixture); the panel dialog is proved only by unit tests"
 ---
 
-# Phase 12: Formulário de perfil do tenant Verification Report
+# Phase 12: Formulario de perfil do tenant Verification Report
 
 **Phase Goal:** The tenant admin builds the profile form of their own community (a list of questions of several types), and every member of that tenant answers it to complete their profile: new members right after their first login, existing members who never completed their profile, and members who had already completed it when the admin creates the form or later adds a question that needs an answer.
-**Verified:** 2026-10-30T09:25:00Z
+**Verified:** 2026-10-30T17:10:00Z
 **Status:** human_needed
-**Re-verification:** No, initial verification
+**Re-verification:** Yes, after the browser run, the code review fixes and two product fixes (previous report: commit 1894b7a4, human_needed 4/8)
 
 ## Verdict in one paragraph
 
-No gap was found. The server side of the phase (the module, the two tables with RLS, the SQL completeness rule, the hard gate in `requireAuth`, the member and builder APIs, the lock rules, the export) exists, is substantive, is wired, and is proved against the live local stack and pgTAP. The web side exists and is wired (completion page, builder, profile surfaces, redirect plumbing), but it is proved only by jsdom/mocked unit tests: the 20 Playwright tests that would walk the gate, the member stories, the builder, the export and the 320/390 px backstops were written and never run (Igor's decision of 2026-10-30, 3.9 GiB of free disk against a 10 GiB guard). Four truths are therefore `PRESENT_BEHAVIOR_UNVERIFIED`, which routes the phase to `human_needed`, not `passed`. The code review is advisory (0 critical, 2 warnings, 4 info) and is unfixed; none of it blocks the goal.
+No gap was found, and the main hole of the first report is closed: the three Playwright specs (20 tests, mobile-chromium) ran for the first time on 2026-10-30 and finished 20 passed; I confirmed it from the run log and re-ran the gate spec myself (6 passed, 23 s, database left with 0 questions, 0 answers, 0 `profile_form` module rows). Success criteria 2, 3 and 4 move from "present, behavior unverified" to VERIFIED. The phase still closes `human_needed`, not `passed`, for four reasons that no agent can remove: the manual ledger `12-MANUAL-PROOFS.md` has nine rows, all `pending` (only Igor flips them, including M8); the design gate (sketch 016) is a provisional approval; everything hosted or on a phone is unproved (M1, M2, M4, M7); and the owner's judgement calls (M3, M5, M6, M9) are open. Two things the browser did not reach are named below (the 87f701d9 loader-race branch and the open-app window).
+
+## What changed since the first report
+
+| Item | Evidence I checked | Result |
+|------|--------------------|--------|
+| Browser run, 20 tests | Run log `.../scratchpad/e2e-phase12.log` ends `20 passed (1.6m)`, exit 0, 16 GiB free; listed tests 18-20 are member 5, 6 at 320 and 6 at 390. Spec counts in the files: admin 6 blocks (7 tests with the two widths), gate 6, member 6 blocks (7 tests). I re-ran `profile-form-gate.spec.ts`: **6 passed (23.1 s)**. Database afterwards: `0\|0\|0` (questions, answers, `profile_form` module rows) | Confirmed. The admin and member specs were not re-run by me; they rest on the log and on 12-UAT.md row 8 |
+| WR-01 | `packages/core/server/profile-form/export.ts:166` `if (ctx.role !== 'admin_tenant') throw new ApiError(403, 'FORBIDDEN')` as the first statement of `exportAnswers`; new `packages/core/tests/profile-form-export-guard.test.ts` | Fixed. Core tests (guard + csv + lock-rules) re-run: 85 passed |
+| WR-02 | `hasUnsafeChars` exported at `packages/contracts/src/profile-form.ts:123` and used at lines 150, 183, 351, 358, 407 (text answers, "Outro", title, help text, option labels) | Fixed. Contracts `profile-form.test.ts` re-run: 87 passed (was 83) |
+| 18d9f0f8 | `packages/ui/src/primitives/buttonClasses.ts`: `HIT_AREA` is now a 44 px box centred on the control (`after:top-1/2 after:h-11 after:-translate-y-1/2`), so a 1 px border no longer shaves it to 42 px. UI `button.test.tsx` re-run: 43 passed. The admin spec at 320 and 390 px passes with its 44 px assertions | Fixed and proved in the browser |
+| 87f701d9 | `apps/web/lib/bootstrap.ts`: `renderDestination` (React `cache`, request scoped, not module level) parked by `readRenderDestination()`, read first in `requireBootstrap`, consumed by `bootstrapRedirectPath` for `PROFILE_FORM_PENDING`. Web `bootstrap.destination.test.ts` + `bootstrap.test.ts` + `safe-next-path.test.ts` re-run: 96 passed | Fixed in code; the guard's own path (header read first, then `next = await destination`) is the one the passing tracer exercises; the loader-race branch is NOT proved in a browser |
+| Six spec-only fixes | `b2f924b7`, `c1f1780f`, `131ff69c`, `affdd3b7`, `44ed96af`, `68b802cc`, each explained by a debug session under `.planning/debug/` | Test code only; no product behaviour changed by them |
 
 ## Goal Achievement
 
@@ -303,144 +322,99 @@ No gap was found. The server side of the phase (the module, the two tables with 
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | SC1. The admin builds the form: add, edit, reorder, required or optional, archive (answers kept, reactivable, in the export), delete only if never answered; a title, optional help text and a type; choice types carry options | ✓ VERIFIED | Contract `packages/contracts/src/profile-form.ts` (679 lines, 13 types, one constant per limit); builder service `packages/core/server/profile-form/admin.ts` (821 lines: 30-question cap at lines 209/256/622, revision 409, advisory lock) and lock rules `lock-rules.ts` mirrored by trigger `app.profile_form_question_guard` (migration `20261029233037`, PF001..PF005); FK `profile_form_answers_question_fk ... ON DELETE restrict` makes the database refuse deleting an answered question; routes `packages/modules/profile-form/server/routes.ts` behind `requireModule('profile_form')` + `requirePermission('profile_form.manage')`; web builder under `apps/web/app/(app)/configuracoes/formulario-de-perfil/` (22 files) with a row in `configuracoes/page.tsx:254`. I re-ran: contracts `profile-form.test.ts` 83 passed; core `profile-form-lock-rules` + `profile-form-csv` 82 passed; pgTAP `220-profile-form.sql` 205 passed. 12-18 exit gate records profile-form-admin 36, lifecycle 23, concurrency 12 passed on the live stack. The builder UI is covered by component tests only. |
-| 2 | SC2. A new member of a tenant with a required question is taken to the form right after the first login, on the same screen existing members use; sign-up and join do not change; a tenant with no form behaves as today | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | Server half VERIFIED live: `requireAuth` (`packages/core/server/auth/require-auth.ts:219-225`) answers 403 `PROFILE_FORM_PENDING` last in the chain on every path outside the exact allow-list (`/v1/me/bootstrap`, `/v1/me/profile-form`, `/v1/me/profile-form/answers`); the pending count rides the membership lookup (`app.membership_in_tenant_gate`, same statement); I re-ran `profile-form-gate.test.ts` + `profile-form-answers.test.ts` against the local stack: 24 passed. Web half: `bootstrapRedirectPath` (`apps/web/lib/bootstrap.ts:128`), `requireBootstrap` (`:182`), `app/(auth)/completar-perfil/page.tsx`, `LiveShell`, counters BFF exist and are wired; I re-ran web `completar-perfil` + `safe-next-path` tests: 84 passed, but these are mocked. Browser journey: `profile-form-gate.spec.ts` unrun (M8). |
-| 3 | SC3. An existing member who has not completed the profile is taken through the form the next time she opens the app, and can reach and edit her answers later from her profile | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | Same rule, no flag stored (`app.profile_form_missing`, migration lines 56-87: module on, live `member` of this tenant, active required question with no answer row). "Minhas respostas" is wired in `apps/web/app/(app)/perfil/page.tsx:211` (`MyAnswersSection`) and edit mode of `completar-perfil/page.tsx`. Component tests only; `profile-form-member.spec.ts` unrun. |
-| 4 | SC4. A member who completed photo, bio and Instagram before the form existed is asked again when the admin creates the form or adds a question that needs an answer, answering only what is new; a form change never discards answers | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | The rule does not read the profile, so photo/bio/Instagram are irrelevant (migration comment, D-585). Reopen on create, optional-to-required and reactivation, and keeping answers on archive/optional, are asserted against the live stack in `profile-form-gate.test.ts` (reopen/release cases lines 158-377) and `profile-form-lifecycle.test.ts` (23 passed per 12-18 gate). `409 form_changed` with the fresh form is covered by `profile-form-member.test.ts` (48) and concurrency (12). Server rule VERIFIED; the member-facing screens are not proved in a browser. |
-| 5 | SC5. Answers are stored per member and tenant with RLS and a two-tenant negative test; the API validates every answer against its question's type, options and required flag, and rejects an answer to a question outside the member's tenant | ✓ VERIFIED | Migration `20261029232606_profile_form_tables.sql`: both tables `ENABLE ROW LEVEL SECURITY`, composite FK `(tenant_id, question_id)`, insert/update policies with the membership leg, `membership_id`/`user_id` `ON DELETE cascade`, TRUNCATE revoked from `authenticated`. pgTAP `220-profile-form.sql` re-run: 205 tests, PASS (53 files / 3132 tests recorded by the 12-18 gate). `parseAnswer` per type in the contract (83 tests) and `answers.ts` (176 lines) validate against the CURRENT question inside one transaction; `profile-form-answers.test.ts` 11 passed (re-run). Isolation inventory entries: `apps/api/tests/admin-lane-inventory/profile-form.ts`; 12-18 gate: `isolation` 77, `two-database-routing` 24 passed. |
-| 6 | SC6 (function). Staff see every answer on the member's page and can export CSV; other members see only the answers flagged "show on profile"; the export is admin-only, logged, formula-safe and streamed | ✓ VERIFIED | `GET /v1/members/{membershipId}/profile-answers` (`apps/api/src/routes/members.ts:123`), `MemberAnswersBlock` wired in `app/(app)/membros/[membershipId]/page.tsx:152`. Export `packages/core/server/profile-form/export.ts`: moderation row `profile_form_exported` is awaited in `recordAndReadHeader` before the stream exists; keyset pages of 500; route guarded by `profile_form.manage` (`routes.ts:328`). `csv.ts` neutralises `= + - @ tab CR` and full-width forms, BOM pinned to `EF BB BF` by a byte test (core test line 132-134, integration `profile-form-export.test.ts:77`); `profile-form-export` 10 passed per the 12-18 gate. Caveat: authorisation of `exportAnswers` lives only in the route guard (WR-01). |
-| 7 | SC6 (screens). The screens are mobile-first (390 px, 320 px must not break), fully pt-BR from the catalog, 44px targets, in the prototype's language (UI-04, PFORM-26) | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | Catalogs `apps/web/messages/pt-BR/profileForm*.json` and `i18n/profile-form-messages.test.ts`; `pnpm lint` including `check-ui-literals` recorded OK. Nothing was rendered at 320/390 px; the backstop assertions exist only in the unrun specs. Design gate: sketch 016 carries `approved: true` but `approval_kind: provisional`, recorded by the orchestrator on Igor's chat instruction (commit `e1dc26c2`, before the first UI plan 12-11); questions (a)-(f) unanswered. |
-| 8 | PFORM-25. The migrations are additive, live in `supabase/migrations` only, fan out idempotently through `migrateAll`; the old `_gated` pair stays one release; no tenant is backfilled | ✓ VERIFIED (local only) | Four migrations `20261029230924` to `20261029234918`, expand-only (new tables, one nullable column, one CHECK widened, new `_gate` functions; `_gated` untouched). `migrate-all.test.ts` Phase 12 case (18 passed in the 12-18 gate): second project gets both tables, six functions, trigger, three ledger versions, second run applies nothing; `schema-gate` 7 and `two-database-routing` 24 passed. `scripts/check-static-routes.sh` lists `/(auth)/completar-perfil` and the builder (95 guarded routes, 0 offenders). Hosted project proof is row M2. |
+| 1 | SC1. The admin builds the form: add, edit, reorder, required or optional, archive (answers kept, reactivable, in the export), delete only if never answered; title, optional help text, a type; choice types carry options | VERIFIED | Server unchanged and as before: contract (13 types, one constant per limit), `admin.ts` (30-question cap, revision 409, advisory lock), `lock-rules.ts` mirrored by the guard trigger, FK `ON DELETE restrict`, routes behind `requireModule('profile_form')` + `requirePermission('profile_form.manage')`. New: `profile-form-admin.spec.ts` in a browser walks create (required text, choice with "Outro", number with limits), reorder with the member seeing the new order, locked answered question, replace, archive, impact of a required reactivation, preview saves nothing, support user does not see the row and meets the not-found screen. 20/20 passed in the run log |
+| 2 | SC2. A new member of a tenant with a required question is taken to the form right after the first login, on the same screen existing members use; sign-up and join do not change; a tenant with no form behaves as today | VERIFIED (browser; two caveats) | API half unchanged (`require-auth.ts` 403 `PROFILE_FORM_PENDING` last in the chain; allow-list; gate suite 13). Browser: gate spec test 1 (tracer: a deep link meets the form and the answer lands on the same post), 2 (hostile `next` never leaves the site; a complete member is not redirected), 3 (staff never taken to the form), 4 ("Sair" signs out), 5 (a direct navigation under the gate returns to the form, never an error screen). I re-ran all six: pass. Caveats: (a) the specs use seeded members, so "sign-up and join are unchanged" stays proved by the API/unit tests, not walked in a browser; (b) the loader-race branch of 87f701d9 and the open-app window (see Human Verification) |
+| 3 | SC3. An existing member who has not completed the profile is taken through the form the next time she opens the app, and can reach and edit her answers later from her profile | VERIFIED (browser) | Rule is `app.profile_form_missing` (no stored flag). `profile-form-member.spec.ts` test 1 (13 types, one "Salvar", member released), 2 (returning mode flags only the missing required question and the error summary jumps to it), 4 ("Minhas respostas" on `/perfil`, "Editar" opens the same screen with "Cancelar", save returns to `/perfil`): in the log, passing |
+| 4 | SC4. A member who completed photo, bio and Instagram before the form existed is asked again when the admin creates the form or adds a question that needs an answer, answering only what is new; a form change never discards answers | VERIFIED (browser) | Rule does not read the profile (D-585); lifecycle 23 and concurrency 12 on the live stack (12-18 gate). Browser: member spec test 2 (only the missing question flagged), test 3 (a form changed while she types returns the refreshed list with her typed answers kept, the 409 `form_changed` path), gate spec test 6 (archiving the last required question or turning the module off lets her in with her answers kept, D-589) |
+| 5 | SC5. Answers stored per member and tenant with RLS and a two-tenant negative test; the API validates each answer against its question's type, options and required flag and rejects a question outside the tenant | VERIFIED | Unchanged since the first report (migration `20261029232606`, pgTAP `220-profile-form.sql` 205 tests, `parseAnswer` per type, answers suite, isolation 77, two-database-routing 24; the 12-18 gate). New hardening: WR-02 means a NUL or lone surrogate is now a keyed 400 `invalid` instead of a Postgres 500 (contract tests, 87 passed). I did not re-run pgTAP or the integration suite (barred this session) |
+| 6 | SC6 (function). Staff see every answer on the member's page and can export CSV; other members see only "show on profile" answers; the export is admin-only, logged, formula-safe and streamed | VERIFIED | `GET /v1/members/{id}/profile-answers`, `exportAnswers` now also refuses non-admin callers itself (WR-01, `export.ts:166`; route guard stays). Browser: member spec test 5 (another member sees only the public answers; staff see every answer, archived included); admin spec test 4 (the export downloads a BOM-prefixed CSV that names the questions). The ledger rows M3, M4, M5 stay the owner's |
+| 7 | SC6 (screens). Screens are mobile-first (390 px design, 320 px must not break), fully pt-BR from the catalog, 44 px targets, in the prototype's language (UI-04, PFORM-26) | UNCERTAIN (human) | Mechanical part now proved in a browser: admin spec 6 and member spec 6 run at 320 and 390 px (4 passing tests in the log: "keep every control on screen"), including 44 px targets, which found and fixed a real defect (18d9f0f8, 42 px to 44 px on bordered `sm` buttons). pt-BR catalogs and `check-ui-literals` as before. Not provable by an agent: fidelity to sketch 016, the brand colours on a device, native pickers, the copy outside the design (M6, M9) and the design approval, which is still `approval_kind: provisional` (UAT row 11 pending) while PFORM-26 asks for the approval pasted by the user |
+| 8 | PFORM-25. Migrations additive, in `supabase/migrations` only, fanned out idempotently through `migrateAll`; the old `_gated` pair stays one release; no tenant backfilled | VERIFIED (local only) | Unchanged: four expand-only migrations, `migrate-all` 18, `schema-gate` 7, `two-database-routing` 24 (12-18 gate). Hosted fan-out is M2, the release order is M7 |
 
-**Score:** 4/8 truths verified (4 present and wired, behavior not exercised in a browser).
+**Score:** 7/8 truths verified; 0 behavior-unverified; 1 uncertain (needs the owner).
 
 ### Required Artifacts
 
-| Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `supabase/migrations/20261029230924_profile_form_module_key.sql` | `profile_form` key in `tenant_modules_key_chk` | ✓ VERIFIED | 4 lines, appended last; pgTAP checks it |
-| `supabase/migrations/20261029232606_profile_form_tables.sql` | Two tables, RLS, CHECKs, FK, indexes, moderation CHECK widened | ✓ VERIFIED | 82 lines, generated by drizzle-kit, matches `packages/core/db/schema/profile-form-*.ts` |
-| `supabase/migrations/20261029233037_profile_form_functions.sql` | `profile_form_missing`, `_self`, `_gate` twins, guard trigger, TRUNCATE revoke | ✓ VERIFIED | 282 lines, SECURITY DEFINER with empty search_path, EXECUTE revoked from PUBLIC |
-| `supabase/migrations/20261029234918_profile_form_lock_active.sql` | Lock helper for the active set | ✓ VERIFIED | 63 lines; same lock order as the service (review confirmed no cycle) |
-| `packages/contracts/src/profile-form.ts` | Discriminated Zod contract, 13 types | ✓ VERIFIED | 679 lines, 83 tests, TS/CHECK list pin in contract test line 126 and pgTAP lines 157-166 |
-| `packages/core/server/profile-form/{member,answers,admin,lock-rules,export,csv}.ts` | Services | ✓ VERIFIED | 390 / 176 / 821 / 115 / 244 / 149 lines, substantive, every statement tenant-scoped |
-| `packages/modules/profile-form/` | Toggleable module, manifest, routes | ✓ VERIFIED | `module.ts`, `server/routes.ts` (376 lines), registered in `apps/api/src/modules/registry.ts`; `profile_form` in `TOGGLEABLE_MODULES`, not in the real-tenant defaults |
-| `packages/core/server/auth/require-auth.ts` | Gate last in the chain | ✓ VERIFIED | lines 115-119 allow-list, 219-225 refusal |
-| `apps/web/app/(auth)/completar-perfil/` | Completion screen | ✓ VERIFIED | page, actions, loading, tests; does not use the redirecting guard (pinned by a test) |
-| `apps/web/app/(app)/configuracoes/formulario-de-perfil/` | Builder (22 files) | ✓ VERIFIED (unit) | no stubs; browser unproven |
-| `apps/web/components/profile-form/*`, `apps/web/lib/profile-form/*` | Fields, answer blocks, form state, formatters | ✓ VERIFIED (unit) | wired from perfil, membros and completar-perfil |
-| `apps/web/e2e/profile-form{,-gate.spec,-member.spec,-admin.spec}.ts` | Browser proofs | ✗ NOT EXECUTED | Written, `tsc` and `biome` clean, `playwright test --list` shows 20 tests, none run (row M8). Counted as evidence of nothing |
-| `.planning/phases/12-.../12-MANUAL-PROOFS.md` | Ledger M1 to M9 | ✓ EXISTS | every row `pending`, correctly |
-| `docs/DEPLOY.md` "Phase 12 release (tenant profile form)" | Release order and smoke SQL | ✓ EXISTS | line 3586; proved only by following it (M7) |
+| Artifact | Status | Details |
+|----------|--------|---------|
+| Migrations, contract, services, module, `require-auth.ts`, builder, member screens, answer blocks, export route | VERIFIED | As in the first report; only `export.ts` and `contracts/src/profile-form.ts` changed (WR-01, WR-02), both read and tested above |
+| `apps/web/lib/bootstrap.ts` | VERIFIED | Request-scoped slot added; no module-level mutable state |
+| `packages/ui/src/primitives/buttonClasses.ts` | VERIFIED | 44 px centred hit area, 43 UI tests |
+| `apps/web/e2e/profile-form{,-gate.spec,-member.spec,-admin.spec}.ts` | VERIFIED (executed) | Were "not executed"; 20 passed on 2026-10-30, gate spec re-run here |
+| `12-MANUAL-PROOFS.md` | EXISTS, untouched | Rows M1 to M9 all `Status: pending` (9 pending lines read, none edited) |
+| `docs/DEPLOY.md` "Phase 12 release" | EXISTS | Proved only by being followed (M7) |
 
 ### Key Link Verification
 
-| From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `requireAuth` | pending fact | `membership.profileFormMissing` from `app.membership_in_tenant_gate` (same statement) | WIRED | `membership.ts:20-135` |
-| `PROFILE_FORM_PENDING` | `/completar-perfil` | `bootstrapRedirectPath` + `requireBootstrap` + LiveShell/counters BFF | WIRED (unit) | `bootstrap.ts:128,182`; `LiveShell.tsx:106-174`; `api/me/counters/route.ts:31-46` |
-| `completar-perfil` save | `PUT /v1/me/profile-form/answers` | server action + `safeNextPath` | WIRED (unit) | `actions.ts`, `me.ts:446-460` |
-| `/perfil` | `MyAnswersSection`, `NewQuestionsNotice` | server components | WIRED (unit) | `perfil/page.tsx:198,211` |
-| `/membros/[id]` | `profile-answers` | `MemberAnswersBlock` | WIRED (unit) | page line 152 |
-| Builder | `/v1/profile_form/*` | server actions in `formulario-de-perfil/actions.ts` | WIRED (unit) | list, create, update, reorder, archive, reactivate, delete, replace, summary, impact |
-| Export dialog | `GET /v1/profile_form/export` | `apps/web/app/api/profile-form/export/route.ts` relay | WIRED (unit) | inventory entry in `route-handlers.inventory.ts` |
-| Moderação | `profile_form_exported` | `moderation-view.ts:67,129`, `ModerationLogRow.tsx` | WIRED | copy awaits M6 |
+| From | To | Via | Status |
+|------|----|-----|--------|
+| `requireAuth` | pending fact | `app.membership_in_tenant_gate`, same statement | WIRED |
+| `PROFILE_FORM_PENDING` | `/completar-perfil` | `bootstrapRedirectPath`, `requireBootstrap`, LiveShell / counters BFF | WIRED (browser: tracer and test 5; open-app redirect seen incidentally in the tracer, see caveat) |
+| Completion save | `PUT /v1/me/profile-form/answers` | server action + `safeNextPath` | WIRED (browser) |
+| `/perfil` | `MyAnswersSection`, `NewQuestionsNotice` | server components | WIRED (browser) |
+| `/membros/[id]` | `profile-answers` | `MemberAnswersBlock` | WIRED (browser) |
+| Builder | `/v1/profile_form/*` | server actions | WIRED (browser) |
+| Export dialog | `GET /v1/profile_form/export` | web route relay | WIRED (browser downloads the file) |
+| Moderacao | `profile_form_exported` | `moderation-view.ts`, `ModerationLogRow.tsx` | WIRED; copy awaits M6 |
+| Platform panel | module switch | `ModuleToggles` | WIRED (unit only; the specs switch by SQL) |
 
 ### Data-Flow Trace (Level 4)
 
-| Artifact | Data variable | Source | Real data | Status |
-|----------|---------------|--------|-----------|--------|
-| Completion page | `form: MemberForm` | `getMemberForm()` to `GET /v1/me/profile-form` to `member.ts` query | yes (SQL over questions and answers) | ✓ FLOWING |
-| Minhas respostas | answer view | same read, `answer-view.ts` | yes | ✓ FLOWING |
-| Builder list and summary | questions, counts, impact | `listQuestions`, `getSummary`, `getImpact` aggregate SQL | yes (aggregates only, PFORM-23) | ✓ FLOWING |
-| Admin member page | staff answers | `staffAnswersOf` (tenant re-checked) | yes | ✓ FLOWING |
+Unchanged and FLOWING for every artifact (completion page, Minhas respostas, builder aggregates, staff answers). The browser run now also shows the saved values coming back on the next screen (answer lands, member released, the answer is pre-filled in edit mode).
 
 ### Behavioral Spot-Checks (run in this verification)
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Answer contract, 13 validators, TS list pinned | `vitest run tests/profile-form.test.ts` in contracts | 83 passed | ✓ PASS |
-| CSV writer and lock rules | `vitest run tests/profile-form-csv.test.ts tests/profile-form-lock-rules.test.ts` in core | 82 passed | ✓ PASS |
-| Completion page, actions, `safeNextPath` | `vitest run "app/(auth)/completar-perfil" lib/safe-next-path` in web | 84 passed (mocked) | ✓ PASS |
-| Gate on the live stack and answer validation | `vitest run tests/integration/profile-form-gate.test.ts tests/integration/profile-form-answers.test.ts` in api | 24 passed | ✓ PASS |
-| SQL rule, RLS, trigger, CHECK lists | `pnpm supabase test db supabase/tests/220-profile-form.sql` | 205 tests, PASS | ✓ PASS |
-| The other 9 integration files, repo gate (41/41), full pgTAP (53 files, 3132 tests), `migrate-all` 18/18, `check-static-routes` | not re-run; recorded by the 12-18 exit gate | consistent with the code read | accepted from SUMMARY, not re-proved |
-| Playwright specs | not run (constraint and Igor's decision) | n/a | ? SKIP, see M8 |
+| Contract validators, WR-02 | contracts `vitest run tests/profile-form.test.ts` | 87 passed | PASS |
+| Export guard (WR-01), CSV, lock rules | core `vitest run tests/profile-form-export-guard.test.ts tests/profile-form-csv.test.ts tests/profile-form-lock-rules.test.ts` | 85 passed | PASS |
+| Destination slot, bootstrap, `safeNextPath` | web `vitest run lib/bootstrap.destination.test.ts lib/bootstrap.test.ts lib/safe-next-path.test.ts` | 96 passed | PASS |
+| Button hit area | ui `vitest run tests/button.test.tsx` | 43 passed | PASS |
+| Gate in a browser | `playwright test profile-form-gate.spec.ts --project=mobile-chromium` | 6 passed (23.1 s); DB restored to 0, 0, 0 | PASS |
+| Admin and member specs | not re-run; read from the run log (20 passed) | consistent with UAT row 8 | accepted from the log, not re-proved |
+| pgTAP, integration suite, `pnpm verify`, `next build`, db reset | barred this session | n/a | SKIP; the 12-18 exit gate figures stand from the first report |
 
 ### Probe Execution
 
 No probe-based verification is declared for this phase. Step skipped.
 
-### Requirements Coverage
+### Requirements Coverage and what the new evidence makes ready to check
 
-Every ID in the plan frontmatters is accounted for: PFORM-01..26 and UI-04 (plan 12-01 only, as a gate reference). No requirement is orphaned. REQUIREMENTS.md still carries PFORM-12, 13, 14, 20, 25, 26 as `[ ]` and "Pending", which matches this verdict (left unedited, as instructed).
+All IDs in the plan frontmatters (PFORM-01..26, UI-04 as a gate reference in plan 12-01) are accounted for; none is orphaned. REQUIREMENTS.md is untouched and still carries PFORM-12, 13, 14, 20, 25, 26 as `[ ]` and "Pending". Readiness to tick, by requirement (the orchestrator commits the REQUIREMENTS edit before re-attesting the digest):
 
-| Requirement | Source plans | Status | Evidence |
-|-------------|--------------|--------|----------|
-| PFORM-01 module, off by default, panel switch with confirm, 404 `MODULE_DISABLED` | 02, 08, 11 | ✓ SATISFIED | `modules.ts`, `requireModule`, platform row dialog (unit), integration `profile-form-admin` |
-| PFORM-02 create/edit/reorder, 30 cap, limits | 03, 08, 15, 16 | ✓ SATISFIED | `admin.ts`, table CHECKs |
-| PFORM-03 archive, hard delete only unanswered | 04, 09, 15 | ✓ SATISFIED | FK restrict, lifecycle suite |
-| PFORM-04 thirteen validators | 03 | ✓ SATISFIED | contract tests |
-| PFORM-05 one-variant extensibility, TS/CHECK pin | 03, 04 | ✓ SATISFIED | contract test 126, pgTAP 157-166 |
-| PFORM-06 options, Outro, stable ids | 03, 06, 16 | ✓ SATISFIED | contract, answers tests |
-| PFORM-07 transactional validated save | 06 | ✓ SATISFIED | `profile-form-answers`, `-member` suites |
-| PFORM-08 tenant isolation, both lanes | 04, 07, 09, 10 | ✓ SATISFIED | pgTAP, isolation 77, two-database 24 |
-| PFORM-09 computed completeness | 04, 05, 06 | ✓ SATISFIED | `app.profile_form_missing`, gate suite |
-| PFORM-10 hard gate, same statement | 05 | ✓ SATISFIED | `require-auth.ts`, gate suite 13 |
-| PFORM-11 spares and releases, cut outranks | 05 | ✓ SATISFIED | gate suite |
-| PFORM-12 bootstrap block, redirect, no self-redirect | 05, 11, 18 | NEEDS HUMAN | API live; web mocked; M8, M1 |
-| PFORM-13 entry paths | 06, 12, 18 | NEEDS HUMAN | same |
-| PFORM-14 one screen, server-decided mode, 409 form_changed | 06, 12, 13, 18 | NEEDS HUMAN | API live; screens unit; M8, M1 |
-| PFORM-15 `safeNextPath` | 11 | ✓ SATISFIED | unit tests; IN-03 residual |
-| PFORM-16 notice, server-side dismissal | 06, 14 | ✓ SATISFIED | API suite + component tests; M1 re-checks on a phone |
-| PFORM-17 locks, DB trigger, atomic replace | 04, 08, 09, 16 | ✓ SATISFIED | pgTAP, lock-rules, lifecycle |
-| PFORM-18 owner/staff/public readability, one 404 | 04, 07, 14 | ✓ SATISFIED | `members.ts`, integration |
-| PFORM-19 staff read every answer | 07, 14 | ✓ SATISFIED | integration |
-| PFORM-20 Minhas respostas | 14, 18 | NEEDS HUMAN | component only; M1, M8 |
-| PFORM-21 CSV export | 10, 17 | ✓ SATISFIED (M3, M4, M5, M6 open) | export suite 10, csv tests; real spreadsheet and Cloud Run size are the owner's |
-| PFORM-22 cascade, LGPD warning | 04, 16 | ✓ SATISFIED | FK, `profileForm.admin.json` |
-| PFORM-23 aggregates only, failed impact blocks write | 09, 15, 17 | ✓ SATISFIED | lifecycle suite |
-| PFORM-24 revision, advisory lock, FOR SHARE | 06, 08, 09 | ✓ SATISFIED | concurrency 12 |
-| PFORM-25 additive fan-out | 02, 04, 18 | ✓ SATISFIED locally; NEEDS HUMAN hosted | `migrate-all` 18; M2, M7 |
-| PFORM-26 mobile-first, pt-BR, gate before UI | 01, 11-18 | NEEDS HUMAN | unit and lint only; M1, M6, M8, M9 |
-| UI-04 (gate reference only, owned by Phase 2) | 01 | NEEDS HUMAN | sketch 016 approval is provisional |
+| Requirement | Verdict | Reason |
+|-------------|---------|--------|
+| PFORM-01 to 11, 15 to 19, 21 to 24 | SATISFIED (already `[x]`) | Unchanged. PFORM-21 still has M3, M4, M5, M6 as owner rows; PFORM-01's platform panel dialog is unit-only |
+| PFORM-12 (bootstrap block, redirect, no self-redirect) | READY TO CHECK | Browser: tracer, hostile-next, direct navigation, staff exempt; the form screen never redirects to itself (test 5). Honest remainder: the open-app redirect without a reload was only seen incidentally in the tracer, and the open-app tap window and the loader-race branch of 87f701d9 are named human items; if Igor wants the box to mean "every branch in a browser", leave it open |
+| PFORM-13 (entry paths) | READY TO CHECK | Browser: required question reopens the form for a new, an existing and a previously complete member; no required question means not gated; only what is missing is asked. Sign-up and join "unchanged" stay proved by API and unit tests, not a browser walk |
+| PFORM-14 (one screen, mode from the data, 409 `form_changed`) | READY TO CHECK | Browser: first, returning and edit modes; member test 3 keeps typed answers on a changed form |
+| PFORM-20 (Minhas respostas) | READY TO CHECK | Browser: member test 4 (section, public row, "Editar", "Cancelar", save back to `/perfil`) and 5 |
+| PFORM-25 (additive fan-out) | NOT READY | Local proof only. Waits for M2 (one hosted project, run twice) and M7 (the release order followed). The browser run adds nothing here |
+| PFORM-26 (mobile-first, pt-BR, gate before UI) | NOT READY | The first report said it waited only on the browser proof. That was too generous: the requirement text itself demands "sketch gate 016 carries approved: true pasted by the user", and the approval is provisional (UAT row 11 pending); M6 and M9 (copy), M1 and the device visual pass are also open. The browser run settles overflow and 44 px only |
+| UI-04 (gate reference, owned by Phase 2) | NOT READY for this phase's use | Same design approval as PFORM-26 |
 
 ### Anti-Patterns Found
 
-Scanned the 189 implementation, test, script and doc files changed by the phase commits.
+Scanned the 14 files changed since the first report plus the debt-marker grep over the phase changes: no `TBD`, `FIXME` or `XXX`; no new stubs, empty handlers or hardcoded empty data. Code review 12-REVIEW.md: WR-01 and WR-02 fixed and verified above. IN-01 to IN-04 stay open by choice (Info, outside the default fix scope):
 
-| File | Line | Pattern | Severity | Impact |
-|------|------|---------|----------|--------|
-| (none) | | `TBD` / `FIXME` / `XXX` debt markers | none | clean |
-| (none) | | `TODO` / stub returns / placeholder pages | none | the only `placeholder` hits are real input placeholders and Biome ignore reasons |
+| ID | Where | Consequence |
+|----|-------|-------------|
+| IN-01 | `csv.ts` BOM constant is a literal invisible character while the comment says escape | Cosmetic; the BOM bytes are pinned by tests and by the browser download check |
+| IN-02 | `apps/web/app/api/profile-form/export/route.ts` | State-changing GET accepted with neither `Sec-Fetch-Site` nor `Origin`; audit-row spam, no exfiltration |
+| IN-03 | `apps/web/lib/safe-next-path.ts` | `/api/*` and `/_next/*` accepted as `next` |
+| IN-04 | `packages/contracts/src/profile-form.ts` | 31 ids in reorder give a generic 400 rather than `order_mismatch` 409 |
 
-Code review (`12-REVIEW.md`, advisory, unfixed): open follow-ups, none goal-blocking.
-
-| ID | Where | Consequence | Severity |
-|----|-------|-------------|----------|
-| WR-01 | `packages/core/server/profile-form/export.ts` (`recordAndReadHeader`, `readPage` under `withAdminTx`) | `exportAnswers` has no role check of its own; the route guard `requirePermission('profile_form.manage')` is the only barrier. Today the sole caller is that route, so the goal holds; a future caller with a support or member ctx would dump all PII and private answers. Fix: `if (ctx.role !== 'admin_tenant') throw new ApiError(403, 'FORBIDDEN')` | ⚠️ Warning |
-| WR-02 | `packages/contracts/src/profile-form.ts` (`parseText`, `otherText`, title, help, option labels) | NUL or lone surrogate in free text passes validation and fails at Postgres: a 500 instead of a 400 `answers_invalid`. Only crafted input; a gated member who types normally is unaffected | ⚠️ Warning |
-| IN-01 | `csv.ts:20-21` | The comment claims an escape; the code point is pinned by byte tests, so a stripped BOM would be caught | ℹ️ Info |
-| IN-02 | `apps/web/app/api/profile-form/export/route.ts` | State-changing GET accepted with neither `Sec-Fetch-Site` nor `Origin`; audit-row spam, no exfiltration | ℹ️ Info |
-| IN-03 | `apps/web/lib/safe-next-path.ts` | `/api/*` and `/_next/*` accepted as `next` | ℹ️ Info |
-| IN-04 | `contracts/src/profile-form.ts` | 31 ids in reorder give a generic 400, not `order_mismatch` 409 | ℹ️ Info |
-
-Deferred, recorded and not part of this phase: the cleanup migration that drops `app.membership_in_tenant_gated` and `app.memberships_of_user_gated` one release after the API calling the `_gate` twins is live (in `docs/DEPLOY.md` and at the foot of the ledger).
+Deferred and not part of this phase: the migration that drops `app.membership_in_tenant_gated` and `app.memberships_of_user_gated` one release after the `_gate` twins are live (documented in `docs/DEPLOY.md`).
 
 ### Human Verification Required
 
-See the `human_verification` list in the frontmatter, the manual ledger `12-MANUAL-PROOFS.md` (rows M1 to M9, all `pending`; only Igor writes `passed`), and the `behavior_unverified_items` for the four truths whose browser hop was never exercised.
+See the `human_verification` list in the frontmatter. In short: the ledger rows M1 to M9 (all pending, M8's Status line is Igor's to flip even though an agent run supports it), sketch 016 approval in the owner's own hand, a phone and the homolog deploy, a hosted project, real spreadsheet programs, and three items the browser could not reach (the 87f701d9 loader-race branch, the open-app window decided as 12-11, the platform panel switch).
 
 ### Gaps Summary
 
-No gaps: nothing the phase promised is missing, stubbed or unwired in the code. What stands between this phase and `passed` is evidence, not implementation:
-
-1. **The browser proof was never run.** Truths 2, 3, 4 and 7 rest on live-stack API tests for the server half and on mocked unit tests for the web half. The 20 Playwright tests (gate, member, admin; 320/390 px backstops) exist, load, and are listed, but are unexecuted (M8). They were written without ever running, so a first failure may be the spec.
-2. **The design gate is provisional.** Sketch 016's `approved: true` was recorded by the orchestrator on Igor's chat instruction; Igor answered none of the README's questions (a) to (f).
-3. **Everything hosted and every judgement of copy or spreadsheets is the owner's** (M1 to M7, M9). Nothing was pushed, deployed or applied to a hosted project.
-4. **Bookkeeping, not a gap:** REQUIREMENTS.md leaves PFORM-12, 13, 14, 20, 25, 26 pending, which is correct today. After M8 and the hosted rows pass, tick them and re-attest the digest (the fingerprint covers REQUIREMENTS.md, so commit that edit first). WR-01 and WR-02 are small, schedulable fixes; WR-01 first.
+No gaps: nothing the phase promised is missing, stubbed or unwired, and the previously unproved web half of success criteria 2, 3 and 4 now has passing browser evidence. What separates this phase from `passed` is owner evidence, not implementation: a ledger with nine pending rows, a provisional design approval, the hosted and phone proofs, and copy and spreadsheet judgements. The status is therefore `human_needed` and is not rounded up. The first browser run found and fixed one real product defect (42 px tap targets), which is the best argument for Igor's own phone pass before the module is switched on for a real tenant.
 
 ---
 
-_Verified: 2026-10-30T09:25:00Z_
-_Verifier: Claude (gsd-verifier)_
+_Verified: 2026-10-30T17:10:00Z_
+_Verifier: gsd-verifier_
