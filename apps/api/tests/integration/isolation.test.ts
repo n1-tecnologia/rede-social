@@ -6539,6 +6539,241 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 12 sweep: profile form lifecycle — a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH on all seven lifecycle routes, a rede-lab question id on the rede-demo host is the bare 404 on archive, reactivate, delete, replace and impact and changes nothing in rede-lab, his archived list and summary name and count nothing of rede-lab, each beside the rede-lab admin’s own positive control (12-09, PFORM-03, PFORM-17, PFORM-23, T-12-22, T-12-23)', async () => {
+    // | Route                                          | Negative asserted here                                          |
+    // |------------------------------------------------|-----------------------------------------------------------------|
+    // | GET  /v1/profile_form/archived                 | lab host: 403; his own list names no lab question               |
+    // | POST /v1/profile_form/questions/{id}/archive   | lab host: 403; a lab id on the demo host: bare 404, lab intact  |
+    // | POST /v1/profile_form/questions/{id}/reactivate| same, for an archived lab question                              |
+    // | DELETE /v1/profile_form/questions/{id}         | same: the lab row still exists                                  |
+    // | POST /v1/profile_form/questions/replace        | lab host: 403; `replaces` = a lab id: bare 404, nothing created |
+    // | GET  /v1/profile_form/summary                  | lab host: 403; his totals count demo members only               |
+    // | GET  /v1/profile_form/impact                   | lab host: 403; a lab questionId on the demo host: bare 404      |
+    const PREFIX12 = `iso1209-${RUN}`;
+    const TITLE12 = `${PREFIX12} `;
+    const prior = new Map<string, boolean | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean }[]>`
+        select enabled from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+      prior.set(tenantId, row?.enabled ?? null);
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'profile_form', true)
+        on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweep12 = async () => {
+      await removeProfileFormByPrefix(TITLE12);
+      await removeIdentitiesByPrefix(PREFIX12);
+    };
+    await sweep12();
+    try {
+      const make = async (host: 'lab' | 'demo') => {
+        const identity = await createSharedIdentity({
+          prefix: PREFIX12,
+          memberships: [{ host, role: 'admin_tenant', status: 'active' }],
+        });
+        return { ...identity, token: await signInAs(identity.email, identity.password) };
+      };
+      const labAdmin = await make('lab');
+      const demoAdmin = await make('demo');
+      const labActive = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE12}lab ativa`,
+        position: 1,
+        required: true,
+      });
+      const labArchived = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE12}lab arquivada`,
+        archived: true,
+      });
+      const labSpare = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE12}lab sobra`,
+        position: 2,
+      });
+      const demoQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.demo,
+        adminUserId: demoAdmin.userId,
+        title: `${TITLE12}demo ativa`,
+        position: 1,
+      });
+      const send = (
+        who: { token: string },
+        method: string,
+        path: string,
+        host: string,
+        body?: unknown,
+      ) =>
+        api.request(path, {
+          method,
+          headers: {
+            authorization: `Bearer ${who.token}`,
+            [TENANT_HOST_HEADER]: host,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+      const labState = async () =>
+        adminSql<
+          { id: string; title: string; position: number; revision: number; archived: boolean }[]
+        >`
+          select id::text as id, title, position, revision, archived_at is not null as archived
+            from public.profile_form_questions
+           where tenant_id = ${tenantIds.lab}::uuid and title like ${`${TITLE12}%`}
+           order by title, id`;
+      const before = await labState();
+      const replaceBody = (replaces: string) => ({
+        replaces,
+        type: 'short_text',
+        title: `${TITLE12}substituta`,
+      });
+      const memberCount = async (tenantId: string) => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.memberships
+           where tenant_id = ${tenantId}::uuid and role = 'member' and status = 'active'
+             and blocked_at is null and deleted_at is null`;
+        return row?.n ?? 0;
+      };
+
+      // The wrong host refuses before anything runs, on all seven routes.
+      for (const [method, path, body] of [
+        ['GET', '/v1/profile_form/archived', undefined],
+        ['POST', `/v1/profile_form/questions/${labActive}/archive`, undefined],
+        ['POST', `/v1/profile_form/questions/${labArchived}/reactivate`, undefined],
+        ['DELETE', `/v1/profile_form/questions/${labSpare}`, undefined],
+        ['POST', '/v1/profile_form/questions/replace', replaceBody(labActive)],
+        ['GET', '/v1/profile_form/summary', undefined],
+        ['GET', `/v1/profile_form/impact?change=make_required&questionId=${labSpare}`, undefined],
+      ] as const) {
+        const res = await send(demoAdmin, method, path, HOSTS.lab, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await code(res), `${method} ${path}`).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await labState()).toEqual(before);
+
+      // A lab question id on the demo host is the bare 404 (no details, the id never echoed).
+      for (const [method, path, body] of [
+        ['POST', `/v1/profile_form/questions/${labActive}/archive`, undefined],
+        ['POST', `/v1/profile_form/questions/${labArchived}/reactivate`, undefined],
+        ['DELETE', `/v1/profile_form/questions/${labSpare}`, undefined],
+        ['POST', '/v1/profile_form/questions/replace', replaceBody(labActive)],
+        ['GET', `/v1/profile_form/impact?change=reactivate&questionId=${labArchived}`, undefined],
+        ['GET', `/v1/profile_form/impact?change=make_required&questionId=${labSpare}`, undefined],
+      ] as const) {
+        const res = await send(demoAdmin, method, path, HOSTS.demo, body);
+        expect(res.status, `${method} ${path}`).toBe(404);
+        const payload = (await res.json()) as Envelope;
+        expect(payload.error.code, `${method} ${path}`).toBe('NOT_FOUND');
+        expect(payload.error.details, `${method} ${path}`).toBeUndefined();
+        expect(JSON.stringify(payload), `${method} ${path}`).not.toContain(labActive);
+      }
+      // Nothing of rede-lab changed, and the failed replace created nothing anywhere.
+      expect(await labState()).toEqual(before);
+      const [substitutes] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.profile_form_questions
+         where title = ${`${TITLE12}substituta`}`;
+      expect(substitutes?.n).toBe(0);
+
+      // His own archived list and summary name and count nothing of rede-lab.
+      const demoArchived = await send(demoAdmin, 'GET', '/v1/profile_form/archived', HOSTS.demo);
+      expect(demoArchived.status).toBe(200);
+      const demoArchivedText = await demoArchived.text();
+      expect(demoArchivedText).not.toContain(labArchived);
+      const demoSummary = await send(demoAdmin, 'GET', '/v1/profile_form/summary', HOSTS.demo);
+      expect(demoSummary.status).toBe(200);
+      const demoNumbers = (await demoSummary.json()) as {
+        total: number;
+        complete: number;
+        hasRequired: boolean;
+      };
+      expect(demoNumbers.total).toBe(await memberCount(tenantIds.demo));
+      // The lab has a REQUIRED question; the demo has none, so the flag cannot have come from the lab.
+      expect(demoNumbers.hasRequired).toBe(false);
+      expect(demoNumbers.complete).toBe(demoNumbers.total);
+
+      // Positive controls: the lab admin runs the whole lifecycle on his own tenant.
+      const labSummary = await send(labAdmin, 'GET', '/v1/profile_form/summary', HOSTS.lab);
+      expect(labSummary.status).toBe(200);
+      const labNumbers = (await labSummary.json()) as { total: number; hasRequired: boolean };
+      expect(labNumbers.total).toBe(await memberCount(tenantIds.lab));
+      expect(labNumbers.hasRequired).toBe(true);
+      const labArchivedList = await send(labAdmin, 'GET', '/v1/profile_form/archived', HOSTS.lab);
+      expect(labArchivedList.status).toBe(200);
+      const labArchivedText = await labArchivedList.text();
+      expect(labArchivedText).toContain(labArchived);
+      expect(labArchivedText).not.toContain(demoQuestion);
+      const impact = await send(
+        labAdmin,
+        'GET',
+        `/v1/profile_form/impact?change=make_required&questionId=${labSpare}`,
+        HOSTS.lab,
+      );
+      expect(impact.status).toBe(200);
+      expect(
+        (
+          await send(
+            labAdmin,
+            'POST',
+            `/v1/profile_form/questions/${labArchived}/reactivate`,
+            HOSTS.lab,
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await send(
+            labAdmin,
+            'POST',
+            `/v1/profile_form/questions/${labArchived}/archive`,
+            HOSTS.lab,
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await send(
+            labAdmin,
+            'POST',
+            '/v1/profile_form/questions/replace',
+            HOSTS.lab,
+            replaceBody(labActive),
+          )
+        ).status,
+      ).toBe(201);
+      expect(
+        (await send(labAdmin, 'DELETE', `/v1/profile_form/questions/${labSpare}`, HOSTS.lab))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.profile_form_questions
+         where tenant_id = ${tenantIds.demo}::uuid and title like ${`${TITLE12}%`}`
+        )[0]?.n,
+      ).toBe(1);
+    } finally {
+      await sweep12();
+      for (const [tenantId, enabled] of prior) {
+        if (enabled === null) {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        } else {
+          await adminSql`
+            update public.tenant_modules set enabled = ${enabled}
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

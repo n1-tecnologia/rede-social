@@ -466,6 +466,19 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/profile_form/questions': { case: 'phase 12 sweep: profile form admin' },
   'PATCH /v1/profile_form/questions/:id': { case: 'phase 12 sweep: profile form admin' },
   'PUT /v1/profile_form/order': { case: 'phase 12 sweep: profile form admin' },
+  // 12-09 (PFORM-03, PFORM-17, PFORM-23, T-12-22, T-12-23): the lifecycle takes the tenant from the session. A
+  // question id of another tenant is the bare 404 on archive, reactivate, delete, replace (`replaces`) and
+  // impact (`questionId`) and changes nothing there; the archived list and the summary count only the caller's
+  // tenant; a session of the other tenant on this host is refused with TENANT_HOST_MISMATCH on all seven.
+  'GET /v1/profile_form/archived': { case: 'phase 12 sweep: profile form lifecycle' },
+  'POST /v1/profile_form/questions/:id/archive': { case: 'phase 12 sweep: profile form lifecycle' },
+  'POST /v1/profile_form/questions/:id/reactivate': {
+    case: 'phase 12 sweep: profile form lifecycle',
+  },
+  'DELETE /v1/profile_form/questions/:id': { case: 'phase 12 sweep: profile form lifecycle' },
+  'POST /v1/profile_form/questions/replace': { case: 'phase 12 sweep: profile form lifecycle' },
+  'GET /v1/profile_form/summary': { case: 'phase 12 sweep: profile form lifecycle' },
+  'GET /v1/profile_form/impact': { case: 'phase 12 sweep: profile form lifecycle' },
 };
 
 /**

@@ -38,6 +38,13 @@ individual member's answer, only counts.
 | `POST /questions` | creates a question at the end of the list (`position` last + 1, `revision` 1, a server-made id for every option); the 31st active question is `409 limit_reached` |
 | `PATCH /questions/{id}` | edits any subset of title, help text, `required`, show-on-profile, type, options, "Outro" and limits; `revision` (the one the caller read) is required and a mismatch is `409 stale_revision`; an archived question is `409 already_archived`; an unknown or another tenant's id is the bare `404`; a body that changes nothing answers `200` and does not bump the revision |
 | `PUT /order` | `{ ids }`, the WHOLE active list in its new order; the stored `position` is renumbered 1..n in one statement and no revision changes; anything that is not exactly the set of active ids (a missing one, an extra, a repeat, an archived one, another tenant's) is `409 order_mismatch` |
+| `GET /archived` | the ARCHIVED questions, newest archive first then id, each with `archivedAt`, `required` and an exact `answerCount` (also per option); a tenant with none answers `{ questions: [] }` |
+| `POST /questions/{id}/archive` | the question leaves the form and stops being asked, every answer stays (D-588); archiving the last required question releases every held member (D-589); an already archived question answers `200` with `archivedAt` unchanged |
+| `POST /questions/{id}/reactivate` | an archived question goes back at the END of the active list (`position` last + 1, `listedAt` now); a required one holds again every member who lacks its answer (D-585); at 30 active questions it is `409 limit_reached`; an active question answers `200` unchanged |
+| `DELETE /questions/{id}` | only a question nobody ever answered (`200 { deleted: true }`, a second delete is the bare `404`); one answer makes it `409 has_answers` and the RESTRICT foreign key refuses the same delete in SQL |
+| `POST /questions/replace` | `{ replaces, ...a create body }`: the new question and the archive of `replaces` in ONE transaction; the new question takes the old one's `position`, the old one keeps its answers; allowed at 30 active questions (the count does not grow); a question that is not active is `409 already_archived`; any failure leaves the old question active and creates nothing |
+| `GET /summary` | `{ total, complete, hasRequired }` over the live, active, non-blocked `member` memberships of the tenant (staff, blocked and invited are in no number); `complete` is the members with an answer to every active required question |
+| `GET /impact` | `?change=create_required\|make_required\|reactivate\|replace[&questionId]` answers `{ members }`: how many members the change would ask to answer if applied now; `make_required` and `reactivate` need `questionId` (400 without it, bare 404 for an unknown or foreign one) and answer 0 when nobody would be asked (an optional or already active question, an already required one) |
 
 **Lock rules (D-587).** Once a question has answers, title, help text and `required` stay free, options may be
 added and reordered, widening a limit and turning "show on profile" off are allowed; everything that would
@@ -53,6 +60,13 @@ positions, so reordering options never changes what a stored answer means.
 `pg_advisory_xact_lock(hashtextextended('profile_form:' || tenant_id, 0))`, so two admins' writes and the
 30-question count never interleave, then re-reads the live module row, then locks the rows it changes
 `FOR UPDATE` in the canonical order `position, created_at, id` (the order the member's save locks in).
+
+**Aggregates only (D-593, PFORM-23).** The builder reads counts: answers per question and per option, the
+summary and the impact. No route of this package ever returns an individual member's answer, and the
+response schemas of the summary, the impact and the archived list carry no `value`, `answer` or `otherText`
+key. Whether a member is held is never stored: the gate reads the SQL rule, so archiving, reactivating,
+creating or flipping `required` takes effect on the next request and no answer row is ever written or
+removed by the lifecycle routes.
 
 ## Events emitted
 
