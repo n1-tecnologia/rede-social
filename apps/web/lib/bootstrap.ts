@@ -77,6 +77,27 @@ export async function loadOrRedirect<T>(
 }
 
 /**
+ * The validated destination of the current request render, parked for the data loaders' refusals
+ * (quick 261030-g1y). One object per request render: React `cache` is the same request-scoped
+ * mechanism `getBootstrap` relies on, and it is deliberately NOT a module-level variable, which would
+ * leak one member's destination into a concurrent request. Outside a render (a route handler, a unit
+ * test on the default React build) `cache` returns a fresh object on every call, so nothing persists
+ * and the slot reads as empty.
+ */
+const renderDestination = cache((): { next: string | null } => ({ next: null }));
+
+/**
+ * Reads the `x-rede-path` header, validates it with `safeNextPath` (the only gate, D-583) and parks the
+ * result in `renderDestination()`. The ONLY writer of the slot: only `requireBootstrap` calls it, so a
+ * request that never runs the guard never carries a destination.
+ */
+async function readRenderDestination(): Promise<string | null> {
+  const next = safeNextPath((await headers()).get(REQUEST_PATH_HEADER));
+  renderDestination().next = next;
+  return next;
+}
+
+/**
  * Bootstrap refusal -> where the member goes. Server Components cannot clear cookies themselves, so
  * each 403 is routed to a Route Handler under `/auth/*` that signs the device out and then lands on
  * the public screen.
@@ -92,9 +113,13 @@ export async function loadOrRedirect<T>(
  * - `PROFILE_FORM_PENDING` (12-11, D-581, PFORM-12): the member owes an answer the tenant made required, so
  *   every refused route sends them to `/completar-perfil`. Like the payment cut, nothing clears the session
  *   ("Sair" stays reachable). The tenant name rides along only as the fallback text for a failed read of
- *   the screen's own data. This mapping carries NO destination: a refusal that is not a render (the
- *   counters BFF of an open app) lands on `/inicio` after saving; the destination of a render travels in
- *   `requireBootstrap` through the validated `x-rede-path` header instead.
+ *   the screen's own data. The mapping carries the destination (`&next=`) only when a `requireBootstrap`
+ *   in the same request render already read it: a page runs the guard and its data loaders in one
+ *   `Promise.all`, and the API gate answers a loader's 403 before the multi-query bootstrap, so the
+ *   LOADER's redirect wins the race and must carry the same validated `x-rede-path` as the guard's. One
+ *   request-scoped slot fixes every loader at once. A refusal that is not a render (the counters BFF of
+ *   an open app, an action that never calls the guard) primes nothing, stays bare and lands on `/inicio`
+ *   after saving.
  * - `TENANT_SUSPENDED` (D-32): the TENANT, not the member, is unavailable; the device is signed out
  *   like D-09 and lands on the branded public screen `/comunidade-indisponivel`. No query — the brand
  *   comes from the host and the copy names no tenant, reason or timestamp.
@@ -125,8 +150,11 @@ export function bootstrapRedirectPath(error: ApiClientError): string | null {
       return `/auth/blocked?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
     case 'SUBSCRIPTION_PENDING':
       return `/assinatura-pendente?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
-    case 'PROFILE_FORM_PENDING':
-      return `${PROFILE_FORM_PATH}?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
+    case 'PROFILE_FORM_PENDING': {
+      const base = `${PROFILE_FORM_PATH}?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
+      const next = renderDestination().next;
+      return next ? `${base}&next=${encodeURIComponent(next)}` : base;
+    }
     case 'TENANT_SUSPENDED':
       return '/auth/suspended';
     case 'TENANT_UPDATING':
@@ -175,12 +203,20 @@ export function acceptInviteRedirectPath(error: ApiClientError): string | null {
  * the request's own URL; it is validated by `safeNextPath` here and again by the form's page, and a
  * rejected value is simply left out. The completion page itself never calls this function (it would
  * redirect to itself, RESEARCH Pitfall 2).
+ *
+ * The header is read FIRST, before the bootstrap is awaited (quick 261030-g1y): a data loader running
+ * beside this guard in the same `Promise.all` can be refused with `PROFILE_FORM_PENDING` while the
+ * bootstrap is still in flight, and its redirect (`bootstrapRedirectPath`) must already find the
+ * validated destination in the request-scoped slot.
  */
 export async function requireBootstrap(): Promise<Bootstrap> {
+  const destination = readRenderDestination();
+  // Settled on every path below; this keeps a failed header read from being reported twice.
+  destination.catch(() => undefined);
   const bootstrap = await loadOrRedirect(getBootstrap, bootstrapRedirectPath);
   if (bootstrap.membership.status === 'invited') redirect('/aceitar-convite');
   if ((bootstrap.profileForm?.pendingRequired ?? 0) > 0) {
-    const next = safeNextPath((await headers()).get(REQUEST_PATH_HEADER));
+    const next = await destination;
     redirect(next ? `${PROFILE_FORM_PATH}?next=${encodeURIComponent(next)}` : PROFILE_FORM_PATH);
   }
   return bootstrap;

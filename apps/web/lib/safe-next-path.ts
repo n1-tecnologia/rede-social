@@ -3,8 +3,10 @@
  * PFORM-15, T-12-27).
  *
  * **Where the value comes from.** `proxy.ts` sets the `x-rede-path` request header from each request's
- * own pathname and search (any inbound copy is deleted first); `requireBootstrap()` reads it when a
- * member still owes a required answer and sends them to `/completar-perfil?next=<this path>`; the
+ * own pathname and search (any inbound copy is deleted first); `requireBootstrap()` reads it at the
+ * start of every call (not only when the member owes an answer), keeps the validated value for the
+ * request's data-loader refusals and sends a member who still owes a required answer to
+ * `/completar-perfil?next=<this path>`; the
  * completion page and its action validate the `next` again before using it (plan 12). The value is
  * validated where it is USED, never echoed into a URL or the DOM unchecked, and a rejected value is
  * dropped silently: the member lands on `/inicio` (or `/perfil` in edit mode).
