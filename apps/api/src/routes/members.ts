@@ -1,5 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import { apiErrorEnvelopeSchema } from '@rede-social/contracts';
+import { publicAnswersSchema, staffAnswersSchema } from '@rede-social/contracts/profile-form';
 import {
   memberListQuerySchema,
   memberListSchema,
@@ -8,6 +9,7 @@ import {
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
+import { publicAnswersOf, staffAnswersOf } from '@rede-social/core/server/profile-form/answers';
 import { getMemberProfile, listMembers } from '@rede-social/core/server/profiles/index';
 import { permissionsForRequest } from '@rede-social/core/server/rbac/permissions';
 import { createMiddleware } from 'hono/factory';
@@ -34,6 +36,13 @@ import { createOpenApiApp } from '../http/openapi';
  * filter on role at all, because a staff member's profile stays openable by direct link — from their
  * content in Phase 4, or the support conversation in Phase 7 — while never appearing in a browsable
  * roster of who runs the community.
+ *
+ * `GET /{membershipId}/profile-answers` (Phase 12-07, D-593, PFORM-18, PFORM-19) is the profile form's
+ * READING side. It is deliberately NOT behind `requireModule`: a module that is off is a 404 like every
+ * other miss (the answers are kept, not shown), so nothing here tells "module off" apart from "no such
+ * member". A `member` viewer receives only the answers to questions flagged `show_on_profile` that are not
+ * archived; `admin_tenant` and `support_tenant` (composed permission `profile_form.read`, literal on
+ * purpose: the kernel never imports a module package) receive every answer of a `member`-role target.
  *
  * Logging: `members.read` is emitted here; the list line (`members.list`) is emitted by
  * `listMembers` in the kernel, where the NORMALISED term is known, so the route does not duplicate
@@ -109,6 +118,24 @@ const readRoute = createRoute({
   },
 });
 
+const answersRoute = createRoute({
+  method: 'get',
+  path: '/{membershipId}/profile-answers',
+  request: { params: memberParams },
+  responses: {
+    200: {
+      description:
+        "A member's answers to the tenant's profile form. A `member` viewer receives `{ kind: 'member', answers }` with ONLY the answered questions the admin flagged `show_on_profile` that are not archived, in the admin's order (D-593). `admin_tenant` and `support_tenant` receive `{ kind: 'staff', answers }` with every active question (`answered: false` when unanswered) and every archived question that has an answer, carrying `showOnProfile`, `required`, `position` and `archivedAt`",
+      content: {
+        'application/json': { schema: z.union([publicAnswersSchema, staffAnswersSchema]) },
+      },
+    },
+    404: envelope(
+      "NOT_FOUND — unknown, other tenant, blocked, invited, removed, a staff member, the caller's own membership (member path) or the `profile_form` module off: ONE identical body for all of them, with no details payload and never naming a tenant (D-23)",
+    ),
+  },
+});
+
 export const membersRoutes = members
   .openapi(listRoute, async (c) => {
     const ctx = c.get('ctx');
@@ -130,4 +157,36 @@ export const membersRoutes = members
     );
     c.header('Cache-Control', 'no-store');
     return c.json(profile, 200);
+  })
+  .openapi(answersRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { membershipId } = c.req.valid('param');
+    const staff = ctx.role === 'admin_tenant' || ctx.role === 'support_tenant';
+    // The role picks the payload and a mix-up never falls through to the other one: staff read the staff
+    // shape only while the composed permission is held (the module off removes it), a member the public
+    // shape, anything else is the same 404.
+    let payload:
+      | Awaited<ReturnType<typeof publicAnswersOf>>
+      | Awaited<ReturnType<typeof staffAnswersOf>> = null;
+    if (staff) {
+      if ((await permissionsForRequest(ctx)).includes('profile_form.read')) {
+        payload = await staffAnswersOf(ctx, membershipId);
+      }
+    } else if (ctx.role === 'member') {
+      payload = await publicAnswersOf(ctx, membershipId);
+    }
+    // ONE bare 404, no details (D-23, T-12-18): every miss above takes this branch.
+    if (!payload) throw new ApiError(404, 'NOT_FOUND');
+    c.get('logger').info(
+      {
+        event: 'profile_form.answers_read',
+        userId: ctx.userId,
+        tenantId: ctx.tenantId,
+        requestId: ctx.requestId,
+        kind: payload.kind,
+      },
+      'profile form answers read',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(payload, 200);
   });
