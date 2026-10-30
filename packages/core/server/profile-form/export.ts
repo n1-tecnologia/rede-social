@@ -155,12 +155,15 @@ async function readPage(
 
 /**
  * The profile-form answers of the caller's tenant as a CSV stream. Throws before any byte exists when the
- * module is off (404) or the audit row cannot be written; the returned stream is the file.
+ * caller is not `admin_tenant` (403), the module is off (404) or the audit row cannot be written; the returned stream is the file.
  */
 export async function exportAnswers(
   ctx: Ctx,
   opts: { pageSize?: number } = {},
 ): Promise<ExportedFile> {
+  // Defense in depth (WR-01): the page reads run with RLS off and the audit insert accepts any role, so the
+  // route guard is not the only door. Refuse before the first read or log row, as `saveAnswers` does for staff.
+  if (ctx.role !== 'admin_tenant') throw new ApiError(403, 'FORBIDDEN');
   const pageSize = Math.max(1, Math.floor(opts.pageSize ?? EXPORT_PAGE_SIZE));
   const { day, questions } = await recordAndReadHeader(ctx);
 
