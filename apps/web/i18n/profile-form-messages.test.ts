@@ -635,3 +635,23 @@ describe('profileForm.admin.export (12-17 Task 1, D-595, UI-D-579)', () => {
     for (const [key, text] of plain) expect(x(key), key).toBe(text);
   });
 });
+
+describe('profileForm.admin.preview (12-17 Task 2, UI-D-580)', () => {
+  const v = createTranslator({
+    locale: 'pt-BR',
+    messages,
+    namespace: 'profileForm.admin.preview',
+  }) as unknown as (key: string) => string;
+  const m = createTranslator({
+    locale: 'pt-BR',
+    messages,
+    namespace: 'profileForm.member.preview',
+  }) as unknown as (key: string) => string;
+
+  it('pins the button and sheet title, and reuses the member banner and Fechar (no second copy)', () => {
+    expect(v('open')).toBe('Ver como o membro vê');
+    expect(v('title')).toBe('Como o membro vê');
+    expect(m('banner')).toBe('Prévia: nada do que você preencher aqui é salvo.');
+    expect(m('close')).toBe('Fechar');
+  });
+});

@@ -6,6 +6,7 @@ import { ClipboardList, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useState } from 'react';
 import type { EditorMode } from './editor-state';
+import { PreviewSheet } from './PreviewSheet';
 import { QuestionEditorSheet } from './QuestionEditorSheet';
 import { QuestionList } from './QuestionList';
 
@@ -29,7 +30,8 @@ interface Opening {
  * The Perguntas tab's interactive body (12-16): the list, or the empty state, and the ONE editor sheet
  * they open. The list's rows open the sheet in edit mode, "Adicionar pergunta" (the list's actions row, or
  * the empty state's call to action) in create mode, and the locked states' "Criar nova pergunta e arquivar
- * esta" in replace mode. The page reads on the server; this holds only which
+ * esta" in replace mode, and "Ver como o membro vê" opens the preview sheet (12-17) over the live active
+ * questions. The page reads on the server; this holds only which
  * opening is showing, and the page refreshes after every write.
  */
 export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilderProps) {
@@ -37,6 +39,7 @@ export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilde
   // `opening` is kept after a close so the sheet's exit animation can play; `open` is what it follows.
   const [opening, setOpening] = useState<Opening | null>(null);
   const [open, setOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const openCreate = useCallback(() => {
     setOpening((current) => ({ id: (current?.id ?? 0) + 1, mode: 'create', question: null }));
@@ -51,11 +54,19 @@ export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilde
     setOpen(true);
   }, []);
   const close = useCallback(() => setOpen(false), []);
+  const openPreview = useCallback(() => setPreviewOpen(true), []);
+  const closePreview = useCallback(() => setPreviewOpen(false), []);
 
   return (
     <>
       {questions.length > 0 ? (
-        <QuestionList questions={questions} limit={limit} onOpen={openEdit} onAdd={openCreate} />
+        <QuestionList
+          questions={questions}
+          limit={limit}
+          onOpen={openEdit}
+          onAdd={openCreate}
+          onPreview={openPreview}
+        />
       ) : (
         <EmptyState
           variant="card"
@@ -82,6 +93,7 @@ export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilde
           onReplace={openReplace}
         />
       ) : null}
+      <PreviewSheet open={previewOpen} questions={questions} onClose={closePreview} />
     </>
   );
 }

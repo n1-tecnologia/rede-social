@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   reactivate: vi.fn(),
   refresh: vi.fn(),
   show: vi.fn(),
+  create: vi.fn(),
+  save: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -32,7 +34,10 @@ vi.mock('./actions', () => ({
   reorderQuestionsAction: (ids: string[]) => mocks.reorder(ids),
   readImpactAction: (input: unknown) => mocks.impact(input),
   reactivateQuestionAction: (id: string) => mocks.reactivate(id),
-  createQuestionAction: vi.fn(),
+  createQuestionAction: (...args: unknown[]) => mocks.create(...args),
+}));
+vi.mock('@/app/(auth)/completar-perfil/actions', () => ({
+  saveProfileFormAction: (...args: unknown[]) => mocks.save(...args),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -733,5 +738,201 @@ describe('QuestionBuilder: the host of the list, the empty state and the editor 
     expect(
       within(dialog).getByText(/“Como conheceu\?” será arquivada quando você salvar esta/),
     ).toBeTruthy();
+  });
+});
+
+describe('"Ver como o membro vê": the real form in a preview sheet (12-17, UI-D-580, PU-8, PFORM-23)', () => {
+  const opts = [
+    { id: uuid(9401), label: 'Instagram', answerCount: 3 },
+    { id: uuid(9402), label: 'Indicação', answerCount: 2 },
+  ];
+  const everyKind = () => [
+    adminQuestion('short_text', {
+      title: 'Qual é o seu cargo?',
+      required: true,
+      showOnProfile: true,
+      answerCount: 7,
+    }),
+    adminQuestion('long_text', { title: 'Texto longo' }),
+    adminQuestion('dropdown', { title: 'Lista', options: opts, allowOther: true }),
+    adminQuestion('multiple_choice', { title: 'Várias', options: opts }),
+    adminQuestion('single_choice', { title: 'Uma', options: opts }),
+    adminQuestion('number', { title: 'Número' }),
+    adminQuestion('date', { title: 'Data' }),
+    adminQuestion('phone', { title: 'Telefone' }),
+    adminQuestion('email', { title: 'E-mail' }),
+    adminQuestion('link', { title: 'Link' }),
+    adminQuestion('yes_no', { title: 'Sim ou não' }),
+    adminQuestion('acceptance', { title: 'Aceite', required: true }),
+    adminQuestion('rating', { title: 'Nota', required: true }),
+  ];
+
+  function host(questions = everyKind()) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionBuilder questions={questions} limit={30} tenantName="Ana Mentoria" />
+      </NextIntlClientProvider>,
+    );
+  }
+  const opener = () => screen.getByRole('button', { name: 'Ver como o membro vê' });
+  const sheet = () => screen.queryByRole('dialog', { name: 'Como o membro vê' });
+
+  it('is a ghost button in the actions row, disabled with no active question', () => {
+    render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionList questions={[]} limit={30} onPreview={vi.fn()} />
+      </NextIntlClientProvider>,
+    );
+    expect((opener() as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('is enabled beside "Adicionar pergunta" and "Reordenar" when a question exists', () => {
+    host([A]);
+    expect((opener() as HTMLButtonElement).disabled).toBe(false);
+    const row = opener().parentElement as HTMLElement;
+    expect(within(row).getByRole('button', { name: 'Adicionar pergunta' })).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'Reordenar' })).toBeTruthy();
+  });
+
+  it('is not offered by the empty state (no actions row without a question)', () => {
+    host([]);
+    expect(screen.queryByRole('button', { name: 'Ver como o membro vê' })).toBeNull();
+  });
+
+  it('opens "Como o membro vê" with the banner, every active question in the admin order, and no Salvar or Sair', () => {
+    const questions = everyKind();
+    host(questions);
+    fireEvent.click(opener());
+    const dialog = sheet() as HTMLElement;
+    expect(dialog).toBeTruthy();
+    expect(
+      within(dialog).getByText('Prévia: nada do que você preencher aqui é salvo.'),
+    ).toBeTruthy();
+    // Every active question, in the order of the list (the order members see).
+    const form = dialog.querySelector('form') as HTMLFormElement;
+    const text = form.textContent ?? '';
+    let last = -1;
+    for (const title of ['Qual é o seu cargo?', 'Texto longo', 'Lista', 'Várias', 'Uma', 'Nota']) {
+      const at = text.indexOf(title);
+      expect(at, title).toBeGreaterThan(last);
+      last = at;
+    }
+    expect(within(dialog).getAllByText('Obrigatória')).toHaveLength(3);
+    // The public notice shows because the flag is on, exactly as the member sees it.
+    expect(within(dialog).getByText('Esta resposta aparece no seu perfil.')).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Salvar' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: /Sair/ })).toBeNull();
+    expect(within(dialog).queryByRole('link')).toBeNull();
+    expect(within(dialog).getAllByRole('button', { name: 'Fechar' })).toHaveLength(1);
+  });
+
+  it('shows the first-time member: nothing pre-filled, nothing flagged, no member answer or count', () => {
+    host();
+    fireEvent.click(opener());
+    const dialog = sheet() as HTMLElement;
+    expect((within(dialog).getByLabelText('Qual é o seu cargo?') as HTMLInputElement).value).toBe(
+      '',
+    );
+    expect(dialog.querySelector('[data-flagged]')).toBeNull();
+    expect(within(dialog).queryByText('Falta responder')).toBeNull();
+    expect(within(dialog).queryByRole('status')).toBeNull();
+    // An admin-side aggregate (7 answers) never reaches the member form.
+    expect(dialog.textContent).not.toMatch(/\b7\b/);
+    expect(dialog.textContent).not.toMatch(/\d+ respostas?/);
+  });
+
+  it('sends nothing: after touching all 13 control kinds, no fetch and no server action ran', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      host();
+      fireEvent.click(opener());
+      const dialog = sheet() as HTMLElement;
+      const inside = within(dialog);
+      fireEvent.change(inside.getByLabelText('Qual é o seu cargo?'), { target: { value: 'novo' } });
+      fireEvent.change(inside.getByLabelText('Texto longo'), { target: { value: 'longo' } });
+      fireEvent.change(inside.getByLabelText('Lista'), { target: { value: '__other__' } });
+      fireEvent.change(inside.getByLabelText('Qual?'), { target: { value: 'outra' } });
+      fireEvent.click(inside.getAllByRole('checkbox', { name: 'Instagram' })[0] as HTMLElement);
+      fireEvent.click(inside.getAllByRole('radio', { name: 'Indicação' })[0] as HTMLElement);
+      fireEvent.change(inside.getByLabelText('Número'), { target: { value: '12,5' } });
+      fireEvent.change(inside.getByLabelText('Data'), { target: { value: '2026-05-01' } });
+      fireEvent.change(inside.getByLabelText('Telefone'), { target: { value: '11912345678' } });
+      fireEvent.change(inside.getByLabelText('E-mail'), { target: { value: 'a@b.co' } });
+      fireEvent.change(inside.getByLabelText('Link'), { target: { value: 'https://x.co' } });
+      fireEvent.click(inside.getByRole('button', { name: 'Sim' }));
+      fireEvent.click(inside.getByRole('checkbox', { name: 'Aceite' }));
+      fireEvent.click(inside.getByRole('radio', { name: '4 estrelas' }));
+      expect((inside.getByLabelText('Qual é o seu cargo?') as HTMLInputElement).value).toBe('novo');
+      await act(async () => {
+        fireEvent.submit(dialog.querySelector('form') as HTMLFormElement);
+      });
+      fireEvent.click(inside.getByRole('button', { name: 'Fechar' }));
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      for (const name of [
+        'reorder',
+        'impact',
+        'reactivate',
+        'create',
+        'save',
+        'refresh',
+      ] as const) {
+        expect(mocks[name], name).not.toHaveBeenCalled();
+      }
+      expect(mocks.show).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('closes at once on Fechar, on Escape and on the backdrop (no dirty guard in a preview)', async () => {
+    host();
+    fireEvent.click(opener());
+    fireEvent.change(screen.getByLabelText('Qual é o seu cargo?'), { target: { value: 'x' } });
+    fireEvent.click(within(sheet() as HTMLElement).getByRole('button', { name: 'Fechar' }));
+    await waitFor(() => expect(sheet()).toBeNull());
+
+    fireEvent.click(opener());
+    fireEvent.change(screen.getByLabelText('Qual é o seu cargo?'), { target: { value: 'y' } });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(sheet()).toBeNull());
+    expect(screen.queryByText('Descartar as alterações?')).toBeNull();
+
+    fireEvent.click(opener());
+    fireEvent.click((sheet() as HTMLElement).previousElementSibling as HTMLElement);
+    await waitFor(() => expect(sheet()).toBeNull());
+  });
+
+  it('starts every opening from a blank form again', async () => {
+    host();
+    fireEvent.click(opener());
+    fireEvent.change(screen.getByLabelText('Qual é o seu cargo?'), { target: { value: 'sobrou' } });
+    fireEvent.click(within(sheet() as HTMLElement).getByRole('button', { name: 'Fechar' }));
+    await waitFor(() => expect(sheet()).toBeNull());
+    fireEvent.click(opener());
+    expect((screen.getByLabelText('Qual é o seu cargo?') as HTMLInputElement).value).toBe('');
+  });
+});
+
+describe('previewForm: the pure member form for a first-time viewer (12-17, PFORM-23)', () => {
+  it('copies the definitions, nulls every answer and strips every admin-side count', async () => {
+    const { previewForm } = await import('./PreviewSheet');
+    const q = adminQuestion('single_choice', {
+      title: 'Uma',
+      required: true,
+      answerCount: 9,
+      options: [{ id: uuid(9501), label: 'A', answerCount: 4 }],
+    });
+    const result = previewForm([q]);
+    expect(result.mode).toBe('first');
+    expect(result.missingRequired).toBe(0);
+    expect(result.questions).toHaveLength(1);
+    const member = result.questions[0] as Record<string, unknown>;
+    expect(member.answer).toBeNull();
+    expect(member.title).toBe('Uma');
+    expect(member.options).toEqual([{ id: uuid(9501), label: 'A' }]);
+    expect(JSON.stringify(result)).not.toContain('answerCount');
+    expect(Object.keys(member)).not.toContain('revision');
   });
 });

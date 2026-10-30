@@ -21,6 +21,8 @@ export interface QuestionListProps {
   onOpen?: (question: AdminQuestion) => void;
   /** Opens the editor for a new question (12-16). Without it the list shows no "Adicionar pergunta". */
   onAdd?: () => void;
+  /** Opens "Como o membro vê" (12-17). Without it the list shows no "Ver como o membro vê". */
+  onPreview?: () => void;
 }
 
 type Direction = 'up' | 'down';
@@ -163,7 +165,7 @@ function ReorderRow({ question, index, total, busy, register, onMove }: ReorderR
 
 /**
  * The active list of the Perguntas tab (12-15, D-582, UI-D-565..UI-D-567): the actions row ("Adicionar pergunta",
- * "Reordenar"; the preview joins it in plan 17), the limit line, the "Perguntas
+ * "Reordenar", "Ver como o membro vê"), the limit line, the "Perguntas
  * ativas (n)" micro-title and the rows in the admin's order, which is the order members see.
  *
  * **Reorder is a mode with buttons, never a drag** (a drag fights the scroll of a mobile page, and the
@@ -178,7 +180,7 @@ function ReorderRow({ question, index, total, busy, register, onMove }: ReorderR
  * order only while a write is in flight, and the page refreshes when the mode ends. It shows aggregate
  * counts only (PFORM-23): never an individual member's answer, and it makes no request of its own.
  */
-export function QuestionList({ questions, limit, onOpen, onAdd }: QuestionListProps) {
+export function QuestionList({ questions, limit, onOpen, onAdd, onPreview }: QuestionListProps) {
   const t = useTranslations('profileForm');
   const tAdmin = useTranslations('admin');
   const router = useRouter();
@@ -285,6 +287,11 @@ export function QuestionList({ questions, limit, onOpen, onAdd }: QuestionListPr
           <ArrowUpDown aria-hidden size={18} />
           {reordering ? t('admin.actions.reorderDone') : t('admin.actions.reorder')}
         </Button>
+        {onPreview ? (
+          <Button variant="ghost" size="md" disabled={items.length === 0} onClick={onPreview}>
+            {t('admin.preview.open')}
+          </Button>
+        ) : null}
       </div>
       {items.length >= limit ? (
         <p data-limit-line className="text-xs font-normal text-text-tertiary">
