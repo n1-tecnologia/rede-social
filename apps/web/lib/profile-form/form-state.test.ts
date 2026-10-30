@@ -9,12 +9,15 @@ import {
   flaggedIds,
   initialAnswers,
   isEmptyDraft,
+  isFormatType,
   issueFor,
   limitHint,
   mergeFreshForm,
   missingErrorIds,
+  settleOnBlur,
   toWire,
   validateAll,
+  validateOnBlur,
   wireAnswers,
 } from './form-state';
 import { form, options, question } from './test-fixtures';
@@ -32,7 +35,7 @@ afterEach(() => {
 
 describe('toWire: a draft becomes what parseAnswer accepts', () => {
   it('text-like types send the string, blank is null', () => {
-    for (const type of ['short_text', 'long_text', 'date', 'email', 'link'] as const) {
+    for (const type of ['short_text', 'long_text', 'date', 'email'] as const) {
       const q = question(type);
       expect(toWire(q, 'abc')).toBe('abc');
       expect(toWire(q, '   ')).toBeNull();
@@ -326,5 +329,156 @@ describe('answers never touch the browser storage (T-12-30)', () => {
     mergeFreshForm(f, answers, f);
     expect(window.localStorage.length).toBe(0);
     expect(window.sessionStorage.length).toBe(0);
+  });
+});
+
+describe('validateOnBlur: the contract judges a format control when the member leaves it (12-13)', () => {
+  it('a phone with the wrong DDD or no leading 9 is refused, a good one passes, empty is never an issue', () => {
+    const q = question('phone');
+    expect(validateOnBlur(q, '0198765432')).toBe('invalid');
+    expect(validateOnBlur(q, '11887654321')).toBe('invalid');
+    expect(validateOnBlur(q, '123')).toBe('invalid');
+    expect(validateOnBlur(q, '11912345678')).toBeNull();
+    expect(validateOnBlur(q, '1112345678')).toBeNull();
+    expect(validateOnBlur(q, '')).toBeNull();
+    expect(validateOnBlur(question('phone', { required: true }), '')).toBeNull();
+  });
+
+  it('e-mail, link, number and date use the same refusals as validateAll', () => {
+    expect(validateOnBlur(question('email'), 'nope')).toBe('invalid');
+    expect(validateOnBlur(question('email'), 'a@b.com')).toBeNull();
+    expect(validateOnBlur(question('link'), 'ftp://x')).toBe('invalid');
+    expect(validateOnBlur(question('link'), 'javascript:alert(1)')).toBe('invalid');
+    expect(validateOnBlur(question('link'), 'exemplo.com.br')).toBeNull();
+    expect(validateOnBlur(question('number'), 'abc')).toBe('invalid');
+    expect(validateOnBlur(question('number', { limits: { min: 1, max: 10 } }), '11')).toBe(
+      'out_of_range',
+    );
+    expect(validateOnBlur(question('number', { limits: { min: 1, max: 10 } }), '1,5')).toBeNull();
+    const date = question('date', { limits: { min: '2026-01-01', max: '2026-12-31' } });
+    expect(validateOnBlur(date, '2027-01-01')).toBe('out_of_range');
+    expect(validateOnBlur(date, '2026-06-15')).toBeNull();
+    expect(validateOnBlur(date, '2026-02-31')).toBe('invalid');
+  });
+
+  it('has no rule for the eight other types', () => {
+    for (const type of ['short_text', 'long_text', 'yes_no', 'rating', 'acceptance'] as const) {
+      expect(isFormatType(type)).toBe(false);
+      expect(validateOnBlur(question(type), 'x'.repeat(5000))).toBeNull();
+    }
+    for (const type of ['number', 'date', 'phone', 'email', 'link'] as const) {
+      expect(isFormatType(type)).toBe(true);
+    }
+  });
+
+  it('agrees with validateAll on every case it judges (one rule, no second copy)', () => {
+    const cases: [ReturnType<typeof question>, string][] = [
+      [question('phone'), '0198765432'],
+      [question('email'), 'x@'],
+      [question('link'), 'ftp://x'],
+      [question('number', { limits: { max: 3 } }), '4'],
+      [question('date'), '2026-13-01'],
+    ];
+    for (const [q, text] of cases) {
+      expect(validateOnBlur(q, text)).toBe(validateAll([q], { [q.id]: text })[q.id] ?? null);
+    }
+  });
+});
+
+describe('settleOnBlur: the text a format control shows after the member leaves it (12-13)', () => {
+  it('a number comes back as it was parsed, in pt-BR form', () => {
+    const q = question('number');
+    expect(settleOnBlur(q, '1.234,5')).toBe('1234,5');
+    expect(settleOnBlur(q, '1.5')).toBe('1,5');
+    expect(settleOnBlur(q, '1.234')).toBe('1234');
+    expect(settleOnBlur(q, 'abc')).toBe('abc');
+    expect(settleOnBlur(q, '')).toBe('');
+  });
+
+  it('a link gets its https:// and a refused scheme is left alone', () => {
+    const q = question('link');
+    expect(settleOnBlur(q, 'exemplo.com.br')).toBe('https://exemplo.com.br');
+    expect(settleOnBlur(q, 'javascript:alert(1)')).toBe('javascript:alert(1)');
+    expect(settleOnBlur(q, '')).toBe('');
+  });
+
+  it('the other types are left exactly as typed', () => {
+    expect(settleOnBlur(question('email'), ' A@B.com ')).toBe(' A@B.com ');
+    expect(settleOnBlur(question('phone'), '11912345678')).toBe('11912345678');
+    expect(settleOnBlur(question('date'), '2026-06-15')).toBe('2026-06-15');
+  });
+});
+
+describe('the string the member sees converts to exactly the stored shape and back (PFORM-14, 26)', () => {
+  it('phone: the mask converts to the national number and the stored number to the digits', () => {
+    const q = question('phone');
+    expect(toWire(q, '(11) 91234-5678')).toBe('11912345678');
+    expect(toWire(q, '(11) 1234-5678')).toBe('1112345678');
+    expect(draftFromStored({ ...q, answer: '11912345678' })).toBe('11912345678');
+    expect(validateAll([q], { [q.id]: '(11) 91234-5678' })).toEqual({});
+  });
+
+  it('number: the pt-BR text converts to a JSON number and the stored number comes back with a comma', () => {
+    const q = question('number');
+    for (const [shown, stored] of [
+      ['1234,5', 1234.5],
+      ['1.234,5', 1234.5],
+      ['12', 12],
+      ['-3,25', -3.25],
+      ['0,5', 0.5],
+    ] as const) {
+      expect(toWire(q, shown)).toBe(stored);
+      expect(typeof toWire(q, shown)).toBe('number');
+    }
+    expect(draftFromStored({ ...q, answer: 1234.5 })).toBe('1234,5');
+    expect(draftFromStored({ ...q, answer: -3.25 })).toBe('-3,25');
+    expect(toWire(q, draftFromStored({ ...q, answer: 1234.5 }))).toBe(1234.5);
+  });
+
+  it('date: the ISO day goes through unchanged both ways, with no time zone', () => {
+    const q = question('date');
+    expect(toWire(q, '2026-06-15')).toBe('2026-06-15');
+    expect(draftFromStored({ ...q, answer: '2026-06-15' })).toBe('2026-06-15');
+  });
+
+  it('e-mail: the text is sent as typed and the server stores it trimmed and lower-cased', () => {
+    const q = question('email');
+    expect(toWire(q, 'nome@exemplo.com.br')).toBe('nome@exemplo.com.br');
+    expect(draftFromStored({ ...q, answer: 'nome@exemplo.com.br' })).toBe('nome@exemplo.com.br');
+  });
+
+  it('link: a bare address is sent with https:// and an http or https link is sent as typed', () => {
+    const q = question('link');
+    expect(toWire(q, 'exemplo.com.br')).toBe('https://exemplo.com.br');
+    expect(toWire(q, 'http://exemplo.com.br/a?b=1')).toBe('http://exemplo.com.br/a?b=1');
+    expect(toWire(q, 'ftp://x')).toBe('ftp://x');
+    expect(draftFromStored({ ...q, answer: 'https://exemplo.com.br' })).toBe(
+      'https://exemplo.com.br',
+    );
+  });
+
+  it('an ambiguous number is sent as the documented rule reads it, or as text so it is refused', () => {
+    const q = question('number');
+    expect(toWire(q, '1.234')).toBe(1234);
+    expect(toWire(q, '1.5')).toBe(1.5);
+    expect(toWire(q, '1,2,3')).toBe('1,2,3');
+    expect(validateAll([q], { [q.id]: '1,2,3' })).toEqual({ [q.id]: 'invalid' });
+  });
+});
+
+describe('limitHint: a date question shows its limits too', () => {
+  it('uses dd/MM/yyyy with no time zone', () => {
+    expect(
+      limitHint(question('date', { limits: { min: '2026-01-01', max: '2026-12-31' } })),
+    ).toEqual({ key: 'controls.between', values: { min: '01/01/2026', max: '31/12/2026' } });
+    expect(limitHint(question('date', { limits: { min: '2026-01-31' } }))).toEqual({
+      key: 'controls.from',
+      values: { min: '31/01/2026' },
+    });
+    expect(limitHint(question('date', { limits: { max: '2026-12-31' } }))).toEqual({
+      key: 'controls.until',
+      values: { max: '31/12/2026' },
+    });
+    expect(limitHint(question('date'))).toBeNull();
   });
 });

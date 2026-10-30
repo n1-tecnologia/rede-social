@@ -8,6 +8,9 @@ import {
   type ProfileFormType,
   parseAnswer,
 } from '@rede-social/contracts/profile-form';
+import { normalizeLink } from './link';
+import { formatNumberPtBr, parseNumberPtBr } from './number';
+import { onlyDigits, parseBrazilianPhone } from './phone';
 
 /**
  * The pure state of the member's completion screen (12-12, D-582, UI-D-582, UI-D-586, UI-D-587).
@@ -61,11 +64,6 @@ export function emptyDraft(type: ProfileFormType): Draft {
   }
 }
 
-/** pt-BR shows the comma as the decimal mark. */
-function formatNumber(value: number): string {
-  return String(value).replace('.', ',');
-}
-
 /** The draft a stored answer pre-fills (UI-D-582: the screen is always pre-filled). */
 export function draftFromStored(question: MemberQuestion): Draft {
   const stored = question.answer;
@@ -78,7 +76,7 @@ export function draftFromStored(question: MemberQuestion): Draft {
     case 'link':
       return typeof stored === 'string' ? stored : '';
     case 'number':
-      return typeof stored === 'number' ? formatNumber(stored) : '';
+      return typeof stored === 'number' ? formatNumberPtBr(stored) : '';
     case 'yes_no':
       return typeof stored === 'boolean' ? stored : null;
     case 'acceptance':
@@ -117,21 +115,11 @@ export function isEmptyDraft(type: ProfileFormType, draft: Draft | undefined): b
   return draft.optionIds.length === 0 && !draft.other;
 }
 
-/** The comma or the dot is the decimal mark; anything that is not a plain number stays text (invalid). */
-function parseNumberText(raw: string): number | string | null {
-  const text = raw.trim().replace(/\s+/g, '');
-  if (text === '') return null;
-  const normalised = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
-  if (!/^-?\d+(\.\d+)?$/.test(normalised)) return raw;
-  return Number(normalised);
-}
-
-/** Digits only; a pasted `+55` or `55` country code is dropped. Nothing but digits is kept as typed. */
+/** Digits only (`parseBrazilianPhone`); text with no digit at all stays as typed so it is refused. */
 function phoneWire(raw: string): string {
   if (raw.trim() === '') return '';
-  const digits = raw.replace(/\D/g, '');
-  if (digits === '') return raw.trim();
-  return digits.length > 11 && digits.startsWith('55') ? digits.slice(2) : digits;
+  const digits = onlyDigits(raw);
+  return digits === '' ? raw.trim() : parseBrazilianPhone(raw);
 }
 
 /** What `parseAnswer` receives for a draft. An empty value is `null` so a required question is `missing`. */
@@ -142,12 +130,15 @@ export function toWire(question: Pick<MemberQuestion, 'type'>, draft: Draft | un
     case 'long_text':
     case 'date':
     case 'email':
-    case 'link':
       return typeof value === 'string' && value.trim() !== '' ? value : null;
+    case 'link':
+      return typeof value === 'string' && value.trim() !== '' ? normalizeLink(value) : null;
     case 'phone':
       return typeof value === 'string' && value.trim() !== '' ? phoneWire(value) : null;
     case 'number':
-      return typeof value === 'string' ? parseNumberText(value) : null;
+      if (typeof value !== 'string' || value.trim() === '') return null;
+      // A text that is not a number stays text, so `parseAnswer` refuses it (never guessed).
+      return parseNumberPtBr(value) ?? value;
     case 'yes_no':
       return typeof value === 'boolean' ? value : null;
     case 'acceptance':
@@ -199,6 +190,46 @@ export function issueFor(
   if (!parsed.ok) return parsed.issue;
   if (parsed.value === null && question.required) return missingIssue(def);
   return null;
+}
+
+/** The five types whose text is judged on blur (UI-D-586): the rest are judged on "Salvar" only. */
+const FORMAT_TYPES: ReadonlySet<ProfileFormType> = new Set([
+  'number',
+  'date',
+  'phone',
+  'email',
+  'link',
+]);
+
+export function isFormatType(type: ProfileFormType): boolean {
+  return FORMAT_TYPES.has(type);
+}
+
+/**
+ * The refusal a format control shows when the member leaves it (UI-D-586). It is the contract's
+ * `parseAnswer` on the same wire value "Salvar" sends, so the screen and the server cannot disagree. An
+ * empty text is never an issue on blur (a required blank is judged on "Salvar"), and the other eight
+ * types have no blur rule.
+ */
+export function validateOnBlur(question: MemberQuestion, rawText: string): ProfileFormIssue | null {
+  if (!isFormatType(question.type) || rawText.trim() === '') return null;
+  const parsed = parseAnswer(toDef(question), toWire(question, rawText));
+  return parsed.ok ? null : parsed.issue;
+}
+
+/**
+ * The text a format control shows once the member leaves it: a number comes back in pt-BR form as it was
+ * parsed (`1.234,5` shows as `1234,5`, `1.5` as `1,5`), a link gets its `https://`. A text the rules
+ * refuse is left exactly as typed.
+ */
+export function settleOnBlur(question: MemberQuestion, rawText: string): string {
+  if (rawText.trim() === '') return rawText;
+  if (question.type === 'number') {
+    const parsed = parseNumberPtBr(rawText);
+    return parsed === null ? rawText : formatNumberPtBr(parsed);
+  }
+  if (question.type === 'link') return normalizeLink(rawText);
+  return rawText;
 }
 
 /** Every invalid draft, keyed by question id, in the admin's order (UI-D-586). */
@@ -300,9 +331,9 @@ function formatLimit(question: MemberQuestion, value: number | string | undefine
   return typeof value === 'number' ? new Intl.NumberFormat('pt-BR').format(value) : String(value);
 }
 
-/** "Entre {min} e {max}.", "A partir de {min}.", "Até {max}." for a number question (UI-D-584). */
+/** "Entre {min} e {max}.", "A partir de {min}.", "Até {max}." for a number or date question (UI-D-584). */
 export function limitHint(question: MemberQuestion): MessageSpec | null {
-  if (question.type !== 'number') return null;
+  if (question.type !== 'number' && question.type !== 'date') return null;
   const min = formatLimit(question, question.limits.min);
   const max = formatLimit(question, question.limits.max);
   if (min !== undefined && max !== undefined)

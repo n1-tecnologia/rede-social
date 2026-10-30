@@ -3,18 +3,38 @@
 import {
   type MemberQuestion,
   PROFILE_FORM_LIMITS,
+  type ProfileFormIssue,
   type ProfileFormType,
 } from '@rede-social/contracts/profile-form';
 import { cn, Input, SegmentedControl, Textarea } from '@rede-social/ui';
 import { ChevronDown, Eye, Star } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type ChangeEvent,
+  type ClipboardEvent,
+  type ComponentProps,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   type ChoiceDraft,
   type Draft,
   emptyDraft,
+  errorSpec,
   isChoiceDraft,
+  settleOnBlur,
+  validateOnBlur,
 } from '@/lib/profile-form/form-state';
+import {
+  caretAfterDigits,
+  onlyDigits,
+  PHONE_MAX_DIGITS,
+  parseBrazilianPhone,
+  phoneMask,
+} from '@/lib/profile-form/phone';
 
 /**
  * The thirteen controls of the member's completion screen (12-12, D-590, UI-D-583, UI-D-584, UI-D-596).
@@ -23,8 +43,8 @@ import {
  * (UI-D-598). Every control is at least 44px tall with 16px text, every label is tied with `for`/`id` or
  * a `fieldset` + `legend`, a required question carries `aria-required` next to its visible caption, and an
  * error is tied to its control with `aria-describedby` and `aria-invalid`. The five format types
- * (number, date, phone, e-mail, link) are plain text controls with the right `type` and `inputMode`; the
- * masks and the blur validation are plan 13's.
+ * (number, date, phone, e-mail, link) share `useFormatField` (12-13): they are judged on blur with the
+ * contract's own `parseAnswer`, never while the member types, and the error clears on the next edit.
  */
 
 /** The ids one question's parts agree on. */
@@ -288,6 +308,11 @@ function TextLine({
     | 'min'
     | 'max'
     | 'enterKeyHint'
+    | 'value'
+    | 'onChange'
+    | 'onBlur'
+    | 'onPaste'
+    | 'ref'
   >
 >) {
   const { question, draft, onChange, disabled, error, hint, ids } = props;
@@ -300,6 +325,7 @@ function TextLine({
         error={error ?? undefined}
         aria-required={question.required || undefined}
         aria-describedby={ids.describedBy}
+        className="min-h-11"
         onChange={(event) => onChange(event.target.value)}
         {...input}
       />
@@ -335,59 +361,172 @@ export const LongText: FieldComponent = ({ question, draft, onChange, disabled, 
   </LabelFrame>
 );
 
-export const NumberField: FieldComponent = (props) => (
-  <TextLine props={props} type="text" inputMode="decimal" autoComplete="off" />
-);
+/**
+ * What the five format controls share (12-13, UI-D-586): the error the field shows is the save's (or the
+ * server's) when there is one, else the one found when the member left the field; typing clears the
+ * second at once; leaving the field settles the text the rules read (a number comes back in pt-BR form,
+ * a link gets its `https://`) and judges it with the contract's `parseAnswer`.
+ */
+function useFormatField(props: FieldProps) {
+  const t = useTranslations('profileForm.member');
+  const { question, draft, onChange, error: saved, ids } = props;
+  const [blurIssue, setBlurIssue] = useState<ProfileFormIssue | null>(null);
+  const text = asText(draft);
+  const spec = saved === null && blurIssue ? errorSpec(question, blurIssue) : null;
+  const error = saved ?? (spec ? t(spec.key, spec.values) : null);
+  const describedBy =
+    [ids.describedBy, saved === null && error ? ids.error : null].filter(Boolean).join(' ') ||
+    undefined;
+  return {
+    text,
+    props: {
+      ...props,
+      error,
+      ids: { ...ids, describedBy },
+      onChange: (next: Draft) => {
+        setBlurIssue(null);
+        onChange(next);
+      },
+    } satisfies FieldProps,
+    blur: () => {
+      const settled = settleOnBlur(question, text);
+      if (settled !== text) onChange(settled);
+      setBlurIssue(validateOnBlur(question, settled));
+    },
+  };
+}
 
-export const DateField: FieldComponent = (props) => {
-  const { limits } = props.question;
+export const NumberField: FieldComponent = (props) => {
+  const f = useFormatField(props);
   return (
     <TextLine
-      props={props}
-      type="date"
-      min={typeof limits.min === 'string' ? limits.min : undefined}
-      max={typeof limits.max === 'string' ? limits.max : undefined}
+      props={f.props}
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      enterKeyHint="next"
+      onBlur={f.blur}
     />
   );
 };
 
-export const PhoneField: FieldComponent = (props) => {
-  const t = useTranslations('profileForm.member');
+export const DateField: FieldComponent = (props) => {
+  const f = useFormatField(props);
+  const { limits } = props.question;
   return (
     <TextLine
-      props={props}
+      props={f.props}
+      type="date"
+      min={typeof limits.min === 'string' ? limits.min : undefined}
+      max={typeof limits.max === 'string' ? limits.max : undefined}
+      onBlur={f.blur}
+    />
+  );
+};
+
+/**
+ * The Brazilian phone: the draft holds the digits, the input shows the mask. A change that would need a
+ * twelfth digit is refused (nothing the member typed is ever dropped), a `+55` or `55` country code is
+ * removed only from a paste or a bulk insert into an empty field (a DDD 55 typed digit by digit is
+ * left alone), and the caret stays next to the digit being edited.
+ */
+export const PhoneField: FieldComponent = (props) => {
+  const t = useTranslations('profileForm.member');
+  const f = useFormatField(props);
+  const ref = useRef<HTMLInputElement>(null);
+  const caret = useRef<number | null>(null);
+  const [, redraw] = useState(0);
+  const digits = onlyDigits(f.text).slice(0, PHONE_MAX_DIGITS);
+  const masked = phoneMask(digits);
+
+  useLayoutEffect(() => {
+    const count = caret.current;
+    caret.current = null;
+    const element = ref.current;
+    if (count === null || element === null || document.activeElement !== element) return;
+    const at = caretAfterDigits(masked, count);
+    element.setSelectionRange(at, at);
+  });
+
+  function commit(next: string, count: number) {
+    caret.current = count;
+    if (next === digits) redraw((n) => n + 1);
+    f.props.onChange(next);
+  }
+
+  function onChange(event: ChangeEvent<HTMLInputElement>) {
+    const raw = event.target.value;
+    const before = onlyDigits(raw.slice(0, event.target.selectionStart ?? raw.length)).length;
+    const typed = onlyDigits(raw);
+    if (digits === '' && (typed.length === 12 || typed.length === 13) && typed.startsWith('55')) {
+      const national = parseBrazilianPhone(raw);
+      commit(national, national.length);
+    } else if (typed.length > PHONE_MAX_DIGITS) {
+      commit(digits, Math.max(0, before - (typed.length - digits.length)));
+    } else {
+      commit(typed, before);
+    }
+  }
+
+  function onPaste(event: ClipboardEvent<HTMLInputElement>) {
+    event.preventDefault();
+    const pasted = parseBrazilianPhone(event.clipboardData.getData('text'));
+    const { selectionStart, selectionEnd } = event.currentTarget;
+    const from = onlyDigits(masked.slice(0, selectionStart ?? masked.length)).length;
+    const to = onlyDigits(masked.slice(0, selectionEnd ?? masked.length)).length;
+    const next = digits.slice(0, from) + pasted + digits.slice(to);
+    if (next.length > PHONE_MAX_DIGITS) return;
+    commit(next, from + pasted.length);
+  }
+
+  return (
+    <TextLine
+      props={f.props}
+      ref={ref}
       type="tel"
       inputMode="tel"
       autoComplete="tel-national"
+      enterKeyHint="next"
       placeholder={t('controls.phonePlaceholder')}
+      value={masked}
+      onChange={onChange}
+      onPaste={onPaste}
+      onBlur={f.blur}
     />
   );
 };
 
 export const EmailField: FieldComponent = (props) => {
   const t = useTranslations('profileForm.member');
+  const f = useFormatField(props);
   return (
     <TextLine
-      props={props}
+      props={f.props}
       type="email"
       inputMode="email"
       autoComplete="email"
       autoCapitalize="off"
+      enterKeyHint="next"
       placeholder={t('controls.emailPlaceholder')}
+      onBlur={f.blur}
     />
   );
 };
 
 export const LinkField: FieldComponent = (props) => {
   const t = useTranslations('profileForm.member');
+  const f = useFormatField(props);
   return (
     <TextLine
-      props={props}
+      props={f.props}
       type="url"
       inputMode="url"
+      autoComplete="off"
       autoCapitalize="off"
       spellCheck={false}
+      enterKeyHint="next"
       placeholder={t('controls.linkPlaceholder')}
+      onBlur={f.blur}
     />
   );
 };

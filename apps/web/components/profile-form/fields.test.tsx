@@ -161,7 +161,7 @@ describe('the thirteen controls: name, role and the 44px floor', () => {
       ['date', 'date', null, null],
       ['phone', 'tel', 'tel', 'tel-national'],
       ['email', 'email', 'email', 'email'],
-      ['link', 'url', 'url', null],
+      ['link', 'url', 'url', 'off'],
     ];
     for (const [type, inputType, inputMode, autoComplete] of cases) {
       const { container, unmount } = show(question(type, { title: `Campo ${type}` }));
