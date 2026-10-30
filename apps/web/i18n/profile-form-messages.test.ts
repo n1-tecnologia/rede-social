@@ -127,6 +127,15 @@ describe('verbatim strings of the Copywriting Contract', () => {
     expect(t('errors.dateMax', { max: '31/12/2026' })).toBe('Informe uma data até 31/12/2026.');
   });
 
+  it('uses the same helper lines for a date question and the number one (12-13)', () => {
+    expect(t('controls.between', { min: '01/01/2026', max: '31/12/2026' })).toBe(
+      'Entre 01/01/2026 e 31/12/2026.',
+    );
+    expect(t('controls.from', { min: '31/01/2026' })).toBe('A partir de 31/01/2026.');
+    expect(t('controls.until', { max: '31/12/2026' })).toBe('Até 31/12/2026.');
+    expect(t('controls.between', { min: '1.000', max: '2.000' })).toBe('Entre 1.000 e 2.000.');
+  });
+
   it('keeps the vocabulary rules: no "form", "survey" or "questionário" on a screen', () => {
     const text = JSON.stringify((messages.profileForm as Record<string, unknown>).member);
     expect(text).not.toMatch(/\b(survey|questionário|deletar|template)\b/i);
