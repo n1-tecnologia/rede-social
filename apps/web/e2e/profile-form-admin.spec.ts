@@ -359,11 +359,33 @@ test('5. a support user does not see the row, and a typed URL meets the not-foun
     await expect(page).toHaveURL(/\/configuracoes$/);
     await expect(page.getByRole('link', { name: 'Formulário de perfil' })).toHaveCount(0);
 
-    const response = await page.goto(`${hosts.lab}/configuracoes/formulario-de-perfil`);
-    expect(response?.status()).toBe(404);
+    // An admin-only question the support user must never receive, in any form.
+    const hidden = await seedQuestion({ title: title('05 so o admin ve esta') });
+
+    // The assertion is on the RENDERED SCREEN, not on `response.status()` (the media-video.spec.ts
+    // precedent): the route has a `loading.tsx`, so Next streams it and the shell commits `200` before
+    // the server component reaches `notFound()`, which can no longer change the status. What the isolation
+    // rule promises is that the builder is not there, the screen is the app's not-found page, and no
+    // refusal is explained.
+    const typed = `${hosts.lab}/configuracoes/formulario-de-perfil`;
+    await page.goto(typed);
+    await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Formulário de perfil', level: 1 })).toHaveCount(
       0,
     );
+    await expect(page.getByRole('button', { name: 'Adicionar pergunta' })).toHaveCount(0);
+    await expect(page.getByText(hidden.title)).toHaveCount(0);
+    await expect(page.getByText(/\b403\b|Forbidden|Acesso negado/i)).toHaveCount(0);
+
+    // And no admin data travels to the support user, in the HTML or in the navigation payload.
+    const navigations: Record<string, string>[] = [
+      { accept: 'text/html' },
+      { RSC: '1', accept: 'text/x-component' },
+    ];
+    for (const headers of navigations) {
+      const body = await (await context.request.get(typed, { headers })).text();
+      expect(body, JSON.stringify(headers)).not.toContain(hidden.title);
+    }
   } finally {
     await context.close();
   }
