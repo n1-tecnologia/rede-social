@@ -448,9 +448,11 @@ for (const width of BACKSTOP_WIDTHS) {
       });
 
       // E06: the discard dialog (a dirty sheet asked to close), then the sheet closes without saving.
+      // The title is already at the 120-character limit and the field has `maxLength`, so `fill` would cut
+      // an appended "!" and leave the sheet clean: replace the last character instead.
       await sheet
         .getByRole('textbox', { name: 'Pergunta', exact: true })
-        .fill(`${longChoice.title}!`);
+        .fill(`${longChoice.title.slice(0, -1)}!`);
       await page.keyboard.press('Escape');
       const discard = page.getByRole('dialog', { name: 'Descartar as alterações?' });
       await expect(discard).toBeVisible();
