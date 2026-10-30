@@ -59,6 +59,43 @@ describe('GET /api/me/counters: the payment cut', () => {
   });
 });
 
+describe('GET /api/me/counters: the required form (12-11, PFORM-12, T-12-28)', () => {
+  it('answers 403 PROFILE_FORM_PENDING with the form’s path and no-store', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      json(403, {
+        error: { code: 'PROFILE_FORM_PENDING', details: { tenantName: 'Clínica Ana' } },
+      }),
+    );
+    const res = await GET(request());
+    expect(res.status).toBe(403);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toEqual({
+      error: { code: 'PROFILE_FORM_PENDING' },
+      location: '/completar-perfil?t=Cl%C3%ADnica%20Ana',
+    });
+  });
+
+  it('builds the location from the mapping, never from a path the API body carries', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      json(403, {
+        error: { code: 'PROFILE_FORM_PENDING', details: { tenantName: 'X' } },
+        location: 'https://evil.example/',
+        next: '//evil.example',
+      }),
+    );
+    const body = await (await GET(request())).json();
+    expect(body.location).toBe('/completar-perfil?t=X');
+    expect(body.location).not.toContain('next=');
+  });
+
+  it('keeps an unknown 403 code as a bare empty 403', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(json(403, { error: { code: 'PROFILE_FORM_UNKNOWN' } }));
+    const res = await GET(request());
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('');
+  });
+});
+
 describe('GET /api/me/counters: unchanged behaviour', () => {
   it('still answers the blocked flow for 403 MEMBERSHIP_BLOCKED', async () => {
     mocks.apiFetch.mockResolvedValueOnce(

@@ -102,11 +102,41 @@ export async function landOnPendingFlow(
   return true;
 }
 
+/**
+ * 12-11 (PFORM-12, D-581, T-12-28): a counters refetch REFUSED with 403 `PROFILE_FORM_PENDING` (the tenant
+ * made a question required, or the member's admin changed the form, with the app open) takes the open app
+ * to the form — the same `/completar-perfil` page `requireBootstrap` maps the code to. A full navigation
+ * (the destination is a different segment), and NOTHING is signed out. Only that one code, and only a
+ * same-origin `/completar-perfil` path, ever navigates (a protocol-relative `//host/completar-perfil` or an
+ * absolute URL does not start with that path); the location is the BFF's mapping, never read from the
+ * API's body. Every other refusal keeps the last counters. Calling it twice with the same refusal
+ * navigates twice and never throws.
+ */
+export async function landOnFormFlow(
+  response: Response,
+  navigate: (path: string) => void,
+): Promise<boolean> {
+  if (response.status !== 403) return false;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return false;
+  }
+  const refusal = body as { error?: { code?: unknown }; location?: unknown };
+  if (refusal?.error?.code !== 'PROFILE_FORM_PENDING') return false;
+  const location = refusal.location;
+  if (typeof location !== 'string' || !location.startsWith('/completar-perfil')) return false;
+  navigate(location);
+  return true;
+}
+
 const assignLocation = (path: string) => window.location.assign(path);
 const onCountersRefused = async (response: Response): Promise<void> => {
   // The body is read once per helper: each gets its own clone, and at most one of them matches.
   if (await landOnBlockedFlow(response.clone(), assignLocation)) return;
-  await landOnPendingFlow(response, assignLocation);
+  if (await landOnPendingFlow(response.clone(), assignLocation)) return;
+  await landOnFormFlow(response, assignLocation);
 };
 
 /** Every signal that can move a badge: the bell, the member's dot and the staff count. */
@@ -140,7 +170,9 @@ const COUNTER_EVENTS = [
  * user topic; the refetch answers 403 `MEMBERSHIP_BLOCKED` and `landOnBlockedFlow` navigates to the
  * shipped blocked flow, with no manual reload. The payment cut does the same (09.1-15): the cut nudges the
  * refetch, it answers 403 `SUBSCRIPTION_PENDING` and `landOnPendingFlow` lands the open app on
- * `/assinatura-pendente`, keeping the session.
+ * `/assinatura-pendente`, keeping the session. A form made required with the app open does the same
+ * (12-11): the refetch answers 403 `PROFILE_FORM_PENDING` and `landOnFormFlow` lands the open app on
+ * `/completar-perfil`, keeping the session.
  *
  * Mounted by `app/(app)/layout.tsx` on the tenant branch only. Leaving the `(app)` segment (logout,
  * the blocked flow's `/acesso-suspenso`) unmounts it, and the provider disconnects on unmount.

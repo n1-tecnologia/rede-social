@@ -292,6 +292,15 @@ describe('disablePush (logout on a shared device, T-07-45 / T-07-48)', () => {
     });
   });
 
+  it('12b. "Sair" under the profile-form gate: a DELETE answered 403 resolves deleted:false and never throws or stalls (12-11, Pitfall 9)', async () => {
+    const log: Log = [];
+    const fetchMock = stubFetch(log, 403);
+    const result = await disablePush(fakeRegistration(log, fakeSubscription(log)));
+    expect(result).toEqual({ unsubscribed: true, deleted: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(log).toContain('unsubscribe');
+  });
+
   it('13. a hanging network never holds logout past 2 s, and nothing throws', async () => {
     vi.useFakeTimers();
     const log: Log = [];

@@ -27,6 +27,12 @@ import { createClient } from '@/lib/supabase/server';
  * this refetch (09.1-12) — answers `{ error: { code }, location }` with `location` the pending screen
  * (`/assinatura-pendente?t=<tenant>`, again the `bootstrapRedirectPath` mapping, never a path taken from
  * the API's body). `LiveShell` navigates there; unlike the blocked flow nothing signs the device out.
+ *
+ * 12-11 (PFORM-12, D-581, T-12-28): the THIRD refusal that carries a body. A 403 `PROFILE_FORM_PENDING` — the
+ * tenant made a question required (or the member's admin changed the form) while the app was open — answers
+ * `{ error: { code }, location }` with `location` the form (`/completar-perfil?t=<tenant>`, again the
+ * `bootstrapRedirectPath` mapping of the code and the tenant name, never a path from the API's body, and
+ * carrying no destination). `LiveShell` navigates there; nothing signs the device out.
  */
 export const dynamic = 'force-dynamic';
 
@@ -34,11 +40,15 @@ const empty = (status: number) =>
   new Response(null, { status, headers: { 'cache-control': 'no-store' } });
 
 /** The refusals whose envelope carries a body: the code the shell reads and the flow it lands on. */
-const REFUSAL_FLOWS = ['MEMBERSHIP_BLOCKED', 'SUBSCRIPTION_PENDING'] as const;
+const REFUSAL_FLOWS = [
+  'MEMBERSHIP_BLOCKED',
+  'SUBSCRIPTION_PENDING',
+  'PROFILE_FORM_PENDING',
+] as const;
 type RefusalFlow = (typeof REFUSAL_FLOWS)[number];
 
 /**
- * The flow a 403 envelope sends the open app to (the blocked flow, or the pending screen), as
+ * The flow a 403 envelope sends the open app to (the blocked flow, the pending screen or the form), as
  * `{ code, location }`, or `null` for any other answer. The location is the `bootstrapRedirectPath`
  * mapping of the code and the tenant name: it is never taken from the API's body.
  */
