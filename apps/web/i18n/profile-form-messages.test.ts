@@ -655,3 +655,74 @@ describe('profileForm.admin.preview (12-17 Task 2, UI-D-580)', () => {
     expect(m('close')).toBe('Fechar');
   });
 });
+
+describe('the builder dialog strings of UI-D-576..UI-D-579, pinned together (12-17 Task 3)', () => {
+  const tr = (namespace: string) =>
+    createTranslator({ locale: 'pt-BR', messages, namespace }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  const impact = tr('profileForm.admin.impact');
+  const archive = tr('profileForm.admin.archive');
+  const del = tr('profileForm.admin.delete');
+  const archived = tr('profileForm.admin.archived');
+  const exportT = tr('profileForm.admin.export');
+  const editor = tr('profileForm.admin.editor');
+
+  it('pins at least 20 dialog strings verbatim', () => {
+    const pinned: [() => string, string][] = [
+      // UI-D-576: the impact confirmation
+      [() => impact('addTitle'), 'Adicionar pergunta obrigatória?'],
+      [() => impact('makeTitle'), 'Tornar a pergunta obrigatória?'],
+      [() => impact('reactivateTitle'), 'Reativar pergunta obrigatória?'],
+      [() => impact('replaceTitle'), 'Substituir a pergunta?'],
+      [() => impact('addConfirm'), 'Adicionar e exigir'],
+      [() => impact('makeConfirm'), 'Tornar obrigatória'],
+      [() => impact('reactivateConfirm'), 'Reativar e exigir'],
+      [() => impact('replaceConfirm'), 'Substituir'],
+      [() => impact('cancel'), 'Voltar'],
+      [() => impact('kept'), 'As respostas guardadas continuam valendo.'],
+      [
+        () => impact('body', { n: 12 }),
+        '12 membros vão precisar responder antes de continuar usando a comunidade. Quem já respondeu as outras perguntas responde só esta.',
+      ],
+      // UI-D-577: archive and delete
+      [() => archive('title'), 'Arquivar esta pergunta?'],
+      [() => archive('confirm'), 'Arquivar'],
+      [() => archive('cancel'), 'Cancelar'],
+      [() => archive('requiredNote'), 'Quem ainda não respondeu deixa de precisar.'],
+      [() => del('title'), 'Excluir esta pergunta?'],
+      [
+        () => del('body'),
+        'Ninguém respondeu esta pergunta ainda. A exclusão não pode ser desfeita.',
+      ],
+      [() => del('confirm'), 'Excluir'],
+      [() => del('cancel'), 'Cancelar'],
+      // UI-D-578: reactivate an optional question
+      [() => archived('confirmTitle'), 'Reativar pergunta?'],
+      [
+        () => archived('confirmBody'),
+        'Ela volta ao fim do formulário e as respostas guardadas voltam a valer.',
+      ],
+      [() => archived('confirm'), 'Reativar'],
+      // UI-D-579: the export
+      [() => exportT('title'), 'Exportar respostas?'],
+      [
+        () => exportT('body'),
+        'O arquivo traz uma linha por membro, com nome, e-mail e as respostas, inclusive das perguntas arquivadas. Ele contém dados pessoais: guarde com cuidado. A exportação fica registrada no histórico de moderação.',
+      ],
+      [() => exportT('confirm'), 'Exportar'],
+      [() => exportT('pending'), 'Preparando…'],
+      [() => exportT('cancel'), 'Cancelar'],
+      [() => exportT('done'), 'Arquivo gerado. O download começou.'],
+      [() => exportT('failed'), 'Não foi possível exportar agora. Tente de novo.'],
+      // the discard confirmation of the editor
+      [() => editor('discard.title'), 'Descartar as alterações?'],
+      [() => editor('discard.body'), 'As mudanças desta pergunta ainda não foram salvas.'],
+      [() => editor('discard.confirm'), 'Descartar'],
+      [() => editor('discard.cancel'), 'Continuar editando'],
+    ];
+    expect(pinned.length).toBeGreaterThanOrEqual(20);
+    for (const [read, text] of pinned) expect(read()).toBe(text);
+  });
+});
