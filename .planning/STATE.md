@@ -4,16 +4,16 @@ current_phase: 12
 current_phase_name: Formulário de perfil do tenant
 current_plan: 17
 status: executing
-stopped_at: Completed 12-07-PLAN.md (member and staff profile answers read route, indistinguishable 404, isolation case; 12-01 still waits for Igor's sketch 016 approval)
-last_updated: "2026-10-30T00:08:34.344Z"
+stopped_at: "Completed 12-08-PLAN.md (profile form builder API: create, list, edit under the D-587 locks and an optimistic revision, reorder; 12-01 still waits for Igor's sketch 016 approval)"
+last_updated: "2026-10-30T00:25:15.855Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 12 execution started
-state_head: a62b59c1cf2930ff02d0008e0a598a0d2fc55ddc
+state_head: 7d395dcbb4c8bdb560df982250cc99fed3135e4d
 progress:
   total_phases: 27
   completed_phases: 0
   total_plans: 312
-  completed_plans: 291
+  completed_plans: 292
   percent: 0
 ---
 
@@ -330,6 +330,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P05 | 17 min | 2 tasks | 12 files |
 | Phase 12 P06 | 14 min | 3 tasks | 12 files |
 | Phase 12 P07 | 13 min | 2 tasks | 5 files |
+| Phase 12 P08 | 15 min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -1067,6 +1068,7 @@ Recent decisions affecting current work:
 - [Phase 12]: 12-05: requireAuth refuses an active member with an unanswered required question as its last check (PROFILE_FORM_PENDING, tenantName only, exact-path allow-list) from profile_form_missing on the lookup row; the bootstrap profileForm block comes from the same SQL rule and a live module read — The form is asked only of an active membership so an invited one can still accept; a null, blank or negative count is a 500, never not pending; the old _gated pair stays one release
 - [Phase 12]: 12-06: the member save locks the active questions FOR SHARE through app.profile_form_lock_active(), a definer function, because a member's own FOR SHARE locks nothing under RLS; answers: {} is a no-op that reports the current missingRequired, a non-empty save that leaves a required question unanswered is refused after the SQL recount, and a form that grew under the save is a 409 form_changed — The lock function takes the tenant from the session claims and orders position, created_at, id so admin multi-row writes of plans 08 and 09 must lock in the same order; an oversized value is too_long, not a 500; other_required stays a vocabulary word the server parser never raises
 - [Phase 12]: 12-07: GET /v1/members/{membershipId}/profile-answers is deliberately not behind requireModule, so the module off is the same bare 404 as every other miss; a member viewer gets only answered, show_on_profile, non-archived rows, the staff path needs the composed permission profile_form.read, and a staff target or the caller's own membership is a 404 — Seven miss cases compare byte for byte (only requestId stripped) so the route cannot probe which memberships exist or are staff; the explicit show_on_profile and archived_at predicates sit beside the public RLS policy as layer 2
+- [Phase 12]: 12-08: the builder API runs on the module's own guard chain; every write takes a per-tenant advisory lock, re-reads the live module row with a plain select (FOR SHARE locks nothing under the tenant lane) and locks rows FOR UPDATE in position, created_at, id order before it reads the answer facts; checkLocks decides the five D-587 locks first and the PF001..PF005 trigger is the backstop with the same codes; a reorder body that is not exactly the active set is a 409 order_mismatch — An edit that breaks a lock answers the lock code even when the merged definition is also invalid; the merged definition is validated by the create schema so no CHECK surfaces as a 500; an option id the question does not hold is a 400 unknown_option; the 12-06 concurrency case 4 now races the real reorder route
 
 ### Pending Todos
 
@@ -1185,6 +1187,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T00:08:29.560Z
-Stopped at: Completed 12-07-PLAN.md (member and staff profile answers read route, indistinguishable 404, isolation case; 12-01 still waits for Igor's sketch 016 approval)
+Last session: 2026-10-30T00:25:09.767Z
+Stopped at: Completed 12-08-PLAN.md (profile form builder API: create, list, edit under the D-587 locks and an optimistic revision, reorder; 12-01 still waits for Igor's sketch 016 approval)
 Resume file: None
