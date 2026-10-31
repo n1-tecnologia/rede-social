@@ -1067,6 +1067,14 @@ describe('12-REVIEW WR-02 - NUL and unpaired surrogates are refused as invalid, 
     expect(accepted(q('short_text'), 'Ação 😀').ok).toBe(true);
   });
 
+  it('a link answer with a lone surrogate is the keyed invalid, not a value Postgres would refuse', () => {
+    // The URL parser accepts these, so only the shared check catches them (phase 12 security audit).
+    for (const bad of ['https://a.com/\uD800', 'https://a.com/x\uDE00y', 'https://a.com/\u0000']) {
+      expect(issueOf(q('link'), bad), JSON.stringify(bad)).toBe('invalid');
+    }
+    expect(accepted(q('link'), 'https://a.com/%F0%9F%98%80').ok).toBe(true);
+  });
+
   it('the "Outro" text of a choice answer is refused the same way', () => {
     for (const bad of [NUL, LONE_HIGH]) {
       expect(issueOf(choice('single_choice', { allowOther: true }), { otherText: bad })).toBe(

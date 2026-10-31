@@ -261,6 +261,8 @@ function parseLink(raw: unknown): ParseAnswerResult {
   if (codePoints(link) > MAX_LINK) return fail('too_long');
   // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
   if (/[\s\u0000-\u001f\u007f]/u.test(link)) return fail('invalid');
+  // An unpaired surrogate passes the URL parser but Postgres refuses it in `jsonb` (22P02): keyed, not a 500.
+  if (hasUnsafeChars(link)) return fail('invalid');
   // The exact path and query are kept as sent; only the scheme (`http:` or `https:`) is gated.
   return linkRule.safeParse(link).success ? ok(link) : fail('invalid');
 }
