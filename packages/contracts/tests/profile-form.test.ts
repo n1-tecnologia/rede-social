@@ -850,6 +850,8 @@ describe('12-03 - updateQuestionBodySchema, reorder and replace (PFORM-02, PFORM
     );
     expect(reorderBodySchema.safeParse({ ids: ids.slice(0, 30) }).success).toBe(true);
     expect(reorderBodySchema.safeParse({ ids }).success).toBe(false);
+    // More than 30 ids is the keyed order_mismatch (the route's 409), not a generic validation issue.
+    expect(issuesOf(reorderBodySchema, { ids })).toContain('order_mismatch');
   });
 
   it('replace is the create body plus the replaced id, with the same definition rules', () => {

@@ -511,7 +511,7 @@ export const reorderBodySchema = z
     ids: z
       .array(z.uuid({ error: 'order_mismatch' }), { error: 'order_mismatch' })
       .min(1, 'order_mismatch')
-      .max(PROFILE_FORM_LIMITS.activeQuestions),
+      .max(PROFILE_FORM_LIMITS.activeQuestions, 'order_mismatch'),
   })
   .strict()
   .refine((body) => new Set(body.ids).size === body.ids.length, 'order_mismatch');
