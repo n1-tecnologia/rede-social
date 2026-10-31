@@ -21,7 +21,8 @@
  * encoded), so it goes through `encodeURIComponent` once and validates again unchanged.
  *
  * **Exclusions.** The form itself (`/completar-perfil`, any sub-path or query) and every `(auth)` public
- * route: sending a member back to the screen they came from, or to a sign-in screen, would loop.
+ * route: sending a member back to the screen they came from, or to a sign-in screen, would loop. Also
+ * `/api/*` and `/_next/*`, which are not pages (a route handler answers raw JSON, `_next` serves assets).
  */
 export const REQUEST_PATH_HEADER = 'x-rede-path';
 
@@ -57,6 +58,13 @@ export const AUTH_PATH_PREFIXES: readonly string[] = [
   '/verifique-seu-email',
 ];
 
+/**
+ * Paths that are not pages: the route handlers (`/api/*`) and the framework's own assets (`/_next/*`).
+ * A destination there would navigate the member to raw JSON or a static chunk (12 review IN-03). Kept
+ * apart from `AUTH_PATH_PREFIXES`, which a test pins to the `(auth)` folders.
+ */
+export const NON_PAGE_PATH_PREFIXES: readonly string[] = ['/api', '/_next'];
+
 /** Slash and backslash look-alikes that a path must not contain (full-width, division, fraction, ...). */
 const LOOKALIKES = /[⁄∕∖⧵⧸⧹／＼﹨]/;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: a header-splitting byte is exactly what must be refused here.
@@ -84,6 +92,7 @@ function isUnder(path: string, prefix: string): boolean {
 function isExcluded(value: string): boolean {
   const path = pathOnly(value);
   if (isUnder(path, PROFILE_FORM_PATH)) return true;
+  if (NON_PAGE_PATH_PREFIXES.some((prefix) => isUnder(path, prefix))) return true;
   return AUTH_PATH_PREFIXES.some((prefix) => isUnder(path, prefix));
 }
 

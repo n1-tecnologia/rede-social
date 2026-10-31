@@ -103,6 +103,15 @@ describe('safeNextPath: the exclusions', () => {
     ['/auth/confirm?token_hash=abc'],
     ['/%65ntrar'],
     ['/entrar%3Fx'],
+    ['/api'],
+    ['/api/'],
+    ['/api/me/counters'],
+    ['/api?x=1'],
+    ['/api#a'],
+    ['/%61pi/me/counters'],
+    ['/_next'],
+    ['/_next/static/x'],
+    ['/_next/image?url=%2Fa'],
   ])('refuses %s', (value) => {
     expect(safeNextPath(value)).toBeNull();
   });
@@ -111,6 +120,9 @@ describe('safeNextPath: the exclusions', () => {
     expect(safeNextPath('/completar-perfil-x')).toBe('/completar-perfil-x');
     expect(safeNextPath('/entrarx')).toBe('/entrarx');
     expect(safeNextPath('/authors')).toBe('/authors');
+    expect(safeNextPath('/apix')).toBe('/apix');
+    expect(safeNextPath('/api-docs')).toBe('/api-docs');
+    expect(safeNextPath('/_nextx/a')).toBe('/_nextx/a');
   });
 
   it('refuses every route folder under app/(auth): the list is derived from the folders', () => {
