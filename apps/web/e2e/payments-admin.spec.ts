@@ -453,9 +453,8 @@ test('4. at 320px the long values keep their controls on screen (E02, E03, E05, 
     await expectInsideViewportX(page, eventRow, 'E07 event row');
     const grant = eventRow.getByRole('button', { name: 'Liberar manualmente' });
     await expectInsideViewportX(page, grant, 'E07 "Liberar manualmente"');
-    // The shipped `hitArea` of an OUTLINE `sm` button reaches 42px, not the 44px its comment claims: the
-    // insets are measured from the padding box, inside the 1px border (deferred-items.md, 09.1-19).
-    await expectTapTarget(grant, 42);
+    // The `hitArea` of an OUTLINE `sm` button is a centred 44px box (quick 261030-hh2), border included.
+    await expectTapTarget(grant);
     expect(
       await eventRow
         .locator('.truncate')
