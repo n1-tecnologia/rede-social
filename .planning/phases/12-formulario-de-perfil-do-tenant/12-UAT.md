@@ -3,12 +3,12 @@ status: partial
 phase: 12-formulario-de-perfil-do-tenant
 source: [12-VERIFICATION.md]
 started: 2026-10-30T09:40:00Z
-updated: 2026-10-30T16:45:00Z
+updated: 2026-10-31T01:30:00Z
 ---
 
 ## Current Test
 
-[testing paused — 10 items outstanding: 5 pending (Igor's own judgment) and 5 blocked (a phone, a hosted project or a deploy)]
+[testing paused — 12 items outstanding: 7 pending (Igor's own judgment or a local walk-through) and 5 blocked (a phone, a hosted project or a deploy)]
 
 ## Tests
 
@@ -63,17 +63,18 @@ note: |
   - product: bordered `sm` buttons with `hitArea` had a 42 px tap target instead of 44 px (shared Button primitive, 18d9f0f8, 16 outline call sites);
   - spec: `#respostas` selector (c1f1780f), two identical replace buttons (b2f924b7), not-found status 200 under loading.tsx (131ff69c), staff block behind the API's 30 s module-flag cache after a SQL module switch (affdd3b7), a title edit past the 120-character limit (44ed96af), and the tracer's deep link cancelled by the open shell's own first-join counters refetch (68b802cc).
   Two caveats: (1) the server-side change of quick 261030-g1y (87f701d9, the deep-link destination kept when a data loader refuses first) is covered by 11 unit tests but the browser never reached that path, so it is not proved in a browser; (2) an open app whose member taps a link in the very moment the gate flips still lands on /inicio, not on the post (no destination travels in an open-app redirect, decision 12-11); not fixed, Igor's call.
+  Second pass, 2026-10-31 01:09, AFTER the review fixes (IN-01 to IN-04 and the `parseLink` surrogate: 4c6dcb7a, f7ed3f50, 80abc5a2, 861f90cb, 8e4a5bae): the same command gave 20 passed in 1.6 min and the local database held 0 profile_form rows afterwards. The admin export download still works with the stricter `Sec-Fetch-Site: same-origin` check of IN-02. `payments-admin.spec.ts` (4 tests, mobile-chromium) also passed with its tap-target pin back at 44 px (e48f4e08).
   The ledger row M8 in 12-MANUAL-PROOFS.md is still `pending` on purpose: that file's rule is that only Igor flips a Status line.
 result: pass
 
 ### 9. M9: read the pt-BR copy that was not in the approved design (editor notes for short and long text, 'Informe um número.', the archive and delete failure toasts, 'Fechar')
 expected: Keep per item, or the wording wanted
-note: Copy written by the planner and executor, not by the design team.
+note: Copy written by the planner and executor, not by the design team. The UI audit (12-UI-REVIEW.md, 18/24, no blocker) flagged this copy for the owner and did not rewrite it.
 result: [pending]
 
 ### 10. Visual fidelity of every Phase 12 screen against sketch 016 at 320 and 390 px, with the tenant brand colours, on a real device (mask, autofill and date picker behaviour of the phone, date and number controls)
 expected: Matches the approved sketch; no overflow; native pickers behave
-note: Visual and device behaviour cannot be checked by grep or jsdom. The browser run of row 8 proves no overflow and 44 px tap targets at 320 and 390 px on an emulated viewport; it does not compare against the sketch and it is not a device.
+note: Visual and device behaviour cannot be checked by grep or jsdom. The browser run of row 8 proves no overflow and 44 px tap targets at 320 and 390 px on an emulated viewport; it does not compare against the sketch and it is not a device. The code-only UI audit (12-UI-REVIEW.md, 18/24) marks sketch fidelity, brand-colour contrast and native pickers as needing a human; its one concrete drift is `text-base` on the locked option label (`OptionsEditor.tsx:115`) and a brand-text check on the TypePicker link (`TypePicker.tsx:76`).
 result: blocked
 blocked_by: physical-device
 reason: needs a real phone and the homolog deploy
@@ -83,12 +84,22 @@ expected: Igor pastes or confirms approved: true; Igor's answers to the README d
 note: The approval in .planning/sketches/016-phase-12-designed-screens/README.md was recorded by the orchestrator on Igor's chat instruction (approval_kind: provisional); PFORM-26 / UI-04 ask for the approval pasted by the user. Design questions (a) to (f) were never answered.
 result: [pending]
 
+### 12. Decide the supported browsers for the profile-form export (review IN-02, fixed in f7ed3f50)
+expected: Igor says the strict check is fine, or asks for the fallback
+note: The export route now accepts only `Sec-Fetch-Site: same-origin`, so a browser that sends no fetch metadata (Safari older than 16.4, March 2023) gets a 403 on this one export. PFORM-21 names no browser support, so the requirement is not violated; the fallback, if wanted, is to accept a same-origin `Origin` header when `Sec-Fetch-Site` is absent.
+result: [pending]
+
+### 13. Walk the platform-panel module switch for the profile form, with its confirm dialog, as super admin in a browser
+expected: Turning the `profile_form` module on and off for a tenant asks for confirmation, and the change takes effect for members (the API caches module flags for 30 s per instance; a switch through the real route invalidates it)
+note: Unit-tested only. The Playwright specs switch the module by direct SQL, which is why they never exercised this dialog. Can be done locally.
+result: [pending]
+
 ## Summary
 
-total: 11
+total: 13
 passed: 1
 issues: 0
-pending: 5
+pending: 7
 skipped: 0
 blocked: 5
 
