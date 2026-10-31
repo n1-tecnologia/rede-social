@@ -18,7 +18,7 @@ import type { ProfileFormType } from '@rede-social/contracts/profile-form';
  */
 
 /** The byte-order mark (U+FEFF), written as an escape so no invisible character lives in the source. */
-export const CSV_BOM = '﻿';
+export const CSV_BOM = '\uFEFF';
 
 /** The field delimiter of a pt-BR spreadsheet. */
 export const CSV_DELIMITER = ';';

@@ -130,13 +130,13 @@ describe('csvRow and the file frame', () => {
   });
 
   it('the byte-order mark is U+FEFF and encodes to EF BB BF in UTF-8', () => {
-    expect(CSV_BOM).toBe('﻿');
+    expect(CSV_BOM).toBe('\uFEFF');
     expect(Array.from(new TextEncoder().encode(CSV_BOM))).toEqual([0xef, 0xbb, 0xbf]);
   });
 
   it('a header-only file is the BOM and one CRLF-terminated header record', () => {
     const file = CSV_BOM + csvRow(['Nome', 'E-mail']);
-    expect(file).toBe('﻿Nome;E-mail\r\n');
+    expect(file).toBe('\uFEFFNome;E-mail\r\n');
   });
 });
 
