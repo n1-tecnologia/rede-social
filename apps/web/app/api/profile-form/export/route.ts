@@ -1,5 +1,4 @@
 import { apiFetch } from '@/lib/api';
-import { sameOriginGet } from '@/lib/notifications-bff';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -20,8 +19,19 @@ export const dynamic = 'force-dynamic';
 const empty = (status: number) =>
   new Response(null, { status, headers: { 'cache-control': 'no-store' } });
 
+/**
+ * The origin gate, STRICT (12 review IN-02). This GET writes an audit row and runs a full member scan, so
+ * it cannot use the lenient `sameOriginGet` of the read-only BFF routes, which lets a request with
+ * neither `Sec-Fetch-Site` nor `Origin` through (old Safari). Here the browser must say `same-origin`:
+ * a missing header is refused. The only caller is `startCsvDownload`, a same-origin `fetch()`, which
+ * always sends `same-origin`. `none` (typed URL, bookmark) is refused too: nothing links to this URL
+ * and an export is started from the dialog, never by navigation.
+ */
+const isStrictSameOrigin = (request: Request): boolean =>
+  request.headers.get('sec-fetch-site') === 'same-origin';
+
 export async function GET(request: Request): Promise<Response> {
-  if (!sameOriginGet(request)) return empty(403);
+  if (!isStrictSameOrigin(request)) return empty(403);
 
   const { data } = await (await createClient()).auth.getClaims();
   if (!data?.claims) return empty(401);

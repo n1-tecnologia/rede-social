@@ -9,11 +9,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
   claims: { sub: 'u1' } as object | null,
-  sameOrigin: true,
 }));
 
 vi.mock('@/lib/api', () => ({ apiFetch: (...args: unknown[]) => mocks.apiFetch(...args) }));
-vi.mock('@/lib/notifications-bff', () => ({ sameOriginGet: () => mocks.sameOrigin }));
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getClaims: async () => ({ data: { claims: mocks.claims } }) },
@@ -22,7 +20,11 @@ vi.mock('@/lib/supabase/server', () => ({
 
 const { GET, dynamic } = await import('./route');
 
-const request = () => new Request('http://localhost/api/profile-form/export');
+/** A browser same-origin `fetch()`: the only caller (`startCsvDownload`) always sends this header. */
+const request = (site: string | null = 'same-origin') =>
+  new Request('http://localhost/api/profile-form/export', {
+    headers: site === null ? {} : { 'sec-fetch-site': site },
+  });
 const DISPOSITION = 'attachment; filename="respostas-perfil-2026-10-30.csv"';
 
 /** A stream that records whether anybody pulled from it, to prove the relay does not read the body. */
@@ -48,7 +50,6 @@ let infoLogs: ReturnType<typeof vi.spyOn>[];
 beforeEach(() => {
   mocks.apiFetch.mockReset();
   mocks.claims = { sub: 'u1' };
-  mocks.sameOrigin = true;
   errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   infoLogs = [
     vi.spyOn(console, 'log').mockImplementation(() => undefined),
@@ -113,12 +114,29 @@ describe('GET /api/profile-form/export: the relay', () => {
 });
 
 describe('GET /api/profile-form/export: the refusals', () => {
-  it('answers an empty 403 without calling the API when the request is cross-origin', async () => {
-    mocks.sameOrigin = false;
-    const res = await GET(request());
+  it.each([
+    ['cross-site', 'cross-site'],
+    ['same-site', 'same-site'],
+    ['none (typed URL or bookmark)', 'none'],
+    ['missing (no Sec-Fetch-Site, no Origin)', null],
+  ])(
+    'answers an empty 403 without calling the API when Sec-Fetch-Site is %s',
+    async (_label, site) => {
+      const res = await GET(request(site));
+      expect(res.status).toBe(403);
+      expect(await res.text()).toBe('');
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(mocks.apiFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses a header-less request even when it carries a same-host Origin', async () => {
+    const res = await GET(
+      new Request('http://localhost/api/profile-form/export', {
+        headers: { origin: 'http://localhost' },
+      }),
+    );
     expect(res.status).toBe(403);
-    expect(await res.text()).toBe('');
-    expect(res.headers.get('cache-control')).toBe('no-store');
     expect(mocks.apiFetch).not.toHaveBeenCalled();
   });
 
