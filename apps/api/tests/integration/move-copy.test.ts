@@ -323,9 +323,9 @@ describe('the tracer: a seeded tenant is copied into a bootstrapped second datab
     expect(plan.order.indexOf('events')).toBeLessThan(plan.order.indexOf('event_attendances'));
     expect(plan.tables.map((t) => t.name)).not.toContain('tenant_domains');
     expect(plan.tables.map((t) => t.name)).not.toContain('tenant_modules');
-    // The table set is the catalog's, not a list: 57 public tables minus the five without tenant_id,
+    // The table set is the catalog's, not a list: 59 public tables minus the five without tenant_id,
     // tenant_domains and tenant_modules.
-    expect(plan.tables.length).toBe(50);
+    expect(plan.tables.length).toBe(52);
   });
 });
 
