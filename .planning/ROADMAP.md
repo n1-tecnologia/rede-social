@@ -50,7 +50,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 09.4: Projeto do tenant no Supabase do cliente (INSERTED)** - A tenant can run on a Supabase project in its own account: a scoped access token limited to that one project is stored sealed per project and used for every Management API call about it, with the organisation pin, the allow-list, the rate limiter, the health and the panel working per project
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
-- [ ] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
+- [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 
 **MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the go-live gate (D-344, 2026-10-01: Phase 8 runs the full gate, and the MVP is declared closed at 08.1's exit gate). It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
 
@@ -1551,7 +1551,7 @@ Plans:
 **Scope**: Post-MVP, independent of the "Rede social" module (Phases 9-11): it reuses Phase 3's member profile, Phase 8's tenant admin panel and Phase 08.1's sign-up/join flow, and no "Rede social" phase depends on it.
 **Depends on**: Phase 3 (member profile), Phase 8 (tenant admin panel), Phase 08.1 (sign-up and join by host), Phase 08.7 (profile screens)
 **Requirements**: PFORM-01, PFORM-02, PFORM-03, PFORM-04, PFORM-05, PFORM-06, PFORM-07, PFORM-08, PFORM-09, PFORM-10, PFORM-11, PFORM-12, PFORM-13, PFORM-14, PFORM-15, PFORM-16, PFORM-17, PFORM-18, PFORM-19, PFORM-20, PFORM-21, PFORM-22, PFORM-23, PFORM-24, PFORM-25, PFORM-26 (plus UI-04 for the sketch gate)
-**Plans:** 18/18 plans executed (planned 2026-10-29; STATE stays on Phase 09.4, the plans execute only when Igor starts this phase)
+**Plans:** 18/18 plans executed (closed by developer closure 2026-11-02: verification human_needed 7/8, UAT 8 of 13 signed off, security threats_open 0, UI review 18/24; the 5 blocked UAT rows (phone, hosted project, release) and the 9 ledger rows of 12-MANUAL-PROOFS.md are Igor's; PFORM-25 and PFORM-26 stay unchecked until the hosted proofs and his own paste of the sketch 016 approval; nothing pushed or deployed)
 **Success Criteria** (what must be TRUE):
 
   1. A tenant admin (`admin_tenant`) opens a "Formulário de perfil" panel in the tenant admin and builds the form: adds, edits, reorders, marks as required or optional, and archives questions (an archived question stops being asked but its answers are kept, can be reactivated and is included in the export; only a question nobody has answered can be deleted, D-588). Each question has a title, an optional help text and one type: short text, long text, dropdown, multiple choice (several answers), single choice (radio) and the other types decided in discuss-phase (see Notes). Choice types carry the admin's list of options.
@@ -1656,7 +1656,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
-| 12. Formulário de perfil do tenant | 18/18 | In Progress|  |
+| 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 
 ---
 *Roadmap created: 2026-09-11*
