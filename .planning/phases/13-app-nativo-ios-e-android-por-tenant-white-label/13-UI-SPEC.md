@@ -1,10 +1,11 @@
 ---
 phase: "13"
 slug: "app-nativo-ios-e-android-por-tenant-white-label"
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: "2026-11-03"
+reviewed_at: "2026-11-04"
 ---
 
 # Phase 13 — UI Design Contract
@@ -443,21 +444,21 @@ All strings live in the pt-BR catalogs. No literal UI text in TSX (`scripts/chec
 
 ## UI Considerations
 
-> Populated by the ui-phase UI-consideration probe (Step 9.5) and lifted by plan-phase's `## UI Considerations` lift rule. Empty-state and error-state COPY live in `## Copywriting Contract` above; this section covers state coverage and REFERENCES those rows. **The compiled probe engine was not run by this researcher** (non-interactive session, no confirmation of element kinds possible): the rows below are authored against the taxonomy and relevance filter of `ui-consideration-probe.md` and must be re-run and reconciled by the orchestrator at Step 9.5 (idempotent: re-running replaces these rows).
+> Populated by the ui-phase UI-consideration probe (Step 9.5) and lifted by plan-phase's `## UI Considerations` lift rule. Empty-state and error-state COPY live in `## Copywriting Contract` above; this section covers state coverage and REFERENCES those rows. **The compiled probe engine was run by the orchestrator at Step 9.5 on 2026-11-04** (82 applicable considerations after the element kinds below were confirmed by Igor): the researcher's 66 hand-authored rows are kept and 16 rows were added for the combinations the engine raised that the hand-authored table lacked. Re-running replaces this section (idempotent).
 
-Applicable state considerations resolved: **55 covered, 6 backstop, 5 dismissed, 0 unresolved** (66 rows).
+Applicable state considerations resolved: **64 covered, 9 backstop, 9 dismissed, 0 unresolved** (82 rows). (66 rows).
 
 **Element inventory** (ids scoped to this document):
 
 | Id | Surface | Element kinds |
 |----|---------|---------------|
-| E01 | Splash and icon label | static-content |
+| E01 | Splash and icon label | static-content, media |
 | E02 | Shell frame, loading bar, back and links | nav, interactive-control |
 | E03 | Load-failure screen | static-content, interactive-control |
 | E04 | Update screen | static-content, interactive-control |
 | E05 | Lock screen and privacy cover | static-content, interactive-control |
 | E06 | Notification explainer sheet | interactive-control, static-content |
-| E07 | Notification and lock rows in Configurações | interactive-control |
+| E07 | Notification and lock rows in Configurações | interactive-control, static-content |
 | E08 | Offline feed reading | list-collection, interactive-control |
 | E09 | Purchase-off surfaces | list-collection, static-content |
 | E10 | Delete-account page and dialog | form |
@@ -465,12 +466,16 @@ Applicable state considerations resolved: **55 covered, 6 backstop, 5 dismissed,
 | E12 | Credential rows and sheets | form, interactive-control |
 | E13 | Links card | form |
 | E14 | Purchase switches | interactive-control |
-| E15 | Store listing card | static-content, interactive-control |
+| E15 | Store listing card | form, static-content, interactive-control |
 | E16 | Publish checklist | list-collection, interactive-control |
 | E17 | Identity card and state pill | static-content |
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
+| empty | E01 | ✅ covered | No logo: the tenant name in 24/700 `onPrimary`, centred, up to three lines (UI-D-602) |
+| loading | E01 | ⚪ dismissed | The splash is a build asset the OS shows; it has no spinner, no progress and nothing to load (UI-D-602) |
+| error | E01 | ⚪ dismissed | The logo is baked into the binary at build time, so there is no fetch that can fail at launch (UI-D-602) |
+| populated | E01 | ✅ covered | The logo centred at one third of the short side, never above 160dp, on `primary` (UI-D-602) |
 | overflow | E01 | ✅ covered | The logo is contained in one third of the short side and 160dp (UI-D-602) |
 | long-text | E01 | ✅ covered | No logo: the name in 24/700, up to three lines, centred (UI-D-602); the icon label is cut at 12 (UI-D-602) |
 | loading | E02 | ✅ covered | The 4dp bar after 400ms; the 10s first-paint timeout (UI-D-603) |
@@ -495,6 +500,7 @@ Applicable state considerations resolved: **55 covered, 6 backstop, 5 dismissed,
 | long-text | E06 | 🧪 backstop | A 40-character tenant name wraps in the body at 320px; a visual UI-state test |
 | loading | E07 | ✅ covered | The shipped `checking` placeholder; the lock switch is `busy` while the system verification runs (UI-D-608, UI-D-609) |
 | error | E07 | ✅ covered | Verification failed or cancelled -> toast and the switch returns (UI-D-609); denied -> "Abrir ajustes" (UI-D-608) |
+| overflow | E07 | ✅ covered | The two rows stack in the Preferências group and scroll with the page; the label truncates and the helper wraps at 130% scale (UI-D-608, UI-D-609) |
 | long-text | E07 | ✅ covered | Helper wraps; the label truncates like every `Row` (shipped) |
 | empty | E08 | ✅ covered | No saved copy -> the native load-failure screen (UI-D-612) |
 | loading | E08 | ✅ covered | On reconnect the feed revalidates in place, scroll position kept (UI-D-612) |
@@ -503,7 +509,10 @@ Applicable state considerations resolved: **55 covered, 6 backstop, 5 dismissed,
 | partial | E08 | ✅ covered | Posts without saved media render the neutral placeholder tile (UI-D-612) |
 | overflow | E08 | ✅ covered | The saved copy is the last loaded page(s) only; it scrolls like the live feed (UI-D-612) |
 | zero-one-many | E08 | ✅ covered | One saved post renders the same list and banner (UI-D-612) |
+| long-text | E08 | ✅ covered | Saved posts render through the same shipped components as the live feed, so long text wraps the same way; the banner wraps on two lines at 320px (UI-D-612) |
 | empty | E09 | ✅ covered | A Loja with no product keeps its shipped empty state; a Loja where every product is locked shows the padlock pills, not an empty state (UI-D-615) |
+| loading | E09 | 🧪 backstop | In the app, no price, buy button or checkout link is in the DOM at any moment, including the loading skeleton, before the bootstrap says whether purchase is visible; a visual UI-state test |
+| error | E09 | 🧪 backstop | If the bootstrap cannot answer, the app treats purchase as hidden (fails closed) and never paints a price; a visual UI-state test |
 | populated | E09 | ✅ covered | Owned cards keep "Comprado"; others show "Bloqueado" (UI-D-615) |
 | partial | E09 | ✅ covered | A mix of owned, free ("Grátis"/"Obter") and locked cards in one list (UI-D-615) |
 | overflow | E09 | ✅ covered | Same grid and scroll as today; the pill is narrower than a price |
@@ -528,15 +537,23 @@ Applicable state considerations resolved: **55 covered, 6 backstop, 5 dismissed,
 | long-text | E13 | ✅ covered | A long host and a 95-character fingerprint wrap with `break-all` (UI-D-624) |
 | loading | E14 | ✅ covered | The shipped `Switch` `busy` while the write runs (UI-D-625) |
 | error | E14 | ✅ covered | The shipped "Algo deu errado. Tente novamente." toast and the switch returns (UI-D-625) |
+| long-text | E14 | ✅ covered | The two labels are fixed text and the helper wraps like every shipped `Switch` row (UI-D-625) |
+| empty | E15 | ✅ covered | The reviewer account reads "Ainda não criada" with "Criar conta do revisor"; the privacy field starts empty (UI-D-626) |
 | loading | E15 | ✅ covered | The reviewer actions show pending states and disable both buttons (UI-D-626) |
 | error | E15 | ✅ covered | URL error under the field; reviewer failure toast "Nada foi alterado" (UI-D-626, UI-D-629) |
+| partial | E15 | ✅ covered | Each field shows its value or its own empty wording independently; a missing privacy URL or reviewer shows "Falta" in the checklist (UI-D-626, UI-D-627) |
 | overflow | E15 | ✅ covered | The description is collapsed in a `<details>` (UI-D-626) |
 | long-text | E15 | 🧪 backstop | A long privacy URL breaks inside the field and the `dl` at 320px; a visual UI-state test |
 | empty | E16 | ✅ covered | At the start every row reads "Falta"/"A fazer" with "0 de 10 etapas" (UI-D-627) |
+| loading | E16 | ⚪ dismissed | The card is read with the tab on the server; only a manual row's shipped `Switch` shows `busy` while it saves (UI-D-627) |
+| error | E16 | ✅ covered | A failed manual-row save shows the shipped "Algo deu errado. Tente novamente." toast and the switch returns (UI-D-625, UI-D-627) |
 | populated | E16 | ✅ covered | Mixed done and todo rows with words and icons (UI-D-627) |
+| partial | E16 | ✅ covered | Mixed automatic and manual rows, done and todo, each with its status word and icon; the count reads "{done} de {total} etapas" (UI-D-627) |
 | overflow | E16 | ⚪ dismissed | Exactly ten rows, never grows |
-| long-text | E17 | ✅ covered | A name over 30 characters shows the warning row with the cut name (UI-D-621) |
+| zero-one-many | E16 | ⚪ dismissed | Exactly ten rows, never zero, one or many; only the count changes, from "0 de 10" to "10 de 10" (UI-D-627) |
+| long-text | E16 | 🧪 backstop | The longest step name wraps beside its status word at 320px without pushing the word out; a visual UI-state test |
 | overflow | E17 | ✅ covered | `dl` values use `break-all` for hosts and IDs (UI-D-621) |
+| long-text | E17 | ✅ covered | A name over 30 characters shows the warning row with the cut name (UI-D-621) |
 
 ---
 
@@ -586,7 +603,7 @@ The researcher ran non-interactively and applied the default below to each; none
 | **PU-11** | Offline: only Início's feed is saved; other tabs show the offline page; every write is disabled with a toast (UI-D-612). | **As written.** | Saving more screens is stage-2-sized work; a subtler disable (no toast) hides why a button does nothing. |
 | **PU-12** | The icon label is the manifest `short_name` (12 characters) and the store name is cut at 30 (UI-D-602, UI-D-621). | **As written.** | A separate editable "Nome do ícone" field would be one more input in the identity card. |
 | **PU-13** | The App tab sits before Status and adds no pill to the tenant header (UI-D-620). | **As written.** | A header pill for "Pronto para gerar" or "Publicado" adds a third/fourth pill at 320px. |
-| **PU-14** | Confirm the element kinds in "UI Considerations" and run the probe engine at Step 9.5. | **Authored here, to be reconciled.** | The rows are replaced by the engine's output; nothing else changes. |
+| **PU-14** | Confirm the element kinds in "UI Considerations" and run the probe engine at Step 9.5. | **Done 2026-11-04.** The engine ran, Igor confirmed four added kinds (E01 media, E05 and E07 static-content, E15 form) and approved the 16 new rows (9 covered, 4 dismissed, 3 backstop). | Nothing open. The two Loja backstops (E09 loading, error) are new behavior to hold in a test: no price before the bootstrap answers, and hidden if it cannot answer. |
 
 ---
 
@@ -601,14 +618,14 @@ The researcher ran non-interactively and applied the default below to each; none
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: FLAG (non-blocking: bare-verb labels such as "Atualizar", "Informar", "Substituir", "Copiar", "Manter", "Desbloquear", "Salvar dados", "Voltar"; "Salvar links" is the clearest fix for "Salvar dados")
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: FLAG (non-blocking: the inherited 12px step is a declared exception, fixed in sketches 013-016)
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
-**Approval:** pending
+**Approval:** approved by gsd-ui-checker on 2026-11-03 (no BLOCK, 2 dimensions with non-blocking FLAGs); UI Considerations probe reconciled 2026-11-04
 
 **Not approved by this document:** the sketch gate (PU-10). If it is kept, `.planning/sketches/017-phase-13-designed-screens/README.md` needs `approved: true` pasted by the user (D-417; an agent never writes it).
