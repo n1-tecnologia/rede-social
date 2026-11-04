@@ -5,10 +5,10 @@ current_phase_name: Projeto do tenant no Supabase do cliente (INSERTED)
 current_plan: 17
 status: executing
 stopped_at: Completed 09.4-17-PLAN.md (17/17 plans; plan 17 task 3 ran on Igor's "pode dar deploy para o branch master" with P1 still pending: catalog bda792a7, SUMMARY 4323c772; full pnpm verify stopped at Playwright e2e on disk, everything before it green incl. 119 integration files / 2288 tests). Earlier: Completed 09.4-12-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01, 11, 12 done = 16/17; plan 17 tasks 1-2 done (46fbb7fa DEPLOY.md section + ledger steps, 7f3f1860 comment; all static gates, pgTAP 2920, 15 integration files, core 1268, contracts 258, web 5810 green except the one expected-red 'permission list written'), task 3 waits for Igor to sign P1). Code review gate ran (09.4-REVIEW.md: 0 critical, 6 warnings, 8 info); WR-01..05 fixed (734cdb30, afc6a907, 4a1030f8, 0f3364fb, 8886729b, 9be8f0fd), WR-06 is the [PENDENTE-PERMISSÕES] placeholder for task 3; REVIEW-FIX.md committed; Info IN-01..IN-08 open. Regression gate (turbo test, 18 tasks) found one real regression, the new PUT .../database/token route missing from apps/api/tests/isolation-inventory.ts, fixed in f4f2c3e1; the only red test left is the expected 'permission list written'. Plan 12: move to a customer project registers an unknown target from the local hidden prompt, fails closed with register_first in the Job, the way back is a normal move (pgTAP 2920, move-run 15, move-guard 22); P7 hosted proof is Igor's. Plan 11: `platform:set-owner` (hidden prompt, 41/41 integration, pgTAP 2920 pass); P6 hosted proof is Igor's. Probe run A ran on Igor's terminal on 2026-10-27 (21/21 allowed with the thirteen permissions) and was pasted into ledger P1 at his word, P1 Status still pending (his line); ruling 1 resolved: Igor said the token only had access to the specific project, so the 13 stay. Igor approved sketch 015 and the orchestrator wrote the approval on his explicit word (aea382b2). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
-last_updated: "2026-11-04T01:20:04.891Z"
+last_updated: "2026-11-04T08:29:57.410Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 12 closed by developer closure (UAT 8 of 13 signed off, 5 blocked rows and the 9 ledger rows are Igor's); pointer back on Phase 09.4, whose verifier, secure-phase and close still have to run
-state_head: e17970ddc3f05d9302641bb05aedd6eccca3ed0a
+state_head: 80e0695a578041dc6a54be9b0a4cd5d1f8febddc
 progress:
   total_phases: 28
   completed_phases: 0
@@ -1210,6 +1210,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T01:20:04.172Z
-Stopped at: Phase 13 context gathered (discuss only; the current-phase pointer stays on 09.4, which still has its verifier, secure-phase and close to run)
-Resume file: None
+Last session: 2026-11-04T08:29:56.716Z
+Stopped at: Phase 13 UI-SPEC approved (discuss + ui-phase done; the current-phase pointer stays on 09.4, which still has its verifier, secure-phase and close to run; next for 13 is the sketch gate PU-10, then plan-phase)
+Resume file: .planning/phases/13-app-nativo-ios-e-android-por-tenant-white-label/13-UI-SPEC.md
