@@ -122,6 +122,8 @@ None of these overrides a decision. Each is surfaced so the orchestrator can put
 | **F11** | UI-D-624 treats the Apple Team ID as a "links" fact. It is also the APNs token issuer (F5d). | Apple token-based connection doc | None if reused. | One field, two uses. |
 | **F12** | Age rating (OQ-3): Apple's current questionnaire has "Unrestricted Web Access" (embedded browser, any page) which raises the rating to 16+. The shell is locked to the tenant host and opens other links in the system browser, so the truthful answer is **No**. User-Generated Content and Messaging/Chat are 4+ globally but map to Brazil A6/A12. | Apple age-ratings page (fetched 2026-11-04) | The listing "Classificação etária" cannot be a single fixed value. | See OQ-3 answer: answer truthfully, store the answers in the template, let the tenant raise the minimum age; the Play IARC questionnaire is a console step. |
 
+> **Reconciled 2026-11-04 (after the orchestrator put F1, F3, F8 and F10 to Igor):** F8 became D-616 (minimum report and block slice pulled into this phase), F1 became D-617 (purchase switch starts OFF in both stores), F3 became D-618 (the shell owns the offline feed), F10 became D-619 (protected GitHub macOS workflow). `13-CONTEXT.md` was edited for this; the findings text below is unchanged.
+
 ## Open Questions Assigned to the Researcher (UI-SPEC OQ-1..OQ-6), settled
 
 | OQ | Answer | Confidence |

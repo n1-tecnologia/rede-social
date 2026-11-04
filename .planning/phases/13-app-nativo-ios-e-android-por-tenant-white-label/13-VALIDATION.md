@@ -13,6 +13,8 @@ created: "2026-11-04"
 
 > Per-phase validation contract for feedback sampling during execution. Seeded from `13-RESEARCH.md` "Validation Architecture"; the per-task map is filled by the planner.
 
+> Reconciled 2026-11-04 with `13-CONTEXT.md` D-616..D-619 (report and block slice, purchase switch off by default, shell-owned offline feed, GitHub macOS build). The planner adds their rows to the map below.
+
 ---
 
 ## Test Infrastructure
