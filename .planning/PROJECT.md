@@ -118,7 +118,7 @@ Validated in Phase 08.7: Dados Reais do Perfil (2026-10-19, local stack; UAT 87/
 - Tenant subdomains under the platform domain, and DNS automation on the customer's behalf — each tenant brings a domain it owns; the customer creates the DNS records from the platform panel's instructions
 - Billing / subscription checkout — tenants are provisioned by Rede Social; plan/status fields exist but no payment integration
 - Varied reactions (emoji) — plain "like" only
-- Native iOS/Android apps — PWA covers mobile in V1
+- Screens rebuilt 100% in native code (stage 2 of the native app), in-app purchase, the platform panel inside the app and a "Gerar app" button — the web, the PWA and the API stay the product; stage 1 (one native app per tenant that opens the web's own screens, with native push, links that open the app, a re-open lock, the unread number on the icon, camera, native share and offline reading of the last feed) is in scope as Phase 13 (D-600..D-619, 2026-11-03 and 2026-11-04)
 - Email and WhatsApp notifications — in-app + push only
 - Public (logged-out) post pages — share links are internal and require login
 - Self-service tenant creation — Rede Social creates tenants through the platform panel

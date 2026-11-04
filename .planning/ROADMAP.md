@@ -1533,14 +1533,14 @@ Plans:
 **Success Criteria** (what must be TRUE):
 
   1. With the "Rede social" module (`social`, Phase 9) on, a member can start a 1:1 direct conversation with any other member of the same tenant from that member's profile ("Enviar mensagem") and exchange text messages — following is NOT required (user decision 2026-09-25). With `social` off, members talk only to support, as before. It reuses the same conversation schema (`kind = 'direct'`), realtime topics, unread badge and push as the support chat; there is at most one direct conversation per pair of members; the other tenant's members are never reachable (RLS + isolation-suite negative test).
-  2. With `social` on, a member can block another member: the blocked member can no longer message them, follow them, or see a message button on their profile, and an existing direct conversation stops accepting messages from them; unblocking restores it. This is distinct from the admin's tenant-level block (Phase 8).
+  2. *(Amended 2026-11-04: the block table, the block and unblock, the blocker's content filter and the "Membros bloqueados" list are delivered earlier by Phase 13 (NATIVE-33, D-616), not gated by `social`; what remains here is the block's effect on messaging, following and the profile message button.)* With `social` on, a member can block another member: the blocked member can no longer message them, follow them, or see a message button on their profile, and an existing direct conversation stops accepting messages from them; unblocking restores it. This is distinct from the admin's tenant-level block (Phase 8).
   3. Notification rules account for member authoring: `admin_tenant` posts notify every member as before; a member's post notifies only that author's followers (or nobody — decide in discuss-phase), never the whole tenant (Phase 9, D-476, answers "nobody" until this phase decides: a member's post notifies no one, and the author is told only of a first-level comment on their own post, D-477); "started following you" and "new direct message" are new notification types (both only with `social` on).
   4. With `social` on, `admin_tenant` moderates member content: soft-deletes any member story and archives or removes any member-created community (even though it cannot publish in one, Phase 10), every action written to the moderation log. Removal of member POSTS and the log row for it ship in Phase 9 (SOCIAL-07, D-475); MODER-04 is split accordingly.
-  5. With `social` on, a member can report a post, story, community, comment or direct message with a reason, and `admin_tenant` works a reports queue (dismiss / remove content / block author). Promotes V2-MODER-01 (user decision 2026-09-25).
+  5. *(Amended 2026-11-04: reports of posts and comments, the admin reports list and its dismiss / remove / block-author actions are delivered earlier by Phase 13 (NATIVE-31, D-616); what remains here is reporting a story, a community and a direct message, and "block author" for those subjects.)* With `social` on, a member can report a post, story, community, comment or direct message with a reason, and `admin_tenant` works a reports queue (dismiss / remove content / block author). Promotes V2-MODER-01 (user decision 2026-09-25).
 
 **UI hint**: yes — "Enviar mensagem" on the member profile, direct conversations in the chat list, block/unblock controls, report sheet, admin reports queue.
 **Research needed**: Light — reuses Phase 7's chat and notification infrastructure and Phase 8's moderation log; the new parts are one direct conversation per pair of members, member-block enforcement across messaging, follow and profile, and follower fan-out for member-post notifications.
-**Notes**: Split out on 2026-09-25 from Phase 7 (criteria 5-7: CHAT-06, CHAT-07, the follower-scoped notification rules) and Phase 8 (criteria 5-6: MODER-04, MODER-05) when the "Rede social" module moved after the MVP. Phase 7's chat schema keeps `kind`, so direct conversations need no migration.
+**Notes**: Split out on 2026-09-25 from Phase 7 (criteria 5-7: CHAT-06, CHAT-07, the follower-scoped notification rules) and Phase 8 (criteria 5-6: MODER-04, MODER-05) when the "Rede social" module moved after the MVP. Phase 7's chat schema keeps `kind`, so direct conversations need no migration. **Amended 2026-11-04 (Phase 13, D-616):** Phase 13 delivers, ahead of this phase and for the app-store review, the minimum slice of MODER-05 (reports of posts and comments, the admin list and its three actions) and of CHAT-07 (the member block and the blocker's content filter) as NATIVE-31 and NATIVE-33 on kernel tables (`content_reports`, `member_blocks`) that are not gated by `social`; when this phase is planned it appends `story_comment`, `community` and `direct_message` to the report subject list, adds the block's effects on messaging, follow and the profile button, and must not plan the slice again.
 
 Plans:
 
@@ -1632,20 +1632,22 @@ Plans:
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
 **Goal**: Each tenant gets its own native iOS and Android app (own store listing, name, icon and bundle id), built from one codebase and fixed to that tenant's host. Stage 1 (this phase) is a native shell that opens the tenant's existing web screens and adds the native layer around them. Members and the tenant's staff find in it every feature of the web app, against the same API, with native push. Stage 2 (screens rebuilt 100% natively) is a later phase.
-**Scope**: Post-MVP and additive. The web app, the PWA and the API keep working unchanged for a browser: nothing in the web is migrated, moved or removed, and a tenant without a native app is not affected. The app is a third client of `/v1/*`, beside the web BFF. Decisions: `13-CONTEXT.md` (D-600..D-615).
+**Scope**: Post-MVP and additive. The web app, the PWA and the API keep working unchanged for a browser: nothing in the web is migrated, moved or removed, and a tenant without a native app is not affected. The app is a third client of `/v1/*`, beside the web BFF. Decisions: `13-CONTEXT.md` (D-600..D-619; D-616..D-619 were decided on 2026-11-04 after the research: the minimum report and block slice pulled from Phase 11, the purchase switch off by default, the shell-owned offline feed, the protected GitHub macOS build).
 **Depends on**: Phase 7 (Realtime, notifications and Web Push), Phase 08.1 (membership chosen by host), Phase 09.2 (the tenant's own Supabase project: the app signs in against the project the by-host answer names), Phase 12 (the profile form gate the app must honour)
-**Requirements**: TBD (new NATIVE-*)
-**Plans:** 0 plans
+**Requirements**: NATIVE-01, NATIVE-02, NATIVE-03, NATIVE-04, NATIVE-05, NATIVE-06, NATIVE-07, NATIVE-08, NATIVE-09, NATIVE-10, NATIVE-11, NATIVE-12, NATIVE-13, NATIVE-14, NATIVE-15, NATIVE-16, NATIVE-17, NATIVE-18, NATIVE-19, NATIVE-20, NATIVE-21, NATIVE-22, NATIVE-23, NATIVE-24, NATIVE-25, NATIVE-26, NATIVE-27, NATIVE-28, NATIVE-29, NATIVE-30, NATIVE-31, NATIVE-32, NATIVE-33, NATIVE-34, NATIVE-35, NATIVE-36
+**Plans:** 32 plans
 **Success Criteria** (settled in `/gsd-discuss-phase 13`, 2026-11-03; decisions in `13-CONTEXT.md`):
 
   1. A member installs the tenant's app (its name, icon, splash and colors), signs in, recovers a forgotten password, confirms the account and accepts an invite through the web's own pages inside the app, and lands on that tenant's Início. The app is fixed to the tenant's host: no community picker, and a session whose membership does not belong to that tenant is refused like `TENANT_HOST_MISMATCH`. The refusals `MEMBERSHIP_BLOCKED`, `MEMBERSHIP_INVITED`, `SUBSCRIPTION_PENDING`, `PROFILE_FORM_PENDING` and `TENANT_SUSPENDED|PREPARING|UPDATING|UNAVAILABLE` each land on the screen the web shows (D-608).
   2. Every member and staff screen of the web works inside the app by permission, for `member`, `admin_tenant` and `support_tenant` from the first published version (D-602); a test shows a browser user sees no difference from the additive web changes (D-603), and the PWA install prompt, the iOS home-screen hint and the Web Push button are hidden inside the app.
   3. A member who allows notifications on an iPhone or an Android phone, after the explanatory screen that follows the first sign-in, receives the same events the web pushes as native notifications; tapping one opens the matching page; logging out removes that device; the unread number shows on the app icon. The device token is stored in the tenant's own project with RLS and a two-tenant negative test (D-606, D-613, D-614).
   4. The auth e-mail links, the shared post links and the tap on a notification open the app when it is installed (Universal Links and App Links verified on the tenant's primary domain, the verification files served per host) and the browser when it is not (D-611).
-  5. A member can turn on a Face ID, fingerprint or passcode lock in Perfil, posts with the camera or the library, shares natively, reads the last feed seen without a connection, and sees a branded "sem internet" screen with a retry (D-612, D-613).
+  5. A member can turn on a Face ID, fingerprint or passcode lock in Perfil, posts with the camera or the library, shares natively, reads the last feed seen without a connection (a native read-only list owned by the shell, D-618), and sees a branded "sem internet" screen with a retry (D-612, D-613).
   6. A member deletes their account from Perfil in the app and in the web: the account is deactivated at once, signing in within 14 days cancels it, after 14 days a job anonymises it (posts and comments stay as "Membro removido"), with a two-tenant negative test (D-609, D-610).
-  7. A product's purchase opens its `checkoutUrl` in the phone's browser; the app never takes a card; each tenant has a switch per store (iPhone, Android) that hides price, button and link, leaving a neutral padlock and keeping content unlocked for members who have access (D-615).
+  7. A product's purchase opens its `checkoutUrl` in the phone's browser; the app never takes a card; each tenant has a switch per store (iPhone, Android), OFF by default in both (D-617), that hides price, button and link, leaving a neutral padlock and keeping content unlocked for members who have access (D-615).
   8. A new "App" tab on the tenant in `/plataforma` stores the store publishing access and the Apple push key write-only and sealed (never returned or logged); one command or workflow builds a tenant's app (name, icon, splash, bundle id and application id, host, associated domain) and sends it to TestFlight and Google internal testing; the store listing is assembled with a reviewer account; the pilot tenant's app is published in both stores (D-604..D-607).
+
+  9. Before the pilot is submitted, a member can report a post or a comment and block another member, in the web and in the app, and the tenant's `admin_tenant` works a list of reports and acts on each (ignore, remove the content, block the author), as Apple 1.2 and Google's user-generated-content policy require (D-616; pulled from Phase 11, which keeps stories, communities and direct messages as report subjects and the block's effect on messaging, follow and the profile button).
 
 **UI hint**: yes — the app follows the web app's own design, adapted to the phone (decided by Igor on 2026-11-03): no new design from the design team. A UI-SPEC and a sketch gate still come first (`/gsd-ui-phase 13`), to fix the native adaptations (navigation, gestures, safe areas, keyboards, pickers).
 **Research needed**: High — the approach, the store account owner and the push-credential model are decided (D-600, D-604..D-606); what is left to the researcher: (a) the shell technology that lets stage 2 replace single screens inside the same app (Expo with a WebView is the candidate) and how the web pages talk to the native layer; (b) what WKWebView and the Android WebView do with the web's cookie session, the service worker (iOS app-bound domains), file inputs and camera, HLS and Mux playback, TUS uploads, the Supabase Realtime socket and `navigator.share`; (c) the current App Store rules 4.2, 4.2.6, 4.3, 3.1.1, 3.1.3 and 5.1.1(v), and the Google Play payments policy for an external purchase link, with the Brazilian rules; (d) Universal Links and App Links on a customer-owned custom domain, and the per-host verification files; (e) FCM HTTP v1 with one Firebase project and an Apple key per tenant, versus calling APNs directly; (f) how to build and send to the stores per tenant (EAS or GitHub Actions macOS runners, fastlane or the stores' APIs) with credentials read from the sealed registry.
@@ -1654,7 +1656,38 @@ Plans:
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 13 to break down)
+- [ ] 13-01-PLAN.md — Sketch gate 017: the 67 prototype-less frames and Igor's approval (wave 1)
+- [ ] 13-02-PLAN.md — Expo supply-chain checkpoint and the apps/mobile workspace with host classification and the UA marker (wave 2)
+- [ ] 13-03-PLAN.md — Contracts: the native subpath, the bridge, id derivation, state functions and additive fields (wave 1)
+- [ ] 13-04-PLAN.md — Wave 0: prerequisites, nine real-device and real-domain spikes, proof documents (wave 3)
+- [ ] 13-05-PLAN.md — Control-plane tables for the App tab and sealed credentials, pgTAP (wave 2)
+- [ ] 13-06-PLAN.md — push_subscriptions native devices: table change, functions, pgTAP (wave 2)
+- [ ] 13-07-PLAN.md — Account deletion schema: request, cancel, deadline, anonymisation in place, pgTAP (wave 3)
+- [ ] 13-08-PLAN.md — Reports and member blocks schema and definers, pgTAP; names the Phase 11 ids covered (wave 4)
+- [ ] 13-09-PLAN.md — Core apps module and the platform App routes, write-only credentials (wave 3)
+- [ ] 13-10-PLAN.md — By-host app block, minimum-version read and the fail-closed purchaseVisible bootstrap (wave 4)
+- [ ] 13-11-PLAN.md — Native device save and delete through the existing notifications route (wave 3)
+- [ ] 13-12-PLAN.md — Worker: APNs and FCM transports, per-tenant keys, badge payload (wave 4)
+- [ ] 13-13-PLAN.md — Account deletion API, cancel by sign-in and the anonymisation job with the completion e-mail (wave 5)
+- [ ] 13-14-PLAN.md — Reports and blocks API, the blocked-author read filter and the riders (wave 6)
+- [ ] 13-15-PLAN.md — Per-host apple-app-site-association and assetlinks.json and the proxy allowance (wave 6)
+- [ ] 13-16-PLAN.md — Web marker, install gate, bridge client, native share, logout signal and platform header (wave 4)
+- [ ] 13-17-PLAN.md — Native push explainer, notification row, app-lock row and the icon badge sender (wave 7)
+- [ ] 13-18-PLAN.md — Purchase switch in the web: padlock, neutral note and locked states (wave 8)
+- [ ] 13-19-PLAN.md — Excluir minha conta screens, scheduled screen, public explanation page and cancel toast (wave 9)
+- [ ] 13-20-PLAN.md — Report and block screens and the admin reports queue (wave 10)
+- [ ] 13-21-PLAN.md — Platform App tab part 1: tab, identity, write-only credential sheets (wave 5)
+- [ ] 13-22-PLAN.md — Platform App tab part 2: links, purchase switches off by default, listing, checklist (wave 6)
+- [ ] 13-23-PLAN.md — Shell hardening: origin-checked bridge router, external links, entry paths, resilience (wave 4)
+- [ ] 13-24-PLAN.md — App images from the tenant branding: store icons, splash, adaptive and notification icons (wave 2)
+- [ ] 13-25-PLAN.md — Per-tenant Expo config, branding record, load-failure, update and loading-bar screens (wave 6)
+- [ ] 13-26-PLAN.md — Shell push and links: permission, device token, notification tap, universal links, badge (wave 7)
+- [ ] 13-27-PLAN.md — App lock, lock screen and the privacy-cover native module (wave 5)
+- [ ] 13-28-PLAN.md — Shell-owned saved feed: snapshot sender, store, offline decision and native list (wave 8)
+- [ ] 13-29-PLAN.md — platform:app-release command, sealed unseal and signing material, store clients, fake stores (wave 4)
+- [ ] 13-30-PLAN.md — Protected GitHub macOS and Ubuntu release workflow, its static guard and the runbook (wave 5)
+- [ ] 13-31-PLAN.md — Store listing assembly, Review Notes and the reviewer account (wave 5)
+- [ ] 13-32-PLAN.md — Pilot decision, phase gate, device and store proofs, publication (wave 11)
 
 ## Progress
 
@@ -1685,7 +1718,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
-| 13. App nativo iOS e Android por tenant (white-label) | 0/TBD | Not started | - |
+| 13. App nativo iOS e Android por tenant (white-label) | 0/32 | Not started | - |
 
 ---
 *Roadmap created: 2026-09-11*
