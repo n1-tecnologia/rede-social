@@ -1655,38 +1655,69 @@ Plans:
 **What must be created**: the app workspace (`apps/mobile`, the shell) and its bridge to the web pages; native push (a migration on `push_subscriptions` for a native token and platform with relaxed `p256dh`/`auth`, a new transport in the worker beside `web-push`, register and delete routes, the payload `url` opened as a page in the shell, the icon badge); the "App" tab in `/plataforma` with sealed write-only credentials and the associated-domain data; the per-host `apple-app-site-association` and `assetlinks.json` routes in the web; web changes inert in a browser that detect the app (D-603); the Face ID / passcode lock, the branded offline screen and the offline last feed; the delete-account screen, route, grace column and anonymisation job in the web and the app; the purchase switch per store; the per-tenant build and release command or workflow and the store listing assembly. Not needed in stage 1, because the web pages already do it: the media uploader, the HLS player and a client-safe `@rede-social/contracts` (stage 2 will need them).
 
 Plans:
+**Wave 1**
 
 - [ ] 13-01-PLAN.md — Sketch gate 017: the 67 prototype-less frames and Igor's approval (wave 1)
-- [ ] 13-02-PLAN.md — Expo supply-chain checkpoint and the apps/mobile workspace with host classification and the UA marker (wave 2)
 - [ ] 13-03-PLAN.md — Contracts: the native subpath, the bridge, id derivation, state functions and additive fields (wave 1)
-- [ ] 13-04-PLAN.md — Wave 0: prerequisites, nine real-device and real-domain spikes, proof documents (wave 3)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 13-02-PLAN.md — Expo supply-chain checkpoint and the apps/mobile workspace with host classification and the UA marker (wave 2)
 - [ ] 13-05-PLAN.md — Control-plane tables for the App tab and sealed credentials, pgTAP (wave 2)
 - [ ] 13-06-PLAN.md — push_subscriptions native devices: table change, functions, pgTAP (wave 2)
-- [ ] 13-07-PLAN.md — Account deletion schema: request, cancel, deadline, anonymisation in place, pgTAP (wave 3)
-- [ ] 13-08-PLAN.md — Reports and member blocks schema and definers, pgTAP; names the Phase 11 ids covered (wave 4)
-- [ ] 13-09-PLAN.md — Core apps module and the platform App routes, write-only credentials (wave 3)
-- [ ] 13-10-PLAN.md — By-host app block, minimum-version read and the fail-closed purchaseVisible bootstrap (wave 4)
-- [ ] 13-11-PLAN.md — Native device save and delete through the existing notifications route (wave 3)
-- [ ] 13-12-PLAN.md — Worker: APNs and FCM transports, per-tenant keys, badge payload (wave 4)
-- [ ] 13-13-PLAN.md — Account deletion API, cancel by sign-in and the anonymisation job with the completion e-mail (wave 5)
-- [ ] 13-14-PLAN.md — Reports and blocks API, the blocked-author read filter and the riders (wave 6)
-- [ ] 13-15-PLAN.md — Per-host apple-app-site-association and assetlinks.json and the proxy allowance (wave 6)
-- [ ] 13-16-PLAN.md — Web marker, install gate, bridge client, native share, logout signal and platform header (wave 4)
-- [ ] 13-17-PLAN.md — Native push explainer, notification row, app-lock row and the icon badge sender (wave 7)
-- [ ] 13-18-PLAN.md — Purchase switch in the web: padlock, neutral note and locked states (wave 8)
-- [ ] 13-19-PLAN.md — Excluir minha conta screens, scheduled screen, public explanation page and cancel toast (wave 9)
-- [ ] 13-20-PLAN.md — Report and block screens and the admin reports queue (wave 10)
-- [ ] 13-21-PLAN.md — Platform App tab part 1: tab, identity, write-only credential sheets (wave 5)
-- [ ] 13-22-PLAN.md — Platform App tab part 2: links, purchase switches off by default, listing, checklist (wave 6)
-- [ ] 13-23-PLAN.md — Shell hardening: origin-checked bridge router, external links, entry paths, resilience (wave 4)
 - [ ] 13-24-PLAN.md — App images from the tenant branding: store icons, splash, adaptive and notification icons (wave 2)
-- [ ] 13-25-PLAN.md — Per-tenant Expo config, branding record, load-failure, update and loading-bar screens (wave 6)
-- [ ] 13-26-PLAN.md — Shell push and links: permission, device token, notification tap, universal links, badge (wave 7)
-- [ ] 13-27-PLAN.md — App lock, lock screen and the privacy-cover native module (wave 5)
-- [ ] 13-28-PLAN.md — Shell-owned saved feed: snapshot sender, store, offline decision and native list (wave 8)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 13-04-PLAN.md — Wave 0: prerequisites, nine real-device and real-domain spikes, proof documents (wave 3)
+- [ ] 13-07-PLAN.md — Account deletion schema: request, cancel, deadline, anonymisation in place, pgTAP (wave 3)
+- [ ] 13-09-PLAN.md — Core apps module and the platform App routes, write-only credentials (wave 3)
+- [ ] 13-11-PLAN.md — Native device save and delete through the existing notifications route (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 13-08-PLAN.md — Reports and member blocks schema and definers, pgTAP; names the Phase 11 ids covered (wave 4)
+- [ ] 13-10-PLAN.md — By-host app block, minimum-version read and the fail-closed purchaseVisible bootstrap (wave 4)
+- [ ] 13-12-PLAN.md — Worker: APNs and FCM transports, per-tenant keys, badge payload (wave 4)
+- [ ] 13-16-PLAN.md — Web marker, install gate, bridge client, native share, logout signal and platform header (wave 4)
+- [ ] 13-23-PLAN.md — Shell hardening: origin-checked bridge router, external links, entry paths, resilience (wave 4)
 - [ ] 13-29-PLAN.md — platform:app-release command, sealed unseal and signing material, store clients, fake stores (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 13-13-PLAN.md — Account deletion API, cancel by sign-in and the anonymisation job with the completion e-mail (wave 5)
+- [ ] 13-21-PLAN.md — Platform App tab part 1: tab, identity, write-only credential sheets (wave 5)
+- [ ] 13-27-PLAN.md — App lock, lock screen and the privacy-cover native module (wave 5)
 - [ ] 13-30-PLAN.md — Protected GitHub macOS and Ubuntu release workflow, its static guard and the runbook (wave 5)
 - [ ] 13-31-PLAN.md — Store listing assembly, Review Notes and the reviewer account (wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 13-14-PLAN.md — Reports and blocks API, the blocked-author read filter and the riders (wave 6)
+- [ ] 13-15-PLAN.md — Per-host apple-app-site-association and assetlinks.json and the proxy allowance (wave 6)
+- [ ] 13-22-PLAN.md — Platform App tab part 2: links, purchase switches off by default, listing, checklist (wave 6)
+- [ ] 13-25-PLAN.md — Per-tenant Expo config, branding record, load-failure, update and loading-bar screens (wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 13-17-PLAN.md — Native push explainer, notification row, app-lock row and the icon badge sender (wave 7)
+- [ ] 13-26-PLAN.md — Shell push and links: permission, device token, notification tap, universal links, badge (wave 7)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 13-18-PLAN.md — Purchase switch in the web: padlock, neutral note and locked states (wave 8)
+- [ ] 13-28-PLAN.md — Shell-owned saved feed: snapshot sender, store, offline decision and native list (wave 8)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 13-19-PLAN.md — Excluir minha conta screens, scheduled screen, public explanation page and cancel toast (wave 9)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 13-20-PLAN.md — Report and block screens and the admin reports queue (wave 10)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
 - [ ] 13-32-PLAN.md — Pilot decision, phase gate, device and store proofs, publication (wave 11)
 
 ## Progress
