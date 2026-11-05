@@ -7,6 +7,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -18,6 +19,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { authenticatedRole } from 'drizzle-orm/supabase';
+import { profileFormSteps } from './profile-form-steps';
 import { tenants } from './tenants';
 import { users } from './users';
 
@@ -54,6 +56,16 @@ const TENANT_ADMIN = sql`tenant_id = app.tenant_id() and app.tenant_role() = 'ad
  * `options` is a `jsonb` array of `{ id, label }` with stable ids (answers reference ids, so a rename
  * never changes meaning); `limits` is `{ min?, max? }` for number and date.
  *
+ * A QUESTION BELONGS TO ONE STEP AND MAY CARRY ONE CONDITION (Phase 12.1; D-621, D-622, D-627, D-633).
+ * `step_id` is declared NOT NULL here, but the generated migration adds it NULLABLE (production already
+ * holds questions): the backfill, the `SET NOT NULL` and the default-step trigger are hand SQL in
+ * `*_profile_form_steps_functions.sql`, so the snapshot stays honest. The condition lives on the SHOWN
+ * question: `condition_question_id` names the opener and `condition_values` the tokens (option ids, or
+ * 'true'/'false' for yes/no) any of which makes it visible. Both references are composite foreign keys
+ * that include `tenant_id`, so neither a step nor an opener can belong to another tenant (T-12.1-01), and
+ * both are NO ACTION, never RESTRICT: RESTRICT is checked per row, and a fixture or a sweep deletes an
+ * opener and its dependent in one statement (the service raises the coded refusal first).
+ *
  * POLICIES: every tenant lane with a real role reads the active questions; archived ones are staff-only; only
  * `admin_tenant` writes. Members and `support_tenant` write nothing.
  */
@@ -77,6 +89,12 @@ export const profileFormQuestions = pgTable(
     /** `{ "min"?, "max"? }` for number (numbers) and date (ISO days). */
     limits: jsonb().$type<{ min?: number | string; max?: number | string }>().notNull().default({}),
     position: integer().notNull(),
+    /** D-627: the one step this question belongs to (NOT NULL once plan 06's backfill has run; see the header). */
+    stepId: uuid('step_id').notNull(),
+    /** D-621: the opener whose answer decides whether this question is shown; null = always shown. */
+    conditionQuestionId: uuid('condition_question_id'),
+    /** D-621: the tokens of the opener's answer that show this question; null exactly when the opener is null. */
+    conditionValues: text('condition_values').array(),
     /** Soft state (SCHEMA-CONVENTIONS (d)2): an archived question leaves the form, its answers stay (D-588). */
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     /** Set on create and on reactivate; drives the "new optional" notice (D-586). */
@@ -115,6 +133,30 @@ export const profileFormQuestions = pgTable(
     ),
     check('profile_form_questions_limits_chk', sql`jsonb_typeof(${t.limits}) = 'object'`),
     check('profile_form_questions_revision_chk', sql`${t.revision} >= 1`),
+    // The two halves of a condition travel together, a question is never its own opener, and the value set is
+    // 1..options long ("Outro" has no id, so it can never be a value). The bound reads the one limit (D-633).
+    check(
+      'profile_form_questions_condition_chk',
+      sql`(${t.conditionQuestionId} is null) = (${t.conditionValues} is null)
+        and ${t.conditionQuestionId} is distinct from ${t.id}
+        and (${t.conditionValues} is null or cardinality(${t.conditionValues}) between 1 and ${sql.raw(String(PROFILE_FORM_LIMITS.options))})`,
+    ),
+    // Both composite and tenant-scoped, NO ACTION (never RESTRICT); the self reference uses the callback form
+    // (the `feed_comments_parent_fk` precedent), because a column-level `.references` on itself trips TS circularity.
+    foreignKey({
+      columns: [t.tenantId, t.stepId],
+      foreignColumns: [profileFormSteps.tenantId, profileFormSteps.id],
+      name: 'profile_form_questions_step_fk',
+    }),
+    foreignKey({
+      columns: [t.tenantId, t.conditionQuestionId],
+      foreignColumns: [t.tenantId, t.id],
+      name: 'profile_form_questions_condition_fk',
+    }),
+    index('profile_form_questions_step_idx').on(t.tenantId, t.stepId),
+    index('profile_form_questions_condition_idx')
+      .on(t.tenantId, t.conditionQuestionId)
+      .where(sql`${t.conditionQuestionId} is not null`),
     // The lists: the active form in order, the archived list.
     index('profile_form_questions_tenant_archived_position_idx').on(
       t.tenantId,

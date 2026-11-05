@@ -14,6 +14,7 @@ export * from './payment-products';
 export * from './platform-admins';
 export * from './profile-form-answers';
 export * from './profile-form-questions';
+export * from './profile-form-steps';
 export * from './tenant-domains';
 export * from './tenant-invites';
 export * from './tenant-modules';
