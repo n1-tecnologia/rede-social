@@ -114,6 +114,36 @@ const staffPayload = {
   ],
 };
 
+describe('loadMyAnswers: the derived-row rule (D-634, UI-D-659)', () => {
+  it('marks a conditional question whose opener answer does not match as hidden, and no other row', async () => {
+    const choices = options('Tenho uma clínica', 'Estou aprendendo');
+    const opener = question('single_choice', {
+      title: 'Qual é o seu caso?',
+      options: choices,
+      answer: { optionId: choices[1]?.id ?? null, otherText: null },
+    });
+    const closed = question('short_text', {
+      title: 'Nome da clínica',
+      condition: { questionId: opener.id, values: [choices[0]?.id ?? ''] },
+    });
+    const open = question('short_text', {
+      title: 'Como é a rotina',
+      answer: 'Estudo',
+      condition: { questionId: opener.id, values: [choices[1]?.id ?? ''] },
+    });
+    const plain = question('short_text', { title: 'Cidade' });
+    mocks.getMemberForm.mockResolvedValue(form([opener, closed, open, plain], { mode: 'edit' }));
+    const result = await loadMyAnswers(words);
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.rows.map((row) => [row.title, row.hidden])).toEqual([
+      ['Qual é o seu caso?', false],
+      ['Nome da clínica', true],
+      ['Como é a rotina', false],
+      ['Cidade', false],
+    ]);
+  });
+});
+
 describe('loadMemberAnswers', () => {
   it('maps a 200 to the parsed payload of either kind', async () => {
     mocks.apiFetch.mockResolvedValueOnce(json(200, publicPayload));

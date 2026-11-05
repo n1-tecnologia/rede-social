@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 import { type AnswerView, type AnswerWords, answerView } from './answer-view';
 import { getMemberForm } from './member-form';
+import { storedVisibleQuestionIds } from './visibility';
 
 /**
  * The profile surfaces' readers of the profile form (12-14, D-584, D-593; UI-D-590, UI-D-592, UI-D-593).
@@ -31,6 +32,12 @@ export type MyAnswerRow = {
   /** `null` is an unanswered question ("Sem resposta"). */
   view: AnswerView | null;
   isPublic: boolean;
+  /**
+   * True for a conditional question whose opener answer does not match (12.1, D-634, UI-D-659): the member
+   * never sees it, so "Minhas respostas" omits the row instead of reading "Sem resposta". Absent counts as
+   * shown. This is a derived-row rule only: no stored answer is filtered (D-624).
+   */
+  hidden?: boolean;
 };
 
 export type MyAnswersResult =
@@ -47,6 +54,7 @@ export async function loadMyAnswers(words: AnswerWords): Promise<MyAnswersResult
   try {
     const form = await getMemberForm();
     if (form.questions.length === 0) return { status: 'empty' };
+    const shown = storedVisibleQuestionIds(form);
     return {
       status: 'ok',
       rows: form.questions.map((question) => ({
@@ -54,6 +62,7 @@ export async function loadMyAnswers(words: AnswerWords): Promise<MyAnswersResult
         title: question.title,
         view: answerView(question, question.answer, words),
         isPublic: question.showOnProfile,
+        hidden: !shown.has(question.id),
       })),
     };
   } catch (error) {

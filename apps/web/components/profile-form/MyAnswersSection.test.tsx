@@ -197,6 +197,72 @@ describe('MyAnswersSection: absence, empty and error', () => {
   });
 });
 
+describe('MyAnswersSection: a question that does not apply is omitted (D-634, UI-D-659; E9)', () => {
+  it('omits a hidden conditional row, keeps a matching one, and the card stays flat in the form order', async () => {
+    mocks.loadMyAnswers.mockResolvedValue({
+      status: 'ok',
+      rows: [row(1), row(2, { view: null, hidden: true }), row(3, { hidden: false }), row(4)],
+    });
+    const { container } = await show();
+    expect(
+      [...container.querySelectorAll('[data-answer-row]')].map((el) =>
+        el.getAttribute('data-answer-row'),
+      ),
+    ).toEqual(['q1', 'q3', 'q4']);
+    // Never "Sem resposta" for a question the member never sees.
+    expect(screen.queryByText('Sem resposta')).toBeNull();
+    // Flat: one card of divided rows, no step headings and no sub-headings.
+    expect(container.querySelectorAll('h3')).toHaveLength(0);
+    expect(container.querySelectorAll('.divide-y')).toHaveLength(1);
+  });
+
+  it('the "Ver todas" count and the threshold count only the rows shown', async () => {
+    // Seven rows, two hidden: five shown, so the collapse still opens, and says 5, not 7.
+    mocks.loadMyAnswers.mockResolvedValue({
+      status: 'ok',
+      rows: [
+        row(1),
+        row(2, { hidden: true, view: null }),
+        row(3),
+        row(4),
+        row(5, { hidden: true, view: null }),
+        row(6),
+        row(7),
+      ],
+    });
+    const { container } = await show();
+    const details = container.querySelector('details') as HTMLElement;
+    expect(within(details).getByText('Ver todas (5)')).toBeTruthy();
+    expect(screen.queryByText('Ver todas (7)')).toBeNull();
+    expect(container.querySelectorAll('[data-answer-row]')).toHaveLength(5);
+  });
+
+  it('with the omitted rows the list falls under the threshold: four shown, no collapse', async () => {
+    mocks.loadMyAnswers.mockResolvedValue({
+      status: 'ok',
+      rows: [row(1), row(2, { hidden: true, view: null }), row(3), row(4), row(5)],
+    });
+    const { container } = await show();
+    expect(container.querySelector('details')).toBeNull();
+    expect(screen.queryByText(/Ver todas/)).toBeNull();
+    expect(container.querySelectorAll('[data-answer-row]')).toHaveLength(4);
+  });
+
+  it('E9 empty: when every remaining row is unanswered or omitted the Phase 12 empty state shows, never an empty card', async () => {
+    mocks.loadMyAnswers.mockResolvedValue({
+      status: 'ok',
+      rows: [row(1, { hidden: true, view: null }), row(2, { hidden: true, view: null })],
+    });
+    const { container } = await show();
+    expect(screen.getByText('Você ainda não respondeu')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Responder' }).getAttribute('href')).toBe(
+      '/completar-perfil?next=%2Fperfil',
+    );
+    expect(container.querySelector('[data-answer-row]')).toBeNull();
+    expect(container.querySelector('details')).toBeNull();
+  });
+});
+
 describe('MyAnswersSkeleton', () => {
   it('is three rows, busy, with no spinner', () => {
     const { container } = render(<MyAnswersSkeleton />);

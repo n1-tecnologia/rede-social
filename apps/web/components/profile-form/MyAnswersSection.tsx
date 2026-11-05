@@ -62,7 +62,8 @@ function AnswerRow({ row, t }: { row: MyAnswerRow; t: Translator }) {
 /**
  * "Minhas respostas" on `/perfil` (12-14, D-584, UI-D-590, UI-D-591; PFORM-20): the member's own answers in
  * the admin's order, each public one marked "Visível no seu perfil", an unanswered optional question
- * reading "Sem resposta". More than four rows collapse behind a native `<details>` so the page does not
+ * reading "Sem resposta" (a conditional question that does not apply to her is omitted, not "Sem resposta").
+ * More than four rows collapse behind a native `<details>` so the page does not
  * stretch. "Editar" opens the same completion screen the first answer used, and returns here.
  *
  * It loads its own data (`loadMyAnswers` never throws) so the page streams it in a `Suspense` of its
@@ -95,7 +96,10 @@ export async function MyAnswersSection({ tenantName }: { tenantName: string }) {
     );
   }
 
-  const { rows } = result;
+  // A conditional question the member never sees is omitted BEFORE the empty check and the collapse, so the
+  // "Ver todas ({count})" count and the threshold count only the rows shown (D-634, UI-D-659). The card stays
+  // flat, in the form's order, with no step headings (PU-6).
+  const rows = result.rows.filter((row) => row.hidden !== true);
 
   // Nothing answered: the shipped empty card with the way to answer.
   if (rows.every((row) => row.view === null)) {

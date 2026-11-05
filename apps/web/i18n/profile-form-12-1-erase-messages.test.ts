@@ -67,3 +67,28 @@ describe('profileForm.member.erase: verbatim strings of the Copywriting Contract
     );
   });
 });
+
+const profile = createTranslator({
+  locale: 'pt-BR',
+  messages,
+  namespace: 'profileForm.profile',
+}) as unknown as Translate;
+
+describe('profileForm.profile.staff.notApplicable: the staff reading of a closed follow-up (UI-D-659)', () => {
+  it('reads "Não se aplica" and leaves the Phase 12 staff strings as they were', () => {
+    expect(profile('staff.notApplicable')).toBe('Não se aplica');
+    expect(profile('answers.none')).toBe('Sem resposta');
+    expect(profile('staff.public')).toBe('Público no perfil');
+    expect(profile('staff.archived')).toBe('Arquivada');
+    expect(profile('staff.empty')).toBe('Esta pessoa ainda não respondeu o formulário.');
+  });
+
+  it('declares exactly the staff keys of Phase 12 plus the one new string', () => {
+    const parsed = JSON.parse(
+      readFileSync(join(process.cwd(), 'messages', 'pt-BR', 'profileForm.profile.json'), 'utf8'),
+    );
+    expect(Object.keys(parsed.profileForm.profile.staff).sort()).toEqual(
+      ['archived', 'archivedTitle', 'empty', 'notApplicable', 'public', 'title'].sort(),
+    );
+  });
+});

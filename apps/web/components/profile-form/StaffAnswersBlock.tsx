@@ -2,13 +2,15 @@ import type { StaffAnswers } from '@rede-social/contracts/profile-form';
 import { Card, SectionTitle, StatusPill } from '@rede-social/ui';
 import { getTranslations } from 'next-intl/server';
 import { answerView, answerWordsFrom, type WordsTranslator } from '@/lib/profile-form/answer-view';
+import { isNotApplicable } from '@/lib/profile-form/visibility';
 import { AnswerValue } from './AnswerValue';
 
 type StaffRow = StaffAnswers['answers'][number];
 
 /**
  * "Respostas do formulário" on a member's page, for the staff (12-14, D-593, D-588, UI-D-593; PFORM-19):
- * every active question in the admin's order (an unanswered one reads "Sem resposta"), then, only when
+ * every active question in the admin's order (an unanswered one reads "Sem resposta", or "Não se aplica"
+ * when it is a follow-up whose opener answer does not match, UI-D-659), then, only when
  * any exists, the sub-heading "Perguntas arquivadas" with the answers kept for archived questions. Two
  * staff-only markers say exactly what other members see: the neutral pill "Público no perfil" on a public
  * question, and "Arquivada" on an archived one (words, never colour alone).
@@ -24,6 +26,7 @@ export async function StaffAnswersBlock({ answers }: { answers: StaffAnswers['an
     answer,
     view: answer.answered ? answerView(answer, answer.value, words) : null,
   }));
+  const rowsById = new Map(answers.map((answer) => [answer.questionId, answer]));
   const answeredAny = rows.some((row) => row.view !== null);
   const active = rows.filter((row) => row.answer.archivedAt === null);
   const archived = rows.filter((row) => row.answer.archivedAt !== null);
@@ -48,7 +51,10 @@ export async function StaffAnswersBlock({ answers }: { answers: StaffAnswers['an
           <AnswerValue view={view} />
         </span>
       ) : (
-        <span className="text-sm font-normal text-text-tertiary">{t('answers.none')}</span>
+        // A follow-up whose opener answer does not match was never asked: it is not a skipped question (UI-D-659).
+        <span className="text-sm font-normal text-text-tertiary">
+          {isNotApplicable(answer, rowsById) ? t('staff.notApplicable') : t('answers.none')}
+        </span>
       )}
     </div>
   );

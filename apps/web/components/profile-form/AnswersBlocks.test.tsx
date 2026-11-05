@@ -339,3 +339,86 @@ describe('MemberAnswersBlock', () => {
     expect(container.querySelector('.animate-spin')).toBeNull();
   });
 });
+
+describe('StaffAnswersBlock: "Não se aplica" for a closed follow-up (D-634, UI-D-659; E9 partial)', () => {
+  const choices = options('Tenho uma clínica', 'Estou aprendendo');
+  const opener = (answered = true) =>
+    staffRow(1, {
+      title: 'Qual é o seu caso?',
+      type: 'single_choice',
+      options: choices,
+      value: answered ? { optionId: choices[1]?.id ?? null, otherText: null } : null,
+      answered,
+    });
+  const followUp = (n: number, title: string, overrides: Partial<StaffRow> = {}) =>
+    staffRow(n, {
+      title,
+      value: null,
+      answered: false,
+      condition: { questionId: uuid(1), values: [choices[0]?.id ?? ''] },
+      ...overrides,
+    });
+  const cellOf = (container: HTMLElement, title: string) => {
+    const label = [...container.querySelectorAll('span')].find((el) => el.textContent === title);
+    return label?.closest('div.flex-col')?.querySelectorAll(':scope > span')[1] as HTMLElement;
+  };
+
+  it('reads "Não se aplica" (tertiary, no pill) for a follow-up whose opener answer does not match', async () => {
+    const ui = await StaffAnswersBlock({
+      answers: [opener(), followUp(2, 'Nome da clínica'), followUp(3, 'Quantas pessoas?')],
+    });
+    const { container } = wrap(ui);
+    const cell = cellOf(container, 'Nome da clínica');
+    expect(cell.textContent).toBe('Não se aplica');
+    expect(cell.className).toContain('text-text-tertiary');
+    expect(cell.className).toContain('font-normal');
+    expect(cell.querySelector('[class*="pill"], .rounded-full')).toBeNull();
+    expect(screen.getAllByText('Não se aplica')).toHaveLength(2);
+    expect(screen.queryByText('Sem resposta')).toBeNull();
+  });
+
+  it('still reads "Sem resposta" for an unanswered VISIBLE row and the value for an answered one', async () => {
+    const ui = await StaffAnswersBlock({
+      answers: [
+        opener(),
+        followUp(2, 'Nome da clínica'),
+        // Its condition IS met by the opener answer: a visible question left unanswered is skipped.
+        followUp(3, 'Como é a rotina', {
+          condition: { questionId: uuid(1), values: [choices[1]?.id ?? ''] },
+        }),
+        staffRow(4, { title: 'Cidade', value: 'Recife' }),
+        staffRow(5, { title: 'Nascimento', type: 'date', value: null, answered: false }),
+      ],
+    });
+    const { container } = wrap(ui);
+    expect(cellOf(container, 'Nome da clínica').textContent).toBe('Não se aplica');
+    expect(cellOf(container, 'Como é a rotina').textContent).toBe('Sem resposta');
+    expect(cellOf(container, 'Nascimento').textContent).toBe('Sem resposta');
+    expect(cellOf(container, 'Cidade').textContent).toBe('Recife');
+  });
+
+  it('an opener the member left unanswered does not open its follow-up either', async () => {
+    const ui = await StaffAnswersBlock({
+      answers: [opener(false), followUp(2, 'Nome da clínica'), staffRow(3, { title: 'Cidade' })],
+    });
+    const { container } = wrap(ui);
+    expect(cellOf(container, 'Nome da clínica').textContent).toBe('Não se aplica');
+  });
+
+  it('the public block and the staff pills are untouched by the rule', async () => {
+    const ui = await StaffAnswersBlock({
+      answers: [
+        opener(),
+        followUp(2, 'Nome da clínica', { showOnProfile: true }),
+        staffRow(3, { title: 'Cidade', showOnProfile: true }),
+      ],
+    });
+    wrap(ui);
+    expect(screen.getAllByText('Público no perfil')).toHaveLength(2);
+    const publicUi = await PublicAnswersBlock({
+      name: 'Carla',
+      answers: [publicRow(1, { title: 'Cidade', value: 'Recife' })],
+    });
+    expect(publicUi).not.toBeNull();
+  });
+});
