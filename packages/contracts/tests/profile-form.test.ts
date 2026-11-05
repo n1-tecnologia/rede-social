@@ -1,20 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
   adminQuestionSchema,
+  adminStepSchema,
   answerEtag,
   answerTokens,
   answerValueSchema,
   archivedQuestionSchema,
   createQuestionBodySchema,
+  createStepBodySchema,
+  dependentSchema,
   dismissNoticeResultSchema,
+  hasDependentsDetailsSchema,
   hasUnsafeChars,
   impactQuerySchema,
   impactResultSchema,
   isQuestionVisible,
+  layoutBodySchema,
   memberFormSchema,
+  memberStepSchema,
   missingIssue,
   normalizeOptionLabel,
   PROFILE_FORM_CHOICE_TYPES,
+  PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_ISSUE_SET,
   PROFILE_FORM_ISSUES,
   PROFILE_FORM_LIMITS,
@@ -25,6 +32,7 @@ import {
   type ProfileFormType,
   parseAnswer,
   profileFormBootstrapSchema,
+  profileFormConditionSchema,
   profileFormSummarySchema,
   publicAnswersSchema,
   reorderBodySchema,
@@ -33,6 +41,7 @@ import {
   saveAnswersResultSchema,
   staffAnswersSchema,
   updateQuestionBodySchema,
+  updateStepBodySchema,
   visibleSteps,
 } from '../src/profile-form';
 
@@ -118,12 +127,24 @@ describe('12-03 - the constants (D-590, D-591)', () => {
       shortText: 120,
       longText: 1000,
       valueBytes: 4096,
+      steps: 10,
+      stepTitle: 60,
     });
   });
 
   it('the refusal list is closed, unique and mirrored by the lookup set', () => {
     expect(new Set(PROFILE_FORM_ISSUES).size).toBe(PROFILE_FORM_ISSUES.length);
-    expect(PROFILE_FORM_ISSUES).toHaveLength(21);
+    expect(PROFILE_FORM_ISSUES).toHaveLength(28);
+    expect(PROFILE_FORM_ISSUES.slice(-7)).toEqual([
+      'condition_locked',
+      'condition_invalid',
+      'condition_order',
+      'has_dependents',
+      'step_not_empty',
+      'last_step',
+      'unknown_step',
+    ]);
+    expect(PROFILE_FORM_ISSUES.at(-1)).toBe('unknown_step');
     for (const issue of PROFILE_FORM_ISSUES) expect(PROFILE_FORM_ISSUE_SET.has(issue)).toBe(true);
     expect(PROFILE_FORM_ISSUE_SET.has('nope')).toBe(false);
   });
@@ -1202,4 +1223,207 @@ describe('12.1-01 - the visibility rule: stored answer to tokens to visible (D-6
       expect(visible).toBe(row.expected);
     });
   }
+});
+
+describe('12.1-01 - limits, opener types and the condition schema (D-620, D-621, D-633, T-12.1-17)', () => {
+  const OPENER = '55555555-5555-4555-8555-555555555555';
+  const tokens = (count: number) => Array.from({ length: count }, (_, i) => `token-${i}`);
+
+  it('the opener types are the four of D-620, in the order of PROFILE_FORM_TYPES, and nothing else', () => {
+    expect(PROFILE_FORM_CONDITION_OPENER_TYPES).toEqual([
+      'dropdown',
+      'multiple_choice',
+      'single_choice',
+      'yes_no',
+    ]);
+    const positions = PROFILE_FORM_CONDITION_OPENER_TYPES.map((type) =>
+      PROFILE_FORM_TYPES.indexOf(type),
+    );
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect([...positions].sort((x, y) => x - y)).toEqual(positions);
+    for (const type of [
+      'number',
+      'date',
+      'short_text',
+      'phone',
+      'email',
+      'link',
+      'acceptance',
+      'rating',
+    ]) {
+      expect(PROFILE_FORM_CONDITION_OPENER_TYPES).not.toContain(type);
+    }
+  });
+
+  it('a condition is strict { questionId, values } with 1 to 20 unique non-empty tokens', () => {
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['true'] }).success,
+    ).toBe(true);
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: OPENER, values: tokens(20) }).success,
+    ).toBe(true);
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: OPENER, values: tokens(21) }).success,
+    ).toBe(false);
+    expect(profileFormConditionSchema.safeParse({ questionId: OPENER, values: [] }).success).toBe(
+      false,
+    );
+    expect(profileFormConditionSchema.safeParse({ questionId: OPENER, values: [''] }).success).toBe(
+      false,
+    );
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['x'.repeat(64)] })
+        .success,
+    ).toBe(true);
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['x'.repeat(65)] })
+        .success,
+    ).toBe(false);
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['a', 'a'] }).success,
+    ).toBe(false);
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: 'nope', values: ['a'] }).success,
+    ).toBe(false);
+    // D-622: no chain, no parent.
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['a'], parent: OPENER })
+        .success,
+    ).toBe(false);
+  });
+
+  it('a refused condition carries the condition_invalid code the route hook lifts', () => {
+    const result = profileFormConditionSchema.safeParse({ questionId: OPENER, values: [] });
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
+    expect(messages).toEqual(['condition_invalid']);
+    expect(PROFILE_FORM_ISSUE_SET.has('condition_invalid')).toBe(true);
+  });
+
+  it('create, update and replace accept the optional stepId and condition, and update takes null to remove one', () => {
+    const condition = { questionId: OPENER, values: ['true'] };
+    expect(
+      createQuestionBodySchema.safeParse({ type: 'short_text', title: 'x', stepId: A, condition })
+        .success,
+    ).toBe(true);
+    expect(createQuestionBodySchema.safeParse({ type: 'short_text', title: 'x' }).success).toBe(
+      true,
+    );
+    expect(
+      createQuestionBodySchema.safeParse({ type: 'short_text', title: 'x', stepId: 'nope' })
+        .success,
+    ).toBe(false);
+    expect(
+      issuesOf(createQuestionBodySchema, { type: 'short_text', title: 'x', stepId: 'nope' }),
+    ).toContain('unknown_step');
+    expect(
+      replaceQuestionBodySchema.safeParse({
+        type: 'short_text',
+        title: 'x',
+        replaces: A,
+        stepId: B,
+        condition,
+      }).success,
+    ).toBe(true);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, condition }).success).toBe(true);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, condition: null }).success).toBe(true);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, stepId: A }).success).toBe(true);
+    expect(
+      updateQuestionBodySchema.safeParse({
+        revision: 1,
+        condition: { questionId: OPENER, values: [] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('saveAnswersBodySchema takes an optional stepId and stays strict', () => {
+    const base = { formEtag: 'e', answers: {} };
+    expect(saveAnswersBodySchema.safeParse(base).success).toBe(true);
+    expect(saveAnswersBodySchema.safeParse({ ...base, stepId: A }).success).toBe(true);
+    expect(saveAnswersBodySchema.safeParse({ ...base, stepId: 'nope' }).success).toBe(false);
+    expect(saveAnswersBodySchema.safeParse({ ...base, extra: 1 }).success).toBe(false);
+  });
+});
+
+describe('12.1-01 - step and layout schemas (D-629, D-632, D-633, T-12.1-17)', () => {
+  const stepsOf = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+      questionIds: [] as string[],
+    }));
+  const qid = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+  it('a step title is 1 to 60 code points, trimmed, on create and update', () => {
+    expect(createStepBodySchema.safeParse({ title: 'x'.repeat(60) }).success).toBe(true);
+    expect(createStepBodySchema.safeParse({ title: 'x'.repeat(61) }).success).toBe(false);
+    expect(issuesOf(createStepBodySchema, { title: 'x'.repeat(61) })).toContain('too_long');
+    expect(issuesOf(createStepBodySchema, { title: '   ' })).toContain('required');
+    expect(createStepBodySchema.safeParse({ title: 'ok', extra: 1 }).success).toBe(false);
+    expect(updateStepBodySchema.safeParse({ revision: 1, title: 'x'.repeat(60) }).success).toBe(
+      true,
+    );
+    expect(updateStepBodySchema.safeParse({ revision: 1, title: 'x'.repeat(61) }).success).toBe(
+      false,
+    );
+    expect(updateStepBodySchema.safeParse({ revision: 0, title: 'ok' }).success).toBe(false);
+  });
+
+  it('a layout accepts 10 steps and refuses 11, 31 question ids and a repeated id', () => {
+    expect(layoutBodySchema.safeParse({ steps: stepsOf(10) }).success).toBe(true);
+    expect(layoutBodySchema.safeParse({ steps: stepsOf(11) }).success).toBe(false);
+    expect(layoutBodySchema.safeParse({ steps: [] }).success).toBe(false);
+    const thirty = Array.from({ length: 30 }, (_, i) => qid(i + 1));
+    expect(
+      layoutBodySchema.safeParse({ steps: [{ id: stepsOf(1)[0]?.id, questionIds: thirty }] })
+        .success,
+    ).toBe(true);
+    expect(
+      layoutBodySchema.safeParse({
+        steps: [{ id: stepsOf(1)[0]?.id, questionIds: [...thirty, qid(31)] }],
+      }).success,
+    ).toBe(false);
+    const [first, second] = stepsOf(2);
+    expect(
+      layoutBodySchema.safeParse({
+        steps: [
+          { id: first?.id, questionIds: [qid(1)] },
+          { id: second?.id, questionIds: [qid(1)] },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(issuesOf(layoutBodySchema, { steps: [first, first] })).toContain('order_mismatch');
+    expect(layoutBodySchema.safeParse({ steps: stepsOf(1), extra: 1 }).success).toBe(false);
+  });
+
+  it('the member and admin step shapes and the has_dependents body parse their samples', () => {
+    expect(memberStepSchema.parse({ id: A, title: 'Sobre você' })).toEqual({
+      id: A,
+      title: 'Sobre você',
+    });
+    const admin = { id: A, title: 't', position: 0, revision: 1, questionCount: 0 };
+    expect(adminStepSchema.parse(admin)).toEqual(admin);
+    expect(adminStepSchema.safeParse({ ...admin, revision: 0 }).success).toBe(false);
+    const body = { profileForm: 'has_dependents', dependents: [{ id: B, title: 'Qual?' }] };
+    expect(hasDependentsDetailsSchema.parse(body)).toEqual(body);
+    expect(hasDependentsDetailsSchema.safeParse({ ...body, profileForm: 'x' }).success).toBe(false);
+    expect(dependentSchema.safeParse({ id: 'nope', title: 't' }).success).toBe(false);
+  });
+
+  it('answerEtag keeps its old output and changes with a stepId or a step revision', () => {
+    const list = [
+      { id: A, revision: 1 },
+      { id: B, revision: 4 },
+    ];
+    expect(answerEtag(list)).toBe(`${A}:1|${B}:4`);
+    expect(answerEtag([])).toBe('');
+    const moved = [{ id: A, revision: 1, stepId: C }, list[1] as (typeof list)[number]];
+    expect(answerEtag(moved)).toBe(`${A}:1:${C}|${B}:4`);
+    expect(answerEtag(moved)).not.toBe(answerEtag(list));
+    const other = [{ id: A, revision: 1, stepId: B }, list[1] as (typeof list)[number]];
+    expect(answerEtag(other)).not.toBe(answerEtag(moved));
+    const steps = [{ id: C, revision: 1 }];
+    expect(answerEtag(list, steps)).toBe(`${A}:1|${B}:4;steps=${C}:1`);
+    expect(answerEtag(list, [{ id: C, revision: 2 }])).not.toBe(answerEtag(list, steps));
+    expect(answerEtag(list, [])).toBe(`${A}:1|${B}:4;steps=`);
+  });
 });

@@ -35,6 +35,19 @@ export type ProfileFormType = (typeof PROFILE_FORM_TYPES)[number];
 export const PROFILE_FORM_CHOICE_TYPES = ['dropdown', 'multiple_choice', 'single_choice'] as const;
 export type ProfileFormChoiceType = (typeof PROFILE_FORM_CHOICE_TYPES)[number];
 
+/**
+ * The types whose answer can open another question (D-620): the three choice types and yes/no. Every
+ * other type contributes no token. This is the ONE list the service rules, the builder's opener list and
+ * the SQL helper tests read.
+ */
+export const PROFILE_FORM_CONDITION_OPENER_TYPES = [
+  'dropdown',
+  'multiple_choice',
+  'single_choice',
+  'yes_no',
+] as const;
+export type ProfileFormConditionOpenerType = (typeof PROFILE_FORM_CONDITION_OPENER_TYPES)[number];
+
 /** What the member form is doing right now (the `mode` of `GET /v1/me/profile-form`). */
 export const PROFILE_FORM_MODES = ['none', 'first', 'returning', 'edit'] as const;
 export type ProfileFormMode = (typeof PROFILE_FORM_MODES)[number];
@@ -56,6 +69,10 @@ export const PROFILE_FORM_LIMITS = {
   longText: 1000,
   /** One stored answer value, as `octet_length(value::text)`. */
   valueBytes: 4096,
+  /** Steps per tenant form, archived questions not counted (D-633); the steps CHECK reads it. */
+  steps: 10,
+  /** One step title, in code points (UI-D-664). */
+  stepTitle: 60,
 } as const;
 
 /**
@@ -86,6 +103,14 @@ export const PROFILE_FORM_ISSUES = [
   'form_changed',
   'not_archived',
   'already_archived',
+  // 12.1 (D-625, D-632): conditions and steps. Appended LAST so the pinned order of the rest holds.
+  'condition_locked',
+  'condition_invalid',
+  'condition_order',
+  'has_dependents',
+  'step_not_empty',
+  'last_step',
+  'unknown_step',
 ] as const;
 export type ProfileFormIssue = (typeof PROFILE_FORM_ISSUES)[number];
 
@@ -626,6 +651,33 @@ function checkDefinition(body: QuestionDefinitionBody, ctx: DefinitionIssueCtx):
   }
 }
 
+/**
+ * The condition of a shown question (D-621, D-622): exactly one opener and the tokens that open it, no
+ * chain and no parent. A token is an option id for a choice opener, `'true'` or `'false'` for yes/no. The
+ * question is shown when ANY token is among the opener's answer tokens.
+ */
+export const profileFormConditionSchema = z
+  .object({
+    questionId: z.uuid({ error: 'condition_invalid' }),
+    values: z
+      .array(
+        z
+          .string({ error: 'condition_invalid' })
+          .min(1, 'condition_invalid')
+          .max(64, 'condition_invalid'),
+        {
+          error: 'condition_invalid',
+        },
+      )
+      .min(1, 'condition_invalid')
+      .max(PROFILE_FORM_LIMITS.options, 'condition_invalid'),
+  })
+  .strict()
+  .refine(
+    (condition) => new Set(condition.values).size === condition.values.length,
+    'condition_invalid',
+  );
+
 const createQuestionShape = z
   .object({
     type: typeField,
@@ -639,6 +691,10 @@ const createQuestionShape = z
       .max(PROFILE_FORM_LIMITS.options + 1, 'limit_reached')
       .default([]),
     limits: limitsSchema.default({}),
+    /** Which step the question lands in; absent means the last step (D-629). */
+    stepId: z.uuid({ error: 'unknown_step' }).optional(),
+    /** The condition that shows the question; absent or null means always shown (D-621). */
+    condition: profileFormConditionSchema.nullable().optional(),
   })
   .strict();
 
@@ -672,6 +728,9 @@ export const updateQuestionBodySchema = z
       .max(PROFILE_FORM_LIMITS.options + 1, 'limit_reached')
       .optional(),
     limits: limitsSchema.optional(),
+    stepId: z.uuid({ error: 'unknown_step' }).optional(),
+    /** `null` removes the condition (D-625); absent leaves it as it is. */
+    condition: profileFormConditionSchema.nullable().optional(),
   })
   .strict()
   .superRefine((body, ctx) => {
@@ -691,6 +750,78 @@ export const reorderBodySchema = z
   .strict()
   .refine((body) => new Set(body.ids).size === body.ids.length, 'order_mismatch');
 export type ReorderBody = z.infer<typeof reorderBodySchema>;
+
+/** One step of the member form (`GET /v1/me/profile-form`, plan 11). */
+export const memberStepSchema = z.object({ id: z.uuid(), title: z.string() });
+export type MemberStep = z.infer<typeof memberStepSchema>;
+
+/** One step of the builder's list: its place, its revision (the optimistic lock) and its question count. */
+export const adminStepSchema = z.object({
+  id: z.uuid(),
+  title: z.string(),
+  position: z.number().int(),
+  revision: z.number().int().min(1),
+  questionCount: z.number().int().min(0),
+});
+export type AdminStep = z.infer<typeof adminStepSchema>;
+
+/** `POST /steps`: a new step goes last. */
+export const createStepBodySchema = z
+  .object({ title: requiredText(PROFILE_FORM_LIMITS.stepTitle) })
+  .strict();
+export type CreateStepBody = z.infer<typeof createStepBodySchema>;
+
+/** `PUT /steps/{id}`: rename a step; `revision` is the optimistic lock. */
+export const updateStepBodySchema = z
+  .object({
+    revision: z.number({ error: 'invalid' }).int('invalid').min(1, 'invalid'),
+    title: requiredText(PROFILE_FORM_LIMITS.stepTitle),
+  })
+  .strict();
+export type UpdateStepBody = z.infer<typeof updateStepBodySchema>;
+
+/**
+ * `PUT /layout`: the whole form at once, steps in order and each step's questions in order. At most
+ * `PROFILE_FORM_LIMITS.steps` steps, at most `PROFILE_FORM_LIMITS.activeQuestions` question ids in total,
+ * no id repeated (T-12.1-17).
+ */
+export const layoutBodySchema = z
+  .object({
+    steps: z
+      .array(
+        z
+          .object({
+            id: z.uuid({ error: 'order_mismatch' }),
+            questionIds: z.array(z.uuid({ error: 'order_mismatch' }), { error: 'order_mismatch' }),
+          })
+          .strict(),
+        { error: 'order_mismatch' },
+      )
+      .min(1, 'order_mismatch')
+      .max(PROFILE_FORM_LIMITS.steps, 'order_mismatch'),
+  })
+  .strict()
+  .superRefine((body, ctx) => {
+    const ids = body.steps.flatMap((step) => step.questionIds);
+    if (ids.length > PROFILE_FORM_LIMITS.activeQuestions || new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: 'custom', message: 'order_mismatch', path: ['steps'] });
+    }
+    if (new Set(body.steps.map((step) => step.id)).size !== body.steps.length) {
+      ctx.addIssue({ code: 'custom', message: 'order_mismatch', path: ['steps'] });
+    }
+  });
+export type LayoutBody = z.infer<typeof layoutBodySchema>;
+
+/** A question that blocks a change because its condition depends on the one being changed (D-632). */
+export const dependentSchema = z.object({ id: z.uuid(), title: z.string() });
+export type Dependent = z.infer<typeof dependentSchema>;
+
+/** The 409 `has_dependents` body: which questions depend on the opener (D-632). */
+export const hasDependentsDetailsSchema = z.object({
+  profileForm: z.literal('has_dependents'),
+  dependents: z.array(dependentSchema),
+});
+export type HasDependentsDetails = z.infer<typeof hasDependentsDetailsSchema>;
 
 /** `POST /questions/replace` (PFORM-17): a new question that takes the place of `replaces`. */
 export const replaceQuestionBodySchema = createQuestionShape
@@ -735,6 +866,8 @@ export type MemberForm = z.infer<typeof memberFormSchema>;
 export const saveAnswersBodySchema = z
   .object({
     formEtag: z.string().min(1).max(256),
+    /** The step being saved (D-629); absent keeps the whole-form save of Phase 12. */
+    stepId: z.uuid().optional(),
     answers: z
       .record(z.uuid(), z.unknown())
       .refine(
@@ -866,7 +999,21 @@ export type StaffAnswers = z.infer<typeof staffAnswersSchema>;
 /**
  * The canonical text of a form's identity: `id:revision` pairs in list order. The server hashes it into
  * `formEtag`, so a member who opened the form before an admin edit is told it changed (`form_changed`).
+ * 12.1: a question that carries a `stepId` renders it as a third segment, and `steps` appends the step
+ * `id:revision` pairs, so moving a question or renaming a step also changes the identity. Both parts are
+ * only added when given, so every earlier call keeps its exact output.
  */
-export function answerEtag(questions: readonly { id: string; revision: number }[]): string {
-  return questions.map((question) => `${question.id}:${question.revision}`).join('|');
+export function answerEtag(
+  questions: readonly { id: string; revision: number; stepId?: string }[],
+  steps?: readonly { id: string; revision: number }[],
+): string {
+  const base = questions
+    .map((question) =>
+      question.stepId === undefined
+        ? `${question.id}:${question.revision}`
+        : `${question.id}:${question.revision}:${question.stepId}`,
+    )
+    .join('|');
+  if (steps === undefined) return base;
+  return `${base};steps=${steps.map((step) => `${step.id}:${step.revision}`).join('|')}`;
 }
