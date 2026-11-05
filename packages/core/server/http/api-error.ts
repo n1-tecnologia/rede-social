@@ -37,6 +37,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   CREDENTIAL_KEY_ID_MISMATCH: 'O ID da chave não confere com o do arquivo.',
   CREDENTIAL_NOT_SERVICE_ACCOUNT: 'O arquivo não é uma conta de serviço do Google.',
   IDS_LOCKED: 'Os IDs do app não podem mudar depois da publicação.',
+  LAST_ADMIN:
+    'Você é o único administrador. Passe a administração para outra pessoa antes de excluir a conta.',
+  WRONG_PASSWORD: 'Senha incorreta.',
+  RATE_LIMITED: 'Muitas tentativas. Tente de novo em alguns minutos.',
   INTERNAL: 'Erro interno',
 };
 

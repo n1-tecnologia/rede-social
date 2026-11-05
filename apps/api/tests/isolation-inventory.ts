@@ -89,6 +89,8 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // stored link; a session of the other tenant on this host is refused with TENANT_HOST_MISMATCH.
   'GET /v1/me/subscription': { case: 'phase 09.1 sweep: member reads' },
   'GET /v1/me/invite': { case: 'inventory sweep: me and media' },
+  'POST /v1/me/account-deletion': { case: 'phase 13 sweep: account deletion' },
+  'GET /v1/me/account-deletion': { case: 'phase 13 sweep: account deletion' },
 
   // ── /v1/join (08.1 identity lane: requireIdentity, no membership, no tenant lane) ──────────────
   // The full guard matrix and D-302 byte checks live in join.test.ts; 08.1-07 adds the

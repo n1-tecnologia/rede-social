@@ -10968,4 +10968,67 @@ describe('shared identity (08.1)', () => {
       ]);
     });
   });
+
+  it("phase 13 sweep: account deletion — a member deletes only their own account in their own tenant; a session on another tenant's host is refused before any password check or write, the last-administrator read answers about the caller's own tenant, and every other member of both tenants is byte-identical (13-13, NATIVE-19, T-13-29)", async () => {
+    // | Route                            | Negative asserted here                                                  |
+    // |----------------------------------|-------------------------------------------------------------------------|
+    // | POST /v1/me/account-deletion     | a demo session on the lab host: 403 TENANT_HOST_MISMATCH, row unchanged  |
+    // | POST /v1/me/account-deletion     | a lab member's request touches no demo or other lab membership           |
+    // | GET  /v1/me/account-deletion     | a demo admin on the lab host: 403; a lab admin reads the lab answer only |
+    const tag = `iso1313-${RUN}`;
+    const demoEmail = `${tag}-d@rede-demo.local`;
+    const labEmail = `${tag}-l@rede-demo.local`;
+    const demoToken = await throwawayMember(tenantIds.demo, demoEmail);
+    const labToken = await throwawayMember(tenantIds.lab, labEmail);
+
+    const tenantRows = async () => {
+      const rows = await adminSql<{ row: unknown }[]>`
+        select to_jsonb(m) as row from public.memberships m
+         where m.tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)
+           and m.user_id not in (select id from public.users where email in (${labEmail}))
+         order by m.id`;
+      return rows.map((r) => r.row);
+    };
+    const labOwn = async () => {
+      const [row] = await adminSql<{ deleted: boolean; requested: boolean }[]>`
+        select m.deleted_at is not null as deleted, m.deletion_requested_at is not null as requested
+          from public.memberships m join public.users u on u.id = m.user_id
+         where u.email = ${labEmail} and m.tenant_id = ${tenantIds.lab}::uuid`;
+      return row;
+    };
+
+    // The demo session on the lab host: refused before the password is even looked at.
+    const before = await tenantRows();
+    await expectHostRefused(
+      await send('POST', '/v1/me/account-deletion', demoToken, HOSTS.lab, {
+        password: THROWAWAY_PASSWORD,
+      }),
+      'POST /v1/me/account-deletion',
+    );
+    await expectHostRefused(
+      await send('GET', '/v1/me/account-deletion', tokens.demoAdmin, HOSTS.lab),
+      'GET /v1/me/account-deletion',
+    );
+    expect(await tenantRows()).toEqual(before);
+    expect(await labOwn()).toEqual({ deleted: false, requested: false });
+
+    // Positive controls: a lab admin reads the lab answer (two admins in the seed would be false, one is true;
+    // either way a plain boolean), the lab member deletes THEIR OWN account on the lab host.
+    const adminRead = await send('GET', '/v1/me/account-deletion', tokens.labAdmin, HOSTS.lab);
+    expect(adminRead.status).toBe(200);
+    expect(Object.keys((await adminRead.json()) as object)).toEqual(['isLastAdmin']);
+    const memberRead = await send('GET', '/v1/me/account-deletion', labToken, HOSTS.lab);
+    expect(await memberRead.json()).toEqual({ isLastAdmin: false });
+
+    const done = await send('POST', '/v1/me/account-deletion', labToken, HOSTS.lab, {
+      password: THROWAWAY_PASSWORD,
+    });
+    expect(done.status).toBe(200);
+    expect(await labOwn()).toEqual({ deleted: true, requested: true });
+    // Nobody else in either tenant moved by a byte (the demo throwaway included).
+    expect(await tenantRows()).toEqual(before);
+    // The demo throwaway is still a live member of the demo tenant.
+    const stillIn = await send('GET', '/v1/me/profile', demoToken, HOSTS.demo);
+    expect(stillIn.status).toBe(200);
+  });
 });

@@ -35,6 +35,7 @@
       "includes": [
         "**",
         "!packages/core/server/tenancy/**",
+        "!packages/core/server/accounts/**",
         "!packages/core/server/platform/**",
         "!packages/core/server/media/**",
         "!packages/core/server/payments/**",

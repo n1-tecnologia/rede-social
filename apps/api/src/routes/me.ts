@@ -1,4 +1,4 @@
-import { createRoute } from '@hono/zod-openapi';
+import { createRoute, z } from '@hono/zod-openapi';
 import {
   acceptInviteBodySchema,
   acceptInviteResponseSchema,
@@ -25,6 +25,14 @@ import {
 } from '@rede-social/contracts/profiles';
 import { memberships, tenants, users } from '@rede-social/core/db/schema';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import {
+  accountDeletionLimiter,
+  deletionLimiterKeys,
+  isLastAdmin,
+  PASSWORD_MAX,
+  requestAccountDeletion,
+  takeDeletionNotice,
+} from '@rede-social/core/server/accounts/index';
 import { nativeRequestOf, readPurchaseSwitches } from '@rede-social/core/server/apps/index';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
@@ -47,6 +55,7 @@ import { acceptInvite } from '@rede-social/core/server/tenancy/accept-invite';
 import { identityHasPassword } from '@rede-social/core/server/tenancy/identity';
 import { membershipOfRecord } from '@rede-social/core/server/tenancy/membership-scope';
 import { eq } from 'drizzle-orm';
+import { decodeJwt } from 'jose';
 import type { ZodError } from 'zod';
 import { createOpenApiApp } from '../http/openapi';
 import { countersFor, enabledModulesForBootstrap, permissionsFor } from '../modules/registry';
@@ -151,6 +160,23 @@ const inviteContextRoute = createRoute({
   },
 });
 
+/**
+ * The body of `POST /v1/me/account-deletion` (13-13, PU-3): the password and nothing else. STRICT, so an extra key
+ * is a 400; `1..256` characters and not whitespace-only. The value is never logged and never echoed (the default
+ * validation hook answers with paths and codes, not values).
+ */
+const accountDeletionBodySchema = z
+  .object({
+    password: z
+      .string()
+      .min(1)
+      .max(PASSWORD_MAX)
+      .refine((value) => value.trim().length > 0, 'required'),
+  })
+  .strict();
+const accountDeletionResultSchema = z.object({ dueAt: z.string() }).strict();
+const lastAdminSchema = z.object({ isLastAdmin: z.boolean() }).strict();
+
 /** `GET /v1/me/bootstrap` — everything is read inside the tenant lane, scoped by the membership's tenant. */
 export const meRoutes = me
   .openapi(
@@ -207,10 +233,13 @@ export const meRoutes = me
         // 12-05 (PFORM-12): the form block, from the same SQL rule the gate uses and a LIVE module read (never
         // the flags cache above), in this same transaction. `undefined` for staff and for a module that is off.
         const profileForm = await bootstrapBlock(tx, ctx);
-        return { tenant, user, membership, profile, counters, profileForm };
+        // 13-13 (NATIVE-20): the one-time "Exclusão cancelada" notice, taken in this same transaction. Take-once
+        // semantics live in SQL, so it is non-null for exactly one bootstrap after a sign-in that cancelled.
+        const pendingDeletion = await takeDeletionNotice(tx);
+        return { tenant, user, membership, profile, counters, profileForm, pendingDeletion };
       });
 
-      const { tenant, user, membership, profile, counters, profileForm } = data;
+      const { tenant, user, membership, profile, counters, profileForm, pendingDeletion } = data;
       if (!tenant || !user || !membership) throw new ApiError(500, 'INTERNAL');
       if (!isTenantRole(membership.role) || !isStatus(membership.status)) {
         throw new ApiError(500, 'INTERNAL');
@@ -256,9 +285,9 @@ export const meRoutes = me
         // 13-03 (D-617, NATIVE-27): the two native-app fields the contract gained. `bootstrapSchema` now
         // outputs them as required (its `.default()`), so the object is typed with the NEUTRAL values a
         // reader would have defaulted to anyway; the store switch and the pending-deletion window are
-        // computed by their own plans.
+        // computed by their own plans (13-13 filled in the pending-deletion window).
         purchaseVisible: purchaseVisible({ native, platform, switches }),
-        pendingDeletion: null,
+        pendingDeletion,
       };
       return c.json(body, 200);
     },
@@ -521,6 +550,87 @@ export const meRoutes = me
       );
       c.header('Cache-Control', 'no-store');
       return c.json(result, 200);
+    },
+  )
+  /**
+   * `POST /v1/me/account-deletion` (13-13, D-609, D-610, NATIVE-19, T-13-29): "Excluir minha conta". The member
+   * re-enters the password, which is checked against the tenant's OWN Auth project BEFORE anything changes; then
+   * the SQL request deactivates the account at once (the very next request with the old token is refused), the
+   * sessions are revoked and the deadline is answered. It acts on `ctx.userId` only (no id in the body, no
+   * administrator variant). The last administrator gets 409 `LAST_ADMIN`; a wrong password 403 `WRONG_PASSWORD`;
+   * more than 5 attempts in 15 minutes per member or per network address 429 `RATE_LIMITED`. Calling it again
+   * never extends the 14 days. Never cached.
+   */
+  .openapi(
+    createRoute({
+      method: 'post',
+      path: '/account-deletion',
+      request: {
+        body: {
+          content: { 'application/json': { schema: accountDeletionBodySchema } },
+          required: true,
+        },
+      },
+      responses: {
+        200: {
+          description: 'The deletion is requested; the instant the 14-day window ends (ISO 8601).',
+          content: { 'application/json': { schema: accountDeletionResultSchema } },
+        },
+        400: envelope(
+          'VALIDATION_FAILED: missing, empty, whitespace-only or over-long password, or extra keys',
+        ),
+        403: envelope('WRONG_PASSWORD: nothing was changed'),
+        409: envelope('LAST_ADMIN: the only active administrator cannot delete the account'),
+        429: envelope('RATE_LIMITED: more than 5 attempts in 15 minutes'),
+      },
+    }),
+    async (c) => {
+      const ctx = c.get('ctx');
+      const { password } = c.req.valid('json');
+      const allowed = accountDeletionLimiter.consume(
+        deletionLimiterKeys({
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          ip: c.req.header(CLIENT_IP_HEADER) ?? null,
+        }),
+      );
+      if (!allowed) throw new ApiError(429, 'RATE_LIMITED');
+
+      // The address and the issue instant come from the token `requireAuth` already verified, never from the body.
+      const accessToken = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1] ?? '';
+      const email = decodeJwt(accessToken).email;
+      if (typeof email !== 'string' || email === '') throw new ApiError(401, 'INVALID_TOKEN');
+
+      const result = await requestAccountDeletion(
+        ctx,
+        { password, email, accessToken },
+        undefined,
+        c.get('logger'),
+      );
+      c.header('Cache-Control', 'no-store');
+      return c.json(result, 200);
+    },
+  )
+  /**
+   * `GET /v1/me/account-deletion` (13-13, UI-D-617, PU-4): `{ isLastAdmin }` for the delete page. `false` with no
+   * query for every role but `admin_tenant`; for an administrator, true when no OTHER active, unblocked,
+   * non-deleted administrator exists. It reveals nothing else. Never cached.
+   */
+  .openapi(
+    createRoute({
+      method: 'get',
+      path: '/account-deletion',
+      responses: {
+        200: {
+          description: 'Whether the caller is the last active administrator of the tenant',
+          content: { 'application/json': { schema: lastAdminSchema } },
+        },
+      },
+    }),
+    async (c) => {
+      const answer = await isLastAdmin(c.get('ctx'));
+      c.header('Cache-Control', 'no-store');
+      return c.json({ isLastAdmin: answer }, 200);
     },
   )
   .openapi(inviteContextRoute, async (c) => {

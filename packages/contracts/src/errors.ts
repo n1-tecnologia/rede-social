@@ -77,6 +77,13 @@ export const ERROR_CODES = [
   'CREDENTIAL_KEY_ID_MISMATCH',
   'CREDENTIAL_NOT_SERVICE_ACCOUNT',
   'IDS_LOCKED',
+  // 13-13 (D-609, D-610, T-13-29): the account-deletion refusals. `LAST_ADMIN` (409): the only active
+  // administrator cannot delete their own account (SQLSTATE AD001). `WRONG_PASSWORD` (403): the password
+  // re-entry did not match; nothing was changed. `RATE_LIMITED` (429): too many deletion attempts for this
+  // member or this network address. None carries details. One-way once released: the apps branch on them.
+  'LAST_ADMIN',
+  'WRONG_PASSWORD',
+  'RATE_LIMITED',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

@@ -1,8 +1,10 @@
 import { normalizeHost, TENANT_CHOICE_HEADER, TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { createMiddleware } from 'hono/factory';
 import { type JWTPayload, jwtVerify } from 'jose';
+import { cancelPendingDeletion } from '../accounts/deletion';
 import { env } from '../env';
 import { ApiError } from '../http/api-error';
+import { redactDbError } from '../logging';
 import {
   type Membership,
   membershipInTenant,
@@ -137,6 +139,11 @@ export const PROFILE_FORM_ALLOWED_PATHS = new Set([
  *   with exactly one not blocked select that one; several all blocked are MEMBERSHIP_BLOCKED and
  *   several open ones are TENANT_CHOICE_REQUIRED, both without details (never name or count them).
  *
+ * 13-13 (D-610, NATIVE-20): on a tenant host a lookup that finds NO live membership first asks SQL to cancel a
+ * pending account deletion (`cancelPendingDeletion`, only for a token issued after the request and before the
+ * deadline); on success the lookup is repeated and the request is an ordinary member request, otherwise the
+ * refusal below is unchanged.
+ *
  * Then, on the SELECTED membership only (D-304 — a block or suspension in another tenant never
  * reaches this request): a suspended tenant answers TENANT_SUSPENDED for every member, blocked or not
  * (D-32); a blocked membership answers MEMBERSHIP_BLOCKED; an `invited` membership may reach only the
@@ -181,7 +188,26 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
 
   let membership: Membership;
   if (hostTenant.kind === 'tenant') {
-    const found = await membershipInTenant(userId, hostTenant.tenantId);
+    let found = await membershipInTenant(userId, hostTenant.tenantId);
+    // 13-13 (D-610, NATIVE-20): no LIVE membership may be a member who asked to delete their account and has now
+    // signed in again inside the 14 days. The SQL cancels only for a token issued AFTER the request and before the
+    // deadline (`iat` below), so a token from before the request never undoes it; a stranger, a blocked member and
+    // a moderation soft-delete carry no request marker and are untouched. A failed call keeps today's refusal.
+    if (!found && typeof payload.iat === 'number') {
+      try {
+        const cancelled = await cancelPendingDeletion({
+          tenantId: hostTenant.tenantId,
+          userId,
+          tokenIat: new Date(payload.iat * 1000),
+        });
+        if (cancelled) found = await membershipInTenant(userId, hostTenant.tenantId);
+      } catch (err) {
+        c.get('logger')?.warn(
+          { event: 'account.deletion.cancel_failed', err: redactDbError(err) },
+          'could not check a pending account deletion',
+        );
+      }
+    }
     // No details on purpose: the body must not name the host's tenant nor any of the caller's own.
     if (!found) throw new ApiError(403, 'TENANT_HOST_MISMATCH');
     membership = found;
