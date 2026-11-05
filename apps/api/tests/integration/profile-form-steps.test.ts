@@ -561,3 +561,71 @@ describe('12.1-08 the guard chain of the steps routes (D-596)', () => {
     });
   }, 30_000);
 });
+
+// ── Task 3: the race (T-12.1-13) ────────────────────────────────────────────────────────────────
+
+describe('12.1-08 T-12.1-13: two admins creating a step at the same time never pass the limit', () => {
+  it('two simultaneous creates at 9 steps end with exactly 10 and one 409 limit_reached, every round', async () => {
+    const first = await person('admin_tenant');
+    const second = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      for (let n = 1; n <= 9; n += 1)
+        await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}Base ${n}` });
+      for (let round = 1; round <= 3; round += 1) {
+        const [a, b] = await Promise.all([
+          createStep(first, `${TITLE}Corrida ${round} a`),
+          createStep(second, `${TITLE}Corrida ${round} b`),
+        ]);
+        expect([a.status, b.status].sort(), `round ${round}`).toEqual([201, 409]);
+        const loser = a.status === 409 ? a : b;
+        expect(await details(loser)).toEqual({ profileForm: 'limit_reached' });
+        const rows = await stepsIn(labTenantId);
+        expect(rows, `round ${round}`).toHaveLength(10);
+        expect(positionsOf(rows)).toEqual(oneTo(10));
+        // Back to 9 for the next round: the winner of this one goes.
+        const winner = rows.find((row) => row.title.startsWith(`${TITLE}Corrida ${round}`));
+        const gone = await deleteStep(first, winner?.id ?? '');
+        expect(gone.status).toBe(200);
+        expect(await stepsIn(labTenantId)).toHaveLength(9);
+      }
+    });
+  }, 60_000);
+
+  it('three creates racing at 8 steps end with exactly 10 and one refusal', async () => {
+    const admins = [
+      await person('admin_tenant'),
+      await person('admin_tenant'),
+      await person('admin_tenant'),
+    ];
+    await withProfileForm(labTenantId, async () => {
+      for (let n = 1; n <= 8; n += 1)
+        await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}Base ${n}` });
+      const results = await Promise.all(
+        admins.map((admin, index) => createStep(admin, `${TITLE}Tripla ${index}`)),
+      );
+      expect(results.map((res) => res.status).sort()).toEqual([201, 201, 409]);
+      const rows = await stepsIn(labTenantId);
+      expect(rows).toHaveLength(10);
+      expect(positionsOf(rows)).toEqual(oneTo(10));
+    });
+  }, 60_000);
+
+  it('a create racing a delete leaves positions 1..n with no gap and no repeat', async () => {
+    const creator = await person('admin_tenant');
+    const remover = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const ids: string[] = [];
+      for (let n = 1; n <= 5; n += 1) {
+        ids.push(await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}Base ${n}` }));
+      }
+      const [made, removed] = await Promise.all([
+        createStep(creator, `${TITLE}Nova`),
+        deleteStep(remover, ids[1] ?? ''),
+      ]);
+      expect([made.status, removed.status]).toEqual([201, 200]);
+      const rows = await stepsIn(labTenantId);
+      expect(rows).toHaveLength(5);
+      expect(positionsOf(rows)).toEqual(oneTo(5));
+    });
+  }, 30_000);
+});

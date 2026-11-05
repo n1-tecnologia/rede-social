@@ -639,7 +639,14 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
       const archived = await adminCall('GET', '/v1/profile_form/archived');
       expect(await archived.json()).toEqual({ questions: [] });
       const list = await adminCall('GET', '/v1/profile_form/questions');
-      expect(await list.json()).toEqual({ questions: [], activeCount: 0, limit: 30 });
+      // 12.1-08: the list also carries the steps (none for a form never built) and their limit.
+      expect(await list.json()).toEqual({
+        questions: [],
+        activeCount: 0,
+        limit: 30,
+        steps: [],
+        stepLimit: 10,
+      });
     });
   }, 30_000);
 });

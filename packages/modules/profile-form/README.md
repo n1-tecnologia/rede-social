@@ -76,6 +76,14 @@ positions, so reordering options never changes what a stored answer means.
 30-question count never interleave, then re-reads the live module row, then locks the rows it changes
 `FOR UPDATE` in the canonical order `position, created_at, id` (the order the member's save locks in).
 
+**Steps (12.1, D-627, D-633).** The builder list also carries the tenant's `steps` (`id`, `title`, `position`,
+`revision`, `questionCount` of ACTIVE questions) and `stepLimit` 10, and every question names its `stepId`.
+`POST /steps` appends an empty step (409 `limit_reached` at 10, counted under the same advisory lock),
+`PATCH /steps/{id}` renames under the optimistic `revision` (409 `stale_revision`), and `DELETE /steps/{id}`
+is refused with `step_not_empty` while an active question is inside and `last_step` for the only step;
+otherwise it moves the step's ARCHIVED questions to the first remaining step and renumbers the steps 1..n. No
+question or answer is deleted. The kernel code is `@rede-social/core/server/profile-form/steps`.
+
 **Aggregates only (D-593, PFORM-23).** The builder reads counts: answers per question and per option, the
 summary and the impact. No route of this package ever returns an individual member's answer, and the
 response schemas of the summary, the impact and the archived list carry no `value`, `answer` or `otherText`
@@ -108,6 +116,7 @@ so a missing row reads as disabled.
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/profile-form/admin`
 - `@rede-social/core/server/profile-form/export`
+- `@rede-social/core/server/profile-form/steps`
 - `@rede-social/core/server/rbac/permissions`
 
 ## Navigation

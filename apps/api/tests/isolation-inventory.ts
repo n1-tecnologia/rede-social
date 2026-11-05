@@ -515,6 +515,13 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // A rede-demo admin never receives a rede-lab member or answer, and on the rede-lab host he is refused with
   // TENANT_HOST_MISMATCH.
   'GET /v1/profile_form/export': { case: 'phase 12 sweep: profile form export' },
+  // 12.1-08 (PFORM-27, T-12.1-10): the steps routes take the tenant from the session. A step id of another
+  // tenant is the bare 404 on rename and delete and changes nothing there; a create lands only in the
+  // caller's tenant and his list names no other tenant's step; a session of the other tenant on this host
+  // is refused with TENANT_HOST_MISMATCH on all three.
+  'POST /v1/profile_form/steps': { case: 'phase 12.1 sweep: profile form steps' },
+  'PATCH /v1/profile_form/steps/:id': { case: 'phase 12.1 sweep: profile form steps' },
+  'DELETE /v1/profile_form/steps/:id': { case: 'phase 12.1 sweep: profile form steps' },
 };
 
 /**

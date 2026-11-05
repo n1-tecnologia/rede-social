@@ -30,6 +30,7 @@ import {
   seedPaymentMapping,
   seedProfileFormAnswer,
   seedProfileFormQuestion,
+  seedProfileFormStep,
   setPaymentsRow,
   signInAs,
   uploadAvatar,
@@ -6879,6 +6880,173 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(labFile).not.toContain(`${PREFIX12}-resposta-demo`);
     } finally {
       await sweep12();
+      for (const [tenantId, enabled] of prior) {
+        if (enabled === null) {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        } else {
+          await adminSql`
+            update public.tenant_modules set enabled = ${enabled}
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
+  it('phase 12.1 sweep: profile form steps — a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH on the step create, rename and delete, his own list names no rede-lab step, a rede-lab step id on the rede-demo host is the bare 404 on rename and delete, and nothing of rede-lab changes, each beside the rede-lab admin’s own positive control (12.1-08, PFORM-27, T-12.1-10)', async () => {
+    // | Route                                 | Negative asserted here                                              |
+    // |---------------------------------------|---------------------------------------------------------------------|
+    // | POST   /v1/profile_form/steps         | lab host with a demo session: 403 TENANT_HOST_MISMATCH, no row; on  |
+    // |                                       | his own host the row lands in demo only                             |
+    // | PATCH  /v1/profile_form/steps/{id}    | lab host: 403; a lab step id on the demo host: the bare 404, the    |
+    // |                                       | lab row unchanged (title and revision)                              |
+    // | DELETE /v1/profile_form/steps/{id}    | lab host: 403; a lab step id on the demo host: the bare 404, the    |
+    // |                                       | lab step still there                                                |
+    // The list (GET /v1/profile_form/questions) of the demo admin names no lab step.
+    const PREFIX121 = `iso1208s-${RUN}`;
+    const TITLE121 = `${PREFIX121} `;
+    const prior = new Map<string, boolean | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean }[]>`
+        select enabled from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+      prior.set(tenantId, row?.enabled ?? null);
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'profile_form', true)
+        on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweep121 = async () => {
+      await removeProfileFormByPrefix(TITLE121);
+      await removeIdentitiesByPrefix(PREFIX121);
+    };
+    await sweep121();
+    try {
+      const make = async (host: 'lab' | 'demo') => {
+        const identity = await createSharedIdentity({
+          prefix: PREFIX121,
+          memberships: [{ host, role: 'admin_tenant', status: 'active' }],
+        });
+        return { ...identity, token: await signInAs(identity.email, identity.password) };
+      };
+      const labAdmin = await make('lab');
+      const demoAdmin = await make('demo');
+      // The SAME title in both tenants (adjacency): only the id can tell them apart.
+      const labA = await seedProfileFormStep({
+        tenantId: tenantIds.lab,
+        title: `${TITLE121}Mesmo título`,
+        position: 1,
+      });
+      const labB = await seedProfileFormStep({
+        tenantId: tenantIds.lab,
+        title: `${TITLE121}Outro título`,
+        position: 2,
+      });
+      const demoStep = await seedProfileFormStep({
+        tenantId: tenantIds.demo,
+        title: `${TITLE121}Mesmo título`,
+        position: 1,
+      });
+      const send = (
+        who: { token: string },
+        method: string,
+        path: string,
+        host: string,
+        body?: unknown,
+      ) =>
+        api.request(path, {
+          method,
+          headers: {
+            authorization: `Bearer ${who.token}`,
+            [TENANT_HOST_HEADER]: host,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+      const labState = async () =>
+        adminSql<{ id: string; title: string; position: number; revision: number }[]>`
+          select id::text as id, title, position, revision from public.profile_form_steps
+           where tenant_id = ${tenantIds.lab}::uuid and title like ${`${TITLE121}%`}
+           order by position, id`;
+      const before = await labState();
+      expect(before.map((row) => row.id)).toEqual([labA, labB]);
+
+      // Positive controls: each admin reads his own list, and only his own step.
+      const labList = await send(labAdmin, 'GET', '/v1/profile_form/questions', HOSTS.lab);
+      expect(labList.status).toBe(200);
+      const labText = await labList.text();
+      expect(labText).toContain(labA);
+      expect(labText).not.toContain(demoStep);
+      const demoList = await send(demoAdmin, 'GET', '/v1/profile_form/questions', HOSTS.demo);
+      expect(demoList.status).toBe(200);
+      const demoText = await demoList.text();
+      expect(demoText).toContain(demoStep);
+      expect(demoText).not.toContain(labA);
+      expect(demoText).not.toContain(labB);
+
+      // The wrong host refuses before anything runs, on all three routes.
+      for (const [method, path, body] of [
+        ['POST', '/v1/profile_form/steps', { title: `${TITLE121}intruso` }],
+        [
+          'PATCH',
+          `/v1/profile_form/steps/${labA}`,
+          { revision: 1, title: `${TITLE121}sequestrada` },
+        ],
+        ['DELETE', `/v1/profile_form/steps/${labB}`, undefined],
+      ] as const) {
+        const res = await send(demoAdmin, method, path, HOSTS.lab, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await code(res), `${method} ${path}`).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await labState()).toEqual(before);
+
+      // A lab step id on the demo host is the bare 404 (no details), and the lab rows are untouched.
+      for (const [method, path, body] of [
+        [
+          'PATCH',
+          `/v1/profile_form/steps/${labA}`,
+          { revision: 1, title: `${TITLE121}sequestrada` },
+        ],
+        ['DELETE', `/v1/profile_form/steps/${labB}`, undefined],
+      ] as const) {
+        const foreign = await send(demoAdmin, method, path, HOSTS.demo, body);
+        expect(foreign.status, `${method} ${path}`).toBe(404);
+        const foreignBody = (await foreign.json()) as Envelope;
+        expect(foreignBody.error.code).toBe('NOT_FOUND');
+        expect(foreignBody.error.details).toBeUndefined();
+        expect(JSON.stringify(foreignBody)).not.toContain(labA);
+        expect(JSON.stringify(foreignBody)).not.toContain(labB);
+      }
+      expect(await labState()).toEqual(before);
+
+      // A create on his own host lands in demo and nowhere else.
+      const made = await send(demoAdmin, 'POST', '/v1/profile_form/steps', HOSTS.demo, {
+        title: `${TITLE121}criada no demo`,
+      });
+      expect(made.status).toBe(201);
+      const [landed] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text as tenant_id from public.profile_form_steps
+         where title = ${`${TITLE121}criada no demo`}`;
+      expect(landed?.tenant_id).toBe(tenantIds.demo);
+      expect(await labState()).toEqual(before);
+
+      // Positive controls: the lab admin renames and deletes his own, and creates one.
+      const own = await send(labAdmin, 'PATCH', `/v1/profile_form/steps/${labA}`, HOSTS.lab, {
+        revision: 1,
+        title: `${TITLE121}renomeada no lab`,
+      });
+      expect(own.status).toBe(200);
+      const removed = await send(labAdmin, 'DELETE', `/v1/profile_form/steps/${labB}`, HOSTS.lab);
+      expect(removed.status).toBe(200);
+      const created = await send(labAdmin, 'POST', '/v1/profile_form/steps', HOSTS.lab, {
+        title: `${TITLE121}criada no lab`,
+      });
+      expect(created.status).toBe(201);
+    } finally {
+      await sweep121();
       for (const [tenantId, enabled] of prior) {
         if (enabled === null) {
           await adminSql`
