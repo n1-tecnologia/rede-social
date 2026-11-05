@@ -1,3 +1,4 @@
+import { REPORT_SUBJECT_TYPES } from '@rede-social/contracts/moderation';
 import { sqlClient } from '@rede-social/core/db';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { resolveReport } from '@rede-social/core/server/safety/index';
@@ -616,5 +617,391 @@ describe("member blocks and the blocker's reads (NATIVE-33)", () => {
     expect(JSON.parse(authorsList).items).toEqual([]);
     expect(await countNotifications()).toBe(before);
     expect((await del(`/v1/blocks/${ids.author}`, tokens.third)).status).toBe(200);
+  });
+});
+
+/* ── Task 3: edges, ordering, every resolution, the unreadable subject and the Phase 11 boundary ─────── */
+
+describe('what a report accepts and refuses (NATIVE-31 edges)', () => {
+  let target = '';
+  let restoreSocial: () => Promise<void> = async () => undefined;
+
+  beforeAll(async () => {
+    restoreSocial = await withSocialEnabled('demo');
+    const postId = await seedPost('bordas');
+    target = (await comment(tokens.author, postId, `${BODY_PREFIX} bordas`)).id;
+  });
+
+  afterAll(async () => {
+    await adminSql`delete from public.member_blocks where tenant_id = ${ids.tenant}::uuid and blocker_user_id = ${ids.third}::uuid`;
+    await adminSql`delete from public.social_follows where tenant_id = ${ids.tenant}::uuid and follower_user_id = ${ids.third}::uuid and followee_user_id = ${ids.author}::uuid`;
+    await restoreSocial();
+  });
+
+  it('a missing or unknown reason, a missing or unknown subject type, a bad id and an unknown key are 400 and write nothing', async () => {
+    const base = { subjectType: 'post_comment', subjectId: target, reason: 'spam' };
+    const bad: Record<string, unknown>[] = [
+      { subjectType: base.subjectType, subjectId: base.subjectId },
+      { ...base, reason: 'nao-existe' },
+      { ...base, reason: '' },
+      { subjectId: base.subjectId, reason: base.reason },
+      { ...base, subjectType: 'story_comment' },
+      { ...base, subjectType: 'community' },
+      { ...base, subjectType: 'direct_message' },
+      { ...base, subjectId: 'not-a-uuid' },
+      { ...base, tenantId: ids.tenant },
+      { ...base, note: 'x'.repeat(501) },
+      { ...base, note: 42 },
+    ];
+    for (const body of bad) {
+      const res = await post('/v1/reports', tokens.third, body);
+      expect(res.status, JSON.stringify(body).slice(0, 80)).toBe(400);
+      expect((await errorOf(res)).code).toBe('VALIDATION_FAILED');
+    }
+    const [rows] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.content_reports where subject_id = ${target}::uuid`;
+    expect(rows?.n).toBe(0);
+  });
+
+  it('the note is trimmed, whitespace is null, 500 characters are stored whole and 501 are refused', async () => {
+    const trimmed = await report(tokens.third, 'post_comment', target, 'other', '  motivo  ');
+    expect(trimmed.status).toBe(201);
+    const { id: firstId } = (await trimmed.json()) as { id: string };
+    expect((await reportRow(firstId))?.note).toBe('motivo');
+    await adminSql`delete from public.content_reports where id = ${firstId}::uuid`;
+
+    const emptyNote = await report(tokens.third, 'post_comment', target, 'other', '');
+    expect(emptyNote.status).toBe(201);
+    const { id: secondId } = (await emptyNote.json()) as { id: string };
+    expect((await reportRow(secondId))?.note).toBeNull();
+    await adminSql`delete from public.content_reports where id = ${secondId}::uuid`;
+
+    // 500 two-byte characters are 1000 bytes: the cap counts characters (the table CHECK does the same).
+    const whole = 'é'.repeat(500);
+    const full = await report(tokens.third, 'post_comment', target, 'other', whole);
+    expect(full.status).toBe(201);
+    const { id: thirdId } = (await full.json()) as { id: string };
+    expect((await reportRow(thirdId))?.note).toBe(whole);
+    await adminSql`delete from public.content_reports where id = ${thirdId}::uuid`;
+  });
+
+  it('the refusals are stable: own content 403, a duplicate 409, an unknown, removed or foreign subject 404 with one body', async () => {
+    const own = await report(tokens.author, 'post_comment', target);
+    expect(own.status).toBe(403);
+    expect((await errorOf(own)).code).toBe('CANNOT_REPORT_OWN');
+
+    const first = await report(tokens.third, 'post_comment', target);
+    expect(first.status).toBe(201);
+    const duplicate = await report(tokens.third, 'post_comment', target, 'harassment');
+    expect(duplicate.status).toBe(409);
+    expect((await errorOf(duplicate)).code).toBe('ALREADY_REPORTED');
+    // A second reporter of the same comment is a different row (the positive control for the unique key).
+    const other = await report(tokens.reporter, 'post_comment', target);
+    expect(other.status).toBe(201);
+
+    const removedPost = await seedPost('removido');
+    const removedComment = await comment(tokens.author, removedPost, `${BODY_PREFIX} removido`);
+    const gone = await request(`/v1/feed/comments/${removedComment.id}`, tokens.author, {
+      method: 'DELETE',
+    });
+    expect(gone.status).toBe(200);
+
+    const bodies: string[] = [];
+    for (const [type, id, token, host] of [
+      ['post_comment', crypto.randomUUID(), tokens.third, HOSTS.demo],
+      ['feed_post', crypto.randomUUID(), tokens.third, HOSTS.demo],
+      ['post_comment', removedComment.id, tokens.third, HOSTS.demo],
+      // The demo's live comment, asked by a member of the lab: the other tenant's id is inert.
+      ['post_comment', target, await signInAs('member@rede-lab.local', SEED_PASSWORD), HOSTS.lab],
+      // A comment id presented as a post: the type picks the table.
+      ['feed_post', target, tokens.third, HOSTS.demo],
+    ] as const) {
+      const res = await request(
+        '/v1/reports',
+        token,
+        {
+          method: 'POST',
+          body: JSON.stringify({ subjectType: type, subjectId: id, reason: 'spam' }),
+        },
+        host,
+      );
+      expect(res.status, `${type} ${id}`).toBe(404);
+      bodies.push(await sansRequestId(res));
+    }
+    expect(new Set(bodies).size).toBe(1);
+  });
+
+  it('a followers-only post the reporter cannot read is the same 404 as a missing one; a follower reports it', async () => {
+    const rows = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, caption, author_user_id, visibility)
+      values (${ids.tenant}::uuid, ${`${CAPTION_PREFIX} so-seguidores`}, ${ids.author}::uuid, 'followers')
+      returning id`;
+    const memberPost = rows[0]?.id ?? '';
+    createdPosts.push(memberPost);
+    await adminSql`
+      insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+      values (${ids.tenant}::uuid, ${ids.third}::uuid, ${ids.author}::uuid)
+      on conflict do nothing`;
+
+    const stranger = await report(tokens.reporter, 'feed_post', memberPost);
+    expect(stranger.status).toBe(404);
+    const unknown = await report(tokens.reporter, 'feed_post', crypto.randomUUID());
+    expect(await sansRequestId(stranger)).toBe(await sansRequestId(unknown));
+    // Nothing was written for the stranger, and the follower (who can read it) files the report.
+    const [none] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.content_reports where subject_id = ${memberPost}::uuid`;
+    expect(none?.n).toBe(0);
+    const follower = await report(tokens.third, 'feed_post', memberPost);
+    expect(follower.status).toBe(201);
+  });
+
+  it('Phase 11 boundary: the subject types stay the two of this phase', () => {
+    expect([...REPORT_SUBJECT_TYPES]).toEqual(['feed_post', 'post_comment']);
+  });
+});
+
+describe('the admin queue: ordering, paging and the empty answers (NATIVE-31 edges)', () => {
+  it('five reports created in one statement come back in descending id order, a page boundary inside the tie neither repeats nor skips, and nextCursor is exact', async () => {
+    const postIds: string[] = [];
+    for (let i = 0; i < 5; i += 1) postIds.push(await seedPost(`empate-${i}`));
+    await adminSql`
+      insert into public.content_reports
+        (tenant_id, reporter_user_id, subject_type, subject_id, author_user_id, reason, excerpt)
+      select ${ids.tenant}::uuid, ${ids.reporter}::uuid, 'feed_post', t.id, ${ids.admin}::uuid, 'spam', ''
+        from unnest(${postIds}::uuid[]) as t(id)`;
+    const tie = await adminSql<{ id: string; created_at: string }[]>`
+      select id::text, created_at::text from public.content_reports
+       where subject_id = any(${postIds}::uuid[])`;
+    expect(tie).toHaveLength(5);
+    expect(new Set(tie.map((row) => row.created_at)).size).toBe(1);
+    const tieIdsDescending = tie
+      .map((row) => row.id)
+      .sort()
+      .reverse();
+
+    const full = await listAdmin(tokens.admin, '?estado=todas&limit=50');
+    const fullIds = full.items.map((row) => row.id);
+    expect(full.nextCursor).toBeNull();
+    expect(fullIds.length).toBeLessThanOrEqual(50);
+    // The tie sits together, in descending id order.
+    const positions = tieIdsDescending.map((id) => fullIds.indexOf(id));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect((positions[4] ?? -1) - (positions[0] ?? 0)).toBe(4);
+
+    // Page by two (the boundary falls inside the tie), following the opaque cursor.
+    const walked: string[] = [];
+    let cursor: string | null = null;
+    for (let pages = 0; pages < 100; pages += 1) {
+      const query: string = `?estado=todas&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const page: AdminReportPage = await listAdmin(tokens.admin, query);
+      expect(page.items.length).toBeLessThanOrEqual(2);
+      walked.push(...page.items.map((row) => row.id));
+      cursor = page.nextCursor;
+      if (cursor === null) break;
+    }
+    expect(walked).toEqual(fullIds);
+    expect(new Set(walked).size).toBe(walked.length);
+
+    // nextCursor is non-null exactly when another row exists.
+    const exact = await listAdmin(tokens.admin, `?estado=todas&limit=${fullIds.length}`);
+    expect(exact.nextCursor).toBeNull();
+    if (fullIds.length > 1) {
+      const short = await listAdmin(tokens.admin, `?estado=todas&limit=${fullIds.length - 1}`);
+      expect(short.nextCursor).not.toBeNull();
+    }
+    // A tampered cursor degrades to page 1.
+    const tampered = await listAdmin(tokens.admin, '?estado=todas&limit=2&cursor=not-a-cursor');
+    expect(tampered.items.map((row) => row.id)).toEqual(fullIds.slice(0, 2));
+  });
+
+  it('the filters split the queue and an unknown estado or query key is 400', async () => {
+    const open = await listAdmin(tokens.admin, '?estado=abertas&limit=50');
+    const closed = await listAdmin(tokens.admin, '?estado=resolvidas&limit=50');
+    const all = await listAdmin(tokens.admin, '?estado=todas&limit=50');
+    expect(open.items.every((row) => row.status === 'open')).toBe(true);
+    expect(closed.items.every((row) => row.status !== 'open')).toBe(true);
+    expect(open.items.length + closed.items.length).toBe(all.items.length);
+    // `abertas` is the default.
+    expect((await listAdmin(tokens.admin, '?limit=50')).items.map((row) => row.id)).toEqual(
+      open.items.map((row) => row.id),
+    );
+    for (const query of ['?estado=pendentes', '?foo=1']) {
+      const res = await request(`/v1/admin/reports${query}`, tokens.admin);
+      expect(res.status, query).toBe(400);
+      expect((await errorOf(res)).code).toBe('VALIDATION_FAILED');
+    }
+  });
+
+  it('a tenant with no reports answers an empty page for every filter', async () => {
+    for (const estado of ['abertas', 'resolvidas', 'todas']) {
+      const res = await request(
+        `/v1/admin/reports?estado=${estado}`,
+        tokens.labAdmin,
+        {},
+        HOSTS.lab,
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ items: [], nextCursor: null });
+    }
+  });
+});
+
+describe('every resolution through the existing paths (NATIVE-31, T-13-33)', () => {
+  const fileReport = async (token: string, subject: 'feed_post' | 'post_comment', id: string) => {
+    const res = await report(token, subject, id);
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  };
+  const resolve = (reportId: string, body: unknown) =>
+    post(`/v1/admin/reports/${reportId}/resolve`, tokens.admin, body);
+
+  it('dismiss closes the report and removes nothing, logs nothing', async () => {
+    const postId = await seedPost('ignorar');
+    const target = await comment(tokens.author, postId, `${BODY_PREFIX} ignorar`);
+    const reportId = await fileReport(tokens.reporter, 'post_comment', target.id);
+
+    const res = await resolve(reportId, { resolution: 'dismiss', reason: 'ignorado' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: reportId, status: 'dismissed' });
+    expect((await reportRow(reportId))?.status).toBe('dismissed');
+    const [live] = await adminSql<{ live: boolean }[]>`
+      select deleted_at is null as live from public.feed_comments where id = ${target.id}::uuid`;
+    expect(live?.live).toBe(true);
+    expect(await logRowsFor(target.id)).toHaveLength(0);
+    const again = await resolve(reportId, { resolution: 'dismiss' });
+    expect(again.status).toBe(409);
+    expect((await errorOf(again)).code).toBe('REPORT_ALREADY_RESOLVED');
+  });
+
+  it('remove_content on a post removes it through the post removal path with its log row; one already removed by its author logs nothing more', async () => {
+    // The member post path (followers) is the one a moderator may take down; staff posts are refused below.
+    const rows = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, caption, author_user_id, visibility)
+      values (${ids.tenant}::uuid, ${`${CAPTION_PREFIX} remover-post`}, ${ids.author}::uuid, 'followers')
+      returning id`;
+    const memberPost = rows[0]?.id ?? '';
+    createdPosts.push(memberPost);
+    // `social` is off for the demo outside the blocks suites, so the post is read by the admin through the
+    // SQL path only; the report is filed directly, as a member who could read it would.
+    const filed = await adminSql<{ id: string }[]>`
+      insert into public.content_reports
+        (tenant_id, reporter_user_id, subject_type, subject_id, author_user_id, reason, excerpt)
+      values (${ids.tenant}::uuid, ${ids.reporter}::uuid, 'feed_post', ${memberPost}::uuid, ${ids.author}::uuid, 'spam', 'x')
+      returning id`;
+    const reportId = filed[0]?.id ?? '';
+    const restore = await withSocialEnabled('demo');
+    try {
+      const res = await resolve(reportId, { resolution: 'remove_content' });
+      expect(res.status).toBe(200);
+      expect(await logRowsFor(memberPost)).toEqual([
+        { action: 'post_removed', actor_user_id: ids.admin, target_user_id: ids.author },
+      ]);
+      const [gone] = await adminSql<{ removed: boolean }[]>`
+        select deleted_at is not null as removed from public.feed_posts where id = ${memberPost}::uuid`;
+      expect(gone?.removed).toBe(true);
+    } finally {
+      await restore();
+    }
+
+    // Removed by the author before the admin acts: content_removed, no second log row.
+    const postId = await seedPost('ja-removido');
+    const target = await comment(tokens.author, postId, `${BODY_PREFIX} ja removido`);
+    const second = await fileReport(tokens.reporter, 'post_comment', target.id);
+    expect(
+      (await request(`/v1/feed/comments/${target.id}`, tokens.author, { method: 'DELETE' })).status,
+    ).toBe(200);
+    const done = await resolve(second, { resolution: 'remove_content' });
+    expect(done.status).toBe(200);
+    expect(await done.json()).toEqual({ id: second, status: 'content_removed' });
+    expect(await logRowsFor(target.id)).toHaveLength(0);
+  });
+
+  it('content the moderation path may not take, and an author who is not a member, refuse the resolution and leave the report open', async () => {
+    const staffPost = await seedPost('equipe', ids.support);
+    const reportId = await fileReport(tokens.reporter, 'feed_post', staffPost);
+
+    const remove = await resolve(reportId, { resolution: 'remove_content' });
+    expect(remove.status).toBe(409);
+    expect(await errorOf(remove)).toMatchObject({
+      code: 'CONFLICT',
+      details: { report: 'not_removable' },
+    });
+    const block = await resolve(reportId, { resolution: 'block_author' });
+    expect(block.status).toBe(409);
+    expect(await errorOf(block)).toMatchObject({
+      code: 'CONFLICT',
+      details: { report: 'author_not_member' },
+    });
+    expect((await reportRow(reportId))?.status).toBe('open');
+    const [stillLive] = await adminSql<{ live: boolean }[]>`
+      select deleted_at is null as live from public.feed_posts where id = ${staffPost}::uuid`;
+    expect(stillLive?.live).toBe(true);
+    const unblockedStaff = await adminSql<{ status: string }[]>`
+      select status from public.memberships where tenant_id = ${ids.tenant}::uuid and user_id = ${ids.support}::uuid`;
+    expect(unblockedStaff[0]?.status).toBe('active');
+    // The report can still be dismissed (the way out).
+    expect((await resolve(reportId, { resolution: 'dismiss' })).status).toBe(200);
+  });
+
+  it('block_author blocks the member through the admin block with its log row and the optional reason, cuts the session, and the content stays', async () => {
+    const postId = await seedPost('bloquear-autor');
+    const target = await comment(tokens.author, postId, `${BODY_PREFIX} bloquear autor`);
+    const reportId = await fileReport(tokens.reporter, 'post_comment', target.id);
+
+    const res = await resolve(reportId, { resolution: 'block_author', reason: '  reincidente  ' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: reportId, status: 'author_blocked' });
+    expect((await reportRow(reportId))?.status).toBe('author_blocked');
+
+    const [member] = await adminSql<{ status: string; blocked: boolean }[]>`
+      select status, blocked_at is not null as blocked from public.memberships
+       where id = ${memberships.author}::uuid`;
+    expect(member).toEqual({ status: 'blocked', blocked: true });
+    const logged = await adminSql<
+      { action: string; reason: string | null; target_user_id: string }[]
+    >`
+      select action, reason, target_user_id::text from public.moderation_log
+       where target_membership_id = ${memberships.author}::uuid and action = 'member_blocked'
+       order by created_at desc limit 1`;
+    expect(logged[0]).toEqual({
+      action: 'member_blocked',
+      reason: 'reincidente',
+      target_user_id: ids.author,
+    });
+    // The session is cut by the live predicate, and the comment itself is untouched (D-330).
+    const cut = await request('/v1/me/profile', tokens.author);
+    expect(cut.status).toBe(403);
+    expect((await errorOf(cut)).code).toBe('MEMBERSHIP_BLOCKED');
+    const [live] = await adminSql<{ live: boolean }[]>`
+      select deleted_at is null as live from public.feed_comments where id = ${target.id}::uuid`;
+    expect(live?.live).toBe(true);
+
+    // Restore the seeded member through the shipped unblock, so no other suite sees a blocked member.
+    const unblock = await post(`/v1/admin/members/${memberships.author}/unblock`, tokens.admin, {});
+    expect(unblock.status).toBe(200);
+    expect((await request('/v1/me/profile', tokens.author)).status).toBe(200);
+    const again = await resolve(reportId, { resolution: 'block_author' });
+    expect(again.status).toBe(409);
+    expect((await errorOf(again)).code).toBe('REPORT_ALREADY_RESOLVED');
+  });
+
+  it('an unknown resolution and an unknown key are 400; a report that does not exist is 404', async () => {
+    const postId = await seedPost('invalida');
+    const target = await comment(tokens.author, postId, `${BODY_PREFIX} invalida`);
+    const reportId = await fileReport(tokens.reporter, 'post_comment', target.id);
+    for (const body of [
+      { resolution: 'open' },
+      { resolution: 'content_removed' },
+      {},
+      { resolution: 'dismiss', extra: true },
+      { resolution: 'dismiss', reason: 'x'.repeat(501) },
+    ]) {
+      const res = await resolve(reportId, body);
+      expect(res.status, JSON.stringify(body).slice(0, 60)).toBe(400);
+    }
+    expect((await reportRow(reportId))?.status).toBe('open');
+    const missing = await resolve(crypto.randomUUID(), { resolution: 'dismiss' });
+    expect(missing.status).toBe(404);
   });
 });

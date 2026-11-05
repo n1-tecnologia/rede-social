@@ -11134,6 +11134,61 @@ describe('shared identity (08.1)', () => {
       );
       expect(resolved.status).toBe(200);
       expect(await reportState()).toEqual([{ id: reportId, status: 'dismissed' }]);
+
+      // Blocks (NATIVE-33): a block is the caller's own row in the caller's own tenant. The demo member is the
+      // target; a lab member naming the same id is the same CANNOT_BLOCK an unknown id gets, lifts nothing, and
+      // lists nothing; a session on the other host is refused on every block route.
+      const [targetRow] = await adminSql<{ id: string }[]>`
+        select id::text from public.users where email = 'member@rede-demo.local'`;
+      const targetUser = targetRow?.id ?? '';
+      const blockRows = async () =>
+        adminSql<{ blocker: string }[]>`
+          select blocker_user_id::text as blocker from public.member_blocks
+           where blocked_user_id = ${targetUser}::uuid`;
+      const refusedOwn = await send('POST', '/v1/blocks', tokens.labMember, HOSTS.lab, {
+        userId: targetUser,
+      });
+      expect(refusedOwn.status).toBe(400);
+      const refusedUnknown = await send('POST', '/v1/blocks', tokens.labMember, HOSTS.lab, {
+        userId: crypto.randomUUID(),
+      });
+      expect(sansRequestId(await refusedOwn.text())).toBe(
+        sansRequestId(await refusedUnknown.text()),
+      );
+      await expectHostRefused(
+        await send('POST', '/v1/blocks', reporterToken, HOSTS.lab, { userId: targetUser }),
+        'POST /v1/blocks on the lab host',
+      );
+      await expectHostRefused(
+        await send('GET', '/v1/blocks', reporterToken, HOSTS.lab),
+        'GET /v1/blocks on the lab host',
+      );
+      await expectHostRefused(
+        await send('DELETE', `/v1/blocks/${targetUser}`, reporterToken, HOSTS.lab),
+        'DELETE /v1/blocks/:userId on the lab host',
+      );
+      expect(await blockRows()).toEqual([]);
+
+      // Positive control: the demo throwaway blocks the demo member; the lab sees and lifts nothing of it.
+      const blocked = await send('POST', '/v1/blocks', reporterToken, HOSTS.demo, {
+        userId: targetUser,
+      });
+      expect(blocked.status).toBe(200);
+      expect(await blockRows()).toHaveLength(1);
+      const labBlocks = await send('GET', '/v1/blocks', tokens.labMember, HOSTS.lab);
+      expect(((await labBlocks.json()) as { items: unknown[] }).items).toEqual([]);
+      const labLift = await send('DELETE', `/v1/blocks/${targetUser}`, tokens.labMember, HOSTS.lab);
+      expect(await labLift.json()).toEqual({ changed: false });
+      expect(await blockRows()).toHaveLength(1);
+      const demoBlocks = await send('GET', '/v1/blocks', reporterToken, HOSTS.demo);
+      expect(
+        ((await demoBlocks.json()) as { items: { userId: string }[] }).items.map(
+          (row) => row.userId,
+        ),
+      ).toEqual([targetUser]);
+      const lifted = await send('DELETE', `/v1/blocks/${targetUser}`, reporterToken, HOSTS.demo);
+      expect(await lifted.json()).toEqual({ changed: true });
+      expect(await blockRows()).toEqual([]);
     } finally {
       await adminSql`delete from public.content_reports where subject_id in (
         select id from public.feed_comments where post_id = ${postId}::uuid)`;
