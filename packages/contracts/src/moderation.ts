@@ -27,6 +27,14 @@ import { TENANT_ROLES } from './modules';
  * Phase 12 (D-595) appends the third value, `profile_form_exported`: a TENANT-LEVEL row. The exporting
  * admin is BOTH the actor and the target (the table's membership columns are NOT NULL), and the row
  * carries no subject, no excerpt, no reason and no details; it names no answer, e-mail or member.
+ *
+ * Phase 13 (D-616) adds the MINIMUM report and member-block slice the store policies require (Apple
+ * 1.2, Google UGC): the report vocabularies below are the CHECK lists of `content_reports`, fixed with
+ * the table the way the moderation log's were. Phase 11 appends `story_comment`, `community` and
+ * `direct_message` to `REPORT_SUBJECT_TYPES` the way 09-07 appended `post_removed` to the actions;
+ * values are appended, never inserted. Phase 13 covers MODER-05 (posts and comments, the admin queue
+ * and its dismiss / remove / block-author actions) and CHAT-07 (the member block, unblock and the
+ * blocker's content filter) only in part; the rest stays in Phase 11.
  */
 
 /** Every `moderation_log.action` value — the `moderation_log_action_chk` list, verbatim. */
@@ -56,6 +64,40 @@ export const MODERATION_EXCERPT_MAX = 280;
 
 /** The optional internal reason of a block or unblock (D-331, UI-D-274): 1..500 characters. */
 export const MODERATION_REASON_MAX = 500;
+
+/**
+ * Phase 13 (D-616): what a member can report. A post (`feed_post`) or a comment on a post
+ * (`post_comment`); the `content_reports_subject_type_chk` list, verbatim. Phase 11 appends.
+ */
+export const REPORT_SUBJECT_TYPES = ['feed_post', 'post_comment'] as const;
+export type ReportSubjectType = (typeof REPORT_SUBJECT_TYPES)[number];
+
+/** Why a member reports (AD-5); the `content_reports_reason_chk` list, verbatim. */
+export const REPORT_REASONS = [
+  'offensive',
+  'harassment',
+  'spam',
+  'sexual_violent',
+  'other',
+] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+/**
+ * Where a report stands; the `content_reports_status_chk` list, verbatim. `open` is the only state a
+ * report is filed in; the other three are the admin's three resolutions (`app.content_report_resolve`).
+ */
+export const REPORT_STATUSES = ['open', 'dismissed', 'content_removed', 'author_blocked'] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
+
+/** The three resolutions an admin can give an open report (`REPORT_STATUSES` without `open`). */
+export const REPORT_RESOLUTIONS = ['dismissed', 'content_removed', 'author_blocked'] as const;
+export type ReportResolution = (typeof REPORT_RESOLUTIONS)[number];
+
+/** The optional note of a report: at most 500 characters (`content_reports_note_len_chk`). */
+export const REPORT_NOTE_MAX = 500;
+
+/** The snapshot of the reported text: at most 280 code points (`content_reports_excerpt_len_chk`). */
+export const REPORT_EXCERPT_MAX = 280;
 
 /**
  * The kernel's permission names (D-338). They are VALUES the web compares with
