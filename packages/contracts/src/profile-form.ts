@@ -76,6 +76,13 @@ export const PROFILE_FORM_LIMITS = {
 } as const;
 
 /**
+ * The title of the step a tenant's form gets when it has none (D-627): the trigger of
+ * `20261105195400_profile_form_steps_backfill.sql` and `ensureDefaultStep` of the kernel write the SAME
+ * literal. Confirmed by Igor in Phase 12.1 plan 06; 17 characters, well under `stepTitle`.
+ */
+export const PROFILE_FORM_DEFAULT_STEP_TITLE = 'Informações gerais';
+
+/**
  * The closed refusal vocabulary. The web maps each code to a pt-BR string; nothing else travels.
  * Field level codes answer a member's value; admin level codes answer a builder write.
  */
@@ -771,7 +778,7 @@ export const createStepBodySchema = z
   .strict();
 export type CreateStepBody = z.infer<typeof createStepBodySchema>;
 
-/** `PUT /steps/{id}`: rename a step; `revision` is the optimistic lock. */
+/** `PATCH /steps/{id}`: rename a step; `revision` is the optimistic lock. */
 export const updateStepBodySchema = z
   .object({
     revision: z.number({ error: 'invalid' }).int('invalid').min(1, 'invalid'),
@@ -779,6 +786,10 @@ export const updateStepBodySchema = z
   })
   .strict();
 export type UpdateStepBody = z.infer<typeof updateStepBodySchema>;
+
+/** `DELETE /steps/{id}`: the step is gone (its archived questions now sit in a surviving step). */
+export const deleteStepResultSchema = z.object({ deleted: z.literal(true) });
+export type DeleteStepResult = z.infer<typeof deleteStepResultSchema>;
 
 /**
  * `PUT /layout`: the whole form at once, steps in order and each step's questions in order. At most
@@ -893,6 +904,8 @@ export type ProfileFormBootstrap = z.infer<typeof profileFormBootstrapSchema>;
 
 const adminCore = {
   ...questionCore,
+  /** The step the question sits in (D-627); every question has exactly one. */
+  stepId: z.uuid(),
   options: z.array(optionSchema.extend({ answerCount: z.number().int().min(0) })),
   position: z.number().int(),
   revision: z.number().int().min(1),
@@ -915,6 +928,10 @@ export const adminQuestionListSchema = z.object({
   questions: z.array(adminQuestionSchema),
   activeCount: z.number().int().min(0),
   limit: z.number().int().min(1),
+  /** The tenant's steps in `position, created_at, id` order; none for a form never built (D-627). */
+  steps: z.array(adminStepSchema),
+  /** The most steps a tenant may have (`PROFILE_FORM_LIMITS.steps`, D-633). */
+  stepLimit: z.number().int().min(1),
 });
 export type AdminQuestionList = z.infer<typeof adminQuestionListSchema>;
 

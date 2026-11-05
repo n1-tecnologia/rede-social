@@ -97,6 +97,9 @@ const list = (questions: ReturnType<typeof adminQuestion>[], limit = 30) => ({
   questions,
   activeCount: questions.length,
   limit,
+  // 12.1-08: the list now carries the tenant's steps; these tests build none.
+  steps: [],
+  stepLimit: 10,
 });
 
 async function html(aba?: string): Promise<string> {

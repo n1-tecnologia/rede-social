@@ -240,7 +240,14 @@ describe('12-08 tracer: an admin creates a question through the guard chain, lis
   it('the list is in the admin order and a tenant with no question answers an empty list', async () => {
     const admin = await person('admin_tenant');
     await withProfileForm(labTenantId, async () => {
-      expect(await listOf(admin)).toEqual({ questions: [], activeCount: 0, limit: 30 });
+      // 12.1-08: the list also carries the tenant's steps (none yet: a read never creates the default one).
+      expect(await listOf(admin)).toEqual({
+        questions: [],
+        activeCount: 0,
+        limit: 30,
+        steps: [],
+        stepLimit: 10,
+      });
       const second = await question({ position: 2, title: `${TITLE}B` });
       const first = await question({ position: 1, title: `${TITLE}A` });
       const archived = await question({ position: 0, title: `${TITLE}Z`, archived: true });

@@ -17,13 +17,17 @@ import {
   updateQuestion,
 } from '@rede-social/core/server/profile-form/admin';
 import { exportAnswers } from '@rede-social/core/server/profile-form/export';
+import { createStep, deleteStep, renameStep } from '@rede-social/core/server/profile-form/steps';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   adminQuestionListSchema,
   adminQuestionSchema,
+  adminStepSchema,
   archivedQuestionListSchema,
   archivedQuestionSchema,
   createQuestionBodySchema,
+  createStepBodySchema,
+  deleteStepResultSchema,
   impactQuerySchema,
   impactResultSchema,
   PROFILE_FORM_ISSUE_SET,
@@ -31,6 +35,7 @@ import {
   reorderBodySchema,
   replaceQuestionBodySchema,
   updateQuestionBodySchema,
+  updateStepBodySchema,
 } from '../contracts/index';
 
 /**
@@ -85,7 +90,7 @@ const listRoute = createRoute({
   responses: {
     200: {
       description:
-        'The ACTIVE questions in the order members see them (`position`), each with `answerCount` and, for every option, its own `answerCount`, plus `activeCount` and `limit` (30). Aggregates only: no individual answer is ever part of the answer. A tenant with no question answers `{ questions: [], activeCount: 0, limit: 30 }`.',
+        'The ACTIVE questions in the order members see them (`position`), each with its `stepId`, `answerCount` and, for every option, its own `answerCount`, plus `activeCount` and `limit` (30), and the tenant’s `steps` (`id`, `title`, `position`, `revision`, `questionCount` of ACTIVE questions; `position, created_at, id` order) with `stepLimit` (10). Aggregates only: no individual answer is ever part of the answer. A tenant with no question and no step answers `{ questions: [], activeCount: 0, limit: 30, steps: [], stepLimit: 10 }`; a read never creates the default step.',
       content: { 'application/json': { schema: adminQuestionListSchema } },
     },
     403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
@@ -169,6 +174,87 @@ const reorderRoute = createRoute({
     409: {
       description:
         '`CONFLICT` with `details.profileForm: order_mismatch`: the ids are not exactly the set of active questions of this tenant (one missing, an extra one, a repeat, an archived one, another tenant’s, or an empty list). Nothing changes, and the body never says which.',
+    },
+  },
+});
+
+const stepParamSchema = z.object({ id: z.uuid() });
+
+const createStepRoute = createRoute({
+  method: 'post',
+  path: '/steps',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: createStepBodySchema } }, required: true },
+  },
+  responses: {
+    201: {
+      description:
+        'Creates an empty step at the END: `position` is the step count plus one, `revision` is 1. The title is trimmed and measured in code points (1 to 60). A tenant has at most 10 steps.',
+      content: { 'application/json': { schema: adminStepSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.profileForm`: `required` (an empty or whitespace-only title), `too_long` (more than 60 characters) or `invalid`. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm: limit_reached`: the tenant already has 10 steps. Nothing is written.',
+    },
+  },
+});
+
+const renameStepRoute = createRoute({
+  method: 'patch',
+  path: '/steps/{id}',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: {
+    params: stepParamSchema,
+    body: { content: { 'application/json': { schema: updateStepBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The renamed step. `revision` (the one the caller read) is the optimistic lock and is bumped by one on success.',
+      content: { 'application/json': { schema: adminStepSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.profileForm`: `required`, `too_long` or `invalid`. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the step is unknown or another tenant’s. One bare `NOT_FOUND`, no details.',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm: stale_revision`: the stored revision moved on. Nothing is written.',
+    },
+  },
+});
+
+const deleteStepRoute = createRoute({
+  method: 'delete',
+  path: '/steps/{id}',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: { params: stepParamSchema },
+  responses: {
+    200: {
+      description:
+        'Deletes a step that holds no ACTIVE question. Its ARCHIVED questions (and their answers) move to the first remaining step in the same transaction and the remaining steps are renumbered 1..n. No question and no answer is deleted.',
+      content: { 'application/json': { schema: deleteStepResultSchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the step is unknown, already deleted or another tenant’s.',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm`: `step_not_empty` (an ACTIVE question is inside) or `last_step` (the tenant’s only step). Nothing changes.',
     },
   },
 });
@@ -347,6 +433,15 @@ export const profileFormRoutes = profileForm
   )
   .openapi(reorderRoute, async (c) =>
     c.json(await reorderQuestions(c.get('ctx'), c.req.valid('json').ids), 200),
+  )
+  .openapi(createStepRoute, async (c) =>
+    c.json(await createStep(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(renameStepRoute, async (c) =>
+    c.json(await renameStep(c.get('ctx'), c.req.valid('param').id, c.req.valid('json')), 200),
+  )
+  .openapi(deleteStepRoute, async (c) =>
+    c.json(await deleteStep(c.get('ctx'), c.req.valid('param').id), 200),
   )
   .openapi(archivedListRoute, async (c) => c.json(await listArchived(c.get('ctx')), 200))
   .openapi(archiveRoute, async (c) =>

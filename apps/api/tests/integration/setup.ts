@@ -756,6 +756,12 @@ export async function seedProfileFormQuestion(input: {
   allowOther?: boolean;
   showOnProfile?: boolean;
   listedAt?: Date;
+  /**
+   * 12.1-08: the step the question sits in. When absent the BEFORE INSERT trigger of the questions table
+   * assigns the tenant's first step (creating the default one), which is also what keeps the Phase 12 tests
+   * working unchanged.
+   */
+  stepId?: string;
 }): Promise<string> {
   const type = input.type ?? 'short_text';
   const isChoice = ['dropdown', 'multiple_choice', 'single_choice'].includes(type);
@@ -765,15 +771,37 @@ export async function seedProfileFormQuestion(input: {
   const archivedAt = input.archivedAt ?? (input.archived ? new Date() : null);
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.profile_form_questions
-      (tenant_id, type, title, required, position, options, limits, allow_other, show_on_profile,
-       archived_at, listed_at, created_by_user_id)
-    values (${input.tenantId}::uuid, ${type}, ${input.title}, ${input.required ?? false},
+      (tenant_id, step_id, type, title, required, position, options, limits, allow_other,
+       show_on_profile, archived_at, listed_at, created_by_user_id)
+    values (${input.tenantId}::uuid, ${input.stepId ?? null}::uuid, ${type}, ${input.title},
+            ${input.required ?? false},
             ${input.position ?? 0}, ${adminSql.json(options as never)},
             ${adminSql.json((input.limits ?? {}) as never)}, ${input.allowOther ?? false},
             ${input.showOnProfile ?? false}, ${archivedAt},
             ${input.listedAt ?? adminSql`now()`}, ${input.adminUserId}::uuid)
     returning id::text as id`;
   if (!row) throw new Error('seedProfileFormQuestion: no row returned');
+  return row.id;
+}
+
+/**
+ * 12.1-08: one profile-form step through the admin SQL (the migration role, RLS off). `position` defaults to
+ * the tenant's step count plus one. Returns the new id. Tear down with `removeProfileFormByPrefix` (the title
+ * should start with the file's prefix).
+ */
+export async function seedProfileFormStep(input: {
+  tenantId: string;
+  title: string;
+  position?: number;
+}): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.profile_form_steps (tenant_id, title, position)
+    values (${input.tenantId}::uuid, ${input.title},
+            coalesce(${input.position ?? null}::int,
+                     (select count(*)::int + 1 from public.profile_form_steps
+                       where tenant_id = ${input.tenantId}::uuid)))
+    returning id::text as id`;
+  if (!row) throw new Error('seedProfileFormStep: no row returned');
   return row.id;
 }
 
@@ -796,13 +824,24 @@ export async function seedProfileFormAnswer(input: {
   return row.id;
 }
 
-/** 12-05: deletes the answers, then the questions, whose question title starts with `prefix` (idempotent). */
+/**
+ * 12-05: deletes the answers, then the questions, whose question title starts with `prefix` (idempotent).
+ * 12.1-08: then the steps this left empty whose title starts with `prefix` OR is the default step title the
+ * database trigger writes when a legacy-shaped insert names no step (`Informações gerais`). The step foreign
+ * key is NO ACTION, so a step that still holds a question (not ours) is never touched. The default title is
+ * matched with a plain literal here, not imported, so a drift of the contract constant fails a test.
+ */
 export async function removeProfileFormByPrefix(prefix: string): Promise<void> {
   await adminSql`
     delete from public.profile_form_answers
      where question_id in (select id from public.profile_form_questions
                             where title like ${`${prefix}%`})`;
   await adminSql`delete from public.profile_form_questions where title like ${`${prefix}%`}`;
+  await adminSql`
+    delete from public.profile_form_steps s
+     where (s.title like ${`${prefix}%`} or s.title = 'Informações gerais')
+       and not exists (select 1 from public.profile_form_questions q
+                        where q.tenant_id = s.tenant_id and q.step_id = s.id)`;
 }
 
 /**

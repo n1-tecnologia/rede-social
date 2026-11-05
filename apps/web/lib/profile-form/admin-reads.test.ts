@@ -29,6 +29,9 @@ const listOf = (count: number) => ({
   questions: Array.from({ length: count }, () => adminQuestion('short_text')),
   activeCount: count,
   limit: 30,
+  // 12.1-08: the list now carries the tenant's steps; these tests build none.
+  steps: [],
+  stepLimit: 10,
 });
 
 beforeEach(() => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminQuestionListSchema,
   adminQuestionSchema,
   adminStepSchema,
   answerEtag,
@@ -8,6 +9,7 @@ import {
   archivedQuestionSchema,
   createQuestionBodySchema,
   createStepBodySchema,
+  deleteStepResultSchema,
   dependentSchema,
   dismissNoticeResultSchema,
   hasDependentsDetailsSchema,
@@ -22,6 +24,7 @@ import {
   normalizeOptionLabel,
   PROFILE_FORM_CHOICE_TYPES,
   PROFILE_FORM_CONDITION_OPENER_TYPES,
+  PROFILE_FORM_DEFAULT_STEP_TITLE,
   PROFILE_FORM_ISSUE_SET,
   PROFILE_FORM_ISSUES,
   PROFILE_FORM_LIMITS,
@@ -970,8 +973,11 @@ describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
   });
 });
 
+const STEP_ID = '55555555-5555-4555-8555-555555555555';
+
 const adminQuestion = {
   id: A,
+  stepId: STEP_ID,
   type: 'dropdown',
   title: 'Estado',
   helpText: 'Onde mora',
@@ -996,6 +1002,58 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
     const archived = { ...adminQuestion, archivedAt: '2026-10-30T10:00:00.000Z' };
     expect(archivedQuestionSchema.parse(archived)).toEqual(archived);
     expect(archivedQuestionSchema.safeParse(adminQuestion).success).toBe(false);
+  });
+
+  it('12.1-08: every admin and archived question carries a uuid stepId, and the list carries steps and stepLimit', () => {
+    const { stepId: _omitted, ...withoutStep } = adminQuestion;
+    expect(adminQuestionSchema.safeParse(withoutStep).success).toBe(false);
+    expect(adminQuestionSchema.safeParse({ ...adminQuestion, stepId: 'not-a-uuid' }).success).toBe(
+      false,
+    );
+    expect(
+      archivedQuestionSchema.safeParse({
+        ...withoutStep,
+        archivedAt: '2026-10-30T10:00:00.000Z',
+      }).success,
+    ).toBe(false);
+
+    const step = { id: STEP_ID, title: 'Etapa', position: 1, revision: 1, questionCount: 1 };
+    const list = {
+      questions: [adminQuestion],
+      activeCount: 1,
+      limit: 30,
+      steps: [step],
+      stepLimit: PROFILE_FORM_LIMITS.steps,
+    };
+    expect(adminQuestionListSchema.parse(list)).toEqual(list);
+    // The empty form: no question and no step (a read never creates the default step).
+    const empty = { questions: [], activeCount: 0, limit: 30, steps: [], stepLimit: 10 };
+    expect(adminQuestionListSchema.parse(empty)).toEqual(empty);
+    // Both new keys are required, and a step needs its count.
+    expect(
+      adminQuestionListSchema.safeParse({ questions: [], activeCount: 0, limit: 30 }).success,
+    ).toBe(false);
+    expect(adminQuestionListSchema.safeParse({ ...list, stepLimit: 0 }).success).toBe(false);
+    expect(
+      adminQuestionListSchema.safeParse({ ...list, steps: [{ ...step, questionCount: undefined }] })
+        .success,
+    ).toBe(false);
+  });
+
+  it('12.1-08: the default step title is the confirmed literal and fits the step title limit', () => {
+    expect(PROFILE_FORM_DEFAULT_STEP_TITLE).toBe('Informações gerais');
+    expect([...PROFILE_FORM_DEFAULT_STEP_TITLE].length).toBeLessThanOrEqual(
+      PROFILE_FORM_LIMITS.stepTitle,
+    );
+    expect(createStepBodySchema.safeParse({ title: PROFILE_FORM_DEFAULT_STEP_TITLE }).success).toBe(
+      true,
+    );
+  });
+
+  it('12.1-08: deleteStepResultSchema is { deleted: true } and nothing else', () => {
+    expect(deleteStepResultSchema.parse({ deleted: true })).toEqual({ deleted: true });
+    expect(deleteStepResultSchema.safeParse({ deleted: false }).success).toBe(false);
+    expect(deleteStepResultSchema.safeParse({}).success).toBe(false);
   });
 
   it('the summary and the impact shapes round-trip; the impact query names one of four changes', () => {

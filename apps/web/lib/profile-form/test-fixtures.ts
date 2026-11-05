@@ -1,5 +1,7 @@
 import type {
   AdminQuestion,
+  AdminQuestionList,
+  AdminStep,
   ArchivedQuestion,
   MemberForm,
   MemberQuestion,
@@ -57,6 +59,39 @@ export function form(questions: MemberQuestion[], overrides: Partial<MemberForm>
  */
 let adminCounter = 0;
 
+/** The step every `adminQuestion` sits in unless a test names another (12.1-08, D-627). */
+export const ADMIN_STEP_ID = uuid(800);
+
+let adminStepCounter = 0;
+
+/** A step of `GET /v1/profile_form/questions` (12.1-08): its place, revision and active question count. */
+export function adminStep(overrides: Partial<AdminStep> = {}): AdminStep {
+  adminStepCounter += 1;
+  return {
+    id: uuid(799 + adminStepCounter),
+    title: `Etapa ${adminStepCounter}`,
+    position: adminStepCounter,
+    revision: 1,
+    questionCount: 0,
+    ...overrides,
+  };
+}
+
+/** A whole `GET /v1/profile_form/questions` answer (12.1-08) for the tests that build the list at once. */
+export function adminQuestionList(
+  questions: AdminQuestion[],
+  overrides: Partial<AdminQuestionList> = {},
+): AdminQuestionList {
+  return {
+    questions,
+    activeCount: questions.length,
+    limit: 30,
+    steps: [],
+    stepLimit: 10,
+    ...overrides,
+  };
+}
+
 export function adminQuestion(
   type: ProfileFormType,
   overrides: Partial<AdminQuestion> = {},
@@ -64,6 +99,7 @@ export function adminQuestion(
   adminCounter += 1;
   return {
     id: uuid(500 + adminCounter),
+    stepId: ADMIN_STEP_ID,
     type,
     title: `Pergunta do admin ${adminCounter}`,
     helpText: null,

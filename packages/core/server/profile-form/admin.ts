@@ -21,6 +21,9 @@ import type { RequestContext } from '../auth/context';
 import { ApiError } from '../http/api-error';
 import { checkLocks, guardIssueOf, type LockDefinition } from './lock-rules';
 import { liveModuleOn } from './member';
+// A call-time-only cycle with ./steps (which takes `adminLock` and `requireModuleOn` from this file): neither
+// module touches the other at load, only inside a function.
+import { readSteps } from './steps';
 
 /**
  * The builder's write side (Phase 12-08, D-582, D-587, D-596; PFORM-01, PFORM-02, PFORM-17, PFORM-24). Pure
@@ -63,6 +66,7 @@ export async function requireModuleOn(tx: Tx, ctx: Pick<AdminCtx, 'tenantId'>): 
 /** A question as the database stores it. */
 export type StoredQuestion = {
   id: string;
+  step_id: string;
   type: ProfileFormType;
   title: string;
   help_text: string | null;
@@ -138,6 +142,7 @@ export function toAdminQuestion(
   const optionCounts = counts.perOption.get(row.id);
   return {
     id: row.id,
+    stepId: row.step_id,
     type: row.type,
     title: row.title,
     helpText: row.help_text,
@@ -159,7 +164,7 @@ export function toAdminQuestion(
 }
 
 const COLUMNS = sql.raw(`
-  q.id::text as id, q.type, q.title, q.help_text, q.required, q.show_on_profile, q.allow_other,
+  q.id::text as id, q.step_id::text as step_id, q.type, q.title, q.help_text, q.required, q.show_on_profile, q.allow_other,
   q.options, q.limits, q."position" as position, q.revision, q.archived_at, q.created_at, q.listed_at`);
 
 /** The tenant's ACTIVE questions in the admin's order, `position, created_at, id` (the lock order too). */
@@ -207,6 +212,9 @@ export async function listInTx(tx: Tx, tenantId: string): Promise<AdminQuestionL
     questions: rows.map((row) => toAdminQuestion(row, counts)),
     activeCount: rows.length,
     limit: PROFILE_FORM_LIMITS.activeQuestions,
+    // D-627: the steps the tenant has, none for a form never built (a read never creates the default step).
+    steps: await readSteps(tx, tenantId),
+    stepLimit: PROFILE_FORM_LIMITS.steps,
   };
 }
 
@@ -221,8 +229,8 @@ export async function adminQuestionOf(
 
 /**
  * `GET /v1/profile_form/questions`: the active questions in the admin's order with `answerCount` per question
- * and per option, `activeCount` and `limit`. A tenant with no question is `{ questions: [], activeCount: 0,
- * limit: 30 }`.
+ * and per option, `activeCount` and `limit`, and (12.1) the tenant's `steps` with `stepLimit`. A tenant with no
+ * question and no step is `{ questions: [], activeCount: 0, limit: 30, steps: [], stepLimit: 10 }`.
  */
 export async function listQuestions(ctx: AdminCtx): Promise<AdminQuestionList> {
   return withTenantTx(ctx, async (tx) => {
