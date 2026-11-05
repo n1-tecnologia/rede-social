@@ -260,3 +260,113 @@ $$;
 --> statement-breakpoint
 revoke all on function app.content_report_resolve(uuid, text) from public;--> statement-breakpoint
 grant execute on function app.content_report_resolve(uuid, text) to authenticated;
+--> statement-breakpoint
+
+-- ── app.account_anonymise (replaced) ──────────────────────────────────────────────────────────────────
+-- `create or replace` of plan 07's function (`20261105150248_account_deletion_functions.sql`, left untouched): the
+-- body is copied verbatim, every statement and the return value unchanged, plus the two statements marked
+-- "Phase 13, plan 08" below. The grants of plan 07 (connection role and `service_role` only) are kept by the
+-- replace; they are restated so this file states the contract on its own.
+create or replace function app.account_anonymise(p_membership uuid)
+returns boolean
+language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_m public.memberships%rowtype;
+  v_email text;
+begin
+  if p_membership is null then
+    return false;
+  end if;
+
+  select m.* into v_m
+    from public.memberships m
+   where m.id = p_membership
+     for update;
+  if not found then
+    return false;
+  end if;
+
+  if v_m.deletion_requested_at is null
+     or v_m.anonymised_at is not null
+     or v_m.deleted_at is null
+     or v_m.deletion_due_at is null
+     or v_m.deletion_due_at > now() then
+    return false;
+  end if;
+
+  select lower(btrim(u.email)) into v_email
+    from public.users u
+   where u.id = v_m.user_id;
+
+  update public.member_profiles p
+     set display_name = 'Membro removido',
+         bio = null,
+         avatar_asset_id = null,
+         updated_at = now()
+   where p.tenant_id = v_m.tenant_id
+     and p.membership_id = v_m.id;
+
+  update public.media_assets a
+     set status = 'deleted',
+         deleted_at = coalesce(a.deleted_at, now()),
+         filename = null
+   where a.tenant_id = v_m.tenant_id
+     and a.owner_user_id = v_m.user_id
+     and a.purpose = 'avatar';
+
+  delete from public.profile_form_answers a
+   where a.tenant_id = v_m.tenant_id
+     and a.membership_id = v_m.id;
+
+  delete from public.push_subscriptions s
+   where s.tenant_id = v_m.tenant_id
+     and s.user_id = v_m.user_id;
+
+  update public.consent_records c
+     set ip = null,
+         user_agent = null
+   where c.tenant_id = v_m.tenant_id
+     and c.user_id = v_m.user_id;
+
+  update public.tenant_invites i
+     set email = 'removed-' || i.id::text || '@removed.invalid'
+   where i.tenant_id = v_m.tenant_id
+     and (i.user_id = v_m.user_id or (v_email is not null and lower(i.email::text) = v_email));
+
+  if v_email is not null and v_email <> '' then
+    update public.access_grants g
+       set email = 'removed-' || g.id::text || '@removed.invalid',
+           updated_at = now()
+     where g.tenant_id = v_m.tenant_id
+       and g.email = v_email;
+
+    update public.payment_events e
+       set email = null
+     where e.tenant_id = v_m.tenant_id
+       and e.email = v_email;
+  end if;
+
+  -- Phase 13, plan 08 (NATIVE-31, NATIVE-33): the member's blocks go in BOTH directions (a block of them and a
+  -- block by them), and the free text of the reports they filed is nulled. The report itself stays: it is the
+  -- evidence an admin may still need, and it carries ids, a reason and a snapshot of the reported text only.
+  -- Both statements are scoped by the LOCKED row's tenant, so the same person's rows in another tenant stay.
+  delete from public.member_blocks b
+   where b.tenant_id = v_m.tenant_id
+     and (b.blocker_user_id = v_m.user_id or b.blocked_user_id = v_m.user_id);
+
+  update public.content_reports r
+     set note = null
+   where r.tenant_id = v_m.tenant_id
+     and r.reporter_user_id = v_m.user_id
+     and r.note is not null;
+
+  update public.memberships m
+     set anonymised_at = now()
+   where m.id = v_m.id
+     and m.tenant_id = v_m.tenant_id;
+  return true;
+end
+$$;
+--> statement-breakpoint
+revoke all on function app.account_anonymise(uuid) from public, anon, authenticated;--> statement-breakpoint
+grant execute on function app.account_anonymise(uuid) to service_role, api_user;
