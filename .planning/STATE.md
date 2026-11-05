@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: 13
 current_phase_name: App nativo iOS e Android por tenant (white-label)
-current_plan: 10
+current_plan: 11
 status: executing
-stopped_at: Completed 13-08-PLAN.md
-last_updated: "2026-11-05T15:38:48.747Z"
+stopped_at: Completed 13-29-PLAN.md
+last_updated: "2026-11-05T16:10:24.586Z"
 last_activity: 2026-11-05
 last_activity_desc: Phase 13 execution started
-state_head: a08e8bc0366e112751c3bbe50ab9bb31d32d1fd5
+state_head: 320779e0a26508fad1d13822251a7ebef9a8b925
 progress:
   total_phases: 28
   completed_phases: 0
   total_plans: 344
-  completed_plans: 312
+  completed_plans: 313
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
-Current Plan: 10
+Current Plan: 11
 Total Plans in Phase: 32
-Plan: 10 of 32
+Plan: 11 of 32
 Status: Ready to execute
 Last activity: 2026-11-05 — Phase 13 execution started
 
@@ -351,6 +351,7 @@ Progress: [███████████████████░] 160/162
 | Phase 13 P07 | 17 min | 3 tasks | 7 files |
 | Phase 13 P10 | 40min | 3 tasks | 12 files |
 | Phase 13 P08 | 40min | 3 tasks | 10 files |
+| Phase 13 P29 | 35min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -1107,6 +1108,7 @@ Recent decisions affecting current work:
 - [Phase 13]: 13-24: the 160dp ceiling of the splash logo is a device size the native shell enforces; the 1024 asset keeps the logo at one third of the short side inside the 80% safe zone. Play icon is 32-bit opaque, App Store icon has no alpha; app-assets re-states the private SVG-density helper instead of editing icons.ts
 - [Phase 13]: 13-09: the App tab sub-router lives in packages/core/server/apps behind two store seams; only readAppCredential unseals (worker and release script) and no route calls it; the seven routes are classified in isolation-inventory.ts because the admin-lane inventory lists withAdminTx sites only; derived ids are shown but never written by a read
 - [Phase 13]: 13-08: content_report_resolve answers a missing report with RP002 (RP003 stays unused) and returns subject and author for plan 14's same-transaction removal; member_blocks is keyed (tenant_id, blocker, blocked)
+- [Phase 13]: 13-29: platform:app-release is dispatch/prepare/publish/cleanup; a dry run persists nothing and drops mask lines, and mask lines reach stdout only on a GitHub runner; the generated keystore and certificate are sealed under <rowId>:<kind> and read back before use; a release gate is held credentials plus the account ticks, not the links row; the build number is the highest of both stores plus one and moves only on publish
 
 ### Pending Todos
 
@@ -1228,6 +1230,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T15:38:48.485Z
-Stopped at: Completed 13-08-PLAN.md
+Last session: 2026-11-05T16:10:20.178Z
+Stopped at: Completed 13-29-PLAN.md
 Resume file: None
