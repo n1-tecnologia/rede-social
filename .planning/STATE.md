@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: 13
 current_phase_name: App nativo iOS e Android por tenant (white-label)
-current_plan: 3
+current_plan: 4
 status: executing
-stopped_at: Completed 13-05-PLAN.md
-last_updated: "2026-11-05T14:11:26.928Z"
+stopped_at: Completed 13-06-PLAN.md
+last_updated: "2026-11-05T14:21:07.877Z"
 last_activity: 2026-11-05
 last_activity_desc: Phase 13 execution started
-state_head: 63d4666edf461df81c7bf08f26910dd87f8571fb
+state_head: 16b78c7c1d441ffda21ad4d93a7bd29cefc6426e
 progress:
   total_phases: 28
   completed_phases: 0
   total_plans: 344
-  completed_plans: 305
+  completed_plans: 306
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
-Current Plan: 3
+Current Plan: 4
 Total Plans in Phase: 32
-Plan: 3 of 32
+Plan: 4 of 32
 Status: Ready to execute
 Last activity: 2026-11-05 — Phase 13 execution started
 
@@ -344,6 +344,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P18 | 35min | 3 tasks | 9 files |
 | Phase 13 P03 | 13 min | 3 tasks | 8 files |
 | Phase 13 P05 | 16 min | 3 tasks | 9 files |
+| Phase 13 P06 | 8 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -1095,6 +1096,8 @@ Recent decisions affecting current work:
 - [Phase 13]: 13-03: hostAppSchema lives in hosts.ts and native.ts re-exports it (no import cycle); by-host app block is additive, so the web must deploy before the API sends it
 - [Phase 13]: 13-05: tenant_app_credentials is one sealed row per (tenant_id, kind), kind CHECK built from APP_CREDENTIAL_KINDS plus GENERATED_CREDENTIAL_KINDS; a replace is an update by (tenant_id, kind) that keeps the row id (sealed AAD rowId:kind); costly to re-key later
 - [Phase 13]: 13-05: tenant_apps stores team_id upper-case only while the contract isValidTeamId accepts lower case, so plan 09 must upper-case before the write; both purchase switches default false (D-617)
+- [Phase 13]: 13-06: app.push_subscriptions_for_v2 is executable by authenticated (plus service_role and api_user), not locked to the connection role: the send job reads inside withTenantTx, which runs as authenticated; the pgTAP fact asserts it
+- [Phase 13]: 13-06: a native token is a second kind of the push_subscriptions row (add-alongside, no devices table); push_device_upsert keeps the same-tenant handoff and the 22023 message never contains the token; the old reader is narrowed to webpush
 
 ### Pending Todos
 
@@ -1216,6 +1219,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T14:11:20.079Z
-Stopped at: Completed 13-05-PLAN.md
+Last session: 2026-11-05T14:21:07.619Z
+Stopped at: Completed 13-06-PLAN.md
 Resume file: None

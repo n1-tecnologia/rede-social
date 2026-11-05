@@ -478,7 +478,7 @@ Phase 13 (post-MVP and additive). Each tenant gets its own native iOS and Androi
 - [ ] **NATIVE-05**: One typed, versioned, zod-validated bridge (`web -> native` through `ReactNativeWebView.postMessage`, `native -> web` through an injected `rede-native` event) lives in `@rede-social/contracts/native`; a message from an origin other than the tenant's, an unknown `type`, a bad shape, an oversized one or one beyond 20 per second is dropped without effect (D-600)
 - [ ] **NATIVE-06**: Native screens that need no web page: splash, 'Sem internet' and 'Não foi possível abrir' (chosen by what failed, with a retry that also fires on reconnect and coalesces), 'Atualize o app' (blocking, store link) and the 4dp loading bar; they paint from a cached, schema-validated branding record baked into the build (D-612)
 - [ ] **NATIVE-07**: A public, unauthenticated read answers `{ minVersion, storeUrl }` per platform for the tenant; an installed app below `minVersion` shows 'Atualize o app'; a failed, slow or malformed check never blocks opening the app
-- [ ] **NATIVE-08**: `push_subscriptions` accepts native devices (new `kind`, `platform`, `app_environment`, `app_version`; `p256dh` and `auth` nullable under a CHECK that keeps web rows complete); web rows and `app.push_subscription_upsert` keep working untouched; pgTAP proves a two-tenant negative on native rows (D-606)
+- [x] **NATIVE-08**: `push_subscriptions` accepts native devices (new `kind`, `platform`, `app_environment`, `app_version`; `p256dh` and `auth` nullable under a CHECK that keeps web rows complete); web rows and `app.push_subscription_upsert` keep working untouched; pgTAP proves a two-tenant negative on native rows (D-606)
 - [ ] **NATIVE-09**: The save and delete routes (`/v1/notifications/push-subscriptions` and the BFF `/api/push/subscriptions`) accept a native token through an additive contract (the web shape still parses unchanged); the token is shape-checked per kind, never run through the push-service URL allow-list; saving moves a token between members like the web upsert (D-606)
 - [ ] **NATIVE-10**: The worker sends native pushes: APNs directly over HTTP/2 with the tenant's own key (ES256 provider token refreshed every 20 to 60 minutes, topic = bundle id, sandbox or production per device) and FCM HTTP v1 for Android with the platform sender account; outcomes map to sent, gone, dropped or retry through the existing report and retry path and a credential problem of ours never deletes a device; CI uses fake transports (D-606)
 - [ ] **NATIVE-11**: After the first sign-in the web shows the branded explainer; only 'Ativar' fires the system prompt (through the bridge); 'Agora não' never re-opens it by itself; Configurações shows on, off and denied (with 'Abrir ajustes'); logout deletes this device's token and clears the stored answer (D-614)
@@ -980,7 +980,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NATIVE-05 | Phase 13 (plans 03, 16, 23) | Pending |
 | NATIVE-06 | Phase 13 (plans 24, 25) | Pending |
 | NATIVE-07 | Phase 13 (plans 10, 25) | Pending |
-| NATIVE-08 | Phase 13 (plan 06) | Pending |
+| NATIVE-08 | Phase 13 (plan 06) | Complete |
 | NATIVE-09 | Phase 13 (plans 11, 17) | Pending |
 | NATIVE-10 | Phase 13 (plan 12) | Pending |
 | NATIVE-11 | Phase 13 (plans 17, 26) | Pending |
