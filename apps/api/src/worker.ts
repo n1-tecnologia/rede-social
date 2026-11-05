@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { anonymiseDueJob, armAnonymiseDue } from '@rede-social/core/server/accounts/anonymise-job';
 import { deriveIconsJob } from '@rede-social/core/server/branding/derive-icons-job';
 import { domainVerifyJob } from '@rede-social/core/server/domains/verify-job';
 import {
@@ -119,6 +120,8 @@ export async function startWorker(): Promise<void> {
     sweepOrphansJob,
     // 08.7-01 (INSIGHT-16): the kernel's daily per-tenant dispatcher (re-arms itself hourly).
     dailyTenantDispatchJob,
+    // 13-13 (D-609, NATIVE-21): anonymises the accounts whose 14-day window ended and confirms by e-mail (re-arms hourly).
+    anonymiseDueJob,
     // 08.7-01: the dashboard has no manifest (no ModuleKey), so its build job is listed here.
     snapshotBuildJob,
     ...Object.values(MODULE_REGISTRY).flatMap((manifest) => manifest?.jobs ?? []),
@@ -224,6 +227,15 @@ export async function startWorker(): Promise<void> {
         async () => ({
           projectId: project.id,
           armed: await armDailyTenantDispatch({ projectId: project.id }),
+        }),
+      );
+      // 13-13 (D-609, NATIVE-21): open the hourly anonymisation cadence with one immediate run under the BOOT singleton.
+      await bestEffort(
+        'could not arm the account anonymisation; the next boot re-opens it',
+        'accounts.anonymise.armed',
+        async () => ({
+          projectId: project.id,
+          armed: await armAnonymiseDue({ projectId: project.id }),
         }),
       );
     },
