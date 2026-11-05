@@ -3727,6 +3727,167 @@ export streamed through Cloud Run, your confirmation of the export's row set (ac
 of the Moderação wording, this release order itself, the browser specs that were written but not yet run
 (they need more than 10 GiB of free disk), and the pt-BR copy that was not in the approved design.
 
+## Phase 12.1 release (steps and conditional questions)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 12.1 has been pushed, deployed or applied to a hosted project, and no agent touches production. No
+command here prints a secret. Phase 12.1 ships ON TOP of the Phase 12 release above (the profile form) and is
+inert until a tenant's admin adds a second step or a condition. The proofs only the owner can run (a real
+phone, one hosted tenant project, the browser run that needs more than 10 GiB of disk, the first client's real
+question list) are in the ledger
+`.planning/phases/12.1-perguntas-condicionais-e-etapas-no-formulario-de-perfil/12.1-MANUAL-PROOFS.md` (M1 to
+M7); it ships with every row `pending`, and a row becomes `passed` only with the evidence you paste and your
+own date.
+
+Phase 12.1 lets the admin split the profile form into **steps** (up to 10) and make a question **conditional**
+(shown only when an earlier choice or Sim ou não question has one of the chosen answers). A member answers one
+step at a time with "Avançar" and "Concluir"; a step whose questions are all hidden is skipped; the edit from
+"Minhas respostas" is one scroll with the step titles as headings; a change that would close an answered
+question asks first and then deletes that answer in the same save.
+
+### What ships
+
+- **Three tenant migrations, applied in timestamp order, all expand-only** (a new table, new columns that
+  start nullable, new functions; nothing dropped, no answer rewritten, no existing function removed):
+  - `20261105194320_profile_form_steps.sql` (generated): the table `profile_form_steps` with its RLS
+    policies, CHECKs and unique `(tenant_id, id)`; on `profile_form_questions` the columns `step_id` (added
+    NULLABLE here), `condition_question_id` and `condition_values`, two composite tenant-scoped foreign keys
+    (NO ACTION), the condition CHECK and two indexes.
+  - `20261105195400_profile_form_steps_backfill.sql` (custom): first the BEFORE INSERT trigger
+    `profile_form_questions_default_step` (a question inserted without a step, by the previous API revision,
+    goes into the tenant's first step and the step is created when there is none), then the backfill (one
+    default step per tenant that already has questions and none yet, every question pointed at it, archived
+    ones included, a tenant with no question gets no step), then `SET NOT NULL` on `step_id`, last. The
+    default step is titled **"Informações gerais"**, the literal you confirmed in the checkpoint of plan 06;
+    after release it is an ordinary step the admin can rename. A re-run is a no-op.
+  - `20261105195403_profile_form_steps_functions.sql` (custom): `app.profile_form_answer_tokens`,
+    `app.profile_form_purge_closed`, `app.profile_form_lock_active_v2` (a NEW function: the old one keeps
+    its row type), and `create or replace` of `app.profile_form_missing` and `app.profile_form_question_guard`
+    with the same signatures (the gate now ignores a conditional question whose opener does not open it; the
+    guard raises PF006 and PF007).
+- **The API:** the steps routes `POST /v1/profile_form/steps`, `PATCH` and `DELETE /v1/profile_form/steps/{id}`;
+  `stepId` and `condition` on the question create and edit; `PUT /v1/profile_form/order` takes the layout body
+  `{ steps: [{ id, questionIds }] }`; the member form (`GET /v1/me/profile-form`) carries the steps and each
+  question's condition, and `PUT /v1/me/profile-form/answers` takes an optional `stepId`, validates by the
+  visibility the SQL uses and deletes the answers that stopped applying in the same transaction.
+- **The web:** the member stepper on `/completar-perfil`, the reveal in place, the erase dialog, the one-scroll
+  edit and the omitted rows of "Minhas respostas", "Não se aplica" on the staff answers, and in the builder the
+  step wells, the step sheet, the condition editor, the markers and refusals, and the stepper in the preview.
+- **What does NOT ship:** no worker job, no cron, no queue; **no environment variable, secret or GitHub
+  variable** is added; nothing is seeded. **The module stays OFF per tenant** exactly as Phase 12 left it: this
+  release does not switch anything on.
+
+### Order: migrations on every tenant project, then the API and the worker together from a REBUILT image, then the web
+
+1. **Local checks first.** `pnpm db:migrate-all -- --dry-run` lists what is pending per project and writes
+   nothing; the three files above must be the pending ones on a project that already has Phase 12.
+   `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty local
+   second database. The case "Phase 12.1 (PFORM-40)" of `apps/api/tests/integration/migrate-all.test.ts`
+   proves on the local second database that the three files fan out onto a project that already holds Phase 12
+   rows, give every existing question a step, leave every answer untouched, and that a second run applies
+   nothing.
+2. **Rehearse the backfill on a copy or on the homolog project BEFORE production** (ledger row M2). The
+   backfill writes data into every project that has questions; it is idempotent, but a rehearsal on a project
+   that holds real Phase 12 rows is the only proof the local stack cannot give (T-12.1-14).
+3. **The three migrations reach EVERY tenant project through the ledgered `migrateAll`** (the Phase 09.2 Cloud
+   Run Job, D-544: databases before API and worker). They apply in the order of their names; the runner is
+   serialised per database and idempotent, so a re-run is safe.
+4. **Rebuild the API image.** The image bakes the migrations manifest (built by
+   `scripts/build-migrations-manifest.mjs`; the Dockerfile copies it with both migration sets to
+   `/app/migrations`); an image built before these three files does not know them, and a production boot without
+   the manifest stops with `migrations manifest empty`.
+5. **The API and the worker TOGETHER**, from that rebuilt image, as in the Phase 09.2 pipeline. The worker does
+   not use the form, but one image keeps the two revisions equal.
+6. **The web LAST**, because its screens read fields and routes the new API returns.
+
+These steps are consecutive; nothing else belongs between them. **Why this order (T-12.1-18).** The migrations
+only add, so the previous API revision keeps working against the new database. The reverse is the dangerous
+one: the new API calls `app.profile_form_lock_active_v2`, `app.profile_form_purge_closed` and reads the
+`step_id`, `condition_question_id` and `condition_values` columns, none of which exists before the migrations,
+so applying the API first would call functions that do not exist yet and fail the first member save; the
+schema gate holds such a project out as `updating` instead of letting a member meet the error.
+
+### What keeps the previous API revision working during the fan-out
+
+- `step_id` is added nullable, backfilled, and only then made NOT NULL, in that file order.
+- The BEFORE INSERT trigger gives a question inserted without a step the tenant's first step.
+- `app.profile_form_lock_active()` is **kept**; the new API calls the `_v2` twin.
+- The two replaced functions keep their signatures and their short-circuits.
+
+### Deferred cleanups (each a later release, none written by Phase 12.1)
+
+- **Drop `app.profile_form_lock_active()`**: a cleanup migration, scheduled one release after the API that
+  calls `_v2` is live on every project (the same precedent as the `_gated` pair of the Phase 12 section).
+- **Remove the legacy `{ ids }` body of `PUT /v1/profile_form/order`**: accepted for one release, and only
+  while the tenant has exactly one step; a follow-up removes it once no web older than this release can be
+  installed.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only; there is no down migration). Roll forward with a fix.
+- **The previous API revision against the new schema keeps working** for forms without conditions: it knows
+  no step and no condition, its inserts get the default step from the trigger, and the gate (SQL) already
+  applies the condition. Once an admin has authored a conditional question the previous revision knows nothing
+  about it and would ask it of every member, so turn the module off for that tenant before rolling the API back.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the migrations
+  reach every project.
+- **Rolling the web back** removes the stepper, the builder's wells and the condition editor; the stored steps
+  and conditions stay. Turn the module off for a tenant that uses them first.
+- **The quickest release of every member** is still the module switch (off) in the platform Módulos tab.
+
+### Smoke checks
+
+Read-only SQL on a tenant project, after the Job:
+
+```sql
+select to_regclass('public.profile_form_steps');
+-- non-null
+select is_nullable from information_schema.columns
+ where table_schema = 'public' and table_name = 'profile_form_questions' and column_name = 'step_id';
+-- NO
+select count(*) from public.profile_form_questions where step_id is null;
+-- 0
+select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and proname in ('profile_form_answer_tokens', 'profile_form_purge_closed',
+   'profile_form_lock_active_v2', 'profile_form_default_step', 'profile_form_lock_active');
+-- five rows: the old lock function is still there
+select tgname from pg_trigger where tgname = 'profile_form_questions_default_step' and not tgisinternal;
+-- one row
+select version from supabase_migrations.schema_migrations
+ where version in ('20261105194320', '20261105195400', '20261105195403') order by version;
+-- three rows
+select count(*) from public.profile_form_steps;
+-- the number of tenants on this project that held questions before the release
+```
+
+And the central check of the Phase 09.2 section: the Job's step summary shows exit code `0` and every project
+`current`.
+
+### Notes for the reader of this release
+
+- **The first client's question list is not in the repository** and is never invented in code, tests or notes:
+  the clinic example in the browser spec is the team's own wording. Loading the real list in a staging tenant
+  is ledger row M5.
+- **The design approval was recorded provisionally** (sketch 018: you answered "Faz você: grave a aprovação" in
+  chat on 2026-11-05 and the orchestrator wrote the approval keys, commit `54cb4351`). Ledger row M4 asks you to
+  confirm the researcher defaults the review left open (PU-1 to PU-16 as the sketch README records them), the
+  copy that is not in the approved design and finding F-9 of the sketch (the sentence that refuses to move an
+  opener repeats `{dependent}` and is slightly wrong in substance; a rewrite was suggested in the plan 17
+  summary).
+- **Behaviours that differ from the plan text**, so the verifier is not surprised: deleting an opener clears
+  the condition of its ARCHIVED dependents (a reactivated dependent comes back unconditional); the layout
+  writer uses `rows from (...) with ordinality` because the plan's `jsonb_to_recordset ... with ordinality`
+  form is rejected by Postgres, and it does not lock every active row on each write; the copy-on-move test
+  cannot assert that a copied opener's id differs from the source id (the move engine keeps primary keys) and
+  asserts the opener exists in the target instead; the move-copy table pin went from 52 to 55.
+
+### Manual proofs (hosted)
+
+The ledger lists them (M1 to M7): the stepper and the builder on a real phone against a hosted tenant project,
+the three migrations and the backfill on one hosted project that holds Phase 12 rows, the Playwright spec run
+under the free-space watchdog, your confirmation of the sketch defaults and of the copy, the first client's real
+question list in a staging tenant, this release order itself, and the later cleanup.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
