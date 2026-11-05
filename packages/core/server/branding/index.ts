@@ -31,5 +31,6 @@ export const deriveIconsPayloadSchema = z.object({
 // always knows the queue before the first `send`; the worker creates it from its explicit job list.
 registerJobQueues([BRANDING_DERIVE_ICONS_QUEUE]);
 
+export * from './app-assets';
 export * from './icons';
 export * from './upload';
