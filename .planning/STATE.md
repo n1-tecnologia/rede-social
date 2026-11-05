@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "09.4"
-current_phase_name: Projeto do tenant no Supabase do cliente (INSERTED)
-current_plan: 17
+current_phase: 13
+current_phase_name: App nativo iOS e Android por tenant (white-label)
+current_plan: 2
 status: executing
-stopped_at: Completed 09.4-17-PLAN.md (17/17 plans; plan 17 task 3 ran on Igor's "pode dar deploy para o branch master" with P1 still pending: catalog bda792a7, SUMMARY 4323c772; full pnpm verify stopped at Playwright e2e on disk, everything before it green incl. 119 integration files / 2288 tests). Earlier: Completed 09.4-12-PLAN.md (plans 03, 05, 02, 06, 07, 08, 09, 10, 13, 04, 14, 15, 16, 01, 11, 12 done = 16/17; plan 17 tasks 1-2 done (46fbb7fa DEPLOY.md section + ledger steps, 7f3f1860 comment; all static gates, pgTAP 2920, 15 integration files, core 1268, contracts 258, web 5810 green except the one expected-red 'permission list written'), task 3 waits for Igor to sign P1). Code review gate ran (09.4-REVIEW.md: 0 critical, 6 warnings, 8 info); WR-01..05 fixed (734cdb30, afc6a907, 4a1030f8, 0f3364fb, 8886729b, 9be8f0fd), WR-06 is the [PENDENTE-PERMISSÕES] placeholder for task 3; REVIEW-FIX.md committed; Info IN-01..IN-08 open. Regression gate (turbo test, 18 tasks) found one real regression, the new PUT .../database/token route missing from apps/api/tests/isolation-inventory.ts, fixed in f4f2c3e1; the only red test left is the expected 'permission list written'. Plan 12: move to a customer project registers an unknown target from the local hidden prompt, fails closed with register_first in the Job, the way back is a normal move (pgTAP 2920, move-run 15, move-guard 22); P7 hosted proof is Igor's. Plan 11: `platform:set-owner` (hidden prompt, 41/41 integration, pgTAP 2920 pass); P6 hosted proof is Igor's. Probe run A ran on Igor's terminal on 2026-10-27 (21/21 allowed with the thirteen permissions) and was pasted into ledger P1 at his word, P1 Status still pending (his line); ruling 1 resolved: Igor said the token only had access to the specific project, so the 13 stay. Igor approved sketch 015 and the orchestrator wrote the approval on his explicit word (aea382b2). Igor closed 09.2 by his own word on 2026-10-27, so D-579 was met; 09.2 plan 25 hosted proofs were never recorded.
-last_updated: "2026-11-04T08:29:57.410Z"
-last_activity: 2026-11-02
-last_activity_desc: Phase 12 closed by developer closure (UAT 8 of 13 signed off, 5 blocked rows and the 9 ledger rows are Igor's); pointer back on Phase 09.4, whose verifier, secure-phase and close still have to run
-state_head: 80e0695a578041dc6a54be9b0a4cd5d1f8febddc
+stopped_at: Completed 13-03-PLAN.md
+last_updated: "2026-11-05T13:56:12.994Z"
+last_activity: 2026-11-05
+last_activity_desc: Phase 13 execution started
+state_head: 33b807de59f58d61db54cffa0f8edcfdc300277e
 progress:
   total_phases: 28
   completed_phases: 0
-  total_plans: 312
-  completed_plans: 303
+  total_plans: 344
+  completed_plans: 304
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 09.4 — Projeto do tenant no Supabase do cliente (INSERTED)
+**Current focus:** Phase 13 — App nativo iOS e Android por tenant (white-label)
 
 ## Current Position
 
-Phase: 09.4 (Projeto do tenant no Supabase do cliente (INSERTED)) — EXECUTING
-Current Plan: 1
-Total Plans in Phase: 17
-Plan: 17 of 17 done and deployed to production on 2026-10-28; the verifier, secure-phase and the phase close still have to run; hosted proofs P1..P8 stay Igor's
-Status: Executing Phase 09.4
-Last activity: 2026-11-02 — Phase 12 closed by developer closure (human_needed 7/8, UAT 8/13 signed off by Igor in chat, 5 blocked rows and the 12-MANUAL-PROOFS.md ledger are his, PFORM-25 and PFORM-26 unchecked); pointer back on 09.4; nothing pushed or deployed
+Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
+Current Plan: 2
+Total Plans in Phase: 32
+Plan: 2 of 32
+Status: Ready to execute
+Last activity: 2026-11-05 — Phase 13 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -342,6 +342,7 @@ Progress: [███████████████████░] 160/162
 | Phase 12 P16 | 22min | 3 tasks | 22 files |
 | Phase 12 P17 | 11 min | 3 tasks | 14 files |
 | Phase 12 P18 | 35min | 3 tasks | 9 files |
+| Phase 13 P03 | 13 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -1089,6 +1090,8 @@ Recent decisions affecting current work:
 - [Phase 12]: 12-15: a reopening write follows a successful impact read only; readImpactAction ok:false (any code) means no write, and 403/404 end in a refresh into notFound() — T-12-34: never apply a change on a guess of how many members it holds out
 - [Phase 12]: 12-18 ran without Playwright (Igor, 2026-10-30, disk 3.9 GiB vs the 10 GiB guard): the three browser specs are written, type-checked and listed (20 tests) but not executed; PFORM-12, 13, 14, 20, 25 and 26 are not marked complete; the phase closes human_needed (ledger row M8 runs them). — The browser proof is missing; marking the requirements complete would claim a proof that was never made.
 - [Phase 12]: Deferred follow-up: a later cleanup migration drops app.membership_in_tenant_gated and app.memberships_of_user_gated, one release after the API that calls the _gate twins is live (docs/DEPLOY.md Phase 12 release, 12-MANUAL-PROOFS.md). — The old pair stays one release so the API revision still serving during the fan-out keeps working.
+- [Phase 13]: 13-03: iOS bundle id keeps hyphens, Android application id uses underscores (Apple allows no underscore); ids are equal for hosts without a hyphen
+- [Phase 13]: 13-03: hostAppSchema lives in hosts.ts and native.ts re-exports it (no import cycle); by-host app block is additive, so the web must deploy before the API sends it
 
 ### Pending Todos
 
@@ -1210,6 +1213,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T08:29:56.716Z
-Stopped at: Phase 13 UI-SPEC approved (discuss + ui-phase done; the current-phase pointer stays on 09.4, which still has its verifier, secure-phase and close to run; next for 13 is the sketch gate PU-10, then plan-phase)
-Resume file: .planning/phases/13-app-nativo-ios-e-android-por-tenant-white-label/13-UI-SPEC.md
+Last session: 2026-11-05T13:56:12.735Z
+Stopped at: Completed 13-03-PLAN.md
+Resume file: None
