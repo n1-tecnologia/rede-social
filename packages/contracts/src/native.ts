@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { hostAppSchema, isRegistrableHost, normalizeHost } from './hosts';
 
 /**
@@ -112,3 +113,22 @@ export function deriveAppIds(
   if (!isValidApplicationId(id) || !isValidBundleId(id)) return null;
   return { ios: id, android: id };
 }
+
+// --- TEMPORARY RED STUB (task 2), fully replaced in GREEN -------------------------------------------
+export const BRIDGE_VERSION = 0;
+export const BRIDGE_MAX_BYTES = 0;
+export const FEED_SNAPSHOT_MAX_POSTS = 0;
+export const PUSH_PATH = /$^/;
+export const APNS_TOKEN_PATTERN = /$^/;
+export const FCM_TOKEN_PATTERN = /$^/;
+const stubMember = z.object({ v: z.literal(1), type: z.literal('stub') }).strict();
+export const feedSnapshotSchema = z.object({}).strict();
+export const bridgeWebMessageSchema = z.discriminatedUnion('type', [stubMember]);
+export const bridgeNativeEventSchema = z.discriminatedUnion('type', [stubMember]);
+export const parseBridgeMessage = (
+  _raw: unknown,
+  _schema?: unknown,
+): { ok: false; reason: string } | { ok: true; message: { type: string; title?: string } } => ({
+  ok: false,
+  reason: 'bad_shape',
+});
