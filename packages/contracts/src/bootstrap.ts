@@ -79,6 +79,13 @@ export const bootstrapSchema = z.object({
   // role is not `member`; the API sends it only then, read live from the same SQL rule the gate uses. An API
   // revision older than the web does not send it, which reads as "no form".
   profileForm: profileFormBootstrapSchema.optional(),
+  // 13-03 (D-617, D-615): whether this store may show a price and a purchase button. ADDITIVE per the rule
+  // above: a required field would fail every signed-in page on an API older than the web. Absent reads as
+  // `true` (a browser, or an API that predates the switch, hides nothing).
+  purchaseVisible: z.boolean().default(true),
+  // 13-03 (NATIVE-27): set once after a member signs in inside the 14-day deletion window. ADDITIVE per
+  // the rule above; absent reads as `null` (no pending deletion).
+  pendingDeletion: z.object({ until: z.string() }).strict().nullable().default(null),
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
 

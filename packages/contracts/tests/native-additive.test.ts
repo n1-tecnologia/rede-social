@@ -75,7 +75,9 @@ describe('hostTenantSchema.app — additive and still strict', () => {
 
   it('still refuses any OTHER unknown key, at the top level and inside the block', () => {
     expect(hostTenantSchema.safeParse({ ...hostBody, foo: 1 }).success).toBe(false);
-    expect(hostTenantSchema.safeParse({ ...hostBody, app: { ...app, foo: 1 } }).success).toBe(false);
+    expect(hostTenantSchema.safeParse({ ...hostBody, app: { ...app, foo: 1 } }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -148,7 +150,11 @@ describe('rolling deploy matrix (T-13-06)', () => {
   // The bootstrap schema before this plan: same shape, no new fields. A plain z.object strips unknown keys.
   const legacyBootstrap = () =>
     bootstrapSchema.omit({ purchaseVisible: true, pendingDeletion: true } as never);
-  const newBootstrap = { ...oldBootstrap, purchaseVisible: false, pendingDeletion: { until: '2026-11-18' } };
+  const newBootstrap = {
+    ...oldBootstrap,
+    purchaseVisible: false,
+    pendingDeletion: { until: '2026-11-18' },
+  };
 
   it.each([
     ['old API x new web (by-host)', () => hostTenantSchema.safeParse(hostBody)],

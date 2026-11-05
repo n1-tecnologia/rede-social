@@ -107,6 +107,30 @@ export const HOST_TENANT_STATUSES = [
 export type HostTenantStatus = (typeof HOST_TENANT_STATUSES)[number];
 
 /**
+ * 13-03 (D-611, D-615, UI-D-624): the non-secret native-app facts the `.well-known` files and the shell
+ * read from the by-host answer. Each platform is independent: one platform's missing data is `null` and
+ * never blocks the other's file. `purchase` is the per-store switch (D-615). Defined HERE, not in
+ * `native.ts`, so `hosts.ts` never imports `native.ts` (which imports `hosts.ts`): no import cycle.
+ */
+export const hostAppSchema = z
+  .object({
+    ios: z
+      .object({ appId: z.string().min(1).max(160) })
+      .strict()
+      .nullable(),
+    android: z
+      .object({
+        applicationId: z.string().min(1).max(160),
+        sha256: z.array(z.string().min(1).max(95)).max(10),
+      })
+      .strict()
+      .nullable(),
+    purchase: z.object({ ios: z.boolean(), android: z.boolean() }).strict(),
+  })
+  .strict();
+export type HostApp = z.infer<typeof hostAppSchema>;
+
+/**
  * Body of `GET /v1/public/tenants/by-host` — brand and host facts only, nothing beyond (D-20, T-02-04):
  * no plan, timezone, ids or member counts ever enter this unauthenticated answer.
  *
@@ -130,6 +154,10 @@ export const hostTenantSchema = z
     // (the project URL and the publishable key ship to every browser); nothing sealed ever enters this answer.
     supabaseUrl: z.url().optional(),
     publishableKey: z.string().min(1).optional(),
+    // 13-03 (D-611, T-13-06): the native-app facts. ADDITIVE: `.nullable().optional()` keeps this strict
+    // answer parsing an API revision that does not send it yet (rolling deploy), and a new one that does.
+    // A web older than the API still rejects the key (it is strict), so the web deploys before the API.
+    app: hostAppSchema.nullable().optional(),
   })
   .strict();
 export type HostTenant = z.infer<typeof hostTenantSchema>;
