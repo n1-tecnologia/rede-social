@@ -1137,3 +1137,236 @@ describe('the accessibility and 320px floor of the stepper (UI-D-660, UI-D-661, 
     }
   });
 });
+
+describe('the erase warning before a save that deletes a stored answer (D-624, D-626, UI-D-656; PFORM-36)', () => {
+  const SECRET = 'segredo-guardado-987';
+  const caseForm = (mode: 'first' | 'returning' | 'edit' = 'first') => {
+    const opts = options('Tenho uma clínica', 'Estou aprendendo');
+    const opener = question('single_choice', {
+      title: 'Qual é o seu caso?',
+      options: opts,
+      stepId: S1,
+      answer: { optionIds: [opts[0]?.id as string], otherText: null },
+    });
+    const name = question('short_text', {
+      title: 'Nome da clínica',
+      stepId: S1,
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+      answer: SECRET,
+    });
+    const phone = question('short_text', { title: 'Telefone', stepId: S2 });
+    return {
+      opener,
+      name,
+      phone,
+      read: form([opener, name, phone], { mode, steps: steps('Sobre você', 'Contato') }),
+    };
+  };
+  const dialog = () => screen.queryByRole('dialog');
+
+  it('a changed opener with a stored dependent answer opens the dialog and calls nothing until confirmed', async () => {
+    const { read } = caseForm();
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await save(container);
+    expect(dialog()).not.toBeNull();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(
+      within(dialog() as HTMLElement).getByRole('heading', {
+        name: 'Apagar respostas que deixaram de valer?',
+      }),
+    ).toBeTruthy();
+    // Titles only: the closed question's TITLE is listed, its stored answer never reaches the DOM.
+    expect(within(dialog() as HTMLElement).getByText('Nome da clínica')).toBeTruthy();
+    expect(document.body.textContent).not.toContain(SECRET);
+    // Avançar on a non-last step confirms with "Apagar e continuar".
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Apagar e continuar' }));
+    });
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.save.mock.calls[0]?.[0]).toMatchObject({ stepId: S1 });
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(screen.getByRole('heading', { level: 2, name: 'Contato' })).toBeTruthy();
+  });
+
+  it('cancel ("Rever respostas") saves nothing and the changed opener stays changed', async () => {
+    const { read } = caseForm();
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await save(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Rever respostas' }));
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(
+      (screen.getByRole('radio', { name: 'Estou aprendendo' }) as HTMLInputElement).checked,
+    ).toBe(true);
+    // Still on the same step, and pressing the button again reopens the dialog.
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    await save(container);
+    expect(dialog()).not.toBeNull();
+  });
+
+  it('a draft that closes only a never-saved answer opens nothing and saves straight away', async () => {
+    const opts = options('Tenho uma clínica', 'Estou aprendendo');
+    const opener = question('single_choice', { title: 'Qual é o seu caso?', options: opts });
+    const name = question('short_text', {
+      title: 'Nome da clínica',
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
+    const { container } = show(form([opener, name]));
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    fireEvent.change(screen.getByLabelText('Nome da clínica'), { target: { value: 'rascunho' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await save(container);
+    expect(dialog()).toBeNull();
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(mocks.save.mock.calls[0]?.[0])).not.toContain('rascunho');
+  });
+
+  it('Concluir and the one-card Salvar confirm with "Apagar e salvar"', async () => {
+    const { read } = caseForm();
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    // Last step of a two-step path: walk to it first, then close nothing there (the dialog opened on step 1).
+    const single = form(
+      read.questions.filter((q) => q.stepId === S1),
+      {
+        mode: 'first',
+        steps: steps('Sobre você'),
+      },
+    );
+    const { container } = show(single);
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await save(container);
+    expect(screen.getByRole('button', { name: 'Apagar e salvar' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Apagar e continuar' })).toBeNull();
+  });
+
+  it('PFORM-36 idempotency: a double press on the confirm button sends ONE save', async () => {
+    const { read } = caseForm();
+    let finish: (value: unknown) => void = () => {};
+    mocks.save.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await save(container);
+    const confirm = screen.getByRole('button', { name: 'Apagar e continuar' });
+    await act(async () => {
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+    });
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    // FA-UI-1: the dialog stays open, both buttons disabled, the confirm button reads "Salvando…".
+    const saving = within(dialog() as HTMLElement).getByRole('button', { name: 'Salvando…' });
+    expect((saving as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (
+        within(dialog() as HTMLElement).getByRole('button', {
+          name: 'Rever respostas',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    await act(async () => {
+      finish({ ok: true, destination: null, missingQuestionIds: [] });
+    });
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('PFORM-36 concurrency: a `changed` answer refreshes the form, keeps the typed answers and asks again from the fresh read', async () => {
+    const { opener, name, read } = caseForm();
+    const fresh = form(read.questions, {
+      mode: 'first',
+      steps: steps('Sobre você', 'Contato'),
+      formEtag: 'etag-2',
+    });
+    mocks.save.mockResolvedValueOnce({ ok: false, code: 'changed', form: fresh });
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await save(container);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Apagar e continuar' }));
+    });
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(
+      screen.getByText(
+        'O formulário mudou enquanto você respondia. Atualizamos a lista; confira e salve de novo.',
+      ),
+    ).toBeTruthy();
+    // The typed opener survives the refresh, and pressing the button asks again from the fresh read.
+    expect(
+      (screen.getByRole('radio', { name: 'Estou aprendendo' }) as HTMLInputElement).checked,
+    ).toBe(true);
+    await save(container);
+    expect(dialog()).not.toBeNull();
+    mocks.save.mockResolvedValueOnce({ ok: true, destination: null, missingQuestionIds: [] });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Apagar e continuar' }));
+    });
+    expect(mocks.save.mock.calls.at(-1)?.[0]).toMatchObject({ formEtag: 'etag-2' });
+    expect(opener.id).not.toBe(name.id);
+  });
+
+  it('FA-UI-2: a failed save closes the dialog, shows the shipped alert and nothing is lost', async () => {
+    const { read } = caseForm();
+    mocks.save.mockResolvedValue({ ok: false, code: 'unavailable' });
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await save(container);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Apagar e continuar' }));
+    });
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(
+      screen.getByText(
+        'Não foi possível salvar agora. Suas respostas continuam aqui. Tente de novo.',
+      ),
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole('radio', { name: 'Estou aprendendo' }) as HTMLInputElement).checked,
+    ).toBe(true);
+    // The button reopens the dialog on the next attempt.
+    await save(container);
+    expect(dialog()).not.toBeNull();
+  });
+
+  it('a step saved earlier in the session is still warned about when a later change would close it (D-626)', async () => {
+    // The opener sits on step 1 and its dependent on step 2: the dependent's answer is saved on the way.
+    const opts = options('Tenho uma clínica', 'Estou aprendendo');
+    const opener = question('single_choice', {
+      title: 'Qual é o seu caso?',
+      options: opts,
+      stepId: S1,
+    });
+    const dependent = question('short_text', {
+      title: 'Nome da clínica',
+      stepId: S2,
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    const tail = question('short_text', { title: 'Telefone', stepId: S2 });
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(
+      form([opener, dependent, tail], { steps: steps('Sobre você', 'Contato') }),
+    );
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    await save(container);
+    fireEvent.change(screen.getByLabelText('Nome da clínica'), {
+      target: { value: 'Clínica Sol' },
+    });
+    await save(container);
+    // Back on step 1 the member changes the opener: the answer saved a moment ago would go.
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    mocks.save.mockClear();
+    await save(container);
+    expect(dialog()).not.toBeNull();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(within(dialog() as HTMLElement).getByText('Nome da clínica')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Clínica Sol');
+  });
+});

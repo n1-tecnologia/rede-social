@@ -34,7 +34,8 @@ import {
   showSteps,
   stepPath,
 } from '@/lib/profile-form/steps';
-import { visibleQuestionIds } from '@/lib/profile-form/visibility';
+import { answersToErase, visibleQuestionIds } from '@/lib/profile-form/visibility';
+import { EraseAnswersDialog } from './EraseAnswersDialog';
 import { QuestionField, questionDomId } from './QuestionField';
 import { StepProgress } from './StepProgress';
 
@@ -157,6 +158,23 @@ export function ProfileForm({
     () => new Set(currentStepId === null ? [] : [currentStepId]),
   );
   const [focusTick, setFocusTick] = useState(0);
+  // The ids of the questions that hold a stored answer RIGHT NOW: the form read, kept current by every good
+  // save of this session, so a step saved earlier is still known when a later change would close it (D-626).
+  const [stored, setStored] = useState<ReadonlySet<string>>(
+    () => new Set(preview ? [] : form.questions.filter((q) => q.answer !== null).map((q) => q.id)),
+  );
+  // The erase warning (D-626, UI-D-656): which kind of button opened it and the TITLES it lists. The titles
+  // stay while the dialog animates out; only `eraseOpen` says whether it is on screen.
+  const [erase, setErase] = useState<{ kind: 'advance' | 'save'; titles: string[] }>({
+    kind: 'save',
+    titles: [],
+  });
+  const [eraseOpen, setEraseOpen] = useState(false);
+  // A double press on the confirm button sends ONE save (PFORM-36 idempotency).
+  const confirming = useRef<Promise<void> | null>(null);
+  // A step change that happened while the dialog was open: its heading takes focus once the dialog has
+  // handed focus back to the button (the focus trap restores it on close).
+  const focusPending = useRef(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
@@ -186,11 +204,12 @@ export function ProfileForm({
 
   // On every step change focus moves to the new step's heading and the page scrolls to it (UI-D-654, UI-D-660).
   useEffect(() => {
-    if (focusTick === 0) return;
+    if (focusTick === 0 || eraseOpen || !focusPending.current) return;
+    focusPending.current = false;
     const heading = stepHeadingRef.current;
     heading?.focus();
     heading?.scrollIntoView?.({ block: 'start' });
-  }, [focusTick]);
+  }, [focusTick, eraseOpen]);
 
   const { questions } = view;
   const locked = pending;
@@ -277,6 +296,7 @@ export function ProfileForm({
     setNotice(null);
     setElsewhere(null);
     setAnnouncement('');
+    focusPending.current = true;
     setFocusTick((tick) => tick + 1);
   }
 
@@ -286,9 +306,116 @@ export function ProfileForm({
     goToStep(previousId);
   }
 
+  /**
+   * The questions whose stored answer a save of the current drafts would delete (D-626). The baseline is
+   * the form read kept current by this session's saves (`stored`); the shared rule decides what closed.
+   * Only an id and a title come out (T-12.1-11). `answer` is a presence marker here: with drafts the
+   * visibility rule never reads it.
+   */
+  function closedWithAnswers() {
+    return answersToErase(
+      { questions: questions.map((q) => ({ ...q, answer: stored.has(q.id) ? true : null })) },
+      answers,
+    );
+  }
+
+  /** What a good save leaves stored: the answered visible questions of the scope, nothing that is closed. */
+  function rememberSaved() {
+    const open = visibleQuestionIds(view, answers);
+    const sent = wireAnswers(questions, answers, scope);
+    setStored((previous) => {
+      const next = new Set(previous);
+      for (const question of questions) {
+        if (!open.has(question.id)) next.delete(question.id);
+        else if (question.id in sent) {
+          if (sent[question.id] === null) next.delete(question.id);
+          else next.add(question.id);
+        }
+      }
+      return next;
+    });
+  }
+
+  /** The save and what the member sees of its result. The caller has validated the screen already. */
+  async function performSave() {
+    const result = await saveProfileFormAction({
+      formEtag: view.formEtag,
+      ...(chrome && currentId ? { stepId: currentId } : {}),
+      answers: wireAnswers(questions, answers, scope),
+      next,
+      mode: view.mode,
+    });
+    if (result.ok) {
+      rememberSaved();
+      // Not the last step: the save is stored and the member moves on, whatever the gate says (D-629).
+      if (!lastStep) {
+        const to = currentId === null ? null : nextStep(path, currentId);
+        if (to !== null) goToStep(to);
+        return;
+      }
+      if (result.destination === null) {
+        // The gate still finds a visible required question unanswered: go to the first step that holds
+        // one and say so (D-629, D-631). Nothing leaves the form before the server reports none.
+        const target = firstStepWithMissing(view, result.missingQuestionIds);
+        if (target === null) {
+          setNotice('failed');
+          return;
+        }
+        setFlagged((previous) => new Set([...previous, ...result.missingQuestionIds]));
+        if (stepperOn) goToStep(target);
+        setElsewhere(view.steps.find((step) => step.id === target)?.title ?? '');
+        return;
+      }
+      // The toast crosses the navigation (it is shown by the screen the member lands on).
+      const pathname = new URL(result.destination, window.location.href).pathname;
+      flashToast({ tone: 'success', message: t('saved') }, pathname);
+      router.push(result.destination);
+      return;
+    }
+    if (result.code === 'invalid') {
+      const known = new Set(questions.map((question) => question.id));
+      const keyed = Object.fromEntries(
+        Object.entries(result.errors).filter(([id]) => known.has(id)),
+      );
+      if (Object.keys(keyed).length > 0) showErrors(keyed);
+      else setNotice('failed');
+      return;
+    }
+    if (result.code === 'changed') {
+      const merged = mergeFreshForm({ questions }, answers, result.form);
+      const surviving = new Set(merged.form.questions.map((question) => question.id));
+      const freshView = viewOf(merged.form);
+      const freshPins = new Set([...pinned, ...(currentId ? [currentId] : [])]);
+      setView(freshView);
+      setAnswers(merged.answers);
+      setStored(new Set(merged.form.questions.filter((q) => q.answer !== null).map((q) => q.id)));
+      setPinned(freshPins);
+      // Stay on the step; if it no longer holds a visible question, move to the next step of the path.
+      if (currentId !== null) {
+        const freshPath = walkPath(freshView, merged.answers, freshPins);
+        const rank = (id: string) => freshView.steps.findIndex((step) => step.id === id);
+        setCurrentStepId(
+          freshPath.includes(currentId)
+            ? currentId
+            : (freshPath.find((id) => rank(id) > rank(currentId)) ?? freshPath.at(-1) ?? null),
+        );
+      }
+      setErrors({});
+      setFlagged(
+        (previous) =>
+          new Set([...[...previous].filter((id) => surviving.has(id)), ...merged.flagged]),
+      );
+      setNotice('changed');
+      setElsewhere(null);
+      setAnnouncement('');
+      return;
+    }
+    setNotice('failed');
+  }
+
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (preview || pending || !online) return;
+    if (preview || pending || !online || eraseOpen) return;
     setNotice(null);
     setElsewhere(null);
     const found = validateAll(questions, answers, scope);
@@ -296,79 +423,40 @@ export function ProfileForm({
       showErrors(found);
       return;
     }
-    startTransition(async () => {
-      const result = await saveProfileFormAction({
-        formEtag: view.formEtag,
-        ...(chrome && currentId ? { stepId: currentId } : {}),
-        answers: wireAnswers(questions, answers, scope),
-        next,
-        mode: view.mode,
+    // The member is told before an answer is deleted, and consents, in this same interaction (D-626). A
+    // draft that closes only never-saved answers lists nothing and saves straight away.
+    const closing = closedWithAnswers();
+    if (closing.length > 0) {
+      setErase({
+        kind: chrome && !lastStep ? 'advance' : 'save',
+        titles: closing.map((c) => c.title),
       });
-      if (result.ok) {
-        // Not the last step: the save is stored and the member moves on, whatever the gate says (D-629).
-        if (!lastStep) {
-          const to = currentId === null ? null : nextStep(path, currentId);
-          if (to !== null) goToStep(to);
-          return;
-        }
-        if (result.destination === null) {
-          // The gate still finds a visible required question unanswered: go to the first step that holds
-          // one and say so (D-629, D-631). Nothing leaves the form before the server reports none.
-          const target = firstStepWithMissing(view, result.missingQuestionIds);
-          if (target === null) {
-            setNotice('failed');
-            return;
-          }
-          setFlagged((previous) => new Set([...previous, ...result.missingQuestionIds]));
-          if (stepperOn) goToStep(target);
-          setElsewhere(view.steps.find((step) => step.id === target)?.title ?? '');
-          return;
-        }
-        // The toast crosses the navigation (it is shown by the screen the member lands on).
-        const pathname = new URL(result.destination, window.location.href).pathname;
-        flashToast({ tone: 'success', message: t('saved') }, pathname);
-        router.push(result.destination);
-        return;
-      }
-      if (result.code === 'invalid') {
-        const known = new Set(questions.map((question) => question.id));
-        const keyed = Object.fromEntries(
-          Object.entries(result.errors).filter(([id]) => known.has(id)),
-        );
-        if (Object.keys(keyed).length > 0) showErrors(keyed);
-        else setNotice('failed');
-        return;
-      }
-      if (result.code === 'changed') {
-        const merged = mergeFreshForm({ questions }, answers, result.form);
-        const surviving = new Set(merged.form.questions.map((question) => question.id));
-        const freshView = viewOf(merged.form);
-        const freshPins = new Set([...pinned, ...(currentId ? [currentId] : [])]);
-        setView(freshView);
-        setAnswers(merged.answers);
-        setPinned(freshPins);
-        // Stay on the step; if it no longer holds a visible question, move to the next step of the path.
-        if (currentId !== null) {
-          const freshPath = walkPath(freshView, merged.answers, freshPins);
-          const rank = (id: string) => freshView.steps.findIndex((step) => step.id === id);
-          setCurrentStepId(
-            freshPath.includes(currentId)
-              ? currentId
-              : (freshPath.find((id) => rank(id) > rank(currentId)) ?? freshPath.at(-1) ?? null),
-          );
-        }
-        setErrors({});
-        setFlagged(
-          (previous) =>
-            new Set([...[...previous].filter((id) => surviving.has(id)), ...merged.flagged]),
-        );
-        setNotice('changed');
-        setElsewhere(null);
-        setAnnouncement('');
-        return;
-      }
-      setNotice('failed');
+      setEraseOpen(true);
+      return;
+    }
+    startTransition(async () => {
+      await performSave();
     });
+  }
+
+  /**
+   * "Apagar e continuar" / "Apagar e salvar": the one save that deletes. A second press while it runs gets the
+   * SAME promise, so it neither sends a second save nor lets the dialog close before the first one settles.
+   */
+  function confirmErase(): Promise<void> {
+    if (confirming.current !== null) return confirming.current;
+    const running = new Promise<void>((resolve) => {
+      startTransition(async () => {
+        try {
+          await performSave();
+        } finally {
+          confirming.current = null;
+          resolve();
+        }
+      });
+    });
+    confirming.current = running;
+    return running;
   }
 
   if (questions.length === 0) {
@@ -571,6 +659,14 @@ export function ProfileForm({
       <p aria-live="polite" className="sr-only">
         {announcement}
       </p>
+      <EraseAnswersDialog
+        open={eraseOpen}
+        kind={erase.kind}
+        titles={erase.titles}
+        pending={pending}
+        onConfirm={confirmErase}
+        onClose={() => setEraseOpen(false)}
+      />
     </form>
   );
 }

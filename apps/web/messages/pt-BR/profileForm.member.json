@@ -78,6 +78,16 @@
         "revealedMany": "Apareceram {count} novas perguntas.",
         "hidden": "{count, plural, one {Uma pergunta saiu da lista.} other {# perguntas saíram da lista.}}"
       },
+      "erase": {
+        "title": "Apagar respostas que deixaram de valer?",
+        "body": "{n, plural, one {Você mudou uma resposta e a pergunta abaixo deixou de se aplicar. A sua resposta a ela será apagada.} other {Você mudou uma resposta e # perguntas abaixo deixaram de se aplicar. As suas respostas a elas serão apagadas.}}",
+        "more": "e mais {count, plural, one {# pergunta} other {# perguntas}}",
+        "hint": "Se você voltar atrás, vai precisar responder de novo.",
+        "confirmNext": "Apagar e continuar",
+        "confirmSave": "Apagar e salvar",
+        "cancel": "Rever respostas",
+        "listLabel": "Perguntas que serão apagadas"
+      },
       "cancel": "Cancelar",
       "home": "Ir para o início",
       "retry": "Tentar de novo",
