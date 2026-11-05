@@ -123,6 +123,9 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
   };
 }
 
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: set by the CI runner, not by the repository
+const inGithubActions = (): boolean => process.env.GITHUB_ACTIONS === 'true';
+
 const GENERATED: readonly CredentialKind[] = ['android_keystore', 'ios_distribution'];
 
 /** Builds the real or the dry-run dependencies. The kernel is loaded here, after the environment is in place. */
@@ -147,8 +150,10 @@ export async function buildDeps(
         generatedStore: pgGeneratedStore,
         tools: runTool,
         report,
+        // Only a GitHub Actions runner consumes `::add-mask::` lines. Anywhere else the line would just print the
+        // secret on the operator's terminal, so it is dropped.
         maskSink: (line) => {
-          process.stdout.write(`${line}\n`);
+          if (inGithubActions()) process.stdout.write(`${line}\n`);
         },
         tempBase: defaultTempBase(),
         stores: {},
@@ -280,9 +285,7 @@ export async function runCli(
 async function main(): Promise<void> {
   // Same skeleton as scripts/seed.ts: load the local stack values before any kernel module reads env.
   const envFile = resolve(process.cwd(), 'apps/api/.env.local');
-  // biome-ignore lint/suspicious/noUndeclaredEnvVars: set by the CI runner, not by the repository
-  const inCi = process.env.GITHUB_ACTIONS === 'true';
-  if (!inCi && existsSync(envFile)) process.loadEnvFile(envFile);
+  if (!inGithubActions() && existsSync(envFile)) process.loadEnvFile(envFile);
   const code = await runCli(process.argv.slice(2));
   try {
     const { sqlClient } = await import('@rede-social/core/db');
