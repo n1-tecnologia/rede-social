@@ -28,9 +28,13 @@ describe('the tenant migration set', () => {
   it('never references schema platform or the central ledger', () => {
     const offenders = files.filter((name) => {
       const text = code(readFileSync(join(dir, name), 'utf8'));
+      // The schema is named by a qualified reference (`platform.x`, `"platform"."x"`) or by a schema
+      // statement; a bare quoted `"platform"` is also a legal COLUMN name (push_subscriptions.platform).
       return (
         /\bplatform\s*\./i.test(text) ||
-        /"platform"/i.test(text) ||
+        /"platform"\s*\./i.test(text) ||
+        /\bschema\s+(if\s+(not\s+)?exists\s+)?"?platform"?(?![\w."])/i.test(text) ||
+        /\bsearch_path\b[^;]*\bplatform\b/i.test(text) ||
         /central_migrations/i.test(text)
       );
     });
