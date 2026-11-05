@@ -1,3 +1,6 @@
+import { PROFILE_FORM_DEFAULT_STEP_TITLE } from '@rede-social/contracts/profile-form';
+import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import { ensureDefaultStep } from '@rede-social/core/server/profile-form/steps';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -6,7 +9,9 @@ import {
   HOSTS,
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
+  seedProfileFormAnswer,
   seedProfileFormQuestion,
+  seedProfileFormStep,
   signInAs,
   withProfileForm,
 } from './setup';
@@ -162,6 +167,397 @@ describe('12.1-08 tracer: an admin creates a step and reads it back in the build
       // The payload still carries the Phase 12 keys.
       expect(after.activeCount).toBe(1);
       expect(after.limit).toBe(30);
+    });
+  }, 30_000);
+});
+
+// ── Task 2: rename, delete, the limits and the positions ────────────────────────────────────────
+
+const renameStep = (
+  p: Person,
+  id: string,
+  body: Record<string, unknown>,
+  host: string = HOSTS.lab,
+) => call(p, 'PATCH', `/v1/profile_form/steps/${id}`, body, host);
+
+const deleteStep = (p: Person, id: string, host: string = HOSTS.lab) =>
+  call(p, 'DELETE', `/v1/profile_form/steps/${id}`, undefined, host);
+
+type StepRow = { id: string; title: string; position: number; revision: number };
+
+/** The tenant's steps straight from the database, in the canonical order. */
+const stepsIn = (tenantId: string) =>
+  adminSql<StepRow[]>`
+    select id::text as id, title, position, revision from public.profile_form_steps
+     where tenant_id = ${tenantId}::uuid
+     order by position, created_at, id`;
+
+const positionsOf = (steps: { position: number }[]) => steps.map((step) => step.position);
+const oneTo = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+
+describe('12.1-08 PFORM-27: an admin renames a step under the optimistic revision', () => {
+  it('stores the trimmed title, bumps the revision, and a stale revision is 409 stale_revision with nothing written', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const step = await stepCreated(admin, `${TITLE}Antes`);
+
+      const ok = await renameStep(admin, step.id, { revision: 1, title: `  ${TITLE}Depois  ` });
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toEqual({ ...step, title: `${TITLE}Depois`, revision: 2 });
+
+      const stale = await renameStep(admin, step.id, { revision: 1, title: `${TITLE}Velha` });
+      expect(stale.status).toBe(409);
+      expect(await code(stale.clone())).toBe('CONFLICT');
+      expect(await details(stale)).toEqual({ profileForm: 'stale_revision' });
+      const [stored] = await stepsIn(labTenantId);
+      expect(stored).toMatchObject({ title: `${TITLE}Depois`, revision: 2 });
+
+      // The fresh revision wins and the list shows the new title.
+      const again = await renameStep(admin, step.id, { revision: 2, title: `${TITLE}Terceira` });
+      expect(again.status).toBe(200);
+      expect(((await again.json()) as Step).revision).toBe(3);
+      expect((await listOf(admin)).steps.map((s) => s.title)).toEqual([`${TITLE}Terceira`]);
+    });
+  }, 30_000);
+
+  it('an unknown step id is the bare 404 and a bad body is a 400 with a code', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const step = await stepCreated(admin, `${TITLE}Uma`);
+      const unknown = await renameStep(admin, crypto.randomUUID(), {
+        revision: 1,
+        title: `${TITLE}x`,
+      });
+      expect(unknown.status).toBe(404);
+      const envelope = (await unknown.json()) as Envelope;
+      expect(envelope.error.code).toBe('NOT_FOUND');
+      expect(envelope.error.details).toBeUndefined();
+
+      for (const [body, issue] of [
+        [{ revision: 1, title: '   ' }, 'required'],
+        [{ revision: 1, title: `${TITLE}${'a'.repeat(57)}` }, 'too_long'],
+        [{ revision: 0, title: `${TITLE}x` }, 'invalid'],
+      ] as const) {
+        const res = await renameStep(admin, step.id, body);
+        expect(res.status, JSON.stringify(body)).toBe(400);
+        expect(await details(res)).toEqual({ profileForm: issue });
+      }
+      const extra = await renameStep(admin, step.id, {
+        revision: 1,
+        title: `${TITLE}x`,
+        position: 3,
+      });
+      expect(extra.status).toBe(400);
+      const [stored] = await stepsIn(labTenantId);
+      expect(stored).toMatchObject({ title: `${TITLE}Uma`, revision: 1 });
+    });
+  }, 30_000);
+});
+
+describe('12.1-08 PFORM-27: an admin deletes a step without losing a question or an answer', () => {
+  it('refuses step_not_empty while an ACTIVE question is inside and last_step for the only step; nothing changes', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const first = await stepCreated(admin, `${TITLE}Primeira`);
+      const second = await stepCreated(admin, `${TITLE}Segunda`);
+      const question = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}Ativa`,
+        position: 1,
+        stepId: first.id,
+      });
+
+      const busy = await deleteStep(admin, first.id);
+      expect(busy.status).toBe(409);
+      expect(await details(busy)).toEqual({ profileForm: 'step_not_empty' });
+      expect((await stepsIn(labTenantId)).map((s) => s.id)).toEqual([first.id, second.id]);
+      const [kept] = await adminSql<{ step_id: string; archived_at: Date | null }[]>`
+        select step_id::text as step_id, archived_at from public.profile_form_questions
+         where id = ${question}::uuid`;
+      expect(kept).toMatchObject({ step_id: first.id, archived_at: null });
+
+      // The empty second step goes; the first is now the only one and stays (it also holds the question,
+      // so it is `step_not_empty` first: archive the question to reach `last_step`).
+      const gone = await deleteStep(admin, second.id);
+      expect(gone.status).toBe(200);
+      expect(await gone.json()).toEqual({ deleted: true });
+      await adminSql`update public.profile_form_questions set archived_at = now() where id = ${question}::uuid`;
+      const last = await deleteStep(admin, first.id);
+      expect(last.status).toBe(409);
+      expect(await details(last)).toEqual({ profileForm: 'last_step' });
+      expect((await stepsIn(labTenantId)).map((s) => s.id)).toEqual([first.id]);
+    });
+  }, 30_000);
+
+  it('re-points the ARCHIVED questions to the first remaining step, keeps their answers, and renumbers the steps 1..n', async () => {
+    const admin = await person('admin_tenant');
+    const member = await person('member');
+    await withProfileForm(labTenantId, async () => {
+      const a = await stepCreated(admin, `${TITLE}A`);
+      const b = await stepCreated(admin, `${TITLE}B`);
+      const c = await stepCreated(admin, `${TITLE}C`);
+      const archived = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}Arquivada`,
+        archived: true,
+        stepId: b.id,
+      });
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: archived,
+        userId: member.userId,
+      });
+      const active = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}Ativa`,
+        position: 1,
+        stepId: c.id,
+      });
+
+      // The count is of ACTIVE questions: B holds an archived one and counts 0.
+      const before = await listOf(admin);
+      expect(before.steps.map((s) => [s.id, s.questionCount])).toEqual([
+        [a.id, 0],
+        [b.id, 0],
+        [c.id, 1],
+      ]);
+
+      const res = await deleteStep(admin, b.id);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ deleted: true });
+
+      const remaining = await stepsIn(labTenantId);
+      expect(remaining.map((s) => s.id)).toEqual([a.id, c.id]);
+      expect(positionsOf(remaining)).toEqual([1, 2]);
+      // The archived question and its answer are still there, now under the first remaining step.
+      const [moved] = await adminSql<{ step_id: string; archived_at: Date | null }[]>`
+        select step_id::text as step_id, archived_at from public.profile_form_questions
+         where id = ${archived}::uuid`;
+      expect(moved?.step_id).toBe(a.id);
+      expect(moved?.archived_at).not.toBeNull();
+      const [answers] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.profile_form_answers where question_id = ${archived}::uuid`;
+      expect(answers?.n).toBe(1);
+      // The active question did not move.
+      const [still] = await adminSql<{ step_id: string }[]>`
+        select step_id::text as step_id from public.profile_form_questions where id = ${active}::uuid`;
+      expect(still?.step_id).toBe(c.id);
+
+      // The archived list names the new step, and the builder list the renumbered steps.
+      const archivedList = await call(admin, 'GET', '/v1/profile_form/archived');
+      expect(archivedList.status).toBe(200);
+      const archivedBody = (await archivedList.json()) as { questions: ListedQuestion[] };
+      expect(archivedBody.questions.map((q) => [q.id, q.stepId])).toEqual([[archived, a.id]]);
+      const after = await listOf(admin);
+      expect(after.steps.map((s) => [s.id, s.position])).toEqual([
+        [a.id, 1],
+        [c.id, 2],
+      ]);
+
+      // A second delete is the bare 404.
+      const twice = await deleteStep(admin, b.id);
+      expect(twice.status).toBe(404);
+      expect(((await twice.json()) as Envelope).error.details).toBeUndefined();
+    });
+  }, 30_000);
+});
+
+describe('12.1-08 PFORM-28: the limits of steps, one step either side', () => {
+  it('PFORM-28 boundary: 10 steps are accepted, the 11th is 409 limit_reached and a delete reopens the room', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const made: Step[] = [];
+      for (let n = 1; n <= 9; n += 1) made.push(await stepCreated(admin, `${TITLE}Etapa ${n}`));
+      // The 10th is the last the tenant may have.
+      const tenth = await stepCreated(admin, `${TITLE}Etapa 10`);
+      expect(tenth.position).toBe(10);
+      made.push(tenth);
+      expect((await listOf(admin)).steps).toHaveLength(10);
+
+      const eleventh = await createStep(admin, `${TITLE}Etapa 11`);
+      expect(eleventh.status).toBe(409);
+      expect(await code(eleventh.clone())).toBe('CONFLICT');
+      expect(await details(eleventh)).toEqual({ profileForm: 'limit_reached' });
+      expect(await stepsIn(labTenantId)).toHaveLength(10);
+
+      // One step fewer (9) and the create works again, landing last at position 10.
+      const gone = await deleteStep(admin, made[4]?.id ?? '');
+      expect(gone.status).toBe(200);
+      expect(positionsOf(await stepsIn(labTenantId))).toEqual(oneTo(9));
+      const again = await stepCreated(admin, `${TITLE}Etapa 12`);
+      expect(again.position).toBe(10);
+    });
+  }, 60_000);
+
+  it('PFORM-28 boundary: a step title of exactly 60 characters is accepted and 61 is a 400 too_long', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const sixty = `${TITLE}${'a'.repeat(56)}`;
+      expect([...sixty]).toHaveLength(60);
+      const ok = await createStep(admin, sixty);
+      expect(ok.status).toBe(201);
+      expect(((await ok.json()) as Step).title).toBe(sixty);
+
+      const sixtyOne = `${sixty}a`;
+      const refused = await createStep(admin, sixtyOne);
+      expect(refused.status).toBe(400);
+      expect(await code(refused.clone())).toBe('VALIDATION_FAILED');
+      expect(await details(refused)).toEqual({ profileForm: 'too_long' });
+
+      // One character is accepted, an empty or blank one is `required`, and the database holds 1 row.
+      for (const blank of ['', '   ']) {
+        const res = await createStep(admin, blank);
+        expect(res.status).toBe(400);
+        expect(await details(res)).toEqual({ profileForm: 'required' });
+      }
+      expect(await stepsIn(labTenantId)).toHaveLength(1);
+    });
+  }, 30_000);
+
+  it('PFORM-28 precision: after any run of creates, deletes and renames the positions are 1..n with no gap and no repeat, revisions only grow, and two reads agree', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const revisions = new Map<string, number>();
+      let n = 0;
+      const check = async () => {
+        const rows = await stepsIn(labTenantId);
+        expect(positionsOf(rows)).toEqual(oneTo(rows.length));
+        for (const row of rows) {
+          expect(row.revision).toBeGreaterThanOrEqual(revisions.get(row.id) ?? 1);
+          revisions.set(row.id, row.revision);
+        }
+        const first = await listOf(admin);
+        const second = await listOf(admin);
+        expect(first.steps.map((s) => s.id)).toEqual(rows.map((row) => row.id));
+        expect(second.steps).toEqual(first.steps);
+        expect(positionsOf(first.steps)).toEqual(oneTo(rows.length));
+        return rows;
+      };
+      const add = async () => {
+        n += 1;
+        await stepCreated(admin, `${TITLE}S${n}`);
+        return check();
+      };
+      const drop = async (index: number) => {
+        const rows = await stepsIn(labTenantId);
+        const target = rows[index];
+        const res = await deleteStep(admin, target?.id ?? '');
+        expect(res.status).toBe(200);
+        return check();
+      };
+      const rename = async (index: number) => {
+        const rows = await stepsIn(labTenantId);
+        const target = rows[index];
+        const res = await renameStep(admin, target?.id ?? '', {
+          revision: target?.revision ?? 1,
+          title: `${TITLE}R${n}-${index}`,
+        });
+        expect(res.status).toBe(200);
+        return check();
+      };
+
+      for (let i = 0; i < 6; i += 1) await add();
+      await drop(2);
+      await rename(0);
+      await add();
+      await add();
+      await drop(0);
+      await rename(3);
+      await drop(4);
+      await add();
+      await rename(0);
+      await drop(1);
+      await drop(0);
+      const rows = await add();
+      expect(rows.length).toBeGreaterThan(1);
+    });
+  }, 90_000);
+});
+
+describe('12.1-08 D-627: the default step carries one title whoever creates it', () => {
+  it('the service-created default and the trigger-created default are titled the same literal', async () => {
+    await withProfileForm(labTenantId, async () => {
+      const ctx = { userId: adminUserId, tenantId: labTenantId, role: 'admin_tenant' as const };
+
+      // A form with no step: the service creates the default one at position 1, and asks it twice for the same.
+      expect(await stepsIn(labTenantId)).toEqual([]);
+      const serviceId = await withTenantTx(ctx, (tx) => ensureDefaultStep(tx, labTenantId));
+      const sameId = await withTenantTx(ctx, (tx) => ensureDefaultStep(tx, labTenantId));
+      expect(sameId).toBe(serviceId);
+      const [fromService] = await stepsIn(labTenantId);
+      expect(fromService).toMatchObject({ id: serviceId, position: 1, revision: 1 });
+      expect(fromService?.title).toBe(PROFILE_FORM_DEFAULT_STEP_TITLE);
+      expect(PROFILE_FORM_DEFAULT_STEP_TITLE).toBe('Informações gerais');
+      await adminSql`delete from public.profile_form_steps where id = ${serviceId}::uuid`;
+
+      // A legacy-shaped insert that names no step: the BEFORE INSERT trigger creates the default one.
+      await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}Legada`,
+      });
+      const [fromTrigger] = await stepsIn(labTenantId);
+      expect(fromTrigger?.title).toBe(fromService?.title);
+      expect(fromTrigger?.position).toBe(1);
+    });
+  }, 30_000);
+});
+
+describe('12.1-08 the guard chain of the steps routes (D-596)', () => {
+  it('a member and a support_tenant are 403 on create, rename and delete, and nothing is written', async () => {
+    const support = await person('support_tenant');
+    const member = await person('member');
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const step = await stepCreated(admin, `${TITLE}Dele`);
+      for (const who of [support, member]) {
+        const made = await createStep(who, `${TITLE}intruso`);
+        expect(made.status).toBe(403);
+        const renamed = await renameStep(who, step.id, {
+          revision: 1,
+          title: `${TITLE}sequestrada`,
+        });
+        expect(renamed.status).toBe(403);
+        const removed = await deleteStep(who, step.id);
+        expect(removed.status).toBe(403);
+      }
+      expect(await stepsIn(labTenantId)).toEqual([
+        { id: step.id, title: `${TITLE}Dele`, position: 1, revision: 1 },
+      ]);
+    });
+  }, 30_000);
+
+  it('the module off is 404 MODULE_DISABLED on create, rename and delete, even to the admin, and nothing is written', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(
+      labTenantId,
+      async () => {
+        const id = crypto.randomUUID();
+        for (const res of [
+          await createStep(admin, `${TITLE}off`),
+          await renameStep(admin, id, { revision: 1, title: `${TITLE}off` }),
+          await deleteStep(admin, id),
+        ]) {
+          expect(res.status).toBe(404);
+          expect(await code(res)).toBe('MODULE_DISABLED');
+        }
+        expect(await stepsIn(labTenantId)).toEqual([]);
+      },
+      { enabled: false },
+    );
+  }, 30_000);
+
+  it('seedProfileFormStep builds a step the list shows', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const id = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}Semeada` });
+      const list = await listOf(admin);
+      expect(list.steps).toEqual([
+        { id, title: `${TITLE}Semeada`, position: 1, revision: 1, questionCount: 0 },
+      ]);
     });
   }, 30_000);
 });
