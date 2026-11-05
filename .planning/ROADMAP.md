@@ -1635,7 +1635,7 @@ Plans:
 **Scope**: Post-MVP and additive. The web app, the PWA and the API keep working unchanged for a browser: nothing in the web is migrated, moved or removed, and a tenant without a native app is not affected. The app is a third client of `/v1/*`, beside the web BFF. Decisions: `13-CONTEXT.md` (D-600..D-619; D-616..D-619 were decided on 2026-11-04 after the research: the minimum report and block slice pulled from Phase 11, the purchase switch off by default, the shell-owned offline feed, the protected GitHub macOS build).
 **Depends on**: Phase 7 (Realtime, notifications and Web Push), Phase 08.1 (membership chosen by host), Phase 09.2 (the tenant's own Supabase project: the app signs in against the project the by-host answer names), Phase 12 (the profile form gate the app must honour)
 **Requirements**: NATIVE-01, NATIVE-02, NATIVE-03, NATIVE-04, NATIVE-05, NATIVE-06, NATIVE-07, NATIVE-08, NATIVE-09, NATIVE-10, NATIVE-11, NATIVE-12, NATIVE-13, NATIVE-14, NATIVE-15, NATIVE-16, NATIVE-17, NATIVE-18, NATIVE-19, NATIVE-20, NATIVE-21, NATIVE-22, NATIVE-23, NATIVE-24, NATIVE-25, NATIVE-26, NATIVE-27, NATIVE-28, NATIVE-29, NATIVE-30, NATIVE-31, NATIVE-32, NATIVE-33, NATIVE-34, NATIVE-35, NATIVE-36
-**Plans:** 5/32 plans executed
+**Plans:** 6/32 plans executed
 **Success Criteria** (settled in `/gsd-discuss-phase 13`, 2026-11-03; decisions in `13-CONTEXT.md`):
 
   1. A member installs the tenant's app (its name, icon, splash and colors), signs in, recovers a forgotten password, confirms the account and accepts an invite through the web's own pages inside the app, and lands on that tenant's Início. The app is fixed to the tenant's host: no community picker, and a session whose membership does not belong to that tenant is refused like `TENANT_HOST_MISMATCH`. The refusals `MEMBERSHIP_BLOCKED`, `MEMBERSHIP_INVITED`, `SUBSCRIPTION_PENDING`, `PROFILE_FORM_PENDING` and `TENANT_SUSPENDED|PREPARING|UPDATING|UNAVAILABLE` each land on the screen the web shows (D-608).
@@ -1672,7 +1672,7 @@ Plans:
 - [ ] 13-04-PLAN.md — Wave 0: prerequisites, nine real-device and real-domain spikes, proof documents (wave 3)
 - [ ] 13-07-PLAN.md — Account deletion schema: request, cancel, deadline, anonymisation in place, pgTAP (wave 3)
 - [x] 13-09-PLAN.md — Core apps module and the platform App routes, write-only credentials (wave 3)
-- [ ] 13-11-PLAN.md — Native device save and delete through the existing notifications route (wave 3)
+- [x] 13-11-PLAN.md — Native device save and delete through the existing notifications route (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -1749,7 +1749,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
-| 13. App nativo iOS e Android por tenant (white-label) | 5/32 | In Progress|  |
+| 13. App nativo iOS e Android por tenant (white-label) | 6/32 | In Progress|  |
 
 ---
 *Roadmap created: 2026-09-11*
