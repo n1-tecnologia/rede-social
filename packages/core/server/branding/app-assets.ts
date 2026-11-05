@@ -137,3 +137,41 @@ export async function deriveStoreIcon(input: Buffer, opts: StoreIconOptions): Pr
 
   return { appStore1024, play512 };
 }
+
+// ---- RED stubs (plan 13-24 task 2): deliberately inert, fully replaced in GREEN ----------------------
+const INERT_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+export type SplashOptions = {
+  primary: string;
+  onPrimary: string;
+  displayName: string;
+  mime?: string;
+};
+export type SplashMode = 'logo' | 'name';
+export type SplashResult = { png: Buffer; mode: SplashMode };
+export type NotificationIconResult = { png: Buffer; quality: 'ok' | 'fallback' };
+
+export function wrapName(_name: string, _maxLines = 3, _maxCharsPerLine = 14): string[] {
+  return [];
+}
+export async function deriveSplash(
+  _input: Buffer | null,
+  _opts: SplashOptions,
+): Promise<SplashResult> {
+  return { png: INERT_PNG, mode: 'logo' };
+}
+export async function deriveAdaptiveForeground(
+  _input: Buffer,
+  _opts: { mime?: string } = {},
+): Promise<Buffer> {
+  return INERT_PNG;
+}
+export async function deriveNotificationIcon(
+  _input: Buffer,
+  _opts: { mime?: string } = {},
+): Promise<NotificationIconResult> {
+  return { png: INERT_PNG, quality: 'ok' };
+}
