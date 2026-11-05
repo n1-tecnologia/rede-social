@@ -7,7 +7,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { form, options, question } from '@/lib/profile-form/test-fixtures';
+import { form, options, question, uuid } from '@/lib/profile-form/test-fixtures';
 import { ProfileForm, type ProfileFormProps } from './ProfileForm';
 
 /**
@@ -522,5 +522,175 @@ describe('the accessibility floor (UI-D-596, PFORM-26)', () => {
       expect(text, file).not.toContain(['dangerously', 'SetInnerHTML'].join(''));
       expect(text, file).not.toMatch(/local(Storage)|session(Storage)/);
     }
+  });
+});
+
+const S1 = uuid(701);
+const S2 = uuid(702);
+const S3 = uuid(703);
+const steps = (...titles: string[]) =>
+  [S1, S2, S3].slice(0, titles.length).map((id, index) => ({ id, title: titles[index] as string }));
+
+describe('the stepper: Avançar saves the step, Concluir finishes (D-629, UI-D-653, UI-D-654)', () => {
+  const twoSteps = () => {
+    const name = question('short_text', { title: 'Nome', required: true, stepId: S1 });
+    const city = question('short_text', { title: 'Cidade', stepId: S1 });
+    const phone = question('short_text', { title: 'Telefone', required: true, stepId: S2 });
+    return {
+      name,
+      city,
+      phone,
+      read: form([name, city, phone], { steps: steps('Sobre você', 'Contato') }),
+    };
+  };
+
+  it('shows the first step only, with progress, the step heading and Avançar (no Voltar)', () => {
+    const { read } = twoSteps();
+    show(read, { title: 'Complete seu perfil' });
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'Sobre você' })).toBeTruthy();
+    expect(screen.getByLabelText('Nome')).toBeTruthy();
+    expect(screen.queryByLabelText('Telefone')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Avançar' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Voltar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Salvar' })).toBeNull();
+    expect(
+      screen.getByText('Suas respostas de cada etapa ficam salvas quando você avança.'),
+    ).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Sobre você' })).toBeTruthy();
+  });
+
+  it('Avançar validates only the visible questions of this step and saves nothing when one is wrong', async () => {
+    const { read } = twoSteps();
+    const { container } = show(read);
+    await save(container);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(screen.getByText('Revise 1 campo antes de salvar.')).toBeTruthy();
+    expect(screen.getAllByText('Falta responder')).toHaveLength(1);
+    // The step after is still not shown and the member stays here.
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+  });
+
+  it('Avançar sends the stepId and only the answers of this step, then the next step takes focus on its h2', async () => {
+    const { name, city, read } = twoSteps();
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(read, { next: '/post/abc' });
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Ana' } });
+    await save(container);
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.save.mock.calls[0]?.[0]).toEqual({
+      formEtag: 'etag-1',
+      stepId: S1,
+      answers: { [name.id]: 'Ana', [city.id]: null },
+      next: '/post/abc',
+      mode: 'first',
+    });
+    // No toast, no navigation: the member moves to the next step.
+    expect(mocks.flash).not.toHaveBeenCalled();
+    expect(mocks.push).not.toHaveBeenCalled();
+    const heading = screen.getByRole('heading', { level: 2, name: 'Contato' });
+    expect(document.activeElement).toBe(heading);
+    expect(screen.getByText('Etapa 2 de 2')).toBeTruthy();
+    expect(screen.getByLabelText('Telefone')).toBeTruthy();
+    expect(screen.queryByLabelText('Nome')).toBeNull();
+  });
+
+  it('the last step reads Concluir, shows Voltar, hides the saved hint and runs the success path', async () => {
+    const { phone, read } = twoSteps();
+    mocks.save.mockResolvedValueOnce({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(read);
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Ana' } });
+    await save(container);
+    expect(screen.getByRole('button', { name: 'Concluir' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Voltar' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Avançar' })).toBeNull();
+    expect(screen.queryByText(/ficam salvas quando você avança/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Telefone'), { target: { value: '1199999' } });
+    mocks.save.mockResolvedValueOnce({ ok: true, destination: '/inicio' });
+    await save(container);
+    expect(mocks.save.mock.calls[1]?.[0]).toMatchObject({
+      stepId: S2,
+      answers: { [phone.id]: '1199999' },
+    });
+    expect(mocks.flash).toHaveBeenCalledWith(
+      { tone: 'success', message: 'Respostas salvas.' },
+      '/inicio',
+    );
+    expect(mocks.push).toHaveBeenCalledWith('/inicio');
+  });
+
+  it('a middle step is saved and advanced even when the gate already reports a destination', async () => {
+    const a = question('short_text', { title: 'A', stepId: S1 });
+    const b = question('short_text', { title: 'B', stepId: S2 });
+    const c = question('short_text', { title: 'C', stepId: S3 });
+    mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
+    const { container } = show(form([a, b, c], { steps: steps('Um', 'Dois', 'Três') }));
+    await save(container);
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(screen.getByText('Etapa 2 de 3')).toBeTruthy();
+  });
+
+  it('Voltar never validates or saves, and brings back the unsaved draft', async () => {
+    const { read } = twoSteps();
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(read);
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Ana' } });
+    await save(container);
+    fireEvent.change(screen.getByLabelText('Telefone'), { target: { value: 'rascunho' } });
+    mocks.save.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }));
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { level: 2, name: 'Sobre você' })).toBeTruthy();
+    expect((screen.getByLabelText('Nome') as HTMLInputElement).value).toBe('Ana');
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 2 }));
+    // The draft typed on the step the member left is still in state, and in no store.
+    await save(container);
+    expect((screen.getByLabelText('Telefone') as HTMLInputElement).value).toBe('rascunho');
+    expect(window.localStorage.length + window.sessionStorage.length).toBe(0);
+  });
+
+  it('a form with one step renders exactly as Phase 12: one card, one Salvar, no progress, no step title', async () => {
+    const a = question('short_text', { title: 'Única', required: true });
+    mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
+    const { container } = show(form([a]));
+    expect(screen.queryByText(/Etapa \d de/)).toBeNull();
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+    expect(screen.queryByRole('region')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Voltar' })).toBeNull();
+    expect(screen.queryByText(/ficam salvas quando você avança/)).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Salvar' })).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText('Única'), { target: { value: 'x' } });
+    await save(container);
+    expect(mocks.save.mock.calls[0]?.[0]).not.toHaveProperty('stepId');
+    expect(mocks.push).toHaveBeenCalledWith('/inicio');
+  });
+
+  it('several configured steps with a path of one: the heading shows, progress does not, the button is Salvar', async () => {
+    const a = question('short_text', { title: 'A', stepId: S1 });
+    const opener = question('yes_no', { title: 'Abre?', stepId: S1 });
+    const hidden = question('short_text', {
+      title: 'Escondida',
+      stepId: S2,
+      condition: { questionId: opener.id, values: ['true'] },
+    });
+    mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
+    const { container } = show(form([a, opener, hidden], { steps: steps('Um', 'Dois') }));
+    expect(screen.getByRole('heading', { level: 2, name: 'Um' })).toBeTruthy();
+    expect(screen.queryByText(/Etapa \d de/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Salvar' })).toBeTruthy();
+    await save(container);
+    expect(mocks.save.mock.calls[0]?.[0]).toMatchObject({ stepId: S1 });
+    expect(mocks.push).toHaveBeenCalledWith('/inicio');
+  });
+
+  it('edit mode keeps the one-card layout until plan 15: every question, one Salvar, no stepper', () => {
+    const a = question('short_text', { title: 'A', stepId: S1, answer: 'x' });
+    const b = question('short_text', { title: 'B', stepId: S2, answer: 'y' });
+    show(form([a, b], { mode: 'edit', missingRequired: 0, steps: steps('Um', 'Dois') }));
+    expect(screen.getByLabelText('A')).toBeTruthy();
+    expect(screen.getByLabelText('B')).toBeTruthy();
+    expect(screen.queryByText(/Etapa \d de/)).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Salvar' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Avançar' })).toBeNull();
   });
 });

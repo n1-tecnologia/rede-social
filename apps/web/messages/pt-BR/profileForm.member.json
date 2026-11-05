@@ -67,6 +67,13 @@
       "offline": "Você está sem conexão. Suas respostas continuam aqui; salve quando voltar.",
       "saveFailed": "Não foi possível salvar agora. Suas respostas continuam aqui. Tente de novo.",
       "changed": "O formulário mudou enquanto você respondia. Atualizamos a lista; confira e salve de novo.",
+      "stepper": {
+        "progress": "Etapa {current} de {total}",
+        "back": "Voltar",
+        "next": "Avançar",
+        "finish": "Concluir",
+        "savedHint": "Suas respostas de cada etapa ficam salvas quando você avança."
+      },
       "cancel": "Cancelar",
       "home": "Ir para o início",
       "retry": "Tentar de novo",

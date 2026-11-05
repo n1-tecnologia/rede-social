@@ -46,6 +46,64 @@ describe('saveProfileFormAction: the request', () => {
   });
 });
 
+describe('saveProfileFormAction: the step save (12.1, D-629, D-631)', () => {
+  const STEP = uuid(701);
+  const MISSING = uuid(5);
+
+  it('sends the stepId with the contract body, and omits the key when no step is named', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { missingRequired: 0, missingQuestionIds: [] }));
+    await saveProfileFormAction({ ...base, stepId: STEP });
+    const [, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      formEtag: 'etag-1',
+      stepId: STEP,
+      answers: { [A]: 'x' },
+    });
+    await saveProfileFormAction(base);
+    const [, again] = mocks.apiFetch.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(String(again.body))).not.toHaveProperty('stepId');
+  });
+
+  it('refuses a stepId that is not a uuid before any request', async () => {
+    expect(await saveProfileFormAction({ ...base, stepId: 'nope' })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('missingRequired > 0 returns no destination, with the ids the gate reported', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      json(200, { missingRequired: 1, missingQuestionIds: [MISSING] }),
+    );
+    expect(await saveProfileFormAction({ ...base, stepId: STEP, next: '/post/abc' })).toEqual({
+      ok: true,
+      destination: null,
+      missingQuestionIds: [MISSING],
+    });
+  });
+
+  it('missingRequired === 0 keeps the validated destination exactly as before', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { missingRequired: 0, missingQuestionIds: [] }));
+    expect(await saveProfileFormAction({ ...base, stepId: STEP, next: '//evil.com' })).toEqual({
+      ok: true,
+      destination: '/inicio',
+    });
+    expect(await saveProfileFormAction({ ...base, stepId: STEP, next: '/post/abc' })).toEqual({
+      ok: true,
+      destination: '/post/abc',
+    });
+  });
+
+  it('an empty 200 body (a module turned off) still continues to the destination', async () => {
+    mocks.apiFetch.mockResolvedValue(new Response(null, { status: 200 }));
+    expect(await saveProfileFormAction({ ...base, stepId: STEP })).toEqual({
+      ok: true,
+      destination: '/inicio',
+    });
+  });
+});
+
 describe('saveProfileFormAction: the destination (T-12-29)', () => {
   beforeEach(() => {
     mocks.apiFetch.mockResolvedValue(json(200, { missingRequired: 0 }));

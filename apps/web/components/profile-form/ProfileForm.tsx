@@ -3,14 +3,15 @@
 import type {
   MemberForm,
   MemberQuestion,
+  MemberStep,
   ProfileFormIssue,
 } from '@rede-social/contracts/profile-form';
-import { Button, buttonClasses, Card, EmptyState, flashToast } from '@rede-social/ui';
-import { CircleAlert, CircleCheck, Eye, WifiOff } from 'lucide-react';
+import { Button, buttonClasses, Card, cn, EmptyState, flashToast } from '@rede-social/ui';
+import { ArrowLeft, ArrowRight, CircleAlert, CircleCheck, Eye, WifiOff } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { type FormEvent, useEffect, useRef, useState, useTransition } from 'react';
+import { type FormEvent, useEffect, useId, useRef, useState, useTransition } from 'react';
 import { saveProfileFormAction } from '@/app/(auth)/completar-perfil/actions';
 import {
   type Answers,
@@ -24,7 +25,17 @@ import {
   validateAll,
   wireAnswers,
 } from '@/lib/profile-form/form-state';
+import {
+  isLastStep,
+  nextStep,
+  previousStep,
+  showProgress,
+  showSteps,
+  stepPath,
+} from '@/lib/profile-form/steps';
+import { visibleQuestionIds } from '@/lib/profile-form/visibility';
 import { QuestionField, questionDomId } from './QuestionField';
+import { StepProgress } from './StepProgress';
 
 /**
  * The member's completion screen as ONE form (12-12, D-582, D-583, UI-D-580..UI-D-588): every active
@@ -37,6 +48,14 @@ import { QuestionField, questionDomId } from './QuestionField';
  * storage, a URL, a log or a toast; the only thing that leaves is the save action's body. The destination
  * after a save is whatever the server action returns (T-12-29): this component never reads `next` to
  * navigate. Every string is React text from the catalog (UI-D-598).
+ *
+ * **12.1: the first fill and the return are a stepper (D-628, D-629, D-630; UI-D-653, UI-D-654).** The layout is
+ * chosen from the API's `mode`, never from the URL: `first` and `returning` walk the steps of the member's path
+ * one at a time ("Avançar" validates the visible questions of the step, then saves the step with its `stepId`);
+ * `edit` and the builder's preview keep the one-card layout of Phase 12. A form with a single configured step
+ * has no step chrome at all and behaves exactly as Phase 12. The path comes from the pure `stepPath` and the
+ * visibility rule from the contracts; the server revalidates every save and the SQL gate is the authority
+ * (T-12.1-16).
  */
 
 export interface ProfileFormProps {
@@ -49,9 +68,15 @@ export interface ProfileFormProps {
   /** The page heading and intro (the heading takes focus on mount). Absent in the preview. */
   title?: string;
   intro?: string;
+  /**
+   * `stepper` walks the steps of the member's path; `scroll` is the one-card layout. Absent: the stepper for
+   * `first` and `returning` (outside the preview), the one card for `edit` and for the preview.
+   */
+  layout?: 'stepper' | 'scroll';
 }
 
 type View = {
+  steps: MemberStep[];
   questions: MemberQuestion[];
   formEtag: string;
   mode: 'first' | 'returning' | 'edit';
@@ -62,6 +87,7 @@ const ALERT_CLASS = 'rounded-xl border border-danger/40 bg-danger/5 p-4 text-sm 
 
 function viewOf(form: MemberForm): View {
   return {
+    steps: form.steps,
     questions: form.questions,
     formEtag: form.formEtag,
     mode: form.mode === 'none' ? 'first' : form.mode,
@@ -75,6 +101,23 @@ function blankAnswers(form: Pick<MemberForm, 'questions'>): Answers {
   return answers;
 }
 
+/**
+ * The ordered step ids the member walks: the shared `stepPath` over the drafts, plus the `pinned` steps (the
+ * ones already visited in this session) that still hold a visible question. The pins keep a step on a
+ * returning path after the member answers what was missing in it, so the progress count does not shrink under
+ * her while she types.
+ */
+function walkPath(view: View, answers: Answers, pinned: ReadonlySet<string>): string[] {
+  const base = new Set(stepPath(view, answers, view.mode));
+  const visible = visibleQuestionIds(view, answers);
+  const holdsVisible = new Set(
+    view.questions.filter((question) => visible.has(question.id)).map((q) => q.stepId),
+  );
+  return view.steps
+    .filter((step) => base.has(step.id) || (pinned.has(step.id) && holdsVisible.has(step.id)))
+    .map((step) => step.id);
+}
+
 function without<T>(record: Record<string, T>, key: string): Record<string, T> {
   return Object.fromEntries(Object.entries(record).filter(([id]) => id !== key));
 }
@@ -86,6 +129,7 @@ export function ProfileForm({
   onClose,
   title,
   intro,
+  layout,
 }: ProfileFormProps) {
   const t = useTranslations('profileForm.member');
   const router = useRouter();
@@ -101,8 +145,17 @@ export function ProfileForm({
   const [pending, startTransition] = useTransition();
   const [online, setOnline] = useState(true);
   const [summaryTick, setSummaryTick] = useState(0);
+  const [currentStepId, setCurrentStepId] = useState<string | null>(
+    () => walkPath(viewOf(form), answers, new Set())[0] ?? null,
+  );
+  const [pinned, setPinned] = useState<ReadonlySet<string>>(
+    () => new Set(currentStepId === null ? [] : [currentStepId]),
+  );
+  const [focusTick, setFocusTick] = useState(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
+  const stepHeadingId = useId();
 
   // The heading takes focus on mount so a screen reader starts at the top (UI-D-596).
   useEffect(() => {
@@ -126,8 +179,37 @@ export function ProfileForm({
     if (summaryTick > 0) summaryRef.current?.focus();
   }, [summaryTick]);
 
+  // On every step change focus moves to the new step's heading and the page scrolls to it (UI-D-654, UI-D-660).
+  useEffect(() => {
+    if (focusTick === 0) return;
+    const heading = stepHeadingRef.current;
+    heading?.focus();
+    heading?.scrollIntoView?.({ block: 'start' });
+  }, [focusTick]);
+
   const { questions } = view;
   const locked = pending;
+  const wantsStepper = layout ? layout === 'stepper' : !preview && view.mode !== 'edit';
+  const path = wantsStepper ? walkPath(view, answers, pinned) : [];
+  const stepperOn = wantsStepper && path.length > 0;
+  const currentId = stepperOn
+    ? currentStepId !== null && path.includes(currentStepId)
+      ? currentStepId
+      : (path[0] ?? null)
+    : null;
+  const chrome = stepperOn && showSteps(view);
+  const visible = visibleQuestionIds(view, answers);
+  const stepQuestions = questions.filter(
+    (question) => visible.has(question.id) && (!chrome || question.stepId === currentId),
+  );
+  const scope = chrome
+    ? new Set(questions.filter((q) => q.stepId === currentId).map((q) => q.id))
+    : undefined;
+  const lastStep = !stepperOn || (currentId !== null && isLastStep(path, currentId));
+  const singleStep = !stepperOn || path.length === 1;
+  const previousId = stepperOn && currentId !== null ? previousStep(path, currentId) : null;
+  const submitLabel = singleStep ? t('save') : lastStep ? t('stepper.finish') : t('stepper.next');
+  const stepTitle = view.steps.find((step) => step.id === currentId)?.title ?? '';
   const errorCount = Object.keys(errors).length;
   const firstInvalid = firstInvalidId(questions, errors);
   const isFlagged = (question: MemberQuestion) =>
@@ -156,11 +238,26 @@ export function ProfileForm({
       ?.focus();
   }
 
+  /** Moves to a step of the path: the new heading takes focus, the old errors go away (UI-D-654). */
+  function goToStep(stepId: string) {
+    setPinned((previous) => new Set([...previous, ...(currentId ? [currentId] : []), stepId]));
+    setCurrentStepId(stepId);
+    setErrors({});
+    setNotice(null);
+    setFocusTick((tick) => tick + 1);
+  }
+
+  /** "Voltar" never validates and never saves: the drafts stay in state (UI-D-654, T-12.1-11). */
+  function goBack() {
+    if (pending || previousId === null) return;
+    goToStep(previousId);
+  }
+
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (preview || pending || !online) return;
     setNotice(null);
-    const found = validateAll(questions, answers);
+    const found = validateAll(questions, answers, scope);
     if (Object.keys(found).length > 0) {
       showErrors(found);
       return;
@@ -168,11 +265,22 @@ export function ProfileForm({
     startTransition(async () => {
       const result = await saveProfileFormAction({
         formEtag: view.formEtag,
-        answers: wireAnswers(questions, answers),
+        ...(chrome && currentId ? { stepId: currentId } : {}),
+        answers: wireAnswers(questions, answers, scope),
         next,
         mode: view.mode,
       });
       if (result.ok) {
+        // Not the last step: the save is stored and the member moves on, whatever the gate says (D-629).
+        if (!lastStep) {
+          const to = currentId === null ? null : nextStep(path, currentId);
+          if (to !== null) goToStep(to);
+          return;
+        }
+        if (result.destination === null) {
+          setNotice('failed');
+          return;
+        }
         // The toast crosses the navigation (it is shown by the screen the member lands on).
         const pathname = new URL(result.destination, window.location.href).pathname;
         flashToast({ tone: 'success', message: t('saved') }, pathname);
@@ -191,8 +299,21 @@ export function ProfileForm({
       if (result.code === 'changed') {
         const merged = mergeFreshForm({ questions }, answers, result.form);
         const surviving = new Set(merged.form.questions.map((question) => question.id));
-        setView(viewOf(merged.form));
+        const freshView = viewOf(merged.form);
+        const freshPins = new Set([...pinned, ...(currentId ? [currentId] : [])]);
+        setView(freshView);
         setAnswers(merged.answers);
+        setPinned(freshPins);
+        // Stay on the step; if it no longer holds a visible question, move to the next step of the path.
+        if (currentId !== null) {
+          const freshPath = walkPath(freshView, merged.answers, freshPins);
+          const rank = (id: string) => freshView.steps.findIndex((step) => step.id === id);
+          setCurrentStepId(
+            freshPath.includes(currentId)
+              ? currentId
+              : (freshPath.find((id) => rank(id) > rank(currentId)) ?? freshPath.at(-1) ?? null),
+          );
+        }
         setErrors({});
         setFlagged(
           (previous) =>
@@ -223,12 +344,55 @@ export function ProfileForm({
     );
   }
 
+  const questionsCard = (
+    <Card className="flex flex-col gap-6 p-4">
+      {errorCount > 0 ? (
+        <div
+          ref={summaryRef}
+          role="alert"
+          tabIndex={-1}
+          className={`${ALERT_CLASS} flex flex-col items-start gap-1 outline-none`}
+        >
+          <p className="font-bold">{t('summary.title', { n: errorCount })}</p>
+          {firstInvalid ? (
+            <a
+              href={`#${questionDomId(firstInvalid)}`}
+              onClick={(event) => {
+                event.preventDefault();
+                focusFirstInvalid();
+              }}
+              className="inline-flex min-h-11 items-center font-bold underline"
+            >
+              {t('summary.jump')}
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+      {notice === 'changed' ? (
+        <p role="alert" className={ALERT_CLASS}>
+          {t('changed')}
+        </p>
+      ) : null}
+      {stepQuestions.map((question) => (
+        <QuestionField
+          key={question.id}
+          question={question}
+          draft={answers[question.id] ?? emptyDraft(question.type)}
+          onChange={(next) => setDraft(question, next)}
+          disabled={locked}
+          issue={errors[question.id] ?? null}
+          flagged={isFlagged(question)}
+        />
+      ))}
+    </Card>
+  );
+
   return (
     <form
       noValidate
       onSubmit={onSubmit}
       aria-busy={pending || undefined}
-      className="flex w-full flex-col gap-6"
+      className={cn('flex w-full flex-col', chrome ? 'gap-4' : 'gap-6')}
     >
       {!preview && title ? (
         <header className="flex flex-col gap-2">
@@ -258,7 +422,7 @@ export function ProfileForm({
           <CircleAlert aria-hidden size={16} className="shrink-0" />
           <p className="flex flex-col items-start">
             <span>{t('missing.notice', { n: view.missingRequired })}</span>
-            {firstFlagged ? (
+            {firstFlagged && !chrome ? (
               <a
                 href={`#${questionDomId(firstFlagged.id)}`}
                 className="inline-flex min-h-11 items-center font-bold text-brand underline"
@@ -270,46 +434,21 @@ export function ProfileForm({
         </div>
       ) : null}
 
-      <Card className="flex flex-col gap-6 p-4">
-        {errorCount > 0 ? (
-          <div
-            ref={summaryRef}
-            role="alert"
-            tabIndex={-1}
-            className={`${ALERT_CLASS} flex flex-col items-start gap-1 outline-none`}
-          >
-            <p className="font-bold">{t('summary.title', { n: errorCount })}</p>
-            {firstInvalid ? (
-              <a
-                href={`#${questionDomId(firstInvalid)}`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  focusFirstInvalid();
-                }}
-                className="inline-flex min-h-11 items-center font-bold underline"
-              >
-                {t('summary.jump')}
-              </a>
-            ) : null}
-          </div>
-        ) : null}
-        {notice === 'changed' ? (
-          <p role="alert" className={ALERT_CLASS}>
-            {t('changed')}
-          </p>
-        ) : null}
-        {questions.map((question) => (
-          <QuestionField
-            key={question.id}
-            question={question}
-            draft={answers[question.id] ?? emptyDraft(question.type)}
-            onChange={(next) => setDraft(question, next)}
-            disabled={locked}
-            issue={errors[question.id] ?? null}
-            flagged={isFlagged(question)}
+      {chrome ? (
+        <section aria-labelledby={stepHeadingId} className="flex flex-col gap-4">
+          <StepProgress
+            title={stepTitle}
+            headingId={stepHeadingId}
+            headingRef={stepHeadingRef}
+            current={currentId === null ? 1 : path.indexOf(currentId) + 1}
+            total={path.length}
+            showProgress={showProgress(path)}
           />
-        ))}
-      </Card>
+          {questionsCard}
+        </section>
+      ) : (
+        questionsCard
+      )}
 
       {!preview && !online ? (
         <p
@@ -330,6 +469,38 @@ export function ProfileForm({
         <Button type="button" variant="outline" size="lg" fullWidth onClick={onClose}>
           {t('preview.close')}
         </Button>
+      ) : chrome ? (
+        <>
+          <div className="flex gap-3">
+            {previousId !== null ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="shrink-0"
+                disabled={locked}
+                onClick={goBack}
+              >
+                <ArrowLeft aria-hidden size={18} />
+                {t('stepper.back')}
+              </Button>
+            ) : null}
+            <Button
+              type="submit"
+              variant="brand"
+              size="lg"
+              className="min-w-0 flex-1"
+              disabled={!online}
+              loading={pending}
+            >
+              {pending ? t('saving') : submitLabel}
+              {!pending && !lastStep ? <ArrowRight aria-hidden size={18} /> : null}
+            </Button>
+          </div>
+          {!lastStep ? (
+            <p className="text-xs font-normal text-text-tertiary">{t('stepper.savedHint')}</p>
+          ) : null}
+        </>
       ) : (
         <Button
           type="submit"
@@ -339,7 +510,7 @@ export function ProfileForm({
           disabled={!online}
           loading={pending}
         >
-          {pending ? t('saving') : t('save')}
+          {pending ? t('saving') : submitLabel}
         </Button>
       )}
     </form>

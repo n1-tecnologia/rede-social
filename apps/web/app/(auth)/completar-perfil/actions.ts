@@ -6,6 +6,7 @@ import {
   PROFILE_FORM_ISSUE_SET,
   type ProfileFormIssue,
   saveAnswersBodySchema,
+  saveAnswersResultSchema,
 } from '@rede-social/contracts/profile-form';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -21,6 +22,11 @@ import { safeNextPath } from '@/lib/safe-next-path';
  * else. A session or membership refusal follows the shipped navigation, OUTSIDE the try/catch (Next 16:
  * `redirect()` throws).
  *
+ * **12.1 (D-629, D-631): the server decides when the member is done.** A save with a `stepId` stores that step;
+ * the answer says how many visible required questions are still unanswered and which ones. Only
+ * `missingRequired === 0` returns the destination; otherwise the result is `destination: null` with the ids, and
+ * the screen moves to the next step or jumps to the first step that holds one of them.
+ *
  * **The destination has one source (T-12-29).** `next` is attacker-controlled; the client never reads it
  * for navigation and only goes where this action says. `safeNextPath` (same-origin relative path, no
  * `//`, no scheme, the form and the `(auth)` screens excluded) decides; an invalid or missing value
@@ -35,6 +41,8 @@ export type SaveProfileFormMode = 'first' | 'returning' | 'edit';
 
 export type SaveProfileFormInput = {
   formEtag: string;
+  /** The step being saved (12.1, D-629); absent keeps the whole-form save of Phase 12. */
+  stepId?: string;
   answers: Record<string, unknown>;
   next?: string | null;
   mode: SaveProfileFormMode;
@@ -42,6 +50,8 @@ export type SaveProfileFormInput = {
 
 export type SaveProfileFormResult =
   | { ok: true; destination: string }
+  /** The save worked but the gate still reports visible required questions: no destination yet (D-629, D-631). */
+  | { ok: true; destination: null; missingQuestionIds: string[] }
   | { ok: false; code: 'invalid'; errors: Record<string, ProfileFormIssue> }
   | { ok: false; code: 'changed'; form: MemberForm }
   | { ok: false; code: 'failed' };
@@ -76,6 +86,7 @@ export async function saveProfileFormAction(
 ): Promise<SaveProfileFormResult> {
   const body = saveAnswersBodySchema.safeParse({
     formEtag: input.formEtag,
+    stepId: input.stepId,
     answers: input.answers,
   });
   if (!body.success) return { ok: false, code: 'failed' };
@@ -91,7 +102,11 @@ export async function saveProfileFormAction(
     if (res.ok) {
       // A module turned off meanwhile answers 200 as a no-op: the member continues as on success.
       const fallback = input.mode === 'edit' ? '/perfil' : '/inicio';
-      result = { ok: true, destination: safeNextPath(input.next) ?? fallback };
+      const pending = saveAnswersResultSchema.safeParse(await res.json().catch(() => null));
+      result =
+        pending.success && pending.data.missingRequired > 0
+          ? { ok: true, destination: null, missingQuestionIds: pending.data.missingQuestionIds }
+          : { ok: true, destination: safeNextPath(input.next) ?? fallback };
     } else {
       const envelope = await readEnvelope(res);
       const reason = envelope?.details?.profileForm;
