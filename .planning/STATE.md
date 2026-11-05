@@ -4,11 +4,11 @@ current_phase: "12.1"
 current_phase_name: Perguntas condicionais e etapas no formulário de perfil
 current_plan: 19
 status: verifying
-stopped_at: "Phase 12.1: 12/19 plans done; 12.1-05 paused at the blocking sketch 018 gate (Igor's approval); plans 14-19 blocked on it"
-last_updated: "2026-11-05T23:35:31.718Z"
+stopped_at: Phase 12.1 executed 19/19; VERIFICATION human_needed (15/16), UAT 7 pending; review 0 blocker / 8 warnings; STATE pointer was moved from Phase 13 plan 14
+last_updated: "2026-11-05T23:53:38.791Z"
 last_activity: 2026-11-05
 last_activity_desc: Phase 12.1 execution started
-state_head: aa61dcf4a4195776aac1ec107a391dcc7ab9ad79
+state_head: 2b462fb1022acfcff82fda1e9a13b991bcd0d509
 progress:
   total_phases: 29
   completed_phases: 0
@@ -1241,6 +1241,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T21:48:06.173Z
-Stopped at: Phase 12.1: 12/19 plans done; 12.1-05 paused at the blocking sketch 018 gate (Igor's approval); plans 14-19 blocked on it
-Resume file: .planning/phases/12.1-perguntas-condicionais-e-etapas-no-formulario-de-perfil/12.1-05-PLAN.md
+Last session: 2026-11-05T23:53:38.011Z
+Stopped at: Phase 12.1 executed 19/19; VERIFICATION human_needed (15/16), UAT 7 pending; review 0 blocker / 8 warnings; STATE pointer was moved from Phase 13 plan 14
+Resume file: .planning/phases/12.1-perguntas-condicionais-e-etapas-no-formulario-de-perfil/12.1-UAT.md
