@@ -229,6 +229,22 @@ export function ProfileForm({
       (visible.has(question.id) || question.condition !== null) &&
       (!chrome || question.stepId === currentId),
   );
+  // Edit (and any one-scroll layout of a form with two or more steps): one titled section per step that holds a
+  // visible question, in step order (D-630, UI-D-658). The preview keeps the one card until plan 18.
+  const sectioned = !preview && !stepperOn && showSteps(view);
+  const sections = sectioned
+    ? view.steps
+        .map((step) => ({
+          step,
+          // A conditional question stays in the list while hidden so its reveal can animate out.
+          items: questions.filter(
+            (question) =>
+              question.stepId === step.id &&
+              (visible.has(question.id) || question.condition !== null),
+          ),
+        }))
+        .filter((section) => section.items.some((question) => visible.has(question.id)))
+    : [];
   const scope = chrome
     ? new Set(questions.filter((q) => q.stepId === currentId).map((q) => q.id))
     : undefined;
@@ -459,7 +475,9 @@ export function ProfileForm({
     return running;
   }
 
-  if (questions.length === 0) {
+  // Nothing to answer: no question at all, or none the member's answers leave visible (never an empty card or a
+  // bare heading, UI-D-658).
+  if (questions.length === 0 || (!preview && !stepperOn && visible.size === 0)) {
     return (
       <EmptyState
         variant="card"
@@ -477,8 +495,8 @@ export function ProfileForm({
     );
   }
 
-  const questionsCard = (
-    <Card className="flex flex-col gap-6 p-4">
+  const alerts = (
+    <>
       {errorCount > 0 ? (
         <div
           ref={summaryRef}
@@ -506,7 +524,13 @@ export function ProfileForm({
           {t('changed')}
         </p>
       ) : null}
-      {stepQuestions.map((question) => (
+    </>
+  );
+
+  const cardOf = (items: MemberQuestion[], withAlerts: boolean) => (
+    <Card className="flex flex-col gap-6 p-4">
+      {withAlerts ? alerts : null}
+      {items.map((question) => (
         <QuestionField
           key={question.id}
           question={question}
@@ -520,6 +544,7 @@ export function ProfileForm({
       ))}
     </Card>
   );
+  const questionsCard = cardOf(stepQuestions, true);
 
   return (
     <form
@@ -580,6 +605,27 @@ export function ProfileForm({
           />
           {questionsCard}
         </section>
+      ) : sectioned ? (
+        <div className="flex flex-col gap-6">
+          {sections.map((section, index) => {
+            const headingId = `${stepHeadingId}-${section.step.id}`;
+            return (
+              <section
+                key={section.step.id}
+                aria-labelledby={headingId}
+                className="flex flex-col gap-2"
+              >
+                <h2
+                  id={headingId}
+                  className="break-words text-base font-bold leading-tight text-text wrap-anywhere"
+                >
+                  {section.step.title}
+                </h2>
+                {cardOf(section.items, index === 0)}
+              </section>
+            );
+          })}
+        </div>
       ) : (
         questionsCard
       )}

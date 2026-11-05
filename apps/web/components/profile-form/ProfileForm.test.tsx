@@ -1370,3 +1370,188 @@ describe('the erase warning before a save that deletes a stored answer (D-624, D
     expect(document.body.textContent).not.toContain('Clínica Sol');
   });
 });
+
+describe('edit from the profile is ONE scroll with every step under its title (D-630, UI-D-658; PFORM-35)', () => {
+  const editForm = () => {
+    const opts = options('Tenho uma clínica', 'Estou aprendendo');
+    const opener = question('single_choice', {
+      title: 'Qual é o seu caso?',
+      options: opts,
+      stepId: S1,
+      answer: { optionIds: [opts[1]?.id as string], otherText: null },
+    });
+    const clinic = question('short_text', {
+      title: 'Nome da clínica',
+      stepId: S2,
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    const phone = question('short_text', { title: 'Telefone', stepId: S3, answer: '11999990000' });
+    return {
+      opener,
+      clinic,
+      phone,
+      opts,
+      read: form([opener, clinic, phone], {
+        mode: 'edit',
+        steps: steps('Informações gerais', 'Sobre a sua clínica', 'Contato'),
+      }),
+    };
+  };
+  const sectionHeadings = () =>
+    screen.queryAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
+
+  it('PFORM-35 ordering: a titled section per step that holds a visible question, in step order, one Salvar', () => {
+    const { read } = editForm();
+    show(read, { title: 'Minhas respostas' });
+    // The clinic step is closed for this member (Estou aprendendo): no heading and no card for it.
+    expect(sectionHeadings()).toEqual(['Informações gerais', 'Contato']);
+    expect(screen.queryByRole('region', { name: 'Sobre a sua clínica' })).toBeNull();
+    const first = screen.getByRole('region', { name: 'Informações gerais' });
+    const second = screen.getByRole('region', { name: 'Contato' });
+    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(second).getByLabelText('Telefone')).toBeTruthy();
+    expect(within(first).queryByLabelText('Telefone')).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Salvar' })).toHaveLength(1);
+    // No stepper chrome: no progress, no Avançar, no Voltar.
+    expect(screen.queryByText(/Etapa \d de \d/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Avançar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Voltar' })).toBeNull();
+  });
+
+  it('the h2 is 16/700 above its own card (p-4, gap-6) and the sections are gap-6 apart', () => {
+    const { read } = editForm();
+    show(read);
+    const heading = screen.getByRole('heading', { level: 2, name: 'Informações gerais' });
+    expect(heading.className).toContain('text-base');
+    expect(heading.className).toContain('font-bold');
+    expect(heading.className).toContain('break-words');
+    const section = heading.closest('section') as HTMLElement;
+    const card = section.querySelector('.p-4') as HTMLElement;
+    expect(card.className).toContain('flex flex-col gap-6');
+    expect(heading.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(section.parentElement?.className).toContain('gap-6');
+    expect(section.parentElement?.querySelectorAll(':scope > section')).toHaveLength(2);
+  });
+
+  it('with one configured step there is no h2 and one card: exactly Phase 12', () => {
+    const a = question('short_text', { title: 'Bio', answer: 'Oi' });
+    const b = question('short_text', { title: 'Cidade' });
+    const { container } = show(form([a, b], { mode: 'edit' }));
+    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
+    expect(container.querySelectorAll('section')).toHaveLength(0);
+    expect(container.querySelectorAll('.p-4')).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Salvar' })).toHaveLength(1);
+  });
+
+  it('PFORM-35 adjacency: two steps with the same title are two distinct sections', () => {
+    const a = question('short_text', { title: 'Cargo', stepId: S1 });
+    const b = question('short_text', { title: 'Cidade', stepId: S2 });
+    const { container } = show(form([a, b], { mode: 'edit', steps: steps('Dados', 'Dados') }));
+    expect(sectionHeadings()).toEqual(['Dados', 'Dados']);
+    const sections = container.querySelectorAll('section');
+    expect(sections).toHaveLength(2);
+    expect(sections[0]?.parentElement).toBe(sections[1]?.parentElement);
+    expect(sections[0]?.parentElement?.className).toContain('gap-6');
+    expect(sections[0]?.getAttribute('aria-labelledby')).not.toBe(
+      sections[1]?.getAttribute('aria-labelledby'),
+    );
+    expect(within(sections[0] as HTMLElement).getByLabelText('Cargo')).toBeTruthy();
+    expect(within(sections[1] as HTMLElement).getByLabelText('Cidade')).toBeTruthy();
+  });
+
+  it('conditions work live in place: a step opens with its h2 and card, and drops them when its last question closes', () => {
+    const { read } = editForm();
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(sectionHeadings()).toEqual(['Informações gerais', 'Sobre a sua clínica', 'Contato']);
+    expect(screen.getByLabelText('Nome da clínica')).toBeTruthy();
+    // Section order, with the neighbours keeping their spacing.
+    const sections = [...container.querySelectorAll('section')];
+    expect(sections.map((s) => s.querySelector('h2')?.textContent)).toEqual([
+      'Informações gerais',
+      'Sobre a sua clínica',
+      'Contato',
+    ]);
+    expect(sections[0]?.parentElement?.className).toContain('gap-6');
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    expect(sectionHeadings()).toEqual(['Informações gerais', 'Contato']);
+    expect(container.querySelectorAll('section')).toHaveLength(2);
+    expect(screen.queryByLabelText('Nome da clínica')).toBeNull();
+    // Focus stays on the opener and one polite announcement says what changed.
+    expect(liveRegion().textContent).toBe('Uma pergunta saiu da lista.');
+  });
+
+  it('PFORM-35 empty: no visible question shows the none state, never an empty card or a bare heading', () => {
+    const ghost = question('short_text', {
+      title: 'Fantasma',
+      stepId: S1,
+      condition: { questionId: uuid(99999), values: ['x'] },
+    });
+    const { container } = show(form([ghost], { mode: 'edit', steps: steps('Dados', 'Mais') }));
+    expect(screen.getByText('Não há perguntas para responder')).toBeTruthy();
+    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
+    expect(container.querySelectorAll('section')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Salvar' })).toBeNull();
+  });
+
+  it('a step with no question at all gets no heading and no card', () => {
+    const a = question('short_text', { title: 'Cargo', stepId: S2 });
+    show(form([a], { mode: 'edit', steps: steps('Vazia', 'Dados') }));
+    expect(sectionHeadings()).toEqual(['Dados']);
+  });
+
+  it('Salvar sends the whole form at once with NO stepId key, and goes where the server says', async () => {
+    const { opener, phone, read } = editForm();
+    mocks.save.mockResolvedValue({ ok: true, destination: '/perfil' });
+    const { container } = show(read, { next: '/perfil' });
+    fireEvent.change(screen.getByLabelText('Telefone'), { target: { value: '11888880000' } });
+    await save(container);
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    const body = mocks.save.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect('stepId' in body).toBe(false);
+    expect(body).toMatchObject({ formEtag: 'etag-1', mode: 'edit', next: '/perfil' });
+    expect(Object.keys(body.answers as object).sort()).toEqual([opener.id, phone.id].sort());
+    expect(mocks.push).toHaveBeenCalledWith('/perfil');
+  });
+
+  it('Salvar validates every visible question of every section before sending', async () => {
+    const a = question('short_text', { title: 'Cargo', required: true, stepId: S1 });
+    const b = question('short_text', { title: 'Cidade', required: true, stepId: S2 });
+    const { container } = show(form([a, b], { mode: 'edit', steps: steps('Um', 'Dois') }));
+    await save(container);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(screen.getByText('Revise 2 campos antes de salvar.')).toBeTruthy();
+  });
+
+  it('Salvar runs the erase warning with "Apagar e salvar" and lists the closed question title only', async () => {
+    const opts = options('Tenho uma clínica', 'Estou aprendendo');
+    const opener = question('single_choice', {
+      title: 'Qual é o seu caso?',
+      options: opts,
+      stepId: S1,
+      answer: { optionIds: [opts[0]?.id as string], otherText: null },
+    });
+    const clinic = question('short_text', {
+      title: 'Nome da clínica',
+      stepId: S2,
+      answer: 'Clínica Sol',
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    mocks.save.mockResolvedValue({ ok: true, destination: '/perfil' });
+    const { container } = show(
+      form([opener, clinic], { mode: 'edit', steps: steps('Caso', 'Clínica') }),
+    );
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await save(container);
+    expect(mocks.save).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Nome da clínica')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Clínica Sol');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Apagar e salvar' }));
+    });
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(Object.keys(mocks.save.mock.calls[0]?.[0] ?? {})).not.toContain('stepId');
+    expect(mocks.push).toHaveBeenCalledWith('/perfil');
+  });
+});
