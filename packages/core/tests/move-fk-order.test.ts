@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { type FkEdge, orderTables, SELF_REF_ORDER } from '../server/projects/move/fk-order';
 import { MoveError } from '../server/projects/move/types';
@@ -101,5 +102,83 @@ describe('orderTables (D-534, Pitfall 8)', () => {
   it('is not fooled by duplicate edges (composite keys produce one constraint, but two FKs may link a pair)', () => {
     const edges = [fk('b', 'a'), fk('b', 'a'), fk('b', 'a', true)];
     expect(orderTables(edges, ['b', 'a']).order).toEqual([['a'], ['b']]);
+  });
+});
+
+/**
+ * 12.1-03 (PFORM-40, T-12.1-08, research Pitfall 1): `profile_form_questions` now references ITSELF
+ * (`profile_form_questions_condition_fk`, `(tenant_id, condition_question_id) -> (tenant_id, id)`, NO ACTION,
+ * not deferrable) and references `profile_form_steps`. Without a `SELF_REF_ORDER` entry the planner would
+ * refuse every tenant move with `unsortable_tables`. The catalog below mirrors that part of the real one.
+ */
+describe('orderTables with the conditional questions (PFORM-40)', () => {
+  const edges = [
+    fk('profile_form_questions', 'profile_form_questions'),
+    fk('profile_form_questions', 'profile_form_steps'),
+    fk('profile_form_answers', 'profile_form_questions'),
+    fk('feed_comments', 'feed_comments'),
+    fk('feed_comments', 'feed_posts'),
+  ];
+  const tables = [
+    'profile_form_answers',
+    'profile_form_questions',
+    'profile_form_steps',
+    'feed_comments',
+    'feed_posts',
+  ];
+
+  it('PFORM-40 ordering: the questions table is plannable, steps come first, and the rule column is condition_question_id', () => {
+    expect(() => orderTables(edges, tables)).not.toThrow();
+    const result = orderTables(edges, tables);
+    const order = flat(result.order);
+    expect(order.indexOf('profile_form_steps')).toBeLessThan(
+      order.indexOf('profile_form_questions'),
+    );
+    expect(order.indexOf('profile_form_questions')).toBeLessThan(
+      order.indexOf('profile_form_answers'),
+    );
+    expect(result.selfReference).toEqual({
+      feed_comments: 'parent_depth',
+      profile_form_questions: 'condition_question_id',
+    });
+  });
+
+  it('PFORM-40 ordering: the entry value is pinned and sits directly after feed_comments', () => {
+    expect(SELF_REF_ORDER.profile_form_questions).toBe('condition_question_id');
+    expect(Object.keys(SELF_REF_ORDER)).toEqual(['feed_comments', 'profile_form_questions']);
+  });
+
+  it('PFORM-40 ordering: without the entry the same catalog is refused, so the entry is what makes it plannable', () => {
+    expect(() =>
+      orderTables(edges, tables, { selfRefOrder: { feed_comments: 'parent_depth' } }),
+    ).toThrowError(/unsortable_tables: profile_form_questions/);
+  });
+
+  it('PFORM-40 adjacency: openers are read before dependents, because the rule column is nullable and the read is "asc nulls first"', () => {
+    // An opener never carries a condition (D-622), so its `condition_question_id` is NULL and sorts first; the
+    // dependent names it. The rule the planner reports is the column of that read; the row-level order is proved
+    // against a real copy by plan 12 (`move-copy.test.ts`).
+    const { selfReference } = orderTables(edges, tables);
+    expect(selfReference.profile_form_questions).toBe('condition_question_id');
+    const copyRows = readFileSync(
+      new URL('../server/projects/move/copy-rows.ts', import.meta.url),
+      'utf8',
+    );
+    expect(copyRows).toContain('asc nulls first');
+  });
+
+  it('PFORM-40 empty: every other table is planned exactly as before, whether or not the new entry is present', () => {
+    const others = tables.filter((table) => !table.startsWith('profile_form_questions'));
+    const otherEdges = edges.filter(
+      (edge) => edge.child !== 'profile_form_questions' && edge.parent !== 'profile_form_questions',
+    );
+    const before = orderTables(otherEdges, others, {
+      selfRefOrder: { feed_comments: 'parent_depth' },
+    });
+    const after = orderTables(otherEdges, others);
+    expect(after).toEqual(before);
+    expect(after.selfReference).toEqual({ feed_comments: 'parent_depth' });
+    // The entry is one more key; the older one is untouched.
+    expect(SELF_REF_ORDER.feed_comments).toBe('parent_depth');
   });
 });
