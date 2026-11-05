@@ -298,3 +298,52 @@ export function parseBridgeMessage<S extends z.ZodType = typeof bridgeWebMessage
   const parsed = schema.safeParse(value);
   return parsed.success ? { ok: true, message: parsed.data } : { ok: false, reason: 'bad_shape' };
 }
+
+// --- TEMPORARY RED STUB (task 3), fully replaced in GREEN -------------------------------------------
+export type AppStateInput = {
+  held: { asc: boolean; play: boolean; apns: boolean };
+  links: { ios: LinkVerdict; android: LinkVerdict };
+  privacyUrl: boolean;
+  reviewer: boolean;
+  manual: {
+    appleAccount: boolean;
+    playAccount: boolean;
+    screenshots: boolean;
+    submitted: boolean;
+    published: boolean;
+  };
+};
+export type LinkVerdict = 'live' | 'missing_team' | 'missing_fingerprint' | 'no_host';
+export const APP_CHECKLIST_AUTO_KEYS: readonly string[] = [];
+export const APP_CHECKLIST_MANUAL_KEYS: readonly string[] = [];
+export const APP_CREDENTIAL_KINDS: readonly string[] = [];
+export const REMOVED_MEMBER_NAME = '';
+type Cut = { name: string; cut: boolean; length: number };
+export const deriveStoreName = (name: string): Cut => ({ name, cut: false, length: 0 });
+export const deriveIconLabel = (name: string | null | undefined, _display?: string): Cut => ({
+  name: name ?? '',
+  cut: false,
+  length: 0,
+});
+export const appState = (_input: AppStateInput): 'none' | 'preparing' | 'ready' | 'published' =>
+  'none';
+export const checklistCounts = (_input: AppStateInput): { done: number; total: number } => ({
+  done: 0,
+  total: 0,
+});
+export const linkVerdict = (
+  _platform: NativePlatform,
+  _data: { hasVerifiedPrimaryHost: boolean; teamId: string | null; fingerprint: string | null },
+): LinkVerdict => 'no_host';
+export const normalizeFingerprint = (_raw: string): string | null => null;
+export const isValidTeamId = (_raw: string): boolean => false;
+export const compareVersions = (_a: string, _b: string): number => 0;
+export const isBelowMinVersion = (_installed: string, _min: string): boolean => false;
+const emptyStub = z.object({}).strict();
+export const appVersionAnswerSchema = emptyStub;
+export const tenantBuildSchema = emptyStub;
+export const ascKeyBodySchema = emptyStub;
+export const playServiceAccountBodySchema = emptyStub;
+export const apnsKeyBodySchema = emptyStub;
+export const credentialAnswerSchema = emptyStub;
+export const appCredentialHeldSchema = emptyStub;
