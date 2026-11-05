@@ -1635,7 +1635,7 @@ Plans:
 **Requirements**: PFORM-27, PFORM-28, PFORM-29, PFORM-30, PFORM-31, PFORM-32, PFORM-33, PFORM-34, PFORM-35, PFORM-36, PFORM-37, PFORM-38, PFORM-39, PFORM-40, PFORM-41, PFORM-42 (plus UI-04 for the sketch gate)
 **Depends on:** Phase 12
 **Open design points (for /gsd-discuss-phase 12.1):** the hard gate (D-581, D-585) runs in SQL on every request as an anti-join, so a required question that is hidden by a condition must stop counting without a second round trip; what happens to the stored answer when a member changes the answer that opened it (keep, hide, or delete; D-587/D-588 promise that answers are never silently discarded); whether a condition may chain (B opens C); how the CSV export, the public answers block and the admin impact count treat hidden questions; whether a step is its own table or a column on the question; the step navigation in the member screen and in the edit-from-profile flow; a new sketch is needed (UI-04), since sketch 016 has no steps or condition editor.
-**Plans:** 4/19 plans executed (planned 2026-11-05)
+**Plans:** 7/19 plans executed (planned 2026-11-05)
 
 Decided in `/gsd-discuss-phase 12.1` on 2026-11-05 (`12.1-CONTEXT.md`, D-620..D-636): only dropdown, multiple choice, single choice and yes/no open questions; the condition lives on the shown question (any-of); one level, the opener first; answers that stop applying are deleted in the member's own save, archived dependents included, after a warning; a condition cannot be gained or changed on an answered question; steps are tenant rows and every question is in one; Avançar saves a step and the gate still decides; edit is one scroll; sketch 018 gates the web.
 
@@ -1654,15 +1654,15 @@ Plans:
 
 **Wave 3**
 
-- [ ] 12.1-06-PLAN.md — The two hand-written migrations: the default-step trigger and idempotent backfill with Igor's one-way literal, the token helper, the visibility-aware gate, the purge, the `_v2` lock and the guard with PF006 and PF007 (PFORM-27, 30, 31, 33, 40, `autonomous: false`)
+- [x] 12.1-06-PLAN.md — The two hand-written migrations: the default-step trigger and idempotent backfill with Igor's one-way literal, the token helper, the visibility-aware gate, the purge, the `_v2` lock and the guard with PF006 and PF007 (PFORM-27, 30, 31, 33, 40, `autonomous: false`)
 
 **Wave 4**
 
-- [ ] 12.1-07-PLAN.md — The `[BLOCKING]` local apply with Igor's word and pgTAP 225: the gate, the helper, the purge, the guard, the steps policies and the backfill replay (PFORM-27, 30, 31, 33, `autonomous: false`)
+- [x] 12.1-07-PLAN.md — The `[BLOCKING]` local apply with Igor's word and pgTAP 225: the gate, the helper, the purge, the guard, the steps policies and the backfill replay (PFORM-27, 30, 31, 33, `autonomous: false`)
 
 **Wave 5**
 
-- [ ] 12.1-08-PLAN.md — The steps API: create, rename, delete, the list with steps and each question's step, limits, isolation and the race (PFORM-27, 28, tracer)
+- [x] 12.1-08-PLAN.md — The steps API: create, rename, delete, the list with steps and each question's step, limits, isolation and the race (PFORM-27, 28, tracer)
 
 **Wave 6**
 
