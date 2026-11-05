@@ -794,3 +794,226 @@ describe('12.1-09 tracer: an admin moves a question across steps and an order th
     });
   }, 30_000);
 });
+
+// ── 12.1-09 Task 2: create in a step, move through an edit, replace on the layout ────────────────
+
+type MadeQuestion = {
+  id: string;
+  stepId: string;
+  position: number;
+  revision: number;
+  title: string;
+};
+
+const postQuestion = (p: Person, body: Record<string, unknown>, host: string = HOSTS.lab) =>
+  call(p, 'POST', '/v1/profile_form/questions', body, host);
+
+const patchQuestion = (
+  p: Person,
+  id: string,
+  body: Record<string, unknown>,
+  host: string = HOSTS.lab,
+) => call(p, 'PATCH', `/v1/profile_form/questions/${id}`, body, host);
+
+const madeBy = async (res: Response, status = 201): Promise<MadeQuestion> => {
+  expect(res.status, JSON.stringify(await res.clone().json())).toBe(status);
+  return (await res.json()) as MadeQuestion;
+};
+
+const countRows = async (tenantId: string) => {
+  const [questions] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.profile_form_questions where tenant_id = ${tenantId}::uuid`;
+  const [steps] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.profile_form_steps where tenant_id = ${tenantId}::uuid`;
+  return { questions: questions?.n ?? -1, steps: steps?.n ?? -1 };
+};
+
+describe('12.1-09 D-627: a new question lands at the end of the named step, the default being the last step', () => {
+  it('a create without stepId lands in the LAST step, a create with stepId lands at the end of THAT step, and every later question shifts by one', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const c = await seedQ('C', { stepId: s2, position: 2 });
+
+      const n1 = await madeBy(
+        await postQuestion(admin, { type: 'short_text', title: `${TITLE}N1` }),
+      );
+      expect(n1).toMatchObject({ stepId: s2, position: 3, revision: 1 });
+
+      const n2 = await madeBy(
+        await postQuestion(admin, { type: 'short_text', title: `${TITLE}N2`, stepId: s1 }),
+      );
+      expect(n2).toMatchObject({ stepId: s1, position: 2, revision: 1 });
+
+      const rows = await activeIn(labTenantId);
+      expect(idsOf(rows)).toEqual([a, n2.id, c, n1.id]);
+      expect(positionsOf(rows)).toEqual([1, 2, 3, 4]);
+      expect(rows.map((row) => row.step_id)).toEqual([s1, s1, s2, s2]);
+      // The question that only shifted keeps its revision (no step change).
+      expect(rows.map((row) => row.revision)).toEqual([1, 1, 1, 1]);
+    });
+  }, 30_000);
+
+  it('a create in a form with no step creates the default step through ensureDefaultStep and lands in it', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      expect((await listOf(admin)).steps).toEqual([]);
+      const made = await madeBy(
+        await postQuestion(admin, { type: 'short_text', title: `${TITLE}Sozinha` }),
+      );
+      const after = await listOf(admin);
+      expect(after.steps).toHaveLength(1);
+      expect(after.steps[0]).toMatchObject({
+        title: PROFILE_FORM_DEFAULT_STEP_TITLE,
+        position: 1,
+        questionCount: 1,
+      });
+      expect(made).toMatchObject({ stepId: after.steps[0]?.id, position: 1 });
+    });
+  }, 30_000);
+
+  it('T-12.1-10: a create naming a foreign tenant step or an unknown step is 400 unknown_step and writes nothing, beside the same-tenant positive control', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const mine = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}Minha` });
+      const theirs = await seedProfileFormStep({ tenantId: demoTenantId, title: `${TITLE}Deles` });
+      const before = await countRows(labTenantId);
+      const demoBefore = await countRows(demoTenantId);
+
+      for (const stepId of [theirs, crypto.randomUUID()]) {
+        const res = await postQuestion(admin, { type: 'short_text', title: `${TITLE}X`, stepId });
+        expect(res.status).toBe(400);
+        // A foreign and a missing id answer the same.
+        expect(await details(res)).toEqual({ profileForm: 'unknown_step' });
+      }
+      expect(await countRows(labTenantId)).toEqual(before);
+      expect(await countRows(demoTenantId)).toEqual(demoBefore);
+
+      const ok = await madeBy(
+        await postQuestion(admin, { type: 'short_text', title: `${TITLE}Ok`, stepId: mine }),
+      );
+      expect(ok.stepId).toBe(mine);
+    });
+  }, 30_000);
+});
+
+describe('12.1-09 D-627: an edit with stepId moves the question to the end of the target step', () => {
+  it('the move lands at the end of the target step and bumps the revision once, with or without another edit; the same step is a no-op', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const b = await seedQ('B', { stepId: s1, position: 2 });
+      const c = await seedQ('C', { stepId: s2, position: 3 });
+
+      const moved = await madeBy(await patchQuestion(admin, a, { revision: 1, stepId: s2 }), 200);
+      expect(moved).toMatchObject({ id: a, stepId: s2, position: 3, revision: 2 });
+      expect(idsOf(await activeIn(labTenantId))).toEqual([b, c, a]);
+      expect(positionsOf(await activeIn(labTenantId))).toEqual([1, 2, 3]);
+
+      // The same step: nothing changes, not even the revision.
+      const same = await madeBy(await patchQuestion(admin, a, { revision: 2, stepId: s2 }), 200);
+      expect(same).toMatchObject({ stepId: s2, position: 3, revision: 2 });
+
+      // A move plus a title edit is ONE revision bump, not two.
+      const both = await madeBy(
+        await patchQuestion(admin, b, { revision: 1, stepId: s2, title: `${TITLE}B renomeada` }),
+        200,
+      );
+      expect(both).toMatchObject({ id: b, stepId: s2, position: 3, revision: 2 });
+      expect(both.title).toBe(`${TITLE}B renomeada`);
+      expect(idsOf(await activeIn(labTenantId))).toEqual([c, a, b]);
+      expect(positionsOf(await activeIn(labTenantId))).toEqual([1, 2, 3]);
+      // The question that never moved kept its revision.
+      expect((await activeIn(labTenantId)).find((row) => row.id === c)?.revision).toBe(1);
+    });
+  }, 30_000);
+
+  it('T-12.1-10: an edit naming a foreign or unknown step is 400 unknown_step and changes nothing; condition_order refuses a move that hides an opener', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const theirs = await seedProfileFormStep({ tenantId: demoTenantId, title: `${TITLE}Deles` });
+      const optionId = crypto.randomUUID();
+      const opener = await seedQ('Opener', {
+        type: 'single_choice',
+        options: [{ id: optionId, label: 'Sim' }, { label: 'Não' }],
+        stepId: s1,
+        position: 1,
+      });
+      const dependent = await seedQ('Dependent', {
+        stepId: s1,
+        position: 2,
+        conditionQuestionId: opener,
+        conditionValues: [optionId],
+      });
+      const before = await activeIn(labTenantId);
+
+      for (const stepId of [theirs, crypto.randomUUID()]) {
+        const res = await patchQuestion(admin, dependent, { revision: 1, stepId });
+        expect(res.status).toBe(400);
+        expect(await details(res)).toEqual({ profileForm: 'unknown_step' });
+      }
+      // Moving the OPENER to the end of the second step would put it after its dependent.
+      const hidden = await patchQuestion(admin, opener, { revision: 1, stepId: s2 });
+      expect(hidden.status).toBe(409);
+      expect(await details(hidden)).toEqual({
+        profileForm: 'condition_order',
+        questionId: dependent,
+        openerId: opener,
+      });
+      expect(await activeIn(labTenantId)).toEqual(before);
+
+      // Positive control: the dependent can move to the later step.
+      const fine = await madeBy(
+        await patchQuestion(admin, dependent, { revision: 1, stepId: s2 }),
+        200,
+      );
+      expect(fine).toMatchObject({ stepId: s2, revision: 2 });
+    });
+  }, 30_000);
+});
+
+describe('12.1-09 D-627: a replacement keeps the step and the position of the question it replaces', () => {
+  it('replace keeps step and position: the new question takes the old place, the old one is archived in its step, and a failure keeps the old one active', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const b = await seedQ('B', { stepId: s1, position: 2 });
+      const c = await seedQ('C', { stepId: s2, position: 3 });
+
+      const res = await call(admin, 'POST', '/v1/profile_form/questions/replace', {
+        replaces: b,
+        type: 'short_text',
+        title: `${TITLE}B nova`,
+      });
+      const made = await madeBy(res);
+      expect(made).toMatchObject({ stepId: s1, position: 2, revision: 1 });
+
+      const rows = await activeIn(labTenantId);
+      expect(idsOf(rows)).toEqual([a, made.id, c]);
+      expect(positionsOf(rows)).toEqual([1, 2, 3]);
+      const [archived] = await adminSql<{ step_id: string; archived: boolean }[]>`
+        select step_id::text as step_id, archived_at is not null as archived
+          from public.profile_form_questions where id = ${b}::uuid`;
+      expect(archived).toEqual({ step_id: s1, archived: true });
+
+      // A failing replace (the old question is already archived) leaves everything as it was.
+      const before = await countRows(labTenantId);
+      const again = await call(admin, 'POST', '/v1/profile_form/questions/replace', {
+        replaces: b,
+        type: 'short_text',
+        title: `${TITLE}B outra`,
+      });
+      expect(again.status).toBe(409);
+      expect(await countRows(labTenantId)).toEqual(before);
+      expect(idsOf(await activeIn(labTenantId))).toEqual([a, made.id, c]);
+    });
+  }, 30_000);
+});
