@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: 13
 current_phase_name: App nativo iOS e Android por tenant (white-label)
-current_plan: 13
+current_plan: 14
 status: executing
-stopped_at: Completed 13-14-PLAN.md
-last_updated: "2026-11-05T16:57:50.219Z"
+stopped_at: Completed 13-31-PLAN.md
+last_updated: "2026-11-05T17:23:37.761Z"
 last_activity: 2026-11-05
 last_activity_desc: Phase 13 execution started
-state_head: 60e87e50448b86414d87a377b3bf8a2c49f654ac
+state_head: 2847f83f4d944a0da897fea49e0d651862877a2f
 progress:
   total_phases: 29
   completed_phases: 0
   total_plans: 344
-  completed_plans: 315
+  completed_plans: 316
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
-Current Plan: 13
+Current Plan: 14
 Total Plans in Phase: 32
-Plan: 13 of 32
+Plan: 14 of 32
 Status: Ready to execute
 Last activity: 2026-11-05 — Phase 13 execution started
 
@@ -354,6 +354,7 @@ Progress: [███████████████████░] 160/162
 | Phase 13 P29 | 35min | 3 tasks | 23 files |
 | Phase 13 P13 | 22min | 3 tasks | 19 files |
 | Phase 13 P14 | 24 min | 3 tasks | 22 files |
+| Phase 13 P31 | 33 min | 3 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -1116,6 +1117,8 @@ Recent decisions affecting current work:
 - [Phase 13]: 13-14: the feed removal and the Phase 8 block bodies are exported as in-transaction functions; the kernel receives the feed remover injected by the API tier (it never imports a module)
 - [Phase 13]: 13-14: createReport reads the subject through the reporter's own lane first, so an unreadable followers-only or locked item is the same 404 as a missing id (13-08's open design note, tightened)
 - [Phase 13]: 13-14: the blocked-author predicate sits in the shared feedPage (main, Explorar, community, Reels), the post detail, comment roots, replies and thread; the social service has no content read and is untouched
+- [Phase 13]: 13-31: the reviewer account is a plain member created in the tenant's own project under a per-tenant advisory lock, its 24-character password sealed as reviewer_password and rotatable; no_primary_host and reviewer_missing travel as 409 CONFLICT with details.reason; the store contact is an operator input (--contact-*) refused with contact_missing before any store call, since no tenant support contact is stored
+- [Phase 13]: 13-31: the listing description comes from a fixed module table with no sentence for store, payments or social, the Review Notes say purchases happen outside the app, and the listing push calls only typed client methods (no review submission, price, territory or track endpoint exists); publish pushes the listing first unless --skip-listing
 
 ### Pending Todos
 
@@ -1238,6 +1241,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T16:57:49.938Z
-Stopped at: Completed 13-14-PLAN.md
+Last session: 2026-11-05T17:23:27.412Z
+Stopped at: Completed 13-31-PLAN.md
 Resume file: None
