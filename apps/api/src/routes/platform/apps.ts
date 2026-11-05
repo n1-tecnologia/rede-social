@@ -14,12 +14,15 @@ import {
   playServiceAccountBodySchema,
   privacyBodySchema,
   purchaseBodySchema,
+  reviewerCreatedAnswerSchema,
 } from '@rede-social/contracts/native';
 import {
   CredentialRefusal,
+  createReviewer,
   readAppTab,
   replaceAppCredential,
   requireTenant,
+  rotateReviewer,
   setAppIds,
   setAppLinks,
   setChecklistFlag,
@@ -184,6 +187,40 @@ const checklistRoute = createRoute({
   },
 });
 
+const reviewerRoute = createRoute({
+  method: 'post',
+  path: '/tenants/{id}/app/reviewer',
+  request: { params: idParams },
+  responses: {
+    200: {
+      description:
+        "The tenant's reviewer account exists (it is created on the first call and returned unchanged after that). `warnings` names what would stop the reviewer after signing in: a required profile-form question or the payment gate. The password is sealed and is never returned",
+      content: { 'application/json': { schema: reviewerCreatedAnswerSchema } },
+    },
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope(
+      'CONFLICT with `details.reason` = `no_primary_host` — the tenant has no verified primary domain; TENANT_MOVING — the tenant is being moved',
+    ),
+  },
+});
+
+const reviewerRotateRoute = createRoute({
+  method: 'post',
+  path: '/tenants/{id}/app/reviewer/rotate',
+  request: { params: idParams },
+  responses: {
+    200: okAnswer(
+      'A new password replaced the old one in Auth and in the sealed row; the same account is kept and nothing is returned',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope(
+      'CONFLICT with `details.reason` = `reviewer_missing` — there is no reviewer account yet; TENANT_MOVING — the tenant is being moved',
+    ),
+  },
+});
+
 const BODY_BY_KIND = {
   asc_key: ascKeyBodySchema,
   apns_key: apnsKeyBodySchema,
@@ -296,6 +333,30 @@ export const appsRoutes = appsRouter
     await setChecklistFlag(id, key, done);
     c.get('logger').info(
       { event: 'platform.apps.checklist', userId, requestId, tenantId: id, key, done },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const }, 200);
+  })
+  .openapi(reviewerRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    // Only the closed warnings are used here. The address is read from the App tab, the password never leaves the
+    // kernel, and the log line below names the tenant and the person, nothing else.
+    const { warnings } = await createReviewer(id);
+    c.get('logger').info(
+      { event: 'platform.apps.reviewer', userId, requestId, tenantId: id },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const, warnings }, 200);
+  })
+  .openapi(reviewerRotateRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    await rotateReviewer(id);
+    c.get('logger').info(
+      { event: 'platform.apps.reviewer_rotate', userId, requestId, tenantId: id },
       'platform write',
     );
     c.header('Cache-Control', 'no-store');

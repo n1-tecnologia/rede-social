@@ -21,6 +21,24 @@ const group = (
 
 export const platform: readonly AdminLaneEntry[] = [
   ...group(
+    'packages/core/server/apps/reviewer.ts',
+    [
+      [
+        'addReviewerMember',
+        'T',
+        31,
+        "the reviewer account App Review signs in with (13-31): the plain `member` membership and its profile in the tenant's own project, after the Auth user was created there; never a staff role",
+      ],
+      [
+        'reviewerGateWarnings',
+        'T',
+        31,
+        'a read only: whether the reviewer would stop at the profile form or the payment gate, so the operator can finish the profile or grant access through the shipped screens',
+      ],
+    ],
+    'migrated',
+  ),
+  ...group(
     'packages/core/server/platform/branding.ts',
     [
       [

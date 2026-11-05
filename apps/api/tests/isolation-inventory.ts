@@ -174,6 +174,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PUT /v1/platform/tenants/:id/app/purchase': { exempt: PLATFORM_LANE },
   'PUT /v1/platform/tenants/:id/app/privacy': { exempt: PLATFORM_LANE },
   'PUT /v1/platform/tenants/:id/app/checklist/:key': { exempt: PLATFORM_LANE },
+  // 13-31 (D-607, T-13-55): the reviewer account App Review signs in with; its password is sealed and never returned.
+  'POST /v1/platform/tenants/:id/app/reviewer': { exempt: PLATFORM_LANE },
+  'POST /v1/platform/tenants/:id/app/reviewer/rotate': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/verify': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/restart': { exempt: PLATFORM_LANE },

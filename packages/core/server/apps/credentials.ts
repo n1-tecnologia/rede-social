@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { APP_CREDENTIAL_KINDS, type AppCredentialKind } from '@rede-social/contracts/native';
 import { and, eq, sql } from 'drizzle-orm';
-import { tenantAppCredentials } from '../../db/central';
+import { type AppCredentialRowKind, tenantAppCredentials } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import { type Logger, moduleLogger } from '../logging';
 import { open, seal } from '../secrets/sealed';
@@ -32,12 +32,12 @@ export type CredentialStore = {
    */
   upsertSealed(
     tenantId: string,
-    kind: AppCredentialKind,
+    kind: AppCredentialRowKind,
     build: (rowId: string) => string,
   ): Promise<{ id: string; heldAt: Date }>;
   readSealed(
     tenantId: string,
-    kind: AppCredentialKind,
+    kind: AppCredentialRowKind,
   ): Promise<{ id: string; sealed: string } | null>;
   /** The kinds the tenant holds (any of the six) and when each was saved. Never a sealed value. */
   held(tenantId: string): Promise<{ kind: string; heldAt: Date }[]>;
@@ -162,7 +162,7 @@ function payloadOf(kind: AppCredentialKind, plain: string, opts: ReplaceOptions)
  */
 export async function readAppCredential(
   tenantId: string,
-  kind: AppCredentialKind,
+  kind: AppCredentialRowKind,
   deps: { store?: CredentialStore | undefined } = {},
 ): Promise<string | null> {
   const row = await (deps.store ?? pgCredentialStore).readSealed(tenantId, kind);

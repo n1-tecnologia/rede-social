@@ -587,6 +587,19 @@ export const appCredentialHeldSchema = z
   .object({ held: z.boolean(), heldAt: z.string().nullable() })
   .strict();
 
+/**
+ * What would stop the store's reviewer after signing in (13-31, A-13-09): a REQUIRED profile-form question
+ * (`PROFILE_FORM_PENDING`) or the payment gate (`SUBSCRIPTION_PENDING`). Closed reasons, never a value; the
+ * operator completes the profile or grants access through the shipped screens, nothing is bypassed.
+ */
+export const REVIEWER_WARNINGS = ['profile_form_required', 'access_grant_required'] as const;
+export type ReviewerWarning = (typeof REVIEWER_WARNINGS)[number];
+export const reviewerWarningSchema = z.enum(REVIEWER_WARNINGS);
+/** `POST .../app/reviewer`: the account exists. The address is on the App tab read, the password never leaves. */
+export const reviewerCreatedAnswerSchema = z
+  .object({ ok: z.literal(true), warnings: z.array(reviewerWarningSchema) })
+  .strict();
+
 // --- The App tab of the platform panel (Phase 13-09, D-605, D-615, D-617, UI-D-620..UI-D-628) -----------
 
 /**

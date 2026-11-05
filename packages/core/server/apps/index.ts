@@ -25,6 +25,20 @@ export {
   readPurchaseSwitches,
 } from './read';
 export {
+  type CreateReviewerResult,
+  createReviewer,
+  generateReviewerPassword,
+  REVIEWER_DISPLAY_NAME,
+  type ReviewerAuth,
+  type ReviewerDeps,
+  type ReviewerMembers,
+  type ReviewerRecord,
+  type ReviewerStore,
+  type ReviewerWarning,
+  reviewerAddress,
+  rotateReviewer,
+} from './reviewer';
+export {
   type AppDeps,
   type AppPatch,
   type AppRow,
