@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 83
+open_count: 84
 waived_count: 0
 fixed_count: 61
-total_count: 144
-last_updated: 2026-10-30T02:50:06.525Z
+total_count: 145
+last_updated: 2026-11-05T14:46:46.214Z
 ---
 
 # Broken Windows Ledger
@@ -159,6 +159,7 @@ last_updated: 2026-10-30T02:50:06.525Z
 | 142 | 09.2 | unrun-verify | docs/DEPLOY.md |  | 09.2-24: the Cloud Run Job execution override that runs the tenant move (gcloud run jobs execute migrate --update-env-vars=ROLE=move --args=node,dist/main.js,...) is documented from the image's CMD and the gcloud flags and has never run; it is part of hosted proofs H5 and H6 | open |  | 2026-10-23T13:42:20.944Z |  |
 | 143 | 09.2 | todo | docs/DEPLOY.md |  | 09.2-24: the orphan-route cleanup (T-09.2-49, plan 10 handoff: payment_integration_routes, payment_product_routes, video_asset_routes rows of purged assets) is a manual read-then-delete procedure in DEPLOY.md; no command exists yet | open |  | 2026-10-23T13:42:21.020Z |  |
 | 144 | 12 | stub | apps/web/app/(app)/configuracoes/formulario-de-perfil/QuestionList.tsx |  | Question row button has no click handler until plan 12-16 supplies onOpen (the editor sheet); the builder empty state has no Adicionar pergunta action until plan 12-16 | fixed |  | 2026-10-30T02:28:58.647Z | 2026-10-30T02:50:06.525Z |
+| 145 | 13 | stub | packages/core/server/apps/tenant-app.ts |  | App tab listing.description and listing.ageRating read null until plan 13-31 supplies the listing builders | open |  | 2026-11-05T14:46:46.214Z |  |
 
 ````json
 [
@@ -1889,6 +1890,18 @@ last_updated: 2026-10-30T02:50:06.525Z
     "reason": "",
     "recorded_at": "2026-10-30T02:28:58.647Z",
     "resolved_at": "2026-10-30T02:50:06.525Z"
+  },
+  {
+    "id": 145,
+    "kind": "stub",
+    "phase": "13",
+    "file": "packages/core/server/apps/tenant-app.ts",
+    "line": null,
+    "description": "App tab listing.description and listing.ageRating read null until plan 13-31 supplies the listing builders",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-05T14:46:46.214Z",
+    "resolved_at": null
   }
 ]
 ````
