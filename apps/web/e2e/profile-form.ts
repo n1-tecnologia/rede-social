@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statfsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
@@ -38,6 +38,12 @@ import {
  * in the OS temp folder at the first change, and puts it back exactly (a missing row is deleted again).
  * A run that was killed half way is repaired by the next run's `beforeAll`, which restores the module
  * before it does anything else: that is what keeps a required question from gating other specs' members.
+ *
+ * Phase 12.1 (plan 19) adds the steps and the conditions: `seedStep`, `stepId` and `condition` on
+ * `seedQuestion`, the clinic example form and the wide 320px form, and a sweep that also removes the
+ * run's steps. The trigger of migration `20261105195400` puts a question seeded WITHOUT a step in the
+ * tenant's first step (creating "Informações gerais" when there is none), so the Phase 12 specs keep
+ * working unchanged and the sweep removes that default step again when the tenant holds no question.
  */
 
 export {
@@ -181,7 +187,14 @@ export async function restoreProfileForm(tenantSlug: string = LAB): Promise<void
 
 // ── The sweep ──────────────────────────────────────────────────────────────────────────────────────
 
-/** Deletes the answers, then the questions, whose question title starts with `prefix`. The module is untouched. */
+/** The title the migration's BEFORE INSERT trigger gives the default step it creates (plan 06). */
+const DEFAULT_STEP_TITLE = 'Informações gerais';
+
+/**
+ * Deletes the answers, then the questions, then the steps whose title starts with `prefix`. The module is
+ * untouched. A step is removed only when no question points at it, and the default step the trigger may have
+ * created is removed only when the tenant holds no question at all: a tenant's own steps are never touched.
+ */
 export async function clearForm(tenantSlug: string, prefix: string): Promise<void> {
   const like = `${prefix}%`;
   await sql()`
@@ -193,6 +206,17 @@ export async function clearForm(tenantSlug: string, prefix: string): Promise<voi
     delete from public.profile_form_questions q
      using public.tenants t
      where t.id = q.tenant_id and t.slug = ${tenantSlug} and q.title like ${like}`;
+  await sql()`
+    delete from public.profile_form_steps s
+     using public.tenants t
+     where t.id = s.tenant_id and t.slug = ${tenantSlug} and s.title like ${like}
+       and not exists (select 1 from public.profile_form_questions q
+                        where q.tenant_id = s.tenant_id and q.step_id = s.id)`;
+  await sql()`
+    delete from public.profile_form_steps s
+     using public.tenants t
+     where t.id = s.tenant_id and t.slug = ${tenantSlug} and s.title = ${DEFAULT_STEP_TITLE}
+       and not exists (select 1 from public.profile_form_questions q where q.tenant_id = s.tenant_id)`;
 }
 
 /**
@@ -222,12 +246,17 @@ export async function snapshot(
   prefix: string = PROFILE_FORM_NAMESPACE,
 ): Promise<{
   module: { existed: boolean; enabled: boolean };
+  steps: number;
   questions: number;
   answers: number;
   posts: number;
   accounts: number;
 }> {
   const like = `${prefix}%`;
+  const [steps] = await sql()<{ n: number }[]>`
+    select count(*)::int as n
+      from public.profile_form_steps s join public.tenants t on t.id = s.tenant_id
+     where t.slug = ${tenantSlug} and s.title like ${like}`;
   const [questions] = await sql()<{ n: number }[]>`
     select count(*)::int as n
       from public.profile_form_questions q join public.tenants t on t.id = q.tenant_id
@@ -246,6 +275,7 @@ export async function snapshot(
     select count(*)::int as n from auth.users where email like ${like}`;
   return {
     module: await moduleState(tenantSlug),
+    steps: steps?.n ?? 0,
     questions: questions?.n ?? 0,
     answers: answers?.n ?? 0,
     posts: posts?.n ?? 0,
@@ -284,6 +314,10 @@ export type SeedQuestion = {
   showOnProfile?: boolean;
   limits?: { min?: number | string; max?: number | string };
   archived?: boolean;
+  /** The step the question lives in (`seedStep`); absent, the migration's trigger picks the tenant's first step. */
+  stepId?: string;
+  /** Opens the question only when the opener's answer is one of `values` (option ids; `'true'` or `'false'` for yes/no). */
+  condition?: { questionId: string; values: string[] };
   tenantSlug?: string;
 };
 
@@ -307,14 +341,18 @@ export async function seedQuestion(input: SeedQuestion): Promise<SeededQuestion>
   const [row] = await sql()<{ id: string }[]>`
     insert into public.profile_form_questions
       (tenant_id, type, title, help_text, required, position, options, limits, allow_other,
-       show_on_profile, archived_at, created_by_user_id)
+       show_on_profile, archived_at, created_by_user_id, step_id, condition_question_id,
+       condition_values)
     select t.id, ${type}, ${input.title}, ${input.helpText ?? null}, ${input.required ?? false},
            coalesce((select max(q.position) + 1 from public.profile_form_questions q
                       where q.tenant_id = t.id and q.archived_at is null), 0),
            ${sql().json(options as never)}, ${sql().json((input.limits ?? {}) as never)},
            ${input.allowOther ?? false}, ${input.showOnProfile ?? false},
            ${input.archived ? new Date() : null},
-           (select u.id from public.users u where u.email = ${SEED_ADMIN})
+           (select u.id from public.users u where u.email = ${SEED_ADMIN}),
+           ${input.stepId ?? null}::uuid, ${input.condition?.questionId ?? null}::uuid,
+           (select array_agg(v) from jsonb_array_elements_text(
+              ${input.condition ? sql().json(input.condition.values as never) : null}::jsonb) v)
       from public.tenants t where t.slug = ${tenantSlug}
     returning id::text as id`;
   if (!row) throw new Error(`seedQuestion: tenant ${tenantSlug} not found`);
@@ -473,6 +511,253 @@ export function longTitle(prefix: string, tag: string, length = 120): string {
   const head = `${prefix} ${tag} `;
   const filler = 'Pergunta comprida sem pontuacao nenhuma '.repeat(6);
   return `${head}${filler}`.slice(0, length).trimEnd().padEnd(length, 'x');
+}
+
+// ── Steps, conditions and the two forms of the 12.1 stories ────────────────────────────────────────
+
+export type SeededStep = { id: string; title: string };
+
+/** The most steps a tenant may hold (`PROFILE_FORM_LIMITS.steps`, restated: the harness never imports product code). */
+const STEPS_LIMIT = 10;
+
+/** One step through the superuser connection, last in the tenant's order. The title must carry the run prefix. */
+export async function seedStep(title: string, tenantSlug: string = LAB): Promise<SeededStep> {
+  if (!title.startsWith(PROFILE_FORM_NAMESPACE)) {
+    throw new Error(`seedStep: "${title}" does not start with ${PROFILE_FORM_NAMESPACE}`);
+  }
+  const [held] = await sql()<{ n: number }[]>`
+    select count(*)::int as n
+      from public.profile_form_steps s join public.tenants t on t.id = s.tenant_id
+     where t.slug = ${tenantSlug}`;
+  if ((held?.n ?? 0) >= STEPS_LIMIT) {
+    throw new Error(
+      `seedStep: ${tenantSlug} already holds ${held?.n} steps and the limit is ${STEPS_LIMIT}; ` +
+        'a story that needs ten steps starts from a lab with no step of its own (a fresh `pnpm db:seed`).',
+    );
+  }
+  const [row] = await sql()<{ id: string }[]>`
+    insert into public.profile_form_steps (tenant_id, title, position)
+    select t.id, ${title},
+           coalesce((select max(s.position) + 1 from public.profile_form_steps s where s.tenant_id = t.id), 1)
+      from public.tenants t where t.slug = ${tenantSlug}
+    returning id::text as id`;
+  if (!row) throw new Error(`seedStep: tenant ${tenantSlug} not found`);
+  return { id: row.id, title };
+}
+
+/** The step titles of the run (those starting with `prefix`), in the order members walk them. */
+export async function stepTitles(prefix: string, tenantSlug: string = LAB): Promise<string[]> {
+  const rows = await sql()<{ title: string }[]>`
+    select s.title
+      from public.profile_form_steps s join public.tenants t on t.id = s.tenant_id
+     where t.slug = ${tenantSlug} and s.title like ${`${prefix}%`}
+     order by s.position, s.created_at, s.id`;
+  return rows.map((row) => row.title);
+}
+
+/** Where a question lives and what opens it, as the table stores it (`null` for a question shown to everyone). */
+export async function placementByTitle(
+  title: string,
+  tenantSlug: string = LAB,
+): Promise<{
+  stepTitle: string;
+  conditionQuestionId: string | null;
+  conditionValues: string[] | null;
+} | null> {
+  const rows = await sql()<
+    {
+      step_title: string;
+      condition_question_id: string | null;
+      condition_values: string[] | null;
+    }[]
+  >`
+    select s.title as step_title, q.condition_question_id::text as condition_question_id,
+           q.condition_values
+      from public.profile_form_questions q
+      join public.profile_form_steps s on s.id = q.step_id and s.tenant_id = q.tenant_id
+      join public.tenants t on t.id = q.tenant_id
+     where t.slug = ${tenantSlug} and q.title = ${title}
+     limit 1`;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    stepTitle: row.step_title,
+    conditionQuestionId: row.condition_question_id,
+    conditionValues: row.condition_values,
+  };
+}
+
+/**
+ * The three options of the team's EXAMPLE for the clinic case (Research A10): one single choice where only
+ * the first option opens the clinic questions. These words are the team's example, NOT the first client's
+ * list; the client's real questions are never invented here and are ledger row M5 of 12.1-MANUAL-PROOFS.md.
+ */
+export const CLINIC_OPENER = 'Você tem clínica, trabalha em clínica ou está aprendendo?';
+export const CLINIC_OPTIONS = ['Tenho uma clínica', 'Trabalho em uma clínica', 'Estou aprendendo'];
+
+export type ClinicForm = {
+  stepOne: SeededStep;
+  stepTwo: SeededStep;
+  opener: SeededQuestion;
+  plain: SeededQuestion;
+  clinicRequired: SeededQuestion;
+  clinicOptional: SeededQuestion;
+};
+
+/**
+ * The example form of the 12.1 stories, run-prefixed: step 1 holds the single-choice opener and one plain
+ * required question; step 2 holds a required question and an optional one, BOTH opened only by 'Tenho uma
+ * clínica' (so a member who answers another option has nothing visible in step 2 and the stepper skips it).
+ */
+export async function seedClinicForm(
+  prefix: string,
+  tenantSlug: string = LAB,
+): Promise<ClinicForm> {
+  const stepOne = await seedStep(`${prefix} Sobre voce`, tenantSlug);
+  const stepTwo = await seedStep(`${prefix} Sobre a clinica`, tenantSlug);
+  const opener = await seedQuestion({
+    title: `${prefix} ${CLINIC_OPENER}`,
+    type: 'single_choice',
+    required: true,
+    options: CLINIC_OPTIONS,
+    stepId: stepOne.id,
+    tenantSlug,
+  });
+  const plain = await seedQuestion({
+    title: `${prefix} Seu nome profissional`,
+    type: 'short_text',
+    required: true,
+    stepId: stepOne.id,
+    tenantSlug,
+  });
+  const opens = { questionId: opener.id, values: [opener.optionIds[0] ?? ''] };
+  const clinicRequired = await seedQuestion({
+    title: `${prefix} Nome da clinica`,
+    type: 'short_text',
+    required: true,
+    stepId: stepTwo.id,
+    condition: opens,
+    tenantSlug,
+  });
+  const clinicOptional = await seedQuestion({
+    title: `${prefix} Site da clinica`,
+    type: 'short_text',
+    stepId: stepTwo.id,
+    condition: opens,
+    tenantSlug,
+  });
+  return { stepOne, stepTwo, opener, plain, clinicRequired, clinicOptional };
+}
+
+export type WideForm = {
+  stepOne: SeededStep;
+  stepTwo: SeededStep;
+  /** A single choice with 20 options of 80 characters. */
+  opener: SeededQuestion;
+  /** Five questions with 120-character titles, opened by the opener's FIRST option, all optional. */
+  dependents: SeededQuestion[];
+};
+
+/**
+ * The long-text form of the 320px backstops (UI-D-661): two steps with 60-character titles, an opener with
+ * 20 options of 80 characters and five conditional questions with 120-character titles. Everything is
+ * optional so a member who has not answered is never gated and lands on the pages the story measures.
+ */
+export async function seedWideForm(prefix: string, tenantSlug: string = LAB): Promise<WideForm> {
+  const stepOne = await seedStep(longTitle(prefix, 'step1', 60), tenantSlug);
+  const stepTwo = await seedStep(longTitle(prefix, 'step2', 60), tenantSlug);
+  const labels = Array.from({ length: 20 }, (_, index) =>
+    `Opcao ${String(index + 1).padStart(2, '0')} ${'a'.repeat(80)}`.slice(0, 80),
+  );
+  const opener = await seedQuestion({
+    title: longTitle(prefix, 'opener'),
+    type: 'single_choice',
+    options: labels,
+    stepId: stepOne.id,
+    tenantSlug,
+  });
+  const dependents: SeededQuestion[] = [];
+  for (let n = 1; n <= 5; n += 1) {
+    dependents.push(
+      await seedQuestion({
+        title: longTitle(prefix, `dep${n}`),
+        type: 'short_text',
+        stepId: stepTwo.id,
+        condition: { questionId: opener.id, values: [opener.optionIds[0] ?? ''] },
+        tenantSlug,
+      }),
+    );
+  }
+  return { stepOne, stepTwo, opener, dependents };
+}
+
+/** Ten steps with 60-character titles, each holding one required question: the longest stepper the product allows. */
+export async function seedTenSteps(
+  prefix: string,
+  tenantSlug: string = LAB,
+): Promise<{ steps: SeededStep[]; questions: SeededQuestion[] }> {
+  const steps: SeededStep[] = [];
+  const questions: SeededQuestion[] = [];
+  for (let n = 1; n <= STEPS_LIMIT; n += 1) {
+    const step = await seedStep(
+      longTitle(prefix, `p${String(n).padStart(2, '0')}`, 60),
+      tenantSlug,
+    );
+    steps.push(step);
+    questions.push(
+      await seedQuestion({
+        title: `${prefix} Pergunta da etapa ${n}`,
+        type: 'short_text',
+        required: true,
+        stepId: step.id,
+        tenantSlug,
+      }),
+    );
+  }
+  return { steps, questions };
+}
+
+// ── Guards and measures ────────────────────────────────────────────────────────────────────────────
+
+/** The free space a browser run needs (a Next server and three browsers drop about 9 GiB; Phase 12 row M8). */
+export const MIN_FREE_GIB = 10;
+
+/**
+ * Refuses to start a run on a disk that cannot hold it, with the numbers in the message. A run that fills
+ * the disk hangs Docker and the Supabase stack, which costs far more than this early stop.
+ */
+export function assertFreeDisk(minGiB: number = MIN_FREE_GIB, path: string = process.cwd()): void {
+  const stats = statfsSync(path);
+  const freeGiB = (Number(stats.bavail) * Number(stats.bsize)) / 1024 ** 3;
+  if (freeGiB < minGiB) {
+    throw new Error(
+      `profile-form e2e: ${freeGiB.toFixed(1)} GiB free, ${minGiB} GiB needed. ` +
+        'Free the disk (rm -rf apps/web/.next/cache apps/web/.next/dev) and run again.',
+    );
+  }
+}
+
+/**
+ * Nothing inside `locator` (a sheet, a dialog) is wider than the box that holds it: its own sideways scroll
+ * is closed (`scrollWidth <= clientWidth`) and no descendant pokes out of its right edge. The document check
+ * alone cannot see a sheet that scrolls inside a fixed overlay.
+ */
+export async function expectContained(locator: Locator, label: string): Promise<void> {
+  await expect(locator, `${label}: not on screen`).toBeVisible();
+  const measure = await locator.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    let widest = 0;
+    for (const child of Array.from(element.querySelectorAll('*'))) {
+      const rect = child.getBoundingClientRect();
+      // The visually hidden controls (1px boxes) are by design outside the flow.
+      if (rect.width < 2 || rect.height < 2) continue;
+      const edge = rect.right - box.right;
+      if (edge > widest) widest = edge;
+    }
+    return { scroll: element.scrollWidth, client: element.clientWidth, widest };
+  });
+  expect(measure.scroll, `${label}: the box scrolls sideways`).toBeLessThanOrEqual(measure.client);
+  expect(measure.widest, `${label}: something pokes out of the box`).toBeLessThanOrEqual(1);
 }
 
 // ── Browser steps ──────────────────────────────────────────────────────────────────────────────────
