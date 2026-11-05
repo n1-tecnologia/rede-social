@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
+import { join } from 'node:path';
 import { cleanupDirectory, createTempDirectory } from './cleanup';
 import { readBuildRecord } from './config';
+import { type ListingContact, pushListing } from './listing';
 import {
   appleClientFrom,
   assertReady,
@@ -33,6 +35,10 @@ export type PublishOptions = {
   minVersion: string | null;
   storeUrlIos: string | null;
   storeUrlAndroid: string | null;
+  /** The people-facing contact the listing needs (13-31). Required unless the listing is skipped. */
+  contact?: ListingContact | null | undefined;
+  /** For a run that only uploads a build: the listing is neither checked nor pushed (13-31). */
+  skipListing?: boolean | undefined;
 };
 
 export type PublishDeps = ReleaseDeps & {
@@ -89,6 +95,45 @@ export async function runPublish(options: PublishOptions, deps: PublishDeps): Pr
       throw new ReleaseRefusal('missing_credentials', unsealed.missing);
     deps.report('publish.unseal', 'ok');
 
+    // Dry run: the workflow's own build upload has already happened by the time `publish` runs, and it is also what
+    // gives the fake store its app record, which the listing below needs. A real run has no hook here.
+    if (platforms.includes('ios')) {
+      deps.beforePublish?.({ bundleId: build.bundleId, buildNumber: build.buildNumber });
+    }
+
+    // The listing goes first (13-31): its refusals (no privacy URL, no reviewer, no contact) come before any
+    // upload, so a build is never sent to a store whose text could not be set.
+    if (options.skipListing !== true) {
+      const listingApple = platforms.includes('ios') ? await appleClientFrom(dir, deps) : null;
+      const listingGoogle = platforms.includes('android')
+        ? await googleClientFrom(dir, deps)
+        : null;
+      let playIcon: Buffer | null = null;
+      if (listingGoogle) {
+        playIcon = await fs.readFile(join(options.outDir, 'play-icon.png')).catch(() => null);
+      }
+      if (record.primaryHost === null) throw new ReleaseRefusal('no_primary_host');
+      await pushListing({
+        tenant: {
+          tenantId: record.tenantId,
+          displayName: record.displayName,
+          modules: record.modules ?? [],
+          primaryHost: record.primaryHost,
+          privacyUrl: record.tab.listing.privacyUrl,
+          reviewerEmail: record.tab.listing.reviewerEmail,
+          reviewerHeld: record.tab.listing.reviewerHeld,
+          bundleId: build.bundleId,
+          applicationId: build.applicationId,
+          contact: options.contact ?? null,
+          playIcon,
+        },
+        apple: listingApple,
+        google: listingGoogle,
+        deps: { readCredential: deps.readCredential, maskSink: deps.maskSink, report: deps.report },
+      });
+      deps.report('publish.listing', 'ok');
+    }
+
     const value = { version: build.version, buildNumber: build.buildNumber };
     const patch = (platform: 'ios' | 'android'): VersionPatch => ({
       last: { [platform]: value },
@@ -102,7 +147,6 @@ export async function runPublish(options: PublishOptions, deps: PublishDeps): Pr
     });
 
     if (platforms.includes('ios')) {
-      deps.beforePublish?.({ bundleId: build.bundleId, buildNumber: build.buildNumber });
       try {
         const apple = await appleClientFrom(dir, deps);
         const app = await apple.findApp(build.bundleId);

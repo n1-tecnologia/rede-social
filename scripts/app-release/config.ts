@@ -37,6 +37,8 @@ export type TenantRecord = {
   hosts: readonly string[];
   /** The App tab (ids, held credentials, link verdicts, last builds). */
   tab: AppTab;
+  /** The enabled module keys (13-31): they shape the store description. Absent reads as none. */
+  modules?: readonly string[] | undefined;
   storeUrls: { ios: string | null; android: string | null };
 };
 

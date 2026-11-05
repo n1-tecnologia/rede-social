@@ -22,6 +22,13 @@ import {
  *  - GET/POST /v1/certificates
  *  - GET/POST /v1/profiles, DELETE /v1/profiles/{id}
  *  - GET /v1/apps, GET /v1/builds, GET /v1/betaGroups, POST /v1/betaGroups/{id}/relationships/builds
+ *
+ * The listing (13-31, D-607, COVERAGE section 3) adds, all checked against Apple's published OpenAPI document
+ * (App Store Connect API 4.6): the editable version and the app info of an app, the version localization
+ * (description, keywords, support URL), the app info localization (name, privacy-policy URL), the age-rating
+ * declaration and the App Review detail (contact, demo account, notes). The paths are listed on each method.
+ * Nothing here touches the review-submission family, pricing or territory availability: those stay the
+ * tenant's own acts (D-619, Apple 4.2.6).
  */
 
 export const APPLE_DEFAULT_ORIGIN = 'https://api.appstoreconnect.apple.com';
@@ -42,6 +49,18 @@ export type AppleClientOptions = {
 };
 
 export type BuildState = 'PROCESSING' | 'VALID' | 'FAILED' | 'INVALID' | 'NOT_FOUND';
+
+/** What the App Review detail carries (13-31): the contact, the demo account and the notes. */
+export type AppleReviewDetail = {
+  contactFirstName: string;
+  contactLastName: string;
+  contactPhone: string;
+  contactEmail: string;
+  demoAccountName: string;
+  /** Passed to the one request that sets it. Never logged, never kept. */
+  demoAccountPassword: string;
+  notes: string;
+};
 
 export type AppleClient = {
   registerBundleId(identifier: string, name: string): Promise<{ id: string; created: boolean }>;
@@ -64,6 +83,36 @@ export type AppleClient = {
     appId: string;
     buildNumber: number;
   }): Promise<{ attached: boolean }>;
+  /** `GET /v1/apps/{id}/appStoreVersions` (iOS, PREPARE_FOR_SUBMISSION): the version whose text can still change. */
+  findEditableVersion(appId: string): Promise<{ id: string } | null>;
+  /** `GET /v1/apps/{id}/appInfos`: the app info that carries the privacy URL and the age rating. */
+  findAppInfo(appId: string): Promise<{ id: string } | null>;
+  /**
+   * `GET /v1/appStoreVersions/{id}/appStoreVersionLocalizations`, then `PATCH /v1/appStoreVersionLocalizations/{id}`
+   * or `POST /v1/appStoreVersionLocalizations`: one localization per locale, so a second call changes nothing.
+   */
+  upsertVersionLocalization(
+    versionId: string,
+    input: { locale: string; description: string; keywords: string; supportUrl: string },
+  ): Promise<{ created: boolean }>;
+  /**
+   * `GET /v1/appInfos/{id}/appInfoLocalizations`, then `PATCH /v1/appInfoLocalizations/{id}` or
+   * `POST /v1/appInfoLocalizations`: the privacy-policy URL of one locale.
+   */
+  upsertAppInfoLocalization(
+    appInfoId: string,
+    input: { locale: string; name: string; privacyPolicyUrl: string },
+  ): Promise<{ created: boolean }>;
+  /** `GET /v1/appInfos/{id}/ageRatingDeclaration`, then `PATCH /v1/ageRatingDeclarations/{id}`. */
+  setAgeRating(
+    appInfoId: string,
+    attributes: Readonly<Record<string, boolean | string>>,
+  ): Promise<void>;
+  /**
+   * `GET /v1/appStoreVersions/{id}/appStoreReviewDetail`, then `PATCH /v1/appStoreReviewDetails/{id}` or
+   * `POST /v1/appStoreReviewDetails`: one detail per version, so a second call never adds one.
+   */
+  upsertDemoAccount(versionId: string, detail: AppleReviewDetail): Promise<{ created: boolean }>;
 };
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -289,6 +338,166 @@ export function createAppleClient(options: AppleClientOptions): AppleClient {
         data: [{ type: 'builds', id: buildId }],
       });
       return { attached: true };
+    },
+
+    async findEditableVersion(appId) {
+      const found = await call(
+        'GET',
+        `/v1/apps/${encodeURIComponent(appId)}/appStoreVersions?filter[platform]=IOS&filter[appStoreState]=PREPARE_FOR_SUBMISSION&limit=1`,
+      );
+      const id = asString(firstOf(found.data).id);
+      return id ? { id } : null;
+    },
+
+    async findAppInfo(appId) {
+      const found = await call('GET', `/v1/apps/${encodeURIComponent(appId)}/appInfos?limit=1`);
+      const id = asString(firstOf(found.data).id);
+      return id ? { id } : null;
+    },
+
+    async upsertVersionLocalization(versionId, { locale, description, keywords, supportUrl }) {
+      const lookup = async (): Promise<string | null> => {
+        const found = await call(
+          'GET',
+          `/v1/appStoreVersions/${encodeURIComponent(versionId)}/appStoreVersionLocalizations?filter[locale]=${encodeURIComponent(locale)}&limit=50`,
+        );
+        const same = asArray(found.data.data)
+          .map(asRecord)
+          .find((item) => asString(asRecord(item.attributes).locale) === locale);
+        return same ? asString(same.id) : null;
+      };
+      const patch = (id: string) =>
+        call('PATCH', `/v1/appStoreVersionLocalizations/${encodeURIComponent(id)}`, {
+          data: {
+            type: 'appStoreVersionLocalizations',
+            id,
+            attributes: { description, keywords, supportUrl },
+          },
+        });
+      const existing = await lookup();
+      if (existing) {
+        await patch(existing);
+        return { created: false };
+      }
+      const made = await call(
+        'POST',
+        '/v1/appStoreVersionLocalizations',
+        {
+          data: {
+            type: 'appStoreVersionLocalizations',
+            attributes: { locale, description, keywords, supportUrl },
+            relationships: {
+              appStoreVersion: { data: { type: 'appStoreVersions', id: versionId } },
+            },
+          },
+        },
+        [200, 201, 409],
+      );
+      // 409: a run that raced this one created the locale first; its row is the one to update.
+      if (made.status === 409) {
+        const raced = await lookup();
+        if (!raced) throw new StoreError('store_conflict', 409);
+        await patch(raced);
+        return { created: false };
+      }
+      return { created: true };
+    },
+
+    async upsertAppInfoLocalization(appInfoId, { locale, name, privacyPolicyUrl }) {
+      const lookup = async (): Promise<string | null> => {
+        const found = await call(
+          'GET',
+          `/v1/appInfos/${encodeURIComponent(appInfoId)}/appInfoLocalizations?filter[locale]=${encodeURIComponent(locale)}&limit=50`,
+        );
+        const same = asArray(found.data.data)
+          .map(asRecord)
+          .find((item) => asString(asRecord(item.attributes).locale) === locale);
+        return same ? asString(same.id) : null;
+      };
+      const patch = (id: string) =>
+        call('PATCH', `/v1/appInfoLocalizations/${encodeURIComponent(id)}`, {
+          data: { type: 'appInfoLocalizations', id, attributes: { privacyPolicyUrl } },
+        });
+      const existing = await lookup();
+      if (existing) {
+        // The name belongs to the app record the tenant created by hand: only the privacy URL is ours to set.
+        await patch(existing);
+        return { created: false };
+      }
+      const made = await call(
+        'POST',
+        '/v1/appInfoLocalizations',
+        {
+          data: {
+            type: 'appInfoLocalizations',
+            attributes: { locale, name, privacyPolicyUrl },
+            relationships: { appInfo: { data: { type: 'appInfos', id: appInfoId } } },
+          },
+        },
+        [200, 201, 409],
+      );
+      if (made.status === 409) {
+        const raced = await lookup();
+        if (!raced) throw new StoreError('store_conflict', 409);
+        await patch(raced);
+        return { created: false };
+      }
+      return { created: true };
+    },
+
+    async setAgeRating(appInfoId, attributes) {
+      const found = await call(
+        'GET',
+        `/v1/appInfos/${encodeURIComponent(appInfoId)}/ageRatingDeclaration`,
+      );
+      const id = asString(asRecord(found.data.data).id);
+      if (!id) throw new StoreError('store_bad_answer', found.status);
+      await call('PATCH', `/v1/ageRatingDeclarations/${encodeURIComponent(id)}`, {
+        data: { type: 'ageRatingDeclarations', id, attributes },
+      });
+    },
+
+    async upsertDemoAccount(versionId, detail) {
+      const lookup = async (): Promise<string | null> => {
+        const found = await call(
+          'GET',
+          `/v1/appStoreVersions/${encodeURIComponent(versionId)}/appStoreReviewDetail`,
+          undefined,
+          [200, 404],
+        );
+        return asString(asRecord(found.data.data).id);
+      };
+      const attributes = { ...detail, demoAccountRequired: true };
+      const patch = (id: string) =>
+        call('PATCH', `/v1/appStoreReviewDetails/${encodeURIComponent(id)}`, {
+          data: { type: 'appStoreReviewDetails', id, attributes },
+        });
+      const existing = await lookup();
+      if (existing) {
+        await patch(existing);
+        return { created: false };
+      }
+      const made = await call(
+        'POST',
+        '/v1/appStoreReviewDetails',
+        {
+          data: {
+            type: 'appStoreReviewDetails',
+            attributes,
+            relationships: {
+              appStoreVersion: { data: { type: 'appStoreVersions', id: versionId } },
+            },
+          },
+        },
+        [200, 201, 409],
+      );
+      if (made.status === 409) {
+        const raced = await lookup();
+        if (!raced) throw new StoreError('store_conflict', 409);
+        await patch(raced);
+        return { created: false };
+      }
+      return { created: true };
     },
   };
 }

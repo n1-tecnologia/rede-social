@@ -21,6 +21,13 @@ import {
  *  - POST /upload/androidpublisher/v3/applications/{package}/edits/{id}/bundles?uploadType=media
  *  - PUT .../edits/{id}/tracks/internal
  *  - POST .../edits/{id}:validate and :commit
+ *
+ * The listing (13-31, D-607, COVERAGE section 4) adds, checked against Google's published API discovery document
+ * (androidpublisher v3): `PUT .../edits/{id}/listings/{language}` (title, short and full description),
+ * `PUT .../edits/{id}/details` (contact e-mail, website, default language), and the high-resolution icon with
+ * `DELETE .../edits/{id}/listings/{language}/icon` (deleteall) followed by
+ * `POST /upload/.../edits/{id}/listings/{language}/icon?uploadType=media`, so a second push leaves one icon.
+ * No release, track promotion or screenshot call is made from here beyond the internal track above.
  */
 
 export const GOOGLE_DEFAULT_ORIGIN = 'https://androidpublisher.googleapis.com';
@@ -53,6 +60,26 @@ export type GoogleClient = {
   ): Promise<void>;
   validateEdit(packageName: string, editId: string): Promise<void>;
   commitEdit(packageName: string, editId: string): Promise<void>;
+  /** `PUT .../edits/{id}/listings/{language}`: replaces the localized text, so a second call changes nothing. */
+  updateListing(
+    packageName: string,
+    editId: string,
+    language: string,
+    input: { title: string; shortDescription: string; fullDescription: string },
+  ): Promise<void>;
+  /** `PUT .../edits/{id}/details`: the user-visible contact e-mail and website and the default language. */
+  updateDetails(
+    packageName: string,
+    editId: string,
+    input: { contactEmail: string; contactWebsite: string; defaultLanguage: string },
+  ): Promise<void>;
+  /** The high-resolution icon of one language: the old one is removed first, so there is always exactly one. */
+  replaceIcon(
+    packageName: string,
+    editId: string,
+    language: string,
+    png: Uint8Array,
+  ): Promise<void>;
 };
 
 export function createGoogleClient(options: GoogleClientOptions): GoogleClient {
@@ -172,6 +199,26 @@ export function createGoogleClient(options: GoogleClientOptions): GoogleClient {
     },
     async commitEdit(packageName, editId) {
       await call('POST', `${editsBase(packageName)}/${encodeURIComponent(editId)}:commit`, '{}');
+    },
+
+    async updateListing(packageName, editId, language, input) {
+      await call(
+        'PUT',
+        `${editsBase(packageName)}/${encodeURIComponent(editId)}/listings/${encodeURIComponent(language)}`,
+        JSON.stringify({ language, ...input }),
+      );
+    },
+    async updateDetails(packageName, editId, input) {
+      await call(
+        'PUT',
+        `${editsBase(packageName)}/${encodeURIComponent(editId)}/details`,
+        JSON.stringify(input),
+      );
+    },
+    async replaceIcon(packageName, editId, language, png) {
+      const base = `${editsBase(packageName)}/${encodeURIComponent(editId)}/listings/${encodeURIComponent(language)}/icon`;
+      await call('DELETE', base);
+      await call('POST', `/upload${base}?uploadType=media`, png, 'image/png');
     },
   };
 }

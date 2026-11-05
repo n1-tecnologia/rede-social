@@ -421,6 +421,7 @@ describe('repeatability (NATIVE-28 idempotency)', () => {
       'publish',
       SLUG,
       '--dry-run',
+      '--skip-listing',
       '--out',
       join(out, '.tenant'),
       '--min-version',
@@ -440,7 +441,14 @@ describe('repeatability (NATIVE-28 idempotency)', () => {
   it('a dry-run publish after a dry-run prepare prints only closed outcomes and no sentinel', async () => {
     const outDir = join(out, '.tenant');
     await run(['prepare', SLUG, '--dry-run', '--out', outDir]);
-    const { code, text } = await run(['publish', SLUG, '--dry-run', '--out', outDir]);
+    const { code, text } = await run([
+      'publish',
+      SLUG,
+      '--dry-run',
+      '--skip-listing',
+      '--out',
+      outDir,
+    ]);
     expect(code).toBe(0);
     for (const line of [
       'publish.ios.build ok',
@@ -494,6 +502,8 @@ describe('publish records the build only after the uploads succeed (NATIVE-28)',
     minVersion: null as string | null,
     storeUrlIos: null as string | null,
     storeUrlAndroid: null as string | null,
+    // These cases are about recording a build; the listing push (13-31) has its own describe below.
+    skipListing: true,
   });
 
   const lastBuilds = async (id: string) => {
@@ -707,5 +717,117 @@ describe('dispatch (NATIVE-28 empty)', () => {
     expect(code).toBe(0);
     expect(text).toContain('dispatch.check ok');
     expect(calls).toEqual([]);
+  });
+});
+
+// --- 13-31: the listing push inside publish ----------------------------------------------------------------------
+
+describe('publish pushes the store listing before the upload and refuses early (13-31, D-607, NATIVE-29)', () => {
+  const LISTING_SLUG = `${SLUG}-ls`;
+  const REVIEWER_EMAIL = `app-review+0a1b2c3d@${LISTING_SLUG}.cliente.test`;
+  const REVIEWER_PASSWORD = 'Listing-sentinel-7Hq2Vm9Xk4Rt6Zp3';
+  const CONTACT = [
+    '--contact-email',
+    'suporte@cliente.test',
+    '--contact-name',
+    'Maria da Silva',
+    '--contact-phone',
+    '+55 11 99999-0000',
+  ];
+  let listingTenantId = '';
+
+  beforeAll(async () => {
+    listingTenantId = await seedFullTenant(LISTING_SLUG, `${LISTING_SLUG}.cliente.test`);
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${listingTenantId}::uuid, 'events', true), (${listingTenantId}::uuid, 'chat', true)
+      on conflict (tenant_id, module_key) do update set enabled = true`;
+  });
+
+  const completeListing = async () => {
+    const id = crypto.randomUUID();
+    await adminSql`
+      update platform.tenant_apps
+         set privacy_url = 'https://listing.cliente.test/privacidade', reviewer_email = ${REVIEWER_EMAIL}
+       where tenant_id = ${listingTenantId}::uuid`;
+    await adminSql`delete from platform.tenant_app_credentials
+                    where tenant_id = ${listingTenantId}::uuid and kind = 'reviewer_password'`;
+    await adminSql`
+      insert into platform.tenant_app_credentials (id, tenant_id, kind, sealed)
+      values (${id}::uuid, ${listingTenantId}::uuid, 'reviewer_password',
+              ${seal(REVIEWER_PASSWORD, `${id}:reviewer_password`)})`;
+  };
+
+  it('a dry-run publish pushes the listing, the demo account and the review notes, and prints only closed outcomes', async () => {
+    await completeListing();
+    const outDir = join(out, '.tenant');
+    await run(['prepare', LISTING_SLUG, '--dry-run', '--out', outDir]);
+    const { code, text } = await run([
+      'publish',
+      LISTING_SLUG,
+      '--dry-run',
+      '--out',
+      outDir,
+      ...CONTACT,
+    ]);
+    expect(code).toBe(0);
+    for (const line of [
+      'listing.texts ok',
+      'listing.ios.localization created',
+      'listing.ios.privacy created',
+      'listing.ios.age-rating ok',
+      'listing.ios.review-detail created',
+      'listing.android.listing ok',
+      'listing.android.details ok',
+      'listing.android.icon ok',
+      'publish.listing ok',
+      'publish.ios.build ok',
+      'publish.android.track ok',
+    ]) {
+      expect(text).toContain(`app-release ${line}`);
+    }
+    // The listing comes before the upload.
+    expect(text.indexOf('publish.listing ok')).toBeLessThan(text.indexOf('publish.android.upload'));
+    expect(text).not.toContain(REVIEWER_PASSWORD);
+    expect(text).not.toContain(REVIEWER_EMAIL);
+    for (const sentinel of SENTINELS) expect(text).not.toContain(sentinel);
+  });
+
+  it('a missing privacy URL, reviewer or contact refuses before anything is uploaded', async () => {
+    const outDir = join(out, '.tenant');
+    await run(['prepare', LISTING_SLUG, '--dry-run', '--out', outDir]);
+
+    // No contact flags.
+    const noContact = await run(['publish', LISTING_SLUG, '--dry-run', '--out', outDir]);
+    expect(noContact.code).toBe(1);
+    expect(noContact.text).toContain('app-release release refused contact_missing');
+    expect(noContact.text).not.toContain('publish.ios');
+
+    await adminSql`update platform.tenant_apps set privacy_url = null where tenant_id = ${listingTenantId}::uuid`;
+    const noPrivacy = await run([
+      'publish',
+      LISTING_SLUG,
+      '--dry-run',
+      '--out',
+      outDir,
+      ...CONTACT,
+    ]);
+    expect(noPrivacy.code).toBe(1);
+    expect(noPrivacy.text).toContain('app-release release refused privacy_url_missing');
+    expect(noPrivacy.text).not.toContain('publish.android');
+
+    await adminSql`
+      update platform.tenant_apps set privacy_url = 'https://listing.cliente.test/privacidade', reviewer_email = null
+       where tenant_id = ${listingTenantId}::uuid`;
+    const noReviewer = await run([
+      'publish',
+      LISTING_SLUG,
+      '--dry-run',
+      '--out',
+      outDir,
+      ...CONTACT,
+    ]);
+    expect(noReviewer.code).toBe(1);
+    expect(noReviewer.text).toContain('app-release release refused reviewer_missing');
   });
 });

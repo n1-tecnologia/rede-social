@@ -3,14 +3,16 @@
  *
  *   pnpm platform:app-release <slug> [--env prod|hml] [--platform ios|android|all] [--dry-run]
  *                             [--min-version x.y.z] [--store-url-ios URL] [--store-url-android URL]
+ *                             [--contact-email E --contact-name N --contact-phone P | --skip-listing]
  *
  * Three subcommands (the first word, `dispatch` when omitted):
  *   dispatch  the operator's: checks the tenant, the held credentials and the checklist, then starts the protected
  *             workflow with `gh workflow run` and prints the run URL (`--check-only` stops after the checks);
  *   prepare   CI's: derives the build record from the tenant, unseals the credentials into a temporary directory,
  *             registers the identifiers, generates the signing material on first use and writes `build.json`;
- *   publish   CI's: waits for the build, uploads to the Play internal track, records the last build and sets the
- *             minimum version and store links.
+ *   publish   CI's: pushes the store listing (13-31: text, age-rating answers, the App Review detail with the
+ *             reviewer demo account; `--skip-listing` for a run that only uploads a build), waits for the build,
+ *             uploads to the Play internal track, records the last build and sets the minimum version and store links.
  * A fourth, `cleanup --secrets-dir <dir>`, removes the directory `prepare --secrets-dir` left for the build steps.
  *
  * `--dry-run` sends every store call to local fake servers (nothing leaves the machine and nothing is persisted:
@@ -26,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { cleanupDirectory, defaultTempBase } from './cleanup';
 import type { ReleaseEnv } from './config';
+import type { ListingContact } from './listing';
 import { type PlatformChoice, runDispatch, runPrepare } from './prepare';
 import { type PublishDeps, runPublish } from './publish';
 import { createReporter, ReleaseRefusal, type Reporter } from './report';
@@ -51,6 +54,9 @@ export type CliArgs = {
   outDir: string;
   secretsDir: string | null;
   aab: string | null;
+  /** 13-31: a run that only uploads a build skips the listing (and its checks). */
+  skipListing: boolean;
+  contact: ListingContact | null;
 };
 
 /** The repository root, so the command works from any working directory. */
@@ -76,6 +82,10 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
         out: { type: 'string' },
         'secrets-dir': { type: 'string' },
         aab: { type: 'string' },
+        'skip-listing': { type: 'boolean' },
+        'contact-email': { type: 'string' },
+        'contact-name': { type: 'string' },
+        'contact-phone': { type: 'string' },
       },
     });
   } catch {
@@ -107,6 +117,12 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
     const url = text(name);
     if (url !== null && !/^https:\/\/\S+$/.test(url)) throw bad();
   }
+  const contactEmail = text('contact-email');
+  const contactName = text('contact-name');
+  const contactPhone = text('contact-phone');
+  if (contactEmail !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw bad();
+  if (contactName !== null && (contactName.trim() === '' || contactName.length > 100)) throw bad();
+  if (contactPhone !== null && !/^\+?[0-9 ()-]{6,30}$/.test(contactPhone)) throw bad();
   return {
     command,
     slug: slugWord,
@@ -120,6 +136,11 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
     outDir: resolve(text('out') ?? DEFAULT_OUT_DIR),
     secretsDir: text('secrets-dir'),
     aab: text('aab'),
+    skipListing: value['skip-listing'] === true,
+    contact:
+      contactEmail !== null
+        ? { email: contactEmail, name: contactName ?? '', phone: contactPhone ?? '' }
+        : null,
   };
 }
 
@@ -254,6 +275,8 @@ export async function runCli(
             minVersion: args.minVersion,
             storeUrlIos: args.storeUrlIos,
             storeUrlAndroid: args.storeUrlAndroid,
+            skipListing: args.skipListing,
+            contact: args.contact,
           },
           deps,
         );

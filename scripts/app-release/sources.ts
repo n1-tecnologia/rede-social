@@ -38,7 +38,13 @@ export const pgTenantSource: TenantSource = {
           select store_url_ios, store_url_android from platform.tenant_apps
            where tenant_id = ${tenantId}::uuid`),
       );
-      return { tenant, domains, url: urls[0] };
+      const modules = Array.from(
+        await tx.execute<Row>(sql`
+          select module_key from public.tenant_modules
+           where tenant_id = ${tenantId}::uuid and enabled
+           order by module_key`),
+      );
+      return { tenant, domains, url: urls[0], modules };
     });
     if (!found) return null;
 
@@ -53,6 +59,7 @@ export const pgTenantSource: TenantSource = {
       primaryHost: primary ? String(primary.host) : null,
       hosts: found.domains.map((row) => String(row.host)),
       tab,
+      modules: found.modules.map((row) => String(row.module_key)),
       storeUrls: {
         ios: typeof found.url?.store_url_ios === 'string' ? found.url.store_url_ios : null,
         android:

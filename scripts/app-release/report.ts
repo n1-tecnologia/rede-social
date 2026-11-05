@@ -25,6 +25,11 @@ export const REFUSAL_REASONS = [
   'workspace_missing',
   'bad_arguments',
   'artifact_missing',
+  // The listing push (13-31): each is raised before any store call.
+  'privacy_url_missing',
+  'reviewer_missing',
+  'contact_missing',
+  'tenant_name_empty',
 ] as const;
 export type RefusalReason = (typeof REFUSAL_REASONS)[number];
 
