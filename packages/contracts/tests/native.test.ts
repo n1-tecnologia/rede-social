@@ -35,14 +35,15 @@ const codePoints = (value: string) => Array.from(value).length;
 
 describe('deriveAppIds', () => {
   it.each([
-    ['comunidade.cliente.com.br', 'br.com.cliente.comunidade'],
-    ['my-community.example.com.br', 'br.com.example.my_community'],
-    ['1st.example.com', 'com.example.x1st'],
-    ['COMUNIDADE.Cliente.COM', 'com.cliente.comunidade'],
-    ['xn--exmplo-gva.com', 'com.xn__exmplo_gva'],
-    ['comunidade.cliente.com.br:3000', 'br.com.cliente.comunidade'],
-  ])('%s -> %s', (host, id) => {
-    expect(deriveAppIds(host)).toEqual({ ios: id, android: id });
+    ['comunidade.cliente.com.br', 'br.com.cliente.comunidade', 'br.com.cliente.comunidade'],
+    ['1st.example.com', 'com.example.x1st', 'com.example.x1st'],
+    ['COMUNIDADE.Cliente.COM', 'com.cliente.comunidade', 'com.cliente.comunidade'],
+    ['comunidade.cliente.com.br:3000', 'br.com.cliente.comunidade', 'br.com.cliente.comunidade'],
+    // A hyphen stays for iOS (no underscore in a bundle id) and becomes `_` for Android (no hyphen).
+    ['my-community.example.com.br', 'br.com.example.my-community', 'br.com.example.my_community'],
+    ['xn--exmplo-gva.com', 'com.xn--exmplo-gva', 'com.xn__exmplo_gva'],
+  ])('%s -> ios %s, android %s', (host, ios, android) => {
+    expect(deriveAppIds(host)).toEqual({ ios, android });
   });
 
   it('returns null for a non-ASCII host, a single label, an empty label, empty and null input', () => {

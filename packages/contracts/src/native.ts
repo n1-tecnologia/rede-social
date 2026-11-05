@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hexColorSchema } from './branding';
 import { hostAppSchema, isRegistrableHost, normalizeHost } from './hosts';
 
 /**
@@ -84,9 +85,11 @@ export function isValidApplicationId(value: string): boolean {
 
 /**
  * NATIVE-02 (D-607, Pattern 6): the default ids of the two stores from the tenant's primary host, the
- * labels reversed (`comunidade.cliente.com.br` -> `br.com.cliente.comunidade`). The same string serves
- * both stores (the Android form, valid on both): a hyphen becomes `_` (`xn--exmplo-gva` ->
- * `xn__exmplo_gva`) and a label starting with a digit gets the prefix `x`.
+ * labels reversed (`comunidade.cliente.com.br` -> `br.com.cliente.comunidade`). The two ids are the SAME
+ * string whenever the host has no hyphen. A hyphen stays a hyphen for iOS (Apple's bundle ids allow
+ * alphanumerics, hyphens and periods, never an underscore) and becomes `_` for Android
+ * (`xn--exmplo-gva` -> `xn__exmplo_gva`, whose rules allow no hyphen). A label starting with a digit gets
+ * the prefix `x` on both.
  *
  * `null` for anything that is not a plain ASCII registrable host with at least two non-empty labels:
  * a non-string, an empty string, a single label (`localhost`), an empty label (`a..b`), an IPv4
@@ -103,15 +106,19 @@ export function deriveAppIds(
   if (/^\d+(\.\d+){3}$/.test(normalized)) return null;
   const labels = normalized.split('.');
   if (labels.length < 2) return null;
-  const segments: string[] = [];
+  const ios: string[] = [];
+  const android: string[] = [];
   for (const label of labels.reverse()) {
     if (label.length === 0 || label.startsWith('-')) return null;
-    const underscored = label.replace(/-/g, '_');
-    segments.push(/^[0-9]/.test(underscored) ? `x${underscored}` : underscored);
+    // A digit cannot start a segment on either store.
+    const lead = /^[0-9]/.test(label) ? 'x' : '';
+    // Apple allows hyphens but NOT underscores in a bundle id; Android allows underscores but NOT hyphens.
+    ios.push(`${lead}${label}`);
+    android.push(`${lead}${label.replace(/-/g, '_')}`);
   }
-  const id = segments.join('.');
-  if (!isValidApplicationId(id) || !isValidBundleId(id)) return null;
-  return { ios: id, android: id };
+  const ids = { ios: ios.join('.'), android: android.join('.') };
+  if (!isValidBundleId(ids.ios) || !isValidApplicationId(ids.android)) return null;
+  return ids;
 }
 
 // --- The bridge (D-600, NATIVE-05, T-13-05) ------------------------------------------------------------
@@ -299,51 +306,271 @@ export function parseBridgeMessage<S extends z.ZodType = typeof bridgeWebMessage
   return parsed.success ? { ok: true, message: parsed.data } : { ok: false, reason: 'bad_shape' };
 }
 
-// --- TEMPORARY RED STUB (task 3), fully replaced in GREEN -------------------------------------------
+// --- Store listing cuts (D-607, UI-D-602, UI-D-621) ----------------------------------------------------
+
+export const STORE_NAME_MAX = 30;
+export const ICON_LABEL_MAX = 12;
+
+export type CutName = {
+  /** The name after the cut. */
+  name: string;
+  /** Whether anything was removed. */
+  cut: boolean;
+  /** Length of the original (trimmed) text, in Unicode code points. */
+  length: number;
+};
+
+const isSpace = (character: string | undefined): boolean =>
+  character !== undefined && /\s/u.test(character);
+
+/**
+ * Cuts `text` to `max` Unicode code points (an emoji or an accented letter is one character and a
+ * surrogate pair is never split), on the last whitespace boundary at or before the limit; a first word
+ * longer than the limit is cut hard.
+ */
+function cutOnWordBoundary(text: string, max: number): CutName {
+  const characters = Array.from(text.trim());
+  const length = characters.length;
+  if (length <= max) return { name: characters.join(''), cut: false, length };
+  const head = characters.slice(0, max);
+  let end = max;
+  if (!isSpace(characters[max])) {
+    const lastSpace = head.findLastIndex((character) => isSpace(character));
+    if (lastSpace > 0) end = lastSpace;
+  }
+  return { name: characters.slice(0, end).join('').trim(), cut: true, length };
+}
+
+/** The store name: the tenant's display name, at most 30 characters. */
+export const deriveStoreName = (displayName: string): CutName =>
+  cutOnWordBoundary(typeof displayName === 'string' ? displayName : '', STORE_NAME_MAX);
+
+/**
+ * The icon label under the app icon: the manifest `short_name` (or, when it has none, the display name),
+ * at most 12 characters. With one argument it is the already-chosen `shortName ?? displayName`.
+ */
+export const deriveIconLabel = (
+  shortName: string | null | undefined,
+  displayName?: string,
+): CutName => {
+  const chosen = typeof shortName === 'string' && shortName.trim() !== '' ? shortName : displayName;
+  return cutOnWordBoundary(chosen ?? '', ICON_LABEL_MAX);
+};
+
+// --- Links, state and the checklist (UI-D-620, UI-D-624, UI-D-627) -------------------------------------
+
+export type LinkVerdict = 'live' | 'missing_team' | 'missing_fingerprint' | 'no_host';
+
+/** Apple Team ID: exactly 10 letters or digits. */
+export const isValidTeamId = (raw: string): boolean =>
+  typeof raw === 'string' && /^[A-Za-z0-9]{10}$/.test(raw);
+
+/**
+ * Android signing fingerprint: accepted with or without colons, in any case, saved as 32 upper-case hex
+ * pairs separated by colons. `null` when it is not exactly 64 hex characters.
+ */
+export function normalizeFingerprint(raw: string): string | null {
+  if (typeof raw !== 'string') return null;
+  const bare = raw.replace(/[:\s]/g, '').toUpperCase();
+  if (!/^[0-9A-F]{64}$/.test(bare)) return null;
+  return bare.match(/.{2}/g)?.join(':') ?? null;
+}
+
+/**
+ * Whether the `.well-known` file for one platform can be served with data (UI-D-624). Each platform is
+ * judged on its own: a missing Team ID never changes the Android verdict.
+ */
+export function linkVerdict(
+  platform: NativePlatform,
+  data: { hasVerifiedPrimaryHost: boolean; teamId: string | null; fingerprint: string | null },
+): LinkVerdict {
+  if (!data.hasVerifiedPrimaryHost) return 'no_host';
+  if (platform === 'ios') {
+    return data.teamId !== null && isValidTeamId(data.teamId) ? 'live' : 'missing_team';
+  }
+  return data.fingerprint !== null && normalizeFingerprint(data.fingerprint) !== null
+    ? 'live'
+    : 'missing_fingerprint';
+}
+
+/** The five rows read from what is held (UI-D-627), then the five the operator ticks, in display order. */
+export const APP_CHECKLIST_AUTO_KEYS = [
+  'storeKeys',
+  'apnsKey',
+  'links',
+  'privacyUrl',
+  'reviewer',
+] as const;
+export const APP_CHECKLIST_MANUAL_KEYS = [
+  'appleAccount',
+  'playAccount',
+  'screenshots',
+  'submitted',
+  'published',
+] as const;
+export type AppChecklistAutoKey = (typeof APP_CHECKLIST_AUTO_KEYS)[number];
+export type AppChecklistManualKey = (typeof APP_CHECKLIST_MANUAL_KEYS)[number];
+
 export type AppStateInput = {
   held: { asc: boolean; play: boolean; apns: boolean };
   links: { ios: LinkVerdict; android: LinkVerdict };
   privacyUrl: boolean;
   reviewer: boolean;
-  manual: {
-    appleAccount: boolean;
-    playAccount: boolean;
-    screenshots: boolean;
-    submitted: boolean;
-    published: boolean;
-  };
+  manual: Record<AppChecklistManualKey, boolean>;
 };
-export type LinkVerdict = 'live' | 'missing_team' | 'missing_fingerprint' | 'no_host';
-export const APP_CHECKLIST_AUTO_KEYS: readonly string[] = [];
-export const APP_CHECKLIST_MANUAL_KEYS: readonly string[] = [];
-export const APP_CREDENTIAL_KINDS: readonly string[] = [];
-export const REMOVED_MEMBER_NAME = '';
-type Cut = { name: string; cut: boolean; length: number };
-export const deriveStoreName = (name: string): Cut => ({ name, cut: false, length: 0 });
-export const deriveIconLabel = (name: string | null | undefined, _display?: string): Cut => ({
-  name: name ?? '',
-  cut: false,
-  length: 0,
+
+const autoRows = (input: AppStateInput): Record<AppChecklistAutoKey, boolean> => ({
+  storeKeys: input.held.asc && input.held.play,
+  apnsKey: input.held.apns,
+  links: input.links.ios === 'live' && input.links.android === 'live',
+  privacyUrl: input.privacyUrl,
+  reviewer: input.reviewer,
 });
-export const appState = (_input: AppStateInput): 'none' | 'preparing' | 'ready' | 'published' =>
-  'none';
-export const checklistCounts = (_input: AppStateInput): { done: number; total: number } => ({
-  done: 0,
-  total: 0,
-});
-export const linkVerdict = (
-  _platform: NativePlatform,
-  _data: { hasVerifiedPrimaryHost: boolean; teamId: string | null; fingerprint: string | null },
-): LinkVerdict => 'no_host';
-export const normalizeFingerprint = (_raw: string): string | null => null;
-export const isValidTeamId = (_raw: string): boolean => false;
-export const compareVersions = (_a: string, _b: string): number => 0;
-export const isBelowMinVersion = (_installed: string, _min: string): boolean => false;
-const emptyStub = z.object({}).strict();
-export const appVersionAnswerSchema = emptyStub;
-export const tenantBuildSchema = emptyStub;
-export const ascKeyBodySchema = emptyStub;
-export const playServiceAccountBodySchema = emptyStub;
-export const apnsKeyBodySchema = emptyStub;
-export const credentialAnswerSchema = emptyStub;
-export const appCredentialHeldSchema = emptyStub;
+
+/** The "Passo a passo" count: how many of the ten rows are done. */
+export function checklistCounts(input: AppStateInput): { done: number; total: 10 } {
+  const auto = Object.values(autoRows(input)).filter(Boolean).length;
+  const manual = APP_CHECKLIST_MANUAL_KEYS.filter((key) => input.manual[key]).length;
+  return { done: auto + manual, total: 10 };
+}
+
+export type AppStateValue = 'none' | 'preparing' | 'ready' | 'published';
+
+/**
+ * The pill on the App tab (UI-D-620), a pure function like `databaseState`. Precedence: published wins
+ * (even when the automatic rows are not all done), then ready (the five automatic rows done), then
+ * preparing (anything held or done), else none.
+ */
+export function appState(input: AppStateInput): AppStateValue {
+  if (input.manual.published) return 'published';
+  const auto = autoRows(input);
+  if (Object.values(auto).every(Boolean)) return 'ready';
+  const anyHeld = input.held.asc || input.held.play || input.held.apns;
+  const anyAuto =
+    Object.values(auto).some(Boolean) ||
+    input.links.ios === 'live' ||
+    input.links.android === 'live';
+  const anyManual = APP_CHECKLIST_MANUAL_KEYS.some((key) => input.manual[key]);
+  return anyHeld || anyAuto || anyManual ? 'preparing' : 'none';
+}
+
+// --- Versions (UI-D-613) -------------------------------------------------------------------------------
+
+const parseVersion = (raw: unknown): [number, number, number] | null => {
+  if (typeof raw !== 'string') return null;
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(raw);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+};
+
+/** Positive when `a` is newer, negative when older, 0 when equal, NaN when either side is malformed. */
+export function compareVersions(a: string, b: string): number {
+  const left = parseVersion(a);
+  const right = parseVersion(b);
+  if (!left || !right) return Number.NaN;
+  for (let i = 0; i < 3; i += 1) {
+    const difference = (left[i] as number) - (right[i] as number);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/** True only when `installed` is strictly older than `min`; a malformed side never blocks the member. */
+export const isBelowMinVersion = (installed: string, min: string): boolean =>
+  compareVersions(installed, min) < 0;
+
+/**
+ * Public read of the version floor per store. `storeUrl` is nullable because the update screen's link is
+ * baked into the build; `0.0.0` means no floor.
+ */
+const storeVersionSchema = z.object({ minVersion: semver, storeUrl: httpsUrl.nullable() }).strict();
+export const appVersionAnswerSchema = z
+  .object({ ios: storeVersionSchema, android: storeVersionSchema })
+  .strict();
+export type AppVersionAnswer = z.infer<typeof appVersionAnswerSchema>;
+
+// --- The build record (NATIVE-02) ----------------------------------------------------------------------
+
+/** The display name an anonymised member keeps (plan 07 writes it in SQL; the web and tests read it here). */
+export const REMOVED_MEMBER_NAME = 'Membro removido';
+
+/**
+ * `.tenant/build.json`: the record the release command writes and `apps/mobile/app.config.ts` reads.
+ * The HOST is baked, not only the slug (D-611: links need the host; a changed host needs a new build).
+ */
+export const tenantBuildSchema = z
+  .object({
+    slug: z.string().min(1).max(63),
+    host: z.string().min(1).max(253),
+    hosts: z.array(z.string().min(1).max(253)).max(10),
+    env: z.enum(['hml', 'prod']),
+    storeName: z.string().min(1).max(STORE_NAME_MAX),
+    shortName: z.string().min(1).max(ICON_LABEL_MAX),
+    bundleId: z.string().refine(isValidBundleId, 'invalid bundle id'),
+    applicationId: z.string().refine(isValidApplicationId, 'invalid application id'),
+    version: semver,
+    buildNumber: z.number().int().min(1),
+    teamId: z.string().refine(isValidTeamId, 'invalid team id').nullable(),
+    colors: z
+      .object({
+        primary: hexColorSchema,
+        onPrimary: hexColorSchema,
+        primaryDark: hexColorSchema,
+        onPrimaryDark: hexColorSchema,
+      })
+      .strict(),
+    logoUrl: httpsUrl.nullable(),
+    strings: z
+      .object({
+        camera: z.string().max(200),
+        photos: z.string().max(200),
+        microphone: z.string().max(200),
+        faceId: z.string().max(200),
+      })
+      .strict(),
+    storeUrls: z.object({ ios: httpsUrl.nullable(), android: httpsUrl.nullable() }).strict(),
+    // A relative path inside the workspace: no leading slash, no `..`.
+    googleServicesFile: z
+      .string()
+      .max(255)
+      .regex(/^(?!\/)(?!.*\.\.)[\w./-]+$/)
+      .nullable(),
+  })
+  .strict();
+export type TenantBuild = z.infer<typeof tenantBuildSchema>;
+
+// --- Store credentials (D-605, UI-D-623, UI-D-628) -----------------------------------------------------
+
+/**
+ * WRITE-ONLY bodies. They are sealed on arrival and never returned: the answers below hold NO field of a
+ * secret kind (no key id, prefix, length or file name), only `{ ok: true }` after a save and `held` /
+ * `heldAt` on a read. The format is checked before a held value is replaced (plan 08).
+ */
+export const APP_CREDENTIAL_KINDS = ['asc_key', 'play_service_account', 'apns_key'] as const;
+export type AppCredentialKind = (typeof APP_CREDENTIAL_KINDS)[number];
+
+const P8_MAX_LENGTH = 8192;
+const SERVICE_ACCOUNT_MAX_LENGTH = 16384;
+const keyId = z
+  .string()
+  .trim()
+  .regex(/^[A-Z0-9]{10}$/);
+const p8 = z.string().trim().min(1).max(P8_MAX_LENGTH);
+
+export const ascKeyBodySchema = z
+  .object({
+    issuerId: z
+      .string()
+      .trim()
+      .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/),
+    keyId,
+    p8,
+  })
+  .strict();
+export const playServiceAccountBodySchema = z
+  .object({ json: z.string().trim().min(1).max(SERVICE_ACCOUNT_MAX_LENGTH) })
+  .strict();
+export const apnsKeyBodySchema = z.object({ keyId, p8 }).strict();
+export const credentialAnswerSchema = z.object({ ok: z.literal(true) }).strict();
+export const appCredentialHeldSchema = z
+  .object({ held: z.boolean(), heldAt: z.string().nullable() })
+  .strict();
