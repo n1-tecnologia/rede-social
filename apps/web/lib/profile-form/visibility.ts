@@ -1,7 +1,6 @@
 import {
   answerTokens,
   isQuestionVisible,
-  type MemberForm,
   type MemberQuestion,
   type ProfileFormCondition,
 } from '@rede-social/contracts/profile-form';
@@ -16,7 +15,7 @@ import { type Answers, type Draft, toWire } from './form-state';
  * only shapes the screen (T-12.1-16). No helper here returns, logs or passes on an answer value (T-12.1-11).
  */
 
-type FormQuestions = Pick<MemberForm, 'questions'>;
+type FormQuestions = { questions: readonly MemberQuestion[] };
 
 /** The tokens a draft contributes to a condition: the draft goes to the wire value the save sends first. */
 export function tokensOfDraft(
@@ -47,21 +46,40 @@ export function visibleQuestionIds(form: FormQuestions, drafts?: Answers): Set<s
   return visible;
 }
 
-/** RED stubs of plan 12.1-13 task 3: deliberately inert, replaced in the GREEN commit. */
-export function storedVisibleQuestionIds(_form: FormQuestions): Set<string> {
-  return new Set();
+/**
+ * The questions "Minhas respostas" shows (D-634, UI-D-659): a question with a condition whose opener answer
+ * does not match is omitted. Stored equals visible (D-624), so nothing else is filtered.
+ */
+export function storedVisibleQuestionIds(form: FormQuestions): Set<string> {
+  return visibleQuestionIds(form);
 }
 
+/**
+ * The ACTIVE questions whose stored answer a save of these drafts would delete (D-626, D-624): they have a
+ * stored answer in the form read and are hidden under the drafts, in form order. A draft that closes
+ * nothing with a stored answer lists nothing. Only an id and a title leave: never an answer (T-12.1-11).
+ */
 export function answersToErase(
-  _form: FormQuestions,
-  _drafts: Answers,
+  form: FormQuestions,
+  drafts: Answers,
 ): { id: string; title: string }[] {
-  return [];
+  const visible = visibleQuestionIds(form, drafts);
+  return form.questions
+    .filter((question) => question.answer !== null && !visible.has(question.id))
+    .map((question) => ({ id: question.id, title: question.title }));
 }
 
+/**
+ * True when a staff row's condition is not met by the opener's own staff row (UI-D-659): the staff view reads
+ * "Não se aplica" for such a row instead of "Sem resposta". An opener row that is absent or holds no value
+ * does not meet the condition. The caller applies it to unanswered rows only.
+ */
 export function isNotApplicable(
-  _row: { questionId: string; condition: ProfileFormCondition | null; value: unknown },
-  _rowsById: ReadonlyMap<string, { value: unknown }>,
+  row: { questionId: string; condition: ProfileFormCondition | null; value: unknown },
+  rowsById: ReadonlyMap<string, { value: unknown }>,
 ): boolean {
-  return false;
+  return !isQuestionVisible(row, (questionId) => {
+    const opener = rowsById.get(questionId);
+    return opener === undefined ? undefined : answerTokens(opener.value);
+  });
 }
