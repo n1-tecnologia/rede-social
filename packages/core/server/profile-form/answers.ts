@@ -52,6 +52,8 @@ type StaffRow = {
   show_on_profile: boolean;
   position: number;
   archived_at: string | Date | null;
+  condition_question_id: string | null;
+  condition_values: string[] | null;
 };
 
 /**
@@ -144,7 +146,8 @@ export async function staffAnswersOf(
     const rows = await tx.execute<StaffRow>(sql`
       select q.id::text as question_id, q.title, q.type, q.options, a.value,
              (a.id is not null) as answered, q.required, q.show_on_profile,
-             q.position, q.archived_at
+             q.position, q.archived_at,
+             q.condition_question_id::text as condition_question_id, q.condition_values
         from public.profile_form_questions q
         left join public.profile_form_answers a
           on a.tenant_id = q.tenant_id
@@ -170,6 +173,11 @@ export async function staffAnswersOf(
         showOnProfile: row.show_on_profile,
         position: row.position,
         archivedAt: iso(row.archived_at),
+        // 12.1 (D-634): the condition only, never an answer value; the opener's own row supplies the value.
+        condition:
+          row.condition_question_id === null || row.condition_values === null
+            ? null
+            : { questionId: row.condition_question_id, values: row.condition_values },
       })),
     };
   });

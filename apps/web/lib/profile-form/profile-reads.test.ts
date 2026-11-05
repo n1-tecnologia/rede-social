@@ -109,6 +109,7 @@ const staffPayload = {
       archivedAt: null,
       answered: true,
       required: false,
+      condition: null,
     },
   ],
 };

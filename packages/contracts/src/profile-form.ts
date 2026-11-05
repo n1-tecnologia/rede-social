@@ -1057,6 +1057,9 @@ export const staffAnswersSchema = z
           archivedAt: z.string().nullable(),
           answered: z.boolean(),
           required: z.boolean(),
+          // 12.1 (D-634, UI-D-659): the question's own condition, so the staff view can read an unanswered
+          // conditional question as "Não se aplica" from the opener's row. No answer value rides here.
+          condition: profileFormConditionSchema.nullable(),
         })
         .strict(),
     ),

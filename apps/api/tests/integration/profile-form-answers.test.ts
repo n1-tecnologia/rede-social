@@ -8,6 +8,7 @@ import {
   removeProfileFormByPrefix,
   seedProfileFormAnswer,
   seedProfileFormQuestion,
+  seedProfileFormStep,
   signInAs,
   withProfileForm,
 } from './setup';
@@ -333,6 +334,7 @@ describe('12-07 staff: PFORM-19', () => {
           expect(Object.keys(row).sort()).toEqual([
             'answered',
             'archivedAt',
+            'condition',
             'options',
             'position',
             'questionId',
@@ -486,4 +488,185 @@ describe('12-07 staff: PFORM-19', () => {
       select count(*)::int as n from public.profile_form_answers where question_id = ${pub}::uuid`;
     expect(row?.n).toBe(1);
   });
+});
+
+/**
+ * 12.1-12 (D-624, D-634, D-636; PFORM-33, T-12.1-03; tracer): STORED EQUALS VISIBLE, proved across every reader.
+ * No reader of stored answers carries a visibility filter, so the only thing that keeps a closed answer out of
+ * the public block and the staff view is that the member's own save already deleted it. The fixture is one
+ * opener (single choice, public) with an ACTIVE and an ARCHIVED public dependent under the same condition, all
+ * answered through the admin SQL, then closed by the member through the REAL save route.
+ */
+describe('12.1-12 tracer: a closed answer leaves every reader and the staff row carries its condition (D-624, D-634, D-636)', () => {
+  type FormRead = { formEtag: string };
+
+  const asMember = (who: Person, method: 'GET' | 'PUT', path: string, body?: unknown) =>
+    api.request(path, {
+      method,
+      headers: {
+        'x-tenant-host': who.host,
+        authorization: `Bearer ${who.token}`,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  const choose = (optionId: string) => ({ optionId, otherText: null });
+
+  const storedIds = async (userId: string): Promise<string[]> =>
+    (
+      await adminSql<{ question_id: string }[]>`
+        select a.question_id::text as question_id
+          from public.profile_form_answers a
+          join public.memberships m on m.id = a.membership_id
+         where m.user_id = ${userId}::uuid
+         order by a.question_id`
+    ).map((row) => row.question_id);
+
+  async function fixture() {
+    const step = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+    const yes = crypto.randomUUID();
+    const no = crypto.randomUUID();
+    const opener = await question({
+      title: `${TITLE}Abridora`,
+      type: 'single_choice',
+      stepId: step,
+      position: 1,
+      showOnProfile: true,
+      options: [
+        { id: yes, label: 'Sim' },
+        { id: no, label: 'Não' },
+      ],
+    });
+    const dependent = await question({
+      title: `${TITLE}Ativa`,
+      stepId: step,
+      position: 2,
+      showOnProfile: true,
+      conditionQuestionId: opener,
+      conditionValues: [yes],
+    });
+    const archivedDependent = await question({
+      title: `${TITLE}Arquivada dependente`,
+      stepId: step,
+      position: 3,
+      showOnProfile: true,
+      archived: true,
+      conditionQuestionId: opener,
+      conditionValues: [yes],
+    });
+    return { step, yes, no, opener, dependent, archivedDependent };
+  }
+
+  it('D-636 archived: the member changes the opener, the ACTIVE and the ARCHIVED dependent answers are gone from the store, the public block and the staff view, a bystander keeps hers, and the staff row names its condition', async () => {
+    const owner = await person();
+    const bystander = await person();
+    const viewer = await person();
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const f = await fixture();
+      for (const who of [owner, bystander]) {
+        await answer(who.userId, f.opener, choose(f.yes));
+        await answer(who.userId, f.dependent, 'ativa-publica');
+        await answer(who.userId, f.archivedDependent, 'arquivada-publica');
+      }
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+
+      // Positive control: before the change the public block carries the open dependent (and not the archived
+      // one, which the public query never lists) and the staff view carries both answers.
+      const publicBefore = (await (await read(viewer, ownerId)).json()) as Answers;
+      expect(publicBefore.answers.map((row) => row.questionId)).toEqual([f.opener, f.dependent]);
+      expect(publicBefore.answers.find((row) => row.questionId === f.dependent)?.value).toBe(
+        'ativa-publica',
+      );
+      const staffBefore = (await (await read(admin, ownerId)).json()) as Answers;
+      expect(
+        staffBefore.answers.filter((row) => row.answered).map((row) => row.questionId),
+      ).toEqual([f.opener, f.dependent, f.archivedDependent]);
+      expect(
+        staffBefore.answers.find((row) => row.questionId === f.archivedDependent),
+      ).toMatchObject({
+        value: 'arquivada-publica',
+        condition: { questionId: f.opener, values: [f.yes] },
+      });
+
+      // The member closes the dependents through the real save route.
+      const formRes = await asMember(owner, 'GET', '/v1/me/profile-form');
+      expect(formRes.status).toBe(200);
+      const form = (await formRes.json()) as FormRead;
+      const saved = await asMember(owner, 'PUT', '/v1/me/profile-form/answers', {
+        formEtag: form.formEtag,
+        stepId: f.step,
+        answers: { [f.opener]: choose(f.no) },
+      });
+      expect(saved.status, await saved.clone().text()).toBe(200);
+
+      // Stored: only the opener remains for the owner (admin SQL, no policy in the way).
+      expect(await storedIds(owner.userId)).toEqual([f.opener]);
+      // The bystander's three answers are untouched.
+      expect(await storedIds(bystander.userId)).toEqual(
+        [f.opener, f.dependent, f.archivedDependent].sort(),
+      );
+
+      // Public block: the new opener answer and neither dependent, not even by id.
+      const publicRes = await read(viewer, ownerId);
+      const publicRaw = await publicRes.text();
+      const publicAfter = JSON.parse(publicRaw) as Answers;
+      expect(publicAfter.answers.map((row) => row.questionId)).toEqual([f.opener]);
+      expect(publicAfter.answers[0]?.value).toEqual(choose(f.no));
+      expect(publicRaw).not.toContain('ativa-publica');
+      expect(publicRaw).not.toContain('arquivada-publica');
+      expect(publicRaw).not.toContain(f.dependent);
+      expect(publicRaw).not.toContain(f.archivedDependent);
+
+      // Staff view: the active dependent is listed UNANSWERED with its condition, the archived one (nothing
+      // left to show) is absent, and no payload gained an answer value for the sake of "Não se aplica".
+      const staffRes = await read(admin, ownerId);
+      const staffRaw = await staffRes.text();
+      const staffAfter = JSON.parse(staffRaw) as Answers;
+      expect(staffAfter.answers.map((row) => row.questionId)).toEqual([f.opener, f.dependent]);
+      expect(staffAfter.answers[1]).toMatchObject({
+        questionId: f.dependent,
+        answered: false,
+        value: null,
+        condition: { questionId: f.opener, values: [f.yes] },
+      });
+      expect(staffAfter.answers[0]).toMatchObject({ answered: true, condition: null });
+      expect(Object.keys(staffAfter.answers[1] ?? {}).sort()).toEqual([
+        'answered',
+        'archivedAt',
+        'condition',
+        'options',
+        'position',
+        'questionId',
+        'required',
+        'showOnProfile',
+        'title',
+        'type',
+        'value',
+      ]);
+      expect(staffRaw).not.toContain('ativa-publica');
+      expect(staffRaw).not.toContain('arquivada-publica');
+
+      // The bystander's public block still shows her dependent (the purge touched only the member's own).
+      const bystanderPublic = (await (
+        await read(viewer, await membershipOf(bystander.userId, labTenantId))
+      ).json()) as Answers;
+      expect(bystanderPublic.answers.map((row) => row.questionId)).toEqual([f.opener, f.dependent]);
+    });
+  }, 60_000);
+
+  it('the public payload is unchanged by the staff contract change: no condition key on a member row', async () => {
+    const owner = await person();
+    const viewer = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await fixture();
+      await answer(owner.userId, f.opener, choose(f.yes));
+      await answer(owner.userId, f.dependent, 'ativa-publica');
+      const res = await read(viewer, await membershipOf(owner.userId, labTenantId));
+      const body = (await res.json()) as Answers;
+      expect(body.kind).toBe('member');
+      for (const row of body.answers) expect(Object.keys(row).sort()).toEqual(MEMBER_KEYS);
+    });
+  }, 30_000);
 });

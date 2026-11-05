@@ -1240,11 +1240,44 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
       archivedAt: null,
       answered: false,
       required: true,
+      condition: null,
     };
     const sample = { kind: 'staff', answers: [row] };
     expect(staffAnswersSchema.parse(sample)).toEqual(sample);
     expect(
       staffAnswersSchema.safeParse({ kind: 'staff', answers: [{ ...row, extra: 1 }] }).success,
+    ).toBe(false);
+    // 12.1 (D-634, UI-D-659): the row carries its condition (or null) and the key is required.
+    const conditioned = { ...row, condition: { questionId: B, values: ['true'] } };
+    expect(staffAnswersSchema.parse({ kind: 'staff', answers: [conditioned] }).answers[0]).toEqual(
+      conditioned,
+    );
+    const { condition: _omitted, ...withoutCondition } = row;
+    expect(
+      staffAnswersSchema.safeParse({ kind: 'staff', answers: [withoutCondition] }).success,
+    ).toBe(false);
+    // Only a condition shape, never an answer value, can ride on the row.
+    expect(
+      staffAnswersSchema.safeParse({
+        kind: 'staff',
+        answers: [{ ...row, condition: { questionId: B, values: ['true'], value: 'x' } }],
+      }).success,
+    ).toBe(false);
+    // The public rows are not touched: no condition key is accepted there.
+    expect(
+      publicAnswersSchema.safeParse({
+        kind: 'member',
+        answers: [
+          {
+            questionId: A,
+            title: 'T',
+            type: 'short_text',
+            options: [],
+            value: 'x',
+            condition: null,
+          },
+        ],
+      }).success,
     ).toBe(false);
   });
 });

@@ -136,6 +136,7 @@ describe('/membros/[membershipId] with the form answers block', () => {
             archivedAt: null,
             answered: false,
             required: false,
+            condition: null,
           },
         ],
       }),

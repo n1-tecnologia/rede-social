@@ -72,6 +72,7 @@ const staffRow = (n: number, overrides: Partial<StaffRow> = {}): StaffRow => ({
   archivedAt: null,
   answered: true,
   required: false,
+  condition: null,
   ...overrides,
 });
 
