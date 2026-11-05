@@ -16,6 +16,7 @@ import type { ProjectRecord } from '../tenancy/project-registry';
 import { buildActionLink, HookPayloadError, type SendEmailHookPayload } from './hook-schema';
 import { localTransport } from './local';
 import { resendTransport } from './resend';
+import { renderAccountDeleted } from './templates/account-deleted';
 import { renderInvite } from './templates/invite';
 import { type MailBrand, type RenderedMail, safeHttpUrl } from './templates/layout';
 import { LINK_ACTION_TYPES, renderNeutral } from './templates/neutral';
@@ -271,4 +272,48 @@ export async function sendAuthMail(input: SendAuthMailInput): Promise<SendAuthMa
   );
 
   return { outcome: 'sent', tenantId, actionType };
+}
+
+export type AccountDeletedMailInput = {
+  tenantId: string;
+  /** The tenant's display name, brand colours included; no logo (a logo needs a host, and the mail does not). */
+  brand: MailBrand;
+  /** Already formatted in the tenant's time zone (`formatDeletionDate`). */
+  date: string;
+  /** Resend's idempotency key: a retry of the same membership's job never doubles the delivery. */
+  idempotencyKey: string;
+};
+
+/**
+ * 13-13 (D-609, NATIVE-21, T-13-31): the completion e-mail, sent BEFORE the Auth account is soft-deleted (after
+ * that the address is gone). Never logs the address, not even masked; the line carries the tenant id and the transport only.
+ * At-least-once by design (A-13-04): the worker may repeat it after a crash, the idempotency key narrows that.
+ */
+export async function sendAccountDeletedMail(
+  to: string,
+  input: AccountDeletedMailInput,
+  logger?: Logger,
+): Promise<void> {
+  const log = logger ? logger.child({ name: 'mail' }) : moduleLogger('mail');
+  const rendered = renderAccountDeleted({ brand: input.brand, date: input.date });
+  await mailTransport.send(
+    {
+      from: { name: input.brand.displayName, email: `no-reply@${env.MAIL_DOMAIN}` },
+      to,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      idempotencyKey: input.idempotencyKey,
+      meta: { actionType: 'account_deleted', tenantId: input.tenantId },
+    },
+    { signal: AbortSignal.timeout(MAIL_SEND_TIMEOUT_MS) },
+  );
+  log.info(
+    {
+      event: 'mail.account_deleted.sent',
+      transport: mailTransport.name,
+      tenantId: input.tenantId,
+    },
+    'account deleted mail sent',
+  );
 }
