@@ -230,14 +230,15 @@ export type FeedListProps = {
 };
 
 /**
- * The geometry of a real post: the flat full-bleed block, a circle + two meta lines in the header's
- * `px-4 py-3`, a full-bleed ratio box, two caption lines in the `px-4` gutter.
+ * The geometry of a real post: the flat full-bleed block (from md up the rounded card, 2026-10-23), a
+ * circle + two meta lines in the header's `px-4 py-3`, a full-bleed ratio box, two caption lines in
+ * the `px-4` gutter.
  */
 export function FeedCardSkeleton() {
   return (
     <Card
       aria-hidden
-      className="flex flex-col overflow-hidden rounded-none pb-4 shadow-none dark:border-0"
+      className="flex flex-col overflow-hidden rounded-none pb-4 shadow-none dark:border-0 md:rounded-2xl md:shadow-[0_1px_3px_rgba(22,35,59,.06)]"
     >
       <div className="flex items-center gap-3 px-4 py-3">
         <Skeleton variant="circle" />

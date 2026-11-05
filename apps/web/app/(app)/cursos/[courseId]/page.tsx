@@ -1,6 +1,6 @@
 import type { MediaPlayback } from '@rede-social/contracts/media';
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
-import { EmptyState, PageHeader } from '@rede-social/ui';
+import { EmptyState, MemberSkin, PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -10,7 +10,8 @@ import { getLearnCourse } from '@/lib/courses-learn';
 import { isPreview } from '@/lib/courses-member-view';
 import { formatPublishedAt } from '@/lib/courses-view';
 import { getPlaybackTokens } from '@/lib/media';
-import { MEMBER_AREA_PATH } from '@/lib/member-area';
+import { memberScreenHref } from '@/lib/member-area';
+import { MemberEmptyCard } from '../MemberEmptyCard';
 import { CoursePage } from './CoursePage';
 import { MemberCoursePage } from './MemberCoursePage';
 
@@ -139,7 +140,8 @@ export default async function CourseDetailPage({
 /**
  * The member branch (08.5-07): one learn read. Every miss — unknown, foreign, draft or archived, for
  * EVERY role, buyers and a previewing admin included — is the segment's "Curso indisponível"
- * (D-426, UI-D-441); a read failure is the shipped course error card with its retry.
+ * (D-426, UI-D-441); a read failure is the course error card with its retry (2026-10-22: the member
+ * area's `MemberEmptyCard`, and "Voltar" falls back to the Cursos screen).
  */
 async function renderMemberPage(
   courseId: string,
@@ -153,27 +155,29 @@ async function renderMemberPage(
   if (result.status === 'error') {
     const retry = `/cursos/${encodeURIComponent(courseId)}${preview ? '?ver=aluno' : ''}`;
     return (
-      <div className="mx-auto flex w-full max-w-[680px] flex-col">
-        <PageHeader
-          backHref={MEMBER_AREA_PATH}
-          backLabel={t('course.back')}
-          className="md:static md:px-0"
-        />
-        <div className="px-4 pt-2">
-          <EmptyState
-            variant="card"
-            icon={CircleAlert}
-            data-testid="course-error"
-            title={t('errors.title')}
-            body={t('errors.course')}
-            action={
-              <a href={retry} className={LINK_OUTLINE}>
-                {t('errors.retry')}
-              </a>
-            }
+      <MemberSkin>
+        <div className="mx-auto flex w-full max-w-[680px] flex-col">
+          <PageHeader
+            backHref={memberScreenHref('cursos', {}, preview)}
+            backLabel={t('course.back')}
+            className="md:static md:px-0"
           />
+          <div className="px-4 pt-2">
+            <MemberEmptyCard
+              icon={CircleAlert}
+              tone="error"
+              data-testid="course-error"
+              title={t('errors.title')}
+              body={t('errors.course')}
+              action={
+                <a href={retry} className={LINK_OUTLINE}>
+                  {t('errors.retry')}
+                </a>
+              }
+            />
+          </div>
         </div>
-      </div>
+      </MemberSkin>
     );
   }
   return <MemberCoursePage course={result.course} preview={preview} storeOn={storeOn} />;

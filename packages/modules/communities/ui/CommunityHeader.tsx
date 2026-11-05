@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { CommunityCover } from './CommunityCover';
 
 /**
- * The community page's header (UI-D-43): the `h-36` cover (or the UI-D-35 gradient block), a 44x44
+ * The community page's header (UI-D-43): the cover (160px, 192px and rounded from `md`) (or the UI-D-35 gradient block), a 44x44
  * back control over it, then the community name at the Title role and the description.
  *
  * **D-67's three drops are the point of this component, not an omission.** The prototype draws an

@@ -1,59 +1,72 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import type { LearnCourse } from '@rede-social/module-courses/contracts';
+import { MemberModuleCard } from '@rede-social/module-courses/ui';
 import { ExclusiveBadge } from '@rede-social/module-store/ui';
-import { chipBase, cn, EmptyState, PageHeader, SectionTitle, StatusPill } from '@rede-social/ui';
-import { Check, GraduationCap, User } from 'lucide-react';
+import { buttonClasses, MemberSkin, PageHeader, StatusPill } from '@rede-social/ui';
+import { BookOpen, Check, CircleCheck, Clock, GraduationCap, Play, User } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import {
   courseActionView,
   courseHeroView,
   courseSeconds,
-  curriculumOpenModules,
   curriculumView,
   memberCourseHref,
   memberLessonHref,
+  moduleCardViews,
 } from '@/lib/courses-member-view';
-import type { CoursesTranslator } from '@/lib/courses-view';
-import { MEMBER_AREA_PATH } from '@/lib/member-area';
+import { type CoursesTranslator, formatCourseDuration } from '@/lib/courses-view';
+import { memberScreenHref } from '@/lib/member-area';
 import { getCourseAccess } from '@/lib/store';
 import { lockedCourseView } from '@/lib/store-view';
-import { PreviewBanner } from '../PreviewBanner';
+import { MemberEmptyCard } from '../MemberEmptyCard';
+import {
+  DETAIL_GRID,
+  HeroChip,
+  MemberDetailHero,
+  MemberDetailSection,
+  MemberProgressPanel,
+} from '../MemberDetail';
+import { MemberSectionHeader } from '../MemberSection';
 import { ReadMoreText } from '../ReadMoreText';
+import { riseStyle } from '../rise';
 import { CourseActionZone, type LockedCourseZone } from './CourseActionZone';
-import { Curriculum } from './Curriculum';
 
 /**
  * The member's course page (08.5-07, UI-D-427..UI-D-430, D-423, D-430, COURSE-18): what a member, a
  * `support_tenant` or a previewing `admin_tenant` sees at `/cursos/[courseId]` (the role split is
  * `page.tsx`'s). Server-rendered top to bottom from ONE read, the courses API's titles-only course
- * (`GET /v1/courses/learn/courses/{id}`):
- *
- *  - the `PageHeader` (back "Voltar para Cursos", the course title truncated, no trailing control);
- *  - the `PreviewBanner` right under it for an `admin_tenant` at `?ver=aluno` (UI-D-437);
- *  - the full-bleed 16:10 hero (the course cover, the tenant gradient without one) with the category
- *    and, on a locked course, the store's `ExclusiveBadge` "Exclusivo" as over-media pills that wrap;
- *  - the identity block: title 24/700, tagline, the `neutral` pills (level, "{N} h", and "Produto
- *    arquivado" when the store says so), the instructor line with the 24px photo;
- *  - the action zone: on a LOCKED course (the courses API's `locked`, never for staff or preview) the
- *    buy section in one of its four variants from the store's access read (UI-D-428), else the
- *    progress variants;
- *  - "Sobre o curso" (absent when empty) with "Ler mais", "O que você vai dominar" (absent when
- *    empty), and "Conteúdo do curso" with the module bands — or "Nenhuma aula ainda" (EP-13).
+ * (`GET /v1/courses/learn/courses/{id}`).
  *
  * **Titles only** (D-423, T-08.5-13): the course read never carries a locked lesson's description,
  * video, poster or material, so none of it can reach this page's HTML or RSC payload. Text safety:
  * every title, description and outcome renders as React text (T-08.5-29).
+ *
+ * **2026-10-26 (the academy reference's course page, the user's "swap completo").** Top to bottom:
+ *
+ *  - on a phone, the sticky `PageHeader` (back to Cursos; its title is a paragraph);
+ *  - the reference's hero (`MemberDetailHero`): the cover as the panel's ground, the overline
+ *    ("Curso · 4 módulos · Iniciante"), the title (the page's h1), the tagline, the instructor, the
+ *    chips ("14 aulas", "3 concluídas", "21% completo", the length; "Exclusivo" on a locked course)
+ *    and the main action ("Começar o curso" / "Continuar o curso" / "Rever o curso"), never on a
+ *    locked course;
+ *  - on a LOCKED course (never for staff or preview) the buy section (UI-D-428, `CourseActionZone`),
+ *    else "Seu progresso no curso", the bar and its share;
+ *  - "Módulos": the modules as the reference's cards (`MemberModuleCard`), each opening its own page
+ *    (`/cursos/{id}/modulos/{moduleId}`), where its lessons are; or "Nenhuma aula ainda" (EP-13);
+ *  - "Sobre o curso" (three lines and "Ler mais") and "O que você vai dominar", side by side from
+ *    `lg`; the store's "Produto arquivado" pill when it applies.
+ *
+ * A WIDE page on the desktop (`data-shell-full`). Nothing here moves or isolates around the buy zone,
+ * whose sheet renders inside it.
  */
 export interface MemberCoursePageProps {
   course: LearnCourse;
-  /** An `admin_tenant` at `?ver=aluno`: the banner, and internal links keep the param (UI-D-437). */
+  /** An `admin_tenant` at `?ver=aluno`: internal links keep the param (UI-D-437); no banner since 2026-10-23. */
   preview: boolean;
   /** The store module is on for the tenant (UI-D-442: off → nothing to buy, no access read). */
   storeOn: boolean;
 }
-
-const COVER_SIZES = '(min-width: 680px) 680px, 100vw';
 
 export async function MemberCoursePage({ course, preview, storeOn }: MemberCoursePageProps) {
   const t = (await getTranslations()) as unknown as CoursesTranslator;
@@ -68,12 +81,10 @@ export async function MemberCoursePage({ course, preview, storeOn }: MemberCours
     preview,
   });
   const curriculum = curriculumView(course, preview, t);
-  const initialOpen = curriculumOpenModules(course);
+  const modules = moduleCardViews(course, preview, t);
   const noLessons = curriculum.lessonCount === 0;
   const archived = locked && access?.archivedTag === true;
-  const identityPills = archived
-    ? [...hero.pills, t('courses.member.tags.productArchived')]
-    : hero.pills;
+  const duration = formatCourseDuration(courseSeconds(course));
 
   let lockedZone: LockedCourseZone | null = null;
   if (locked) {
@@ -124,187 +135,227 @@ export async function MemberCoursePage({ course, preview, storeOn }: MemberCours
     };
   }
 
-  return (
-    <div
-      data-testid="member-course-page"
-      className="mx-auto flex w-full max-w-[680px] flex-col pb-6"
-    >
-      <PageHeader
-        title={hero.title}
-        backHref={MEMBER_AREA_PATH}
-        backLabel={t('courses.course.back')}
-        stickyTop="0px"
-        className="md:static md:px-0"
-      />
-      {preview ? <PreviewBanner courseId={course.id} /> : null}
+  const progress = course.progress;
+  const chips = noLessons ? null : (
+    <>
+      <HeroChip icon={BookOpen} testId="member-course-chip-lessons">
+        {t('courses.member.chips.lessons', { N: curriculum.lessonCount })}
+      </HeroChip>
+      {progress.done > 0 ? (
+        <HeroChip icon={CircleCheck} testId="member-course-chip-done">
+          {t('courses.member.chips.done', { n: progress.done })}
+        </HeroChip>
+      ) : null}
+      {duration ? (
+        <HeroChip icon={Clock} testId="member-course-chip-duration">
+          {duration}
+        </HeroChip>
+      ) : null}
+      {!locked && progress.percent > 0 ? (
+        <HeroChip tone="brand" testId="member-course-chip-progress">
+          {t('courses.member.chips.percent', { percent: progress.percent })}
+        </HeroChip>
+      ) : null}
+      {locked ? (
+        <ExclusiveBadge label={t('courses.member.tags.exclusiveCourse')} size="compact" />
+      ) : null}
+    </>
+  );
 
-      <div
-        data-testid="member-course-hero"
-        className="relative aspect-[16/10] w-full overflow-hidden bg-bg-tertiary"
+  const cta =
+    !locked && !noLessons && progressAction?.href ? (
+      <a
+        href={progressAction.href}
+        data-testid="course-action-cta"
+        data-variant={progressAction.variant}
+        className={buttonClasses({
+          variant: progressAction.variant === 'done' ? 'outline' : 'brand',
+          size: 'lg',
+          className: 'w-full gap-2 sm:w-auto',
+        })}
       >
-        {hero.coverAssetId ? (
-          <MediaImage
-            assetId={hero.coverAssetId}
-            widths={PURPOSE_WIDTHS.cover}
-            alt={hero.coverAlt}
-            sizes={COVER_SIZES}
-            eager
-            ratio=""
-            className="absolute inset-0 h-full w-full"
-            fallback={
-              <span
-                aria-hidden
-                className="absolute inset-0 block"
-                style={{ backgroundImage: 'var(--brand-gradient)' }}
-              />
-            }
-          />
-        ) : (
-          <span
-            aria-hidden
-            data-testid="member-course-hero-fallback"
-            className="absolute inset-0 block"
-            style={{ backgroundImage: 'var(--brand-gradient)' }}
-          />
+        {progressAction.variant === 'done' ? null : (
+          <Play aria-hidden size={17} fill="currentColor" />
         )}
-        {hero.categoryPill || locked ? (
-          <div
-            data-testid="member-course-hero-tags"
-            className="absolute top-3 right-3 left-3 flex flex-wrap items-start gap-1"
-          >
-            {hero.categoryPill ? (
+        {progressAction.label}
+      </a>
+    ) : null;
+
+  return (
+    <MemberSkin>
+      <div
+        data-testid="member-course-page"
+        data-shell-full
+        className="mx-auto flex w-full flex-col gap-6 pb-8 md:gap-8"
+      >
+        <PageHeader
+          title={hero.title}
+          titleAs="p"
+          backHref={memberScreenHref('cursos', {}, preview)}
+          backLabel={t('courses.course.back')}
+          className="md:hidden"
+        />
+
+        <MemberDetailHero
+          back={{
+            href: memberScreenHref('cursos', {}, preview),
+            label: t('courses.member.catalogue.title'),
+          }}
+          coverAssetId={hero.coverAssetId}
+          eyebrow={hero.overline}
+          title={hero.title}
+          description={hero.tagline}
+          chips={
+            <>
               <span
-                className={cn(
-                  chipBase,
-                  'max-w-full truncate bg-black/60 text-white backdrop-blur-sm',
-                )}
+                data-testid="member-course-instructor"
+                className="inline-flex w-full items-center gap-2 pb-1 text-sm text-white/85"
               >
-                {hero.categoryPill}
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/20">
+                  {hero.instructorPhotoAssetId ? (
+                    <MediaImage
+                      assetId={hero.instructorPhotoAssetId}
+                      widths={PURPOSE_WIDTHS.cover}
+                      alt=""
+                      sizes="24px"
+                      ratio=""
+                      className="h-full w-full"
+                    />
+                  ) : (
+                    <User aria-hidden size={13} className="text-white" />
+                  )}
+                </span>
+                <span className="min-w-0 break-words">{hero.instructorLine}</span>
               </span>
-            ) : null}
-            {locked ? <ExclusiveBadge label={t('courses.member.tags.exclusiveCourse')} /> : null}
+              {chips}
+            </>
+          }
+          actions={
+            cta ? (
+              <div data-testid="member-course-actions" className="flex w-full sm:w-auto">
+                {cta}
+              </div>
+            ) : null
+          }
+          testIds={{
+            root: 'member-course-hero',
+            title: 'member-course-title',
+            description: 'member-course-tagline',
+            chips: 'member-course-chips',
+          }}
+        />
+
+        {archived ? (
+          <div data-testid="member-course-pills" className="flex flex-wrap items-center gap-1 px-4">
+            <StatusPill tone="neutral">{t('courses.member.tags.productArchived')}</StatusPill>
           </div>
         ) : null}
-      </div>
 
-      <div className="flex flex-col gap-2 px-4 pt-4">
-        <p
-          data-testid="member-course-title"
-          data-brand-title
-          className="text-2xl font-bold leading-tight tracking-[-0.02em] text-text [overflow-wrap:anywhere]"
+        {/* EP-13: a course with no live lesson has no action zone at all, locked or open. */}
+        {!noLessons && locked ? (
+          <div data-testid="member-course-locked" className="flex flex-col lg:max-w-xl">
+            <CourseActionZone action={null} locked={lockedZone} />
+          </div>
+        ) : null}
+        {!noLessons && !locked && progressAction ? (
+          <MemberProgressPanel
+            testId="member-course-progress"
+            title={t('courses.member.course.progressTitle')}
+            percent={progress.percent}
+            barLabel={t('courses.member.progress.aria', { percent: progress.percent })}
+            helper={progressAction.variant === 'start' ? null : progressAction.line}
+          />
+        ) : null}
+
+        <MemberDetailSection
+          id="course-content"
+          title={t('courses.member.course.modulesTitle')}
+          sub={noLessons ? null : curriculum.countLabel}
+          testId="member-course-modules"
         >
-          {hero.title}
-        </p>
-        {hero.tagline ? (
-          <p
-            data-testid="member-course-tagline"
-            className="text-sm font-normal text-text-secondary [overflow-wrap:anywhere]"
-          >
-            {hero.tagline}
-          </p>
-        ) : null}
-        {identityPills.length > 0 ? (
-          <div data-testid="member-course-pills" className="flex flex-wrap items-center gap-1">
-            {identityPills.map((pill) => (
-              <StatusPill key={pill} tone="neutral">
-                {pill}
-              </StatusPill>
-            ))}
-          </div>
-        ) : null}
-        <p
-          data-testid="member-course-instructor"
-          className="flex items-center gap-2 text-sm font-normal text-text"
-        >
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-tertiary">
-            {hero.instructorPhotoAssetId ? (
-              <MediaImage
-                assetId={hero.instructorPhotoAssetId}
-                widths={PURPOSE_WIDTHS.cover}
-                alt=""
-                sizes="24px"
-                ratio=""
-                className="h-full w-full"
-              />
-            ) : (
-              <User aria-hidden size={14} className="text-text-tertiary" />
-            )}
-          </span>
-          <span className="min-w-0 break-words">{hero.instructorLine}</span>
-        </p>
-      </div>
-
-      {/* EP-13: a course with no live lesson has no action zone at all, locked or open. */}
-      {noLessons ? null : (
-        <div data-testid="member-course-actions" className="flex flex-col">
-          <CourseActionZone action={locked ? null : progressAction} locked={lockedZone} />
-        </div>
-      )}
-
-      <div className="flex flex-col gap-6 pt-6">
-        {hero.description ? (
-          <section aria-labelledby="course-about" className="flex flex-col gap-2 px-4">
-            <SectionTitle id="course-about">{t('courses.member.course.about')}</SectionTitle>
-            <ReadMoreText
-              id="course-about-text"
-              data-testid="member-course-description"
-              text={hero.description}
-              moreLabel={t('courses.member.readMore')}
-              lessLabel={t('courses.member.readLess')}
-            />
-          </section>
-        ) : null}
-
-        {hero.outcomes.length > 0 ? (
-          <section aria-labelledby="course-outcomes" className="flex flex-col gap-2 px-4">
-            <SectionTitle id="course-outcomes">{t('courses.member.course.outcomes')}</SectionTitle>
-            <ul aria-labelledby="course-outcomes" className="flex flex-col gap-2">
-              {hero.outcomes.map((outcome, index) => (
-                <li
-                  // biome-ignore lint/suspicious/noArrayIndexKey: outcomes may repeat; order is the identity.
-                  key={index}
-                  className="flex items-start gap-2 text-sm font-normal text-text-secondary [overflow-wrap:anywhere]"
-                >
-                  <Check aria-hidden size={16} className="shrink-0 text-text-secondary" />
-                  <span className="min-w-0">{outcome}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        <section aria-labelledby="course-content" className="flex flex-col gap-3">
-          <div className="flex items-baseline justify-between gap-3 px-4">
-            <SectionTitle id="course-content">{t('courses.member.course.content')}</SectionTitle>
-            {noLessons ? null : (
-              <span
-                data-testid="member-course-count"
-                className="shrink-0 text-xs font-normal text-text-tertiary tabular-nums"
-              >
-                {curriculum.countLabel}
-              </span>
-            )}
-          </div>
           {noLessons ? (
             <div className="px-4">
-              <EmptyState
-                variant="card"
+              <MemberEmptyCard
                 icon={GraduationCap}
+                as="h3"
                 data-testid="member-course-no-lessons"
                 title={t('courses.member.course.noLessons.title')}
                 body={t('courses.member.course.noLessons.body')}
               />
             </div>
           ) : (
-            <Curriculum
-              modules={curriculum.modules}
-              initialOpen={initialOpen}
-              coverAssetId={course.coverAssetId}
-              coverWidths={PURPOSE_WIDTHS.cover}
-            />
+            <ul aria-labelledby="course-content" className={DETAIL_GRID}>
+              {modules.map((module, index) => (
+                <li key={module.id} className="ms-rise min-w-0" style={riseStyle(index)}>
+                  <MemberModuleCard
+                    id={module.id}
+                    href={module.href}
+                    ariaLabel={module.ariaLabel}
+                    title={module.title}
+                    pill={module.pill}
+                    meta={module.meta}
+                    state={module.state}
+                    coverAssetId={course.coverAssetId}
+                    coverWidths={PURPOSE_WIDTHS.cover}
+                  />
+                </li>
+              ))}
+            </ul>
           )}
-        </section>
+        </MemberDetailSection>
+
+        {hero.description || hero.outcomes.length > 0 ? (
+          <div className="flex flex-col gap-7 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-2">
+            {hero.description ? (
+              <section aria-labelledby="course-about" className="flex flex-col">
+                <MemberSectionHeader id="course-about" title={t('courses.member.course.about')} />
+                <div className="px-4">
+                  <div className="ms-panel rounded-2xl border border-border p-4 md:p-5">
+                    <ReadMoreText
+                      id="course-about-text"
+                      data-testid="member-course-description"
+                      text={hero.description}
+                      moreLabel={t('courses.member.readMore')}
+                      lessLabel={t('courses.member.readLess')}
+                    />
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {hero.outcomes.length > 0 ? (
+              <section aria-labelledby="course-outcomes" className="flex flex-col">
+                <MemberSectionHeader
+                  id="course-outcomes"
+                  title={t('courses.member.course.outcomes')}
+                />
+                <div className="px-4">
+                  <ul
+                    aria-labelledby="course-outcomes"
+                    className="ms-panel flex flex-col gap-3 rounded-2xl border border-border p-4 md:p-5"
+                  >
+                    {hero.outcomes.map((outcome, index) => (
+                      <li
+                        // biome-ignore lint/suspicious/noArrayIndexKey: outcomes may repeat; order is the identity.
+                        key={index}
+                        className="flex items-start gap-2.5 text-sm font-normal leading-relaxed text-text-secondary [overflow-wrap:anywhere]"
+                      >
+                        <span
+                          aria-hidden
+                          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand/15 text-brand"
+                        >
+                          <Check size={12} strokeWidth={3} />
+                        </span>
+                        <span className="min-w-0">{outcome}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-    </div>
+    </MemberSkin>
   );
 }

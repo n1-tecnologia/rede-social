@@ -4910,3 +4910,329 @@ describe('09.3 — communities delete strings', () => {
     expect(String(lookup('communities.blocked.more'))).not.toContain('\u2014');
   });
 });
+
+/**
+ * 2026-10-22 — the courses area redesign on the social-igoralves prototype: the area menus ("·
+ * Membros" for the member, "· Cursos" for the admin) now that each screen is a page of its own, the
+ * screens' titles and supporting lines, the course hero's overline and facts strip, the module band's
+ * states, the live agenda's time line and the admin module band's pill. All ADDED keys: every string
+ * the earlier blocks pin stays as it was.
+ */
+describe('2026-10-22 — the courses area redesign strings (courses.member.json, courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  const added: ReadonlyArray<readonly [string, string]> = [
+    ['courses.member.area.label', 'Membros'],
+    ['courses.member.area.menu', 'Menu de Membros'],
+    ['courses.member.area.screens.home', 'Início'],
+    ['courses.member.area.screens.courses', 'Cursos'],
+    ['courses.member.area.screens.tracks', 'Trilhas'],
+    ['courses.member.area.screens.lives', 'Lives'],
+    ['courses.member.area.screens.progress', 'Progresso'],
+    ['courses.member.screens.courses.meta', 'Todos os cursos de {tenant}.'],
+    ['courses.member.screens.tracks.title', 'Trilhas'],
+    [
+      'courses.member.screens.tracks.meta',
+      'Caminhos prontos: a ordem certa para aprender sem pular etapa.',
+    ],
+    ['courses.member.screens.lives.title', 'Lives'],
+    ['courses.member.screens.lives.meta', 'Aulas ao vivo e gravações de {tenant}.'],
+    ['courses.member.screens.progress.title', 'Meu progresso'],
+    ['courses.member.screens.progress.meta', 'Sua evolução nos cursos de {tenant}.'],
+    [
+      'courses.member.course.overline',
+      'Curso{M, plural, =0 {} one { · # módulo} other { · # módulos}}{hasLevel, select, true { · {level}} other {}}',
+    ],
+    ['courses.member.course.facts.lessons', 'Aulas'],
+    ['courses.member.course.facts.duration', 'Duração'],
+    ['courses.member.course.facts.level', 'Nível'],
+    ['courses.member.module.inProgress', 'Em andamento'],
+    ['courses.member.module.locked', 'Bloqueado'],
+    ['courses.member.lives.timeLine', '{time} · {duration} min'],
+    ['courses.area.label', 'Cursos'],
+    ['courses.area.menu', 'Menu de Cursos'],
+    ['courses.area.screens.courses', 'Cursos'],
+    ['courses.area.screens.tracks', 'Trilhas'],
+    ['courses.area.screens.lives', 'Lives'],
+    ['courses.screens.tracks.title', 'Trilhas'],
+    ['courses.screens.tracks.subtitle', 'Sequências de cursos de {tenant}.'],
+    ['courses.screens.lives.title', 'Lives'],
+    ['courses.screens.lives.subtitle', 'Lives e replays de {tenant}.'],
+    ['courses.curriculum.module.pill', 'Módulo {nn}'],
+  ];
+
+  it.each(added)('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it('never says "Premium", "trancada", "assinar" or "plano", and never uses an em dash', () => {
+    for (const [key] of added) {
+      const value = String(lookup(key));
+      expect(value, key).not.toMatch(/premium|trancad|assinar|plano/i);
+      expect(value, key).not.toContain('—');
+    }
+  });
+
+  it('formats the supporting lines, the overline, the time line and the module pill', async () => {
+    const t = await translator();
+    expect(t('courses.member.screens.courses.meta', { tenant: 'Clínica A' })).toBe(
+      'Todos os cursos de Clínica A.',
+    );
+    expect(t('courses.member.screens.lives.meta', { tenant: 'Clínica A' })).toBe(
+      'Aulas ao vivo e gravações de Clínica A.',
+    );
+    expect(t('courses.member.screens.progress.meta', { tenant: 'Clínica A' })).toBe(
+      'Sua evolução nos cursos de Clínica A.',
+    );
+    expect(t('courses.screens.tracks.subtitle', { tenant: 'Clínica A' })).toBe(
+      'Sequências de cursos de Clínica A.',
+    );
+    expect(t('courses.screens.lives.subtitle', { tenant: 'Clínica A' })).toBe(
+      'Lives e replays de Clínica A.',
+    );
+    const overline = (M: number, level: string | null) =>
+      t('courses.member.course.overline', {
+        M,
+        hasLevel: level === null ? 'false' : 'true',
+        level: level ?? '',
+      });
+    expect(overline(0, null)).toBe('Curso');
+    expect(overline(1, null)).toBe('Curso · 1 módulo');
+    expect(overline(3, null)).toBe('Curso · 3 módulos');
+    expect(overline(3, 'Iniciante')).toBe('Curso · 3 módulos · Iniciante');
+    expect(overline(0, 'Avançado')).toBe('Curso · Avançado');
+    expect(t('courses.member.lives.timeLine', { time: '20:30', duration: 90 })).toBe(
+      '20:30 · 90 min',
+    );
+    expect(t('courses.curriculum.module.pill', { nn: '01' })).toBe('Módulo 01');
+  });
+});
+
+/**
+ * 2026-10-23 — the admin's management gathered under "Gerenciar" (the social-igoralves reference):
+ * the hub's title, supporting line and back link, its four cards (title, the counts line, the
+ * sentence), the course page's "Editar" doors to the form's sections and the admin live card's
+ * "Editar". All ADDED keys.
+ */
+describe('2026-10-23 — the "Gerenciar" strings (courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+  const lookup = (dotted: string): unknown =>
+    dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+
+  const added: ReadonlyArray<readonly [string, string]> = [
+    ['courses.manage.title', 'Gerenciar'],
+    ['courses.manage.subtitle', 'O conteúdo da área de membros, por tipo.'],
+    ['courses.manage.back', 'Gerenciar'],
+    ['courses.manage.backAria', 'Voltar para Gerenciar'],
+    ['courses.manage.cards.courses.title', 'Cursos'],
+    [
+      'courses.manage.cards.courses.body',
+      'A página do curso inteira: capa, textos, módulos, aulas, vídeos e materiais.',
+    ],
+    ['courses.manage.cards.tracks.title', 'Trilhas'],
+    ['courses.manage.cards.tracks.body', 'Capa, título, público e a ordem dos cursos.'],
+    ['courses.manage.cards.lives.title', 'Lives'],
+    [
+      'courses.manage.cards.lives.body',
+      'Data, hora, duração, capa, acesso e o replay de cada uma.',
+    ],
+    ['courses.manage.cards.categories.title', 'Categorias'],
+    ['courses.manage.cards.categories.body', 'Nome e capa das categorias do catálogo.'],
+    ['courses.course.editSection.label', 'Editar'],
+    ['courses.course.editSection.hero', 'Editar a capa e as informações do curso'],
+    ['courses.course.editSection.about', 'Editar a descrição do curso'],
+    ['courses.course.editSection.outcomes', 'Editar o que o aluno vai dominar'],
+    ['courses.lives.edit', 'Editar'],
+    ['courses.lives.editAria', 'Editar a live: {title}'],
+    // The management lists' supporting lines: Cursos is no longer the hub, Categorias wears the
+    // lists' header.
+    ['courses.screens.courses.subtitle', 'Cursos e aulas de {tenant}.'],
+    ['courses.categories.subtitle', 'Os temas do catálogo de {tenant}.'],
+    // The lists' filter became an icon button with a dropdown: its name carries the choice.
+    ['courses.hub.filter.button', '{label}: {current}'],
+    // Every way to attach a cover, and the same image at its other proportions.
+    ['courses.coverField.pickFile', 'Escolher arquivo'],
+    ['courses.coverField.camera', 'Tirar foto'],
+    [
+      'courses.coverField.ways',
+      'Arraste uma imagem até o quadro, cole com Ctrl+V ou escolha um arquivo.',
+    ],
+    ['courses.coverField.waysTouch', 'Escolha da galeria ou tire uma foto.'],
+    ['courses.coverField.dropHere', 'Solte para usar como capa'],
+    ['courses.coverField.as.horizontal', 'Horizontal · página do curso e Início'],
+    ['courses.coverField.as.panoramic', 'Panorâmica · destaque no computador'],
+    ['courses.coverField.as.tile', 'Bloco · Explore por categoria'],
+    // The grouped desktop rail: its groups, its account card and the home tab's desktop name.
+    ['app.nav.sections.main', 'Principal'],
+    ['app.nav.sections.shortcuts', 'Atalhos'],
+    ['app.nav.accountMenu', 'Menu da conta'],
+    ['app.nav.viewProfile', 'Ver perfil'],
+    ['app.nav.feed', 'Feed'],
+  ];
+
+  it.each(added)('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it('formats the cards’ counts in the singular and the plural, with no em dash anywhere', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, number>,
+    ) => string;
+    expect(t('courses.manage.cards.courses.meta', { courses: 1, modules: 1, lessons: 1 })).toBe(
+      '1 curso · 1 módulo · 1 aula',
+    );
+    expect(t('courses.manage.cards.courses.meta', { courses: 9, modules: 28, lessons: 111 })).toBe(
+      '9 cursos · 28 módulos · 111 aulas',
+    );
+    expect(t('courses.manage.cards.tracks.meta', { n: 0 })).toBe('0 trilhas');
+    expect(t('courses.manage.cards.tracks.meta', { n: 1 })).toBe('1 trilha');
+    expect(t('courses.manage.cards.lives.meta', { upcoming: 1, past: 3 })).toBe(
+      '1 próxima · 3 passadas',
+    );
+    expect(t('courses.manage.cards.categories.meta', { n: 5 })).toBe('5 categorias');
+    for (const [key] of added) expect(String(lookup(key)), key).not.toContain('—');
+  });
+});
+
+/**
+ * 2026-10-23 — every cover field shows the ideal size of its image (`CoverSizeHint`, the numbers in
+ * `lib/cover-sizes.ts`): one line for the size and, for a cover the app also crops to another shape,
+ * one asking to keep the subject in the middle. ADDED keys (media.json), and the course's cover
+ * helper CHANGED (courses.json).
+ */
+describe('2026-10-23 — the ideal cover size strings (media.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+  const lookup = (dotted: string): unknown =>
+    dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+
+  const centre = 'Deixe o principal no centro';
+  const added: ReadonlyArray<readonly [string, string]> = [
+    // CHANGED: the course's helper asked for a vertical 3:4 image, against the 4:3 the size line now
+    // asks for (the cover also heads the course and Início, wide); the size line carries the advice.
+    ['courses.form.cover.helper', 'Opcional. Sem imagem, usamos as cores de {tenant}.'],
+    ['media.coverSize.ideal', 'Medida ideal: {width} × {height} px ({ratio})'],
+    [
+      'media.coverSize.notes.course',
+      `${centre}: a capa aparece vertical no catálogo e horizontal no topo do curso.`,
+    ],
+    // 2026-10-27: the track cover shows on the card and on the wide top of the track's page.
+    [
+      'media.coverSize.notes.track',
+      `${centre}: o cartão mostra o meio da imagem e o topo da trilha usa uma faixa larga.`,
+    ],
+    ['media.coverSize.notes.live', `${centre}: no computador a capa aparece mais larga.`],
+    [
+      'media.coverSize.notes.community',
+      `${centre}: na página da comunidade a capa aparece mais larga.`,
+    ],
+    // 2026-10-24: no event note any more: an event has one cover field per shape.
+    ['media.coverSize.notes.highlight', `${centre}: a capa aparece num círculo.`],
+  ];
+
+  it.each(added)('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it('formats the size with the numbers as given (strings, never "1.600") and no em dash', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string>,
+    ) => string;
+    expect(t('media.coverSize.ideal', { width: '1600', height: '1200', ratio: '4:3' })).toBe(
+      'Medida ideal: 1600 × 1200 px (4:3)',
+    );
+    for (const [key] of added) expect(String(lookup(key)), key).not.toContain('—');
+  });
+});
+
+/**
+ * 2026-10-23 — Reels on the desktop in the YouTube Shorts layout: the player's full-screen control.
+ * ADDED keys (reels.json); everything else the layout shows reuses the feed's and reels' words.
+ */
+describe('2026-10-23 — the desktop Reels player strings (reels.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+  const lookup = (dotted: string): unknown =>
+    dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+
+  it.each([
+    ['reels.fullscreen.enter', 'Tela cheia'],
+    ['reels.fullscreen.exit', 'Sair da tela cheia'],
+    // 2026-10-24: the event form has a cover field per shape (the standing one front only so far).
+    ['events.form.cover.as.hero', 'Horizontal · página do evento'],
+    ['events.form.cover.as.poster', 'Vertical · lista de eventos'],
+    ['events.form.cover.posterAdd', 'Adicionar capa vertical'],
+    ['events.form.cover.posterChange', 'Trocar capa vertical'],
+    ['events.form.cover.posterRemove', 'Remover capa vertical'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+});
+
+describe('2026-10-24 — the Loja area strings (store.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+  const lookup = (dotted: string): unknown =>
+    dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+
+  const added: ReadonlyArray<readonly [string, string]> = [
+    // The "· Loja" menu (the TopBar's area label and sandwich, the rail's sub-lines).
+    ['store.area.label', 'Loja'],
+    ['store.area.menu', 'Menu da Loja'],
+    ['store.area.screens.products', 'Produtos'],
+    ['store.area.screens.owned', 'Comprados'],
+    ['store.area.screens.manage', 'Gerenciar'],
+    // The screens.
+    ['store.screens.owned.title', 'Comprados'],
+    ['store.screens.owned.subtitle', 'Os produtos que você comprou ou recebeu de {tenant}.'],
+    ['store.screens.manage.title', 'Gerenciar'],
+    ['store.screens.manage.subtitle', 'Crie, edite e arquive os produtos de {tenant}.'],
+    ['store.screens.manage.filter.active', 'Ativos'],
+    ['store.screens.manage.filter.button', '{label}: {current}'],
+    // The product page.
+    ['store.product.overline', 'Produto'],
+    ['store.product.about', 'Sobre o produto'],
+    ['store.product.unlocks.count', '{count, plural, one {# conteúdo} other {# conteúdos}}'],
+  ];
+
+  it.each(added)('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it('never uses an em dash', () => {
+    for (const [key] of added) expect(String(lookup(key))).not.toContain('—');
+  });
+
+  it('counts the unlocks in the singular and the plural', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages: messages as MessageTree,
+    }) as unknown as (key: string, values: Record<string, number>) => string;
+    expect(t('store.product.unlocks.count', { count: 1 })).toBe('1 conteúdo');
+    expect(t('store.product.unlocks.count', { count: 3 })).toBe('3 conteúdos');
+  });
+});

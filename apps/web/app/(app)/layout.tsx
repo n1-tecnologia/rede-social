@@ -2,15 +2,15 @@ import { resolveBranding } from '@rede-social/contracts';
 import { THEME_COOKIE } from '@rede-social/contracts/branding';
 import {
   AppShell,
-  buildNav,
   type ShellNav,
   ThemeToggle,
   withAreas,
   withCollapsingTabs,
+  withPhoneLayout,
+  withPhoneTabSlots,
+  withRailMainSlots,
   withTabDots,
-  withTabOverrides,
 } from '@rede-social/core/ui';
-import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -23,9 +23,11 @@ import { TabDotRefresh } from '@/components/shell/TabDotRefresh';
 import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
 import { brandScope } from '@/lib/brand-scope';
 import { env } from '@/lib/env';
-import { memberAreaTabOverrides } from '@/lib/member-area';
+import { iconsFor } from '@/lib/manifest';
 import { requirePlatformTenants } from '@/lib/platform';
-import { areasFor, collapsingTabsFor, moduleLabelResolver, tabDotsFor } from '@/lib/registry';
+import { readPhoneNavLayout } from '@/lib/phone-nav-layout-cookie';
+import { areasFor, collapsingTabsFor, tabDotsFor } from '@/lib/registry';
+import { MAIN_SLOTS, shellTabs } from '@/lib/shell-tabs';
 import { coordinatesForRequest, SupabaseCoordinatesUnavailableError } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
 import { logout, setTheme } from './actions';
@@ -72,6 +74,10 @@ export async function generateViewport(): Promise<Viewport> {
  * Folding bar (2026-10-03): over the pages of a tab whose module asks for it (`collapsingTabsFor`;
  * today Comunidades, as in the REINE prototype), the phone's BottomNav folds into the corner as the
  * page scrolls down, one button named here ("Comunidades: voltar ao topo").
+ *
+ * Areas per request (2026-10-22): `areasFor` gets the bootstrap, because the courses area depends on
+ * the caller ("Membros" for a member; "Cursos", plus the "Membros" preview variant under the member
+ * area, for a manager, whose Cursos tab is also current there: `memberAreaTabOverrides`).
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const [hostTenant, t, tp, tRoot, cookieStore] = await Promise.all([
@@ -89,6 +95,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     settings: t('nav.settings'),
     logout: t('logout'),
     theme: t('nav.theme'),
+    // 2026-10-23: the desktop rail's groups and its account card (the grouped sidebar).
+    sections: { main: t('nav.sections.main'), shortcuts: t('nav.sections.shortcuts') },
+    accountMenu: t('nav.accountMenu'),
+    viewProfile: t('nav.viewProfile'),
   };
 
   if (hostTenant.mode === 'platform') {
@@ -119,33 +129,40 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const { tenant, membership } = bootstrap;
   const branding = resolveBranding(tenant.branding);
   const scope = brandScope(branding);
-  // The manifest nav is role-blind (one Cursos entry for everyone), so the host decides per request,
-  // as with dots and areas: a caller without `courses.manage` (member, support_tenant) gets the
-  // Membros tab pointing at the member area; an admin keeps Cursos -> the hub.
-  const tabs = withTabOverrides(
-    buildNav(bootstrap.modules, {
-      home: t('nav.home'),
-      profile: t('nav.profile'),
-      module: moduleLabelResolver(tRoot),
-    }),
-    memberAreaTabOverrides({
-      canManage: bootstrap.permissions.includes(COURSE_PERMISSIONS.manage),
-      label: tRoot('courses.memberNav'),
-    }),
+  // The caller's tabs and slots (`shellTabs`, shared with Marca's phone bar order since 2026-10-28).
+  const tabs = shellTabs(
+    bootstrap,
+    { home: t('nav.home'), profile: t('nav.profile'), memberNav: tRoot('courses.memberNav') },
+    tRoot,
   );
   const dots = Object.entries(await tabDotsFor(bootstrap, tabs.tabs));
-  // 2026-10-06: the areas (today Eventos) fold the TopBar's shortcuts into the area's menu.
-  const nav = withAreas(
-    withCollapsingTabs(
-      withTabDots(tabs, Object.fromEntries(dots.map(([key, dot]) => [key, dot.description]))),
-      Object.fromEntries(
-        collapsingTabsFor(tabs.tabs).map((tab) => [
-          tab.key,
-          t('nav.backToTop', { tab: tab.label }),
-        ]),
+  // 2026-10-06: the areas (Eventos; since 2026-10-22 the school's too) fold the TopBar's shortcuts
+  // into the area's menu. 2026-10-23: on the desktop rail the Loja is a destination of its own,
+  // under Principal with the tabs; the other slots stay the Atalhos at the rail's foot. 2026-10-24:
+  // the Loja slot owns an area too ("· Loja"), so the areas are read over the tabs AND the slots.
+  // 2026-10-28: on the phone the Loja leaves the TopBar for the BottomNav, as its last tab.
+  // 2026-11-05: the phone's bar and top follow the "Menu do app" chosen in Configurações on this
+  // device (`lib/phone-nav-layout.ts`); the desktop never reads it.
+  const nav = withPhoneLayout(
+    withPhoneTabSlots(
+      withRailMainSlots(
+        withAreas(
+          withCollapsingTabs(
+            withTabDots(tabs, Object.fromEntries(dots.map(([key, dot]) => [key, dot.description]))),
+            Object.fromEntries(
+              collapsingTabsFor(tabs.tabs).map((tab) => [
+                tab.key,
+                t('nav.backToTop', { tab: tab.label }),
+              ]),
+            ),
+          ),
+          areasFor([...tabs.tabs, ...tabs.topbar], (key) => tRoot(key), bootstrap),
+        ),
+        MAIN_SLOTS,
       ),
+      MAIN_SLOTS,
     ),
-    areasFor(tabs.tabs, (key) => tRoot(key)),
+    await readPhoneNavLayout(),
   );
   const dotBoundaries = dots.flatMap(([, dot]) => (dot.until ? [dot.until] : []));
 
@@ -162,6 +179,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (!(error instanceof SupabaseCoordinatesUnavailableError)) throw error;
   }
   if (!live) redirect('/comunidade-indisponivel');
+  // 2026-10-26 — the collapsed desktop rail's mark is the page's favicon (the product owner: "o que
+  // deve aparecer quando o menu estiver recolhido é a mesma imagem do favicon"): the same choice the
+  // root layout's <link rel="icon"> makes (`iconsFor`, the manifest's allow-list, T-02-72), the
+  // brand's own or the neutral one, read from the HOST's project (09.2-17), as the root layout does.
+  const markUrl = iconsFor(branding, live.origin).favicon;
 
   const notificationsOn = bootstrap.modules.some((m) => m.key === 'notifications');
   const vapidPublicKey = notificationsOn ? (env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null) : null;
@@ -177,11 +199,17 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       vapidPublicKey={vapidPublicKey}
     >
       <AppShell
-        brand={{ displayName: tenant.displayName, logoUrl: branding.logoUrl }}
+        brand={{ displayName: tenant.displayName, logoUrl: branding.logoUrl, markUrl }}
         nav={nav}
         counters={bootstrap.counters}
         avatar={{ src: membership.profile.avatarUrl, alt: membership.profile.displayName }}
-        labels={labels}
+        labels={{
+          ...labels,
+          // 2026-10-23: on the desktop the home tab is named for what it holds, "Feed", while the
+          // feed module is on (without it the home has no feed and stays "Início"); the phone keeps
+          // "Início" either way.
+          homeTab: bootstrap.modules.some((m) => m.key === 'feed') ? t('nav.feed') : undefined,
+        }}
         settingsHref="/configuracoes"
         logoutAction={logout}
         themeToggle={<ThemeToggle initial={theme} label={t('nav.theme')} action={setTheme} />}

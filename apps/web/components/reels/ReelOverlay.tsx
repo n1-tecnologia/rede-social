@@ -11,6 +11,7 @@ import {
 } from '@rede-social/module-feed/ui';
 import { compactCount, ReelCaption, ReelRail } from '@rede-social/module-reels/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ReelView } from '@/lib/reels';
 import { announcedCount } from '@/lib/reels-count';
 
@@ -49,6 +50,13 @@ import { announcedCount } from '@/lib/reels-count';
  *
  * The client-safe `announcedCount` is imported from `lib/reels-count`: `lib/reels` reaches the
  * server-only API client.
+ *
+ * **Beside the desktop player** (2026-10-23, the YouTube Shorts layout). From md the current page
+ * also gets the pager's slots: the rail goes to the one right of the player (`desktopRail`, the
+ * feed's like as a disc) and the one over the video is hidden from md; the caption block goes to the
+ * stage's bottom left (`desktopInfo`) while there is room, and stays over the video otherwise. They
+ * are PORTALS rendered by this page, so its one like engine drives the rail there, the double tap
+ * and the count alike, and its caption keeps one expanded state. The phone renders as before.
  */
 
 export type ReelOverlayLabels = {
@@ -80,6 +88,10 @@ export type ReelOverlayProps = {
   /** `code` (08.2-09): the refusal's code when the action answered one (`community_locked`). */
   onError: (code?: string) => void;
   bind: (postId: string, binder: ReelBinder | null) => void;
+  /** 2026-10-23: the pager's slot right of the desktop player, for the current page; else none. */
+  desktopRail?: HTMLElement | null;
+  /** 2026-10-23: the pager's slot at the stage's bottom left, while there is room; else none. */
+  desktopInfo?: HTMLElement | null;
 };
 
 export function ReelOverlay({
@@ -93,6 +105,8 @@ export function ReelOverlay({
   onShare,
   onError,
   bind,
+  desktopRail = null,
+  desktopInfo = null,
 }: ReelOverlayProps) {
   // The refusal envelope becomes a rejection — the one signal the engine reverts on (the card's rule).
   const toggleRequest = useCallback(
@@ -140,50 +154,67 @@ export function ReelOverlay({
   /** The host already merged this visit's sheet deltas into `view` (CR-01). */
   const commentCount = Math.max(0, view.commentCount);
 
+  const caption = (placement: 'over' | 'side') => (
+    <ReelCaption
+      placement={placement}
+      author={{
+        name: authorName,
+        href: view.author.profileHref,
+        // 2026-10-09: the author's Instagram, under the name; absent, no line.
+        handle: view.author.handle ?? null,
+        // 2026-10-23: the photo beside the name on the desktop (the rail there carries none).
+        avatarUrl: view.author.avatarUrl,
+      }}
+      community={view.community}
+      moreLabel={labels.captionMore}
+      lessLabel={labels.captionLess}
+      expanded={expanded}
+      onExpandedChange={setExpanded}
+    >
+      {view.caption.length > 0 ? linkify(view.caption) : null}
+    </ReelCaption>
+  );
+
+  const rail = (placement: 'over' | 'side') => (
+    <ReelRail
+      placement={placement}
+      author={{
+        href: view.author.profileHref,
+        avatarUrl: view.author.avatarUrl,
+        name: authorName,
+        // A function replacement, so a `$` pattern in a display name is never interpreted.
+        label: labels.railAuthor.replace('{name}', () => authorName),
+      }}
+      like={
+        <LikeButton
+          tone={placement === 'side' ? 'disc' : 'overMedia'}
+          glyphSize={placement === 'side' ? 22 : 28}
+          liked={state.liked}
+          countLabel={announcedCount(state.likeCount, labels.likes, locale)}
+          likeLabel={labels.like}
+          unlikeLabel={labels.unlike}
+          pulseKey={pulseKey}
+          onToggle={toggle}
+        />
+      }
+      likeCount={compactCount(state.likeCount, locale)}
+      commentLabel={labels.comment}
+      commentCount={compactCount(commentCount, locale)}
+      onComment={() => onComment(view.id)}
+      shareLabel={labels.share}
+      onShare={shareUrl ? () => onShare({ postId: view.id, url: shareUrl }) : undefined}
+    />
+  );
+
   return (
     <>
-      <ReelCaption
-        author={{
-          name: authorName,
-          href: view.author.profileHref,
-          // 2026-10-09: the author's Instagram, under the name; absent, no line.
-          handle: view.author.handle ?? null,
-        }}
-        community={view.community}
-        moreLabel={labels.captionMore}
-        lessLabel={labels.captionLess}
-        expanded={expanded}
-        onExpandedChange={setExpanded}
-      >
-        {view.caption.length > 0 ? linkify(view.caption) : null}
-      </ReelCaption>
-      <ReelRail
-        author={{
-          href: view.author.profileHref,
-          avatarUrl: view.author.avatarUrl,
-          name: authorName,
-          // A function replacement, so a `$` pattern in a display name is never interpreted.
-          label: labels.railAuthor.replace('{name}', () => authorName),
-        }}
-        like={
-          <LikeButton
-            tone="overMedia"
-            glyphSize={28}
-            liked={state.liked}
-            countLabel={announcedCount(state.likeCount, labels.likes, locale)}
-            likeLabel={labels.like}
-            unlikeLabel={labels.unlike}
-            pulseKey={pulseKey}
-            onToggle={toggle}
-          />
-        }
-        likeCount={compactCount(state.likeCount, locale)}
-        commentLabel={labels.comment}
-        commentCount={compactCount(commentCount, locale)}
-        onComment={() => onComment(view.id)}
-        shareLabel={labels.share}
-        onShare={shareUrl ? () => onShare({ postId: view.id, url: shareUrl }) : undefined}
-      />
+      {desktopInfo ? createPortal(caption('side'), desktopInfo) : caption('over')}
+      {desktopRail ? (
+        createPortal(rail('side'), desktopRail)
+      ) : (
+        // From md the rail beside the player replaces it, before hydration too.
+        <div className="md:hidden">{rail('over')}</div>
+      )}
     </>
   );
 }

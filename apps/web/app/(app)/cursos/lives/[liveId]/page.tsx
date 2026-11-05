@@ -1,10 +1,11 @@
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
-import { EmptyState, PageHeader } from '@rede-social/ui';
+import { MemberSkin, PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { LiveForm } from '@/app/(app)/cursos/lives/LiveForm';
+import { MemberEmptyCard } from '@/app/(app)/cursos/MemberEmptyCard';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { getLessonsForPicker, getLive, getLiveReactivation } from '@/lib/courses';
 import { getLearnLive } from '@/lib/courses-learn';
@@ -116,30 +117,35 @@ async function renderMemberLive(
   );
 }
 
-/** A failed live read (E10 error): the shipped error words and a retry to this URL. */
+/**
+ * A failed live read (E10 error): the shipped error words and a retry to this URL, in the member
+ * area's `MemberEmptyCard` since 2026-10-22.
+ */
 async function LiveErrorCard({ liveId }: { liveId: string }) {
   const t = await getTranslations('courses');
   return (
-    <div className="mx-auto flex w-full max-w-[680px] flex-col">
-      <PageHeader
-        backHref={MEMBER_LIVES_HREF}
-        backLabel={t('member.live.back')}
-        className="md:static md:px-0"
-      />
-      <div className="px-4 pt-2">
-        <EmptyState
-          variant="card"
-          icon={CircleAlert}
-          data-testid="live-error"
-          title={t('errors.title')}
-          body={t('errors.lives')}
-          action={
-            <a href={`/cursos/lives/${encodeURIComponent(liveId)}`} className={LINK_OUTLINE}>
-              {t('errors.retry')}
-            </a>
-          }
+    <MemberSkin>
+      <div className="mx-auto flex w-full max-w-[680px] flex-col">
+        <PageHeader
+          backHref={MEMBER_LIVES_HREF}
+          backLabel={t('member.live.back')}
+          className="md:static md:px-0"
         />
+        <div className="px-4 pt-2">
+          <MemberEmptyCard
+            icon={CircleAlert}
+            tone="error"
+            data-testid="live-error"
+            title={t('errors.title')}
+            body={t('errors.lives')}
+            action={
+              <a href={`/cursos/lives/${encodeURIComponent(liveId)}`} className={LINK_OUTLINE}>
+                {t('errors.retry')}
+              </a>
+            }
+          />
+        </div>
       </div>
-    </div>
+    </MemberSkin>
   );
 }

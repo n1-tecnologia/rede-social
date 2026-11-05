@@ -13,6 +13,7 @@ import {
   type ReelsPagerItem,
   type ReelsPagerLabels,
   type ReelsPagerProps,
+  type ReelsPagerSlots,
 } from '../ui/ReelsPager';
 
 /**
@@ -639,26 +640,160 @@ describe('ReelsPager — a mouse drag released over the overlay (WR-01, D-117, D
   });
 });
 
-describe('ReelsPager — the desktop column (UI-D-95, 2026-10-09)', () => {
-  it('from md the 9:16 column takes the full stage height: no black margin, square corners', () => {
+describe('ReelsPager — the desktop player box (UI-D-95; 2026-10-23, the YouTube Shorts layout)', () => {
+  /** Every `min-width` query matches: the desktop. */
+  function stubDesktop() {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: query.includes('min-width'),
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      })),
+    );
+  }
+
+  it('full-bleed on the phone; from md a 9:16 box 8 px under the top, as tall as leaves the next video peeking', () => {
     render(<ReelsPager {...baseProps()} />);
     const column = screen.getByTestId('reels-column').className.split(/\s+/);
-    for (const cls of [
-      'h-full',
-      'w-full',
-      'md:aspect-[9/16]',
-      'md:h-[var(--screen-h)]',
-      'md:w-auto',
-      'md:max-w-[calc(100%-160px)]',
-    ]) {
+    for (const cls of ['relative', 'h-full', 'w-full', 'md:aspect-[9/16]', 'md:h-auto']) {
       expect(column).toContain(cls);
     }
-    // The old 24 px band above and below the column is gone.
-    expect(column.filter((cls) => cls.startsWith('md:mt-') && cls !== 'md:mt-0')).toEqual([]);
-    expect(column.join(' ')).not.toContain('48px');
-    const clip = screen.getByTestId('reels-clip').className;
-    expect(clip).toContain('overflow-hidden');
-    expect(clip).not.toContain('rounded');
+    // Width decides, height follows (9:16 on a narrow window too): the stage height less 36 px,
+    // never wider than the stage less 80 px a side.
+    expect(column.join(' ')).toContain('md:w-[min(calc((var(--screen-h)_-_36px)_*_9_/_16)');
+    expect(column.join(' ')).toContain('calc(100%_-_160px)');
+    const root = screen.getByTestId('reels-pager').className;
+    expect(root).toContain('md:pt-2');
+    expect(root).toContain('md:[--reels-gap:16px]');
+  });
+
+  it('the clip is the dark scope; from md every page carries its own rounded corners and the gap', () => {
+    render(<ReelsPager {...baseProps({ index: 1 })} />);
+    const clip = screen.getByTestId('reels-clip');
+    expect(clip).toHaveAttribute('data-theme', 'dark');
+    expect(clip.className).toContain('overflow-hidden');
+    expect(clip.className).toContain('md:overflow-visible');
+    const page = document.querySelector('[data-reel-page="2"]') as HTMLElement;
+    expect(page.className).toContain('md:rounded-xl');
+    expect(page.style.top).toBe('calc(200% + 2 * var(--reels-gap, 0px))');
+    expect(track().style.transform).toBe(
+      'translateY(calc(-100% + -1 * var(--reels-gap, 0px) + 0px))',
+    );
+  });
+
+  it('↑/↓ sit at the stage’s right edge in the member’s theme; the phone’s ticks are hidden from md', () => {
+    render(<ReelsPager {...baseProps({ index: 1 })} />);
+    const next = screen.getByRole('button', { name: 'next-label' });
+    const row = next.parentElement as HTMLElement;
+    for (const cls of ['absolute', 'right-6', 'top-1/2', 'hidden', 'md:flex']) {
+      expect(row.className).toContain(cls);
+    }
+    // Outside the box: the stage's ground, never the dark clip.
+    expect(screen.getByTestId('reels-clip')).not.toContainElement(next);
+    expect(next.className).toContain('bg-bg-tertiary');
+    expect(next.className).toContain('text-text');
+    expect(screen.getByTestId('reels-ticks').className).toContain('md:hidden');
+  });
+
+  it('the current page gets the rail slot right of the box; neighbours get none; no room left of it means no caption slot', () => {
+    const renderOverlay = vi.fn(
+      (item: ReelsPagerItem, _state: { current: boolean; slots: ReelsPagerSlots }) => (
+        <span>{item.id}</span>
+      ),
+    );
+    render(<ReelsPager {...baseProps({ index: 1, renderOverlay })} />);
+    const slot = document.querySelector('[data-reels-rail-slot]') as HTMLElement;
+    expect(slot.className).toContain('left-[calc(100%+16px)]');
+    expect(slot.className).toContain('md:block');
+    const last = (id: string) =>
+      renderOverlay.mock.calls.filter(([item]) => (item as ReelsPagerItem).id === id).at(-1)?.[1];
+    expect(last('p1')?.slots.rail).toBe(slot);
+    expect(last('p0')?.slots).toEqual({ rail: null, info: null });
+    expect(last('p2')?.slots).toEqual({ rail: null, info: null });
+    // happy-dom lays nothing out: the box has no room on its left, so the caption stays over it.
+    expect(last('p1')?.slots.info).toBeNull();
+    expect(document.querySelector('[data-reels-info-slot]')).toBeNull();
+  });
+
+  it('shifted (the comments panel open) moves the box left from xl', () => {
+    const { rerender } = render(<ReelsPager {...baseProps()} />);
+    expect(screen.getByTestId('reels-pager').className).not.toContain('xl:pr-[532px]');
+    rerender(<ReelsPager {...baseProps({ shifted: true })} />);
+    expect(screen.getByTestId('reels-pager').className).toContain('xl:pr-[532px]');
+  });
+
+  it('from md the player’s own play/pause sits top left and the page’s sr-only control steps aside; the phone has neither change', () => {
+    const phone = render(<ReelsPager {...baseProps()} />);
+    expect(screen.queryByTestId('reels-player-toggle')).toBeNull();
+    const pageControl = screen.getByRole('button', { name: 'pause-label' });
+    expect(pageControl.className).toContain('md:hidden');
+    phone.unmount();
+
+    stubDesktop();
+    render(<ReelsPager {...baseProps({ paused: true })} />);
+    const toggle = screen.getByTestId('reels-player-toggle');
+    expect(toggle).toHaveAccessibleName('play-label');
+    fireEvent.click(toggle);
+    expect(events).toEqual([['togglePause']]);
+  });
+
+  it('"Tela cheia" takes the STAGE full screen, and the control names the way out while it is', () => {
+    stubDesktop();
+    Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, value: true });
+    let fullscreenElement: Element | null = null;
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => fullscreenElement,
+    });
+    const requestFullscreen = vi.fn(function (this: HTMLElement) {
+      fullscreenElement = this;
+      document.dispatchEvent(new Event('fullscreenchange'));
+      return Promise.resolve();
+    });
+    const exitFullscreen = vi.fn(() => {
+      fullscreenElement = null;
+      document.dispatchEvent(new Event('fullscreenchange'));
+      return Promise.resolve();
+    });
+    Object.defineProperty(document, 'exitFullscreen', {
+      configurable: true,
+      value: exitFullscreen,
+    });
+    try {
+      render(
+        <section data-reels-stage="tab">
+          <ReelsPager
+            {...baseProps({
+              labels: { ...LABELS, fullscreen: 'full-label', exitFullscreen: 'exit-full-label' },
+            })}
+          />
+        </section>,
+      );
+      const stage = document.querySelector('[data-reels-stage]') as HTMLElement;
+      stage.requestFullscreen = requestFullscreen as unknown as HTMLElement['requestFullscreen'];
+      fireEvent.click(screen.getByRole('button', { name: 'full-label' }));
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      expect(fullscreenElement).toBe(stage);
+      fireEvent.click(screen.getByRole('button', { name: 'exit-full-label' }));
+      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'full-label' })).toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(document, 'fullscreenEnabled');
+      Reflect.deleteProperty(document, 'fullscreenElement');
+      Reflect.deleteProperty(document, 'exitFullscreen');
+    }
+  });
+
+  it('without the full-screen labels (or a browser that cannot) there is no such control', () => {
+    stubDesktop();
+    render(<ReelsPager {...baseProps()} />);
+    expect(screen.queryByTestId('reels-fullscreen')).toBeNull();
   });
 });
 

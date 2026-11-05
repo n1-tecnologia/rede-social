@@ -19,6 +19,10 @@ import type { ReactNode } from 'react';
  *
  * Rows are `<button role="radio" aria-checked>`: one tap selects, so the whole 44px row is the
  * control and the glyph at its end never has to be aimed at.
+ *
+ * 2026-10-22 (the courses area redesign): the rows are outlined blocks with a gap (the
+ * social-igoralves choice sheets), and the selected one is tinted `border-brand/40 bg-brand/10` beside
+ * its check, so the choice reads at a glance.
  */
 export interface CategoryPickerItem {
   id: string;
@@ -45,7 +49,11 @@ export interface CategoryPickerSheetProps {
 }
 
 const ROW =
-  'flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+  'flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+/** A row at rest, and the chosen one (2026-10-22). */
+const ROW_IDLE = 'border-border bg-card hover:bg-card-hover';
+const ROW_SELECTED = 'border-brand/40 bg-brand/10';
 
 /** The 3:4 thumb slot of every row: 32px wide, `rounded-lg`, on `bg-bg-tertiary`. */
 const THUMB = 'relative block w-8 shrink-0 overflow-hidden rounded-lg bg-bg-tertiary aspect-[3/4]';
@@ -77,7 +85,7 @@ export function CategoryPickerSheet({
   return (
     <BottomSheet open={open} onClose={onClose} title={title}>
       {helper ? <p className="pb-2 text-xs font-normal text-text-tertiary">{helper}</p> : null}
-      <div role="radiogroup" aria-label={title} className="flex flex-col">
+      <div role="radiogroup" aria-label={title} className="flex flex-col gap-2">
         {/* The none row comes FIRST (UI-D-393): a course with no category is the common case. */}
         {/* biome-ignore lint/a11y/useSemanticElements: UI-D-393 / UI-D-206 fix a 44px row BUTTON that selects on one tap and closes the sheet; a native radio input needs a form, a legend and a separate submit */}
         <button
@@ -86,7 +94,7 @@ export function CategoryPickerSheet({
           aria-checked={selectedId === null}
           data-testid="category-picker-none"
           onClick={() => onSelect(null)}
-          className={ROW}
+          className={cn(ROW, selectedId === null ? ROW_SELECTED : ROW_IDLE)}
         >
           <span className={cn(THUMB, 'flex items-center justify-center')}>
             <Tag aria-hidden size={16} className="text-text-tertiary" />
@@ -107,7 +115,7 @@ export function CategoryPickerSheet({
               data-testid="category-picker-row"
               data-category-id={item.id}
               onClick={() => onSelect(item.id)}
-              className={ROW}
+              className={cn(ROW, selected ? ROW_SELECTED : ROW_IDLE)}
             >
               <span
                 className={THUMB}

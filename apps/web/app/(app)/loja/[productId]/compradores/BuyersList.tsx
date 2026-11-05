@@ -4,6 +4,7 @@ import {
   Avatar,
   Button,
   ConfirmDialog,
+  cn,
   EmptyState,
   IconButton,
   InfiniteScroll,
@@ -16,6 +17,7 @@ import { CircleAlert, UserMinus, UserPlus, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { BuyerRowView } from '@/lib/store-view';
+import { LIST_CARD_GRID, LIST_GRID_ITEM, WIDE_EMPTY } from '../../../cursos/admin-styles';
 import { loadMoreBuyersAction, revokeAccessAction } from './actions';
 import { GrantAccessSheet } from './GrantAccessSheet';
 
@@ -39,15 +41,22 @@ export interface BuyersListProps {
 export const BUYERS_GRANT_BUTTON_ID = 'store-buyers-grant';
 
 /**
- * `count` rows in the `AttendeeRow` geometry (UI-D-384): a 32px circle, two bars and the trailing
+ * One holder row (2026-10-24, the admin lists' look): inside the outlined list card with hairlines
+ * between rows on a phone and up to `lg`, one outlined card per holder in a grid from `lg`.
+ */
+const ROW = 'flex min-h-16 items-center gap-3 px-4 py-3';
+
+/**
+ * `count` rows in the row geometry (UI-D-384): a 32px circle, two bars and the trailing
  * tag-and-control shape, so nothing shifts when the real rows swap in. 8 in `loading.tsx`, 3 at the
- * load-more sentinel.
+ * load-more sentinel. 2026-10-24: inside the admin lists' outlined card (`LIST_CARD_GRID`), like the
+ * rows; the host owns the side gutter.
  */
 export function BuyersSkeleton({ count }: { count: number }) {
   return (
-    <div aria-busy data-testid="buyers-skeleton" className="flex flex-col px-4">
+    <div aria-busy data-testid="buyers-skeleton" className={LIST_CARD_GRID}>
       {Array.from({ length: count }, (_, index) => index).map((index) => (
-        <div key={index} className="flex min-h-14 items-center gap-3 border-b border-divider py-2">
+        <div key={index} className={cn(ROW, LIST_GRID_ITEM)}>
           <Skeleton variant="circle" className="h-8 w-8" />
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <Skeleton variant="text" className="w-3/5" />
@@ -238,7 +247,7 @@ export function BuyersList({
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
     body = (
-      <div className="px-4">
+      <div className={WIDE_EMPTY}>
         <EmptyState
           variant="card"
           icon={CircleAlert}
@@ -255,7 +264,7 @@ export function BuyersList({
     );
   } else if (items.length === 0) {
     body = (
-      <div className="px-4">
+      <div className={WIDE_EMPTY}>
         <EmptyState
           variant="card"
           icon={Users}
@@ -270,7 +279,7 @@ export function BuyersList({
       <>
         <ul
           aria-label={t('store.buyers.region', { product: productName })}
-          className="flex flex-col px-4"
+          className={LIST_CARD_GRID}
         >
           {items.map((row) => (
             <li
@@ -278,7 +287,7 @@ export function BuyersList({
               data-buyer-row={row.id}
               data-source={row.source}
               data-removed={row.removed ? 'true' : undefined}
-              className="flex min-h-14 items-center gap-3 border-b border-divider py-2"
+              className={cn(ROW, LIST_GRID_ITEM)}
             >
               <Avatar src={row.removed ? null : row.avatarUrl} alt={row.name} size="sm" />
               <div className="flex min-w-0 flex-1 flex-col">
@@ -322,10 +331,7 @@ export function BuyersList({
         />
 
         {pageFailed ? (
-          <div
-            data-buyers-page-error
-            className="mt-4 flex flex-col items-center gap-3 px-4 text-center"
-          >
+          <div data-buyers-page-error className="mt-4 flex flex-col items-center gap-3 text-center">
             <p className="text-sm font-normal text-danger">{t('store.errors.loadMoreBuyers')}</p>
             <Button variant="outline" onClick={retryPage}>
               {t('store.errors.retry')}
@@ -338,7 +344,7 @@ export function BuyersList({
 
   return (
     <>
-      <div data-buyers-toolbar className="flex items-center justify-between gap-3 px-4 pt-3 pb-3">
+      <div data-buyers-toolbar className="flex items-center justify-between gap-3 px-4 pb-4">
         <div className="flex min-w-0 flex-col">
           <p data-buyers-product className="truncate text-sm font-bold text-text">
             {productName}
@@ -351,7 +357,7 @@ export function BuyersList({
           id={BUYERS_GRANT_BUTTON_ID}
           variant="brand"
           size="sm"
-          className="shrink-0"
+          className="h-11 shrink-0 px-4"
           aria-haspopup="dialog"
           onClick={() => setGranting(true)}
         >
@@ -361,7 +367,7 @@ export function BuyersList({
       </div>
 
       <PullToRefresh onRefresh={refresh}>
-        <div ref={listRef} data-buyers className="flex flex-col pb-6">
+        <div ref={listRef} data-buyers className="flex flex-col px-4 pb-6">
           {body}
         </div>
       </PullToRefresh>

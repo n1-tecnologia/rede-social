@@ -1,11 +1,16 @@
 import type { ReactNode } from 'react';
-import { ListRow, type ListRowPill } from './ListRow';
+import { CoverCard } from './CoverCard';
+import type { ListRowPill } from './ListRow';
 
 /**
- * The track row of the hub's Trilhas tab (UI-D-392, plan 10): the 16:10 thumb (`w-16`), the title,
- * the meta "{N} cursos" (published ones only, D-415) and the "Arquivada" pill only when archived. It
- * links to the track's edit form. Built props-only now so plan 10 composes it without touching the
- * module's UI surface again.
+ * The track row of the admin's Trilhas list (UI-D-392, plan 10): the title, the meta "{N} cursos"
+ * (published ones only, D-415) and the "Arquivada" pill only when archived. It links to the track's
+ * edit form.
+ *
+ * 2026-10-22 (the courses area redesign): the row is a COVER CARD now, the social-igoralves
+ * "Todas as trilhas" card: the 16:10 cover with the title and the meta over its foot and the pill as
+ * a glass chip at the top (`CoverCard`). Same props and test ids (`track-row`, `-thumb`, `-fallback`,
+ * `-title`, `-meta`, `-pill`), so the host only changes the list around it (a gap, not hairlines).
  */
 export type TrackRowPill = ListRowPill;
 
@@ -20,14 +25,13 @@ export interface TrackRowProps {
 
 export function TrackRow({ href, ariaLabel, title, meta, pills, thumb }: TrackRowProps) {
   return (
-    <ListRow
+    <CoverCard
       href={href}
       ariaLabel={ariaLabel}
       title={title}
       meta={meta}
-      pills={pills}
+      chips={pills}
       thumb={thumb}
-      thumbShape="wide"
       testId="track-row"
     />
   );

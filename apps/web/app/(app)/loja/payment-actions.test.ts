@@ -117,9 +117,11 @@ describe('savePaymentMappingAction', () => {
     ).rejects.toThrow('REDIRECT /entrar');
   });
 
-  it('a success revalidates the grid and the product page', async () => {
+  it('a success revalidates every store screen and the product page', async () => {
     await savePaymentMappingAction(P, { externalProductId: 'a1', checkoutUrl: '' });
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/loja');
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/loja/comprados');
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/loja/gerenciar');
     expect(mocks.revalidatePath).toHaveBeenCalledWith(`/loja/${P}`);
   });
 

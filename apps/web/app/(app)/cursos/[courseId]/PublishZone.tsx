@@ -3,7 +3,7 @@
 import type { CourseStatus } from '@rede-social/module-courses/contracts';
 import { PublishBlockedNotice } from '@rede-social/module-courses/ui';
 import { Button, ConfirmDialog, useToast } from '@rede-social/ui';
-import { Eye, EyeOff, Send } from 'lucide-react';
+import { EyeOff, Send } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState } from 'react';
@@ -25,10 +25,6 @@ export interface PublishZoneProps {
 
 const LIST = new Intl.ListFormat('pt-BR', { style: 'long', type: 'conjunction' });
 
-/** The `Button` outline `md` `fullWidth` geometry as a LINK (a route, never a `<button>`). */
-const OUTLINE_LINK =
-  'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-
 /**
  * The action zone of the course page (08.3-08, D-413, UI-D-394, UI-D-404, UI-D-405, COURSE-03), one
  * card per status:
@@ -37,16 +33,23 @@ const OUTLINE_LINK =
  *   ready the `PublishBlockedNotice` sits ABOVE it and the button is DISABLED: the reason before the
  *   tap. The brand "Publicar curso?" dialog (the gated body naming the products when the course has
  *   any) → `setCourseStatusAction(id, 'published')` → "Curso publicado." and a refresh.
- * - **published** — the `outline fullWidth` LINK "Ver como aluno" (`Eye` 18, 08.5-10, D-422,
- *   UI-D-437) to `/cursos/{id}?ver=aluno`, then the `outline fullWidth` "Despublicar" (`EyeOff` 18)
- *   over "Publicado em {date}." (the card's `gap-3` spaces them); the danger "Despublicar curso?"
- *   dialog → `'draft'` → "Curso despublicado." and a refresh.
+ * - **published** — the `outline fullWidth` "Despublicar" (`EyeOff` 18) over "Publicado em {date}."
+ *   (the card's `gap-3` spaces them); the danger "Despublicar curso?" dialog → `'draft'` → "Curso
+ *   despublicado." and a refresh. ("Ver como aluno" is the page header's pill since 2026-10-23.)
  * - **archived** — the note and no button (A-UI-3: no reactivation here).
  *
  * **Server truth wins.** A `409 video_not_ready` after the tap (a video that failed between the
  * render and the confirm) re-renders the notice from the SERVER's `lessonIds`, toasts the same
  * sentence and moves focus to the notice once the dialog's trap has released (UI-D-407). Any other
  * refusal toasts and keeps the screen (E14 error).
+ *
+ * 2026-10-22 (the courses area redesign): the zone sits in the outlined card under the course hero;
+ * on a published course "Ver como aluno" and "Despublicar" stand side by side from 400px (one under
+ * the other below), the date under them. No behaviour changed.
+ *
+ * 2026-10-23 (the admin's course page as the reference draws it): the zone is publish and unpublish
+ * only. "Ver como aluno" (`course-view-as-member`) left for the page header's pill, so a published
+ * course's card holds the full-width "Despublicar" over the date. No behaviour changed.
  */
 export function PublishZone({
   courseId,
@@ -141,14 +144,6 @@ export function PublishZone({
   if (status === 'published') {
     return (
       <>
-        <a
-          href={`/cursos/${encodeURIComponent(courseId)}?ver=aluno`}
-          data-testid="course-view-as-member"
-          className={OUTLINE_LINK}
-        >
-          <Eye aria-hidden size={18} className="shrink-0" />
-          {t('course.viewAsMember')}
-        </a>
         <Button
           type="button"
           variant="outline"

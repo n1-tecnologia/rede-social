@@ -40,6 +40,7 @@ import {
   setHighlightCoverAction,
 } from '@/app/(app)/stories/highlight-actions';
 import { loadMoreOwnStoriesAction } from '@/app/(app)/stories/story-actions';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useAssetReadiness } from '@/components/media/useAssetReadiness';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import type {
@@ -692,6 +693,7 @@ export function HighlightManager({
           onCover={(cover) => setCover(cover)}
           onDelete={removeHighlight}
           uploadTile={uploadTile}
+          coverHint={<CoverSizeHint kind="highlight" />}
           pickerRows={pickerRows}
           pickerSelectedIds={pickerSelectedIds}
           onPickerToggle={togglePicker}

@@ -30,6 +30,13 @@ import { useReelsBottomClearance } from './ReelsStage';
  * **Its height follows the stage** (2026-10-09): on the tab it clears the floating BottomNav, in the
  * overlay a feed video opens there is no BottomNav and it drops to the bottom
  * (`useReelsBottomClearance`).
+ *
+ * **Beside the player** (`placement="side"`, 2026-10-23, the YouTube Shorts layout): the desktop
+ * rail, drawn in the pager's slot right of the box in the member's theme. No avatar (the caption
+ * block carries the author there); like, comment and share as 48 px discs, the count under like and
+ * comment, the share's own name under share (`aria-hidden`, the disc already carries it). The host
+ * passes a `like` built for a disc (the feed's `LikeButton tone="disc"`). `"over"` (the default) is
+ * the phone's rail over the video, unchanged.
  */
 export type ReelRailProps = {
   author: {
@@ -51,6 +58,8 @@ export type ReelRailProps = {
   shareLabel: string;
   /** Absent → no share control at all (T-04-51). */
   onShare?: () => void;
+  /** 2026-10-23: `"side"`, the desktop rail beside the player; `"over"` (default), over the video. */
+  placement?: 'over' | 'side';
 };
 
 /** The story caption's shipped text shadow, so white ink stays legible over a bright frame. */
@@ -62,10 +71,23 @@ const SHADOW = 'drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]';
 const OVER_MEDIA_BUTTON =
   'text-white hover:bg-white/10 active:bg-white/20 focus-visible:ring-white focus-visible:ring-offset-0 [&_svg]:drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]';
 const GLYPH = 28;
+/**
+ * 2026-10-23 — a 48 px disc beside the player, in the member's theme (YouTube's). The feed's
+ * `LikeButton tone="disc"` draws the same disc for the like, which this module cannot import.
+ */
+const SIDE_DISC =
+  'size-12 bg-bg-tertiary text-text hover:bg-[color-mix(in_oklch,var(--theme-bg-tertiary),var(--theme-text)_8%)] active:bg-[color-mix(in_oklch,var(--theme-bg-tertiary),var(--theme-text)_14%)]';
+const SIDE_GLYPH = 22;
 
 function stopPointer(event: ReactPointerEvent) {
   event.stopPropagation();
 }
+const STOP_POINTER = {
+  onPointerDown: stopPointer,
+  onPointerMove: stopPointer,
+  onPointerUp: stopPointer,
+  onPointerCancel: stopPointer,
+};
 
 /** The reserved number under a glyph: always 20 px tall, empty at zero, never announced. */
 function CountSlot({ which, value }: { which: 'like' | 'comment'; value: string | null }) {
@@ -74,6 +96,19 @@ function CountSlot({ which, value }: { which: 'like' | 'comment'; value: string 
       aria-hidden
       data-reel-count={which}
       className={cn('h-5 text-xs leading-5 font-bold text-white tabular-nums', SHADOW)}
+    >
+      {value ?? ''}
+    </span>
+  );
+}
+
+/** The number under a disc beside the player: 16 px tall, empty at zero, never announced. */
+function SideCount({ which, value }: { which: 'like' | 'comment'; value: string | null }) {
+  return (
+    <span
+      aria-hidden
+      data-reel-count={which}
+      className="h-4 text-xs leading-4 font-medium text-text tabular-nums"
     >
       {value ?? ''}
     </span>
@@ -89,18 +124,54 @@ export function ReelRail({
   onComment,
   shareLabel,
   onShare,
+  placement = 'over',
 }: ReelRailProps) {
   const clearance = useReelsBottomClearance();
+  if (placement === 'side') {
+    return (
+      <div
+        data-reel-rail="side"
+        className="flex w-20 flex-col items-center gap-4"
+        {...STOP_POINTER}
+      >
+        <div className="flex flex-col items-center gap-1">
+          {like}
+          <SideCount which="like" value={likeCount} />
+        </div>
+        <div className="flex flex-col items-center gap-1">
+          <IconButton
+            icon={MessageCircle}
+            size={SIDE_GLYPH}
+            label={commentLabel}
+            onClick={onComment}
+            className={SIDE_DISC}
+          />
+          <SideCount which="comment" value={commentCount} />
+        </div>
+        {onShare ? (
+          <div className="flex flex-col items-center gap-1">
+            <IconButton
+              icon={Send}
+              size={SIDE_GLYPH}
+              label={shareLabel}
+              onClick={onShare}
+              className={SIDE_DISC}
+            />
+            <span aria-hidden className="max-w-20 truncate text-xs leading-4 font-medium text-text">
+              {shareLabel}
+            </span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div
       className={cn(
         'absolute right-2 z-[3] flex w-12 flex-col items-center gap-4 md:bottom-6',
         clearance,
       )}
-      onPointerDown={stopPointer}
-      onPointerMove={stopPointer}
-      onPointerUp={stopPointer}
-      onPointerCancel={stopPointer}
+      {...STOP_POINTER}
     >
       <a
         href={author.href}

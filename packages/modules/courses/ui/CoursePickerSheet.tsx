@@ -28,6 +28,10 @@ import { RowSkeleton } from './RowSkeleton';
  * host's empty copy under the `emptyIcon` (a `GraduationCap` by default) with no action, otherwise
  * the rows. The sheet body is the scroll container (the shipped 80%-height cap), so a long list
  * scrolls INSIDE the sheet while the footer stays pinned (E12 overflow).
+ *
+ * 2026-10-22 (the courses area redesign): the rows are outlined blocks with a gap (the
+ * social-igoralves choice sheets), and an included one is tinted `border-brand/40 bg-brand/10` beside
+ * its check, so the selection reads at a glance; the Loja's "Cursos liberados" sheet gets it too.
  */
 export interface CoursePickerItem {
   id: string;
@@ -80,7 +84,11 @@ export interface CoursePickerSheetProps {
 }
 
 const ROW =
-  'flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+  'flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+/** A row at rest, and an included one (2026-10-22). */
+const ROW_IDLE = 'border-border bg-card hover:bg-card-hover';
+const ROW_SELECTED = 'border-brand/40 bg-brand/10';
 
 /** The thumb slot of every row, `rounded-lg` on `bg-bg-tertiary`: 3:4 at 32px, or 16:10 at 48px. */
 const THUMB = {
@@ -109,7 +117,7 @@ export function CoursePickerSheet({
   let body: ReactNode;
   if (loading) {
     body = (
-      <div aria-busy data-testid="course-picker-loading">
+      <div aria-busy data-testid="course-picker-loading" className="flex flex-col gap-2">
         {LOADING_ROWS.map((index) => (
           <RowSkeleton key={index} variant={thumbShape} />
         ))}
@@ -127,7 +135,7 @@ export function CoursePickerSheet({
     );
   } else {
     body = (
-      <ul className="flex flex-col" data-testid="course-picker-list">
+      <ul className="flex flex-col gap-2" data-testid="course-picker-list">
         {items.map((item) => {
           const on = selectedIds.includes(item.id);
           const hasThumb = item.thumb !== undefined && item.thumb !== null;
@@ -140,7 +148,7 @@ export function CoursePickerSheet({
                 data-testid="course-picker-row"
                 data-course-id={item.id}
                 onClick={() => onToggle(item.id)}
-                className={ROW}
+                className={cn(ROW, on ? ROW_SELECTED : ROW_IDLE)}
               >
                 <span
                   className={THUMB[thumbShape]}

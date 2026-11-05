@@ -1082,6 +1082,67 @@ describe('EventForm — the cover shows as soon as it is uploaded (2026-10-06)',
   });
 });
 
+describe('EventForm — a cover field per shape (2026-10-24, the standing one front only)', () => {
+  it('the standing cover is its own field: picked, shown, replaced and removed in the browser, never uploaded', () => {
+    const made: string[] = [];
+    const revoked: string[] = [];
+    const originals = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    const setStatic = (name: 'createObjectURL' | 'revokeObjectURL', value: unknown) =>
+      Object.defineProperty(URL, name, { configurable: true, writable: true, value });
+    setStatic('createObjectURL', () => {
+      const url = `blob:em-pe-${made.length + 1}`;
+      made.push(url);
+      return url;
+    });
+    setStatic('revokeObjectURL', (url: string) => revoked.push(url));
+    try {
+      renderCreate();
+      const field = document.querySelector('[data-event-poster-field]') as HTMLElement;
+      expect(field.textContent).toContain(lookup('events', 'form.cover.as.poster'));
+      // The lying field keeps its own hooks; the standing one starts empty.
+      expect(document.querySelector('[data-event-cover-preview]')).not.toBeNull();
+      expect(field.querySelector('[data-event-poster-local]')).toBeNull();
+
+      const input = field.querySelector('[data-event-poster-input]') as HTMLInputElement;
+      fireEvent.change(input, {
+        target: { files: [new File(['jpg'], 'em-pe.jpg', { type: 'image/jpeg' })] },
+      });
+      expect(field.querySelector('[data-event-poster-local]')?.getAttribute('src')).toBe(
+        'blob:em-pe-1',
+      );
+      // Nothing went through the upload machine: the lying cover is untouched.
+      expect(uploadOptions.current?.onCompleted).toBeDefined();
+      expect(document.querySelector('[data-event-cover-preview] img')).toBeNull();
+
+      // Replaced: the old picture's URL is released.
+      fireEvent.change(input, {
+        target: { files: [new File(['png'], 'outra.png', { type: 'image/png' })] },
+      });
+      expect(field.querySelector('[data-event-poster-local]')?.getAttribute('src')).toBe(
+        'blob:em-pe-2',
+      );
+      expect(revoked).toContain('blob:em-pe-1');
+
+      // Not an image: ignored.
+      fireEvent.change(input, {
+        target: { files: [new File(['%PDF'], 'doc.pdf', { type: 'application/pdf' })] },
+      });
+      expect(field.querySelector('[data-event-poster-local]')?.getAttribute('src')).toBe(
+        'blob:em-pe-2',
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', { name: lookup('events', 'form.cover.posterRemove') }),
+      );
+      expect(field.querySelector('[data-event-poster-local]')).toBeNull();
+      expect(revoked).toContain('blob:em-pe-2');
+    } finally {
+      setStatic('createObjectURL', originals.create);
+      setStatic('revokeObjectURL', originals.revoke);
+    }
+  });
+});
+
 describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => {
   const extrasList = (id: string) =>
     document.querySelector(`[data-extras-list="${id}"]`) as HTMLElement;

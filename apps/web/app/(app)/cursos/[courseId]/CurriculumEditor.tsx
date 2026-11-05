@@ -1,19 +1,28 @@
 'use client';
 
+import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
+import { MediaImage } from '@rede-social/core/ui';
 import type { LessonView, ModuleView } from '@rede-social/module-courses/contracts';
-import { LessonRow, ModuleCard, ReorderList } from '@rede-social/module-courses/ui';
+import {
+  LessonRow,
+  MODULE_BAND_CONTROL,
+  ModuleCard,
+  ReorderList,
+} from '@rede-social/module-courses/ui';
 import { Button, EmptyState, SectionTitle, useToast } from '@rede-social/ui';
 import { Layers, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useAssetReadiness } from '@/components/media/useAssetReadiness';
+import { FadeIn } from '@/components/motion/FadeIn';
 import {
   CURRICULUM_SECTION_ID,
   lessonRowView,
   moduleCardView,
   newLessonHref,
 } from '@/lib/courses-view';
+import { DASHED_OVERRIDES, SECTION_TITLE } from '../admin-styles';
 import {
   type ReorderResult,
   reorderLessonsAction,
@@ -28,13 +37,18 @@ export interface CurriculumEditorProps {
   modules: ModuleView[];
   /** The provider thumbnail of every READY lesson video, minted by the server for this render. */
   thumbnails: Readonly<Record<string, string>>;
+  /** 2026-10-22: the course cover, the art of every module band (the tenant gradient without one). */
+  coverAssetId?: string | null;
 }
 
 type SheetState = { mode: 'new' } | { mode: 'edit'; module: ModuleView; position: number };
 
-/** The "Nova aula" ghost row: a LINK (a route) in the `ghost sm` geometry, 44px tall. */
+/** The "Nova aula" row at the foot of a module's card: a LINK (a route), 44px tall, brand ink. */
 const NEW_LESSON =
-  'flex min-h-11 items-center gap-1.5 px-3 text-xs font-bold text-brand transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand';
+  'flex min-h-11 items-center justify-center gap-1.5 px-3 text-[13px] font-semibold text-brand transition-colors hover:bg-card-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand';
+
+/** The band's art: the module band is the column's width, at most the 680px column minus padding. */
+const BAND_SIZES = '(min-width: 680px) 648px, 100vw';
 
 /** Permutes `items` into the order of `ids`; null when the ids are not exactly the items (a stale list). */
 function permute<T extends { id: string }>(
@@ -72,14 +86,23 @@ function permute<T extends { id: string }>(
  * this render's and are never stored (T-08.3-18).
  *
  * Focus (UI-D-407): the sheet's trap returns focus to the opener on close; after a removal the
- * opener is gone, so focus moves to the next module's edit control, or to "Novo módulo" when none
- * is left.
+ * opener is gone, so focus moves to the next module's edit control, or to "Novo módulo" (the empty
+ * state's "Criar módulo" when none is left).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the heading is 18/800
+ * with the draft's "{N} módulos · {N} aulas" on its right; each module is a 16:6 BAND over the
+ * course's art (`ModuleCard`: the "Módulo 01" pill, the watermark numeral, the arrows and the pencil
+ * as glass discs, `MODULE_BAND_CONTROL`), its lessons ALWAYS visible in the outlined card under it
+ * (no accordion) with "Nova aula" at its foot; "Novo módulo" moved from the heading to a dashed
+ * block at the end of the list. A module the admin just created enters with `FadeIn` (opacity,
+ * client-mounted content only; never under "reduzir movimento"). No behaviour changed.
  */
 export function CurriculumEditor({
   courseId,
   courseTitle,
   modules,
   thumbnails,
+  coverAssetId = null,
 }: CurriculumEditorProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -119,7 +142,11 @@ export function CurriculumEditor({
         pendingFocus.nextId === null
           ? null
           : root?.querySelector<HTMLElement>(`[data-module-edit="${pendingFocus.nextId}"]`);
-      (next ?? root?.querySelector<HTMLElement>('[data-curriculum-create]'))?.focus({
+      (
+        next ??
+        root?.querySelector<HTMLElement>('[data-curriculum-create]') ??
+        root?.querySelector<HTMLElement>('[data-curriculum-empty-create]')
+      )?.focus({
         preventScroll: true,
       });
       setPendingFocus(null);
@@ -226,29 +253,45 @@ export function CurriculumEditor({
       t('courses.reorder.moved', { name, position, total }),
   };
 
+  const lessonTotal = draft.reduce((sum, module) => sum + module.lessons.length, 0);
+  const art = coverAssetId ? (
+    <MediaImage
+      assetId={coverAssetId}
+      widths={PURPOSE_WIDTHS.cover}
+      alt=""
+      sizes={BAND_SIZES}
+      ratio=""
+      className="h-full w-full"
+      fallback={
+        <span
+          aria-hidden
+          className="block h-full w-full"
+          style={{ backgroundImage: 'var(--brand-gradient)' }}
+        />
+      }
+    />
+  ) : undefined;
+
   return (
     <section
       ref={rootRef}
       id={CURRICULUM_SECTION_ID}
       aria-labelledby={headingId}
       data-testid="curriculum"
-      className="flex flex-col gap-3 pt-2"
+      className="flex flex-col gap-3 pt-1"
     >
-      <div className="flex items-center justify-between gap-3">
-        <SectionTitle id={headingId} variant="group">
+      <div className="flex items-baseline justify-between gap-3">
+        <SectionTitle id={headingId} variant="group" className={SECTION_TITLE}>
           {t('courses.curriculum.title')}
         </SectionTitle>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          data-curriculum-create
-          className="h-11"
-          onClick={() => openSheet({ mode: 'new' })}
-        >
-          <Plus aria-hidden size={16} className="shrink-0" />
-          {t('courses.curriculum.newModule')}
-        </Button>
+        {draft.length > 0 ? (
+          <span
+            data-testid="curriculum-count"
+            className="shrink-0 text-xs font-normal text-text-tertiary tabular-nums"
+          >
+            {t('courses.row.meta', { modules: draft.length, lessons: lessonTotal })}
+          </span>
+        ) : null}
       </div>
 
       {draft.length === 0 ? (
@@ -277,62 +320,83 @@ export function CurriculumEditor({
           disabled={savingModules}
           label={t('courses.reorder.lists.modules', { course: courseTitle })}
           labels={labels}
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-4"
           testId="curriculum-modules"
+          arrowClassName={MODULE_BAND_CONTROL}
           renderItem={(module, arrows, index) => {
             const position = index + 1;
             const view = moduleCardView(module, position, t as never);
             return (
-              <ModuleCard
-                id={module.id}
-                position={position}
-                positionLabel={view.positionLabel}
-                title={module.title}
-                requiresPreviousLabel={view.requiresPreviousLabel}
-                meta={view.meta}
-                arrows={arrows}
-                editLabel={view.editLabel}
-                onEdit={() => openSheet({ mode: 'edit', module, position })}
-              >
-                {module.lessons.length > 0 ? (
-                  <ReorderList
-                    items={module.lessons.map((lesson) => ({ ...lesson, name: lesson.title }))}
-                    onChange={(ids) => void moveLessons(module.id, ids)}
-                    disabled={savingLessons[module.id] === true}
-                    label={t('courses.reorder.lists.lessons', { module: module.title })}
-                    labels={labels}
-                    className="flex flex-col divide-y divide-divider"
-                    testId="curriculum-lessons"
-                    renderItem={(lesson, lessonArrows) => (
-                      <LessonRowHost
-                        lesson={lesson}
-                        courseId={courseId}
-                        thumbnailUrl={thumbnails[lesson.id]}
-                        arrows={lessonArrows}
-                      />
-                    )}
-                  />
-                ) : (
-                  <p
-                    data-testid="curriculum-no-lessons"
-                    className="flex min-h-11 items-center px-3 text-sm font-normal text-text-tertiary"
-                  >
-                    {t('courses.curriculum.noLessons')}
-                  </p>
-                )}
-                <a
-                  href={newLessonHref(courseId, module.id)}
-                  data-testid="curriculum-new-lesson"
-                  className={`${NEW_LESSON} border-t border-divider`}
+              <FadeIn>
+                <ModuleCard
+                  id={module.id}
+                  position={position}
+                  positionLabel={view.positionLabel}
+                  numeral={view.numeral}
+                  pillLabel={view.pillLabel}
+                  title={module.title}
+                  requiresPreviousLabel={view.requiresPreviousLabel}
+                  meta={view.meta}
+                  art={art}
+                  arrows={arrows}
+                  editLabel={view.editLabel}
+                  onEdit={() => openSheet({ mode: 'edit', module, position })}
                 >
-                  <Plus aria-hidden size={16} className="shrink-0" />
-                  {t('courses.curriculum.newLesson')}
-                </a>
-              </ModuleCard>
+                  {module.lessons.length > 0 ? (
+                    <ReorderList
+                      items={module.lessons.map((lesson) => ({ ...lesson, name: lesson.title }))}
+                      onChange={(ids) => void moveLessons(module.id, ids)}
+                      disabled={savingLessons[module.id] === true}
+                      label={t('courses.reorder.lists.lessons', { module: module.title })}
+                      labels={labels}
+                      className="flex flex-col divide-y divide-divider"
+                      testId="curriculum-lessons"
+                      renderItem={(lesson, lessonArrows) => (
+                        <LessonRowHost
+                          lesson={lesson}
+                          courseId={courseId}
+                          thumbnailUrl={thumbnails[lesson.id]}
+                          arrows={lessonArrows}
+                        />
+                      )}
+                    />
+                  ) : (
+                    <p
+                      data-testid="curriculum-no-lessons"
+                      className="flex min-h-11 items-center px-3.5 text-sm font-normal text-text-tertiary"
+                    >
+                      {t('courses.curriculum.noLessons')}
+                    </p>
+                  )}
+                  <a
+                    href={newLessonHref(courseId, module.id)}
+                    data-testid="curriculum-new-lesson"
+                    className={`${NEW_LESSON} border-t border-divider`}
+                  >
+                    <Plus aria-hidden size={15} className="shrink-0" />
+                    {t('courses.curriculum.newLesson')}
+                  </a>
+                </ModuleCard>
+              </FadeIn>
             );
           }}
         />
       )}
+
+      {/* "Novo módulo" closes the list, a dashed block (the prototype's); the empty state has its own. */}
+      {draft.length > 0 ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="md"
+          data-curriculum-create
+          className={DASHED_OVERRIDES}
+          onClick={() => openSheet({ mode: 'new' })}
+        >
+          <Plus aria-hidden size={16} className="shrink-0" />
+          {t('courses.curriculum.newModule')}
+        </Button>
+      ) : null}
 
       {sheet ? (
         <ModuleSheet

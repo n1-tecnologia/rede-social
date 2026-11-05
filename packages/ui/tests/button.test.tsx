@@ -279,11 +279,64 @@ describe('PageHeader', () => {
     expect(header.className).toContain('md:static');
   });
 
+  // 2026-10-26 ("essa barra não deve ter background, deve só ter a escrita e a seta"): the bar paints
+  // nothing of its own; a phone's pinned ground is the `ui-page-header` rule in tokens.css.
+  it('paints no band, blur or hairline of its own', () => {
+    const { container } = render(
+      <PageHeader title="Evento" backHref="/eventos" backLabel="Voltar" />,
+    );
+    const header = container.querySelector('header') as HTMLElement;
+    expect(header.className).toContain('ui-page-header');
+    expect(header.className).not.toMatch(/(^|\s)(bg-|backdrop-|border-)/);
+  });
+
   it('an explicit stickyTop still wins over the default', () => {
     const { container } = render(
       <PageHeader title="Evento" backHref="/eventos" backLabel="Voltar" stickyTop="0px" />,
     );
     expect((container.querySelector('header') as HTMLElement).style.top).toBe('0px');
+  });
+
+  /**
+   * 2026-10-22 (the courses area redesign): the lesson page's two-line header. `eyebrow` draws the
+   * course as an overline above the title; `titleAs="p"` keeps the title out of the outline when the
+   * screen's one h1 lives in its body. Without either, the header renders as before.
+   */
+  it('draws the eyebrow above the title, which stays the h1 by default', () => {
+    render(
+      <PageHeader eyebrow="Fundamentos" title="Aula 1" backHref="/cursos" backLabel="Voltar" />,
+    );
+    const heading = screen.getByRole('heading', { level: 1, name: 'Aula 1' });
+    const eyebrow = screen.getByText('Fundamentos');
+    expect(eyebrow.tagName).toBe('P');
+    expect(eyebrow.className).toContain('uppercase');
+    expect(heading.className).toContain('text-sm');
+    expect(
+      eyebrow.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('titleAs="p" renders the title as a paragraph, so the body owns the one h1', () => {
+    render(
+      <PageHeader
+        eyebrow="Fundamentos"
+        title="Aula 1"
+        titleAs="p"
+        backHref="/cursos"
+        backLabel="Voltar"
+      />,
+    );
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+    expect(screen.getByText('Aula 1').tagName).toBe('P');
+  });
+
+  it('without eyebrow or titleAs the title is the same 16/700 h1 as before', () => {
+    const { container } = render(
+      <PageHeader title="Evento" backHref="/eventos" backLabel="Voltar" />,
+    );
+    const heading = screen.getByRole('heading', { level: 1, name: 'Evento' });
+    expect(heading.className).toContain('flex-1 truncate text-base font-bold text-text');
+    expect(container.querySelector('header .min-w-0')).toBeNull();
   });
 
   /**
@@ -578,6 +631,19 @@ describe('buttonClasses', () => {
     );
     expect(afterTokens(merged.join(' '))).toEqual(expected);
     for (const token of ['h-10', 'top-2', 'translate-y-1']) expect(merged).toContain(token);
+  });
+
+  it('carries the member skin hooks on every variant (2026-10-26), inert outside the scope', () => {
+    for (const variant of variants) {
+      const classes = tokens(buttonClasses({ variant }));
+      expect(classes, variant).toContain('ui-btn');
+      expect(classes, variant).toContain(`ui-btn-${variant}`);
+      // One variant hook only: the skin styles brand, outline and secondary apart.
+      expect(
+        classes.filter((token) => token.startsWith('ui-btn-')),
+        variant,
+      ).toHaveLength(1);
+    }
   });
 
   it('lets a call-site className override the size defaults (tailwind-merge)', () => {

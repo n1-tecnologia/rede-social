@@ -3,6 +3,7 @@
 import type { MediaPlayback } from '@rede-social/contracts/media';
 import {
   type CommentAccessRefusal,
+  CommentPanel,
   CommentSheet,
   type CommentSheetProps,
   type CountTemplates,
@@ -16,14 +17,17 @@ import {
   REELS_TOKEN_REMINT_MARGIN_MS,
 } from '@rede-social/module-reels/contracts';
 import {
+  compactCount,
   ReelPlaybackError,
+  ReelsFrame,
   type ReelsLane,
   ReelsLanes,
   ReelsPager,
   type ReelsPagerItem,
+  type ReelsPagerSlots,
   ReelsStage,
 } from '@rede-social/module-reels/ui';
-import { Button, cn, EmptyState, IconButton, useToast } from '@rede-social/ui';
+import { Button, cn, EmptyState, IconButton, useMediaQuery, useToast } from '@rede-social/ui';
 import { CircleAlert, Film, Loader2, Undo2, Volume2, VolumeX } from 'lucide-react';
 import {
   type ReactNode,
@@ -162,6 +166,9 @@ export type ReelsHostLabels = {
   next: string;
   /** RAW "Vídeo {current}, de {author}" — the pager fills it. */
   position: string;
+  /** 2026-10-23: "Tela cheia" and "Sair da tela cheia", the desktop player's control. */
+  fullscreen?: string;
+  exitFullscreen?: string;
   /** RAW "Ver o perfil de {name}". */
   railAuthor: string;
   captionMore: string;
@@ -413,13 +420,24 @@ export function ReelsHost({
 
   const [viewerPaused, setViewerPaused] = useState(false);
   const [documentHidden, setDocumentHidden] = useState(false);
-  /** THE post whose comments are open (UI-D-90), or null. The sheet is a pause source. */
+  /**
+   * THE post whose comments are open (UI-D-90), or null. On the phone (any window under xl) they
+   * open in the sheet, a pause source. Beside the desktop player (xl, 2026-10-23, the YouTube Shorts
+   * layout) they open in the panel, which is not: the video keeps playing, gestures stay live, and
+   * the panel follows the video the member moves to.
+   */
   const [sheetFor, setSheetFor] = useState<string | null>(null);
   const sheetOpen = sheetFor !== null;
+  /** 2026-10-23: from md the rail sits beside the player; from xl the comments panel too. */
+  const desktop = useMediaQuery('(min-width: 768px)');
+  const wide = useMediaQuery('(min-width: 1280px)');
+  const panelOpen = sheetOpen && wide;
+  /** The comments as a pause source: the sheet only. */
+  const commentsPause = sheetOpen && !wide;
   /** The viewer is holding the video (2026-10-09). `holdingRef` is the same fact, synchronously. */
   const [holding, setHolding] = useState(false);
   const holdingRef = useRef(false);
-  const effectivePaused = viewerPaused || documentHidden || sheetOpen || holding;
+  const effectivePaused = viewerPaused || documentHidden || commentsPause || holding;
 
   /* ── Per-page flags ───────────────────────────────────────────────────────────────────────── */
 
@@ -444,8 +462,9 @@ export function ReelsHost({
     viewerPaused,
     effectivePaused,
     documentHidden,
-    sheetOpen,
-    otherPaused: documentHidden || sheetOpen || holding,
+    commentsPause,
+    wide,
+    otherPaused: documentHidden || commentsPause || holding,
     blockedCurrent,
     failed,
   });
@@ -458,8 +477,9 @@ export function ReelsHost({
     viewerPaused,
     effectivePaused,
     documentHidden,
-    sheetOpen,
-    otherPaused: documentHidden || sheetOpen || holding,
+    commentsPause,
+    wide,
+    otherPaused: documentHidden || commentsPause || holding,
     blockedCurrent,
     failed,
   };
@@ -761,7 +781,7 @@ export function ReelsHost({
     holdingRef.current = false;
     setHolding(false);
     const state = latest.current;
-    if (state.viewerPaused || state.documentHidden || state.sheetOpen) return;
+    if (state.viewerPaused || state.documentHidden || state.commentsPause) return;
     if (state.effectivePaused) suppressResume.current = true;
     if (state.blockedCurrent) return;
     controllerIn(controllers.current, state.currentId)?.resume();
@@ -824,6 +844,12 @@ export function ReelsHost({
     setSheetFor(postId);
   }, []);
 
+  // Beside the desktop player the panel follows the video (YouTube's): a move to another video
+  // shows that video's comments.
+  useEffect(() => {
+    if (panelOpen && currentId !== null && sheetFor !== currentId) setSheetFor(currentId);
+  }, [panelOpen, currentId, sheetFor]);
+
   /**
    * Stable by habit (`BottomSheet`'s focus trap reads `onClose` through a ref and arms once per
    * opening). Closing resumes inside the close gesture when nothing else holds the video (sound
@@ -832,6 +858,8 @@ export function ReelsHost({
   const closeSheet = useCallback(() => {
     const state = latest.current;
     setSheetFor(null);
+    // The panel beside the desktop player paused nothing: there is nothing to resume.
+    if (state.wide) return;
     if (!state.viewerPaused && !state.documentHidden && !holdingRef.current) {
       suppressResume.current = true;
       controllerIn(controllers.current, state.currentId)?.resume();
@@ -1072,7 +1100,10 @@ export function ReelsHost({
     );
   };
 
-  const renderOverlay = (item: ReelsPagerItem, state: { current: boolean }): ReactNode => {
+  const renderOverlay = (
+    item: ReelsPagerItem,
+    state: { current: boolean; slots: ReelsPagerSlots },
+  ): ReactNode => {
     const view = views.get(item.id);
     if (!view) return null;
     return (
@@ -1087,6 +1118,10 @@ export function ReelsHost({
         onShare={onShare}
         onError={onLikeError}
         bind={bind}
+        // 2026-10-23 — the desktop pieces beside the player (from md), drawn by THIS page so its
+        // one like engine drives the rail there and the double tap alike.
+        desktopRail={desktop ? state.slots.rail : null}
+        desktopInfo={desktop ? state.slots.info : null}
       />
     );
   };
@@ -1111,10 +1146,12 @@ export function ReelsHost({
       onClick={toggleSound}
       data-video-sound=""
       className={cn(
-        'absolute top-[calc(var(--safe-top)+8px)] z-[3] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4',
-        // In the overlay the return arrow takes the corner and this sits to its left; from md the
-        // arrow is the SCREEN's corner and this stays in the column's.
-        overlay ? 'right-16 md:right-4' : 'right-4',
+        'absolute top-[calc(var(--safe-top)+8px)] z-[3] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0',
+        // In the overlay the return arrow takes the corner and this sits to its left.
+        overlay ? 'right-16' : 'right-4',
+        // 2026-10-23 — from md the player's top left, beside its play/pause (the YouTube Shorts
+        // layout); the return arrow is the SCREEN's corner there.
+        'md:top-3 md:right-auto md:left-16 md:size-11 md:bg-black/40 md:backdrop-blur-sm md:hover:bg-black/55',
       )}
     />
   );
@@ -1130,7 +1167,11 @@ export function ReelsHost({
       label={backLabel ?? ''}
       onClick={onBack}
       data-reels-back=""
-      className="absolute top-[calc(var(--safe-top)+8px)] right-4 z-[5] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4"
+      className={cn(
+        'absolute top-[calc(var(--safe-top)+8px)] right-4 z-[5] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0',
+        // 2026-10-23 — from md it sits on the stage's ground, in the member's theme.
+        'md:top-4 md:bg-bg-tertiary md:text-text md:hover:bg-[color-mix(in_oklch,var(--theme-bg-tertiary),var(--theme-text)_8%)] md:focus-visible:ring-brand md:focus-visible:ring-offset-2',
+      )}
     />
   ) : null;
 
@@ -1139,8 +1180,10 @@ export function ReelsHost({
   if (empty) {
     // UI-D-94. In "Todos" there is no lane row; an empty community lane keeps it, so the viewer
     // can step back. No sound button and no pager (so no keys, wheel or ↑/↓) either way.
+    // Every state draws in the player box (2026-10-23): the whole stage on the phone, as before;
+    // from md the rounded 9:16 box the video sits in, the dark scope.
     body = (
-      <>
+      <ReelsFrame>
         {activeLane === ALL ? null : lanesNode}
         <div className="absolute inset-0 flex items-center justify-center">
           <EmptyState
@@ -1164,12 +1207,12 @@ export function ReelsHost({
             }
           />
         </div>
-      </>
+      </ReelsFrame>
     );
   } else if (lane.status === 'error') {
     // UI-D-93a: the stage error, the lane row still usable.
     body = (
-      <>
+      <ReelsFrame>
         {lanesNode}
         <div className="absolute inset-0 flex items-center justify-center">
           <EmptyState
@@ -1187,12 +1230,12 @@ export function ReelsHost({
             }
           />
         </div>
-      </>
+      </ReelsFrame>
     );
   } else if (lane.status !== 'ready') {
     // UI E02 loading: a lane selected for the first time, its tab already active.
     body = (
-      <>
+      <ReelsFrame>
         {lanesNode}
         <div
           data-testid="reels-stage-loading"
@@ -1205,7 +1248,7 @@ export function ReelsHost({
             className="animate-spin text-white/70 motion-reduce:animate-none"
           />
         </div>
-      </>
+      </ReelsFrame>
     );
   } else {
     body = (
@@ -1233,20 +1276,33 @@ export function ReelsHost({
         onHoldStart={onHoldStart}
         onHoldEnd={onHoldEnd}
         onToggleSound={toggleSound}
-        gesturesDisabled={sheetOpen}
+        gesturesDisabled={commentsPause}
         instantKey={String(instantKey)}
         panelId={multiLane ? PANEL_ID : undefined}
         labelledBy={multiLane ? activeTabId : undefined}
+        shifted={panelOpen}
         labels={{
           play: labels.play,
           pause: labels.pause,
           previous: labels.previous,
           next: labels.next,
           position: labels.position,
+          fullscreen: labels.fullscreen,
+          exitFullscreen: labels.exitFullscreen,
         }}
       />
     );
   }
+
+  // 2026-10-23 — the comments BESIDE the desktop player (xl): the post they belong to, and its count
+  // with this visit's deltas, beside the title.
+  const panelView = panelOpen && sheetFor !== null ? views.get(sheetFor) : undefined;
+  const panelCount = panelView
+    ? compactCount(
+        Math.max(0, withInteraction(panelView, interactions[panelView.id]).commentCount),
+        locale,
+      )
+    : null;
 
   return (
     <>
@@ -1254,12 +1310,29 @@ export function ReelsHost({
         <div className="absolute inset-0" onTouchEnd={onTouchEnd}>
           {body}
           {backButton}
+          {panelOpen && sheetFor !== null ? (
+            // In the stage, outside the player's dark box: the member's theme. Keyed by the post,
+            // so following the video starts the next one's list afresh.
+            <CommentPanel
+              key={sheetFor}
+              {...comments}
+              title={comments.title}
+              count={panelCount}
+              closeLabel={comments.closeLabel ?? ''}
+              onClose={closeSheet}
+              targetId={sheetFor}
+              onCountChange={(delta) => bumpCommentCount(sheetFor, delta)}
+              onLocked={onLocked}
+              className="absolute top-2 right-[88px] bottom-2 z-[6] hidden w-[420px] xl:flex"
+            />
+          ) : null}
         </div>
       </ReelsStage>
-      {/* The feed's ONE sheet, threaded (D-59, D-62), OUTSIDE the stage's dark scope (UI-D-98). */}
+      {/* The feed's ONE sheet, threaded (D-59, D-62), OUTSIDE the stage's dark scope (UI-D-98); on
+          a window under xl only, the panel takes its place beside the desktop player. */}
       <CommentSheet
         {...comments}
-        open={sheetOpen}
+        open={commentsPause}
         onClose={closeSheet}
         // `''` is only ever read while the sheet is closed, and the sheet then renders nothing.
         targetId={sheetFor ?? ''}

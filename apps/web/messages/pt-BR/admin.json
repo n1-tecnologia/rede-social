@@ -108,6 +108,39 @@
       "toasts": {
         "roleChanged": "Papel de {name} alterado para {role}."
       }
+    },
+    "menu": {
+      "title": "Menu do app",
+      "intro": "Escolha o que aparece na barra de baixo e no topo do app no celular. No computador, o menu continua o mesmo.",
+      "preview": "Prévia no celular",
+      "bar": "Barra de baixo",
+      "barCount": "{n} de {max} itens",
+      "barHelp": "Segure e arraste os ícones para mudar a ordem.",
+      "top": "Topo do app",
+      "topCount": "{n} de {max} itens extras",
+      "topHelp": "Ficam ao lado de Notificações e Suporte. Segure e arraste para mudar a ordem.",
+      "topEmpty": "Nenhum item extra no topo.",
+      "fixed": "Sempre no topo",
+      "items": "Itens do menu",
+      "itemsHelp": "Escolha onde cada item fica: na barra, no topo ou fora do menu.",
+      "place": {
+        "bar": "Barra",
+        "top": "Topo",
+        "hidden": "Oculto"
+      },
+      "placeGroup": "Onde fica {item}",
+      "locked": "Início fica sempre na barra.",
+      "profileNote": "O Perfil também abre pela foto no topo.",
+      "barFull": "A barra já tem {max} itens.",
+      "barMin": "A barra precisa de pelo menos {min} itens.",
+      "topFull": "O topo já tem {max} itens extras.",
+      "item": "{item}, posição {position} de {total}",
+      "keys": "Use as setas para mover o item.",
+      "moved": "{item} agora está na posição {position} de {total}.",
+      "restore": "Restaurar o padrão",
+      "save": "Salvar",
+      "saved": "Menu salvo neste aparelho.",
+      "device": "Vale só no celular. Por enquanto, só neste aparelho."
     }
   }
 }

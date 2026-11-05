@@ -21,6 +21,7 @@ import type {
 } from '@rede-social/module-courses/contracts';
 import { COURSE_MAX_PAGE_SIZE, materialKind } from '@rede-social/module-courses/contracts';
 import type { getTranslations } from 'next-intl/server';
+import { adminScreenHref } from './member-area';
 
 /**
  * WR-06 (08.3 review): the track form's course picker walks the published catalogue by keyset, at
@@ -40,6 +41,9 @@ export const TRACK_PICKER_MAX = TRACK_PICKER_MAX_PAGES * COURSE_MAX_PAGE_SIZE;
  * totals "45 min" / "2 h 15 min", hours "12 h", sizes "2,4 MB" in binary units with one decimal
  * through `Intl.NumberFormat('pt-BR')`. Nothing here rounds a count, reads the clock, fetches or
  * sorts (P09): the rows arrive in the API's order and leave in it.
+ *
+ * 2026-10-23: the admin's live cards (`LiveCardFields`, on every live row) and the admin course
+ * page's facts strip (`courseFactsView`) are built here too, additions only.
  */
 
 /** The same untyped translator every `lib/*-view` module takes. Keys are FULL (`courses.…`). */
@@ -84,10 +88,12 @@ export function courseFilterFromParam(value: string | string[] | undefined): Cou
     : 'all';
 }
 
-/** The `/cursos` href of a filter chip (the Cursos tab is the default `aba`, so it stays implicit). */
+/**
+ * The `/cursos` href of a filter chip. 2026-10-22: built by `adminScreenHref`, the one producer of
+ * the admin screens' paths (the Cursos screen IS `/cursos`, so the hrefs read as before).
+ */
 export function courseFilterHref(filter: CourseFilter): string {
-  const query = COURSE_FILTER_QUERY[filter];
-  return query === null ? '/cursos' : `/cursos?filtro=${query}`;
+  return adminScreenHref('cursos', { filtro: COURSE_FILTER_QUERY[filter] });
 }
 
 /** The catalog key of each chip label. */
@@ -184,6 +190,11 @@ export interface CourseRowView {
    * the sibling "Ver como aluno" eye on a published one (08.5-10, D-422, UI-D-437).
    */
   status?: CourseStatus;
+  /**
+   * 2026-10-23: only on a LIVE row (`liveRowView`): the words the admin's Lives screen prints on the
+   * member's live cards beyond the title and the meta.
+   */
+  live?: LiveCardFields;
 }
 
 /**
@@ -307,9 +318,42 @@ export function formatLiveDate(startsAt: string, timeZone: string): string {
 }
 
 /**
+ * 2026-10-23 — a live row's card words: the admin's Lives screen draws the member's `LiveCard`
+ * variants (the spotlight, the agenda rows, the tiles), each with its own "Editar" door.
+ */
+export interface LiveCardFields {
+  /** The status in words, the row pill's label: "Agendada", "Ao vivo", "Gravada", "Cancelada". */
+  statusLabel: string;
+  /** `live` → the red chip with the breathing dot; none otherwise (a recording is edited here, not played). */
+  statusIcon: 'live' | null;
+  /** A cancelled card keeps its colour; only its title steps back. */
+  cancelled: boolean;
+  /** The agenda's date column, in the tenant's timezone: the day ("16") and the short month ("out"). */
+  day: string;
+  month: string;
+  /** The agenda's line: "{time} · {duration} min". */
+  timeLine: string;
+  /** The "Editar" door's name: "Editar a live: {title}". */
+  editAriaLabel: string;
+}
+
+/** "16" and "out": a live's day and short month in the tenant timezone (the agenda's date column). */
+function liveDayAndMonth(startsAt: string, timeZone: string): { day: string; month: string } {
+  const at = new Date(startsAt);
+  const day = new Intl.DateTimeFormat('pt-BR', { timeZone, day: 'numeric' }).format(at);
+  const month = new Intl.DateTimeFormat('pt-BR', { timeZone, month: 'short' })
+    .format(at)
+    .replace(/\./g, '');
+  return { day, month };
+}
+
+/**
  * One finished live row (UI-D-392): the meta "{weekday} {day} {month}, {time} · {duration} min" in
  * the TENANT's timezone (the device's zone never enters), the derived status pill. `Intl` formats
  * the date on the server, so the same instant renders identically before and after hydration.
+ *
+ * 2026-10-23: the row also carries its card words (`live`, `LiveCardFields`) for the admin's Lives
+ * screen, built from the same instant and the same status; the row's own fields are unchanged.
  */
 export function liveRowView(
   live: LiveRowInput,
@@ -317,6 +361,7 @@ export function liveRowView(
   t: Translator,
 ): CourseRowView {
   const { date, time } = liveDateParts(live.startsAt, timezone);
+  const { day, month } = liveDayAndMonth(live.startsAt, timezone);
   const status = liveStatusPill(live.status, t);
   return {
     id: live.id,
@@ -327,6 +372,15 @@ export function liveRowView(
     ariaLabel: t('courses.row.aria', { title: live.title, status: status.label }),
     coverAssetId: live.coverAssetId,
     coverAlt: t('courses.alt.live', { title: live.title }),
+    live: {
+      statusLabel: status.label,
+      statusIcon: live.status === 'live' ? 'live' : null,
+      cancelled: live.status === 'cancelled',
+      day,
+      month,
+      timeLine: t('courses.member.lives.timeLine', { time, duration: live.durationMin }),
+      editAriaLabel: t('courses.lives.editAria', { title: live.title }),
+    },
   };
 }
 
@@ -416,10 +470,64 @@ export function formatPublishedAt(iso: string, timezone: string): string {
   }).format(new Date(iso));
 }
 
-/** The words of one module card (UI-D-395), from the module and its 1-based position in the draft. */
+/** One cell of the admin course page's facts strip (2026-10-23): the value over its label. */
+export interface CourseFactCell {
+  key: 'lessons' | 'duration' | 'level';
+  /** "18", "12 h" / "3 h 41 min", "Iniciante". */
+  value: string;
+  /** "Aulas", "Duração", "Nível". */
+  label: string;
+}
+
+/**
+ * 2026-10-23 — the admin course page's facts strip, the member's (`courseHeroView`) built from the
+ * manager's detail, in this order: Aulas (always, the API's count), Duração (the certificate hours
+ * when set, else the ready videos' sum; absent with neither) and Nível (absent without a level).
+ */
+export function courseFactsView(
+  course: Pick<CourseDetail, 'lessonCount' | 'durationSeconds' | 'certificateHours' | 'level'>,
+  t: Translator,
+): CourseFactCell[] {
+  const duration =
+    course.certificateHours !== null && course.certificateHours > 0
+      ? t('courses.course.hours', { N: String(Math.trunc(course.certificateHours)) })
+      : formatCourseDuration(course.durationSeconds);
+  const facts: CourseFactCell[] = [
+    {
+      key: 'lessons',
+      value: String(course.lessonCount),
+      label: t('courses.member.course.facts.lessons'),
+    },
+  ];
+  if (duration) {
+    facts.push({
+      key: 'duration',
+      value: duration,
+      label: t('courses.member.course.facts.duration'),
+    });
+  }
+  if (course.level) {
+    facts.push({
+      key: 'level',
+      value: t(COURSE_LEVEL_LABEL_KEY[course.level]),
+      label: t('courses.member.course.facts.level'),
+    });
+  }
+  return facts;
+}
+
+/**
+ * The words of one module card (UI-D-395), from the module and its 1-based position in the draft.
+ * 2026-10-22 (the courses area redesign): the card is the social-igoralves module band, so the view
+ * also carries the band's two-digit numeral ("01", the watermark) and its pill ("Módulo 01").
+ */
 export interface ModuleCardView {
   /** "Módulo {position}" — the numeral's accessible name. */
   positionLabel: string;
+  /** The position as two digits ("01", "12"): the band's watermark. */
+  numeral: string;
+  /** "Módulo {nn}" — the band's pill, the numeral in words. */
+  pillLabel: string;
   /** "Exige o anterior" when the flag is on — never on the first module (D-406 forces it off). */
   requiresPreviousLabel: string | undefined;
   /** "{N} aulas" plus " · {duration}" when any video is ready. */
@@ -434,8 +542,11 @@ export function moduleCardView(
   t: Translator,
 ): ModuleCardView {
   const duration = formatCourseDuration(module.durationSeconds);
+  const numeral = String(position).padStart(2, '0');
   return {
     positionLabel: t('courses.curriculum.module.aria', { position }),
+    numeral,
+    pillLabel: t('courses.curriculum.module.pill', { nn: numeral }),
     requiresPreviousLabel:
       module.requiresPrevious && position > 1
         ? t('courses.curriculum.module.requiresPrevious')
@@ -773,10 +884,13 @@ export function trackFilterFromParam(value: string | string[] | undefined): Trac
   return (TRACK_FILTER_PARAMS as Record<string, TrackFilter>)[value] ?? 'active';
 }
 
-/** The chip's href: the Trilhas tab, plus `&filtro=` for the archive. */
+/**
+ * The chip's href. 2026-10-22: the Trilhas list is a page of its own (`/cursos/trilhas`, reached
+ * from "Gerenciar" since 2026-10-23), plus `?filtro=` for the archive; the old `?aba=trilhas` only
+ * redirects.
+ */
 export function trackFilterHref(filter: TrackFilter): string {
-  const query = TRACK_FILTER_QUERY[filter];
-  return query === null ? '/cursos?aba=trilhas' : `/cursos?aba=trilhas&filtro=${query}`;
+  return adminScreenHref('trilhas', { filtro: TRACK_FILTER_QUERY[filter] });
 }
 
 export const TRACK_FILTER_LABEL_KEY: Record<TrackFilter, string> = {
@@ -854,10 +968,12 @@ export function liveFilterFromParam(value: string | string[] | undefined): LiveF
   return (LIVE_FILTER_PARAMS as Record<string, LiveFilter>)[value] ?? 'upcoming';
 }
 
-/** The `/cursos?aba=lives` href of a filter chip. */
+/**
+ * The href of a Lives chip. 2026-10-22: the Lives list is a page of its own (`/cursos/lives`), plus
+ * `?filtro=passadas`; the old `?aba=lives` only redirects.
+ */
 export function liveFilterHref(filter: LiveFilter): string {
-  const query = LIVE_FILTER_QUERY[filter];
-  return query === null ? '/cursos?aba=lives' : `/cursos?aba=lives&filtro=${query}`;
+  return adminScreenHref('lives', { filtro: LIVE_FILTER_QUERY[filter] });
 }
 
 /** The catalog key of each Lives chip label. */

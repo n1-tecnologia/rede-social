@@ -87,6 +87,26 @@ async function navLabels(page: Page): Promise<string[]> {
     );
 }
 
+/**
+ * 2026-10-23 (the grouped desktop rail): the phone's tab names as the visible nav reads them — on
+ * the desktop the home tab is "Feed" while the feed module is on, Perfil lives in the rail's account
+ * card, not among its tabs, and with the store on the Loja closes the rail's navigation (the phone
+ * keeps it a TopBar slot). The phone's BottomNav is unchanged.
+ */
+function navFor(
+  page: Page,
+  labels: string[],
+  { feed = true, store = false }: { feed?: boolean; store?: boolean } = {},
+): string[] {
+  if ((page.viewportSize()?.width ?? 0) < 768) return labels;
+  return [
+    ...labels
+      .filter((label) => label !== 'Perfil')
+      .map((label) => (feed && label === 'Início' ? 'Feed' : label)),
+    ...(store ? ['Loja'] : []),
+  ];
+}
+
 /** `{ status, code }` of one API call, so a 403 can never be read as a 404 by accident. */
 async function answer(api: ApiFetch, path: string, host: string) {
   const res = await api(path, {}, host);
@@ -120,6 +140,7 @@ test.afterAll(async () => {
 test.describe('Phase 4 smoke — the feed, in both directions of its module flag', () => {
   test('1. ENABLED: a member lands on the feed, the navigation gains no tab (D-55), and a post page renders', async ({
     page,
+    isMobile,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
@@ -130,18 +151,20 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
     await expect(region.getByRole('article').first()).toBeVisible();
 
     // D-55, asserted rather than assumed: the FEED contributes a HOME SLOT and no navigation entry.
-    // The `Comunidades` and `Cursos` entries beside the two kernel tabs are 05-01's `communities` and
-    // 08.5-11's `courses` manifests (Reels yields its tab to Cursos on rede-demo, D-419, and sits in
-    // the TopBar), not the feed's — which is exactly the distinction this assertion exists to keep
-    // visible, and the explicit `name: 'Feed'` count below is what pins it.
-    expect(await navLabels(page)).toEqual([
-      'Início',
-      'Comunidades',
-      'Membros',
-      'Eventos',
-      'Perfil',
-    ]);
-    await expect(visibleNav(page).getByRole('link', { name: 'Feed', exact: true })).toHaveCount(0);
+    // The `Comunidades`, `Membros` and `Reels` entries beside the two kernel tabs are 05-01's
+    // `communities`, 08.5-11's `courses` and 05.3-01's `reels` manifests, not the feed's — which is
+    // exactly the distinction this assertion exists to keep visible, and the explicit `name: 'Feed'`
+    // count below is what pins it. 2026-10-23: rede-demo's row is full (the school is on), so Reels
+    // keeps its tab and the kernel Perfil is the desktop rail's alone (the phone's door is the
+    // TopBar avatar).
+    expect(await navLabels(page)).toEqual(
+      navFor(page, ['Início', 'Comunidades', 'Membros', 'Reels', 'Eventos'], { store: true }),
+    );
+    // The feed still ships no tab of its own (D-55): on the phone no "Feed" link at all; on the
+    // desktop (2026-10-23) the HOME tab is named "Feed" and leads to /inicio — the only one.
+    const feedLinks = visibleNav(page).getByRole('link', { name: 'Feed', exact: true });
+    await expect(feedLinks).toHaveCount(isMobile ? 0 : 1);
+    if (!isMobile) await expect(feedLinks).toHaveAttribute('href', '/inicio');
 
     // FEED-07: the deep link a member would receive resolves to the post's own page.
     await page.goto(`${hosts.demo}/post/${demoPostId}`);
@@ -167,8 +190,8 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
     // With no module slot registered, the kernel's own "Em breve" card is what fills the page.
     await expect(page.getByText(APP.home.soonTitle, { exact: true })).toBeVisible();
     // This throwaway tenant has no `reels` row at all, so D-121's `requires` is not what keeps the
-    // Reels tab away here (05.3-09 proves that on its own tenant).
-    expect(await navLabels(page)).toEqual(['Início', 'Perfil']);
+    // Reels tab away here (05.3-09 proves that on its own tenant). The feed is off: "Início".
+    expect(await navLabels(page)).toEqual(navFor(page, ['Início', 'Perfil'], { feed: false }));
 
     // The module-disabled rule, across the routes a member could reach: 404 MODULE_DISABLED on all
     // of them. A 403 anywhere here would tell a member the feature exists and is being withheld.
@@ -214,7 +237,7 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
     await expect(page.getByText(APP.home.soonTitle, { exact: true })).toHaveCount(0);
     // Still no tab: turning the module on adds a slot, never a navigation entry (D-55). The
     // throwaway tenant has no `reels` row, so no Reels tab either (not D-121's doing).
-    expect(await navLabels(page)).toEqual(['Início', 'Perfil']);
+    expect(await navLabels(page)).toEqual(navFor(page, ['Início', 'Perfil']));
   });
 
   test('4. the deleted reference module leaves no trace a browser or an API client can see (D-19)', async ({
@@ -230,17 +253,14 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
 
     // …and the shell offers neither a tab nor a widget for it, on a tenant that used to have both.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    // `Comunidades` (05-01) and `Membros` (08.5-11's courses tab, shown to a member as Membros since 2026-10-19; Reels yields its tab to it on rede-demo, D-419)
-    // are module manifests and are exactly what the absent reference module's own entry would have
-    // looked like — their presence is what makes this an assertion about the DELETED module rather
-    // than about a nav that happens to be kernel-only.
-    expect(await navLabels(page)).toEqual([
-      'Início',
-      'Comunidades',
-      'Membros',
-      'Eventos',
-      'Perfil',
-    ]);
+    // `Comunidades` (05-01), `Membros` (08.5-11's courses tab, shown to a member as Membros since
+    // 2026-10-19) and `Reels` (05.3-01) are module manifests and are exactly what the absent
+    // reference module's own entry would have looked like — their presence is what makes this an
+    // assertion about the DELETED module rather than about a nav that happens to be kernel-only.
+    // 2026-10-23: the full row keeps Reels as a tab and leaves Perfil to the desktop rail.
+    expect(await navLabels(page)).toEqual(
+      navFor(page, ['Início', 'Comunidades', 'Membros', 'Reels', 'Eventos'], { store: true }),
+    );
     await expect(page.locator('#exemplo')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Exemplo', exact: true })).toHaveCount(0);
   });

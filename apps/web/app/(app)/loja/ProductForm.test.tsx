@@ -304,10 +304,10 @@ describe('ProductForm — create (UI-D-377)', () => {
     expect(create.mock.calls[0]?.[0]).toMatchObject({ name: 'Mentoria', priceCents: 0 });
   });
 
-  it('7. a dirty close opens the discard dialog; a clean close leaves for /loja', () => {
+  it('7. a dirty close opens the discard dialog; a clean close leaves for Gerenciar', () => {
     renderCreate();
     fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
-    expect(push).toHaveBeenCalledWith('/loja');
+    expect(push).toHaveBeenCalledWith('/loja/gerenciar');
 
     fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
     fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));

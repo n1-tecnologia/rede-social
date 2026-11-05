@@ -61,9 +61,9 @@ describe('weights', () => {
 });
 
 describe('Google stylesheet URLs', () => {
-  it('asks for one family in its title weight, swapping from Manrope while it loads', () => {
+  it('asks for one family in its regular and title weights, swapping from Manrope while it loads', () => {
     expect(titleFontHref(['Open Sans', 'sans', [300, 400, 500, 600, 700, 800]])).toBe(
-      'https://fonts.googleapis.com/css2?family=Open+Sans:wght@700&display=swap',
+      'https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap',
     );
     expect(titleFontHref(['Bebas Neue', 'sans', [400]])).toBe(
       'https://fonts.googleapis.com/css2?family=Bebas+Neue:wght@400&display=swap',
@@ -155,7 +155,7 @@ describe('savedTitleFont (the app’s saved family, looked up on the server)', (
     expect(savedTitleFont('Poppins')).toEqual({
       family: 'Poppins',
       stack: titleFontStack('Poppins'),
-      href: 'https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap',
+      href: 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap',
     });
     const single = GOOGLE_FONTS.find(([, , weights]) => !weights.includes(700));
     if (!single) throw new Error('the catalogue has no family without a 700 weight');

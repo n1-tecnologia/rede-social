@@ -1,6 +1,7 @@
-import { EmptyState, PageHeader } from '@rede-social/ui';
+import { PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { MemberEmptyCard } from '@/app/(app)/cursos/MemberEmptyCard';
 import { MEMBER_LIVES_HREF } from '@/lib/courses-member-view';
 
 const LINK_OUTLINE =
@@ -14,7 +15,8 @@ const LINK_OUTLINE =
  *
  * Takes no props and reads no param, so it cannot echo the id and is never an existence oracle.
  * Sketch 010 frame `live-cancelada-apos-o-fim` (the unknown live): the header back to the Lives tab
- * with the title "Lives", and the alert card with the outline "Ver as lives".
+ * with the title "Lives", and the alert card with the outline "Ver as lives". 2026-10-22: the card is
+ * the member area's `MemberEmptyCard`, and "Lives" is the screen `/area-membros/lives`.
  */
 export default async function LiveNotFound() {
   const t = await getTranslations('courses');
@@ -27,9 +29,9 @@ export default async function LiveNotFound() {
         className="md:static md:px-0"
       />
       <div className="px-4 pt-2">
-        <EmptyState
-          variant="card"
+        <MemberEmptyCard
           icon={CircleAlert}
+          tone="error"
           data-testid="live-not-found"
           title={t('notFound.live')}
           body={t('notFound.liveBody')}

@@ -28,6 +28,7 @@ export {
   buttonRampEnd,
   buttonThemeVars,
 } from './button-colors';
+export { DesktopHeader, type DesktopHeaderProps } from './DesktopHeader';
 export { DesktopRail, type DesktopRailProps } from './DesktopRail';
 export { type HomeSlot, HomeSlots, type HomeSlotsProps } from './HomeSlots';
 export { MediaImage, type MediaImageProps } from './MediaImage';
@@ -42,11 +43,18 @@ export {
   type NavBadge,
   type NavItem,
   type NavLabels,
+  isFixedTopSlot,
   type NavModule,
+  type PhoneLayout,
+  phoneBarItems,
+  phoneChrome,
   type ShellNav,
   type TabOverride,
   withAreas,
   withCollapsingTabs,
+  withPhoneLayout,
+  withPhoneTabSlots,
+  withRailMainSlots,
   withTabDots,
   withTabOverrides,
 } from './nav';

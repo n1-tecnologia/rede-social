@@ -66,9 +66,12 @@ const VEIL = {
   thumb: null,
 } as const;
 
-/** `sizes` per geometry: the poster is a gallery's 256px slot, the others fill 680px. */
+/**
+ * `sizes` per geometry: the poster is a gallery's 256px slot on a phone and a grid cell of up to
+ * 288px from `md` (2026-10-26, `/eventos` on the whole width); the others fill 680px.
+ */
 const SIZES = {
-  poster: '256px',
+  poster: '(min-width: 768px) 288px, 256px',
   hero: '(min-width: 680px) 680px, 100vw',
   ticket: '(min-width: 680px) 680px, 100vw',
   thumb: '64px',

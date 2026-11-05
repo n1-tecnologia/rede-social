@@ -1,14 +1,18 @@
 'use client';
 
-import { Button, cn } from '@rede-social/ui';
+import { cn } from '@rede-social/ui';
 import { useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * The member pages' long-text block with its "Ler mais" / "Ler menos" toggle (08.5-07, UI-D-427,
- * UI-D-443): 14/400 secondary `whitespace-pre-line`, clamped to four lines, and a `ghost sm` BUTTON
- * (an in-place action, not a route) with `aria-expanded` bound to the paragraph. The toggle renders
- * only when the clamp actually hides something (measured after mount), so a short description never
- * offers a "Ler mais" that reveals nothing. Instant: no height animation.
+ * UI-D-443): 14/400 secondary `whitespace-pre-line`, clamped, and a BUTTON (an in-place action, not a
+ * route) with `aria-expanded` bound to the paragraph. The toggle renders only when the clamp actually
+ * hides something (measured after mount), so a short description never offers a "Ler mais" that
+ * reveals nothing.
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): three lines, the
+ * prototype's clamp, with the relaxed leading; the toggle is the prototype's quiet text link in the
+ * brand ink (12/600), still a 44px target (its extra height pulled out of the flow).
  *
  * Text safety: the description is React text (T-08.5-29). Words arrive from the host (PWA-03).
  */
@@ -45,25 +49,23 @@ export function ReadMoreText({
         id={id}
         data-testid={testId}
         className={cn(
-          'whitespace-pre-line text-sm font-normal text-text-secondary [overflow-wrap:anywhere]',
-          !expanded && 'line-clamp-4',
+          'whitespace-pre-line text-sm font-normal leading-relaxed text-text-secondary [overflow-wrap:anywhere]',
+          !expanded && 'line-clamp-3',
         )}
       >
         {text}
       </p>
       {clamped || expanded ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          hitArea
+        <button
+          type="button"
           aria-expanded={expanded}
           aria-controls={id}
           data-testid="read-more-toggle"
           onClick={() => setExpanded((value) => !value)}
-          className="-ml-4"
+          className="-my-2.5 inline-flex min-h-11 items-center rounded-md text-xs font-semibold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
         >
           {expanded ? lessLabel : moreLabel}
-        </Button>
+        </button>
       ) : null}
     </div>
   );

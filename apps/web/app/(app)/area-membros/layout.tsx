@@ -1,3 +1,4 @@
+import { MemberSkin } from '@rede-social/ui';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
@@ -8,9 +9,16 @@ import { requireBootstrap } from '@/lib/bootstrap';
  * `bootstrap.modules`, else the kernel's generic not-found for every role (nothing about the school
  * leaks when it is off). `requireBootstrap` is React-cached, and reading it keeps the segment dynamic
  * (`scripts/check-static-routes.sh`).
+ *
+ * 2026-10-22 (one page per screen): the gate of the five screen pages (`/area-membros`, `/cursos`,
+ * `/trilhas`, `/lives`, `/progresso` under it); `member-screen.tsx` repeats it in each page and
+ * splits the roles.
+ *
+ * 2026-10-26: the five screens and their loading states wear the member skin (`MemberSkin`, the
+ * academy look in the tenant's colours), drawn here once around them.
  */
 export default async function MemberAreaLayout({ children }: { children: ReactNode }) {
   const bootstrap = await requireBootstrap();
   if (!bootstrap.modules.some((module) => module.key === 'courses')) notFound();
-  return children;
+  return <MemberSkin>{children}</MemberSkin>;
 }

@@ -74,8 +74,12 @@ function writeResult(outcome: TrackWriteOutcome): {
   }
 }
 
+/** The lists a track write changes: since 2026-10-22 the Trilhas list is a page of its own. */
 function revalidateTrack(trackId: string) {
   revalidatePath('/cursos');
+  // 2026-10-23: the counts on Gerenciar's cards.
+  revalidatePath('/cursos/gerenciar');
+  revalidatePath('/cursos/trilhas');
   revalidatePath(`/cursos/trilhas/${trackId}`);
 }
 

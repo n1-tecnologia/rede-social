@@ -970,3 +970,155 @@ describe('tokens.css — the button colour, apart from the primary (2026-10-03)'
     });
   });
 });
+
+describe('tokens.css — the courses area motion (2026-10-22)', () => {
+  const theme = css.slice(css.indexOf('@theme inline'), css.indexOf('@keyframes shimmer'));
+
+  it.each([
+    ['--animate-progress-fill', 'progress-fill 0.8s ease-out both'],
+    ['--animate-ring-draw', 'ring-draw 0.8s ease-out both'],
+    ['--animate-live-dot', 'live-dot 1.4s ease-in-out infinite'],
+    ['--animate-node-ping', 'node-ping 1.6s ease-out infinite'],
+    ['--animate-swap-in', 'swap-in 0.18s ease-out both'],
+  ])('declares %s inside @theme inline (so Tailwind builds the utility)', (token, value) => {
+    expect(theme).toContain(`${token}: ${value};`);
+  });
+
+  it.each(['progress-fill', 'ring-draw', 'live-dot', 'node-ping', 'swap-in'])(
+    'declares the @keyframes %s',
+    (name) => {
+      expect(css).toMatch(new RegExp(`@keyframes ${name} \\{`));
+    },
+  );
+
+  it('animates only width, the ring offset, opacity and transform: never a colour', () => {
+    const start = css.indexOf('@keyframes progress-fill');
+    const block = css.slice(start, css.indexOf('/* ===== Dashboard motion'));
+    expect(block).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|color/i);
+  });
+
+  it('under "reduzir movimento" every one of them stops, and the ping is not drawn', () => {
+    const start = css.indexOf('/* Reduced motion: no shimmer');
+    const block = css.slice(start, css.indexOf('/* ===== Preview device'));
+    for (const name of ['progress-fill', 'ring-draw', 'live-dot', 'swap-in']) {
+      expect(block).toContain(`.animate-${name}`);
+    }
+    expect(block).toMatch(/\.animate-node-ping \{\s*display: none;/);
+  });
+});
+
+/**
+ * 2026-10-26 — the PageHeader has no ground of its own ("essa barra não deve ter background, deve só
+ * ter a escrita e a seta"). On a phone, where it pins under the TopBar, the page's ground fades in
+ * behind it over the first 24px of scroll; the keyframe holds the ground, so an engine without scroll
+ * timelines keeps it at all times. From `md` nothing paints it.
+ */
+describe('tokens.css — the PageHeader ground (2026-10-26)', () => {
+  const start = css.indexOf('.ui-page-header {');
+
+  it('runs on a phone only, on the scroll root, over the first 24px', () => {
+    expect(start).toBeGreaterThan(0);
+    expect(css.slice(css.lastIndexOf('@media', start), start)).toContain(
+      '@media (max-width: 767px)',
+    );
+    const rule = css.slice(start, css.indexOf('}', start));
+    expect(rule).toContain('animation: ui-page-header-ground linear both;');
+    expect(rule).toContain('animation-timeline: scroll(nearest block);');
+    expect(rule).toContain('animation-range: 0px 24px;');
+  });
+
+  it("the ground is the page's own, through the theme variable, never a literal", () => {
+    const keyframes = css.slice(
+      css.indexOf('@keyframes ui-page-header-ground {'),
+      css.indexOf('.pb-safe {'),
+    );
+    expect(keyframes).toContain(
+      'background-color: color-mix(in oklab, var(--theme-bg) 95%, transparent);',
+    );
+    expect(keyframes).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
+  });
+});
+
+/**
+ * 2026-10-26 — the desktop rail ("quero o mesmo efeito de recolhido", "ainda não está abrindo com o
+ * hover do mouse"): collapsed at rest with no ground; its panel opens over the page while a fine
+ * pointer rests on the rail (after a beat) or the keyboard's focus is inside, on a frosted ground.
+ */
+describe('tokens.css — the desktop rail that opens on hover (2026-10-26)', () => {
+  const start = css.indexOf('[data-shell-rail-panel] {');
+  const section = css.slice(start, css.indexOf('.pb-safe {'));
+
+  it('rests shut: the names and the ground hidden, nothing painted under the glyphs', () => {
+    expect(start).toBeGreaterThan(0);
+    expect(section).toMatch(
+      /\[data-shell-rail-ground\],\s*\[data-shell-rail-label\] \{\s*opacity: 0;/,
+    );
+    const rest = section.slice(0, section.indexOf('}'));
+    expect(rest).not.toMatch(/background-color:|backdrop-filter:|box-shadow:/);
+  });
+
+  it('opens on a fine pointer only, after a beat, and on keyboard focus, its glass faded in', () => {
+    const hover = section.slice(section.indexOf('@media (hover: hover) and (pointer: fine)'));
+    expect(hover).toContain('[data-shell-rail]:hover [data-shell-rail-panel] {');
+    expect(hover).toContain('width: 15rem;');
+    expect(hover).toContain('transition-delay: 0.12s;');
+    expect(hover).toMatch(/\[data-shell-rail\]:hover \[data-shell-rail-ground\] \{\s*opacity: 1;/);
+    expect(section).toContain('[data-shell-rail]:has(:focus-visible) [data-shell-rail-panel] {');
+    expect(section).toContain('[data-shell-rail]:has(:focus-visible) [data-shell-rail-ground],');
+    expect(section).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
+  });
+
+  it("an area's screens: the guide line at the edge while shut, indented as before once open", () => {
+    expect(section).toMatch(
+      /\[data-shell-rail\] \[data-rail-area\] \{\s*margin-left: 2px;\s*padding-left: 0;/,
+    );
+    const hover = section.slice(section.indexOf('@media (hover: hover) and (pointer: fine)'));
+    expect(hover).toMatch(
+      /\[data-shell-rail\]:hover \[data-rail-area\] \{\s*margin-left: 1\.375rem;\s*padding-left: 0\.5rem;/,
+    );
+    expect(section).toMatch(
+      /\[data-shell-rail\]:has\(:focus-visible\) \[data-rail-area\] \{\s*margin-left: 1\.375rem;/,
+    );
+  });
+
+  it('the favicon mark while shut gives its place to the whole logo once open', () => {
+    const hover = section.slice(section.indexOf('@media (hover: hover) and (pointer: fine)'));
+    expect(hover).toMatch(/\[data-shell-rail\]:hover \[data-shell-rail-mark\] \{\s*opacity: 0;/);
+    expect(section).toMatch(
+      /\[data-shell-rail\]:has\(:focus-visible\) \[data-shell-rail-mark\] \{\s*opacity: 0;/,
+    );
+  });
+
+  it('stops its motion under "reduzir movimento"', () => {
+    const reduced = section.slice(section.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(reduced).toMatch(
+      /\[data-shell-rail-panel\],\s*\[data-shell-rail-ground\],\s*\[data-shell-rail-label\],\s*\[data-shell-rail-mark\],\s*\[data-shell-rail\] \[data-rail-area\] \{\s*transition: none;/,
+    );
+  });
+});
+
+/**
+ * 2026-10-26 — the shell's frosted glass ("o bg da barra deve ser o efeito de vidro fosco granulado
+ * igual do header"): ONE recipe for the desktop header's ground and the open rail's.
+ */
+describe('tokens.css — the shell glass (2026-10-26)', () => {
+  const glass = css.slice(css.indexOf('.shell-glass {'), css.indexOf('[data-shell-rail-panel] {'));
+
+  it('a translucent ground of the page, blurred behind it, through the theme variable', () => {
+    expect(glass).toContain(
+      'background-color: color-mix(in oklab, var(--theme-bg) 70%, transparent);',
+    );
+    expect(glass).toContain('backdrop-filter: blur(24px);');
+    expect(glass).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
+  });
+
+  it('a fine grain over it, a little stronger in the dark theme, never catching the pointer', () => {
+    const grain = glass.slice(glass.indexOf('.shell-glass::after {'));
+    expect(grain).toContain('pointer-events: none;');
+    expect(grain).toContain('feTurbulence');
+    expect(grain).toMatch(/opacity: 0\.06;/);
+    expect(glass).toMatch(
+      /:where\(\[data-theme="dark"\]\) \.shell-glass::after \{\s*opacity: 0\.12;/,
+    );
+  });
+});

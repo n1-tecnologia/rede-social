@@ -191,3 +191,50 @@ describe('ReelRail — the reserved count slots (UI-D-87)', () => {
     expect(rail.lastElementChild).toBe(share);
   });
 });
+
+describe('ReelRail beside the desktop player (placement="side", 2026-10-23)', () => {
+  it('discs in the member’s theme: like, comment with its count, share with its name; no avatar', () => {
+    const onComment = vi.fn();
+    const onShare = vi.fn();
+    render(
+      <ReelRail
+        {...props({
+          placement: 'side',
+          likeCount: '1,2 mil',
+          commentCount: '16',
+          onComment,
+          onShare,
+        })}
+      />,
+    );
+    const rail = document.querySelector('[data-reel-rail="side"]') as HTMLElement;
+    expect(rail).not.toBeNull();
+    // Laid out by the pager's slot: never positioned over the video.
+    expect(rail.className).not.toContain('absolute');
+    expect(screen.queryByRole('link', { name: 'author-profile-label' })).toBeNull();
+    expect(screen.getByTestId('like-node')).toBeInTheDocument();
+    expect(document.querySelector('[data-reel-count="like"]')?.textContent).toBe('1,2 mil');
+    expect(document.querySelector('[data-reel-count="comment"]')?.textContent).toBe('16');
+
+    const comment = screen.getByRole('button', { name: 'comment-label' });
+    for (const cls of ['size-12', 'bg-bg-tertiary', 'text-text']) {
+      expect(comment.className).toContain(cls);
+    }
+    fireEvent.click(comment);
+    expect(onComment).toHaveBeenCalledTimes(1);
+
+    const share = screen.getByRole('button', { name: 'share-label' });
+    fireEvent.click(share);
+    expect(onShare).toHaveBeenCalledTimes(1);
+    // The share's own name under its disc, hidden from assistive tech (the disc carries it).
+    const name = share.nextElementSibling as HTMLElement;
+    expect(name.textContent).toBe('share-label');
+    expect(name).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('without onShare there is no share disc and no name under it', () => {
+    render(<ReelRail {...props({ placement: 'side', onShare: undefined })} />);
+    expect(screen.queryByRole('button', { name: 'share-label' })).toBeNull();
+    expect(screen.queryByText('share-label')).toBeNull();
+  });
+});

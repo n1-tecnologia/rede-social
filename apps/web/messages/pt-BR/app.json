@@ -10,11 +10,31 @@
       "theme": "Tema",
       "settings": "Configurações",
       "openProfile": "Meu perfil",
-      "backToTop": "{tab}: voltar ao topo"
+      "backToTop": "{tab}: voltar ao topo",
+      "sections": {
+        "main": "Principal",
+        "shortcuts": "Atalhos"
+      },
+      "accountMenu": "Menu da conta",
+      "viewProfile": "Ver perfil",
+      "feed": "Feed"
     },
     "home": {
       "soonTitle": "Em breve",
-      "soonBody": "As novidades de {tenant} vão aparecer aqui."
+      "soonBody": "As novidades de {tenant} vão aparecer aqui.",
+      "suggestions": {
+        "title": "Sugestões para você",
+        "course": "Curso",
+        "courseInProgress": "Curso · Em andamento",
+        "community": "Comunidade",
+        "lessons": "{total, plural, =0 {Sem aulas ainda} one {# aula} other {# aulas}}",
+        "lessonsDone": "{done} de {total, plural, =0 {# aulas} one {# aula} other {# aulas}}",
+        "posts": "{count, plural, =0 {Nenhuma publicação ainda} one {# publicação} other {# publicações}}",
+        "continue": "Continuar",
+        "open": "Acessar",
+        "allCourses": "Todos os cursos",
+        "allCommunities": "Todas as comunidades"
+      }
     },
     "error": {
       "title": "Algo deu errado.",
@@ -47,7 +67,8 @@
         "rules": "Regras da comunidade",
         "moderation": "Moderação",
         "payments": "Pagamentos",
-        "profileForm": "Formulário de perfil"
+        "profileForm": "Formulário de perfil",
+        "menu": "Menu do app"
       },
       "soon": "Em breve",
       "logoutFailed": "Algo deu errado. Tente novamente."

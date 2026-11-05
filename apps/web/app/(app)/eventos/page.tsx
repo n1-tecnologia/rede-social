@@ -26,6 +26,11 @@ import { EventsSections } from './EventsSections';
  * square with `Plus` 20 below `sm`, `Plus` 16 + "Criar evento" from `sm`, the label
  * `sr-only sm:not-sr-only` so the accessible name is always the catalog string. It is gated on the
  * composed `events.event.manage` PERMISSION from the bootstrap, never a role (T-06-19).
+ *
+ * **2026-10-26 — the whole width on a desktop** (the product owner: "eventos também", after "o
+ * aproveitamento igual da área de membros"): the page carries `data-shell-full`, so the shell lifts
+ * the 680px column, and from `md` each gallery lays its posters out in a grid instead of a row that
+ * scrolls sideways (`EventsSections`). A phone keeps the row.
  */
 export default async function EventsPage() {
   const [bootstrap, t] = await Promise.all([requireBootstrap(), getTranslations('events')]);
@@ -38,7 +43,7 @@ export default async function EventsPage() {
   const sections = loaded ? eventSectionsView(loaded, { tz, nowMs, t }) : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-[680px] flex-col">
+    <div data-shell-full className="flex w-full flex-col">
       <h1 className="sr-only">{t('list.title')}</h1>
       <EventsSections
         initial={sections}

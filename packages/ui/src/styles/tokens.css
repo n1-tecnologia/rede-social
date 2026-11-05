@@ -448,6 +448,148 @@
   --brand-secondary: var(--brand-secondary-dark) !important;
 }
 
+/* ===== Layer 1f — the member skin palette (2026-10-26) =====
+   The members area and the store's shop window wear the academy look inside `[data-member-skin]`
+   (`MemberSkin`, packages/ui/src/skin; the effects live in member-skin.css): glass surfaces, 1px
+   light edges, drifting brand glows, posters with a vignette, a glowing progress fill. Every colour
+   of that look is declared here and nowhere else, mixed at runtime from the tenant's accent and
+   secondary and from the theme's own neutrals (`--theme-*`), so each brand and each ground tone
+   repaint it with no new key and no hex. Two rules: the light look, and the dark one under a dark
+   theme, where the glows burn brighter and the hero veils melt into the ground. Nothing here
+   declares a brand, theme or button key, and nothing reads a tone key: Layers 1c and 1d stay the
+   only readers of the tones, and the admin screens, which never carry the attribute, never see
+   these keys. */
+[data-member-skin] {
+  --ms-edge: color-mix(in oklab, var(--theme-text) 12%, transparent);
+  --ms-edge-strong: color-mix(in oklab, var(--theme-text) 20%, transparent);
+  --ms-highlight: color-mix(in oklab, white 70%, transparent);
+  --ms-highlight-strong: color-mix(in oklab, white 90%, transparent);
+  --ms-surface: color-mix(in oklab, var(--theme-card) 90%, transparent);
+  --ms-surface-2: color-mix(in oklab, var(--theme-card) 78%, transparent);
+  --ms-surface-hover: var(--theme-card);
+  --ms-surface-hover-2: color-mix(in oklab, var(--theme-card) 92%, transparent);
+  --ms-surface-solid: var(--theme-card);
+  --ms-surface-sheen: color-mix(in oklab, var(--brand-accent) 6%, transparent);
+  --ms-shadow:
+    0 1px 3px color-mix(in oklab, var(--theme-text) 7%, transparent),
+    0 8px 22px -12px color-mix(in oklab, var(--theme-text) 16%, transparent);
+  --ms-shadow-hover:
+    0 4px 12px color-mix(in oklab, var(--theme-text) 10%, transparent),
+    0 18px 36px -16px color-mix(in oklab, var(--theme-text) 22%, transparent);
+  --ms-text-shade: color-mix(in oklab, black 45%, transparent);
+  --ms-focus: var(--brand-accent);
+  --ms-ring: color-mix(in oklab, var(--brand-accent) 28%, transparent);
+  --ms-light: color-mix(in oklab, var(--brand-accent) 14%, transparent);
+  --ms-halo: color-mix(in oklab, var(--brand-accent) 12%, transparent);
+  --ms-halo-out: color-mix(in oklab, var(--brand-accent) 18%, transparent);
+  --ms-halo-b: color-mix(in oklab, var(--brand-secondary) 10%, transparent);
+  --ms-sheen: color-mix(in oklab, var(--brand-accent) 7%, transparent);
+  --ms-glow-a: color-mix(in oklab, var(--brand-accent) 13%, transparent);
+  --ms-glow-b: color-mix(in oklab, var(--brand-secondary) 11%, transparent);
+  --ms-ground-lift: color-mix(in oklab, white 55%, transparent);
+  --ms-ground-shade: transparent;
+  --ms-grain-opacity: 0.05;
+  --ms-header-fill: color-mix(in oklab, var(--theme-card) 70%, transparent);
+  --ms-ambient-a: color-mix(in oklab, var(--brand-accent) 14%, transparent);
+  --ms-ambient-b: color-mix(in oklab, var(--brand-secondary) 8%, transparent);
+  --ms-hero-floor: color-mix(in oklab, black 82%, transparent);
+  --ms-hero-side: color-mix(in oklab, black 40%, transparent);
+  --ms-tile-vignette: color-mix(in oklab, black 42%, transparent);
+  --ms-tile-glow-a: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--brand-accent), white 30%) 22%,
+    transparent
+  );
+  --ms-tile-glow-b: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--brand-secondary), white 30%) 14%,
+    transparent
+  );
+  --ms-tile-dots: color-mix(in oklab, white 5.5%, transparent);
+  --ms-track-glow-a: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--brand-accent), white 35%) 30%,
+    transparent
+  );
+  --ms-track-glow-b: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--brand-secondary), white 35%) 22%,
+    transparent
+  );
+  --ms-atmos-field: color-mix(in oklab, var(--brand-accent) 10%, black);
+  --ms-atmos-a: color-mix(in oklab, var(--brand-accent) 35%, transparent);
+  --ms-atmos-b: color-mix(in oklab, var(--brand-secondary) 12%, transparent);
+  --ms-atmos-vignette: color-mix(in oklab, black 40%, transparent);
+  --ms-chip-media: color-mix(in oklab, black 40%, transparent);
+  --ms-chip-media-edge: color-mix(in oklab, white 10%, transparent);
+  --ms-chip-surface: color-mix(in oklab, var(--theme-card) 60%, transparent);
+  --ms-chip-brand: color-mix(in oklab, var(--brand-accent) 16%, transparent);
+  --ms-chip-brand-edge: color-mix(in oklab, var(--brand-accent) 30%, transparent);
+  --ms-bar-track: color-mix(in oklab, var(--theme-text) 8%, transparent);
+  --ms-bar-track-media: color-mix(in oklab, white 12%, transparent);
+  --ms-bar-from: color-mix(in oklab, var(--brand-accent), black 18%);
+  --ms-bar-to: color-mix(in oklab, var(--brand-accent), white 22%);
+  --ms-bar-sheen: color-mix(in oklab, white 38%, transparent);
+  --ms-bar-glow: color-mix(in oklab, var(--brand-accent) 28%, transparent);
+  --ms-bar-glow-soft: color-mix(in oklab, var(--brand-accent) 10%, transparent);
+  --ms-btn-halo: color-mix(in oklab, var(--brand-accent) 22%, transparent);
+  --ms-btn-accent: color-mix(in oklab, var(--brand-secondary) 15%, transparent);
+  --ms-btn-edge: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--brand-accent), white 55%) 38%,
+    transparent
+  );
+  --ms-btn-sheen: color-mix(in oklab, white 16%, transparent);
+  --ms-btn-sheen-2: color-mix(in oklab, white 8%, transparent);
+}
+[data-theme="dark"] [data-member-skin] {
+  --ms-highlight: color-mix(in oklab, white 6%, transparent);
+  --ms-highlight-strong: color-mix(in oklab, white 9%, transparent);
+  --ms-surface: color-mix(in oklab, var(--theme-card) 72%, transparent);
+  --ms-surface-2: color-mix(in oklab, var(--theme-card) 46%, transparent);
+  --ms-surface-hover: color-mix(in oklab, var(--theme-card) 82%, transparent);
+  --ms-surface-hover-2: color-mix(in oklab, var(--theme-card) 56%, transparent);
+  --ms-surface-sheen: color-mix(in oklab, white 5%, transparent);
+  --ms-shadow:
+    0 10px 24px -10px color-mix(in oklab, black 25%, transparent),
+    0 2px 6px -2px color-mix(in oklab, black 12%, transparent);
+  --ms-shadow-hover:
+    0 16px 32px -12px color-mix(in oklab, black 32%, transparent),
+    0 4px 10px -3px color-mix(in oklab, black 16%, transparent);
+  --ms-ring: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--brand-accent), white 45%) 30%,
+    transparent
+  );
+  --ms-light: color-mix(in oklab, var(--brand-accent) 24%, transparent);
+  --ms-halo: color-mix(in oklab, var(--brand-accent) 18%, transparent);
+  --ms-halo-out: color-mix(in oklab, var(--brand-accent) 26%, transparent);
+  --ms-halo-b: color-mix(in oklab, var(--brand-secondary) 14%, transparent);
+  --ms-sheen: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--brand-accent), white 50%) 12%,
+    transparent
+  );
+  --ms-glow-a: color-mix(in oklab, var(--brand-accent) 17%, transparent);
+  --ms-glow-b: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--brand-secondary), white 15%) 11%,
+    transparent
+  );
+  --ms-ground-lift: color-mix(in oklab, var(--theme-text) 5%, transparent);
+  --ms-ground-shade: color-mix(in oklab, black 28%, transparent);
+  --ms-grain-opacity: 0.16;
+  --ms-header-fill: color-mix(in oklab, var(--theme-text) 4%, transparent);
+  --ms-ambient-a: color-mix(in oklab, var(--brand-accent) 21%, transparent);
+  --ms-ambient-b: color-mix(in oklab, var(--brand-secondary) 9%, transparent);
+  --ms-hero-floor: var(--theme-bg);
+  --ms-hero-side: color-mix(in oklab, var(--theme-bg) 80%, transparent);
+  --ms-bar-glow: color-mix(in oklab, var(--brand-accent) 35%, transparent);
+  --ms-bar-glow-soft: color-mix(in oklab, var(--brand-accent) 14%, transparent);
+  --ms-btn-halo: color-mix(in oklab, var(--brand-accent) 30%, transparent);
+  --ms-btn-accent: color-mix(in oklab, var(--brand-secondary) 19%, transparent);
+}
+
 /* ===== Layer 2 — Tailwind utilities bound to the runtime variables ===== */
 @theme inline {
   --font-sans: var(--font-manrope), system-ui, sans-serif;
@@ -491,6 +633,11 @@
   --color-info: #2563eb;
 
   --animate-shimmer: shimmer 1.5s ease-in-out infinite;
+  --animate-progress-fill: progress-fill 0.8s ease-out both;
+  --animate-ring-draw: ring-draw 0.8s ease-out both;
+  --animate-live-dot: live-dot 1.4s ease-in-out infinite;
+  --animate-node-ping: node-ping 1.6s ease-out infinite;
+  --animate-swap-in: swap-in 0.18s ease-out both;
 }
 
 @keyframes shimmer {
@@ -499,6 +646,49 @@
   }
   100% {
     background-position: -200% 0;
+  }
+}
+
+/* ===== Member area motion (the courses area redesign, 2026-10-22) =====
+   The social-igoralves prototype's motion, as CSS so it runs on the server-rendered HTML with no
+   hydration: a progress bar fills from zero, a ring draws its arc from the full circumference (the
+   ring sets it as --ring-c), the "Ao vivo" dot breathes, the current step of a track pings, and a
+   filter swap fades its new list in. Every user pairs the class with motion-reduce:animate-none (the
+   ping with motion-reduce:hidden); the reduced-motion block below is the same rule as a backstop. */
+
+@keyframes progress-fill {
+  from {
+    width: 0;
+  }
+}
+
+@keyframes ring-draw {
+  from {
+    stroke-dashoffset: var(--ring-c);
+  }
+}
+
+@keyframes live-dot {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes node-ping {
+  from {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+@keyframes swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
   }
 }
 
@@ -650,7 +840,8 @@
 
 /* The stacking ladder, as literal z-index utilities in the components: 40 the sticky page layer
    (PageHeader, ComposeFab, ReelsStage, the loading header bars; the /membros search bar sits one
-   rung under, at 30), 50 the shell chrome (TopBar, BottomNav), 52 the full-screen surfaces
+   rung under, at 30), 50 the shell chrome (TopBar, BottomNav, the desktop header; the desktop
+   rail one rung over, at 51, since its panel opens over the header), 52 the full-screen surfaces
    (StoryViewer, the StoryComposer frame), 55 the sheets and dialogs (BottomSheet, ConfirmDialog),
    90 the offline banner, 100 the toast. Smaller values inside a component stay local to it.
    Overlays render INLINE, inside [data-brand-root] (the tenant's --brand-* variables live there),
@@ -691,6 +882,132 @@
   }
 }
 
+/* The PageHeader (2026-10-26, the product owner: "essa barra não deve ter background, deve só ter a
+   escrita e a seta, isso vale para todas") has no ground of its own: the arrow and the title sit on
+   the page. On a phone it pins under the TopBar, so the page's ground fades in behind it over the
+   first 24px of scroll of its scroll root, the moment the content starts sliding under it. The
+   keyframe holds that ground: an engine without scroll timelines runs it as a 0s animation and keeps
+   the ground at all times (the look before), and a page too short to scroll never gets one. From
+   `md` the header is static and scrolls away with the page, with no ground at any scroll. */
+@media (max-width: 767px) {
+  .ui-page-header {
+    animation: ui-page-header-ground linear both;
+    animation-timeline: scroll(nearest block);
+    animation-range: 0px 24px;
+  }
+}
+@keyframes ui-page-header-ground {
+  to {
+    background-color: color-mix(in oklab, var(--theme-bg) 95%, transparent);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+}
+
+/* The shell's frosted glass (2026-10-26, the product owner: "o bg da barra deve ser o efeito de vidro
+   fosco granulado igual do header"): ONE recipe for the desktop header's ground once the page scrolls
+   under it and the desktop rail's panel while it is open. A translucent ground over the page blurred
+   behind it, and a fine grain on top. The element is a positioned layer of its own (the header's and
+   the rail's ground), so the blur never makes the header or the rail a containing block. */
+.shell-glass {
+  background-color: color-mix(in oklab, var(--theme-bg) 70%, transparent);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+.shell-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 160'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.9 0'/></filter><rect width='100%25' height='100%25' filter='url(%23g)'/></svg>");
+  background-size: 160px 160px;
+}
+:where([data-theme="dark"]) .shell-glass::after {
+  opacity: 0.12;
+}
+
+/* The desktop rail (2026-10-26, the product owner: "quero o mesmo efeito de recolhido", then "ainda
+   não está abrindo com o hover do mouse"): Instagram's collapsed rail, its 72px of glyphs with no
+   ground at rest. Its panel opens over the page, to 240px with the names, while the pointer rests on
+   the rail (after a beat, so a pointer only passing by leaves it shut; it shuts at once) or the
+   keyboard's focus is inside it; its ground (`data-shell-rail-ground`, the shell's glass, the
+   header's) fades in under the names. A touch screen has no hover, so a tap never leaves it open. */
+[data-shell-rail-panel] {
+  transition:
+    width 0.22s cubic-bezier(0.23, 1, 0.32, 1),
+    box-shadow 0.18s ease;
+}
+[data-shell-rail-ground],
+[data-shell-rail-label] {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+/* The brand's mark (the favicon) shows while the rail is shut and gives its place to the whole logo
+   once it opens ("quando a navbar lateral abrir o ícone deve sumir e ficar somente a logo inteira"). */
+[data-shell-rail-mark] {
+  transition: opacity 0.12s ease;
+}
+/* An area's screens ("os submenus devem ser como antes"): collapsed, their guide line runs at the
+   rail's edge and the glyphs stand centred under the rows'; open, the list is indented as it always
+   was (the line 22px in), gliding there with the panel. */
+[data-shell-rail] [data-rail-area] {
+  margin-left: 2px;
+  padding-left: 0;
+  transition:
+    margin-left 0.22s cubic-bezier(0.23, 1, 0.32, 1),
+    padding-left 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-shell-rail]:hover [data-shell-rail-panel] {
+    width: 15rem;
+    box-shadow: 0 24px 48px -12px color-mix(in oklab, var(--theme-text) 22%, transparent);
+    transition-delay: 0.12s;
+  }
+  [data-shell-rail]:hover [data-shell-rail-ground] {
+    opacity: 1;
+    transition-delay: 0.12s;
+  }
+  [data-shell-rail]:hover [data-shell-rail-mark] {
+    opacity: 0;
+    transition-delay: 0.12s;
+  }
+  [data-shell-rail]:hover [data-rail-area] {
+    margin-left: 1.375rem;
+    padding-left: 0.5rem;
+    transition-delay: 0.12s;
+  }
+  [data-shell-rail]:hover [data-shell-rail-label] {
+    opacity: 1;
+    transition-delay: 0.2s;
+  }
+}
+[data-shell-rail]:has(:focus-visible) [data-shell-rail-panel] {
+  width: 15rem;
+  box-shadow: 0 24px 48px -12px color-mix(in oklab, var(--theme-text) 22%, transparent);
+}
+[data-shell-rail]:has(:focus-visible) [data-shell-rail-ground],
+[data-shell-rail]:has(:focus-visible) [data-shell-rail-label] {
+  opacity: 1;
+}
+[data-shell-rail]:has(:focus-visible) [data-shell-rail-mark] {
+  opacity: 0;
+}
+[data-shell-rail]:has(:focus-visible) [data-rail-area] {
+  margin-left: 1.375rem;
+  padding-left: 0.5rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-shell-rail-panel],
+  [data-shell-rail-ground],
+  [data-shell-rail-label],
+  [data-shell-rail-mark],
+  [data-shell-rail] [data-rail-area] {
+    transition: none;
+  }
+}
+
 .pb-safe {
   padding-bottom: var(--safe-bottom, 0px);
 }
@@ -724,11 +1041,20 @@
   }
 }
 
-/* Reduced motion: no shimmer. Overlays read `useReducedMotion()` from motion/react and fall back to
-   instant opacity, so there is no blanket animation reset here. */
+/* Reduced motion: no shimmer and (2026-10-22) none of the member area's motion: the bar and the ring
+   rest at their final value, the dot stays lit, a swap lands at once and the ping is not drawn.
+   Overlays read `useReducedMotion()` from motion/react and fall back to instant opacity, so there is
+   no blanket animation reset here. */
 @media (prefers-reduced-motion: reduce) {
-  .animate-shimmer {
+  .animate-shimmer,
+  .animate-progress-fill,
+  .animate-ring-draw,
+  .animate-live-dot,
+  .animate-swap-in {
     animation: none;
+  }
+  .animate-node-ping {
+    display: none;
   }
 }
 

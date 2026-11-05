@@ -12,19 +12,25 @@ import {
   Button,
   ConfirmDialog,
   Input,
-  Switch,
   Textarea,
+  useMediaQuery,
   useToast,
 } from '@rede-social/ui';
+import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState, useTransition } from 'react';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
+import { DANGER_OVERRIDES } from '../admin-styles';
+import { CoverField } from '../CoverField';
+import { PagePreview } from '../CoverPreviews';
 import {
   createModuleAction,
   deleteModuleAction,
   type ModuleWriteResult,
   updateModuleAction,
 } from '../curriculum-actions';
+import { SwitchRow } from '../SwitchRow';
 
 /**
  * The module sheet (08.3-08, D-406, UI-D-396, UI-D-404, UI-D-407): "Novo módulo" / "Editar módulo"
@@ -39,6 +45,10 @@ import {
  * (the trap). A dirty close asks "Descartar módulo?" first. An empty title is the field error; a save
  * failure toasts and keeps the sheet; a remove failure toasts and keeps the row (E07 error). The
  * dialogs render BESIDE the sheet, never inside its form (the category sheet's rule).
+ *
+ * 2026-10-22 (the courses area redesign): the switch is a `SwitchRow` block (the panel's: name,
+ * helper, switch), and "Remover módulo" is the danger zone's outlined button under the hairline. No
+ * behaviour changed.
  */
 export interface ModuleSheetProps {
   open: boolean;
@@ -54,6 +64,10 @@ export interface ModuleSheetProps {
   onRemoved: (id: string) => void;
 }
 
+/** The cover field's accepted types, and its upload state: always idle (the preview is local). */
+const MODULE_COVER_ACCEPT = mediaAcceptFor('image', 'cover');
+const IDLE_UPLOAD = { state: 'idle', progress: 0, error: null } as const;
+
 export function ModuleSheet({
   open,
   mode,
@@ -66,6 +80,8 @@ export function ModuleSheet({
   onRemoved,
 }: ModuleSheetProps) {
   const t = useTranslations('courses');
+  const tm = useTranslations('media');
+  const desktop = useMediaQuery('(min-width: 768px)');
   const toast = useToast();
 
   const startTitle = module?.title ?? '';
@@ -86,6 +102,19 @@ export function ModuleSheet({
   const [pending, startTransition] = useTransition();
 
   const titleRef = useRef<HTMLInputElement>(null);
+
+  // 2026-10-27 (the product owner: "o ato de criar um módulo ... tenha o campo de imagem do módulo
+  // assim como no curso e trilha", then "faça só o front"): the module's cover blocks. A module has
+  // no cover column yet, so the picked image is a LOCAL preview only (an object URL, revoked when it
+  // changes or the sheet closes): nothing is uploaded and nothing is saved with the module until the
+  // API carries a module cover.
+  const [localCover, setLocalCover] = useState<string | null>(null);
+  useEffect(
+    () => () => {
+      if (localCover) URL.revokeObjectURL(localCover);
+    },
+    [localCover],
+  );
 
   // UI-D-407: the title field on open, after the shipped trap's own first-focus has run.
   useEffect(() => {
@@ -194,6 +223,9 @@ export function ModuleSheet({
         open={open}
         onClose={requestClose}
         title={mode === 'edit' ? t('module.form.editTitle') : t('module.form.createTitle')}
+        // 2026-10-27 (the product owner: "o ato de criar um módulo quero que abra um popup ao
+        // centro"): the centred card from `md`, the sheet from the bottom on a phone.
+        desktopCard={desktop}
       >
         <form
           data-module-sheet
@@ -204,6 +236,47 @@ export function ModuleSheet({
             submit();
           }}
         >
+          <CoverField
+            hook="module"
+            ratio="video"
+            layout="blocks"
+            frameLabel={t('coverField.as.moduleCard')}
+            accept={MODULE_COVER_ACCEPT}
+            assetId={null}
+            widths={PURPOSE_WIDTHS.cover}
+            previewUrl={localCover}
+            sizes="360px"
+            upload={IDLE_UPLOAD}
+            error={null}
+            helper={t('module.form.coverHelper')}
+            alsoAs={[
+              {
+                key: 'page',
+                ratio: 'banner',
+                label: t('coverField.as.modulePage'),
+                sizeHint: <CoverSizeHint kind="moduleBanner" />,
+                decor: <PagePreview title={title.trim()} line={summary.trim()} />,
+              },
+            ]}
+            sizeHint={<CoverSizeHint kind="moduleCard" />}
+            labels={{
+              pickFile: t('coverField.pickFile'),
+              camera: t('coverField.camera'),
+              ways: t('coverField.ways'),
+              waysTouch: t('coverField.waysTouch'),
+              dropHere: t('coverField.dropHere'),
+              field: t('module.form.cover'),
+              add: t('form.cover.add'),
+              change: t('form.cover.change'),
+              remove: t('form.cover.remove'),
+              preview: t('form.cover.preview'),
+              progress: (percent) => tm('progress', { percent }),
+              processing: tm('photo.preparing'),
+            }}
+            onPick={(file) => setLocalCover(URL.createObjectURL(file))}
+            onRemove={() => setLocalCover(null)}
+          />
+
           <Input
             ref={titleRef}
             id="module-title"
@@ -234,30 +307,17 @@ export function ModuleSheet({
           />
 
           {/* D-406: the sequential lock, modeled now and enforced in the member phase. */}
-          <div data-module-requires className="flex items-start gap-3">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <span id="module-requires-label" className="text-sm font-bold text-text">
-                {t('module.form.requiresPrevious')}
-              </span>
-              <span
-                id="module-requires-helper"
-                data-module-requires-helper
-                className="text-xs font-normal text-text-tertiary"
-              >
-                {firstModule
-                  ? t('module.form.firstModule')
-                  : t('module.form.requiresPreviousHelper')}
-              </span>
-            </div>
-            <Switch
-              checked={requiresPrevious}
-              onChange={setRequiresPrevious}
-              label={t('module.form.requiresPrevious')}
-              aria-describedby="module-requires-helper"
-              disabled={firstModule}
-              className="mt-0.5"
-            />
-          </div>
+          <SwitchRow
+            id="module-requires"
+            hook="module-requires"
+            label={t('module.form.requiresPrevious')}
+            helper={
+              firstModule ? t('module.form.firstModule') : t('module.form.requiresPreviousHelper')
+            }
+            checked={requiresPrevious}
+            onChange={setRequiresPrevious}
+            disabled={firstModule}
+          />
 
           <Button
             type="submit"
@@ -275,13 +335,13 @@ export function ModuleSheet({
               <div aria-hidden className="h-px bg-border" />
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="md"
                 data-module-remove
-                className="justify-start self-start px-0 text-danger"
+                className={DANGER_OVERRIDES}
                 onClick={() => setRemoving(true)}
               >
-                <Trash2 aria-hidden size={20} />
+                <Trash2 aria-hidden size={18} />
                 {t('module.form.remove')}
               </Button>
             </>

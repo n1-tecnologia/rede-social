@@ -1,7 +1,9 @@
 import type { Bootstrap, ModuleKey } from '@rede-social/contracts';
 import type { HomeSlot, NavArea, NavItem } from '@rede-social/core/ui';
+import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import { FEED_CAPTION_TRUNCATE_AT, type FeedPage } from '@rede-social/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@rede-social/module-feed/ui';
+import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { EmptyState } from '@rede-social/ui';
 import { TriangleAlert } from 'lucide-react';
@@ -40,8 +42,10 @@ import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { loadFeed } from '@/lib/feed';
 import { composerEntryFor, postAdminLabel, postCardView } from '@/lib/feed-view';
+import { coursesAreas } from '@/lib/member-area';
 import type { InstagramByMember } from '@/lib/profile-instagram';
 import { loadHighlights, loadStories } from '@/lib/stories';
+import { storeAreas } from '@/lib/store-area';
 import {
   highlightGroupView,
   inicioGroups,
@@ -149,8 +153,15 @@ interface WebModule {
    * The module's pages form an AREA (2026-10-06): the TopBar names it and folds its shortcuts into
    * the area's menu, whose screens this declares (`areasFor`, `NavArea`). Worded with the ROOT
    * translator, like the module labels.
+   *
+   * 2026-10-22: a LIST, per request (the bootstrap is passed), because an area may depend on the
+   * caller: the courses tab is "Membros" for a member and, for a manager, "Cursos" plus the
+   * "Membros" preview variant under the member area (`NavArea.within`, `coursesAreas`).
+   *
+   * 2026-10-24: a module whose nav entry is a TopBar SLOT may declare one too (the store, "· Loja");
+   * the kernel applies it only on the pages no tab claims (`activeArea`).
    */
-  area?: (t: (key: string) => string) => Omit<NavArea, 'key'>;
+  areas?: (t: (key: string) => string, bootstrap: Bootstrap) => Omit<NavArea, 'key'>[];
 }
 
 /** The events area: the list, the photos of past events, the check-in and the member's own. */
@@ -185,6 +196,28 @@ function eventsArea(t: (key: string) => string): Omit<NavArea, 'key'> {
       },
     ],
   };
+}
+
+/**
+ * The courses area (2026-10-22, the social-igoralves prototype's "· Membros" menu), per role: the
+ * composed `courses.manage` permission decides, the same predicate the pages split on.
+ */
+function coursesAreasFor(t: (key: string) => string, bootstrap: Bootstrap): Omit<NavArea, 'key'>[] {
+  return coursesAreas({
+    canManage: bootstrap.permissions.includes(COURSE_PERMISSIONS.manage),
+    t,
+  });
+}
+
+/**
+ * The store area (2026-10-24, the Loja as an area like "· Membros"): Produtos and Comprados for
+ * everyone and, with `store.product.manage` (the predicate the pages split on), Gerenciar.
+ */
+function storeAreasFor(t: (key: string) => string, bootstrap: Bootstrap): Omit<NavArea, 'key'>[] {
+  return storeAreas({
+    canManage: bootstrap.permissions.includes(STORE_PERMISSIONS.manage),
+    t,
+  });
 }
 
 /**
@@ -486,6 +519,8 @@ export async function reelsHostProps(bootstrap: Bootstrap): Promise<ReelsHostBin
       previous: t('previous'),
       next: t('next'),
       position: t.raw('position'),
+      fullscreen: t('fullscreen.enter'),
+      exitFullscreen: t('fullscreen.exit'),
       railAuthor: t.raw('rail.author'),
       captionMore: tf('caption.more'),
       captionLess: t('caption.less'),
@@ -727,7 +762,13 @@ export const WEB_MODULE_REGISTRY: Partial<Record<ModuleKey, WebModule>> = {
   // The manifest still declares its Início slot (order 7); no renderer here, so `homeSlotsFor`
   // skips it: the next event is the tab's dot since 2026-10-03, no longer a card on Início.
   // 2026-10-06: the events pages form an area (the REINE prototype's Eventos, Fotos, Check-in, Meus).
-  events: { tabDot: eventsTabDot, area: eventsArea },
+  events: { tabDot: eventsTabDot, areas: (t) => [eventsArea(t)] },
+  // 2026-10-22: so do the school's (Membros: Início, Cursos, Trilhas, Lives, Progresso; for a
+  // manager, Cursos: Cursos, Trilhas, Lives).
+  courses: { areas: coursesAreasFor },
+  // 2026-10-24: and the store's, owned by its TopBar slot (Produtos, Comprados; for a manager,
+  // Gerenciar).
+  store: { areas: storeAreasFor },
   // 2026-10-03: the bar folds into the corner over the communities, as in the REINE prototype.
   communities: { collapsesNav: true },
 };
@@ -823,12 +864,19 @@ export function collapsingTabsFor(tabs: ReadonlyArray<NavItem>): NavItem[] {
 }
 
 /**
- * 2026-10-06: the areas of the shell, one per enabled module that declares one (`WebModule.area`),
- * worded with the root translator. `withAreas` puts them on the nav.
+ * 2026-10-06: the areas of the shell, those of every enabled module that declares them
+ * (`WebModule.areas`), worded with the root translator and keyed by the module's nav entry.
+ * `withAreas` puts them on the nav. 2026-10-22: per request (`bootstrap`), and possibly several per
+ * tab. 2026-10-24: `items` are the tabs AND the TopBar slots, so a slot's module (the store) owns an
+ * area too.
  */
-export function areasFor(tabs: ReadonlyArray<NavItem>, t: (key: string) => string): NavArea[] {
-  return tabs.flatMap((tab) => {
-    const area = WEB_MODULE_REGISTRY[tab.key as ModuleKey]?.area;
-    return area ? [{ key: tab.key, ...area(t) }] : [];
+export function areasFor(
+  items: ReadonlyArray<NavItem>,
+  t: (key: string) => string,
+  bootstrap: Bootstrap,
+): NavArea[] {
+  return items.flatMap((item) => {
+    const areas = WEB_MODULE_REGISTRY[item.key as ModuleKey]?.areas;
+    return areas ? areas(t, bootstrap).map((area) => ({ ...area, key: item.key })) : [];
   });
 }

@@ -195,7 +195,11 @@ describe('MaterialsList (UI-D-399, D-410)', () => {
     upload.state = 'error';
     upload.error = 'Arquivo muito grande. O limite é 50 MB.';
     renderList([PDF], { error: 'Você pode anexar até 10 arquivos.' });
-    expect(screen.getByText('Arquivo muito grande. O limite é 50 MB.')).toBeTruthy();
+    // 2026-10-22: the zone is a desktop affordance, so the same refusal is also the line under it
+    // that a phone shows (`md:hidden`); each layout reads it once.
+    const refusals = screen.getAllByText('Arquivo muito grande. O limite é 50 MB.');
+    expect(refusals).toHaveLength(2);
+    expect(refusals.filter((line) => line.className.includes('md:hidden'))).toHaveLength(1);
     expect(document.querySelector('[data-material-failed]')).toBeNull();
     expect(document.querySelector('[data-materials-error]')?.textContent).toBe(
       'Você pode anexar até 10 arquivos.',

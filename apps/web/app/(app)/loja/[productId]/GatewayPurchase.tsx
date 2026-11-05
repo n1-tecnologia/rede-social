@@ -114,7 +114,12 @@ export function GatewayPurchase({
           type="button"
           disabled
           aria-disabled="true"
-          className={buttonClasses({ variant: 'outline', size: 'lg', fullWidth: true })}
+          className={buttonClasses({
+            variant: 'outline',
+            size: 'lg',
+            fullWidth: true,
+            className: 'rounded-full',
+          })}
         >
           {labels.unavailable}
         </button>
@@ -130,7 +135,12 @@ export function GatewayPurchase({
         target="_blank"
         rel="noopener noreferrer"
         data-store-buy-gateway
-        className={buttonClasses({ variant: 'brand', size: 'lg', fullWidth: true })}
+        className={buttonClasses({
+          variant: 'brand',
+          size: 'lg',
+          fullWidth: true,
+          className: 'rounded-full',
+        })}
       >
         <ShoppingBag aria-hidden size={18} className="shrink-0" />
         {labels.buy} <span className="sr-only">{labels.newTab}</span>

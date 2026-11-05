@@ -174,6 +174,26 @@ async function navLabels(page: Page): Promise<string[]> {
     );
 }
 
+/**
+ * 2026-10-23 (the grouped desktop rail): the phone's tab names as the visible nav reads them — on
+ * the desktop the home tab is "Feed" while the feed module is on, Perfil lives in the rail's account
+ * card, not among its tabs, and with the store on the Loja closes the rail's navigation (the phone
+ * keeps it a TopBar slot). The phone's BottomNav is unchanged.
+ */
+function navFor(
+  page: Page,
+  labels: string[],
+  { feed = true, store = false }: { feed?: boolean; store?: boolean } = {},
+): string[] {
+  if ((page.viewportSize()?.width ?? 0) < 768) return labels;
+  return [
+    ...labels
+      .filter((label) => label !== 'Perfil')
+      .map((label) => (feed && label === 'Início' ? 'Feed' : label)),
+    ...(store ? ['Loja'] : []),
+  ];
+}
+
 /** One gallery of `/eventos` (2026-10-03): `mine` ("Meus eventos") or `others` ("Outros eventos"). */
 const gallery = (page: Page, section: 'mine' | 'others'): Locator =>
   page.locator(`main section[data-events-section="${section}"]`);
@@ -259,14 +279,11 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
     // D-55: the tab exists because the module's manifest declares it. 08.5-11 (D-419): rede-demo
-    // has the school on, so Cursos sits before Eventos and Reels is a TopBar slot.
-    expect(await navLabels(page)).toEqual([
-      'Início',
-      'Comunidades',
-      'Membros',
-      'Eventos',
-      'Perfil',
-    ]);
+    // has the school on, so Cursos (Membros for a member) sits before Eventos; 2026-10-23: Reels
+    // keeps its tab between them and the full row leaves Perfil to the desktop rail.
+    expect(await navLabels(page)).toEqual(
+      navFor(page, ['Início', 'Comunidades', 'Membros', 'Reels', 'Eventos'], { store: true }),
+    );
 
     // 2026-10-03 (replacing the D-202 Início card): the seeded in-progress event is an event to
     // come, so the Eventos tab carries the red dot, its name unchanged and the state read after it;

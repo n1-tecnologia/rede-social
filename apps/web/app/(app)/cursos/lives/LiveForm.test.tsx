@@ -269,7 +269,7 @@ describe('LiveForm — create (UI-D-403, E13)', () => {
     });
     await waitFor(() => expect(toast.show).toHaveBeenCalled());
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Live agendada.' });
-    expect(push).toHaveBeenCalledWith('/cursos?aba=lives');
+    expect(push).toHaveBeenCalledWith('/cursos/lives');
   });
 
   it('6. a server refusal lands under its field: url_invalid, duration_invalid, start_required; the draft stays', async () => {
@@ -318,7 +318,7 @@ describe('LiveForm — edit (UI-D-403, E13 partial)', () => {
     await waitFor(() =>
       expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Alterações salvas.' }),
     );
-    expect(push).toHaveBeenCalledWith('/cursos?aba=lives');
+    expect(push).toHaveBeenCalledWith('/cursos/lives');
   });
 
   it('9. a moved time sends the rebuilt instant in the tenant zone', async () => {

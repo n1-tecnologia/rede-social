@@ -96,3 +96,23 @@ describe("LikeButton — tone='overMedia' (D-124, UI-D-87)", () => {
     expect(region).toHaveTextContent('count-label');
   });
 });
+
+describe("LikeButton — tone='disc' (2026-10-23, the Reels rail beside the desktop player)", () => {
+  it('unliked: a 48 px disc in the member’s theme with the theme’s ink', () => {
+    render(<LikeButton {...props({ tone: 'disc', glyphSize: 22 })} />);
+    const button = screen.getByRole('button', { name: 'like-label' });
+    for (const cls of ['size-12', 'bg-bg-tertiary', 'text-text']) {
+      expect(button.className).toContain(cls);
+    }
+    expect(button.className).not.toContain('text-white');
+    expect(glyph(button).getAttribute('width')).toBe('22');
+  });
+
+  it('liked: the like colour with its fill, on the same disc', () => {
+    render(<LikeButton {...props({ tone: 'disc', liked: true })} />);
+    const button = screen.getByRole('button', { name: 'unlike-label' });
+    expect(button.className).toContain('text-like');
+    expect(button.className).toContain('[&_svg]:fill-like');
+    expect(button.className).toContain('bg-bg-tertiary');
+  });
+});

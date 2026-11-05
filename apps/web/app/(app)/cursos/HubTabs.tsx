@@ -12,7 +12,7 @@ export interface HubTabItem {
 export interface HubTabsProps {
   /** The tablist's accessible name ("Áreas de Cursos"). */
   label: string;
-  /** Already translated by the server page from `COURSE_HUB_TABS`. */
+  /** Already translated by the server page that owns the row. */
   items: readonly HubTabItem[];
   /** The active key, decided on the server from `?aba=`. */
   value: string;
@@ -27,6 +27,10 @@ export interface HubTabsProps {
  * through the roving tabindex and navigate. The server page cannot hand a function to the `Tabs`
  * primitive, so this thin client wrapper owns the `onChange` → `router.push` of the item's href.
  * Every word arrives translated from the server.
+ *
+ * 2026-10-22: the courses area no longer draws it (each of its screens is a page of its own, reached
+ * from the shell's area menu, and `tabs.ts` is gone); the Início · Explorar chip row
+ * (`inicio/InicioTabs.tsx`) is its remaining user.
  */
 export function HubTabs({ label, items, value, density, className }: HubTabsProps) {
   const router = useRouter();

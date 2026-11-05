@@ -1,15 +1,16 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
+import { MEDIA_CHIP_LG } from '@rede-social/module-courses/ui';
 import { LockedSection } from '@rede-social/module-store/ui';
-import { chipBase, cn, EmptyState, PageHeader, StatusPill } from '@rede-social/ui';
-import { CircleAlert, Lock, User } from 'lucide-react';
+import { MemberSkin, PageHeader, SkinAtmos } from '@rede-social/ui';
+import { CircleAlert, Clock, Lock, User } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import {
   CourseActionZone,
   type LockedCourseZone,
 } from '@/app/(app)/cursos/[courseId]/CourseActionZone';
-import { PreviewBanner } from '@/app/(app)/cursos/PreviewBanner';
+import { MemberEmptyCard } from '@/app/(app)/cursos/MemberEmptyCard';
 import { getLearnCourse, type LessonLockKind } from '@/lib/courses-learn';
 import { lessonLockView, memberCourseHref, memberLessonHref } from '@/lib/courses-member-view';
 import type { CoursesTranslator } from '@/lib/courses-view';
@@ -30,7 +31,7 @@ import { lockedCourseView } from '@/lib/store-view';
  *  - header as the player's (back "Voltar para o curso", the course title);
  *  - the media block: `aspect-video bg-bg-tertiary`, NO image, a centred 56px `bg-black/60` disc
  *    with `Lock` 24 white, and the over-media pill "Exclusiva" or "Bloqueada" at top-left;
- *  - the identity as the player's (pills, length, title, instructor);
+ *  - the identity as the player's (length, title, instructor; the pills left on 2026-10-23);
  *  - **purchase** → the course's buy section in its UI-D-428 variants with the LESSON words ("Aula
  *    exclusiva", `lockedCourseView(…, { mode: 'lesson' })`): "Comprar para liberar" to
  *    `/loja/{id}?curso={courseId}` or the "Opções de acesso" sheet, the not-for-sale line, or the
@@ -39,6 +40,20 @@ import { lockedCourseView } from '@/lib/store-view';
  *  - **sequence** → "Aula ainda bloqueada", the lock label as a sentence, and the brand "Continuar o
  *    curso" to the course's `nextLessonId` (the lesson that unblocks the path), or the outline
  *    "Voltar para o curso" when there is none. No buy action.
+ *
+ * **2026-10-22 (the courses area redesign on the social-igoralves prototype).** The player's own
+ * frame: the two-line header (the course over the lesson title), the BLACK 16:9 frame with the large
+ * padlock disc and the glass chip ("Exclusiva" / "Bloqueada"), the length (2026-10-23: the
+ * "Módulo / Aula / Aula aberta / Prática" pills left, at the product owner's request), the title
+ * 20/700 (the page's h1) and the instructor; both notices are the prototype's centred card
+ * (`LockedSection` `centered`, and the course's buy section through `CourseActionZone`). A failed
+ * read is the member area's `MemberEmptyCard`.
+ *
+ * **2026-10-23 — the player's new frame** (`MemberLessonPage`): a WIDE page (`data-shell-full`); the
+ * header names the course (the lesson's title is the h1 under the stage); the black 16:9 stage edge to
+ * edge on the phone and, from `md`, inset by the 16px gutter, rounded and lifted; under it the title
+ * (20/800, 24 from `md`) with the instructor and the length (`Clock`) on one line; the notice keeps a
+ * readable width (`md:max-w-xl`) on a wide column.
  */
 export interface LessonLockedProps {
   courseId: string;
@@ -70,27 +85,29 @@ export async function LessonErrorCard({
 }) {
   const t = await getTranslations('courses');
   return (
-    <div className="mx-auto flex w-full max-w-[680px] flex-col">
-      <PageHeader
-        backHref={memberCourseHref(courseId, preview)}
-        backLabel={t('member.player.back')}
-        className="md:static md:px-0"
-      />
-      <div className="px-4 pt-2">
-        <EmptyState
-          variant="card"
-          icon={CircleAlert}
-          data-testid="lesson-error"
-          title={t('errors.title')}
-          body={t('errors.course')}
-          action={
-            <a href={memberLessonHref(courseId, lessonId, preview)} className={LINK_OUTLINE}>
-              {t('errors.retry')}
-            </a>
-          }
+    <MemberSkin>
+      <div className="mx-auto flex w-full max-w-[680px] flex-col">
+        <PageHeader
+          backHref={memberCourseHref(courseId, preview)}
+          backLabel={t('member.player.back')}
+          className="md:static md:px-0"
         />
+        <div className="px-4 pt-2">
+          <MemberEmptyCard
+            icon={CircleAlert}
+            tone="error"
+            data-testid="lesson-error"
+            title={t('errors.title')}
+            body={t('errors.course')}
+            action={
+              <a href={memberLessonHref(courseId, lessonId, preview)} className={LINK_OUTLINE}>
+                {t('errors.retry')}
+              </a>
+            }
+          />
+        </div>
       </div>
-    </div>
+    </MemberSkin>
   );
 }
 
@@ -159,101 +176,103 @@ export async function LessonLocked({
   }
 
   return (
-    <div
-      data-testid="lesson-lock-page"
-      data-reason={reason}
-      className="mx-auto flex w-full max-w-[680px] flex-col pb-6"
-    >
-      <PageHeader
-        title={view.courseTitle}
-        backHref={view.courseHref}
-        backLabel={t('courses.member.player.back')}
-        stickyTop="0px"
-        className="md:static md:px-0"
-      />
-      {preview ? <PreviewBanner courseId={view.courseId} /> : null}
-
+    <MemberSkin>
       <div
-        data-testid="lesson-lock-media"
-        className={cn(
-          'relative flex aspect-video w-full items-center justify-center bg-bg-tertiary',
-          preview && 'mt-3',
-        )}
+        data-testid="lesson-lock-page"
+        data-reason={reason}
+        data-shell-full
+        className="mx-auto flex w-full flex-col pb-6"
       >
-        <span className="absolute top-3 left-3">
-          <span className={cn(chipBase, 'bg-black/60 text-white backdrop-blur-sm')}>
-            {view.mediaPill}
-          </span>
-        </span>
-        <span
-          aria-hidden
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-black/60 text-white"
-        >
-          <Lock size={24} />
-        </span>
-      </div>
+        <PageHeader
+          title={view.courseTitle}
+          titleAs="p"
+          backHref={view.courseHref}
+          backLabel={t('courses.member.player.back')}
+          className="md:px-0"
+        />
 
-      <div className="flex flex-col gap-2 px-4 pt-4">
-        <div data-testid="lesson-lock-pills" className="flex flex-wrap items-center gap-1">
-          {view.pills.map((pill) => (
-            <StatusPill key={pill} tone="neutral">
-              {pill}
-            </StatusPill>
-          ))}
-          {view.duration ? (
-            <span className="ml-1 text-xs font-normal text-text-tertiary tabular-nums">
-              {view.duration}
+        <div className="md:px-4 md:pt-1">
+          <div
+            data-testid="lesson-lock-media"
+            className="ms-hero relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black md:rounded-3xl md:shadow-lg"
+          >
+            {/* 2026-10-26 (the member skin): the brand's atmosphere over the black frame. */}
+            <SkinAtmos />
+            <span className="absolute top-3 left-3">
+              <span className={MEDIA_CHIP_LG}>{view.mediaPill}</span>
             </span>
-          ) : null}
+            <span
+              aria-hidden
+              className="ms-chip relative flex h-16 w-16 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white ring-[10px] ring-brand/10 md:h-20 md:w-20"
+            >
+              <Lock size={26} />
+            </span>
+          </div>
         </div>
-        <h1
-          data-testid="lesson-lock-title"
-          data-brand-title
-          className="text-2xl font-bold leading-tight tracking-[-0.02em] text-text [overflow-wrap:anywhere]"
-        >
-          {view.title}
-        </h1>
-        <p className="flex items-center gap-2 text-sm font-normal text-text">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-tertiary">
-            {view.instructorPhotoAssetId ? (
-              <MediaImage
-                assetId={view.instructorPhotoAssetId}
-                widths={PURPOSE_WIDTHS.cover}
-                alt=""
-                sizes="24px"
-                ratio=""
-                className="h-full w-full"
-              />
-            ) : (
-              <User aria-hidden size={14} className="text-text-tertiary" />
-            )}
-          </span>
-          <span className="min-w-0 break-words">{view.instructorLine}</span>
-        </p>
-      </div>
 
-      {view.sequence ? (
-        <div data-testid="lesson-lock-sequence" className="flex flex-col">
-          <LockedSection
-            title={view.sequence.title}
-            body={view.sequence.body}
-            action={
-              <a
-                href={view.sequence.action.href}
-                data-testid="lesson-lock-action"
-                data-variant={view.sequence.action.brand ? 'brand' : 'outline'}
-                className={view.sequence.action.brand ? BRAND_LINK : OUTLINE_FULL_LINK}
+        <div className="flex flex-col gap-3 px-4 pt-4 md:pt-6">
+          <h1
+            data-testid="lesson-lock-title"
+            data-brand-title
+            className="ms-title-compact text-xl font-extrabold leading-tight tracking-tight text-text md:text-2xl [overflow-wrap:anywhere]"
+          >
+            {view.title}
+          </h1>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <p className="flex min-w-0 items-center gap-2 text-sm font-normal text-text-secondary">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-tertiary">
+                {view.instructorPhotoAssetId ? (
+                  <MediaImage
+                    assetId={view.instructorPhotoAssetId}
+                    widths={PURPOSE_WIDTHS.cover}
+                    alt=""
+                    sizes="28px"
+                    ratio=""
+                    className="h-full w-full"
+                  />
+                ) : (
+                  <User aria-hidden size={14} className="text-text-tertiary" />
+                )}
+              </span>
+              <span className="min-w-0 break-words">{view.instructorLine}</span>
+            </p>
+            {view.duration ? (
+              <p
+                data-testid="lesson-lock-duration"
+                className="ms-chip-surface inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-text-tertiary tabular-nums"
               >
-                {view.sequence.action.label}
-              </a>
-            }
-          />
+                <Clock aria-hidden size={14} className="shrink-0" />
+                {view.duration}
+              </p>
+            ) : null}
+          </div>
         </div>
-      ) : lockedZone ? (
-        <div data-testid="lesson-lock-purchase" className="flex flex-col">
-          <CourseActionZone action={null} locked={lockedZone} />
-        </div>
-      ) : null}
-    </div>
+
+        {view.sequence ? (
+          <div data-testid="lesson-lock-sequence" className="flex flex-col md:max-w-xl">
+            <LockedSection
+              variant="centered"
+              className="ms-panel rounded-3xl"
+              title={view.sequence.title}
+              body={view.sequence.body}
+              action={
+                <a
+                  href={view.sequence.action.href}
+                  data-testid="lesson-lock-action"
+                  data-variant={view.sequence.action.brand ? 'brand' : 'outline'}
+                  className={view.sequence.action.brand ? BRAND_LINK : OUTLINE_FULL_LINK}
+                >
+                  {view.sequence.action.label}
+                </a>
+              }
+            />
+          </div>
+        ) : lockedZone ? (
+          <div data-testid="lesson-lock-purchase" className="flex flex-col md:max-w-xl">
+            <CourseActionZone action={null} locked={lockedZone} />
+          </div>
+        ) : null}
+      </div>
+    </MemberSkin>
   );
 }

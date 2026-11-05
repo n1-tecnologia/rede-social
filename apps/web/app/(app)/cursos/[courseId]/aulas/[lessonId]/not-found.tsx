@@ -1,9 +1,10 @@
 'use client';
 
-import { EmptyState, PageHeader } from '@rede-social/ui';
+import { PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { MemberEmptyCard } from '@/app/(app)/cursos/MemberEmptyCard';
 
 const LINK_OUTLINE =
   'inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
@@ -18,7 +19,8 @@ const LINK_OUTLINE =
  * `/cursos/{courseId}`): a not-found boundary receives no params. The id is never printed, so the
  * card is no existence oracle; the back link only repeats what the URL already says, and a crafted
  * course id lands on that course's own not-found. Sketch 010 frame `aula-indisponivel`: the header's
- * back control and the alert card (the header has no title: a not-found reads no course).
+ * back control and the alert card (the header has no title: a not-found reads no course). 2026-10-22:
+ * the card is the member area's `MemberEmptyCard`.
  */
 export default function LessonNotFound() {
   const t = useTranslations('courses.notFound');
@@ -31,9 +33,9 @@ export default function LessonNotFound() {
     <div className="mx-auto flex w-full max-w-[680px] flex-col">
       <PageHeader backHref={back} backLabel={t('lessonCta')} className="md:static md:px-0" />
       <div className="px-4 pt-2">
-        <EmptyState
-          variant="card"
+        <MemberEmptyCard
           icon={CircleAlert}
+          tone="error"
           data-testid="lesson-not-found"
           title={t('lesson')}
           body={t('lessonBody')}

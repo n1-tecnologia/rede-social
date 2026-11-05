@@ -44,8 +44,8 @@ function closestWeight(weights: readonly number[], target: number): number {
 
 /**
  * The weight the titles are drawn in: they are bold (700), so 700 or the closest weight the family
- * ships. Only that one is requested; the titles never synthesize bold, so a family that ships one
- * regular weight shows as it was drawn.
+ * ships. The titles never synthesize bold, so a family that ships one regular weight shows as it
+ * was drawn.
  */
 export function titleWeight(weights: readonly number[]): number {
   return closestWeight(weights, 700);
@@ -58,13 +58,20 @@ export function sampleWeight(weights: readonly number[]): number {
 
 const CSS2 = 'https://fonts.googleapis.com/css2';
 
-function familyParam(family: string, weight: number): string {
-  return `family=${family.replaceAll(' ', '+')}:wght@${weight}`;
+/** `family=Open+Sans:wght@400;700`: the weights ascending and once each, as css2 requires. */
+function familyParam(family: string, ...weights: number[]): string {
+  const axis = [...new Set(weights)].sort((a, b) => a - b).join(';');
+  return `family=${family.replaceAll(' ', '+')}:wght@${axis}`;
 }
 
-/** Google's stylesheet of a family in its title weight (`display=swap`: Manrope until it loads). */
+/**
+ * Google's stylesheet of a family in its title weight (`display=swap`: Manrope until it loads).
+ * Since 2026-10-26 its regular weight comes with it (one weight when they are the same): the member
+ * skin draws its titles thin (400) in the tenant's font, and with no synthesis a family loaded in
+ * 700 alone would draw them bold.
+ */
 export function titleFontHref([family, , weights]: GoogleFont): string {
-  return `${CSS2}?${familyParam(family, titleWeight(weights))}&display=swap`;
+  return `${CSS2}?${familyParam(family, sampleWeight(weights), titleWeight(weights))}&display=swap`;
 }
 
 /**

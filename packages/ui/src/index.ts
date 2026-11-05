@@ -112,6 +112,10 @@ export {
   type TabsProps,
 } from './primitives/Tabs';
 export { Textarea, type TextareaProps } from './primitives/Textarea';
+// The member skin (2026-10-26): the members area's scope and its decorative layers, inert outside
+// `[data-member-skin]` (the look is styles/member-skin.css, the colours tokens.css Layer 1f).
+export { MemberBackdrop, MemberSkin, type MemberSkinProps } from './skin/MemberSkin';
+export { SkinAmbient, SkinAtmos, SkinTileFx } from './skin/SkinLayers';
 // Text: the ONE auto-linker (re-homed from the feed in 07-09, T-04-43) and its matcher.
 export { DEFAULT_LINK_CLASS, type LinkifyOptions, linkify } from './text/linkify';
 export { LINK_URL_PATTERN, LINK_URL_TRAILING_PUNCTUATION, trimMatchedUrl } from './text/url';

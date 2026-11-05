@@ -7,8 +7,9 @@ import { cn } from '../cn';
  *
  * Kept OUT of Button.tsx on purpose, for the same reason as `chipBase.ts` (PDF item #9): Button.tsx
  * is a 'use client' module, and in the RSC graph Next replaces EVERY export of a client module with
- * a client-reference function. Server Components (PreviewBanner, LiveStateZone, MemberLessonPage)
- * call this helper, so it must live in a directive-less module. Never re-export it from Button.tsx.
+ * a client-reference function. Server Components (LiveStateZone, MemberLessonPage, the courses
+ * admin lists) call this helper, so it must live in a directive-less module. Never re-export it from
+ * Button.tsx.
  *
  * `brand` merges the prototype's `primary` and `accent` variants and reads the tenant through
  * `bg-button`/`text-on-button` — never `text-white` on the fill, the on-colour is computed per
@@ -54,6 +55,19 @@ export type ButtonSize = keyof typeof sizeStyles;
 const HIT_AREA =
   'relative after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2';
 
+/**
+ * 2026-10-26 — the member skin's hooks: `ui-btn` and `ui-btn-<variant>`, inert anywhere but inside
+ * `[data-member-skin]` (styles/member-skin.css), where the button gains a halo and a sheen on hover
+ * and sinks a little when pressed. Nothing changes outside that scope.
+ */
+const SKIN_HOOKS = {
+  brand: 'ui-btn ui-btn-brand',
+  secondary: 'ui-btn ui-btn-secondary',
+  outline: 'ui-btn ui-btn-outline',
+  ghost: 'ui-btn ui-btn-ghost',
+  danger: 'ui-btn ui-btn-danger',
+} as const satisfies Record<keyof typeof variantStyles, string>;
+
 export interface ButtonClassesOptions {
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -72,6 +86,7 @@ export function buttonClasses({
   className,
 }: ButtonClassesOptions = {}): string {
   return cn(
+    SKIN_HOOKS[variant],
     'inline-flex items-center justify-center rounded-xl font-bold transition-colors',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
     'disabled:pointer-events-none disabled:opacity-50',

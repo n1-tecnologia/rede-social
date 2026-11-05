@@ -1,22 +1,28 @@
+import type { CSSProperties } from 'react';
+
 /**
  * The module band's progress ring (08.5-07, UI-D-429, UI-D-443, accent item P-08.5), ported from the
- * prototype's `ProgressRing` at its band size: 32px, the brand stroke (`var(--color-brand)`) on a
- * `white/25` track, the arc starting at twelve o'clock.
+ * prototype's `ProgressRing`: the brand stroke (`var(--color-brand)`) on a `white/25` track, the arc
+ * starting at twelve o'clock.
  *
  * **Decorative.** `aria-hidden`: the band's accessible name already carries "{percent}% concluído",
- * so the ring repeats nothing to a screen reader. **No animation** (UI-D-443): the prototype's 0.8 s
- * draw is dropped, so a server-rendered ring never sweeps from 0 on hydration, and `motion` is not
- * imported. Props only, no words.
+ * so the ring repeats nothing to a screen reader. Props only, no words.
  *
  * **08.6-10 (UI-D-457, UI-D-458).** An optional centred `label` (the host's formatted "{percent}%",
- * 24/700 `tabular-nums`, `aria-hidden` like the ring) for the Progresso ring at 88px, and a `tone`:
- * `media` (the default, the `white/25` track over a cover) or `page` (the neutral `bg-tertiary`
- * track on a card). Without either prop the ring renders exactly as before.
+ * `tabular-nums`, `aria-hidden` like the ring) for the Progresso ring at 88px, and a `tone`: `media`
+ * (the default, the `white/25` track over a cover) or `page` (the neutral `bg-tertiary` track on a
+ * card).
+ *
+ * **2026-10-22 (the courses area redesign on the social-igoralves prototype).** The arc DRAWS in
+ * 0.8 s, the prototype's motion, as the CSS `animate-ring-draw`: the keyframe starts from the full
+ * circumference, which the arc carries as `--ring-c`, and ends at its own `stroke-dashoffset`, so a
+ * server-rendered ring animates with no hydration and a static render is exact. Under "reduzir
+ * movimento" it rests drawn (`motion-reduce:animate-none`). The label is 800, the prototype's weight.
  */
 export interface ProgressRingProps {
   /** 0–100; clamped here so a stray value cannot overdraw the circle. */
   percent: number;
-  /** Diameter in px; the band uses 32. */
+  /** Diameter in px; the band uses 34 (the default stays 32). */
   size?: number;
   /** The host's formatted "{percent}%", centred over the ring; absent on the band. */
   label?: string;
@@ -37,6 +43,10 @@ export function ProgressRing({
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const center = size / 2;
+  const arcStyle = {
+    stroke: 'var(--color-brand)',
+    '--ring-c': `${circumference}px`,
+  } as CSSProperties;
 
   const ring = (
     <svg
@@ -67,7 +77,8 @@ export function ProgressRing({
         strokeDasharray={circumference}
         strokeDashoffset={circumference * (1 - value / 100)}
         transform={`rotate(-90 ${center} ${center})`}
-        style={{ stroke: 'var(--color-brand)' }}
+        className="animate-ring-draw motion-reduce:animate-none"
+        style={arcStyle}
       />
     </svg>
   );
@@ -86,7 +97,7 @@ export function ProgressRing({
       {ring}
       <span
         data-testid="progress-ring-label"
-        className="absolute inset-0 flex items-center justify-center text-2xl font-bold tracking-[-0.02em] text-text tabular-nums"
+        className="absolute inset-0 flex items-center justify-center text-xl font-extrabold tracking-tight text-text tabular-nums"
       >
         {label}
       </span>

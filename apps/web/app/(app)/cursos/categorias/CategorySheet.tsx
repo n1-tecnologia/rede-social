@@ -1,7 +1,6 @@
 'use client';
 
 import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
-import { MediaImage } from '@rede-social/core/ui';
 import {
   CATEGORY_MAX_NAME,
   type Category,
@@ -9,11 +8,14 @@ import {
   type CategoryPatch,
 } from '@rede-social/module-courses/contracts';
 import { BottomSheet, Button, ConfirmDialog, Input, useToast } from '@rede-social/ui';
-import { Image as ImageIcon, Trash2, X } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState, useTransition } from 'react';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import { DANGER_OVERRIDES } from '../admin-styles';
+import { CoverField } from '../CoverField';
 import {
   type CategoryWriteResult,
   createCategoryAction,
@@ -34,6 +36,11 @@ import {
  * Focus (UI-D-407): the name field on open (after the trap's own first-focus), back to the opener on
  * close (the trap). A dirty close asks "Descartar categoria?" first. The dialogs render BESIDE the
  * sheet, never inside its form.
+ *
+ * 2026-10-22 (the courses area redesign): the cover is the shared `CoverField` in its compact frame
+ * (the 120px 3:4 frame IS the control, "Remover capa" on the label line, no drop zone), and "Remover
+ * categoria" is the danger zone's outlined button, still disabled with its reason while courses use
+ * the category. No behaviour changed.
  */
 export interface CategorySheetProps {
   open: boolean;
@@ -47,14 +54,6 @@ export interface CategorySheetProps {
 }
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
-
-const GRADIENT = (
-  <span
-    aria-hidden
-    className="block h-full w-full"
-    style={{ backgroundImage: 'var(--brand-gradient)' }}
-  />
-);
 
 export function CategorySheet({
   open,
@@ -84,7 +83,6 @@ export function CategorySheet({
   const [pending, startTransition] = useTransition();
 
   const nameRef = useRef<HTMLInputElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const preview = useCoverPreview(coverAssetId);
   const upload = useSignedUpload({
@@ -232,98 +230,42 @@ export function CategorySheet({
             submit();
           }}
         >
-          {/* ── Capa: the 3:4 preview at 120px (the catalogue's category art, UI-D-409). ── */}
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
-            <div
-              data-category-cover-preview
-              className="relative aspect-[3/4] w-full max-w-[120px] overflow-hidden rounded-xl bg-bg-tertiary"
-            >
-              {preview.previewUrl ? (
-                // biome-ignore lint/performance/noImgElement: a local object URL of the file being uploaded
-                <img
-                  src={preview.previewUrl}
-                  alt={t('form.cover.preview')}
-                  data-category-cover-local
-                  className="h-full w-full object-cover object-center"
-                />
-              ) : coverAssetId !== null ? (
-                <MediaImage
-                  assetId={coverAssetId}
-                  widths={coverWidths}
-                  alt={t('form.cover.preview')}
-                  sizes="120px"
-                  ratio=""
-                  className="h-full w-full"
-                  fallback={GRADIENT}
-                />
-              ) : (
-                <span
-                  data-category-cover-fallback
-                  aria-hidden
-                  className="block h-full w-full"
-                  style={{ backgroundImage: 'var(--brand-gradient)' }}
-                />
-              )}
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept={ACCEPT}
-              className="sr-only"
-              aria-label={
-                coverAssetId ? t('category.form.coverChange') : t('category.form.coverAdd')
-              }
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = '';
-                if (file) void upload.pick(file);
-              }}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={uploading}
-                loading={uploading}
-                onClick={() => fileRef.current?.click()}
-              >
-                <ImageIcon aria-hidden size={16} className="shrink-0" />
-                {coverAssetId ? t('category.form.coverChange') : t('category.form.coverAdd')}
-              </Button>
-              {coverAssetId ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="px-2"
-                  disabled={uploading}
-                  onClick={() => {
-                    setCoverAssetId(null);
-                    setCoverError(null);
-                    upload.reset();
-                  }}
-                >
-                  <X aria-hidden size={16} className="shrink-0" />
-                  {t('category.form.coverRemove')}
-                </Button>
-              ) : null}
-            </div>
-            {upload.state === 'progress' ? (
-              <span className="text-xs tabular-nums text-text-tertiary">
-                {tm('progress', { percent: upload.progress })}
-              </span>
-            ) : null}
-            {upload.error || coverError ? (
-              <p role="alert" data-category-cover-error className="text-sm font-normal text-danger">
-                {upload.error ?? coverError}
-              </p>
-            ) : null}
-            <p className="text-xs font-normal text-text-tertiary">
-              {t('category.form.coverHelper')}
-            </p>
-          </div>
+          {/* ── Capa: the 3:4 frame at 120px (the catalogue's category art, UI-D-409). ── */}
+          <CoverField
+            hook="category"
+            ratio="poster"
+            compact
+            accept={ACCEPT}
+            assetId={coverAssetId}
+            widths={coverWidths}
+            previewUrl={preview.previewUrl}
+            sizes="120px"
+            upload={upload}
+            error={coverError}
+            helper={t('category.form.coverHelper')}
+            alsoAs={[{ key: 'tile', ratio: 'tile', label: t('coverField.as.tile') }]}
+            sizeHint={<CoverSizeHint kind="category" />}
+            labels={{
+              pickFile: t('coverField.pickFile'),
+              camera: t('coverField.camera'),
+              ways: t('coverField.ways'),
+              waysTouch: t('coverField.waysTouch'),
+              dropHere: t('coverField.dropHere'),
+              field: t('form.cover.label'),
+              add: t('category.form.coverAdd'),
+              change: t('category.form.coverChange'),
+              remove: t('category.form.coverRemove'),
+              preview: t('form.cover.preview'),
+              progress: (percent) => tm('progress', { percent }),
+              processing: tm('photo.preparing'),
+            }}
+            onPick={(file) => void upload.pick(file)}
+            onRemove={() => {
+              setCoverAssetId(null);
+              setCoverError(null);
+              upload.reset();
+            }}
+          />
 
           {/* ── Nome ── */}
           <Input
@@ -362,15 +304,15 @@ export function CategorySheet({
               <div className="flex flex-col gap-1">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="md"
                   data-category-remove
-                  className="justify-start self-start px-0 text-danger"
+                  className={DANGER_OVERRIDES}
                   disabled={courseCount > 0}
                   aria-describedby={courseCount > 0 ? 'category-remove-helper' : undefined}
                   onClick={() => setRemoving(true)}
                 >
-                  <Trash2 aria-hidden size={20} />
+                  <Trash2 aria-hidden size={18} />
                   {t('category.form.remove')}
                 </Button>
                 {courseCount > 0 ? (

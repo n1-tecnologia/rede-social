@@ -107,12 +107,13 @@ function nav(page: Page, mobile: boolean): Locator {
 }
 
 /**
- * The Reels door, wherever the shell put it (08.5-11, D-419, UI-D-423). On a tenant whose school is
- * on (rede-demo) the Cursos tab holds the middle of the bar and Reels is a SLOT: the TopBar's
- * leftmost on the phone, the first row of the rail's bottom group on desktop. On a tenant without
- * the school (rede-lab, the throwaway tenants of e12) it is still the tab. One locator covers both,
+ * The Reels door (08.5-11, D-419, UI-D-423). From 08.5-11 to 2026-10-22, on a tenant whose school
+ * is on (rede-demo) Reels was a SLOT: the TopBar's leftmost on the phone, the first row of the
+ * rail's bottom group on desktop. Since 2026-10-23 it is the TAB on every tenant: with the school on
+ * Reels keeps its tab beside Cursos and the kernel Perfil turns rail-only instead. The locator stays
  * scoped to the shell's chrome so a page link named "Reels" never matches: the phone's TopBar or
- * BottomNav, the desktop's rail (its tab nav and its bottom group alike).
+ * BottomNav, the desktop's rail (its tab nav; its bottom group moved to the desktop header on
+ * 2026-10-26).
  */
 function reelsDoor(page: Page, mobile: boolean): Locator {
   return page
@@ -134,6 +135,18 @@ function currentPage(page: Page): Locator {
   return page.locator('[data-reel-page]:not([inert])');
 }
 
+/**
+ * 2026-10-23 — where the CURRENT page's rail and caption are: over the video on the phone (the page
+ * itself); beside the player on the desktop (the YouTube Shorts layout), in the pager's slots, the
+ * rail right of the box and the caption block at the stage's bottom left (or over the video while
+ * the room left of the box is too narrow). Only the current page fills the slots.
+ */
+function currentPieces(page: Page): Locator {
+  return page.locator(
+    '[data-reel-page]:not([inert]), [data-reels-rail-slot], [data-reels-info-slot]',
+  );
+}
+
 /** The polite live region: "Vídeo {n}, de {author}". */
 function position(page: Page): Locator {
   return page.getByTestId('reels-position');
@@ -150,7 +163,7 @@ async function hangStreams(page: Page): Promise<void> {
 
 /**
  * Signs the demo member in and opens Reels, waiting for video 1's credential. Through its door by
- * default (`reelsDoor`: on rede-demo the TopBar slot / rail row since 08.5-11); `direct` navigates
+ * default (`reelsDoor`: on rede-demo the Reels tab again since 2026-10-23); `direct` navigates
  * instead, for the 320 px backstops: there `next dev`'s issues pill sits over the floating
  * BottomNav and could intercept a tap (a dev-only overlay — e1 proves the door).
  */
@@ -292,16 +305,19 @@ test.describe('05.3 Reels', () => {
     await hangStreams(page);
 
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await expect(page.locator('header:visible')).toHaveCount(mobile ? 1 : 0);
+    // One bar on top: the phone's TopBar, or since 2026-10-26 the desktop header.
+    await expect(page.locator('header:visible')).toHaveCount(1);
 
     await reelsDoor(page, mobile).click();
     await expect(page).toHaveURL(/\/reels$/);
 
     await expect(stage(page)).toBeVisible();
 
+    // UI-D-81: no TopBar on the media tab, and (2026-10-26) no desktop header either: the stage
+    // owns the top of the screen on both chromes.
+    await expect(page.locator('header:visible')).toHaveCount(0);
     if (mobile) {
-      // UI-D-81: no TopBar on the media tab, and the BottomNav under the dark-token scope.
-      await expect(page.locator('header:visible')).toHaveCount(0);
+      // The BottomNav under the dark-token scope.
       await expect(nav(page, mobile)).toHaveAttribute('data-theme', 'dark');
     }
 
@@ -317,44 +333,44 @@ test.describe('05.3 Reels', () => {
     // phone BottomNav's first tab and intercepts a coordinate click (06-01 deviation 8, 06-09).
     await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
     await expect(page).toHaveURL(/\/inicio$/);
+    await expect(page.locator('header:visible')).toHaveCount(1);
     if (mobile) {
-      await expect(page.locator('header:visible')).toHaveCount(1);
       await expect(nav(page, mobile)).not.toHaveAttribute('data-theme', 'dark');
     }
   });
 
-  test('e18 (08.5-11, UI-D-423): from the TopBar slot on rede-demo, /reels has no mobile TopBar, the dark BottomNav, and no tab is current', async ({
+  test('e18 (08.5-11, UI-D-423; 2026-10-23): on rede-demo Reels keeps its tab beside Membros, and from it /reels has no mobile TopBar, the dark BottomNav, and the Reels tab current', async ({
     page,
   }, testInfo) => {
     const mobile = isMobile(testInfo.project.name);
     await hangStreams(page);
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
-    // rede-demo has the school on: the member's Membros tab (Cursos for an admin) holds the tab, and Reels is a slot, never a tab.
+    // rede-demo has the school on: the member's Membros tab (Cursos for an admin) and, since
+    // 2026-10-23, the Reels tab too (the full row sends Perfil to the rail instead); no Reels slot
+    // in the TopBar or the desktop shortcuts (the desktop header's since 2026-10-26).
     await expect(
       nav(page, mobile).getByRole('link', { name: coursesMessages.courses.memberNav }),
     ).toBeVisible();
-    await expect(nav(page, mobile).getByRole('link', { name: R.nav })).toHaveCount(0);
-    const slot = page.locator(
-      mobile
-        ? 'header[data-shell-topbar] a[data-slot="reels"]'
-        : '[data-shell-nav="rail"] ~ div a[data-slot="reels"]',
-    );
-    await expect(slot).toBeVisible();
+    const tab = nav(page, mobile).getByRole('link', { name: R.nav, exact: true });
+    await expect(tab).toBeVisible();
+    await expect(
+      page.locator('header a[data-slot="reels"], [data-shell-shortcuts] a[data-slot="reels"]'),
+    ).toHaveCount(0);
 
-    await slot.click();
+    await tab.click();
     await expect(page).toHaveURL(/\/reels$/);
     await expect(stage(page)).toBeVisible();
     await expectPlaybackToken(stage(page));
 
-    // UI-D-81 through the slot: the chrome lookup reads the topbar items too.
+    // UI-D-81 on the tab: the media chrome, unchanged.
     if (mobile) {
       await expect(page.locator('header:visible')).toHaveCount(0);
       await expect(nav(page, mobile)).toHaveAttribute('data-theme', 'dark');
     }
-    // No TAB is current on /reels: the member leaves by tapping any tab.
-    await expect(nav(page, mobile).locator('a[aria-current="page"]')).toHaveCount(0);
-    if (!mobile) await expect(slot).toHaveAttribute('aria-current', 'page');
+    // The Reels tab is the one current tab on /reels; the member leaves by tapping another.
+    await expect(tab).toHaveAttribute('aria-current', 'page');
+    await expect(nav(page, mobile).locator('a[aria-current="page"]')).toHaveCount(1);
 
     // Leaving through a tab restores the normal chrome.
     await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
@@ -382,13 +398,13 @@ test.describe('05.3 Reels', () => {
     // A tap on A shows A's video on the current page.
     await laneTab(page, NAME_A).click();
     await expect(laneTab(page, NAME_A)).toHaveAttribute('aria-selected', 'true');
-    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_A);
+    await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_A);
     await expectVideo(page, 1);
 
     // A horizontal drag right steps back to the neighbouring lane (B), and never pages the video.
     await drag(page, 0, 120);
     await expect(laneTab(page, NAME_B)).toHaveAttribute('aria-selected', 'true');
-    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_B);
+    await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_B);
     await expectVideo(page, 1);
 
     // D-120: the lab tenant has communities OFF, so one lane — no tablist, the sound button alone.
@@ -508,9 +524,9 @@ test.describe('05.3 Reels', () => {
     const caption = `${PREFIX} e6 curtir ${testInfo.project.name}.`;
     const { postId } = await freshVideo(caption);
     await openReels(page, mobile);
-    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption);
+    await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(caption);
 
-    const heart = currentPage(page).locator('[data-like-state]');
+    const heart = currentPieces(page).locator('[data-like-state]');
     await expect(heart).toHaveAttribute('data-like-state', 'unliked');
 
     // Every like/unlike is a server-action POST whose arguments carry the post id (a mint carries
@@ -577,7 +593,7 @@ test.describe('05.3 Reels', () => {
     );
   });
 
-  test('e7 comments: the threaded sheet opens over Reels, pauses the video, and closing resumes it', async ({
+  test('e7 comments: the threaded sheet opens over Reels, pauses the video, and closing resumes it (2026-10-23: beside the desktop player, a panel that pauses nothing)', async ({
     page,
   }, testInfo) => {
     const mobile = isMobile(testInfo.project.name);
@@ -586,19 +602,38 @@ test.describe('05.3 Reels', () => {
     const { postId } = await freshVideo(caption);
     await createFeedCommentAs(users.demoAdmin, postId, `${PREFIX} e7: um comentario raiz.`);
     await openReels(page, mobile);
-    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption);
+    await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(caption);
     await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
 
-    await currentPage(page).getByRole('button', { name: F.actions.comment }).click();
-    const sheet = page.getByRole('dialog', { name: F.comments.title });
-    await expect(sheet).toBeVisible();
-    // D-59: the feed's THREADED sheet — a root carries the reply affordance the flat variant lacks.
-    await expect(sheet.getByRole('button', { name: F.comments.reply }).first()).toBeVisible();
-    // UI-D-90: the open sheet is a pause source.
-    await expect.poll(() => playerProperty(page, 'paused')).toBe(true);
+    await currentPieces(page).getByRole('button', { name: F.actions.comment }).click();
+    if (mobile) {
+      const sheet = page.getByRole('dialog', { name: F.comments.title });
+      await expect(sheet).toBeVisible();
+      // D-59: the feed's THREADED sheet — a root carries the reply affordance the flat variant lacks.
+      await expect(sheet.getByRole('button', { name: F.comments.reply }).first()).toBeVisible();
+      // UI-D-90: the open sheet is a pause source.
+      await expect.poll(() => playerProperty(page, 'paused')).toBe(true);
 
+      await page.keyboard.press('Escape');
+      await expect(sheet).toHaveCount(0);
+      await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
+      return;
+    }
+
+    // The desktop project is 1280 px wide (xl): the YouTube Shorts layout puts the same threaded
+    // list in a panel beside the player. No dialog, and the video keeps playing.
+    const panel = page.getByRole('complementary', { name: F.comments.title });
+    await expect(panel).toBeVisible();
+    await expect(page.getByRole('dialog', { name: F.comments.title })).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: F.comments.reply }).first()).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(await playerProperty(page, 'paused')).toBe(false);
+
+    // Escape inside the panel closes it, and only it.
+    await panel.getByRole('heading', { name: F.comments.title }).focus();
     await page.keyboard.press('Escape');
-    await expect(sheet).toHaveCount(0);
+    await expect(panel).toHaveCount(0);
+    await expect(stage(page)).toBeVisible();
     await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
   });
 
@@ -615,9 +650,9 @@ test.describe('05.3 Reels', () => {
     const caption = `${PREFIX} e8 compartilhar.`;
     const { postId } = await freshVideo(caption);
     await openReels(page, mobile);
-    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption);
+    await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(caption);
 
-    await currentPage(page).getByRole('button', { name: F.actions.share }).click();
+    await currentPieces(page).getByRole('button', { name: F.actions.share }).click();
     await expect(page.getByText(F.share.copied, { exact: true })).toBeVisible();
     const copied = await page.evaluate(() => navigator.clipboard.readText());
     // D-130 / FEED-07: the VERIFIED primary origin, not the `http://…:3000` the tab is on.
@@ -633,12 +668,16 @@ test.describe('05.3 Reels', () => {
     await openReels(page, mobile);
 
     // "Todos" opens on a tenant-wide video (every fixture video in no community is newer than A/B).
-    const block = currentPage(page).locator('[data-reel-caption]');
+    const block = currentPieces(page).locator('[data-reel-caption]');
     const authorName = (await block.getByRole('link').first().textContent()) ?? '';
     expect(authorName).not.toBe('');
-    await expect(
-      currentPage(page).getByRole('link', { name: R.rail.author.replace('{name}', authorName) }),
-    ).toHaveAttribute('href', profile);
+    // The rail's avatar is the phone's (over the video); beside the desktop player (2026-10-23)
+    // the caption block carries the author, by name.
+    if (mobile) {
+      await expect(
+        currentPage(page).getByRole('link', { name: R.rail.author.replace('{name}', authorName) }),
+      ).toHaveAttribute('href', profile);
+    }
     await expect(block.getByRole('link', { name: authorName, exact: true })).toHaveAttribute(
       'href',
       profile,
@@ -647,8 +686,8 @@ test.describe('05.3 Reels', () => {
     await expect(block.locator('a[aria-label]')).toHaveCount(0);
 
     await laneTab(page, NAME_A).click();
-    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_A);
-    const chip = currentPage(page).locator('[data-reel-caption] a[aria-label]');
+    await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_A);
+    const chip = currentPieces(page).locator('[data-reel-caption] a[aria-label]');
     await expect(chip).toHaveText(NAME_A);
     await expect(chip).toHaveAttribute('href', `/comunidades/${fixture.communityA}`);
   });
@@ -680,8 +719,8 @@ test.describe('05.3 Reels', () => {
     await freshVideo(caption);
     await openReels(page, mobile, { direct: true });
 
-    const text = currentPage(page).locator('[data-reel-caption-text]');
-    const more = currentPage(page).getByRole('button', { name: F.caption.more });
+    const text = currentPieces(page).locator('[data-reel-caption-text]');
+    const more = currentPieces(page).getByRole('button', { name: F.caption.more });
     await expect(more).toBeVisible();
     // Collapsed is exactly two rendered lines.
     const lines = await text.evaluate(
@@ -690,7 +729,7 @@ test.describe('05.3 Reels', () => {
     expect(Math.round(lines)).toBe(2);
 
     await more.click();
-    const less = currentPage(page).getByRole('button', { name: R.caption.less });
+    const less = currentPieces(page).getByRole('button', { name: R.caption.less });
     await expect(less).toBeVisible();
     const box = await text.boundingBox();
     if (!box) throw new Error('the caption has no box');
@@ -742,12 +781,12 @@ test.describe('05.3 Reels', () => {
       // The second-to-last lane by a tap, then the last one by a horizontal swipe (left = next).
       await tabs.nth(-2).click();
       await expect(tabs.nth(-2)).toHaveAttribute('aria-selected', 'true');
-      await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(
+      await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(
         `${local} video 5.`,
       );
       await drag(page, 0, -120);
       await expect(tabs.last()).toHaveAttribute('aria-selected', 'true');
-      await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(
+      await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(
         `${local} video 6.`,
       );
 
@@ -889,11 +928,11 @@ test.describe('05.3 Reels', () => {
 
     await page.unroute('**/reels');
     await stage(page).getByRole('button', { name: R.errors.retry }).click();
-    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_A);
+    await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_A);
     await expect(stage(page).getByText(R.errors.load, { exact: true })).toHaveCount(0);
   });
 
-  test('e16 md boundary: the ↑/↓ buttons render beside the column at 768 px and not at 767 px', async ({
+  test('e16 md boundary: the ↑/↓ buttons render at the stage’s edge at 768 px and not at 767 px', async ({
     page,
   }, testInfo) => {
     const mobile = isMobile(testInfo.project.name);
@@ -935,7 +974,7 @@ test.describe('05.3 Reels', () => {
       await openReels(page, mobile);
 
       await laneTab(page, laneName).click();
-      await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(
+      await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(
         `${local} video 1.`,
       );
       for (let n = 2; n <= 7; n += 1) {
@@ -970,7 +1009,7 @@ test.describe('05.3 Reels', () => {
     // What every real upload looks like to the feed: no width and no height (only images are probed).
     await createVideoPostAs(users.demoAdmin, DEMO, caption, { width: null, height: null });
     await openReels(page, mobile);
-    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption);
+    await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(caption);
 
     // Reels is vertical-first: until the proportion is known the video covers the stage. Locally
     // nothing teaches it (the fake provider derives no poster and the stream never answers).
@@ -1061,7 +1100,7 @@ test.describe('05.3 Reels', () => {
       const overlay = page.getByRole('dialog', { name: R.region });
       await expect(overlay).toBeVisible();
       await expect(page).toHaveURL(new RegExp(`/inicio\\?reel=${postId}$`));
-      await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption, {
+      await expect(currentPieces(page).locator('[data-reel-caption-text]')).toHaveText(caption, {
         timeout: 15_000,
       });
       await expect(overlay.getByRole('button', { name: R.backToPost })).toBeVisible();
@@ -1069,7 +1108,7 @@ test.describe('05.3 Reels', () => {
       // The next video, in the feed's order.
       if (mobile) await drag(page, -100);
       else await page.keyboard.press('ArrowDown');
-      await expect(currentPage(page).locator('[data-reel-caption-text]')).not.toHaveText(caption);
+      await expect(currentPieces(page).locator('[data-reel-caption-text]')).not.toHaveText(caption);
 
       // The arrow: the overlay is gone, the address is the feed's, and the post is where it was.
       await overlay.getByRole('button', { name: R.backToPost }).click();

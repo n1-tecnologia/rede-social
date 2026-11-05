@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import { useEffect, useId, useRef, useState } from 'react';
 import { formatMediaLimit, useSignedUpload } from '@/components/media/useSignedUpload';
 import { type MaterialDraft, materialKindsSentence, materialRowView } from '@/lib/courses-view';
+import { DASHED_OVERRIDES } from '../../admin-styles';
 
 export interface MaterialsListProps {
   /** The draft, first to last: saved rows (`materialId`) and fresh uploads (`null`). CONTROLLED. */
@@ -29,12 +30,23 @@ export interface MaterialsListProps {
 
 const ACCEPT = mediaAcceptFor('file', 'attachment');
 const ZONE_ID = 'material-dropzone';
-const ROW = 'flex min-h-14 items-center gap-3 rounded-xl bg-bg-secondary px-3 py-2' as const;
+const ROW =
+  'flex min-h-14 items-center gap-3 rounded-xl border border-border bg-card py-2 pr-1 pl-2.5' as const;
 
-/** The row's glyph by kind (UI-D-399): `Image` for an image, `FileText` for everything else. */
+/**
+ * The row's glyph by kind (UI-D-399): `Image` for an image, `FileText` for everything else — since
+ * 2026-10-22 in a 36px brand-tinted square (the prototype's material rows).
+ */
 function Glyph({ mime }: { mime: string }) {
   const Icon = materialKind(mime) === 'image' ? ImageIcon : FileText;
-  return <Icon aria-hidden size={20} className="shrink-0 text-text-secondary" />;
+  return (
+    <span
+      aria-hidden
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand"
+    >
+      <Icon size={18} />
+    </span>
+  );
 }
 
 /**
@@ -58,6 +70,12 @@ function Glyph({ mime }: { mime: string }) {
  * The arrows, their names, their disabled ends and the focus rules are the `ReorderList`'s (the
  * three protected rules); this component draws the row around them (`renderItem`). Every file name
  * renders as React text and truncates by CSS (T-08.3-25, E10 long-text).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the rows are outlined
+ * blocks with the kind's glyph in a brand-tinted square; the drop zone is a DESKTOP affordance now
+ * (`hidden md:block`: a phone has nothing to drag), so on a phone the dashed "Adicionar arquivo" is
+ * the way in — it still clicks the zone's input, which stays in the page — and the zone's refusal
+ * line is repeated outside it on a phone. Every rule is unchanged.
  */
 export function MaterialsList({
   items,
@@ -209,16 +227,16 @@ export function MaterialsList({
                     data-material-open={row.materialId}
                     disabled={disabled}
                     onClick={() => onOpen(row.materialId as string)}
-                    className="truncate text-left text-sm font-bold text-text underline-offset-2 hover:underline focus-visible:outline-none focus-visible:underline"
+                    className="truncate text-left text-[13px] font-semibold text-text underline-offset-2 hover:underline focus-visible:outline-none focus-visible:underline"
                   >
                     {row.name}
                   </button>
                 ) : (
-                  <span className="truncate text-sm font-bold text-text">{row.name}</span>
+                  <span className="truncate text-[13px] font-semibold text-text">{row.name}</span>
                 )}
                 <span
                   data-material-meta
-                  className="text-xs font-normal text-text-secondary tabular-nums"
+                  className="text-[11px] font-normal text-text-tertiary tabular-nums"
                 >
                   {row.meta}
                 </span>
@@ -279,29 +297,37 @@ export function MaterialsList({
         </p>
       ) : (
         <>
-          <FileDropZone
-            id={ZONE_ID}
-            icon={Paperclip}
-            accept={ACCEPT}
-            maxBytes={MEDIA_LIMITS.file.attachment?.maxBytes}
-            state={uploading ? (upload.state as 'progress' | 'processing') : 'idle'}
-            progress={upload.progress}
-            error={zoneError ?? undefined}
-            disabled={disabled || busy}
-            onFile={pick}
-            onReject={(reason) => upload.reject(reason)}
-            labels={{
-              caption: t('lesson.materials.dropzone'),
-              progress: (percent) => t('lesson.materials.uploading', { percent }),
-              // The server's file check after the bytes landed: the row already reads 100%.
-              processing: t('lesson.materials.uploading', { percent: 100 }),
-            }}
-          />
+          {/* The zone is a desktop affordance; its input stays in the page for the button below. */}
+          <div className="hidden md:block">
+            <FileDropZone
+              id={ZONE_ID}
+              icon={Paperclip}
+              accept={ACCEPT}
+              maxBytes={MEDIA_LIMITS.file.attachment?.maxBytes}
+              state={uploading ? (upload.state as 'progress' | 'processing') : 'idle'}
+              progress={upload.progress}
+              error={zoneError ?? undefined}
+              disabled={disabled || busy}
+              onFile={pick}
+              onReject={(reason) => upload.reject(reason)}
+              labels={{
+                caption: t('lesson.materials.dropzone'),
+                progress: (percent) => t('lesson.materials.uploading', { percent }),
+                // The server's file check after the bytes landed: the row already reads 100%.
+                processing: t('lesson.materials.uploading', { percent: 100 }),
+              }}
+            />
+          </div>
+          {zoneError ? (
+            <p role="alert" className="text-sm font-normal text-danger md:hidden">
+              {zoneError}
+            </p>
+          ) : null}
           <Button
             type="button"
             variant="outline"
             size="md"
-            className="self-start"
+            className={DASHED_OVERRIDES}
             data-materials-add
             disabled={disabled || busy}
             onClick={() => document.getElementById(ZONE_ID)?.click()}

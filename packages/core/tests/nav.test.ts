@@ -1,18 +1,39 @@
-import { Bell, GraduationCap, LayoutGrid, ShoppingBag } from 'lucide-react';
+import {
+  Bell,
+  GraduationCap,
+  LayoutGrid,
+  PackageCheck,
+  Radio,
+  Route,
+  ShoppingBag,
+  SlidersHorizontal,
+  TrendingUp,
+} from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 import {
+  activeArea,
   activeTabChrome,
   activeTabKey,
   buildNav,
   iconFor,
   isNavItemActive,
+  type NavArea,
+  type NavItem,
   type NavLabels,
   type NavModule,
   type ShellNav,
+  withAreas,
   withCollapsingTabs,
+  isFixedTopSlot,
+  phoneBarItems,
+  phoneChrome,
+  withPhoneLayout,
+  withPhoneTabSlots,
+  withRailMainSlots,
   withTabDots,
   withTabOverrides,
 } from '../ui';
+import { isAreaScreenCurrent, isAreaScreenHere } from '../ui/nav';
 
 /**
  * MOD-04 / D-40: the shell's navigation is a pure function of the bootstrap's ENABLED module entries.
@@ -261,13 +282,17 @@ describe('the Cursos tab and the Reels demotion (08.5-11: D-401, D-419, UI-D-423
   ];
   const keys = (items: ReadonlyArray<{ key: string }>) => items.map((item) => item.key);
 
-  it('EP-01 (boundary): with courses present Reels is a slot and not a tab; with it absent Reels is a tab and the topbar is unchanged', () => {
+  // 2026-10-23 (the product owner's call): the full row keeps Reels as a TAB and marks the kernel
+  // Perfil `railOnly` (the phone's BottomNav drops it; the TopBar's avatar is its door).
+  it('EP-01 (boundary): with courses present Reels stays a tab and Perfil turns railOnly; with it absent the row is the old one, Perfil included', () => {
     const on = buildNav([reels, ...base, courses], labels);
-    expect(keys(on.tabs)).not.toContain('reels');
-    expect(keys(on.topbar)).toContain('reels');
+    expect(keys(on.tabs)).toContain('reels');
+    expect(keys(on.topbar)).not.toContain('reels');
     expect(keys(on.tabs)).toContain('courses');
+    expect(on.tabs.find((tab) => tab.key === 'profile')?.railOnly).toBe(true);
 
     const off = buildNav([reels, ...base], labels);
+    expect(off.tabs.find((tab) => tab.key === 'profile')?.railOnly).toBeUndefined();
     expect(keys(off.tabs)).toEqual(['home', 'communities', 'reels', 'events', 'profile']);
     expect(keys(off.topbar)).toEqual(['store', 'notifications', 'chat']);
     // D-401: courses off is exactly the bar before this phase (the same nav without the new fields).
@@ -285,11 +310,25 @@ describe('the Cursos tab and the Reels demotion (08.5-11: D-401, D-419, UI-D-423
     expect(off).toEqual(buildNav([plainReels, ...base], labels));
   });
 
-  it('EP-02 (adjacency): Cursos and Reels share order 30; with both on the tab keys are exactly home, communities, courses, events, profile, and the topbar starts with reels', () => {
+  it('EP-02 (adjacency): Cursos and Reels share order 30 (key order breaks the tie); with both on the row is home, communities, courses, reels, events, profile (railOnly), and the topbar has no Reels', () => {
     expect(reels.nav?.order).toBe(courses.nav?.order);
     const nav = buildNav([reels, ...base, courses], labels);
-    expect(keys(nav.tabs)).toEqual(['home', 'communities', 'courses', 'events', 'profile']);
-    expect(keys(nav.topbar)[0]).toBe('reels');
+    expect(keys(nav.tabs)).toEqual([
+      'home',
+      'communities',
+      'courses',
+      'reels',
+      'events',
+      'profile',
+    ]);
+    expect(keys(nav.tabs.filter((tab) => !tab.railOnly))).toEqual([
+      'home',
+      'communities',
+      'courses',
+      'reels',
+      'events',
+    ]);
+    expect(keys(nav.topbar)).toEqual(['store', 'notifications', 'chat']);
     // No duplicate slot anywhere: every key renders once across both rows.
     const all = keys([...nav.tabs, ...nav.topbar]);
     expect(new Set(all).size).toBe(all.length);
@@ -316,13 +355,13 @@ describe('the Cursos tab and the Reels demotion (08.5-11: D-401, D-419, UI-D-423
     expect(reelsOnly.topbar).toEqual([]);
   });
 
-  it('EP-04 (ordering): the demoted topbar reads reels (1), store (5), notifications (10), chat (20), stable across calls and input orders', () => {
+  it('EP-04 (ordering): the full row and the topbar (store 5, notifications 10, chat 20) are stable across calls and input orders', () => {
     const first = buildNav([reels, ...base, courses], labels);
     const second = buildNav([courses, ...[...base].reverse(), reels], labels);
-    expect(keys(first.topbar)).toEqual(['reels', 'store', 'notifications', 'chat']);
+    expect(keys(first.topbar)).toEqual(['store', 'notifications', 'chat']);
     expect(second).toEqual(first);
-    // The yielded slot keeps its media chrome and carries no badge; the kernel item has no yield fields.
-    expect(first.topbar[0]).toEqual({
+    // The Reels tab keeps its media chrome and carries no yield field.
+    expect(first.tabs.find((tab) => tab.key === 'reels')).toEqual({
       key: 'reels',
       href: '/reels',
       icon: 'film',
@@ -359,13 +398,12 @@ describe('the Cursos tab and the Reels demotion (08.5-11: D-401, D-419, UI-D-423
     expect(mutual.topbar).toEqual([]);
   });
 
-  it('UI-D-423: the chrome of /reels read over [...tabs, ...topbar] is media while no tab is aria-current', () => {
+  it('UI-D-423: the chrome of /reels is media and the Reels tab is current (2026-10-23: it keeps its tab)', () => {
     const { tabs, topbar } = buildNav([reels, ...base, courses], labels);
     expect(activeTabChrome([...tabs, ...topbar], '/reels')).toBe('media');
     expect(activeTabChrome([...tabs, ...topbar], '/reels/abc')).toBe('media');
-    expect(activeTabKey(tabs, '/reels')).toBeNull();
-    // Tabs alone no longer carry the media entry: the lookup must be given the slots.
-    expect(activeTabChrome(tabs, '/reels')).toBeNull();
+    expect(activeTabKey(tabs, '/reels')).toBe('reels');
+    expect(activeTabChrome(tabs, '/reels')).toBe('media');
     // The Cursos tab is the active one under /cursos, in the normal chrome.
     expect(activeTabKey(tabs, '/cursos')).toBe('courses');
     expect(activeTabKey(tabs, '/cursos/abc/aulas/def')).toBe('courses');
@@ -441,6 +479,138 @@ describe('withCollapsingTabs (2026-10-03: the host folds the BottomNav over a ta
   });
 });
 
+describe('withRailMainSlots (2026-10-23: the host moves a slot up into the rail navigation)', () => {
+  const nav = buildNav(
+    [
+      ...modules,
+      {
+        key: 'store',
+        nav: { order: 5, placement: 'topbar', href: '/loja', icon: 'shopping-bag', label: 'Loja' },
+      },
+    ],
+    labels,
+  );
+
+  it('marks only the named slot, keeps the row order and never touches the tabs or the input', () => {
+    const moved = withRailMainSlots(nav, ['store']);
+    expect(moved.topbar.map((slot) => [slot.key, slot.railMain ?? false])).toEqual([
+      ['notifications', false],
+      ['store', true],
+    ]);
+    expect(moved.tabs).toBe(nav.tabs);
+    expect(nav.topbar.some((slot) => slot.railMain)).toBe(false);
+  });
+
+  it('ignores a tab key and a key with no slot', () => {
+    const moved = withRailMainSlots(nav, ['communities', 'chat']);
+    expect(moved.topbar.some((slot) => slot.railMain)).toBe(false);
+    expect(moved.tabs.some((tab) => tab.railMain)).toBe(false);
+  });
+});
+
+describe('withPhoneTabSlots (2026-10-28: the host moves a slot down into the phone BottomNav)', () => {
+  const nav = buildNav(
+    [
+      ...modules,
+      {
+        key: 'store',
+        nav: { order: 5, placement: 'topbar', href: '/loja', icon: 'shopping-bag', label: 'Loja' },
+      },
+    ],
+    labels,
+  );
+
+  it('marks only the named slot, keeps the row order and never touches the tabs or the input', () => {
+    const moved = withPhoneTabSlots(nav, ['store']);
+    expect(moved.topbar.map((slot) => [slot.key, slot.phoneTab ?? false])).toEqual([
+      ['notifications', false],
+      ['store', true],
+    ]);
+    expect(moved.tabs).toBe(nav.tabs);
+    expect(nav.topbar.some((slot) => slot.phoneTab)).toBe(false);
+  });
+
+  it('ignores a tab key and a key with no slot, and keeps a railMain mark it is given', () => {
+    const moved = withPhoneTabSlots(nav, ['communities', 'chat']);
+    expect(moved.topbar.some((slot) => slot.phoneTab)).toBe(false);
+    expect(moved.tabs.some((tab) => tab.phoneTab)).toBe(false);
+    const both = withPhoneTabSlots(withRailMainSlots(nav, ['store']), ['store']);
+    const store = both.topbar.find((slot) => slot.key === 'store');
+    expect([store?.railMain, store?.phoneTab]).toEqual([true, true]);
+  });
+});
+
+describe('phoneChrome and withPhoneLayout (2026-11-05: the phone menu the administrator arranges)', () => {
+  const nav = withPhoneTabSlots(
+    buildNav(
+      [
+        ...modules,
+        {
+          key: 'store',
+          nav: {
+            order: 5,
+            placement: 'topbar',
+            href: '/loja',
+            icon: 'shopping-bag',
+            label: 'Loja',
+          },
+        },
+      ],
+      labels,
+    ),
+    ['store'],
+  );
+  const keys = (items: { key: string }[]) => items.map((item) => item.key);
+
+  it("without a layout: the shell's own bar and top", () => {
+    expect(keys(phoneBarItems(nav.tabs, nav.topbar))).toEqual([
+      'home',
+      'communities',
+      'events',
+      'profile',
+      'store',
+    ]);
+    const chrome = phoneChrome(nav.tabs, nav.topbar);
+    expect(keys(chrome.bar)).toEqual(['home', 'communities', 'events', 'profile', 'store']);
+    expect(keys(chrome.top)).toEqual(['notifications']);
+  });
+
+  it('with a layout: the bar and the top in its order, the counter slots always at the top', () => {
+    const chrome = phoneChrome(nav.tabs, nav.topbar, {
+      bar: ['store', 'home', 'gone'],
+      top: ['events', 'notifications'],
+      hidden: ['profile'],
+    });
+    // Comunidades, named nowhere, keeps its place after the named ones.
+    expect(keys(chrome.bar)).toEqual(['store', 'home', 'communities']);
+    // A counter slot cannot be placed: it stays at the top, after the chosen ones.
+    expect(keys(chrome.top)).toEqual(['events', 'notifications']);
+    expect(nav.topbar.find((slot) => slot.key === 'notifications')).toSatisfy(isFixedTopSlot);
+  });
+
+  it('a key keeps its first list, and a layout that empties the bar is not applied', () => {
+    const chrome = phoneChrome(nav.tabs, nav.topbar, {
+      bar: ['home', 'events'],
+      top: ['events', 'store'],
+      hidden: [],
+    });
+    expect(keys(chrome.bar)).toEqual(['home', 'events', 'communities', 'profile']);
+    expect(keys(chrome.top)).toEqual(['store', 'notifications']);
+    const empty = phoneChrome(nav.tabs, nav.topbar, {
+      bar: [],
+      top: [],
+      hidden: ['home', 'communities', 'events', 'profile', 'store'],
+    });
+    expect(keys(empty.bar)).toEqual(keys(phoneChrome(nav.tabs, nav.topbar).bar));
+  });
+
+  it('withPhoneLayout keeps the layout, and null leaves the nav as it was', () => {
+    const layout = { bar: ['home'], top: [], hidden: [] };
+    expect(withPhoneLayout(nav, layout).phoneLayout).toBe(layout);
+    expect(withPhoneLayout(nav, null)).toBe(nav);
+  });
+});
+
 describe('iconFor (serialisable icon names → lucide components)', () => {
   it('maps the known names and falls back to a neutral glyph without throwing', () => {
     expect(iconFor('bell')).toBe(Bell);
@@ -463,9 +633,26 @@ describe('iconFor (serialisable icon names → lucide components)', () => {
       'log-out',
       'shopping-bag',
       'graduation-cap',
+      'route',
+      'radio',
+      'trending-up',
+      'sliders-horizontal',
+      'package-check',
     ]) {
       expect(iconFor(name), name).not.toBe(LayoutGrid);
     }
+  });
+
+  it('2026-10-22: the courses area screens wear the prototype glyphs (Trilhas, Lives, Progresso)', () => {
+    expect(iconFor('route')).toBe(Route);
+    expect(iconFor('radio')).toBe(Radio);
+    expect(iconFor('trending-up')).toBe(TrendingUp);
+  });
+
+  it('2026-10-24: the store area screens wear their glyphs (Produtos, Comprados, Gerenciar)', () => {
+    expect(iconFor('shopping-bag')).toBe(ShoppingBag);
+    expect(iconFor('package-check')).toBe(PackageCheck);
+    expect(iconFor('sliders-horizontal')).toBe(SlidersHorizontal);
   });
 });
 
@@ -575,14 +762,15 @@ describe('withTabOverrides composed over the courses fixture', () => {
   };
   const keys = (items: ReadonlyArray<{ key: string }>) => items.map((item) => item.key);
 
-  it('keeps the tab key, order and neighbours, the Reels yield, and marks the tab current across both paths', () => {
+  it('keeps the tab key, order and neighbours, the full row (Reels a tab, Perfil railOnly), and marks the tab current across both paths', () => {
     const built = buildNav([reels, courses, events], labels);
     const nav = withTabOverrides(built, {
       courses: { href: '/area', label: 'Membros', matches: ['/cursos'] },
     });
     expect(keys(nav.tabs)).toEqual(keys(built.tabs));
-    expect(keys(nav.tabs)).toEqual(['home', 'courses', 'events', 'profile']);
-    expect(keys(nav.topbar)).toEqual(['reels']);
+    expect(keys(nav.tabs)).toEqual(['home', 'courses', 'reels', 'events', 'profile']);
+    expect(nav.tabs.find((t) => t.key === 'profile')?.railOnly).toBe(true);
+    expect(nav.topbar).toEqual([]);
     expect(nav.tabs.find((t) => t.key === 'courses')).toMatchObject({
       href: '/area',
       label: 'Membros',
@@ -591,6 +779,224 @@ describe('withTabOverrides composed over the courses fixture', () => {
     expect(activeTabKey(nav.tabs, '/area')).toBe('courses');
     expect(activeTabKey(nav.tabs, '/cursos/abc/aulas/def')).toBe('courses');
     expect(activeTabKey(nav.tabs, '/eventos')).toBe('events');
-    expect(activeTabKey(nav.tabs, '/reels')).toBeNull();
+    expect(activeTabKey(nav.tabs, '/reels')).toBe('reels');
+  });
+});
+
+/**
+ * 2026-10-22 — the courses area: a tab may declare several areas under its key (`NavArea.within`).
+ * A manager's courses tab is "Cursos" (the authoring screens) everywhere and "Membros" (the member's
+ * screens, every link in preview) under the member area's path; Eventos keeps its single area.
+ */
+describe('areas with variants (NavArea.within)', () => {
+  const tabs: NavItem[] = [
+    { key: 'home', href: '/inicio', icon: 'home', label: 'Início' },
+    {
+      key: 'courses',
+      href: '/cursos',
+      icon: 'graduation-cap',
+      label: 'Cursos',
+      matches: ['/area-membros'],
+    },
+    { key: 'events', href: '/eventos', icon: 'calendar-days', label: 'Eventos' },
+  ];
+  const screen = (key: string, href: string): NavItem => ({ key, href, icon: 'home', label: key });
+  const authoring: NavArea = {
+    key: 'courses',
+    label: 'Cursos',
+    menuLabel: 'Menu de Cursos',
+    screens: [
+      screen('admin-cursos', '/cursos'),
+      screen('admin-trilhas', '/cursos/trilhas'),
+      screen('admin-lives', '/cursos/lives'),
+    ],
+  };
+  const preview: NavArea = {
+    key: 'courses',
+    label: 'Membros',
+    menuLabel: 'Menu de Membros',
+    within: ['/area-membros'],
+    screens: [
+      screen('member-inicio', '/area-membros?ver=aluno'),
+      screen('member-trilhas', '/area-membros/trilhas?ver=aluno'),
+    ],
+  };
+  const events: NavArea = {
+    key: 'events',
+    label: 'Eventos',
+    menuLabel: 'Menu de Eventos',
+    screens: [screen('events-list', '/eventos')],
+  };
+
+  it('withAreas keeps two areas under the same tab key, each on its own terms', () => {
+    const nav = withAreas({ tabs, topbar: [] }, [authoring, preview, events]);
+    expect(nav.areas?.map((area) => [area.key, area.label])).toEqual([
+      ['courses', 'Cursos'],
+      ['courses', 'Membros'],
+      ['events', 'Eventos'],
+    ]);
+    // An area with no screens, or for a tab or slot the shell does not have, is still dropped.
+    const dropped = withAreas({ tabs, topbar: [] }, [
+      { ...preview, screens: [] },
+      { ...authoring, key: 'store' },
+    ]);
+    expect(dropped.areas).toBeUndefined();
+  });
+
+  it('activeArea picks the variant whose within holds the path, else the plain one', () => {
+    const areas = [authoring, preview, events];
+    expect(activeArea(tabs, areas, '/area-membros')?.label).toBe('Membros');
+    expect(activeArea(tabs, areas, '/area-membros/trilhas')?.label).toBe('Membros');
+    expect(activeArea(tabs, areas, '/cursos')?.label).toBe('Cursos');
+    expect(activeArea(tabs, areas, '/cursos/trilhas/nova')?.label).toBe('Cursos');
+    expect(activeArea(tabs, areas, '/cursos/abc/aulas/def')?.label).toBe('Cursos');
+    expect(activeArea(tabs, areas, '/eventos/123')).toBe(events);
+    expect(activeArea(tabs, areas, '/inicio')).toBeNull();
+    expect(activeArea(tabs, areas, '/configuracoes')).toBeNull();
+  });
+
+  it('the order of the variants does not decide: the path does', () => {
+    expect(activeArea(tabs, [preview, authoring], '/cursos/lives')?.label).toBe('Cursos');
+    expect(activeArea(tabs, [preview, authoring], '/area-membros/lives')?.label).toBe('Membros');
+  });
+
+  it('a tab whose only area is scoped elsewhere has no area outside that scope', () => {
+    expect(activeArea(tabs, [preview], '/cursos')).toBeNull();
+    expect(activeArea(tabs, [preview], '/area-membros/progresso')).toBe(preview);
+  });
+
+  it('an area without within answers as before (Eventos), and no areas means no area', () => {
+    expect(activeArea(tabs, [events], '/eventos')).toBe(events);
+    expect(activeArea(tabs, undefined, '/eventos')).toBeNull();
+    expect(activeArea(tabs, [], '/eventos')).toBeNull();
+    // An empty within reads as the plain variant.
+    const empty: NavArea = { ...events, within: [] };
+    expect(activeArea(tabs, [empty], '/eventos/fotos')).toBe(empty);
+  });
+});
+
+/**
+ * 2026-10-24 — the Loja area: a TopBar SLOT may own an area (the store's "· Loja": Produtos,
+ * Comprados and the manager's Gerenciar). A tab always wins: the slot's area applies only on the
+ * pages no tab claims, and only when the caller hands `activeArea` the slots.
+ */
+describe('areas owned by a TopBar slot (2026-10-24: the Loja)', () => {
+  const tabs: NavItem[] = [
+    { key: 'home', href: '/inicio', icon: 'home', label: 'Início' },
+    { key: 'events', href: '/eventos', icon: 'calendar-days', label: 'Eventos' },
+    { key: 'profile', href: '/perfil', icon: 'user', label: 'Perfil' },
+  ];
+  const storeSlot: NavItem = { key: 'store', href: '/loja', icon: 'shopping-bag', label: 'Loja' };
+  const bellSlot: NavItem = {
+    key: 'notifications',
+    href: '/notificacoes',
+    icon: 'bell',
+    label: 'Notificações',
+    badge: 'unreadNotifications',
+  };
+  const slots = [storeSlot, bellSlot];
+  const screen = (key: string, href: string, icon: string): NavItem => ({
+    key,
+    href,
+    icon,
+    label: key,
+  });
+  const store: NavArea = {
+    key: 'store',
+    label: 'Loja',
+    menuLabel: 'Menu da Loja',
+    screens: [
+      screen('store-products', '/loja', 'shopping-bag'),
+      screen('store-purchases', '/loja/comprados', 'package-check'),
+      screen('store-manage', '/loja/gerenciar', 'sliders-horizontal'),
+    ],
+  };
+  const events: NavArea = {
+    key: 'events',
+    label: 'Eventos',
+    menuLabel: 'Menu de Eventos',
+    screens: [screen('events-list', '/eventos', 'calendar-days')],
+  };
+  const areas = [store, events];
+
+  it('withAreas keeps the store area while the shell has the store slot, and drops it without', () => {
+    expect(withAreas({ tabs, topbar: slots }, areas).areas).toEqual([store, events]);
+    expect(withAreas({ tabs, topbar: [bellSlot] }, [store]).areas).toBeUndefined();
+    expect(withAreas({ tabs, topbar: [] }, [store]).areas).toBeUndefined();
+    // Without screens it is dropped, slot or not.
+    expect(withAreas({ tabs, topbar: slots }, [{ ...store, screens: [] }]).areas).toBeUndefined();
+  });
+
+  it('activeArea, given the slots, is the store area on the pages no tab claims', () => {
+    for (const path of [
+      '/loja',
+      '/loja/comprados',
+      '/loja/gerenciar',
+      '/loja/6f2c5b1e-4d3a-4c2b-9e8f-1a2b3c4d5e6f/compradores',
+    ]) {
+      expect(activeArea(tabs, areas, path, slots), path).toBe(store);
+    }
+    expect(activeArea(tabs, areas, '/inicio', slots)).toBeNull();
+    expect(activeArea(tabs, areas, '/configuracoes', slots)).toBeNull();
+    // A slot without an area of its own, or a path that only shares the prefix, has none.
+    expect(activeArea(tabs, areas, '/notificacoes', slots)).toBeNull();
+    expect(activeArea(tabs, areas, '/lojas', slots)).toBeNull();
+    // The tabs' areas answer as before.
+    expect(activeArea(tabs, areas, '/eventos/123', slots)).toBe(events);
+  });
+
+  it('a tab always wins: a slot under a tab gets the tab area, or none when that tab has none', () => {
+    const underEvents: NavItem = { ...storeSlot, href: '/eventos/loja' };
+    expect(activeArea(tabs, areas, '/eventos/loja', [underEvents])).toBe(events);
+    expect(activeArea(tabs, areas, '/eventos/loja/comprados', [underEvents])).toBe(events);
+    const underHome: NavItem = { ...storeSlot, href: '/inicio/loja' };
+    expect(activeArea(tabs, areas, '/inicio/loja', [underHome])).toBeNull();
+  });
+
+  it('with the old three arguments a slot area never applies', () => {
+    for (const path of ['/loja', '/loja/comprados', '/loja/gerenciar']) {
+      expect(activeArea(tabs, areas, path), path).toBeNull();
+    }
+    expect(activeArea(tabs, areas, '/eventos')).toBe(events);
+  });
+});
+
+describe('isAreaScreenHere (2026-10-22: a screen is marked by its path)', () => {
+  it('ignores the query and the hash of the screen href', () => {
+    expect(isAreaScreenHere('/area-membros', '/area-membros?ver=aluno')).toBe(true);
+    expect(
+      isAreaScreenHere('/area-membros/trilhas', '/area-membros/trilhas?trilha=T&ver=aluno'),
+    ).toBe(true);
+    expect(isAreaScreenHere('/eventos/fotos', '/eventos/fotos#topo')).toBe(true);
+    expect(isAreaScreenHere('/eventos/meus', '/eventos/meus')).toBe(true);
+  });
+
+  it('a sub-path, a parent or a sibling is not the screen', () => {
+    expect(isAreaScreenHere('/area-membros/cursos', '/area-membros')).toBe(false);
+    expect(isAreaScreenHere('/eventos/6f2c', '/eventos')).toBe(false);
+    expect(isAreaScreenHere('/cursos', '/cursos/trilhas')).toBe(false);
+    expect(isAreaScreenHere('/cursos/lives', '/cursos/livesx')).toBe(false);
+  });
+});
+
+describe('isAreaScreenCurrent (2026-10-23: a screen may gather pages by exact paths)', () => {
+  const manage = {
+    href: '/cursos/gerenciar',
+    matches: ['/cursos', '/cursos/trilhas', '/cursos/lives', '/cursos/categorias'],
+  };
+
+  it('is its own page or one of its exact matches', () => {
+    expect(isAreaScreenCurrent('/cursos/gerenciar', manage)).toBe(true);
+    for (const path of manage.matches) expect(isAreaScreenCurrent(path, manage)).toBe(true);
+  });
+
+  it('a detail page under a match is not the screen (matches are not prefixes here)', () => {
+    expect(isAreaScreenCurrent('/cursos/6f2c', manage)).toBe(false);
+    expect(isAreaScreenCurrent('/cursos/lives/6f2c', manage)).toBe(false);
+  });
+
+  it('a screen without matches is its path alone', () => {
+    expect(isAreaScreenCurrent('/area-membros', { href: '/area-membros?ver=aluno' })).toBe(true);
+    expect(isAreaScreenCurrent('/area-membros/cursos', { href: '/area-membros' })).toBe(false);
   });
 });

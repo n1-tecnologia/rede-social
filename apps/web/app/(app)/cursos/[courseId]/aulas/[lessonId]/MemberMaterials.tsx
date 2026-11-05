@@ -1,7 +1,8 @@
 'use client';
 
 import type { MaterialKind } from '@rede-social/module-courses/contracts';
-import { Card, IconButton, SectionTitle, useToast } from '@rede-social/ui';
+import { MEMBER_CARD } from '@rede-social/module-courses/ui';
+import { Card, cn, IconButton, useToast } from '@rede-social/ui';
 import {
   Download,
   FileSpreadsheet,
@@ -13,6 +14,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import { learnMaterialUrlAction } from '@/app/(app)/cursos/learn-actions';
+import { MemberSectionHeader } from '@/app/(app)/cursos/MemberSection';
 import type { MemberMaterialView } from '@/lib/courses-member-view';
 import { useLessonSession } from './LessonSession';
 
@@ -33,6 +35,11 @@ import { useLessonSession } from './LessonSession';
  * reaction. The URL is never kept: it lives in this closure for one navigation.
  *
  * The host renders the section only when the lesson has at least one material (E09 empty).
+ *
+ * **2026-10-22 (the courses area redesign on the social-igoralves prototype).** The 17/800 title row
+ * with the count on the right (`MemberSectionHeader`), and the rows in one outlined card: the kind
+ * glyph in a square on the brand tint (in the dark ink), the name and its meta, and the download as
+ * a round button on the input ground (still the 44px `IconButton`, "Baixar {file}").
  */
 export interface MemberMaterialsProps {
   lessonId: string;
@@ -88,30 +95,27 @@ export function MemberMaterials({ lessonId, materials, countLabel, title }: Memb
     <section
       aria-labelledby="lesson-materials"
       data-testid="lesson-materials"
-      className="flex flex-col gap-3 px-4"
+      className="flex flex-col"
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <SectionTitle id="lesson-materials">{title ?? t('materials')}</SectionTitle>
-        <span
-          data-testid="lesson-materials-count"
-          className="shrink-0 text-xs font-normal text-text-tertiary tabular-nums"
-        >
-          {countLabel}
-        </span>
-      </div>
-      <Card className="p-0">
-        <ul aria-labelledby="lesson-materials" className="flex flex-col divide-y divide-divider">
+      <MemberSectionHeader
+        id="lesson-materials"
+        title={title ?? t('materials')}
+        count={countLabel}
+        countTestId="lesson-materials-count"
+      />
+      <Card className={cn(MEMBER_CARD, 'ms-panel mx-4 rounded-2xl p-1.5')}>
+        <ul aria-labelledby="lesson-materials" className="flex flex-col gap-1">
           {materials.map((material) => {
             const Glyph = KIND_GLYPH[material.kind];
             return (
               <li
                 key={material.id}
                 data-testid="lesson-material-row"
-                className="flex min-h-14 items-center gap-3 px-3 py-2"
+                className="flex min-h-16 items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-bg-hover"
               >
                 <span
                   aria-hidden
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-bg-tertiary text-text-secondary"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-text"
                 >
                   <Glyph size={18} />
                 </span>
@@ -134,7 +138,7 @@ export function MemberMaterials({ lessonId, materials, countLabel, title }: Memb
                   disabled={pendingId === material.id}
                   aria-busy={pendingId === material.id}
                   onClick={() => void open(material.id)}
-                  className="shrink-0 text-text-secondary"
+                  className="ms-chip-surface shrink-0 rounded-full bg-bg-input text-text-secondary"
                 />
               </li>
             );

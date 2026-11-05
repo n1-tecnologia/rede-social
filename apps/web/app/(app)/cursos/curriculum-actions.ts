@@ -111,6 +111,8 @@ function orderRefusal<T>(outcome: ReorderOutcome<T>): {
 
 function revalidateCourse(courseId: string) {
   revalidatePath('/cursos');
+  // 2026-10-23: the counts on Gerenciar's cards.
+  revalidatePath('/cursos/gerenciar');
   revalidatePath(`/cursos/${courseId}`);
 }
 

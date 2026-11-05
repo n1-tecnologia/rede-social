@@ -1,6 +1,6 @@
 'use client';
 
-import { IconButton } from '@rede-social/ui';
+import { cn, IconButton } from '@rede-social/ui';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
@@ -48,6 +48,10 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
  *
  * The truncation is CSS only (`line-clamp-2`): a 60-character name wraps to a second line and is then
  * clipped, never cut in the string, so a grapheme can never be split (edge: encoding).
+ *
+ * 2026-10-22 (the courses area redesign): the default row is an outlined block on `bg-card` (the
+ * prototype's editor blocks) instead of a filled one, and a host can restyle the arrows
+ * (`arrowClassName`) for a row drawn over art.
  */
 
 export interface ReorderItem {
@@ -96,6 +100,12 @@ export interface ReorderListProps<T extends ReorderItem = ReorderItem> {
   className?: string;
   /** The `data-testid` of the `<ol>`. */
   testId?: string;
+  /**
+   * 2026-10-22: extra classes for every arrow button, merged by `cn` over the `IconButton` (the
+   * module band passes `MODULE_BAND_CONTROL`, so its arrows are glass discs over the art). The
+   * buttons, their names, their `disabled` state and the focus rules do not change.
+   */
+  arrowClassName?: string;
 }
 
 type Direction = 'up' | 'down';
@@ -113,6 +123,7 @@ export function ReorderList<T extends ReorderItem = ReorderItem>({
   renderItem,
   className = 'flex flex-col gap-2',
   testId,
+  arrowClassName,
 }: ReorderListProps<T>) {
   const listRef = useRef<HTMLOListElement>(null);
   const [announcement, setAnnouncement] = useState('');
@@ -169,7 +180,7 @@ export function ReorderList<T extends ReorderItem = ReorderItem>({
         onClick={() => move(item.id, -1)}
         data-reorder-id={item.id}
         data-reorder-move="up"
-        className="shrink-0"
+        className={cn('shrink-0', arrowClassName)}
       />
       <IconButton
         icon={ChevronDown}
@@ -179,7 +190,7 @@ export function ReorderList<T extends ReorderItem = ReorderItem>({
         onClick={() => move(item.id, 1)}
         data-reorder-id={item.id}
         data-reorder-move="down"
-        className="shrink-0"
+        className={cn('shrink-0', arrowClassName)}
       />
     </>
   );
@@ -204,7 +215,7 @@ export function ReorderList<T extends ReorderItem = ReorderItem>({
             <li
               key={item.id}
               data-reorder-row={item.id}
-              className="flex min-h-14 items-center gap-2 rounded-xl bg-bg-secondary py-1.5 pr-1 pl-2"
+              className="flex min-h-14 items-center gap-2 rounded-xl border border-border bg-card py-1.5 pr-1 pl-2"
             >
               {item.thumb !== undefined && item.thumb !== null ? (
                 <span

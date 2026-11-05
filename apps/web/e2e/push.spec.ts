@@ -5,6 +5,7 @@ import notificationMessages from '../messages/pt-BR/notifications.json' with { t
 import pwaMessages from '../messages/pt-BR/pwa.json' with { type: 'json' };
 import { closeAdmin, createMember, deleteUserByEmail } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { untilHydrated } from './hydration';
 import { fakeEndpoint, installFakePush, pushLog } from './push-fake';
 
 /**
@@ -261,10 +262,13 @@ test.describe('push (a browser that can subscribe)', () => {
     await expect.poll(() => subscriptionsOf(users.demoMember)).toEqual([]);
   });
 
-  test('8b. the desktop rail Sair awaits the same cleanup (the kernel BeforeLogout seam)', async ({
+  test('8b. the desktop account menu Sair awaits the same cleanup (the kernel BeforeLogout seam)', async ({
     page,
   }, testInfo) => {
-    test.skip(testInfo.project.name !== 'desktop-chromium', 'the rail exists only on the desktop');
+    test.skip(
+      testInfo.project.name !== 'desktop-chromium',
+      'the desktop header exists only on the desktop',
+    );
     await installFakePush(page, { permission: 'default', answer: 'granted', pushManager: true });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/configuracoes`);
@@ -273,7 +277,14 @@ test.describe('push (a browser that can subscribe)', () => {
     await expect.poll(async () => (await subscriptionsOf(users.demoMember)).length).toBe(1);
 
     await page.goto(`${hosts.demo}/inicio`);
-    await page.locator('aside').getByRole('button', { name: 'Sair' }).click();
+    // Sair is a row of the desktop account menu: the rail's account card at its foot from
+    // 2026-10-23, the desktop header's account button since 2026-10-26.
+    const account = page
+      .locator('header[data-shell-header]')
+      .getByRole('button', { name: 'Menu da conta' });
+    await untilHydrated(account);
+    await account.click();
+    await page.locator('[data-shell-account-menu]').getByRole('button', { name: 'Sair' }).click();
     await expect(page).toHaveURL(/\/entrar$/);
     expect(await pushLog(page)).toContain('unsubscribe');
     await expect.poll(() => subscriptionsOf(users.demoMember)).toEqual([]);

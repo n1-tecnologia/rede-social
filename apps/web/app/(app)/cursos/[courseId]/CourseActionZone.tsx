@@ -1,12 +1,12 @@
 'use client';
 
-import { ProgressBar } from '@rede-social/module-courses/ui';
+import { MEMBER_CARD, ProgressBar } from '@rede-social/module-courses/ui';
 import {
   LockedSection,
   type ProductChoiceItem,
   ProductChoiceSheet,
 } from '@rede-social/module-store/ui';
-import { Button, buttonClasses, Card } from '@rede-social/ui';
+import { Button, buttonClasses, Card, cn } from '@rede-social/ui';
 import { CircleCheck, Play } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import type { CourseActionView } from '@/lib/courses-member-view';
@@ -41,6 +41,12 @@ import type { LockedCourseView } from '@/lib/store-view';
  *
  * Links for routes, buttons for in-place actions (UI-D-443). Every string arrives finished from the
  * server (`courseActionView`, `lockedCourseView`). Client only for the sheet's open state.
+ *
+ * **2026-10-22 (the courses area redesign on the social-igoralves prototype).** The buy section is
+ * the prototype's centred card (`LockedSection` `variant="centered"`: the hairline card, the 48px
+ * padlock disc, the words centred over the action); the not-for-sale and store-failure cards are the
+ * area's outlined cards; the progress variants keep their words and links with the prototype's
+ * spacing (the bar fills in on its own).
  */
 export interface LockedCourseZone {
   /** Null: the store access read failed → variant (d). */
@@ -89,8 +95,14 @@ const GHOST_SM_LINK = buttonClasses({
   variant: 'ghost',
   size: 'sm',
   hitArea: true,
-  className: 'mt-2 gap-2 self-center',
+  className: 'mt-2 gap-2 self-center text-brand',
 });
+
+/**
+ * The progress zone's card (2026-10-26, the member skin): the reference's "your progress" panel,
+ * glass in the skin. Static: nothing here moves or isolates.
+ */
+const ZONE = 'ms-panel flex flex-col rounded-3xl border border-border bg-card p-5';
 
 export function CourseActionZone({ action, locked }: CourseActionZoneProps) {
   if (locked) return <LockedZone zone={locked} />;
@@ -109,7 +121,10 @@ function LockedZone({ zone }: { zone: LockedCourseZone }) {
   let body: ReactNode;
   if (!view) {
     body = (
-      <Card data-testid="course-locked-store-error" className="mx-4 mt-4 flex flex-col gap-3 p-4">
+      <Card
+        data-testid="course-locked-store-error"
+        className={cn(MEMBER_CARD, 'ms-panel mx-4 mt-4 flex flex-col gap-3 rounded-2xl p-4')}
+      >
         <p className="text-sm font-normal text-text-secondary">{zone.storeUnavailable}</p>
         <a href={zone.retryHref} data-testid="course-locked-retry" className={OUTLINE_SM_LINK}>
           {zone.retryLabel}
@@ -118,13 +133,18 @@ function LockedZone({ zone }: { zone: LockedCourseZone }) {
     );
   } else if (view.section === 'none') {
     body = (
-      <Card data-testid="course-locked-unavailable" className="mx-4 mt-4 p-4">
+      <Card
+        data-testid="course-locked-unavailable"
+        className={cn(MEMBER_CARD, 'ms-panel mx-4 mt-4 rounded-2xl p-4')}
+      >
         <p className="text-sm font-normal text-text-secondary">{view.body}</p>
       </Card>
     );
   } else {
     body = (
       <LockedSection
+        variant="centered"
+        className="ms-panel rounded-3xl"
         title={view.title}
         body={view.body}
         action={
@@ -178,7 +198,7 @@ function LockedZone({ zone }: { zone: LockedCourseZone }) {
 function ProgressZone({ action }: { action: CourseActionView }) {
   if (action.variant === 'start') {
     return (
-      <div data-testid="course-action" data-variant="start" className="flex flex-col gap-3">
+      <div data-testid="course-action" data-variant="start" className={cn(ZONE, 'gap-3')}>
         <p
           data-testid="course-action-line"
           className="text-sm font-normal text-text-secondary tabular-nums"
@@ -196,11 +216,11 @@ function ProgressZone({ action }: { action: CourseActionView }) {
 
   if (action.variant === 'continue') {
     return (
-      <div data-testid="course-action" data-variant="continue" className="flex flex-col">
+      <div data-testid="course-action" data-variant="continue" className={ZONE}>
         <ProgressBar percent={action.percent} label={action.progressLabel} size="md" />
         <p
           data-testid="course-action-line"
-          className="mt-2 text-xs font-normal text-text-secondary tabular-nums"
+          className="mt-1.5 text-xs font-normal text-text-secondary tabular-nums"
         >
           {action.line}
         </p>
@@ -214,7 +234,7 @@ function ProgressZone({ action }: { action: CourseActionView }) {
   }
 
   return (
-    <div data-testid="course-action" data-variant="done" className="flex flex-col gap-3">
+    <div data-testid="course-action" data-variant="done" className={cn(ZONE, 'gap-3')}>
       <p
         data-testid="course-action-line"
         className="flex items-center gap-2 text-sm font-normal text-text-secondary tabular-nums"

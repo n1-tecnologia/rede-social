@@ -41,10 +41,16 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState, useTransition } from 'react';
+import { SelectMenu } from '@/components/forms/SelectMenu';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
+import { STORE_MANAGE_PATH } from '@/lib/store-area';
+import { guessStoreCategory } from '@/lib/store-categories';
+import { NO_CATEGORY } from '@/lib/store-setup';
+import { saveProductCategory } from '@/lib/store-setup-client';
 import {
   type LockWarningView,
   lockWarningView,
@@ -150,6 +156,13 @@ export interface ProductFormProps {
    * never calls the mapping endpoint.
    */
   payment?: ProductFormPayment | null;
+  /**
+   * 2026-10-28 (the product owner: "um menu dropdown com as categorias que o user criou"): the
+   * store's categories as Gerenciar keeps them, in its order, for the "Categoria" menu.
+   */
+  categories?: readonly { id: string; name: string }[];
+  /** Edit mode: the product's category now (`null` = none). A create starts from its name's guess. */
+  initialCategory?: string | null;
 }
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -225,6 +238,8 @@ export function ProductForm({
   courses,
   lives,
   payment = null,
+  categories = [],
+  initialCategory = null,
 }: ProductFormProps) {
   const t = useTranslations('store');
   /** Full-key translator for the shared `lib/store-view` builders (`store.lockWarning.…`). */
@@ -248,6 +263,20 @@ export function ProductForm({
   const [selectedLives, setSelectedLives] = useState<string[]>(() =>
     start.lives.map((live) => live.id),
   );
+
+  /**
+   * The category the menu shows: the one picked here, else (a create) the one the name tells while
+   * the store keeps it, else none. `NO_CATEGORY` is "Sem categoria".
+   */
+  const startPicked = mode === 'edit' ? (initialCategory ?? NO_CATEGORY) : null;
+  const [pickedCategory, setPickedCategory] = useState<string | null>(startPicked);
+  const guessedCategory = guessStoreCategory(name);
+  const category =
+    pickedCategory ??
+    (categories.some((entry) => entry.id === guessedCategory) ? guessedCategory : NO_CATEGORY);
+  const categoryChanged = categories.length > 0 && pickedCategory !== startPicked;
+  const categoryLabelId = useId();
+  const categoryHintId = useId();
 
   const [gatewayId, setGatewayId] = useState(payment?.externalProductId ?? '');
   const [checkoutUrl, setCheckoutUrl] = useState(payment?.checkoutUrl ?? '');
@@ -361,14 +390,16 @@ export function ProductForm({
     linksChanged ||
     coursesChanged ||
     livesChanged ||
-    paymentChanged;
+    paymentChanged ||
+    categoryChanged;
 
   /** UI-D-377: valid (a name and a price within the cap) and, on edit, dirty. */
   const valid = name.trim().length > 0 && price.kind === 'ok';
   const busy = pending || uploading;
   const submittable = valid && (mode === 'create' || dirty);
 
-  const back = mode === 'edit' && productId ? `/loja/${productId}` : '/loja';
+  // 2026-10-24: a new product is born in the store's Gerenciar, so a create leaves for it.
+  const back = mode === 'edit' && productId ? `/loja/${productId}` : STORE_MANAGE_PATH;
 
   const close = () => {
     if (dirty) {
@@ -507,6 +538,11 @@ export function ProductForm({
         return;
       }
       savedMapping.current = { id: mappingId, link: mappingLink };
+    }
+
+    // 2026-10-28: the product's category, kept on this device (`lib/store-setup.ts`).
+    if (savedId !== null && categories.length > 0 && (mode !== 'edit' || categoryChanged)) {
+      saveProductCategory(savedId, category);
     }
 
     const done = {
@@ -704,6 +740,8 @@ export function ProductForm({
               />
             )}
           </div>
+          {/* 2026-10-23: the ideal size of the image, under the preview. */}
+          <CoverSizeHint kind="product" />
 
           <div className="hidden md:block">
             <FileDropZone
@@ -821,6 +859,33 @@ export function ProductForm({
             setNameError(undefined);
           }}
         />
+
+        {/* ── (2b) Categoria: the storefront's shelf for this product. 2026-10-28 (the product
+            owner: "um menu dropdown com as categorias que o user criou"): a menu of the store's
+            categories (Gerenciar), "Sem categoria" last; a new product starts on the one its name
+            tells until one is picked. The API keeps no category yet: the choice is kept on this
+            device (`saveProductCategory`) once the product is saved, never sent. ── */}
+        {categories.length > 0 ? (
+          <div data-product-category-field className="flex flex-col gap-1.5">
+            <span id={categoryLabelId} className="text-sm font-normal text-text-secondary">
+              {t('form.category.label')}
+            </span>
+            <SelectMenu
+              options={[
+                ...categories.map((entry) => ({ id: entry.id, label: entry.name })),
+                { id: NO_CATEGORY, label: t('form.category.none') },
+              ]}
+              value={category}
+              onChange={setPickedCategory}
+              labelId={categoryLabelId}
+              describedBy={categoryHintId}
+              optionAttribute="product-category"
+            />
+            <p id={categoryHintId} className="text-xs font-normal text-text-tertiary">
+              {t('form.category.helper')}
+            </p>
+          </div>
+        ) : null}
 
         {/* ── (3) Descrição: grows to its content; the page scrolls (E11/long-text). ── */}
         <Textarea

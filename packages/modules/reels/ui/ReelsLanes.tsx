@@ -114,7 +114,9 @@ export function ReelsLanes({ lanes, activeKey, onSelect, label, panelId }: Reels
 
   return (
     <div
-      className="absolute top-[calc(var(--safe-top)+8px)] right-16 left-16 z-[3] md:top-4"
+      // From md (2026-10-23) the player's play/pause and sound take its top left: the row starts
+      // after them.
+      className="absolute top-[calc(var(--safe-top)+8px)] right-16 left-16 z-[3] md:top-4 md:left-[120px]"
       onPointerDown={stopPointer}
       onPointerMove={stopPointer}
       onPointerUp={stopPointer}

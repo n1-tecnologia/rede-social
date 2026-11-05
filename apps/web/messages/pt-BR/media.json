@@ -80,6 +80,19 @@
       "duration": "Vídeo muito longo. O limite é {duration}.",
       "transcode": "Não foi possível processar este vídeo.",
       "generic": "Algo deu errado. Tente novamente."
+    },
+    "coverSize": {
+      "ideal": "Medida ideal: {width} × {height} px ({ratio})",
+      "notes": {
+        "course": "Deixe o principal no centro: a capa aparece vertical no catálogo e horizontal no topo do curso.",
+        "track": "Deixe o principal no centro: o cartão mostra o meio da imagem e o topo da trilha usa uma faixa larga.",
+        "courseBanner": "Deixe o principal no centro: é a mesma imagem do cartão, aqui aparece a faixa do meio.",
+        "moduleBanner": "Deixe o principal no centro: é a mesma imagem do cartão, aqui aparece a faixa do meio.",
+        "trackBanner": "Deixe o principal no centro: é a mesma imagem do cartão, aqui aparece a faixa do meio.",
+        "live": "Deixe o principal no centro: no computador a capa aparece mais larga.",
+        "community": "Deixe o principal no centro: na página da comunidade a capa aparece mais larga.",
+        "highlight": "Deixe o principal no centro: a capa aparece num círculo."
+      }
     }
   }
 }

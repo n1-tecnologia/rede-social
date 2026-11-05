@@ -3,13 +3,15 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import type { CourseFilter } from '@rede-social/module-courses/contracts';
-import { CourseRow, RowSkeleton } from '@rede-social/module-courses/ui';
-import { Button, EmptyState, InfiniteScroll, PullToRefresh } from '@rede-social/ui';
+import { CourseRow } from '@rede-social/module-courses/ui';
+import { Button, cn, EmptyState, InfiniteScroll, PullToRefresh } from '@rede-social/ui';
 import { CircleAlert, Eye, GraduationCap } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { CourseRowView } from '@/lib/courses-view';
+import { AdminRowsSkeleton } from './AdminListSkeletons';
 import { loadMoreCoursesAction, refreshCoursesAction } from './actions';
+import { LIST_CARD_GRID, LIST_GRID_ITEM, OUTLINE_LINK, WIDE_EMPTY } from './admin-styles';
 
 export interface CoursesListProps {
   /** Which list this is; the TAB decides it on the server and remounts the list per filter. */
@@ -23,17 +25,11 @@ export interface CoursesListProps {
   initialError?: boolean;
 }
 
-/** The 40px poster thumb: one rung is enough, the ladder starts at 640. */
-const THUMB_SIZES = '40px';
+/** The 48px poster thumb: one rung is enough, the ladder starts at 640. */
+const THUMB_SIZES = '48px';
 
 /** The first rows load eagerly; the rest are lazy. */
 const EAGER_ROWS = 4;
-
-/** Three row skeletons on load more (UI-D-401). */
-const LOAD_MORE_SKELETONS = [0, 1, 2];
-
-const LINK_BRAND =
-  'inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 /**
  * The "Ver como aluno" eye (08.5-10, D-422, UI-D-437): a 44px neutral `<a>` SIBLING of the row link
@@ -52,12 +48,11 @@ const GRADIENT_THUMB = (
   />
 );
 
+/** Three row skeletons on load more (UI-D-401), in a list card of their own under the rows. */
 function NextRowsSkeleton() {
   return (
-    <div aria-busy>
-      {LOAD_MORE_SKELETONS.map((index) => (
-        <RowSkeleton key={index} />
-      ))}
+    <div aria-busy className="mt-3">
+      <AdminRowsSkeleton variant="poster" count={3} />
     </div>
   );
 }
@@ -99,6 +94,18 @@ const EMPTY_KEYS: Record<CourseFilter, { title: string; body: string; testId: st
  * `flex items-center` pair — the shipped `CourseRow` link (`min-w-0 flex-1`, so the name truncates
  * first) and, after it, the 44px eye to `/cursos/{id}?ver=aluno` named "Ver como aluno: {course}".
  * Drafts and archived rows keep the bare row; the module's `CourseRow` is unchanged.
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the rows live in ONE
+ * outlined list card with hairlines between them (48px thumbs, the pills under the meta), the
+ * load-more skeletons in a card of their own; the screen's frame owns the side padding. The empty
+ * state's "Criar curso" is an outline link now: the header's "Novo curso" is the screen's one brand
+ * fill.
+ *
+ * 2026-10-23 (the wide desktop page, `data-shell-wide`): the list card on a phone and up to `lg`;
+ * from `lg` every course is an outlined card of its own in a grid (two columns, three from `2xl`,
+ * `LIST_CARD_GRID`), the row and its eye unchanged inside. Every row is the same `flex` pair now
+ * (the row link `min-w-0 flex-1`, then the eye when published), so the cards of one grid row line
+ * up. The empty and error cards keep a readable width (`WIDE_EMPTY`).
  */
 export function CoursesList({
   filter,
@@ -176,7 +183,7 @@ export function CoursesList({
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
     body = (
-      <div className="px-4 pt-2">
+      <div className={WIDE_EMPTY}>
         <EmptyState
           variant="card"
           icon={CircleAlert}
@@ -194,7 +201,7 @@ export function CoursesList({
   } else if (items.length === 0) {
     const empty = EMPTY_KEYS[filter];
     body = (
-      <div className="px-4 pt-2">
+      <div className={WIDE_EMPTY}>
         <EmptyState
           variant="card"
           icon={GraduationCap}
@@ -203,7 +210,7 @@ export function CoursesList({
           body={t(empty.body)}
           action={
             filter === 'all' ? (
-              <a href="/cursos/novo" className={LINK_BRAND}>
+              <a href="/cursos/novo" className={OUTLINE_LINK}>
                 {t('list.empty.cta')}
               </a>
             ) : undefined
@@ -217,14 +224,11 @@ export function CoursesList({
         <ol
           aria-label={t('list.region', { tenant: tenantName })}
           data-testid="courses-list"
-          className="flex flex-col divide-y divide-divider"
+          className={LIST_CARD_GRID}
         >
           {items.map((item, index) => (
-            <li
-              key={item.id}
-              className={item.status === 'published' ? 'flex items-center' : undefined}
-            >
-              <div className={item.status === 'published' ? 'min-w-0 flex-1' : undefined}>
+            <li key={item.id} className={cn('flex items-center', LIST_GRID_ITEM)}>
+              <div className="min-w-0 flex-1">
                 <CourseRow
                   href={item.href}
                   ariaLabel={item.ariaLabel}
@@ -273,7 +277,7 @@ export function CoursesList({
           <div
             role="alert"
             data-courses-page-error
-            className="mt-3 flex flex-col items-center gap-3 px-4 text-center"
+            className="mt-3 flex flex-col items-center gap-3 text-center"
           >
             <p className="text-sm font-normal text-danger">{t('errors.loadMore')}</p>
             <Button variant="outline" onClick={retryPage}>

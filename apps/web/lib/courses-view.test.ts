@@ -13,6 +13,7 @@ import { loadMessages } from '../i18n/messages';
 import {
   COURSE_FILTER_ORDER,
   CURRICULUM_SECTION_ID,
+  courseFactsView,
   courseFilterFromParam,
   courseFilterHref,
   courseRowView,
@@ -52,6 +53,8 @@ import {
 /**
  * 08.3-06 — the ONE courses formatter (UI-D-410, UI-D-392). Durations and sizes are built from the
  * asset's integers; the web never rounds a count and never sorts (P09, P29).
+ *
+ * 2026-10-23: the live row's card words and the admin course page's facts strip are pinned too.
  */
 
 const catalogDir = fileURLToPath(new URL('../messages/pt-BR/', import.meta.url));
@@ -248,6 +251,70 @@ describe('trackRowView and liveRowView scaffolds (UI-D-392, plans 10 and 11)', (
       { label: 'Cancelada', tone: 'neutral' },
     ]);
   });
+
+  it('2026-10-23: a live row carries its card words: the status in words, the red chip only on air, the tenant-zone date parts, the time line and the Editar name', () => {
+    const live = {
+      id: C,
+      title: 'Tira-dúvidas de outubro',
+      coverAssetId: null,
+      // 02:30 UTC on the 17th is 23:30 in São Paulo (UTC-3) on the 16th: the zone picks the day.
+      startsAt: '2026-10-17T02:30:00.000Z',
+      durationMin: 45,
+    };
+    expect(
+      liveRowView({ ...live, status: 'scheduled' }, { timezone: 'America/Sao_Paulo' }, t).live,
+    ).toEqual({
+      statusLabel: 'Agendada',
+      statusIcon: null,
+      cancelled: false,
+      day: '16',
+      month: 'out',
+      timeLine: '23:30 · 45 min',
+      editAriaLabel: 'Editar a live: Tira-dúvidas de outubro',
+    });
+    expect(liveRowView({ ...live, status: 'live' }, { timezone: 'UTC' }, t).live).toMatchObject({
+      statusLabel: 'Ao vivo',
+      statusIcon: 'live',
+      day: '17',
+      timeLine: '02:30 · 45 min',
+    });
+    expect(
+      liveRowView({ ...live, status: 'recorded' }, { timezone: 'UTC' }, t).live?.statusIcon,
+    ).toBeNull();
+    expect(
+      liveRowView({ ...live, status: 'cancelled' }, { timezone: 'UTC' }, t).live,
+    ).toMatchObject({ statusLabel: 'Cancelada', statusIcon: null, cancelled: true });
+  });
+});
+
+describe('courseFactsView (2026-10-23, the admin course page)', () => {
+  it('Aulas always; Duração from the certificate hours, else the ready videos, else absent; Nível only with a level', () => {
+    expect(
+      courseFactsView(
+        { lessonCount: 18, durationSeconds: 13260, certificateHours: 12, level: 'intermediario' },
+        t,
+      ),
+    ).toEqual([
+      { key: 'lessons', value: '18', label: 'Aulas' },
+      { key: 'duration', value: '12 h', label: 'Duração' },
+      { key: 'level', value: 'Intermediário', label: 'Nível' },
+    ]);
+    expect(
+      courseFactsView(
+        { lessonCount: 3, durationSeconds: 13260, certificateHours: 0, level: null },
+        t,
+      ),
+    ).toEqual([
+      { key: 'lessons', value: '3', label: 'Aulas' },
+      { key: 'duration', value: '3 h 41 min', label: 'Duração' },
+    ]);
+    expect(
+      courseFactsView(
+        { lessonCount: 0, durationSeconds: 0, certificateHours: null, level: null },
+        t,
+      ),
+    ).toEqual([{ key: 'lessons', value: '0', label: 'Aulas' }]);
+  });
 });
 
 /* ── 08.3-08: the course page and the curriculum editor (UI-D-394, UI-D-395) ─────────────────── */
@@ -300,6 +367,14 @@ describe('moduleCardView (UI-D-395)', () => {
     expect(moduleCardView({ ...module, lessonCount: 1, durationSeconds: 0 }, 1, t).meta).toBe(
       '1 aula',
     );
+  });
+
+  it('2026-10-22: the band carries the two-digit numeral and the pill "Módulo {nn}"', () => {
+    expect(moduleCardView(module, 1, t)).toMatchObject({ numeral: '01', pillLabel: 'Módulo 01' });
+    expect(moduleCardView(module, 9, t)).toMatchObject({ numeral: '09', pillLabel: 'Módulo 09' });
+    expect(moduleCardView(module, 12, t)).toMatchObject({ numeral: '12', pillLabel: 'Módulo 12' });
+    // The accessible name keeps the plain position.
+    expect(moduleCardView(module, 9, t).positionLabel).toBe('Módulo 9');
   });
 });
 
@@ -644,8 +719,9 @@ describe('trackFilterFromParam / trackFilterHref (UI-D-391, E04 partial)', () =>
     expect(trackFilterFromParam('ativas')).toBe('active');
     expect(trackFilterFromParam('todos')).toBe('active');
     expect(trackFilterFromParam(['arquivadas', 'ativas'])).toBe('active');
-    expect(trackFilterHref('active')).toBe('/cursos?aba=trilhas');
-    expect(trackFilterHref('archived')).toBe('/cursos?aba=trilhas&filtro=arquivadas');
+    // 2026-10-22: the Trilhas list is its own page; the old ?aba=trilhas only redirects there.
+    expect(trackFilterHref('active')).toBe('/cursos/trilhas');
+    expect(trackFilterHref('archived')).toBe('/cursos/trilhas?filtro=arquivadas');
   });
 });
 
@@ -710,8 +786,9 @@ describe('live filters (UI-D-391)', () => {
     for (const value of [undefined, '', 'all', 'canceladas', ['passadas'], 'PASSADAS']) {
       expect(liveFilterFromParam(value as string | string[] | undefined)).toBe('upcoming');
     }
-    expect(liveFilterHref('upcoming')).toBe('/cursos?aba=lives');
-    expect(liveFilterHref('past')).toBe('/cursos?aba=lives&filtro=passadas');
+    // 2026-10-22: the Lives list is its own page; the old ?aba=lives only redirects there.
+    expect(liveFilterHref('upcoming')).toBe('/cursos/lives');
+    expect(liveFilterHref('past')).toBe('/cursos/lives?filtro=passadas');
   });
 });
 

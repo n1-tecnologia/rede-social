@@ -183,15 +183,27 @@ export type PostCardProps = {
    * previews are untouched: the server already decided this post may be read.
    */
   readOnly?: boolean;
+  /**
+   * The phone's flat block whatever the window: the platform preview's device, where a `md:` variant
+   * would read the PANEL's width and round the card inside a phone.
+   */
+  phone?: boolean;
 };
 
+/** The phone's post: flat, no radius, no shadow, no dark hairline (it would draw at the screen's edges). */
+const CARD_PHONE = 'rounded-none pb-1 shadow-none focus:outline-none dark:border-0';
+/** The post: the phone's, then a card with rounded corners and the cards' shadow in the desktop column. */
+const CARD = `${CARD_PHONE} md:rounded-2xl md:shadow-[0_1px_3px_rgba(22,35,59,.06)]`;
+
 /**
- * `[proto]` `feed/PostCard.tsx` minus the mock hooks. The post is a FLAT full-bleed block (the REINE
- * timeline, 2026-10-02, over the Phase 4 rounded card): the shipped `Card` supplies the `bg-card`
- * surface and the `role`, with its 12px radius, shadow and dark hairline turned off, so the white
- * runs to both sides of the column and the page ground between posts does the separating. Media is
- * full-bleed inside it and text keeps the `px-4` inner gutter. Its host leaves no side gutter
- * around it (Início, the community page, the post page).
+ * `[proto]` `feed/PostCard.tsx` minus the mock hooks. On the phone the post is a FLAT full-bleed
+ * block (the REINE timeline, 2026-10-02, over the Phase 4 rounded card): the shipped `Card` supplies
+ * the `bg-card` surface and the `role`, with its 12px radius, shadow and dark hairline turned off, so
+ * the white runs to both sides of the column and the page ground between posts does the separating.
+ * From md up (2026-10-23, the product owner: no square cards) it is a card again in the centred
+ * column, with 16px corners and the cards' shadow. Media is full-bleed inside it and text keeps the
+ * `px-4` inner gutter. Its host leaves no side gutter around it (Início, the community page, the post
+ * page).
  *
  * **One toggle, three entry points.** The like button, the double tap on the gallery and the count
  * in the meta row all read and write the SAME optimistic state, because a double tap that took a
@@ -214,6 +226,7 @@ export function PostCard({
   onOpenVideo,
   suppressCommunity,
   readOnly: readOnlyProp,
+  phone = false,
 }: PostCardProps) {
   const readOnly = readOnlyProp ?? post.readOnly === true;
   // The refusal envelope becomes a rejection, which is the one signal the optimistic engine reverts
@@ -259,7 +272,6 @@ export function PostCard({
   return (
     // `role="article"` on the shipped `Card` surface rather than a nested `<article>`: the card IS
     // the post, and one element with an accessible name reads better than a div wrapping a landmark.
-    // Flat: no radius, no shadow, no dark hairline (it would draw at the screen's edges).
     <Card
       role="article"
       aria-label={post.ariaLabel}
@@ -268,7 +280,7 @@ export function PostCard({
       // Focusable by script only: after a removal the list moves focus to the next card, and a
       // card that cannot take focus would drop it to the page (09-09, UI-D-497).
       tabIndex={-1}
-      className="rounded-none pb-1 shadow-none focus:outline-none dark:border-0"
+      className={phone ? CARD_PHONE : CARD}
     >
       <PostHeader
         displayName={post.author.displayName}

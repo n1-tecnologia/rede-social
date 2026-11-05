@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@rede-social/ui';
+import { Avatar, cn } from '@rede-social/ui';
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -52,16 +52,26 @@ import { useReelsBottomClearance } from './ReelsStage';
  * arrive finished from the host, and an author without one renders no line.
  *
  * Plain `<a>` links (D-52): a module must not depend on the web framework. Every string is a prop.
+ *
+ * **Beside the player** (`placement="side"`, 2026-10-23, the YouTube Shorts layout): the desktop
+ * caption block, drawn in the pager's slot at the stage's bottom left in the member's theme: the
+ * author's photo, name and Instagram line, the caption (the same two-line clamp, "… mais" and
+ * "menos", no veil: nothing is under it to darken) and the community chip. Over the video from md
+ * (a window too narrow for that slot, or the comments panel open) the block shows the author's
+ * photo beside the name too, since the rail beside the player carries none; the phone's block is
+ * unchanged.
  */
 export type ReelCaptionProps = {
   /**
    * The author's name and profile href (`/membros/{membershipId}`), and their Instagram line:
    * `label` is the visible `@handle`, `ariaLabel` the link's accessible name. `null` or absent, none.
+   * `avatarUrl` (2026-10-23): the photo the desktop block shows beside the name; absent, none.
    */
   author: {
     name: string;
     href: string;
     handle?: { label: string; href: string; ariaLabel: string } | null;
+    avatarUrl?: string | null;
   };
   /** `null` when the post has no community: no chip at all (D-129). */
   community: { name: string; href: string; ariaLabel: string } | null;
@@ -71,6 +81,8 @@ export type ReelCaptionProps = {
   lessLabel: string;
   expanded: boolean;
   onExpandedChange(next: boolean): void;
+  /** 2026-10-23: `"side"`, the desktop block beside the player; `"over"` (default), over the video. */
+  placement?: 'over' | 'side';
 };
 
 /** The story caption's shipped text shadow, so white ink stays legible over a bright frame. */
@@ -78,6 +90,10 @@ const SHADOW = 'drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]';
 /** The white focus ring every control over video carries (UI-D-97). */
 const RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white';
 const TOGGLE = cn('text-sm font-bold text-white/70', RING);
+/** 2026-10-23 — the focus ring of the block beside the player, on the member's theme. */
+const SIDE_RING =
+  'rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand';
+const SIDE_TOGGLE = cn('text-sm font-bold text-text-secondary hover:text-text', SIDE_RING);
 
 function stopPointer(event: ReactPointerEvent) {
   event.stopPropagation();
@@ -104,6 +120,7 @@ export function ReelCaption({
   lessLabel,
   expanded,
   onExpandedChange,
+  placement = 'over',
 }: ReelCaptionProps) {
   const textRef = useRef<HTMLParagraphElement>(null);
   const [overflowing, setOverflowing] = useState(false);
@@ -132,6 +149,95 @@ export function ReelCaption({
     onExpandedChange(!expanded);
   };
 
+  if (placement === 'side') {
+    return (
+      <div data-reel-caption="side" {...STOP_POINTER} className="flex flex-col gap-3 text-text">
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar src={author.avatarUrl ?? null} alt="" size="md" className="shrink-0" />
+          <div className="min-w-0">
+            <a
+              href={author.href}
+              className={cn('block truncate text-base font-bold text-text', SIDE_RING)}
+            >
+              {author.name}
+            </a>
+            {author.handle ? (
+              <a
+                href={author.handle.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={author.handle.ariaLabel}
+                data-reel-handle
+                className={cn(
+                  'block w-fit max-w-full truncate text-sm font-normal text-text-secondary',
+                  SIDE_RING,
+                )}
+              >
+                {author.handle.label}
+              </a>
+            ) : null}
+          </div>
+        </div>
+
+        {withText ? (
+          <div className="relative">
+            {/* biome-ignore lint/a11y/useKeyWithClickEvents: a pointer shortcut; "mais"/"menos" are the keyboard path. */}
+            <p
+              ref={textRef}
+              data-reel-caption-text
+              onClick={onTextClick}
+              className={cn(
+                'whitespace-pre-wrap break-words text-base leading-snug font-semibold text-text',
+                expanded ? 'max-h-[40vh] overflow-y-auto overscroll-contain' : 'line-clamp-2',
+              )}
+            >
+              {children}
+              {expanded ? (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    aria-expanded="true"
+                    onClick={() => onExpandedChange(false)}
+                    className={SIDE_TOGGLE}
+                  >
+                    {lessLabel}
+                  </button>
+                </>
+              ) : null}
+            </p>
+            {!expanded && overflowing ? (
+              <button
+                type="button"
+                aria-expanded="false"
+                onClick={() => onExpandedChange(true)}
+                className={cn(
+                  'absolute right-0 bottom-0 bg-gradient-to-r from-transparent to-bg to-30% pl-8',
+                  SIDE_TOGGLE,
+                )}
+              >
+                {moreLabel}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {community ? (
+          <a
+            href={community.href}
+            aria-label={community.ariaLabel}
+            className={cn(
+              'inline-flex h-7 w-fit max-w-full items-center rounded-full bg-bg-tertiary px-3',
+              SIDE_RING,
+            )}
+          >
+            <span className="truncate text-xs font-bold text-text">{community.name}</span>
+          </a>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <>
       {expanded ? (
@@ -149,14 +255,27 @@ export function ReelCaption({
       <div
         data-reel-caption
         {...STOP_POINTER}
-        className={cn('absolute right-[72px] left-4 z-[3] text-white md:bottom-6', clearance)}
+        // From md the rail sits beside the player, not over it: the block takes the width.
+        className={cn(
+          'absolute right-[72px] left-4 z-[3] text-white md:right-4 md:bottom-6',
+          clearance,
+        )}
       >
-        <a
-          href={author.href}
-          className={cn('block truncate text-base font-bold text-white', SHADOW, RING)}
-        >
-          {author.name}
-        </a>
+        {/* From md the author's photo beside the name (2026-10-23): the rail beside the player
+            carries none. A plain block on the phone, as before. */}
+        <div className="min-w-0 md:flex md:items-center md:gap-2">
+          {author.avatarUrl !== undefined ? (
+            <span aria-hidden className="hidden shrink-0 md:block">
+              <Avatar src={author.avatarUrl} alt="" size="sm" />
+            </span>
+          ) : null}
+          <a
+            href={author.href}
+            className={cn('block min-w-0 truncate text-base font-bold text-white', SHADOW, RING)}
+          >
+            {author.name}
+          </a>
+        </div>
 
         {author.handle ? (
           <a

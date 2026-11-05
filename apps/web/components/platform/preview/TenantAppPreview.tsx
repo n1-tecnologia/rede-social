@@ -222,7 +222,9 @@ export function TenantAppPreview({
           </div>
           {admin && screen === 'home' && slots.includes('feed') ? <PreviewComposeFab /> : null}
           <PreviewBottomNav
-            tabs={nav.tabs}
+            // 2026-10-23: as the kernel BottomNav, the phone's bar leaves a `railOnly` tab out
+            // (Perfil when the row is full; the TopBar's avatar is its door).
+            tabs={nav.tabs.filter((tab) => !tab.railOnly)}
             active={screen}
             media={media}
             hidden={nudge.open}
@@ -784,6 +786,8 @@ function PreviewFeed({
         onLike={localLike}
         onUnlike={localUnlike}
         onMore={() => setMenu(true)}
+        // The device is always a phone: `md:` would read the panel's window and round the card.
+        phone
       />
       <PreviewPostMenu open={menu} admin={admin} onClose={() => setMenu(false)} />
     </div>

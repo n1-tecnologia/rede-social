@@ -44,6 +44,17 @@ export type PageHeaderProps = BackProps & {
    * header pushed ~60px down over the page's first block. `0px` leaves a 7px seam instead.
    */
   stickyTop?: string;
+  /**
+   * 2026-10-22: a small overline above the title (the lesson page's course name over the lesson's
+   * title, the social-igoralves two-line header). With it the title drops to 14/700 so both lines fit
+   * the 44px bar; without it the header renders exactly as before.
+   */
+  eyebrow?: string;
+  /**
+   * 2026-10-22: the title's element. `h1` (the default) is the screen's heading; `p` when the screen's
+   * one h1 lives in its body (the lesson title under the player), so the outline keeps a single h1.
+   */
+  titleAs?: 'h1' | 'p';
   className?: string;
 };
 
@@ -56,6 +67,12 @@ const backClasses =
  * centred column. The screens keep the default `stickyTop` (no per-page override, the 03-05
  * `stickyTop="0px"` workaround is gone); one that passes its own value owns the geometry it implies.
  *
+ * 2026-10-26 — NO ground of its own (the product owner: "essa barra não deve ter background, deve só
+ * ter a escrita e a seta, isso vale para todas"): the arrow and the title sit on the page, and a
+ * screen no longer paints a band, a blur or a hairline under it. On a phone, where it pins under the
+ * TopBar, `ui-page-header` (tokens.css) fades the page's ground in behind it only once the content
+ * starts sliding under it, so the title never reads over the content.
+ *
  * The `backHref` control is a `BackLink` (2026-10-09): a tap returns to the previous screen when the
  * shell recorded one behind this screen, and only otherwise follows `backHref`, so a screen's static
  * parent is its fallback rather than its destination. Its label therefore names no place ("Voltar").
@@ -65,6 +82,8 @@ export function PageHeader({
   trailing,
   backIcon: BackIcon = ChevronLeft,
   stickyTop = '-0.5rem',
+  eyebrow,
+  titleAs: Title = 'h1',
   className,
   ...back
 }: PageHeaderProps) {
@@ -73,7 +92,7 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        'sticky z-40 flex items-center gap-1 bg-bg/95 px-2 py-1 backdrop-blur-sm md:static',
+        'ui-page-header sticky z-40 flex items-center gap-1 px-2 py-1 md:static',
         className,
       )}
       style={{ top: stickyTop }}
@@ -87,10 +106,17 @@ export function PageHeader({
       ) : null}
       {title === undefined ? (
         <div className="flex-1" />
+      ) : eyebrow !== undefined ? (
+        <div className={cn('min-w-0 flex-1', !hasBack && 'px-2')}>
+          <p className="truncate text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
+            {eyebrow}
+          </p>
+          <Title className="truncate text-sm font-bold text-text">{title}</Title>
+        </div>
       ) : (
-        <h1 className={cn('flex-1 truncate text-base font-bold text-text', !hasBack && 'px-2')}>
+        <Title className={cn('flex-1 truncate text-base font-bold text-text', !hasBack && 'px-2')}>
           {title}
-        </h1>
+        </Title>
       )}
       {trailing ? <div className="flex items-center gap-1">{trailing}</div> : null}
     </header>

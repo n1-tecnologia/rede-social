@@ -16,6 +16,12 @@ export {
   type ReelsPagerItem,
   type ReelsPagerLabels,
   type ReelsPagerProps,
+  type ReelsPagerSlots,
 } from './ReelsPager';
-export { ReelsStage, type ReelsStageProps, type ReelsStageVariant } from './ReelsStage';
+export {
+  ReelsFrame,
+  ReelsStage,
+  type ReelsStageProps,
+  type ReelsStageVariant,
+} from './ReelsStage';
 export { type ReelsTick, ticksWindow } from './ticks';

@@ -68,6 +68,14 @@ export function CommunityCardSkeleton() {
 
 const SKELETON_CARDS = [0, 1, 2];
 
+/**
+ * 2026-10-26 — the cards' grid on the page's whole width (the product owner: "o aproveitamento igual
+ * da área de membros"): one column on a phone, two once the column holds 672px, three from 1024px.
+ * The container is the padded wrapper, so the steps follow the room the rail leaves, not the window.
+ */
+const GRID_WRAP = '@container px-4';
+const GRID = 'grid gap-3 @2xl:grid-cols-2 @5xl:grid-cols-3 lg:gap-4';
+
 /** The reorder mode's draft: the order the mode opened on, and the order the admin is building. */
 type ReorderDraft = { original: CommunitySummary[]; draft: CommunitySummary[] };
 
@@ -83,10 +91,12 @@ const sameOrder = (a: readonly CommunitySummary[], b: readonly CommunitySummary[
  */
 export function CommunitiesSkeleton() {
   return (
-    <div aria-busy data-testid="communities-skeleton" className="flex flex-col gap-3 px-4">
-      {SKELETON_CARDS.map((index) => (
-        <CommunityCardSkeleton key={index} />
-      ))}
+    <div aria-busy data-testid="communities-skeleton" className={GRID_WRAP}>
+      <div className={GRID}>
+        {SKELETON_CARDS.map((index) => (
+          <CommunityCardSkeleton key={index} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -392,47 +402,51 @@ export function CommunitiesList({
   } else {
     body = (
       <>
-        <div className="flex flex-col gap-3 px-4">
-          {items.map((community) => {
-            // P80: an archived community keeps today's rule; the store adds no tag to it.
-            const tags = community.status === 'archived' ? undefined : storeTags?.[community.id];
-            return (
-              <CommunityCard
-                key={community.id}
-                href={`/comunidades/${community.id}`}
-                name={community.name}
-                description={community.description}
-                coverAssetId={community.coverAssetId}
-                coverVariantWidths={community.coverVariantWidths}
-                postCountLabel={t('card.posts', { count: community.postCount })}
-                coverAlt={t('card.cover', { community: community.name })}
-                // UI-D-50: decided per ROW from the row's own status, never from the list's.
-                // UI-D-372: "Produto arquivado" takes the same slot (never both: P80 above).
-                statusPill={
-                  community.status === 'archived' ? (
-                    <StatusPill tone="neutral">{t('archived.pill')}</StatusPill>
-                  ) : tags?.archived ? (
-                    <StatusPill tone="neutral">{t('tags.productArchived')}</StatusPill>
-                  ) : undefined
-                }
-                // UI-D-372: "Exclusiva" on the cover, in colour, inside the card's one link.
-                coverBadge={
-                  tags?.coverBadge ? <ExclusiveBadge label={t('tags.exclusive')} /> : undefined
-                }
-              />
-            );
-          })}
+        <div className={GRID_WRAP}>
+          <div className={GRID}>
+            {items.map((community) => {
+              // P80: an archived community keeps today's rule; the store adds no tag to it.
+              const tags = community.status === 'archived' ? undefined : storeTags?.[community.id];
+              return (
+                <CommunityCard
+                  key={community.id}
+                  href={`/comunidades/${community.id}`}
+                  name={community.name}
+                  description={community.description}
+                  coverAssetId={community.coverAssetId}
+                  coverVariantWidths={community.coverVariantWidths}
+                  postCountLabel={t('card.posts', { count: community.postCount })}
+                  coverAlt={t('card.cover', { community: community.name })}
+                  // UI-D-50: decided per ROW from the row's own status, never from the list's.
+                  // UI-D-372: "Produto arquivado" takes the same slot (never both: P80 above).
+                  statusPill={
+                    community.status === 'archived' ? (
+                      <StatusPill tone="neutral">{t('archived.pill')}</StatusPill>
+                    ) : tags?.archived ? (
+                      <StatusPill tone="neutral">{t('tags.productArchived')}</StatusPill>
+                    ) : undefined
+                  }
+                  // UI-D-372: "Exclusiva" on the cover, in colour, inside the card's one link.
+                  coverBadge={
+                    tags?.coverBadge ? <ExclusiveBadge label={t('tags.exclusive')} /> : undefined
+                  }
+                />
+              );
+            })}
+          </div>
         </div>
 
         {/* The sentinel stands down while a page is refused, so a failed page cannot spin: the
-            member asks for the retry explicitly. */}
+            member asks for the retry explicitly. Its skeleton takes one cell of the same grid. */}
         <InfiniteScroll
           hasMore={cursor !== null}
           enabled={!pageFailed}
           onLoadMore={loadMore}
           skeleton={
-            <div className="px-4">
-              <CommunityCardSkeleton />
+            <div className={GRID_WRAP}>
+              <div className={GRID}>
+                <CommunityCardSkeleton />
+              </div>
             </div>
           }
           className="mt-3"
@@ -462,9 +476,14 @@ export function CommunitiesList({
       : t('list.region', { tenant: tenantName });
 
   if (reorder !== null) {
-    // Outside `PullToRefresh` on purpose: a pull would re-read a list the mode is not showing.
+    // Outside `PullToRefresh` on purpose: a pull would re-read a list the mode is not showing. Its
+    // rows keep a reading width on a wide page (2026-10-26), so a row's arrows stay near its name.
     return (
-      <section aria-label={region} data-communities-reordering className="flex flex-col pb-6">
+      <section
+        aria-label={region}
+        data-communities-reordering
+        className="flex w-full max-w-3xl flex-col pb-6"
+      >
         <div className="flex flex-col gap-3 px-4 pb-3">
           <div>
             <h2

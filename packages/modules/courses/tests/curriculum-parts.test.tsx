@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LessonRow, ModuleCard, PUBLISH_BLOCKED_MAX_LINKS, PublishBlockedNotice } from '../ui';
 
 /**
@@ -19,14 +19,16 @@ const ARROWS = (
   </>
 );
 
-describe('ModuleCard (UI-D-395)', () => {
-  it('1. renders the numeral with its accessible name, the title, the meta, the arrows slot and the edit control', () => {
+describe('ModuleCard — the module band (UI-D-395; 2026-10-22)', () => {
+  it('1. renders the pill with its accessible name, the watermark, the title, the meta, the arrows slot and the edit control over a 16:6 band', () => {
     const onEdit = vi.fn();
     render(
       <ModuleCard
         id="m1"
         position={3}
         positionLabel="position-sentinel"
+        numeral="03"
+        pillLabel="pill-sentinel"
         title="title-sentinel"
         meta="meta-sentinel"
         arrows={ARROWS}
@@ -36,24 +38,64 @@ describe('ModuleCard (UI-D-395)', () => {
         <p>body-sentinel</p>
       </ModuleCard>,
     );
+    const band = screen.getByTestId('module-card-band');
+    expect(band.className).toContain('aspect-[16/6]');
+    expect(band.className).toContain('rounded-2xl');
+    // The pill shows the words; a screen reader hears the plain position instead.
     const numeral = screen.getByTestId('module-card-numeral');
-    expect(numeral.textContent).toContain('3');
+    expect(numeral.textContent).toContain('pill-sentinel');
     expect(numeral.textContent).toContain('position-sentinel');
-    for (const token of ['h-8', 'w-8', 'rounded-lg', 'bg-bg-tertiary']) {
-      expect(numeral.className).toContain(token);
-    }
-    expect(screen.getByTestId('module-card-title')).toHaveTextContent('title-sentinel');
-    expect(screen.getByTestId('module-card-title').className).toContain('line-clamp-2');
+    expect(numeral.querySelector('[aria-hidden]')?.textContent).toBe('pill-sentinel');
+    expect(numeral.querySelector('.sr-only')?.textContent).toBe('position-sentinel');
+    // The watermark numeral is decoration, hidden with the art.
+    const watermark = screen.getByTestId('module-card-watermark');
+    expect(watermark).toHaveTextContent('03');
+    expect(watermark.closest('[aria-hidden]')).not.toBeNull();
+    // No art → the tenant gradient.
+    expect(screen.getByTestId('module-card-art-fallback').getAttribute('style')).toContain(
+      'var(--brand-gradient)',
+    );
+    const title = screen.getByTestId('module-card-title');
+    expect(title).toHaveTextContent('title-sentinel');
+    expect(title.className).toContain('line-clamp-2');
+    expect(title.className).toContain('text-white');
     expect(screen.getByTestId('module-card-meta')).toHaveTextContent('meta-sentinel');
     expect(screen.getByRole('button', { name: 'up-sentinel' })).toBeInTheDocument();
-    expect(screen.getByText('body-sentinel')).toBeInTheDocument();
+
+    // The lessons live in the outlined card UNDER the band, always open.
+    const body = screen.getByTestId('module-card-body');
+    expect(body).toHaveTextContent('body-sentinel');
+    expect(body.className).toContain('border');
+    expect(band.contains(body)).toBe(false);
 
     const edit = screen.getByRole('button', { name: 'edit-sentinel' });
     expect(edit.getAttribute('data-module-edit')).toBe('m1');
+    expect(edit.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(edit.className).toContain('text-white');
     fireEvent.click(edit);
     expect(onEdit).toHaveBeenCalledTimes(1);
-    // The card is the shipped Card with no padding of its own; the header is the 56px row.
-    expect(screen.getByTestId('module-card').className).toContain('p-0');
+  });
+
+  it('1b. the art slot replaces the gradient', () => {
+    render(
+      <ModuleCard
+        id="m1"
+        position={1}
+        positionLabel="p"
+        numeral="01"
+        pillLabel="pill"
+        title="t"
+        meta="m"
+        art={<img data-testid="host-art" alt="" src="data:," />}
+        arrows={ARROWS}
+        onEdit={() => {}}
+        editLabel="e"
+      >
+        x
+      </ModuleCard>,
+    );
+    expect(screen.getByTestId('module-card-art')).toContainElement(screen.getByTestId('host-art'));
+    expect(screen.queryByTestId('module-card-art-fallback')).toBeNull();
   });
 
   it('2. the lock caption renders ONLY when the host passes it (never on the first module)', () => {
@@ -61,6 +103,8 @@ describe('ModuleCard (UI-D-395)', () => {
       id: 'm1',
       position: 1,
       positionLabel: 'p',
+      numeral: '01',
+      pillLabel: 'pill',
       title: 't',
       meta: 'm',
       arrows: ARROWS,
@@ -90,6 +134,25 @@ describe('LessonRow (UI-D-395)', () => {
     meta: 'meta-sentinel',
     ariaLabel: 'aria-sentinel',
   };
+
+  // 2026-10-22: happy-dom loads no image, so every `<img>` reads `complete` with no natural width —
+  // exactly what the row now takes for a poster that failed before hydration. A LOADED poster has a
+  // width; the test that needs the failed-before-hydration case sets it back to 0.
+  beforeEach(() => {
+    vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(640);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('5b. a poster that failed BEFORE hydration (complete, no width) falls back on mount', () => {
+    vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(0);
+    render(<LessonRow {...base} thumb={{ kind: 'poster', src: 'data:,' }} />);
+    const thumb = screen.getByTestId('lesson-row-thumb');
+    expect(thumb.querySelector('img')).toBeNull();
+    expect(thumb.getAttribute('data-thumb')).toBe('poster-missing');
+    expect(thumb.querySelectorAll('svg')).toHaveLength(1);
+  });
 
   it('3. is ONE link with the host href and name, the title, the meta, and the trailing slot OUTSIDE the link', () => {
     render(

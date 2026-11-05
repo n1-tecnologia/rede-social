@@ -25,7 +25,7 @@ import type { ReactNode } from 'react';
  * over an arbitrary image.
  *
  * **Layout never moves.** Every branch is the SAME explicit box — `aspect-[16/7]` on the card,
- * `aspect-[16/9]` on the tile, `h-36` on the page — so loading, loaded and failed differ in ink only
+ * `aspect-[16/9]` on the tile, `h-40 md:h-48` on the page — so loading, loaded and failed differ in ink only
  * (the Phase 3 CLS rule). `MediaImage`'s own error path degrades to the neutral `bg-bg-tertiary`
  * ground rather than a broken-image glyph, so a deleted or cross-tenant cover still reads as a
  * cover-shaped block.
@@ -37,7 +37,10 @@ import type { ReactNode } from 'react';
 
 /**
  * `card` → the list card's `aspect-[16/7]` block · `tile` → the compact card's `aspect-[16/9]`
- * block, in a rail's 256px slot (2026-10-12, `/perfil`) · `page` → the community page's `h-36` block.
+ * block, in a rail's 256px slot (2026-10-12, `/perfil`) · `page` → the community page's block: 160px
+ * on a phone, 192px from `md` with rounded corners (2026-10-26, the product owner: "a capa deve ser
+ * levemente maior verticalmente e as bordas devem ser arredondadas"; it was a flat 144px). A phone
+ * keeps it edge to edge and square, as the feed's cards are.
  */
 export type CommunityCoverGeometry = 'card' | 'tile' | 'page';
 
@@ -88,7 +91,7 @@ const SIZES = {
 const BOX = {
   card: 'relative aspect-[16/7] w-full',
   tile: 'relative aspect-[16/9] w-full',
-  page: 'relative h-36 w-full',
+  page: 'relative h-40 w-full overflow-hidden md:h-48 md:rounded-2xl',
 } as const;
 
 /**

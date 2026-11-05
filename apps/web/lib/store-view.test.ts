@@ -19,16 +19,16 @@ import {
   lockWarningView,
   priceInputText,
   priceLabel,
+  priceParts,
   productCardView,
   productFormCourseView,
   productFormDefaults,
   productFormLiveView,
+  productManageView,
   productPageView,
   purchaseBodyText,
   purchaseConfirmView,
   purchaseReturnView,
-  storeFilterFromParam,
-  storeFilterHref,
   successView,
 } from './store-view';
 
@@ -80,27 +80,6 @@ describe('priceLabel (UI-D-383, P20, P22)', () => {
   });
 });
 
-describe('storeFilterFromParam (D-352, T-08.2-32)', () => {
-  it('maps the pt-BR chip values; anything else reads as all', () => {
-    expect(storeFilterFromParam(undefined, false)).toBe('all');
-    expect(storeFilterFromParam('todos', false)).toBe('all');
-    expect(storeFilterFromParam('comprados', false)).toBe('owned');
-    expect(storeFilterFromParam('qualquer', true)).toBe('all');
-    expect(storeFilterFromParam(['comprados', 'arquivados'], true)).toBe('all');
-  });
-
-  it('arquivados is a manager filter only', () => {
-    expect(storeFilterFromParam('arquivados', false)).toBe('all');
-    expect(storeFilterFromParam('arquivados', true)).toBe('archived');
-  });
-
-  it('builds the chip hrefs', () => {
-    expect(storeFilterHref('all')).toBe('/loja');
-    expect(storeFilterHref('owned')).toBe('/loja?filtro=comprados');
-    expect(storeFilterHref('archived')).toBe('/loja?filtro=arquivados');
-  });
-});
-
 describe('productCardView (UI-D-368, UI-D-386)', () => {
   const card = { id: P, name: 'Kit', priceCents: 1990, owned: false, imageAssetId: null };
 
@@ -134,6 +113,45 @@ describe('productCardView (UI-D-368, UI-D-386)', () => {
 });
 
 const TZ = 'America/Sao_Paulo';
+
+describe("productManageView (2026-10-24, the Loja's Gerenciar rows)", () => {
+  const card = {
+    id: P,
+    name: 'Kit',
+    priceCents: 1990,
+    imageAssetId: null,
+    status: 'active' as const,
+  };
+  const gatewayNoLink = { mode: 'gateway' as const, checkoutUrl: null };
+
+  it("shows the catalogue's state, never the manager's own holding", () => {
+    const view = productManageView({ ...card, owned: true }, t, {
+      archived: false,
+      canManage: true,
+    });
+    expect(view.pill).toBeUndefined();
+    expect(view.ariaLabel).toBe(`Kit, ${formatBrl(1990)}`);
+  });
+
+  it('reads "Arquivado" on the archived list', () => {
+    const view = productManageView({ ...card, owned: true, status: 'archived' }, t, {
+      archived: true,
+      canManage: true,
+    });
+    expect(view.pill).toEqual({ kind: 'archived', label: 'Arquivado' });
+    expect(view.ariaLabel).toBe('Kit, arquivado');
+  });
+
+  it('flags a gateway product with no usable link, held by the manager or not', () => {
+    for (const owned of [false, true]) {
+      const view = productManageView({ ...card, owned, purchase: gatewayNoLink }, t, {
+        archived: false,
+        canManage: true,
+      });
+      expect(view.pill).toEqual({ kind: 'noLink', label: 'Sem link de pagamento' });
+    }
+  });
+});
 
 describe('productPageView (UI-D-369, P23, P24, P25)', () => {
   const opts = { canManage: false, communitiesOn: true, coursesOn: true, timeZone: TZ };
@@ -251,6 +269,27 @@ const ASSET = '77777777-7777-4777-8777-777777777777';
 
 /** 2026-10-22 23:00 UTC = 20:00 in São Paulo (UTC-3), a Thursday. */
 const LIVE_AT = '2026-10-22T23:00:00.000Z';
+
+describe('productPageView — the unlocks count (2026-10-24)', () => {
+  const opts = {
+    canManage: false,
+    communitiesOn: true,
+    coursesOn: true,
+    timeZone: 'America/Sao_Paulo',
+  };
+
+  it('counts every row of "Libera o acesso a", singular and plural', () => {
+    const one = detail({ communities: [{ id: C1, name: 'VIP', coverAssetId: null }] });
+    expect(productPageView(one, t, opts).unlocksCount).toBe('1 conteúdo');
+    const many = detail({
+      communities: [
+        { id: C1, name: 'VIP', coverAssetId: null },
+        { id: C2, name: 'Alunas', coverAssetId: null },
+      ],
+    });
+    expect(productPageView(many, t, opts).unlocksCount).toBe('2 conteúdos');
+  });
+});
 
 describe('productPageView — courses and lives (08.5-12, UI-D-439, D-425, EP-56, EP-59)', () => {
   const opts = { canManage: false, communitiesOn: true, coursesOn: true, timeZone: TZ };
@@ -1680,5 +1719,17 @@ describe('lockedLiveView (08.5-09, UI-D-435, UI-D-428, D-424, E10, T-08.5-30)', 
     );
     expect(course.title).toBe('Curso exclusivo');
     expect(course.productHref).toBe(`/loja/${P}?curso=${LIVE}`);
+  });
+});
+
+describe('the shop price parts (2026-10-24, the product page buy box)', () => {
+  it('priceParts joins back into formatBrl, character for character, and is null for zero', () => {
+    for (const cents of [1, 1990, 149_700, 10_000_000]) {
+      const parts = priceParts(cents);
+      expect(parts).not.toBeNull();
+      expect(`${parts?.lead}${parts?.main}${parts?.tail}`).toBe(formatBrl(cents));
+    }
+    expect(priceParts(149_700)).toEqual({ lead: `R$${NBSP}`, main: '1.497', tail: ',00' });
+    expect(priceParts(0)).toBeNull();
   });
 });

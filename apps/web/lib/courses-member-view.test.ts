@@ -104,35 +104,37 @@ describe('categoryFromParam / catalogueCategoryHref (UI-D-425, E02 error)', () =
     expect(categoryFromParam(K, [])).toBeNull();
   });
 
-  it('08.6 (UI-D-446): "Todas" is /area-membros?aba=cursos, a category adds &categoria=, a preview keeps ver=aluno', () => {
-    expect(catalogueCategoryHref(null)).toBe('/area-membros?aba=cursos');
+  it('2026-10-22: "Todas" is /area-membros/cursos, a category adds ?categoria=, a preview keeps ver=aluno', () => {
+    expect(catalogueCategoryHref(null)).toBe('/area-membros/cursos');
     expect(catalogueCategoryHref(null)).toBe(MEMBER_CATALOGUE_HREF);
-    expect(catalogueCategoryHref(K)).toBe(`/area-membros?aba=cursos&categoria=${K}`);
-    expect(catalogueCategoryHref(null, true)).toBe('/area-membros?aba=cursos&ver=aluno');
-    expect(catalogueCategoryHref(K, true)).toBe(
-      `/area-membros?aba=cursos&categoria=${K}&ver=aluno`,
-    );
-    // The bare area means Início: no catalogue link may lead there.
+    expect(catalogueCategoryHref(K)).toBe(`/area-membros/cursos?categoria=${K}`);
+    expect(catalogueCategoryHref(null, true)).toBe('/area-membros/cursos?ver=aluno');
+    expect(catalogueCategoryHref(K, true)).toBe(`/area-membros/cursos?categoria=${K}&ver=aluno`);
+    // The bare area means Início: no catalogue link may lead there, and no ?aba= is ever built.
     for (const href of [catalogueCategoryHref(null), catalogueCategoryHref(K, true)]) {
       expect(href).not.toBe('/area-membros');
-      expect(href).toContain('aba=cursos');
+      expect(href).not.toContain('aba=');
     }
   });
 });
 
-describe('memberAreaRedirectHref (quick 261019-k7x, T-k7x-02)', () => {
-  it('no query is the bare area, a preview keeps ver=aluno', () => {
+describe('memberAreaRedirectHref (quick 261019-k7x, T-k7x-02; screens of their own 2026-10-22)', () => {
+  it('no query is the bare area (Início), a preview keeps ver=aluno', () => {
     expect(memberAreaRedirectHref({})).toBe('/area-membros');
     expect(memberAreaRedirectHref({}, true)).toBe('/area-membros?ver=aluno');
   });
 
-  it('keeps aba, categoria and trilha, encoded exactly as memberHref encodes them', () => {
-    expect(memberAreaRedirectHref({ aba: 'lives' })).toBe('/area-membros?aba=lives');
+  it('an old ?aba= lands on its screen, categoria only on Cursos and trilha only on Trilhas', () => {
+    expect(memberAreaRedirectHref({ aba: 'lives' })).toBe('/area-membros/lives');
+    expect(memberAreaRedirectHref({ aba: 'progresso' })).toBe('/area-membros/progresso');
     expect(memberAreaRedirectHref({ aba: 'trilhas', trilha: 'T1' })).toBe(
-      '/area-membros?aba=trilhas&trilha=T1',
+      '/area-membros/trilhas?trilha=T1',
     );
     expect(memberAreaRedirectHref({ aba: 'cursos', categoria: 'a b&c' })).toBe(
-      '/area-membros?aba=cursos&categoria=a+b%26c',
+      '/area-membros/cursos?categoria=a+b%26c',
+    );
+    expect(memberAreaRedirectHref({ aba: 'lives', categoria: 'x', trilha: 'y' })).toBe(
+      '/area-membros/lives',
     );
   });
 
@@ -143,27 +145,28 @@ describe('memberAreaRedirectHref (quick 261019-k7x, T-k7x-02)', () => {
     expect(memberAreaRedirectHref({ aba: '', categoria: '', trilha: '' })).toBe('/area-membros');
     expect(
       memberAreaRedirectHref({ aba: 'lives', filtro: 'x', ver: 'admin' } as Record<string, string>),
-    ).toBe('/area-membros?aba=lives');
+    ).toBe('/area-membros/lives');
   });
 
   it('appends ver=aluno last in a preview', () => {
-    expect(memberAreaRedirectHref({ aba: 'lives' }, true)).toBe(
-      '/area-membros?aba=lives&ver=aluno',
+    expect(memberAreaRedirectHref({ aba: 'lives' }, true)).toBe('/area-membros/lives?ver=aluno');
+    expect(memberAreaRedirectHref({ aba: 'cursos', categoria: K }, true)).toBe(
+      `/area-membros/cursos?categoria=${K}&ver=aluno`,
     );
   });
 
-  it('keeps a URL-shaped or protocol-relative value an encoded query value (no open redirect)', () => {
-    for (const value of ['https://evil.example/x', '//evil.example', '/\\evil.example']) {
-      const href = memberAreaRedirectHref({ aba: value });
-      expect(href.startsWith('/area-membros?aba=')).toBe(true);
-      expect(href.split('?')[0]).toBe('/area-membros');
-      expect(href.slice('/area-membros?aba='.length)).toBe(encodeURIComponent(value));
+  it('an unknown or URL-shaped ?aba= reads as Início, never a redirect target (no open redirect)', () => {
+    for (const value of ['https://evil.example/x', '//evil.example', '/\\evil.example', 'Lives']) {
+      expect(memberAreaRedirectHref({ aba: value })).toBe('/area-membros');
     }
+    expect(memberAreaRedirectHref({ aba: 'cursos', categoria: '//evil.example' })).toBe(
+      `/area-membros/cursos?categoria=${encodeURIComponent('//evil.example')}`,
+    );
   });
 });
 
 describe('courseCardView (UI-D-426, E03)', () => {
-  it('populated: href, title, cover, the category · level line and the meta with duration', () => {
+  it('populated: href, title, cover, the category · level line, the lessons line and the length', () => {
     const view = courseCardView(card({ coverAssetId: K }), undefined, t);
     expect(view).toMatchObject({
       id: C,
@@ -171,7 +174,8 @@ describe('courseCardView (UI-D-426, E03)', () => {
       title: 'Lábios: técnica',
       coverAssetId: K,
       categoryLine: 'Lábios · Iniciante',
-      meta: '6 aulas · 45 min',
+      meta: '0/6 aulas',
+      duration: '45 min',
       tags: { exclusive: false, archived: false },
       progress: null,
       ariaLabel: 'Lábios: técnica, 6 aulas',
@@ -189,14 +193,17 @@ describe('courseCardView (UI-D-426, E03)', () => {
     );
   });
 
-  it('partial: zero duration → the meta omits it; the meta pluralises 1 aula / N aulas', () => {
-    expect(courseCardView(card({ durationSeconds: 0 }), undefined, t).meta).toBe('6 aulas');
+  it('2026-10-26: the lessons line is "{done}/{N} aulas" and the length rides apart (null at zero)', () => {
+    const none = courseCardView(card({ durationSeconds: 0 }), undefined, t);
+    expect(none.meta).toBe('0/6 aulas');
+    expect(none.duration).toBeNull();
     expect(courseCardView(card({ lessonCount: 1, durationSeconds: 0 }), undefined, t).meta).toBe(
-      '1 aula',
+      '0/1 aula',
     );
-    expect(
-      courseCardView(card({ lessonCount: 18, durationSeconds: 2 * 3600 }), undefined, t).meta,
-    ).toBe('18 aulas · 2 h');
+    const long = courseCardView(card({ lessonCount: 18, durationSeconds: 2 * 3600 }), undefined, t);
+    expect(long.meta).toBe('0/18 aulas');
+    expect(long.duration).toBe('2 h');
+    expect(courseCardView(card({ completedCount: 2 }), undefined, t).meta).toBe('2/6 aulas');
   });
 
   it('partial: no completion → no bar; one completed lesson → the bar and its name (D-430)', () => {
@@ -285,18 +292,19 @@ describe('liveCardView (UI-D-434, E04)', () => {
     };
   }
 
-  it('the four statuses read in words; only the on-air one carries the Radio glyph', () => {
+  it('the four statuses read in words; on air → the live glyph, recorded → the replay glyph', () => {
     const scheduled = liveCardView(live(), undefined, TZ, t);
     expect(scheduled.statusLabel).toBe('Agendada');
     expect(scheduled.statusIcon).toBeNull();
     const onAir = liveCardView(live({ status: 'live' }), undefined, TZ, t);
     expect(onAir.statusLabel).toBe('Ao vivo agora');
-    expect(onAir.statusIcon).toBe('radio');
-    expect(liveCardView(live({ status: 'recorded' }), undefined, TZ, t).statusLabel).toBe(
-      'Gravada',
-    );
+    expect(onAir.statusIcon).toBe('live');
+    const recorded = liveCardView(live({ status: 'recorded' }), undefined, TZ, t);
+    expect(recorded.statusLabel).toBe('Gravada');
+    expect(recorded.statusIcon).toBe('replay');
     const cancelled = liveCardView(live({ status: 'cancelled' }), undefined, TZ, t);
     expect(cancelled.statusLabel).toBe('Cancelada');
+    expect(cancelled.statusIcon).toBeNull();
     expect(cancelled.cancelled).toBe(true);
     expect(scheduled.cancelled).toBe(false);
   });
@@ -306,6 +314,18 @@ describe('liveCardView (UI-D-434, E04)', () => {
     expect(view.meta).toBe('sex, 16 de out, 19:00 · 60 min');
     expect(view.ariaLabel).toBe('Tira-dúvidas de outubro, Agendada, sex, 16 de out, 19:00');
     expect(liveCardView(live(), undefined, 'UTC', t).meta).toBe('sex, 16 de out, 22:00 · 60 min');
+  });
+
+  it('2026-10-22: the agenda row gets the day, the short month and "{time} · {duration} min", tenant-local', () => {
+    const view = liveCardView(live(), undefined, TZ, t);
+    expect(view.day).toBe('16');
+    expect(view.month).toBe('out');
+    expect(view.timeLine).toBe('19:00 · 60 min');
+    // 2026-10-17 02:30Z is still the 16th, 23:30, in São Paulo; the 17th in UTC.
+    const late = liveCardView(live({ startsAt: '2026-10-17T02:30:00.000Z' }), undefined, TZ, t);
+    expect([late.day, late.month, late.timeLine]).toEqual(['16', 'out', '23:30 · 60 min']);
+    const utc = liveCardView(live({ startsAt: '2026-10-17T02:30:00.000Z' }), undefined, 'UTC', t);
+    expect(utc.day).toBe('17');
   });
 
   it('"Exclusiva" comes only from the store: locked → the tag and ", exclusiva" in the name', () => {
@@ -599,20 +619,30 @@ describe('curriculumView (UI-D-429)', () => {
       state: { kind: 'done' },
       ariaLabel: 'Módulo 01: Módulo 1, concluído',
     });
+    // 2026-10-22: the pill says the band's state ("Bloqueado", "Em andamento").
     expect(two).toMatchObject({
-      pill: 'Módulo 02',
+      pill: 'Bloqueado',
       meta: 'Libera ao concluir o Módulo 01',
       metaLocked: true,
       state: { kind: 'locked' },
       ariaLabel: 'Módulo 02: Módulo 2, bloqueado',
     });
     expect(three).toMatchObject({
+      pill: 'Em andamento',
       state: { kind: 'ring', percent: 33 },
       ariaLabel: 'Módulo 03: Módulo 3, 33% concluído',
     });
   });
 
-  it('a purchase-locked band keeps its meta and shows the lock disc', () => {
+  it('2026-10-22: an untouched open band reads "Módulo {nn}"', () => {
+    const view = curriculumView(course({ modules: [mod(1, [lesson(1)])] }), false, t);
+    expect(view.modules[0]).toMatchObject({
+      pill: 'Módulo 01',
+      state: { kind: 'ring', percent: 0 },
+    });
+  });
+
+  it('a purchase-locked band keeps its meta, shows the lock disc and the "Exclusivo" pill', () => {
     const view = curriculumView(
       course({
         locked: true,
@@ -622,6 +652,7 @@ describe('curriculumView (UI-D-429)', () => {
       t,
     );
     expect(view.modules[0]).toMatchObject({
+      pill: 'Exclusivo',
       meta: '1 aula · 13 min',
       metaLocked: false,
       state: { kind: 'locked' },
@@ -731,8 +762,44 @@ describe('courseHeroView / courseSeconds (UI-D-427, E05 populated)', () => {
     expect(view.description).toBeNull();
     expect(view.outcomes).toEqual([]);
     expect(view.categoryPill).toBe('Lábios');
-    expect(view.pills).toEqual(['Iniciante', '12 h']);
     expect(view.instructorLine).toBe('Com Dra. Ana');
+    expect(view).not.toHaveProperty('pills');
+  });
+
+  it('2026-10-22: the overline counts the listed modules and names the level', () => {
+    const two = course({ modules: [mod(1, [lesson(1)]), mod(2, [lesson(2)]), mod(3, [])] });
+    expect(courseHeroView(two, t).overline).toBe('Curso · 2 módulos · Iniciante');
+    expect(courseHeroView(course({ modules: [mod(1, [lesson(1)])] }), t).overline).toBe(
+      'Curso · 1 módulo · Iniciante',
+    );
+    expect(courseHeroView(course({ level: null }), t).overline).toBe('Curso');
+    expect(courseHeroView(course({ level: 'avancado' }), t).overline).toBe('Curso · Avançado');
+  });
+
+  it('2026-10-22: the facts are Aulas, Duração (hours first, else the videos) and Nível, each only when known', () => {
+    const modules = [mod(1, [lesson(1), lesson(2, { durationSeconds: null })])];
+    expect(courseHeroView(course({ modules }), t).facts).toEqual([
+      { key: 'lessons', value: '2', label: 'Aulas' },
+      { key: 'duration', value: '12 h', label: 'Duração' },
+      { key: 'level', value: 'Iniciante', label: 'Nível' },
+    ]);
+    // No certificate hours: the ready videos' sum (754 s → 13 min).
+    expect(courseHeroView(course({ modules, certificateHours: null }), t).facts[1]).toEqual({
+      key: 'duration',
+      value: '13 min',
+      label: 'Duração',
+    });
+    // Neither, and no level: the lessons alone.
+    expect(
+      courseHeroView(
+        course({
+          modules: [mod(1, [lesson(1, { durationSeconds: null })])],
+          certificateHours: 0,
+          level: null,
+        }),
+        t,
+      ).facts,
+    ).toEqual([{ key: 'lessons', value: '1', label: 'Aulas' }]);
   });
 
   it("sums every live lesson's ready seconds", () => {
@@ -1037,7 +1104,7 @@ describe('livePageView (08.5-09, UI-D-435, UI-D-436, D-431..D-434, E10)', () => 
     const view = livePageView(live(), TZ, t);
     expect(view.title).toBe('Tira-dúvidas de outubro');
     expect(view.backHref).toBe(MEMBER_LIVES_HREF);
-    expect(MEMBER_LIVES_HREF).toBe('/area-membros?aba=lives');
+    expect(MEMBER_LIVES_HREF).toBe('/area-membros/lives');
     expect(view.meta).toBe('quinta, 22 de outubro, 19:00 · 60 min');
     expect(view.coverAlt).toBe('Capa da live Tira-dúvidas de outubro');
     expect(view.description).toBe('Traga as dúvidas do mês.');
@@ -1091,7 +1158,7 @@ describe('livePageView (08.5-09, UI-D-435, UI-D-436, D-431..D-434, E10)', () => 
       TZ,
       t,
     );
-    expect(view.statusPill).toEqual({ label: 'Ao vivo agora', icon: 'radio' });
+    expect(view.statusPill).toEqual({ label: 'Ao vivo agora', icon: 'live' });
     expect(view.zone).toMatchObject({
       state: 'open',
       helper: 'A live acontece fora do app, no link da transmissão.',
@@ -1143,7 +1210,7 @@ describe('livePageView (08.5-09, UI-D-435, UI-D-436, D-431..D-434, E10)', () => 
       TZ,
       t,
     );
-    expect(view.statusPill).toEqual({ label: 'Gravada', icon: null });
+    expect(view.statusPill).toEqual({ label: 'Gravada', icon: 'replay' });
     expect(view.refresh).toBeNull();
     expect(view.zone).toMatchObject({
       state: 'replay',
@@ -1265,8 +1332,8 @@ function hero(overrides: Partial<LearnOverviewHero> = {}): LearnOverviewHero {
 }
 
 describe('MEMBER_CATALOGUE_HREF (D-435, UI-D-446)', () => {
-  it('is the Cursos body at ?aba=cursos (bare /cursos is Início)', () => {
-    expect(MEMBER_CATALOGUE_HREF).toBe('/area-membros?aba=cursos');
+  it('is the Cursos screen at /area-membros/cursos (2026-10-22; the bare area is Início)', () => {
+    expect(MEMBER_CATALOGUE_HREF).toBe('/area-membros/cursos');
   });
 });
 
@@ -1515,7 +1582,7 @@ describe('homeTrackView (UI-D-451, D-438, COURSE-31)', () => {
     const view = homeTrackView(overviewTrack(), t);
     expect(view.state).toBe('started');
     expect(view.href).toBe(`/cursos/${C}`);
-    expect(view.seeAllHref).toBe('/area-membros?aba=trilhas');
+    expect(view.seeAllHref).toBe('/area-membros/trilhas');
     expect(view.eyebrow).toBe('Etapa 2 de 4');
     expect(view.bar).toEqual({ percent: 35, label: '35% concluído' });
     expect(view.line).toBe('35% do caminho · agora: Olhar do zero');
@@ -1560,8 +1627,8 @@ describe('homeTrackView (UI-D-451, D-438, COURSE-31)', () => {
   it('keeps ver=aluno on the card and on "Ver tudo" in preview', () => {
     const view = homeTrackView(overviewTrack(), t, true);
     expect(view.href).toBe(`/cursos/${C}?ver=aluno`);
-    expect(view.seeAllHref).toBe('/area-membros?aba=trilhas&ver=aluno');
-    expect(memberTracksHref()).toBe('/area-membros?aba=trilhas');
+    expect(view.seeAllHref).toBe('/area-membros/trilhas?ver=aluno');
+    expect(memberTracksHref()).toBe('/area-membros/trilhas');
   });
 });
 
@@ -1585,6 +1652,7 @@ describe('newLessonView (UI-D-454, COURSE-33)', () => {
     expect(view.badge).toBe('Nova');
     expect(view.duration).toBe('8:10');
     expect(view.meta).toBe('Pele: protocolo · 8 min');
+    expect(view.courseTitle).toBe('Pele: protocolo');
     expect(view.done).toBe(false);
     expect(view.ariaLabel).toBe('Limpeza e preparo da pele, Pele: protocolo');
   });
@@ -1615,7 +1683,7 @@ function categoryTile(overrides: Partial<LearnCategoryTile> = {}): LearnCategory
 describe('categoryTileView (UI-D-455, COURSE-34, T-08.6-26)', () => {
   it("lands on the catalogue filtered by the server's category id, with the pluralised count", () => {
     const view = categoryTileView(categoryTile(), t);
-    expect(view.href).toBe(`/area-membros?aba=cursos&categoria=${K}`);
+    expect(view.href).toBe(`/area-membros/cursos?categoria=${K}`);
     expect(view.name).toBe('Harmonização');
     expect(view.count).toBe('3 cursos');
     expect(view.ariaLabel).toBe('Harmonização, 3 cursos');
@@ -1629,10 +1697,10 @@ describe('categoryTileView (UI-D-455, COURSE-34, T-08.6-26)', () => {
 
   it('adds &ver=aluno in preview and URL-encodes the id', () => {
     expect(categoryTileView(categoryTile(), t, true).href).toBe(
-      `/area-membros?aba=cursos&categoria=${K}&ver=aluno`,
+      `/area-membros/cursos?categoria=${K}&ver=aluno`,
     );
     expect(categoryTileView(categoryTile({ id: 'a b&c' }), t).href).toBe(
-      '/area-membros?aba=cursos&categoria=a+b%26c',
+      '/area-membros/cursos?categoria=a+b%26c',
     );
   });
 });
@@ -1844,7 +1912,7 @@ describe('trackTabView (D-439, D-438, UI-D-456, COURSE-35)', () => {
     expect(view?.selected.pill).toBeNull();
     expect(view?.selected.cta.kind).toBe('start');
     expect(view?.others.map((other) => other.id)).toEqual([TA, TC]);
-    expect(view?.others[0]?.href).toBe(`/area-membros?aba=trilhas&trilha=${TA}`);
+    expect(view?.others[0]?.href).toBe(`/area-membros/trilhas?trilha=${TA}`);
 
     const fallback = trackTabView(tracks, 'nao-existe', t);
     expect(fallback?.selected.id).toBe(TA);
@@ -1861,6 +1929,12 @@ describe('otherTrackView (UI-D-456)', () => {
     expect(view.meta).toBe('3 etapas · 30 aulas · 5 h');
     expect(view.progress).toBeNull();
     expect(view.notStarted).toBe('Você ainda não começou');
+    expect(view.pill).toBeNull();
+  });
+
+  it('2026-10-22: the cover chip says "Sua trilha" or "Sugerido", as the hero does', () => {
+    expect(otherTrackView(learnTrack({ id: TB, mine: true }), t).pill).toBe('Sua trilha');
+    expect(otherTrackView(learnTrack({ id: TB, suggested: true }), t).pill).toBe('Sugerido');
   });
 
   it('started → the bar and "{percent}% do caminho"; one step pluralises "1 etapa"; preview keeps ver=aluno', () => {
@@ -1879,7 +1953,7 @@ describe('otherTrackView (UI-D-456)', () => {
     expect(view.meta).toBe('1 etapa · 1 aula');
     expect(view.progress).toEqual({ percent: 40, label: '40% concluído', line: '40% do caminho' });
     expect(view.notStarted).toBeNull();
-    expect(view.href).toBe(`/area-membros?aba=trilhas&trilha=${TB}&ver=aluno`);
+    expect(view.href).toBe(`/area-membros/trilhas?trilha=${TB}&ver=aluno`);
   });
 });
 

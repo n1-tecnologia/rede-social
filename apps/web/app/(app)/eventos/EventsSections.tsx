@@ -1,7 +1,7 @@
 'use client';
 
 import { EventPoster } from '@rede-social/module-events/ui';
-import { Button, Card, EmptyState, PullToRefresh, Skeleton } from '@rede-social/ui';
+import { Button, Card, cn, EmptyState, PullToRefresh, Skeleton } from '@rede-social/ui';
 import { CalendarDays, Plus, TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useId, useState } from 'react';
@@ -78,8 +78,28 @@ function GalleryEmpty({
 }
 
 /**
- * One gallery: its header, then the posters side by side in a row that scrolls sideways (a list, so
- * assistive tech announces how many), or its empty card. The first two posters load eagerly.
+ * 2026-10-26 — a gallery on the page's whole width (the product owner: "o aproveitamento igual da
+ * área de membros"). A phone keeps the row of 256px posters that scrolls sideways; from `md` the same
+ * list is a grid that shows every poster, two columns and then three, four and five as the column
+ * holds 672, 896 and 1152px. The container is the padded wrapper, so the steps follow the room the
+ * rail leaves. `POSTER_CELL` is the slot on both; `SKELETON_ROW` keeps the skeleton to one row.
+ */
+const POSTERS_WRAP = '@container md:px-4';
+const POSTERS =
+  'flex gap-3 overflow-x-auto overscroll-x-contain px-4 pb-2 scrollbar-none md:grid md:grid-cols-2 md:overflow-visible md:px-0 md:pb-0 @2xl:grid-cols-3 @4xl:grid-cols-4 @6xl:grid-cols-5 lg:gap-4';
+const POSTER_CELL = 'w-64 shrink-0 md:w-auto md:min-w-0';
+const SKELETON_ROW = [
+  ['p0', ''],
+  ['p1', ''],
+  ['p2', 'hidden @2xl:block'],
+  ['p3', 'hidden @4xl:block'],
+  ['p4', 'hidden @6xl:block'],
+] as const;
+
+/**
+ * One gallery: its header, then the posters side by side in a row that scrolls sideways on a phone
+ * and in a grid from `md` (a list, so assistive tech announces how many), or its empty card. The
+ * first two posters load eagerly.
  */
 function Gallery({
   section,
@@ -101,27 +121,29 @@ function Gallery({
     <section aria-labelledby={headingId} data-events-section={section} className="mb-7">
       <GalleryHeader id={headingId} title={title} subtitle={subtitle} action={action} />
       {cards.length > 0 ? (
-        <ul className="flex gap-3 overflow-x-auto overscroll-x-contain px-4 pb-2 scrollbar-none md:scrollbar-thin">
-          {cards.map((card, index) => (
-            <li key={card.id} className="w-64 shrink-0">
-              <EventPoster
-                href={card.href}
-                ariaLabel={card.ariaLabel}
-                title={card.title}
-                category={card.category}
-                place={card.place}
-                placeKind={card.placeKind}
-                badge={card.badge}
-                note={card.note}
-                coverAssetId={card.coverAssetId}
-                coverVariantWidths={card.coverVariantWidths}
-                coverAlt={card.coverAlt}
-                grayscale={card.grayscale}
-                eager={index < 2}
-              />
-            </li>
-          ))}
-        </ul>
+        <div className={POSTERS_WRAP}>
+          <ul className={POSTERS}>
+            {cards.map((card, index) => (
+              <li key={card.id} className={POSTER_CELL}>
+                <EventPoster
+                  href={card.href}
+                  ariaLabel={card.ariaLabel}
+                  title={card.title}
+                  category={card.category}
+                  place={card.place}
+                  placeKind={card.placeKind}
+                  badge={card.badge}
+                  note={card.note}
+                  coverAssetId={card.coverAssetId}
+                  coverVariantWidths={card.coverVariantWidths}
+                  coverAlt={card.coverAlt}
+                  grayscale={card.grayscale}
+                  eager={index < 2}
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : (
         empty
       )}
@@ -139,9 +161,16 @@ export function EventsSkeleton({ headers }: { headers: { title: string; subtitle
       {headers.map((header) => (
         <div key={header.title} className="mb-7">
           <GalleryHeader title={header.title} subtitle={header.subtitle} />
-          <div className="flex gap-3 overflow-hidden px-4 pb-2">
-            <Skeleton variant="rect" className="aspect-[4/5] w-64 shrink-0 rounded-xl" />
-            <Skeleton variant="rect" className="aspect-[4/5] w-64 shrink-0 rounded-xl" />
+          <div className={POSTERS_WRAP}>
+            <div className={cn(POSTERS, 'overflow-hidden')}>
+              {SKELETON_ROW.map(([id, only]) => (
+                <Skeleton
+                  key={id}
+                  variant="rect"
+                  className={cn('aspect-[4/5] rounded-xl', POSTER_CELL, only)}
+                />
+              ))}
+            </div>
           </div>
         </div>
       ))}

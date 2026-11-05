@@ -12,7 +12,7 @@ import {
   ConfirmDialog,
   Input,
   PageHeader,
-  Switch,
+  SectionTitle,
   Textarea,
   useToast,
 } from '@rede-social/ui';
@@ -26,6 +26,7 @@ import {
   lessonHref,
   type MaterialDraft,
 } from '@/lib/courses-view';
+import { DANGER_OVERRIDES } from '../../admin-styles';
 import {
   createLessonAction,
   deleteLessonAction,
@@ -34,6 +35,7 @@ import {
   replaceMaterialsAction,
   updateLessonAction,
 } from '../../lesson-actions';
+import { SwitchRow } from '../../SwitchRow';
 import { MaterialsList } from './MaterialsList';
 import { VideoBlock } from './VideoBlock';
 
@@ -67,6 +69,11 @@ import { VideoBlock } from './VideoBlock';
  * through `materialUrlAction` and opens it with `noopener` (T-08.3-06); the URL is never kept.
  *
  * Every field renders as React text (UI-D-407, T-08.3-25); every string comes from the catalogs.
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the order is Título →
+ * Vídeo → Descrição → Materiais → Acesso (the two switches as `SwitchRow` blocks under the
+ * "Acesso" heading: "Aula aberta" first, then the sequence rule) → on edit, the danger zone's
+ * outlined "Remover aula". Every rule, hook and id of the two switches is unchanged.
  */
 export type LessonFormMode = 'create' | 'edit';
 
@@ -385,7 +392,11 @@ export function LessonForm({
           onBlur={() => setTitleTouched(true)}
         />
 
-        {/* ── (2) Descrição: grows to its content; the page scrolls (E09 long-text). ── */}
+        {/* ── (2) Vídeo: the five states on the direct upload (D-409); right under the title, the
+            prototype's order (the lesson IS its video). ── */}
+        <VideoBlock video={video} onChange={onVideoChange} />
+
+        {/* ── (3) Descrição: grows to its content; the page scrolls (E09 long-text). ── */}
         <Textarea
           id="lesson-description"
           name="description"
@@ -403,65 +414,7 @@ export function LessonForm({
           onChange={(event) => setDescription(event.target.value)}
         />
 
-        {/* ── (3) Vídeo: the five states on the direct upload (D-409). ── */}
-        <VideoBlock video={video} onChange={onVideoChange} />
-
-        {/* ── (4) Aula aberta (D-407): editable on every course; the helper says what it means. ── */}
-        <div data-lesson-free className="flex items-start gap-3">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span id="lesson-free-label" className="text-sm font-bold text-text">
-              {t('lesson.free.label')}
-            </span>
-            <span
-              id="lesson-free-helper"
-              data-lesson-free-helper
-              className="text-xs font-normal text-text-tertiary"
-            >
-              {hasProducts ? t('lesson.free.helperGated') : t('lesson.free.helperOpen')}
-            </span>
-          </div>
-          <Switch
-            checked={isFree}
-            onChange={(next) => {
-              setIsFree(next);
-              // Turning "Aula aberta" on clears the rule: an open lesson is never locked (A-UI-6).
-              if (next) setRequiresPrevious(false);
-            }}
-            label={t('lesson.free.label')}
-            aria-describedby="lesson-free-helper"
-            className="mt-0.5"
-          />
-        </div>
-
-        {/* ── (4b) Exige concluir a aula anterior (D-428, UI-D-438): the disabled states say why. ── */}
-        <div data-lesson-requires className="flex items-start gap-3">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span id="lesson-requires-label" className="text-sm font-bold text-text">
-              {t('lesson.requiresPrevious.label')}
-            </span>
-            <span
-              id="lesson-requires-helper"
-              data-lesson-requires-helper
-              className="text-xs font-normal text-text-tertiary"
-            >
-              {isFirstLesson
-                ? t('lesson.requiresPrevious.first')
-                : isFree
-                  ? t('lesson.requiresPrevious.free')
-                  : t('lesson.requiresPrevious.helper')}
-            </span>
-          </div>
-          <Switch
-            checked={requiresValue}
-            onChange={setRequiresPrevious}
-            label={t('lesson.requiresPrevious.label')}
-            aria-describedby="lesson-requires-helper"
-            disabled={requiresLocked}
-            className="mt-0.5"
-          />
-        </div>
-
-        {/* ── (5) Materiais (D-410): the whole set saves with the lesson. ── */}
+        {/* ── (4) Materiais (D-410): the whole set saves with the lesson. ── */}
         <MaterialsList
           items={materials}
           onChange={onMaterialsChange}
@@ -471,19 +424,55 @@ export function LessonForm({
           onBusyChange={onMaterialsBusy}
         />
 
-        {/* ── (6) Edit only: the hairline and "Remover aula" (UI-D-398). ── */}
+        {/* ── (5) Acesso: the two switches, each a block that says what it changes before the tap. ── */}
+        <section aria-labelledby="lesson-access-title" className="flex flex-col gap-2">
+          <SectionTitle id="lesson-access-title" variant="group" as="h2">
+            {t('form.access.label')}
+          </SectionTitle>
+          {/* Aula aberta (D-407): editable on every course; the helper says what it means. */}
+          <SwitchRow
+            id="lesson-free"
+            hook="lesson-free"
+            label={t('lesson.free.label')}
+            helper={hasProducts ? t('lesson.free.helperGated') : t('lesson.free.helperOpen')}
+            checked={isFree}
+            onChange={(next) => {
+              setIsFree(next);
+              // Turning "Aula aberta" on clears the rule: an open lesson is never locked (A-UI-6).
+              if (next) setRequiresPrevious(false);
+            }}
+          />
+          {/* Exige concluir a aula anterior (D-428, UI-D-438): the disabled states say why. */}
+          <SwitchRow
+            id="lesson-requires"
+            hook="lesson-requires"
+            label={t('lesson.requiresPrevious.label')}
+            helper={
+              isFirstLesson
+                ? t('lesson.requiresPrevious.first')
+                : isFree
+                  ? t('lesson.requiresPrevious.free')
+                  : t('lesson.requiresPrevious.helper')
+            }
+            checked={requiresValue}
+            onChange={setRequiresPrevious}
+            disabled={requiresLocked}
+          />
+        </section>
+
+        {/* ── (6) Edit only: the hairline and the danger zone's "Remover aula" (UI-D-398). ── */}
         {mode === 'edit' && lessonId ? (
           <>
             <div aria-hidden className="h-px bg-border" />
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               size="md"
               data-lesson-remove
-              className="justify-start self-start px-0 text-danger"
+              className={DANGER_OVERRIDES}
               onClick={() => setRemoving(true)}
             >
-              <Trash2 aria-hidden size={20} />
+              <Trash2 aria-hidden size={18} />
               {t('lesson.form.remove')}
             </Button>
           </>

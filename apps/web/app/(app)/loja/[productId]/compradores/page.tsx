@@ -1,12 +1,15 @@
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
-import { EmptyState, PageHeader } from '@rede-social/ui';
-import { CircleAlert } from 'lucide-react';
+import { BackLink, EmptyState } from '@rede-social/ui';
+import { ChevronLeft, CircleAlert } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { getProduct } from '@/lib/store';
 import { listBuyers } from '@/lib/store-admin';
 import { buyerRowView } from '@/lib/store-view';
+import { OUTLINE_LINK, WIDE_EMPTY } from '../../../cursos/admin-styles';
+import { ScreenHeader } from '../../../cursos/ScreenHeader';
+import { BACK_ROW_LINK } from '../../store-styles';
 import { BuyersList } from './BuyersList';
 
 /**
@@ -25,6 +28,11 @@ import { BuyersList } from './BuyersList';
  * permission lost since the bootstrap; a product read failure is the error card with a retry, and a
  * buyers read failure is the list's own first-load error (the toolbar stays). Every row is built
  * HERE, its date in the TENANT's timezone (UI-D-380): the client list formats nothing.
+ *
+ * 2026-10-24 (the Loja redesign on the "área de membros"): a WIDE page (`data-shell-wide`) in the
+ * admin lists' language: the "Voltar" back row (a `BackLink`: the screen the manager came from, the
+ * product page only as the fallback) over the `ScreenHeader` "Compradores", then the toolbar and the
+ * rows in the outlined list card (`BuyersList`).
  */
 export default async function BuyersPage({ params }: { params: Promise<{ productId: string }> }) {
   const { productId } = await params;
@@ -40,18 +48,22 @@ export default async function BuyersPage({ params }: { params: Promise<{ product
 
   const productHref = `/loja/${encodeURIComponent(productId)}`;
   const header = (
-    <PageHeader
-      backHref={productHref}
-      backLabel={t('store.buyers.back')}
+    <ScreenHeader
       title={t('store.buyers.title')}
+      back={
+        <BackLink href={productHref} className={BACK_ROW_LINK}>
+          <ChevronLeft aria-hidden size={18} />
+          <span>{t('store.buyers.back')}</span>
+        </BackLink>
+      }
     />
   );
 
   if (product.status === 'error') {
     return (
-      <div className="mx-auto w-full max-w-[680px] pb-6">
+      <div data-shell-wide className="mx-auto flex w-full flex-col pb-6">
         {header}
-        <div className="px-4 pt-4">
+        <div className={`px-4 ${WIDE_EMPTY}`}>
           <EmptyState
             variant="card"
             icon={CircleAlert}
@@ -59,10 +71,7 @@ export default async function BuyersPage({ params }: { params: Promise<{ product
             title={t('store.errors.title')}
             body={t('store.errors.buyers')}
             action={
-              <a
-                href={`${productHref}/compradores`}
-                className="inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-              >
+              <a href={`${productHref}/compradores`} className={OUTLINE_LINK}>
                 {t('store.errors.retry')}
               </a>
             }
@@ -78,7 +87,7 @@ export default async function BuyersPage({ params }: { params: Promise<{ product
   const page = buyers.status === 'ok' ? buyers.page : null;
 
   return (
-    <div className="mx-auto w-full max-w-[680px] pb-6" data-store-buyers>
+    <div data-store-buyers data-shell-wide className="mx-auto flex w-full flex-col pb-6">
       {header}
       <BuyersList
         productId={product.product.id}

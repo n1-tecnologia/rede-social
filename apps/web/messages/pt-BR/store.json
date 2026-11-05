@@ -1,6 +1,15 @@
 {
   "store": {
     "nav": "Loja",
+    "area": {
+      "label": "Loja",
+      "menu": "Menu da Loja",
+      "screens": {
+        "products": "Produtos",
+        "owned": "Comprados",
+        "manage": "Gerenciar"
+      }
+    },
     "list": {
       "title": "Loja",
       "subtitle": "Produtos e acessos exclusivos de {tenant}.",
@@ -27,6 +36,81 @@
         "body": "Produtos arquivados aparecem aqui e podem ser reativados."
       }
     },
+    "categories": {
+      "title": "Categorias",
+      "all": "Tudo",
+      "count": "{n, plural, =0 {Nenhum produto} one {# produto} other {# produtos}}",
+      "aria": "{category}, {count}",
+      "names": {
+        "cursos": "Cursos",
+        "livros": "Livros",
+        "materiais": "Materiais",
+        "roupas": "Roupas",
+        "perfumes": "Perfumes",
+        "equipamentos": "Equipamentos",
+        "servicos": "Serviços",
+        "outros": "Outros"
+      },
+      "tags": {
+        "cursos": "Curso",
+        "livros": "Livro",
+        "materiais": "Material",
+        "roupas": "Roupa",
+        "perfumes": "Perfume",
+        "equipamentos": "Equipamento",
+        "servicos": "Serviço",
+        "outros": "Produto"
+      }
+    },
+    "front": {
+      "hero": {
+        "title": "Em destaque",
+        "eyebrow": "Destaque da loja",
+        "cta": "Ver produto"
+      },
+      "shelf": {
+        "seeAll": "Ver tudo",
+        "seeAllAria": "Ver tudo em {category}"
+      },
+      "search": {
+        "label": "Buscar na loja",
+        "placeholder": "Busque um produto",
+        "submit": "Buscar",
+        "title": "Busca",
+        "results": "{n, plural, =0 {Nenhum resultado} one {# resultado} other {# resultados}} para “{query}”",
+        "empty": {
+          "title": "Nada encontrado",
+          "body": "Tente outra palavra ou navegue pelas categorias."
+        }
+      },
+      "sort": {
+        "label": "Ordenar por",
+        "recent": "Mais recentes",
+        "priceAsc": "Menor preço",
+        "priceDesc": "Maior preço"
+      },
+      "back": "Loja",
+      "backAria": "Voltar para a Loja",
+      "categoryEmpty": {
+        "title": "Nada nesta categoria ainda",
+        "body": "Quando {tenant} publicar produtos aqui, eles aparecem nesta página."
+      },
+      "related": "Você também pode gostar"
+    },
+    "screens": {
+      "owned": {
+        "title": "Comprados",
+        "subtitle": "Os produtos que você comprou ou recebeu de {tenant}."
+      },
+      "manage": {
+        "title": "Gerenciar",
+        "subtitle": "Crie, edite e arquive os produtos de {tenant}.",
+        "filter": {
+          "active": "Ativos",
+          "button": "{label}: {current}"
+        }
+      }
+    },
     "price": {
       "free": "Grátis"
     },
@@ -41,13 +125,17 @@
     "product": {
       "buy": "Comprar",
       "get": "Obter",
+      "buyNote": "Acesso liberado assim que você confirmar a compra.",
       "back": "Voltar",
+      "overline": "Produto",
+      "about": "Sobre o produto",
       "owned": {
         "title": "Comprado",
         "body": "Você tem acesso a este produto."
       },
       "unlocks": {
         "title": "Libera o acesso a",
+        "count": "{count, plural, one {# conteúdo} other {# conteúdos}}",
         "rowLocked": "{community}, liberada com a compra",
         "rowOpen": "Abrir {community}"
       },
@@ -124,6 +212,11 @@
       "name": {
         "label": "Nome",
         "placeholder": "Ex.: Mentoria em grupo"
+      },
+      "category": {
+        "label": "Categoria",
+        "helper": "Crie e organize as categorias no Gerenciar da loja.",
+        "none": "Sem categoria"
       },
       "description": {
         "label": "Descrição",
@@ -277,6 +370,73 @@
       "title": "Produto indisponível",
       "body": "Este produto não está mais na Loja.",
       "cta": "Ir para a Loja"
+    },
+    "setup": {
+      "device": "Por enquanto, vale só neste aparelho.",
+      "save": "Salvar",
+      "cancel": "Cancelar",
+      "featured": {
+        "title": "Em destaque",
+        "sub": "O primeiro produto aparece grande na vitrine.",
+        "auto": "Automático: os produtos mais recentes.",
+        "main": "Principal",
+        "mainLine": "{price} · card grande",
+        "edit": "Editar",
+        "sheetTitle": "Em destaque",
+        "helper": "Toque nos produtos na ordem em que devem aparecer, até {max}. O primeiro fica grande na vitrine.",
+        "position": "Posição {n}",
+        "useNewest": "Usar os mais recentes",
+        "empty": "Nenhum produto à venda ainda.",
+        "saved": "Destaque salvo."
+      },
+      "categories": {
+        "title": "Categorias",
+        "sub": "{n, plural, =0 {Nenhuma categoria} one {# categoria} other {# categorias}}",
+        "manage": "Gerenciar",
+        "sheetTitle": "Categorias da loja",
+        "helper": "Crie, renomeie e ordene as categorias. A ordem aqui é a das prateleiras da vitrine.",
+        "nameLabel": "Nome da categoria {n}",
+        "icon": "Ícone de {name}",
+        "iconPick": "Escolha o ícone",
+        "moveUp": "Mover para cima: {name}",
+        "moveDown": "Mover para baixo: {name}",
+        "moved": "{name} agora está na posição {position} de {total}.",
+        "remove": "Excluir {name}",
+        "removeConfirm": "Excluir {name}? Os produtos dela ficam sem categoria.",
+        "removeYes": "Excluir",
+        "newLabel": "Nova categoria",
+        "newPlaceholder": "Ex.: Skincare",
+        "add": "Adicionar",
+        "reset": "Restaurar as categorias padrão",
+        "saved": "Categorias salvas.",
+        "errors": {
+          "empty": "Dê um nome a cada categoria.",
+          "taken": "Já existe uma categoria com esse nome.",
+          "max": "A loja pode ter até {max} categorias."
+        }
+      },
+      "icons": {
+        "graduation-cap": "Capelo",
+        "book-open": "Livro",
+        "file-text": "Documento",
+        "shirt": "Camiseta",
+        "spray-can": "Perfume",
+        "wrench": "Ferramenta",
+        "calendar-check": "Agenda",
+        "package": "Pacote",
+        "tag": "Etiqueta",
+        "sparkles": "Brilho",
+        "gift": "Presente",
+        "heart": "Coração",
+        "star": "Estrela",
+        "gem": "Joia",
+        "coffee": "Café",
+        "dumbbell": "Haltere",
+        "palette": "Paleta",
+        "camera": "Câmera",
+        "laptop": "Notebook",
+        "music": "Música"
+      }
     }
   }
 }

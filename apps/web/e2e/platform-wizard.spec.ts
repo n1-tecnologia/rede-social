@@ -440,7 +440,7 @@ test.describe('Tenant wizard — the preview device', () => {
     await expect.poll(() => fontFamilyOf(appName)).toMatch(/^Poppins, Manrope/);
     expect(await fontFamilyOf(device.locator('[data-preview-screen]'))).toMatch(/^Manrope/);
     await expect(
-      page.locator('link[data-google-font][href*="family=Poppins:wght@700"]'),
+      page.locator('link[data-google-font][href*="family=Poppins:wght@400;700"]'),
     ).toHaveAttribute('referrerpolicy', 'no-referrer');
     // "Concluir" closes the editor again; the line keeps naming the choice.
     await editFont.click();

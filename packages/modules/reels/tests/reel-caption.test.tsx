@@ -381,3 +381,67 @@ describe('ReelCaption — encoding (REELS-07 encoding edge)', () => {
     expect(text(container)?.textContent).toBe(caption);
   });
 });
+
+describe('ReelCaption beside the desktop player (placement="side", 2026-10-23)', () => {
+  it('the author block in the member’s theme: photo, name, Instagram line, then the caption and the chip; no veil', () => {
+    const { container } = render(
+      <ReelCaption
+        {...props({
+          placement: 'side',
+          author: {
+            name: 'author-name',
+            href: '/membros/m-1',
+            avatarUrl: null,
+            handle: {
+              label: '@handle',
+              href: 'https://instagram.com/handle',
+              ariaLabel: 'ig-aria',
+            },
+          },
+          community: COMMUNITY,
+        })}
+      />,
+    );
+    const block = container.querySelector('[data-reel-caption="side"]') as HTMLElement;
+    expect(block).not.toBeNull();
+    expect(block.className).not.toContain('absolute');
+    expect(block.className).toContain('text-text');
+    expect(screen.getByRole('link', { name: 'author-name' })).toHaveAttribute(
+      'href',
+      '/membros/m-1',
+    );
+    expect(screen.getByRole('link', { name: 'ig-aria' })).toHaveAttribute(
+      'href',
+      'https://instagram.com/handle',
+    );
+    expect(screen.getByRole('link', { name: 'community-aria-label' })).toHaveAttribute(
+      'href',
+      '/comunidades/c-1',
+    );
+    expect(screen.getByText('caption body')).toBeInTheDocument();
+    expect(container.querySelector('[data-reel-caption-veil]')).toBeNull();
+  });
+
+  it('the same clamp: "mais" when the text overflows, "menos" when expanded, never a veil', () => {
+    layout.scrollHeight = 80;
+    const onExpandedChange = vi.fn();
+    const { container, rerender } = render(
+      <ReelCaption {...props({ placement: 'side', onExpandedChange })} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'more-label' }));
+    expect(onExpandedChange).toHaveBeenCalledWith(true);
+    rerender(<ReelCaption {...props({ placement: 'side', onExpandedChange, expanded: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'less-label' }));
+    expect(onExpandedChange).toHaveBeenLastCalledWith(false);
+    expect(container.querySelector('[data-reel-caption-veil]')).toBeNull();
+  });
+
+  it('over the video, the author’s photo shows from md only (the phone’s block is unchanged)', () => {
+    const { container } = render(
+      <ReelCaption {...props({ author: { name: 'author-name', href: '/m', avatarUrl: null } })} />,
+    );
+    const photo = container.querySelector('[data-reel-caption] span[aria-hidden]') as HTMLElement;
+    expect(photo.className).toContain('hidden');
+    expect(photo.className).toContain('md:block');
+  });
+});

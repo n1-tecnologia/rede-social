@@ -2,6 +2,7 @@
 
 import { Button } from '@rede-social/ui';
 import { Play } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { LessonPlayer } from '@/app/(app)/cursos/[courseId]/aulas/[lessonId]/LessonPlayer';
 import { LessonSessionProvider } from '@/app/(app)/cursos/[courseId]/aulas/[lessonId]/LessonSession';
@@ -24,6 +25,9 @@ import type { VideoPlayerStatus } from '@/components/media/VideoPlayer';
  *    the lesson as on the player. A lock or removal answer stops the writes (UI-D-433).
  *  - "Materiais da gravação" (`MemberMaterials`) shares this session, so a lock seen on a material
  *    tap stops the player too.
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the player box FADES in
+ * where the cover was (0.25 s, `motion/react`; instant under "reduzir movimento").
  */
 
 interface ReplayState {
@@ -70,9 +74,15 @@ export interface LiveReplayMediaProps {
 const PLAYER_PROBE_STEP_MS = 120;
 const PLAYER_PROBE_TIMEOUT_MS = 6000;
 
-/** The cover box until the tap; the replay player in a box of the same size after it. */
+/**
+ * The cover box until the tap; the replay player in a box of the same size after it.
+ *
+ * 2026-10-23 (the wide live page): the player's box keeps the cover's proportion, 16:9 from `lg`
+ * like the page's cover, so the swap never changes the height.
+ */
 export function LiveReplayMedia({ cover, lessonId, video }: LiveReplayMediaProps) {
   const { playing } = useReplay();
+  const reduce = useReducedMotion();
   const boxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -104,11 +114,14 @@ export function LiveReplayMedia({ cover, lessonId, video }: LiveReplayMediaProps
   if (!playing) return <>{cover}</>;
 
   return (
-    <div
+    <motion.div
       ref={boxRef}
       tabIndex={-1}
       data-testid="live-replay-player"
-      className="flex aspect-[16/10] w-full flex-col justify-center bg-black focus-visible:outline-none"
+      initial={reduce ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: reduce ? 0 : 0.25, ease: 'easeOut' }}
+      className="flex aspect-[16/10] w-full flex-col justify-center bg-black focus-visible:outline-none lg:aspect-video"
     >
       <LessonPlayer
         lessonId={lessonId}
@@ -117,7 +130,7 @@ export function LiveReplayMedia({ cover, lessonId, video }: LiveReplayMediaProps
         startTime={video.startTime}
         writes
       />
-    </div>
+    </motion.div>
   );
 }
 

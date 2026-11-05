@@ -1,7 +1,6 @@
 'use client';
 
 import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
-import { MediaImage } from '@rede-social/core/ui';
 import {
   LESSON_PICKER_MAX,
   type LessonPickerItem,
@@ -18,7 +17,6 @@ import { LessonPickerSheet } from '@rede-social/module-courses/ui';
 import {
   Button,
   ConfirmDialog,
-  FileDropZone,
   Input,
   PageHeader,
   SectionTitle,
@@ -26,19 +24,23 @@ import {
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { ChevronDown, ExternalLink, Image as ImageIcon, RotateCcw, Video, X } from 'lucide-react';
+import { ChevronDown, ExternalLink, RotateCcw, Video, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useId, useMemo, useRef, useState, useTransition } from 'react';
+import { useId, useMemo, useState, useTransition } from 'react';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
   groupLessonsForPicker,
   type LiveFormDefaults,
   type LiveWallClock,
+  liveFilterHref,
   tenantWallClockToInstant,
 } from '@/lib/courses-view';
 import { type AccessProductView, communityAccessSegments } from '@/lib/store-view';
+import { DANGER_OVERRIDES, FIELD_TRIGGER, INFO_TILE } from '../admin-styles';
+import { CoverField } from '../CoverField';
 import {
   cancelLiveAction,
   createLiveAction,
@@ -88,6 +90,12 @@ import {
  * **ZERO UPLOAD CODE LIVES HERE.** The cover runs the Phase 3 machine (`useSignedUpload`, purpose
  * `cover`), straight to Storage; this file holds an asset id, never bytes (MEDIA-01). Every field
  * renders as React text (T-08.3-25); every string comes from the `courses` catalog (PWA-03).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the cover is the shared
+ * `CoverField` (the 16:10 frame IS the control; read-only, the frame alone, on a cancelled live),
+ * the replay opens from the forms' field-like trigger, the read-only "Acesso" is an information
+ * block and "Cancelar live" is the danger zone's outlined button. A save lands on the Lives list's
+ * own page (`/cursos/lives`). Rules, writes and hooks are unchanged.
  */
 export type LiveFormMode = 'create' | 'edit';
 
@@ -127,22 +135,13 @@ const ACCEPT = mediaAcceptFor('image', 'cover');
 /** Announced at these percentages only, not on every tick (the `CommunityForm` rule). */
 const QUARTILES = [25, 50, 75, 100];
 
-/** The Lives tab. */
-const LIVES_TAB = '/cursos?aba=lives';
+/** The Lives list's own page (2026-10-22). */
+const LIVES_TAB = liveFilterHref('upcoming');
 
 /** The planned slot the form opens with: an hour, the sketch's figure (within 5..600). */
 const DEFAULT_DURATION = 60;
 
 const EMPTY_START: LiveWallClock = { date: '', time: '' };
-
-/** The gradient the 16:10 preview falls back to (D-69, UI-D-403). */
-const GRADIENT = (
-  <span
-    aria-hidden
-    className="block h-full w-full"
-    style={{ backgroundImage: 'var(--brand-gradient)' }}
-  />
-);
 
 /** The duration field's verdict on its text: an integer within the contract's bounds. */
 export type DurationVerdict = { kind: 'invalid' } | { kind: 'ok'; minutes: number };
@@ -222,7 +221,6 @@ export function LiveForm({
   const [reactivating, setReactivating] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const coverInputRef = useRef<HTMLInputElement>(null);
   const startErrorId = useId();
   const replayHelperId = useId();
 
@@ -542,146 +540,45 @@ export function LiveForm({
         ) : null}
 
         {/* ── (1) Capa: the 16:10 crop the live row shows (the track's block, UI-D-403). ── */}
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
-          <div
-            data-live-cover-preview
-            className="relative aspect-[16/10] w-full max-w-[320px] overflow-hidden rounded-xl bg-bg-tertiary"
-          >
-            {coverPreview.previewUrl ? (
-              // biome-ignore lint/performance/noImgElement: a local object URL of the file being uploaded; next/image cannot load it (the `CommunityCover` precedent)
-              <img
-                src={coverPreview.previewUrl}
-                alt={t('form.cover.preview')}
-                data-live-cover-local
-                className="h-full w-full object-cover object-center"
-              />
-            ) : coverAssetId !== null ? (
-              <MediaImage
-                assetId={coverAssetId}
-                widths={coverWidths}
-                alt={t('form.cover.preview')}
-                sizes="320px"
-                ratio=""
-                className="h-full w-full"
-                fallback={GRADIENT}
-              />
-            ) : (
-              <span
-                data-live-cover-fallback
-                aria-hidden
-                className="block h-full w-full"
-                style={{ backgroundImage: 'var(--brand-gradient)' }}
-              />
-            )}
-          </div>
-
-          {readOnly ? null : (
-            <>
-              <div className="hidden md:block">
-                <FileDropZone
-                  id="live-cover-dropzone"
-                  icon={ImageIcon}
-                  accept={ACCEPT}
-                  // The hook owns the verdict (a phone photo is re-encoded in the browser).
-                  screen={false}
-                  state={
-                    coverUpload.state === 'progress' || coverUpload.state === 'processing'
-                      ? coverUpload.state
-                      : 'idle'
-                  }
-                  progress={coverUpload.progress}
-                  onFile={(file) => void coverUpload.pick(file)}
-                  labels={{
-                    caption: coverAssetId ? t('form.cover.change') : t('form.cover.add'),
-                    progress: (percent) => tm('progress', { percent }),
-                    processing: tm('photo.preparing'),
-                  }}
-                />
-              </div>
-
-              <input
-                ref={coverInputRef}
-                type="file"
-                accept={ACCEPT}
-                className="sr-only"
-                aria-label={coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = '';
-                  if (file) void coverUpload.pick(file);
-                }}
-              />
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={coverUploading}
-                  onClick={() => coverInputRef.current?.click()}
-                >
-                  <ImageIcon aria-hidden size={18} className="shrink-0" />
-                  {coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-                </Button>
-                {coverAssetId ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={coverUploading}
-                    onClick={() => {
-                      setCoverAssetId(null);
-                      setCoverError(null);
-                      coverUpload.reset();
-                    }}
-                  >
-                    <X aria-hidden size={18} className="shrink-0" />
-                    {t('form.cover.remove')}
-                  </Button>
-                ) : null}
-              </div>
-
-              {coverUpload.state === 'progress' ? (
-                <div className="flex flex-col gap-2">
-                  <div
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={coverUpload.progress}
-                    className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
-                  >
-                    <div
-                      className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
-                      style={{ width: `${coverUpload.progress}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs tabular-nums text-text-tertiary">
-                      {tm('progress', { percent: coverUpload.progress })}
-                    </span>
-                    <Button type="button" variant="ghost" size="sm" onClick={coverUpload.cancel}>
-                      {tm('cancel')}
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-
-              <span aria-live="polite" className="sr-only">
-                {coverAnnounced}
-              </span>
-
-              {coverUpload.error || coverError ? (
-                <p role="alert" data-live-cover-error className="text-sm font-normal text-danger">
-                  {coverUpload.error ?? coverError}
-                </p>
-              ) : null}
-              <p className="text-xs font-normal text-text-tertiary">
-                {t('live.form.coverHelper', { tenant: tenantName })}
-              </p>
-            </>
-          )}
-        </div>
+        <CoverField
+          hook="live"
+          ratio="wide"
+          dropzoneId="live-cover-dropzone"
+          accept={ACCEPT}
+          assetId={coverAssetId}
+          widths={coverWidths}
+          previewUrl={coverPreview.previewUrl}
+          sizes="360px"
+          upload={coverUpload}
+          error={coverError}
+          helper={t('live.form.coverHelper', { tenant: tenantName })}
+          readOnly={readOnly}
+          announced={coverAnnounced}
+          alsoAs={[{ key: 'panoramic', ratio: 'panoramic', label: t('coverField.as.panoramic') }]}
+          sizeHint={<CoverSizeHint kind="live" />}
+          labels={{
+            pickFile: t('coverField.pickFile'),
+            camera: t('coverField.camera'),
+            ways: t('coverField.ways'),
+            waysTouch: t('coverField.waysTouch'),
+            dropHere: t('coverField.dropHere'),
+            field: t('form.cover.label'),
+            add: t('form.cover.add'),
+            change: t('form.cover.change'),
+            remove: t('form.cover.remove'),
+            preview: t('form.cover.preview'),
+            progress: (percent) => tm('progress', { percent }),
+            processing: tm('photo.preparing'),
+            cancel: tm('cancel'),
+          }}
+          onPick={(file) => void coverUpload.pick(file)}
+          onRemove={() => {
+            setCoverAssetId(null);
+            setCoverError(null);
+            coverUpload.reset();
+          }}
+          onCancel={coverUpload.cancel}
+        />
 
         {/* ── (2) Título ── */}
         <Input
@@ -833,12 +730,16 @@ export function LiveForm({
             <span className="text-sm font-normal text-text-secondary">
               {t('form.access.label')}
             </span>
-            <p
-              data-live-access-value
-              className="text-sm font-normal text-text [overflow-wrap:anywhere]"
-            >
-              {communityAccessSegments(accessProducts, tRoot, 'courses.live.form.access.value').map(
-                (segment, index) =>
+            <div className={INFO_TILE}>
+              <p
+                data-live-access-value
+                className="text-sm font-normal text-text [overflow-wrap:anywhere]"
+              >
+                {communityAccessSegments(
+                  accessProducts,
+                  tRoot,
+                  'courses.live.form.access.value',
+                ).map((segment, index) =>
                   segment.kind === 'text' ? (
                     // biome-ignore lint/suspicious/noArrayIndexKey: a fixed sentence, never reordered
                     <span key={`text-${index}`}>{segment.text}</span>
@@ -854,9 +755,10 @@ export function LiveForm({
                       {segment.product.archived ? t('form.access.archivedSuffix') : null}
                     </span>
                   ),
-              )}
-            </p>
-            <p className="text-xs font-normal text-text-tertiary">{t('form.access.helper')}</p>
+                )}
+              </p>
+              <p className="text-xs font-normal text-text-tertiary">{t('form.access.helper')}</p>
+            </div>
           </div>
         ) : null}
 
@@ -872,9 +774,9 @@ export function LiveForm({
               aria-describedby={replayHelperId}
               aria-haspopup="dialog"
               onClick={() => setReplayOpen(true)}
-              className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-border bg-bg-secondary px-3 py-2 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+              className={FIELD_TRIGGER}
             >
-              <Video aria-hidden size={20} className="shrink-0 text-text-secondary" />
+              <Video aria-hidden size={18} className="shrink-0 text-text-secondary" />
               <span
                 data-live-replay-value
                 className={
@@ -955,13 +857,13 @@ export function LiveForm({
             ) : (
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="md"
                 data-live-cancel
-                className="justify-start self-start px-0 text-danger"
+                className={DANGER_OVERRIDES}
                 onClick={() => setCancelling(true)}
               >
-                <X aria-hidden size={20} />
+                <X aria-hidden size={18} />
                 {t('live.form.cancel')}
               </Button>
             )}
