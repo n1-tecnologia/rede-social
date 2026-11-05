@@ -8,6 +8,7 @@ import {
   removeProfileFormByPrefix,
   seedProfileFormAnswer,
   seedProfileFormQuestion,
+  seedProfileFormStep,
   signInAs,
   withProfileForm,
 } from './setup';
@@ -885,5 +886,89 @@ describe('12-09 the summary and the impact: counts only, staff excluded (PFORM-2
       },
       { enabled: false },
     );
+  }, 30_000);
+});
+
+// ── 12.1-09 Task 3: the lifecycle on the global layout (D-627) ───────────────────────────────────
+
+type LayoutRow = { id: string; step_id: string; position: number; revision: number };
+
+/** The tenant's ACTIVE questions straight from the database, in the canonical order. */
+const activeRows = () =>
+  adminSql<LayoutRow[]>`
+    select id::text as id, step_id::text as step_id, position, revision
+      from public.profile_form_questions
+     where tenant_id = ${labTenantId}::uuid and archived_at is null
+     order by position, created_at, id`;
+
+describe('12.1-09 D-627: reactivate, archive and delete keep the layout contiguous', () => {
+  it('on a two-step tenant a reactivated question lands at the end of its own step and positions are contiguous 1..n', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await question({ stepId: s1, position: 1, title: `${TITLE}A` });
+      const back = await question({
+        stepId: s1,
+        position: 0,
+        archived: true,
+        title: `${TITLE}Back`,
+      });
+      const c = await question({ stepId: s2, position: 2, title: `${TITLE}C` });
+      const other = await question({
+        stepId: s2,
+        position: 0,
+        archived: true,
+        title: `${TITLE}Other`,
+      });
+
+      const res = await reactivate(admin, back);
+      expect(res.status).toBe(200);
+      const made = (await res.json()) as AdminQuestion & { stepId: string };
+      // Its own step is the FIRST one, so it sits after A in step 1 and before C in step 2.
+      expect(made.stepId).toBe(s1);
+      const rows = await activeRows();
+      expect(rows.map((row) => row.id)).toEqual([a, back, c]);
+      expect(rows.map((row) => row.position)).toEqual([1, 2, 3]);
+      expect(rows.map((row) => row.step_id)).toEqual([s1, s1, s2]);
+      // Reactivation bumped the revision once (1 -> 2); the shifted question kept its own.
+      expect(rows.find((row) => row.id === back)?.revision).toBe(2);
+      expect(rows.find((row) => row.id === c)?.revision).toBe(1);
+
+      // The second one belongs to the second step and lands at ITS end.
+      expect((await reactivate(admin, other)).status).toBe(200);
+      const after = await activeRows();
+      expect(after.map((row) => row.id)).toEqual([a, back, c, other]);
+      expect(after.map((row) => row.position)).toEqual([1, 2, 3, 4]);
+      expect(after.map((row) => row.step_id)).toEqual([s1, s1, s2, s2]);
+    });
+  }, 30_000);
+
+  it('archive and delete keep the remaining positions contiguous 1..n across steps', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await question({ stepId: s1, position: 1, title: `${TITLE}A` });
+      const b = await question({ stepId: s1, position: 2, title: `${TITLE}B` });
+      const c = await question({ stepId: s2, position: 3, title: `${TITLE}C` });
+      const d = await question({ stepId: s2, position: 4, title: `${TITLE}D` });
+
+      expect((await archive(admin, b)).status).toBe(200);
+      const afterArchive = await activeRows();
+      expect(afterArchive.map((row) => row.id)).toEqual([a, c, d]);
+      expect(afterArchive.map((row) => row.position)).toEqual([1, 2, 3]);
+
+      const gone = await call(admin, 'DELETE', `/v1/profile_form/questions/${c}`);
+      expect(gone.status).toBe(200);
+      const afterDelete = await activeRows();
+      expect(afterDelete.map((row) => row.id)).toEqual([a, d]);
+      expect(afterDelete.map((row) => row.position)).toEqual([1, 2]);
+      expect(afterDelete.map((row) => row.step_id)).toEqual([s1, s2]);
+
+      // Deleting an ARCHIVED question changes no active position.
+      expect((await call(admin, 'DELETE', `/v1/profile_form/questions/${b}`)).status).toBe(200);
+      expect((await activeRows()).map((row) => row.position)).toEqual([1, 2]);
+    });
   }, 30_000);
 });

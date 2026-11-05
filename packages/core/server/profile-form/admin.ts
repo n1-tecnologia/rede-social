@@ -24,6 +24,7 @@ import { addQuestion, applyRequestedLayout, flatten, type Layout, moveQuestion }
 import {
   assertLayoutOrder,
   dropQuestion,
+  endsWith,
   type LayoutRead,
   layoutOrThrow,
   readLayout,
@@ -302,7 +303,10 @@ export async function createQuestion(
     const target = await targetStep(tx, ctx.tenantId, read, body.stepId);
     const id = await insertQuestion(tx, ctx, body, target.stepId, null);
     const next = layoutOrThrow(addQuestion(target.layout, target.stepId, id));
-    await writeLayout(tx, ctx.tenantId, next);
+    // An append to the very end of the form moves nobody: the insert already gave it max(position) + 1, so no
+    // other row is touched and a member's save in flight is never waited for (the Phase 12 adjacency rule).
+    // Anywhere else the later questions shift, and the whole layout is renumbered in one statement.
+    if (!endsWith(next, id)) await writeLayout(tx, ctx.tenantId, next);
     return questionAfterWrite(tx, ctx, id);
   });
 }
@@ -493,7 +497,7 @@ export async function updateQuestion(
 
     // A move needs the whole layout: read (and lock) it BEFORE the question row, in the canonical order, so
     // this transaction never waits for a row a member's save already holds while that save waits for ours.
-    const read = body.stepId !== undefined ? await readLayout(tx, ctx.tenantId) : null;
+    const read = body.stepId !== undefined ? await readLayout(tx, ctx.tenantId, true) : null;
 
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
@@ -594,7 +598,7 @@ export async function reorderQuestions(
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readLayout(tx, ctx.tenantId);
+    const read = await readLayout(tx, ctx.tenantId, true);
     const requested: Layout = (() => {
       if ('ids' in body) {
         const only = read.layout.length === 1 ? read.layout[0] : undefined;
@@ -667,7 +671,8 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    // The layout first (canonical lock order), the row after; the remaining active questions renumber below.
+    // The layout first, the row after. Only the questions AFTER this one change place, so `writeLayout` takes
+    // them in the canonical order, behind the row lock below (no cycle with a member's ordered share locks).
     const read = await readLayout(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
@@ -719,11 +724,17 @@ export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<Adm
         : read.facts;
     assertLayoutOrder(next, facts);
 
+    // The end of ITS step is the end of the form only for the last step; there it takes max(position) + 1 of the
+    // other active questions and nobody else is touched (a save in flight is never waited for). Anywhere else
+    // the later questions shift and the whole layout is renumbered below.
     await tx.execute(sql`
       update public.profile_form_questions
-         set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now()
+         set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now(),
+             position = (select coalesce(max(position), 0) + 1
+                           from public.profile_form_questions
+                          where tenant_id = ${ctx.tenantId}::uuid and archived_at is null)
        where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-    await writeLayout(tx, ctx.tenantId, next);
+    if (!endsWith(next, row.id)) await writeLayout(tx, ctx.tenantId, next);
     return questionAfterWrite(tx, ctx, row.id);
   });
 }

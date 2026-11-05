@@ -209,10 +209,10 @@ describe('12-08 tracer: an admin creates a question through the guard chain, lis
     });
   }, 30_000);
 
-  it('a new question lands LAST among the active ones (12.1: the whole layout is renumbered 1..n, so a gap closes) and a choice question gets server-made option ids', async () => {
+  it('a new question takes max(position) + 1 among the active ones and a choice question gets server-made option ids', async () => {
     const admin = await person('admin_tenant');
     await withProfileForm(labTenantId, async () => {
-      const first = await question({ position: 4 });
+      await question({ position: 4 });
       await question({ position: 9, archived: true });
       const made = await created(admin, {
         type: 'single_choice',
@@ -220,13 +220,7 @@ describe('12-08 tracer: an admin creates a question through the guard chain, lis
         options: [{ label: '  Alfa ' }, { label: 'Beta' }],
         allowOther: true,
       });
-      // Phase 12 pinned max(position) + 1 = 5 here. Since 12.1-09 every structural write renumbers the active
-      // questions 1..n in one statement (D-627), so the seeded gap (position 4) closes: the older question is
-      // 1 and the new one is 2, still last. The archived one keeps its number and is not counted.
-      expect(made.position).toBe(2);
-      const [older] = await adminSql<{ position: number }[]>`
-        select position from public.profile_form_questions where id = ${first}::uuid`;
-      expect(older?.position).toBe(1);
+      expect(made.position).toBe(5);
       expect(made.options.map((o) => o.label)).toEqual(['Alfa', 'Beta']);
       expect(new Set(made.options.map((o) => o.id)).size).toBe(2);
       for (const option of made.options) {

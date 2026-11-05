@@ -1017,3 +1017,268 @@ describe('12.1-09 D-627: a replacement keeps the step and the position of the qu
     });
   }, 30_000);
 });
+
+// ── 12.1-09 Task 3: the legacy body for one release, foreign ids, and the two-writer race ────────
+
+describe('12.1-09 PUT /order: the legacy { ids } body is kept for one release, on a one-step tenant only', () => {
+  it('the legacy { ids } body is accepted on a one-step tenant and answers order_mismatch on a two-step tenant, changing nothing', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const b = await seedQ('B', { stepId: s1, position: 2 });
+      const c = await seedQ('C', { stepId: s1, position: 3 });
+
+      const ok = await putOrder(admin, { ids: [c, a, b] });
+      expect(ok.status, JSON.stringify(await ok.clone().json())).toBe(200);
+      expect(idsOf(await activeIn(labTenantId))).toEqual([c, a, b]);
+      expect(positionsOf(await activeIn(labTenantId))).toEqual([1, 2, 3]);
+      // A pure reorder inside a step keeps every revision.
+      expect((await activeIn(labTenantId)).map((row) => row.revision)).toEqual([1, 1, 1]);
+
+      // A second step makes a flat list ambiguous: which step does each question belong to?
+      await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const before = await activeIn(labTenantId);
+      const refused = await putOrder(admin, { ids: [a, b, c] });
+      expect(refused.status).toBe(409);
+      expect(await details(refused)).toEqual({ profileForm: 'order_mismatch' });
+      expect(await activeIn(labTenantId)).toEqual(before);
+    });
+  }, 30_000);
+
+  it('a layout that omits, repeats or invents a question or a step is order_mismatch and a question is never dropped', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const b = await seedQ('B', { stepId: s1, position: 2 });
+      const gone = await seedQ('Gone', { stepId: s2, position: 0, archived: true });
+      const before = await activeIn(labTenantId);
+
+      const bodies: [string, unknown][] = [
+        [
+          'a question missing',
+          {
+            steps: [
+              { id: s1, questionIds: [a] },
+              { id: s2, questionIds: [] },
+            ],
+          },
+        ],
+        ['a step missing', { steps: [{ id: s1, questionIds: [a, b] }] }],
+        [
+          'an archived question',
+          {
+            steps: [
+              { id: s1, questionIds: [a, b] },
+              { id: s2, questionIds: [gone] },
+            ],
+          },
+        ],
+        [
+          'a question invented',
+          {
+            steps: [
+              { id: s1, questionIds: [a, b, crypto.randomUUID()] },
+              { id: s2, questionIds: [] },
+            ],
+          },
+        ],
+        [
+          'a step invented',
+          {
+            steps: [
+              { id: s1, questionIds: [a, b] },
+              { id: s2, questionIds: [] },
+              { id: crypto.randomUUID(), questionIds: [] },
+            ],
+          },
+        ],
+        ['not a layout at all', { steps: 'x' }],
+        ['an empty body', {}],
+      ];
+      for (const [name, body] of bodies) {
+        const res = await putOrder(admin, body);
+        expect(res.status, name).toBe(409);
+        expect(await details(res), name).toEqual({ profileForm: 'order_mismatch' });
+      }
+      expect(await activeIn(labTenantId)).toEqual(before);
+
+      // Positive control: the full layout, upper-case ids included.
+      const ok = await putOrder(admin, {
+        steps: [
+          { id: s2.toUpperCase(), questionIds: [] },
+          { id: s1.toUpperCase(), questionIds: [b.toUpperCase(), a.toUpperCase()] },
+        ],
+      });
+      expect(ok.status, JSON.stringify(await ok.clone().json())).toBe(200);
+      expect(idsOf(await activeIn(labTenantId))).toEqual([b, a]);
+      expect(
+        (await stepsIn(labTenantId)).map((row) => [row.id, row.position, row.revision]),
+      ).toEqual([
+        [s2, 1, 2],
+        [s1, 2, 2],
+      ]);
+    });
+  }, 30_000);
+});
+
+describe('12.1-09 T-12.1-10: a layout can only name the caller’s own questions and steps', () => {
+  it('a layout, a legacy body, a move or a create naming the other tenant’s ids is order_mismatch or unknown_step and changes nothing in either tenant, beside the own-tenant positive controls', async () => {
+    const labAdmin = await person('admin_tenant');
+    const demoAdmin = await person('admin_tenant', 'demo');
+    await withProfileForm(labTenantId, async () => {
+      await withProfileForm(demoTenantId, async () => {
+        const labStep = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}Lab` });
+        const demoStep = await seedProfileFormStep({
+          tenantId: demoTenantId,
+          title: `${TITLE}Demo`,
+        });
+        const labQ = await seedQ('Lab', { stepId: labStep, position: 1 });
+        const demoQ = await seedProfileFormQuestion({
+          tenantId: demoTenantId,
+          adminUserId,
+          title: `${TITLE}Demo`,
+          stepId: demoStep,
+          position: 1,
+        });
+        const labBefore = await activeIn(labTenantId);
+        const demoBefore = await activeIn(demoTenantId);
+        const labStepsBefore = await stepsIn(labTenantId);
+        const demoStepsBefore = await stepsIn(demoTenantId);
+
+        const attempts: [string, Response][] = [
+          [
+            'lab layout with a demo question',
+            await putOrder(labAdmin, { steps: [{ id: labStep, questionIds: [labQ, demoQ] }] }),
+          ],
+          [
+            'lab layout with a demo step',
+            await putOrder(labAdmin, {
+              steps: [
+                { id: labStep, questionIds: [labQ] },
+                { id: demoStep, questionIds: [] },
+              ],
+            }),
+          ],
+          [
+            'lab layout with only a demo step',
+            await putOrder(labAdmin, { steps: [{ id: demoStep, questionIds: [labQ] }] }),
+          ],
+          [
+            'demo layout with a lab question',
+            await putOrder(
+              demoAdmin,
+              { steps: [{ id: demoStep, questionIds: [demoQ, labQ] }] },
+              HOSTS.demo,
+            ),
+          ],
+        ];
+        for (const [name, res] of attempts) {
+          expect(res.status, name).toBe(409);
+          expect(await details(res), name).toEqual({ profileForm: 'order_mismatch' });
+        }
+        const moveToForeign = await patchQuestion(labAdmin, labQ, {
+          revision: 1,
+          stepId: demoStep,
+        });
+        expect(moveToForeign.status).toBe(400);
+        expect(await details(moveToForeign)).toEqual({ profileForm: 'unknown_step' });
+
+        expect(await activeIn(labTenantId)).toEqual(labBefore);
+        expect(await activeIn(demoTenantId)).toEqual(demoBefore);
+        expect(await stepsIn(labTenantId)).toEqual(labStepsBefore);
+        expect(await stepsIn(demoTenantId)).toEqual(demoStepsBefore);
+
+        // Positive controls: each admin lays out his own.
+        const own = await putOrder(labAdmin, { steps: [{ id: labStep, questionIds: [labQ] }] });
+        expect(own.status).toBe(200);
+        const theirs = await putOrder(
+          demoAdmin,
+          { steps: [{ id: demoStep, questionIds: [demoQ] }] },
+          HOSTS.demo,
+        );
+        expect(theirs.status).toBe(200);
+      });
+    });
+  }, 40_000);
+});
+
+describe('12.1-09 T-12.1-13: two admin writes to one layout serialise and never mix', () => {
+  it('two simultaneous moves end in one of the two serial orders, with contiguous positions, every round', async () => {
+    const first = await person('admin_tenant');
+    const second = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const b = await seedQ('B', { stepId: s1, position: 2 });
+      const c = await seedQ('C', { stepId: s2, position: 3 });
+      for (let round = 1; round <= 4; round += 1) {
+        await adminSql`
+          update public.profile_form_questions set
+            step_id = case id when ${c}::uuid then ${s2}::uuid else ${s1}::uuid end,
+            position = case id when ${a}::uuid then 1 when ${b}::uuid then 2 else 3 end,
+            revision = 1
+          where id in (${a}::uuid, ${b}::uuid, ${c}::uuid)`;
+        const [one, two] = await Promise.all([
+          patchQuestion(first, a, { revision: 1, stepId: s2 }),
+          patchQuestion(second, b, { revision: 1, stepId: s2 }),
+        ]);
+        expect([one.status, two.status], `round ${round}`).toEqual([200, 200]);
+        const rows = await activeIn(labTenantId);
+        expect(positionsOf(rows), `round ${round}`).toEqual([1, 2, 3]);
+        const order = idsOf(rows);
+        // Serial orders: a then b gives [c, a, b]; b then a gives [c, b, a]. Never a mixture.
+        expect([[c, a, b].join(), [c, b, a].join()], `round ${round}`).toContain(order.join());
+        expect(
+          rows.every((row) => row.step_id === s2),
+          `round ${round}`,
+        ).toBe(true);
+        expect(rows.find((row) => row.id === a)?.revision, `round ${round}`).toBe(2);
+        expect(rows.find((row) => row.id === b)?.revision, `round ${round}`).toBe(2);
+        expect(rows.find((row) => row.id === c)?.revision, `round ${round}`).toBe(1);
+      }
+    });
+  }, 60_000);
+
+  it('a move racing a whole-layout reorder ends in one of the two serial outcomes, never a mixture', async () => {
+    const mover = await person('admin_tenant');
+    const orderer = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const b = await seedQ('B', { stepId: s1, position: 2 });
+      const c = await seedQ('C', { stepId: s2, position: 3 });
+      for (let round = 1; round <= 4; round += 1) {
+        await adminSql`
+          update public.profile_form_questions set
+            step_id = case id when ${c}::uuid then ${s2}::uuid else ${s1}::uuid end,
+            position = case id when ${a}::uuid then 1 when ${b}::uuid then 2 else 3 end,
+            revision = 1
+          where id in (${a}::uuid, ${b}::uuid, ${c}::uuid)`;
+        const [moved, ordered] = await Promise.all([
+          patchQuestion(mover, b, { revision: 1, stepId: s2 }),
+          putOrder(orderer, {
+            steps: [
+              { id: s1, questionIds: [b, a] },
+              { id: s2, questionIds: [c] },
+            ],
+          }),
+        ]);
+        // A layout body is a whole-form layout, so both writes succeed in either order:
+        //   move first, then the layout: the layout wins (b back in s1, first);
+        //   layout first, then the move: b ends last in s2.
+        expect([moved.status, ordered.status], `round ${round}`).toEqual([200, 200]);
+        const rows = await activeIn(labTenantId);
+        expect(positionsOf(rows), `round ${round}`).toEqual([1, 2, 3]);
+        const outcome = `${idsOf(rows).join()}|${rows.map((row) => row.step_id).join()}`;
+        const moveThenLayout = `${[b, a, c].join()}|${[s1, s1, s2].join()}`;
+        const layoutThenMove = `${[a, c, b].join()}|${[s1, s2, s2].join()}`;
+        expect([moveThenLayout, layoutThenMove], `round ${round}`).toContain(outcome);
+      }
+    });
+  }, 60_000);
+});

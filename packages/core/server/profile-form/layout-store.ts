@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import type { Tx } from '../../db/tenant-tx';
 import { ApiError } from '../http/api-error';
 import type { RuleQuestion } from './condition-rules';
-import { checkLayoutOrder, type Layout, type LayoutResult, renumber } from './layout';
+import { checkLayoutOrder, flatten, type Layout, type LayoutResult, renumber } from './layout';
 
 /**
  * The store half of the layout writes (Phase 12.1 plan 09, D-623, D-627; PFORM-27, PFORM-28, PFORM-29): the
@@ -38,25 +38,43 @@ type StoredLayoutQuestion = {
 };
 
 /**
- * The tenant's layout, read under the canonical locks: the steps `order by position, created_at, id for
- * update`, then the ACTIVE questions in the same total order `for update` (the order the member's lock
- * function takes, so no pair of transactions can deadlock). A tenant that never built a form has an empty
- * layout.
+ * The tenant's layout. The steps are read `order by position, created_at, id for update` (a member's save
+ * never touches a step). The ACTIVE questions are read in the same total order, and `lockRows` decides whether
+ * they are also locked `for update`:
+ *
+ *   - `lockRows: true` (a reorder, a move): the write can change ANY question's place, so every active row is
+ *     taken now, in the canonical order the member's lock function takes them in, and no pair of transactions
+ *     can deadlock;
+ *   - `lockRows: false` (the default): the caller holds `adminLock`, which already serialises the admins, and
+ *     `writeLayout` takes only the rows whose place actually changes, in the same canonical order. So a create
+ *     at the end of the last step, or a reactivation, never waits for a member's save (the Phase 12 adjacency
+ *     rule), while a write that shifts other rows waits for them.
+ *
+ * A tenant that never built a form has an empty layout.
  */
-export async function readLayout(tx: Tx, tenantId: string): Promise<LayoutRead> {
+export async function readLayout(tx: Tx, tenantId: string, lockRows = false): Promise<LayoutRead> {
   const steps = await tx.execute<StoredStep>(sql`
     select s.id::text as id
       from public.profile_form_steps s
      where s.tenant_id = ${tenantId}::uuid
      order by s."position", s.created_at, s.id
        for update`);
-  const rows = await tx.execute<StoredLayoutQuestion>(sql`
-    select q.id::text as id, q.step_id::text as step_id, q.type, q.title, q.options,
-           q.condition_question_id::text as condition_question_id, q.condition_values
-      from public.profile_form_questions q
-     where q.tenant_id = ${tenantId}::uuid and q.archived_at is null
-     order by q."position", q.created_at, q.id
-       for update`);
+  const rows = await tx.execute<StoredLayoutQuestion>(
+    lockRows
+      ? sql`
+        select q.id::text as id, q.step_id::text as step_id, q.type, q.title, q.options,
+               q.condition_question_id::text as condition_question_id, q.condition_values
+          from public.profile_form_questions q
+         where q.tenant_id = ${tenantId}::uuid and q.archived_at is null
+         order by q."position", q.created_at, q.id
+           for update`
+      : sql`
+        select q.id::text as id, q.step_id::text as step_id, q.type, q.title, q.options,
+               q.condition_question_id::text as condition_question_id, q.condition_values
+          from public.profile_form_questions q
+         where q.tenant_id = ${tenantId}::uuid and q.archived_at is null
+         order by q."position", q.created_at, q.id`,
+  );
 
   const layout: Layout = steps.map((step) => ({
     stepId: step.id,
@@ -95,6 +113,7 @@ export async function readLayout(tx: Tx, tenantId: string): Promise<LayoutRead> 
 export async function writeLayout(tx: Tx, tenantId: string, layout: Layout): Promise<void> {
   const rows = renumber(layout);
   if (rows.length > 0) {
+    await lockChangedRows(tx, tenantId, rows);
     const json = JSON.stringify(rows.map((row) => ({ id: row.id, step_id: row.stepId })));
     await tx.execute(sql`
       update public.profile_form_questions q
@@ -116,6 +135,49 @@ export async function writeLayout(tx: Tx, tenantId: string, layout: Layout): Pro
        where s.id = o.id and s.tenant_id = ${tenantId}::uuid
          and s."position" is distinct from o.ord::int`);
   }
+}
+
+type StoredPlace = { id: string; position: number | string; step_id: string };
+
+/**
+ * Takes `for update`, in the canonical order `position, created_at, id` (the order the member's lock function
+ * takes them in), exactly the rows whose `position` or `step_id` the renumber is about to change. A row that
+ * keeps its place is not touched, so an append to the end of the form waits for nobody, and the rows that do
+ * change are acquired in the same total order as everyone else's (T-12.1-13, no deadlock). Rows already
+ * locked by the caller are locked again for free.
+ */
+async function lockChangedRows(
+  tx: Tx,
+  tenantId: string,
+  rows: readonly { id: string; stepId: string; position: number }[],
+): Promise<void> {
+  const idsJson = JSON.stringify(rows.map((row) => row.id));
+  const stored = await tx.execute<StoredPlace>(sql`
+    select q.id::text as id, q."position" as position, q.step_id::text as step_id
+      from public.profile_form_questions q
+     where q.tenant_id = ${tenantId}::uuid
+       and q.id in (select e::uuid from jsonb_array_elements_text(${idsJson}::jsonb) e)`);
+  const wanted = new Map(rows.map((row) => [row.id, row] as const));
+  const changed = stored.filter((row) => {
+    const next = wanted.get(row.id);
+    return (
+      next !== undefined && (Number(row.position) !== next.position || row.step_id !== next.stepId)
+    );
+  });
+  if (changed.length === 0) return;
+  const changedJson = JSON.stringify(changed.map((row) => row.id));
+  await tx.execute(sql`
+    select q.id
+      from public.profile_form_questions q
+     where q.tenant_id = ${tenantId}::uuid
+       and q.id in (select e::uuid from jsonb_array_elements_text(${changedJson}::jsonb) e)
+     order by q."position", q.created_at, q.id
+       for update`);
+}
+
+/** Whether the question is the LAST one of the flattened layout (an append to the very end of the form). */
+export function endsWith(layout: Layout, questionId: string): boolean {
+  return flatten(layout).at(-1) === questionId;
 }
 
 /** The layout without one question (an archive or a delete); a question that is not in it changes nothing. */

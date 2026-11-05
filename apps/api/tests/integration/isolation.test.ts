@@ -6895,7 +6895,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 12.1 sweep: profile form steps — a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH on the step create, rename and delete, his own list names no rede-lab step, a rede-lab step id on the rede-demo host is the bare 404 on rename and delete, and nothing of rede-lab changes, each beside the rede-lab admin’s own positive control (12.1-08, PFORM-27, T-12.1-10)', async () => {
+  it('phase 12.1 sweep: profile form steps — a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH on the step create, rename and delete, his own list names no rede-lab step, a rede-lab step id on the rede-demo host is the bare 404 on rename and delete, and nothing of rede-lab changes; a layout, a legacy order body, a move or a create naming the other tenant’s question or step is order_mismatch or unknown_step and changes nothing in either tenant; each beside the admin’s own positive control (12.1-08, 12.1-09, PFORM-27, T-12.1-10)', async () => {
     // | Route                                 | Negative asserted here                                              |
     // |---------------------------------------|---------------------------------------------------------------------|
     // | POST   /v1/profile_form/steps         | lab host with a demo session: 403 TENANT_HOST_MISMATCH, no row; on  |
@@ -7032,6 +7032,136 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
          where title = ${`${TITLE121}criada no demo`}`;
       expect(landed?.tenant_id).toBe(tenantIds.demo);
       expect(await labState()).toEqual(before);
+
+      // 12.1-09 (T-12.1-10, T-12.1-01): the layout negatives. A rede-lab question and a rede-demo question,
+      // each in its own step; no layout, move or create of one admin may reach the other tenant.
+      const labQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE121}pergunta lab`,
+        stepId: labA,
+        position: 1,
+      });
+      const demoQuestion = await seedProfileFormQuestion({
+        tenantId: tenantIds.demo,
+        adminUserId: demoAdmin.userId,
+        title: `${TITLE121}pergunta demo`,
+        stepId: demoStep,
+        position: 1,
+      });
+      const questionState = async (tenantId: string) =>
+        adminSql<{ id: string; step_id: string; position: number; revision: number }[]>`
+          select id::text as id, step_id::text as step_id, position, revision
+            from public.profile_form_questions
+           where tenant_id = ${tenantId}::uuid and title like ${`${TITLE121}%`}
+           order by position, id`;
+      const layoutBefore = {
+        lab: await questionState(tenantIds.lab),
+        demo: await questionState(tenantIds.demo),
+      };
+      const stepsBefore = await labState();
+      const mismatch = async (res: Response, label: string) => {
+        expect(res.status, label).toBe(409);
+        expect(((await res.json()) as Envelope).error.details, label).toEqual({
+          profileForm: 'order_mismatch',
+        });
+      };
+      // A rede-demo question id inside a rede-lab layout, and a rede-demo step id as a step of it.
+      await mismatch(
+        await send(labAdmin, 'PUT', '/v1/profile_form/order', HOSTS.lab, {
+          steps: [
+            { id: labA, questionIds: [labQuestion, demoQuestion] },
+            { id: labB, questionIds: [] },
+          ],
+        }),
+        'lab layout naming a demo question',
+      );
+      await mismatch(
+        await send(labAdmin, 'PUT', '/v1/profile_form/order', HOSTS.lab, {
+          steps: [
+            { id: labA, questionIds: [labQuestion] },
+            { id: labB, questionIds: [] },
+            { id: demoStep, questionIds: [] },
+          ],
+        }),
+        'lab layout naming a demo step',
+      );
+      // The legacy body with a demo id on a two-step lab tenant is the same refusal.
+      await mismatch(
+        await send(labAdmin, 'PUT', '/v1/profile_form/order', HOSTS.lab, {
+          ids: [labQuestion, demoQuestion],
+        }),
+        'lab legacy body naming a demo question',
+      );
+      // And the other way round: a rede-lab question id inside a rede-demo layout.
+      await mismatch(
+        await send(demoAdmin, 'PUT', '/v1/profile_form/order', HOSTS.demo, {
+          steps: [{ id: demoStep, questionIds: [demoQuestion, labQuestion] }],
+        }),
+        'demo layout naming a lab question',
+      );
+      // A move into, and a create in, a step that belongs to the other tenant: 400 unknown_step.
+      for (const [who, host, questionId, foreignStep] of [
+        [labAdmin, HOSTS.lab, labQuestion, demoStep],
+        [demoAdmin, HOSTS.demo, demoQuestion, labA],
+      ] as const) {
+        const moved = await send(who, 'PATCH', `/v1/profile_form/questions/${questionId}`, host, {
+          revision: 1,
+          stepId: foreignStep,
+        });
+        expect(moved.status).toBe(400);
+        expect(((await moved.json()) as Envelope).error.details).toEqual({
+          profileForm: 'unknown_step',
+        });
+        const createdIn = await send(who, 'POST', '/v1/profile_form/questions', host, {
+          type: 'short_text',
+          title: `${TITLE121}intrusa`,
+          stepId: foreignStep,
+        });
+        expect(createdIn.status).toBe(400);
+        expect(((await createdIn.json()) as Envelope).error.details).toEqual({
+          profileForm: 'unknown_step',
+        });
+      }
+      // A rede-lab question id on the rede-demo host is the bare 404 on an edit.
+      const foreignEdit = await send(
+        demoAdmin,
+        'PATCH',
+        `/v1/profile_form/questions/${labQuestion}`,
+        HOSTS.demo,
+        { revision: 1, stepId: demoStep },
+      );
+      expect(foreignEdit.status).toBe(404);
+      expect(((await foreignEdit.json()) as Envelope).error.details).toBeUndefined();
+      // Nothing of either tenant moved.
+      expect(await questionState(tenantIds.lab)).toEqual(layoutBefore.lab);
+      expect(await questionState(tenantIds.demo)).toEqual(layoutBefore.demo);
+      expect(await labState()).toEqual(stepsBefore);
+
+      // Same-tenant positive controls: each admin lays out and moves his own.
+      const labLayout = await send(labAdmin, 'PUT', '/v1/profile_form/order', HOSTS.lab, {
+        steps: [
+          { id: labA, questionIds: [labQuestion] },
+          { id: labB, questionIds: [] },
+        ],
+      });
+      expect(labLayout.status).toBe(200);
+      const demoSteps = (
+        (await (await send(demoAdmin, 'GET', '/v1/profile_form/questions', HOSTS.demo)).json()) as {
+          steps: { id: string }[];
+        }
+      ).steps;
+      const demoSecond = demoSteps.find((step) => step.id !== demoStep)?.id ?? '';
+      expect(demoSecond).not.toBe('');
+      const demoMove = await send(
+        demoAdmin,
+        'PATCH',
+        `/v1/profile_form/questions/${demoQuestion}`,
+        HOSTS.demo,
+        { revision: 1, stepId: demoSecond },
+      );
+      expect(demoMove.status).toBe(200);
+      expect((await questionState(tenantIds.lab)).map((row) => row.step_id)).toEqual([labA]);
 
       // Positive controls: the lab admin renames and deletes his own, and creates one.
       const own = await send(labAdmin, 'PATCH', `/v1/profile_form/steps/${labA}`, HOSTS.lab, {
