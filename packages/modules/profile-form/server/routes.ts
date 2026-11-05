@@ -108,7 +108,7 @@ const createQuestionRoute = createRoute({
   responses: {
     201: {
       description:
-        'Creates a question at the end of the list: `position` is the last active position plus one, `revision` is 1, every option gets a server-generated id. Title (1 to 120) and help text (at most 300) are trimmed and measured in code points; a choice type needs 2 to 20 distinct options. The body never carries an id, a position or a revision.',
+        'Creates a question at the end of the named step (`stepId`; default: the last step, the default step being created when the form has none): the positions of the whole form are renumbered 1..n, `revision` is 1, every option gets a server-generated id. Title (1 to 120) and help text (at most 300) are trimmed and measured in code points; a choice type needs 2 to 20 distinct options. The body never carries an id, a position or a revision.',
       content: { 'application/json': { schema: adminQuestionSchema } },
     },
     400: {
@@ -137,12 +137,12 @@ const updateQuestionRoute = createRoute({
   responses: {
     200: {
       description:
-        'The edited question. `revision` (the one the caller read) is required and is the optimistic lock; every other key is optional and only the keys sent change. Title, help text and `required` are always free. Once the question has answers the TYPE, every option that has answers (not removable, not relabelled; options may be added and reordered), switching "Outro" off while an "Outro" answer exists, narrowing a number or date limit, and private-to-public are locked. A body that changes nothing answers 200 and does NOT bump the revision.',
+        'The edited question. `revision` (the one the caller read) is required and is the optimistic lock; every other key is optional and only the keys sent change. Title, help text and `required` are always free. Once the question has answers the TYPE, every option that has answers (not removable, not relabelled; options may be added and reordered), switching "Outro" off while an "Outro" answer exists, narrowing a number or date limit, and private-to-public are locked. A body that changes nothing answers 200 and does NOT bump the revision. `stepId` moves the question to the END of that step (the same step is a no-op) and bumps the revision once, with or without other edits.',
       content: { 'application/json': { schema: adminQuestionSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.profileForm` (`required`, `too_long`, `invalid`, `out_of_range`, `limit_reached`, `other_not_allowed`, `unknown_option`): the merged question is one a create would refuse. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.profileForm` (`required`, `too_long`, `invalid`, `out_of_range`, `limit_reached`, `other_not_allowed`, `unknown_option`, `unknown_step`): the merged question is one a create would refuse. Nothing is written.',
     },
     403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
     404: {
@@ -151,7 +151,7 @@ const updateQuestionRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm`: `stale_revision` (the stored revision moved on), `already_archived` (read-only until reactivated) or the D-587 lock that was hit: `type_locked`, `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`. Nothing is written.',
+        '`CONFLICT` with `details.profileForm`: `stale_revision` (the stored revision moved on), `already_archived` (read-only until reactivated) or the D-587 lock that was hit: `type_locked`, `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`, or `condition_order` (a move that would put an opener at or after a question it opens). Nothing is written.',
     },
   },
 });
@@ -166,14 +166,14 @@ const reorderRoute = createRoute({
   responses: {
     200: {
       description:
-        'Stores the new order of the WHOLE active list (`ids`, first to last) and answers the refreshed list. The stored `position` is the order members see; it is renumbered 1..n in one statement and no revision changes. A list of one is accepted when the tenant has one active question.',
+        'Stores the new order of the WHOLE form and answers the refreshed list. Two bodies for one release: the legacy `{ ids }` (the whole active list, first to last) is accepted only while the tenant has exactly ONE step, and the layout `{ steps: [{ id, questionIds }] }` names every step and every active question exactly once, in order, so a question can change step. The stored `position` is the order members see; it is renumbered 1..n in one statement. A question that changes step has its `revision` bumped, a step that changes place too; a pure reorder inside a step changes no revision. A list of one is accepted when the tenant has one active question.',
       content: { 'application/json': { schema: adminQuestionListSchema } },
     },
     403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
     404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm: order_mismatch`: the ids are not exactly the set of active questions of this tenant (one missing, an extra one, a repeat, an archived one, another tenant’s, or an empty list). Nothing changes, and the body never says which.',
+        '`CONFLICT` with `details.profileForm`: `order_mismatch` (the ids are not exactly the set of active questions and steps of this tenant: one missing, an extra one, a repeat, an archived one, another tenant’s, an empty list, or the legacy `{ ids }` body on a form with several steps; nothing changes and the body never says which) or `condition_order` with `questionId` and `openerId` (the order would put an opener at or after a question it opens, or a step above the step that holds an opener of one of its questions; nothing changes).',
     },
   },
 });
@@ -432,7 +432,7 @@ export const profileFormRoutes = profileForm
     c.json(await updateQuestion(c.get('ctx'), c.req.valid('param').id, c.req.valid('json')), 200),
   )
   .openapi(reorderRoute, async (c) =>
-    c.json(await reorderQuestions(c.get('ctx'), c.req.valid('json').ids), 200),
+    c.json(await reorderQuestions(c.get('ctx'), c.req.valid('json')), 200),
   )
   .openapi(createStepRoute, async (c) =>
     c.json(await createStep(c.get('ctx'), c.req.valid('json')), 201),

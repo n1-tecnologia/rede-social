@@ -762,6 +762,12 @@ export async function seedProfileFormQuestion(input: {
    * working unchanged.
    */
   stepId?: string;
+  /**
+   * 12.1-09: the condition that shows the question (D-621). Both or neither (the CHECK keeps them paired);
+   * `conditionValues` are option ids of the opener. The opener must exist already and carry no condition.
+   */
+  conditionQuestionId?: string;
+  conditionValues?: string[];
 }): Promise<string> {
   const type = input.type ?? 'short_text';
   const isChoice = ['dropdown', 'multiple_choice', 'single_choice'].includes(type);
@@ -772,13 +778,16 @@ export async function seedProfileFormQuestion(input: {
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.profile_form_questions
       (tenant_id, step_id, type, title, required, position, options, limits, allow_other,
-       show_on_profile, archived_at, listed_at, created_by_user_id)
+       show_on_profile, archived_at, listed_at, created_by_user_id, condition_question_id,
+       condition_values)
     values (${input.tenantId}::uuid, ${input.stepId ?? null}::uuid, ${type}, ${input.title},
             ${input.required ?? false},
             ${input.position ?? 0}, ${adminSql.json(options as never)},
             ${adminSql.json((input.limits ?? {}) as never)}, ${input.allowOther ?? false},
             ${input.showOnProfile ?? false}, ${archivedAt},
-            ${input.listedAt ?? adminSql`now()`}, ${input.adminUserId}::uuid)
+            ${input.listedAt ?? adminSql`now()`}, ${input.adminUserId}::uuid,
+            ${input.conditionQuestionId ?? null}::uuid,
+            ${input.conditionValues ? adminSql.array(input.conditionValues) : null}::text[])
     returning id::text as id`;
   if (!row) throw new Error('seedProfileFormQuestion: no row returned');
   return row.id;

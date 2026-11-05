@@ -18,6 +18,7 @@ import {
   impactResultSchema,
   isQuestionVisible,
   layoutBodySchema,
+  legacyReorderBodySchema,
   memberFormSchema,
   memberStepSchema,
   missingIssue,
@@ -880,6 +881,29 @@ describe('12-03 - updateQuestionBodySchema, reorder and replace (PFORM-02, PFORM
     expect(reorderBodySchema.safeParse({ ids }).success).toBe(false);
     // More than 30 ids is the keyed order_mismatch (the route's 409), not a generic validation issue.
     expect(issuesOf(reorderBodySchema, { ids })).toContain('order_mismatch');
+  });
+
+  it('12.1-09: reorder takes the legacy { ids } OR the layout { steps } for one release, and anything else is the keyed order_mismatch', () => {
+    const [first, second] = [
+      { id: A, questionIds: [B] },
+      { id: C, questionIds: [] },
+    ];
+    // Both shapes parse, and each keeps its own strictness.
+    expect(reorderBodySchema.safeParse({ ids: [A, B] }).success).toBe(true);
+    expect(reorderBodySchema.safeParse({ steps: [first, second] }).success).toBe(true);
+    // A body that is neither shape (or both at once) is the keyed mismatch, so the route answers its 409.
+    expect(issuesOf(reorderBodySchema, {})).toContain('order_mismatch');
+    expect(issuesOf(reorderBodySchema, { ids: [A], steps: [first] })).toContain('order_mismatch');
+    expect(issuesOf(reorderBodySchema, { steps: [] })).toContain('order_mismatch');
+    expect(issuesOf(reorderBodySchema, { steps: [first, first] })).toContain('order_mismatch');
+    expect(issuesOf(reorderBodySchema, { steps: [{ id: A, questionIds: ['x'] }] })).toContain(
+      'order_mismatch',
+    );
+    // The legacy refusals keep their text through the union.
+    expect(issuesOf(reorderBodySchema, { ids: [A, A] })).toContain('order_mismatch');
+    expect(issuesOf(reorderBodySchema, { ids: [] })).toContain('order_mismatch');
+    // The legacy schema alone is still the strict Phase 12 body.
+    expect(legacyReorderBodySchema.safeParse({ ids: [A], steps: [first] }).success).toBe(false);
   });
 
   it('replace is the create body plus the replaced id, with the same definition rules', () => {

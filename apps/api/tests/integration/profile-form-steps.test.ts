@@ -629,3 +629,168 @@ describe('12.1-08 T-12.1-13: two admins creating a step at the same time never p
     });
   }, 30_000);
 });
+
+// ── 12.1-09: the global layout (D-623, D-627; PFORM-27, PFORM-28, PFORM-29) ─────────────────────
+
+const putOrder = (p: Person, body: unknown, host: string = HOSTS.lab) =>
+  call(p, 'PUT', '/v1/profile_form/order', body, host);
+
+type StoredQuestionRow = {
+  id: string;
+  step_id: string;
+  position: number;
+  revision: number;
+};
+
+/** The tenant's ACTIVE questions straight from the database, in the canonical order. */
+const activeIn = (tenantId: string) =>
+  adminSql<StoredQuestionRow[]>`
+    select id::text as id, step_id::text as step_id, position, revision
+      from public.profile_form_questions
+     where tenant_id = ${tenantId}::uuid and archived_at is null
+     order by position, created_at, id`;
+
+const idsOf = (rows: { id: string }[]) => rows.map((row) => row.id);
+
+const seedQ = (title: string, over: Partial<Parameters<typeof seedProfileFormQuestion>[0]> = {}) =>
+  seedProfileFormQuestion({
+    tenantId: labTenantId,
+    adminUserId,
+    title: `${TITLE}${title}`,
+    ...over,
+  });
+
+describe('12.1-09 tracer: an admin moves a question across steps and an order that hides an opener is refused (D-623, D-627)', () => {
+  it('a layout body moves a question from step 1 to step 2 in one statement; the list reads the new stepIds, contiguous positions, and only the mover has a new revision', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const b = await seedQ('B', { stepId: s1, position: 2 });
+      const c = await seedQ('C', { stepId: s2, position: 3 });
+
+      const res = await putOrder(admin, {
+        steps: [
+          { id: s1, questionIds: [a] },
+          { id: s2, questionIds: [c, b] },
+        ],
+      });
+      expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+      const list = (await res.json()) as QuestionList;
+      expect(list.questions.map((q) => [q.id, q.stepId])).toEqual([
+        [a, s1],
+        [c, s2],
+        [b, s2],
+      ]);
+      expect(list.steps.map((s) => [s.id, s.questionCount])).toEqual([
+        [s1, 1],
+        [s2, 2],
+      ]);
+
+      const rows = await activeIn(labTenantId);
+      expect(idsOf(rows)).toEqual([a, c, b]);
+      expect(positionsOf(rows)).toEqual([1, 2, 3]);
+      // Only the question that changed step has a new revision; a pure reorder keeps revisions.
+      expect(Object.fromEntries(rows.map((row) => [row.id, row.revision]))).toEqual({
+        [a]: 1,
+        [c]: 1,
+        [b]: 2,
+      });
+      // A step that did not change place keeps its revision.
+      expect((await stepsIn(labTenantId)).map((s) => s.revision)).toEqual([1, 1]);
+    });
+  }, 30_000);
+
+  it('condition_order: a layout that puts an opener after the question it opens is 409 naming BOTH ids, and the stored order is unchanged', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+      const optionId = crypto.randomUUID();
+      const opener = await seedQ('Opener', {
+        type: 'single_choice',
+        options: [{ id: optionId, label: 'Sim' }, { label: 'Não' }],
+        stepId: s1,
+        position: 1,
+      });
+      const dependent = await seedQ('Dependent', {
+        stepId: s1,
+        position: 2,
+        conditionQuestionId: opener,
+        conditionValues: [optionId],
+      });
+      const other = await seedQ('Other', { stepId: s2, position: 3 });
+      const before = await activeIn(labTenantId);
+
+      // The opener after its dependent in the same step.
+      const swapped = await putOrder(admin, {
+        steps: [
+          { id: s1, questionIds: [dependent, opener] },
+          { id: s2, questionIds: [other] },
+        ],
+      });
+      expect(swapped.status).toBe(409);
+      expect(await details(swapped)).toEqual({
+        profileForm: 'condition_order',
+        questionId: dependent,
+        openerId: opener,
+      });
+      expect(await activeIn(labTenantId)).toEqual(before);
+
+      // The dependent moved into a step ABOVE the opener's step.
+      const above = await putOrder(admin, {
+        steps: [
+          { id: s1, questionIds: [dependent] },
+          { id: s2, questionIds: [opener, other] },
+        ],
+      });
+      expect(above.status).toBe(409);
+      expect(await details(above)).toEqual({
+        profileForm: 'condition_order',
+        questionId: dependent,
+        openerId: opener,
+      });
+      expect(await activeIn(labTenantId)).toEqual(before);
+
+      // A step above the step that holds the opener of one of its questions: the steps swap places.
+      const setup = await putOrder(admin, {
+        steps: [
+          { id: s1, questionIds: [opener] },
+          { id: s2, questionIds: [dependent, other] },
+        ],
+      });
+      expect(setup.status).toBe(200);
+      const stepsSwapped = await putOrder(admin, {
+        steps: [
+          { id: s2, questionIds: [dependent, other] },
+          { id: s1, questionIds: [opener] },
+        ],
+      });
+      expect(stepsSwapped.status).toBe(409);
+      expect(await details(stepsSwapped)).toEqual({
+        profileForm: 'condition_order',
+        questionId: dependent,
+        openerId: opener,
+      });
+      expect(idsOf(await activeIn(labTenantId))).toEqual([opener, dependent, other]);
+
+      // Positive controls: the opener earlier in the same step, or in an earlier step, passes.
+      const sameStep = await putOrder(admin, {
+        steps: [
+          { id: s1, questionIds: [opener, dependent] },
+          { id: s2, questionIds: [other] },
+        ],
+      });
+      expect(sameStep.status).toBe(200);
+      const earlierStep = await putOrder(admin, {
+        steps: [
+          { id: s1, questionIds: [opener] },
+          { id: s2, questionIds: [other, dependent] },
+        ],
+      });
+      expect(earlierStep.status).toBe(200);
+      expect(idsOf(await activeIn(labTenantId))).toEqual([opener, other, dependent]);
+    });
+  }, 30_000);
+});

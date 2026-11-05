@@ -746,8 +746,8 @@ export const updateQuestionBodySchema = z
   });
 export type UpdateQuestionBody = z.infer<typeof updateQuestionBodySchema>;
 
-/** `PUT /questions/order`: the whole active list, ids unique. */
-export const reorderBodySchema = z
+/** The legacy `PUT /order` body: the whole active list of a ONE-step form, ids unique (Phase 12). */
+export const legacyReorderBodySchema = z
   .object({
     ids: z
       .array(z.uuid({ error: 'order_mismatch' }), { error: 'order_mismatch' })
@@ -756,7 +756,7 @@ export const reorderBodySchema = z
   })
   .strict()
   .refine((body) => new Set(body.ids).size === body.ids.length, 'order_mismatch');
-export type ReorderBody = z.infer<typeof reorderBodySchema>;
+export type LegacyReorderBody = z.infer<typeof legacyReorderBodySchema>;
 
 /** One step of the member form (`GET /v1/me/profile-form`, plan 11). */
 export const memberStepSchema = z.object({ id: z.uuid(), title: z.string() });
@@ -822,6 +822,16 @@ export const layoutBodySchema = z
     }
   });
 export type LayoutBody = z.infer<typeof layoutBodySchema>;
+
+/**
+ * `PUT /order` (Phase 12.1 plan 09, Research Open Question 2: both bodies for one release): the legacy
+ * `{ ids }` (valid only while the tenant has exactly one step) or the whole layout `{ steps: [{ id,
+ * questionIds }] }`. A body that is neither is the same keyed `order_mismatch` the legacy body always gave.
+ */
+export const reorderBodySchema = z.union([legacyReorderBodySchema, layoutBodySchema], {
+  error: 'order_mismatch',
+});
+export type ReorderBody = z.infer<typeof reorderBodySchema>;
 
 /** A question that blocks a change because its condition depends on the one being changed (D-632). */
 export const dependentSchema = z.object({ id: z.uuid(), title: z.string() });

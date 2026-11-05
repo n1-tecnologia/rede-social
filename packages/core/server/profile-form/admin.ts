@@ -12,6 +12,7 @@ import {
   PROFILE_FORM_LIMITS,
   type ProfileFormSummary,
   type ProfileFormType,
+  type ReorderBody,
   type ReplaceQuestionBody,
   type UpdateQuestionBody,
 } from '@rede-social/contracts/profile-form';
@@ -19,11 +20,21 @@ import { sql } from 'drizzle-orm';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { ApiError } from '../http/api-error';
+import { addQuestion, applyRequestedLayout, flatten, type Layout, moveQuestion } from './layout';
+import {
+  assertLayoutOrder,
+  dropQuestion,
+  type LayoutRead,
+  layoutOrThrow,
+  readLayout,
+  swapQuestion,
+  writeLayout,
+} from './layout-store';
 import { checkLocks, guardIssueOf, type LockDefinition } from './lock-rules';
 import { liveModuleOn } from './member';
 // A call-time-only cycle with ./steps (which takes `adminLock` and `requireModuleOn` from this file): neither
 // module touches the other at load, only inside a function.
-import { readSteps } from './steps';
+import { ensureDefaultStep, readSteps } from './steps';
 
 /**
  * The builder's write side (Phase 12-08, D-582, D-587, D-596; PFORM-01, PFORM-02, PFORM-17, PFORM-24). Pure
@@ -240,14 +251,40 @@ export async function listQuestions(ctx: AdminCtx): Promise<AdminQuestionList> {
 }
 
 /**
- * `POST /v1/profile_form/questions` (PFORM-02): a new question at the end of the list. The body is already
- * validated by the contract (title and help text trimmed, 2 to 20 distinct options for a choice type, limits
- * of the right kind). The server decides the rest: a UUID for every option, `position` = last + 1, revision 1,
- * `listed_at` now and the caller as the author.
+ * The step a new question lands in (D-627, D-629): the named one, which must be a step of THIS tenant (a foreign
+ * and a missing id answer the same 400 `unknown_step`, T-12.1-10), otherwise the tenant's LAST step, otherwise
+ * the default step, created now. Answers the step id and the layout the question will be added to.
+ */
+async function targetStep(
+  tx: Tx,
+  tenantId: string,
+  read: LayoutRead,
+  stepId: string | undefined,
+): Promise<{ stepId: string; layout: Layout }> {
+  if (stepId !== undefined) {
+    const wanted = stepId.toLowerCase();
+    if (!read.layout.some((step) => step.stepId === wanted)) throw unknownStep();
+    return { stepId: wanted, layout: read.layout };
+  }
+  const last = read.layout.at(-1);
+  if (last) return { stepId: last.stepId, layout: read.layout };
+  const created = await ensureDefaultStep(tx, tenantId);
+  return { stepId: created, layout: [{ stepId: created, questionIds: [] }] };
+}
+
+const unknownStep = () => new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'unknown_step' });
+
+/**
+ * `POST /v1/profile_form/questions` (PFORM-02, D-627): a new question at the END of the named step (default:
+ * the last step; the default step is created when the form has none). The body is already validated by the
+ * contract (title and help text trimmed, 2 to 20 distinct options for a choice type, limits of the right
+ * kind). The server decides the rest: a UUID for every option, the position (the layout is renumbered in one
+ * statement, so every later step shifts by one), revision 1, `listed_at` now and the caller as the author.
  *
  *   - 404 `MODULE_DISABLED` when the module is off (live read);
  *   - 409 `limit_reached` at 30 ACTIVE questions (counted under the advisory lock, so two simultaneous
- *     creates at 29 end with exactly 30).
+ *     creates at 29 end with exactly 30);
+ *   - 400 `unknown_step` for a `stepId` that is not a step of this tenant.
  */
 export async function createQuestion(
   ctx: AdminCtx,
@@ -257,37 +294,40 @@ export async function createQuestion(
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const [counted] = await tx.execute<{ n: number | string }>(sql`
-      select count(*)::int as n
-        from public.profile_form_questions
-       where tenant_id = ${ctx.tenantId}::uuid and archived_at is null`);
-    if (Number(counted?.n ?? 0) >= PROFILE_FORM_LIMITS.activeQuestions) {
+    if ((await activeCountOf(tx, ctx.tenantId)) >= PROFILE_FORM_LIMITS.activeQuestions) {
       throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
     }
 
-    return insertQuestion(tx, ctx, body, null);
+    const read = await readLayout(tx, ctx.tenantId);
+    const target = await targetStep(tx, ctx.tenantId, read, body.stepId);
+    const id = await insertQuestion(tx, ctx, body, target.stepId, null);
+    const next = layoutOrThrow(addQuestion(target.layout, target.stepId, id));
+    await writeLayout(tx, ctx.tenantId, next);
+    return questionAfterWrite(tx, ctx, id);
   });
 }
 
 /**
- * The insert a create and a replace share: server-made option ids, `revision` 1, `listed_at` now and the caller
- * as the author. `position` is the given one, or (null) the last active position plus one.
+ * The insert a create and a replace share: server-made option ids, `revision` 1, `listed_at` now, the step and
+ * the caller as the author. `position` is the given one, or (null) the last active position plus one; the
+ * layout write that follows sets the final one. Answers the new id.
  */
 async function insertQuestion(
   tx: Tx,
   ctx: AdminCtx,
   body: CreateQuestionBody,
+  stepId: string,
   position: number | null,
-): Promise<AdminQuestion> {
+): Promise<string> {
   const options = isChoiceType(body.type)
     ? body.options.map((option) => ({ id: crypto.randomUUID(), label: option.label.trim() }))
     : [];
   const [created] = await tx.execute<{ id: string }>(sql`
     insert into public.profile_form_questions
-      (tenant_id, type, title, help_text, required, show_on_profile, allow_other, options, limits,
+      (tenant_id, step_id, type, title, help_text, required, show_on_profile, allow_other, options, limits,
        position, revision, listed_at, created_by_user_id)
-    values (${ctx.tenantId}::uuid, ${body.type}, ${body.title}, ${body.helpText}, ${body.required},
-            ${body.showOnProfile}, ${body.allowOther}, ${JSON.stringify(options)}::jsonb,
+    values (${ctx.tenantId}::uuid, ${stepId}::uuid, ${body.type}, ${body.title}, ${body.helpText},
+            ${body.required}, ${body.showOnProfile}, ${body.allowOther}, ${JSON.stringify(options)}::jsonb,
             ${JSON.stringify(body.limits)}::jsonb,
             coalesce(${position}::int,
               (select coalesce(max(position), 0) + 1
@@ -296,8 +336,13 @@ async function insertQuestion(
             1, now(), ${ctx.userId}::uuid)
     returning id::text as id`);
   if (!created) throw new Error('insertQuestion: the insert returned no row');
-  const row = await readOne(tx, ctx.tenantId, created.id);
-  if (!row) throw new Error('insertQuestion: the new question is not readable');
+  return created.id;
+}
+
+/** The question as stored AFTER the layout write (its final step, position and revision), with its counts. */
+async function questionAfterWrite(tx: Tx, ctx: AdminCtx, id: string): Promise<AdminQuestion> {
+  const row = await readOne(tx, ctx.tenantId, id);
+  if (!row) throw new Error('questionAfterWrite: the question is not readable');
   return adminQuestionOf(tx, ctx.tenantId, row);
 }
 
@@ -432,7 +477,10 @@ const unchanged = (a: Definition, b: Definition) =>
  *      backstop and its PF001..PF005 map to the same codes;
  *   4. the merged definition must be one a create would accept (400 otherwise);
  *   5. a change that alters nothing answers 200 and does NOT bump the revision; otherwise the revision is
- *      bumped by one in the same statement.
+ *      bumped by one in the same statement;
+ *   6. (12.1, D-627) `stepId` moves the question to the END of the target step through the layout store and
+ *      bumps its revision once, with or without other edits; an id that is not a step of this tenant is 400
+ *      `unknown_step`, and a move that would put an opener at or after its dependent is 409 `condition_order`.
  */
 export async function updateQuestion(
   ctx: AdminCtx,
@@ -443,6 +491,10 @@ export async function updateQuestion(
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
+    // A move needs the whole layout: read (and lock) it BEFORE the question row, in the canonical order, so
+    // this transaction never waits for a row a member's save already holds while that save waits for ours.
+    const read = body.stepId !== undefined ? await readLayout(tx, ctx.tenantId) : null;
+
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     if (row.archived_at !== null) {
@@ -450,6 +502,19 @@ export async function updateQuestion(
     }
     if (body.revision !== row.revision) {
       throw new ApiError(409, 'CONFLICT', { profileForm: 'stale_revision' });
+    }
+
+    // D-627: `stepId` moves the question to the END of the target step; the same step is a no-op. A step that
+    // is not the tenant's is the 400 `unknown_step` (T-12.1-10); the order rule (D-623) is checked over the
+    // layout the move would produce, before anything is written.
+    let moved: Layout | null = null;
+    if (read !== null && body.stepId !== undefined) {
+      const to = body.stepId.toLowerCase();
+      if (!read.layout.some((step) => step.stepId === to)) throw unknownStep();
+      if (to !== row.step_id) {
+        moved = layoutOrThrow(moveQuestion(read.layout, row.id, to));
+        assertLayoutOrder(moved, read.facts);
+      }
     }
 
     const counts = await countsFor(tx, ctx.tenantId, [row.id]);
@@ -466,26 +531,29 @@ export async function updateQuestion(
     if (locked) throw new ApiError(409, 'CONFLICT', { profileForm: locked });
 
     assertValidDefinition(next);
-    if (unchanged(current, next)) return toAdminQuestion(row, counts);
+    const edited = !unchanged(current, next);
+    if (!edited && moved === null) return toAdminQuestion(row, counts);
 
-    try {
-      await tx.execute(sql`
-        update public.profile_form_questions
-           set type = ${next.type}, title = ${next.title}, help_text = ${next.helpText},
-               required = ${next.required}, show_on_profile = ${next.showOnProfile},
-               allow_other = ${next.allowOther}, options = ${JSON.stringify(next.options)}::jsonb,
-               limits = ${JSON.stringify(next.limits)}::jsonb,
-               revision = revision + 1, updated_at = now()
-         where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-    } catch (error) {
-      // The trigger is the backstop of a race that got past `checkLocks`: the same coded 409, never a 500.
-      const issue = guardIssueOf(error);
-      if (issue) throw new ApiError(409, 'CONFLICT', { profileForm: issue });
-      throw error;
+    // The layout write bumps the revision of a question that changed step, so a move plus an edit is ONE bump.
+    if (moved !== null) await writeLayout(tx, ctx.tenantId, moved);
+    if (edited) {
+      try {
+        await tx.execute(sql`
+          update public.profile_form_questions
+             set type = ${next.type}, title = ${next.title}, help_text = ${next.helpText},
+                 required = ${next.required}, show_on_profile = ${next.showOnProfile},
+                 allow_other = ${next.allowOther}, options = ${JSON.stringify(next.options)}::jsonb,
+                 limits = ${JSON.stringify(next.limits)}::jsonb,
+                 revision = revision + ${moved === null ? 1 : 0}::int, updated_at = now()
+           where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+      } catch (error) {
+        // The trigger is the backstop of a race that got past `checkLocks`: the same coded 409, never a 500.
+        const issue = guardIssueOf(error);
+        if (issue) throw new ApiError(409, 'CONFLICT', { profileForm: issue });
+        throw error;
+      }
     }
-    const updated = await readOne(tx, ctx.tenantId, row.id);
-    if (!updated) throw new Error('updateQuestion: the edited question is not readable');
-    return adminQuestionOf(tx, ctx.tenantId, updated);
+    return questionAfterWrite(tx, ctx, row.id);
   });
 }
 
@@ -501,47 +569,47 @@ async function otherAnswered(tx: Tx, tenantId: string, questionId: string): Prom
 }
 
 /**
- * `PUT /v1/profile_form/order` (PFORM-02, PFORM-24; D-582): the whole active list in its new order. The stored
- * `position` IS the order members see, so the rewrite renumbers `1..n` in ONE set-based statement.
+ * `PUT /v1/profile_form/order` (PFORM-02, PFORM-24, PFORM-27; D-582, D-623, D-627): the whole form in its new
+ * order, in ONE set-based renumber (`writeLayout`) so positions stay `1..n` and the readers' order is unchanged.
  *
- *   1. `adminLock`, the live module check, then EVERY active row `FOR UPDATE` in the canonical order
- *      `position, created_at, id` (the order the member's save locks in, so the two can never deadlock);
- *   2. the submitted ids must be EXACTLY the set of active ids (no missing one, no extra, no repeat, no
- *      archived one, none of another tenant): anything else is 409 `order_mismatch` and nothing changes. An id
- *      of another tenant is just an id that is not in the set, so it leaks nothing;
- *   3. the `revision` is NOT bumped: the member's `formEtag` already depends on the id sequence.
+ *   1. `adminLock`, the live module check, then `readLayout` (steps, then every ACTIVE question, `FOR UPDATE` in
+ *      the canonical order the member's save locks in, so the two can never deadlock);
+ *   2. two bodies for one release: the legacy `{ ids }` is accepted only while the tenant has exactly ONE step
+ *      (a flat list cannot say which step each question belongs to, so a form with several steps answers
+ *      `order_mismatch`); the layout `{ steps: [{ id, questionIds }] }` must name every step and every active
+ *      question exactly once. A missing, repeated, archived or foreign id is 409 `order_mismatch`, an id of
+ *      another tenant being just an id that is not in the set, so it leaks nothing;
+ *   3. D-623: a layout that puts an opener at or after a question it opens is 409 `condition_order` naming the
+ *      pair, and nothing changes;
+ *   4. only `position`, `step_id` and (for a question that changed step) `revision` are written. A question is
+ *      never dropped: a layout that omits one is a mismatch.
  *
  * Answers the refreshed list.
  */
 export async function reorderQuestions(
   ctx: AdminCtx,
-  ids: readonly string[],
+  body: ReorderBody,
 ): Promise<AdminQuestionList> {
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const locked = await tx.execute<{ id: string }>(sql`
-      select q.id::text as id
-        from public.profile_form_questions q
-       where q.tenant_id = ${ctx.tenantId}::uuid and q.archived_at is null
-       order by q.position, q.created_at, q.id
-         for update`);
-    const active = new Set(locked.map((row) => row.id));
-    const wanted = ids.map((id) => id.toLowerCase());
-    if (
-      wanted.length !== active.size ||
-      new Set(wanted).size !== wanted.length ||
-      wanted.some((id) => !active.has(id))
-    ) {
-      throw new ApiError(409, 'CONFLICT', { profileForm: 'order_mismatch' });
-    }
+    const read = await readLayout(tx, ctx.tenantId);
+    const requested: Layout = (() => {
+      if ('ids' in body) {
+        const only = read.layout.length === 1 ? read.layout[0] : undefined;
+        if (!only) throw new ApiError(409, 'CONFLICT', { profileForm: 'order_mismatch' });
+        return [{ stepId: only.stepId, questionIds: body.ids.map((id) => id.toLowerCase()) }];
+      }
+      return body.steps.map((step) => ({
+        stepId: step.id.toLowerCase(),
+        questionIds: step.questionIds.map((id) => id.toLowerCase()),
+      }));
+    })();
 
-    await tx.execute(sql`
-      update public.profile_form_questions q
-         set position = o.ord::int, updated_at = now()
-        from jsonb_array_elements_text(${JSON.stringify(wanted)}::jsonb) with ordinality as o(id, ord)
-       where q.id = o.id::uuid and q.tenant_id = ${ctx.tenantId}::uuid`);
+    const next = layoutOrThrow(applyRequestedLayout(read.layout, requested));
+    assertLayoutOrder(next, read.facts);
+    await writeLayout(tx, ctx.tenantId, next);
     return listInTx(tx, ctx.tenantId);
   });
 }
@@ -599,6 +667,8 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
+    // The layout first (canonical lock order), the row after; the remaining active questions renumber below.
+    const read = await readLayout(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     if (row.archived_at !== null) return archivedQuestionOf(tx, ctx.tenantId, row);
@@ -607,6 +677,7 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
       update public.profile_form_questions
          set archived_at = now(), revision = revision + 1, updated_at = now()
        where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    await writeLayout(tx, ctx.tenantId, dropQuestion(read.layout, row.id));
     const archived = await readOne(tx, ctx.tenantId, row.id);
     if (!archived) throw new Error('archiveQuestion: the archived question is not readable');
     return archivedQuestionOf(tx, ctx.tenantId, archived);
@@ -614,16 +685,19 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
 }
 
 /**
- * `POST /v1/profile_form/questions/{id}/reactivate` (D-585, D-588): an archived question goes back to the END of
- * the active list (`position` = last active + 1, `listed_at` now, so members see it as new). Idempotent: an
- * active question is answered unchanged. At 30 active questions it is 409 `limit_reached`. Its old answers are
- * still there, so a member who had answered it is not held again.
+ * `POST /v1/profile_form/questions/{id}/reactivate` (D-585, D-588, D-627): an archived question goes back to
+ * the END of ITS OWN step (`listed_at` now, so members see it as new). Its stored `step_id` always names an
+ * existing step, because deleting a step re-points the archived questions inside it. Idempotent: an active
+ * question is answered unchanged. At 30 active questions it is 409 `limit_reached`. Its old answers are still
+ * there, so a member who had answered it is not held again. A reactivated conditional question whose opener is
+ * active but sits after it would break D-623 and is 409 `condition_order`.
  */
 export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<AdminQuestion> {
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
+    const read = await readLayout(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     if (row.archived_at === null) return adminQuestionOf(tx, ctx.tenantId, row);
@@ -631,16 +705,26 @@ export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<Adm
       throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
     }
 
+    const next = layoutOrThrow(addQuestion(read.layout, row.step_id, row.id));
+    const [conditional] = await tx.execute<{ opener_id: string | null }>(sql`
+      select q.condition_question_id::text as opener_id
+        from public.profile_form_questions q
+       where q.id = ${row.id}::uuid and q.tenant_id = ${ctx.tenantId}::uuid`);
+    const openerId = conditional?.opener_id ?? null;
+    // An opener that is archived or ineligible is the reactivation rule of the conditions (plan 10); here only
+    // the ORDER over what is active is enforced.
+    const facts =
+      openerId !== null && flatten(next).includes(openerId)
+        ? [...read.facts, { questionId: row.id, openerId }]
+        : read.facts;
+    assertLayoutOrder(next, facts);
+
     await tx.execute(sql`
       update public.profile_form_questions
-         set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now(),
-             position = (select coalesce(max(position), 0) + 1
-                           from public.profile_form_questions
-                          where tenant_id = ${ctx.tenantId}::uuid and archived_at is null)
+         set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now()
        where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-    const active = await readOne(tx, ctx.tenantId, row.id);
-    if (!active) throw new Error('reactivateQuestion: the reactivated question is not readable');
-    return adminQuestionOf(tx, ctx.tenantId, active);
+    await writeLayout(tx, ctx.tenantId, next);
+    return questionAfterWrite(tx, ctx, row.id);
   });
 }
 
@@ -680,6 +764,7 @@ export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ delet
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
+    const read = await readLayout(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     const [answered] = await tx.execute<{ found: boolean }>(sql`
@@ -699,16 +784,19 @@ export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ delet
       }
       throw error;
     }
+    await writeLayout(tx, ctx.tenantId, dropQuestion(read.layout, row.id));
     return { deleted: true };
   });
 }
 
 /**
- * `POST /v1/profile_form/questions/replace` (PFORM-17): the new question and the archive of the old one in ONE
- * transaction. The new question takes the old one's `position`; the old one keeps its answers, archived. The
- * active count does not grow, so the 30-question limit is not re-checked. An old question that is not active
- * is 409 `already_archived`; unknown or another tenant's id is the bare 404. Any failure of either half rolls
- * both back: the old question stays active and nothing is created.
+ * `POST /v1/profile_form/questions/replace` (PFORM-17, D-627): the new question and the archive of the old one in
+ * ONE transaction. The new question takes the old one's STEP and POSITION (its id replaces the old id in the
+ * layout, in place); the old one keeps its answers, archived. The active count does not grow, so the
+ * 30-question limit is not re-checked. A `stepId` in the body must still be a step of this tenant (400
+ * `unknown_step`) but does not move the replacement. An old question that is not active is 409
+ * `already_archived`; unknown or another tenant's id is the bare 404. Any failure of either half rolls both
+ * back: the old question stays active and nothing is created.
  */
 export async function replaceQuestion(
   ctx: AdminCtx,
@@ -718,18 +806,28 @@ export async function replaceQuestion(
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
+    const read = await readLayout(tx, ctx.tenantId);
     const old = await readOne(tx, ctx.tenantId, body.replaces, true);
     if (!old) throw new ApiError(404, 'NOT_FOUND');
     if (old.archived_at !== null) {
       throw new ApiError(409, 'CONFLICT', { profileForm: 'already_archived' });
     }
+    if (
+      body.stepId !== undefined &&
+      !read.layout.some((step) => step.stepId === body.stepId?.toLowerCase())
+    ) {
+      throw unknownStep();
+    }
 
-    const created = await insertQuestion(tx, ctx, body, old.position);
+    const createdId = await insertQuestion(tx, ctx, body, old.step_id, old.position);
+    const next = swapQuestion(read.layout, old.id, createdId);
+    assertLayoutOrder(next, read.facts);
     await tx.execute(sql`
       update public.profile_form_questions
          set archived_at = now(), revision = revision + 1, updated_at = now()
        where id = ${old.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-    return created;
+    await writeLayout(tx, ctx.tenantId, next);
+    return questionAfterWrite(tx, ctx, createdId);
   });
 }
 
