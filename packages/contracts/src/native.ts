@@ -419,7 +419,8 @@ export type AppStateInput = {
   manual: Record<AppChecklistManualKey, boolean>;
 };
 
-const autoRows = (input: AppStateInput): Record<AppChecklistAutoKey, boolean> => ({
+/** The five rows read from what is held (UI-D-627); the App tab answer and `appState` share this one derivation. */
+export const checklistAutoRows = (input: AppStateInput): Record<AppChecklistAutoKey, boolean> => ({
   storeKeys: input.held.asc && input.held.play,
   apnsKey: input.held.apns,
   links: input.links.ios === 'live' && input.links.android === 'live',
@@ -429,7 +430,7 @@ const autoRows = (input: AppStateInput): Record<AppChecklistAutoKey, boolean> =>
 
 /** The "Passo a passo" count: how many of the ten rows are done. */
 export function checklistCounts(input: AppStateInput): { done: number; total: 10 } {
-  const auto = Object.values(autoRows(input)).filter(Boolean).length;
+  const auto = Object.values(checklistAutoRows(input)).filter(Boolean).length;
   const manual = APP_CHECKLIST_MANUAL_KEYS.filter((key) => input.manual[key]).length;
   return { done: auto + manual, total: 10 };
 }
@@ -443,7 +444,7 @@ export type AppStateValue = 'none' | 'preparing' | 'ready' | 'published';
  */
 export function appState(input: AppStateInput): AppStateValue {
   if (input.manual.published) return 'published';
-  const auto = autoRows(input);
+  const auto = checklistAutoRows(input);
   if (Object.values(auto).every(Boolean)) return 'ready';
   const anyHeld = input.held.asc || input.held.play || input.held.apns;
   const anyAuto =
@@ -555,6 +556,16 @@ const keyId = z
   .trim()
   .regex(/^[A-Z0-9]{10}$/);
 const p8 = z.string().trim().min(1).max(P8_MAX_LENGTH);
+/**
+ * The Key ID read from the `.p8` FILE NAME (`AuthKey_ABCD123456.p8`) by the browser, when it could. Optional and
+ * nullable; when present it must equal the typed Key ID or the save is refused (`CREDENTIAL_KEY_ID_MISMATCH`).
+ * It is checked and dropped: nothing stores, logs or returns it (UI-D-628).
+ */
+const fileKeyId = z
+  .string()
+  .regex(/^[A-Z0-9]{10}$/)
+  .nullable()
+  .optional();
 
 export const ascKeyBodySchema = z
   .object({
@@ -564,13 +575,141 @@ export const ascKeyBodySchema = z
       .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/),
     keyId,
     p8,
+    fileKeyId,
   })
   .strict();
 export const playServiceAccountBodySchema = z
   .object({ json: z.string().trim().min(1).max(SERVICE_ACCOUNT_MAX_LENGTH) })
   .strict();
-export const apnsKeyBodySchema = z.object({ keyId, p8 }).strict();
+export const apnsKeyBodySchema = z.object({ keyId, p8, fileKeyId }).strict();
 export const credentialAnswerSchema = z.object({ ok: z.literal(true) }).strict();
 export const appCredentialHeldSchema = z
   .object({ held: z.boolean(), heldAt: z.string().nullable() })
   .strict();
+
+// --- The App tab of the platform panel (Phase 13-09, D-605, D-615, D-617, UI-D-620..UI-D-628) -----------
+
+/**
+ * Write bodies of `PUT /v1/platform/tenants/{id}/app/*`, all `.strict()`. The store ids are checked with the
+ * SAME validators the build record uses, so a saved id is always one a build accepts.
+ */
+export const appIdsBodySchema = z
+  .object({
+    bundleId: z.string().refine(isValidBundleId, 'invalid bundle id'),
+    applicationId: z.string().refine(isValidApplicationId, 'invalid application id'),
+  })
+  .strict();
+
+/**
+ * The Apple Team ID and the Android signing fingerprint, both nullable (`null` clears). The Team ID is
+ * stored upper-case (the table's check), the fingerprint as 32 colon-separated upper-case hex pairs.
+ */
+export const appLinksBodySchema = z
+  .object({
+    teamId: z.string().trim().refine(isValidTeamId, 'invalid team id').nullable(),
+    sha256: z.string().trim().min(1).max(200).nullable(),
+  })
+  .strict();
+
+/** One store's purchase switch. `visible: true` shows the purchase in that store's app (D-617). */
+export const purchaseBodySchema = z
+  .object({ platform: z.enum(NATIVE_PLATFORMS), visible: z.boolean() })
+  .strict();
+
+/** The tenant's privacy-policy URL: https only, at most 2048 characters. */
+export const privacyBodySchema = z
+  .object({ url: z.string().trim().max(2048).pipe(httpsUrl) })
+  .strict();
+
+export const checklistBodySchema = z.object({ done: z.boolean() }).strict();
+
+const appBuildSchema = z
+  .object({ version: z.string(), buildNumber: z.number().int(), at: z.string() })
+  .strict();
+
+const appCutSchema = z.object({ name: z.string(), cut: z.boolean() }).strict();
+
+/**
+ * The App tab read (UI-SPEC "Platform App tab reads"). `.strict()` at every level and no field able to carry
+ * a store credential: a held credential is `{ kind, held, heldAt }` and nothing else (no Key ID, issuer,
+ * prefix, length, file name or hash, NATIVE-26, UI-D-628). `appState` and the checklist are derived on the
+ * server from the same pure functions this file exports, so every screen shows one answer.
+ *
+ * `listing.description` and `listing.ageRating` are filled by the listing builders of plan 31; until then they
+ * read `null` and the panel shows the standard text from its own template.
+ */
+export const appTabSchema = z
+  .object({
+    appState: z.enum(['none', 'preparing', 'ready', 'published']),
+    identity: z
+      .object({
+        displayName: z.string(),
+        shortName: appCutSchema,
+        host: z.string().nullable(),
+        bundleId: z.string().nullable(),
+        applicationId: z.string().nullable(),
+        idsLocked: z.boolean(),
+        idsDefault: z.boolean(),
+        lastBuild: z
+          .object({ ios: appBuildSchema.nullable(), android: appBuildSchema.nullable() })
+          .strict(),
+      })
+      .strict(),
+    credentials: z
+      .array(
+        z
+          .object({
+            kind: z.enum(APP_CREDENTIAL_KINDS),
+            held: z.boolean(),
+            heldAt: z.string().nullable(),
+          })
+          .strict(),
+      )
+      .length(APP_CREDENTIAL_KINDS.length),
+    links: z
+      .object({
+        teamId: z.string().nullable(),
+        fingerprint: z.string().nullable(),
+        verdict: z
+          .object({
+            ios: z.enum(['live', 'missing_team', 'missing_fingerprint', 'no_host']),
+            android: z.enum(['live', 'missing_team', 'missing_fingerprint', 'no_host']),
+          })
+          .strict(),
+      })
+      .strict(),
+    purchase: z.object({ ios: z.boolean(), android: z.boolean() }).strict(),
+    listing: z
+      .object({
+        name: appCutSchema,
+        description: z.string().nullable(),
+        ageRating: z.string().nullable(),
+        privacyUrl: z.string().nullable(),
+        reviewerEmail: z.string().nullable(),
+        reviewerHeld: z.boolean(),
+      })
+      .strict(),
+    checklist: z
+      .object({
+        done: z.number().int().min(0).max(10),
+        total: z.literal(10),
+        auto: z
+          .object(
+            Object.fromEntries(APP_CHECKLIST_AUTO_KEYS.map((key) => [key, z.boolean()])) as Record<
+              AppChecklistAutoKey,
+              z.ZodBoolean
+            >,
+          )
+          .strict(),
+        manual: z
+          .object(
+            Object.fromEntries(
+              APP_CHECKLIST_MANUAL_KEYS.map((key) => [key, z.boolean()]),
+            ) as Record<AppChecklistManualKey, z.ZodBoolean>,
+          )
+          .strict(),
+      })
+      .strict(),
+  })
+  .strict();
+export type AppTab = z.infer<typeof appTabSchema>;

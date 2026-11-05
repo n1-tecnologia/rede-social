@@ -69,6 +69,14 @@ export const ERROR_CODES = [
   // 03-01: the named 03-06 seam — `POST /v1/media/uploads { kind: 'video' }` until the
   // `VideoProvider` adapter lands. A named, tested refusal rather than a silent gap.
   'NOT_IMPLEMENTED',
+  // 13-09 (D-605, D-615, T-13-18): the closed refusals of the App tab. The first three say a store credential
+  // file is the wrong kind (a `.p8` that is not an EC P-256 key, a typed Key ID that differs from the one in the
+  // file name, a Google JSON that is not a service account) and NEVER name a value. `IDS_LOCKED` (409) says the
+  // store ids cannot change once the app is marked published.
+  'CREDENTIAL_NOT_P8',
+  'CREDENTIAL_KEY_ID_MISMATCH',
+  'CREDENTIAL_NOT_SERVICE_ACCOUNT',
+  'IDS_LOCKED',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

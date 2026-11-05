@@ -33,6 +33,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: 'Não encontrado.',
   CONFLICT: 'Este recurso ainda não está pronto.',
   NOT_IMPLEMENTED: 'Este recurso ainda não está disponível.',
+  CREDENTIAL_NOT_P8: 'O arquivo não é uma chave .p8 válida.',
+  CREDENTIAL_KEY_ID_MISMATCH: 'O ID da chave não confere com o do arquivo.',
+  CREDENTIAL_NOT_SERVICE_ACCOUNT: 'O arquivo não é uma conta de serviço do Google.',
+  IDS_LOCKED: 'Os IDs do app não podem mudar depois da publicação.',
   INTERNAL: 'Erro interno',
 };
 
