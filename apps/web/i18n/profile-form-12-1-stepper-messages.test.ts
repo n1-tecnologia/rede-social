@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
@@ -17,6 +18,25 @@ const t = createTranslator({
 }) as unknown as (key: string, values?: Record<string, string | number>) => string;
 
 describe('profileForm.member.stepper: verbatim strings of the Copywriting Contract', () => {
+  it('declares exactly the keys of the contract and nothing invented', () => {
+    const parsed = JSON.parse(
+      readFileSync(join(process.cwd(), 'messages', 'pt-BR', 'profileForm.member.json'), 'utf8'),
+    );
+    expect(Object.keys(parsed.profileForm.member.stepper).sort()).toEqual(
+      [
+        'back',
+        'finish',
+        'hidden',
+        'next',
+        'pendingElsewhere',
+        'progress',
+        'revealedMany',
+        'revealedOne',
+        'savedHint',
+      ].sort(),
+    );
+  });
+
   it('the progress eyebrow and the buttons', () => {
     expect(t('stepper.progress', { current: 2, total: 3 })).toBe('Etapa 2 de 3');
     expect(t('stepper.back')).toBe('Voltar');

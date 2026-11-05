@@ -1043,3 +1043,97 @@ describe('returning: a stepper over the steps with something missing (D-630, UI-
     expect(screen.getByRole('button', { name: 'Concluir' })).toBeTruthy();
   });
 });
+
+describe('the accessibility and 320px floor of the stepper (UI-D-660, UI-D-661, PFORM-42)', () => {
+  const walk = () => {
+    const ids = [S1, S2, S3];
+    const qs = ids.map((stepId, index) =>
+      question('short_text', { title: `Pergunta ${index + 1}`, stepId }),
+    );
+    return form(qs, {
+      steps: steps('Um título de etapa bem longo para quebrar linha', 'Dois', 'Três'),
+    });
+  };
+
+  it('the step is a section named by its h2, and the form is busy only while saving', async () => {
+    const { container } = show(walk());
+    const heading = screen.getByRole('heading', { level: 2 });
+    const section = screen.getByRole('region', { name: heading.textContent as string });
+    expect(section.getAttribute('aria-labelledby')).toBe(heading.id);
+    expect(section.contains(heading)).toBe(true);
+    expect(formEl(container).getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('the progress bar is decorative and the meaning is in the text', () => {
+    const { container } = show(walk());
+    const bar = container.querySelector('[data-step-bar]') as HTMLElement;
+    expect(bar.getAttribute('aria-hidden')).toBe('true');
+    expect(bar.querySelectorAll('[data-segment]')).toHaveLength(3);
+    expect(screen.getByText('Etapa 1 de 3')).toBeTruthy();
+    expect(
+      screen.getByRole('heading', { level: 2 }).getAttribute('aria-describedby'),
+    ).not.toBeNull();
+  });
+
+  it('Voltar and Avançar are real buttons in the form, so Enter in a text field submits the step', async () => {
+    const { container } = show(walk());
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    fireEvent.change(screen.getByLabelText('Pergunta 1'), { target: { value: 'x' } });
+    const input = screen.getByLabelText('Pergunta 1') as HTMLInputElement;
+    expect(input.form).toBe(formEl(container));
+    const submits = [...formEl(container).querySelectorAll('button')].filter(
+      (button) => button.type === 'submit',
+    );
+    expect(submits).toHaveLength(1);
+    expect(submits[0]?.textContent).toContain('Avançar');
+    await save(container);
+    const back = screen.getByRole('button', { name: 'Voltar' }) as HTMLButtonElement;
+    expect(back.type).toBe('button');
+    expect(formEl(container).contains(back)).toBe(true);
+  });
+
+  it('at 320px Voltar keeps its content width and Avançar takes the rest, on 44px targets', async () => {
+    const { container } = show(walk());
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    await save(container);
+    const back = screen.getByRole('button', { name: 'Voltar' });
+    const forward = screen.getByRole('button', { name: 'Avançar' });
+    expect(back.className).toContain('shrink-0');
+    expect(back.className).not.toContain('flex-1');
+    expect(forward.className).toContain('flex-1');
+    expect(forward.className).toContain('min-w-0');
+    expect(back.parentElement?.className).toContain('flex gap-3');
+    // `size="lg"` is the 52px button of the system; no target in the row falls below 44px.
+    for (const button of [back, forward]) expect(button.className).toContain('h-13');
+  });
+
+  it('a long step title wraps instead of clipping or scrolling sideways', () => {
+    show(walk());
+    const heading = screen.getByRole('heading', { level: 2 });
+    expect(heading.textContent).toContain('bem longo');
+    expect(heading.className).toContain('break-words');
+    expect(heading.className).toContain('scroll-mt-4');
+  });
+
+  it('a long revealed title and long option labels sit inside the neutral rule and wrap (E5 long-text)', () => {
+    const long = 'Uma opção com um rótulo extremamente longo que precisa quebrar linha sem rolagem';
+    const opts = options(long, 'Curta');
+    const opener = question('single_choice', { title: 'Abre?', options: opts });
+    const follow = question('short_text', {
+      title: `${long} ${long}`,
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    show(form([opener, follow]));
+    fireEvent.click(screen.getByRole('radio', { name: long }));
+    const rule = document.querySelector('[data-revealed]') as HTMLElement;
+    expect(rule.className).toBe('border-l-2 border-border pl-3');
+    expect(rule.querySelector('label')?.textContent).toContain(long);
+  });
+
+  it('no markup of the stepper writes a half-step spacing class (UI-SPEC Spacing Scale)', () => {
+    const half = /(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/;
+    for (const file of ['ProfileForm.tsx', 'StepProgress.tsx', 'RevealedField.tsx']) {
+      expect(readFileSync(join(__dirname, file), 'utf8'), file).not.toMatch(half);
+    }
+  });
+});
