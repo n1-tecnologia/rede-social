@@ -22,9 +22,10 @@ import {
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { tenantApps } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
-import { tenantDomains, tenants } from '../../db/schema';
+import { tenantDomains, tenantModules, tenants } from '../../db/schema';
 import { ApiError } from '../http/api-error';
 import { type CredentialStore, pgCredentialStore, summarizeHeld } from './credentials';
+import { AGE_RATING_LABEL, buildStoreDescription } from './listing';
 
 /**
  * The control-plane facts of a tenant's native app and the App tab read over them (13-09, D-605, D-607, D-615,
@@ -63,8 +64,15 @@ export type AppRow = {
 };
 /** What a write may change. The tenant id and the timestamps are never part of a patch. */
 export type AppPatch = Partial<Omit<AppRow, 'tenantId'>>;
-/** The central mirror's facts about the tenant that the tab needs. */
-export type TenantFacts = { displayName: string; primaryHost: string | null };
+/**
+ * The central mirror's facts about the tenant that the tab needs. `modules` are the enabled module keys; they
+ * only shape the store description (13-31), and an absent list reads as no module.
+ */
+export type TenantFacts = {
+  displayName: string;
+  primaryHost: string | null;
+  modules?: readonly string[] | undefined;
+};
 
 export type AppStore = {
   /** `null` when the control plane does not know the tenant. */
@@ -147,7 +155,15 @@ export const pgAppStore: AppStore = {
           ),
         )
         .limit(1);
-      return { displayName: tenant.displayName, primaryHost: primary?.host ?? null };
+      const enabled = await tx
+        .select({ key: tenantModules.moduleKey })
+        .from(tenantModules)
+        .where(and(eq(tenantModules.tenantId, tenantId), eq(tenantModules.enabled, true)));
+      return {
+        displayName: tenant.displayName,
+        primaryHost: primary?.host ?? null,
+        modules: enabled.map((row) => row.key),
+      };
     });
   },
   async read(tenantId) {
@@ -191,6 +207,16 @@ export async function requireTenant(
   const facts = await (deps.app ?? pgAppStore).facts(tenantId);
   if (!facts) throw new ApiError(404, 'NOT_FOUND');
   return facts;
+}
+
+/** The standard store description for this tenant (13-31), or `null` when the name cannot be printed. */
+function descriptionOf(facts: TenantFacts): string | null {
+  try {
+    return buildStoreDescription({ tenantName: facts.displayName, modules: facts.modules ?? [] })
+      .text;
+  } catch {
+    return null;
+  }
 }
 
 const buildOf = (version: string | null, build: number | null, at: Date | null) =>
@@ -263,8 +289,8 @@ export function buildAppTab(input: {
     purchase: { ios: row.purchaseIos, android: row.purchaseAndroid },
     listing: {
       name: { name: storeName.name, cut: storeName.cut },
-      description: null,
-      ageRating: null,
+      description: descriptionOf(facts),
+      ageRating: AGE_RATING_LABEL,
       privacyUrl: row.privacyUrl,
       reviewerEmail: row.reviewerEmail,
       reviewerHeld,

@@ -78,6 +78,34 @@ describe('readAppTab for a tenant with no row (the empty form)', () => {
   });
 });
 
+describe('the listing fields of the tab come from the listing builders (13-31, NATIVE-29)', () => {
+  it('reads the standard description for the modules the tenant has on and the template age rating', async () => {
+    const withModules = memoryAppStore({
+      [TENANT]: {
+        displayName: 'Clube Aurora',
+        primaryHost: 'comunidade.cliente.com.br',
+        modules: ['events', 'store', 'payments'],
+      },
+    });
+    const tab = await readAppTab(TENANT, {
+      app: withModules.store,
+      credentials: memoryCredentialStore().store,
+    });
+    expect(tab.listing.ageRating).toBe('13+');
+    expect(tab.listing.description).toContain('Clube Aurora');
+    expect(tab.listing.description).toContain('Veja a agenda de eventos');
+    // The store and payments modules add no sentence: the description never speaks of buying (T-13-56).
+    expect(tab.listing.description).not.toMatch(/loja|compra|preço|pagamento/i);
+    expect(appTabSchema.parse(tab)).toEqual(tab);
+  });
+
+  it('a tenant whose facts carry no module list reads the base text only', async () => {
+    const tab = await readAppTab(TENANT, deps);
+    expect(tab.listing.description).toContain(LONG_NAME);
+    expect(tab.listing.description).not.toContain('agenda de eventos');
+  });
+});
+
 describe('setAppIds (D-615, T-13-18)', () => {
   it('accepts valid ids and stores them; the read shows them as saved, not as defaults', async () => {
     await setAppIds(

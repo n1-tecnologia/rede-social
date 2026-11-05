@@ -198,6 +198,10 @@ describe('tracer: a reviewer member is created with a sealed password, idempoten
     email = tab.listing.reviewerEmail ?? '';
     expect(email).toMatch(new RegExp(`^app-review\\+[0-9a-f]{8}@${HOST.replace(/\./g, '\\.')}$`));
     expect(tab.checklist.auto.reviewer).toBe(true);
+    // The listing stub is closed (13-31): the standard text and the template age rating.
+    expect(tab.listing.ageRating).toBe('13+');
+    expect(tab.listing.description).toContain(`Comunidade Revisor ${SLUG}`);
+    expect(tab.listing.description).not.toMatch(/loja|compra|preço|pagamento/i);
 
     // The account: confirmed, a `member` of this tenant only, no staff role, named 'Revisor do app'.
     const members = await adminSql<

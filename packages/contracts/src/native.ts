@@ -648,8 +648,9 @@ const appCutSchema = z.object({ name: z.string(), cut: z.boolean() }).strict();
  * prefix, length, file name or hash, NATIVE-26, UI-D-628). `appState` and the checklist are derived on the
  * server from the same pure functions this file exports, so every screen shows one answer.
  *
- * `listing.description` and `listing.ageRating` are filled by the listing builders of plan 31; until then they
- * read `null` and the panel shows the standard text from its own template.
+ * `listing.description` and `listing.ageRating` come from the listing builders of plan 31: the standard text for
+ * the modules the tenant has on, and the template age rating. `description` is `null` only for a name that cannot
+ * be printed.
  */
 export const appTabSchema = z
   .object({
