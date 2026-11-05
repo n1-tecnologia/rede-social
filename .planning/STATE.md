@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: 13
 current_phase_name: App nativo iOS e Android por tenant (white-label)
-current_plan: 9
+current_plan: 10
 status: executing
-stopped_at: Completed 13-10-PLAN.md
-last_updated: "2026-11-05T15:25:41.223Z"
+stopped_at: Completed 13-08-PLAN.md
+last_updated: "2026-11-05T15:38:48.747Z"
 last_activity: 2026-11-05
 last_activity_desc: Phase 13 execution started
-state_head: f348badfa0fe4686aa05dcd9bd4fef1a28339ae9
+state_head: a08e8bc0366e112751c3bbe50ab9bb31d32d1fd5
 progress:
   total_phases: 28
   completed_phases: 0
   total_plans: 344
-  completed_plans: 311
+  completed_plans: 312
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
-Current Plan: 9
+Current Plan: 10
 Total Plans in Phase: 32
-Plan: 9 of 32
+Plan: 10 of 32
 Status: Ready to execute
 Last activity: 2026-11-05 — Phase 13 execution started
 
@@ -350,6 +350,7 @@ Progress: [███████████████████░] 160/162
 | Phase 13 P11 | 14 min | 3 tasks | 7 files |
 | Phase 13 P07 | 17 min | 3 tasks | 7 files |
 | Phase 13 P10 | 40min | 3 tasks | 12 files |
+| Phase 13 P08 | 40min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -1105,6 +1106,7 @@ Recent decisions affecting current work:
 - [Phase 13]: 13-06: a native token is a second kind of the push_subscriptions row (add-alongside, no devices table); push_device_upsert keeps the same-tenant handoff and the 22023 message never contains the token; the old reader is narrowed to webpush
 - [Phase 13]: 13-24: the 160dp ceiling of the splash logo is a device size the native shell enforces; the 1024 asset keeps the logo at one third of the short side inside the 80% safe zone. Play icon is 32-bit opaque, App Store icon has no alpha; app-assets re-states the private SVG-density helper instead of editing icons.ts
 - [Phase 13]: 13-09: the App tab sub-router lives in packages/core/server/apps behind two store seams; only readAppCredential unseals (worker and release script) and no route calls it; the seven routes are classified in isolation-inventory.ts because the admin-lane inventory lists withAdminTx sites only; derived ids are shown but never written by a read
+- [Phase 13]: 13-08: content_report_resolve answers a missing report with RP002 (RP003 stays unused) and returns subject and author for plan 14's same-transaction removal; member_blocks is keyed (tenant_id, blocker, blocked)
 
 ### Pending Todos
 
@@ -1226,6 +1228,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T15:25:40.961Z
-Stopped at: Completed 13-10-PLAN.md
+Last session: 2026-11-05T15:38:48.485Z
+Stopped at: Completed 13-08-PLAN.md
 Resume file: None
