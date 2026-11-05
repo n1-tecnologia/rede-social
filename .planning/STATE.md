@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 13
-current_phase_name: App nativo iOS e Android por tenant (white-label)
-current_plan: 14
+current_phase: "12.1"
+current_phase_name: Perguntas condicionais e etapas no formulário de perfil
+current_plan: 3
 status: executing
 stopped_at: Completed 13-31-PLAN.md
-last_updated: "2026-11-05T17:23:37.761Z"
+last_updated: "2026-11-05T19:38:53.395Z"
 last_activity: 2026-11-05
-last_activity_desc: Phase 13 execution started
-state_head: 2847f83f4d944a0da897fea49e0d651862877a2f
+last_activity_desc: Phase 12.1 execution started
+state_head: 1baa4b08930102c77416fa9fe54b5c79755dfeb5
 progress:
   total_phases: 29
   completed_phases: 0
-  total_plans: 344
-  completed_plans: 316
+  total_plans: 363
+  completed_plans: 318
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 13 — App nativo iOS e Android por tenant (white-label)
+**Current focus:** Phase 12.1 — Perguntas condicionais e etapas no formulário de perfil
 
 ## Current Position
 
-Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
-Current Plan: 14
-Total Plans in Phase: 32
-Plan: 14 of 32
+Phase: 12.1 (Perguntas condicionais e etapas no formulário de perfil) — EXECUTING
+Current Plan: 3
+Total Plans in Phase: 19
+Plan: 3 of 19
 Status: Ready to execute
-Last activity: 2026-11-05 — Phase 13 execution started
+Last activity: 2026-11-05 — Phase 12.1 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
