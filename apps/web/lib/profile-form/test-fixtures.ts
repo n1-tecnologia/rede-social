@@ -19,6 +19,9 @@ export function uuid(n: number): string {
   return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 }
 
+/** The step every member `question` sits in unless a test names another (12.1-11, D-628). */
+export const MEMBER_STEP_ID = uuid(700);
+
 export function question(
   type: ProfileFormType,
   overrides: Partial<MemberQuestion> = {},
@@ -33,6 +36,8 @@ export function question(
     showOnProfile: false,
     allowOther: false,
     limits: {},
+    stepId: MEMBER_STEP_ID,
+    condition: null,
     options: [],
     answer: null,
     ...overrides,
@@ -48,6 +53,7 @@ export function form(questions: MemberQuestion[], overrides: Partial<MemberForm>
     mode: 'first',
     missingRequired: questions.filter((q) => q.required && q.answer === null).length,
     formEtag: 'etag-1',
+    steps: [{ id: MEMBER_STEP_ID, title: 'Etapa 1' }],
     questions,
     ...overrides,
   };

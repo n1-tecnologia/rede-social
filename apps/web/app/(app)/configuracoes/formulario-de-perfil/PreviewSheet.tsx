@@ -1,6 +1,6 @@
 'use client';
 
-import type { AdminQuestion, MemberForm } from '@rede-social/contracts/profile-form';
+import type { AdminQuestion, AdminStep, MemberForm } from '@rede-social/contracts/profile-form';
 import { BottomSheet, useMediaQuery } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { ProfileForm } from '@/components/profile-form/ProfileForm';
@@ -9,6 +9,8 @@ export interface PreviewSheetProps {
   open: boolean;
   /** The live ACTIVE questions in the admin's order: the definitions, never a member's answer. */
   questions: AdminQuestion[];
+  /** The builder's steps in order. */
+  steps?: AdminStep[];
   onClose: () => void;
 }
 
@@ -18,11 +20,15 @@ export interface PreviewSheetProps {
  * `missingRequired: 0`) and the option rows carry an id and a label only, so not even an aggregate count
  * reaches the member screen. The `formEtag` is a dummy because a preview never saves.
  */
-export function previewForm(questions: AdminQuestion[]): MemberForm {
+export function previewForm(questions: AdminQuestion[], steps: AdminStep[] = []): MemberForm {
+  const held = new Set(questions.map((question) => question.stepId));
   return {
     mode: 'first',
     missingRequired: 0,
     formEtag: 'preview',
+    steps: steps
+      .filter((step) => held.has(step.id))
+      .map((step) => ({ id: step.id, title: step.title })),
     questions: questions.map((question) => ({
       id: question.id,
       type: question.type,
@@ -32,6 +38,8 @@ export function previewForm(questions: AdminQuestion[]): MemberForm {
       showOnProfile: question.showOnProfile,
       allowOther: question.allowOther,
       limits: question.limits,
+      stepId: question.stepId,
+      condition: question.condition,
       options: question.options.map((option) => ({ id: option.id, label: option.label })),
       answer: null,
     })),
@@ -47,7 +55,7 @@ export function previewForm(questions: AdminQuestion[]): MemberForm {
  * component. The sheet closes through "Fechar", the backdrop or Escape; the handle is pointer-only, so
  * the screen reader meets exactly one "Fechar".
  */
-export function PreviewSheet({ open, questions, onClose }: PreviewSheetProps) {
+export function PreviewSheet({ open, questions, steps, onClose }: PreviewSheetProps) {
   const t = useTranslations('profileForm.admin.preview');
   const desktop = useMediaQuery('(min-width: 768px)');
 
@@ -59,7 +67,7 @@ export function PreviewSheet({ open, questions, onClose }: PreviewSheetProps) {
       desktopCard={desktop}
       dismiss="handle"
     >
-      <ProfileForm form={previewForm(questions)} preview onClose={onClose} />
+      <ProfileForm form={previewForm(questions, steps)} preview onClose={onClose} />
     </BottomSheet>
   );
 }

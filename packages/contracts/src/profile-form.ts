@@ -866,19 +866,29 @@ const questionCore = {
 /** The stored answer as the member read returns it: the loose shape of any type, or `null`. */
 const storedValueSchema = z.union([z.string(), z.number(), z.boolean(), choiceOne, choiceMany]);
 
-/** One question of the member form (`GET /v1/me/profile-form`). */
+/**
+ * One question of the member form (`GET /v1/me/profile-form`). 12.1 (D-628, D-630): the form carries EVERY
+ * active question, hidden ones included, each with the step it sits in and the condition that shows it, so the
+ * client can reveal and hide live while the answers are typed.
+ */
 export const memberQuestionSchema = z.object({
   ...questionCore,
+  stepId: z.uuid(),
+  condition: profileFormConditionSchema.nullable(),
   options: z.array(optionSchema),
   answer: storedValueSchema.nullable(),
 });
 export type MemberQuestion = z.infer<typeof memberQuestionSchema>;
 
-/** `GET /v1/me/profile-form`: staff and a module that is off get `mode: 'none'` and no questions. */
+/**
+ * `GET /v1/me/profile-form`: staff and a module that is off get `mode: 'none'` and no questions. 12.1: `steps`
+ * lists, in order, the steps that hold at least one ACTIVE question (an empty step is never shown to a member).
+ */
 export const memberFormSchema = z.object({
   mode: z.enum(PROFILE_FORM_MODES),
   missingRequired: z.number().int().min(0),
   formEtag: z.string(),
+  steps: z.array(memberStepSchema),
   questions: z.array(memberQuestionSchema),
 });
 export type MemberForm = z.infer<typeof memberFormSchema>;
@@ -899,7 +909,15 @@ export const saveAnswersBodySchema = z
   .strict();
 export type SaveAnswersBody = z.infer<typeof saveAnswersBodySchema>;
 
-export const saveAnswersResultSchema = z.object({ missingRequired: z.number().int().min(0) });
+/**
+ * What a save answers (D-629): how many visible required questions are still unanswered and which ones, in form
+ * order. The save never refuses for a required question outside the step it saved; completeness is the SQL
+ * gate's alone, so `missingQuestionIds` has the same length as `missingRequired`.
+ */
+export const saveAnswersResultSchema = z.object({
+  missingRequired: z.number().int().min(0),
+  missingQuestionIds: z.array(z.uuid()),
+});
 export type SaveAnswersResult = z.infer<typeof saveAnswersResultSchema>;
 
 export const dismissNoticeResultSchema = z.object({ newOptional: z.number().int().min(0) });

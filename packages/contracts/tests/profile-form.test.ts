@@ -939,6 +939,8 @@ const memberQuestion = {
   ],
   allowOther: true,
   limits: {},
+  stepId: C,
+  condition: null,
   answer: { optionIds: [B], otherText: null },
 };
 
@@ -948,6 +950,7 @@ describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
       mode: 'returning',
       missingRequired: 1,
       formEtag: 'abc',
+      steps: [{ id: C, title: 'Sobre você' }],
       questions: [
         memberQuestion,
         { ...memberQuestion, id: B, type: 'rating', options: [], allowOther: false, answer: null },
@@ -964,6 +967,38 @@ describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
     };
     expect(memberFormSchema.parse(sample)).toEqual(sample);
     expect(memberFormSchema.safeParse({ ...sample, mode: 'other' }).success).toBe(false);
+  });
+
+  it('12.1-11: the member form carries steps and each question its stepId and condition (D-628, D-630)', () => {
+    const conditional = {
+      ...memberQuestion,
+      id: B,
+      stepId: A,
+      condition: { questionId: C, values: [B] },
+    };
+    const sample = {
+      mode: 'first',
+      missingRequired: 0,
+      formEtag: 'abc',
+      steps: [
+        { id: C, title: 'Sobre você' },
+        { id: A, title: 'Detalhes' },
+      ],
+      questions: [memberQuestion, conditional],
+    };
+    expect(memberFormSchema.parse(sample)).toEqual(sample);
+    const { steps: _steps, ...withoutSteps } = sample;
+    expect(memberFormSchema.safeParse(withoutSteps).success).toBe(false);
+    const { stepId: _stepId, ...noStep } = memberQuestion;
+    expect(memberFormSchema.safeParse({ ...sample, questions: [noStep] }).success).toBe(false);
+    const { condition: _condition, ...noCondition } = memberQuestion;
+    expect(memberFormSchema.safeParse({ ...sample, questions: [noCondition] }).success).toBe(false);
+    expect(
+      memberFormSchema.safeParse({
+        ...sample,
+        questions: [{ ...memberQuestion, condition: { questionId: C, values: [] } }],
+      }).success,
+    ).toBe(false);
   });
 
   it('saveAnswersBodySchema keys the answers by question id, at most 30 keys', () => {
@@ -987,7 +1022,18 @@ describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
   });
 
   it('the small result shapes round-trip', () => {
-    expect(saveAnswersResultSchema.parse({ missingRequired: 0 })).toEqual({ missingRequired: 0 });
+    expect(saveAnswersResultSchema.parse({ missingRequired: 0, missingQuestionIds: [] })).toEqual({
+      missingRequired: 0,
+      missingQuestionIds: [],
+    });
+    expect(saveAnswersResultSchema.parse({ missingRequired: 1, missingQuestionIds: [A] })).toEqual({
+      missingRequired: 1,
+      missingQuestionIds: [A],
+    });
+    expect(saveAnswersResultSchema.safeParse({ missingRequired: 0 }).success).toBe(false);
+    expect(
+      saveAnswersResultSchema.safeParse({ missingRequired: 1, missingQuestionIds: ['x'] }).success,
+    ).toBe(false);
     expect(dismissNoticeResultSchema.parse({ newOptional: 2 })).toEqual({ newOptional: 2 });
     expect(profileFormBootstrapSchema.parse({ pendingRequired: 1, newOptional: 0 })).toEqual({
       pendingRequired: 1,

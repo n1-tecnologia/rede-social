@@ -1,6 +1,6 @@
 'use client';
 
-import type { AdminQuestion } from '@rede-social/contracts/profile-form';
+import type { AdminQuestion, AdminStep } from '@rede-social/contracts/profile-form';
 import { Button, EmptyState } from '@rede-social/ui';
 import { ClipboardList, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -13,6 +13,8 @@ import { QuestionList } from './QuestionList';
 export interface QuestionBuilderProps {
   /** The ACTIVE questions in the order members see them. */
   questions: AdminQuestion[];
+  /** The tenant's steps in order. */
+  steps?: AdminStep[];
   /** The most active questions a tenant may have. */
   limit: number;
   /** The tenant's display name: the `{tenant}` of the editor's LGPD notice. */
@@ -34,7 +36,7 @@ interface Opening {
  * questions. The page reads on the server; this holds only which
  * opening is showing, and the page refreshes after every write.
  */
-export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilderProps) {
+export function QuestionBuilder({ questions, steps, limit, tenantName }: QuestionBuilderProps) {
   const t = useTranslations('profileForm.admin');
   // `opening` is kept after a close so the sheet's exit animation can play; `open` is what it follows.
   const [opening, setOpening] = useState<Opening | null>(null);
@@ -93,7 +95,7 @@ export function QuestionBuilder({ questions, limit, tenantName }: QuestionBuilde
           onReplace={openReplace}
         />
       ) : null}
-      <PreviewSheet open={previewOpen} questions={questions} onClose={closePreview} />
+      <PreviewSheet open={previewOpen} questions={questions} steps={steps} onClose={closePreview} />
     </>
   );
 }

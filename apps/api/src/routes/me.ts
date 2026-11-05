@@ -450,10 +450,12 @@ export const meRoutes = me
     },
   )
   /**
-   * `GET /v1/me/profile-form` (D-582): ONE read for the first answer, the return after a form change and the
-   * later edit. Every active question in the admin's order, pre-filled with the caller's own answers, plus
-   * `mode`, `missingRequired` and `formEtag`, all decided by the server from the data. A KERNEL route with no
-   * `requireModule`: staff and a module that is off get `mode: 'none'`.
+   * `GET /v1/me/profile-form` (D-582, D-628, D-630): ONE read for the first answer, the return after a form
+   * change and the later edit. Every active question in the admin's order, hidden ones included (the client
+   * reveals live), each with its `stepId` and `condition`, pre-filled with the caller's own answers, plus the
+   * `steps` that hold at least one active question, `mode`, `missingRequired` (visibility-aware) and `formEtag`
+   * (it follows questions, steps and conditions), all decided by the server from the data. A KERNEL route with
+   * no `requireModule`: staff and a module that is off get `mode: 'none'`.
    */
   .openapi(
     createRoute({
@@ -473,9 +475,14 @@ export const meRoutes = me
     },
   )
   /**
-   * `PUT /v1/me/profile-form/answers` (D-585, PFORM-07, PFORM-24): the single save for the whole screen. Every
-   * value is validated against the question's CURRENT stored definition in one transaction, with no partial
-   * write. Logs ids and a count only, never a value (T-12-15).
+   * `PUT /v1/me/profile-form/answers` (D-585, D-624, D-629, D-631, D-636; PFORM-07, PFORM-24, PFORM-33): the
+   * save of one step (the optional `stepId`) or of the whole screen. Every visible value is validated against
+   * the question's CURRENT stored definition in one transaction, with no partial write. The server re-derives
+   * visibility from the stored answers overlaid with the submitted ones: a value for a hidden question is
+   * ignored, and the answers that stopped applying (active or archived questions) are deleted in the same
+   * transaction. It never refuses for a required question outside the saved step: the answer carries
+   * `missingRequired` and `missingQuestionIds`, and only the gate holds a member in. Logs ids and a count only,
+   * never a value (T-12-15).
    */
   .openapi(
     createRoute({
@@ -489,11 +496,12 @@ export const meRoutes = me
       },
       responses: {
         200: {
-          description: 'Saved; the number of required questions still unanswered (0)',
+          description:
+            'Saved; the visible required questions still unanswered: their count and ids in form order',
           content: { 'application/json': { schema: saveAnswersResultSchema } },
         },
         400: envelope(
-          'VALIDATION_FAILED with details.profileForm "answers_invalid" and details.errors keyed by question id',
+          'VALIDATION_FAILED with details.profileForm "answers_invalid" and details.errors keyed by question id, or "unknown_step" for an unknown, empty or foreign stepId',
         ),
         403: envelope('FORBIDDEN: staff roles do not answer the form'),
         409: envelope(
