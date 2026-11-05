@@ -24,6 +24,11 @@ export type FkEdge = { child: string; parent: string; deferrable: boolean };
  */
 export const SELF_REF_ORDER: Readonly<Record<string, string>> = {
   feed_comments: 'parent_depth',
+  // Phase 12.1 (PFORM-40, T-12.1-08): `profile_form_questions_condition_fk` is
+  // `(tenant_id, condition_question_id) -> (tenant_id, id)`, NO ACTION, not deferrable. An opener never carries
+  // a condition (D-622), so every NULL-condition row (every possible opener) is read before every conditional
+  // row by `condition_question_id asc nulls first`. Widening D-622 to chains would require changing this entry.
+  profile_form_questions: 'condition_question_id',
 };
 
 export type OrderOptions = { selfRefOrder?: Readonly<Record<string, string>> };
