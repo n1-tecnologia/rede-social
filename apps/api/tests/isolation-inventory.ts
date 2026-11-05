@@ -46,6 +46,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
     exempt:
       "public pre-login lookup by slug: unauthenticated, answers the one named tenant's public brand only (the case i shape; hosts.test.ts pins the key set)",
   },
+  'GET /v1/public/tenants/:slug/app-version': {
+    exempt:
+      "public minimum-version read (13-10, NATIVE-07): unauthenticated, answers the named tenant's two version floors and store links only, from the control plane, no tenant row and no member data; public-app.test.ts pins the strict answer",
+  },
   'POST /v1/public/signup/:slug': {
     exempt:
       "public sign-up: unauthenticated, writes one membership into the slug's own tenant only; signup.test.ts proves the refusals",
