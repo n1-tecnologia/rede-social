@@ -2,8 +2,9 @@ import { sqlClient } from '@rede-social/core/db';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { resolveReport } from '@rede-social/core/server/safety/index';
 import type { FeedComment } from '@rede-social/module-feed/contracts';
+import { feedPostSchema } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withSocialEnabled } from './setup';
 
 /**
  * Reports and member blocks, the API against the live local stack (13-14, D-616, NATIVE-31, NATIVE-33; T-13-32,
@@ -310,5 +311,310 @@ describe('who may use the report routes (T-13-32, T-13-33)', () => {
     // Nothing changed, and the admin (the positive control) still can.
     expect((await reportRow(reportId))?.status).toBe('open');
     expect((await listAdmin(tokens.admin)).items.map((r) => r.id)).toContain(reportId);
+  });
+});
+
+/* ── Task 2: member blocks and the blocked-author filter (NATIVE-33) ──────────────────────────────── */
+
+type FeedItem = { id: string; canReport?: boolean; canBlock?: boolean };
+
+const del = (path: string, token: string, host: string = HOSTS.demo) =>
+  request(path, token, { method: 'DELETE' }, host);
+
+const sansRequestId = async (res: Response) => {
+  const { requestId: _requestId, ...error } = ((await res.json()) as Envelope)
+    .error as Envelope['error'] & {
+    requestId?: string;
+  };
+  return JSON.stringify(error);
+};
+
+describe("member blocks and the blocker's reads (NATIVE-33)", () => {
+  const fx = { orgPost: '', communityPost: '', memberPost: '', adminPost: '', replyRoot: '' };
+  const comments = { byAuthor: '', rootByReporter: '', replyByAuthor: '', byThird: '' };
+  let community = '';
+  let restoreSocial: () => Promise<void> = async () => undefined;
+  let supportUser = '';
+  let labUser = '';
+
+  const feedIds = async (token: string, query: string): Promise<string[]> => {
+    const res = await request(`/v1/feed?limit=25${query}`, token);
+    expect(res.status, `GET /v1/feed${query}`).toBe(200);
+    return ((await res.json()) as { items: FeedItem[] }).items.map((item) => item.id);
+  };
+  const commentIds = async (token: string, postId: string): Promise<string[]> => {
+    const res = await request(`/v1/feed/posts/${postId}/comments?limit=50`, token);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { items: { id: string }[] }).items.map((item) => item.id);
+  };
+  const replyIds = async (token: string, rootId: string): Promise<string[]> => {
+    const res = await request(`/v1/feed/comments/${rootId}/replies?limit=25`, token);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { items: { id: string }[] }).items.map((item) => item.id);
+  };
+
+  beforeAll(async () => {
+    restoreSocial = await withSocialEnabled('demo');
+    const [sup] = await adminSql<{ id: string }[]>`
+      select id::text from public.users where email = 'support@rede-demo.local'`;
+    supportUser = sup?.id ?? '';
+    const [lab] = await adminSql<{ id: string }[]>`
+      select id::text from public.users where email = 'member@rede-lab.local'`;
+    labUser = lab?.id ?? '';
+    const [comm] = await adminSql<{ id: string }[]>`
+      select id::text from public.communities
+       where tenant_id = ${ids.tenant}::uuid and slug = 'eventos-e-encontros' and deleted_at is null`;
+    community = comm?.id ?? '';
+
+    // The blocker follows the author, so the author's member post reaches the blocker's Explorar.
+    await adminSql`
+      insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+      values (${ids.tenant}::uuid, ${ids.third}::uuid, ${ids.author}::uuid)
+      on conflict do nothing`;
+
+    // Three posts the AUTHOR wrote: tenant-wide, in a community, and a followers-only member post (the V2 shape).
+    const insertPost = async (label: string, visibility: string, communityId: string | null) => {
+      const rows = await adminSql<{ id: string }[]>`
+        insert into public.feed_posts (tenant_id, caption, author_user_id, visibility, community_id)
+        values (${ids.tenant}::uuid, ${`${CAPTION_PREFIX} ${label}`}, ${ids.author}::uuid, ${visibility}, ${communityId}::uuid)
+        returning id`;
+      const id = rows[0]?.id ?? '';
+      createdPosts.push(id);
+      return id;
+    };
+    fx.orgPost = await insertPost('bloqueio-org', 'tenant', null);
+    fx.communityPost = await insertPost('bloqueio-comunidade', 'tenant', community);
+    fx.memberPost = await insertPost('bloqueio-membro', 'followers', null);
+    fx.adminPost = await seedPost('bloqueio-admin');
+
+    // Comments on the admin's post: the author's root, a reporter's root with a reply by the author, and the
+    // blocker's own comment (for the rider rule).
+    comments.byAuthor = (await comment(tokens.author, fx.adminPost, `${BODY_PREFIX} do autor`)).id;
+    comments.rootByReporter = (
+      await comment(tokens.reporter, fx.adminPost, `${BODY_PREFIX} raiz`)
+    ).id;
+    const reply = await post(`/v1/feed/posts/${fx.adminPost}/comments`, tokens.author, {
+      body: `${BODY_PREFIX} resposta do autor`,
+      parentId: comments.rootByReporter,
+    });
+    expect(reply.status).toBe(201);
+    comments.replyByAuthor = ((await reply.json()) as FeedComment).id;
+    comments.byThird = (
+      await comment(tokens.third, fx.adminPost, `${BODY_PREFIX} do bloqueador`)
+    ).id;
+  });
+
+  afterAll(async () => {
+    await adminSql`delete from public.member_blocks where tenant_id = ${ids.tenant}::uuid and blocker_user_id = any(${[ids.third, ids.reporter]}::uuid[])`;
+    await adminSql`delete from public.social_follows where tenant_id = ${ids.tenant}::uuid and follower_user_id = ${ids.third}::uuid and followee_user_id = ${ids.author}::uuid`;
+    await restoreSocial();
+  });
+
+  it("blocks and unblocks idempotently; a staff target, a foreign id and oneself are the same 400; the list is the caller's own", async () => {
+    const first = await post('/v1/blocks', tokens.third, { userId: ids.author });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ changed: true });
+    const again = await post('/v1/blocks', tokens.third, { userId: ids.author });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ changed: false });
+
+    const refusals: string[] = [];
+    for (const userId of [supportUser, labUser, ids.third, crypto.randomUUID()]) {
+      const res = await post('/v1/blocks', tokens.third, { userId });
+      expect(res.status, `block ${userId}`).toBe(400);
+      expect((await res.clone().json()).error.code).toBe('CANNOT_BLOCK');
+      refusals.push(await sansRequestId(res));
+    }
+    expect(new Set(refusals).size).toBe(1);
+
+    // The caller's own blocks, with name and avatar; nobody else's.
+    const mine = await request('/v1/blocks', tokens.third);
+    expect(mine.status).toBe(200);
+    const list = (await mine.json()) as {
+      items: {
+        userId: string;
+        displayName: string | null;
+        avatarAssetId: string | null;
+        blockedAt: string;
+      }[];
+      nextCursor: string | null;
+    };
+    expect(list.items.map((row) => row.userId)).toEqual([ids.author]);
+    expect(Object.keys(list.items[0] ?? {}).sort()).toEqual([
+      'avatarAssetId',
+      'blockedAt',
+      'displayName',
+      'userId',
+    ]);
+    expect(list.items[0]?.displayName).not.toBeNull();
+    expect(list.nextCursor).toBeNull();
+    for (const token of [tokens.reporter, tokens.author]) {
+      const other = await request('/v1/blocks', token);
+      expect(((await other.json()) as { items: unknown[] }).items).toEqual([]);
+    }
+
+    const lifted = await del(`/v1/blocks/${ids.author}`, tokens.third);
+    expect(lifted.status).toBe(200);
+    expect(await lifted.json()).toEqual({ changed: true });
+    const liftedAgain = await del(`/v1/blocks/${ids.author}`, tokens.third);
+    expect(liftedAgain.status).toBe(200);
+    expect(await liftedAgain.json()).toEqual({ changed: false });
+    const none = await request('/v1/blocks', tokens.third);
+    expect(((await none.json()) as { items: unknown[] }).items).toEqual([]);
+  });
+
+  it("after a block the author's posts and comments vanish from the five read paths for the blocker only, and return after the unblock", async () => {
+    const readAll = async (token: string) => ({
+      main: await feedIds(token, ''),
+      explorar: await feedIds(token, '&scope=explorar'),
+      community: await feedIds(token, `&communityId=${community}`),
+      orgDetail: (await request(`/v1/feed/posts/${fx.orgPost}`, token)).status,
+      memberDetail: (await request(`/v1/feed/posts/${fx.memberPost}`, token)).status,
+      roots: await commentIds(token, fx.adminPost),
+      replies: await replyIds(token, comments.rootByReporter),
+    });
+
+    // Positive controls first: before the block the blocker sees all of it.
+    const before = await readAll(tokens.third);
+    expect(before.main).toContain(fx.orgPost);
+    expect(before.explorar).toContain(fx.memberPost);
+    expect(before.community).toContain(fx.communityPost);
+    expect(before.orgDetail).toBe(200);
+    expect(before.memberDetail).toBe(200);
+    expect(before.roots).toContain(comments.byAuthor);
+    expect(before.replies).toContain(comments.replyByAuthor);
+
+    expect((await post('/v1/blocks', tokens.third, { userId: ids.author })).status).toBe(200);
+
+    const hidden = await readAll(tokens.third);
+    expect(hidden.main).not.toContain(fx.orgPost);
+    expect(hidden.explorar).not.toContain(fx.memberPost);
+    expect(hidden.community).not.toContain(fx.communityPost);
+    expect(hidden.orgDetail).toBe(404);
+    expect(hidden.memberDetail).toBe(404);
+    expect(hidden.roots).not.toContain(comments.byAuthor);
+    expect(hidden.replies).not.toContain(comments.replyByAuthor);
+    // What is NOT the author's stays: the blocker's own comment and the reporter's root.
+    expect(hidden.roots).toEqual(
+      expect.arrayContaining([comments.rootByReporter, comments.byThird]),
+    );
+
+    // Another viewer and the blocked member see exactly what they saw before (the filter is a viewer predicate).
+    const bystander = await readAll(tokens.reporter);
+    expect(bystander.main).toContain(fx.orgPost);
+    expect(bystander.community).toContain(fx.communityPost);
+    expect(bystander.orgDetail).toBe(200);
+    expect(bystander.roots).toContain(comments.byAuthor);
+    expect(bystander.replies).toContain(comments.replyByAuthor);
+    const blockedSelf = await readAll(tokens.author);
+    expect(blockedSelf.main).toContain(fx.orgPost);
+    expect(blockedSelf.orgDetail).toBe(200);
+    expect(blockedSelf.roots).toContain(comments.byAuthor);
+
+    expect((await del(`/v1/blocks/${ids.author}`, tokens.third)).status).toBe(200);
+    const restored = await readAll(tokens.third);
+    expect(restored.main).toContain(fx.orgPost);
+    expect(restored.explorar).toContain(fx.memberPost);
+    expect(restored.community).toContain(fx.communityPost);
+    expect(restored.orgDetail).toBe(200);
+    expect(restored.roots).toContain(comments.byAuthor);
+    expect(restored.replies).toContain(comments.replyByAuthor);
+  });
+
+  it('posts and comments carry canReport and canBlock by the rule, and an answer without them still parses', async () => {
+    const feed = await request('/v1/feed?limit=25', tokens.third);
+    const items = ((await feed.json()) as { items: FeedItem[] }).items;
+    // The author's post: reportable and blockable (a member). The admin's: reportable, never blockable (AD-1).
+    expect(items.find((i) => i.id === fx.orgPost)).toMatchObject({
+      canReport: true,
+      canBlock: true,
+    });
+    expect(items.find((i) => i.id === fx.adminPost)).toMatchObject({
+      canReport: true,
+      canBlock: false,
+    });
+
+    const page = await request(`/v1/feed/posts/${fx.adminPost}/comments?limit=50`, tokens.third);
+    const roots = ((await page.json()) as { items: FeedItem[] }).items;
+    expect(roots.find((c) => c.id === comments.byAuthor)).toMatchObject({
+      canReport: true,
+      canBlock: true,
+    });
+    // The viewer's own comment: neither.
+    expect(roots.find((c) => c.id === comments.byThird)).toMatchObject({
+      canReport: false,
+      canBlock: false,
+    });
+
+    // A post an older API sent (no riders) still parses in the web contracts.
+    const detail = await request(`/v1/feed/posts/${fx.adminPost}`, tokens.third);
+    const full = (await detail.json()) as Record<string, unknown>;
+    const { canReport: _r, canBlock: _b, ...legacy } = full;
+    expect(feedPostSchema.safeParse(legacy).success).toBe(true);
+    expect(feedPostSchema.safeParse(full).success).toBe(true);
+  });
+
+  it('a story comment is not reportable yet, and the report and block limits answer 429 beyond 20 and 60 an hour', async () => {
+    const story = await post('/v1/reports', tokens.third, {
+      subjectType: 'story_comment',
+      subjectId: comments.byAuthor,
+      reason: 'spam',
+    });
+    expect(story.status).toBe(400);
+    expect((await errorOf(story)).code).toBe('VALIDATION_FAILED');
+
+    const spammer = await signInAs('iris.munoz@rede-demo.local', SEED_PASSWORD);
+    const reportStatuses: number[] = [];
+    for (let i = 0; i < 21; i += 1) {
+      const res = await post('/v1/reports', spammer, {
+        subjectType: 'feed_post',
+        subjectId: crypto.randomUUID(),
+        reason: 'spam',
+      });
+      reportStatuses.push(res.status);
+    }
+    expect(reportStatuses.slice(0, 20).every((status) => status === 404)).toBe(true);
+    expect(reportStatuses[20]).toBe(429);
+
+    const blocker = await signInAs('joao.goncalves@rede-demo.local', SEED_PASSWORD);
+    const blockStatuses: number[] = [];
+    for (let i = 0; i < 61; i += 1) {
+      const res = await post('/v1/blocks', blocker, { userId: crypto.randomUUID() });
+      blockStatuses.push(res.status);
+    }
+    expect(blockStatuses.slice(0, 60).every((status) => status === 400)).toBe(true);
+    expect(blockStatuses[60]).toBe(429);
+  });
+
+  it('nothing tells the author or names the reporter or the blocker, and no notification is created', async () => {
+    const countNotifications = async () => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.notifications where user_id = ${ids.author}::uuid`;
+      return row?.n ?? 0;
+    };
+    const before = await countNotifications();
+
+    const filed = await report(
+      tokens.third,
+      'post_comment',
+      comments.byAuthor,
+      'offensive',
+      'ruim',
+    );
+    expect(filed.status).toBe(201);
+    const filedBody = await filed.text();
+    const blocked = await post('/v1/blocks', tokens.third, { userId: ids.author });
+    const blockedBody = await blocked.text();
+    const blockList = await (await request('/v1/blocks', tokens.third)).text();
+    const authorsList = await (await request('/v1/blocks', tokens.author)).text();
+
+    for (const text of [filedBody, blockedBody, blockList, authorsList]) {
+      expect(text).not.toContain(ids.third);
+      expect(text).not.toContain('beatriz');
+    }
+    // The author's own view of the lists names no one: empty.
+    expect(JSON.parse(authorsList).items).toEqual([]);
+    expect(await countNotifications()).toBe(before);
+    expect((await del(`/v1/blocks/${ids.author}`, tokens.third)).status).toBe(200);
   });
 });
