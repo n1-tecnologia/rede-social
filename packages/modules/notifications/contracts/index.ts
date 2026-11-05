@@ -253,6 +253,13 @@ export const pushSubscriptionInputSchema = z
   .strict();
 export type PushSubscriptionInput = z.infer<typeof pushSubscriptionInputSchema>;
 
+/**
+ * RED STUB (13-11): inert placeholders so the failing tests fail on their assertions, not on a missing
+ * export. Replaced by the real union in the GREEN commit.
+ */
+export const pushDeviceInputSchema = z.object({}).strict();
+export const pushSubscriptionSaveBodySchema = pushSubscriptionInputSchema;
+
 /** `DELETE /v1/notifications/push-subscriptions`: which of the caller's own devices to forget. */
 export const pushSubscriptionDeleteSchema = z
   .object({ endpoint: z.string().min(1).max(PUSH_ENDPOINT_MAX_LENGTH) })
