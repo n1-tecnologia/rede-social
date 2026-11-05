@@ -58,7 +58,8 @@ function decodeInstantCursor(raw: string | undefined) {
  * claims and the subject row, never from the body.
  *
  * SQLSTATE to API error: `RP001` (own content) 403 `CANNOT_REPORT_OWN`; `RP002` (missing, deleted or another
- * tenant's subject) 404 `NOT_FOUND`, the same body for all three, so the route is no existence oracle; `23505`
+ * tenant's subject, or one the reporter cannot read) 404 `NOT_FOUND`, the same body for all of them, so the route
+ * is no existence oracle; `23505`
  * (this reporter already reported this item) 409 `ALREADY_REPORTED`; `22023` (an unknown subject type, which the
  * schema already refuses) 400 `VALIDATION_FAILED`; `42501` (a caller who is not a live member) 403 `FORBIDDEN`.
  * A note over 500 characters would hit the table CHECK (23514); the body schema refuses it first.
@@ -68,12 +69,28 @@ export async function createReport(
   input: ReportCreateBody,
 ): Promise<{ id: string }> {
   try {
-    const rows = await withTenantTx(ctx, (tx) =>
-      tx.execute<{ id: string }>(sql`
+    const rows = await withTenantTx(ctx, async (tx) => {
+      // The reporter must be able to READ the subject (13-08's open design note, decided here): the SQL definer
+      // resolves it with the live predicate only, so without this read a member who learned the uuid of a
+      // followers-only post they may not read, or of a post in a community locked for them, would get a 201 and so
+      // learn that the uuid exists. The read goes through the reporter's own lane, so the social gate and the
+      // community gate apply; a miss is the SAME 404 (`RP002`) a missing subject gives.
+      const readable =
+        input.subjectType === 'feed_post'
+          ? await tx.execute<{ one: number }>(sql`
+              select 1 as one from feed_posts p
+               where p.id = ${input.subjectId}::uuid and p.deleted_at is null`)
+          : await tx.execute<{ one: number }>(sql`
+              select 1 as one
+                from feed_comments c
+                join feed_posts p on p.id = c.post_id and p.deleted_at is null
+               where c.id = ${input.subjectId}::uuid and c.deleted_at is null`);
+      if (readable.length === 0) throw new ApiError(404, 'NOT_FOUND');
+      return tx.execute<{ id: string }>(sql`
         select app.content_report_create(
           ${input.subjectType}::text, ${input.subjectId}::uuid, ${input.reason}::text, ${input.note ?? null}::text
-        ) as id`),
-    );
+        ) as id`);
+    });
     const id = rows[0]?.id;
     if (!id) throw new ApiError(500, 'INTERNAL');
     // Ids and the closed vocabulary only: never the note, never the excerpt.
