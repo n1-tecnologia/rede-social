@@ -3,6 +3,7 @@ import {
   isQuestionVisible,
   type MemberForm,
   type MemberQuestion,
+  type ProfileFormCondition,
 } from '@rede-social/contracts/profile-form';
 import { type Answers, type Draft, toWire } from './form-state';
 
@@ -44,4 +45,23 @@ export function visibleQuestionIds(form: FormQuestions, drafts?: Answers): Set<s
     if (isQuestionVisible(question, tokensOf)) visible.add(question.id);
   }
   return visible;
+}
+
+/** RED stubs of plan 12.1-13 task 3: deliberately inert, replaced in the GREEN commit. */
+export function storedVisibleQuestionIds(_form: FormQuestions): Set<string> {
+  return new Set();
+}
+
+export function answersToErase(
+  _form: FormQuestions,
+  _drafts: Answers,
+): { id: string; title: string }[] {
+  return [];
+}
+
+export function isNotApplicable(
+  _row: { questionId: string; condition: ProfileFormCondition | null; value: unknown },
+  _rowsById: ReadonlyMap<string, { value: unknown }>,
+): boolean {
+  return false;
 }
