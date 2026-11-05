@@ -10,8 +10,10 @@ import {
   PROFILE_FORM_CHOICE_TYPES,
   PROFILE_FORM_ISSUE_SET,
   PROFILE_FORM_LIMITS,
+  type ProfileFormCondition,
   type ProfileFormSummary,
   type ProfileFormType,
+  parseConditionValues,
   type ReorderBody,
   type ReplaceQuestionBody,
   type UpdateQuestionBody,
@@ -20,7 +22,16 @@ import { sql } from 'drizzle-orm';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { ApiError } from '../http/api-error';
-import { addQuestion, applyRequestedLayout, flatten, type Layout, moveQuestion } from './layout';
+import {
+  type ConditionCheck,
+  checkCondition,
+  checkConditionLock,
+  checkOpenerChange,
+  checkReactivation,
+  dependentsOf,
+  type RuleQuestion,
+} from './condition-rules';
+import { addQuestion, applyRequestedLayout, type Layout, moveQuestion } from './layout';
 import {
   assertLayoutOrder,
   dropQuestion,
@@ -89,6 +100,8 @@ export type StoredQuestion = {
   limits: { min?: number | string; max?: number | string };
   position: number;
   revision: number;
+  condition_question_id: string | null;
+  condition_values: string[] | null;
   archived_at: string | Date | null;
   created_at: string | Date;
   listed_at: string | Date;
@@ -98,6 +111,14 @@ const iso = (value: string | Date): string => new Date(value).toISOString();
 
 type CountRow = { question_id: string; n: number | string };
 type OptionCountRow = { question_id: string; option_id: string; n: number | string };
+type OpenerCountRow = { opener_id: string; n: number | string };
+
+type Counts = {
+  perQuestion: Map<string, number>;
+  perOption: Map<string, Map<string, number>>;
+  /** ACTIVE dependents per opener (D-632): how many active questions name the key as their opener. */
+  opens: Map<string, number>;
+};
 
 /**
  * The aggregate counts of the given questions: answers per question, and answers per option for the choice
@@ -107,11 +128,20 @@ async function countsFor(
   tx: Tx,
   tenantId: string,
   questionIds: readonly string[],
-): Promise<{ perQuestion: Map<string, number>; perOption: Map<string, Map<string, number>> }> {
+): Promise<Counts> {
   const perQuestion = new Map<string, number>();
   const perOption = new Map<string, Map<string, number>>();
-  if (questionIds.length === 0) return { perQuestion, perOption };
+  const opens = new Map<string, number>();
+  if (questionIds.length === 0) return { perQuestion, perOption, opens };
   const idsJson = JSON.stringify(questionIds);
+  const openerRows = await tx.execute<OpenerCountRow>(sql`
+    select d.condition_question_id::text as opener_id, count(*)::int as n
+      from public.profile_form_questions d
+     where d.tenant_id = ${tenantId}::uuid
+       and d.archived_at is null
+       and d.condition_question_id in (select e::uuid from jsonb_array_elements_text(${idsJson}::jsonb) e)
+     group by d.condition_question_id`);
+  for (const row of openerRows) opens.set(row.opener_id, Number(row.n));
   const questionRows = await tx.execute<CountRow>(sql`
     select a.question_id::text as question_id, count(*)::int as n
       from public.profile_form_answers a
@@ -143,14 +173,11 @@ async function countsFor(
     inner.set(row.option_id, Number(row.n));
     perOption.set(row.question_id, inner);
   }
-  return { perQuestion, perOption };
+  return { perQuestion, perOption, opens };
 }
 
 /** One stored question as the builder shows it: the member fields without `answer`, plus the counts. */
-export function toAdminQuestion(
-  row: StoredQuestion,
-  counts: { perQuestion: Map<string, number>; perOption: Map<string, Map<string, number>> },
-): AdminQuestion {
+export function toAdminQuestion(row: StoredQuestion, counts: Counts): AdminQuestion {
   const optionCounts = counts.perOption.get(row.id);
   return {
     id: row.id,
@@ -170,6 +197,11 @@ export function toAdminQuestion(
     position: row.position,
     revision: row.revision,
     answerCount: counts.perQuestion.get(row.id) ?? 0,
+    condition:
+      row.condition_question_id === null
+        ? null
+        : { questionId: row.condition_question_id, values: row.condition_values ?? [] },
+    opensCount: counts.opens.get(row.id) ?? 0,
     createdAt: iso(row.created_at),
     listedAt: iso(row.listed_at),
   };
@@ -177,7 +209,9 @@ export function toAdminQuestion(
 
 const COLUMNS = sql.raw(`
   q.id::text as id, q.step_id::text as step_id, q.type, q.title, q.help_text, q.required, q.show_on_profile, q.allow_other,
-  q.options, q.limits, q."position" as position, q.revision, q.archived_at, q.created_at, q.listed_at`);
+  q.options, q.limits, q."position" as position, q.revision,
+  q.condition_question_id::text as condition_question_id, q.condition_values,
+  q.archived_at, q.created_at, q.listed_at`);
 
 /** The tenant's ACTIVE questions in the admin's order, `position, created_at, id` (the lock order too). */
 export async function readActive(tx: Tx, tenantId: string): Promise<StoredQuestion[]> {
@@ -275,6 +309,106 @@ async function targetStep(
 
 const unknownStep = () => new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'unknown_step' });
 
+// ── Conditions (Phase 12.1 plan 10: D-620..D-623, D-625, D-632; PFORM-29, PFORM-31) ──────────────────────────
+
+/** The part of a stored question the condition rules look at. */
+const ruleQuestionOf = (row: StoredQuestion): RuleQuestion => ({
+  id: row.id,
+  type: row.type,
+  title: row.title,
+  archived: row.archived_at !== null,
+  options: row.options.map((option) => ({ id: option.id })),
+  conditionQuestionId: row.condition_question_id,
+  conditionValues: row.condition_values,
+});
+
+const conditionOf = (row: StoredQuestion): ProfileFormCondition | null =>
+  row.condition_question_id === null
+    ? null
+    : { questionId: row.condition_question_id, values: row.condition_values ?? [] };
+
+/** The same opener and the same set of tokens (an order of the tokens is not a change). */
+const sameCondition = (a: ProfileFormCondition | null, b: ProfileFormCondition | null): boolean => {
+  if (a === null || b === null) return a === b;
+  const left = new Set(a.values);
+  const right = new Set(b.values);
+  return (
+    a.questionId === b.questionId &&
+    left.size === right.size &&
+    [...left].every((token) => right.has(token))
+  );
+};
+
+/**
+ * The pure rule's refusal as the coded 409: `condition_invalid` or `condition_order` in `details.profileForm`,
+ * with `openerId` for the order (and `questionId` when the subject exists already; a question being created has
+ * none yet). Nothing is written, the caller's transaction rolls back.
+ */
+function refuseCondition(check: ConditionCheck, subjectId?: string): void {
+  if (check.ok) return;
+  throw new ApiError(409, 'CONFLICT', {
+    profileForm: check.issue,
+    ...(subjectId !== undefined ? { questionId: subjectId } : {}),
+    ...(check.openerId !== undefined ? { openerId: check.openerId } : {}),
+  });
+}
+
+/** D-632: the opener's refusal as the coded 409 `has_dependents` with the ACTIVE dependents it lists. */
+function refuseDependents(refusal: ReturnType<typeof checkOpenerChange>): void {
+  if (refusal === null) return;
+  throw hasDependents(refusal.dependents);
+}
+
+const hasDependents = (dependents: { id: string; title: string }[]) =>
+  new ApiError(409, 'CONFLICT', { profileForm: 'has_dependents', dependents });
+
+/** `text[]` of the tokens, in order, from a JSON array (a JS array would expand into a record). */
+const textArray = (values: readonly string[]) =>
+  sql`array(select t.e from jsonb_array_elements_text(${JSON.stringify(values)}::jsonb)
+            with ordinality as t(e, n) order by t.n)`;
+
+/**
+ * Runs one write inside a SAVEPOINT, so a database error leaves the transaction usable: the caller can read the
+ * current dependents of an opener before it refuses. Answers the value or the error; it never throws a
+ * database error itself.
+ */
+async function attempt<T>(
+  tx: Tx,
+  run: () => Promise<T>,
+): Promise<{ value: T } | { error: unknown }> {
+  await tx.execute(sql`savepoint pf_attempt`);
+  try {
+    const value = await run();
+    await tx.execute(sql`release savepoint pf_attempt`);
+    return { value };
+  } catch (error) {
+    await tx.execute(sql`rollback to savepoint pf_attempt`);
+    return { error };
+  }
+}
+
+/**
+ * A write the guard trigger can still refuse in a race that got past the service (PF001..PF007): the same coded
+ * 409 as the pure rules, never a 500. PF007 (`has_dependents`) re-reads the opener's dependents NOW (the savepoint
+ * keeps the transaction alive for it), so the list is what a second writer just committed.
+ */
+async function guardedWrite<T>(
+  tx: Tx,
+  tenantId: string,
+  openerId: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const out = await attempt(tx, run);
+  if ('value' in out) return out.value;
+  const issue = guardIssueOf(out.error);
+  if (!issue) throw out.error;
+  if (issue === 'has_dependents') {
+    const fresh = await readLayout(tx, tenantId);
+    throw hasDependents(dependentsOf(fresh.questions, openerId));
+  }
+  throw new ApiError(409, 'CONFLICT', { profileForm: issue });
+}
+
 /**
  * `POST /v1/profile_form/questions` (PFORM-02, D-627): a new question at the END of the named step (default:
  * the last step; the default step is created when the form has none). The body is already validated by the
@@ -301,6 +435,20 @@ export async function createQuestion(
 
     const read = await readLayout(tx, ctx.tenantId);
     const target = await targetStep(tx, ctx.tenantId, read, body.stepId);
+    // D-620..D-623: a condition is accepted only through the pure rule, over the layout the question will have
+    // (at the end of its step). The opener must be an ACTIVE question of THIS tenant: a foreign and a missing id
+    // are the same refusal (T-12.1-01), and the composite foreign key is the backstop.
+    if (body.condition) {
+      const probe = crypto.randomUUID();
+      refuseCondition(
+        checkCondition({
+          questions: read.questions,
+          layout: layoutOrThrow(addQuestion(target.layout, target.stepId, probe)),
+          subjectId: probe,
+          condition: { ...body.condition, questionId: body.condition.questionId.toLowerCase() },
+        }),
+      );
+    }
     const id = await insertQuestion(tx, ctx, body, target.stepId, null);
     const next = layoutOrThrow(addQuestion(target.layout, target.stepId, id));
     // An append to the very end of the form moves nobody: the insert already gave it max(position) + 1, so no
@@ -326,10 +474,11 @@ async function insertQuestion(
   const options = isChoiceType(body.type)
     ? body.options.map((option) => ({ id: crypto.randomUUID(), label: option.label.trim() }))
     : [];
+  const condition = body.condition ?? null;
   const [created] = await tx.execute<{ id: string }>(sql`
     insert into public.profile_form_questions
       (tenant_id, step_id, type, title, help_text, required, show_on_profile, allow_other, options, limits,
-       position, revision, listed_at, created_by_user_id)
+       position, revision, listed_at, created_by_user_id, condition_question_id, condition_values)
     values (${ctx.tenantId}::uuid, ${stepId}::uuid, ${body.type}, ${body.title}, ${body.helpText},
             ${body.required}, ${body.showOnProfile}, ${body.allowOther}, ${JSON.stringify(options)}::jsonb,
             ${JSON.stringify(body.limits)}::jsonb,
@@ -337,7 +486,9 @@ async function insertQuestion(
               (select coalesce(max(position), 0) + 1
                  from public.profile_form_questions
                 where tenant_id = ${ctx.tenantId}::uuid and archived_at is null)),
-            1, now(), ${ctx.userId}::uuid)
+            1, now(), ${ctx.userId}::uuid,
+            ${condition === null ? null : condition.questionId.toLowerCase()}::uuid,
+            ${condition === null ? sql`null::text[]` : textArray(condition.values)})
     returning id::text as id`);
   if (!created) throw new Error('insertQuestion: the insert returned no row');
   return created.id;
@@ -496,8 +647,9 @@ export async function updateQuestion(
     await requireModuleOn(tx, ctx);
 
     // A move needs the whole layout: read (and lock) it BEFORE the question row, in the canonical order, so
-    // this transaction never waits for a row a member's save already holds while that save waits for ours.
-    const read = body.stepId !== undefined ? await readLayout(tx, ctx.tenantId, true) : null;
+    // this transaction never waits for a row a member's save already holds while that save waits for ours. Any
+    // other edit reads it unlocked: the condition rules (12.1) look at the tenant's active questions.
+    const read = await readLayout(tx, ctx.tenantId, body.stepId !== undefined);
 
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
@@ -512,7 +664,7 @@ export async function updateQuestion(
     // is not the tenant's is the 400 `unknown_step` (T-12.1-10); the order rule (D-623) is checked over the
     // layout the move would produce, before anything is written.
     let moved: Layout | null = null;
-    if (read !== null && body.stepId !== undefined) {
+    if (body.stepId !== undefined) {
       const to = body.stepId.toLowerCase();
       if (!read.layout.some((step) => step.stepId === to)) throw unknownStep();
       if (to !== row.step_id) {
@@ -525,6 +677,51 @@ export async function updateQuestion(
     const current = definitionOf(row);
     const next = nextDefinition(row, body);
 
+    // D-625, D-620..D-623: `condition` undefined leaves the stored one, `null` removes it (allowed at any answer
+    // count, nothing is discarded), an object gains or changes it: the lock first (a question with answers
+    // cannot), then the pure rule over the layout the question will have. An unchanged condition is not
+    // re-checked, so a rename passes at any answer count.
+    const storedCondition = conditionOf(row);
+    let conditionWrite: { to: ProfileFormCondition | null } | null = null;
+    if (body.condition !== undefined) {
+      const wanted: ProfileFormCondition | null =
+        body.condition === null
+          ? null
+          : { ...body.condition, questionId: body.condition.questionId.toLowerCase() };
+      const lock = checkConditionLock({
+        answerCount: counts.perQuestion.get(row.id) ?? 0,
+        current: storedCondition,
+        next: wanted,
+      });
+      if (lock) throw new ApiError(409, 'CONFLICT', { profileForm: lock });
+      if (!sameCondition(storedCondition, wanted)) {
+        refuseCondition(
+          checkCondition({
+            questions: read.questions,
+            layout: moved ?? read.layout,
+            subjectId: row.id,
+            condition: wanted,
+          }),
+          row.id,
+        );
+        conditionWrite = { to: wanted };
+      }
+    }
+
+    // D-632: an opener that still opens others cannot change type or lose an option an ACTIVE dependent's
+    // condition names. Checked before the answer locks, as the trigger does (PF007 before PF001).
+    const nextOptionIds = new Set(next.options.map((option) => option.id));
+    refuseDependents(
+      checkOpenerChange({
+        questions: read.questions,
+        openerId: row.id,
+        nextType: next.type,
+        removedOptionIds: current.options
+          .map((option) => option.id)
+          .filter((optionId) => !nextOptionIds.has(optionId)),
+      }),
+    );
+
     const locked = checkLocks({
       current,
       next,
@@ -535,27 +732,31 @@ export async function updateQuestion(
     if (locked) throw new ApiError(409, 'CONFLICT', { profileForm: locked });
 
     assertValidDefinition(next);
-    const edited = !unchanged(current, next);
+    const edited = !unchanged(current, next) || conditionWrite !== null;
     if (!edited && moved === null) return toAdminQuestion(row, counts);
 
     // The layout write bumps the revision of a question that changed step, so a move plus an edit is ONE bump.
     if (moved !== null) await writeLayout(tx, ctx.tenantId, moved);
     if (edited) {
-      try {
-        await tx.execute(sql`
+      const conditionSet =
+        conditionWrite === null
+          ? sql``
+          : conditionWrite.to === null
+            ? sql`, condition_question_id = null, condition_values = null`
+            : sql`, condition_question_id = ${conditionWrite.to.questionId}::uuid,
+                   condition_values = ${textArray(conditionWrite.to.values)}`;
+      // The trigger is the backstop of a race that got past the pure rules: the same coded 409, never a 500
+      // (PF007 also lists the dependents a second writer just committed).
+      await guardedWrite(tx, ctx.tenantId, row.id, () =>
+        tx.execute(sql`
           update public.profile_form_questions
              set type = ${next.type}, title = ${next.title}, help_text = ${next.helpText},
                  required = ${next.required}, show_on_profile = ${next.showOnProfile},
                  allow_other = ${next.allowOther}, options = ${JSON.stringify(next.options)}::jsonb,
-                 limits = ${JSON.stringify(next.limits)}::jsonb,
+                 limits = ${JSON.stringify(next.limits)}::jsonb${conditionSet},
                  revision = revision + ${moved === null ? 1 : 0}::int, updated_at = now()
-           where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-      } catch (error) {
-        // The trigger is the backstop of a race that got past `checkLocks`: the same coded 409, never a 500.
-        const issue = guardIssueOf(error);
-        if (issue) throw new ApiError(409, 'CONFLICT', { profileForm: issue });
-        throw error;
-      }
+           where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`),
+      );
     }
     return questionAfterWrite(tx, ctx, row.id);
   });
@@ -678,10 +879,17 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     if (row.archived_at !== null) return archivedQuestionOf(tx, ctx.tenantId, row);
 
-    await tx.execute(sql`
-      update public.profile_form_questions
-         set archived_at = now(), revision = revision + 1, updated_at = now()
-       where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    // D-632: an opener with active dependents is not archived (the list names them); the trigger's PF007 is
+    // the backstop of a race.
+    refuseDependents(
+      checkOpenerChange({ questions: read.questions, openerId: row.id, archive: true }),
+    );
+    await guardedWrite(tx, ctx.tenantId, row.id, () =>
+      tx.execute(sql`
+        update public.profile_form_questions
+           set archived_at = now(), revision = revision + 1, updated_at = now()
+         where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`),
+    );
     await writeLayout(tx, ctx.tenantId, dropQuestion(read.layout, row.id));
     const archived = await readOne(tx, ctx.tenantId, row.id);
     if (!archived) throw new Error('archiveQuestion: the archived question is not readable');
@@ -711,18 +919,26 @@ export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<Adm
     }
 
     const next = layoutOrThrow(addQuestion(read.layout, row.step_id, row.id));
-    const [conditional] = await tx.execute<{ opener_id: string | null }>(sql`
-      select q.condition_question_id::text as opener_id
-        from public.profile_form_questions q
-       where q.id = ${row.id}::uuid and q.tenant_id = ${ctx.tenantId}::uuid`);
-    const openerId = conditional?.opener_id ?? null;
-    // An opener that is archived or ineligible is the reactivation rule of the conditions (plan 10); here only
-    // the ORDER over what is active is enforced.
-    const facts =
-      openerId !== null && flatten(next).includes(openerId)
-        ? [...read.facts, { questionId: row.id, openerId }]
-        : read.facts;
-    assertLayoutOrder(next, facts);
+    // D-632: a shown question comes back only while its opener still holds: active, still eligible, no condition
+    // of its own, and before it. A refusal names the opener (`openerId`); pure, no extra lock on the hot path.
+    const openerId = row.condition_question_id;
+    if (openerId !== null) {
+      const check = checkReactivation({
+        questions: [...read.questions, ruleQuestionOf({ ...row, archived_at: null })],
+        layout: next,
+        questionId: row.id,
+      });
+      if (!check.ok) {
+        throw new ApiError(409, 'CONFLICT', {
+          profileForm: check.issue,
+          openerId: check.openerId ?? openerId,
+        });
+      }
+    }
+    assertLayoutOrder(
+      next,
+      openerId !== null ? [...read.facts, { questionId: row.id, openerId }] : read.facts,
+    );
 
     // The end of ITS step is the end of the form only for the last step; there it takes max(position) + 1 of the
     // other active questions and nobody else is touched (a save in flight is never waited for). Anywhere else
@@ -785,15 +1001,30 @@ export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ delet
     if (answered?.found === true)
       throw new ApiError(409, 'CONFLICT', { profileForm: 'has_answers' });
 
-    try {
-      await tx.execute(sql`
+    // D-632: an opener with active dependents is not deleted. Its ARCHIVED dependents do not block, but the
+    // composite foreign key still points at it, so their condition is cleared in this transaction (an archived
+    // question is read-only to members; removing a condition is allowed at any answer count and discards no
+    // answer). Without it the delete would end in the foreign key.
+    refuseDependents(
+      checkOpenerChange({ questions: read.questions, openerId: row.id, archive: true }),
+    );
+    await tx.execute(sql`
+      update public.profile_form_questions
+         set condition_question_id = null, condition_values = null, updated_at = now()
+       where tenant_id = ${ctx.tenantId}::uuid and condition_question_id = ${row.id}::uuid
+         and archived_at is not null`);
+
+    const out = await attempt(tx, () =>
+      tx.execute(sql`
         delete from public.profile_form_questions
-         where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-    } catch (error) {
-      if (hasSqlState(error, '23503')) {
-        throw new ApiError(409, 'CONFLICT', { profileForm: 'has_answers' });
-      }
-      throw error;
+         where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`),
+    );
+    if ('error' in out) {
+      if (!hasSqlState(out.error, '23503')) throw out.error;
+      // A foreign key in a race: a second writer gave the question a dependent, or an answer, after the checks.
+      const dependents = dependentsOf((await readLayout(tx, ctx.tenantId)).questions, row.id);
+      if (dependents.length > 0) throw hasDependents(dependents);
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'has_answers' });
     }
     await writeLayout(tx, ctx.tenantId, dropQuestion(read.layout, row.id));
     return { deleted: true };
@@ -830,13 +1061,33 @@ export async function replaceQuestion(
       throw unknownStep();
     }
 
+    // D-632: replacing archives the old question, so an opener with active dependents is refused (and listed).
+    refuseDependents(
+      checkOpenerChange({ questions: read.questions, openerId: old.id, archive: true }),
+    );
+    // The replacement's own condition (D-620..D-623) is checked over the layout it will have: it takes the old
+    // question's place, so an opener that IS the old question is no longer in the layout (condition_invalid).
+    if (body.condition) {
+      const probe = crypto.randomUUID();
+      refuseCondition(
+        checkCondition({
+          questions: read.questions,
+          layout: swapQuestion(read.layout, old.id, probe),
+          subjectId: probe,
+          condition: { ...body.condition, questionId: body.condition.questionId.toLowerCase() },
+        }),
+      );
+    }
+
     const createdId = await insertQuestion(tx, ctx, body, old.step_id, old.position);
     const next = swapQuestion(read.layout, old.id, createdId);
     assertLayoutOrder(next, read.facts);
-    await tx.execute(sql`
-      update public.profile_form_questions
-         set archived_at = now(), revision = revision + 1, updated_at = now()
-       where id = ${old.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    await guardedWrite(tx, ctx.tenantId, old.id, () =>
+      tx.execute(sql`
+        update public.profile_form_questions
+           set archived_at = now(), revision = revision + 1, updated_at = now()
+         where id = ${old.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`),
+    );
     await writeLayout(tx, ctx.tenantId, next);
     return questionAfterWrite(tx, ctx, createdId);
   });
@@ -857,9 +1108,13 @@ const ACTIVE_MEMBERS = (tenantId: string) => sql`
      and m.deleted_at is null`;
 
 /**
- * `GET /v1/profile_form/summary` (PFORM-23): `{ total, complete, hasRequired }` in ONE set-based statement.
- * `complete` is the members with an answer to EVERY active required question (all of them when there is no
- * required question). Counts only: no answer is selected.
+ * `GET /v1/profile_form/summary` (PFORM-23, PFORM-38, D-634): `{ total, complete, hasRequired }` in ONE set-based
+ * statement. `complete` is the members who owe NO VISIBLE required question: a required, active question with no
+ * answer row of that member, and either no condition or an answer of that member to the opener whose tokens
+ * overlap the condition values. This repeats the predicate of the gate function `app.profile_form_missing`
+ * (which the tenant lane cannot call: it takes an arbitrary membership id and is granted to the API and service
+ * roles only); the integration test asserts the two never drift. A member who does not see a conditional
+ * required question is complete without it. Counts only: no answer is selected.
  */
 export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
   return withTenantTx(ctx, async (tx) => {
@@ -872,20 +1127,28 @@ export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
       sql`
       with members as (${ACTIVE_MEMBERS(ctx.tenantId)}),
       req as (
-        select q.id
+        select q.id, q.condition_question_id, q.condition_values
           from public.profile_form_questions q
-         where q.tenant_id = ${ctx.tenantId}::uuid and q.required and q.archived_at is null),
-      answered as (
-        select a.membership_id, count(*) as n
-          from public.profile_form_answers a
-          join req r on r.id = a.question_id
-         where a.tenant_id = ${ctx.tenantId}::uuid
-         group by a.membership_id)
+         where q.tenant_id = ${ctx.tenantId}::uuid and q.required and q.archived_at is null)
       select (select count(*) from members)::int as total,
              (select count(*)
                 from members m
-                left join answered x on x.membership_id = m.id
-               where coalesce(x.n, 0) = (select count(*) from req))::int as complete,
+               where not exists (
+                 select 1
+                   from req r
+                  where not exists (
+                          select 1 from public.profile_form_answers a
+                           where a.tenant_id = ${ctx.tenantId}::uuid
+                             and a.membership_id = m.id
+                             and a.question_id = r.id)
+                    and (r.condition_question_id is null
+                         or exists (
+                           select 1 from public.profile_form_answers o
+                            where o.tenant_id = ${ctx.tenantId}::uuid
+                              and o.membership_id = m.id
+                              and o.question_id = r.condition_question_id
+                              and r.condition_values && app.profile_form_answer_tokens(o.value)))
+               ))::int as complete,
              exists (select 1 from req) as has_required`,
     );
     return {
@@ -896,22 +1159,60 @@ export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
   });
 }
 
+/** Members who have an answer to `openerId` whose tokens overlap `values` (they SEE a question it opens). */
+const SEES_THROUGH = (tenantId: string, openerId: string, values: readonly string[]) => sql`
+  exists (
+    select 1 from public.profile_form_answers o
+     where o.tenant_id = ${tenantId}::uuid
+       and o.membership_id = members.id
+       and o.question_id = ${openerId}::uuid
+       and ${textArray(values)} && app.profile_form_answer_tokens(o.value))`;
+
+/** Members with no answer row for the question. */
+const LACKS_ANSWER = (tenantId: string, questionId: string) => sql`
+  not exists (
+    select 1 from public.profile_form_answers a
+     where a.tenant_id = ${tenantId}::uuid
+       and a.membership_id = members.id
+       and a.question_id = ${questionId}::uuid)`;
+
 /**
- * `GET /v1/profile_form/impact` (D-585, PFORM-23): how many members a change would ask to answer, were it
- * applied now. `create_required` and `replace` count every member; `make_required` and `reactivate` count the
- * members with no answer to `questionId`. A change that asks nobody is 0: a `reactivate` of an optional or an
- * active question, a `make_required` of a question that is already required or archived. `questionId` is
- * needed by those two (400 `invalid` without it) and an unknown or foreign one is the bare 404. A count only.
+ * `GET /v1/profile_form/impact` (D-585, D-634, PFORM-23, PFORM-38): how many members a change would ask to answer,
+ * were it applied now, counting only the members who would SEE the question.
+ *
+ *   - `create_required` and `replace` count every member, or, with `conditionQuestionId` and `conditionValues`,
+ *     the members whose answer to that opener overlaps the values (the opener must be an ACTIVE question of this
+ *     tenant: a foreign or missing id is the bare 404, which reveals nothing; one of the two parameters alone
+ *     is 400 `invalid`);
+ *   - `make_required` and `reactivate` count the members with no answer to `questionId`, and, for a conditional
+ *     question, only those who see it;
+ *   - `remove_condition` (needs `questionId`) counts the members who do NOT see the question today and lack an
+ *     answer to it: they are the ones who newly owe it. It is 0 for an unconditional, an optional or an archived
+ *     question.
+ *
+ * A change that asks nobody is 0. `questionId` is needed by the last three kinds (400 `invalid` without it) and
+ * an unknown or foreign one is the bare 404. A count only: no member and no answer is ever selected.
  */
 export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<ImpactResult> {
   return withTenantTx(ctx, async (tx) => {
     await requireModuleOn(tx, ctx);
 
+    const count = async (where: ReturnType<typeof sql>): Promise<ImpactResult> => {
+      const [counted] = await tx.execute<{ n: number | string }>(sql`
+        select count(*)::int as n from (${ACTIVE_MEMBERS(ctx.tenantId)}) members where ${where}`);
+      return { members: Number(counted?.n ?? 0) };
+    };
+
     if (query.change === 'create_required' || query.change === 'replace') {
-      const [row] = await tx.execute<{ n: number | string }>(
-        sql`select count(*)::int as n from (${ACTIVE_MEMBERS(ctx.tenantId)}) members`,
-      );
-      return { members: Number(row?.n ?? 0) };
+      const values =
+        query.conditionValues === undefined ? [] : parseConditionValues(query.conditionValues);
+      if ((query.conditionQuestionId === undefined) !== (values.length === 0)) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'invalid' });
+      }
+      if (query.conditionQuestionId === undefined) return count(sql`true`);
+      const opener = await readOne(tx, ctx.tenantId, query.conditionQuestionId);
+      if (!opener || opener.archived_at !== null) throw new ApiError(404, 'NOT_FOUND');
+      return count(SEES_THROUGH(ctx.tenantId, opener.id, values));
     }
 
     if (query.questionId === undefined) {
@@ -919,20 +1220,27 @@ export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<Impa
     }
     const row = await readOne(tx, ctx.tenantId, query.questionId);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
+    const condition = conditionOf(row);
+
+    if (query.change === 'remove_condition') {
+      if (condition === null || !row.required || row.archived_at !== null) return { members: 0 };
+      return count(
+        sql`not ${SEES_THROUGH(ctx.tenantId, condition.questionId, condition.values)}
+            and ${LACKS_ANSWER(ctx.tenantId, row.id)}`,
+      );
+    }
+
     const asksNobody =
       query.change === 'reactivate'
         ? row.archived_at === null || !row.required
         : row.archived_at !== null || row.required;
     if (asksNobody) return { members: 0 };
 
-    const [counted] = await tx.execute<{ n: number | string }>(sql`
-      select count(*)::int as n
-        from (${ACTIVE_MEMBERS(ctx.tenantId)}) members
-       where not exists (
-         select 1 from public.profile_form_answers a
-          where a.tenant_id = ${ctx.tenantId}::uuid
-            and a.membership_id = members.id
-            and a.question_id = ${row.id}::uuid)`);
-    return { members: Number(counted?.n ?? 0) };
+    return count(
+      condition === null
+        ? LACKS_ANSWER(ctx.tenantId, row.id)
+        : sql`${LACKS_ANSWER(ctx.tenantId, row.id)}
+              and ${SEES_THROUGH(ctx.tenantId, condition.questionId, condition.values)}`,
+    );
   });
 }

@@ -26,6 +26,7 @@ import {
   PROFILE_FORM_CHOICE_TYPES,
   PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_DEFAULT_STEP_TITLE,
+  PROFILE_FORM_IMPACT_CHANGES,
   PROFILE_FORM_ISSUE_SET,
   PROFILE_FORM_ISSUES,
   PROFILE_FORM_LIMITS,
@@ -35,6 +36,7 @@ import {
   type ProfileFormQuestionDef,
   type ProfileFormType,
   parseAnswer,
+  parseConditionValues,
   profileFormBootstrapSchema,
   profileFormConditionSchema,
   profileFormSummarySchema,
@@ -1016,6 +1018,8 @@ const adminQuestion = {
   position: 1,
   revision: 2,
   answerCount: 3,
+  condition: null,
+  opensCount: 0,
   createdAt: '2026-10-29T10:00:00.000Z',
   listedAt: '2026-10-29T10:00:00.000Z',
 };
@@ -1093,6 +1097,67 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
     expect(impactQuerySchema.safeParse({ change: 'archive' }).success).toBe(false);
     expect(impactQuerySchema.safeParse({ change: 'replace', questionId: A }).success).toBe(true);
     expect(impactQuerySchema.safeParse({ change: 'replace', questionId: 'x' }).success).toBe(false);
+  });
+
+  it('12.1-10: the admin question carries condition (nullable) and opensCount (an integer from 0)', () => {
+    const conditional = {
+      ...adminQuestion,
+      condition: { questionId: B, values: [C] },
+      opensCount: 0,
+    };
+    expect(adminQuestionSchema.parse(conditional)).toEqual(conditional);
+    const opener = { ...adminQuestion, opensCount: 2 };
+    expect(adminQuestionSchema.parse(opener)).toEqual(opener);
+    const { condition: _c, ...withoutCondition } = adminQuestion;
+    expect(adminQuestionSchema.safeParse(withoutCondition).success).toBe(false);
+    const { opensCount: _o, ...withoutOpens } = adminQuestion;
+    expect(adminQuestionSchema.safeParse(withoutOpens).success).toBe(false);
+    expect(adminQuestionSchema.safeParse({ ...adminQuestion, opensCount: -1 }).success).toBe(false);
+    expect(adminQuestionSchema.safeParse({ ...adminQuestion, opensCount: 1.5 }).success).toBe(
+      false,
+    );
+    // The condition is the shared schema: an empty value set is refused.
+    expect(
+      adminQuestionSchema.safeParse({ ...adminQuestion, condition: { questionId: B, values: [] } })
+        .success,
+    ).toBe(false);
+    const archived = { ...conditional, archivedAt: '2026-10-30T10:00:00.000Z' };
+    expect(archivedQuestionSchema.parse(archived)).toEqual(archived);
+  });
+
+  it('12.1-10: remove_condition is the LAST impact change and the query takes the optional condition', () => {
+    expect(PROFILE_FORM_IMPACT_CHANGES.at(-1)).toBe('remove_condition');
+    expect(PROFILE_FORM_IMPACT_CHANGES.slice(0, 4)).toEqual([
+      'create_required',
+      'make_required',
+      'reactivate',
+      'replace',
+    ]);
+    expect(impactQuerySchema.safeParse({ change: 'remove_condition', questionId: A }).success).toBe(
+      true,
+    );
+    expect(
+      impactQuerySchema.safeParse({
+        change: 'create_required',
+        conditionQuestionId: B,
+        conditionValues: `${C},true`,
+      }).success,
+    ).toBe(true);
+    // Strict, a uuid opener and a bounded value list.
+    expect(
+      impactQuerySchema.safeParse({ change: 'replace', conditionQuestionId: 'x' }).success,
+    ).toBe(false);
+    expect(
+      impactQuerySchema.safeParse({ change: 'replace', conditionValues: 'a'.repeat(2001) }).success,
+    ).toBe(false);
+    expect(impactQuerySchema.safeParse({ change: 'replace', other: 1 }).success).toBe(false);
+  });
+
+  it('12.1-10: parseConditionValues splits on commas, trims and drops empty tokens', () => {
+    expect(parseConditionValues('a, b ,,c,')).toEqual(['a', 'b', 'c']);
+    expect(parseConditionValues('true')).toEqual(['true']);
+    expect(parseConditionValues('')).toEqual([]);
+    expect(parseConditionValues(' , ,')).toEqual([]);
   });
 
   it('publicAnswersSchema rejects an unknown key at either level (strictness)', () => {

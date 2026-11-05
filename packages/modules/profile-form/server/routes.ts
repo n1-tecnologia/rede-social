@@ -108,7 +108,7 @@ const createQuestionRoute = createRoute({
   responses: {
     201: {
       description:
-        'Creates a question at the end of the named step (`stepId`; default: the last step, the default step being created when the form has none): the positions of the whole form are renumbered 1..n, `revision` is 1, every option gets a server-generated id. Title (1 to 120) and help text (at most 300) are trimmed and measured in code points; a choice type needs 2 to 20 distinct options. The body never carries an id, a position or a revision.',
+        'Creates a question at the end of the named step (`stepId`; default: the last step, the default step being created when the form has none): the positions of the whole form are renumbered 1..n, `revision` is 1, every option gets a server-generated id. Title (1 to 120) and help text (at most 300) are trimmed and measured in code points; a choice type needs 2 to 20 distinct options. The body never carries an id, a position or a revision. `condition` (`{ questionId, values }`, or null/absent for an always-shown question) is accepted only through the condition rules: the opener must be an ACTIVE `dropdown`, `single_choice`, `multiple_choice` or `yes_no` question of this tenant that sits BEFORE the new one and has no condition itself, the values are option ids of the opener (`true`/`false` for yes/no; never "Outro"), and the new question must not be an opener.',
       content: { 'application/json': { schema: adminQuestionSchema } },
     },
     400: {
@@ -119,7 +119,7 @@ const createQuestionRoute = createRoute({
     404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm: limit_reached`: the tenant already has 30 active questions. Nothing is written.',
+        '`CONFLICT` with `details.profileForm`: `limit_reached` (the tenant already has 30 active questions), `condition_invalid` (the opener is of another tenant, missing, archived, of a type that cannot open, itself conditional, the new question is an opener, a value is not an option of the opener, or the values are empty or repeated) or `condition_order` with `openerId` (the opener would sit at or after the new question). A foreign and a missing opener answer the same. Nothing is written.',
     },
   },
 });
@@ -137,7 +137,7 @@ const updateQuestionRoute = createRoute({
   responses: {
     200: {
       description:
-        'The edited question. `revision` (the one the caller read) is required and is the optimistic lock; every other key is optional and only the keys sent change. Title, help text and `required` are always free. Once the question has answers the TYPE, every option that has answers (not removable, not relabelled; options may be added and reordered), switching "Outro" off while an "Outro" answer exists, narrowing a number or date limit, and private-to-public are locked. A body that changes nothing answers 200 and does NOT bump the revision. `stepId` moves the question to the END of that step (the same step is a no-op) and bumps the revision once, with or without other edits.',
+        'The edited question. `revision` (the one the caller read) is required and is the optimistic lock; every other key is optional and only the keys sent change. Title, help text and `required` are always free. Once the question has answers the TYPE, every option that has answers (not removable, not relabelled; options may be added and reordered), switching "Outro" off while an "Outro" answer exists, narrowing a number or date limit, and private-to-public are locked. `condition` follows the same rules as a create; `null` removes it (always allowed, no answer is discarded) and a question that already has answers cannot GAIN or CHANGE a condition. An opener cannot change type or lose an option an active dependent names. A body that changes nothing answers 200 and does NOT bump the revision. `stepId` moves the question to the END of that step (the same step is a no-op) and bumps the revision once, with or without other edits.',
       content: { 'application/json': { schema: adminQuestionSchema } },
     },
     400: {
@@ -151,7 +151,7 @@ const updateQuestionRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm`: `stale_revision` (the stored revision moved on), `already_archived` (read-only until reactivated) or the D-587 lock that was hit: `type_locked`, `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`, or `condition_order` (a move that would put an opener at or after a question it opens). Nothing is written.',
+        '`CONFLICT` with `details.profileForm`: `stale_revision` (the stored revision moved on), `already_archived` (read-only until reactivated) or the D-587 lock that was hit: `type_locked`, `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`, `condition_locked` (the question has answers), `condition_invalid`, `condition_order` (an opener at or after a question it opens, with `openerId`), or `has_dependents` with `details.dependents` (`[{ id, title }]`: the active questions whose condition names this opener, only those naming a removed option for an option removal). Nothing is written.',
     },
   },
 });
@@ -290,6 +290,10 @@ const archiveRoute = createRoute({
       description:
         '`MODULE_DISABLED` when the module is off; otherwise the question is unknown or another tenant’s. One bare `NOT_FOUND`.',
     },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm: has_dependents` and `details.dependents` (`[{ id, title }]`, the ACTIVE questions whose condition names this one): an opener with active dependents is not archived. Nothing changes.',
+    },
   },
 });
 
@@ -311,7 +315,7 @@ const reactivateRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm: limit_reached`: the tenant already has 30 active questions. Nothing changes.',
+        '`CONFLICT` with `details.profileForm`: `limit_reached` (the tenant already has 30 active questions), or, for a conditional question, `condition_invalid` / `condition_order` with `openerId` (its opener is archived, no longer eligible, or sits after it). Nothing changes.',
     },
   },
 });
@@ -333,7 +337,7 @@ const deleteRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm: has_answers`: at least one answer exists, so the question can only be archived. Nothing is deleted.',
+        '`CONFLICT` with `details.profileForm`: `has_answers` (at least one answer exists, so the question can only be archived) or `has_dependents` with `details.dependents` (an opener with active dependents). Nothing is deleted.',
     },
   },
 });
@@ -365,7 +369,7 @@ const replaceRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm: already_archived`: the question to replace is not active. Nothing is created.',
+        '`CONFLICT` with `details.profileForm`: `already_archived` (the question to replace is not active), `has_dependents` with `details.dependents` (replacing archives the old question, which an opener with active dependents refuses), or `condition_invalid` / `condition_order` for the new question’s own `condition`. Nothing is created.',
     },
   },
 });
@@ -377,7 +381,7 @@ const summaryRoute = createRoute({
   responses: {
     200: {
       description:
-        '`{ total, complete, hasRequired }` over the tenant’s active `member` memberships (staff, blocked and invited are in no number): `complete` is the members with an answer to every active required question. Counts only.',
+        '`{ total, complete, hasRequired }` over the tenant’s active `member` memberships (staff, blocked and invited are in no number): `complete` is the members who owe no VISIBLE required question (a conditional required question is owed only by the members whose answer to its opener opens it). Counts only.',
       content: { 'application/json': { schema: profileFormSummarySchema } },
     },
     403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
@@ -393,17 +397,17 @@ const impactRoute = createRoute({
   responses: {
     200: {
       description:
-        '`{ members }`: how many members a change (`create_required`, `make_required`, `reactivate`, `replace`) would ask to answer if applied now. `make_required` and `reactivate` need `questionId`. A count only.',
+        '`{ members }`: how many members a change (`create_required`, `make_required`, `reactivate`, `replace`, `remove_condition`) would ask to answer if applied now, counting only the members who SEE the question. `make_required`, `reactivate` and `remove_condition` need `questionId`. `create_required` and `replace` take the optional `conditionQuestionId` and `conditionValues` (comma-separated tokens) of the question to be created, and then count only the members whose answer to that opener overlaps the values. `remove_condition` counts the members who do not see the question today and lack an answer to it (0 for an unconditional, optional or archived question). A count only.',
       content: { 'application/json': { schema: impactResultSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED`: an unknown `change`, or a `questionId` missing where it is needed.',
+        '`VALIDATION_FAILED`: an unknown `change`, a `questionId` missing where it is needed, or only one of `conditionQuestionId` and `conditionValues`.',
     },
     403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
     404: {
       description:
-        '`MODULE_DISABLED` when the module is off; otherwise `questionId` is unknown or another tenant’s.',
+        '`MODULE_DISABLED` when the module is off; otherwise `questionId` or `conditionQuestionId` is unknown, archived or another tenant’s (one bare `NOT_FOUND`).',
     },
   },
 });

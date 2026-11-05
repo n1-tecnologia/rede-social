@@ -111,6 +111,8 @@ export function adminQuestion(
     position: adminCounter,
     revision: 1,
     answerCount: 0,
+    condition: null,
+    opensCount: 0,
     createdAt: '2026-10-01T12:00:00.000Z',
     listedAt: '2026-10-01T12:00:00.000Z',
     ...overrides,

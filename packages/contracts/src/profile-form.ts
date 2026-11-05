@@ -920,6 +920,10 @@ const adminCore = {
   position: z.number().int(),
   revision: z.number().int().min(1),
   answerCount: z.number().int().min(0),
+  /** The condition that shows the question, or null for an always-shown one (12.1, D-621). */
+  condition: profileFormConditionSchema.nullable(),
+  /** How many ACTIVE questions name this one as their opener (D-632); 0 for a question that opens nothing. */
+  opensCount: z.number().int().min(0),
   createdAt: z.string(),
   listedAt: z.string(),
 };
@@ -964,14 +968,33 @@ export const PROFILE_FORM_IMPACT_CHANGES = [
   'make_required',
   'reactivate',
   'replace',
+  // 12.1 (D-625, D-634): appended LAST so the pinned order of the Phase 12 keys holds.
+  'remove_condition',
 ] as const;
 export type ProfileFormImpactChange = (typeof PROFILE_FORM_IMPACT_CHANGES)[number];
 
-/** `GET /impact`: how many members a change would ask to answer. */
+/**
+ * `GET /impact`: how many members a change would ask to answer. 12.1 (D-634): `create_required` and `replace`
+ * may carry the condition the new question will have (`conditionQuestionId` and `conditionValues`, comma
+ * separated tokens, see `parseConditionValues`), so only the members who would SEE the question are counted.
+ */
 export const impactQuerySchema = z
-  .object({ change: z.enum(PROFILE_FORM_IMPACT_CHANGES), questionId: z.uuid().optional() })
+  .object({
+    change: z.enum(PROFILE_FORM_IMPACT_CHANGES),
+    questionId: z.uuid().optional(),
+    conditionQuestionId: z.uuid().optional(),
+    conditionValues: z.string().max(2000).optional(),
+  })
   .strict();
 export type ImpactQuery = z.infer<typeof impactQuerySchema>;
+
+/** The tokens of an impact query's `conditionValues`: split on commas, trimmed, empties dropped. */
+export function parseConditionValues(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+}
 
 export const impactResultSchema = z.object({ members: z.number().int().min(0) });
 export type ImpactResult = z.infer<typeof impactResultSchema>;
