@@ -11031,4 +11031,115 @@ describe('shared identity (08.1)', () => {
     const stillIn = await send('GET', '/v1/me/profile', demoToken, HOSTS.demo);
     expect(stillIn.status).toBe(200);
   });
+
+  it("phase 13 sweep: reports and blocks — a member of one tenant cannot report, list or resolve another tenant's report, every session on the other tenant's host is refused, and the same-tenant calls are the positive controls (13-14, NATIVE-31, T-13-32, T-13-33)", async () => {
+    // | Route                               | Negative asserted here                                                |
+    // |-------------------------------------|-----------------------------------------------------------------------|
+    // | POST /v1/reports                    | a lab member reporting a demo comment: bare 404; demo on lab host: 403 |
+    // | GET  /v1/admin/reports              | a lab admin lists none of the demo's reports; demo admin on lab: 403   |
+    // | POST /v1/admin/reports/:id/resolve  | a lab admin: bare 404, the report stays open; demo admin on lab: 403   |
+    const tag = `iso1314-${RUN}`;
+    const since = await dbNow();
+    const reporterToken = await throwawayMember(tenantIds.demo, `${tag}-r@rede-demo.local`);
+    const [adminRow] = await adminSql<{ id: string }[]>`
+      select id::text from public.users where email = 'admin@rede-demo.local'`;
+    const [postRow] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, caption, author_user_id)
+      values (${tenantIds.demo}::uuid, ${`Denuncia isolamento ${tag}`}, ${adminRow?.id ?? ''}::uuid)
+      returning id`;
+    const postId = postRow?.id ?? '';
+    try {
+      const commented = await send(
+        'POST',
+        `/v1/feed/posts/${postId}/comments`,
+        tokens.demoMember,
+        HOSTS.demo,
+        {
+          body: `Comentario ${tag}`,
+        },
+      );
+      expect(commented.status).toBe(201);
+      const commentId = ((await commented.json()) as { id: string }).id;
+      const filed = { subjectType: 'post_comment', subjectId: commentId, reason: 'spam' };
+      const reportState = async () => {
+        const rows = await adminSql<{ id: string; status: string }[]>`
+          select id::text, status from public.content_reports where subject_id = ${commentId}::uuid`;
+        return rows;
+      };
+
+      // Negatives first: another tenant's member is the bare 404, a session on the wrong host is refused.
+      await expectBareNotFound(
+        await send('POST', '/v1/reports', tokens.labMember, HOSTS.lab, filed),
+        'POST /v1/reports by a lab member',
+      );
+      await expectHostRefused(
+        await send('POST', '/v1/reports', reporterToken, HOSTS.lab, filed),
+        'POST /v1/reports on the lab host',
+      );
+      await expectHostRefused(
+        await send('GET', '/v1/admin/reports', tokens.demoAdmin, HOSTS.lab),
+        'GET /v1/admin/reports on the lab host',
+      );
+      expect(await reportState()).toEqual([]);
+
+      // Positive control: the demo reporter files it, the demo admin lists it.
+      const created = await send('POST', '/v1/reports', reporterToken, HOSTS.demo, filed);
+      expect(created.status).toBe(201);
+      const reportId = ((await created.json()) as { id: string }).id;
+      const demoList = await send(
+        'GET',
+        '/v1/admin/reports?estado=todas',
+        tokens.demoAdmin,
+        HOSTS.demo,
+      );
+      expect(demoList.status).toBe(200);
+      expect(
+        ((await demoList.json()) as { items: { id: string }[] }).items.map((r) => r.id),
+      ).toContain(reportId);
+
+      // The lab admin lists none of it and cannot resolve it; the demo admin on the lab host is refused.
+      const labList = await send(
+        'GET',
+        '/v1/admin/reports?estado=todas',
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(labList.status).toBe(200);
+      expect(
+        ((await labList.json()) as { items: { id: string }[] }).items.map((r) => r.id),
+      ).not.toContain(reportId);
+      await expectBareNotFound(
+        await send('POST', `/v1/admin/reports/${reportId}/resolve`, tokens.labAdmin, HOSTS.lab, {
+          resolution: 'dismiss',
+        }),
+        'POST /v1/admin/reports/:id/resolve by a lab admin',
+      );
+      await expectHostRefused(
+        await send('POST', `/v1/admin/reports/${reportId}/resolve`, tokens.demoAdmin, HOSTS.lab, {
+          resolution: 'dismiss',
+        }),
+        'POST /v1/admin/reports/:id/resolve on the lab host',
+      );
+      expect(await reportState()).toEqual([{ id: reportId, status: 'open' }]);
+
+      // Positive control: the demo admin resolves it.
+      const resolved = await send(
+        'POST',
+        `/v1/admin/reports/${reportId}/resolve`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+        {
+          resolution: 'dismiss',
+        },
+      );
+      expect(resolved.status).toBe(200);
+      expect(await reportState()).toEqual([{ id: reportId, status: 'dismissed' }]);
+    } finally {
+      await adminSql`delete from public.content_reports where subject_id in (
+        select id from public.feed_comments where post_id = ${postId}::uuid)`;
+      await adminSql`delete from public.notifications where subject_id = ${postId}::uuid`;
+      await adminSql`delete from public.feed_posts where id = ${postId}::uuid`;
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+    }
+  });
 });

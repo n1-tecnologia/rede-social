@@ -182,7 +182,51 @@ export async function lockAdminsAndTarget(
   };
 }
 
-type AccessChangeResult = { member: AdminMember; changed: boolean; userId: string };
+export type AccessChangeResult = { member: AdminMember; changed: boolean; userId: string };
+
+/**
+ * The transaction body of a block or unblock, in the CALLER's ADMIN-lane transaction (13-14, D-616): a report's
+ * `block_author` resolution runs this in the same transaction as the report's resolution, so the block, its
+ * `member_blocked` log row and the report's new state commit together or not at all. Every rule in the docblock
+ * above holds unchanged. The after-commit half (the `membership.blocked` event) belongs to whoever owns the
+ * transaction.
+ */
+export async function changeAccessInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  membershipId: string,
+  kind: AccessChangeKind,
+  reason: string | undefined,
+): Promise<AccessChangeResult> {
+  const { target, activeAdminIds } = await lockAdminsAndTarget(tx, ctx, membershipId);
+  const decision = decideAccessChange(target, activeAdminIds, ctx.userId, kind);
+  if (decision.outcome === 'refuse') {
+    throw new ApiError(409, 'CONFLICT', { member: decision.refusal });
+  }
+  if (decision.outcome === 'write') {
+    if (kind === 'block') {
+      await tx.execute(sql`
+      update memberships set status = 'blocked', blocked_at = now()
+       where id = ${target.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    } else {
+      await tx.execute(sql`
+      update memberships set status = 'active', blocked_at = null
+       where id = ${target.id}::uuid and tenant_id = ${ctx.tenantId}::uuid
+         and (status = 'blocked' or blocked_at is not null)`);
+    }
+    await recordModerationAction(tx, ctx, {
+      action: kind === 'block' ? 'member_blocked' : 'member_unblocked',
+      targetUserId: target.userId,
+      targetMembershipId: target.id,
+      reason: reason ?? null,
+    });
+  }
+  return {
+    member: await readMemberForAdmin(tx, ctx, target.id),
+    changed: decision.outcome === 'write',
+    userId: target.userId,
+  };
+}
 
 async function changeAccess(
   ctx: RequestContext,
@@ -190,38 +234,8 @@ async function changeAccess(
   kind: AccessChangeKind,
   reason: string | undefined,
 ): Promise<AdminMember> {
-  const result = await withAdminTx(
-    { tenantId: ctx.tenantId },
-    async (tx): Promise<AccessChangeResult> => {
-      const { target, activeAdminIds } = await lockAdminsAndTarget(tx, ctx, membershipId);
-      const decision = decideAccessChange(target, activeAdminIds, ctx.userId, kind);
-      if (decision.outcome === 'refuse') {
-        throw new ApiError(409, 'CONFLICT', { member: decision.refusal });
-      }
-      if (decision.outcome === 'write') {
-        if (kind === 'block') {
-          await tx.execute(sql`
-          update memberships set status = 'blocked', blocked_at = now()
-           where id = ${target.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-        } else {
-          await tx.execute(sql`
-          update memberships set status = 'active', blocked_at = null
-           where id = ${target.id}::uuid and tenant_id = ${ctx.tenantId}::uuid
-             and (status = 'blocked' or blocked_at is not null)`);
-        }
-        await recordModerationAction(tx, ctx, {
-          action: kind === 'block' ? 'member_blocked' : 'member_unblocked',
-          targetUserId: target.userId,
-          targetMembershipId: target.id,
-          reason: reason ?? null,
-        });
-      }
-      return {
-        member: await readMemberForAdmin(tx, ctx, target.id),
-        changed: decision.outcome === 'write',
-        userId: target.userId,
-      };
-    },
+  const result = await withAdminTx({ tenantId: ctx.tenantId }, (tx) =>
+    changeAccessInTx(tx, ctx, membershipId, kind, reason),
   );
 
   // After commit only: `withAdminTx` has returned, so the row is durable before anyone hears of it.

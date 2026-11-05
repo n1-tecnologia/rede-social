@@ -76,6 +76,8 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   },
 
   // ── /v1/me ──────────────────────────────────────────────────────────────────────────────────
+  // 13-14 (D-616, NATIVE-31): a member of another tenant reporting this tenant's content is the bare 404.
+  'POST /v1/reports': { case: 'phase 13 sweep: reports and blocks' },
   'GET /v1/me/bootstrap': { case: 'f' },
   'GET /v1/me/counters': { case: 'phase 7 sweep' },
   'GET /v1/me/profile': { case: 'inventory sweep: me and media' },
@@ -119,6 +121,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
 
   // ── /v1/admin (Phase 8, the tenant admin panel) ─────────────────────────────────────────────
   'GET /v1/admin/moderation-log': { case: 'phase 8 sweep' },
+  // 13-14 (D-616, NATIVE-31, T-13-32, T-13-33): the reports queue and its resolve. A lab admin lists none of the
+  // demo tenant's reports and cannot resolve one; the demo session on the lab host is refused; each beside a
+  // same-tenant positive control (`phase 13 sweep: reports and blocks`).
+  'GET /v1/admin/reports': { case: 'phase 13 sweep: reports and blocks' },
+  'POST /v1/admin/reports/:id/resolve': { case: 'phase 13 sweep: reports and blocks' },
   'GET /v1/admin/members': { case: 'phase 8 sweep' },
   'GET /v1/admin/members/:membershipId': { case: 'phase 8 sweep' },
   'POST /v1/admin/members/:membershipId/block': { case: 'phase 8 sweep' },

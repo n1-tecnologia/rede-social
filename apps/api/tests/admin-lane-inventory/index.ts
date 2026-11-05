@@ -3,6 +3,7 @@ import { media } from './media';
 import { payments } from './payments';
 import { platform } from './platform';
 import { profileForm } from './profile-form';
+import { safety } from './safety';
 import { scripts } from './scripts';
 import { tenancy } from './tenancy';
 
@@ -56,6 +57,7 @@ export const AREAS = {
   payments,
   platform,
   profileForm,
+  safety,
   scripts,
   tenancy,
 } as const;

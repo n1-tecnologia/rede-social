@@ -41,6 +41,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     'Você é o único administrador. Passe a administração para outra pessoa antes de excluir a conta.',
   WRONG_PASSWORD: 'Senha incorreta.',
   RATE_LIMITED: 'Muitas tentativas. Tente de novo em alguns minutos.',
+  CANNOT_REPORT_OWN: 'Você não pode denunciar o seu próprio conteúdo.',
+  ALREADY_REPORTED: 'Você já denunciou isto.',
+  CANNOT_BLOCK: 'Não foi possível bloquear esta pessoa.',
+  REPORT_ALREADY_RESOLVED: 'Esta denúncia já foi resolvida.',
   INTERNAL: 'Erro interno',
 };
 

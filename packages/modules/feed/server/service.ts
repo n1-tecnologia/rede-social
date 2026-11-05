@@ -1,4 +1,5 @@
 import type { AccessRefusal, PostAccess } from '@rede-social/contracts/access';
+import type { ReportSubjectType } from '@rede-social/contracts/moderation';
 import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { SOCIAL_ENABLED, SOCIAL_VISIBLE_AUTHOR_IDS } from '@rede-social/core/db/social-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
@@ -1552,49 +1553,75 @@ export async function softDeletePost(
   postId: string,
   opts: { canModerate: boolean } = { canModerate: false },
 ): Promise<void> {
-  const { authorUserId, moderated } = await withTenantTx(ctx, async (tx) => {
-    const moderatorBranch = opts.canModerate
-      ? sql`or (p.visibility = 'followers'
-               and exists (
-                 select 1
-                   from memberships am
-                  where am.tenant_id = p.tenant_id
-                    and am.user_id = p.author_user_id
-                    and am.status = 'active'
-                    and am.blocked_at is null
-                    and am.deleted_at is null))`
-      : sql``;
-    const locked = await tx.execute<{ author_user_id: string; caption: string }>(sql`
-      select p.author_user_id, p.caption
-        from feed_posts p
-       where p.id = ${postId}::uuid
-         and p.deleted_at is null
-         and (p.author_user_id = ${ctx.userId}::uuid ${moderatorBranch})
-       for update of p`);
-    const target = locked[0];
-    if (!target) throw new ApiError(404, 'NOT_FOUND');
+  const { authorUserId, moderated } = await withTenantTx(ctx, (tx) =>
+    softDeletePostInTx(tx, ctx, postId, opts),
+  );
+  announcePostRemoved(ctx, postId, authorUserId, moderated);
+}
 
-    await tx.execute(sql`
-      update feed_posts
-         set deleted_at = now(),
-             deleted_by_user_id = ${ctx.userId}::uuid
-       where id = ${postId}::uuid
-         and deleted_at is null`);
+/**
+ * The body of `softDeletePost`, run in the CALLER's tenant transaction (13-14, D-616): a report's `remove_content`
+ * resolution runs this in the SAME transaction as the report's resolution, so the removal, its `post_removed` log
+ * row and the report's new state commit together or not at all. Everything the docblock above says about the lock,
+ * the predicates and the log row holds unchanged; the only difference is who owns the transaction. The after-commit
+ * half (`announcePostRemoved`: the `post.deleted` event and the log line) is the caller's to run once the
+ * transaction has committed.
+ */
+export async function softDeletePostInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  postId: string,
+  opts: { canModerate: boolean },
+): Promise<{ authorUserId: string; moderated: boolean }> {
+  const moderatorBranch = opts.canModerate
+    ? sql`or (p.visibility = 'followers'
+             and exists (
+               select 1
+                 from memberships am
+                where am.tenant_id = p.tenant_id
+                  and am.user_id = p.author_user_id
+                  and am.status = 'active'
+                  and am.blocked_at is null
+                  and am.deleted_at is null))`
+    : sql``;
+  const locked = await tx.execute<{ author_user_id: string; caption: string }>(sql`
+    select p.author_user_id, p.caption
+      from feed_posts p
+     where p.id = ${postId}::uuid
+       and p.deleted_at is null
+       and (p.author_user_id = ${ctx.userId}::uuid ${moderatorBranch})
+     for update of p`);
+  const target = locked[0];
+  if (!target) throw new ApiError(404, 'NOT_FOUND');
 
-    const isAuthor = target.author_user_id === ctx.userId;
-    if (!isAuthor) {
-      await recordModerationAction(tx, ctx, {
-        action: 'post_removed',
-        targetUserId: target.author_user_id,
-        subjectType: 'feed_post',
-        subjectId: postId,
-        excerptSource: target.caption,
-        reason: null,
-      });
-    }
-    return { authorUserId: target.author_user_id, moderated: !isAuthor };
-  });
+  await tx.execute(sql`
+    update feed_posts
+       set deleted_at = now(),
+           deleted_by_user_id = ${ctx.userId}::uuid
+     where id = ${postId}::uuid
+       and deleted_at is null`);
 
+  const isAuthor = target.author_user_id === ctx.userId;
+  if (!isAuthor) {
+    await recordModerationAction(tx, ctx, {
+      action: 'post_removed',
+      targetUserId: target.author_user_id,
+      subjectType: 'feed_post',
+      subjectId: postId,
+      excerptSource: target.caption,
+      reason: null,
+    });
+  }
+  return { authorUserId: target.author_user_id, moderated: !isAuthor };
+}
+
+/** The after-commit half of a post removal: the retraction event and the ids-only log line (T-04-05). */
+export function announcePostRemoved(
+  ctx: RequestContext,
+  postId: string,
+  authorUserId: string,
+  moderated: boolean,
+): void {
   emit(ctx, 'post.deleted', {
     tenantId: ctx.tenantId,
     postId,
@@ -2188,45 +2215,70 @@ export async function deleteComment(
   commentId: string,
   opts: { canModerate: boolean },
 ): Promise<void> {
-  const { removedIds, moderated } = await withTenantTx(ctx, async (tx) => {
-    // 08.2 (D-356): a non-staff caller's comment on a locked community's post is invisible under
-    // `feed_comments_community_gate`, so this lock read misses and answers the bare 404; staff read
-    // every comment (the locked set is '{}' for their claims) and moderate as before.
-    const locked = await tx.execute<{ id: string; author_user_id: string; body: string }>(sql`
-      select id, author_user_id, body
-        from feed_comments
-       where id = ${commentId}::uuid
-         and post_id is not null
-         and deleted_at is null
-       for update`);
-    const target = locked[0];
-    const isAuthor = target?.author_user_id === ctx.userId;
-    if (!target || (!isAuthor && !opts.canModerate)) throw new ApiError(404, 'NOT_FOUND');
+  const { removedIds, moderated } = await withTenantTx(ctx, (tx) =>
+    deleteCommentInTx(tx, ctx, commentId, opts),
+  );
+  announceCommentRemoved(ctx, commentId, removedIds, moderated);
+}
 
-    // D-334: the root and its live replies in ONE statement (a reply has none, so this is a no-op
-    // widening for it). `deleted_by_user_id` names the actor on every row it took down.
-    const removed = await tx.execute<{ id: string }>(sql`
-      update feed_comments
-         set deleted_at = now(),
-             deleted_by_user_id = ${ctx.userId}::uuid
-       where (id = ${commentId}::uuid or parent_id = ${commentId}::uuid)
-         and post_id is not null
-         and deleted_at is null
-      returning id`);
+/**
+ * The body of `deleteComment`, run in the CALLER's tenant transaction (13-14, D-616): a report's `remove_content`
+ * resolution runs this in the SAME transaction as the report's resolution, so the removal, its `comment_removed`
+ * log row and the report's new state commit together or not at all. Every rule of the docblock above holds
+ * unchanged; the only difference is who owns the transaction. The after-commit half (`announceCommentRemoved`) is
+ * the caller's to run once the transaction has committed.
+ */
+export async function deleteCommentInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  commentId: string,
+  opts: { canModerate: boolean },
+): Promise<{ removedIds: string[]; moderated: boolean }> {
+  // 08.2 (D-356): a non-staff caller's comment on a locked community's post is invisible under
+  // `feed_comments_community_gate`, so this lock read misses and answers the bare 404; staff read
+  // every comment (the locked set is '{}' for their claims) and moderate as before.
+  const locked = await tx.execute<{ id: string; author_user_id: string; body: string }>(sql`
+    select id, author_user_id, body
+      from feed_comments
+     where id = ${commentId}::uuid
+       and post_id is not null
+       and deleted_at is null
+     for update`);
+  const target = locked[0];
+  const isAuthor = target?.author_user_id === ctx.userId;
+  if (!target || (!isAuthor && !opts.canModerate)) throw new ApiError(404, 'NOT_FOUND');
 
-    if (!isAuthor) {
-      await recordModerationAction(tx, ctx, {
-        action: 'comment_removed',
-        targetUserId: target.author_user_id,
-        subjectType: 'post_comment',
-        subjectId: commentId,
-        excerptSource: target.body,
-        reason: null,
-      });
-    }
-    return { removedIds: removed.map((row) => row.id), moderated: !isAuthor };
-  });
+  // D-334: the root and its live replies in ONE statement (a reply has none, so this is a no-op
+  // widening for it). `deleted_by_user_id` names the actor on every row it took down.
+  const removed = await tx.execute<{ id: string }>(sql`
+    update feed_comments
+       set deleted_at = now(),
+           deleted_by_user_id = ${ctx.userId}::uuid
+     where (id = ${commentId}::uuid or parent_id = ${commentId}::uuid)
+       and post_id is not null
+       and deleted_at is null
+    returning id`);
 
+  if (!isAuthor) {
+    await recordModerationAction(tx, ctx, {
+      action: 'comment_removed',
+      targetUserId: target.author_user_id,
+      subjectType: 'post_comment',
+      subjectId: commentId,
+      excerptSource: target.body,
+      reason: null,
+    });
+  }
+  return { removedIds: removed.map((row) => row.id), moderated: !isAuthor };
+}
+
+/** The after-commit half of a comment removal: one `comment.deleted` per removed id and the ids-only log line. */
+export function announceCommentRemoved(
+  ctx: RequestContext,
+  commentId: string,
+  removedIds: string[],
+  moderated: boolean,
+): void {
   for (const id of removedIds) {
     emit(ctx, 'comment.deleted', {
       tenantId: ctx.tenantId,
@@ -2248,6 +2300,65 @@ export async function deleteComment(
     },
     'comment soft-deleted',
   );
+}
+
+/**
+ * What a report's `remove_content` resolution did (13-14, D-616):
+ *  - `removed`: the post or comment was live and a holder of `moderation.manage` took it down through the SAME
+ *    function the moderation routes call, with its `post_removed` / `comment_removed` log row in the caller's
+ *    transaction (an administrator removing their own content is an author delete and logs nothing, as always);
+ *  - `already_gone`: it was removed since the report was filed (by its author, or by another moderator), so there is
+ *    nothing to take down and no second log row; the report still reads "conteúdo removido";
+ *  - `not_removable`: it is live but the moderation path may not take it (an organization post written by another
+ *    administrator), so the resolution is refused and the caller's transaction rolls back.
+ * `afterCommit` is the event and log line half; the caller runs it once the transaction has committed.
+ */
+export type ReportedRemoval = {
+  outcome: 'removed' | 'already_gone' | 'not_removable';
+  afterCommit: () => void;
+};
+
+const NOTHING_AFTER_COMMIT = () => undefined;
+
+/**
+ * Removes the post or comment a report points at, in the CALLER's tenant transaction (13-14, D-616, T-13-33). The
+ * kernel's report resolution cannot import this module, so the API tier hands it this function.
+ */
+export async function removeReportedContentInTx(
+  tx: Tx,
+  ctx: RequestContext,
+  subject: { type: ReportSubjectType; id: string },
+): Promise<ReportedRemoval> {
+  const live =
+    subject.type === 'feed_post'
+      ? await tx.execute<{ one: number }>(sql`
+          select 1 as one from feed_posts
+           where id = ${subject.id}::uuid and deleted_at is null`)
+      : await tx.execute<{ one: number }>(sql`
+          select 1 as one from feed_comments
+           where id = ${subject.id}::uuid and post_id is not null and deleted_at is null`);
+  if (live.length === 0) return { outcome: 'already_gone', afterCommit: NOTHING_AFTER_COMMIT };
+
+  try {
+    if (subject.type === 'feed_post') {
+      const done = await softDeletePostInTx(tx, ctx, subject.id, { canModerate: true });
+      return {
+        outcome: 'removed',
+        afterCommit: () => announcePostRemoved(ctx, subject.id, done.authorUserId, done.moderated),
+      };
+    }
+    const done = await deleteCommentInTx(tx, ctx, subject.id, { canModerate: true });
+    return {
+      outcome: 'removed',
+      afterCommit: () => announceCommentRemoved(ctx, subject.id, done.removedIds, done.moderated),
+    };
+  } catch (error) {
+    // The bare 404 of a live subject the moderation path may not take (nothing was written before it).
+    if (error instanceof ApiError && error.status === 404) {
+      return { outcome: 'not_removable', afterCommit: NOTHING_AFTER_COMMIT };
+    }
+    throw error;
+  }
 }
 
 /**

@@ -17,6 +17,8 @@ export {
   listCommunityFeed,
   listFeed,
   listReplies,
+  type ReportedRemoval,
+  removeReportedContentInTx,
   setPostLinkPreview,
   softDeletePost,
   unlikeComment,

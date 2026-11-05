@@ -84,6 +84,16 @@ export const ERROR_CODES = [
   'LAST_ADMIN',
   'WRONG_PASSWORD',
   'RATE_LIMITED',
+  // 13-14 (D-616, T-13-32, T-13-33): the report and block refusals. `CANNOT_REPORT_OWN` (403, SQLSTATE RP001): a
+  // member cannot report their own content. `ALREADY_REPORTED` (409, unique violation 23505): this reporter already
+  // reported this item. `CANNOT_BLOCK` (400, SQLSTATE BL001): the target is not a live member of the caller's own
+  // tenant (a staff account, a stranger, oneself): ONE body for every case, so it never tells them apart.
+  // `REPORT_ALREADY_RESOLVED` (409, SQLSTATE RP004): another admin resolved the report first. None carries
+  // details. One-way once released: the apps branch on them.
+  'CANNOT_REPORT_OWN',
+  'ALREADY_REPORTED',
+  'CANNOT_BLOCK',
+  'REPORT_ALREADY_RESOLVED',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

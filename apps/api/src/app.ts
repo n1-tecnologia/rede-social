@@ -26,6 +26,7 @@ import { mediaRoutes } from './routes/media';
 import { membersRoutes } from './routes/members';
 import { platformRoutes } from './routes/platform';
 import { publicRoutes } from './routes/public';
+import { reportRoutes } from './routes/safety';
 import { muxWebhookRoutes } from './routes/webhooks/mux';
 import { paymentsWebhookRoutes } from './routes/webhooks/payments';
 
@@ -96,6 +97,10 @@ const routes = app
   // read-only moderation log; the log itself is written only inside each moderator action's own
   // transaction (`recordModerationAction`), never through a route.
   .route('/v1/admin', adminRoutes)
+  // 13-14 (D-616, NATIVE-31): a member files a report of a post or comment. Tenant lane, every role; the group
+  // carries its own `requireAuth`, so the tenant of record is the only tenant it can act on. The blocks routes
+  // (`/v1/blocks`, NATIVE-33) are mounted by the next task.
+  .route('/v1/reports', reportRoutes)
   .route('/v1/platform', platformRoutes)
   // The module carries its own `requireAuth` + `requireModule('feed')` chain plus a per-route
   // `requirePermission('feed.post.create')` on the write (packages/modules/feed/server/routes.ts),

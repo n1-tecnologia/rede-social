@@ -2,6 +2,7 @@ import { createOpenApiApp } from '../../http/openapi';
 import { adminBrandingRoutes } from './branding';
 import { adminMembersRoutes } from './members';
 import { moderationLogRoutes } from './moderation';
+import { adminReportsRoutes } from './reports';
 import { adminRulesRoutes } from './rules';
 import { adminTenantRoutes } from './tenant';
 
@@ -16,10 +17,12 @@ import { adminTenantRoutes } from './tenant';
  *
  * Sub-routers are chained with `.route()` so `AppType` carries every admin route for `hc<AppType>()`.
  * 08-01 mounts the moderation log; 08-04 chains the Membros routes (`/members`); 08-06 chains the
- * brand (`/branding`) and the display name (`/tenant`); 08-07 chains the community rules (`/rules`).
+ * brand (`/branding`) and the display name (`/tenant`); 08-07 chains the community rules (`/rules`); 13-14
+ * chains the reports queue (`/reports`).
  */
 export const adminRoutes = createOpenApiApp()
   .route('/moderation-log', moderationLogRoutes)
+  .route('/reports', adminReportsRoutes)
   .route('/members', adminMembersRoutes)
   .route('/branding', adminBrandingRoutes)
   .route('/tenant', adminTenantRoutes)

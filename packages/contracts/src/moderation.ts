@@ -99,6 +99,191 @@ export const REPORT_NOTE_MAX = 500;
 /** The snapshot of the reported text: at most 280 code points (`content_reports_excerpt_len_chk`). */
 export const REPORT_EXCERPT_MAX = 280;
 
+/* ── Reports and member blocks: the API (Phase 13, plan 14, D-616, NATIVE-31, NATIVE-33) ─────────────── */
+
+/** `GET /v1/admin/reports` and the blocked list: one screen of rows, the ceiling a crafted `limit` cannot pass. */
+export const REPORT_PAGE_SIZE = 20;
+export const REPORT_MAX_PAGE_SIZE = 50;
+export const REPORT_MAX_CURSOR_LENGTH = 512;
+
+/**
+ * The admin queue's filter (UI-D-637), a CLOSED list that does not clamp: an unknown value is a 400 (the web maps
+ * an unknown `?estado=` to "Abertas" before it asks). `abertas` is `status = 'open'`, `resolvidas` is every other
+ * state, `todas` is no filter.
+ */
+export const REPORT_LIST_STATES = ['abertas', 'resolvidas', 'todas'] as const;
+export type ReportListState = (typeof REPORT_LIST_STATES)[number];
+
+/**
+ * What the admin chooses on a report (UI-D-638), in the verbs of the sheet. Each maps to one `REPORT_STATUSES`
+ * resolution (`dismiss` to `dismissed`, `remove_content` to `content_removed`, `block_author` to
+ * `author_blocked`); the status vocabulary stays the table's, the verbs are the API's.
+ */
+export const REPORT_RESOLVE_ACTIONS = ['dismiss', 'remove_content', 'block_author'] as const;
+export type ReportResolveAction = (typeof REPORT_RESOLVE_ACTIONS)[number];
+
+/**
+ * `POST /v1/reports` (NATIVE-31). `.strict()`: no tenant, reporter or author is ever named by the client.
+ *
+ * - `subjectType` is the CLOSED `REPORT_SUBJECT_TYPES` list; a story comment, a community or a message is a 400
+ *   until Phase 11 appends it.
+ * - `reason` is the closed `REPORT_REASONS` list; a missing or unknown one is a 400.
+ * - `note` is trimmed and at most `REPORT_NOTE_MAX` characters (code points, the table CHECK counts the same); an
+ *   empty or whitespace-only note is stored as `null`, so `note` leaves this schema as a string or `undefined`.
+ */
+export const reportCreateBodySchema = z
+  .object({
+    subjectType: z.enum(REPORT_SUBJECT_TYPES),
+    subjectId: z.uuid(),
+    reason: z.enum(REPORT_REASONS),
+    note: z
+      .string()
+      .trim()
+      .refine((value) => [...value].length <= REPORT_NOTE_MAX, 'too_long')
+      .optional()
+      .transform((value) => (value === undefined || value === '' ? undefined : value)),
+  })
+  .strict();
+export type ReportCreateBody = z.infer<typeof reportCreateBodySchema>;
+
+/** The answer of `POST /v1/reports`: the new report's id and nothing about anyone (T-13-32). */
+export const reportCreateAnswerSchema = z.object({ id: z.uuid() }).strict();
+export type ReportCreateAnswer = z.infer<typeof reportCreateAnswerSchema>;
+
+/** `GET /v1/admin/reports?estado=&cursor=&limit=`. `.strict()`: an unknown key fails loudly. */
+export const reportListQuerySchema = z
+  .object({
+    estado: z.enum(REPORT_LIST_STATES).default('abertas'),
+    cursor: z
+      .string()
+      .optional()
+      .transform((value) =>
+        value !== undefined && value.length > REPORT_MAX_CURSOR_LENGTH ? undefined : value,
+      ),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(REPORT_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), REPORT_MAX_PAGE_SIZE))
+      .default(REPORT_PAGE_SIZE),
+  })
+  .strict();
+export type ReportListQuery = z.infer<typeof reportListQuerySchema>;
+
+/**
+ * One report as the admin queue reads it (UI-D-637). ADMIN ONLY: it names the reporter, which no member-facing
+ * answer ever does (T-13-32).
+ *
+ * - `excerpt` is the snapshot taken when the report was filed (at most `REPORT_EXCERPT_MAX` characters), so the row
+ *   still reads when the content is gone; `contentAvailable` says whether the subject is still live, which is how
+ *   the web chooses between the excerpt and "Conteúdo não está mais disponível".
+ * - `reporter` and `author` names are read LIVE (`displayName: null` for a departed member, the web's "Membro
+ *   removido"); `author.isMember` is the server's answer to "may the block-author row be offered" (the web never
+ *   compares a role).
+ * - `createdAt` and `resolvedAt` are UTC ISO strings with microseconds, formatted by Postgres (the cursor's `n`).
+ */
+export const reportItemSchema = z
+  .object({
+    id: z.uuid(),
+    createdAt: z.string(),
+    subjectType: z.enum(REPORT_SUBJECT_TYPES),
+    subjectId: z.uuid(),
+    reason: z.enum(REPORT_REASONS),
+    note: z.string().nullable(),
+    excerpt: z.string(),
+    status: z.enum(REPORT_STATUSES),
+    resolvedAt: z.string().nullable(),
+    contentAvailable: z.boolean(),
+    reporter: z
+      .object({ displayName: z.string().nullable(), avatarAssetId: z.uuid().nullable() })
+      .strict(),
+    author: z
+      .object({
+        displayName: z.string().nullable(),
+        avatarAssetId: z.uuid().nullable(),
+        isMember: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+export type ReportItem = z.infer<typeof reportItemSchema>;
+
+/** One keyset page of the queue, newest first. `nextCursor` is non-null EXACTLY when another row exists. */
+export const reportListAnswerSchema = z
+  .object({ items: z.array(reportItemSchema), nextCursor: z.string().nullable() })
+  .strict();
+export type ReportListAnswer = z.infer<typeof reportListAnswerSchema>;
+
+/**
+ * `POST /v1/admin/reports/{id}/resolve`. `reason` is the optional INTERNAL reason of the author's block (D-331):
+ * trimmed, at most `MODERATION_REASON_MAX`, written only to `moderation_log.reason`, and ignored by the two
+ * resolutions that carry none (a removal's log row has no reason by design).
+ */
+export const reportResolveBodySchema = z
+  .object({
+    resolution: z.enum(REPORT_RESOLVE_ACTIONS),
+    reason: z
+      .string()
+      .trim()
+      .refine((value: string) => value.length <= MODERATION_REASON_MAX, 'too_long')
+      .optional()
+      .transform((value) => (value === undefined || value === '' ? undefined : value)),
+  })
+  .strict();
+export type ReportResolveBody = z.infer<typeof reportResolveBodySchema>;
+
+/** The answer of the resolve: the report's id and its new status. */
+export const reportResolveAnswerSchema = z
+  .object({ id: z.uuid(), status: z.enum(REPORT_RESOLUTIONS) })
+  .strict();
+export type ReportResolveAnswer = z.infer<typeof reportResolveAnswerSchema>;
+
+/** `POST /v1/blocks` (NATIVE-33): the member to block, by user id. */
+export const blockBodySchema = z.object({ userId: z.uuid() }).strict();
+export type BlockBody = z.infer<typeof blockBodySchema>;
+
+/**
+ * One member the caller blocked (UI-D-635), with the name and avatar the "Membros bloqueados" page shows. Only the
+ * CALLER's own blocks are ever listed; a block never reveals the blocker to the blocked (T-13-32).
+ */
+export const blockedMemberSchema = z
+  .object({
+    userId: z.uuid(),
+    displayName: z.string().nullable(),
+    avatarAssetId: z.uuid().nullable(),
+    blockedAt: z.string(),
+  })
+  .strict();
+export type BlockedMember = z.infer<typeof blockedMemberSchema>;
+
+/** `GET /v1/blocks`: keyset like every list. */
+export const blockListQuerySchema = z
+  .object({
+    cursor: z
+      .string()
+      .optional()
+      .transform((value) =>
+        value !== undefined && value.length > REPORT_MAX_CURSOR_LENGTH ? undefined : value,
+      ),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(REPORT_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), REPORT_MAX_PAGE_SIZE))
+      .default(REPORT_PAGE_SIZE),
+  })
+  .strict();
+export type BlockListQuery = z.infer<typeof blockListQuerySchema>;
+
+export const blockListAnswerSchema = z
+  .object({ items: z.array(blockedMemberSchema), nextCursor: z.string().nullable() })
+  .strict();
+export type BlockListAnswer = z.infer<typeof blockListAnswerSchema>;
+
+/** The answer of the block and unblock writes: `changed` is false for the idempotent repeat. */
+export const blockChangeAnswerSchema = z.object({ changed: z.boolean() }).strict();
+export type BlockChangeAnswer = z.infer<typeof blockChangeAnswerSchema>;
+
 /**
  * The kernel's permission names (D-338). They are VALUES the web compares with
  * `bootstrap.permissions` and the API guards with `requirePermission(...)` — never a role check, so a
