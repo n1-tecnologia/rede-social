@@ -88,6 +88,15 @@ prototype does not cover are designed in that same language from the primitives 
   the public answers block and the staff view; the platform module row) are drawn from (UI-D-564..UI-D-599,
   Component Inventory, Copywriting Contract, Screen contracts, Visual Anchors, Sketch gate, UI
   Considerations)
+- `.planning/phases/13-app-nativo-ios-e-android-por-tenant-white-label/13-UI-SPEC.md` — the Phase 13
+  contract the [designed] native app surfaces (the splash and launch sequence; the load-failure, update
+  and lock screens and the privacy cover; the notification explainer and the notification and "Bloqueio do
+  app" rows; the purchase-off padlock; the "Excluir minha conta" row, page, dialog and "Exclusão agendada"
+  screen; the platform "App" tab with its six cards) are drawn from (UI-D-600..UI-D-631, Component
+  Inventory, Copywriting Contract, Screen contracts, Visual Anchors, Sketch gate, UI Considerations)
+- `.planning/phases/13-app-nativo-ios-e-android-por-tenant-white-label/13-UI-SPEC-ADDENDUM.md` — the
+  Phase 13 addendum for D-616..D-619 (the report and block surfaces, the native saved feed, the purchase
+  switches starting off, assumptions AD-1..AD-8) the same sketch is drawn from (UI-D-632..UI-D-641)
 - `packages/ui/src/styles/tokens.css` — the real token file (two-layer neutrals + tenant brand,
   plus the Phase 4 `--color-like`)
 
@@ -111,3 +120,4 @@ prototype does not cover are designed in that same language from the primitives 
 | 014 | [phase-09.2-designed-screens](014-phase-09.2-designed-screens/README.md) | As telas novas do banco por tenant — o campo 'Código do projeto' do Dados (com o bloco de acesso manual), a linha 'Projeto' do resumo e a tarefa 'Preparar o banco de dados' da confirmação; a aba Banco com a visão geral (estado, projeto, esquema), a Preparação (etapa que falhou e 'Tentar de novo') e as Credenciais; a coluna Banco e o filtro 'Banco com problema' da lista de tenants; o selo 'Banco: Atrasado' do cabeçalho; e as telas 'Comunidade em atualização' e 'Comunidade em preparação' — leem como a própria linguagem do painel e das telas de acesso suspenso, em claro e escuro, sob qualquer marca de tenant, em 320 e 390px? | pending | phase-09.2, design-review, D-33, UI-04, D-417, database-per-tenant |
 | 015 | [phase-09.4-designed-screens](015-phase-09.4-designed-screens/README.md) | As telas novas do projeto do cliente — a escolha 'Projeto da plataforma / Projeto do cliente' e o campo do token (com a data de vencimento e o 'Como criar o token') no Dados do Novo tenant; as linhas Dono e Organização da aba Banco; o cartão 'Token de acesso' com os sete estados; a folha 'Substituir token'; e os selos 'Token: …' do cabeçalho e da lista — leem como a própria linguagem do painel aprovado no sketch 014, em claro e escuro, em 320 e 390px? | pending | phase-09.4, design-review, D-33, UI-04, D-417, customer-token |
 | 016 | [phase-12-designed-screens](016-phase-12-designed-screens/README.md) | As telas novas do formulário de perfil — o construtor do admin (lista de perguntas, ordenar, resumo e exportação), a folha da pergunta com os 13 tipos e os estados bloqueados, as perguntas arquivadas, a tela de completar o perfil com os 13 controles, o aviso e 'Minhas respostas' no perfil, as respostas no perfil de outro membro e na visão da equipe, e a linha do módulo no painel — leem como a própria linguagem do protótipo, em claro e escuro, sob qualquer marca de tenant, em 320 e 390px? | pending | phase-12, design-review, D-417, UI-04, profile-form |
+| 017 | [phase-13-designed-screens](017-phase-13-designed-screens/README.md) | As telas novas do app nativo — a splash, as telas de sem internet, de atualizar e de bloqueio, a folha de ativar notificações, as linhas de notificação e de bloqueio nas Configurações, a leitura do feed sem internet, o cadeado no lugar do preço, a exclusão de conta, a aba App do painel e as telas de denunciar e bloquear — leem como a própria linguagem do protótipo, em claro e escuro, sob qualquer marca de tenant, em 320 e 390px? | pending | phase-13, design-review, D-417, UI-04, native-app, D-616 |
