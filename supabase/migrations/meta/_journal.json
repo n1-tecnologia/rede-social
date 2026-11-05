@@ -1086,6 +1086,13 @@
       "when": 1793888016254,
       "tag": "20261105141336_push_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1793888299623,
+      "tag": "20261105141819_push_devices_functions",
+      "breakpoints": true
     }
   ]
 }
