@@ -1,60 +1,170 @@
 import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
 
 /**
- * The pure layout of the profile form (Phase 12.1, D-623, D-627): ONE sequence of question ids cut into
- * steps. This first cut carries the types and `flatten`; the operations arrive with the layout task.
+ * The pure layout of the profile form (Phase 12.1, D-623, D-627; PFORM-28, PFORM-29): ONE sequence of
+ * question ids cut into steps. Position is global (steps are contiguous ranges of it), so the readers'
+ * `order by position, created_at, id` is unchanged. No database, no I/O, no clock.
+ *
+ * This is the pure half of the plan 08 and 09 writes: the service reads the locked layout, calls one
+ * operation, validates D-623 over the result with `checkLayoutOrder` and writes `renumber` in one set-based
+ * statement (the 12-08 reorder shape extended with `step_id`). Every operation returns a NEW layout or a
+ * coded refusal and never mutates its argument. Only `unknown_step`, `order_mismatch`, `step_not_empty`,
+ * `last_step` and `condition_order` are produced here.
  */
 
 export type LayoutStep = { stepId: string; questionIds: readonly string[] };
 export type Layout = readonly LayoutStep[];
 export type LayoutResult = { ok: true; layout: Layout } | { ok: false; issue: ProfileFormIssue };
+export type LayoutOrderCheck =
+  | { ok: true }
+  | { ok: false; issue: 'condition_order'; questionId: string; openerId: string };
+
+const refuse = (issue: ProfileFormIssue): LayoutResult => ({ ok: false, issue });
+const accept = (layout: Layout): LayoutResult => ({ ok: true, layout });
+const copy = (layout: Layout): LayoutStep[] =>
+  layout.map((step) => ({ stepId: step.stepId, questionIds: [...step.questionIds] }));
+
+/** Whether `ids` holds exactly the members of `expected`, each once, in any order. */
+function sameSet(ids: readonly string[], expected: readonly string[]): boolean {
+  return (
+    ids.length === expected.length &&
+    new Set(ids).size === ids.length &&
+    ids.every((id) => expected.includes(id))
+  );
+}
 
 /** The question ids of every step in order; an empty step contributes nothing. */
 export function flatten(layout: Layout): string[] {
   return layout.flatMap((step) => step.questionIds);
 }
 
-// ── RED-phase inert stubs (12.1-04 Task 2): replaced in the GREEN commit ─────────────────────────
-
-export function addQuestion(layout: Layout, _stepId: string, _questionId: string): LayoutResult {
-  return { ok: true, layout };
+/** Appends a new question to the END of the named step. */
+export function addQuestion(layout: Layout, stepId: string, questionId: string): LayoutResult {
+  if (!layout.some((step) => step.stepId === stepId)) return refuse('unknown_step');
+  if (flatten(layout).includes(questionId)) return refuse('order_mismatch');
+  return accept(
+    layout.map((step) =>
+      step.stepId === stepId
+        ? { stepId: step.stepId, questionIds: [...step.questionIds, questionId] }
+        : { stepId: step.stepId, questionIds: [...step.questionIds] },
+    ),
+  );
 }
 
-export function moveQuestion(layout: Layout, _questionId: string, _toStepId: string): LayoutResult {
-  return { ok: true, layout };
+/** Takes the question out of its step and appends it to the END of the target step (UI-D-647). */
+export function moveQuestion(layout: Layout, questionId: string, toStepId: string): LayoutResult {
+  if (!layout.some((step) => step.stepId === toStepId)) return refuse('unknown_step');
+  if (!flatten(layout).includes(questionId)) return refuse('order_mismatch');
+  const from = layout.find((step) => step.questionIds.includes(questionId));
+  if (from?.stepId === toStepId) return accept(copy(layout));
+  return accept(
+    layout.map((step) => {
+      const kept = step.questionIds.filter((id) => id !== questionId);
+      return {
+        stepId: step.stepId,
+        questionIds: step.stepId === toStepId ? [...kept, questionId] : kept,
+      };
+    }),
+  );
 }
 
+/** Reorders one step: `questionIds` must be exactly the step's current ids. */
 export function reorderWithin(
   layout: Layout,
-  _stepId: string,
-  _questionIds: readonly string[],
+  stepId: string,
+  questionIds: readonly string[],
 ): LayoutResult {
-  return { ok: true, layout };
+  const target = layout.find((step) => step.stepId === stepId);
+  if (!target) return refuse('unknown_step');
+  if (!sameSet(questionIds, target.questionIds)) return refuse('order_mismatch');
+  return accept(
+    layout.map((step) => ({
+      stepId: step.stepId,
+      questionIds: step.stepId === stepId ? [...questionIds] : [...step.questionIds],
+    })),
+  );
 }
 
-export function reorderSteps(layout: Layout, _stepIds: readonly string[]): LayoutResult {
-  return { ok: true, layout };
+/** Reorders the steps: `stepIds` must be exactly the current step ids. */
+export function reorderSteps(layout: Layout, stepIds: readonly string[]): LayoutResult {
+  if (
+    !sameSet(
+      stepIds,
+      layout.map((step) => step.stepId),
+    )
+  )
+    return refuse('order_mismatch');
+  const byId = new Map(layout.map((step) => [step.stepId, step] as const));
+  return accept(
+    stepIds.map((id) => ({
+      stepId: id,
+      questionIds: [...(byId.get(id)?.questionIds ?? [])],
+    })),
+  );
 }
 
-export function removeStep(layout: Layout, _stepId: string): LayoutResult {
-  return { ok: true, layout };
+/** Drops an EMPTY step; the only step is never removed. */
+export function removeStep(layout: Layout, stepId: string): LayoutResult {
+  const target = layout.find((step) => step.stepId === stepId);
+  if (!target) return refuse('unknown_step');
+  if (target.questionIds.length > 0) return refuse('step_not_empty');
+  if (layout.length === 1) return refuse('last_step');
+  return accept(copy(layout.filter((step) => step.stepId !== stepId)));
 }
 
-export function applyRequestedLayout(current: Layout, _requested: Layout): LayoutResult {
-  return { ok: true, layout: current };
+/**
+ * Accepts a requested whole layout only when it holds exactly the same question ids and step ids as the
+ * current one (nothing added, dropped, duplicated or foreign); the requested grouping and order win.
+ */
+export function applyRequestedLayout(current: Layout, requested: Layout): LayoutResult {
+  const stepsOk = sameSet(
+    requested.map((step) => step.stepId),
+    current.map((step) => step.stepId),
+  );
+  const questionsOk = sameSet(flatten(requested), flatten(current));
+  if (!stepsOk || !questionsOk) return refuse('order_mismatch');
+  return accept(copy(requested));
 }
 
-export function renumber(_layout: Layout): { id: string; stepId: string; position: number }[] {
-  return [];
+/** The rows a service writes in one statement: positions 1..n over the flattened order, no gap, no repeat. */
+export function renumber(layout: Layout): { id: string; stepId: string; position: number }[] {
+  let position = 0;
+  return layout.flatMap((step) =>
+    step.questionIds.map((id) => {
+      position += 1;
+      return { id, stepId: step.stepId, position };
+    }),
+  );
 }
 
-export type LayoutOrderCheck =
-  | { ok: true }
-  | { ok: false; issue: 'condition_order'; questionId: string; openerId: string };
-
+/**
+ * D-623 over a whole layout: every `{ questionId, openerId }` fact needs the opener at a strictly lower
+ * flattened index than its question. The first violated pair, in flattened order of the question, is
+ * returned so the UI can print the two titles. A fact about a question that is not in the layout is not
+ * about this layout and is ignored; an opener that is not in the layout violates the rule. With no facts
+ * the layout passes.
+ */
 export function checkLayoutOrder(
-  _layout: Layout,
-  _facts: readonly { questionId: string; openerId: string }[],
+  layout: Layout,
+  facts: readonly { questionId: string; openerId: string }[],
 ): LayoutOrderCheck {
+  const flat = flatten(layout);
+  const index = new Map(flat.map((id, i) => [id, i] as const));
+  const violations = facts
+    .map((fact) => ({ fact, at: index.get(fact.questionId) }))
+    .filter(
+      (entry): entry is { fact: (typeof facts)[number]; at: number } => entry.at !== undefined,
+    )
+    .sort((a, b) => a.at - b.at);
+  for (const { fact, at } of violations) {
+    const openerAt = index.get(fact.openerId);
+    if (openerAt === undefined || openerAt >= at)
+      return {
+        ok: false,
+        issue: 'condition_order',
+        questionId: fact.questionId,
+        openerId: fact.openerId,
+      };
+  }
   return { ok: true };
 }
