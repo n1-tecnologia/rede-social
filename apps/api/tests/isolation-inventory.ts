@@ -247,6 +247,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/notifications/seen': { case: 'phase 7 sweep' },
   'POST /v1/notifications/read-all': { case: 'phase 7 sweep' },
   'POST /v1/notifications/:notificationId/read': { case: 'phase 7 sweep' },
+  // 13-11 (NATIVE-09): the save route also takes a native device token (`kind: 'apns' | 'fcm'`). The
+  // cross-tenant case stays 'b11'; the native arm's own proof is `tests/integration/push-devices.test.ts`
+  // (two tenants saving the same token, a foreign delete, a wrong host, concurrent handoff).
   'POST /v1/notifications/push-subscriptions': { case: 'b11' },
   'DELETE /v1/notifications/push-subscriptions': { case: 'b11' },
 
