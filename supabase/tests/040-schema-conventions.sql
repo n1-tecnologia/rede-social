@@ -292,12 +292,15 @@ select ok(
 -- the TOTAL order `created_at desc, id desc` (P40, a tie resolves to the higher id), and the
 -- `limit 1` is what lets each lateral probe stop at the first index row (RESEARCH Pitfall 4). The
 -- second assertion pins that ordering, so a future edit cannot turn it into an arbitrary pick.
+-- 12.1-06 adds the SECOND deliberate `limit 1`: `app.profile_form_default_step()` (the BEFORE INSERT trigger of a
+-- legacy-shaped question) picks the tenant's FIRST step by the total order `position, created_at, id`; the pgTAP file
+-- 225 proves which step a legacy insert lands in when the tenant has two.
 select is(
   (select string_agg(p.proname::text, ',' order by p.proname)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'app' and p.prosrc ilike '%limit 1%'),
-  'feed_sample_post_ids,membership_for_user',
-  'app.membership_for_user and the deterministic feed_sample_post_ids are the ONLY functions in schema app that pick one row'
+  'feed_sample_post_ids,membership_for_user,profile_form_default_step',
+  'app.membership_for_user and the deterministic feed_sample_post_ids and profile_form_default_step are the ONLY functions in schema app that pick one row'
 );
 select ok(
   (select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
