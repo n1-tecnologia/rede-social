@@ -284,3 +284,37 @@ export async function readAppTab(tenantId: string, deps: AppDeps = {}): Promise<
     reviewerHeld: heldRows.some((entry) => entry.kind === 'reviewer_password'),
   });
 }
+
+// RED stubs (13-09 Task 2): inert so the failing tests can load. Replaced in the GREEN commit.
+export const purchaseSwitchCache = new Map<
+  string,
+  { ios: boolean; android: boolean; at: number }
+>();
+export function invalidatePurchaseSwitch(_tenantId: string): void {}
+export async function setAppIds(
+  _tenantId: string,
+  _input: { bundleId: string; applicationId: string },
+  _deps: AppDeps = {},
+): Promise<void> {}
+export async function setAppLinks(
+  _tenantId: string,
+  _input: { teamId: string | null; sha256: string | null },
+  _deps: AppDeps = {},
+): Promise<void> {}
+export async function setPurchaseSwitch(
+  _tenantId: string,
+  _platform: 'ios' | 'android',
+  _visible: boolean,
+  _deps: AppDeps = {},
+): Promise<void> {}
+export async function setPrivacyUrl(
+  _tenantId: string,
+  _url: string,
+  _deps: AppDeps = {},
+): Promise<void> {}
+export async function setChecklistFlag(
+  _tenantId: string,
+  _key: string,
+  _done: boolean,
+  _deps: AppDeps = {},
+): Promise<void> {}

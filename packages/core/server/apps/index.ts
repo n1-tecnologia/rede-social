@@ -20,8 +20,15 @@ export {
   type AppStore,
   buildAppTab,
   emptyAppRow,
+  invalidatePurchaseSwitch,
+  purchaseSwitchCache,
   readAppTab,
   requireTenant,
+  setAppIds,
+  setAppLinks,
+  setChecklistFlag,
+  setPrivacyUrl,
+  setPurchaseSwitch,
   type TenantFacts,
 } from './tenant-app';
 export {
