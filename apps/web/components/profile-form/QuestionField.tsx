@@ -26,6 +26,7 @@ import {
   SingleChoice,
   YesNo,
 } from './fields';
+import { RevealedField } from './RevealedField';
 
 /**
  * One control per type, exhaustive by construction (D-591): a new entry in `PROFILE_FORM_TYPES` fails
@@ -78,6 +79,11 @@ export interface QuestionFieldProps {
   issue: ProfileFormIssue | null;
   /** A missing required question gets the danger-tinted block and "Falta responder" (UI-D-582). */
   flagged: boolean;
+  /**
+   * Whether the question is visible under the member's drafts (default: yes). Only a CONDITIONAL question can
+   * be hidden: it renders inside the reveal, which animates it in and out (12.1, D-621, UI-D-655).
+   */
+  visible?: boolean;
 }
 
 /**
@@ -92,6 +98,7 @@ export function QuestionField({
   disabled,
   issue,
   flagged,
+  visible = true,
 }: QuestionFieldProps) {
   const t = useTranslations('profileForm.member');
   const Field = FIELD_BY_TYPE[question.type];
@@ -101,7 +108,7 @@ export function QuestionField({
   const error = spec ? t(spec.key, spec.values) : null;
   const ids = buildIds(question, { hint: hint !== null, error: error !== null });
 
-  return (
+  const field = (
     <div
       id={questionDomId(question.id)}
       data-question={question.id}
@@ -124,5 +131,12 @@ export function QuestionField({
         ids={ids}
       />
     </div>
+  );
+
+  if (question.condition === null) return field;
+  return (
+    <RevealedField show={visible} flagged={flagged}>
+      {field}
+    </RevealedField>
   );
 }

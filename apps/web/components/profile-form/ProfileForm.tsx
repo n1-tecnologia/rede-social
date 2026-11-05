@@ -26,6 +26,7 @@ import {
   wireAnswers,
 } from '@/lib/profile-form/form-state';
 import {
+  firstStepWithMissing,
   isLastStep,
   nextStep,
   previousStep,
@@ -142,6 +143,10 @@ export function ProfileForm({
     () => new Set(!preview && form.mode === 'returning' ? flaggedIds(form) : []),
   );
   const [notice, setNotice] = useState<'failed' | 'changed' | null>(null);
+  // The title of the step the gate sent the member back to (D-629, D-631), or null.
+  const [elsewhere, setElsewhere] = useState<string | null>(null);
+  // The sentence the single polite live region reads: titles and counts only (T-12.1-11).
+  const [announcement, setAnnouncement] = useState('');
   const [pending, startTransition] = useTransition();
   const [online, setOnline] = useState(true);
   const [summaryTick, setSummaryTick] = useState(0);
@@ -199,8 +204,11 @@ export function ProfileForm({
     : null;
   const chrome = stepperOn && showSteps(view);
   const visible = visibleQuestionIds(view, answers);
+  // A conditional question that is hidden stays in the list so its reveal can animate out (UI-D-655).
   const stepQuestions = questions.filter(
-    (question) => visible.has(question.id) && (!chrome || question.stepId === currentId),
+    (question) =>
+      (visible.has(question.id) || question.condition !== null) &&
+      (!chrome || question.stepId === currentId),
   );
   const scope = chrome
     ? new Set(questions.filter((q) => q.stepId === currentId).map((q) => q.id))
@@ -219,6 +227,29 @@ export function ProfileForm({
   function setDraft(question: MemberQuestion, next: Answers[string]) {
     setAnswers((previous) => ({ ...previous, [question.id]: next }));
     setErrors((previous) => (previous[question.id] ? without(previous, question.id) : previous));
+    announceReveal(visible, visibleQuestionIds(view, { ...answers, [question.id]: next }));
+  }
+
+  /**
+   * What an answer opened or closed on the screen the member is looking at (the current step in the stepper,
+   * the whole form otherwise). Focus never moves; this is the one announcement (UI-D-655).
+   */
+  function announceReveal(before: ReadonlySet<string>, after: ReadonlySet<string>) {
+    const onScreen = (question: MemberQuestion) => !chrome || question.stepId === currentId;
+    const appeared = questions.filter(
+      (question) => onScreen(question) && after.has(question.id) && !before.has(question.id),
+    );
+    const gone = questions.filter(
+      (question) => onScreen(question) && before.has(question.id) && !after.has(question.id),
+    );
+    const parts: string[] = [];
+    if (appeared.length === 1) {
+      parts.push(t('stepper.revealedOne', { title: appeared[0]?.title ?? '' }));
+    } else if (appeared.length > 1) {
+      parts.push(t('stepper.revealedMany', { count: appeared.length }));
+    }
+    if (gone.length > 0) parts.push(t('stepper.hidden', { count: gone.length }));
+    setAnnouncement(parts.join(' '));
   }
 
   function showErrors(found: Record<string, ProfileFormIssue>) {
@@ -244,6 +275,8 @@ export function ProfileForm({
     setCurrentStepId(stepId);
     setErrors({});
     setNotice(null);
+    setElsewhere(null);
+    setAnnouncement('');
     setFocusTick((tick) => tick + 1);
   }
 
@@ -257,6 +290,7 @@ export function ProfileForm({
     event.preventDefault();
     if (preview || pending || !online) return;
     setNotice(null);
+    setElsewhere(null);
     const found = validateAll(questions, answers, scope);
     if (Object.keys(found).length > 0) {
       showErrors(found);
@@ -278,7 +312,16 @@ export function ProfileForm({
           return;
         }
         if (result.destination === null) {
-          setNotice('failed');
+          // The gate still finds a visible required question unanswered: go to the first step that holds
+          // one and say so (D-629, D-631). Nothing leaves the form before the server reports none.
+          const target = firstStepWithMissing(view, result.missingQuestionIds);
+          if (target === null) {
+            setNotice('failed');
+            return;
+          }
+          setFlagged((previous) => new Set([...previous, ...result.missingQuestionIds]));
+          if (stepperOn) goToStep(target);
+          setElsewhere(view.steps.find((step) => step.id === target)?.title ?? '');
           return;
         }
         // The toast crosses the navigation (it is shown by the screen the member lands on).
@@ -320,6 +363,8 @@ export function ProfileForm({
             new Set([...[...previous].filter((id) => surviving.has(id)), ...merged.flagged]),
         );
         setNotice('changed');
+        setElsewhere(null);
+        setAnnouncement('');
         return;
       }
       setNotice('failed');
@@ -382,6 +427,7 @@ export function ProfileForm({
           disabled={locked}
           issue={errors[question.id] ?? null}
           flagged={isFlagged(question)}
+          visible={visible.has(question.id)}
         />
       ))}
     </Card>
@@ -450,6 +496,15 @@ export function ProfileForm({
         questionsCard
       )}
 
+      {elsewhere !== null ? (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-3 text-xs text-text"
+        >
+          <CircleAlert aria-hidden size={16} className="shrink-0" />
+          <p>{t('stepper.pendingElsewhere', { step: elsewhere })}</p>
+        </div>
+      ) : null}
       {!preview && !online ? (
         <p
           role="status"
@@ -513,6 +568,9 @@ export function ProfileForm({
           {pending ? t('saving') : submitLabel}
         </Button>
       )}
+      <p aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
     </form>
   );
 }

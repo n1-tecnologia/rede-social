@@ -30,6 +30,21 @@ describe('profileForm.member.stepper: verbatim strings of the Copywriting Contra
     );
   });
 
+  it('the notice that sends the member back to a step the gate still finds incomplete', () => {
+    expect(t('stepper.pendingElsewhere', { step: 'Informações gerais' })).toBe(
+      'Falta responder uma pergunta obrigatória na etapa “Informações gerais”. Levamos você até lá.',
+    );
+  });
+
+  it('the announcements of a question that opens and of questions that close', () => {
+    expect(t('stepper.revealedOne', { title: 'Nome da clínica' })).toBe(
+      'Apareceu uma nova pergunta: Nome da clínica.',
+    );
+    expect(t('stepper.revealedMany', { count: 3 })).toBe('Apareceram 3 novas perguntas.');
+    expect(t('stepper.hidden', { count: 1 })).toBe('Uma pergunta saiu da lista.');
+    expect(t('stepper.hidden', { count: 2 })).toBe('2 perguntas saíram da lista.');
+  });
+
   it('keeps the Phase 12 button and state strings the stepper reuses', () => {
     expect(t('save')).toBe('Salvar');
     expect(t('saving')).toBe('Salvando…');

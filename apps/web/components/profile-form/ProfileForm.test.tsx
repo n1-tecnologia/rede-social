@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MemberForm } from '@rede-social/contracts/profile-form';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
@@ -16,13 +16,18 @@ import { ProfileForm, type ProfileFormProps } from './ProfileForm';
  * action (the API boundary: plan 18's Playwright run proves the real path), the router and `flashToast`.
  */
 
-const mocks = vi.hoisted(() => ({ save: vi.fn(), push: vi.fn(), flash: vi.fn() }));
+const mocks = vi.hoisted(() => ({ save: vi.fn(), push: vi.fn(), flash: vi.fn(), reduced: true }));
 
 vi.mock('@/app/(auth)/completar-perfil/actions', () => ({
   saveProfileFormAction: (...args: unknown[]) => mocks.save(...args),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mocks.push, refresh: vi.fn(), replace: vi.fn() }),
+}));
+// `prefers-reduced-motion` is a switch of the test: reduced (instant) unless a case turns the animation on.
+vi.mock('motion/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('motion/react')>()),
+  useReducedMotion: () => mocks.reduced,
 }));
 vi.mock('@rede-social/ui', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@rede-social/ui')>()),
@@ -56,6 +61,7 @@ beforeEach(() => {
   mocks.save.mockReset();
   mocks.push.mockReset();
   mocks.flash.mockReset();
+  mocks.reduced = true;
   window.localStorage.clear();
   window.sessionStorage.clear();
   setOnline(true);
@@ -692,5 +698,348 @@ describe('the stepper: Avançar saves the step, Concluir finishes (D-629, UI-D-6
     expect(screen.queryByText(/Etapa \d de/)).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Salvar' })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Avançar' })).toBeNull();
+  });
+});
+
+const liveRegion = () => document.querySelector('[aria-live="polite"]') as HTMLElement;
+
+describe('a question that opens appears in place, announced, unflagged and calm (D-621, UI-D-655)', () => {
+  const clinic = () => {
+    const opts = options('Tenho uma clínica', 'Estou aprendendo');
+    const opener = question('single_choice', {
+      title: 'Qual é o seu caso?',
+      required: true,
+      options: opts,
+    });
+    const name = question('short_text', {
+      title: 'Nome da clínica',
+      required: true,
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    const size = question('short_text', {
+      title: 'Quantas pessoas?',
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    return { opener, name, size, read: form([opener, name, size]) };
+  };
+
+  it('hides the follow-ups until the opener is answered, then shows them below it, and focus stays on the opener', () => {
+    const { read } = clinic();
+    show(read);
+    expect(screen.queryByLabelText('Nome da clínica')).toBeNull();
+    const radio = screen.getByRole('radio', { name: 'Tenho uma clínica' });
+    radio.focus();
+    fireEvent.click(radio);
+    expect(screen.getByLabelText('Nome da clínica')).toBeTruthy();
+    expect(screen.getByLabelText('Quantas pessoas?')).toBeTruthy();
+    expect(document.activeElement).toBe(radio);
+    // At its own position: after the opener, in the admin's order.
+    expect(
+      [...document.querySelectorAll('[data-question]')].map((el) => el.textContent),
+    ).toHaveLength(3);
+    expect(screen.getByRole('radio', { name: 'Estou aprendendo' })).toBeTruthy();
+  });
+
+  it('announces the title of one question, the count of many, and what left, through one polite region', () => {
+    const { read } = clinic();
+    show(read);
+    expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+    expect(liveRegion().className).toContain('sr-only');
+    expect(liveRegion().textContent).toBe('');
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(liveRegion().textContent).toBe('Apareceram 2 novas perguntas.');
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    expect(liveRegion().textContent).toBe('2 perguntas saíram da lista.');
+  });
+
+  it('names the title when exactly one question appears, and says one left in the singular', () => {
+    const opts = options('Sim, uso', 'Não uso');
+    const opener = question('single_choice', { title: 'Usa sistema?', options: opts });
+    const follow = question('short_text', {
+      title: 'Qual sistema?',
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    show(form([opener, follow]));
+    fireEvent.click(screen.getByRole('radio', { name: 'Sim, uso' }));
+    expect(liveRegion().textContent).toBe('Apareceu uma nova pergunta: Qual sistema?.');
+    fireEvent.click(screen.getByRole('radio', { name: 'Não uso' }));
+    expect(liveRegion().textContent).toBe('Uma pergunta saiu da lista.');
+  });
+
+  it('an announcement carries titles and counts, never an answer value (T-12.1-11)', () => {
+    const { read, name } = clinic();
+    show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    const secret = 'segredo-do-membro-123';
+    fireEvent.change(screen.getByLabelText('Nome da clínica'), { target: { value: secret } });
+    expect(liveRegion().textContent).not.toContain(secret);
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    expect(liveRegion().textContent).not.toContain(secret);
+    expect(JSON.stringify(mocks.flash.mock.calls)).not.toContain(secret);
+    expect(read.questions.some((q) => q.id === name.id)).toBe(true);
+  });
+
+  it('enters unflagged and wears the neutral rule; a failed Avançar flags it and drops the rule', async () => {
+    const { read, name } = clinic();
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(screen.queryByText('Falta responder')).toBeNull();
+    const wrapper = () =>
+      document.querySelector(`#pf-q-${name.id}`)?.closest('[data-revealed]') as HTMLElement;
+    expect(wrapper().className).toContain('border-l-2 border-border pl-3');
+    await save(container);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(document.querySelector(`#pf-q-${name.id}`)?.getAttribute('data-flagged')).not.toBeNull();
+    expect(wrapper().className).not.toContain('border-l-2');
+  });
+
+  it('a draft typed into a question that later closes is kept, not sent, and comes back when it reopens', async () => {
+    const { read, opener, name } = clinic();
+    mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    fireEvent.change(screen.getByLabelText('Nome da clínica'), {
+      target: { value: 'Clínica Sol' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    expect(screen.queryByLabelText('Nome da clínica')).toBeNull();
+    await save(container);
+    const sent = mocks.save.mock.calls[0]?.[0] as { answers: Record<string, unknown> };
+    expect(Object.keys(sent.answers)).toEqual([opener.id]);
+    expect(sent.answers).not.toHaveProperty(name.id);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect((screen.getByLabelText('Nome da clínica') as HTMLInputElement).value).toBe(
+      'Clínica Sol',
+    );
+  });
+
+  it('with the animation on, the question mounts at once and leaves after its exit', async () => {
+    mocks.reduced = false;
+    const { read } = clinic();
+    show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(screen.getByLabelText('Nome da clínica')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    await waitFor(() => expect(screen.queryByLabelText('Nome da clínica')).toBeNull(), {
+      timeout: 3000,
+    });
+  });
+});
+
+describe('the path follows the answers: a step with no visible question drops out (D-628, E4 empty)', () => {
+  it('revealing and hiding the only question of step 2 changes the path and the Etapa x de y count', async () => {
+    const opts = options('Tenho', 'Não tenho');
+    const opener = question('single_choice', { title: 'Tem clínica?', options: opts, stepId: S1 });
+    const only = question('short_text', {
+      title: 'Nome da clínica',
+      stepId: S2,
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    const last = question('short_text', { title: 'Contato', stepId: S3 });
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(form([opener, only, last], { steps: steps('Um', 'Dois', 'Três') }));
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho' }));
+    expect(screen.getByText('Etapa 1 de 3')).toBeTruthy();
+    // Announced only for what is on screen: the question that opened sits on a later step.
+    expect(liveRegion().textContent).toBe('');
+    fireEvent.click(screen.getByRole('radio', { name: 'Não tenho' }));
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    // Avançar skips the empty step and goes straight to Três.
+    await save(container);
+    expect(screen.getByRole('heading', { level: 2, name: 'Três' })).toBeTruthy();
+    expect(screen.getByText('Etapa 2 de 2')).toBeTruthy();
+  });
+});
+
+describe('the states of a step save (UI-D-654, E4 loading, error)', () => {
+  const twoSteps = () => {
+    const a = question('short_text', { title: 'Nome', stepId: S1 });
+    const b = question('short_text', { title: 'Telefone', stepId: S2 });
+    return { a, b, read: form([a, b], { steps: steps('Sobre você', 'Contato') }) };
+  };
+
+  it('pending: Salvando… on the brand button, every control and Voltar disabled, aria-busy on the form', async () => {
+    const { read } = twoSteps();
+    mocks.save.mockResolvedValueOnce({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(read);
+    await save(container);
+    let resolve: (value: unknown) => void = () => {};
+    mocks.save.mockImplementation(() => new Promise((r) => (resolve = r)));
+    await save(container);
+    expect(formEl(container).getAttribute('aria-busy')).toBe('true');
+    expect((screen.getByRole('button', { name: /Salvando…/ }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole('button', { name: 'Voltar' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByLabelText('Telefone') as HTMLInputElement).disabled).toBe(true);
+    await act(async () => resolve({ ok: true, destination: '/inicio' }));
+  });
+
+  it('offline disables Avançar and Concluir with the shipped notice while Voltar stays enabled', async () => {
+    const { read } = twoSteps();
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(read);
+    setOnline(false);
+    expect((screen.getByRole('button', { name: 'Avançar' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByText(/Você está sem conexão/)).toBeTruthy();
+    setOnline(true);
+    await save(container);
+    setOnline(false);
+    expect((screen.getByRole('button', { name: 'Concluir' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole('button', { name: 'Voltar' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    mocks.save.mockClear();
+    await save(container);
+    expect(mocks.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'Sobre você' })).toBeTruthy();
+  });
+
+  it('a save failure shows the shipped alert and keeps the member on the step with the answers', async () => {
+    const { read } = twoSteps();
+    mocks.save.mockResolvedValue({ ok: false, code: 'failed' });
+    const { container } = show(read);
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Ana' } });
+    await save(container);
+    expect(
+      screen
+        .getByText('Não foi possível salvar agora. Suas respostas continuam aqui. Tente de novo.')
+        .getAttribute('role'),
+    ).toBe('alert');
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    expect((screen.getByLabelText('Nome') as HTMLInputElement).value).toBe('Ana');
+    expect((screen.getByRole('button', { name: 'Avançar' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('a 409 form_changed refreshes the steps in place, keeps typed answers and stays on the step', async () => {
+    const { a, b, read } = twoSteps();
+    const extra = question('short_text', { title: 'Nova', stepId: S3 });
+    mocks.save.mockResolvedValue({
+      ok: false,
+      code: 'changed',
+      form: form([a, b, extra], {
+        formEtag: 'etag-2',
+        steps: steps('Sobre você', 'Contato', 'Extra'),
+      }),
+    });
+    const { container } = show(read);
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Ana' } });
+    await save(container);
+    expect(screen.getByText(/O formulário mudou enquanto você respondia/)).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'Sobre você' })).toBeTruthy();
+    expect(screen.getByText('Etapa 1 de 3')).toBeTruthy();
+    expect((screen.getByLabelText('Nome') as HTMLInputElement).value).toBe('Ana');
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    await save(container);
+    expect(mocks.save.mock.calls.at(-1)?.[0]).toMatchObject({ formEtag: 'etag-2', stepId: S1 });
+  });
+
+  it('a 409 that leaves the current step with nothing visible moves to the next step of the path', async () => {
+    const a = question('short_text', { title: 'Nome', stepId: S1 });
+    const b = question('short_text', { title: 'Telefone', stepId: S2 });
+    const c = question('short_text', { title: 'Cargo', stepId: S3 });
+    mocks.save.mockResolvedValue({
+      ok: false,
+      code: 'changed',
+      form: form([b, c], { formEtag: 'etag-2', steps: steps('Um', 'Dois', 'Três').slice(1) }),
+    });
+    const { container } = show(form([a, b, c], { steps: steps('Um', 'Dois', 'Três') }));
+    await save(container);
+    expect(screen.getByRole('heading', { level: 2, name: 'Dois' })).toBeTruthy();
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    expect(screen.queryByLabelText('Nome')).toBeNull();
+    expect(screen.getByLabelText('Telefone')).toBeTruthy();
+  });
+
+  it('Concluir with missing ids jumps to the first step that holds one and says so, with no toast and no navigation', async () => {
+    const a = question('short_text', { title: 'Nome', required: true, stepId: S1 });
+    const b = question('short_text', { title: 'Telefone', stepId: S2 });
+    mocks.save.mockResolvedValueOnce({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(form([a, b], { steps: steps('Sobre você', 'Contato') }));
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Ana' } });
+    await save(container);
+    mocks.save.mockResolvedValueOnce({ ok: true, destination: null, missingQuestionIds: [a.id] });
+    await save(container);
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.flash).not.toHaveBeenCalled();
+    const heading = screen.getByRole('heading', { level: 2, name: 'Sobre você' });
+    expect(document.activeElement).toBe(heading);
+    const notice = screen.getByText(
+      'Falta responder uma pergunta obrigatória na etapa “Sobre você”. Levamos você até lá.',
+    );
+    expect(notice.closest('[role="status"]')).not.toBeNull();
+    // The pending question carries the danger block (the member typed it, then the server still says missing).
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: '' } });
+    expect(screen.getAllByText('Falta responder')).toHaveLength(1);
+  });
+
+  it('missing ids the form does not hold are a plain failure, never a navigation', async () => {
+    const { read } = twoSteps();
+    mocks.save.mockResolvedValueOnce({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(read);
+    await save(container);
+    mocks.save.mockResolvedValueOnce({
+      ok: true,
+      destination: null,
+      missingQuestionIds: [uuid(99999)],
+    });
+    await save(container);
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(screen.getByText(/Não foi possível salvar agora/)).toBeTruthy();
+  });
+});
+
+describe('returning: a stepper over the steps with something missing (D-630, UI-D-657, E4 partial)', () => {
+  it('walks only the steps that owe an answer, pre-filled, flagging only the missing required ones, with no jump link', () => {
+    const done = question('short_text', {
+      title: 'Nome',
+      required: true,
+      stepId: S1,
+      answer: 'Ana',
+    });
+    const missing = question('short_text', { title: 'Telefone', required: true, stepId: S2 });
+    const filled = question('short_text', { title: 'Cargo', stepId: S2, answer: 'Dev' });
+    const other = question('short_text', { title: 'Cidade', stepId: S3, answer: 'Recife' });
+    show(
+      form([done, missing, filled, other], {
+        mode: 'returning',
+        missingRequired: 1,
+        steps: steps('Um', 'Dois', 'Três'),
+      }),
+    );
+    expect(screen.getByRole('heading', { level: 2, name: 'Dois' })).toBeTruthy();
+    expect(screen.queryByText(/Etapa \d de/)).toBeNull();
+    expect(screen.queryByLabelText('Nome')).toBeNull();
+    expect((screen.getByLabelText('Cargo') as HTMLInputElement).value).toBe('Dev');
+    expect(document.querySelectorAll('[data-flagged]')).toHaveLength(1);
+    const notice = screen.getByText(/Falta 1 pergunta obrigatória/).closest('[role="status"]');
+    expect(notice).not.toBeNull();
+    expect(within(notice as HTMLElement).queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Salvar' })).toBeTruthy();
+  });
+
+  it('keeps the count of the path while the member answers what was missing', async () => {
+    const m1 = question('short_text', { title: 'Nome', required: true, stepId: S1 });
+    const m2 = question('short_text', { title: 'Telefone', required: true, stepId: S2 });
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [m2.id] });
+    const { container } = show(
+      form([m1, m2], { mode: 'returning', missingRequired: 2, steps: steps('Um', 'Dois') }),
+    );
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Ana' } });
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    await save(container);
+    expect(screen.getByText('Etapa 2 de 2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Concluir' })).toBeTruthy();
   });
 });

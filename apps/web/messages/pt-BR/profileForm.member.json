@@ -72,7 +72,11 @@
         "back": "Voltar",
         "next": "Avançar",
         "finish": "Concluir",
-        "savedHint": "Suas respostas de cada etapa ficam salvas quando você avança."
+        "savedHint": "Suas respostas de cada etapa ficam salvas quando você avança.",
+        "pendingElsewhere": "Falta responder uma pergunta obrigatória na etapa “{step}”. Levamos você até lá.",
+        "revealedOne": "Apareceu uma nova pergunta: {title}.",
+        "revealedMany": "Apareceram {count} novas perguntas.",
+        "hidden": "{count, plural, one {Uma pergunta saiu da lista.} other {# perguntas saíram da lista.}}"
       },
       "cancel": "Cancelar",
       "home": "Ir para o início",
