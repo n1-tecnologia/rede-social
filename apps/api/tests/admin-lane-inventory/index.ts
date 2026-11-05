@@ -1,3 +1,4 @@
+import { accounts } from './accounts';
 import { media } from './media';
 import { payments } from './payments';
 import { platform } from './platform';
@@ -49,7 +50,15 @@ export type AdminLaneEntry = {
  */
 export const ALLOW_PENDING = false;
 
-export const AREAS = { media, payments, platform, profileForm, scripts, tenancy } as const;
+export const AREAS = {
+  accounts,
+  media,
+  payments,
+  platform,
+  profileForm,
+  scripts,
+  tenancy,
+} as const;
 
 const byFile = (a: AdminLaneEntry, b: AdminLaneEntry) =>
   a.file < b.file ? -1 : a.file > b.file ? 1 : 0;

@@ -8,8 +8,9 @@ import {
   armAnonymiseDue,
   rearmAnonymiseDue,
 } from '@rede-social/core/server/accounts/anonymise-job';
+import { rootLogger } from '@rede-social/core/server/logging';
 import { centralProjectId } from '@rede-social/core/server/tenancy/project-registry';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { adminSql, api, authAdmin, signInAs } from './setup';
 
 /**
@@ -32,9 +33,12 @@ const SLUG = `ad13-${STAMP}`.slice(0, 40);
 const HOST = `${SLUG}.localhost`;
 const SLUG_B = `ad13b-${STAMP}`.slice(0, 40);
 const HOST_B = `${SLUG_B}.localhost`;
+const SLUG_C = `ad13c-${STAMP}`.slice(0, 40);
+const HOST_C = `${SLUG_C}.localhost`;
 
 let tenantId = '';
 let tenantBId = '';
+let tenantCId = '';
 const userIds: string[] = [];
 /** Identities a re-sign-up created after the job freed the address. */
 const reborn: string[] = [];
@@ -47,12 +51,13 @@ const call = (
   token: string,
   body?: unknown,
   headers: Record<string, string> = {},
+  host: string = HOST,
 ) =>
   api.request(path, {
     method,
     headers: {
       authorization: `Bearer ${token}`,
-      [TENANT_HOST_HEADER]: HOST,
+      [TENANT_HOST_HEADER]: host,
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       ...headers,
     },
@@ -66,11 +71,12 @@ async function member(
   role: 'member' | 'support_tenant' | 'admin_tenant',
   tag: string,
   inTenant: string = tenantId,
+  password: string = PASSWORD,
 ): Promise<Member> {
   const email = `ad13-${tag}-${crypto.randomUUID().slice(0, 8)}@rede-demo.local`;
   const { data, error } = await authAdmin().createUser({
     email,
-    password: PASSWORD,
+    password,
     email_confirm: true,
     user_metadata: { name: 'Exclusão' },
   });
@@ -79,7 +85,7 @@ async function member(
   await adminSql`
     insert into public.memberships (tenant_id, user_id, role, status)
     values (${inTenant}::uuid, ${data.user.id}::uuid, ${role}, 'active')`;
-  return { userId: data.user.id, email, token: await signInAs(email, PASSWORD) };
+  return { userId: data.user.id, email, token: await signInAs(email, password) };
 }
 
 type MembershipState = {
@@ -129,6 +135,14 @@ beforeAll(async () => {
   await adminSql`
     insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
     values (${tenantBId}::uuid, ${HOST_B}, true, now())`;
+  const [tenantC] = await adminSql<{ id: string }[]>`
+    insert into public.tenants (slug, display_name, rules_text, rules_version)
+    values (${SLUG_C}, 'Comunidade Papéis', 'Regras de teste.', 1)
+    returning id`;
+  tenantCId = tenantC?.id ?? '';
+  await adminSql`
+    insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+    values (${tenantCId}::uuid, ${HOST_C}, true, now())`;
 });
 
 afterAll(async () => {
@@ -141,7 +155,7 @@ afterAll(async () => {
     // Hard delete, also for an account the job soft-deleted (GoTrue keeps that row).
     await authAdmin().deleteUser(id);
   }
-  for (const id of [tenantId, tenantBId]) {
+  for (const id of [tenantId, tenantBId, tenantCId]) {
     if (id) await adminSql`delete from public.tenants where id = ${id}::uuid`;
   }
   await adminSql.end();
@@ -351,9 +365,10 @@ describe('accounts.anonymise-due: the job against the local stack (NATIVE-21)', 
     const [peerPost] = await adminSql<{ id: string }[]>`
       insert into public.feed_posts (tenant_id, author_user_id, caption)
       values (${tenantId}::uuid, ${peer.userId}::uuid, 'Post do outro administrador') returning id::text as id`;
+    const peerPostId = peerPost?.id ?? '';
     await adminSql`
       insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
-      values (${tenantId}::uuid, ${peerPost?.id}::uuid, ${target.userId}::uuid, 'Comentário que fica')`;
+      values (${tenantId}::uuid, ${peerPostId}::uuid, ${target.userId}::uuid, 'Comentário que fica')`;
 
     await requestAndExpire(target);
     // B: one member with a device and one that asks later (the positive control at the end).
@@ -404,7 +419,7 @@ describe('accounts.anonymise-due: the job against the local stack (NATIVE-21)', 
     const kept = page.items.find((item) => item.id === ownPost?.id);
     expect(kept?.caption).toBe(caption);
     expect(kept?.author.displayName).toBe('Membro removido');
-    const comments = await call('GET', `/v1/feed/posts/${peerPost?.id}/comments`, viewer.token);
+    const comments = await call('GET', `/v1/feed/posts/${peerPostId}/comments`, viewer.token);
     expect(comments.status).toBe(200);
     const thread = (await comments.json()) as {
       items: { body: string; authorRemoved: boolean; author: { displayName: string | null } }[];
@@ -480,5 +495,225 @@ describe('accounts.anonymise-due: the job against the local stack (NATIVE-21)', 
       select count(*)::int as n from pgboss.job where name = ${ANONYMISE_DUE_QUEUE}`;
     expect(total?.n).toBe(2);
     await adminSql`delete from pgboss.job where name = ${ANONYMISE_DUE_QUEUE}`;
+  });
+});
+
+/* ── Gate: limits, roles, ordering, logs (NATIVE-19 edges, T-13-29, T-13-31) ───────────────────────── */
+
+const callC = (method: string, path: string, token: string, body?: unknown) =>
+  call(method, path, token, body, {}, HOST_C);
+
+/** Everything the API process writes through the root logger's destination while `run` executes. */
+async function captureLogs(run: () => Promise<void>): Promise<string[]> {
+  const streamKey = Object.getOwnPropertySymbols(rootLogger).find(
+    (symbol) => symbol.description === 'pino.stream',
+  );
+  if (!streamKey) throw new Error('pino stream symbol not found');
+  const stream = (rootLogger as unknown as Record<symbol, { write: (chunk: string) => unknown }>)[
+    streamKey
+  ];
+  if (!stream) throw new Error('pino stream not found');
+  const lines: string[] = [];
+  const original = stream.write.bind(stream);
+  const spy = vi.spyOn(stream, 'write').mockImplementation((chunk: string) => {
+    lines.push(String(chunk));
+    return original(chunk);
+  });
+  try {
+    await run();
+  } finally {
+    spy.mockRestore();
+  }
+  return lines;
+}
+
+describe('POST /v1/me/account-deletion: rate limit (T-13-29)', () => {
+  it('the sixth attempt inside the window is 429 and changes nothing; another member is not limited', async () => {
+    const guesser = await member('member', 'rate');
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const res = await call('POST', '/v1/me/account-deletion', guesser.token, {
+        password: `errada-${attempt}`,
+      });
+      expect(res.status, `attempt ${attempt}`).toBe(403);
+    }
+    // Even the RIGHT password is refused now, and the account is untouched.
+    const sixth = await call('POST', '/v1/me/account-deletion', guesser.token, {
+      password: PASSWORD,
+    });
+    expect(sixth.status).toBe(429);
+    expect(await errorCode(sixth)).toBe('RATE_LIMITED');
+    expect(await stateOf(guesser.userId)).toMatchObject({ deleted: false, requested: false });
+    expect((await call('GET', '/v1/me/bootstrap', guesser.token)).status).toBe(200);
+
+    const other = await member('member', 'rate2');
+    const ok = await call('POST', '/v1/me/account-deletion', other.token, { password: PASSWORD });
+    expect(ok.status).toBe(200);
+  });
+
+  it('the network address is limited across members', async () => {
+    const ip = { 'x-client-ip': `203.0.113.${STAMP % 200}` };
+    const people = await Promise.all(
+      Array.from({ length: 6 }, (_, i) => member('member', `ip${i}`)),
+    );
+    for (const person of people.slice(0, 5)) {
+      const res = await call(
+        'POST',
+        '/v1/me/account-deletion',
+        person.token,
+        { password: 'errada-123' },
+        ip,
+      );
+      expect(res.status).toBe(403);
+    }
+    const sixth = people[5];
+    if (!sixth) throw new Error('fixture');
+    const refused = await call(
+      'POST',
+      '/v1/me/account-deletion',
+      sixth.token,
+      { password: PASSWORD },
+      ip,
+    );
+    expect(refused.status).toBe(429);
+    expect(await stateOf(sixth.userId)).toMatchObject({ deleted: false, requested: false });
+    // The same member from no address (or another one) is fine: only the address was spent.
+    const elsewhere = await call(
+      'POST',
+      '/v1/me/account-deletion',
+      sixth.token,
+      { password: PASSWORD },
+      { 'x-client-ip': '198.51.100.7' },
+    );
+    expect(elsewhere.status).toBe(200);
+  });
+});
+
+describe('POST /v1/me/account-deletion: administrators (NATIVE-19 edge adjacency)', () => {
+  it('with two active administrators either may delete their own account and the second then gets LAST_ADMIN', async () => {
+    const a1 = await member('admin_tenant', 'adj1', tenantCId);
+    const a2 = await member('admin_tenant', 'adj2', tenantCId);
+    const read = async (m: Member) =>
+      (await (await callC('GET', '/v1/me/account-deletion', m.token)).json()) as {
+        isLastAdmin: boolean;
+      };
+    expect(await read(a1)).toEqual({ isLastAdmin: false });
+    expect(await read(a2)).toEqual({ isLastAdmin: false });
+
+    const first = await callC('POST', '/v1/me/account-deletion', a1.token, { password: PASSWORD });
+    expect(first.status).toBe(200);
+
+    expect(await read(a2)).toEqual({ isLastAdmin: true });
+    const second = await callC('POST', '/v1/me/account-deletion', a2.token, {
+      password: PASSWORD,
+    });
+    expect(second.status).toBe(409);
+    expect(await errorCode(second)).toBe('LAST_ADMIN');
+    const [still] = await adminSql<{ live: boolean }[]>`
+      select deleted_at is null as live from public.memberships
+       where tenant_id = ${tenantCId}::uuid and user_id = ${a2.userId}::uuid`;
+    expect(still?.live).toBe(true);
+  });
+
+  it('with one administrator and one support member the administrator is refused; a support member and a member are never refused for it', async () => {
+    // A fresh tenant, so the administrators of the case above do not count.
+    const [fresh] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${`${SLUG_C}x`.slice(0, 40)}, 'Comunidade Papéis 2', 'Regras de teste.', 1)
+      returning id`;
+    const freshId = fresh?.id ?? '';
+    const freshHost = `${`${SLUG_C}x`.slice(0, 40)}.localhost`;
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+      values (${freshId}::uuid, ${freshHost}, true, now())`;
+    try {
+      const admin = await member('admin_tenant', 'solo', freshId);
+      const support = await member('support_tenant', 'sup', freshId);
+      const plain = await member('member', 'plain', freshId);
+      const callF = (method: string, path: string, token: string, body?: unknown) =>
+        call(method, path, token, body, {}, freshHost);
+
+      const refused = await callF('POST', '/v1/me/account-deletion', admin.token, {
+        password: PASSWORD,
+      });
+      expect(refused.status).toBe(409);
+      expect(await errorCode(refused)).toBe('LAST_ADMIN');
+      expect(await (await callF('GET', '/v1/me/account-deletion', admin.token)).json()).toEqual({
+        isLastAdmin: true,
+      });
+      for (const person of [support, plain]) {
+        expect(await (await callF('GET', '/v1/me/account-deletion', person.token)).json()).toEqual({
+          isLastAdmin: false,
+        });
+        const done = await callF('POST', '/v1/me/account-deletion', person.token, {
+          password: PASSWORD,
+        });
+        expect(done.status).toBe(200);
+      }
+      // The administrator is still live and still the last one.
+      expect((await callF('GET', '/v1/me/bootstrap', admin.token)).status).toBe(200);
+    } finally {
+      await adminSql`delete from public.memberships where tenant_id = ${freshId}::uuid`;
+      await adminSql`delete from public.tenants where id = ${freshId}::uuid`;
+    }
+  });
+});
+
+describe('accounts.anonymise-due: ordering with equal deadlines (NATIVE-19 edge ordering)', () => {
+  it('processes due members by deadline then id, and sends the completion e-mails in that order', async () => {
+    const projectId = await centralProjectId();
+    const people = await Promise.all(
+      Array.from({ length: 3 }, (_, i) => member('member', `ord${i}`, tenantBId)),
+    );
+    for (const person of people) {
+      await adminSql`
+        update public.memberships
+           set deleted_at = now(),
+               deletion_requested_at = timestamptz '2026-10-01 10:00:00+00',
+               deletion_due_at = timestamptz '2026-10-15 10:00:00+00'
+         where tenant_id = ${tenantBId}::uuid and user_id = ${person.userId}::uuid`;
+    }
+    // Same deadline for all three: only the membership id can break the tie.
+    const rows = await adminSql<{ id: string; email: string }[]>`
+      select m.id::text as id, u.email from public.memberships m join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantBId}::uuid and m.user_id = any(${people.map((p) => p.userId)}::uuid[])
+       order by m.id`;
+    const expected = rows.map((row) => row.email);
+
+    const sent: string[] = [];
+    const result = await anonymiseDueOnce(projectId, {
+      sendMail: async (to) => {
+        sent.push(to);
+      },
+    });
+    expect(result).toMatchObject({ failed: 0 });
+    expect(sent).toEqual(expected);
+  });
+});
+
+describe('POST /v1/me/account-deletion: logs (T-13-31)', () => {
+  it('never writes the password, the address or the token into a log line, wrong or right', async () => {
+    const sentinel = `Sentinel-${crypto.randomUUID()}`;
+    const wrongSentinel = `${sentinel}-errada`;
+    const m = await member('member', 'logs', tenantId, sentinel);
+    const lines = await captureLogs(async () => {
+      const wrong = await call('POST', '/v1/me/account-deletion', m.token, {
+        password: wrongSentinel,
+      });
+      expect(wrong.status).toBe(403);
+      const right = await call('POST', '/v1/me/account-deletion', m.token, { password: sentinel });
+      expect(right.status).toBe(200);
+      // A rejected body is logged by the validator hook: it must not echo the value either.
+      const extra = await call('POST', '/v1/me/account-deletion', m.token, {
+        password: sentinel,
+        extra: sentinel,
+      });
+      expect(extra.status).toBeGreaterThanOrEqual(400);
+    });
+    const text = lines.join('');
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).not.toContain(sentinel);
+    expect(text).not.toContain(m.email);
+    expect(text).not.toContain(m.token);
+    expect(text).toContain('account.deletion.requested');
   });
 });
