@@ -15,6 +15,11 @@ import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
  * (`type_locked`), every option that has answers, removed or relabelled (`option_locked`), switching "Outro"
  * off while an "Outro" answer exists (`other_locked`), private to public (`visibility_locked`, the one-way
  * ratchet of PU-1) and narrowing a number or date limit (`limits_locked`).
+ *
+ * 12.1 (D-625, D-632): the trigger states two more rules, PF006 and PF007 (a condition cannot be gained or
+ * changed on an answered question; an opener with active dependents cannot be archived, retyped or lose a
+ * referenced option). Their pure twins live in `condition-rules.ts` (`checkConditionLock`,
+ * `checkOpenerChange`); `guardIssueOf` maps both SQLSTATEs below.
  */
 
 export type LockLimits = { min?: number | string; max?: number | string };
@@ -94,6 +99,8 @@ const GUARD_CODES: Readonly<Record<string, ProfileFormIssue>> = {
   PF003: 'other_locked',
   PF004: 'visibility_locked',
   PF005: 'limits_locked',
+  PF006: 'condition_locked',
+  PF007: 'has_dependents',
 };
 
 /**
