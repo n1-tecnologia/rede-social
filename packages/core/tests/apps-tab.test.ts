@@ -39,7 +39,8 @@ beforeEach(() => {
     [NO_HOST_TENANT]: { displayName: 'Sem endereço', primaryHost: null },
   });
   deps = { app: app.store, credentials: memoryCredentialStore().store };
-  purchaseSwitchCache.clear();
+  invalidatePurchaseSwitch(TENANT);
+  invalidatePurchaseSwitch(NO_HOST_TENANT);
 });
 
 const row = (tenantId = TENANT): AppRow => {
@@ -206,14 +207,14 @@ describe('setPurchaseSwitch (D-617, NATIVE-24)', () => {
   });
 
   it('invalidates the in-process purchase cache of the tenant, and only of that tenant', async () => {
-    purchaseSwitchCache.set(TENANT, { ios: false, android: false, at: 1 });
-    purchaseSwitchCache.set(NO_HOST_TENANT, { ios: false, android: false, at: 1 });
+    purchaseSwitchCache.set(TENANT, { ios: false, android: false }, 15_000);
+    purchaseSwitchCache.set(NO_HOST_TENANT, { ios: false, android: false }, 15_000);
     await setPurchaseSwitch(TENANT, 'ios', true, deps);
-    expect(purchaseSwitchCache.has(TENANT)).toBe(false);
-    expect(purchaseSwitchCache.has(NO_HOST_TENANT)).toBe(true);
-    purchaseSwitchCache.set(TENANT, { ios: true, android: false, at: 2 });
+    expect(purchaseSwitchCache.get(TENANT)).toBeUndefined();
+    expect(purchaseSwitchCache.get(NO_HOST_TENANT)).toBeDefined();
+    purchaseSwitchCache.set(TENANT, { ios: true, android: false }, 15_000);
     invalidatePurchaseSwitch(TENANT);
-    expect(purchaseSwitchCache.has(TENANT)).toBe(false);
+    expect(purchaseSwitchCache.get(TENANT)).toBeUndefined();
   });
 
   it('no code path of the module defaults a switch to on', async () => {

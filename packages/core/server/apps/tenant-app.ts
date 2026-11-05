@@ -18,6 +18,7 @@ import {
   privacyBodySchema,
   purchaseBodySchema,
 } from '@rede-social/contracts/native';
+import { createBoundedTtlCache } from '@rede-social/contracts';
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { tenantApps } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
@@ -300,15 +301,21 @@ const refuse = (): never => {
   throw new ApiError(400, 'VALIDATION_FAILED');
 };
 
+/** The two purchase switches of one tenant, as the request path reads them (13-10, D-615, D-617). */
+export type PurchaseSwitches = { ios: boolean; android: boolean };
+
+/** Bound and life of the in-process switch cache (13-10, PU-5): 15 s is the staleness other instances may show. */
+export const PURCHASE_SWITCH_CACHE_MAX = 500;
+export const PURCHASE_SWITCH_TTL_MS = 15_000;
+
 /**
- * The in-process cache of the purchase switches that plan 10's `readPurchaseSwitches` fills (a bounded 15-second
- * cache). It lives here, beside the writer that must clear it, so the switch route and the reader share one
- * door. Nothing in this module fills it.
+ * The in-process cache of the purchase switches that `readPurchaseSwitches` (read.ts) fills: a bounded 15-second
+ * cache. It lives here, beside the writer that must clear it, so the switch route and the reader share one
+ * door. Nothing in this file fills it.
  */
-export const purchaseSwitchCache = new Map<
-  string,
-  { ios: boolean; android: boolean; at: number }
->();
+export const purchaseSwitchCache = createBoundedTtlCache<PurchaseSwitches>(
+  PURCHASE_SWITCH_CACHE_MAX,
+);
 
 /**
  * Drops the cached switches of one tenant, so the instance that wrote sees the change at once and the others
