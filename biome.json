@@ -40,6 +40,7 @@
         "!packages/core/server/payments/**",
         "!packages/core/server/profile-form/**",
         "!packages/core/server/projects/**",
+        "!packages/core/server/apps/**",
         "!packages/core/server/migrations/**",
         "!packages/core/server/secrets/**",
         "!scripts/**"

@@ -148,6 +148,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/platform/tenants/:id/database/bootstrap/resume': { exempt: PLATFORM_LANE },
   'PUT /v1/platform/tenants/:id/database/credentials': { exempt: PLATFORM_LANE },
   'PUT /v1/platform/tenants/:id/database/token': { exempt: PLATFORM_LANE },
+  // 13-09 (D-605, D-615, D-617): the App tab, super_admin only; the store credentials are write-only.
+  'GET /v1/platform/tenants/:id/app': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/app/credentials/:kind': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/verify': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/restart': { exempt: PLATFORM_LANE },

@@ -4,6 +4,7 @@ import {
   requireSuperAdmin,
 } from '@rede-social/core/server/platform/require-super-admin';
 import { platformDefaultHook } from '../../http/openapi';
+import { appsRoutes } from './apps';
 import { brandingRoutes } from './branding';
 import { domainsRoutes } from './domains';
 import { projectsRoutes } from './projects';
@@ -20,7 +21,7 @@ import { refuseWhileMoving, tenantsRoutes } from './tenants';
  * with 403 TENANT_HOST_MISMATCH.
  *
  * Sub-routers are chained with `.route('/', …)` so `AppType` carries every platform route for
- * `hc<AppType>()`: `tenantsRoutes` (02-05), `domainsRoutes` (02-09), `brandingRoutes` (02-13), `projectsRoutes` (09.2-14).
+ * `hc<AppType>()`: `tenantsRoutes` (02-05), `domainsRoutes` (02-09), `brandingRoutes` (02-13), `projectsRoutes` (09.2-14), `appsRoutes` (13-09, the App tab).
  */
 const platform = new OpenAPIHono<PlatformEnv>({ defaultHook: platformDefaultHook });
 
@@ -33,4 +34,5 @@ export const platformRoutes = platform
   .route('/', tenantsRoutes)
   .route('/', domainsRoutes)
   .route('/', brandingRoutes)
-  .route('/', projectsRoutes);
+  .route('/', projectsRoutes)
+  .route('/', appsRoutes);
