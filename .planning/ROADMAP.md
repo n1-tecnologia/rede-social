@@ -1635,7 +1635,7 @@ Plans:
 **Requirements**: PFORM-27, PFORM-28, PFORM-29, PFORM-30, PFORM-31, PFORM-32, PFORM-33, PFORM-34, PFORM-35, PFORM-36, PFORM-37, PFORM-38, PFORM-39, PFORM-40, PFORM-41, PFORM-42 (plus UI-04 for the sketch gate)
 **Depends on:** Phase 12
 **Open design points (for /gsd-discuss-phase 12.1):** the hard gate (D-581, D-585) runs in SQL on every request as an anti-join, so a required question that is hidden by a condition must stop counting without a second round trip; what happens to the stored answer when a member changes the answer that opened it (keep, hide, or delete; D-587/D-588 promise that answers are never silently discarded); whether a condition may chain (B opens C); how the CSV export, the public answers block and the admin impact count treat hidden questions; whether a step is its own table or a column on the question; the step navigation in the member screen and in the edit-from-profile flow; a new sketch is needed (UI-04), since sketch 016 has no steps or condition editor.
-**Plans:** 2/19 plans executed (planned 2026-11-05)
+**Plans:** 4/19 plans executed (planned 2026-11-05)
 
 Decided in `/gsd-discuss-phase 12.1` on 2026-11-05 (`12.1-CONTEXT.md`, D-620..D-636): only dropdown, multiple choice, single choice and yes/no open questions; the condition lives on the shown question (any-of); one level, the opener first; answers that stop applying are deleted in the member's own save, archived dependents included, after a warning; a condition cannot be gained or changed on an answered question; steps are tenant rows and every question is in one; Avançar saves a step and the gate still decides; edit is one scroll; sketch 018 gates the web.
 
@@ -1648,8 +1648,8 @@ Plans:
 
 **Wave 2** *(the schema, the pure rules and the sketch review)*
 
-- [ ] 12.1-03-PLAN.md — The steps table, the question columns and keys, one generated expand-only migration, and the self-reference entry the tenant move engine needs (PFORM-27, 29, 40, tracer)
-- [ ] 12.1-04-PLAN.md — The pure rules: the condition rule, the layout operations with renumbering and the order check, the PF006 and PF007 map (PFORM-28, 29, 31, tracer)
+- [x] 12.1-03-PLAN.md — The steps table, the question columns and keys, one generated expand-only migration, and the self-reference entry the tenant move engine needs (PFORM-27, 29, 40, tracer)
+- [x] 12.1-04-PLAN.md — The pure rules: the condition rule, the layout operations with renumbering and the order check, the PF006 and PF007 map (PFORM-28, 29, 31, tracer)
 - [ ] 12.1-05-PLAN.md — Sketch 018's README, its manifest row and Igor's recorded approval (PFORM-42, UI-04, `autonomous: false`)
 
 **Wave 3**
