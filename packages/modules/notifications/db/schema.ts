@@ -1,6 +1,7 @@
 import { tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
+  check,
   index,
   integer,
   jsonb,
@@ -135,6 +136,13 @@ export type Notification = typeof notifications.$inferSelect;
  *    but `https:` on a known push-service host (`isAllowedPushEndpoint`, T-07-33) before it gets here.
  * 5. **Keys are stored as the browser sent them** (base64url `p256dh` 65 bytes, `auth` 16 bytes); they
  *    are encryption material for the payload, not credentials, and never leave the worker.
+ * 6. **A native device token is a second `kind` of the SAME row** (13-06, D-606): `kind` is `webpush`
+ *    (the default, every shipped row), `apns` (iOS) or `fcm` (Android). For a native kind `endpoint`
+ *    holds the device token, `p256dh` and `auth` are null, and `platform` names the OS. The unique key
+ *    `(tenant_id, endpoint)` and the two owner-only policies are the web ones, unchanged: a token belongs
+ *    to one member of one tenant, and the handoff rule carries over. The kind CHECK is the shape every
+ *    installed app's token depends on, so it is the costly part of D-606. A token is a delivery
+ *    credential for that member's phone: it must not be logged.
  */
 export const pushSubscriptions = pgTable(
   'push_subscriptions',
@@ -149,10 +157,18 @@ export const pushSubscriptions = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     /** The push service URL the browser handed out (fact 4). */
     endpoint: text().notNull(),
-    /** The browser's P-256 ECDH public key, base64url (65 raw bytes). */
-    p256dh: text().notNull(),
-    /** The browser's auth secret, base64url (16 raw bytes). */
-    auth: text().notNull(),
+    /** The browser's P-256 ECDH public key, base64url (65 raw bytes). Null for a native kind (fact 6). */
+    p256dh: text(),
+    /** The browser's auth secret, base64url (16 raw bytes). Null for a native kind (fact 6). */
+    auth: text(),
+    /** `webpush` | `apns` | `fcm` (fact 6, `push_subscriptions_kind_chk`). */
+    kind: text('kind').notNull().default('webpush'),
+    /** `ios` | `android` for a native kind, null for `webpush`. */
+    platform: text('platform'),
+    /** `production` | `sandbox` for a native kind (which APNs/FCM environment issued the token), else null. */
+    appEnvironment: text('app_environment'),
+    /** The app version that last saved the token (informational). */
+    appVersion: text('app_version'),
     /** Informational only (at most 512 characters, API-bounded): which device this is. */
     userAgent: text('user_agent'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -166,6 +182,19 @@ export const pushSubscriptions = pgTable(
     uniqueIndex('push_subscriptions_tenant_endpoint_uq').on(t.tenantId, t.endpoint),
     // The worker's per-recipient lookup (`app.push_subscriptions_for`) and the owner's own list.
     index('push_subscriptions_tenant_user_idx').on(t.tenantId, t.userId),
+    // Fact 6: a web row keeps both keys and has no platform; a native row has no keys and one platform.
+    check(
+      'push_subscriptions_kind_chk',
+      sql`(${t.kind} = 'webpush' and ${t.p256dh} is not null and ${t.auth} is not null and ${t.platform} is null) or (${t.kind} in ('apns','fcm') and ${t.p256dh} is null and ${t.auth} is null and ${t.platform} is not null)`,
+    ),
+    check(
+      'push_subscriptions_platform_chk',
+      sql`${t.platform} is null or (${t.platform} in ('ios','android') and ((${t.kind} = 'apns' and ${t.platform} = 'ios') or (${t.kind} = 'fcm' and ${t.platform} = 'android')))`,
+    ),
+    check(
+      'push_subscriptions_environment_chk',
+      sql`${t.appEnvironment} is null or ${t.appEnvironment} in ('production','sandbox')`,
+    ),
     // Fact 1: owner-only, ANDed with the tenant claim.
     pgPolicy('push_subscriptions_owner_select', {
       for: 'select',
