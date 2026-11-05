@@ -1632,14 +1632,78 @@ Plans:
 ### Phase 12.1: Perguntas condicionais e etapas no formulário de perfil (INSERTED)
 
 **Goal:** The tenant admin can make a question of the profile form conditional and split the form into steps. On a choice question (dropdown, multiple choice, single choice) or a yes/no question, the admin says which answers open further questions (example from the first client: "I own a clinic / I work in a clinic / I am learning", where only "I own a clinic" opens the clinic questions). The admin groups questions into steps (sections); the member answers one step at a time and moves on. Reverses D-582 (one scrollable screen, no sections) and takes "question sections and conditional questions" out of Phase 12's deferred list. Requested by the team on 2026-11-05 for the first client's profile questions.
-**Requirements**: TBD
+**Requirements**: PFORM-27, PFORM-28, PFORM-29, PFORM-30, PFORM-31, PFORM-32, PFORM-33, PFORM-34, PFORM-35, PFORM-36, PFORM-37, PFORM-38, PFORM-39, PFORM-40, PFORM-41, PFORM-42 (plus UI-04 for the sketch gate)
 **Depends on:** Phase 12
 **Open design points (for /gsd-discuss-phase 12.1):** the hard gate (D-581, D-585) runs in SQL on every request as an anti-join, so a required question that is hidden by a condition must stop counting without a second round trip; what happens to the stored answer when a member changes the answer that opened it (keep, hide, or delete; D-587/D-588 promise that answers are never silently discarded); whether a condition may chain (B opens C); how the CSV export, the public answers block and the admin impact count treat hidden questions; whether a step is its own table or a column on the question; the step navigation in the member screen and in the edit-from-profile flow; a new sketch is needed (UI-04), since sketch 016 has no steps or condition editor.
-**Plans:** 0 plans
+**Plans:** 19 plans (planned 2026-11-05)
+
+Decided in `/gsd-discuss-phase 12.1` on 2026-11-05 (`12.1-CONTEXT.md`, D-620..D-636): only dropdown, multiple choice, single choice and yes/no open questions; the condition lives on the shown question (any-of); one level, the opener first; answers that stop applying are deleted in the member's own save, archived dependents included, after a warning; a condition cannot be gained or changed on an answered question; steps are tenant rows and every question is in one; Avançar saves a step and the gate still decides; edit is one scroll; sketch 018 gates the web.
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 12.1 to break down)
+**Wave 1** *(independent: the additive contract and the sketch drawing)*
+
+- [ ] 12.1-01-PLAN.md — The additive contract: the visibility function and its parity table, the limits, the seven refusal codes, the condition, step and layout schemas, optional keys on the write bodies (PFORM-27..32, 40, 41, tracer)
+- [ ] 12.1-02-PLAN.md — Sketch 018: the 66 prototype-less frames of the builder steps, the condition editor, the stepper, the erase dialog, the one-scroll edit and the readers (PFORM-42, UI-04)
+
+**Wave 2** *(the schema, the pure rules and the sketch review)*
+
+- [ ] 12.1-03-PLAN.md — The steps table, the question columns and keys, one generated expand-only migration, and the self-reference entry the tenant move engine needs (PFORM-27, 29, 40, tracer)
+- [ ] 12.1-04-PLAN.md — The pure rules: the condition rule, the layout operations with renumbering and the order check, the PF006 and PF007 map (PFORM-28, 29, 31, tracer)
+- [ ] 12.1-05-PLAN.md — Sketch 018's README, its manifest row and Igor's recorded approval (PFORM-42, UI-04, `autonomous: false`)
+
+**Wave 3**
+
+- [ ] 12.1-06-PLAN.md — The two hand-written migrations: the default-step trigger and idempotent backfill with Igor's one-way literal, the token helper, the visibility-aware gate, the purge, the `_v2` lock and the guard with PF006 and PF007 (PFORM-27, 30, 31, 33, 40, `autonomous: false`)
+
+**Wave 4**
+
+- [ ] 12.1-07-PLAN.md — The `[BLOCKING]` local apply with Igor's word and pgTAP 225: the gate, the helper, the purge, the guard, the steps policies and the backfill replay (PFORM-27, 30, 31, 33, `autonomous: false`)
+
+**Wave 5**
+
+- [ ] 12.1-08-PLAN.md — The steps API: create, rename, delete, the list with steps and each question's step, limits, isolation and the race (PFORM-27, 28, tracer)
+
+**Wave 6**
+
+- [ ] 12.1-09-PLAN.md — The question writes on one global layout: create in a step, move, reorder, reactivate, replace and delete, with the opener-before-question rule (PFORM-27, 28, 29, tracer)
+
+**Wave 7**
+
+- [ ] 12.1-10-PLAN.md — The conditions API: write, lock, remove, the opener refusals with the dependents list, and the visibility-aware summary and impact (PFORM-29, 31, 38, tracer)
+
+**Wave 8**
+
+- [ ] 12.1-11-PLAN.md — The member API: steps and conditions in the read, the step-aware etag, the scoped save with the purge and the missing report, the notice count (PFORM-30, 32, 33, tracer)
+
+**Wave 9**
+
+- [ ] 12.1-12-PLAN.md — The staff row's condition and the server proofs: no stale answer in any reader, the three-way parity, the races, the real move copy and the fan-out onto Phase 12 rows (PFORM-33, 39, 40, 41, tracer)
+- [ ] 12.1-13-PLAN.md — The pure web logic: visibility over drafts, the step path, the erase list, the readers' rules and the condition sentence (PFORM-34, 35, 36, 39, 41, tracer)
+
+**Wave 10** *(web, behind the sketch gate)*
+
+- [ ] 12.1-14-PLAN.md — The member stepper: Avançar saves a step, the question that opens appears in place, the states and the 320px floor (PFORM-32, 34, 42, tracer)
+- [ ] 12.1-16-PLAN.md — The builder steps: Adicionar etapa, the wells, the step sheet, the limits and the reorder with its refusal sentences (PFORM-27, 28, 37, 42, tracer)
+
+**Wave 11**
+
+- [ ] 12.1-15-PLAN.md — The erase warning, the one-scroll edit and the two readers' rules (PFORM-35, 36, 39, 42, tracer)
+- [ ] 12.1-17-PLAN.md — The condition editor, the list markers, the dependents refusal list, the locked and removable states and the impact reading (PFORM-29, 31, 37, 38, 42, tracer)
+
+**Wave 12**
+
+- [ ] 12.1-18-PLAN.md — The admin preview that follows steps and conditions (PFORM-37, 42, tracer)
+
+**Wave 13** *(release and close)*
+
+- [ ] 12.1-19-PLAN.md — The Playwright spec on the clinic example, the "Phase 12.1 release" notes, the owner's ledger and the local exit gate (PFORM-34, 35, 36, 37, 40, 42, tracer)
+
+**Cross-cutting constraints:**
+
+- The server, SQL, contract and pure-lib plans (01, 03, 04, 06 to 13) never depend on the sketch gate; every web plan (14 to 18, and the browser task of 19) carries `grep -q '^approved: true' .planning/sketches/018-phase-12.1-designed-screens/README.md` and the executor never writes the approval. When the approval is late, run every non-web plan first and let the web plans stop at their precondition guard; no `depends_on` or wave changes. Recommended order: 01, 03, 04, 06, 07 (Igor's word), 08, 09, 10, 11, 12, 13, then 02 and 05 (the review) and 14 to 19.
+- Plan 01 is additive; each read shape is tightened by the plan that also fixes its consumers (08 and 09 admin, 10 admin conditions, 11 member, 12 staff), so core, api and web typecheck green at the end of every plan. The one UI-file touch before approval is plan 11's compile-only preview plumbing (planner assumption A-12.1-PLUMB).
+- Plan 07's `[BLOCKING]` task and plan 06's default-step literal need Igor's word; production `supabase db push`, every hosted run and the Playwright run under the free-space watchdog are Igor's (`12.1-MANUAL-PROOFS.md`, "Phase 12.1 release" in `docs/DEPLOY.md`). The old `app.profile_form_lock_active()` and the legacy `{ ids }` reorder body stay one release.
 
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
