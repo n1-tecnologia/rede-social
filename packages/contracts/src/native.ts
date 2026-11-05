@@ -114,21 +114,187 @@ export function deriveAppIds(
   return { ios: id, android: id };
 }
 
-// --- TEMPORARY RED STUB (task 2), fully replaced in GREEN -------------------------------------------
-export const BRIDGE_VERSION = 0;
-export const BRIDGE_MAX_BYTES = 0;
-export const FEED_SNAPSHOT_MAX_POSTS = 0;
-export const PUSH_PATH = /$^/;
-export const APNS_TOKEN_PATTERN = /$^/;
-export const FCM_TOKEN_PATTERN = /$^/;
-const stubMember = z.object({ v: z.literal(1), type: z.literal('stub') }).strict();
-export const feedSnapshotSchema = z.object({}).strict();
-export const bridgeWebMessageSchema = z.discriminatedUnion('type', [stubMember]);
-export const bridgeNativeEventSchema = z.discriminatedUnion('type', [stubMember]);
-export const parseBridgeMessage = (
-  _raw: unknown,
-  _schema?: unknown,
-): { ok: false; reason: string } | { ok: true; message: { type: string; title?: string } } => ({
-  ok: false,
-  reason: 'bad_shape',
-});
+// --- The bridge (D-600, NATIVE-05, T-13-05) ------------------------------------------------------------
+
+/**
+ * The bridge between the web pages and the native layer: ONE versioned vocabulary for both sides, every
+ * member `.strict()` with `v: 1`, strings and counts bounded. An old app and a new web degrade by ignoring
+ * an unknown `type` (`parseBridgeMessage` answers `unknown_type`, never throws); `minVersion` is the hard
+ * floor. No member carries a token, a password or an e-mail address: the device token travels only in
+ * the native-to-web `push.state` / `push.result` events, to the PAGE, which saves it through the BFF with
+ * its own cookie (D-608); the shell never holds a session.
+ */
+export const BRIDGE_VERSION = 1;
+/** Largest accepted message, in UTF-8 BYTES, checked before `JSON.parse`. */
+export const BRIDGE_MAX_BYTES = 65536;
+/** Most posts the offline snapshot of Início carries (Pattern 9). */
+export const FEED_SNAPSHOT_MAX_POSTS = 20;
+
+/**
+ * A path the shell may open from a push payload: starts with one `/`, then no second `/` or `\` (which a
+ * browser reads as another origin) and no backslash or whitespace anywhere. The SAME expression as the
+ * notifications module; duplicated on purpose because `apps/mobile` must not import a module.
+ */
+export const PUSH_PATH = /^\/(?![/\\])[^\\\s]*$/;
+/** APNs device token: hex, "don't make assumptions about device token size" (Apple), so 32..200. */
+export const APNS_TOKEN_PATTERN = /^[0-9a-f]{32,200}$/i;
+/** FCM registration token: URL-safe class, 100..4096 characters. */
+export const FCM_TOKEN_PATTERN = /^[A-Za-z0-9_:-]{100,4096}$/;
+
+const URL_MAX_LENGTH = 2048;
+/** An https URL (no `http:`, `javascript:` or `data:`), bounded. */
+const httpsUrl = z.url({ protocol: /^https$/ }).max(URL_MAX_LENGTH);
+const isoInstant = z.iso.datetime();
+const semver = z.string().regex(/^\d+\.\d+\.\d+$/);
+
+/** The last-seen first page of Início (Pattern 9): only what the member's own feed already shows. */
+export const feedSnapshotPostSchema = z
+  .object({
+    id: z.uuid(),
+    authorName: z.string().max(120),
+    authorAvatarUrl: httpsUrl.nullable(),
+    text: z.string().max(2000),
+    media: z
+      .object({ kind: z.enum(['image', 'video']), thumbUrl: httpsUrl })
+      .strict()
+      .nullable(),
+    likeCount: z.number().int().min(0),
+    commentCount: z.number().int().min(0),
+    createdAt: isoInstant,
+  })
+  .strict();
+export const feedSnapshotSchema = z
+  .object({
+    savedAt: isoInstant,
+    posts: z.array(feedSnapshotPostSchema).max(FEED_SNAPSHOT_MAX_POSTS),
+  })
+  .strict();
+export type FeedSnapshot = z.infer<typeof feedSnapshotSchema>;
+
+const member = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
+  z.object({ v: z.literal(BRIDGE_VERSION), type: z.literal(type), ...shape }).strict();
+
+/** Web to native. */
+export const bridgeWebMessageSchema = z.discriminatedUnion('type', [
+  member('ready', {}),
+  member('push.enable', {}),
+  member('push.disable', {}),
+  member('push.state.request', {}),
+  member('badge.set', { count: z.number().int().min(0).max(99999) }),
+  member('share', {
+    url: httpsUrl,
+    // An empty title reads as absent.
+    title: z
+      .string()
+      .max(200)
+      .transform((title) => (title === '' ? undefined : title))
+      .optional(),
+  }),
+  member('lock.set', { enabled: z.boolean() }),
+  member('lock.state.request', {}),
+  member('snapshot.feed', feedSnapshotSchema.shape),
+  member('logout.done', {}),
+  member('settings.open', {}),
+  member('theme.changed', { theme: z.enum(['light', 'dark']) }),
+]);
+export type BridgeWebMessage = z.infer<typeof bridgeWebMessageSchema>;
+
+export const PUSH_PERMISSIONS = ['undetermined', 'granted', 'denied', 'unsupported'] as const;
+export type PushPermission = (typeof PUSH_PERMISSIONS)[number];
+
+const deviceShape = {
+  platform: z.enum(NATIVE_PLATFORMS),
+  environment: z.enum(['production', 'sandbox']),
+  appVersion: semver,
+};
+/** The device the shell hands to the page; the token matches the pattern of its own kind. */
+export const nativeDeviceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('apns'),
+      token: z.string().regex(APNS_TOKEN_PATTERN),
+      ...deviceShape,
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('fcm'), token: z.string().regex(FCM_TOKEN_PATTERN), ...deviceShape })
+    .strict(),
+]);
+export type NativeDevice = z.infer<typeof nativeDeviceSchema>;
+
+/** Native to web. */
+export const bridgeNativeEventSchema = z.discriminatedUnion('type', [
+  member('push.state', {
+    permission: z.enum(PUSH_PERMISSIONS),
+    registered: z.boolean(),
+    device: nativeDeviceSchema.nullable(),
+  }),
+  member('push.result', {
+    ok: z.boolean(),
+    permission: z.enum(PUSH_PERMISSIONS),
+    device: nativeDeviceSchema.nullable(),
+  }),
+  member('lock.state', { enabled: z.boolean(), available: z.boolean() }),
+  member('lock.result', { ok: z.boolean(), enabled: z.boolean() }),
+  member('resume', {}),
+]);
+export type BridgeNativeEvent = z.infer<typeof bridgeNativeEventSchema>;
+
+export type BridgeParseFailure =
+  | 'not_string'
+  | 'too_large'
+  | 'bad_json'
+  | 'unknown_type'
+  | 'bad_shape';
+export type BridgeParseResult<M> =
+  | { ok: true; message: M }
+  | { ok: false; reason: BridgeParseFailure };
+
+type UnionLike = { options?: ReadonlyArray<{ shape?: { type?: { value?: unknown } } }> };
+const knownTypesCache = new WeakMap<object, Set<string>>();
+
+/** The `type` literals a discriminated union knows, read once per schema. */
+function knownTypes(schema: object): Set<string> {
+  let known = knownTypesCache.get(schema);
+  if (!known) {
+    known = new Set<string>();
+    for (const option of (schema as UnionLike).options ?? []) {
+      const value = option.shape?.type?.value;
+      if (typeof value === 'string') known.add(value);
+    }
+    knownTypesCache.set(schema, known);
+  }
+  return known;
+}
+
+/**
+ * T-13-05: parse one raw bridge message. Never throws, never logs, never echoes the input in the reason.
+ * The size cap is in UTF-8 bytes and is checked BEFORE `JSON.parse`; a leading BOM is refused; the `type`
+ * is read first so a message from a newer version answers `unknown_type` (dropped quietly) and only a
+ * known type with a bad body answers `bad_shape`. The origin and main-frame checks are the shell's.
+ */
+export function parseBridgeMessage<S extends z.ZodType = typeof bridgeWebMessageSchema>(
+  raw: unknown,
+  schema: S = bridgeWebMessageSchema as unknown as S,
+): BridgeParseResult<z.infer<S>> {
+  if (typeof raw !== 'string') return { ok: false, reason: 'not_string' };
+  // UTF-8 bytes are never fewer than UTF-16 units, so a longer string is too large without encoding it.
+  if (raw.length > BRIDGE_MAX_BYTES || new TextEncoder().encode(raw).length > BRIDGE_MAX_BYTES) {
+    return { ok: false, reason: 'too_large' };
+  }
+  if (raw.startsWith('\uFEFF')) return { ok: false, reason: 'bad_json' };
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: 'bad_json' };
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, reason: 'bad_shape' };
+  }
+  const type = (value as { type?: unknown }).type;
+  if (typeof type !== 'string') return { ok: false, reason: 'bad_shape' };
+  if (!knownTypes(schema).has(type)) return { ok: false, reason: 'unknown_type' };
+  const parsed = schema.safeParse(value);
+  return parsed.success ? { ok: true, message: parsed.data } : { ok: false, reason: 'bad_shape' };
+}
