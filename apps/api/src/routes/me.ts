@@ -238,6 +238,12 @@ export const meRoutes = me
         counters,
         // Additive: the key is absent (not null) when there is no form to answer.
         ...(profileForm ? { profileForm } : {}),
+        // 13-03 (D-617, NATIVE-27): the two native-app fields the contract gained. `bootstrapSchema` now
+        // outputs them as required (its `.default()`), so the object is typed with the NEUTRAL values a
+        // reader would have defaulted to anyway; the store switch and the pending-deletion window are
+        // computed by their own plans.
+        purchaseVisible: true,
+        pendingDeletion: null,
       };
       return c.json(body, 200);
     },
