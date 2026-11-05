@@ -235,6 +235,39 @@
           "limits": "Como já há respostas, só dá para ampliar o intervalo.",
           "limitsRefused": "Esse intervalo deixaria respostas fora do limite. Só é possível ampliar."
         },
+        "where": {
+          "title": "Onde e quando aparece"
+        },
+        "step": {
+          "label": "Etapa",
+          "helper": "Os membros respondem as etapas em ordem. Ao mudar de etapa, a pergunta vai para o fim da nova etapa.",
+          "errors": {
+            "mustFollow": "Esta pergunta depende de “{opener}”, então precisa ficar na etapa dela ou em uma depois.",
+            "mustPrecede": "“{dependent}” depende desta pergunta, então ela precisa ficar na etapa de “{dependent}” ou em uma antes."
+          }
+        },
+        "condition": {
+          "label": "Mostrar só em alguns casos",
+          "helper": "Sem condição, todos os membros veem esta pergunta.",
+          "opener": {
+            "label": "Pergunta que decide",
+            "placeholder": "Selecione",
+            "help": "Só aparecem aqui perguntas de escolha ou de Sim ou não, sem condição, que vêm antes desta."
+          },
+          "none": "Para usar uma condição, crie antes uma pergunta de escolha ou de Sim ou não, sem condição, que venha antes desta.",
+          "values": {
+            "legend": "Mostrar quando a resposta for",
+            "help": "Basta uma das opções marcadas para a pergunta aparecer.",
+            "otherNote": "A opção “Outro” não abre perguntas."
+          },
+          "requiredNote": "Como esta pergunta é obrigatória, só quem a vê precisa responder.",
+          "reset": "A pergunta que decide mudou, então as respostas escolhidas foram limpas.",
+          "errors": {
+            "opener": "Escolha a pergunta que decide.",
+            "values": "Escolha pelo menos uma resposta que abre esta pergunta.",
+            "stale": "Esta condição não vale mais. Escolha a pergunta e a resposta de novo."
+          }
+        },
         "save": "Salvar pergunta",
         "saving": "Salvando…",
         "archive": "Arquivar pergunta",

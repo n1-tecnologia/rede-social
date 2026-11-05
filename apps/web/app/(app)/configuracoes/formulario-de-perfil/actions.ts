@@ -226,7 +226,7 @@ export async function reactivateQuestionAction(id: string): Promise<ReactivateRe
 // ── 12-16: the question editor's writes ────────────────────────────────────────────────────────────
 
 /** The field of the sheet a refusal of a write belongs to; `form` is a refusal no single field owns. */
-export type SaveFieldKey = 'title' | 'helpText' | 'options' | 'limits' | 'form';
+export type SaveFieldKey = 'title' | 'helpText' | 'options' | 'limits' | 'condition' | 'form';
 
 /**
  * What a write of a question returns (UI-D-569). `invalid` is a 400: the issue code per field, which the
@@ -275,7 +275,13 @@ const TITLE_ISSUES: ReadonlySet<string> = new Set(['required', 'too_long']);
 /** The field of a contract issue's path. */
 function fieldOf(path: PropertyKey[]): SaveFieldKey {
   const head = path[0];
-  if (head === 'title' || head === 'helpText' || head === 'options' || head === 'limits') {
+  if (
+    head === 'title' ||
+    head === 'helpText' ||
+    head === 'options' ||
+    head === 'limits' ||
+    head === 'condition'
+  ) {
     return head;
   }
   return 'form';

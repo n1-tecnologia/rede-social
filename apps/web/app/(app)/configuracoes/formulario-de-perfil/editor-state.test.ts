@@ -1,19 +1,23 @@
 import type { AdminQuestion } from '@rede-social/contracts/profile-form';
 import { describe, expect, it } from 'vitest';
-import { adminQuestion, uuid } from '@/lib/profile-form/test-fixtures';
+import { adminQuestion, adminStep, archivedQuestion, uuid } from '@/lib/profile-form/test-fixtures';
 import {
   addOptionRow,
   blankDraft,
   canSave,
   changeType,
   checkDraftLocks,
+  checkStepChange,
+  conditionOptionsText,
   draftFromQuestion,
   draftLock,
+  eligibleOpeners,
   hasChanges,
   hasErrors,
   isDirty,
   type LockDefinition,
   type LockInput,
+  layoutOrder,
   lockFlags,
   moveOptionRow,
   narrowsLimits,
@@ -23,11 +27,13 @@ import {
   renameOptionRow,
   reopeningOf,
   replaceDraftFrom,
+  sameCondition,
   serverFieldError,
   serverLimitsError,
   serverOptionsErrors,
   toCreateBody,
   toUpdateBody,
+  validateCondition,
   validateDraft,
   validateOptions,
 } from './editor-state';
@@ -794,5 +800,349 @@ describe('the limits refusal before any request (UI-D-574)', () => {
   it('does not refuse the same narrowing on a question nobody answered', () => {
     const fresh = { ...question, answerCount: 0 };
     expect(hasErrors(validateDraft({ ...draftFromQuestion(fresh), max: '9' }, fresh))).toBe(false);
+  });
+});
+
+// ── 12.1-17 Task 1: the step and the condition in the draft (D-620..D-623, UI-D-647, UI-D-648) ────
+
+describe('12.1-17: the draft carries the step and the condition', () => {
+  const stepA = adminStep({ title: 'Geral' });
+  const stepB = adminStep({ title: 'Clínica' });
+  const opener = adminQuestion('single_choice', {
+    stepId: stepA.id,
+    options: [
+      { id: uuid(9001), label: 'Tenho', answerCount: 0 },
+      { id: uuid(9002), label: 'Trabalho', answerCount: 0 },
+    ],
+  });
+
+  it('starts without a condition and with the step it is given', () => {
+    expect(blankDraft().condition).toBeNull();
+    expect(blankDraft().stepId).toBeNull();
+    expect(blankDraft(stepB.id).stepId).toBe(stepB.id);
+  });
+
+  it('copies the stored step and condition into an edit draft and into a replacement', () => {
+    const shown = adminQuestion('short_text', {
+      stepId: stepB.id,
+      condition: { questionId: opener.id, values: [uuid(9001)] },
+    });
+    for (const draft of [draftFromQuestion(shown), replaceDraftFrom(shown)]) {
+      expect(draft.stepId).toBe(stepB.id);
+      expect(draft.condition).toEqual({ questionId: opener.id, values: [uuid(9001)] });
+      // A copy: ticking a value in the draft never edits the stored question.
+      expect(draft.condition?.values).not.toBe(shown.condition?.values);
+    }
+  });
+
+  it('sends the step and the condition on create only when the draft has them', () => {
+    const plain = { ...blankDraft(), type: 'short_text' as const, title: 'Nome' };
+    expect(Object.keys(toCreateBody(plain))).not.toContain('stepId');
+    expect(Object.keys(toCreateBody(plain))).not.toContain('condition');
+    const body = toCreateBody({
+      ...plain,
+      stepId: stepB.id,
+      condition: { questionId: opener.id, values: [uuid(9002)] },
+    });
+    expect(body.stepId).toBe(stepB.id);
+    expect(body.condition).toEqual({ questionId: opener.id, values: [uuid(9002)] });
+  });
+
+  it('sends on update ONLY a changed step, and a changed or removed condition', () => {
+    const shown = adminQuestion('short_text', {
+      stepId: stepA.id,
+      condition: { questionId: opener.id, values: [uuid(9001), uuid(9002)] },
+    });
+    const same = draftFromQuestion(shown);
+    expect(hasChanges(toUpdateBody(shown, same))).toBe(false);
+    // The order of the tokens is not a change.
+    expect(
+      hasChanges(
+        toUpdateBody(shown, {
+          ...same,
+          condition: { questionId: opener.id, values: [uuid(9002), uuid(9001)] },
+        }),
+      ),
+    ).toBe(false);
+    expect(toUpdateBody(shown, { ...same, stepId: stepB.id }).stepId).toBe(stepB.id);
+    expect(toUpdateBody(shown, { ...same, condition: null }).condition).toBeNull();
+    expect(
+      toUpdateBody(shown, { ...same, condition: { questionId: opener.id, values: [uuid(9001)] } })
+        .condition,
+    ).toEqual({ questionId: opener.id, values: [uuid(9001)] });
+    // A question with no condition that gets one.
+    const free = adminQuestion('short_text', { stepId: stepA.id });
+    expect(
+      toUpdateBody(free, {
+        ...draftFromQuestion(free),
+        condition: { questionId: opener.id, values: [uuid(9001)] },
+      }).condition,
+    ).toEqual({ questionId: opener.id, values: [uuid(9001)] });
+  });
+
+  it('compares conditions as sets', () => {
+    expect(sameCondition(null, null)).toBe(true);
+    expect(sameCondition(null, { questionId: 'a', values: ['x'] })).toBe(false);
+    expect(
+      sameCondition(
+        { questionId: 'a', values: ['x', 'y'] },
+        { questionId: 'a', values: ['y', 'x'] },
+      ),
+    ).toBe(true);
+    expect(
+      sameCondition({ questionId: 'a', values: ['x'] }, { questionId: 'b', values: ['x'] }),
+    ).toBe(false);
+  });
+
+  it('counts the step and the condition as unsaved changes', () => {
+    const shown = adminQuestion('short_text', { stepId: stepA.id });
+    const draft = draftFromQuestion(shown);
+    expect(isDirty(draft, { ...draft, stepId: stepB.id })).toBe(true);
+    expect(isDirty(draft, { ...draft, condition: { questionId: '', values: [] } })).toBe(true);
+  });
+});
+
+describe('12.1-17: validateCondition (UI-D-648)', () => {
+  it('says nothing while the switch is off', () => {
+    expect(validateCondition({ condition: null })).toEqual({});
+  });
+  it('asks for the opener, then for at least one answer', () => {
+    expect(validateCondition({ condition: { questionId: '', values: [] } })).toEqual({
+      conditionOpener: { key: 'condition.errors.opener' },
+    });
+    expect(validateCondition({ condition: { questionId: uuid(1), values: [] } })).toEqual({
+      conditionValues: { key: 'condition.errors.values' },
+    });
+    expect(validateCondition({ condition: { questionId: uuid(1), values: ['true'] } })).toEqual({});
+  });
+  it('is part of validateDraft', () => {
+    const draft = {
+      ...blankDraft(),
+      type: 'short_text' as const,
+      title: 'Nome',
+      condition: { questionId: '', values: [] },
+    };
+    expect(validateDraft(draft).conditionOpener).toEqual({ key: 'condition.errors.opener' });
+    expect(hasErrors(validateDraft({ ...draft, condition: null }))).toBe(false);
+  });
+});
+
+describe('12.1-17: eligibleOpeners (D-620, D-622, D-623)', () => {
+  const s1 = adminStep({ title: 'Um' });
+  const s2 = adminStep({ title: 'Dois' });
+  const s3 = adminStep({ title: 'Três' });
+  const steps = [s1, s2, s3];
+  const a = adminQuestion('single_choice', { stepId: s1.id, title: 'A' });
+  const b = adminQuestion('yes_no', { stepId: s1.id, title: 'B' });
+  const text = adminQuestion('short_text', { stepId: s1.id, title: 'Texto' });
+  const c = adminQuestion('dropdown', { stepId: s2.id, title: 'C' });
+  const conditional = adminQuestion('multiple_choice', {
+    stepId: s2.id,
+    title: 'Condicional',
+    condition: { questionId: a.id, values: [uuid(1)] },
+  });
+  const me = adminQuestion('short_text', { stepId: s2.id, title: 'Eu' });
+  const later = adminQuestion('single_choice', { stepId: s2.id, title: 'Depois' });
+  const far = adminQuestion('yes_no', { stepId: s3.id, title: 'Longe' });
+  const all = [a, b, text, c, conditional, me, later, far];
+  const titles = (list: AdminQuestion[]) => list.map((q) => q.title);
+
+  it('orders the layout by step, then by position', () => {
+    expect(titles(layoutOrder([far, a, c], steps))).toEqual(['A', 'C', 'Longe']);
+    expect(titles(layoutOrder([c, a], []))).toEqual(['C', 'A']);
+  });
+
+  it('offers, for an edited question, only the ACTIVE choice or yes/no ones without a condition that come before it', () => {
+    const offered = eligibleOpeners({
+      questions: all,
+      steps,
+      selfId: me.id,
+      storedStepId: me.stepId,
+      stepId: me.stepId,
+    });
+    // Texto (wrong type), Condicional (has a condition), Eu (itself), Depois and Longe (later) are absent.
+    expect(titles(offered)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('never offers an archived row or a question of a type that cannot open', () => {
+    const archived = archivedQuestion('single_choice', { stepId: s1.id, title: 'Arquivada' });
+    const offered = eligibleOpeners({
+      questions: [...all, archived as unknown as AdminQuestion],
+      steps,
+      selfId: null,
+      storedStepId: null,
+      stepId: s3.id,
+    });
+    expect(titles(offered)).not.toContain('Arquivada');
+    expect(titles(offered)).not.toContain('Texto');
+  });
+
+  it('for a NEW question offers every eligible one of its step and the steps before it', () => {
+    expect(
+      titles(
+        eligibleOpeners({ questions: all, steps, selfId: null, storedStepId: null, stepId: s1.id }),
+      ),
+    ).toEqual(['A', 'B']);
+    expect(
+      titles(
+        eligibleOpeners({ questions: all, steps, selfId: null, storedStepId: null, stepId: s2.id }),
+      ),
+    ).toEqual(['A', 'B', 'C', 'Depois']);
+    expect(
+      titles(
+        eligibleOpeners({ questions: all, steps, selfId: null, storedStepId: null, stepId: s3.id }),
+      ),
+    ).toEqual(['A', 'B', 'C', 'Depois', 'Longe']);
+  });
+
+  it('for a question that MOVES, measures it at the end of the new step (never itself)', () => {
+    expect(
+      titles(
+        eligibleOpeners({
+          questions: all,
+          steps,
+          selfId: me.id,
+          storedStepId: s2.id,
+          stepId: s3.id,
+        }),
+      ),
+    ).toEqual(['A', 'B', 'C', 'Depois', 'Longe']);
+    expect(
+      titles(
+        eligibleOpeners({
+          questions: all,
+          steps,
+          selfId: me.id,
+          storedStepId: s2.id,
+          stepId: s1.id,
+        }),
+      ),
+    ).toEqual(['A', 'B']);
+  });
+
+  it('with no step known, an edited question sees those before it and a new one sees all', () => {
+    const flat = [a, text, c, me, later];
+    expect(
+      titles(
+        eligibleOpeners({
+          questions: flat,
+          steps: [],
+          selfId: me.id,
+          storedStepId: s2.id,
+          stepId: null,
+        }),
+      ),
+    ).toEqual(['A', 'C']);
+    expect(
+      titles(
+        eligibleOpeners({
+          questions: flat,
+          steps: [],
+          selfId: null,
+          storedStepId: null,
+          stepId: null,
+        }),
+      ),
+    ).toEqual(['A', 'C', 'Depois']);
+  });
+});
+
+describe('12.1-17: checkStepChange (D-623, UI-D-647)', () => {
+  const s1 = adminStep({ title: 'Um' });
+  const s2 = adminStep({ title: 'Dois' });
+  const s3 = adminStep({ title: 'Três' });
+  const steps = [s1, s2, s3];
+  const opener = adminQuestion('single_choice', { stepId: s2.id, title: 'Abridora' });
+  const shown = adminQuestion('short_text', {
+    stepId: s3.id,
+    title: 'Mostrada',
+    condition: { questionId: opener.id, values: [uuid(1)] },
+  });
+  const questions = [opener, shown];
+
+  it('is a no-op when the step does not change', () => {
+    expect(
+      checkStepChange({
+        questions,
+        steps,
+        stored: shown,
+        condition: shown.condition,
+        nextStepId: s3.id,
+      }),
+    ).toEqual({ kind: 'ok', clearOpener: false });
+  });
+
+  it('snaps back a shown question that would go above its opener, naming the opener', () => {
+    expect(
+      checkStepChange({
+        questions,
+        steps,
+        stored: shown,
+        condition: shown.condition,
+        nextStepId: s1.id,
+      }),
+    ).toEqual({ kind: 'mustFollow', opener: 'Abridora' });
+    // The opener's own step is fine: the question goes to the END of it.
+    expect(
+      checkStepChange({
+        questions,
+        steps,
+        stored: shown,
+        condition: shown.condition,
+        nextStepId: s2.id,
+      }),
+    ).toEqual({ kind: 'ok', clearOpener: false });
+  });
+
+  it('snaps back an opener that would go at or after a dependent, naming the dependent', () => {
+    expect(
+      checkStepChange({ questions, steps, stored: opener, condition: null, nextStepId: s3.id }),
+    ).toEqual({ kind: 'mustPrecede', dependent: 'Mostrada' });
+    expect(
+      checkStepChange({ questions, steps, stored: opener, condition: null, nextStepId: s1.id }),
+    ).toEqual({ kind: 'ok', clearOpener: false });
+  });
+
+  it('only clears a DRAFT opener the new step no longer allows', () => {
+    const free = adminQuestion('short_text', { stepId: s3.id });
+    expect(
+      checkStepChange({
+        questions: [...questions, free],
+        steps,
+        stored: free,
+        condition: { questionId: opener.id, values: [uuid(1)] },
+        nextStepId: s1.id,
+      }),
+    ).toEqual({ kind: 'ok', clearOpener: true });
+    expect(
+      checkStepChange({
+        questions,
+        steps,
+        stored: null,
+        condition: { questionId: opener.id, values: [uuid(1)] },
+        nextStepId: s1.id,
+      }),
+    ).toEqual({ kind: 'ok', clearOpener: true });
+  });
+});
+
+describe('12.1-17: conditionOptionsText (UI-D-650)', () => {
+  const words = { yes: 'Sim', no: 'Não' };
+  it('quotes the labels of a choice opener as a disjunction', () => {
+    expect(conditionOptionsText({ yesNo: false, openerTitle: 'X', labels: ['A'] }, words)).toBe(
+      '“A”',
+    );
+    expect(
+      conditionOptionsText({ yesNo: false, openerTitle: 'X', labels: ['A', 'B', 'C'] }, words),
+    ).toBe('“A”, “B” ou “C”');
+  });
+  it('uses the plain words for yes/no and nothing when no label is left', () => {
+    expect(conditionOptionsText({ yesNo: true, openerTitle: 'X', values: ['true'] }, words)).toBe(
+      'Sim',
+    );
+    expect(
+      conditionOptionsText({ yesNo: true, openerTitle: 'X', values: ['true', 'false'] }, words),
+    ).toBe('Sim ou Não');
+    expect(conditionOptionsText({ yesNo: false, openerTitle: 'X', labels: [] }, words)).toBe('');
   });
 });

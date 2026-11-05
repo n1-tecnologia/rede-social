@@ -157,6 +157,8 @@ export function QuestionBuilder({
           mode={opening.mode}
           question={opening.question}
           stepId={opening.stepId}
+          questions={questions}
+          steps={steps}
           tenantName={tenantName}
           limit={limit}
           onClose={close}

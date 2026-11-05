@@ -6,7 +6,7 @@ import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { adminQuestion, uuid } from '@/lib/profile-form/test-fixtures';
+import { adminQuestion, adminStep, uuid } from '@/lib/profile-form/test-fixtures';
 import type { SaveQuestionResult } from './actions';
 import type { EditorMode } from './editor-state';
 
@@ -56,7 +56,14 @@ const onClose = vi.fn();
 const onReplace = vi.fn();
 
 function mount(
-  props: { mode?: EditorMode; question?: ReturnType<typeof adminQuestion> | null } = {},
+  props: {
+    mode?: EditorMode;
+    question?: ReturnType<typeof adminQuestion> | null;
+    /** 12.1-17: the active list and the steps the builder holds. Absent: the sheet shows no condition block. */
+    questions?: ReturnType<typeof adminQuestion>[];
+    steps?: ReturnType<typeof adminStep>[];
+    stepId?: string;
+  } = {},
 ) {
   return render(
     <NextIntlClientProvider locale="pt-BR" messages={messages}>
@@ -64,6 +71,9 @@ function mount(
         open
         mode={props.mode ?? 'create'}
         question={props.question ?? null}
+        questions={props.questions}
+        steps={props.steps}
+        stepId={props.stepId}
         tenantName="Ana Mentoria"
         limit={30}
         onClose={onClose}
@@ -1451,5 +1461,353 @@ describe('no raw HTML anywhere in the editor (T-12-35)', () => {
     expect(dialog().querySelector('script, img, b')).toBeNull();
     expect(titleField().value).toBe('<script>alert(1)</script>');
     expect(dialog().textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+});
+
+// ── 12.1-17 Task 1: the step field and the condition editor inside the sheet (UI-D-647, UI-D-648) ──
+
+describe('12.1-17: "Onde e quando aparece" (D-620..D-623, UI-D-647, UI-D-648)', () => {
+  const s1 = adminStep({ title: 'Informações gerais' });
+  const s2 = adminStep({ title: 'Sobre a sua clínica' });
+  const steps = [s1, s2];
+  const opts = (...labels: string[]) =>
+    labels.map((label, at) => ({ id: uuid(9300 + at), label, answerCount: 0 }));
+  const clinic = adminQuestion('single_choice', {
+    stepId: s1.id,
+    title: 'Você tem clínica?',
+    options: opts('Tenho uma clínica', 'Trabalho em uma clínica', 'Estou aprendendo'),
+  });
+  const team = adminQuestion('yes_no', { stepId: s1.id, title: 'Você já tem equipe?' });
+  const plain = adminQuestion('short_text', { stepId: s1.id, title: 'Nome profissional' });
+  const shown = adminQuestion('short_text', {
+    stepId: s2.id,
+    title: 'Nome da clínica',
+    condition: { questionId: clinic.id, values: [uuid(9300)] },
+  });
+  const later = adminQuestion('dropdown', {
+    stepId: s2.id,
+    title: 'Depois desta',
+    options: opts('Um', 'Dois'),
+  });
+  const target = adminQuestion('short_text', { stepId: s2.id, title: 'Telefone da clínica' });
+  const active = [clinic, team, plain, shown, later, target];
+
+  const stepSelect = () => screen.getByLabelText('Etapa') as HTMLSelectElement;
+  const conditionSwitch = () => screen.getByRole('switch', { name: 'Mostrar só em alguns casos' });
+  const openerSelect = () => screen.getByLabelText('Pergunta que decide') as HTMLSelectElement;
+  const openerTitles = () =>
+    within(openerSelect())
+      .getAllByRole('option')
+      .map((option) => option.textContent);
+
+  it('shows the block after the two switch rows, before the footer', () => {
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    expect(screen.queryByText('Onde e quando aparece')).toBeTruthy();
+    const form = dialog().querySelector('form') as HTMLFormElement;
+    const block = form.querySelector('[data-where-block]') as HTMLElement;
+    const switches = screen.getByRole('switch', { name: 'Mostrar no perfil do membro' });
+    expect(switches.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      block.compareDocumentPosition(saveButton()) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(block.querySelector('h3')?.textContent).toBe('Onde e quando aparece');
+  });
+
+  it('shows no condition block when the caller does not hold the question list', () => {
+    mount();
+    pick('Texto curto');
+    expect(screen.queryByText('Onde e quando aparece')).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
+  });
+
+  it('offers the "Etapa" select only with two or more steps, defaulting to the last', () => {
+    const { unmount } = mount({ questions: active, steps });
+    pick('Texto curto');
+    expect(stepSelect().tagName).toBe('SELECT');
+    expect(
+      within(stepSelect())
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Informações gerais', 'Sobre a sua clínica']);
+    expect(stepSelect().value).toBe(s2.id);
+    expect(
+      screen.getByText(
+        'Os membros respondem as etapas em ordem. Ao mudar de etapa, a pergunta vai para o fim da nova etapa.',
+      ),
+    ).toBeTruthy();
+    unmount();
+
+    mount({ questions: active, steps: [s1] });
+    pick('Texto curto');
+    expect(screen.queryByLabelText('Etapa')).toBeNull();
+    // With one step the block holds only the condition.
+    expect(screen.getByText('Onde e quando aparece')).toBeTruthy();
+    expect(conditionSwitch()).toBeTruthy();
+  });
+
+  it('opens on the step the sheet was opened from', () => {
+    mount({ questions: active, steps, stepId: s1.id });
+    pick('Texto curto');
+    expect(stepSelect().value).toBe(s1.id);
+  });
+
+  it('lists ONLY legal openers: no wrong type, no conditional, none later, not itself', () => {
+    mount({ mode: 'edit', question: plain, questions: active, steps });
+    fireEvent.click(conditionSwitch());
+    // "Nome profissional" is itself; "Nome da clínica" has a condition; "Depois desta" is later.
+    expect(openerTitles()).toEqual(['Selecione', 'Você tem clínica?', 'Você já tem equipe?']);
+    const groups = [...openerSelect().querySelectorAll('optgroup')].map((g) => g.label);
+    expect(groups).toEqual(['Informações gerais']);
+  });
+
+  it('with no eligible opener the switch is disabled and a note says what to create first', () => {
+    mount({ questions: [plain], steps: [s1, s2] });
+    pick('Texto curto');
+    expect(conditionSwitch().hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/crie antes uma pergunta de escolha ou de Sim ou não/)).toBeTruthy();
+  });
+
+  it('moves focus into the opener select when the switch turns on', () => {
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    fireEvent.click(conditionSwitch());
+    expect(document.activeElement).toBe(openerSelect());
+  });
+
+  it('the value picker follows the type of the chosen opener', () => {
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+    fireEvent.change(openerSelect(), { target: { value: team.id } });
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Sim' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Não' })).toBeTruthy();
+  });
+
+  it('changing the opener clears the ticked answers and says so in a status line', () => {
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
+    fireEvent.click(screen.getAllByRole('checkbox')[0] as HTMLElement);
+    fireEvent.change(openerSelect(), { target: { value: team.id } });
+    expect(
+      screen
+        .getByText('A pergunta que decide mudou, então as respostas escolhidas foram limpas.')
+        .closest('[role="status"]'),
+    ).toBeTruthy();
+  });
+
+  it('a required question shows the "só quem a vê" line', () => {
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
+    expect(screen.queryByText(/só quem a vê precisa responder/)).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    expect(
+      screen.getByText('Como esta pergunta é obrigatória, só quem a vê precisa responder.'),
+    ).toBeTruthy();
+  });
+
+  it('refuses to save without an opener, then without an answer, with the inline messages', async () => {
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    typeTitle('Telefone da clínica');
+    fireEvent.click(conditionSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe('Escolha a pergunta que decide.');
+    expect(openerSelect().getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(openerSelect());
+
+    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
+    expect(screen.queryByText('Escolha a pergunta que decide.')).toBeNull();
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(
+      screen
+        .getByText('Escolha pelo menos uma resposta que abre esta pergunta.')
+        .getAttribute('role'),
+    ).toBe('alert');
+  });
+
+  it('saves the condition and the step through the create action', async () => {
+    mount({ questions: active, steps, stepId: s2.id });
+    pick('Texto curto');
+    typeTitle('Telefone da clínica');
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
+    const boxes = screen.getAllByRole('checkbox');
+    fireEvent.click(boxes[1] as HTMLElement);
+    fireEvent.click(boxes[0] as HTMLElement);
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    const body = mocks.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.stepId).toBe(s2.id);
+    expect(body.condition).toEqual({
+      questionId: clinic.id,
+      values: [uuid(9300), uuid(9301)],
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('a yes/no opener saves the literal "true" or "false"', async () => {
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    typeTitle('Quantas pessoas?');
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: team.id } });
+    fireEvent.click(screen.getByRole('button', { name: 'Não' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    const sent = mocks.create.mock.calls[0]?.[0] as { condition: unknown };
+    expect(sent.condition).toEqual({ questionId: team.id, values: ['false'] });
+  });
+
+  it('sends no condition key when the switch was turned on and off again', async () => {
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    typeTitle('Telefone');
+    fireEvent.click(conditionSwitch());
+    fireEvent.click(conditionSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(Object.keys(mocks.create.mock.calls[0]?.[0] as object)).not.toContain('condition');
+  });
+
+  it('an edit sends the new condition and the new step, and only them', async () => {
+    mocks.update.mockResolvedValue({
+      ok: true,
+      question: adminQuestion('short_text'),
+      pending: null,
+    });
+    mount({ mode: 'edit', question: target, questions: active, steps });
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
+    fireEvent.click(screen.getAllByRole('checkbox')[2] as HTMLElement);
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+      revision: target.revision,
+      condition: { questionId: clinic.id, values: [uuid(9302)] },
+    });
+  });
+
+  it('snaps a shown question back when the step would put it above its opener', () => {
+    const lateOpener = adminQuestion('single_choice', {
+      stepId: s2.id,
+      title: 'Você tem clínica?',
+      options: opts('Tenho uma clínica', 'Estou aprendendo'),
+    });
+    const dependent = adminQuestion('short_text', {
+      stepId: s2.id,
+      title: 'Nome da clínica',
+      condition: { questionId: lateOpener.id, values: [uuid(9300)] },
+    });
+    mount({ mode: 'edit', question: dependent, questions: [lateOpener, dependent], steps });
+    expect(stepSelect().value).toBe(s2.id);
+    fireEvent.change(stepSelect(), { target: { value: s1.id } });
+    expect(stepSelect().value).toBe(s2.id);
+    const alert = screen.getByText(
+      'Esta pergunta depende de “Você tem clínica?”, então precisa ficar na etapa dela ou em uma depois.',
+    );
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(stepSelect().getAttribute('aria-invalid')).toBe('true');
+    // The opener's own step is fine: the question goes to the end of it.
+    fireEvent.change(stepSelect(), { target: { value: s2.id } });
+  });
+
+  it('snaps an opener back when the step would put it at or after its dependent', () => {
+    const opener = adminQuestion('single_choice', {
+      stepId: s1.id,
+      title: 'Abridora',
+      options: opts('A', 'B'),
+      opensCount: 1,
+    });
+    const dependent = adminQuestion('short_text', {
+      stepId: s2.id,
+      title: 'Nome da clínica',
+      condition: { questionId: opener.id, values: [uuid(9300)] },
+    });
+    mount({ mode: 'edit', question: opener, questions: [opener, dependent], steps });
+    fireEvent.change(stepSelect(), { target: { value: s2.id } });
+    expect(stepSelect().value).toBe(s1.id);
+    expect(
+      screen
+        .getByText(
+          '“Nome da clínica” depende desta pergunta, então ela precisa ficar na etapa de “Nome da clínica” ou em uma antes.',
+        )
+        .getAttribute('role'),
+    ).toBe('alert');
+  });
+
+  it('recomputes the opener list on a step change and clears an opener that is no longer legal', () => {
+    mount({ questions: active, steps, stepId: s2.id });
+    pick('Texto curto');
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
+    // Moving to the first step keeps "Você tem clínica?" (same step, earlier position than the end).
+    fireEvent.change(stepSelect(), { target: { value: s1.id } });
+    expect(openerSelect().value).toBe(clinic.id);
+    // A step that comes BEFORE the opener's step cannot hold the question: only possible with a later opener.
+  });
+
+  it('clears a draft opener the new step no longer allows, with the polite note', () => {
+    const lateOpener = adminQuestion('yes_no', { stepId: s2.id, title: 'Já na etapa dois?' });
+    mount({ questions: [clinic, lateOpener], steps, stepId: s2.id });
+    pick('Texto curto');
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: lateOpener.id } });
+    fireEvent.change(stepSelect(), { target: { value: s1.id } });
+    expect(openerSelect().value).toBe('');
+    expect(
+      screen.getByText('A pergunta que decide mudou, então as respostas escolhidas foram limpas.'),
+    ).toBeTruthy();
+    expect(openerTitles()).toEqual(['Selecione', 'Você tem clínica?']);
+  });
+
+  it('shows the 409 line, clears the choice and refreshes when the opener changed meanwhile', async () => {
+    mocks.create.mockResolvedValue({ ok: false, code: 'conflict', issue: 'condition_invalid' });
+    mount({ questions: active, steps });
+    pick('Texto curto');
+    typeTitle('Telefone');
+    fireEvent.click(conditionSwitch());
+    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
+    fireEvent.click(screen.getAllByRole('checkbox')[0] as HTMLElement);
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(
+      screen
+        .getByText('Esta condição não vale mais. Escolha a pergunta e a resposta de novo.')
+        .getAttribute('role'),
+    ).toBe('alert');
+    expect(openerSelect().value).toBe('');
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    // It is the condition's line, not the generic "changed while you edited" banner.
+    expect(dialog().querySelector('[data-conflict-alert]')).toBeNull();
+  });
+
+  it('a replacement copies the step and the condition of the replaced question', () => {
+    mount({ mode: 'replace', question: shown, questions: active, steps });
+    pick('Texto curto');
+    expect(stepSelect().value).toBe(s2.id);
+    expect(conditionSwitch().getAttribute('aria-checked')).toBe('true');
+    expect(openerSelect().value).toBe(clinic.id);
   });
 });

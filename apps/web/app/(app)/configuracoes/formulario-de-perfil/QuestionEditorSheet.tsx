@@ -2,6 +2,7 @@
 
 import {
   type AdminQuestion,
+  type AdminStep,
   codePoints,
   PROFILE_FORM_LIMITS,
 } from '@rede-social/contracts/profile-form';
@@ -10,6 +11,7 @@ import {
   Button,
   ConfirmDialog,
   Input,
+  SectionTitle,
   Textarea,
   useMediaQuery,
   useToast,
@@ -31,13 +33,16 @@ import {
   type SaveQuestionResult,
   updateQuestionAction,
 } from './actions';
+import { CONDITION_OPENER_ID, ConditionEditor, SheetSelect } from './ConditionEditor';
 import {
   blankDraft,
   canSave,
   changeType,
+  checkStepChange,
   type DraftErrors,
   draftFromQuestion,
   type EditorMode,
+  eligibleOpeners,
   hasChanges,
   hasErrors,
   isDirty,
@@ -69,6 +74,13 @@ export interface QuestionEditorSheetProps {
    * step, which the server picks (D-629). Ignored for an edit and a replace, which keep their step.
    */
   stepId?: string;
+  /**
+   * The ACTIVE questions the builder holds (12.1-17): the openers the condition editor may offer. Absent means the
+   * caller does not know them, and then the sheet shows no condition block at all.
+   */
+  questions?: AdminQuestion[];
+  /** The tenant's steps in order (12.1-17): the "Etapa" field shows with two or more. */
+  steps?: AdminStep[];
   /** The tenant's display name, the `{tenant}` of the LGPD notice. */
   tenantName: string;
   /** The most active questions a tenant may have: the limit sentence when a create hits it. */
@@ -81,6 +93,8 @@ export interface QuestionEditorSheetProps {
 
 const TITLE_ID = 'pf-title';
 const HELP_ID = 'pf-help';
+const STEP_ID = 'pf-step';
+const NO_STEPS: AdminStep[] = [];
 
 /**
  * The question editor (12-16, D-585, D-590, D-593, D-594, UI-D-569..UI-D-573; PFORM-02, PFORM-22): ONE
@@ -108,6 +122,8 @@ export function QuestionEditorSheet({
   mode,
   question,
   stepId,
+  questions,
+  steps = NO_STEPS,
   tenantName,
   limit,
   onClose,
@@ -123,7 +139,8 @@ export function QuestionEditorSheet({
   const [initial] = useState<QuestionDraft>(() => {
     if (mode === 'edit' && question) return draftFromQuestion(question);
     if (mode === 'replace' && question) return replaceDraftFrom(question);
-    return blankDraft();
+    // A new question lands in the step the sheet was opened from, or in the last one (D-629).
+    return blankDraft(stepId ?? steps[steps.length - 1]?.id ?? null);
   });
   const stored = mode === 'edit' ? (question ?? null) : null;
   const locks = lockFlags(stored);
@@ -142,6 +159,21 @@ export function QuestionEditorSheet({
   // `impact` keeps the figure for the dialog's exit animation; `impactOpen` is what the dialog follows.
   const [impact, setImpact] = useState<{ members: number; kind: Reopening['kind'] } | null>(null);
   const [impactOpen, setImpactOpen] = useState(false);
+  // The condition block (12.1-17): the step field's refusal, the editor's own "answers cleared" note and the 409.
+  const [stepRefusal, setStepRefusal] = useState<ReturnType<typeof checkStepChange> | null>(null);
+  const [resetNote, setResetNote] = useState(false);
+  const [conditionStale, setConditionStale] = useState(false);
+
+  const activeQuestions = questions ?? [];
+  const showStepField = steps.length >= 2;
+  const showConditions = questions !== undefined;
+  const openers = eligibleOpeners({
+    questions: activeQuestions,
+    steps,
+    selfId: question && mode !== 'create' ? question.id : null,
+    storedStepId: stored?.stepId ?? null,
+    stepId: draft.stepId,
+  });
 
   const dirty = isDirty(initial, draft);
 
@@ -189,7 +221,55 @@ export function QuestionEditorSheet({
       id = target ? `pf-option-${target.key}` : null;
     } else if (found.min || found.limits) id = 'pf-min';
     else if (found.max) id = 'pf-max';
+    else if (found.conditionOpener) id = CONDITION_OPENER_ID;
     if (id) document.getElementById(id)?.focus();
+    else if (found.conditionValues) {
+      document
+        .querySelector<HTMLElement>(
+          '[data-condition-editor] fieldset input, [data-condition-editor] fieldset button',
+        )
+        ?.focus();
+    }
+  }
+
+  /** The opener changed meanwhile (409): nothing was saved, the choice is cleared and the page re-reads. */
+  function staleCondition() {
+    setConditionStale(true);
+    setResetNote(false);
+    setDraft((current) =>
+      current.condition ? { ...current, condition: { questionId: '', values: [] } } : current,
+    );
+    router.refresh();
+  }
+
+  /**
+   * A change of the step field (UI-D-647). A change that breaks D-623 is NOT applied: the select stays on the
+   * step it had and a `role="alert"` line says which question forces it. One that only makes the draft opener
+   * ineligible clears the opener and says so politely.
+   */
+  function changeStep(nextStepId: string) {
+    if (nextStepId === draft.stepId) return;
+    const result = checkStepChange({
+      questions: activeQuestions,
+      steps,
+      stored,
+      condition: draft.condition,
+      nextStepId,
+    });
+    if (result.kind !== 'ok') {
+      setStepRefusal(result);
+      return;
+    }
+    setStepRefusal(null);
+    setDraft((current) => ({
+      ...current,
+      stepId: nextStepId,
+      condition:
+        result.clearOpener && current.condition
+          ? { questionId: '', values: [] }
+          : current.condition,
+    }));
+    if (result.clearOpener) setResetNote(true);
   }
 
   function lostPermission(message: string) {
@@ -210,6 +290,10 @@ export function QuestionEditorSheet({
         toast.show({ tone: 'error', message: t('list.limit', { max: limit }) });
         return;
       case 'conflict':
+        if (result.issue === 'condition_invalid') {
+          staleCondition();
+          return;
+        }
         // Nothing was saved. The page is refreshed so reopening the question shows the current version.
         setConflict(true);
         router.refresh();
@@ -228,6 +312,10 @@ export function QuestionEditorSheet({
         const limits = result.fields.limits;
         const limitsError = limits === undefined ? null : serverLimitsError(draft.type, limits);
         if (limitsError) found.limits = limitsError;
+        if (result.fields.condition !== undefined) {
+          staleCondition();
+          return;
+        }
         if (hasErrors(found)) {
           setErrors(found);
           focusFirst(found);
@@ -255,10 +343,11 @@ export function QuestionEditorSheet({
           { reopens },
         );
       } else {
-        result = await createQuestionAction(
-          stepId ? { ...toCreateBody(draft), stepId } : toCreateBody(draft),
-          { reopens },
-        );
+        const body = toCreateBody(draft);
+        // The top "Adicionar pergunta" names no step: the server adds to the last one (D-629), unless the admin
+        // picked another in the "Etapa" field. A well's own button names its step.
+        if (stepId === undefined && draft.stepId === initial.stepId) delete body.stepId;
+        result = await createQuestionAction(body, { reopens });
       }
     } catch {
       // A thrown request reads like any other failed write: the sheet stays open with the draft.
@@ -531,6 +620,63 @@ export function QuestionEditorSheet({
                       : undefined
                   }
                 />
+
+                {showStepField || showConditions ? (
+                  <div className="flex flex-col gap-4" data-where-block>
+                    <SectionTitle variant="micro" as="h3">
+                      {te('where.title')}
+                    </SectionTitle>
+                    {showStepField ? (
+                      <SheetSelect
+                        id={STEP_ID}
+                        label={te('step.label')}
+                        value={draft.stepId ?? ''}
+                        onChange={changeStep}
+                        helper={te('step.helper')}
+                        error={
+                          stepRefusal?.kind === 'mustFollow'
+                            ? te('step.errors.mustFollow', { opener: stepRefusal.opener })
+                            : stepRefusal?.kind === 'mustPrecede'
+                              ? te('step.errors.mustPrecede', { dependent: stepRefusal.dependent })
+                              : undefined
+                        }
+                      >
+                        {steps.map((step) => (
+                          <option key={step.id} value={step.id}>
+                            {step.title}
+                          </option>
+                        ))}
+                      </SheetSelect>
+                    ) : null}
+                    {showConditions ? (
+                      <ConditionEditor
+                        condition={draft.condition}
+                        openers={openers}
+                        steps={steps}
+                        required={draft.required}
+                        openerError={
+                          errors.conditionOpener
+                            ? te(errors.conditionOpener.key, errors.conditionOpener.values)
+                            : undefined
+                        }
+                        valuesError={
+                          errors.conditionValues
+                            ? te(errors.conditionValues.key, errors.conditionValues.values)
+                            : undefined
+                        }
+                        stale={conditionStale}
+                        resetNote={resetNote}
+                        onChange={(condition, reset) => {
+                          patch({ condition });
+                          setResetNote(reset === true);
+                          setConditionStale(false);
+                          clear('conditionOpener');
+                          clear('conditionValues');
+                        }}
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
               </>
             ) : null}
           </fieldset>
