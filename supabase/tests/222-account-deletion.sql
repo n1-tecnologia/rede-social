@@ -24,7 +24,7 @@ begin;
 --
 -- Fixture ids use the `22200000-…` prefix, used by no other file. Like its siblings, this file ROLLS BACK.
 -- The literal `Membro removido` is the constant `REMOVED_MEMBER_NAME` in packages/contracts/src/native.ts (plan 03).
-select plan(86);
+select plan(97);
 
 -- ── helpers (session-local) ───────────────────────────────────────────────────────────────────
 -- u('a3') a user id, m('a3') that user's membership id, t('a') a tenant id, mail('a3') the e-mail.

@@ -190,3 +190,144 @@ $$;
 --> statement-breakpoint
 revoke all on function app.account_deletion_notice_take() from public;--> statement-breakpoint
 grant execute on function app.account_deletion_notice_take() to authenticated;
+--> statement-breakpoint
+
+-- ── app.account_deletion_due ──────────────────────────────────────────────────────────────────────────
+-- The job's list (plan 13): memberships whose deadline has PASSED (`deletion_due_at <= now()`, so a row due
+-- exactly now is returned and one a second ahead is not), that are not anonymised yet and are still deactivated.
+-- A cancelled request has its markers cleared and a moderation soft-delete never had them, so neither appears.
+-- Ordered by deadline then id, the limit clamped to 1..500. It lists across tenants on purpose (the job runs
+-- for the whole database); executable by the connection role and `service_role` only (T-13-13).
+create or replace function app.account_deletion_due(p_limit int)
+returns table (membership_id uuid, user_id uuid, tenant_id uuid)
+language plpgsql stable security definer set search_path = '' as $$
+#variable_conflict use_column
+declare
+  v_limit int := least(greatest(coalesce(p_limit, 1), 1), 500);
+begin
+  return query
+  select m.id, m.user_id, m.tenant_id
+    from public.memberships m
+   where m.deletion_due_at <= now()
+     and m.anonymised_at is null
+     and m.deleted_at is not null
+   order by m.deletion_due_at, m.id
+   limit v_limit;
+end
+$$;
+--> statement-breakpoint
+revoke all on function app.account_deletion_due(int) from public, anon, authenticated;--> statement-breakpoint
+grant execute on function app.account_deletion_due(int) to service_role, api_user;--> statement-breakpoint
+
+-- ── app.account_anonymise ─────────────────────────────────────────────────────────────────────────────
+-- THE ANONYMISATION (D-609, one-way): erases the personal data of ONE due member IN PLACE and returns true; it
+-- returns false (changing nothing) for a member who is not due, was cancelled, is already anonymised or does not
+-- exist. The membership is locked `for update` and the deadline is re-checked under the lock, so a cancel racing
+-- the deadline resolves to exactly one outcome (the cancel takes the same lock and re-checks the same deadline).
+-- It NEVER deletes a content row: posts, comments, counters, orders, grants, moderation records and the
+-- membership itself stay, so every author foreign key holds. `tenant_id` comes from the LOCKED ROW in every
+-- statement, never from a parameter (the owner is `postgres`, which bypasses RLS, so scoping is the function's).
+--
+-- THE PRIVACY INVENTORY (assumption A-13-01, recorded in the 13-07 SUMMARY, one decision per column):
+--   scrubbed here   member_profiles.display_name (the constant below) / bio / avatar_asset_id;
+--                   media_assets (the member's avatar): status 'deleted', deleted_at, filename;
+--                   access_grants.email, tenant_invites.email (placeholder `removed-<id>@removed.invalid`);
+--                   payment_events.email (null); consent_records.ip and user_agent (null, the proof stays);
+--   rows deleted    profile_form_answers (Instagram and the other free text), push_subscriptions (tokens, agents);
+--   kept            everything with ids only (orders, entitlements, attendances, follows, moderation rows);
+--   residual        see the SUMMARY (public.users e-mail and name, chat bodies, the storage object, notifications).
+-- The display name below is the constant `REMOVED_MEMBER_NAME` in packages/contracts/src/native.ts (plan 03);
+-- supabase/tests/222-account-deletion.sql asserts this source still contains the literal.
+--
+-- The Auth account (e-mail and password) is NOT touched here: the API job removes it through the Auth admin soft
+-- delete so the address becomes reusable (plan 13). The member's e-mail is read from `public.users` BEFORE any
+-- scrub, to find the retained purchase and grant rows that carry it.
+create or replace function app.account_anonymise(p_membership uuid)
+returns boolean
+language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_m public.memberships%rowtype;
+  v_email text;
+begin
+  if p_membership is null then
+    return false;
+  end if;
+
+  select m.* into v_m
+    from public.memberships m
+   where m.id = p_membership
+     for update;
+  if not found then
+    return false;
+  end if;
+
+  if v_m.deletion_requested_at is null
+     or v_m.anonymised_at is not null
+     or v_m.deleted_at is null
+     or v_m.deletion_due_at is null
+     or v_m.deletion_due_at > now() then
+    return false;
+  end if;
+
+  select lower(btrim(u.email)) into v_email
+    from public.users u
+   where u.id = v_m.user_id;
+
+  update public.member_profiles p
+     set display_name = 'Membro removido',
+         bio = null,
+         avatar_asset_id = null,
+         updated_at = now()
+   where p.tenant_id = v_m.tenant_id
+     and p.membership_id = v_m.id;
+
+  update public.media_assets a
+     set status = 'deleted',
+         deleted_at = coalesce(a.deleted_at, now()),
+         filename = null
+   where a.tenant_id = v_m.tenant_id
+     and a.owner_user_id = v_m.user_id
+     and a.purpose = 'avatar';
+
+  delete from public.profile_form_answers a
+   where a.tenant_id = v_m.tenant_id
+     and a.membership_id = v_m.id;
+
+  delete from public.push_subscriptions s
+   where s.tenant_id = v_m.tenant_id
+     and s.user_id = v_m.user_id;
+
+  update public.consent_records c
+     set ip = null,
+         user_agent = null
+   where c.tenant_id = v_m.tenant_id
+     and c.user_id = v_m.user_id;
+
+  update public.tenant_invites i
+     set email = 'removed-' || i.id::text || '@removed.invalid'
+   where i.tenant_id = v_m.tenant_id
+     and (i.user_id = v_m.user_id or (v_email is not null and lower(i.email::text) = v_email));
+
+  if v_email is not null and v_email <> '' then
+    update public.access_grants g
+       set email = 'removed-' || g.id::text || '@removed.invalid',
+           updated_at = now()
+     where g.tenant_id = v_m.tenant_id
+       and g.email = v_email;
+
+    update public.payment_events e
+       set email = null
+     where e.tenant_id = v_m.tenant_id
+       and e.email = v_email;
+  end if;
+
+  update public.memberships m
+     set anonymised_at = now()
+   where m.id = v_m.id
+     and m.tenant_id = v_m.tenant_id;
+  return true;
+end
+$$;
+--> statement-breakpoint
+revoke all on function app.account_anonymise(uuid) from public, anon, authenticated;--> statement-breakpoint
+grant execute on function app.account_anonymise(uuid) to service_role, api_user;
