@@ -143,7 +143,7 @@ describe('12-06 tracer: a member reads the form, answers it and the gate lets he
 
       const saved = await save(member, form, { [id]: '  Um amigo me indicou  ' });
       expect(saved.status).toBe(200);
-      expect(await saved.json()).toEqual({ missingRequired: 0 });
+      expect(await saved.json()).toEqual({ missingRequired: 0, missingQuestionIds: [] });
 
       // Stored trimmed, as the validator returns it.
       const [row] = await adminSql<{ value: unknown }[]>`
@@ -372,7 +372,7 @@ describe('12-06 every type round-trips (PFORM-07)', () => {
         const form = await readForm(member);
         const res = await save(member, form, { [id]: c.valid.send });
         expect(res.status).toBe(200);
-        expect(await res.json()).toEqual({ missingRequired: 0 });
+        expect(await res.json()).toEqual({ missingRequired: 0, missingQuestionIds: [] });
         expect(await storedAnswer(id)).toEqual(c.valid.stored);
         const again = await readForm(member);
         expect(again.questions.find((q) => q.id === id)?.answer).toEqual(c.valid.stored);
@@ -518,11 +518,11 @@ describe('12-06 every refusal is keyed by question id and writes nothing (PFORM-
   it('`answers: {}` is a valid no-op that answers the current missingRequired', async () => {
     const member = await person();
     await withProfileForm(labTenantId, async () => {
-      await question({ required: true });
+      const owed = await question({ required: true });
       const form = await readForm(member);
       const res = await save(member, form, {});
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ missingRequired: 1 });
+      expect(await res.json()).toEqual({ missingRequired: 1, missingQuestionIds: [owed] });
       expect(await answerRows()).toBe(0);
     });
   });
@@ -654,7 +654,7 @@ describe('12-06 the form changed, the module moved, the role and the host (PFORM
         async () => {
           const res = await save(member, form, { [id]: 'resposta' });
           expect(res.status).toBe(200);
-          expect(await res.json()).toEqual({ missingRequired: 0 });
+          expect(await res.json()).toEqual({ missingRequired: 0, missingQuestionIds: [] });
           expect(await answerRows()).toBe(0);
 
           const off = await readForm(member);

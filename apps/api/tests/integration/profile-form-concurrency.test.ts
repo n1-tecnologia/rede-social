@@ -635,7 +635,7 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
       expect(form.questions).toEqual([]);
       const res = await save(member, form, {});
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ missingRequired: 0 });
+      expect(await res.json()).toEqual({ missingRequired: 0, missingQuestionIds: [] });
       const archived = await adminCall('GET', '/v1/profile_form/archived');
       expect(await archived.json()).toEqual({ questions: [] });
       const list = await adminCall('GET', '/v1/profile_form/questions');

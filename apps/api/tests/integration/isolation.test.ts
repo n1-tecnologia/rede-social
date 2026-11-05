@@ -6188,6 +6188,35 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(await rowsOf(labQuestion)).toBe(0);
       expect(await rowsOf(demoQuestion)).toBe(0);
 
+      // 12.1-11 (T-12.1-10): a rede-demo STEP id in a rede-lab save is 400 unknown_step and writes nothing in
+      // either tenant, beside her own rede-lab step id, which is accepted.
+      const [demoStep] = await adminSql<{ step_id: string }[]>`
+        select step_id::text as step_id from public.profile_form_questions
+         where id = ${demoQuestion}::uuid`;
+      const [labStep] = await adminSql<{ step_id: string }[]>`
+        select step_id::text as step_id from public.profile_form_questions
+         where id = ${labQuestion}::uuid`;
+      if (!demoStep || !labStep) throw new Error('the fixture questions have no step');
+      const foreignStep = await call('PUT', '/v1/me/profile-form/answers', HOSTS.lab, {
+        formEtag: form.formEtag,
+        stepId: demoStep.step_id,
+        answers: { [labQuestion]: 'valido' },
+      });
+      expect(foreignStep.status).toBe(400);
+      expect(((await foreignStep.json()) as Envelope).error.details).toEqual({
+        profileForm: 'unknown_step',
+      });
+      expect(await rowsOf(labQuestion)).toBe(0);
+      expect(await rowsOf(demoQuestion)).toBe(0);
+      const ownStep = await call('PUT', '/v1/me/profile-form/answers', HOSTS.lab, {
+        formEtag: form.formEtag,
+        stepId: labStep.step_id,
+        answers: { [labQuestion]: 'valido' },
+      });
+      expect(ownStep.status).toBe(200);
+      expect(await ownStep.json()).toEqual({ missingRequired: 0, missingQuestionIds: [] });
+      expect(await rowsOf(demoQuestion)).toBe(0);
+
       // Positive control: her own id saves, and the dismissal answers.
       const own = await call('PUT', '/v1/me/profile-form/answers', HOSTS.lab, {
         formEtag: form.formEtag,
