@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.1"
 current_phase_name: Perguntas condicionais e etapas no formulário de perfil
-current_plan: 14
+current_plan: 16
 status: executing
 stopped_at: "Phase 12.1: 12/19 plans done; 12.1-05 paused at the blocking sketch 018 gate (Igor's approval); plans 14-19 blocked on it"
-last_updated: "2026-11-05T22:07:38.871Z"
+last_updated: "2026-11-05T22:31:56.791Z"
 last_activity: 2026-11-05
 last_activity_desc: Phase 12.1 execution started
-state_head: 3e00df78e178bcb99872217d9873b3ef70b9b2e0
+state_head: 7c9b8bbc91b61cb874d3abde2f6d07f912579f8a
 progress:
   total_phases: 29
   completed_phases: 0
   total_plans: 363
-  completed_plans: 329
+  completed_plans: 331
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.1 (Perguntas condicionais e etapas no formulário de perfil) — EXECUTING
-Current Plan: 14
+Current Plan: 16
 Total Plans in Phase: 19
-Plan: 14 of 19
+Plan: 16 of 19
 Status: Ready to execute
 Last activity: 2026-11-05 — Phase 12.1 execution started
 
