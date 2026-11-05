@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   adminQuestionSchema,
   answerEtag,
+  answerTokens,
   answerValueSchema,
   archivedQuestionSchema,
   createQuestionBodySchema,
@@ -9,6 +10,7 @@ import {
   hasUnsafeChars,
   impactQuerySchema,
   impactResultSchema,
+  isQuestionVisible,
   memberFormSchema,
   missingIssue,
   normalizeOptionLabel,
@@ -18,6 +20,7 @@ import {
   PROFILE_FORM_LIMITS,
   PROFILE_FORM_MODES,
   PROFILE_FORM_TYPES,
+  PROFILE_FORM_VISIBILITY_CASES,
   type ProfileFormQuestionDef,
   type ProfileFormType,
   parseAnswer,
@@ -30,6 +33,7 @@ import {
   saveAnswersResultSchema,
   staffAnswersSchema,
   updateQuestionBodySchema,
+  visibleSteps,
 } from '../src/profile-form';
 
 /**
@@ -1119,4 +1123,76 @@ describe('12-REVIEW WR-02 - NUL and unpaired surrogates are refused as invalid, 
       ).toContain('invalid');
     }
   });
+});
+
+describe('12.1-01 - the visibility rule: stored answer to tokens to visible (D-621, D-628, PFORM-41)', () => {
+  const OPENER = '55555555-5555-4555-8555-555555555555';
+  const STEP_1 = '66666666-6666-4666-8666-666666666661';
+  const STEP_2 = '66666666-6666-4666-8666-666666666662';
+  const STEP_3 = '66666666-6666-4666-8666-666666666663';
+
+  it('answerTokens reads the three stored shapes and nothing else', () => {
+    expect(answerTokens(true)).toEqual(['true']);
+    expect(answerTokens(false)).toEqual(['false']);
+    expect(answerTokens({ optionId: A, otherText: null })).toEqual([A]);
+    expect(answerTokens({ optionId: null, otherText: 'x' })).toEqual([]);
+    expect(answerTokens({ optionIds: [A, B], otherText: null })).toEqual([A, B]);
+    expect(answerTokens({ optionIds: [], otherText: 'x' })).toEqual([]);
+    for (const other of ['text', 7, null, undefined]) expect(answerTokens(other)).toEqual([]);
+  });
+
+  it('isQuestionVisible: no condition is visible, a condition needs one shared token', () => {
+    const tokens = (map: Record<string, string[]>) => (id: string) => map[id];
+    expect(isQuestionVisible({ condition: null }, () => undefined)).toBe(true);
+    const shown = { condition: { questionId: OPENER, values: [A, B] } };
+    expect(isQuestionVisible(shown, tokens({ [OPENER]: [B, C] }))).toBe(true);
+    expect(isQuestionVisible(shown, tokens({ [OPENER]: [C] }))).toBe(false);
+    expect(isQuestionVisible(shown, tokens({}))).toBe(false);
+    expect(isQuestionVisible(shown, tokens({ [OPENER]: [] }))).toBe(false);
+  });
+
+  it('visibleSteps keeps the step order, drops a step with only hidden or no questions', () => {
+    const steps = [{ id: STEP_1 }, { id: STEP_2 }, { id: STEP_3 }];
+    const shown = (id: string, stepId: string) => ({
+      id,
+      stepId,
+      condition: { questionId: OPENER, values: ['true'] },
+    });
+    const tokensOf = (id: string) => (id === OPENER ? ['false'] : undefined);
+    // step 1: one free question among hidden ones; step 2: only hidden; step 3: no question at all.
+    const questions = [
+      { id: OPENER, stepId: STEP_1, condition: null },
+      shown(A, STEP_1),
+      shown(B, STEP_2),
+      shown(C, STEP_2),
+    ];
+    expect(visibleSteps(steps, questions, tokensOf)).toEqual([STEP_1]);
+    expect(visibleSteps(steps, questions, () => ['true'])).toEqual([STEP_1, STEP_2]);
+    expect(visibleSteps([...steps].reverse(), questions, () => ['true'])).toEqual([STEP_2, STEP_1]);
+    expect(visibleSteps(steps, [], tokensOf)).toEqual([]);
+  });
+
+  it('the parity table has the planned breadth', () => {
+    expect(PROFILE_FORM_VISIBILITY_CASES.length).toBeGreaterThanOrEqual(14);
+    const names = PROFILE_FORM_VISIBILITY_CASES.map((row) => row.name).join('\n');
+    for (const needle of ['yes_no true', 'yes_no false', 'Outro', 'unanswered', 'any-of', 'unknown']) {
+      expect(names).toContain(needle);
+    }
+    expect(new Set(PROFILE_FORM_VISIBILITY_CASES.map((row) => row.name)).size).toBe(
+      PROFILE_FORM_VISIBILITY_CASES.length,
+    );
+    expect(PROFILE_FORM_VISIBILITY_CASES.some((row) => row.expected)).toBe(true);
+    expect(PROFILE_FORM_VISIBILITY_CASES.some((row) => !row.expected)).toBe(true);
+  });
+
+  for (const row of PROFILE_FORM_VISIBILITY_CASES) {
+    it(`parity row: ${row.name}`, () => {
+      const tokens = answerTokens(row.stored);
+      const visible = isQuestionVisible(
+        { condition: { questionId: OPENER, values: row.values } },
+        () => tokens,
+      );
+      expect(visible).toBe(row.expected);
+    });
+  }
 });

@@ -337,6 +337,38 @@ export const answerValueSchema = z.discriminatedUnion('type', [
 ]);
 export type AnswerValue = z.infer<typeof answerValueSchema>;
 
+// ── 12.1-01: the visibility rule (D-621, D-628, PFORM-41) ──────────────────────────────────────
+
+/** A condition on the shown question: one opener and the tokens that open it (D-621, D-622). */
+export type ProfileFormCondition = { questionId: string; values: string[] };
+
+// RED-phase stub: inert on purpose, replaced by the real rule in the GREEN commit.
+export function answerTokens(_stored: unknown): string[] {
+  return [];
+}
+
+export function isQuestionVisible(
+  _question: { condition: ProfileFormCondition | null },
+  _tokensOf: (questionId: string) => readonly string[] | undefined,
+): boolean {
+  return false;
+}
+
+export function visibleSteps(
+  _steps: readonly { id: string }[],
+  _questions: readonly { id: string; stepId: string; condition: ProfileFormCondition | null }[],
+  _tokensOf: (questionId: string) => readonly string[] | undefined,
+): string[] {
+  return [];
+}
+
+export const PROFILE_FORM_VISIBILITY_CASES: readonly {
+  name: string;
+  stored: unknown;
+  values: string[];
+  expected: boolean;
+}[] = [];
+
 // ── 12-03 Task 2: the wire schemas of every route ─────────────────────────────────────────────
 
 const CHOICE_SET: ReadonlySet<string> = new Set(PROFILE_FORM_CHOICE_TYPES);
