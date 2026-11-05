@@ -4,7 +4,7 @@ import { env } from '@rede-social/core/server/env';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { sql } from 'drizzle-orm';
-import type { PushSubscriptionInput } from '../contracts/index';
+import type { PushDeviceInput, PushSubscriptionInput } from '../contracts/index';
 import { isAllowedPushEndpoint } from './push/endpoint';
 
 const log = moduleLogger('module-notifications');
@@ -43,6 +43,38 @@ export async function savePushSubscription(
       )`),
   );
   log.info({ event: 'push.subscription_saved', tenantId: ctx.tenantId }, 'push subscription saved');
+}
+
+/**
+ * NATIVE-09: the installed app saves THIS device's APNs or FCM token (`POST /v1/notifications/push-subscriptions`
+ * with `kind: 'apns' | 'fcm'`, D-603, D-606). The body already passed `pushDeviceInputSchema` (kind and platform
+ * paired, token shape of its own kind, environment, app version). Unlike a web endpoint, a native token is NOT
+ * a URL: `isAllowedPushEndpoint` (T-07-33) is deliberately not called here, the anchored token patterns are the
+ * whole shape check, and the sender (plan 12) addresses the platform's own API, never a stored host.
+ *
+ * The write is `app.push_device_upsert` in the caller's own tenant lane (plan 13-06): it requires a live
+ * membership, hands the token over inside the tenant when another member held it (the phone changed hands),
+ * refreshes the app version of the caller's own row, and never touches another tenant's row. Returns the row id.
+ *
+ * Logs carry the shape only (`kind`, `platform`): never the token, the environment or the app version
+ * (T-13-20). An error from the database is rethrown untouched; the function's messages are fixed text.
+ */
+export async function savePushDevice(ctx: RequestContext, body: PushDeviceInput): Promise<string> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ id: string }>(sql`
+      select app.push_device_upsert(
+        ${body.kind}::text,
+        ${body.token}::text,
+        ${body.platform}::text,
+        ${body.environment}::text,
+        ${body.appVersion}::text
+      ) as id`),
+  );
+  log.info(
+    { event: 'push.device.saved', kind: body.kind, platform: body.platform },
+    'push device saved',
+  );
+  return String(rows[0]?.id ?? '');
 }
 
 /**

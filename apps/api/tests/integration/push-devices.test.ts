@@ -22,7 +22,7 @@ const ids = { demo: '', lab: '', a1: '', a2: '', b1: '' };
 const written = new Set<string>();
 let labFlag: boolean | undefined;
 
-const send = (
+const send = async (
   method: 'POST' | 'DELETE',
   token: string,
   host: string,
@@ -176,8 +176,9 @@ describe('tracer: a native token through the existing route, isolated per tenant
     });
 
     // The member of the OTHER tenant and the other member of THIS tenant hold none of it.
-    expect((await rowsOf(ids.lab, ids.b1)).filter((r) => r.endpoint === apns || r.endpoint === fcm))
-      .toEqual([]);
+    expect(
+      (await rowsOf(ids.lab, ids.b1)).filter((r) => r.endpoint === apns || r.endpoint === fcm),
+    ).toEqual([]);
     expect((await rowsOf(ids.demo, ids.a2)).filter((r) => r.endpoint === apns)).toEqual([]);
 
     // The lab member saves the SAME strings: separate rows, the demo rows are untouched (per-tenant key).

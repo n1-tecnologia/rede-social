@@ -37,7 +37,7 @@ export {
   resetFakePushOutbox,
   webPushTransport,
 } from './push/transport';
-export { deletePushSubscription, savePushSubscription } from './push-subscriptions';
+export { deletePushSubscription, savePushDevice, savePushSubscription } from './push-subscriptions';
 export { notificationsRoutes } from './routes';
 export { countUnseen, listNotifications, markAllRead, markAllSeen, markRead } from './service';
 export { notificationsSink } from './sink';

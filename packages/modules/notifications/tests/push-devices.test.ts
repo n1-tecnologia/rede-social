@@ -232,10 +232,12 @@ describe('NATIVE-09 union: the web arm is unchanged and the native arm is closed
 
 describe('NATIVE-09 delete door and T-13-20: nothing echoes a token', () => {
   it('accepts a native token through the existing delete schema, up to the shared bound', () => {
-    expect(pushSubscriptionDeleteSchema.safeParse({ endpoint: 'ab'.repeat(32) }).success).toBe(true);
-    expect(
-      pushSubscriptionDeleteSchema.safeParse({ endpoint: 'A'.repeat(4096) }).success,
-    ).toBe(true);
+    expect(pushSubscriptionDeleteSchema.safeParse({ endpoint: 'ab'.repeat(32) }).success).toBe(
+      true,
+    );
+    expect(pushSubscriptionDeleteSchema.safeParse({ endpoint: 'A'.repeat(4096) }).success).toBe(
+      true,
+    );
   });
   it('refuses an empty or 4097-character delete, and keeps the web save bound at 2048', () => {
     expect(pushSubscriptionDeleteSchema.safeParse({ endpoint: '' }).success).toBe(false);

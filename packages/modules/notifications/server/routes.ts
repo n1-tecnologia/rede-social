@@ -7,9 +7,14 @@ import {
   notificationPageSchema,
   notificationQuerySchema,
   pushSubscriptionDeleteSchema,
-  pushSubscriptionInputSchema,
+  pushSubscriptionSaveBodySchema,
 } from '../contracts/index';
-import { deletePushSubscription, pushInputError, savePushSubscription } from './push-subscriptions';
+import {
+  deletePushSubscription,
+  pushInputError,
+  savePushDevice,
+  savePushSubscription,
+} from './push-subscriptions';
 import { listNotifications, markAllRead, markAllSeen, markRead } from './service';
 
 /**
@@ -104,17 +109,17 @@ const savePushRoute = createRoute({
   request: {
     body: {
       required: true,
-      content: { 'application/json': { schema: pushSubscriptionInputSchema } },
+      content: { 'application/json': { schema: pushSubscriptionSaveBodySchema } },
     },
   },
   responses: {
     204: {
       description:
-        "NOTIF-03: saves THIS device's Web Push subscription for the caller (what `PushSubscription.toJSON()` returns, plus an optional user agent). Saving an endpoint that another member of the tenant had registered moves it to the caller (the device changed hands); saving it again refreshes its keys. Requires a live membership.",
+        "NOTIF-03: saves THIS device's Web Push subscription for the caller (what `PushSubscription.toJSON()` returns, plus an optional user agent). Saving an endpoint that another member of the tenant had registered moves it to the caller (the device changed hands); saving it again refreshes its keys. Requires a live membership. 13-11 (additive, D-603): a body with `kind: 'apns' | 'fcm'` (plus `token`, `platform`, `environment`, `appVersion`) saves the installed app's native device token instead, shape-checked and never run through the push-service host list; the answer is the same 204. A body without `kind` is the web shape, unchanged.",
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.push`: `endpoint_invalid` when the endpoint is not `https:` on a known push-service host (FCM, Mozilla, Apple, WNS), carries userinfo, a port or an IP literal; `keys_invalid` when `p256dh` is not a 65-byte uncompressed P-256 point or `auth` not 16 bytes (base64url). An unknown key is a plain `VALIDATION_FAILED`.',
+        '`VALIDATION_FAILED` with `details.push`: `endpoint_invalid` when the endpoint is not `https:` on a known push-service host (FCM, Mozilla, Apple, WNS), carries userinfo, a port or an IP literal; `keys_invalid` when `p256dh` is not a 65-byte uncompressed P-256 point or `auth` not 16 bytes (base64url). An unknown key, a native token that does not match its kind, a `kind`/`platform` mismatch or a missing field is a plain `VALIDATION_FAILED` that never echoes the token.',
     },
   },
 });
@@ -176,7 +181,13 @@ export const notificationsRoutes = notifications
   .openapi(
     savePushRoute,
     async (c) => {
-      await savePushSubscription(c.get('ctx'), c.req.valid('json'));
+      const body = c.req.valid('json');
+      if (body.kind === 'webpush') {
+        const { kind: _tag, ...web } = body;
+        await savePushSubscription(c.get('ctx'), web);
+      } else {
+        await savePushDevice(c.get('ctx'), body);
+      }
       return noContent();
     },
     (result) => {

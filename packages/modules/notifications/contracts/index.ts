@@ -1,3 +1,8 @@
+import {
+  APNS_TOKEN_PATTERN,
+  FCM_TOKEN_PATTERN,
+  NATIVE_PLATFORMS,
+} from '@rede-social/contracts/native';
 import { z } from 'zod';
 
 /**
@@ -253,16 +258,84 @@ export const pushSubscriptionInputSchema = z
   .strict();
 export type PushSubscriptionInput = z.infer<typeof pushSubscriptionInputSchema>;
 
+/** The longest native device token this API stores: an FCM registration token (`FCM_TOKEN_PATTERN`). */
+export const PUSH_DEVICE_TOKEN_MAX_LENGTH = 4096;
+
 /**
- * RED STUB (13-11): inert placeholders so the failing tests fail on their assertions, not on a missing
- * export. Replaced by the real union in the GREEN commit.
+ * The semver a native shell reports as its own version (D-603, bridge `deviceShape`): at most 32 characters.
+ * Never logged (T-13-20).
  */
-export const pushDeviceInputSchema = z.object({}).strict();
-export const pushSubscriptionSaveBodySchema = pushSubscriptionInputSchema;
+const APP_VERSION = /^\d+\.\d+\.\d+$/;
+
+/**
+ * `POST /v1/notifications/push-subscriptions` with `kind: 'apns' | 'fcm'` (13-11, NATIVE-09, D-603, D-606):
+ * the device token the installed app holds. `.strict()`: an unknown key fails loudly, so a body carrying
+ * both `endpoint` and `kind` is refused. The token is an OPAQUE string (never coerced; a JSON number is
+ * refused) shape-checked against the anchored pattern of its own kind from `@rede-social/contracts/native`;
+ * it is NEVER run through the push-service URL allow-list (`isAllowedPushEndpoint`, T-07-33), and a token
+ * that looks like a URL is refused by the patterns. `kind` and `platform` are paired (`apns` with `ios`,
+ * `fcm` with `android`); `environment` is required for both and fixed to `production` for `fcm`.
+ *
+ * Every refusal message below is a fixed sentence: a token is a delivery credential and never reaches an
+ * error (T-13-20).
+ */
+export const pushDeviceInputSchema = z
+  .object({
+    kind: z.enum(['apns', 'fcm']),
+    token: z.string(),
+    platform: z.enum(NATIVE_PLATFORMS),
+    environment: z.enum(['production', 'sandbox']),
+    appVersion: z.string().min(1).max(32).regex(APP_VERSION),
+  })
+  .strict()
+  .superRefine((device, ctx) => {
+    const pattern = device.kind === 'apns' ? APNS_TOKEN_PATTERN : FCM_TOKEN_PATTERN;
+    if (!pattern.test(device.token)) {
+      ctx.addIssue({ code: 'custom', path: ['token'], message: 'token does not match its kind' });
+    }
+    if (device.platform !== (device.kind === 'apns' ? 'ios' : 'android')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['platform'],
+        message: 'platform does not match the kind',
+      });
+    }
+    if (device.kind === 'fcm' && device.environment !== 'production') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['environment'],
+        message: 'environment must be production for fcm',
+      });
+    }
+  });
+export type PushDeviceInput = z.infer<typeof pushDeviceInputSchema>;
+
+/** The web arm of the save union: the unchanged web body, carrying the tag the server adds (never sent). */
+const pushWebSaveSchema = pushSubscriptionInputSchema.extend({ kind: z.literal('webpush') });
+
+/**
+ * The save body of `POST /v1/notifications/push-subscriptions` (D-603, additive): a body WITHOUT `kind` is
+ * the web shape exactly as before (old clients and the web BFF keep working); `kind: 'apns' | 'fcm'` is a
+ * native device token. The web arm is tagged `kind: 'webpush'` after parsing so the handler can branch.
+ * A client-sent `kind: 'webpush'` is refused (the tag is the server's, not a published value) as is any
+ * other `kind`. Unrecognised input is a plain `VALIDATION_FAILED` at the route.
+ */
+export const pushSubscriptionSaveBodySchema = z.preprocess(
+  (value) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+    const body = value as Record<string, unknown>;
+    if (!('kind' in body)) return { ...body, kind: 'webpush' };
+    // A client may not claim the server's tag.
+    if (body.kind === 'webpush') return { ...body, kind: 'client-webpush' };
+    return value;
+  },
+  z.discriminatedUnion('kind', [pushWebSaveSchema, pushDeviceInputSchema]),
+);
+export type PushSubscriptionSaveBody = z.infer<typeof pushSubscriptionSaveBodySchema>;
 
 /** `DELETE /v1/notifications/push-subscriptions`: which of the caller's own devices to forget. */
 export const pushSubscriptionDeleteSchema = z
-  .object({ endpoint: z.string().min(1).max(PUSH_ENDPOINT_MAX_LENGTH) })
+  .object({ endpoint: z.string().min(1).max(PUSH_DEVICE_TOKEN_MAX_LENGTH) })
   .strict();
 export type PushSubscriptionDelete = z.infer<typeof pushSubscriptionDeleteSchema>;
 
