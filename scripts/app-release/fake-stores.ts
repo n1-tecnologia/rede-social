@@ -221,10 +221,10 @@ export async function createFakeStores(options: FakeStoreOptions = {}): Promise<
       const bundle = bundles.get(String(relation.id ?? ''));
       if (!bundle) return json(res, 404, { errors: [{ code: 'NOT_FOUND' }] });
       const type = String(attributes.capabilityType ?? '');
-      if (!bundle.capabilities.has(type)) {
-        bundle.capabilities.add(type);
-        counts.capabilities += 1;
-      }
+      if (bundle.capabilities.has(type))
+        return json(res, 409, { errors: [{ code: 'ENTITY_ERROR' }] });
+      bundle.capabilities.add(type);
+      counts.capabilities += 1;
       return json(res, 201, {
         data: resource('bundleIdCapabilities', `${bundle.id}-${type}`, { capabilityType: type }),
       });

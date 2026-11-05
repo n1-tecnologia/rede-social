@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import type { AppCredentialKind } from '@rede-social/contracts/native';
+import { maskValues, secretValuesOf } from './mask';
 
 /**
  * Sealed credentials reach the CI runner only as FILES in a temporary directory (13-29, D-605, D-539, T-13-50).
@@ -101,13 +102,29 @@ export function filesOf(kind: CredentialKind, plain: string): SecretFile[] {
   }
 }
 
-/** Writes one secret file into `dir`. */
+/** A file name is one plain segment: no separator, no `..`, no NUL, nothing absolute. Throws before any write. */
+export function assertInsideDirectory(dir: string, name: string): void {
+  const refused = () => new Error('path_outside_directory');
+  if (name === '' || name === '.' || name === '..' || name.includes('\0')) throw refused();
+  if (name.includes('/') || name.includes('\\') || isAbsolute(name)) throw refused();
+  const inside = relative(dir, join(dir, name));
+  if (inside !== name) throw refused();
+}
+
+/**
+ * Writes one secret file into `dir` with mode 0600 (the mode is set again after the write, so a file that already
+ * existed with looser permissions is tightened). A symbolic link in the way is refused.
+ */
 export async function writeSecretFile(
   dir: string,
   name: string,
   data: Buffer | string,
 ): Promise<void> {
-  await fs.writeFile(join(dir, name), data);
+  assertInsideDirectory(dir, name);
+  const existing = await fs.lstat(join(dir, name)).catch(() => null);
+  if (existing?.isSymbolicLink()) throw new Error('path_outside_directory');
+  await fs.writeFile(join(dir, name), data, { mode: 0o600 });
+  await fs.chmod(join(dir, name), 0o600);
 }
 
 export async function readSecretFile(dir: string, name: string): Promise<string> {
@@ -125,17 +142,27 @@ export async function unsealToDirectory(input: {
   tenantId: string;
   kinds: readonly CredentialKind[];
   dir: string;
+  /** Receives every `::add-mask::` line. Called for ALL secrets before the first file is written. */
+  write: (line: string) => void;
   readCredential: ReadCredential;
 }): Promise<UnsealResult> {
   const { dir } = input;
-  const files: UnsealResult['files'] = {};
+  const held: { kind: CredentialKind; plain: string }[] = [];
   const missing: CredentialKind[] = [];
   for (const kind of input.kinds) {
     const plain = await input.readCredential(input.tenantId, kind);
-    if (plain === null) {
-      missing.push(kind);
-      continue;
-    }
+    if (plain === null) missing.push(kind);
+    else held.push({ kind, plain });
+  }
+
+  // Masks first, writes second: from the first byte on disk, the runner already redacts every one of these.
+  maskValues(
+    held.flatMap((entry) => secretValuesOf(entry.plain)),
+    input.write,
+  );
+
+  const files: UnsealResult['files'] = {};
+  for (const { kind, plain } of held) {
     const written: string[] = [];
     for (const file of filesOf(kind, plain)) {
       await writeSecretFile(dir, file.name, file.data);

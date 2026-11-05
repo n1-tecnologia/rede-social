@@ -118,19 +118,31 @@ export function createAppleClient(options: AppleClientOptions): AppleClient {
 
   return {
     async registerBundleId(identifier, name) {
-      const found = await call(
-        'GET',
-        `/v1/bundleIds?filter[identifier]=${encodeURIComponent(identifier)}&filter[platform]=IOS&limit=200`,
-      );
-      // The identifier filter is a prefix match on the real API: only an exact identifier is "the" bundle id.
-      const exact = asArray(found.data.data)
-        .map(asRecord)
-        .find((item) => asString(asRecord(item.attributes).identifier) === identifier);
-      const existingId = exact ? asString(exact.id) : null;
+      const lookup = async (): Promise<string | null> => {
+        const found = await call(
+          'GET',
+          `/v1/bundleIds?filter[identifier]=${encodeURIComponent(identifier)}&filter[platform]=IOS&limit=200`,
+        );
+        // The identifier filter is a prefix match on the real API: only an exact identifier is "the" bundle id.
+        const exact = asArray(found.data.data)
+          .map(asRecord)
+          .find((item) => asString(asRecord(item.attributes).identifier) === identifier);
+        return exact ? asString(exact.id) : null;
+      };
+      const existingId = await lookup();
       if (existingId) return { id: existingId, created: false };
-      const made = await call('POST', '/v1/bundleIds', {
-        data: { type: 'bundleIds', attributes: { identifier, name, platform: 'IOS' } },
-      });
+      const made = await call(
+        'POST',
+        '/v1/bundleIds',
+        { data: { type: 'bundleIds', attributes: { identifier, name, platform: 'IOS' } } },
+        [200, 201, 409],
+      );
+      // A 409 means another run registered it between the lookup and the POST: it is theirs, so reuse it.
+      if (made.status === 409) {
+        const raced = await lookup();
+        if (raced) return { id: raced, created: false };
+        throw new StoreError('store_conflict', 409);
+      }
       const id = asString(asRecord(made.data.data).id);
       if (!id) throw new StoreError('store_bad_answer', made.status);
       return { id, created: true };
@@ -149,14 +161,20 @@ export function createAppleClient(options: AppleClientOptions): AppleClient {
       const added: string[] = [];
       for (const capabilityType of REQUIRED_CAPABILITIES) {
         if (have.has(capabilityType)) continue;
-        await call('POST', '/v1/bundleIdCapabilities', {
-          data: {
-            type: 'bundleIdCapabilities',
-            attributes: { capabilityType },
-            relationships: { bundleId: { data: { type: 'bundleIds', id: bundleResourceId } } },
+        const made = await call(
+          'POST',
+          '/v1/bundleIdCapabilities',
+          {
+            data: {
+              type: 'bundleIdCapabilities',
+              attributes: { capabilityType },
+              relationships: { bundleId: { data: { type: 'bundleIds', id: bundleResourceId } } },
+            },
           },
-        });
-        added.push(capabilityType);
+          [200, 201, 409],
+        );
+        // 409: already enabled (by a run that raced this one). Nothing to add.
+        if (made.status !== 409) added.push(capabilityType);
       }
       return { added };
     },
@@ -176,39 +194,54 @@ export function createAppleClient(options: AppleClientOptions): AppleClient {
     },
 
     async ensureProfile({ name, bundleResourceId, certificateId }) {
-      const listed = await call(
-        'GET',
-        `/v1/profiles?filter[name]=${encodeURIComponent(name)}&filter[profileType]=IOS_APP_STORE&limit=200`,
-      );
-      const same = asArray(listed.data.data)
-        .map(asRecord)
-        .filter((item) => asString(asRecord(item.attributes).name) === name);
-      for (const profile of same) {
-        const attributes = asRecord(profile.attributes);
-        const id = asString(profile.id);
-        const content = asString(attributes.profileContent);
-        if (id && content && attributes.profileState === 'ACTIVE') {
-          return { id, content, created: false };
+      /** The ACTIVE profile of that name; an inactive one (its certificate was replaced) is removed first. */
+      const findActive = async (): Promise<{ id: string; content: string } | null> => {
+        const listed = await call(
+          'GET',
+          `/v1/profiles?filter[name]=${encodeURIComponent(name)}&filter[profileType]=IOS_APP_STORE&limit=200`,
+        );
+        const same = asArray(listed.data.data)
+          .map(asRecord)
+          .filter((item) => asString(asRecord(item.attributes).name) === name);
+        for (const profile of same) {
+          const attributes = asRecord(profile.attributes);
+          const id = asString(profile.id);
+          const content = asString(attributes.profileContent);
+          if (id && content && attributes.profileState === 'ACTIVE') return { id, content };
+          if (id) {
+            await call(
+              'DELETE',
+              `/v1/profiles/${encodeURIComponent(id)}`,
+              undefined,
+              [200, 204, 404],
+            );
+          }
         }
-        // An inactive profile (its certificate was replaced) is removed so a fresh one can take the name.
-        if (id)
-          await call(
-            'DELETE',
-            `/v1/profiles/${encodeURIComponent(id)}`,
-            undefined,
-            [200, 204, 404],
-          );
-      }
-      const made = await call('POST', '/v1/profiles', {
-        data: {
-          type: 'profiles',
-          attributes: { name, profileType: 'IOS_APP_STORE' },
-          relationships: {
-            bundleId: { data: { type: 'bundleIds', id: bundleResourceId } },
-            certificates: { data: [{ type: 'certificates', id: certificateId }] },
+        return null;
+      };
+      const active = await findActive();
+      if (active) return { ...active, created: false };
+      const made = await call(
+        'POST',
+        '/v1/profiles',
+        {
+          data: {
+            type: 'profiles',
+            attributes: { name, profileType: 'IOS_APP_STORE' },
+            relationships: {
+              bundleId: { data: { type: 'bundleIds', id: bundleResourceId } },
+              certificates: { data: [{ type: 'certificates', id: certificateId }] },
+            },
           },
         },
-      });
+        [200, 201, 409],
+      );
+      // 409: a run that raced this one created it first; theirs is the profile.
+      if (made.status === 409) {
+        const raced = await findActive();
+        if (raced) return { ...raced, created: false };
+        throw new StoreError('store_conflict', 409);
+      }
       const data = asRecord(made.data.data);
       const id = asString(data.id);
       const content = asString(asRecord(data.attributes).profileContent);

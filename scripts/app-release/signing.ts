@@ -79,6 +79,8 @@ export async function ensureAndroidKeystore(input: {
   /** The temporary directory (workdir space for the generator). */
   dir: string;
   random?: Random;
+  /** Called with the generated passwords BEFORE keytool runs, so the runner redacts them from then on. */
+  mask?: (values: string[]) => void;
 }): Promise<{ created: boolean }> {
   const { tenantId, store, tools, dir } = input;
   const random = input.random ?? nodeRandomBytes;
@@ -87,6 +89,7 @@ export async function ensureAndroidKeystore(input: {
     const alias = keystoreAlias(tenantId, input.applicationId);
     const storePassword = password(random);
     const keyPassword = password(random);
+    input.mask?.([storePassword, keyPassword]);
     const workdir = await fs.mkdtemp(join(dir, 'keystore-'));
     try {
       const target = join(workdir, 'generated.keystore');
@@ -115,16 +118,19 @@ export async function ensureAndroidKeystore(input: {
         ],
         { env: { APP_RELEASE_STOREPASS: storePassword, APP_RELEASE_KEYPASS: keyPassword } },
       );
+      if (result.missing || result.code === null) throw new ReleaseRefusal('tool_missing');
       if (result.code !== 0) throw new ReleaseRefusal('signing_failed');
       const keystore = await fs.readFile(target);
-      await slot.write(
-        JSON.stringify({
-          alias,
-          storePassword,
-          keyPassword,
-          keystoreB64: keystore.toString('base64'),
-        }),
-      );
+      const sealed = JSON.stringify({
+        alias,
+        storePassword,
+        keyPassword,
+        keystoreB64: keystore.toString('base64'),
+      });
+      await slot.write(sealed);
+      // Sealed and confirmed readable BEFORE any caller writes it anywhere: a value that does not read back is
+      // refused here, while the generator's work folder is still the only place the key has ever been.
+      if ((await slot.read()) !== sealed) throw new ReleaseRefusal('signing_failed');
       return { created: true };
     } finally {
       await fs.rm(workdir, { recursive: true, force: true });
@@ -163,6 +169,7 @@ export const makeCsrWithOpenssl: MakeCsr = async ({ tenantId, dir, tools }) => {
       '-subj',
       `/CN=app-${tenantId}`,
     ]);
+    if (result.missing || result.code === null) throw new ReleaseRefusal('tool_missing');
     if (result.code !== 0) throw new ReleaseRefusal('signing_failed');
     return {
       csrPem: await fs.readFile(csrPath, 'utf8'),
@@ -198,6 +205,7 @@ export const packP12WithOpenssl: PackP12 = async ({
       '-out',
       pemPath,
     ]);
+    if (convert.missing || convert.code === null) throw new ReleaseRefusal('tool_missing');
     if (convert.code !== 0) throw new ReleaseRefusal('signing_failed');
     const pack = await tools(
       'openssl',
@@ -215,6 +223,7 @@ export const packP12WithOpenssl: PackP12 = async ({
       ],
       { env: { APP_RELEASE_P12PASS: pass } },
     );
+    if (pack.missing || pack.code === null) throw new ReleaseRefusal('tool_missing');
     if (pack.code !== 0) throw new ReleaseRefusal('signing_failed');
     return await fs.readFile(outPath);
   } finally {
@@ -244,6 +253,8 @@ export async function ensureIosSigning(input: {
   makeCsr?: MakeCsr;
   packP12?: PackP12;
   random?: Random;
+  /** Called with the generated bundle password before it is used. */
+  mask?: (values: string[]) => void;
 }): Promise<IosSigning> {
   const { tenantId, apple, store, tools, dir } = input;
   const random = input.random ?? nodeRandomBytes;
@@ -261,6 +272,7 @@ export async function ensureIosSigning(input: {
     const csr = await (input.makeCsr ?? makeCsrWithOpenssl)({ tenantId, dir, tools });
     const created = await apple.createCertificate(csr.csrPem.replace(/\r?\n/g, '\n'));
     const p12Password = password(random);
+    input.mask?.([p12Password]);
     const p12 = await (input.packP12 ?? packP12WithOpenssl)({
       keyPem: csr.keyPem,
       certificateDerB64: created.content,
@@ -268,13 +280,14 @@ export async function ensureIosSigning(input: {
       dir,
       tools,
     });
-    await slot.write(
-      JSON.stringify({
-        certificateId: created.id,
-        p12B64: p12.toString('base64'),
-        p12Password,
-      }),
-    );
+    const sealed = JSON.stringify({
+      certificateId: created.id,
+      p12B64: p12.toString('base64'),
+      p12Password,
+    });
+    await slot.write(sealed);
+    // Sealed and confirmed readable before the profile (and any file) depends on it.
+    if ((await slot.read()) !== sealed) throw new ReleaseRefusal('signing_failed');
     return { id: created.id, created: true };
   });
 
@@ -302,8 +315,10 @@ type Sealing = {
  * In memory, for the dry run and the unit tests: a dry run must never leave a certificate that exists only on a
  * fake server in the control plane. Seals through the same `Sealing` the real store uses.
  */
-export function memoryGeneratedStore(sealing: Sealing): GeneratedStore {
-  const rows = new Map<string, { id: string; sealed: string }>();
+export function memoryGeneratedStore(
+  sealing: Sealing,
+  rows: Map<string, { id: string; sealed: string }> = new Map(),
+): GeneratedStore {
   const tails = new Map<string, Promise<unknown>>();
   const key = (tenantId: string, kind: GeneratedKind) => `${tenantId}:${kind}`;
   const peek = async (tenantId: string, kind: GeneratedKind): Promise<string | null> => {

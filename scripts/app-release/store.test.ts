@@ -93,6 +93,36 @@ describe('App Store Connect client', () => {
     expect(fakes.counts().bundleIds - before).toBe(2);
   });
 
+  it('two runs racing on one bundle id, capability set and profile create each exactly once', async () => {
+    const one = appleClient();
+    const two = appleClient();
+    const before = fakes.counts();
+    const registered = await Promise.all([
+      one.registerBundleId('test.cliente.race', 'Race'),
+      two.registerBundleId('test.cliente.race', 'Race'),
+    ]);
+    expect(registered[0].id).toBe(registered[1].id);
+    expect(registered.filter((r) => r.created).length).toBe(1);
+    await Promise.all([
+      one.ensureCapabilities(registered[0].id),
+      two.ensureCapabilities(registered[0].id),
+    ]);
+    const certificate = await one.createCertificate(
+      '-----BEGIN CERTIFICATE REQUEST-----\nQUJD\n-----END CERTIFICATE REQUEST-----',
+    );
+    const input = {
+      name: 'app-race',
+      bundleResourceId: registered[0].id,
+      certificateId: certificate.id,
+    };
+    const profiles = await Promise.all([one.ensureProfile(input), two.ensureProfile(input)]);
+    expect(profiles[0].id).toBe(profiles[1].id);
+    const after = fakes.counts();
+    expect(after.bundleIds - before.bundleIds).toBe(1);
+    expect(after.capabilities - before.capabilities).toBe(2);
+    expect(after.profileCreates - before.profileCreates).toBe(1);
+  });
+
   it('enables Push Notifications and Associated Domains once', async () => {
     const client = appleClient();
     const bundle = await client.registerBundleId('test.cliente.caps', 'Caps');

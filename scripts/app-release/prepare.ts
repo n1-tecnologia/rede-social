@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppTab } from '@rede-social/contracts/native';
-import { cleanupDirectory, createTempDirectory } from './cleanup';
+import { cleanupDirectory, createTempDirectory, isOwnSecretsDirectory } from './cleanup';
 import {
   deriveBuildRecord,
   type LogoReader,
@@ -10,6 +10,7 @@ import {
   type TenantSource,
   writeBuildRecord,
 } from './config';
+import { maskValues } from './mask';
 import { printUrl, ReleaseRefusal, type Reporter } from './report';
 import {
   ensureAndroidKeystore,
@@ -223,6 +224,11 @@ async function step<T>(
 
 export async function runPrepare(options: PrepareOptions, deps: ReleaseDeps): Promise<void> {
   const platforms = platformsOf(options.platform);
+  if (options.secretsDir && !isOwnSecretsDirectory(options.secretsDir, deps.tempBase)) {
+    // CI's hand-off folder must be `app-release-*` directly under the runner's temp folder, so `cleanup` can never
+    // be pointed at anything else.
+    throw new ReleaseRefusal('bad_arguments');
+  }
   try {
     await fs.access(join(options.outDir, '..'));
   } catch {
@@ -247,6 +253,7 @@ export async function runPrepare(options: PrepareOptions, deps: ReleaseDeps): Pr
       tenantId: derived.tenantId,
       kinds,
       dir,
+      write: deps.maskSink,
       readCredential: deps.readCredential,
     });
     if (unsealed.missing.length > 0)
@@ -268,6 +275,7 @@ export async function runPrepare(options: PrepareOptions, deps: ReleaseDeps): Pr
           ...(deps.makeCsr ? { makeCsr: deps.makeCsr } : {}),
           ...(deps.packP12 ? { packP12: deps.packP12 } : {}),
           ...(deps.random ? { random: deps.random } : {}),
+          mask: (values) => maskValues(values, deps.maskSink),
         }),
       );
       deps.report('ios.bundle-id', 'ok');
@@ -283,6 +291,7 @@ export async function runPrepare(options: PrepareOptions, deps: ReleaseDeps): Pr
         tenantId: derived.tenantId,
         kinds: ['ios_distribution'],
         dir,
+        write: deps.maskSink,
         readCredential: deps.readCredential,
       });
       await writeSecretFile(
@@ -314,12 +323,14 @@ export async function runPrepare(options: PrepareOptions, deps: ReleaseDeps): Pr
         tools: deps.tools,
         dir,
         ...(deps.random ? { random: deps.random } : {}),
+        mask: (values) => maskValues(values, deps.maskSink),
       });
       deps.report('android.keystore', keystore.created ? 'created' : 'reused');
       await unsealToDirectory({
         tenantId: derived.tenantId,
         kinds: ['android_keystore'],
         dir,
+        write: deps.maskSink,
         readCredential: deps.readCredential,
       });
     }

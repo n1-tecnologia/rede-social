@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, isAbsolute, join, normalize } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 
 /**
  * The temporary directory that holds the unsealed files (13-29, T-13-50). It is created fresh, used, and deleted
@@ -25,6 +25,16 @@ export function assertOwnTemporaryDirectory(dir: string): void {
   if (!isAbsolute(dir) || normalize(dir) !== dir || !basename(dir).startsWith(TEMP_PREFIX)) {
     throw new Error('cleanup_refused');
   }
+}
+
+/** True when `dir` is a directory this command could have made directly under `base` (what `--secrets-dir` must be). */
+export function isOwnSecretsDirectory(dir: string, base: string): boolean {
+  try {
+    assertOwnTemporaryDirectory(dir);
+  } catch {
+    return false;
+  }
+  return dirname(dir) === resolve(base);
 }
 
 export async function cleanupDirectory(dir: string): Promise<void> {

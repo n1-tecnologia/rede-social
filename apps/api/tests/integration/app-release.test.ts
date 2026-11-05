@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tenantBuildSchema } from '@rede-social/contracts/native';
 import { sqlClient } from '@rede-social/core/db';
 import { replaceAppCredential } from '@rede-social/core/server/apps/index';
+import { open } from '@rede-social/core/server/secrets/sealed';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminSql } from './setup';
 
@@ -13,6 +14,15 @@ import { adminSql } from './setup';
 const release = (await import(
   /* @vite-ignore */ new URL('../../../../scripts/app-release/index.ts', import.meta.url).href
 )) as typeof import('../../../../scripts/app-release/index');
+const signing = (await import(
+  /* @vite-ignore */ new URL('../../../../scripts/app-release/signing.ts', import.meta.url).href
+)) as typeof import('../../../../scripts/app-release/signing');
+const fakeStoresModule = (await import(
+  /* @vite-ignore */ new URL('../../../../scripts/app-release/fake-stores.ts', import.meta.url).href
+)) as typeof import('../../../../scripts/app-release/fake-stores');
+const appleModule = (await import(
+  /* @vite-ignore */ new URL('../../../../scripts/app-release/store-apple.ts', import.meta.url).href
+)) as typeof import('../../../../scripts/app-release/store-apple');
 type Tools = import('../../../../scripts/app-release/signing').ToolRunner;
 
 /**
@@ -74,7 +84,7 @@ let tenantId = '';
 let out = '';
 
 async function removeTenant(): Promise<void> {
-  await adminSql`delete from public.tenants where slug = ${SLUG}`;
+  await adminSql`delete from public.tenants where slug = ${SLUG} or slug like ${`${SLUG}-%`}`;
 }
 
 beforeAll(async () => {
@@ -195,5 +205,128 @@ describe('the tracer: a dry run for a seeded tenant (D-619, NATIVE-02, NATIVE-28
     ]);
     expect(code).toBe(1);
     expect(text).toContain('workspace_missing');
+  });
+});
+
+/** A throwaway tenant (slug `${SLUG}-<tag>`), removed with the others in `afterAll`. */
+async function freshTenant(tag: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.tenants (slug, display_name) values (${`${SLUG}-${tag}`}, ${`Tenant ${tag}`})
+    returning id::text as id`;
+  return row?.id ?? '';
+}
+
+const keystoreRows = (id: string, kind: string) =>
+  adminSql<{ id: string; sealed: string }[]>`
+    select id::text as id, sealed from platform.tenant_app_credentials
+     where tenant_id = ${id}::uuid and kind = ${kind}`;
+
+/** Counts calls and writes distinct bytes where keytool would, slowly enough for two callers to overlap. */
+const countingKeytool =
+  (counter: { calls: number }): Tools =>
+  async (file, args) => {
+    if (file !== 'keytool') return { code: 0, missing: false };
+    counter.calls += 1;
+    const target = args[args.indexOf('-keystore') + 1] ?? '';
+    const { writeFile } = await import('node:fs/promises');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await writeFile(target, Buffer.from(`keystore-${counter.calls}-${Math.random()}`));
+    return { code: 0, missing: false };
+  };
+
+describe('first-use generation against the local control plane (NATIVE-27, T-13-51, T-13-52)', () => {
+  it('two concurrent first-use runs leave exactly one keystore row, one keytool run and one value for both callers', async () => {
+    const id = await freshTenant('race');
+    const dir = await mkdtemp(join(tmpdir(), 'app-release-it-'));
+    const counter = { calls: 0 };
+    try {
+      const run = () =>
+        signing.ensureAndroidKeystore({
+          tenantId: id,
+          applicationId: 'test.cliente.race',
+          store: signing.pgGeneratedStore,
+          tools: countingKeytool(counter),
+          dir,
+        });
+      const results = await Promise.all([run(), run()]);
+      expect(results.filter((r) => r.created).length).toBe(1);
+      expect(counter.calls).toBe(1);
+      expect(await keystoreRows(id, 'android_keystore')).toHaveLength(1);
+      const held = await signing.pgGeneratedStore.peek(id, 'android_keystore');
+      expect(JSON.parse(held ?? '{}').alias).toBe(signing.keystoreAlias(id, 'test.cliente.race'));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("seals under <rowId>:<kind>: it opens with its own AAD and with no other tenant's or kind's", async () => {
+    const a = await freshTenant('aad-a');
+    const b = await freshTenant('aad-b');
+    const dir = await mkdtemp(join(tmpdir(), 'app-release-it-'));
+    try {
+      for (const tenantId of [a, b]) {
+        await signing.ensureAndroidKeystore({
+          tenantId,
+          applicationId: 'test.cliente.aad',
+          store: signing.pgGeneratedStore,
+          tools: countingKeytool({ calls: 0 }),
+          dir,
+        });
+      }
+      const [rowA] = await keystoreRows(a, 'android_keystore');
+      const [rowB] = await keystoreRows(b, 'android_keystore');
+      expect(rowA && rowB && rowA.id !== rowB.id).toBe(true);
+      expect(() => open(rowA?.sealed ?? '', `${rowA?.id}:android_keystore`)).not.toThrow();
+      expect(() => open(rowA?.sealed ?? '', `${rowB?.id}:android_keystore`)).toThrow(
+        'sealed value unreadable',
+      );
+      expect(() => open(rowA?.sealed ?? '', `${rowA?.id}:ios_distribution`)).toThrow(
+        'sealed value unreadable',
+      );
+      const aliasA = JSON.parse(open(rowA?.sealed ?? '', `${rowA?.id}:android_keystore`)).alias;
+      const aliasB = JSON.parse(open(rowB?.sealed ?? '', `${rowB?.id}:android_keystore`)).alias;
+      expect(aliasA).not.toBe(aliasB);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('two apps of one tenant keep separate kinds, and two concurrent iOS runs create one certificate', async () => {
+    const id = await freshTenant('ios');
+    const dir = await mkdtemp(join(tmpdir(), 'app-release-it-'));
+    const fakes = await fakeStoresModule.createFakeStores();
+    const { appleKeyPair } = (await import(
+      /* @vite-ignore */ new URL('../../../../scripts/app-release/fixtures.ts', import.meta.url)
+        .href
+    )) as typeof import('../../../../scripts/app-release/fixtures');
+    try {
+      const apple = appleModule.createAppleClient({
+        origin: fakes.apple.origin,
+        keyId: 'KEYID12345',
+        issuerId: 'issuer',
+        privateKey: appleKeyPair().p8,
+      });
+      const run = () =>
+        signing.ensureIosSigning({
+          tenantId: id,
+          bundleId: 'test.cliente.ios',
+          storeName: 'Ios',
+          apple,
+          store: signing.pgGeneratedStore,
+          tools: async () => ({ code: 0, missing: false }),
+          dir,
+          makeCsr: fakeCsr,
+          packP12: async () => Buffer.from('p12'),
+        });
+      const [one, two] = await Promise.all([run(), run()]);
+      expect(fakes.counts().certificates).toBe(1);
+      expect(fakes.counts().profileCreates).toBe(1);
+      expect(one.certificateId).toBe(two.certificateId);
+      expect(await keystoreRows(id, 'ios_distribution')).toHaveLength(1);
+      expect(await keystoreRows(id, 'android_keystore')).toHaveLength(0);
+    } finally {
+      await fakes.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
