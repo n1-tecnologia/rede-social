@@ -558,6 +558,14 @@ export const feedPostSchema = z
     community: postCommunitySchema.nullable(),
     canManage: z.boolean(),
     /**
+     * 13-14 (D-616, UI-D-632): the viewer may report this post (they did not write it) and may block its
+     * author (they did not write it AND the author is a `member`, never staff, AD-1). SERVER-DERIVED like
+     * `canManage`; the web never compares a role. OPTIONAL on purpose (the 08.2 Pitfall 10 rule): a web that
+     * ships before this API, or an API older than the web, simply omits them and the web reads them as `false`.
+     */
+    canReport: z.boolean().optional(),
+    canBlock: z.boolean().optional(),
+    /**
      * D-53's discriminator — what `PostMedia` BRANCHES on. It is the parent's own column, not a
      * count over `media`, so a post with three attachments and no photos is still `'none'` and
      * renders no media frame at all.
@@ -807,6 +815,13 @@ export const commentSchema = z
      * ships before this API reads an absent value as `canDelete ? 'own' : null`.
      */
     removal: commentRemovalSchema.optional(),
+    /**
+     * 13-14 (D-616, UI-D-632): the same two riders as on a post. `canReport`: the viewer did not write the
+     * comment. `canBlock`: not their own AND the author is a `member` (a removed author has no role, so false).
+     * OPTIONAL on purpose: an absent value reads as `false`.
+     */
+    canReport: z.boolean().optional(),
+    canBlock: z.boolean().optional(),
   })
   .strict();
 export type FeedComment = z.infer<typeof commentSchema>;

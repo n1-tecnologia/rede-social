@@ -85,6 +85,8 @@ type FeedRow = {
   membership_id: string;
   display_name: string;
   avatar_asset_id: string | null;
+  /** 13-14 (D-616): the author's role on this tenant, for `canBlock` (a member only). Never sent as is. */
+  author_role: string;
   media_kind: 'none' | 'gallery' | 'video';
   /** `json_agg` of the post's media rows, already ordered. `[]` when the post carries none. */
   media: PostMediaItem[];
@@ -158,7 +160,8 @@ const postProjection = (viewerUserId: string, extraColumns: ReturnType<typeof sq
            lp.image_asset_id as link_preview_image_asset_id,
            ms.id as membership_id,
            mp.display_name,
-           mp.avatar_asset_id
+           mp.avatar_asset_id,
+           ms.role as author_role
       from feed_posts p
       join memberships ms on ms.user_id = p.author_user_id
       join member_profiles mp on mp.membership_id = ms.id
@@ -252,6 +255,22 @@ function toLinkPreview(row: FeedRow): LinkPreview | null {
   };
 }
 
+/**
+ * 13-14 (D-616, UI-D-632): the two rider booleans every post and comment answer carries, computed on the server
+ * exactly like `canManage` so the web never compares a role. `canReport`: the viewer did not write it.
+ * `canBlock`: the viewer did not write it AND the author's role is `member` (AD-1: staff can be reported, never
+ * blocked by a member). OPTIONAL in the contract, so an API older than the web simply omits them and the web reads
+ * them as false. They say nothing about whether anyone reported or blocked anyone.
+ */
+const reportRiders = (
+  authorUserId: string,
+  authorRole: string | null,
+  viewerUserId: string,
+): { canReport: boolean; canBlock: boolean } => {
+  const notOwn = authorUserId !== viewerUserId;
+  return { canReport: notOwn, canBlock: notOwn && authorRole === 'member' };
+};
+
 const toPost = (row: FeedRow, viewerUserId: string, canModerate = false): FeedPost => ({
   id: row.id,
   createdAt: row.created_at,
@@ -274,6 +293,7 @@ const toPost = (row: FeedRow, viewerUserId: string, canModerate = false): FeedPo
       ? { id: row.community_id, name: row.community_name, slug: row.community_slug }
       : null,
   canManage: row.author_user_id === viewerUserId,
+  ...reportRiders(row.author_user_id, row.author_role, viewerUserId),
   mediaKind: row.media_kind,
   // `coalesce(..., '[]'::json)` inside the lateral means the array is always present; the `?? []`
   // guards only the `left join` miss (a post row with no lateral match cannot happen, but a future
@@ -329,6 +349,16 @@ function mediaPredicate(query: FeedQuery): ReturnType<typeof sql> {
  * InitPlan evaluated ONCE per statement (pgTAP 180 pins `InitPlan` in the plan), and '{}' for staff
  * and while the store is off, so the predicate is then true for every row.
  */
+/**
+ * 13-14 (D-616, NATIVE-33, UI-D-636): "the author is not someone the VIEWER blocked". A VIEWER predicate and
+ * nothing more: `app.is_blocked_by_viewer` is true only for the blocker looking at the blocked member (the select
+ * policy of `member_blocks` shows a lane its own rows only), so every other viewer's page is byte-identical, the
+ * blocked member sees nothing different, and no placeholder or recomputed counter says that something is hidden
+ * (AD-2, AD-3). It sits beside `deleted_at is null` in every read that returns a member's content and adds no join.
+ * Staff are never blockable by a member (SQL `BL001`), so an official post is never hidden by it.
+ */
+const NOT_BLOCKED_AUTHOR = sql`and not app.is_blocked_by_viewer(p.author_user_id)`;
+
 const NOT_LOCKED = sql`and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS}))`;
 
 /**
@@ -405,6 +435,7 @@ async function feedPage(
     tx.execute<FeedRow>(sql`
       ${postProjection(ctx.userId)}
        where p.deleted_at is null and c.deleted_at is null
+         ${NOT_BLOCKED_AUTHOR}
          ${predicate}
          and (
            ${afterAt}::timestamptz is null
@@ -766,9 +797,22 @@ export async function getPost(
        where p.id = ${postId}::uuid
          and p.deleted_at is null
          and c.deleted_at is null
+         ${NOT_BLOCKED_AUTHOR}
          and ${memberPostVisible(opts.canModerate)}
        limit 1`);
     if (rows[0]) return { row: rows[0], lockedCommunityId: null, lockedAuthor: null };
+
+    // 13-14 (D-616, UI-D-636): a blocked author's post is "não encontrado", whatever the two gates below would
+    // have said about it (a locked community or an unfollowed author would otherwise answer a 403 that names it).
+    // Paid on the miss only, and the bare miss it falls into is the same 404 an unknown id gets.
+    const hidden = await tx.execute<{ blocked: boolean }>(sql`
+      select app.is_blocked_by_viewer(p.author_user_id) as blocked
+        from feed_posts p
+       where p.id = ${postId}::uuid and p.deleted_at is null
+       limit 1`);
+    if (hidden[0]?.blocked === true) {
+      return { row: undefined, lockedCommunityId: null, lockedAuthor: null };
+    }
 
     // 08.2 (STORE-17, RESEARCH Pattern 6): an RLS miss cannot tell "hidden by the store gate" from
     // "absent". The definer answers the community id ONLY for a live post of this tenant in a
@@ -1670,6 +1714,8 @@ type CommentRow = {
   membership_id: string | null;
   display_name: string | null;
   avatar_asset_id: string | null;
+  /** 13-14 (D-616): the author's role, NULL exactly when `author_removed`; feeds `canBlock`, never sent as is. */
+  author_role: string | null;
 };
 
 /**
@@ -1709,7 +1755,8 @@ const commentProjection = (viewerUserId: string) => sql`
            (ms.id is null) as author_removed,
            ms.id as membership_id,
            mp.display_name,
-           mp.avatar_asset_id
+           mp.avatar_asset_id,
+           ms.role as author_role
       from feed_comments c
       left join memberships ms on ms.user_id = c.author_user_id and ms.deleted_at is null
       left join member_profiles mp on mp.membership_id = ms.id
@@ -1722,6 +1769,9 @@ const commentProjection = (viewerUserId: string) => sql`
  * service opens its transaction); anything else is `null`. The delete itself re-decides the same
  * question under a row lock, so this value is a convenience, never the authority.
  */
+/** 13-14 (D-616): the comment reads' form of `NOT_BLOCKED_AUTHOR` (the alias there is `p`, here it is `c`). */
+const NOT_BLOCKED_COMMENT_AUTHOR = sql`and not app.is_blocked_by_viewer(c.author_user_id)`;
+
 const removalFor = (
   row: CommentRow,
   viewerUserId: string,
@@ -1753,6 +1803,7 @@ const toComment = (row: CommentRow, viewerUserId: string, canModerate: boolean):
   isReply: row.depth === 1,
   canDelete: removalFor(row, viewerUserId, canModerate) !== null,
   removal: removalFor(row, viewerUserId, canModerate),
+  ...reportRiders(row.author_user_id, row.author_role, viewerUserId),
 });
 
 /**
@@ -2402,6 +2453,7 @@ export async function listComments(
        where c.post_id = ${postId}::uuid
          and c.parent_id is null
          and c.deleted_at is null
+         ${NOT_BLOCKED_COMMENT_AUTHOR}
          and (
            ${afterAt}::timestamptz is null
            or (c.created_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
@@ -2487,6 +2539,7 @@ export async function listReplies(
           ${commentProjection(ctx.userId)}
            where c.parent_id = ${commentId}::uuid
              and c.deleted_at is null
+             ${NOT_BLOCKED_COMMENT_AUTHOR}
              and (
                ${afterAt}::timestamptz is null
                or (c.created_at, c.id) > (${afterAt}::timestamptz, ${afterId}::uuid)
@@ -2557,7 +2610,8 @@ export async function getCommentThread(
        where c.id = ${commentId}::uuid
          and c.tenant_id = ${ctx.tenantId}::uuid
          and c.post_id is not null
-         and c.deleted_at is null`);
+         and c.deleted_at is null
+         ${NOT_BLOCKED_COMMENT_AUTHOR}`);
     const target = targets[0];
     if (!target) return refuseHiddenComment(tx, commentId);
 
@@ -2565,7 +2619,8 @@ export async function getCommentThread(
       ${commentProjection(ctx.userId)}
        where c.id = ${target.root_id}::uuid
          and c.tenant_id = ${ctx.tenantId}::uuid
-         and c.deleted_at is null`);
+         and c.deleted_at is null
+         ${NOT_BLOCKED_COMMENT_AUTHOR}`);
     const rootRow = roots[0];
     if (!rootRow) throw new ApiError(404, 'NOT_FOUND');
 
@@ -2574,6 +2629,7 @@ export async function getCommentThread(
        where c.parent_id = ${target.root_id}::uuid
          and c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
+         ${NOT_BLOCKED_COMMENT_AUTHOR}
        order by c.created_at asc, c.id asc
        limit ${cap + 1}`);
 

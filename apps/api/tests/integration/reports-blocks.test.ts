@@ -422,7 +422,7 @@ describe("member blocks and the blocker's reads (NATIVE-33)", () => {
     for (const userId of [supportUser, labUser, ids.third, crypto.randomUUID()]) {
       const res = await post('/v1/blocks', tokens.third, { userId });
       expect(res.status, `block ${userId}`).toBe(400);
-      expect((await res.clone().json()).error.code).toBe('CANNOT_BLOCK');
+      expect((await errorOf(res.clone())).code).toBe('CANNOT_BLOCK');
       refusals.push(await sansRequestId(res));
     }
     expect(new Set(refusals).size).toBe(1);

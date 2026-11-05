@@ -78,6 +78,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // ── /v1/me ──────────────────────────────────────────────────────────────────────────────────
   // 13-14 (D-616, NATIVE-31): a member of another tenant reporting this tenant's content is the bare 404.
   'POST /v1/reports': { case: 'phase 13 sweep: reports and blocks' },
+  // 13-14 (D-616, NATIVE-33): the blocks are the caller's own rows in their own tenant; a foreign id is the same
+  // CANNOT_BLOCK as an unknown one and the wrong host is refused.
+  'GET /v1/blocks': { case: 'phase 13 sweep: reports and blocks' },
+  'POST /v1/blocks': { case: 'phase 13 sweep: reports and blocks' },
+  'DELETE /v1/blocks/:userId': { case: 'phase 13 sweep: reports and blocks' },
   'GET /v1/me/bootstrap': { case: 'f' },
   'GET /v1/me/counters': { case: 'phase 7 sweep' },
   'GET /v1/me/profile': { case: 'inventory sweep: me and media' },

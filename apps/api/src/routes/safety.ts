@@ -1,15 +1,23 @@
-import { createRoute } from '@hono/zod-openapi';
+import { createRoute, z } from '@hono/zod-openapi';
 import { apiErrorEnvelopeSchema } from '@rede-social/contracts';
 import {
+  blockBodySchema,
+  blockChangeAnswerSchema,
+  blockListAnswerSchema,
+  blockListQuerySchema,
   reportCreateAnswerSchema,
   reportCreateBodySchema,
 } from '@rede-social/contracts/moderation';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import {
+  blockLimiter,
+  blockMember,
   createReport,
+  listBlocks,
   reportLimiter,
   safetyLimiterKey,
+  unblockMember,
 } from '@rede-social/core/server/safety/index';
 import { createOpenApiApp } from '../http/openapi';
 
@@ -69,3 +77,76 @@ export const reportRoutes = reports.openapi(createRoute_, async (c) => {
   c.header('Cache-Control', 'no-store');
   return c.json(created, 201);
 });
+
+/* ── /v1/blocks (NATIVE-33) ───────────────────────────────────────────────────────────────────────── */
+
+const blocks = createOpenApiApp();
+blocks.use('*', requireAuth);
+
+const listBlocksRoute = createRoute({
+  method: 'get',
+  path: '/',
+  request: { query: blockListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "The members the CALLER blocked, newest first (`created_at desc`, then the blocked user id), with their name and avatar read live (`displayName: null` for a departed member). Only the caller's own blocks are ever listed; nobody else, the blocked member included, can read that a block exists. `cursor` is OPAQUE (a tampered one answers page 1); `nextCursor` is non-null exactly when another row exists. `limit` clamps to 1..50",
+      content: { 'application/json': { schema: blockListAnswerSchema } },
+    },
+    400: envelope('VALIDATION_FAILED — an unknown query key'),
+  },
+});
+
+const blockRoute = createRoute({
+  method: 'post',
+  path: '/',
+  request: {
+    body: { content: { 'application/json': { schema: blockBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The member is blocked for the caller: `changed` is true when this call created the block and false for the idempotent repeat. Nobody is told; the blocked member sees nothing different',
+      content: { 'application/json': { schema: blockChangeAnswerSchema } },
+    },
+    400: envelope(
+      'CANNOT_BLOCK — ONE body for a staff account, a person of another tenant, an unknown, blocked or removed member and oneself; VALIDATION_FAILED — a malformed id or an unknown key',
+    ),
+    429: envelope('RATE_LIMITED — more than 60 blocks in an hour'),
+  },
+});
+
+const unblockRoute = createRoute({
+  method: 'delete',
+  path: '/{userId}',
+  request: { params: z.object({ userId: z.uuid() }) },
+  responses: {
+    200: {
+      description:
+        "The caller's block of that member is lifted: `changed` is true when a block was removed and false when there was none (a repeat is the same 200). Only the caller's own block can be lifted",
+      content: { 'application/json': { schema: blockChangeAnswerSchema } },
+    },
+    400: envelope('VALIDATION_FAILED — a malformed user id'),
+  },
+});
+
+export const blockRoutes = blocks
+  .openapi(listBlocksRoute, async (c) => {
+    const page = await listBlocks(c.get('ctx'), c.req.valid('query'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(page, 200);
+  })
+  .openapi(blockRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { userId } = c.req.valid('json');
+    if (!blockLimiter.consume(safetyLimiterKey(ctx))) throw new ApiError(429, 'RATE_LIMITED');
+    const done = await blockMember(ctx, userId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(done, 200);
+  })
+  .openapi(unblockRoute, async (c) => {
+    const { userId } = c.req.valid('param');
+    const done = await unblockMember(c.get('ctx'), userId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(done, 200);
+  });
