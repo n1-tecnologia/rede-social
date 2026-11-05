@@ -26,12 +26,14 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { cleanupDirectory, defaultTempBase } from './cleanup';
 import type { ReleaseEnv } from './config';
-import { type PlatformChoice, type ReleaseDeps, runDispatch, runPrepare } from './prepare';
+import { type PlatformChoice, runDispatch, runPrepare } from './prepare';
+import { type PublishDeps, runPublish } from './publish';
 import { createReporter, ReleaseRefusal, type Reporter } from './report';
 import { memoryGeneratedStore, pgGeneratedStore, runTool } from './signing';
 import { httpsLogoReader, localLogoReader, pgTenantSource } from './sources';
 import { StoreError } from './store-http';
 import type { CredentialKind, ReadCredential } from './unseal';
+import { memoryVersionStore, pgVersionStore } from './versions';
 
 const SUBCOMMANDS = ['dispatch', 'prepare', 'publish', 'cleanup'] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
@@ -127,7 +129,7 @@ const GENERATED: readonly CredentialKind[] = ['android_keystore', 'ios_distribut
 export async function buildDeps(
   args: CliArgs,
   report: Reporter,
-): Promise<{ deps: ReleaseDeps; close(): Promise<void> }> {
+): Promise<{ deps: PublishDeps; close(): Promise<void> }> {
   const { readAppCredential } = await import('@rede-social/core/server/apps/index');
   const entered = async (tenantId: string, kind: CredentialKind) =>
     readAppCredential(tenantId, kind as 'asc_key' | 'play_service_account' | 'apns_key');
@@ -150,6 +152,7 @@ export async function buildDeps(
         },
         tempBase: defaultTempBase(),
         stores: {},
+        versionStore: pgVersionStore,
       },
       close: async () => {},
     };
@@ -177,6 +180,10 @@ export async function buildDeps(
       stores: { apple: fakes.apple, google: fakes.google },
       // The fake store's certificate is not a real DER, so the dry run packs a stand-in bundle.
       packP12: async () => Buffer.from('dry-run-p12'),
+      // Nothing a dry run records is persisted.
+      versionStore: memoryVersionStore(),
+      // The workflow's own upload of the iOS build, stood in by the fake store.
+      beforePublish: (build) => fakes.markBuildUploaded(build.bundleId, build.buildNumber),
     },
     close: () => fakes.close(),
   };
@@ -184,7 +191,7 @@ export async function buildDeps(
 
 export async function runCli(
   argv: readonly string[],
-  overrides: Partial<ReleaseDeps> = {},
+  overrides: Partial<PublishDeps> = {},
 ): Promise<number> {
   const report = createReporter();
   let args: CliArgs;
@@ -206,7 +213,7 @@ export async function runCli(
       return 0;
     }
     const built = await buildDeps(args, report);
-    const deps: ReleaseDeps = { ...built.deps, ...overrides };
+    const deps: PublishDeps = { ...built.deps, ...overrides };
     const { close } = built;
     try {
       if (args.command === 'dispatch') {
@@ -227,7 +234,21 @@ export async function runCli(
             env: args.env,
             platform: args.platform,
             outDir: args.outDir,
-            secretsDir: args.secretsDir,
+            secretsDir: args.secretsDir ?? undefined,
+          },
+          deps,
+        );
+      } else if (args.command === 'publish') {
+        await runPublish(
+          {
+            slug: args.slug,
+            platform: args.platform,
+            outDir: args.outDir,
+            aab: args.aab,
+            ...(args.dryRun && args.aab === null ? { aabBytes: Buffer.from('dry-run-aab') } : {}),
+            minVersion: args.minVersion,
+            storeUrlIos: args.storeUrlIos,
+            storeUrlAndroid: args.storeUrlAndroid,
           },
           deps,
         );

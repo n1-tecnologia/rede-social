@@ -121,10 +121,16 @@ export async function createFakeStores(options: FakeStoreOptions = {}): Promise<
   let sequence = 0;
   const nextId = (prefix: string) => `${prefix}${++sequence}`;
   const appIdOf = (identifier: string) => `app-${identifier}`;
+  /** Bundle identifiers a build was uploaded for: such an app necessarily has an app record. */
+  const uploadedApps = new Set<string>();
   const hasAppRecord = (identifier: string): boolean => {
     const records = options.appRecords ?? 'all';
-    if (records === 'all')
-      return bundles.size > 0 && [...bundles.values()].some((b) => b.identifier === identifier);
+    if (records === 'all') {
+      return (
+        uploadedApps.has(identifier) ||
+        [...bundles.values()].some((b) => b.identifier === identifier)
+      );
+    }
     return records.includes(identifier);
   };
 
@@ -444,6 +450,7 @@ export async function createFakeStores(options: FakeStoreOptions = {}): Promise<
     lastAppleToken: () => lastAppleToken,
     trackUpdates: () => [...trackUpdates],
     markBuildUploaded(bundleIdentifier, buildNumber, state = 'VALID') {
+      uploadedApps.add(bundleIdentifier);
       builds.set(`${appIdOf(bundleIdentifier)}:${buildNumber}`, { id: nextId('build'), state });
     },
     close: () =>

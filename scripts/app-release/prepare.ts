@@ -63,6 +63,8 @@ export type ReleaseDeps = {
   random?: Random;
   makeCsr?: MakeCsr;
   packP12?: PackP12;
+  /** Waits between polls and retries; tests pass an instant one. */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 export type PrepareOptions = {
@@ -111,9 +113,8 @@ export async function runDispatch(
     dryRun: boolean;
     checkOnly: boolean;
   },
-  deps: Pick<ReleaseDeps, 'source' | 'tools' | 'report'> & {
+  deps: Pick<ReleaseDeps, 'source' | 'tools' | 'report' | 'sleep'> & {
     print?: (line: string) => void;
-    sleep?: (ms: number) => Promise<void>;
   },
 ): Promise<void> {
   const record = await deps.source.load(options.slug);

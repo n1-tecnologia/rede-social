@@ -68,7 +68,7 @@ export async function requestJson(
     response = await fetchImpl(url, {
       method: init.method,
       headers: init.headers,
-      ...(init.body === undefined ? {} : { body: init.body as BodyInit }),
+      ...(init.body === undefined ? {} : { body: init.body as RequestInit['body'] }),
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
     });
