@@ -1,9 +1,10 @@
 'use client';
 
 import type { AdminQuestion, AdminStep, MemberForm } from '@rede-social/contracts/profile-form';
-import { BottomSheet, useMediaQuery } from '@rede-social/ui';
+import { BottomSheet, Button, useMediaQuery } from '@rede-social/ui';
+import { ListChecks, RotateCcw } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { ProfileForm } from '@/components/profile-form/ProfileForm';
+import { type PreviewStatusInfo, ProfileForm } from '@/components/profile-form/ProfileForm';
 
 export interface PreviewSheetProps {
   open: boolean;
@@ -47,12 +48,47 @@ export function previewForm(questions: AdminQuestion[], steps: AdminStep[] = [])
 }
 
 /**
+ * The status line and the restart (UI-D-652): `role="status"` (polite) so a step that appears or disappears is
+ * announced by the new count, and a ghost "Recomeçar" with a 44px target. Both wrap on a 320px screen.
+ */
+function PreviewStatus({ info }: { info: PreviewStatusInfo }) {
+  const t = useTranslations('profileForm.admin.preview');
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p
+        role="status"
+        className="flex min-w-0 flex-1 items-start gap-2 break-words text-xs font-normal text-text-secondary"
+      >
+        <ListChecks aria-hidden size={16} className="shrink-0" />
+        <span className="min-w-0 wrap-anywhere">
+          {t('summary', { steps: info.steps, questions: info.questions })}
+        </span>
+      </p>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        hitArea
+        className="text-text"
+        onClick={info.restart}
+      >
+        <RotateCcw aria-hidden size={16} />
+        {t('restart')}
+      </Button>
+    </div>
+  );
+}
+
+/**
  * "Como o membro vê" (12-17, UI-D-580): the REAL member form (`ProfileForm`, plan 12) in `preview` mode
  * inside a `BottomSheet` (the centred card from `md`). Every control is live and nothing is ever sent:
  * the form's submit is a no-op in preview, there is no "Salvar", no "Sair" and no destination, and
  * "Fechar" closes at once (a preview has no unsaved work, so no dirty guard). The banner, the required
  * markers, the public notice and the error messages are the member's own, because it is the same
- * component. The sheet closes through "Fechar", the backdrop or Escape; the handle is pointer-only, so
+ * component. With two or more steps (`showSteps`) it is the member's stepper (12.1, UI-D-652): "Avançar" works
+ * without answers, the last step ends in the outline "Fechar", one more sentence joins the banner, and under it
+ * a polite status line counts the steps and questions a member with the preview's answers would see, beside the
+ * ghost "Recomeçar" that clears every preview answer. The sheet closes through "Fechar", the backdrop or Escape; the handle is pointer-only, so
  * the screen reader meets exactly one "Fechar".
  */
 export function PreviewSheet({ open, questions, steps, onClose }: PreviewSheetProps) {
@@ -67,7 +103,13 @@ export function PreviewSheet({ open, questions, steps, onClose }: PreviewSheetPr
       desktopCard={desktop}
       dismiss="handle"
     >
-      <ProfileForm form={previewForm(questions, steps)} preview onClose={onClose} />
+      <ProfileForm
+        form={previewForm(questions, steps)}
+        preview
+        onClose={onClose}
+        previewNote={t('skipNote')}
+        previewStatus={(info) => <PreviewStatus info={info} />}
+      />
     </BottomSheet>
   );
 }

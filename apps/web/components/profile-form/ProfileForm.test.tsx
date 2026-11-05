@@ -430,6 +430,91 @@ describe('the preview sends nothing (UI-D-580)', () => {
   });
 });
 
+describe('the preview as a stepper: nothing validated, saved or confirmed (12.1-18, UI-D-652)', () => {
+  const threeSteps = () => {
+    const opts = options('Sim', 'Não');
+    const opener = question('single_choice', {
+      title: 'Abre',
+      required: true,
+      options: opts,
+      stepId: S1,
+    });
+    const gated = question('short_text', {
+      title: 'Depois',
+      required: true,
+      stepId: S2,
+      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+    });
+    const last = question('short_text', { title: 'Fim', required: true, stepId: S3 });
+    return form([opener, gated, last], { steps: steps('Um', 'Dois', 'Três') });
+  };
+
+  it('uses the stepper when the form has two or more steps and the one card otherwise', () => {
+    show(threeSteps(), { preview: true, onClose: vi.fn() });
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Avançar' })).toBeTruthy();
+    cleanup();
+    show(form([question('short_text', { title: 'Só' })]), { preview: true });
+    expect(screen.queryByText(/Etapa \d de \d/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Avançar' })).toBeNull();
+  });
+
+  it('Avançar walks a required, untouched form: no error, no flag, no erase dialog, no action', async () => {
+    const { container } = show(threeSteps(), { preview: true, onClose: vi.fn() });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Avançar' }));
+    });
+    expect(screen.getByRole('heading', { level: 2, name: 'Três' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(container.querySelector('[data-flagged]')).toBeNull();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('ending the last step offers the outline Fechar and no Concluir, calling onClose only', async () => {
+    const onClose = vi.fn();
+    show(threeSteps(), { preview: true, onClose });
+    fireEvent.click(screen.getByRole('button', { name: 'Avançar' }));
+    expect(screen.queryByRole('button', { name: 'Concluir' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('hands the sheet the counts and a restart, and adds the banner sentence only in the stepper', () => {
+    const seen: { steps: number; questions: number }[] = [];
+    show(threeSteps(), {
+      preview: true,
+      previewNote: 'Nota extra.',
+      previewStatus: (info) => {
+        seen.push({ steps: info.steps, questions: info.questions });
+        return (
+          <button type="button" onClick={info.restart}>
+            reiniciar
+          </button>
+        );
+      },
+    });
+    expect(
+      screen.getByText('Prévia: nada do que você preencher aqui é salvo. Nota extra.'),
+    ).toBeTruthy();
+    expect(seen.at(-1)).toEqual({ steps: 2, questions: 2 });
+    fireEvent.click(screen.getByRole('radio', { name: 'Sim' }));
+    expect(seen.at(-1)).toEqual({ steps: 3, questions: 3 });
+    fireEvent.click(screen.getByRole('button', { name: 'reiniciar' }));
+    expect(seen.at(-1)).toEqual({ steps: 2, questions: 2 });
+    expect((screen.getByRole('radio', { name: 'Sim' }) as HTMLInputElement).checked).toBe(false);
+    cleanup();
+    show(form([question('short_text')]), {
+      preview: true,
+      previewNote: 'Nota extra.',
+      previewStatus: () => <p>linha</p>,
+    });
+    expect(screen.queryByText(/Nota extra/)).toBeNull();
+    expect(screen.queryByText('linha')).toBeNull();
+  });
+});
+
 describe('the accessibility floor (UI-D-596, PFORM-26)', () => {
   it('the page heading takes focus on mount', () => {
     show(form([question('short_text')]), { title: 'Complete seu perfil', intro: 'Introdução' });

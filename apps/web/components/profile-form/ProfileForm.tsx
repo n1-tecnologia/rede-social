@@ -11,7 +11,15 @@ import { ArrowLeft, ArrowRight, CircleAlert, CircleCheck, Eye, WifiOff } from 'l
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { type FormEvent, useEffect, useId, useRef, useState, useTransition } from 'react';
+import {
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import { saveProfileFormAction } from '@/app/(auth)/completar-perfil/actions';
 import {
   type Answers,
@@ -58,6 +66,13 @@ import { StepProgress } from './StepProgress';
  * has no step chrome at all and behaves exactly as Phase 12. The path comes from the pure `stepPath` and the
  * visibility rule from the contracts; the server revalidates every save and the SQL gate is the authority
  * (T-12.1-16).
+ *
+ * **12.1: the builder's preview walks the same stepper (D-627, D-628; UI-D-652).** With two or more configured
+ * steps the preview is the stepper too, over a blank first-time viewer: "Avançar" and "Voltar" only move
+ * between the steps of the path (nothing is validated, flagged, saved or confirmed, and the erase dialog never
+ * opens), the last step's button is the outline "Fechar", and the reveal, the conditions and the skipped steps
+ * are the member's own. The counts of what this viewer would see and the restart go to the sheet through
+ * `previewStatus`, so the answers keep ONE owner (this component).
  */
 
 export interface ProfileFormProps {
@@ -75,6 +90,20 @@ export interface ProfileFormProps {
    * `first` and `returning` (outside the preview), the one card for `edit` and for the preview.
    */
   layout?: 'stepper' | 'scroll';
+  /** Preview only: one more sentence for the banner, shown only in the stepper layout (UI-D-652). */
+  previewNote?: string;
+  /**
+   * Preview only, stepper layout only: the sheet's status line and restart, drawn under the banner. Gets the
+   * counts of what a member with the preview's answers would see (steps on the path, visible questions) and
+   * a `restart` that clears every preview answer and returns to the first step. No answer value goes out.
+   */
+  previewStatus?: (info: PreviewStatusInfo) => ReactNode;
+}
+
+export interface PreviewStatusInfo {
+  steps: number;
+  questions: number;
+  restart: () => void;
 }
 
 type View = {
@@ -132,6 +161,8 @@ export function ProfileForm({
   title,
   intro,
   layout,
+  previewNote,
+  previewStatus,
 }: ProfileFormProps) {
   const t = useTranslations('profileForm.member');
   const router = useRouter();
@@ -213,7 +244,12 @@ export function ProfileForm({
 
   const { questions } = view;
   const locked = pending;
-  const wantsStepper = layout ? layout === 'stepper' : !preview && view.mode !== 'edit';
+  // The preview is the stepper whenever the form has two or more steps that hold a question (UI-D-652).
+  const wantsStepper = layout
+    ? layout === 'stepper'
+    : preview
+      ? showSteps(view)
+      : view.mode !== 'edit';
   const path = wantsStepper ? walkPath(view, answers, pinned) : [];
   const stepperOn = wantsStepper && path.length > 0;
   const currentId = stepperOn
@@ -230,7 +266,7 @@ export function ProfileForm({
       (!chrome || question.stepId === currentId),
   );
   // Edit (and any one-scroll layout of a form with two or more steps): one titled section per step that holds a
-  // visible question, in step order (D-630, UI-D-658). The preview keeps the one card until plan 18.
+  // visible question, in step order (D-630, UI-D-658). The preview is either the stepper or the one card, never sectioned.
   const sectioned = !preview && !stepperOn && showSteps(view);
   const sections = sectioned
     ? view.steps
@@ -314,6 +350,17 @@ export function ProfileForm({
     setAnnouncement('');
     focusPending.current = true;
     setFocusTick((tick) => tick + 1);
+  }
+
+  /** The preview's "Recomeçar": every answer cleared, back on the first step of the blank path (UI-D-652). */
+  function restart() {
+    const blank = blankAnswers({ questions });
+    const first = walkPath(view, blank, new Set())[0] ?? null;
+    setAnswers(blank);
+    setErrors({});
+    setAnnouncement('');
+    setCurrentStepId(first);
+    setPinned(new Set(first === null ? [] : [first]));
   }
 
   /** "Voltar" never validates and never saves: the drafts stay in state (UI-D-654, T-12.1-11). */
@@ -431,7 +478,13 @@ export function ProfileForm({
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (preview || pending || !online || eraseOpen) return;
+    if (preview) {
+      // Nothing is validated, saved or confirmed in the preview: "Avançar" only moves along the path.
+      const to = chrome && !lastStep && currentId !== null ? nextStep(path, currentId) : null;
+      if (to !== null) goToStep(to);
+      return;
+    }
+    if (pending || !online || eraseOpen) return;
     setNotice(null);
     setElsewhere(null);
     const found = validateAll(questions, answers, scope);
@@ -569,9 +622,14 @@ export function ProfileForm({
       {preview ? (
         <p className="flex items-start gap-2 rounded-xl bg-bg-tertiary px-3 py-3 text-xs text-text">
           <Eye aria-hidden size={16} className="shrink-0" />
-          {t('preview.banner')}
+          <span className="min-w-0 break-words">
+            {chrome && previewNote ? `${t('preview.banner')} ${previewNote}` : t('preview.banner')}
+          </span>
         </p>
       ) : null}
+      {preview && chrome && previewStatus
+        ? previewStatus({ steps: path.length, questions: visible.size, restart })
+        : null}
 
       {!preview && view.mode === 'returning' && view.missingRequired > 0 ? (
         <div
@@ -654,7 +712,32 @@ export function ProfileForm({
         </p>
       ) : null}
 
-      {preview ? (
+      {preview && chrome ? (
+        <div className="flex gap-3">
+          {previousId !== null ? (
+            <Button type="button" variant="outline" size="lg" className="shrink-0" onClick={goBack}>
+              <ArrowLeft aria-hidden size={18} />
+              {t('stepper.back')}
+            </Button>
+          ) : null}
+          {lastStep ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="min-w-0 flex-1"
+              onClick={onClose}
+            >
+              {t('preview.close')}
+            </Button>
+          ) : (
+            <Button type="submit" variant="brand" size="lg" className="min-w-0 flex-1">
+              {t('stepper.next')}
+              <ArrowRight aria-hidden size={18} />
+            </Button>
+          )}
+        </div>
+      ) : preview ? (
         <Button type="button" variant="outline" size="lg" fullWidth onClick={onClose}>
           {t('preview.close')}
         </Button>

@@ -339,7 +339,10 @@
       },
       "preview": {
         "open": "Ver como o membro vê",
-        "title": "Como o membro vê"
+        "title": "Como o membro vê",
+        "skipNote": "Aqui você avança sem precisar responder.",
+        "summary": "Com estas respostas, o membro vê {steps, plural, one {# etapa} other {# etapas}} e {questions, plural, one {# pergunta} other {# perguntas}}.",
+        "restart": "Recomeçar"
       }
     },
     "types": {
