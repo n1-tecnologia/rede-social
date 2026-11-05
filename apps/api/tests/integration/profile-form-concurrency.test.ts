@@ -7,7 +7,9 @@ import {
   HOSTS,
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
+  seedProfileFormAnswer,
   seedProfileFormQuestion,
+  seedProfileFormStep,
   signInAs,
   withProfileForm,
 } from './setup';
@@ -649,4 +651,413 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
       });
     });
   }, 30_000);
+});
+
+// ── 12.1-12: admin condition and step edits against a member's save (D-632, D-633, T-12.1-13) ─────────────────
+//
+// The member's save locks the active questions `FOR SHARE` through `app.profile_form_lock_active_v2()` in the
+// canonical order; an admin's condition or step edit takes the per-tenant advisory lock (`adminLock`) and then
+// the same rows `FOR UPDATE`. Each case below pins BOTH commit orders with a held transaction on one side and
+// the REAL route on the other, and then asserts the one invariant of the phase: STORED EQUALS VISIBLE.
+
+const choose = (optionId: string) => ({ optionId, otherText: null });
+
+/** The question ids of a member's answers whose condition is not met (must always be empty). */
+async function staleAnswers(userId: string): Promise<string[]> {
+  const rows = await adminSql<{ question_id: string }[]>`
+    select a.question_id::text as question_id
+      from public.profile_form_answers a
+      join public.memberships m on m.id = a.membership_id
+      join public.profile_form_questions q on q.tenant_id = a.tenant_id and q.id = a.question_id
+     where m.user_id = ${userId}::uuid
+       and q.condition_question_id is not null
+       and not exists (
+         select 1 from public.profile_form_answers o
+          where o.tenant_id = a.tenant_id and o.membership_id = a.membership_id
+            and o.question_id = q.condition_question_id
+            and q.condition_values && app.profile_form_answer_tokens(o.value))`;
+  return rows.map((row) => row.question_id);
+}
+
+const storedFor = async (userId: string): Promise<string[]> =>
+  (
+    await adminSql<{ question_id: string }[]>`
+      select a.question_id::text as question_id
+        from public.profile_form_answers a
+        join public.memberships m on m.id = a.membership_id
+       where m.user_id = ${userId}::uuid order by a.question_id`
+  ).map((row) => row.question_id);
+
+const saveStep = (
+  p: Person,
+  form: Form,
+  stepId: string,
+  answers: Record<string, unknown>,
+): Promise<Response> =>
+  call(p, 'PUT', '/v1/me/profile-form/answers', { formEtag: form.formEtag, stepId, answers });
+
+type HeldTx = { release: () => void; committed: Promise<unknown> };
+
+/**
+ * A member's save, held open before the commit: claims, role, the `_v2` lock, then the writes the real save
+ * does (`write` on the transaction) and the purge. The transaction stays open until `release()`.
+ */
+async function holdMemberSave(
+  member: Person,
+  write: (tx: postgres.TransactionSql) => Promise<void>,
+): Promise<HeldTx> {
+  let release: () => void = () => {};
+  let held: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const holding = new Promise<void>((resolve) => {
+    held = resolve;
+  });
+  const claims = JSON.stringify({
+    sub: member.userId,
+    role: 'authenticated',
+    tenant_id: labTenantId,
+    tenant_role: 'member',
+  });
+  const committed = memberSql.begin(async (tx) => {
+    await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+    await tx.unsafe('set local role authenticated');
+    await tx`select id::text as id from app.profile_form_lock_active_v2()`;
+    await write(tx);
+    await tx`select question_id from app.profile_form_purge_closed()`;
+    held();
+    await gate;
+  });
+  await holding;
+  return { release, committed };
+}
+
+const upsertAnswer = (
+  tx: postgres.TransactionSql,
+  member: Person,
+  questionId: string,
+  value: unknown,
+) =>
+  tx`
+    insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+    select m.tenant_id, ${questionId}::uuid, m.id, m.user_id, ${tx.json(value as never)}
+      from public.memberships m
+     where m.tenant_id = ${labTenantId}::uuid and m.user_id = ${member.userId}::uuid
+    on conflict (tenant_id, membership_id, question_id)
+    do update set value = excluded.value, updated_at = now()`;
+
+/**
+ * An admin's edit, held open before the commit: the per-tenant advisory lock `adminLock` takes, every active
+ * row `FOR UPDATE` in the canonical order (`position, created_at, id`), then `edit` on the transaction.
+ */
+async function holdAdminEdit(
+  edit: (tx: postgres.TransactionSql) => Promise<void>,
+): Promise<HeldTx> {
+  let release: () => void = () => {};
+  let held: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const holding = new Promise<void>((resolve) => {
+    held = resolve;
+  });
+  const committed = editorSql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtextextended(${`profile_form:${labTenantId}`}, 0))`;
+    await tx`
+      select id from public.profile_form_questions
+       where tenant_id = ${labTenantId}::uuid and archived_at is null
+       order by position, created_at, id for update`;
+    await edit(tx);
+    held();
+    await gate;
+  });
+  await holding;
+  return { release, committed };
+}
+
+/** Two steps; step 1 holds an opener (Sim / Não) and its dependent (shown by Sim), step 2 holds a plain question. */
+async function twoStepBranch() {
+  const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+  const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+  const yes = crypto.randomUUID();
+  const no = crypto.randomUUID();
+  const opener = await question({
+    title: `${TITLE}abridora`,
+    type: 'single_choice',
+    stepId: s1,
+    position: 1,
+    options: [
+      { id: yes, label: 'Sim' },
+      { id: no, label: 'Não' },
+    ],
+  });
+  const dependent = await question({
+    title: `${TITLE}dependente`,
+    stepId: s1,
+    position: 2,
+    conditionQuestionId: opener,
+    conditionValues: [yes],
+  });
+  const other = await question({ title: `${TITLE}outra`, stepId: s2, position: 3 });
+  return { s1, s2, yes, no, opener, dependent, other };
+}
+
+describe('12.1-12 D-632 and D-633: an admin condition or step edit and a member save never interleave or deadlock (T-12.1-13)', () => {
+  it('condition edit, member first: the admin waits for the save, then is refused condition_locked because the dependent now has an answer; the store stays consistent', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await twoStepBranch();
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.opener,
+        userId: member.userId,
+        value: choose(f.yes),
+      });
+      const held = await holdMemberSave(member, async (tx) => {
+        await upsertAnswer(tx, member, f.dependent, 'minha resposta');
+      });
+
+      const [row] = await adminSql<{ revision: number }[]>`
+        select revision from public.profile_form_questions where id = ${f.dependent}::uuid`;
+      const patching = Promise.resolve(
+        adminCall('PATCH', `/v1/profile_form/questions/${f.dependent}`, {
+          revision: row?.revision,
+          condition: { questionId: f.opener, values: [f.no] },
+        }),
+      );
+      const patchDone = watch(patching);
+      await sleep(600);
+      expect(patchDone(), 'the condition edit waited for the member’s save').toBe(false);
+
+      held.release();
+      await held.committed;
+      const refused = await patching;
+      expect(refused.status).toBe(409);
+      expect(await profileFormCode(refused)).toBe('condition_locked');
+      const [after] = await adminSql<{ condition_values: string[] }[]>`
+        select condition_values from public.profile_form_questions where id = ${f.dependent}::uuid`;
+      expect(after?.condition_values).toEqual([f.yes]);
+      expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
+      expect(await staleAnswers(member.userId)).toEqual([]);
+    });
+  }, 60_000);
+
+  it('condition edit, admin first: the member’s save waits for the edit, then is refused form_changed and writes nothing; the retry with the fresh etag is consistent', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await twoStepBranch();
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.opener,
+        userId: member.userId,
+        value: choose(f.yes),
+      });
+      const stale = await readForm(member);
+      const held = await holdAdminEdit(async (tx) => {
+        await tx`
+          update public.profile_form_questions
+             set condition_values = ${tx.array([f.no])}, revision = revision + 1
+           where id = ${f.dependent}::uuid`;
+      });
+
+      const saving = Promise.resolve(
+        saveStep(member, stale, f.s1, { [f.dependent]: 'tarde demais' }),
+      );
+      const saveDone = watch(saving);
+      await sleep(600);
+      expect(saveDone(), 'the save waited for the admin’s edit').toBe(false);
+
+      held.release();
+      await held.committed;
+      const refused = await saving;
+      expect(refused.status).toBe(409);
+      expect(await profileFormCode(refused)).toBe('form_changed');
+      expect(await storedFor(member.userId)).toEqual([f.opener]);
+      expect(await staleAnswers(member.userId)).toEqual([]);
+
+      // The condition now wants Não; the member says Não and the dependent is shown, so the answer is kept.
+      const fresh = await readForm(member);
+      const ok = await saveStep(member, fresh, f.s1, {
+        [f.opener]: choose(f.no),
+        [f.dependent]: 'agora vale',
+      });
+      expect(ok.status, await ok.clone().text()).toBe(200);
+      expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
+      expect(await staleAnswers(member.userId)).toEqual([]);
+    });
+  }, 60_000);
+
+  it('step move, member first: the admin’s reorder waits for the save that closes the dependent, then commits; no stale answer, no deadlock', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await twoStepBranch();
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.opener,
+        userId: member.userId,
+        value: choose(f.yes),
+      });
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.dependent,
+        userId: member.userId,
+        value: 'velha',
+      });
+      const held = await holdMemberSave(member, async (tx) => {
+        await upsertAnswer(tx, member, f.opener, choose(f.no));
+      });
+
+      const reordering = Promise.resolve(
+        adminCall('PUT', '/v1/profile_form/order', {
+          steps: [
+            { id: f.s1, questionIds: [f.opener] },
+            { id: f.s2, questionIds: [f.dependent, f.other] },
+          ],
+        }),
+      );
+      const reorderDone = watch(reordering);
+      await sleep(600);
+      expect(reorderDone(), 'the reorder waited for the member’s save').toBe(false);
+
+      held.release();
+      await held.committed;
+      const moved = await reordering;
+      expect(moved.status, await moved.clone().text()).toBe(200);
+      expect(await storedFor(member.userId)).toEqual([f.opener]);
+      expect(await staleAnswers(member.userId)).toEqual([]);
+      const [placed] = await adminSql<{ step_id: string }[]>`
+        select step_id::text as step_id from public.profile_form_questions where id = ${f.dependent}::uuid`;
+      expect(placed?.step_id).toBe(f.s2);
+    });
+  }, 60_000);
+
+  it('step move, admin first: the member’s save waits for the move, then is refused form_changed; the dependent’s answer is still visible and the retry closes it', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await twoStepBranch();
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.opener,
+        userId: member.userId,
+        value: choose(f.yes),
+      });
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.dependent,
+        userId: member.userId,
+        value: 'velha',
+      });
+      const stale = await readForm(member);
+      const held = await holdAdminEdit(async (tx) => {
+        await tx`
+          update public.profile_form_questions
+             set step_id = ${f.s2}::uuid, revision = revision + 1
+           where id = ${f.dependent}::uuid`;
+      });
+
+      const saving = Promise.resolve(saveStep(member, stale, f.s1, { [f.opener]: choose(f.no) }));
+      const saveDone = watch(saving);
+      await sleep(600);
+      expect(saveDone(), 'the save waited for the admin’s step move').toBe(false);
+
+      held.release();
+      await held.committed;
+      const refused = await saving;
+      expect(refused.status).toBe(409);
+      expect(await profileFormCode(refused)).toBe('form_changed');
+      expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
+      expect(await staleAnswers(member.userId)).toEqual([]);
+
+      const fresh = await readForm(member);
+      const retry = await saveStep(member, fresh, f.s1, { [f.opener]: choose(f.no) });
+      expect(retry.status, await retry.clone().text()).toBe(200);
+      expect(await storedFor(member.userId)).toEqual([f.opener]);
+      expect(await staleAnswers(member.userId)).toEqual([]);
+    });
+  }, 60_000);
+
+  it('real routes raced both ways over several rounds (a step move against the member’s opener change): only 200 or 409 form_changed, never a 500 or a deadlock, and stored equals visible after every round', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await twoStepBranch();
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.opener,
+        userId: member.userId,
+        value: choose(f.yes),
+      });
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.dependent,
+        userId: member.userId,
+        value: 'rodada',
+      });
+      const outcomes: string[] = [];
+      for (let round = 0; round < 6; round += 1) {
+        const form = await readForm(member);
+        const toSecond = round % 2 === 0;
+        const reordering = Promise.resolve(
+          adminCall('PUT', '/v1/profile_form/order', {
+            steps: toSecond
+              ? [
+                  { id: f.s1, questionIds: [f.opener] },
+                  { id: f.s2, questionIds: [f.dependent, f.other] },
+                ]
+              : [
+                  { id: f.s1, questionIds: [f.opener, f.dependent] },
+                  { id: f.s2, questionIds: [f.other] },
+                ],
+          }),
+        ).then(
+          (res) => `admin-${res.status}`,
+          () => 'admin-error',
+        );
+        if (round % 3 === 1) await sleep(25);
+        const saving = saveStep(member, form, f.s1, {
+          [f.opener]: choose(round % 2 === 0 ? f.no : f.yes),
+        }).then(
+          async (res) =>
+            res.status === 409 ? `save-409-${await profileFormCode(res)}` : `save-${res.status}`,
+          () => 'save-error',
+        );
+        const [adminResult, saveResult] = await Promise.all([reordering, saving]);
+        outcomes.push(adminResult, saveResult);
+        expect(adminResult, `round ${round}`).toBe('admin-200');
+        expect(['save-200', 'save-409-form_changed'], `round ${round}`).toContain(saveResult);
+        expect(await staleAnswers(member.userId), `round ${round}`).toEqual([]);
+      }
+      expect(outcomes.filter((outcome) => outcome.includes('40P01'))).toEqual([]);
+    });
+  }, 120_000);
+
+  it('two saves of the same member racing (the opener closes while a dependent is rewritten) end consistent whichever wins', async () => {
+    await withProfileForm(labTenantId, async () => {
+      const f = await twoStepBranch();
+      for (let round = 0; round < 3; round += 1) {
+        const member = await person();
+        await seedProfileFormAnswer({
+          tenantId: labTenantId,
+          questionId: f.opener,
+          userId: member.userId,
+          value: choose(f.yes),
+        });
+        await seedProfileFormAnswer({
+          tenantId: labTenantId,
+          questionId: f.dependent,
+          userId: member.userId,
+          value: 'antiga',
+        });
+        const form = await readForm(member);
+        const [close, rewrite] = await Promise.all([
+          saveStep(member, form, f.s1, { [f.opener]: choose(f.no) }),
+          saveStep(member, form, f.s1, { [f.dependent]: 'nova' }),
+        ]);
+        expect(close.status, `round ${round}: ${await close.clone().text()}`).toBe(200);
+        expect(rewrite.status, `round ${round}: ${await rewrite.clone().text()}`).toBe(200);
+        expect(await staleAnswers(member.userId), `round ${round}`).toEqual([]);
+        expect(await storedFor(member.userId), `round ${round}`).toEqual([f.opener]);
+      }
+    });
+  }, 90_000);
 });

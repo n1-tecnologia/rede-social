@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { PROFILE_FORM_DEFAULT_STEP_TITLE } from '@rede-social/contracts/profile-form';
 import { sqlClient } from '@rede-social/core/db';
 import { applyDirectory } from '@rede-social/core/server/migrations/runner';
 import {
@@ -754,4 +755,220 @@ describe('Phase 12 (PFORM-25): the profile form migrations reach the second proj
     expect(await ledgerOfB()).toEqual({ count: files.length, head });
     expect(await stateOf(f.projectId)).toMatchObject({ status: 'current' });
   }, 240_000);
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Phase 12.1 (PFORM-40, D-596, T-12.1-14): the three step and condition files fan out onto rows
+// ---------------------------------------------------------------------------------------------------------
+
+/** What the three Phase 12.1 files create in the `app` schema (the helper, the purge and the `_v2` lock). */
+const PROFILE_FORM_STEPS_FUNCTIONS = [
+  'profile_form_answer_tokens',
+  'profile_form_default_step',
+  'profile_form_lock_active_v2',
+  'profile_form_purge_closed',
+] as const;
+
+describe('Phase 12.1 (PFORM-40): the steps and conditions migrations reach a project that already holds Phase 12 rows', () => {
+  it('applies the three files after the three Phase 12 files, gives every existing question a step, leaves every answer untouched, and a second run applies nothing (T-12.1-14)', async () => {
+    const all = await readMigrationDir(defaultMigrationDir('tenant'), 'tenant');
+    // The versions are READ from the files, so regenerating a migration cannot break this case.
+    const PROFILE_FORM_STEPS_VERSIONS = all
+      .filter((file) => /profile_form_steps/.test(file.name))
+      .map((file) => file.version);
+    expect(
+      PROFILE_FORM_STEPS_VERSIONS,
+      'the three Phase 12.1 files are in the tenant set',
+    ).toHaveLength(3);
+    expect([...PROFILE_FORM_STEPS_VERSIONS].sort()).toEqual(PROFILE_FORM_STEPS_VERSIONS);
+    const first = all.findIndex((file) => file.version === PROFILE_FORM_STEPS_VERSIONS[0]);
+    // After the three Phase 12 files: every one of them sorts BEFORE the first Phase 12.1 file.
+    for (const version of PROFILE_FORM_VERSIONS) {
+      expect(all.findIndex((file) => file.version === version)).toBeLessThan(first);
+    }
+    const behind = all.length - first;
+    const files = await laggingB(behind);
+    const f = await register('pform121');
+
+    // A project that already holds Phase 12 data in the OLD shape (no steps table, no step_id): one tenant
+    // with a single-choice question, a text question and an archived one, and members who answered them.
+    const tenantId = crypto.randomUUID();
+    const quiet = crypto.randomUUID();
+    const userA = crypto.randomUUID();
+    const userB = crypto.randomUUID();
+    const q1 = crypto.randomUUID();
+    const q2 = crypto.randomUUID();
+    const q3 = crypto.randomUUID();
+    const yes = crypto.randomUUID();
+    const no = crypto.randomUUID();
+    await onB(async (b) => {
+      await b`
+        insert into public.tenants (id, slug, display_name, rules_text, rules_version)
+        values (${tenantId}::uuid, ${`ma-121-${RUN}`}, 'Tenant fan-out 12.1', 'Regras.', 1),
+               (${quiet}::uuid, ${`ma-121q-${RUN}`}, 'Tenant sem perguntas', 'Regras.', 1)`;
+      for (const [id, email] of [
+        [userA, `fan-a-${RUN}@example.test`],
+        [userB, `fan-b-${RUN}@example.test`],
+      ] as const) {
+        await b`
+          insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
+                                  email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                                  created_at, updated_at)
+          values ('00000000-0000-0000-0000-000000000000', ${id}::uuid, 'authenticated',
+                  'authenticated', ${email}, 'x', now(), '{}'::jsonb, '{}'::jsonb, now(), now())`;
+      }
+      await b`
+        insert into public.memberships (tenant_id, user_id, role, status)
+        values (${tenantId}::uuid, ${userA}::uuid, 'member', 'active'),
+               (${tenantId}::uuid, ${userB}::uuid, 'member', 'active')`;
+      await b`
+        insert into public.profile_form_questions
+          (id, tenant_id, type, title, required, position, options, created_by_user_id, archived_at)
+        values (${q1}::uuid, ${tenantId}::uuid, 'single_choice', 'Fan-out abridora', false, 1,
+                ${b.json([
+                  { id: yes, label: 'Sim' },
+                  { id: no, label: 'Não' },
+                ] as never)}, ${userA}::uuid, null),
+               (${q2}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out texto', true, 2, '[]'::jsonb,
+                ${userA}::uuid, null),
+               (${q3}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out arquivada', false, 3, '[]'::jsonb,
+                ${userA}::uuid, now())`;
+      await b`
+        insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+        select m.tenant_id, v.q, m.id, m.user_id, v.value
+          from public.memberships m
+          join (values (${q1}::uuid, ${userA}::uuid, ${b.json({ optionId: yes, otherText: null } as never)}),
+                       (${q2}::uuid, ${userA}::uuid, ${b.json('resposta A' as never)}),
+                       (${q3}::uuid, ${userA}::uuid, ${b.json('arquivada A' as never)}),
+                       (${q2}::uuid, ${userB}::uuid, ${b.json('resposta B' as never)}))
+               as v(q, u, value) on v.u = m.user_id
+         where m.tenant_id = ${tenantId}::uuid`;
+    });
+
+    const snapshot = () =>
+      onB(
+        async (b) =>
+          b<
+            {
+              id: string;
+              question_id: string;
+              membership_id: string;
+              value: unknown;
+              created: string;
+              updated: string;
+            }[]
+          >`
+          select id::text as id, question_id::text as question_id, membership_id::text as membership_id,
+                 value, created_at::text as created, updated_at::text as updated
+            from public.profile_form_answers order by id`,
+      );
+    const answersBefore = await snapshot();
+    expect(answersBefore).toHaveLength(4);
+
+    const shape = () =>
+      onB(async (b) => {
+        const [row] = await b<
+          { steps: string | null; step_col: number; fns: number; trig: number }[]
+        >`
+          select to_regclass('public.profile_form_steps')::text as steps,
+                 (select count(*)::int from information_schema.columns
+                   where table_schema = 'public' and table_name = 'profile_form_questions'
+                     and column_name in ('step_id', 'condition_question_id', 'condition_values')) as step_col,
+                 (select count(*)::int
+                    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname = 'app'
+                     and p.proname = any(${[...PROFILE_FORM_STEPS_FUNCTIONS]}::text[])) as fns,
+                 (select count(*)::int from pg_trigger
+                   where tgname = 'profile_form_questions_default_step' and not tgisinternal) as trig`;
+        return row;
+      });
+    // Before: none of the Phase 12.1 structure exists in B, Phase 12's does.
+    expect(await shape()).toMatchObject({ steps: null, step_col: 0, trig: 0 });
+    expect((await ledgerOfB()).count).toBe(files.length - behind);
+
+    const run = await migrateAll({ concurrency: 2 });
+    expect(run.exitCode).toBe(0);
+    expect(lineOf(run.lines, f.ref)).toMatchObject({ status: 'current', applied: behind });
+
+    // After: the table, the three columns, the default-step trigger and the functions are there.
+    expect(await shape()).toEqual({
+      steps: 'profile_form_steps',
+      step_col: 3,
+      fns: PROFILE_FORM_STEPS_FUNCTIONS.length,
+      trig: 1,
+    });
+
+    // Every existing question has a step titled with the confirmed literal; ONE step for the tenant, none
+    // for the tenant without questions; the questions' own columns did not move.
+    const questions = await onB(
+      async (b) =>
+        b<
+          {
+            id: string;
+            step_id: string | null;
+            title: string;
+            archived: boolean;
+            condition: string | null;
+          }[]
+        >`
+        select q.id::text as id, q.step_id::text as step_id, s.title,
+               q.archived_at is not null as archived,
+               q.condition_question_id::text as condition
+          from public.profile_form_questions q
+          left join public.profile_form_steps s on s.tenant_id = q.tenant_id and s.id = q.step_id
+         where q.tenant_id = ${tenantId}::uuid order by q.position`,
+    );
+    expect(questions.map((row) => row.id)).toEqual([q1, q2, q3]);
+    expect(questions.every((row) => row.step_id !== null)).toBe(true);
+    expect(new Set(questions.map((row) => row.step_id)).size).toBe(1);
+    expect(questions.map((row) => row.title)).toEqual(
+      Array(3).fill(PROFILE_FORM_DEFAULT_STEP_TITLE),
+    );
+    expect(questions.map((row) => row.archived)).toEqual([false, false, true]);
+    expect(questions.every((row) => row.condition === null)).toBe(true);
+    const steps = await onB(
+      async (b) =>
+        b<{ tenant_id: string; n: number }[]>`
+        select tenant_id::text as tenant_id, count(*)::int as n from public.profile_form_steps
+         group by tenant_id`,
+    );
+    expect(steps).toEqual([{ tenant_id: tenantId, n: 1 }]);
+
+    // T-12.1-14: not one answer changed (same ids, values and timestamps), and none was lost.
+    expect(await snapshot()).toEqual(answersBefore);
+
+    // A legacy-shaped insert (the previous API revision, still serving during the fan-out) lands in the step.
+    const late = crypto.randomUUID();
+    await onB(async (b) => {
+      await b`
+        insert into public.profile_form_questions
+          (id, tenant_id, type, title, required, position, created_by_user_id)
+        values (${late}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out tardia', false, 4, ${userA}::uuid)`;
+    });
+    const [lateRow] = await onB(
+      async (b) =>
+        b<{ step_id: string }[]>`
+        select step_id::text as step_id from public.profile_form_questions where id = ${late}::uuid`,
+    );
+    expect(lateRow?.step_id).toBe(questions[0]?.step_id);
+
+    // The ledger lists the three files, in order, and the project is current.
+    const listed = await onB(async (b) => {
+      const rows = await b<{ version: string }[]>`
+        select version from supabase_migrations.schema_migrations
+         where version = any(${[...PROFILE_FORM_STEPS_VERSIONS]}::text[]) order by version`;
+      return rows.map((row) => row.version);
+    });
+    expect(listed).toEqual([...PROFILE_FORM_STEPS_VERSIONS]);
+    const head = files.at(-1)?.version;
+    expect(await ledgerOfB()).toEqual({ count: files.length, head });
+    expect(await stateOf(f.projectId)).toMatchObject({ status: 'current', error_code: null });
+
+    // The second run is a no-op: nothing applied, the ledger and the state unchanged, answers still equal.
+    const second = await migrateAll({ concurrency: 2 });
+    expect(second.exitCode).toBe(0);
+    expect(lineOf(second.lines, f.ref)).toMatchObject({ status: 'current', applied: 0 });
+    expect(await ledgerOfB()).toEqual({ count: files.length, head });
+    expect(await snapshot()).toEqual(answersBefore);
+  }, 300_000);
 });

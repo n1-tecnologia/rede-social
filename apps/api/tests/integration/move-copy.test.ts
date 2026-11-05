@@ -30,7 +30,7 @@ import { closeAllPools } from '@rede-social/core/server/tenancy/project-registry
 import { createClient } from '@supabase/supabase-js';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, SEED_PASSWORD } from './setup';
+import { adminSql, removeProfileFormByPrefix, SEED_PASSWORD, seedProfileFormAnswer } from './setup';
 
 /**
  * Phase 09.2-22 (DBT-33, D-534, D-536, D-533): the copy engine of the move tool, rehearsed end to end on TWO
@@ -323,9 +323,12 @@ describe('the tracer: a seeded tenant is copied into a bootstrapped second datab
     expect(plan.order.indexOf('events')).toBeLessThan(plan.order.indexOf('event_attendances'));
     expect(plan.tables.map((t) => t.name)).not.toContain('tenant_domains');
     expect(plan.tables.map((t) => t.name)).not.toContain('tenant_modules');
-    // The table set is the catalog's, not a list: 59 public tables minus the five without tenant_id,
-    // tenant_domains and tenant_modules.
-    expect(plan.tables.length).toBe(52);
+    // The table set is the catalog's, not a list: the public tables that carry tenant_id, minus
+    // tenant_domains and tenant_modules. Each new tenant table moves the pin (12.1-12: 52 to 55, the
+    // `profile_form_steps` table of Phase 12.1 plus `member_blocks` and `content_reports` of the reports and
+    // blocks work, which had left this number behind).
+    expect(plan.tables.length).toBe(55);
+    expect(plan.tables.map((t) => t.name)).toContain('profile_form_steps');
   });
 });
 
@@ -985,4 +988,150 @@ describe('resume, conflicts, identity safety and reports', () => {
     // And it does say something: tables and counts are there.
     expect(text).toContain('feed_posts');
   });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// 12.1-12 (PFORM-40, T-12.1-08): a conditional form with steps is copied for real
+// ---------------------------------------------------------------------------------------------------------
+
+describe('12.1-12 PFORM-40: a tenant with steps, conditional questions and answers is copied for real (T-12.1-08)', () => {
+  const MV = 'mvp ';
+  // The opener's id sorts LAST and the conditional ids sort FIRST, so a copy that went by primary key alone
+  // would insert a conditional question before its opener and break `profile_form_questions_condition_fk`.
+  const OPENER = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  const ACTIVE_DEP = '00000000-0000-4000-8000-00000000000a';
+  const ARCHIVED_DEP = '00000000-0000-4000-8000-00000000000b';
+
+  it('copies steps, an opener, an active and an archived conditional question and a member’s answers; every condition names its opener and every question its step in the TARGET, and the planner raises no unsortable_tables', async () => {
+    const member = await labMemberId();
+    const stepOne = crypto.randomUUID();
+    const stepTwo = crypto.randomUUID();
+    const yes = crypto.randomUUID();
+    const no = crypto.randomUUID();
+    try {
+      await adminSql`
+        insert into public.profile_form_steps (id, tenant_id, title, position)
+        values (${stepOne}::uuid, ${labId}::uuid, ${`${MV}Etapa 1`}, 1),
+               (${stepTwo}::uuid, ${labId}::uuid, ${`${MV}Etapa 2`}, 2)`;
+      const options = adminSql.json([
+        { id: yes, label: 'Sim' },
+        { id: no, label: 'Não' },
+      ] as never);
+      await adminSql`
+        insert into public.profile_form_questions
+          (id, tenant_id, step_id, type, title, required, position, options, limits, allow_other,
+           show_on_profile, created_by_user_id)
+        values (${OPENER}::uuid, ${labId}::uuid, ${stepOne}::uuid, 'single_choice', ${`${MV}Abridora`},
+                false, 1, ${options}, '{}'::jsonb, false, true, ${member}::uuid)`;
+      await adminSql`
+        insert into public.profile_form_questions
+          (id, tenant_id, step_id, type, title, required, position, options, limits, allow_other,
+           show_on_profile, archived_at, created_by_user_id, condition_question_id, condition_values)
+        values (${ACTIVE_DEP}::uuid, ${labId}::uuid, ${stepTwo}::uuid, 'short_text', ${`${MV}Ativa`},
+                false, 2, '[]'::jsonb, '{}'::jsonb, false, true, null, ${member}::uuid,
+                ${OPENER}::uuid, ${adminSql.array([yes])}),
+               (${ARCHIVED_DEP}::uuid, ${labId}::uuid, ${stepTwo}::uuid, 'short_text',
+                ${`${MV}Arquivada`}, false, 3, '[]'::jsonb, '{}'::jsonb, false, true, now(),
+                ${member}::uuid, ${OPENER}::uuid, ${adminSql.array([yes])})`;
+      await seedProfileFormAnswer({
+        tenantId: labId,
+        questionId: OPENER,
+        userId: member,
+        value: { optionId: yes, otherText: null },
+      });
+      await seedProfileFormAnswer({
+        tenantId: labId,
+        questionId: ACTIVE_DEP,
+        userId: member,
+        value: 'copiada',
+      });
+      await seedProfileFormAnswer({
+        tenantId: labId,
+        questionId: ARCHIVED_DEP,
+        userId: member,
+        value: 'arquivada copiada',
+      });
+
+      const target = await freshTarget(labId);
+      const src = side(source, labId, 'p0');
+      const tgt = side(target, labId, 'tb');
+      // The planner derives the order from the catalog and does NOT raise unsortable_tables.
+      const plan = await planMove(src, tgt);
+      expect(plan.uncovered).toEqual([]);
+      expect(plan.schemaMismatch).toEqual([]);
+      assertCoverage(plan);
+      const names = plan.tables.map((t) => t.name);
+      for (const table of [
+        'profile_form_steps',
+        'profile_form_questions',
+        'profile_form_answers',
+      ]) {
+        expect(names).toContain(table);
+      }
+      expect(plan.order.indexOf('profile_form_steps')).toBeLessThan(
+        plan.order.indexOf('profile_form_questions'),
+      );
+      expect(plan.order.indexOf('profile_form_questions')).toBeLessThan(
+        plan.order.indexOf('profile_form_answers'),
+      );
+
+      await copyAuth(src, tgt);
+      const rows = await copyRows(plan, src, tgt);
+      const copied = (table: string) => rows.tables.find((t) => t.name === table);
+      expect(copied('profile_form_steps')?.inserted).toBe(2);
+      expect(copied('profile_form_questions')?.inserted).toBe(3);
+      expect(copied('profile_form_answers')?.inserted).toBe(3);
+      expect((await verifyCopy(plan, src, tgt)).ok).toBe(true);
+
+      // The steps, with their titles and positions.
+      const steps = await target`
+        select id::text as id, title, position from public.profile_form_steps
+         where tenant_id = ${labId}::uuid order by position`;
+      expect(steps.map((r) => [r.id, r.title, r.position])).toEqual([
+        [stepOne, `${MV}Etapa 1`, 1],
+        [stepTwo, `${MV}Etapa 2`, 2],
+      ]);
+
+      // Every question names a step that exists in the TARGET, and every condition names an opener that
+      // exists in the TARGET with no condition of its own. (The move engine keeps primary keys, so the
+      // opener's copy carries the opener's id; the foreign key makes "the copy" the only thing it can name.)
+      const questions = await target`
+        select q.id::text as id, q.step_id::text as step_id,
+               q.condition_question_id::text as condition_question_id, q.condition_values,
+               q.archived_at is not null as archived,
+               exists (select 1 from public.profile_form_steps s
+                        where s.tenant_id = q.tenant_id and s.id = q.step_id) as step_in_target,
+               exists (select 1 from public.profile_form_questions o
+                        where o.tenant_id = q.tenant_id and o.id = q.condition_question_id
+                          and o.condition_question_id is null) as opener_in_target
+          from public.profile_form_questions q
+         where q.tenant_id = ${labId}::uuid order by q.position`;
+      expect(questions.map((r) => r.id)).toEqual([OPENER, ACTIVE_DEP, ARCHIVED_DEP]);
+      expect(questions.map((r) => r.step_id)).toEqual([stepOne, stepTwo, stepTwo]);
+      expect(questions.every((r) => r.step_in_target)).toBe(true);
+      expect(questions[0]?.condition_question_id).toBeNull();
+      for (const dependent of questions.slice(1)) {
+        expect(dependent.condition_question_id).toBe(OPENER);
+        expect(dependent.condition_values).toEqual([yes]);
+        expect(dependent.opener_in_target).toBe(true);
+      }
+      expect(questions[2]?.archived).toBe(true);
+
+      // The member's answers, archived dependent included, with their values.
+      const answers = await target`
+        select a.question_id::text as question_id, a.value from public.profile_form_answers a
+         where a.tenant_id = ${labId}::uuid order by a.question_id`;
+      expect(answers.map((r) => [r.question_id, r.value])).toEqual([
+        [ACTIVE_DEP, 'copiada'],
+        [ARCHIVED_DEP, 'arquivada copiada'],
+        [OPENER, { optionId: yes, otherText: null }],
+      ]);
+
+      // A second run inserts nothing (the resume contract holds for the self-referencing table too).
+      const again = await copyRows(plan, src, tgt);
+      expect(again.tables.every((t) => t.inserted === 0)).toBe(true);
+    } finally {
+      await removeProfileFormByPrefix(MV);
+    }
+  }, 120_000);
 });
