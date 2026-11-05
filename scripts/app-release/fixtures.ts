@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, generateKeyPairSync, randomBytes } from 'node:crypto';
 import type { AppTab } from '@rede-social/contracts/native';
 import type { TenantRecord } from './config';
 
@@ -114,4 +114,34 @@ export function serviceAccount(email = 'release@project.iam.test'): {
     private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
   });
   return { json, email, publicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString() };
+}
+
+/**
+ * AES-256-GCM with the caller's AAD, the same construction as the kernel's `sealed.ts`, so the unit tests can seal
+ * and open without loading the kernel environment. What matters here is that the AAD is `<rowId>:<kind>`.
+ */
+export function testSealing(key: Buffer = randomBytes(32)) {
+  return {
+    seal(plain: string, aad: string): string {
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', key, iv);
+      cipher.setAAD(Buffer.from(aad));
+      const body = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+      return `t1:${iv.toString('base64url')}:${cipher.getAuthTag().toString('base64url')}:${body.toString('base64url')}`;
+    },
+    open(sealed: string, aad: string): string {
+      const [, iv, tag, body] = sealed.split(':');
+      const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv ?? '', 'base64url'));
+      decipher.setAAD(Buffer.from(aad));
+      decipher.setAuthTag(Buffer.from(tag ?? '', 'base64url'));
+      try {
+        return Buffer.concat([
+          decipher.update(Buffer.from(body ?? '', 'base64url')),
+          decipher.final(),
+        ]).toString('utf8');
+      } catch {
+        throw new Error('sealed value unreadable');
+      }
+    },
+  };
 }

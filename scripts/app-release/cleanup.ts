@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, isAbsolute, join, normalize } from 'node:path';
 
 /**
  * The temporary directory that holds the unsealed files (13-29, T-13-50). It is created fresh, used, and deleted
@@ -17,7 +17,18 @@ export async function createTempDirectory(base: string = defaultTempBase()): Pro
   return fs.mkdtemp(join(base, TEMP_PREFIX));
 }
 
+/**
+ * Only a directory this command made (an absolute, normalised path whose last segment starts with `app-release-`)
+ * may be removed: a wrong argument can never delete `/`, the home folder or a shared temp folder.
+ */
+export function assertOwnTemporaryDirectory(dir: string): void {
+  if (!isAbsolute(dir) || normalize(dir) !== dir || !basename(dir).startsWith(TEMP_PREFIX)) {
+    throw new Error('cleanup_refused');
+  }
+}
+
 export async function cleanupDirectory(dir: string): Promise<void> {
+  assertOwnTemporaryDirectory(dir);
   await fs.rm(dir, { recursive: true, force: true });
 }
 
