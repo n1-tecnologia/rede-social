@@ -10,6 +10,7 @@ import {
   SEED_PASSWORD,
   seedProfileFormAnswer,
   seedProfileFormQuestion,
+  seedProfileFormStep,
   signInAs,
   withProfileForm,
 } from './setup';
@@ -602,4 +603,109 @@ describe('12-10 tenant isolation (PFORM-08 route half, T-12-25)', () => {
       }),
     );
   });
+});
+
+/**
+ * 12.1-12 (D-624, D-634, D-636; PFORM-39 idempotency; T-12.1-03): the CSV reads the stored rows with NO
+ * visibility filter, and that is correct because stored equals visible. A member answers an opener, an ACTIVE
+ * and an ARCHIVED conditional question, then closes them through the real save route: both cells are empty,
+ * the columns stay (one column per question, archived included), and two exports return identical bytes.
+ * Both exports are made by the seeded lab admin (each writes one append-only moderation row, as in 12-10).
+ */
+describe('12.1-12 the CSV carries no closed answer and keeps its columns (D-634, D-636, PFORM-39 idempotency)', () => {
+  it('after the member closes an ACTIVE and an ARCHIVED dependent the cells are empty, the columns and the row count are unchanged, and two exports are identical', async () => {
+    await withProfileForm(labTenantId, async () => {
+      const ana = await member('member', { displayName: 'pfx Ana Aberta' });
+      const other = await member('member', { displayName: 'pfx Bia Vizinha' });
+      const step = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+      const yes = crypto.randomUUID();
+      const no = crypto.randomUUID();
+      const opener = await question({
+        title: `${TITLE}Abridora`,
+        type: 'single_choice',
+        stepId: step,
+        position: 1,
+        options: [
+          { id: yes, label: 'Sim' },
+          { id: no, label: 'Não' },
+        ],
+      });
+      const dependent = await question({
+        title: `${TITLE}Ativa`,
+        stepId: step,
+        position: 2,
+        conditionQuestionId: opener,
+        conditionValues: [yes],
+      });
+      const archivedDependent = await question({
+        title: `${TITLE}Arquivada`,
+        stepId: step,
+        position: 3,
+        archived: true,
+        conditionQuestionId: opener,
+        conditionValues: [yes],
+      });
+      for (const who of [ana, other]) {
+        await answer(who.userId, opener, { optionId: yes, otherText: null });
+        await answer(who.userId, dependent, 'resposta-ativa');
+        await answer(who.userId, archivedDependent, 'resposta-arquivada');
+      }
+
+      const csvOf = async () => {
+        const res = await callExport(labAdmin.token);
+        expect(res.status).toBe(200);
+        return bodyOf(res);
+      };
+      const beforeText = await csvOf();
+      const before = parseCsv(beforeText);
+      const cell = (csv: ReturnType<typeof parseCsv>, email: string, title: string) =>
+        mine(csv).get(email)?.[csv.header.indexOf(`${TITLE}${title}`)];
+      // Positive control: the cells are filled before the change.
+      expect(cell(before, ana.email, 'Ativa')).toBe('resposta-ativa');
+      expect(cell(before, ana.email, 'Arquivada')).toBe('resposta-arquivada');
+
+      // Ana closes both dependents through the real save route.
+      const formRes = await api.request('/v1/me/profile-form', {
+        method: 'GET',
+        headers: { 'x-tenant-host': HOSTS.lab, authorization: `Bearer ${ana.token}` },
+      });
+      expect(formRes.status).toBe(200);
+      const form = (await formRes.json()) as { formEtag: string };
+      const saved = await api.request('/v1/me/profile-form/answers', {
+        method: 'PUT',
+        headers: {
+          'x-tenant-host': HOSTS.lab,
+          authorization: `Bearer ${ana.token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          formEtag: form.formEtag,
+          stepId: step,
+          answers: { [opener]: { optionId: no, otherText: null } },
+        }),
+      });
+      expect(saved.status, await saved.clone().text()).toBe(200);
+
+      const firstText = await csvOf();
+      const after = parseCsv(firstText);
+      // The columns are the same, archived included, and so is the number of rows.
+      expect(after.header).toEqual(before.header);
+      expect(after.rows).toHaveLength(before.rows.length);
+      expect(after.header.filter((h) => h.startsWith(TITLE))).toEqual([
+        `${TITLE}Abridora`,
+        `${TITLE}Ativa`,
+        `${TITLE}Arquivada`,
+      ]);
+      // Ana's closed cells are empty, her opener cell shows the new choice, and Bia's cells are untouched.
+      expect(cell(after, ana.email, 'Ativa')).toBe('');
+      expect(cell(after, ana.email, 'Arquivada')).toBe('');
+      expect(cell(after, ana.email, 'Abridora')).toBe('Não');
+      expect(cell(after, other.email, 'Ativa')).toBe('resposta-ativa');
+      expect(cell(after, other.email, 'Arquivada')).toBe('resposta-arquivada');
+      expect(firstText).not.toContain('Ana Aberta;resposta');
+
+      // PFORM-39 idempotency: a second export of the unchanged data is the same file.
+      expect(await csvOf()).toBe(firstText);
+    });
+  }, 60_000);
 });

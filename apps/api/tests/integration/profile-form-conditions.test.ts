@@ -1,3 +1,8 @@
+import {
+  answerTokens,
+  isQuestionVisible,
+  PROFILE_FORM_VISIBILITY_CASES,
+} from '@rede-social/contracts/profile-form';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -1166,4 +1171,123 @@ describe('12.1-10 seed parity: a question seeded with a condition lists like one
       });
     });
   }, 60_000);
+});
+
+/**
+ * 12.1-12 PFORM-41 (parity of the three implementations, integration half): every row of the contracts'
+ * `PROFILE_FORM_VISIBILITY_CASES` is run through (1) the TypeScript `isQuestionVisible` over `answerTokens`,
+ * (2) the SQL gate `app.profile_form_missing` (the conditional REQUIRED question is counted exactly when it is
+ * visible) and (3) the purge `app.profile_form_purge_closed()` (a stored answer to the conditional question is
+ * deleted exactly when it is hidden), and all three must equal the row's `expected`. One throwaway member is
+ * reused; every row seeds its own opener and dependent, and `afterEach` removes them (answers first).
+ */
+describe('12.1-12 PFORM-41 parity: TypeScript rule, SQL gate and purge agree on every PROFILE_FORM_VISIBILITY_CASES row', () => {
+  let parityMember: Person | null = null;
+
+  beforeAll(async () => {
+    parityMember = await person();
+  });
+
+  const openerTypeOf = (stored: unknown): string => {
+    if (typeof stored === 'boolean' || typeof stored === 'string') return 'yes_no';
+    if (
+      typeof stored === 'object' &&
+      stored !== null &&
+      Array.isArray((stored as { optionIds?: unknown }).optionIds)
+    ) {
+      return 'multiple_choice';
+    }
+    return 'single_choice';
+  };
+
+  it('the table has the 18 rows plan 01 wrote, and names are unique', () => {
+    expect(PROFILE_FORM_VISIBILITY_CASES.length).toBeGreaterThanOrEqual(18);
+    expect(new Set(PROFILE_FORM_VISIBILITY_CASES.map((row) => row.name)).size).toBe(
+      PROFILE_FORM_VISIBILITY_CASES.length,
+    );
+  });
+
+  for (const row of PROFILE_FORM_VISIBILITY_CASES) {
+    it(`${row.name} -> ${row.expected ? 'visible' : 'hidden'}`, async () => {
+      const who = parityMember;
+      if (!who) throw new Error('the parity member is missing');
+      await withProfileForm(labTenantId, async () => {
+        const opener = await seedProfileFormQuestion({
+          tenantId: labTenantId,
+          adminUserId,
+          type: openerTypeOf(row.stored),
+          title: `${TITLE}parity opener`,
+          position: 1,
+        });
+        const dependent = await seedProfileFormQuestion({
+          tenantId: labTenantId,
+          adminUserId,
+          title: `${TITLE}parity dependent`,
+          position: 2,
+          required: true,
+          conditionQuestionId: opener,
+          conditionValues: row.values,
+        });
+        if (row.stored !== null) {
+          await seedProfileFormAnswer({
+            tenantId: labTenantId,
+            questionId: opener,
+            userId: who.userId,
+            value: row.stored,
+          });
+        }
+        const [membership] = await adminSql<{ id: string }[]>`
+          select id::text as id from public.memberships
+           where user_id = ${who.userId}::uuid and tenant_id = ${labTenantId}::uuid`;
+        const membershipId = membership?.id as string;
+
+        // 1. TypeScript.
+        const viaTypeScript = isQuestionVisible(
+          { condition: { questionId: opener, values: row.values } },
+          (id) => (id === opener && row.stored !== null ? answerTokens(row.stored) : undefined),
+        );
+        // 2. The SQL gate: the opener is optional, so the only owed question is the dependent, exactly
+        //    when it is visible.
+        const [gate] = await adminSql<{ n: number }[]>`
+          select app.profile_form_missing(${labTenantId}::uuid, ${membershipId}::uuid) as n`;
+        const viaGate = gate?.n === 1;
+        expect([0, 1]).toContain(gate?.n);
+        // 3. The purge: a stored answer to the dependent survives exactly when it is visible.
+        await seedProfileFormAnswer({
+          tenantId: labTenantId,
+          questionId: dependent,
+          userId: who.userId,
+          value: 'guardada',
+        });
+        const claims = JSON.stringify({
+          sub: who.userId,
+          role: 'authenticated',
+          tenant_id: labTenantId,
+          tenant_role: 'member',
+        });
+        const purged = await adminSql.begin(async (tx) => {
+          await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+          await tx.unsafe('set local role authenticated');
+          return tx<{ question_id: string }[]>`
+            select question_id::text as question_id from app.profile_form_purge_closed()`;
+        });
+        const [left] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.profile_form_answers
+           where question_id = ${dependent}::uuid and membership_id = ${membershipId}::uuid`;
+        const viaPurge = left?.n === 1;
+
+        expect(viaTypeScript, 'TypeScript isQuestionVisible').toBe(row.expected);
+        expect(viaGate, 'SQL gate app.profile_form_missing').toBe(row.expected);
+        expect(viaPurge, 'purge app.profile_form_purge_closed').toBe(row.expected);
+        // The purge reports the dependent exactly when it deleted it, and never touches the opener's answer.
+        expect(purged.map((r) => r.question_id)).toEqual(row.expected ? [] : [dependent]);
+        if (row.stored !== null) {
+          const [openerLeft] = await adminSql<{ n: number }[]>`
+            select count(*)::int as n from public.profile_form_answers
+             where question_id = ${opener}::uuid and membership_id = ${membershipId}::uuid`;
+          expect(openerLeft?.n).toBe(1);
+        }
+      });
+    }, 30_000);
+  }
 });

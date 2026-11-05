@@ -1,3 +1,4 @@
+import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -669,4 +670,233 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
       for (const row of body.answers) expect(Object.keys(row).sort()).toEqual(MEMBER_KEYS);
     });
   }, 30_000);
+});
+
+/**
+ * 12.1-12 PFORM-39 (idempotency, concurrency; D-634, T-12.1-03): the readers are pure functions of the stored
+ * rows, and a reader running while a save is open sees the whole state before the save or the whole state
+ * after it, never the new opener answer together with the old closed answer, because the opener's write and the
+ * purge commit together.
+ */
+describe('12.1-12 PFORM-39 idempotency and concurrency: the readers are repeatable and see one snapshot of a save', () => {
+  const DB_URL = 'postgres://postgres:postgres@127.0.0.1:54322/postgres';
+  const holder = postgres(DB_URL, { prepare: false, max: 1 });
+  afterAll(async () => {
+    await holder.end({ timeout: 2 });
+  });
+
+  const choose = (optionId: string) => ({ optionId, otherText: null });
+
+  async function openerAndDependent(over: { dependentArchived?: boolean } = {}) {
+    const step = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+    const yes = crypto.randomUUID();
+    const no = crypto.randomUUID();
+    const opener = await question({
+      title: `${TITLE}Abridora`,
+      type: 'single_choice',
+      stepId: step,
+      position: 1,
+      showOnProfile: true,
+      options: [
+        { id: yes, label: 'Sim' },
+        { id: no, label: 'Não' },
+      ],
+    });
+    const dependent = await question({
+      title: `${TITLE}Ativa`,
+      stepId: step,
+      position: 2,
+      showOnProfile: true,
+      archived: over.dependentArchived ?? false,
+      conditionQuestionId: opener,
+      conditionValues: [yes],
+    });
+    return { step, yes, no, opener, dependent };
+  }
+
+  const answerOf = (body: Answers, questionId: string) =>
+    body.answers.find((row) => row.questionId === questionId);
+
+  it('PFORM-39 idempotency: the public block, the staff view and the profile summary return identical payloads twice', async () => {
+    const owner = await person();
+    const viewer = await person();
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const f = await openerAndDependent();
+      await answer(owner.userId, f.opener, choose(f.yes));
+      await answer(owner.userId, f.dependent, 'estavel');
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+
+      for (const who of [viewer, admin]) {
+        const first = stable(await (await read(who, ownerId)).text());
+        const second = stable(await (await read(who, ownerId)).text());
+        expect(second).toBe(first);
+        expect(first).toContain('estavel');
+      }
+      // The admin's profile summary (totals of members complete and owed) is the same twice as well.
+      const summaryOnce = await api.request('/v1/profile_form/summary', {
+        method: 'GET',
+        headers: { 'x-tenant-host': admin.host, authorization: `Bearer ${admin.token}` },
+      });
+      expect(summaryOnce.status).toBe(200);
+      const summaryTwice = await api.request('/v1/profile_form/summary', {
+        method: 'GET',
+        headers: { 'x-tenant-host': admin.host, authorization: `Bearer ${admin.token}` },
+      });
+      expect(stable(await summaryTwice.text())).toBe(stable(await summaryOnce.text()));
+      // The member's own form read is the same twice as well.
+      const mineOnce = await api.request('/v1/me/profile-form', {
+        method: 'GET',
+        headers: { 'x-tenant-host': owner.host, authorization: `Bearer ${owner.token}` },
+      });
+      const mineTwice = await api.request('/v1/me/profile-form', {
+        method: 'GET',
+        headers: { 'x-tenant-host': owner.host, authorization: `Bearer ${owner.token}` },
+      });
+      expect(stable(await mineTwice.text())).toBe(stable(await mineOnce.text()));
+    });
+  }, 40_000);
+
+  it('PFORM-39 idempotency: a purge that finds nothing to delete changes nothing', async () => {
+    const owner = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await openerAndDependent();
+      await answer(owner.userId, f.opener, choose(f.yes));
+      await answer(owner.userId, f.dependent, 'fica');
+      const claims = JSON.stringify({
+        sub: owner.userId,
+        role: 'authenticated',
+        tenant_id: labTenantId,
+        tenant_role: 'member',
+      });
+      const stamp = async () =>
+        adminSql<{ question_id: string; updated_at: Date }[]>`
+          select question_id::text as question_id, updated_at from public.profile_form_answers
+           where user_id = ${owner.userId}::uuid order by question_id`;
+      const before = await stamp();
+      for (let i = 0; i < 2; i += 1) {
+        const deleted = await holder.begin(async (tx) => {
+          await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+          await tx.unsafe('set local role authenticated');
+          return tx`select question_id::text as question_id from app.profile_form_purge_closed()`;
+        });
+        expect(deleted).toHaveLength(0);
+      }
+      expect(await stamp()).toEqual(before);
+    });
+  }, 40_000);
+
+  it('PFORM-39 concurrency: a reader while the save is open sees the whole state before it, and after the commit the whole state after it, never the new opener with the old closed answer', async () => {
+    const owner = await person();
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const f = await openerAndDependent();
+      await answer(owner.userId, f.opener, choose(f.yes));
+      await answer(owner.userId, f.dependent, 'antiga');
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+      const staff = async () => (await (await read(admin, ownerId)).json()) as Answers;
+
+      // Connection A: exactly what the member's save does, held open before the commit.
+      const claims = JSON.stringify({
+        sub: owner.userId,
+        role: 'authenticated',
+        tenant_id: labTenantId,
+        tenant_role: 'member',
+      });
+      let release: () => void = () => {};
+      let held: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holding = new Promise<void>((resolve) => {
+        held = resolve;
+      });
+      const saving = holder.begin(async (tx) => {
+        await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+        await tx.unsafe('set local role authenticated');
+        await tx`select id::text as id from app.profile_form_lock_active_v2()`;
+        await tx`
+          insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+          select m.tenant_id, ${f.opener}::uuid, m.id, m.user_id, ${tx.json(choose(f.no))}
+            from public.memberships m
+           where m.tenant_id = ${labTenantId}::uuid and m.user_id = ${owner.userId}::uuid
+          on conflict (tenant_id, membership_id, question_id)
+          do update set value = excluded.value, updated_at = now()`;
+        await tx`select question_id from app.profile_form_purge_closed()`;
+        held();
+        await gate;
+      });
+      await holding;
+
+      // Connection B reads while A is open: the WHOLE old state (old opener answer with the old closed one).
+      const during = await staff();
+      expect(answerOf(during, f.opener)?.value).toEqual(choose(f.yes));
+      expect(answerOf(during, f.dependent)).toMatchObject({ answered: true, value: 'antiga' });
+
+      release();
+      await saving;
+
+      // After the commit: the WHOLE new state.
+      const after = await staff();
+      expect(answerOf(after, f.opener)?.value).toEqual(choose(f.no));
+      expect(answerOf(after, f.dependent)).toMatchObject({ answered: false, value: null });
+      // A repeat read of the settled state is the same (idempotency).
+      expect(await staff()).toEqual(after);
+    });
+  }, 60_000);
+
+  it('PFORM-39 concurrency: readers hammering the staff view during the REAL save route never see a torn state (new opener with the old closed answer)', async () => {
+    const owner = await person();
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const f = await openerAndDependent();
+      await answer(owner.userId, f.opener, choose(f.yes));
+      await answer(owner.userId, f.dependent, 'antiga');
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+      const formRes = await api.request('/v1/me/profile-form', {
+        method: 'GET',
+        headers: { 'x-tenant-host': owner.host, authorization: `Bearer ${owner.token}` },
+      });
+      const form = (await formRes.json()) as { formEtag: string };
+
+      let saveDone = false;
+      const snapshots: Answers[] = [];
+      const reader = (async () => {
+        while (!saveDone) {
+          snapshots.push((await (await read(admin, ownerId)).json()) as Answers);
+        }
+        snapshots.push((await (await read(admin, ownerId)).json()) as Answers);
+      })();
+      const save = await api.request('/v1/me/profile-form/answers', {
+        method: 'PUT',
+        headers: {
+          'x-tenant-host': owner.host,
+          authorization: `Bearer ${owner.token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          formEtag: form.formEtag,
+          stepId: f.step,
+          answers: { [f.opener]: choose(f.no) },
+        }),
+      });
+      saveDone = true;
+      await reader;
+      expect(save.status, await save.clone().text()).toBe(200);
+
+      expect(snapshots.length).toBeGreaterThan(0);
+      for (const snapshot of snapshots) {
+        const newOpener =
+          (answerOf(snapshot, f.opener)?.value as { optionId?: string } | null)?.optionId === f.no;
+        const oldClosed = answerOf(snapshot, f.dependent)?.answered === true;
+        expect(
+          newOpener && oldClosed,
+          'a snapshot held the new opener with the old closed answer',
+        ).toBe(false);
+      }
+      const last = snapshots[snapshots.length - 1] as Answers;
+      expect(answerOf(last, f.opener)?.value).toEqual(choose(f.no));
+      expect(answerOf(last, f.dependent)).toMatchObject({ answered: false });
+    });
+  }, 60_000);
 });
