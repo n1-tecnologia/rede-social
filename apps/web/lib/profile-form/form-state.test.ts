@@ -482,3 +482,105 @@ describe('limitHint: a date question shows its limits too', () => {
     expect(limitHint(question('date'))).toBeNull();
   });
 });
+
+describe('the visible set drives the form state (12.1-13 task 1: D-631, Pitfall 10, UI-D-662)', () => {
+  const opts = options('A', 'B');
+  const [optA, optB] = [opts[0]?.id ?? '', opts[1]?.id ?? ''];
+  const picked = (id: string) => ({ optionIds: [id], other: false, otherText: '' });
+
+  function conditioned() {
+    const opener = question('single_choice', { options: opts });
+    const hiddenRequired = question('short_text', {
+      required: true,
+      condition: { questionId: opener.id, values: [optA] },
+    });
+    return { opener, hiddenRequired, questions: [opener, hiddenRequired] };
+  }
+
+  it('flaggedIds flags a required unanswered question only when it is visible by the stored answers', () => {
+    const { opener, hiddenRequired } = conditioned();
+    expect(flaggedIds(form([opener, hiddenRequired]))).toEqual([]);
+    const answered = { ...opener, answer: { optionId: optA, otherText: null } };
+    expect(flaggedIds(form([answered, hiddenRequired]))).toEqual([hiddenRequired.id]);
+  });
+
+  it('validateAll does not judge a hidden required question and judges a revealed one', () => {
+    const { opener, hiddenRequired, questions } = conditioned();
+    expect(validateAll(questions, { [opener.id]: picked(optB), [hiddenRequired.id]: '' })).toEqual(
+      {},
+    );
+    expect(validateAll(questions, { [opener.id]: picked(optA), [hiddenRequired.id]: '' })).toEqual({
+      [hiddenRequired.id]: 'required',
+    });
+  });
+
+  it('wireAnswers leaves a hidden question out of the body and sends a visible one', () => {
+    const { opener, hiddenRequired, questions } = conditioned();
+    const closed = wireAnswers(questions, {
+      [opener.id]: picked(optB),
+      [hiddenRequired.id]: 'typed',
+    });
+    expect(Object.keys(closed)).toEqual([opener.id]);
+    const open = wireAnswers(questions, {
+      [opener.id]: picked(optA),
+      [hiddenRequired.id]: 'typed',
+    });
+    expect(open[hiddenRequired.id]).toBe('typed');
+  });
+
+  it('the step scope restricts validateAll and wireAnswers to the questions of one step', () => {
+    const inStepOne = question('short_text', { required: true });
+    const otherStep = '00000000-0000-4000-8000-000000000999';
+    const inStepTwo = question('short_text', { required: true, stepId: otherStep });
+    const all = [inStepOne, inStepTwo];
+    const scope = new Set([inStepOne.id]);
+    expect(validateAll(all, {}, scope)).toEqual({ [inStepOne.id]: 'required' });
+    expect(
+      Object.keys(wireAnswers(all, { [inStepOne.id]: 'a', [inStepTwo.id]: 'b' }, scope)),
+    ).toEqual([inStepOne.id]);
+    expect(flaggedIds(form(all), scope)).toEqual([inStepOne.id]);
+  });
+
+  it('mergeFreshForm keeps typed drafts of surviving questions and carries stepId, condition and steps', () => {
+    const { opener, hiddenRequired } = conditioned();
+    const otherStep = '00000000-0000-4000-8000-000000000998';
+    const movedDependent = {
+      ...hiddenRequired,
+      stepId: otherStep,
+      condition: { questionId: opener.id, values: [optB] },
+    };
+    const fresh = form([opener, movedDependent], {
+      steps: [
+        { id: opener.stepId, title: 'Etapa 1' },
+        { id: otherStep, title: 'Etapa 2' },
+      ],
+    });
+    const merged = mergeFreshForm(
+      { questions: [opener, hiddenRequired] },
+      { [opener.id]: picked(optB), [hiddenRequired.id]: 'typed' },
+      fresh,
+    );
+    expect(merged.answers[hiddenRequired.id]).toBe('typed');
+    expect(merged.form.steps.map((s) => s.id)).toEqual([opener.stepId, otherStep]);
+    const carried = merged.form.questions.find((q) => q.id === hiddenRequired.id);
+    expect(carried?.stepId).toBe(otherStep);
+    expect(carried?.condition?.values).toEqual([optB]);
+  });
+
+  it('mergeFreshForm flags a newly required question only while it is visible', () => {
+    const { opener, hiddenRequired } = conditioned();
+    const wasOptional = { ...hiddenRequired, required: false };
+    const shut = mergeFreshForm(
+      { questions: [opener, wasOptional] },
+      { [opener.id]: picked(optB), [hiddenRequired.id]: '' },
+      form([opener, hiddenRequired]),
+    );
+    expect(shut.flagged).toEqual([]);
+    const open = mergeFreshForm(
+      { questions: [opener, wasOptional] },
+      { [opener.id]: picked(optA), [hiddenRequired.id]: '' },
+      form([opener, hiddenRequired]),
+    );
+    expect(open.flagged).toEqual([hiddenRequired.id]);
+  });
+});
