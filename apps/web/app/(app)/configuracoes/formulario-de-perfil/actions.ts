@@ -8,7 +8,9 @@ import {
   type CreateQuestionBody,
   createQuestionBodySchema,
   createStepBodySchema,
+  type Dependent,
   deleteStepResultSchema,
+  dependentSchema,
   impactQuerySchema,
   impactResultSchema,
   layoutBodySchema,
@@ -58,7 +60,9 @@ export type ImpactActionResult =
 
 export type ReactivateResult =
   | { ok: true }
-  | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };
+  | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' }
+  // 12.1-17 (D-632): the question's own opener is not in the form any more; `openerId` is the opener the server named.
+  | { ok: false; code: 'conditionInvalid'; openerId: string | null };
 
 type ErrorBody = { code?: string; details?: Record<string, unknown>; requestId?: string };
 type Envelope = { error?: ErrorBody };
@@ -203,6 +207,13 @@ export async function reactivateQuestionAction(id: string): Promise<ReactivateRe
       const code = refusalOf(res.status, envelope);
       if (code === 'forbidden' || code === 'moduleOff' || code === 'limit') {
         result = { ok: false, code };
+      } else if (res.status === 409 && envelope?.details?.profileForm === 'condition_invalid') {
+        const openerId = envelope.details.openerId;
+        result = {
+          ok: false,
+          code: 'conditionInvalid',
+          openerId: typeof openerId === 'string' ? openerId : null,
+        };
       } else {
         refusal = navigationFor(res.status, envelope);
         if (!refusal) {
@@ -238,7 +249,8 @@ export type SaveFieldKey = 'title' | 'helpText' | 'options' | 'limits' | 'condit
 export type SaveQuestionResult =
   | { ok: true; question: AdminQuestion; pending: number | null }
   | { ok: false; code: 'invalid'; fields: Partial<Record<SaveFieldKey, string>> }
-  | { ok: false; code: 'conflict'; issue: string }
+  // `dependents` rides with `has_dependents` (12.1-17, D-632): the questions that name this one as their opener.
+  | { ok: false; code: 'conflict'; issue: string; dependents?: Dependent[] }
   | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };
 
 type Sent =
@@ -315,7 +327,19 @@ function failureOf(
     return { result: { ok: false, code: refusal }, navigate: null };
   }
   if (status === 409) {
-    return { result: { ok: false, code: 'conflict', issue: issue ?? 'conflict' }, navigate: null };
+    const listed =
+      issue === 'has_dependents'
+        ? z.array(dependentSchema).safeParse(envelope?.details?.dependents)
+        : null;
+    return {
+      result: {
+        ok: false,
+        code: 'conflict',
+        issue: issue ?? 'conflict',
+        ...(listed?.success ? { dependents: listed.data } : {}),
+      },
+      navigate: null,
+    };
   }
   if (status === 404 && envelope?.code === 'NOT_FOUND') {
     return { result: { ok: false, code: 'conflict', issue: 'not_found' }, navigate: null };
@@ -444,7 +468,9 @@ export async function replaceQuestionAction(
  */
 export type RemoveResult =
   | { ok: true }
-  | { ok: false; code: 'hasAnswers' | 'gone' | 'forbidden' | 'moduleOff' | 'failed' };
+  | { ok: false; code: 'hasAnswers' | 'gone' | 'forbidden' | 'moduleOff' | 'failed' }
+  // 12.1-17 (D-632): the question still opens others; `dependents` is the server's list (a race the page missed).
+  | { ok: false; code: 'hasDependents'; dependents: Dependent[] };
 
 async function remove(
   label: 'archive' | 'delete',
@@ -461,6 +487,9 @@ async function remove(
   const result = failure.result;
   if (result.ok) return { ok: false, code: 'failed' };
   if (result.code === 'conflict') {
+    if (result.issue === 'has_dependents') {
+      return { ok: false, code: 'hasDependents', dependents: result.dependents ?? [] };
+    }
     return { ok: false, code: result.issue === 'has_answers' ? 'hasAnswers' : 'gone' };
   }
   if (result.code === 'forbidden' || result.code === 'moduleOff') {

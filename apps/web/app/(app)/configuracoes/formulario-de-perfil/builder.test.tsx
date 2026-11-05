@@ -1605,3 +1605,143 @@ describe('12.1-16 Task 3: reorder on steps and within steps, and the refusals th
     expect(screen.getByRole('button', { name: 'Renomear etapa: Contato' })).toBeTruthy();
   });
 });
+
+/* ------------------------------------------------------------------------------------------------ */
+/* 12.1-17 Task 2: the markers of the list (D-621, D-622, UI-D-650)                                   */
+/* ------------------------------------------------------------------------------------------------ */
+
+describe('12.1-17 Task 2: "Condicional", "Abre N perguntas" and the condition sentence (D-621, D-622, UI-D-650)', () => {
+  const clinic = adminQuestion('single_choice', {
+    title: 'Você tem clínica?',
+    options: [
+      { id: uuid(9601), label: 'Tenho', answerCount: 0 },
+      { id: uuid(9602), label: 'Trabalho', answerCount: 0 },
+      { id: uuid(9603), label: 'Aprendo', answerCount: 0 },
+    ],
+    opensCount: 3,
+  });
+  const team = adminQuestion('yes_no', { title: 'Você já tem equipe?', opensCount: 1 });
+  const byOne = adminQuestion('short_text', {
+    title: 'Nome da clínica',
+    condition: { questionId: clinic.id, values: [uuid(9601)] },
+  });
+  const byThree = adminQuestion('short_text', {
+    title: 'Quantas salas?',
+    condition: { questionId: clinic.id, values: [uuid(9603), uuid(9601), uuid(9602)] },
+  });
+  const byYes = adminQuestion('short_text', {
+    title: 'Quantas pessoas?',
+    condition: { questionId: team.id, values: ['true'] },
+  });
+  const byBoth = adminQuestion('short_text', {
+    title: 'Equipe de qualquer jeito',
+    condition: { questionId: team.id, values: ['false', 'true'] },
+  });
+  const plain = adminQuestion('short_text', { title: 'Nome profissional' });
+  const all = [clinic, team, byOne, byThree, byYes, byBoth, plain];
+
+  const rowOf = (title: string) =>
+    screen.getByRole('button', { name: `Editar pergunta: ${title}` }).closest('li') as HTMLElement;
+
+  it('a conditional row has the neutral pill "Condicional" and the sentence under the title', () => {
+    show(all);
+    const row = rowOf('Nome da clínica');
+    expect(within(row).getByText('Condicional')).toBeTruthy();
+    const line = row.querySelector('[data-condition-line]') as HTMLElement;
+    expect(line.textContent).toBe('Só aparece se “Você tem clínica?” for “Tenho”.');
+    expect(line.className).toContain('line-clamp-2');
+    expect(line.className).toContain('break-words');
+    expect(line.className).toContain('text-xs');
+    // The pill is a neutral soft pill with the glyph, never a brand fill.
+    const pill = within(row).getByText('Condicional');
+    expect(pill.className).not.toContain('bg-brand');
+    expect(pill.querySelector('svg')).toBeTruthy();
+  });
+
+  it('lists a choice opener\'s labels quoted, in the opener order, joined by "ou"', () => {
+    show(all);
+    expect(rowOf('Quantas salas?').querySelector('[data-condition-line]')?.textContent).toBe(
+      'Só aparece se “Você tem clínica?” for “Tenho”, “Trabalho” ou “Aprendo”.',
+    );
+  });
+
+  it('writes a yes/no opener as the plain words, unquoted', () => {
+    show(all);
+    expect(rowOf('Quantas pessoas?').querySelector('[data-condition-line]')?.textContent).toBe(
+      'Só aparece se “Você já tem equipe?” for Sim.',
+    );
+    expect(
+      rowOf('Equipe de qualquer jeito').querySelector('[data-condition-line]')?.textContent,
+    ).toBe('Só aparece se “Você já tem equipe?” for Sim ou Não.');
+  });
+
+  it('an opener row has "Abre N perguntas" as a plural, and "Abre 1 pergunta" in the singular', () => {
+    show(all);
+    expect(within(rowOf('Você tem clínica?')).getByText('Abre 3 perguntas')).toBeTruthy();
+    expect(within(rowOf('Você já tem equipe?')).getByText('Abre 1 pergunta')).toBeTruthy();
+  });
+
+  it('never renders zero: a plain row has neither marker, no "Abre 0" and no sentence', () => {
+    show(all);
+    const row = rowOf('Nome profissional');
+    expect(within(row).queryByText('Condicional')).toBeNull();
+    expect(row.textContent).not.toContain('Abre');
+    expect(row.querySelector('[data-condition-line]')).toBeNull();
+  });
+
+  it('a row never carries both the "Condicional" and the "Abre" pill', () => {
+    show(all);
+    for (const item of screen.getAllByRole('listitem')) {
+      const text = item.textContent ?? '';
+      expect(text.includes('Condicional') && /Abre \d/.test(text)).toBe(false);
+    }
+  });
+
+  it('puts the same sentences in the accessible description of the row', () => {
+    show(all);
+    const button = screen.getByRole('button', { name: 'Editar pergunta: Nome da clínica' });
+    const description = document.getElementById(button.getAttribute('aria-describedby') ?? '');
+    expect(description?.textContent).toContain('Só aparece se “Você tem clínica?” for “Tenho”.');
+    const opener = screen.getByRole('button', { name: 'Editar pergunta: Você tem clínica?' });
+    expect(
+      document.getElementById(opener.getAttribute('aria-describedby') ?? '')?.textContent,
+    ).toContain('Abre 3 perguntas.');
+  });
+
+  it('keeps the markers in reorder mode, where the rows are not editor openers', () => {
+    show(all);
+    fireEvent.click(reorderButton());
+    const row = screen
+      .getAllByRole('listitem')
+      .find((item) => item.textContent?.includes('Nome da clínica')) as HTMLElement;
+    expect(within(row).getByText('Condicional')).toBeTruthy();
+    expect(row.querySelector('[data-condition-line]')).toBeTruthy();
+  });
+
+  it('wraps a very long opener title inside two lines and never as markup (T-12.1-12)', () => {
+    const hostile = adminQuestion('single_choice', {
+      title: '<b>x</b> ' + 'pergunta'.repeat(20),
+      options: [{ id: uuid(9701), label: 'A', answerCount: 0 }],
+      opensCount: 1,
+    });
+    const dependent = adminQuestion('short_text', {
+      title: 'Depende',
+      condition: { questionId: hostile.id, values: [uuid(9701)] },
+    });
+    show([hostile, dependent]);
+    const line = rowOf('Depende').querySelector('[data-condition-line]') as HTMLElement;
+    expect(line.querySelector('b')).toBeNull();
+    expect(line.className).toContain('break-words');
+  });
+
+  it('leaves the Arquivadas list unchanged: a condition is not shown there', () => {
+    showArchived([
+      archivedQuestion('short_text', {
+        title: 'Antiga condicional',
+        condition: { questionId: uuid(1), values: [uuid(2)] },
+      }),
+    ]);
+    expect(screen.queryByText('Condicional')).toBeNull();
+    expect(screen.queryByText(/Só aparece se/)).toBeNull();
+  });
+});

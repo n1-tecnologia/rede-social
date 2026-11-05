@@ -34,12 +34,15 @@ import {
   updateQuestionAction,
 } from './actions';
 import { CONDITION_OPENER_ID, ConditionEditor, SheetSelect } from './ConditionEditor';
+import { DEPENDENTS_SHOWN, DependentsAlert } from './DependentsAlert';
 import {
   blankDraft,
   canSave,
   changeType,
   checkStepChange,
+  type DependentsRefusal,
   type DraftErrors,
+  dependentsOf,
   draftFromQuestion,
   type EditorMode,
   eligibleOpeners,
@@ -47,8 +50,10 @@ import {
   hasErrors,
   isDirty,
   lockFlags,
+  optionUsage,
   type QuestionDraft,
   type Reopening,
+  refusalOfUpdate,
   reopeningOf,
   replaceDraftFrom,
   serverFieldError,
@@ -163,10 +168,17 @@ export function QuestionEditorSheet({
   const [stepRefusal, setStepRefusal] = useState<ReturnType<typeof checkStepChange> | null>(null);
   const [resetNote, setResetNote] = useState(false);
   const [conditionStale, setConditionStale] = useState(false);
+  // The opener edits the question refuses (12.1-17, D-632): archive, delete, retype, remove an option. The alert
+  // renders from the list the page holds (no round trip) or from the server's 409 list (a race).
+  const [refusal, setRefusal] = useState<DependentsRefusal | null>(null);
 
   const activeQuestions = questions ?? [];
   const showStepField = steps.length >= 2;
   const showConditions = questions !== undefined;
+  const dependents = stored ? dependentsOf(activeQuestions, stored.id) : [];
+  // An opener has no condition of its own (D-622): it shows what it opens, not the condition editor.
+  const isOpener = stored !== null && stored.opensCount > 0;
+  const usedCounts = stored ? optionUsage(activeQuestions, stored.id) : undefined;
   const openers = eligibleOpeners({
     questions: activeQuestions,
     steps,
@@ -293,6 +305,20 @@ export function QuestionEditorSheet({
         if (result.issue === 'condition_invalid') {
           staleCondition();
           return;
+        }
+        if (result.issue === 'has_dependents') {
+          // Another admin gave this question a dependent after the page was read: show the server's list.
+          const shown =
+            mode === 'edit' && question
+              ? refusalOfUpdate(question, draft, result.dependents ?? [], activeQuestions)
+              : result.dependents?.length
+                ? { kind: 'archive' as const, dependents: result.dependents }
+                : null;
+          if (shown) {
+            setRefusal(shown);
+            router.refresh();
+            return;
+          }
         }
         // Nothing was saved. The page is refreshed so reopening the question shows the current version.
         setConflict(true);
@@ -427,6 +453,15 @@ export function QuestionEditorSheet({
       return;
     }
     switch (result.code) {
+      case 'hasDependents':
+        if (result.dependents.length > 0) {
+          setRefusal({ kind, dependents: result.dependents });
+          router.refresh();
+          return;
+        }
+        setConflict(true);
+        router.refresh();
+        return;
       case 'hasAnswers':
         // An answer arrived between the page read and the tap: archive instead (D-588).
         toast.show({ tone: 'error', message: t('delete.hasAnswers') });
@@ -449,6 +484,12 @@ export function QuestionEditorSheet({
   }
 
   function askRemove(kind: ArchiveKind) {
+    // The page already holds who depends on this question: refuse here, with the list, before any dialog or request.
+    if (dependents.length > 0) {
+      setRefusal({ kind, dependents });
+      return;
+    }
+    setRefusal(null);
     setRemoveKind(kind);
     setRemoveOpen(true);
   }
@@ -456,6 +497,7 @@ export function QuestionEditorSheet({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving || !canSave(draft)) return;
+    setRefusal(null);
     const found = validateDraft(draft, stored);
     setErrors(found);
     if (hasErrors(found)) {
@@ -526,7 +568,12 @@ export function QuestionEditorSheet({
               droppedOptions={
                 stored !== null && isChoiceType(stored.type) && !isChoiceType(draft.type)
               }
+              blocked={dependents.length > 0}
+              onBlocked={() => setRefusal({ kind: 'type', dependents })}
             />
+            {refusal?.kind === 'type' ? (
+              <DependentsAlert kind="type" dependents={refusal.dependents} />
+            ) : null}
 
             {draft.type !== null ? (
               <>
@@ -576,6 +623,7 @@ export function QuestionEditorSheet({
                     allowOther={draft.allowOther}
                     errors={errors.options}
                     lockedCounts={locks.lockedOptions}
+                    usedCounts={usedCounts}
                     otherLocked={locks.otherLocked}
                     onChange={(options) => {
                       patch({ options });
@@ -621,7 +669,7 @@ export function QuestionEditorSheet({
                   }
                 />
 
-                {showStepField || showConditions ? (
+                {showStepField || (showConditions && !isOpener) ? (
                   <div className="flex flex-col gap-4" data-where-block>
                     <SectionTitle variant="micro" as="h3">
                       {te('where.title')}
@@ -648,7 +696,7 @@ export function QuestionEditorSheet({
                         ))}
                       </SheetSelect>
                     ) : null}
-                    {showConditions ? (
+                    {showConditions && !isOpener ? (
                       <ConditionEditor
                         condition={draft.condition}
                         openers={openers}
@@ -677,6 +725,33 @@ export function QuestionEditorSheet({
                     ) : null}
                   </div>
                 ) : null}
+
+                {isOpener && stored ? (
+                  <div className="flex flex-col gap-2" data-opens-block>
+                    <p className="break-words text-sm font-bold text-text">
+                      {te('opens.title', { count: stored.opensCount })}
+                    </p>
+                    <ul
+                      aria-label={te('opens.listLabel')}
+                      className="flex list-disc flex-col gap-1 pl-4 text-sm text-text"
+                    >
+                      {dependents.slice(0, DEPENDENTS_SHOWN).map((dependent) => (
+                        <li key={dependent.id} className="break-words">
+                          {dependent.title}
+                        </li>
+                      ))}
+                    </ul>
+                    {stored.opensCount > Math.min(dependents.length, DEPENDENTS_SHOWN) &&
+                    dependents.length > 0 ? (
+                      <p className="text-xs font-normal text-text-secondary">
+                        {t('dependents.more', {
+                          count: stored.opensCount - Math.min(dependents.length, DEPENDENTS_SHOWN),
+                        })}
+                      </p>
+                    ) : null}
+                    <p className="text-xs font-normal text-text-tertiary">{te('opens.hint')}</p>
+                  </div>
+                ) : null}
               </>
             ) : null}
           </fieldset>
@@ -689,6 +764,14 @@ export function QuestionEditorSheet({
             >
               {te('errors.conflict')}
             </div>
+          ) : null}
+
+          {refusal && refusal.kind !== 'type' ? (
+            <DependentsAlert
+              kind={refusal.kind}
+              dependents={refusal.dependents}
+              label={refusal.label}
+            />
           ) : null}
 
           <Button type="submit" fullWidth size="lg" loading={saving} disabled={!canSave(draft)}>

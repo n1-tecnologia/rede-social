@@ -35,7 +35,10 @@
         "answers": "{count, plural, =0 {Sem respostas} one {# resposta} other {# respostas}}",
         "onProfile": "No perfil",
         "locked": "Tipo bloqueado",
-        "position": "Pergunta {position} de {total}"
+        "position": "Pergunta {position} de {total}",
+        "conditional": "Condicional",
+        "opens": "Abre {count, plural, one {# pergunta} other {# perguntas}}",
+        "condition": "Só aparece se “{opener}” for {options}."
       },
       "reorder": {
         "up": "Subir “{title}”",
@@ -117,6 +120,7 @@
         "confirm": "Reativar",
         "done": "Pergunta reativada.",
         "failed": "Não foi possível reativar agora. Tente de novo.",
+        "openerArchived": "Para reativar “{title}”, reative antes “{opener}”, que decide se ela aparece.",
         "empty": {
           "title": "Nenhuma pergunta arquivada",
           "body": "Quando você arquivar uma pergunta, ela aparece aqui com as respostas guardadas."
@@ -157,6 +161,17 @@
         "hasAnswers": "Esta pergunta recebeu respostas. Arquive em vez de excluir.",
         "failed": "Não foi possível excluir agora. Tente de novo."
       },
+      "dependents": {
+        "title": {
+          "archive": "Esta pergunta abre outras e não pode ser arquivada agora.",
+          "delete": "Esta pergunta abre outras e não pode ser excluída agora.",
+          "type": "Esta pergunta abre outras e não pode mudar de tipo agora.",
+          "option": "A opção “{label}” abre outras perguntas e não pode ser removida agora."
+        },
+        "hint": "Remova a condição destas perguntas, ou arquive-as, e tente de novo:",
+        "hintOption": "Tire esta opção da condição destas perguntas, ou remova a condição delas, e tente de novo:",
+        "more": "e mais {count, plural, one {# pergunta} other {# perguntas}}"
+      },
       "editor": {
         "createTitle": "Nova pergunta",
         "editTitle": "Editar pergunta",
@@ -186,6 +201,9 @@
           "up": "Subir opção {n}",
           "down": "Descer opção {n}",
           "remove": "Remover opção {n}",
+          "usedBy": "Abre {count, plural, one {# pergunta} other {# perguntas}}",
+          "usedLocked": "Opção usada em uma condição. Não pode ser removida.",
+          "usedNote": "As opções que abrem perguntas não podem ser removidas. Você pode renomear e mudar a ordem.",
           "err": {
             "min": "Inclua pelo menos 2 opções.",
             "empty": "Preencha ou remova as opções vazias.",
@@ -267,6 +285,11 @@
             "values": "Escolha pelo menos uma resposta que abre esta pergunta.",
             "stale": "Esta condição não vale mais. Escolha a pergunta e a resposta de novo."
           }
+        },
+        "opens": {
+          "title": "Esta pergunta abre {count, plural, one {# pergunta} other {# perguntas}}:",
+          "hint": "Elas só aparecem para quem responder como você definiu. Para arquivar ou mudar esta pergunta, ajuste essas antes.",
+          "listLabel": "Perguntas que dependem desta"
         },
         "save": "Salvar pergunta",
         "saving": "Salvando…",

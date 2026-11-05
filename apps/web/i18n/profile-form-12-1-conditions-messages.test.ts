@@ -74,3 +74,68 @@ describe('profileForm.admin.editor: where and when it appears (UI-D-647, UI-D-64
     );
   });
 });
+
+describe('profileForm.admin: the list markers (UI-D-650)', () => {
+  it('the pills and the condition sentence', () => {
+    expect(t('row.conditional')).toBe('Condicional');
+    expect(t('row.opens', { count: 1 })).toBe('Abre 1 pergunta');
+    expect(t('row.opens', { count: 3 })).toBe('Abre 3 perguntas');
+    expect(t('row.condition', { opener: 'Tem clínica?', options: '“A” ou “B”' })).toBe(
+      'Só aparece se “Tem clínica?” for “A” ou “B”.',
+    );
+  });
+
+  it('the opener block of the sheet', () => {
+    expect(t('editor.opens.title', { count: 1 })).toBe('Esta pergunta abre 1 pergunta:');
+    expect(t('editor.opens.title', { count: 4 })).toBe('Esta pergunta abre 4 perguntas:');
+    expect(t('editor.opens.hint')).toBe(
+      'Elas só aparecem para quem responder como você definiu. Para arquivar ou mudar esta pergunta, ajuste essas antes.',
+    );
+    expect(t('editor.opens.listLabel')).toBe('Perguntas que dependem desta');
+  });
+});
+
+describe('profileForm.admin: the refusals and the used option (UI-D-651)', () => {
+  it('the four titles', () => {
+    expect(t('dependents.title.archive')).toBe(
+      'Esta pergunta abre outras e não pode ser arquivada agora.',
+    );
+    expect(t('dependents.title.delete')).toBe(
+      'Esta pergunta abre outras e não pode ser excluída agora.',
+    );
+    expect(t('dependents.title.type')).toBe(
+      'Esta pergunta abre outras e não pode mudar de tipo agora.',
+    );
+    expect(t('dependents.title.option', { label: 'Tenho' })).toBe(
+      'A opção “Tenho” abre outras perguntas e não pode ser removida agora.',
+    );
+  });
+
+  it('the hints and the overflow line', () => {
+    expect(t('dependents.hint')).toBe(
+      'Remova a condição destas perguntas, ou arquive-as, e tente de novo:',
+    );
+    expect(t('dependents.hintOption')).toBe(
+      'Tire esta opção da condição destas perguntas, ou remova a condição delas, e tente de novo:',
+    );
+    expect(t('dependents.more', { count: 1 })).toBe('e mais 1 pergunta');
+    expect(t('dependents.more', { count: 4 })).toBe('e mais 4 perguntas');
+  });
+
+  it('the option row', () => {
+    expect(t('editor.options.usedBy', { count: 1 })).toBe('Abre 1 pergunta');
+    expect(t('editor.options.usedBy', { count: 2 })).toBe('Abre 2 perguntas');
+    expect(t('editor.options.usedLocked')).toBe(
+      'Opção usada em uma condição. Não pode ser removida.',
+    );
+    expect(t('editor.options.usedNote')).toBe(
+      'As opções que abrem perguntas não podem ser removidas. Você pode renomear e mudar a ordem.',
+    );
+  });
+
+  it('the reactivation toast', () => {
+    expect(t('archived.openerArchived', { title: 'Nome da clínica', opener: 'Tem clínica?' })).toBe(
+      'Para reativar “Nome da clínica”, reative antes “Tem clínica?”, que decide se ela aparece.',
+    );
+  });
+});

@@ -100,6 +100,8 @@ export type ArchivedResult =
       questions: ArchivedQuestion[];
       activeCount: number;
       limit: number;
+      /** The ACTIVE questions (12.1-17): the openers a reactivated question may name. */
+      activeQuestions: AdminQuestion[];
     }
   | Refused;
 
@@ -123,6 +125,7 @@ export async function loadArchived(): Promise<ArchivedResult> {
       questions: parsedArchived.questions,
       activeCount: parsedList.activeCount,
       limit: parsedList.limit,
+      activeQuestions: parsedList.questions,
     };
   } catch (error) {
     console.error('profile_form.archived_failed', { error: errorName(error) });

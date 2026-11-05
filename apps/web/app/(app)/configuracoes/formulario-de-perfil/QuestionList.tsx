@@ -11,17 +11,21 @@ import {
   ArrowUp,
   ArrowUpDown,
   ChevronRight,
+  CornerDownRight,
   Eye,
   Info,
   Layers,
   Lock,
   Plus,
+  Split,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { describeCondition } from '@/lib/profile-form/describe-condition';
 import { typeNameKey } from '@/lib/profile-form/question-types';
 import { type ReorderLayoutResult, reorderLayoutAction, reorderQuestionsAction } from './actions';
+import { conditionOptionsText, openerIndex } from './editor-state';
 import { StepWell } from './StepWell';
 
 export interface QuestionListProps {
@@ -97,8 +101,41 @@ function orderViolation(
 
 type Direction = 'up' | 'down';
 
-/** The body every row shares: position, title, badges and the meta line (UI-D-566). */
-function RowBody({ question, position }: { question: AdminQuestion; position: number }) {
+/**
+ * The sentence "Só aparece se “{opener}” for {options}." of every conditional row, by question id (12.1-17, D-621,
+ * UI-D-650), built from `describeCondition` and the catalog. A condition that names no option its opener still
+ * has gets no sentence rather than half of one.
+ */
+function useConditionLines(items: AdminQuestion[]): Map<string, string> {
+  const t = useTranslations('profileForm');
+  const index = openerIndex(items);
+  const words = { yes: t('member.controls.yes'), no: t('member.controls.no') };
+  const lines = new Map<string, string>();
+  for (const question of items) {
+    if (question.condition === null) continue;
+    const description = describeCondition(question.condition, index);
+    if (description === null) continue;
+    const options = conditionOptionsText(description, words);
+    if (options === '') continue;
+    lines.set(question.id, t('admin.row.condition', { opener: description.openerTitle, options }));
+  }
+  return lines;
+}
+
+/**
+ * The body every row shares: position, title, the condition sentence, badges and the meta line (UI-D-566,
+ * UI-D-650). A row carries at most ONE condition marker, because an opener has no condition (D-622): the
+ * "Condicional" pill for a shown question, "Abre N perguntas" for an opener; both are words, never colour.
+ */
+function RowBody({
+  question,
+  position,
+  conditionLine,
+}: {
+  question: AdminQuestion;
+  position: number;
+  conditionLine: string | null;
+}) {
   const t = useTranslations('profileForm');
   const answered = question.answerCount > 0;
   return (
@@ -110,8 +147,27 @@ function RowBody({ question, position }: { question: AdminQuestion; position: nu
         <span className="line-clamp-3 break-words text-sm font-bold text-text">
           {question.title}
         </span>
+        {conditionLine ? (
+          <span
+            data-condition-line
+            className="line-clamp-2 break-words text-xs font-normal text-text-secondary"
+          >
+            {conditionLine}
+          </span>
+        ) : null}
         <span className="flex flex-wrap gap-2">
           <StatusPill tone="neutral">{t(typeNameKey(question.type))}</StatusPill>
+          {question.condition !== null ? (
+            <StatusPill tone="neutral">
+              <CornerDownRight aria-hidden size={12} />
+              {t('admin.row.conditional')}
+            </StatusPill>
+          ) : question.opensCount > 0 ? (
+            <StatusPill tone="neutral">
+              <Split aria-hidden size={12} />
+              {t('admin.row.opens', { count: question.opensCount })}
+            </StatusPill>
+          ) : null}
           {question.showOnProfile ? (
             <StatusPill tone="neutral">
               <Eye aria-hidden size={12} />
@@ -142,6 +198,8 @@ interface RowProps {
   /** The number across the WHOLE form, 1..total, in the order members see (UI-D-643). */
   position: number;
   total: number;
+  /** "Só aparece se …" for a conditional row (UI-D-650). */
+  conditionLine: string | null;
   onOpen?: (question: AdminQuestion) => void;
 }
 
@@ -150,7 +208,7 @@ interface RowProps {
  * editor. Colour and weight never carry a state alone: the required state, the position and the count
  * are words, and the position and the state are also in the accessible description.
  */
-function QuestionRow({ question, position, total, onOpen }: RowProps) {
+function QuestionRow({ question, position, total, conditionLine, onOpen }: RowProps) {
   const t = useTranslations('profileForm');
   const descriptionId = useId();
   const answered = question.answerCount > 0;
@@ -160,9 +218,13 @@ function QuestionRow({ question, position, total, onOpen }: RowProps) {
     stateWord,
     t('admin.row.answers', { count: question.answerCount }),
     answered ? t('admin.row.locked') : null,
+    conditionLine,
+    question.condition === null && question.opensCount > 0
+      ? t('admin.row.opens', { count: question.opensCount })
+      : null,
   ]
     .filter((part): part is string => part !== null)
-    .map((part) => `${part}.`)
+    .map((part) => (part.endsWith('.') ? part : `${part}.`))
     .join(' ');
 
   return (
@@ -175,7 +237,7 @@ function QuestionRow({ question, position, total, onOpen }: RowProps) {
           onClick={onOpen ? () => onOpen(question) : undefined}
           className="flex min-h-11 w-full items-start gap-3 p-4 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
         >
-          <RowBody question={question} position={position} />
+          <RowBody question={question} position={position} conditionLine={conditionLine} />
           <ChevronRight aria-hidden size={18} className="mt-0.5 shrink-0 text-text-tertiary" />
         </button>
         <span id={descriptionId} className="sr-only">
@@ -193,6 +255,7 @@ interface ReorderRowProps {
   /** The row's place inside its step (or inside the flat list) and how many rows that group holds. */
   groupIndex: number;
   groupSize: number;
+  conditionLine: string | null;
   busy: boolean;
   register: (key: string, element: HTMLButtonElement | null) => void;
   onMove: (id: string, delta: -1 | 1) => void;
@@ -210,6 +273,7 @@ function ReorderRow({
   position,
   groupIndex,
   groupSize,
+  conditionLine,
   busy,
   register,
   onMove,
@@ -219,7 +283,7 @@ function ReorderRow({
     <li>
       <Card className="p-0">
         <div className="flex min-h-11 w-full items-start gap-3 p-4">
-          <RowBody question={question} position={position} />
+          <RowBody question={question} position={position} conditionLine={conditionLine} />
           <span className="-my-2 -mr-2 flex shrink-0 items-center">
             <IconButton
               ref={(element) => register(`${question.id}:up`, element)}
@@ -320,6 +384,7 @@ export function QuestionList({
     winner?.focus();
   }, [items]);
 
+  const conditionLines = useConditionLines(items);
   const wells = stepList.length > 1;
   const groups = groupByStep(stepList, items);
   const positions = new Map(items.map((question, at) => [question.id, at + 1] as const));
@@ -483,6 +548,7 @@ export function QuestionList({
             position={positions.get(question.id) ?? groupIndex + 1}
             groupIndex={groupIndex}
             groupSize={rows.length}
+            conditionLine={conditionLines.get(question.id) ?? null}
             busy={busy}
             register={register}
             onMove={moveQuestion}
@@ -493,6 +559,7 @@ export function QuestionList({
             question={question}
             position={positions.get(question.id) ?? groupIndex + 1}
             total={items.length}
+            conditionLine={conditionLines.get(question.id) ?? null}
             onOpen={onOpen}
           />
         ),

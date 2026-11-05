@@ -907,3 +907,486 @@ describe('the list: names, live region, 44px targets and no raw HTML (UI-D-596)'
     }
   });
 });
+
+/* ------------------------------------------------------------------------------------------------ */
+/* 12.1-17 Task 2: the opener's refusals, the used option and the reactivation toast (D-632, UI-D-651) */
+/* ------------------------------------------------------------------------------------------------ */
+
+describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose a used option (D-632, UI-D-651)', () => {
+  const onClose = vi.fn();
+  const optionIds = [uuid(9801), uuid(9802), uuid(9803)];
+  const baseOptions = [
+    { id: optionIds[0] as string, label: 'Tenho uma clínica', answerCount: 0 },
+    { id: optionIds[1] as string, label: 'Trabalho em uma clínica', answerCount: 0 },
+    { id: optionIds[2] as string, label: 'Estou aprendendo', answerCount: 0 },
+  ];
+
+  /** An opener and `count` questions that depend on it through its first option (or none). */
+  function world(count: number, overrides: Partial<ReturnType<typeof adminQuestion>> = {}) {
+    const opener = adminQuestion('single_choice', {
+      title: 'Você tem clínica?',
+      options: baseOptions,
+      opensCount: count,
+      ...overrides,
+    });
+    const dependents = Array.from({ length: count }, (_, at) =>
+      adminQuestion('short_text', {
+        title: `Dependente ${at + 1}`,
+        condition: { questionId: opener.id, values: [optionIds[0] as string] },
+      }),
+    );
+    return { opener, dependents, questions: [opener, ...dependents] };
+  }
+
+  function sheet(
+    question: ReturnType<typeof adminQuestion>,
+    questions: ReturnType<typeof adminQuestion>[],
+  ) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionEditorSheet
+          open
+          mode="edit"
+          question={question}
+          questions={questions}
+          steps={[]}
+          tenantName="Ana Mentoria"
+          limit={30}
+          onClose={onClose}
+          onReplace={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+  }
+  const alertOf = () => document.querySelector('[data-dependents-alert]') as HTMLElement | null;
+  const titles = (el: HTMLElement) =>
+    within(el)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent);
+
+  beforeEach(() => onClose.mockReset());
+
+  it('archive: the client refuses from the list it holds, with the list, and opens no dialog', () => {
+    const { opener, questions } = world(3, { answerCount: 4 });
+    sheet(opener, questions);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    const alert = alertOf() as HTMLElement;
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.getAttribute('data-dependents-alert')).toBe('archive');
+    expect(
+      within(alert).getByText('Esta pergunta abre outras e não pode ser arquivada agora.'),
+    ).toBeTruthy();
+    expect(titles(alert)).toEqual(['Dependente 1', 'Dependente 2', 'Dependente 3']);
+    expect(screen.queryByRole('dialog', { name: 'Arquivar esta pergunta?' })).toBeNull();
+    expect(mocks.archive).not.toHaveBeenCalled();
+  });
+
+  it('delete: refused the same way, with the delete title', () => {
+    const { opener, questions } = world(2);
+    sheet(opener, questions);
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir pergunta' }));
+    const alert = alertOf() as HTMLElement;
+    expect(
+      within(alert).getByText('Esta pergunta abre outras e não pode ser excluída agora.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Excluir esta pergunta?' })).toBeNull();
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it('the alert sits directly above the footer button, inside the sheet', () => {
+    const { opener, questions } = world(1);
+    sheet(opener, questions);
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir pergunta' }));
+    const alert = alertOf() as HTMLElement;
+    const saveButton = screen.getByRole('button', { name: 'Salvar pergunta' });
+    expect(alert.nextElementSibling).toBe(saveButton);
+  });
+
+  it('retype: "Trocar tipo" does not open the grid, the alert appears under the type row', () => {
+    const { opener, questions } = world(2);
+    sheet(opener, questions);
+    fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
+    expect(screen.queryByRole('group', { name: 'Tipo de resposta' })).toBeNull();
+    const alert = alertOf() as HTMLElement;
+    expect(alert.getAttribute('data-dependents-alert')).toBe('type');
+    expect(
+      within(alert).getByText('Esta pergunta abre outras e não pode mudar de tipo agora.'),
+    ).toBeTruthy();
+    // Under the type row, before the title field.
+    const title = screen.getByLabelText('Pergunta');
+    expect(alert.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a question that opens nothing archives and retypes as before', () => {
+    const lone = adminQuestion('single_choice', {
+      title: 'Sozinha',
+      options: baseOptions,
+      answerCount: 2,
+    });
+    sheet(lone, [lone]);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    expect(alertOf()).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Arquivar esta pergunta?' })).toBeTruthy();
+  });
+
+  it('lists five titles and "e mais 2 perguntas" for seven, and "e mais 1 pergunta" for six', () => {
+    const seven = world(7, { answerCount: 1 });
+    const { unmount } = sheet(seven.opener, seven.questions);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    expect(titles(alertOf() as HTMLElement)).toHaveLength(5);
+    expect(within(alertOf() as HTMLElement).getByText('e mais 2 perguntas')).toBeTruthy();
+    unmount();
+    const six = world(6, { answerCount: 1 });
+    sheet(six.opener, six.questions);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    expect(within(alertOf() as HTMLElement).getByText('e mais 1 pergunta')).toBeTruthy();
+  });
+
+  it('race: archive reaches the server, which answers its own dependents list', async () => {
+    // The page does not know the dependents (opensCount 0): the confirmation opens, the server refuses.
+    const lone = adminQuestion('single_choice', {
+      title: 'Sozinha',
+      options: baseOptions,
+      answerCount: 2,
+    });
+    mocks.archive.mockResolvedValue({
+      ok: false,
+      code: 'hasDependents',
+      dependents: Array.from({ length: 6 }, (_, at) => ({
+        id: uuid(9900 + at),
+        title: `Nova ${at + 1}`,
+      })),
+    });
+    sheet(lone, [lone]);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Arquivar esta pergunta?' })).getByRole(
+          'button',
+          { name: 'Arquivar' },
+        ),
+      );
+    });
+    const alert = alertOf() as HTMLElement;
+    expect(alert.getAttribute('data-dependents-alert')).toBe('archive');
+    expect(titles(alert)).toHaveLength(5);
+    expect(within(alert).getByText('e mais 1 pergunta')).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mocks.refresh).toHaveBeenCalled();
+  });
+
+  it('race: a delete answered with has_dependents shows the delete alert', async () => {
+    const lone = adminQuestion('single_choice', { title: 'Sozinha', options: baseOptions });
+    mocks.remove.mockResolvedValue({
+      ok: false,
+      code: 'hasDependents',
+      dependents: [{ id: uuid(9910), title: 'Surgiu agora' }],
+    });
+    sheet(lone, [lone]);
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir pergunta' }));
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Excluir esta pergunta?' })).getByRole('button', {
+          name: 'Excluir',
+        }),
+      );
+    });
+    const alert = alertOf() as HTMLElement;
+    expect(alert.getAttribute('data-dependents-alert')).toBe('delete');
+    expect(titles(alert)).toEqual(['Surgiu agora']);
+  });
+
+  it('race: an update that retypes answers with the retype alert under the type row', async () => {
+    const lone = adminQuestion('single_choice', { title: 'Sozinha', options: baseOptions });
+    mocks.update.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      issue: 'has_dependents',
+      dependents: [{ id: uuid(9911), title: 'Depende agora' }],
+    });
+    sheet(lone, [lone]);
+    fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
+    fireEvent.click(screen.getByRole('radio', { name: /^Lista suspensa/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar pergunta' }));
+    });
+    const alert = alertOf() as HTMLElement;
+    expect(alert.getAttribute('data-dependents-alert')).toBe('type');
+    expect(titles(alert)).toEqual(['Depende agora']);
+  });
+});
+
+describe('12.1-17 Task 2: an option used by a condition (D-632, UI-D-651)', () => {
+  const onClose = vi.fn();
+  const ids = [uuid(9821), uuid(9822), uuid(9823)];
+  const options = [
+    { id: ids[0] as string, label: 'Tenho uma clínica', answerCount: 0 },
+    { id: ids[1] as string, label: 'Trabalho em uma clínica', answerCount: 0 },
+    { id: ids[2] as string, label: 'Estou aprendendo', answerCount: 0 },
+  ];
+  const opener = adminQuestion('single_choice', {
+    title: 'Você tem clínica?',
+    options,
+    opensCount: 3,
+  });
+  const dependents = [0, 1, 2].map((at) =>
+    adminQuestion('short_text', {
+      title: `Dependente ${at + 1}`,
+      // The first option opens three questions, the second opens the last one too.
+      condition: {
+        questionId: opener.id,
+        values: at === 2 ? [ids[0] as string, ids[1] as string] : [ids[0] as string],
+      },
+    }),
+  );
+
+  function sheet(question = opener, questions = [opener, ...dependents]) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionEditorSheet
+          open
+          mode="edit"
+          question={question}
+          questions={questions}
+          steps={[]}
+          tenantName="Ana Mentoria"
+          limit={30}
+          onClose={onClose}
+          onReplace={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+  }
+
+  beforeEach(() => onClose.mockReset());
+
+  it('shows Split in place of the remove button, with the count and the screen-reader text', () => {
+    sheet();
+    expect(screen.queryByRole('button', { name: 'Remover opção 1' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remover opção 2' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remover opção 3' })).toBeTruthy();
+    const used = document.querySelectorAll('[data-option-used]');
+    expect(used).toHaveLength(2);
+    expect(used[0]?.className).toContain('size-11');
+    expect(used[0]?.textContent).toBe('Opção usada em uma condição. Não pode ser removida.');
+    expect(screen.getByText('Abre 3 perguntas')).toBeTruthy();
+    expect(screen.getByText('Abre 1 pergunta')).toBeTruthy();
+    const note = screen.getByText(
+      'As opções que abrem perguntas não podem ser removidas. Você pode renomear e mudar a ordem.',
+    );
+    expect(note.closest('[role="status"]')).toBeTruthy();
+  });
+
+  it('rename and reorder still work on a used option, and the id stays stable', async () => {
+    mocks.update.mockResolvedValue({ ok: true, question: opener, pending: null });
+    sheet();
+    fireEvent.change(screen.getByLabelText('Opção 1'), {
+      target: { value: 'Tenho clínica própria' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Descer opção 1' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar pergunta' }));
+    });
+    const body = mocks.update.mock.calls[0]?.[1] as { options: { id?: string; label: string }[] };
+    expect(body.options.map((o) => o.id)).toEqual([ids[1], ids[0], ids[2]]);
+    expect(body.options[1]?.label).toBe('Tenho clínica própria');
+  });
+
+  it('shows no used-option note, no Split and no caption for an opener-free question', () => {
+    const lone = adminQuestion('single_choice', { title: 'Sozinha', options });
+    sheet(lone, [lone]);
+    expect(document.querySelector('[data-option-used]')).toBeNull();
+    expect(screen.queryByText(/não podem ser removidas\. Você pode renomear/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remover opção 1' })).toBeTruthy();
+  });
+
+  it('race: the server refuses a removed option and the alert names it, with the list', async () => {
+    // The page did not know about the dependents (the list it holds has none), so the remove button is there.
+    const lone = adminQuestion('single_choice', { title: 'Sozinha', options });
+    mocks.update.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      issue: 'has_dependents',
+      dependents: [
+        { id: uuid(9930), title: 'Quantas salas?' },
+        { id: uuid(9931), title: 'Nome da clínica' },
+      ],
+    });
+    sheet(lone, [lone]);
+    fireEvent.click(screen.getByRole('button', { name: 'Remover opção 3' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar pergunta' }));
+    });
+    const alert = document.querySelector('[data-dependents-alert]') as HTMLElement;
+    expect(alert.getAttribute('data-dependents-alert')).toBe('option');
+    expect(
+      within(alert).getByText(
+        'A opção “Estou aprendendo” abre outras perguntas e não pode ser removida agora.',
+      ),
+    ).toBeTruthy();
+    expect(
+      within(alert)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Quantas salas?', 'Nome da clínica']);
+  });
+});
+
+describe('12.1-17 Task 2: the read-only block of an opener (UI-D-650)', () => {
+  const ids = [uuid(9841), uuid(9842)];
+  const options = [
+    { id: ids[0] as string, label: 'A', answerCount: 0 },
+    { id: ids[1] as string, label: 'B', answerCount: 0 },
+  ];
+
+  function open(count: number) {
+    const opener = adminQuestion('single_choice', {
+      title: 'Abridora',
+      options,
+      opensCount: count,
+    });
+    const deps = Array.from({ length: count }, (_, at) =>
+      adminQuestion('short_text', {
+        title: `Dependente ${at + 1}`,
+        condition: { questionId: opener.id, values: [ids[0] as string] },
+      }),
+    );
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionEditorSheet
+          open
+          mode="edit"
+          question={opener}
+          questions={[opener, ...deps]}
+          steps={[]}
+          tenantName="Ana Mentoria"
+          limit={30}
+          onClose={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+  }
+  const block = () => document.querySelector('[data-opens-block]') as HTMLElement | null;
+
+  it('says how many it opens, lists up to five and gives the hint; no condition editor appears', () => {
+    open(3);
+    const el = block() as HTMLElement;
+    expect(within(el).getByText('Esta pergunta abre 3 perguntas:')).toBeTruthy();
+    expect(within(el).getByRole('list', { name: 'Perguntas que dependem desta' })).toBeTruthy();
+    expect(within(el).getAllByRole('listitem')).toHaveLength(3);
+    expect(
+      within(el).getByText(
+        'Elas só aparecem para quem responder como você definiu. Para arquivar ou mudar esta pergunta, ajuste essas antes.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('says "e mais 2" for seven, and the singular for one', () => {
+    const { unmount } = open(7);
+    expect(within(block() as HTMLElement).getAllByRole('listitem')).toHaveLength(5);
+    expect(within(block() as HTMLElement).getByText('e mais 2 perguntas')).toBeTruthy();
+    unmount();
+    open(1);
+    expect(within(block() as HTMLElement).getByText('Esta pergunta abre 1 pergunta:')).toBeTruthy();
+    expect(within(block() as HTMLElement).queryByText(/^e mais/)).toBeNull();
+  });
+});
+
+describe('12.1-17 Task 2: reactivating a shown question whose opener is archived (UI-D-651)', () => {
+  const opener = archivedQuestion('single_choice', {
+    title: 'Você tem clínica, trabalha em clínica ou está aprendendo?',
+    options: [{ id: uuid(9851), label: 'Tenho', answerCount: 0 }],
+  });
+  const shown = archivedQuestion('short_text', {
+    title: 'Nome da clínica',
+    required: true,
+    condition: { questionId: opener.id, values: [uuid(9851)] },
+  });
+  const SENTENCE =
+    'Para reativar “Nome da clínica”, reative antes “Você tem clínica, trabalha em clínica ou está aprendendo?”, que decide se ela aparece.';
+
+  function list(
+    questions = [shown, opener],
+    activeQuestions: ReturnType<typeof adminQuestion>[] = [],
+  ) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <ArchivedList
+          questions={questions}
+          activeCount={3}
+          limit={30}
+          activeQuestions={activeQuestions}
+          timeZone="America/Sao_Paulo"
+        />
+      </NextIntlClientProvider>,
+    );
+  }
+  const reactivate = (title: string) =>
+    screen.getByRole('button', { name: `Reativar pergunta: ${title}` });
+
+  it('opens no dialog, reads no impact and toasts the one sentence', async () => {
+    list();
+    await act(async () => {
+      fireEvent.click(reactivate('Nome da clínica'));
+    });
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'error', message: SENTENCE });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mocks.impact).not.toHaveBeenCalled();
+    expect(mocks.reactivate).not.toHaveBeenCalled();
+  });
+
+  it('lets the same question through once its opener is not archived (it is active)', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+    mocks.reactivate.mockResolvedValue({ ok: true });
+    const activeOpener = adminQuestion('single_choice', { title: 'Abridora ativa' });
+    list(
+      [{ ...shown, condition: { questionId: activeOpener.id, values: [uuid(9851)] } }],
+      [activeOpener],
+    );
+    await act(async () => {
+      fireEvent.click(reactivate('Nome da clínica'));
+    });
+    expect(mocks.reactivate).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the same sentence when the server answers condition_invalid (a race)', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+    const activeOpener = adminQuestion('single_choice', { title: 'Abridora que saiu agora' });
+    mocks.reactivate.mockResolvedValue({
+      ok: false,
+      code: 'conditionInvalid',
+      openerId: activeOpener.id,
+    });
+    list(
+      [{ ...shown, condition: { questionId: activeOpener.id, values: [uuid(9851)] } }],
+      [activeOpener],
+    );
+    await act(async () => {
+      fireEvent.click(reactivate('Nome da clínica'));
+    });
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message:
+        'Para reativar “Nome da clínica”, reative antes “Abridora que saiu agora”, que decide se ela aparece.',
+    });
+  });
+
+  it('falls back to the failure toast when the server names an opener the page cannot title', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+    mocks.reactivate.mockResolvedValue({
+      ok: false,
+      code: 'conditionInvalid',
+      openerId: uuid(9999),
+    });
+    list([{ ...shown, condition: { questionId: uuid(9998), values: [uuid(9851)] } }], []);
+    await act(async () => {
+      fireEvent.click(reactivate('Nome da clínica'));
+    });
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível reativar agora. Tente de novo.',
+    });
+  });
+});

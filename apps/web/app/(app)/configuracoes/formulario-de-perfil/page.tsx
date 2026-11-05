@@ -73,6 +73,7 @@ export default async function ProfileFormPage({
           questions={archived.questions}
           activeCount={archived.activeCount}
           limit={archived.limit}
+          activeQuestions={archived.activeQuestions}
           timeZone={bootstrap.tenant.timezone}
         />
       );

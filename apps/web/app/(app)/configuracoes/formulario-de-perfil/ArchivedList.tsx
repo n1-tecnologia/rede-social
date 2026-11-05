@@ -1,6 +1,6 @@
 'use client';
 
-import type { ArchivedQuestion } from '@rede-social/contracts/profile-form';
+import type { AdminQuestion, ArchivedQuestion } from '@rede-social/contracts/profile-form';
 import { Button, Card, ConfirmDialog, EmptyState, StatusPill, useToast } from '@rede-social/ui';
 import { Archive, ArchiveRestore, Info } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -21,6 +21,11 @@ export interface ArchivedListProps {
   /** How many questions are active now, and the most a tenant may have: the limit check needs no write. */
   activeCount: number;
   limit: number;
+  /**
+   * The ACTIVE questions (12.1-17): the openers a reactivated question may name. Optional; the page passes what its
+   * read of the active list returned. Without it only an opener that is itself archived can be named.
+   */
+  activeQuestions?: AdminQuestion[];
   /** The tenant's IANA time zone: the archive date is its calendar day, `dd/MM/yyyy`. */
   timeZone: string;
 }
@@ -61,7 +66,13 @@ type Pending =
  *
  * The component fetches nothing itself and shows aggregate counts only (PFORM-23).
  */
-export function ArchivedList({ questions, activeCount, limit, timeZone }: ArchivedListProps) {
+export function ArchivedList({
+  questions,
+  activeCount,
+  limit,
+  activeQuestions,
+  timeZone,
+}: ArchivedListProps) {
   const t = useTranslations('profileForm');
   const tAdmin = useTranslations('admin');
   const router = useRouter();
@@ -84,6 +95,16 @@ export function ArchivedList({ questions, activeCount, limit, timeZone }: Archiv
     router.refresh();
   }
 
+  /** The title of a question by id, from the archived list and the active one the page holds. */
+  function openerTitle(id: string | null): string | null {
+    if (id === null) return null;
+    return (
+      questions.find((candidate) => candidate.id === id)?.title ??
+      activeQuestions?.find((candidate) => candidate.id === id)?.title ??
+      null
+    );
+  }
+
   async function reactivate(question: ArchivedQuestion): Promise<void> {
     setWriting(true);
     let result: ReactivateResult;
@@ -102,6 +123,17 @@ export function ArchivedList({ questions, activeCount, limit, timeZone }: Archiv
       router.refresh();
     } else if (result.code === 'forbidden' || result.code === 'moduleOff') {
       refuse(result.code);
+    } else if (result.code === 'conditionInvalid') {
+      // The opener left the form between the read and the tap (a race): the same sentence as the client's check.
+      const opener = openerTitle(result.openerId ?? question.condition?.questionId ?? null);
+      toast.show({
+        tone: 'error',
+        message:
+          opener === null
+            ? t('admin.archived.failed')
+            : t('admin.archived.openerArchived', { title: question.title, opener }),
+      });
+      router.refresh();
     } else {
       toast.show({ tone: 'error', message: t('admin.archived.failed') });
     }
@@ -109,6 +141,21 @@ export function ArchivedList({ questions, activeCount, limit, timeZone }: Archiv
 
   async function onReactivate(question: ArchivedQuestion): Promise<void> {
     if (checking !== null || writing) return;
+    // A shown question whose opener is still archived cannot come back before it: one sentence, one dependency,
+    // so a toast and no dialog (D-632, UI-D-651).
+    const opener = question.condition
+      ? questions.find((candidate) => candidate.id === question.condition?.questionId)
+      : undefined;
+    if (opener) {
+      toast.show({
+        tone: 'error',
+        message: t('admin.archived.openerArchived', {
+          title: question.title,
+          opener: opener.title,
+        }),
+      });
+      return;
+    }
     // At the limit the dialog is not even opened: the answer is the sentence, with no request.
     if (activeCount >= limit) {
       toast.show({ tone: 'error', message: limitSentence });

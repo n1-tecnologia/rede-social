@@ -25,6 +25,12 @@ export interface TypePickerProps {
   lock?: { answerCount: number; onReplace: () => void };
   /** The choice options were dropped by the last type change: say so in a plain note (UI-D-570). */
   droppedOptions?: boolean;
+  /**
+   * The question opens others (12.1-17, D-632, UI-D-651): "Trocar tipo" does not open the grid, it asks the host to
+   * show the refusal list under this row, because a new type would undo the conditions that depend on it.
+   */
+  blocked?: boolean;
+  onBlocked?: () => void;
 }
 
 /**
@@ -42,6 +48,8 @@ export function TypePicker({
   onGridOpenChange,
   lock,
   droppedOptions = false,
+  blocked = false,
+  onBlocked,
 }: TypePickerProps) {
   const t = useTranslations('profileForm');
   const te = useTranslations('profileForm.admin.editor');
@@ -72,7 +80,7 @@ export function TypePicker({
           </p>
           <button
             type="button"
-            onClick={() => onGridOpenChange(true)}
+            onClick={() => (blocked ? onBlocked?.() : onGridOpenChange(true))}
             className="inline-flex min-h-11 shrink-0 items-center px-2 text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             {te('type.change')}

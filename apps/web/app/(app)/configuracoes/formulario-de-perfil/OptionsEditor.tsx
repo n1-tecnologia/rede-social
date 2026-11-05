@@ -2,7 +2,7 @@
 
 import { PROFILE_FORM_LIMITS } from '@rede-social/contracts/profile-form';
 import { Button, IconButton, Input, Switch } from '@rede-social/ui';
-import { ArrowDown, ArrowUp, Lock, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Info, Lock, Plus, Split, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useLayoutEffect, useRef } from 'react';
 import {
@@ -28,6 +28,11 @@ export interface OptionsEditorProps {
   lockedCounts?: ReadonlyMap<string, number>;
   /** "Outro" is locked on because the question has answers. */
   otherLocked?: boolean;
+  /**
+   * Option id to the number of questions whose condition names it (12.1-17, D-632, UI-D-651): such an option
+   * shows `Split` in place of its remove button, with the count; rename and reorder keep working (the id is stable).
+   */
+  usedCounts?: ReadonlyMap<string, number>;
 }
 
 const rowId = (key: string) => `pf-option-${key}`;
@@ -53,6 +58,7 @@ export function OptionsEditor({
   onAllowOtherChange,
   lockedCounts,
   otherLocked = false,
+  usedCounts,
 }: OptionsEditorProps) {
   const t = useTranslations('profileForm.admin.editor');
   const max = PROFILE_FORM_LIMITS.options;
@@ -94,6 +100,17 @@ export function OptionsEditor({
         {t('options.legend')}
       </legend>
 
+      {usedCounts && usedCounts.size > 0 ? (
+        <div
+          role="status"
+          data-options-used-note
+          className="flex items-start gap-2 rounded-xl bg-bg-tertiary px-3 py-3 text-xs font-normal text-text"
+        >
+          <Info aria-hidden size={16} className="mt-px shrink-0 text-text-secondary" />
+          <span className="min-w-0 flex-1 break-words">{t('options.usedNote')}</span>
+        </div>
+      ) : null}
+
       {lockedCounts && lockedCounts.size > 0 ? (
         <p className="text-xs font-normal text-text-secondary">{t('locked.options')}</p>
       ) : null}
@@ -103,6 +120,7 @@ export function OptionsEditor({
           const invalid = errors?.rows[option.key] !== undefined;
           const answers = option.id === undefined ? undefined : lockedCounts?.get(option.id);
           const locked = answers !== undefined;
+          const opens = option.id === undefined ? undefined : usedCounts?.get(option.id);
           return (
             <li key={option.key} className="flex flex-wrap items-center gap-2">
               {locked ? (
@@ -150,7 +168,15 @@ export function OptionsEditor({
                   disabled={index === options.length - 1}
                   onClick={() => move(option.key, 'down')}
                 />
-                {locked ? null : (
+                {opens !== undefined ? (
+                  <span
+                    data-option-used
+                    className="grid size-11 shrink-0 place-items-center text-text-tertiary"
+                  >
+                    <Split aria-hidden size={14} />
+                    <span className="sr-only">{t('options.usedLocked')}</span>
+                  </span>
+                ) : locked ? null : (
                   <IconButton
                     icon={X}
                     size={18}
@@ -160,6 +186,11 @@ export function OptionsEditor({
                   />
                 )}
               </span>
+              {opens !== undefined ? (
+                <span className="basis-full text-xs font-normal text-text-tertiary">
+                  {t('options.usedBy', { count: opens })}
+                </span>
+              ) : null}
             </li>
           );
         })}

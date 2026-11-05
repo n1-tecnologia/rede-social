@@ -2,6 +2,7 @@ import {
   type AdminQuestion,
   type AdminStep,
   codePoints,
+  type Dependent,
   normalizeOptionLabel,
   PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_LIMITS,
@@ -881,4 +882,62 @@ export function openerIndex(questions: readonly AdminQuestion[]) {
         ] as const,
     ),
   );
+}
+
+// ── 12.1-17: the opener side (D-632, UI-D-650, UI-D-651) ───────────────────────────────────────────
+
+/**
+ * The ACTIVE questions that name `openerId` as their opener, with their titles, in form order. The client's
+ * mirror of `dependentsOf` in `condition-rules.ts` over `AdminQuestion.condition`, so a refusal can be shown
+ * without a round trip. The server (`checkOpenerChange`) stays the authority: it answers 409 `has_dependents`
+ * with its own list when the page was stale (D-632, T-12.1-02).
+ */
+export function dependentsOf(questions: readonly AdminQuestion[], openerId: string): Dependent[] {
+  return layoutOrder(questions, []).flatMap((question) =>
+    question.condition?.questionId === openerId ? [{ id: question.id, title: question.title }] : [],
+  );
+}
+
+/** Option id to the number of ACTIVE questions whose condition names that option of `openerId`. */
+export function optionUsage(
+  questions: readonly AdminQuestion[],
+  openerId: string,
+): Map<string, number> {
+  const usage = new Map<string, number>();
+  for (const question of questions) {
+    if (question.condition?.questionId !== openerId) continue;
+    for (const value of question.condition.values) usage.set(value, (usage.get(value) ?? 0) + 1);
+  }
+  return usage;
+}
+
+/** What the dependents alert is about: the edit the opener refuses (UI-D-651). */
+export type RefusalKind = 'archive' | 'delete' | 'type' | 'option';
+
+/** A refusal to show: the kind, the questions that block it and, for an option, the option's label. */
+export interface DependentsRefusal {
+  kind: RefusalKind;
+  dependents: Dependent[];
+  label?: string;
+}
+
+/**
+ * The refusal a server `has_dependents` 409 stands for, from what the save was changing (UI-D-651): a new type
+ * is a retype; otherwise it is an option that left the list, named by its LABEL (the first one a dependent's
+ * condition uses, else the first removed). `null` when the save removed nothing that explains it.
+ */
+export function refusalOfUpdate(
+  question: AdminQuestion,
+  draft: QuestionDraft,
+  dependents: Dependent[],
+  questions: readonly AdminQuestion[],
+): DependentsRefusal | null {
+  if (dependents.length === 0) return null;
+  if (draft.type !== question.type) return { kind: 'type', dependents };
+  const kept = new Set(draft.options.flatMap((option) => (option.id ? [option.id] : [])));
+  const removed = question.options.filter((option) => !kept.has(option.id));
+  if (removed.length === 0) return null;
+  const used = optionUsage(questions, question.id);
+  const named = removed.find((option) => used.has(option.id)) ?? removed[0];
+  return { kind: 'option', dependents, label: named?.label ?? '' };
 }
