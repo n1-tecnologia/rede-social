@@ -138,40 +138,245 @@ export async function deriveStoreIcon(input: Buffer, opts: StoreIconOptions): Pr
   return { appStore1024, play512 };
 }
 
-// ---- RED stubs (plan 13-24 task 2): deliberately inert, fully replaced in GREEN ----------------------
-const INERT_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==',
-  'base64',
-);
+/** The splash is one square image for light and dark (UI-D-602); the OS fits it to the screen. */
+export const SPLASH_SIZE = 1024;
+/**
+ * The logo's larger side as a fraction of the splash's short side (UI-D-602: "one third of the short side").
+ * The "never above 160dp" ceiling of the same decision is a size the native shell enforces on the device
+ * (a 1024 asset has no dp); the asset itself never exceeds this third and sits inside the 80 % safe zone.
+ */
+export const SPLASH_LOGO_FRACTION = 1 / 3;
+/** Android adaptive icons keep the artwork inside the central 66 % (the rest is cropped by the mask). */
+export const ADAPTIVE_SAFE_ZONE = 0.66;
+export const ADAPTIVE_FOREGROUND_SIZE = 1024;
+export const NOTIFICATION_ICON_SIZE = 96;
+
+/** Splash name: 24/700 on the shell's scale, in asset pixels, wrapped to at most three lines. */
+const SPLASH_NAME_FONT_SIZE = 64;
+const SPLASH_NAME_LINE_HEIGHT = 80;
+const SPLASH_NAME_FONT_FAMILY = 'Manrope, sans-serif';
+const SPLASH_NAME_MAX_LINES = 3;
+const SPLASH_NAME_MAX_CHARS = 14;
 
 export type SplashOptions = {
+  /** The tenant's primary colour, `#rrggbb`: the splash background. */
   primary: string;
+  /** The readable colour on `primary`, `#rrggbb`: the name when there is no logo. */
   onPrimary: string;
+  /** The tenant's display name, drawn only when there is no logo. */
   displayName: string;
+  /** Declared mime of the logo; sniffed from the bytes when absent. */
   mime?: string;
 };
 export type SplashMode = 'logo' | 'name';
 export type SplashResult = { png: Buffer; mode: SplashMode };
-export type NotificationIconResult = { png: Buffer; quality: 'ok' | 'fallback' };
+export type NotificationIconResult = {
+  png: Buffer;
+  /** `fallback`: the logo had no transparency to make a silhouette from, so a plain white disc stands in. */
+  quality: 'ok' | 'fallback';
+};
 
-export function wrapName(_name: string, _maxLines = 3, _maxCharsPerLine = 14): string[] {
-  return [];
+const graphemes = new Intl.Segmenter('pt-BR', { granularity: 'grapheme' });
+
+function splitGraphemes(text: string): string[] {
+  return Array.from(graphemes.segment(text), (part) => part.segment);
 }
+
+/**
+ * Word-wraps `name` into at most `maxLines` lines of at most `maxCharsPerLine` characters. Counting and
+ * cutting work on grapheme clusters, so an emoji (even a joined family) or an accented letter, composed or
+ * not, is never split. A word longer than a line is broken at the line width; when text remains after the
+ * last line, that line ends with an ellipsis (still within the width).
+ */
+export function wrapName(name: string, maxLines = 3, maxCharsPerLine = 14): string[] {
+  const words = name
+    .normalize('NFC')
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .map(splitGraphemes);
+  const lines: string[][] = [];
+  let current: string[] = [];
+  let truncated = false;
+
+  const push = (): void => {
+    if (current.length > 0) lines.push(current);
+    current = [];
+  };
+
+  outer: for (const word of words) {
+    let rest = word;
+    while (rest.length > 0) {
+      const spacer = current.length > 0 ? 1 : 0;
+      if (current.length + spacer + rest.length <= maxCharsPerLine) {
+        current = current.length > 0 ? [...current, ' ', ...rest] : [...rest];
+        rest = [];
+        break;
+      }
+      if (current.length > 0) {
+        push();
+      } else {
+        current = rest.slice(0, maxCharsPerLine);
+        rest = rest.slice(maxCharsPerLine);
+        push();
+      }
+      if (lines.length >= maxLines) {
+        truncated = true;
+        break outer;
+      }
+    }
+    if (lines.length >= maxLines) {
+      truncated = true;
+      break;
+    }
+  }
+  if (!truncated) push();
+  if (lines.length > maxLines) {
+    lines.length = maxLines;
+    truncated = true;
+  }
+  if (truncated && lines.length > 0) {
+    const last = lines[lines.length - 1] ?? [];
+    while (last.length > 0 && last.length >= maxCharsPerLine) last.pop();
+    while (last.length > 0 && last[last.length - 1] === ' ') last.pop();
+    lines[lines.length - 1] = [...last, '…'];
+  }
+  return lines.map((line) => line.join(''));
+}
+
+/** XML-escape tenant text before it enters an SVG (`&`, `<`, `>`, quotes) and drop characters XML forbids. */
+function escapeXml(text: string): string {
+  let clean = '';
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    const forbidden =
+      (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) ||
+      code === 0xfffe ||
+      code === 0xffff;
+    if (!forbidden) clean += char;
+  }
+  return clean
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function nameSvg(lines: string[], onPrimary: string): Buffer {
+  const first = SPLASH_SIZE / 2 - ((lines.length - 1) * SPLASH_NAME_LINE_HEIGHT) / 2;
+  // The baseline sits about a third of the font size below the optical middle of its line.
+  const baseline = Math.round(SPLASH_NAME_FONT_SIZE * 0.35);
+  const text = lines
+    .map(
+      (line, i) =>
+        `<text x="${SPLASH_SIZE / 2}" y="${Math.round(first + i * SPLASH_NAME_LINE_HEIGHT + baseline)}">${escapeXml(line)}</text>`,
+    )
+    .join('');
+  return Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${SPLASH_SIZE}" height="${SPLASH_SIZE}" viewBox="0 0 ${SPLASH_SIZE} ${SPLASH_SIZE}">` +
+      `<g fill="${onPrimary}" font-family="${SPLASH_NAME_FONT_FAMILY}" font-size="${SPLASH_NAME_FONT_SIZE}" font-weight="700" text-anchor="middle">${text}</g></svg>`,
+  );
+}
+
+/**
+ * The splash (UI-D-602): `primary` background, the same picture for light and dark. With a logo, the logo
+ * sits centred with its larger side at one third of the short side; without one, the tenant's own
+ * `displayName` is drawn in `onPrimary`, centred, up to three lines (never a platform placeholder).
+ */
 export async function deriveSplash(
-  _input: Buffer | null,
-  _opts: SplashOptions,
+  input: Buffer | null,
+  opts: SplashOptions,
 ): Promise<SplashResult> {
-  return { png: INERT_PNG, mode: 'logo' };
+  const primary = parseAssetColor(opts.primary, 'primary');
+  const onPrimary = parseAssetColor(opts.onPrimary, 'onPrimary');
+  const canvas = (): Sharp =>
+    sharp({
+      create: { width: SPLASH_SIZE, height: SPLASH_SIZE, channels: 3, background: primary },
+    });
+
+  if (input) {
+    const logo = await openLogo(input, opts.mime);
+    const fitted = await fitLogo(logo, Math.round(SPLASH_SIZE * SPLASH_LOGO_FRACTION));
+    const png = await canvas()
+      .composite([{ input: fitted, gravity: 'centre' }])
+      .removeAlpha()
+      .png()
+      .toBuffer();
+    return { png, mode: 'logo' };
+  }
+
+  const lines = wrapName(opts.displayName, SPLASH_NAME_MAX_LINES, SPLASH_NAME_MAX_CHARS);
+  if (lines.length === 0) throw new AppAssetError('bad_name', 'displayName is empty');
+  const overlay = sharp(nameSvg(lines, onPrimary), { limitInputPixels: MAX_INPUT_PIXELS });
+  const png = await canvas()
+    .composite([{ input: await overlay.png().toBuffer(), gravity: 'centre' }])
+    .removeAlpha()
+    .png()
+    .toBuffer();
+  return { png, mode: 'name' };
 }
+
+/**
+ * The Android adaptive-icon foreground: the logo on a transparent 1024 square, inside the central 66 %.
+ * The background layer is the tenant's `primary` as a plain colour the build writes (no image).
+ */
 export async function deriveAdaptiveForeground(
-  _input: Buffer,
-  _opts: { mime?: string } = {},
+  input: Buffer,
+  opts: { mime?: string } = {},
 ): Promise<Buffer> {
-  return INERT_PNG;
+  const logo = await openLogo(input, opts.mime);
+  const fitted = await fitLogo(logo, Math.round(ADAPTIVE_FOREGROUND_SIZE * ADAPTIVE_SAFE_ZONE));
+  return sharp({
+    create: {
+      width: ADAPTIVE_FOREGROUND_SIZE,
+      height: ADAPTIVE_FOREGROUND_SIZE,
+      channels: 4,
+      background: TRANSPARENT,
+    },
+  })
+    .composite([{ input: fitted, gravity: 'centre' }])
+    .png()
+    .toBuffer();
 }
+
+const WHITE_DISC = Buffer.from(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${NOTIFICATION_ICON_SIZE}" height="${NOTIFICATION_ICON_SIZE}" viewBox="0 0 96 96"><circle cx="48" cy="48" r="44" fill="#ffffff"/></svg>`,
+);
+
+/**
+ * The Android status-bar icon: a white silhouette cut from the logo's alpha channel at 96x96. A logo with
+ * no transparent pixel (or no visible pixel at all) has no silhouette, and would become a white square; it
+ * gets a plain white disc and `quality: 'fallback'` so the release script can tell the tenant.
+ */
 export async function deriveNotificationIcon(
-  _input: Buffer,
-  _opts: { mime?: string } = {},
+  input: Buffer,
+  opts: { mime?: string } = {},
 ): Promise<NotificationIconResult> {
-  return { png: INERT_PNG, quality: 'ok' };
+  const logo = await openLogo(input, opts.mime);
+  const disc = async (): Promise<NotificationIconResult> => ({
+    png: await sharp(WHITE_DISC, { limitInputPixels: MAX_INPUT_PIXELS }).png().toBuffer(),
+    quality: 'fallback',
+  });
+
+  if ((await logo.clone().stats()).isOpaque) return disc();
+
+  const fitted = await fitLogo(logo, NOTIFICATION_ICON_SIZE);
+  const mask = await sharp(fitted, { limitInputPixels: MAX_INPUT_PIXELS })
+    .extractChannel('alpha')
+    .toBuffer();
+  const visible = (await sharp(mask, { limitInputPixels: MAX_INPUT_PIXELS }).stats()).channels[0];
+  if (!visible || visible.max === 0) return disc();
+
+  const png = await sharp({
+    create: {
+      width: NOTIFICATION_ICON_SIZE,
+      height: NOTIFICATION_ICON_SIZE,
+      channels: 3,
+      background: '#ffffff',
+    },
+  })
+    .joinChannel(mask)
+    .png()
+    .toBuffer();
+  return { png, quality: 'ok' };
 }

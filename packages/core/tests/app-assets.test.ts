@@ -197,7 +197,8 @@ const ON_PRIMARY_RGB = { r: 255, g: 255, b: 255 };
 
 describe('wrapName — at most three lines, whole characters (UI-D-602, E01 long-text)', () => {
   it('returns one line for a short name', () => {
-    expect(wrapName('Comunidade Alfa')).toEqual(['Comunidade Alfa']);
+    expect(wrapName('Comunidade Ana')).toEqual(['Comunidade Ana']);
+    expect(wrapName('Comunidade Alfa')).toEqual(['Comunidade', 'Alfa']);
     expect(wrapName('Rede')).toEqual(['Rede']);
   });
 
@@ -223,8 +224,10 @@ describe('wrapName — at most three lines, whole characters (UI-D-602, E01 long
         Array.from(new Intl.Segmenter('pt', { granularity: 'grapheme' }).segment(line)).length,
       ).toBeLessThanOrEqual(8);
     }
+    // A decomposed accent (letter + combining mark) is composed and never left alone at a line start.
     const decomposed = wrapName('Educac\u0327a\u0303o em Grupo', 3, 6);
-    expect(decomposed.join(' ')).toContain('c\u0327a\u0303o');
+    expect(decomposed.join('')).toContain('Educação');
+    for (const line of decomposed) expect(line).not.toMatch(/^\p{M}/u);
   });
 
   it('returns no line for a blank name', () => {
