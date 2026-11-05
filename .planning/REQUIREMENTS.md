@@ -477,7 +477,7 @@ Phase 13 (post-MVP and additive). Each tenant gets its own native iOS and Androi
 - [ ] **NATIVE-04**: Sign-in, sign-up, recovery, invite acceptance and the session are the web's own pages unchanged inside the app; the session cookie survives a force-quit and a restart; a session whose membership is another tenant's is refused as `TENANT_HOST_MISMATCH`; every refusal (`MEMBERSHIP_BLOCKED`, `MEMBERSHIP_INVITED`, `SUBSCRIPTION_PENDING`, `PROFILE_FORM_PENDING`, `TENANT_*`) lands on the web's own screen (D-608)
 - [ ] **NATIVE-05**: One typed, versioned, zod-validated bridge (`web -> native` through `ReactNativeWebView.postMessage`, `native -> web` through an injected `rede-native` event) lives in `@rede-social/contracts/native`; a message from an origin other than the tenant's, an unknown `type`, a bad shape, an oversized one or one beyond 20 per second is dropped without effect (D-600)
 - [ ] **NATIVE-06**: Native screens that need no web page: splash, 'Sem internet' and 'Não foi possível abrir' (chosen by what failed, with a retry that also fires on reconnect and coalesces), 'Atualize o app' (blocking, store link) and the 4dp loading bar; they paint from a cached, schema-validated branding record baked into the build (D-612)
-- [ ] **NATIVE-07**: A public, unauthenticated read answers `{ minVersion, storeUrl }` per platform for the tenant; an installed app below `minVersion` shows 'Atualize o app'; a failed, slow or malformed check never blocks opening the app
+- [x] **NATIVE-07**: A public, unauthenticated read answers `{ minVersion, storeUrl }` per platform for the tenant; an installed app below `minVersion` shows 'Atualize o app'; a failed, slow or malformed check never blocks opening the app
 - [x] **NATIVE-08**: `push_subscriptions` accepts native devices (new `kind`, `platform`, `app_environment`, `app_version`; `p256dh` and `auth` nullable under a CHECK that keeps web rows complete); web rows and `app.push_subscription_upsert` keep working untouched; pgTAP proves a two-tenant negative on native rows (D-606)
 - [ ] **NATIVE-09**: The save and delete routes (`/v1/notifications/push-subscriptions` and the BFF `/api/push/subscriptions`) accept a native token through an additive contract (the web shape still parses unchanged); the token is shape-checked per kind, never run through the push-service URL allow-list; saving moves a token between members like the web upsert (D-606)
 - [ ] **NATIVE-10**: The worker sends native pushes: APNs directly over HTTP/2 with the tenant's own key (ES256 provider token refreshed every 20 to 60 minutes, topic = bundle id, sandbox or production per device) and FCM HTTP v1 for Android with the platform sender account; outcomes map to sent, gone, dropped or retry through the existing report and retry path and a credential problem of ours never deletes a device; CI uses fake transports (D-606)
@@ -494,7 +494,7 @@ Phase 13 (post-MVP and additive). Each tenant gets its own native iOS and Androi
 - [ ] **NATIVE-21**: An idempotent job anonymises accounts whose deadline passed: it sends the completion e-mail BEFORE the address is erased, soft-deletes the Auth account so the address is reusable, removes the name, photo, bio, Instagram, profile-form answers and devices, keeps posts and comments as 'Membro removido', and keeps purchase and access-grant rows without personal data; a two-tenant negative test proves it touches only the due tenant's rows (D-609)
 - [ ] **NATIVE-22**: The delete flow exists in the browser and the app: the row under 'Editar perfil', the page, the confirmation dialog (with the sentence that deleting the account does not cancel a gateway subscription), the 'Exclusão agendada' screen, and a public `/excluir-conta` page explaining the process (the web link Google Play's Data safety form asks for) (D-609, D-610)
 - [ ] **NATIVE-23**: A product's `checkoutUrl` opens in the phone's system browser; no card is taken in the app and there is no in-app purchase (D-615)
-- [ ] **NATIVE-24**: Each tenant has a switch per store (iPhone, Android), stored in the control plane and OFF by default in both (D-617), that decides whether the app shows purchase; the bootstrap carries `purchaseVisible` (always true for a browser, false for an app whose switch is off or unknown); when false, price, buy button, purchase dialog and checkout link are absent from the DOM and a neutral padlock shows; members with access are unchanged; turning a switch ON in the App tab needs a confirmation (D-615, D-617)
+- [x] **NATIVE-24**: Each tenant has a switch per store (iPhone, Android), stored in the control plane and OFF by default in both (D-617), that decides whether the app shows purchase; the bootstrap carries `purchaseVisible` (always true for a browser, false for an app whose switch is off or unknown); when false, price, buy button, purchase dialog and checkout link are absent from the DOM and a neutral padlock shows; members with access are unchanged; turning a switch ON in the App tab needs a confirmation (D-615, D-617)
 - [ ] **NATIVE-25**: The 'App' tab `/plataforma/tenants/[id]/app` (`super_admin` only, before Status) shows the state pill, identity, store accesses, links data and verdicts, purchase switches, listing and the ten-step checklist, with the state derived by a pure function (D-605, D-607)
 - [ ] **NATIVE-26**: The App Store Connect key, the Google Play service account and the Apple push key are write-only: sealed under the master key (AAD `<rowId>:<kind>`), format-checked before replacing a held value, never returned by any read, log, URL or toast; reads expose only `held` and `heldAt` (D-605, D-539)
 - [ ] **NATIVE-27**: Signing material the platform generates (the iOS distribution key and certificate and the Android upload keystore) is created by the release command on first use, sealed per tenant before any build uses it, never entered or shown, and reused by every later build; first-use generation is serialised per tenant (D-605)
@@ -979,7 +979,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NATIVE-04 | Phase 13 (plans 16, 23) | Pending |
 | NATIVE-05 | Phase 13 (plans 03, 16, 23) | Pending |
 | NATIVE-06 | Phase 13 (plans 24, 25) | Pending |
-| NATIVE-07 | Phase 13 (plans 10, 25) | Pending |
+| NATIVE-07 | Phase 13 (plans 10, 25) | Complete |
 | NATIVE-08 | Phase 13 (plan 06) | Complete |
 | NATIVE-09 | Phase 13 (plans 11, 17) | Pending |
 | NATIVE-10 | Phase 13 (plan 12) | Pending |
@@ -996,7 +996,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NATIVE-21 | Phase 13 (plans 07, 13) | Pending |
 | NATIVE-22 | Phase 13 (plan 19) | Pending |
 | NATIVE-23 | Phase 13 (plans 18, 23) | Pending |
-| NATIVE-24 | Phase 13 (plans 05, 09, 10, 18, 22) | Pending |
+| NATIVE-24 | Phase 13 (plans 05, 09, 10, 18, 22) | Complete |
 | NATIVE-25 | Phase 13 (plans 21, 22) | Pending |
 | NATIVE-26 | Phase 13 (plans 05, 09, 21) | Pending |
 | NATIVE-27 | Phase 13 (plans 05, 29) | Pending |
