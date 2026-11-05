@@ -1390,3 +1390,114 @@ describe('12.1-17 Task 2: reactivating a shown question whose opener is archived
     });
   });
 });
+
+describe('12.1-17 Task 3: ImpactDialog for a conditional question and for a removed condition (D-634, UI-D-649)', () => {
+  function impactDialog(props: {
+    kind: 'add' | 'make' | 'reactivate' | 'replace' | 'unconditional';
+    members: number;
+    note?: string;
+    conditionNote?: string;
+  }) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <ImpactDialog open onConfirm={vi.fn()} onClose={vi.fn()} {...props} />
+      </NextIntlClientProvider>,
+    );
+  }
+  const SENTENCE = 'Só conta quem vê esta pergunta: quem respondeu “Tem clínica?” com “Tenho”.';
+
+  it('the removal case has its own title, plural body and confirm label', () => {
+    impactDialog({ kind: 'unconditional', members: 6 });
+    const dlg = screen.getByRole('dialog', { name: 'Remover a condição?' });
+    expect(dlg.textContent).toContain(
+      '6 membros que hoje não veem esta pergunta vão precisar respondê-la antes de continuar usando a comunidade. Quem já respondeu mantém a resposta.',
+    );
+    expect(within(dlg).getByRole('button', { name: 'Remover e exigir' })).toBeTruthy();
+    expect(within(dlg).getByRole('button', { name: 'Voltar' })).toBeTruthy();
+  });
+
+  it('the removal case does not repeat the add body', () => {
+    impactDialog({ kind: 'unconditional', members: 6 });
+    expect(screen.getByRole('dialog').textContent).not.toContain(
+      'Quem já respondeu as outras perguntas',
+    );
+  });
+
+  for (const [kind, title] of [
+    ['add', 'Adicionar pergunta obrigatória?'],
+    ['make', 'Tornar a pergunta obrigatória?'],
+    ['reactivate', 'Reativar pergunta obrigatória?'],
+    ['replace', 'Substituir a pergunta?'],
+  ] as const) {
+    it(`${kind}: the condition sentence closes the body`, () => {
+      impactDialog({ kind, members: 2, conditionNote: SENTENCE });
+      const body = screen.getByRole('dialog', { name: title }).querySelector('p');
+      expect(body?.textContent?.endsWith(SENTENCE)).toBe(true);
+    });
+  }
+
+  it('without a condition note the Phase 12 bodies are untouched', () => {
+    impactDialog({ kind: 'reactivate', members: 2 });
+    expect(screen.getByRole('dialog').textContent).toContain(
+      'As respostas guardadas continuam valendo.',
+    );
+    expect(screen.getByRole('dialog').textContent).not.toContain('Só conta quem vê');
+  });
+
+  it('the replace note comes before the condition note', () => {
+    impactDialog({ kind: 'replace', members: 2, note: 'Nota de troca.', conditionNote: SENTENCE });
+    const text = screen.getByRole('dialog').textContent ?? '';
+    expect(text.indexOf('Nota de troca.')).toBeLessThan(text.indexOf('Só conta quem vê'));
+  });
+});
+
+describe('12.1-17 Task 3: reactivating a required conditional question (UI-D-649)', () => {
+  const opener = adminQuestion('single_choice', {
+    title: 'Você tem clínica?',
+    options: [
+      { id: uuid(9861), label: 'Tenho uma clínica', answerCount: 0 },
+      { id: uuid(9862), label: 'Estou aprendendo', answerCount: 0 },
+    ],
+  });
+  const archived = archivedQuestion('short_text', {
+    title: 'Nome da clínica',
+    required: true,
+    condition: { questionId: opener.id, values: [uuid(9861)] },
+  });
+
+  function list(question = archived) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <ArchivedList
+          questions={[question]}
+          activeCount={3}
+          limit={30}
+          activeQuestions={[opener]}
+          timeZone="America/Sao_Paulo"
+        />
+      </NextIntlClientProvider>,
+    );
+  }
+
+  it('ends the impact dialog with who counts', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 3 });
+    list();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reativar pergunta: Nome da clínica' }));
+    });
+    const dlg = await screen.findByRole('dialog', { name: 'Reativar pergunta obrigatória?' });
+    expect(dlg.textContent).toContain(
+      'Só conta quem vê esta pergunta: quem respondeu “Você tem clínica?” com “Tenho uma clínica”.',
+    );
+  });
+
+  it('leaves the dialog as it was for an unconditional question', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 3 });
+    list({ ...archived, condition: null });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reativar pergunta: Nome da clínica' }));
+    });
+    const dlg = await screen.findByRole('dialog', { name: 'Reativar pergunta obrigatória?' });
+    expect(dlg.textContent).not.toContain('Só conta quem vê');
+  });
+});

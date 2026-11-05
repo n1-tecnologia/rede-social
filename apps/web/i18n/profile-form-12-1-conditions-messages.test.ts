@@ -139,3 +139,50 @@ describe('profileForm.admin: the refusals and the used option (UI-D-651)', () =>
     );
   });
 });
+
+describe('profileForm.admin: a question with answers and the impact reading (D-625, D-634, UI-D-649)', () => {
+  it('the locked rows', () => {
+    expect(t('editor.condition.locked.none', { n: 1 })).toBe(
+      'Esta pergunta já tem 1 resposta, então a condição não pode ser criada nem mudada. Para mudar, crie uma nova pergunta e arquive esta.',
+    );
+    expect(t('editor.condition.locked.none', { n: 12 })).toBe(
+      'Esta pergunta já tem 12 respostas, então a condição não pode ser criada nem mudada. Para mudar, crie uma nova pergunta e arquive esta.',
+    );
+    expect(t('editor.locked.replace')).toBe('Criar nova pergunta e arquivar esta');
+    expect(t('editor.condition.locked.removable')).toBe(
+      'Como a pergunta já tem respostas, a condição só pode ser removida.',
+    );
+  });
+
+  it('the condition sentence, the removal and the undo', () => {
+    expect(t('editor.condition.summary', { opener: 'Tem clínica?', options: '“A” ou “B”' })).toBe(
+      'Só aparece se “Tem clínica?” for “A” ou “B”.',
+    );
+    expect(t('editor.condition.remove')).toBe('Remover condição');
+    expect(t('editor.condition.removePending')).toBe(
+      'A condição será removida quando você salvar.',
+    );
+    expect(t('editor.condition.undo')).toBe('Desfazer');
+  });
+
+  it('the "Remover a condição?" dialog', () => {
+    expect(t('impact.unconditionalTitle')).toBe('Remover a condição?');
+    expect(t('impact.unconditionalBody', { n: 1 })).toBe(
+      '1 membro que hoje não vê esta pergunta vai precisar respondê-la antes de continuar usando a comunidade. Quem já respondeu mantém a resposta.',
+    );
+    expect(t('impact.unconditionalBody', { n: 7 })).toBe(
+      '7 membros que hoje não veem esta pergunta vão precisar respondê-la antes de continuar usando a comunidade. Quem já respondeu mantém a resposta.',
+    );
+    expect(t('impact.unconditionalConfirm')).toBe('Remover e exigir');
+    expect(t('impact.cancel')).toBe('Voltar');
+    expect(t('impact.previewFailed')).toBe(
+      'Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.',
+    );
+  });
+
+  it('the sentence every impact dialog of a required conditional question gains', () => {
+    expect(t('impact.conditionalNote', { opener: 'Tem clínica?', options: '“A” ou “B”' })).toBe(
+      'Só conta quem vê esta pergunta: quem respondeu “Tem clínica?” com “A” ou “B”.',
+    );
+  });
+});

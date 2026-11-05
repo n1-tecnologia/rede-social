@@ -99,7 +99,7 @@ export function blankDraft(stepId: string | null = null): QuestionDraft {
 }
 
 /** A condition copied, so a draft never shares its array with the stored question. */
-function copyCondition(condition: DraftCondition | null): DraftCondition | null {
+export function copyCondition(condition: DraftCondition | null): DraftCondition | null {
   return condition === null
     ? null
     : { questionId: condition.questionId, values: [...condition.values] };
@@ -501,27 +501,56 @@ export function serverLimitsError(type: ProfileFormType | null, code: string): F
 /** What a reopening write is called by the impact read and the dialog, and which question it concerns. */
 export interface Reopening {
   /** The `change` of `GET /impact`. */
-  change: 'create_required' | 'make_required' | 'replace';
+  change: 'create_required' | 'make_required' | 'replace' | 'remove_condition';
   /** The dialog's case (its title and confirm label). */
-  kind: 'add' | 'make' | 'replace';
+  kind: 'add' | 'make' | 'replace' | 'unconditional';
   questionId?: string;
+  /**
+   * The condition the NEW question will have (a create or a replace, 12.1-17, D-634): the impact then counts only
+   * the members who would see it. Present only when the draft's condition is complete.
+   */
+  condition?: DraftCondition;
+}
+
+/** The draft's condition when it names an opener and at least one answer; a half-made one counts as none. */
+function completeCondition(
+  condition: DraftCondition | null | undefined,
+): DraftCondition | undefined {
+  return condition != null && condition.questionId !== '' && condition.values.length > 0
+    ? (copyCondition(condition) ?? undefined)
+    : undefined;
 }
 
 /**
- * Whether saving this draft REOPENS the form (D-585, UI-D-576): a new required question, an optional
- * question turned required, or a replacement that is required. Making a required question optional,
- * editing anything else, or replacing with an optional one frees members and needs no count.
+ * Whether saving this draft REOPENS the form (D-585, D-634, UI-D-576, UI-D-649): a new required question, an
+ * optional question turned required, a replacement that is required, or the removal of the condition of a
+ * question that stays required (members who do not see it today will owe an answer). Making a required
+ * question optional, editing anything else, or replacing with an optional one frees members and needs no count.
+ * A create and a replace carry the condition the new question will have, so the count is of who would see it.
  */
 export function reopeningOf(
   mode: EditorMode,
-  draft: Pick<QuestionDraft, 'required'>,
-  question: { id: string; required: boolean } | null,
+  draft: Pick<QuestionDraft, 'required'> & { condition?: DraftCondition | null },
+  question: { id: string; required: boolean; condition?: DraftCondition | null } | null,
 ): Reopening | null {
   if (!draft.required) return null;
-  if (mode === 'create') return { change: 'create_required', kind: 'add' };
+  const condition = completeCondition(draft.condition);
+  if (mode === 'create') {
+    return { change: 'create_required', kind: 'add', ...(condition ? { condition } : {}) };
+  }
   if (!question) return null;
-  if (mode === 'replace') return { change: 'replace', kind: 'replace', questionId: question.id };
+  if (mode === 'replace') {
+    return {
+      change: 'replace',
+      kind: 'replace',
+      questionId: question.id,
+      ...(condition ? { condition } : {}),
+    };
+  }
   if (!question.required) return { change: 'make_required', kind: 'make', questionId: question.id };
+  if (question.condition && draft.condition == null) {
+    return { change: 'remove_condition', kind: 'unconditional', questionId: question.id };
+  }
   return null;
 }
 

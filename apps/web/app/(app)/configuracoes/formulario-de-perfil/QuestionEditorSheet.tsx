@@ -20,6 +20,7 @@ import { Archive, CircleAlert, Info, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type FormEvent, useCallback, useRef, useState } from 'react';
+import { describeCondition } from '@/lib/profile-form/describe-condition';
 import { isChoiceType } from '@/lib/profile-form/question-types';
 import { ArchiveDialog, type ArchiveKind } from './ArchiveDialog';
 import {
@@ -33,13 +34,20 @@ import {
   type SaveQuestionResult,
   updateQuestionAction,
 } from './actions';
-import { CONDITION_OPENER_ID, ConditionEditor, SheetSelect } from './ConditionEditor';
+import {
+  CONDITION_OPENER_ID,
+  ConditionEditor,
+  LockedCondition,
+  SheetSelect,
+} from './ConditionEditor';
 import { DEPENDENTS_SHOWN, DependentsAlert } from './DependentsAlert';
 import {
   blankDraft,
   canSave,
   changeType,
   checkStepChange,
+  conditionOptionsText,
+  copyCondition,
   type DependentsRefusal,
   type DraftErrors,
   dependentsOf,
@@ -50,6 +58,7 @@ import {
   hasErrors,
   isDirty,
   lockFlags,
+  openerIndex,
   optionUsage,
   type QuestionDraft,
   type Reopening,
@@ -136,6 +145,7 @@ export function QuestionEditorSheet({
 }: QuestionEditorSheetProps) {
   const t = useTranslations('profileForm.admin');
   const te = useTranslations('profileForm.admin.editor');
+  const tc = useTranslations('profileForm.member.controls');
   const tAdmin = useTranslations('admin');
   const router = useRouter();
   const toast = useToast();
@@ -179,6 +189,23 @@ export function QuestionEditorSheet({
   // An opener has no condition of its own (D-622): it shows what it opens, not the condition editor.
   const isOpener = stored !== null && stored.opensCount > 0;
   const usedCounts = stored ? optionUsage(activeQuestions, stored.id) : undefined;
+  // A question with answers cannot gain or change a condition (D-625), only lose it: the switch becomes a lock row.
+  const conditionLocked = stored !== null && stored.answerCount > 0;
+  const conditionWords = { yes: tc('yes'), no: tc('no') };
+
+  /** The "Só aparece se …" sentence of a condition against the questions the builder holds, or `null`. */
+  function conditionSentence(
+    condition: { questionId: string; values: string[] },
+    sentenceKey: 'condition.summary' | 'impact.conditionalNote',
+  ): string | null {
+    const described = describeCondition(condition, openerIndex(activeQuestions));
+    if (described === null) return null;
+    const options = conditionOptionsText(described, conditionWords);
+    if (options === '') return null;
+    return sentenceKey === 'condition.summary'
+      ? te('condition.summary', { opener: described.openerTitle, options })
+      : t('impact.conditionalNote', { opener: described.openerTitle, options });
+  }
   const openers = eligibleOpeners({
     questions: activeQuestions,
     steps,
@@ -414,6 +441,12 @@ export function QuestionEditorSheet({
       read = await readImpactAction({
         change: reopening.change,
         ...(reopening.questionId ? { questionId: reopening.questionId } : {}),
+        ...(reopening.condition
+          ? {
+              conditionQuestionId: reopening.condition.questionId,
+              conditionValues: reopening.condition.values,
+            }
+          : {}),
       });
     } catch {
       // Falls through to "could not calculate": nothing is written.
@@ -696,7 +729,20 @@ export function QuestionEditorSheet({
                         ))}
                       </SheetSelect>
                     ) : null}
-                    {showConditions && !isOpener ? (
+                    {conditionLocked && showConditions && !isOpener && stored ? (
+                      <LockedCondition
+                        answerCount={stored.answerCount}
+                        summary={
+                          stored.condition === null
+                            ? null
+                            : (conditionSentence(stored.condition, 'condition.summary') ?? '')
+                        }
+                        removing={stored.condition !== null && draft.condition === null}
+                        onRemove={() => patch({ condition: null })}
+                        onUndo={() => patch({ condition: copyCondition(stored.condition) })}
+                        onReplace={onReplace ? startReplace : undefined}
+                      />
+                    ) : showConditions && !isOpener ? (
                       <ConditionEditor
                         condition={draft.condition}
                         openers={openers}
@@ -816,6 +862,11 @@ export function QuestionEditorSheet({
         note={
           impact?.kind === 'replace' && question
             ? t('impact.replaceBody', { title: question.title })
+            : undefined
+        }
+        conditionNote={
+          impact && impact.kind !== 'unconditional' && draft.condition !== null
+            ? (conditionSentence(draft.condition, 'impact.conditionalNote') ?? undefined)
             : undefined
         }
         onConfirm={() => write(true)}

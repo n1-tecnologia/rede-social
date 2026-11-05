@@ -1146,3 +1146,82 @@ describe('12.1-17: conditionOptionsText (UI-D-650)', () => {
     expect(conditionOptionsText({ yesNo: false, openerTitle: 'X', labels: [] }, words)).toBe('');
   });
 });
+
+describe('12.1-17: reopeningOf with conditions (D-634, UI-D-649)', () => {
+  const cond = { questionId: uuid(1), values: [uuid(2), uuid(3)] };
+
+  it('a new required question carries its complete condition, so the count is of who sees it', () => {
+    expect(reopeningOf('create', { required: true, condition: cond }, null)).toEqual({
+      change: 'create_required',
+      kind: 'add',
+      condition: cond,
+    });
+  });
+
+  it('carries no condition while it is half made, and none when the question is unconditional', () => {
+    expect(
+      reopeningOf('create', { required: true, condition: { questionId: '', values: [] } }, null),
+    ).toEqual({ change: 'create_required', kind: 'add' });
+    expect(
+      reopeningOf(
+        'create',
+        { required: true, condition: { questionId: uuid(1), values: [] } },
+        null,
+      ),
+    ).toEqual({ change: 'create_required', kind: 'add' });
+    expect(reopeningOf('create', { required: true, condition: null }, null)).toEqual({
+      change: 'create_required',
+      kind: 'add',
+    });
+  });
+
+  it('a required replacement carries the condition it will have', () => {
+    expect(
+      reopeningOf('replace', { required: true, condition: cond }, { id: uuid(9), required: false }),
+    ).toEqual({ change: 'replace', kind: 'replace', questionId: uuid(9), condition: cond });
+  });
+
+  it('removing the condition of a question that stays required is the unconditional case', () => {
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, condition: null },
+        { id: uuid(9), required: true, condition: cond },
+      ),
+    ).toEqual({ change: 'remove_condition', kind: 'unconditional', questionId: uuid(9) });
+  });
+
+  it('needs no count for an optional question, an unchanged condition or no stored condition', () => {
+    expect(
+      reopeningOf(
+        'edit',
+        { required: false, condition: null },
+        { id: uuid(9), required: false, condition: cond },
+      ),
+    ).toBeNull();
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, condition: cond },
+        { id: uuid(9), required: true, condition: cond },
+      ),
+    ).toBeNull();
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, condition: null },
+        { id: uuid(9), required: true, condition: null },
+      ),
+    ).toBeNull();
+  });
+
+  it('keeps the Phase 12 cases: making an optional question required is still "make"', () => {
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, condition: cond },
+        { id: uuid(9), required: false, condition: cond },
+      ),
+    ).toEqual({ change: 'make_required', kind: 'make', questionId: uuid(9) });
+  });
+});

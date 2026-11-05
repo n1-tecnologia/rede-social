@@ -6,6 +6,7 @@ import { Archive, ArchiveRestore, Info } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
+import { describeCondition } from '@/lib/profile-form/describe-condition';
 import { typeNameKey } from '@/lib/profile-form/type-key';
 import {
   type ImpactActionResult,
@@ -13,6 +14,7 @@ import {
   reactivateQuestionAction,
   readImpactAction,
 } from './actions';
+import { conditionOptionsText, openerIndex } from './editor-state';
 import { ImpactDialog } from './ImpactDialog';
 
 export interface ArchivedListProps {
@@ -103,6 +105,22 @@ export function ArchivedList({
       activeQuestions?.find((candidate) => candidate.id === id)?.title ??
       null
     );
+  }
+
+  /**
+   * "Só conta quem vê esta pergunta: quem respondeu “{opener}” com {options}." for a reactivated CONDITIONAL
+   * question (12.1-17, UI-D-649): its opener is active here (an archived one would have refused already).
+   */
+  function conditionNote(question: ArchivedQuestion): string | undefined {
+    if (!question.condition || !activeQuestions) return undefined;
+    const described = describeCondition(question.condition, openerIndex(activeQuestions));
+    if (described === null) return undefined;
+    const options = conditionOptionsText(described, {
+      yes: t('member.controls.yes'),
+      no: t('member.controls.no'),
+    });
+    if (options === '') return undefined;
+    return t('admin.impact.conditionalNote', { opener: described.openerTitle, options });
   }
 
   async function reactivate(question: ArchivedQuestion): Promise<void> {
@@ -271,6 +289,7 @@ export function ArchivedList({
         open={open && pending?.kind === 'impact'}
         kind="reactivate"
         members={pending?.kind === 'impact' ? pending.members : 0}
+        conditionNote={pending?.kind === 'impact' ? conditionNote(pending.question) : undefined}
         onConfirm={async () => {
           if (pending) await reactivate(pending.question);
         }}

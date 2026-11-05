@@ -790,3 +790,159 @@ describe('logging (T-12.1-12)', () => {
     }
   });
 });
+
+// ── 12.1-17: the condition on the impact read, the dependents list and the reactivation race ──────
+
+describe('12.1-17: readImpactAction carries the condition of a new question (D-634)', () => {
+  it('sends remove_condition for a stored question', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 4 }));
+    expect(await readImpactAction({ change: 'remove_condition', questionId: IDS[0] })).toEqual({
+      ok: true,
+      members: 4,
+    });
+    const [path] = mocks.apiFetch.mock.calls[0] as [string];
+    const params = new URL(path, 'http://x').searchParams;
+    expect(params.get('change')).toBe('remove_condition');
+    expect(params.get('questionId')).toBe(IDS[0]);
+    expect(params.has('conditionQuestionId')).toBe(false);
+  });
+
+  it('sends the opener and the tokens, comma-joined, for a create or a replace', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 2 }));
+    await readImpactAction({
+      change: 'create_required',
+      conditionQuestionId: IDS[1],
+      conditionValues: [uuid(9001), uuid(9002)],
+    });
+    const [path] = mocks.apiFetch.mock.calls[0] as [string];
+    const params = new URL(path, 'http://x').searchParams;
+    expect(params.get('conditionQuestionId')).toBe(IDS[1]);
+    expect(params.get('conditionValues')).toBe(`${uuid(9001)},${uuid(9002)}`);
+  });
+
+  it('carries the literal true or false of a yes/no opener', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 0 }));
+    await readImpactAction({
+      change: 'replace',
+      questionId: IDS[0],
+      conditionQuestionId: IDS[1],
+      conditionValues: ['false'],
+    });
+    const [path] = mocks.apiFetch.mock.calls[0] as [string];
+    expect(new URL(path, 'http://x').searchParams.get('conditionValues')).toBe('false');
+  });
+
+  it('refuses a malformed opener id before any request', async () => {
+    expect(
+      await readImpactAction({
+        change: 'create_required',
+        conditionQuestionId: 'nope',
+        conditionValues: ['true'],
+      }),
+    ).toEqual({ ok: false, code: 'failed' });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('12.1-17: has_dependents and condition_invalid (D-632)', () => {
+  const dependents = [
+    { id: uuid(91), title: 'Quantas salas?' },
+    { id: uuid(92), title: 'Nome da clínica' },
+  ];
+
+  it('an update answered with has_dependents keeps the server list on the conflict', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'has_dependents', dependents }),
+    );
+    expect(await updateQuestionAction(IDS[0] as string, { revision: 1, title: 'X' })).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'has_dependents',
+      dependents,
+    });
+  });
+
+  it('drops a dependents list that breaks the contract instead of trusting it', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', {
+        profileForm: 'has_dependents',
+        dependents: [{ title: 'sem id' }],
+      }),
+    );
+    expect(await updateQuestionAction(IDS[0] as string, { revision: 1, title: 'X' })).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'has_dependents',
+    });
+  });
+
+  it('archive and delete answer hasDependents with the list', async () => {
+    mocks.apiFetch.mockImplementation(() =>
+      Promise.resolve(refusal(409, 'CONFLICT', { profileForm: 'has_dependents', dependents })),
+    );
+    expect(await archiveQuestionAction(IDS[0] as string)).toEqual({
+      ok: false,
+      code: 'hasDependents',
+      dependents,
+    });
+    expect(await deleteQuestionAction(IDS[0] as string)).toEqual({
+      ok: false,
+      code: 'hasDependents',
+      dependents,
+    });
+  });
+
+  it('a condition_invalid conflict on a write is carried as its issue', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'condition_invalid' }),
+    );
+    expect(await updateQuestionAction(IDS[0] as string, { revision: 1, title: 'X' })).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'condition_invalid',
+    });
+  });
+
+  it('a reactivation refused with condition_invalid names the opener', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'condition_invalid', openerId: IDS[1] }),
+    );
+    expect(await reactivateQuestionAction(IDS[0] as string)).toEqual({
+      ok: false,
+      code: 'conditionInvalid',
+      openerId: IDS[1],
+    });
+  });
+
+  it('a reactivation refused with condition_invalid and no opener id still says so', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'condition_invalid' }),
+    );
+    expect(await reactivateQuestionAction(IDS[0] as string)).toEqual({
+      ok: false,
+      code: 'conditionInvalid',
+      openerId: null,
+    });
+  });
+
+  it('a create carries the condition and the step to the API untouched', async () => {
+    mocks.apiFetch.mockResolvedValue(json(201, adminQuestion('short_text')));
+    await createQuestionAction({
+      type: 'short_text',
+      title: 'Nome da clínica',
+      stepId: IDS[2],
+      condition: { questionId: IDS[1], values: [uuid(9001)] },
+    });
+    const [, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    const sent = JSON.parse(String(init.body));
+    expect(sent.stepId).toBe(IDS[2]);
+    expect(sent.condition).toEqual({ questionId: IDS[1], values: [uuid(9001)] });
+  });
+
+  it('an update removes the condition with an explicit null', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, adminQuestion('short_text')));
+    await updateQuestionAction(IDS[0] as string, { revision: 2, condition: null });
+    const [, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ revision: 2, condition: null });
+  });
+});

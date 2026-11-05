@@ -1,8 +1,8 @@
 'use client';
 
 import type { AdminQuestion, AdminStep } from '@rede-social/contracts/profile-form';
-import { SegmentedControl, Switch } from '@rede-social/ui';
-import { ChevronDown, Info } from 'lucide-react';
+import { Button, SegmentedControl, Switch } from '@rede-social/ui';
+import { ChevronDown, Info, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useEffect, useRef } from 'react';
 import type { DraftCondition } from './editor-state';
@@ -329,6 +329,85 @@ export function ConditionEditor({
           ) : null}
         </>
       ) : null}
+    </div>
+  );
+}
+
+export interface LockedConditionProps {
+  /** How many answers the question has: the plural of the lock sentence. */
+  answerCount: number;
+  /**
+   * The stored condition as the "Só aparece se …" sentence, `null` when the question has none, or `''` when the
+   * sentence cannot be built (the opener is not in the list the page holds): the lock row is then left out.
+   */
+  summary: string | null;
+  /** The removal is marked in the draft and not yet saved. */
+  removing: boolean;
+  onRemove: () => void;
+  onUndo: () => void;
+  /** "Criar nova pergunta e arquivar esta": the shipped replace flow. Without it the way out is not offered. */
+  onReplace?: () => void;
+}
+
+/**
+ * The condition block of a question that already has answers (12.1-17, D-625, UI-D-649): the condition cannot be
+ * created or changed, because that would change who owes an answer retroactively; it can only be REMOVED, which
+ * widens who sees the question and deletes nothing. With no condition the switch is replaced by a read-only row
+ * (`Lock` 16) and the one-tap way out, "Criar nova pergunta e arquivar esta". With a condition the row shows the
+ * sentence and the ghost "Remover condição", which only MARKS the draft ("A condição será removida quando você
+ * salvar." with "Desfazer"); nothing is written until "Salvar pergunta". The server repeats the lock (409).
+ */
+export function LockedCondition({
+  answerCount,
+  summary,
+  removing,
+  onRemove,
+  onUndo,
+  onReplace,
+}: LockedConditionProps) {
+  const te = useTranslations('profileForm.admin.editor');
+  const lockRow = (text: string) => (
+    <p className="flex items-start gap-2 break-words text-xs font-normal text-text-secondary">
+      <Lock aria-hidden size={16} className="mt-px shrink-0 text-text-tertiary" />
+      <span className="min-w-0 flex-1">{text}</span>
+    </p>
+  );
+
+  if (summary === null) {
+    return (
+      <div className="flex flex-col gap-3" data-condition-locked="none">
+        {lockRow(te('condition.locked.none', { n: answerCount }))}
+        {onReplace ? (
+          <Button variant="outline" fullWidth onClick={onReplace}>
+            {te('locked.replace')}
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3" data-condition-locked="removable">
+      {summary !== '' ? lockRow(summary) : null}
+      {removing ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-normal text-text-secondary">
+          <span data-condition-removing>{te('condition.removePending')}</span>
+          <Button variant="ghost" size="sm" hitArea onClick={onUndo}>
+            {te('condition.undo')}
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p className="text-xs font-normal text-text-tertiary">
+            {te('condition.locked.removable')}
+          </p>
+          <div>
+            <Button variant="ghost" size="sm" hitArea onClick={onRemove}>
+              {te('condition.remove')}
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

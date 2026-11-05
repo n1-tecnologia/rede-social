@@ -141,7 +141,11 @@
         "previewFailed": "Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.",
         "added": "Pergunta adicionada. {n, plural, =0 {} one {1 membro vai precisar responder.} other {# membros vão precisar responder.}}",
         "pending": "{n, plural, =0 {} one {1 membro vai precisar responder.} other {# membros vão precisar responder.}}",
-        "replaceBody": "“{title}” será arquivada, com as respostas guardadas, e a nova entra no formulário."
+        "replaceBody": "“{title}” será arquivada, com as respostas guardadas, e a nova entra no formulário.",
+        "unconditionalTitle": "Remover a condição?",
+        "unconditionalBody": "{n, plural, one {# membro que hoje não vê esta pergunta vai precisar respondê-la antes de continuar usando a comunidade.} other {# membros que hoje não veem esta pergunta vão precisar respondê-la antes de continuar usando a comunidade.}} Quem já respondeu mantém a resposta.",
+        "unconditionalConfirm": "Remover e exigir",
+        "conditionalNote": "Só conta quem vê esta pergunta: quem respondeu “{opener}” com {options}."
       },
       "archive": {
         "title": "Arquivar esta pergunta?",
@@ -284,7 +288,15 @@
             "opener": "Escolha a pergunta que decide.",
             "values": "Escolha pelo menos uma resposta que abre esta pergunta.",
             "stale": "Esta condição não vale mais. Escolha a pergunta e a resposta de novo."
-          }
+          },
+          "locked": {
+            "none": "Esta pergunta já tem {n, plural, one {# resposta} other {# respostas}}, então a condição não pode ser criada nem mudada. Para mudar, crie uma nova pergunta e arquive esta.",
+            "removable": "Como a pergunta já tem respostas, a condição só pode ser removida."
+          },
+          "summary": "Só aparece se “{opener}” for {options}.",
+          "remove": "Remover condição",
+          "removePending": "A condição será removida quando você salvar.",
+          "undo": "Desfazer"
         },
         "opens": {
           "title": "Esta pergunta abre {count, plural, one {# pergunta} other {# perguntas}}:",

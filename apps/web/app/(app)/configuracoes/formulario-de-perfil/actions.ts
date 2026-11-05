@@ -147,18 +147,36 @@ export async function reorderQuestionsAction(ids: string[]): Promise<ReorderResu
  * `GET /v1/profile_form/impact`: how many members a change would ask to answer (D-585, UI-D-576). It is a
  * READ: nothing is written. `{ ok: false }` is the caller's signal that the count is unknown, and **the
  * caller must then not write** (T-12-34): a reopening change is never applied on a guess of how many
- * members it holds out. 403 and 404 carry their own code so the screen can end in `notFound()`; anything
+ * members it holds out.
+ * 12.1-17 (D-634): `remove_condition` asks how many members do NOT see a required question today and lack an
+ * answer, before the condition is removed (UI-D-649). 403 and 404 carry their own code so the screen can end in `notFound()`; anything
  * else, including a body that breaks the contract, is `failed`.
  */
 export async function readImpactAction(input: {
   change: ProfileFormImpactChange;
   questionId?: string;
+  /**
+   * 12.1-17 (D-634): the condition the NEW question will have (a create or a replace), so only the members who would
+   * see it are counted. The tokens travel comma-joined, as the route reads them.
+   */
+  conditionQuestionId?: string;
+  conditionValues?: string[];
 }): Promise<ImpactActionResult> {
-  const query = impactQuerySchema.safeParse(input);
+  const { conditionValues, ...rest } = input;
+  const query = impactQuerySchema.safeParse({
+    ...rest,
+    ...(conditionValues && conditionValues.length > 0
+      ? { conditionValues: conditionValues.join(',') }
+      : {}),
+  });
   if (!query.success) return { ok: false, code: 'failed' };
 
   const params = new URLSearchParams({ change: query.data.change });
   if (query.data.questionId) params.set('questionId', query.data.questionId);
+  if (query.data.conditionQuestionId) {
+    params.set('conditionQuestionId', query.data.conditionQuestionId);
+  }
+  if (query.data.conditionValues) params.set('conditionValues', query.data.conditionValues);
 
   let refusal: string | null = null;
   let result: ImpactActionResult = { ok: false, code: 'failed' };

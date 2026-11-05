@@ -1811,3 +1811,380 @@ describe('12.1-17: "Onde e quando aparece" (D-620..D-623, UI-D-647, UI-D-648)', 
     expect(openerSelect().value).toBe(clinic.id);
   });
 });
+
+// ── 12.1-17 Task 3: an answered question's condition and the impact before a removal (D-625, D-634) ──
+
+describe('12.1-17 Task 3: the condition of a question with answers (D-625, UI-D-649)', () => {
+  const ids = [uuid(9411), uuid(9412), uuid(9413)];
+  const clinic = adminQuestion('single_choice', {
+    title: 'Você tem clínica?',
+    options: [
+      { id: ids[0] as string, label: 'Tenho uma clínica', answerCount: 0 },
+      { id: ids[1] as string, label: 'Trabalho em uma clínica', answerCount: 0 },
+      { id: ids[2] as string, label: 'Estou aprendendo', answerCount: 0 },
+    ],
+  });
+  const team = adminQuestion('yes_no', { title: 'Você já tem equipe?' });
+  const conditional = (overrides: Partial<ReturnType<typeof adminQuestion>> = {}) =>
+    adminQuestion('short_text', {
+      title: 'Nome da clínica',
+      answerCount: 5,
+      condition: { questionId: clinic.id, values: [ids[0] as string, ids[1] as string] },
+      ...overrides,
+    });
+  const locked = () => document.querySelector('[data-condition-locked]') as HTMLElement | null;
+  const removeButton = () => screen.queryByRole('button', { name: 'Remover condição' });
+
+  function open(question: ReturnType<typeof adminQuestion>, onReplaceFn = onReplace) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionEditorSheet
+          open
+          mode="edit"
+          question={question}
+          questions={[clinic, team, question]}
+          steps={[]}
+          tenantName="Ana Mentoria"
+          limit={30}
+          onClose={onClose}
+          onReplace={onReplaceFn}
+        />
+      </NextIntlClientProvider>,
+    );
+  }
+
+  it('with answers and NO condition, the switch is a lock row with the plural and the way out', () => {
+    open(adminQuestion('short_text', { title: 'Cargo', answerCount: 5 }));
+    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
+    const row = locked() as HTMLElement;
+    expect(row.getAttribute('data-condition-locked')).toBe('none');
+    expect(row.querySelector('svg')).toBeTruthy();
+    expect(row.textContent).toContain(
+      'Esta pergunta já tem 5 respostas, então a condição não pode ser criada nem mudada. Para mudar, crie uma nova pergunta e arquive esta.',
+    );
+    fireEvent.click(
+      within(row).getByRole('button', { name: 'Criar nova pergunta e arquivar esta' }),
+    );
+    expect(onReplace).toHaveBeenCalledTimes(1);
+  });
+
+  it('says "1 resposta" in the singular', () => {
+    open(adminQuestion('short_text', { title: 'Cargo', answerCount: 1 }));
+    expect(locked()?.textContent).toContain('Esta pergunta já tem 1 resposta, então');
+  });
+
+  it('with answers and a condition, shows the lock, the sentence, the line and a ghost "Remover condição"', () => {
+    open(conditional());
+    const row = locked() as HTMLElement;
+    expect(row.getAttribute('data-condition-locked')).toBe('removable');
+    expect(row.textContent).toContain(
+      'Só aparece se “Você tem clínica?” for “Tenho uma clínica” ou “Trabalho em uma clínica”.',
+    );
+    expect(row.textContent).toContain(
+      'Como a pergunta já tem respostas, a condição só pode ser removida.',
+    );
+    expect(removeButton()).toBeTruthy();
+    // Nothing of the free editor: no select, no checkbox, no switch.
+    expect(screen.queryByLabelText('Pergunta que decide')).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('writes a yes/no condition in the plain words', () => {
+    open(
+      adminQuestion('short_text', {
+        title: 'Quantas pessoas?',
+        answerCount: 2,
+        condition: { questionId: team.id, values: ['true'] },
+      }),
+    );
+    expect(locked()?.textContent).toContain('Só aparece se “Você já tem equipe?” for Sim.');
+  });
+
+  it('"Remover condição" only MARKS the draft, with "Desfazer", and writes nothing', () => {
+    open(conditional());
+    fireEvent.click(removeButton() as HTMLElement);
+    expect(removeButton()).toBeNull();
+    expect(screen.getByText('A condição será removida quando você salvar.')).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.impact).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Desfazer' }));
+    expect(removeButton()).toBeTruthy();
+    expect(screen.queryByText('A condição será removida quando você salvar.')).toBeNull();
+  });
+
+  it('gives the pending row and the undo a 44px hit area', () => {
+    open(conditional());
+    fireEvent.click(removeButton() as HTMLElement);
+    const undo = screen.getByRole('button', { name: 'Desfazer' });
+    // The transparent 44px target of the small button (UI-D-443).
+    expect(undo.className).toContain('after:h-11');
+  });
+
+  it('counts the marked removal as an unsaved change, and undoing it as none', () => {
+    open(conditional());
+    fireEvent.click(removeButton() as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Desfazer' }));
+    // Back to the stored condition: closing asks nothing.
+    closeSheet();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('removing on an OPTIONAL question writes at once with condition null and reads no impact', async () => {
+    const question = conditional({ required: false });
+    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+    open(question);
+    fireEvent.click(removeButton() as HTMLElement);
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+      revision: question.revision,
+      condition: null,
+    });
+  });
+
+  describe('removing it from a REQUIRED question reads the impact BEFORE the write', () => {
+    async function removeAndSave(question: ReturnType<typeof adminQuestion>) {
+      open(question);
+      fireEvent.click(removeButton() as HTMLElement);
+      await act(async () => {
+        fireEvent.click(saveButton());
+      });
+    }
+
+    it('opens "Remover a condição?" with the plural body when members would newly owe an answer', async () => {
+      const question = conditional({ required: true });
+      mocks.impact.mockResolvedValue({ ok: true, members: 4 });
+      mocks.update.mockResolvedValue({ ok: true, question, pending: 4 });
+      await removeAndSave(question);
+      expect(mocks.impact).toHaveBeenCalledWith({
+        change: 'remove_condition',
+        questionId: question.id,
+      });
+      const confirm = await screen.findByRole('dialog', { name: 'Remover a condição?' });
+      expect(confirm.textContent).toContain(
+        '4 membros que hoje não veem esta pergunta vão precisar respondê-la antes de continuar usando a comunidade. Quem já respondeu mantém a resposta.',
+      );
+      // Nothing is written until the admin confirms.
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(within(confirm).getByRole('button', { name: 'Voltar' })).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(within(confirm).getByRole('button', { name: 'Remover e exigir' }));
+      });
+      expect(mocks.update).toHaveBeenCalledTimes(1);
+      expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+        revision: question.revision,
+        condition: null,
+      });
+      // The impact was read first, then the update.
+      expect(mocks.impact.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.update.mock.invocationCallOrder[0] as number,
+      );
+    });
+
+    it('uses the singular body for one member', async () => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 1 });
+      await removeAndSave(conditional({ required: true }));
+      const confirm = await screen.findByRole('dialog', { name: 'Remover a condição?' });
+      expect(confirm.textContent).toContain(
+        '1 membro que hoje não vê esta pergunta vai precisar respondê-la antes de continuar usando a comunidade.',
+      );
+    });
+
+    it('writes nothing when the admin goes back', async () => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 3 });
+      await removeAndSave(conditional({ required: true }));
+      const confirm = await screen.findByRole('dialog', { name: 'Remover a condição?' });
+      await act(async () => {
+        fireEvent.click(within(confirm).getByRole('button', { name: 'Voltar' }));
+      });
+      expect(mocks.update).not.toHaveBeenCalled();
+    });
+
+    it('writes directly, with no dialog, when no member is affected', async () => {
+      const question = conditional({ required: true });
+      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+      mocks.update.mockResolvedValue({ ok: true, question, pending: 0 });
+      await removeAndSave(question);
+      expect(screen.queryByRole('dialog', { name: 'Remover a condição?' })).toBeNull();
+      expect(mocks.update).toHaveBeenCalledTimes(1);
+      expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+        revision: question.revision,
+        condition: null,
+      });
+    });
+
+    it('saves NOTHING when the impact cannot be read, and says so', async () => {
+      mocks.impact.mockResolvedValue({ ok: false, code: 'failed' });
+      await removeAndSave(conditional({ required: true }));
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message:
+          'Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.',
+      });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('does the same when a free question (no answers) loses its condition with the switch', async () => {
+      const question = conditional({ required: true, answerCount: 0 });
+      mocks.impact.mockResolvedValue({ ok: true, members: 2 });
+      open(question);
+      fireEvent.click(screen.getByRole('switch', { name: 'Mostrar só em alguns casos' }));
+      await act(async () => {
+        fireEvent.click(saveButton());
+      });
+      expect(mocks.impact).toHaveBeenCalledWith({
+        change: 'remove_condition',
+        questionId: question.id,
+      });
+      expect(await screen.findByRole('dialog', { name: 'Remover a condição?' })).toBeTruthy();
+    });
+  });
+
+  it('a question with answers is not offered a new condition even from a replace', () => {
+    // The replacement is a NEW question: the full editor, with the condition copied.
+    render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <QuestionEditorSheet
+          open
+          mode="replace"
+          question={conditional()}
+          questions={[clinic, team, conditional()]}
+          steps={[]}
+          tenantName="Ana Mentoria"
+          limit={30}
+          onClose={onClose}
+          onReplace={onReplace}
+        />
+      </NextIntlClientProvider>,
+    );
+    pick('Texto curto');
+    expect(locked()).toBeNull();
+    expect(screen.getByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeTruthy();
+  });
+});
+
+describe('12.1-17 Task 3: every impact dialog of a required conditional question (D-634, UI-D-649)', () => {
+  const ids = [uuid(9421), uuid(9422)];
+  const clinic = adminQuestion('single_choice', {
+    title: 'Você tem clínica?',
+    options: [
+      { id: ids[0] as string, label: 'Tenho uma clínica', answerCount: 0 },
+      { id: ids[1] as string, label: 'Trabalho em uma clínica', answerCount: 0 },
+    ],
+  });
+  const team = adminQuestion('yes_no', { title: 'Você já tem equipe?' });
+  const SENTENCE =
+    'Só conta quem vê esta pergunta: quem respondeu “Você tem clínica?” com “Tenho uma clínica” ou “Trabalho em uma clínica”.';
+
+  async function createConditionalRequired() {
+    mocks.impact.mockResolvedValue({ ok: true, members: 5 });
+    mount({ questions: [clinic, team], steps: [] });
+    pick('Texto curto');
+    typeTitle('Nome da clínica');
+    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Mostrar só em alguns casos' }));
+    fireEvent.change(screen.getByLabelText('Pergunta que decide'), {
+      target: { value: clinic.id },
+    });
+    for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box);
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+  }
+
+  it('ADD: the impact request carries the opener and the tokens, and the dialog ends with the sentence', async () => {
+    await createConditionalRequired();
+    expect(mocks.impact).toHaveBeenCalledWith({
+      change: 'create_required',
+      conditionQuestionId: clinic.id,
+      conditionValues: [ids[0], ids[1]],
+    });
+    const confirm = await screen.findByRole('dialog', { name: 'Adicionar pergunta obrigatória?' });
+    expect(confirm.textContent).toContain(
+      '5 membros vão precisar responder antes de continuar usando a comunidade. Quem já respondeu as outras perguntas responde só esta. ' +
+        SENTENCE,
+    );
+  });
+
+  it('ADD with a yes/no opener names the plain word, unquoted', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 2 });
+    mount({ questions: [clinic, team], steps: [] });
+    pick('Texto curto');
+    typeTitle('Quantas pessoas?');
+    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Mostrar só em alguns casos' }));
+    fireEvent.change(screen.getByLabelText('Pergunta que decide'), { target: { value: team.id } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sim' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).toHaveBeenCalledWith({
+      change: 'create_required',
+      conditionQuestionId: team.id,
+      conditionValues: ['true'],
+    });
+    const confirm = await screen.findByRole('dialog', { name: 'Adicionar pergunta obrigatória?' });
+    expect(confirm.textContent).toContain(
+      'Só conta quem vê esta pergunta: quem respondeu “Você já tem equipe?” com Sim.',
+    );
+  });
+
+  it('adds no sentence for a required question with no condition', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 5 });
+    mount({ questions: [clinic, team], steps: [] });
+    pick('Texto curto');
+    typeTitle('Cargo');
+    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).toHaveBeenCalledWith({ change: 'create_required' });
+    const confirm = await screen.findByRole('dialog', { name: 'Adicionar pergunta obrigatória?' });
+    expect(confirm.textContent).not.toContain('Só conta quem vê');
+  });
+
+  it('MAKE REQUIRED on a conditional question ends with the sentence', async () => {
+    const shown = adminQuestion('short_text', {
+      title: 'Nome da clínica',
+      condition: { questionId: clinic.id, values: [ids[0] as string, ids[1] as string] },
+    });
+    mocks.impact.mockResolvedValue({ ok: true, members: 3 });
+    mount({ mode: 'edit', question: shown, questions: [clinic, shown], steps: [] });
+    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).toHaveBeenCalledWith({ change: 'make_required', questionId: shown.id });
+    const confirm = await screen.findByRole('dialog', { name: 'Tornar a pergunta obrigatória?' });
+    expect(confirm.textContent).toContain(SENTENCE);
+  });
+
+  it('REPLACE: the request carries the copied condition, and the dialog has both notes', async () => {
+    const old = adminQuestion('short_text', {
+      title: 'Nome da clínica',
+      required: true,
+      answerCount: 4,
+      condition: { questionId: clinic.id, values: [ids[0] as string, ids[1] as string] },
+    });
+    mocks.impact.mockResolvedValue({ ok: true, members: 2 });
+    mount({ mode: 'replace', question: old, questions: [clinic, old], steps: [] });
+    pick('Texto curto');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.impact).toHaveBeenCalledWith({
+      change: 'replace',
+      questionId: old.id,
+      conditionQuestionId: clinic.id,
+      conditionValues: [ids[0], ids[1]],
+    });
+    const confirm = await screen.findByRole('dialog', { name: 'Substituir a pergunta?' });
+    expect(confirm.textContent).toContain('“Nome da clínica” será arquivada');
+    expect(confirm.textContent).toContain(SENTENCE);
+  });
+});
