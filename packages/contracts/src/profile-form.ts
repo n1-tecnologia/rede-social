@@ -342,32 +342,173 @@ export type AnswerValue = z.infer<typeof answerValueSchema>;
 /** A condition on the shown question: one opener and the tokens that open it (D-621, D-622). */
 export type ProfileFormCondition = { questionId: string; values: string[] };
 
-// RED-phase stub: inert on purpose, replaced by the real rule in the GREEN commit.
-export function answerTokens(_stored: unknown): string[] {
-  return [];
+/**
+ * The tokens a STORED answer value contributes to a condition (D-621): an option id for a choice
+ * answer, the literal `'true'` or `'false'` for a yes/no answer. "Outro" (no option id), an empty
+ * multiple-choice set and every other shape contribute none. Pure.
+ *
+ * TypeScript twin of the SQL helper `app.profile_form_answer_tokens` plus array overlap (plans 06 and
+ * 07). Both are asserted against `PROFILE_FORM_VISIBILITY_CASES`; a new stored-answer shape adds a row
+ * to that table in the same change (FA-41).
+ */
+export function answerTokens(stored: unknown): string[] {
+  if (typeof stored === 'boolean') return [String(stored)];
+  if (!isRecord(stored)) return [];
+  if (Array.isArray(stored.optionIds)) {
+    return stored.optionIds.filter((id): id is string => typeof id === 'string');
+  }
+  return typeof stored.optionId === 'string' ? [stored.optionId] : [];
 }
 
+/**
+ * Whether a question is shown (D-621, D-631): no condition is always visible; with one, the opener must
+ * have an answer whose tokens share at least one value with the condition. An opener the caller knows
+ * nothing about (`undefined`) or one with no tokens hides the question. Pure; the server recomputes it
+ * on every save, the browser's copy is a convenience (T-12.1-16).
+ */
 export function isQuestionVisible(
-  _question: { condition: ProfileFormCondition | null },
-  _tokensOf: (questionId: string) => readonly string[] | undefined,
+  question: { condition: ProfileFormCondition | null },
+  tokensOf: (questionId: string) => readonly string[] | undefined,
 ): boolean {
-  return false;
+  if (question.condition === null) return true;
+  const opener = tokensOf(question.condition.questionId);
+  return opener !== undefined && question.condition.values.some((value) => opener.includes(value));
 }
 
+/**
+ * The ids of the steps that hold at least one visible question, in the given step order (D-628). A step
+ * whose questions are all hidden, and a step with no question, are absent.
+ */
 export function visibleSteps(
-  _steps: readonly { id: string }[],
-  _questions: readonly { id: string; stepId: string; condition: ProfileFormCondition | null }[],
-  _tokensOf: (questionId: string) => readonly string[] | undefined,
+  steps: readonly { id: string }[],
+  questions: readonly { id: string; stepId: string; condition: ProfileFormCondition | null }[],
+  tokensOf: (questionId: string) => readonly string[] | undefined,
 ): string[] {
-  return [];
+  const withVisible = new Set(
+    questions.filter((question) => isQuestionVisible(question, tokensOf)).map((q) => q.stepId),
+  );
+  return steps.filter((step) => withVisible.has(step.id)).map((step) => step.id);
 }
 
+const CASE_A = '11111111-1111-4111-8111-111111111111';
+const CASE_B = '22222222-2222-4222-8222-222222222222';
+const CASE_C = '33333333-3333-4333-8333-333333333333';
+
+/**
+ * The parity table (PFORM-41): `(stored opener value, condition values) -> visible`. The contracts unit
+ * test runs each row through `answerTokens` and `isQuestionVisible`; the pgTAP file of plan 07 and the
+ * integration test of plan 12 run the same rows through the SQL helper and the gate.
+ */
 export const PROFILE_FORM_VISIBILITY_CASES: readonly {
   name: string;
   stored: unknown;
   values: string[];
   expected: boolean;
-}[] = [];
+}[] = [
+  { name: 'yes_no true opens a true condition', stored: true, values: ['true'], expected: true },
+  {
+    name: 'yes_no false opens a false condition',
+    stored: false,
+    values: ['false'],
+    expected: true,
+  },
+  {
+    name: 'yes_no true does not open a false condition',
+    stored: true,
+    values: ['false'],
+    expected: false,
+  },
+  {
+    name: 'yes_no false does not open a true condition',
+    stored: false,
+    values: ['true'],
+    expected: false,
+  },
+  {
+    name: 'yes_no true opens a both-values condition',
+    stored: true,
+    values: ['true', 'false'],
+    expected: true,
+  },
+  {
+    name: 'yes_no as a string is not a boolean answer',
+    stored: 'true',
+    values: ['true'],
+    expected: false,
+  },
+  {
+    name: 'single choice: the chosen option opens',
+    stored: { optionId: CASE_A, otherText: null },
+    values: [CASE_A],
+    expected: true,
+  },
+  {
+    name: 'single choice: another option does not open',
+    stored: { optionId: CASE_A, otherText: null },
+    values: [CASE_B],
+    expected: false,
+  },
+  {
+    name: 'single choice: mixed list, the chosen option is among them',
+    stored: { optionId: CASE_A, otherText: null },
+    values: [CASE_B, CASE_A, CASE_C],
+    expected: true,
+  },
+  {
+    name: 'multiple choice any-of: one of two chosen options is enough',
+    stored: { optionIds: [CASE_A, CASE_B], otherText: null },
+    values: [CASE_B],
+    expected: true,
+  },
+  {
+    name: 'multiple choice: none of the chosen options is in the condition',
+    stored: { optionIds: [CASE_A, CASE_B], otherText: null },
+    values: [CASE_C],
+    expected: false,
+  },
+  {
+    name: 'multiple choice: one chosen option against a list that omits it',
+    stored: { optionIds: [CASE_A], otherText: null },
+    values: [CASE_B, CASE_C],
+    expected: false,
+  },
+  {
+    name: 'multiple choice with Outro text still opens by its option ids',
+    stored: { optionIds: [CASE_A], otherText: 'texto' },
+    values: [CASE_A],
+    expected: true,
+  },
+  {
+    name: 'Outro on a single choice (optionId null) opens nothing',
+    stored: { optionId: null, otherText: 'texto' },
+    values: [CASE_A],
+    expected: false,
+  },
+  {
+    name: 'Outro only on a multiple choice opens nothing',
+    stored: { optionIds: [], otherText: 'texto' },
+    values: [CASE_A],
+    expected: false,
+  },
+  {
+    name: 'multiple choice: an empty set opens nothing',
+    stored: { optionIds: [], otherText: null },
+    values: [CASE_A],
+    expected: false,
+  },
+  {
+    name: 'unanswered opener (no stored value) is hidden',
+    stored: null,
+    values: [CASE_A],
+    expected: false,
+  },
+  {
+    name: 'unknown option id stored for the opener opens nothing',
+    stored: { optionId: '99999999-9999-4999-8999-999999999999', otherText: null },
+    values: [CASE_A],
+    expected: false,
+  },
+];
 
 // ── 12-03 Task 2: the wire schemas of every route ─────────────────────────────────────────────
 

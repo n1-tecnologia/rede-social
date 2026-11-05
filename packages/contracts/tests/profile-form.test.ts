@@ -1175,7 +1175,14 @@ describe('12.1-01 - the visibility rule: stored answer to tokens to visible (D-6
   it('the parity table has the planned breadth', () => {
     expect(PROFILE_FORM_VISIBILITY_CASES.length).toBeGreaterThanOrEqual(14);
     const names = PROFILE_FORM_VISIBILITY_CASES.map((row) => row.name).join('\n');
-    for (const needle of ['yes_no true', 'yes_no false', 'Outro', 'unanswered', 'any-of', 'unknown']) {
+    for (const needle of [
+      'yes_no true',
+      'yes_no false',
+      'Outro',
+      'unanswered',
+      'any-of',
+      'unknown',
+    ]) {
       expect(names).toContain(needle);
     }
     expect(new Set(PROFILE_FORM_VISIBILITY_CASES.map((row) => row.name)).size).toBe(
