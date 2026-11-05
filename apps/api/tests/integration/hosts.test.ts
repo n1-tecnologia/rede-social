@@ -71,10 +71,12 @@ describe('GET /v1/public/tenants/by-host — verified-only, brand-carrying, prim
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const raw = (await res.json()) as Record<string, unknown>;
-    // T-02-04: exactly these keys — brand and host facts only.
+    // T-02-04: exactly these keys — brand and host facts only. 13-10 (D-603) added `app`, sent as an explicit
+    // null for a tenant with no native app, so the web can tell "no app" from an API that predates the key.
     expect(Object.keys(raw).sort()).toEqual(
-      ['branding', 'displayName', 'isPrimary', 'primaryHost', 'slug', 'status'].sort(),
+      ['app', 'branding', 'displayName', 'isPrimary', 'primaryHost', 'slug', 'status'].sort(),
     );
+    expect(raw.app).toBeNull();
     const body = hostTenantSchema.parse(raw);
     expect(body).toMatchObject({
       slug: 'rede-lab',

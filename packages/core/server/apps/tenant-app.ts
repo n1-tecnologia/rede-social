@@ -1,3 +1,4 @@
+import { createBoundedTtlCache } from '@rede-social/contracts';
 import {
   APP_CHECKLIST_MANUAL_KEYS,
   type AppChecklistManualKey,
@@ -18,7 +19,6 @@ import {
   privacyBodySchema,
   purchaseBodySchema,
 } from '@rede-social/contracts/native';
-import { createBoundedTtlCache } from '@rede-social/contracts';
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { tenantApps } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
@@ -313,9 +313,8 @@ export const PURCHASE_SWITCH_TTL_MS = 15_000;
  * cache. It lives here, beside the writer that must clear it, so the switch route and the reader share one
  * door. Nothing in this file fills it.
  */
-export const purchaseSwitchCache = createBoundedTtlCache<PurchaseSwitches>(
-  PURCHASE_SWITCH_CACHE_MAX,
-);
+export const purchaseSwitchCache =
+  createBoundedTtlCache<PurchaseSwitches>(PURCHASE_SWITCH_CACHE_MAX);
 
 /**
  * Drops the cached switches of one tenant, so the instance that wrote sees the change at once and the others

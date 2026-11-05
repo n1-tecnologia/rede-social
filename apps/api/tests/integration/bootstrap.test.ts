@@ -90,6 +90,17 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
     expect(body.membership.profile.displayName).toBe(row?.display_name);
   });
 
+  it('1c. 13-10 (D-617, NATIVE-24): purchaseVisible is true for a browser and false for an app with no usable platform', async () => {
+    // Independent of any stored switch (public-app.test.ts owns the tracer and flips the demo tenant's switches
+    // in parallel): no header is a browser, and a header outside ios / android is false whatever the switches say.
+    const browser = bootstrapSchema.parse(await (await bootstrap()).json());
+    expect(browser.purchaseVisible).toBe(true);
+    const unknown = bootstrapSchema.parse(
+      await (await bootstrap({ 'x-rede-app-platform': 'windows' })).json(),
+    );
+    expect(unknown.purchaseVisible).toBe(false);
+  });
+
   it('2. no token -> 401 UNAUTHENTICATED with the envelope', async () => {
     const res = await api.request('/v1/me/bootstrap');
     expect(res.status).toBe(401);

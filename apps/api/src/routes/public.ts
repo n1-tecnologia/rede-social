@@ -8,8 +8,10 @@ import {
   signupResponseSchema,
   toHostBranding,
 } from '@rede-social/contracts';
+import { appVersionAnswerSchema } from '@rede-social/contracts/native';
+import { readAppVersion } from '@rede-social/core/server/apps/index';
 import { ApiError } from '@rede-social/core/server/http/api-error';
-import { getPublicTenant } from '@rede-social/core/server/tenancy/public-tenant';
+import { getHostApp, getPublicTenant } from '@rede-social/core/server/tenancy/public-tenant';
 import { signupMember } from '@rede-social/core/server/tenancy/signup';
 import { resolveTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import { createOpenApiApp } from '../http/openapi';
@@ -68,6 +70,9 @@ export const publicRoutes = createOpenApiApp()
           ...(resolved.supabaseUrl && resolved.publishableKey
             ? { supabaseUrl: resolved.supabaseUrl, publishableKey: resolved.publishableKey }
             : {}),
+          // 13-10 (D-603, D-611, D-615): the native-app facts, `null` for a tenant with no app. ADDITIVE and
+          // non-secret (hostAppSchema is strict). The web must be deployed BEFORE the API starts sending it.
+          app: await getHostApp(resolved.tenantId, resolved.primaryHost),
         },
         200,
       );
@@ -99,6 +104,30 @@ export const publicRoutes = createOpenApiApp()
       const tenant = await getPublicTenant(c.req.valid('param').slug);
       c.header('Cache-Control', 'no-store');
       return c.json(tenant, 200);
+    },
+  )
+  .openapi(
+    createRoute({
+      method: 'get',
+      path: '/tenants/{slug}/app-version',
+      request: { params: slugParams },
+      responses: {
+        200: {
+          description:
+            'The minimum app version and the store link of each store (NATIVE-07). Unauthenticated and non-secret; a tenant with no app or no floor answers 0.0.0 and no link, so the shell never blocks. A suspended tenant still answers.',
+          content: { 'application/json': { schema: appVersionAnswerSchema } },
+        },
+        404: {
+          description: 'Unknown or malformed slug',
+          content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
+        },
+      },
+    }),
+    async (c) => {
+      const answer = await readAppVersion(c.req.valid('param').slug);
+      // Cacheable: the shell asks at every launch and the floor changes only at a release.
+      c.header('Cache-Control', 'public, max-age=60');
+      return c.json(answer, 200);
     },
   )
   .openapi(

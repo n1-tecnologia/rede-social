@@ -40,7 +40,10 @@ const rowOf = (patch: Partial<AppRow>, tenantId = TENANT): AppRow => ({
 /** A store that counts how many times the cache fell through to it. */
 function countingStore(initial: Record<string, AppRow> = {}) {
   const memory = memoryAppStore(
-    { [TENANT]: { displayName: 'A', primaryHost: HOST }, [OTHER]: { displayName: 'B', primaryHost: null } },
+    {
+      [TENANT]: { displayName: 'A', primaryHost: HOST },
+      [OTHER]: { displayName: 'B', primaryHost: null },
+    },
     initial,
   );
   const counter = { reads: 0 };
@@ -98,7 +101,10 @@ describe('readHostAppBlock (D-603, D-611, T-13-24)', () => {
       [TENANT]: rowOf({ teamId: 'ABCDE12345', androidSha256: [FINGERPRINT] }),
     });
 
-    const block = await readHostAppBlock(TENANT, { app: store, primaryHost: 'minha-loja.exemplo.com.br' });
+    const block = await readHostAppBlock(TENANT, {
+      app: store,
+      primaryHost: 'minha-loja.exemplo.com.br',
+    });
 
     expect(block?.ios).toEqual({ appId: 'ABCDE12345.br.com.exemplo.minha-loja' });
     expect(block?.android).toEqual({
@@ -177,7 +183,10 @@ describe('readPurchaseSwitches (D-615, D-617, PU-5)', () => {
 
   it('a tenant with no row reads both switches false, never null or an error', async () => {
     const { store } = countingStore();
-    expect(await readPurchaseSwitches(TENANT, { app: store })).toEqual({ ios: false, android: false });
+    expect(await readPurchaseSwitches(TENANT, { app: store })).toEqual({
+      ios: false,
+      android: false,
+    });
   });
 
   it('invalidatePurchaseSwitch makes the next read hit the store again', async () => {
@@ -198,7 +207,10 @@ describe('readPurchaseSwitches (D-615, D-617, PU-5)', () => {
 
     await setPurchaseSwitch(TENANT, 'ios', true, { app: store });
 
-    expect(await readPurchaseSwitches(TENANT, { app: store })).toEqual({ ios: true, android: false });
+    expect(await readPurchaseSwitches(TENANT, { app: store })).toEqual({
+      ios: true,
+      android: false,
+    });
   });
 
   it('the cache is bounded: 1,000 tenants never leave more than the bound', async () => {
@@ -280,7 +292,9 @@ describe('readAppVersion (NATIVE-07)', () => {
   });
 
   it('a tenant with no app row, or no floor, answers 0.0.0 and no store link, so the shell never blocks', async () => {
-    const answer = await readAppVersion('rede-demo', { versions: versionStore({ 'rede-demo': noRow }) });
+    const answer = await readAppVersion('rede-demo', {
+      versions: versionStore({ 'rede-demo': noRow }),
+    });
     expect(answer).toEqual({
       ios: { minVersion: '0.0.0', storeUrl: null },
       android: { minVersion: '0.0.0', storeUrl: null },

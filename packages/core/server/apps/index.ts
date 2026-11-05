@@ -14,6 +14,17 @@ export {
   summarizeHeld,
 } from './credentials';
 export {
+  type AppVersionRow,
+  type AppVersionStore,
+  appVersionAnswerOf,
+  hostAppBlockOf,
+  nativeRequestOf,
+  pgAppVersionStore,
+  readAppVersion,
+  readHostAppBlock,
+  readPurchaseSwitches,
+} from './read';
+export {
   type AppDeps,
   type AppPatch,
   type AppRow,
@@ -41,14 +52,3 @@ export {
   validateP8,
   validatePlayServiceAccount,
 } from './validate';
-export {
-  type AppVersionRow,
-  type AppVersionStore,
-  appVersionAnswerOf,
-  hostAppBlockOf,
-  nativeRequestOf,
-  pgAppVersionStore,
-  readAppVersion,
-  readHostAppBlock,
-  readPurchaseSwitches,
-} from './read';

@@ -123,7 +123,8 @@ describe('tracer: the bootstrap answers purchase visibility per store and fails 
     expect(await visibleOf({ [PLATFORM_HEADER]: 'ios' })).toBe(true);
     await setSwitch(demoId, 'ios', true);
     expect(await visibleOf({ [PLATFORM_HEADER]: 'ios' })).toBe(true);
-    const rows = await adminSql`select 1 from platform.tenant_apps where tenant_id = ${demoId}::uuid`;
+    const rows =
+      await adminSql`select 1 from platform.tenant_apps where tenant_id = ${demoId}::uuid`;
     expect(rows.length).toBe(1);
 
     await setSwitch(demoId, 'ios', false);

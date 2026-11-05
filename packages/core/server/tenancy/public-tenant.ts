@@ -4,6 +4,7 @@ import { withAdminTx } from '../../db/admin-tx';
 import { projectHealth, projectSchemaState, projects, tenantProjects } from '../../db/central';
 import { withPlatformTx } from '../../db/platform-tx';
 import { tenantDomains, tenants } from '../../db/schema';
+import { readHostAppBlock } from '../apps/read';
 import { ApiError } from '../http/api-error';
 import { accessCheckoutUrl } from './access';
 import { hostStatusOf } from './tenant-host';
@@ -142,4 +143,14 @@ export async function getTenantIdBySlug(slug: string): Promise<string> {
   const row = rows[0];
   if (!row) throw new ApiError(404, 'TENANT_NOT_FOUND');
   return row.id;
+}
+
+/**
+ * 13-10 (D-603, D-611, D-615, T-13-24): the non-secret `app` block of the by-host answer for a tenant: the
+ * links data and the per-store purchase switches, or `null` when the tenant has no app row. Sent explicitly as
+ * `null` (never omitted) so the web can tell "no app" from an API that does not send the key yet. The block is
+ * built field by field from non-secret columns; no credential, Key ID or reviewer datum has a path into it.
+ */
+export function getHostApp(tenantId: string, primaryHost: string) {
+  return readHostAppBlock(tenantId, { primaryHost });
 }

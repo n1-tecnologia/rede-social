@@ -10,6 +10,7 @@ import {
   resolveBranding,
   TENANT_ROLES,
 } from '@rede-social/contracts';
+import { NATIVE_PLATFORM_HEADER, purchaseVisible } from '@rede-social/contracts/native';
 import { subscriptionStatusSchema } from '@rede-social/contracts/payments';
 import {
   dismissNoticeResultSchema,
@@ -24,8 +25,10 @@ import {
 } from '@rede-social/contracts/profiles';
 import { memberships, tenants, users } from '@rede-social/core/db/schema';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import { nativeRequestOf, readPurchaseSwitches } from '@rede-social/core/server/apps/index';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
+import { redactDbError } from '@rede-social/core/server/logging';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { getSubscriptionStatus } from '@rede-social/core/server/payments/status';
 import {
@@ -213,6 +216,18 @@ export const meRoutes = me
         throw new ApiError(500, 'INTERNAL');
       }
 
+      // 13-10 (D-617, T-13-25): the purchase answer. A request WITHOUT the platform header is a browser and sees
+      // the purchase; WITH it, the store's switch decides and anything unreadable fails closed.
+      const { native, platform } = nativeRequestOf(c.req.header(NATIVE_PLATFORM_HEADER));
+      let switches: Awaited<ReturnType<typeof readPurchaseSwitches>> | null = null;
+      if (native && platform !== null) {
+        try {
+          switches = await readPurchaseSwitches(tenant.id);
+        } catch (err) {
+          c.get('logger').warn({ err: redactDbError(err) }, 'purchase switch read failed');
+        }
+      }
+
       const body: Bootstrap = {
         // D-310: `user.name` is the HOST membership's profile name, so a person in two communities
         // is called what each community knows them as. The key stays for contract compatibility:
@@ -242,7 +257,7 @@ export const meRoutes = me
         // outputs them as required (its `.default()`), so the object is typed with the NEUTRAL values a
         // reader would have defaulted to anyway; the store switch and the pending-deletion window are
         // computed by their own plans.
-        purchaseVisible: true,
+        purchaseVisible: purchaseVisible({ native, platform, switches }),
         pendingDeletion: null,
       };
       return c.json(body, 200);
