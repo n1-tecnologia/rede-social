@@ -1,3 +1,4 @@
+export * from './apps';
 export * from './bootstrap-steps';
 export * from './health';
 export * from './moves';
