@@ -41,7 +41,58 @@
         "up": "Subir “{title}”",
         "down": "Descer “{title}”",
         "moved": "“{title}” agora é a pergunta {position} de {total}.",
-        "failed": "Não foi possível salvar a nova ordem. A lista voltou como estava."
+        "failed": "Não foi possível salvar a nova ordem. A lista voltou como estava.",
+        "mustFollow": "“{title}” precisa ficar depois de “{other}”, que decide se ela aparece.",
+        "mustPrecede": "“{title}” precisa ficar antes de “{other}”, que só aparece conforme a resposta dela."
+      },
+      "steps": {
+        "add": "Adicionar etapa",
+        "note": "Os membros respondem uma etapa por vez e avançam com “Avançar”. Uma etapa sem pergunta visível para o membro é pulada.",
+        "eyebrow": "Etapa {n}",
+        "count": "{count, plural, =0 {Sem perguntas} one {# pergunta} other {# perguntas}}",
+        "rename": "Renomear etapa: {title}",
+        "addQuestion": "Adicionar pergunta",
+        "addQuestionLabel": "Adicionar pergunta à etapa: {title}",
+        "empty": "Esta etapa está vazia. Enquanto estiver vazia, os membros não a veem.",
+        "defaultTitle": "Informações gerais",
+        "limit": "Você chegou ao limite de {max} etapas. Exclua uma etapa vazia para adicionar outra.",
+        "sheet": {
+          "createTitle": "Nova etapa",
+          "renameTitle": "Renomear etapa",
+          "field": "Título da etapa",
+          "placeholder": "Ex.: Sobre a sua clínica",
+          "counter": "{n}/{max}",
+          "errors": {
+            "required": "Escreva o título da etapa.",
+            "tooLong": "Use até {max} caracteres."
+          },
+          "save": "Salvar etapa",
+          "saving": "Salvando…",
+          "delete": "Excluir etapa",
+          "notEmpty": "Para excluir esta etapa, mova ou arquive as perguntas dela primeiro.",
+          "last": "Todo formulário precisa de pelo menos uma etapa.",
+          "discardBody": "As mudanças desta etapa ainda não foram salvas.",
+          "failed": "Não foi possível salvar a etapa agora. Tente de novo."
+        },
+        "delete": {
+          "title": "Excluir esta etapa?",
+          "body": "Ela está vazia. A exclusão não pode ser desfeita.",
+          "confirm": "Excluir",
+          "cancel": "Manter etapa"
+        },
+        "toasts": {
+          "added": "Etapa adicionada.",
+          "renamed": "Etapa renomeada.",
+          "deleted": "Etapa excluída."
+        },
+        "errors": {
+          "notEmpty": "Esta etapa recebeu perguntas. Mova ou arquive antes de excluir."
+        },
+        "reorder": {
+          "up": "Subir etapa “{title}”",
+          "down": "Descer etapa “{title}”",
+          "moved": "A etapa “{title}” agora é a etapa {position} de {total}."
+        }
       },
       "empty": {
         "title": "Seu formulário ainda está vazio",

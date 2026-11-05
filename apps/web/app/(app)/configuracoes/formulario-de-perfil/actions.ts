@@ -2,16 +2,22 @@
 
 import {
   type AdminQuestion,
+  type AdminStep,
   adminQuestionSchema,
+  adminStepSchema,
   type CreateQuestionBody,
   createQuestionBodySchema,
+  createStepBodySchema,
+  deleteStepResultSchema,
   impactQuerySchema,
   impactResultSchema,
+  layoutBodySchema,
   type ProfileFormImpactChange,
   profileFormSummarySchema,
   reorderBodySchema,
   replaceQuestionBodySchema,
   updateQuestionBodySchema,
+  updateStepBodySchema,
 } from '@rede-social/contracts/profile-form';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
@@ -471,4 +477,230 @@ export async function archiveQuestionAction(id: string): Promise<RemoveResult> {
  */
 export async function deleteQuestionAction(id: string): Promise<RemoveResult> {
   return remove('delete', id, `/v1/profile_form/questions/${id}`, { method: 'DELETE' });
+}
+
+// ── 12.1-16: the steps and the layout reorder ──────────────────────────────────────────────────────
+
+/** One step of the layout body: the step and its active question ids in order. */
+export type LayoutStepInput = { id: string; questionIds: string[] };
+
+/**
+ * What `PUT /order` with the layout body answers. `mismatch` is 409 `order_mismatch` (the list changed under
+ * the admin); `condition_order` is the coded 409 of D-623 (a race the client check could not see) and names
+ * the QUESTION that would sit at or before its opener and that opener, never a step.
+ */
+export type ReorderLayoutResult =
+  | { ok: true }
+  | { ok: false; code: 'forbidden' | 'moduleOff' | 'mismatch' | 'failed' }
+  | { ok: false; code: 'condition_order'; questionId: string; openerId: string };
+
+/**
+ * `PUT /v1/profile_form/order` with the whole layout `{ steps: [{ id, questionIds }] }` (D-623, D-627): every
+ * step in order and each step's questions in order, validated here with the contract's own schema first. The
+ * write has already happened when the API answers, and the builder keeps the order it holds and re-reads the
+ * list when the mode ends, so the refreshed list in the answer is not parsed.
+ */
+export async function reorderLayoutAction(input: {
+  steps: LayoutStepInput[];
+}): Promise<ReorderLayoutResult> {
+  const body = layoutBodySchema.safeParse(input);
+  if (!body.success) return { ok: false, code: 'failed' };
+
+  const sent = await send('reorder_layout', '/v1/profile_form/order', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body.data),
+  });
+  if (sent.kind === 'ok') return { ok: true };
+  if (sent.kind === 'thrown') return { ok: false, code: 'failed' };
+
+  const { status, envelope } = sent;
+  const refusal = refusalOf(status, envelope);
+  if (refusal === 'forbidden' || refusal === 'moduleOff' || refusal === 'mismatch') {
+    return { ok: false, code: refusal };
+  }
+  if (status === 409 && envelope?.details?.profileForm === 'condition_order') {
+    const { questionId, openerId } = envelope.details;
+    if (typeof questionId === 'string' && typeof openerId === 'string') {
+      return { ok: false, code: 'condition_order', questionId, openerId };
+    }
+  }
+  const navigate = navigationFor(status, envelope);
+  if (navigate) redirect(navigate);
+  console.error('profile_form.reorder_layout_failed', { status, code: envelope?.code });
+  return { ok: false, code: 'failed' };
+}
+
+/** The issue codes of a title the API refuses with a 400 (UI-D-645). */
+export type StepIssue = 'required' | 'too_long' | 'invalid';
+
+const STEP_ISSUES: ReadonlySet<string> = new Set<StepIssue>(['required', 'too_long', 'invalid']);
+
+const stepIssueOf = (value: unknown): StepIssue =>
+  typeof value === 'string' && STEP_ISSUES.has(value) ? (value as StepIssue) : 'invalid';
+
+/** What a refused step write is, in one closed vocabulary shared by the three step actions. */
+type StepFailure =
+  | { code: 'invalid'; issue: StepIssue }
+  | {
+      code:
+        | 'limit_reached'
+        | 'stale_revision'
+        | 'step_not_empty'
+        | 'last_step'
+        | 'gone'
+        | 'forbidden'
+        | 'moduleOff'
+        | 'failed';
+    };
+
+/**
+ * The refusals of the step routes (plans 08 and 09): 403 and the module switch like the rest of the builder,
+ * 409 `limit_reached` (10 steps), `stale_revision`, `step_not_empty` and `last_step`, a bare 404 for a step
+ * that is gone and a 400 with the title's issue code. A session refusal is the `(app)` navigation, done by
+ * the caller OUTSIDE any try/catch.
+ */
+function stepFailureOf(
+  label: string,
+  sent: Exclude<Sent, { kind: 'ok' }>,
+): { failure: StepFailure; navigate: string | null } {
+  if (sent.kind === 'thrown') return { failure: { code: 'failed' }, navigate: null };
+  const { status, envelope } = sent;
+  const detail = envelope?.details?.profileForm;
+
+  const refusal = refusalOf(status, envelope);
+  if (refusal === 'forbidden' || refusal === 'moduleOff') {
+    return { failure: { code: refusal }, navigate: null };
+  }
+  if (status === 409) {
+    if (detail === 'limit_reached') return { failure: { code: 'limit_reached' }, navigate: null };
+    if (detail === 'stale_revision') return { failure: { code: 'stale_revision' }, navigate: null };
+    if (detail === 'step_not_empty') return { failure: { code: 'step_not_empty' }, navigate: null };
+    if (detail === 'last_step') return { failure: { code: 'last_step' }, navigate: null };
+  }
+  if (status === 404 && envelope?.code === 'NOT_FOUND') {
+    return { failure: { code: 'gone' }, navigate: null };
+  }
+  if (status === 400 && envelope?.code === 'VALIDATION_FAILED') {
+    return { failure: { code: 'invalid', issue: stepIssueOf(detail) }, navigate: null };
+  }
+  const navigate = navigationFor(status, envelope);
+  if (!navigate) console.error(`profile_form.${label}_failed`, { status, code: envelope?.code });
+  return { failure: { code: 'failed' }, navigate };
+}
+
+export type CreateStepResult =
+  | { ok: true; step: AdminStep }
+  | { ok: false; code: 'invalid'; issue: StepIssue }
+  | { ok: false; code: 'limit_reached' | 'forbidden' | 'moduleOff' | 'failed' };
+
+/**
+ * `POST /v1/profile_form/steps`: a new EMPTY step at the END of the form (D-627). The title is validated
+ * here with the contract's own schema first, so an empty or too long one never leaves the server tier. A
+ * tenant with no step yet gets its default step first (the server does it); the new step is still last.
+ */
+export async function createStepAction(input: { title: string }): Promise<CreateStepResult> {
+  const parsed = createStepBodySchema.safeParse({ title: input.title });
+  if (!parsed.success) {
+    return { ok: false, code: 'invalid', issue: stepIssueOf(parsed.error.issues[0]?.message) };
+  }
+
+  const sent = await send('create_step', '/v1/profile_form/steps', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parsed.data),
+  });
+  if (sent.kind === 'ok') {
+    const step = adminStepSchema.safeParse(sent.body);
+    return step.success ? { ok: true, step: step.data } : { ok: false, code: 'failed' };
+  }
+
+  const { failure, navigate } = stepFailureOf('create_step', sent);
+  if (navigate) redirect(navigate);
+  if (failure.code === 'invalid') return { ok: false, code: 'invalid', issue: failure.issue };
+  if (failure.code === 'limit_reached' || failure.code === 'forbidden') {
+    return { ok: false, code: failure.code };
+  }
+  if (failure.code === 'moduleOff') return { ok: false, code: 'moduleOff' };
+  return { ok: false, code: 'failed' };
+}
+
+export type RenameStepResult =
+  | { ok: true; step: AdminStep }
+  | { ok: false; code: 'invalid'; issue: StepIssue }
+  | { ok: false; code: 'stale_revision' | 'gone' | 'forbidden' | 'moduleOff' | 'failed' };
+
+/**
+ * `PATCH /v1/profile_form/steps/{id}`: the new title under the optimistic `revision` the admin read. A stale
+ * revision is its own code so the sheet keeps the typed title and the page re-reads the step.
+ */
+export async function renameStepAction(input: {
+  id: string;
+  revision: number;
+  title: string;
+}): Promise<RenameStepResult> {
+  if (!z.uuid().safeParse(input.id).success) return { ok: false, code: 'failed' };
+  const parsed = updateStepBodySchema.safeParse({ revision: input.revision, title: input.title });
+  if (!parsed.success) {
+    return { ok: false, code: 'invalid', issue: stepIssueOf(parsed.error.issues[0]?.message) };
+  }
+
+  const sent = await send('rename_step', `/v1/profile_form/steps/${input.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parsed.data),
+  });
+  if (sent.kind === 'ok') {
+    const step = adminStepSchema.safeParse(sent.body);
+    return step.success ? { ok: true, step: step.data } : { ok: false, code: 'failed' };
+  }
+
+  const { failure, navigate } = stepFailureOf('rename_step', sent);
+  if (navigate) redirect(navigate);
+  if (failure.code === 'invalid') return { ok: false, code: 'invalid', issue: failure.issue };
+  if (
+    failure.code === 'stale_revision' ||
+    failure.code === 'gone' ||
+    failure.code === 'forbidden' ||
+    failure.code === 'moduleOff'
+  ) {
+    return { ok: false, code: failure.code };
+  }
+  return { ok: false, code: 'failed' };
+}
+
+export type DeleteStepActionResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code: 'step_not_empty' | 'last_step' | 'gone' | 'forbidden' | 'moduleOff' | 'failed';
+    };
+
+/**
+ * `DELETE /v1/profile_form/steps/{id}`: only a step with no ACTIVE question, and never the only step. An
+ * ARCHIVED question of the step is re-pointed to the first remaining step by the server, so deleting a step
+ * never discards a question or an answer. The two refusals are coded so the sheet can explain them.
+ */
+export async function deleteStepAction(id: string): Promise<DeleteStepActionResult> {
+  if (!z.uuid().safeParse(id).success) return { ok: false, code: 'failed' };
+
+  const sent = await send('delete_step', `/v1/profile_form/steps/${id}`, { method: 'DELETE' });
+  if (sent.kind === 'ok') {
+    return deleteStepResultSchema.safeParse(sent.body).success
+      ? { ok: true }
+      : { ok: false, code: 'failed' };
+  }
+
+  const { failure, navigate } = stepFailureOf('delete_step', sent);
+  if (navigate) redirect(navigate);
+  if (
+    failure.code === 'step_not_empty' ||
+    failure.code === 'last_step' ||
+    failure.code === 'gone' ||
+    failure.code === 'forbidden' ||
+    failure.code === 'moduleOff'
+  ) {
+    return { ok: false, code: failure.code };
+  }
+  return { ok: false, code: 'failed' };
 }

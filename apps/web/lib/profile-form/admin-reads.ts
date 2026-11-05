@@ -1,5 +1,6 @@
 import {
   type AdminQuestion,
+  type AdminStep,
   type ArchivedQuestion,
   adminQuestionListSchema,
   archivedQuestionListSchema,
@@ -39,6 +40,10 @@ export type AdminFormResult =
   | {
       status: 'ok';
       questions: AdminQuestion[];
+      /** The tenant's steps in order (12.1-16); none for a form never built. */
+      steps: AdminStep[];
+      /** The most steps a tenant may have (D-633). */
+      stepLimit: number;
       summary: ProfileFormSummary;
       activeCount: number;
       limit: number;
@@ -76,6 +81,8 @@ export async function loadAdminForm(): Promise<AdminFormResult> {
     return {
       status: 'ok',
       questions: parsedList.questions,
+      steps: parsedList.steps,
+      stepLimit: parsedList.stepLimit,
       summary: parsedSummary,
       activeCount: parsedList.activeCount,
       limit: parsedList.limit,

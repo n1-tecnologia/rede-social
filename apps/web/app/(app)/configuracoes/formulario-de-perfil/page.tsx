@@ -95,6 +95,8 @@ export default async function ProfileFormPage({
           {hasQuestions || hasArchived ? <FormSummaryCard summary={loaded.summary} /> : null}
           <QuestionBuilder
             questions={loaded.questions}
+            steps={loaded.steps}
+            stepLimit={loaded.stepLimit}
             limit={loaded.limit}
             tenantName={bootstrap.tenant.displayName}
           />

@@ -1,13 +1,28 @@
 'use client';
 
-import type { AdminQuestion } from '@rede-social/contracts/profile-form';
+import {
+  type AdminQuestion,
+  type AdminStep,
+  PROFILE_FORM_LIMITS,
+} from '@rede-social/contracts/profile-form';
 import { Button, Card, IconButton, SectionTitle, StatusPill, useToast } from '@rede-social/ui';
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Eye, Lock, Plus } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronRight,
+  Eye,
+  Info,
+  Layers,
+  Lock,
+  Plus,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { typeNameKey } from '@/lib/profile-form/question-types';
-import { type ReorderResult, reorderQuestionsAction } from './actions';
+import { type ReorderLayoutResult, reorderLayoutAction, reorderQuestionsAction } from './actions';
+import { StepWell } from './StepWell';
 
 export interface QuestionListProps {
   /** The ACTIVE questions in the order members see them (the API's order). */
@@ -23,6 +38,61 @@ export interface QuestionListProps {
   onAdd?: () => void;
   /** Opens "Como o membro vê" (12-17). Without it the list shows no "Ver como o membro vê". */
   onPreview?: () => void;
+  /**
+   * The tenant's steps in order (12.1-16, D-627). With none the list is Phase 12's flat list and reorders
+   * with the legacy body; with ONE it is the same flat list; with two or more it is a column of step wells.
+   */
+  steps?: AdminStep[];
+  /** The most steps a tenant may have; "Adicionar etapa" is disabled at it (D-633). */
+  stepLimit?: number;
+  /** Opens the step sheet in create mode. Without it the list shows no "Adicionar etapa". */
+  onAddStep?: () => void;
+  /** Opens the step sheet in rename mode for a well. */
+  onRenameStep?: (step: AdminStep) => void;
+  /** Opens the editor in create mode with this step preselected (the well's footer). */
+  onAddToStep?: (step: AdminStep) => void;
+}
+
+const NO_STEPS: AdminStep[] = [];
+
+/**
+ * The active questions cut into the steps' groups, each in order. A question of a step the list does not
+ * know (it cannot happen: the API puts every question in a step) rides with the last step instead of
+ * disappearing from the screen.
+ */
+function groupByStep(steps: AdminStep[], items: AdminQuestion[]): AdminQuestion[][] {
+  if (steps.length === 0) return [items];
+  const known = new Set(steps.map((step) => step.id));
+  const last = steps[steps.length - 1];
+  return steps.map((step) =>
+    items.filter(
+      (question) => question.stepId === step.id || (step === last && !known.has(question.stepId)),
+    ),
+  );
+}
+
+/** The list in the order members see it: the steps in order, each holding its questions. */
+function normalize(steps: AdminStep[], items: AdminQuestion[]): AdminQuestion[] {
+  return steps.length === 0 ? items : groupByStep(steps, items).flat();
+}
+
+/**
+ * D-623 over a candidate order: the first question that would sit at or before the opener of its condition,
+ * as the pair (the conditional question, its opener), or `null`. The server enforces the same rule; this
+ * check only lets the press say which two QUESTIONS conflict before anything moves.
+ */
+function orderViolation(
+  flat: AdminQuestion[],
+): { dependent: AdminQuestion; opener: AdminQuestion } | null {
+  const index = new Map(flat.map((question, at) => [question.id, at] as const));
+  for (const [at, question] of flat.entries()) {
+    if (question.condition === null) continue;
+    const openerAt = index.get(question.condition.questionId);
+    if (openerAt === undefined || openerAt < at) continue;
+    const opener = flat[openerAt];
+    if (opener) return { dependent: question, opener };
+  }
+  return null;
 }
 
 type Direction = 'up' | 'down';
@@ -69,6 +139,7 @@ function RowBody({ question, position }: { question: AdminQuestion; position: nu
 
 interface RowProps {
   question: AdminQuestion;
+  /** The number across the WHOLE form, 1..total, in the order members see (UI-D-643). */
   position: number;
   total: number;
   onOpen?: (question: AdminQuestion) => void;
@@ -117,33 +188,45 @@ function QuestionRow({ question, position, total, onOpen }: RowProps) {
 
 interface ReorderRowProps {
   question: AdminQuestion;
-  index: number;
-  total: number;
+  /** The number across the whole form. */
+  position: number;
+  /** The row's place inside its step (or inside the flat list) and how many rows that group holds. */
+  groupIndex: number;
+  groupSize: number;
   busy: boolean;
   register: (key: string, element: HTMLButtonElement | null) => void;
   onMove: (id: string, delta: -1 | 1) => void;
 }
 
 /**
- * A row in reorder mode (UI-D-567): not an editor opener (no accidental taps). The chevron is replaced
- * by two 44x44 `IconButton`s, disabled on the first and the last row (a list of one has both disabled).
- * While a write runs the buttons are `aria-busy` and ignore presses instead of becoming `disabled`, so
- * the focused control keeps focus through the write.
+ * A row in reorder mode (UI-D-567, UI-D-646): not an editor opener (no accidental taps). The chevron is
+ * replaced by two 44x44 `IconButton`s, disabled on the first and the last row OF ITS STEP (a group of one
+ * has both disabled): an arrow never moves a question to another step. While a write runs the buttons are
+ * `aria-busy` and ignore presses instead of becoming `disabled`, so the focused control keeps focus through
+ * the write.
  */
-function ReorderRow({ question, index, total, busy, register, onMove }: ReorderRowProps) {
+function ReorderRow({
+  question,
+  position,
+  groupIndex,
+  groupSize,
+  busy,
+  register,
+  onMove,
+}: ReorderRowProps) {
   const t = useTranslations('profileForm.admin.reorder');
   return (
     <li>
       <Card className="p-0">
         <div className="flex min-h-11 w-full items-start gap-3 p-4">
-          <RowBody question={question} position={index + 1} />
+          <RowBody question={question} position={position} />
           <span className="-my-2 -mr-2 flex shrink-0 items-center">
             <IconButton
               ref={(element) => register(`${question.id}:up`, element)}
               icon={ArrowUp}
               size={18}
               label={t('up', { title: question.title })}
-              disabled={index === 0}
+              disabled={groupIndex === 0}
               aria-busy={busy || undefined}
               onClick={() => onMove(question.id, -1)}
             />
@@ -152,7 +235,7 @@ function ReorderRow({ question, index, total, busy, register, onMove }: ReorderR
               icon={ArrowDown}
               size={18}
               label={t('down', { title: question.title })}
-              disabled={index === total - 1}
+              disabled={groupIndex === groupSize - 1}
               aria-busy={busy || undefined}
               onClick={() => onMove(question.id, 1)}
             />
@@ -164,34 +247,52 @@ function ReorderRow({ question, index, total, busy, register, onMove }: ReorderR
 }
 
 /**
- * The active list of the Perguntas tab (12-15, D-582, UI-D-565..UI-D-567): the actions row ("Adicionar pergunta",
- * "Reordenar", "Ver como o membro vê"), the limit line, the "Perguntas
- * ativas (n)" micro-title and the rows in the admin's order, which is the order members see.
+ * The active list of the Perguntas tab (12-15, 12.1-16; D-582, D-623, D-627, UI-D-565..UI-D-567, UI-D-642..UI-D-646):
+ * the actions row ("Adicionar pergunta", "Adicionar etapa", "Reordenar", "Ver como o membro vê"), the limit
+ * lines, the "Perguntas ativas (n)" micro-title and the rows in the admin's order, which is the order
+ * members see. **With one step (or none) the rows are the flat list of Phase 12; with two or more they sit
+ * in step wells** under a one-time note, numbered across the whole form.
  *
  * **Reorder is a mode with buttons, never a drag** (a drag fights the scroll of a mobile page, and the
- * buttons are the keyboard alternative). Each press moves the row, SAVES AT ONCE with one write of the
- * WHOLE ordered id list through the server action, keeps focus on the same button at its new position
- * (re-applied after React moves the row, because a moved node loses focus; if that button is now disabled
- * at an edge, its sibling takes the focus) and announces the new position through an `aria-live="polite"`
- * region. A failed write puts the row back and toasts; a lost permission or a module turned off ends in
- * a refresh into the page's `notFound()`.
+ * buttons are the keyboard alternative). Each press moves the row (or, on a well's header, the whole step),
+ * SAVES AT ONCE with one write of the WHOLE layout through the server action, keeps focus on the same
+ * button at its new position (re-applied after React moves the row, because a moved node loses focus; if
+ * that button is now disabled at an edge, its sibling takes the focus) and announces the new position
+ * through an `aria-live="polite"` region. **An arrow moves a question only inside its step.** A press that
+ * would put an opener at or after a question it opens (or a step above the step that holds an opener of one
+ * of its questions) moves NOTHING and toasts which two QUESTIONS conflict; the server's coded 409 for the
+ * same rule, after a race, puts the list back and says the same sentence. A failed write puts the row back
+ * and toasts; a lost permission or a module turned off ends in a refresh into the page's `notFound()`.
  *
  * The tab is read once per request on the server: the list holds the server's copy and the optimistic
  * order only while a write is in flight, and the page refreshes when the mode ends. It shows aggregate
  * counts only (PFORM-23): never an individual member's answer, and it makes no request of its own.
  */
-export function QuestionList({ questions, limit, onOpen, onAdd, onPreview }: QuestionListProps) {
+export function QuestionList({
+  questions,
+  limit,
+  onOpen,
+  onAdd,
+  onPreview,
+  steps = NO_STEPS,
+  stepLimit = PROFILE_FORM_LIMITS.steps,
+  onAddStep,
+  onRenameStep,
+  onAddToStep,
+}: QuestionListProps) {
   const t = useTranslations('profileForm');
   const tAdmin = useTranslations('admin');
   const router = useRouter();
   const toast = useToast();
 
   // The server's list wins whenever it re-renders with a new one (after a refresh).
-  const [source, setSource] = useState(questions);
-  const [items, setItems] = useState(questions);
-  if (source !== questions) {
-    setSource(questions);
-    setItems(questions);
+  const [source, setSource] = useState({ questions, steps });
+  const [items, setItems] = useState(() => normalize(steps, questions));
+  const [stepList, setStepList] = useState(steps);
+  if (source.questions !== questions || source.steps !== steps) {
+    setSource({ questions, steps });
+    setItems(normalize(steps, questions));
+    setStepList(steps);
   }
 
   const [reordering, setReordering] = useState(false);
@@ -219,51 +320,149 @@ export function QuestionList({ questions, limit, onOpen, onAdd, onPreview }: Que
     winner?.focus();
   }, [items]);
 
-  async function move(id: string, delta: -1 | 1) {
-    if (busy) return;
-    const from = items.findIndex((question) => question.id === id);
-    const to = from + delta;
-    if (from < 0 || to < 0 || to >= items.length) return;
+  const wells = stepList.length > 1;
+  const groups = groupByStep(stepList, items);
+  const positions = new Map(items.map((question, at) => [question.id, at + 1] as const));
 
-    const previous = items;
-    const next = items.slice();
-    const [moved] = next.splice(from, 1);
-    if (!moved) return;
-    next.splice(to, 0, moved);
+  /** The sentence of a refused or reverted press, naming the two QUESTIONS (D-623, UI-D-646). */
+  function refusalSentence(delta: -1 | 1, dependent: AdminQuestion, opener: AdminQuestion) {
+    return delta < 0
+      ? t('admin.reorder.mustFollow', { title: dependent.title, other: opener.title })
+      : t('admin.reorder.mustPrecede', { title: opener.title, other: dependent.title });
+  }
+
+  /**
+   * One press: checks D-623 on the layout the list already holds, then saves the WHOLE layout at once. A
+   * press the server would refuse changes nothing and says why; a failed write puts the list back.
+   */
+  async function apply(change: {
+    nextSteps: AdminStep[];
+    nextGroups: AdminQuestion[][];
+    focusId: string;
+    delta: -1 | 1;
+    announce: (flat: AdminQuestion[]) => string;
+  }) {
+    const { nextSteps, nextGroups, focusId, delta, announce } = change;
+    const nextItems = nextGroups.flat();
     const direction: Direction = delta < 0 ? 'up' : 'down';
 
-    pendingFocus.current = { id, direction };
-    setItems(next);
+    const violation = orderViolation(nextItems);
+    if (violation) {
+      toast.show({
+        tone: 'error',
+        message: refusalSentence(delta, violation.dependent, violation.opener),
+      });
+      return;
+    }
+
+    const previous = { items, steps: stepList };
+    pendingFocus.current = { id: focusId, direction };
+    setItems(nextItems);
+    setStepList(nextSteps);
     setBusy(true);
 
-    let result: ReorderResult;
+    let result: ReorderLayoutResult;
     try {
-      result = await reorderQuestionsAction(next.map((question) => question.id));
+      result =
+        nextSteps.length > 0
+          ? await reorderLayoutAction({
+              steps: nextSteps.map((step, at) => ({
+                id: step.id,
+                questionIds: (nextGroups[at] ?? []).map((question) => question.id),
+              })),
+            })
+          : await reorderQuestionsAction(nextItems.map((question) => question.id));
     } catch {
       result = { ok: false, code: 'failed' };
     }
     setBusy(false);
 
     if (result.ok) {
-      setAnnouncement(
-        t('admin.reorder.moved', { title: moved.title, position: to + 1, total: next.length }),
-      );
+      setAnnouncement(announce(nextItems));
       return;
     }
 
-    // The row goes back where it was and the pressed control keeps focus.
-    pendingFocus.current = { id, direction };
-    setItems(previous);
+    // The list goes back where it was and the pressed control keeps focus.
+    pendingFocus.current = { id: focusId, direction };
+    setItems(previous.items);
+    setStepList(previous.steps);
     if (result.code === 'moduleOff') {
       toast.show({ tone: 'error', message: t('admin.errors.moduleOff') });
       router.refresh();
     } else if (result.code === 'forbidden') {
       toast.show({ tone: 'error', message: tAdmin('errors.forbidden') });
       router.refresh();
+    } else if (result.code === 'condition_order') {
+      // A race the check above could not see: the same sentence, naming the same two questions.
+      const dependent = previous.items.find((question) => question.id === result.questionId);
+      const opener = previous.items.find((question) => question.id === result.openerId);
+      toast.show({
+        tone: 'error',
+        message:
+          dependent && opener
+            ? refusalSentence(delta, dependent, opener)
+            : t('admin.reorder.failed'),
+      });
+      router.refresh();
     } else {
       toast.show({ tone: 'error', message: t('admin.reorder.failed') });
       if (result.code === 'mismatch') router.refresh();
     }
+  }
+
+  function moveQuestion(id: string, delta: -1 | 1) {
+    if (busy) return;
+    const at = groups.findIndex((rows) => rows.some((question) => question.id === id));
+    const rows = groups[at];
+    if (!rows) return;
+    const from = rows.findIndex((question) => question.id === id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= rows.length) return;
+
+    const nextRows = rows.slice();
+    const [moved] = nextRows.splice(from, 1);
+    if (!moved) return;
+    nextRows.splice(to, 0, moved);
+    const nextGroups = groups.map((group, index) => (index === at ? nextRows : group));
+    void apply({
+      nextSteps: stepList,
+      nextGroups,
+      focusId: id,
+      delta,
+      announce: (flat) =>
+        t('admin.reorder.moved', {
+          title: moved.title,
+          position: flat.findIndex((question) => question.id === id) + 1,
+          total: flat.length,
+        }),
+    });
+  }
+
+  function moveStep(id: string, delta: -1 | 1) {
+    if (busy) return;
+    const from = stepList.findIndex((step) => step.id === id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= stepList.length) return;
+
+    const nextSteps = stepList.slice();
+    const [moved] = nextSteps.splice(from, 1);
+    if (!moved) return;
+    nextSteps.splice(to, 0, moved);
+    const nextGroups = groups.slice();
+    const [movedRows] = nextGroups.splice(from, 1);
+    nextGroups.splice(to, 0, movedRows ?? []);
+    void apply({
+      nextSteps,
+      nextGroups,
+      focusId: `step:${id}`,
+      delta,
+      announce: () =>
+        t('admin.steps.reorder.moved', {
+          title: moved.title,
+          position: to + 1,
+          total: nextSteps.length,
+        }),
+    });
   }
 
   function toggleReordering() {
@@ -274,6 +473,33 @@ export function QuestionList({ questions, limit, onOpen, onAdd, onPreview }: Que
     if (leaving) router.refresh();
   }
 
+  const renderRows = (rows: AdminQuestion[]) => (
+    <ul className="flex flex-col gap-3">
+      {rows.map((question, groupIndex) =>
+        reordering ? (
+          <ReorderRow
+            key={question.id}
+            question={question}
+            position={positions.get(question.id) ?? groupIndex + 1}
+            groupIndex={groupIndex}
+            groupSize={rows.length}
+            busy={busy}
+            register={register}
+            onMove={moveQuestion}
+          />
+        ) : (
+          <QuestionRow
+            key={question.id}
+            question={question}
+            position={positions.get(question.id) ?? groupIndex + 1}
+            total={items.length}
+            onOpen={onOpen}
+          />
+        ),
+      )}
+    </ul>
+  );
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -281,6 +507,17 @@ export function QuestionList({ questions, limit, onOpen, onAdd, onPreview }: Que
           <Button size="md" disabled={items.length >= limit} onClick={onAdd}>
             <Plus aria-hidden size={18} />
             {t('admin.actions.add')}
+          </Button>
+        ) : null}
+        {onAddStep ? (
+          <Button
+            variant="outline"
+            size="md"
+            disabled={stepList.length >= stepLimit}
+            onClick={onAddStep}
+          >
+            <Layers aria-hidden size={18} />
+            {t('admin.steps.add')}
           </Button>
         ) : null}
         <Button variant="outline" size="md" aria-pressed={reordering} onClick={toggleReordering}>
@@ -293,38 +530,54 @@ export function QuestionList({ questions, limit, onOpen, onAdd, onPreview }: Que
           </Button>
         ) : null}
       </div>
+      {onAddStep && stepList.length >= stepLimit ? (
+        <p data-step-limit-line className="text-xs font-normal text-text-tertiary">
+          {t('admin.steps.limit', { max: stepLimit })}
+        </p>
+      ) : null}
       {items.length >= limit ? (
         <p data-limit-line className="text-xs font-normal text-text-tertiary">
           {t('admin.list.limit', { max: limit })}
         </p>
       ) : null}
       <SectionTitle variant="micro">{t('admin.list.title', { count: items.length })}</SectionTitle>
+      {wells ? (
+        <div
+          role="status"
+          data-steps-note
+          className="flex items-start gap-2 rounded-xl bg-bg-tertiary px-3 py-3 text-xs font-normal text-text"
+        >
+          <Info aria-hidden size={16} className="mt-px shrink-0 text-text-secondary" />
+          <span className="min-w-0 flex-1 break-words">{t('admin.steps.note')}</span>
+        </div>
+      ) : null}
       <p aria-live="polite" aria-atomic="true" data-reorder-live className="sr-only">
         {announcement}
       </p>
-      <ul className="flex flex-col gap-3">
-        {items.map((question, index) =>
-          reordering ? (
-            <ReorderRow
-              key={question.id}
-              question={question}
-              index={index}
-              total={items.length}
+      {wells ? (
+        <div className="flex flex-col gap-3">
+          {stepList.map((step, at) => (
+            <StepWell
+              key={step.id}
+              step={step}
+              number={at + 1}
+              total={stepList.length}
+              count={groups[at]?.length ?? 0}
+              reordering={reordering}
               busy={busy}
+              addDisabled={items.length >= limit}
+              onRename={(target) => onRenameStep?.(target)}
+              onAddQuestion={(target) => onAddToStep?.(target)}
+              onMove={moveStep}
               register={register}
-              onMove={move}
-            />
-          ) : (
-            <QuestionRow
-              key={question.id}
-              question={question}
-              position={index + 1}
-              total={items.length}
-              onOpen={onOpen}
-            />
-          ),
-        )}
-      </ul>
+            >
+              {renderRows(groups[at] ?? [])}
+            </StepWell>
+          ))}
+        </div>
+      ) : (
+        renderRows(items)
+      )}
     </section>
   );
 }

@@ -64,6 +64,11 @@ export interface QuestionEditorSheetProps {
   mode: EditorMode;
   /** The question being edited (edit) or replaced (replace); `null` for a new one. */
   question?: AdminQuestion | null;
+  /**
+   * The step a NEW question lands in (12.1-16: the "Adicionar pergunta" of a step well). Absent means the last
+   * step, which the server picks (D-629). Ignored for an edit and a replace, which keep their step.
+   */
+  stepId?: string;
   /** The tenant's display name, the `{tenant}` of the LGPD notice. */
   tenantName: string;
   /** The most active questions a tenant may have: the limit sentence when a create hits it. */
@@ -102,6 +107,7 @@ export function QuestionEditorSheet({
   open,
   mode,
   question,
+  stepId,
   tenantName,
   limit,
   onClose,
@@ -249,7 +255,10 @@ export function QuestionEditorSheet({
           { reopens },
         );
       } else {
-        result = await createQuestionAction(toCreateBody(draft), { reopens });
+        result = await createQuestionAction(
+          stepId ? { ...toCreateBody(draft), stepId } : toCreateBody(draft),
+          { reopens },
+        );
       }
     } catch {
       // A thrown request reads like any other failed write: the sheet stays open with the draft.
