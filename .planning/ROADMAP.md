@@ -1629,13 +1629,25 @@ Plans:
 - The API plans (04 to 10) never depend on the sketch gate; every web plan (11 to 18) carries `grep -q '^approved: true' .planning/sketches/016-phase-12-designed-screens/README.md` and the executor never writes the approval. When the approval is late, the API plans run first and the web plans stop at their precondition guard; no `depends_on` or wave changes.
 - Production deploys and hosted proofs are Igor's (`12-MANUAL-PROOFS.md`); the old `_gated` SQL pair is dropped by a later cleanup migration, not in this phase.
 
+### Phase 12.1: Perguntas condicionais e etapas no formulário de perfil (INSERTED)
+
+**Goal:** The tenant admin can make a question of the profile form conditional and split the form into steps. On a choice question (dropdown, multiple choice, single choice) or a yes/no question, the admin says which answers open further questions (example from the first client: "I own a clinic / I work in a clinic / I am learning", where only "I own a clinic" opens the clinic questions). The admin groups questions into steps (sections); the member answers one step at a time and moves on. Reverses D-582 (one scrollable screen, no sections) and takes "question sections and conditional questions" out of Phase 12's deferred list. Requested by the team on 2026-11-05 for the first client's profile questions.
+**Requirements**: TBD
+**Depends on:** Phase 12
+**Open design points (for /gsd-discuss-phase 12.1):** the hard gate (D-581, D-585) runs in SQL on every request as an anti-join, so a required question that is hidden by a condition must stop counting without a second round trip; what happens to the stored answer when a member changes the answer that opened it (keep, hide, or delete; D-587/D-588 promise that answers are never silently discarded); whether a condition may chain (B opens C); how the CSV export, the public answers block and the admin impact count treat hidden questions; whether a step is its own table or a column on the question; the step navigation in the member screen and in the edit-from-profile flow; a new sketch is needed (UI-04), since sketch 016 has no steps or condition editor.
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 12.1 to break down)
+
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
 **Goal**: Each tenant gets its own native iOS and Android app (own store listing, name, icon and bundle id), built from one codebase and fixed to that tenant's host. Stage 1 (this phase) is a native shell that opens the tenant's existing web screens and adds the native layer around them. Members and the tenant's staff find in it every feature of the web app, against the same API, with native push. Stage 2 (screens rebuilt 100% natively) is a later phase.
 **Scope**: Post-MVP and additive. The web app, the PWA and the API keep working unchanged for a browser: nothing in the web is migrated, moved or removed, and a tenant without a native app is not affected. The app is a third client of `/v1/*`, beside the web BFF. Decisions: `13-CONTEXT.md` (D-600..D-619; D-616..D-619 were decided on 2026-11-04 after the research: the minimum report and block slice pulled from Phase 11, the purchase switch off by default, the shell-owned offline feed, the protected GitHub macOS build).
 **Depends on**: Phase 7 (Realtime, notifications and Web Push), Phase 08.1 (membership chosen by host), Phase 09.2 (the tenant's own Supabase project: the app signs in against the project the by-host answer names), Phase 12 (the profile form gate the app must honour)
 **Requirements**: NATIVE-01, NATIVE-02, NATIVE-03, NATIVE-04, NATIVE-05, NATIVE-06, NATIVE-07, NATIVE-08, NATIVE-09, NATIVE-10, NATIVE-11, NATIVE-12, NATIVE-13, NATIVE-14, NATIVE-15, NATIVE-16, NATIVE-17, NATIVE-18, NATIVE-19, NATIVE-20, NATIVE-21, NATIVE-22, NATIVE-23, NATIVE-24, NATIVE-25, NATIVE-26, NATIVE-27, NATIVE-28, NATIVE-29, NATIVE-30, NATIVE-31, NATIVE-32, NATIVE-33, NATIVE-34, NATIVE-35, NATIVE-36
-**Plans:** 11/32 plans executed
+**Plans:** 12/32 plans executed
 **Success Criteria** (settled in `/gsd-discuss-phase 13`, 2026-11-03; decisions in `13-CONTEXT.md`):
 
   1. A member installs the tenant's app (its name, icon, splash and colors), signs in, recovers a forgotten password, confirms the account and accepts an invite through the web's own pages inside the app, and lands on that tenant's Início. The app is fixed to the tenant's host: no community picker, and a session whose membership does not belong to that tenant is refused like `TENANT_HOST_MISMATCH`. The refusals `MEMBERSHIP_BLOCKED`, `MEMBERSHIP_INVITED`, `SUBSCRIPTION_PENDING`, `PROFILE_FORM_PENDING` and `TENANT_SUSPENDED|PREPARING|UPDATING|UNAVAILABLE` each land on the screen the web shows (D-608).
@@ -1693,7 +1705,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 13-14-PLAN.md — Reports and blocks API, the blocked-author read filter and the riders (wave 6)
+- [x] 13-14-PLAN.md — Reports and blocks API, the blocked-author read filter and the riders (wave 6)
 - [ ] 13-15-PLAN.md — Per-host apple-app-site-association and assetlinks.json and the proxy allowance (wave 6)
 - [ ] 13-22-PLAN.md — Platform App tab part 2: links, purchase switches off by default, listing, checklist (wave 6)
 - [ ] 13-25-PLAN.md — Per-tenant Expo config, branding record, load-failure, update and loading-bar screens (wave 6)
@@ -1749,7 +1761,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
-| 13. App nativo iOS e Android por tenant (white-label) | 11/32 | In Progress|  |
+| 13. App nativo iOS e Android por tenant (white-label) | 12/32 | In Progress|  |
 
 ---
 *Roadmap created: 2026-09-11*

@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: 13
 current_phase_name: App nativo iOS e Android por tenant (white-label)
-current_plan: 12
+current_plan: 13
 status: executing
-stopped_at: Completed 13-13-PLAN.md
-last_updated: "2026-11-05T16:31:18.876Z"
+stopped_at: Completed 13-14-PLAN.md
+last_updated: "2026-11-05T16:57:50.219Z"
 last_activity: 2026-11-05
 last_activity_desc: Phase 13 execution started
-state_head: 9641423f627fb6f65adbfd8c5035b8817ae13243
+state_head: 60e87e50448b86414d87a377b3bf8a2c49f654ac
 progress:
-  total_phases: 28
+  total_phases: 29
   completed_phases: 0
   total_plans: 344
-  completed_plans: 314
+  completed_plans: 315
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
-Current Plan: 12
+Current Plan: 13
 Total Plans in Phase: 32
-Plan: 12 of 32
+Plan: 13 of 32
 Status: Ready to execute
 Last activity: 2026-11-05 — Phase 13 execution started
 
@@ -353,6 +353,7 @@ Progress: [███████████████████░] 160/162
 | Phase 13 P08 | 40min | 3 tasks | 10 files |
 | Phase 13 P29 | 35min | 3 tasks | 23 files |
 | Phase 13 P13 | 22min | 3 tasks | 19 files |
+| Phase 13 P14 | 24 min | 3 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -1111,6 +1112,10 @@ Recent decisions affecting current work:
 - [Phase 13]: 13-08: content_report_resolve answers a missing report with RP002 (RP003 stays unused) and returns subject and author for plan 14's same-transaction removal; member_blocks is keyed (tenant_id, blocker, blocked)
 - [Phase 13]: 13-29: platform:app-release is dispatch/prepare/publish/cleanup; a dry run persists nothing and drops mask lines, and mask lines reach stdout only on a GitHub runner; the generated keystore and certificate are sealed under <rowId>:<kind> and read back before use; a release gate is held credentials plus the account ticks, not the links row; the build number is the highest of both stores plus one and moves only on publish
 - [Phase 13]: 13-13: the identity mirror (public.users) is scrubbed once every membership of the user is anonymised and the Auth account is soft-deleted only when no other live membership remains; the cancel path lives on the tenant-host branch of requireAuth; the repository had no request limiter so an in-process one (5 per 15 minutes, per member and address) was added with RATE_LIMITED
+- [Phase 13]: 13-14: block_author runs in withAdminTx (the admin block writes memberships, which the tenant lane refuses) with the report's SQL definer called under the caller's claims (asTenantLane); dismiss and remove_content stay in withTenantTx
+- [Phase 13]: 13-14: the feed removal and the Phase 8 block bodies are exported as in-transaction functions; the kernel receives the feed remover injected by the API tier (it never imports a module)
+- [Phase 13]: 13-14: createReport reads the subject through the reporter's own lane first, so an unreadable followers-only or locked item is the same 404 as a missing id (13-08's open design note, tightened)
+- [Phase 13]: 13-14: the blocked-author predicate sits in the shared feedPage (main, Explorar, community, Reels), the post detail, comment roots, replies and thread; the social service has no content read and is untouched
 
 ### Pending Todos
 
@@ -1221,6 +1226,7 @@ None yet.
 - Phase 09.4 inserted after Phase 09.3: Projeto do tenant no Supabase do cliente: token com escopo por projeto (decided with Igor 2026-10-27; numbered 09.4 by hand, STATE stays on 09.2 plan 25)
 - Phase 12 added: Formulário de perfil do tenant: admin-built profile form (short/long text, dropdown, multiple choice, radio, more types) answered at sign-up, by members without a completed profile and again by members who had completed it before the form existed; requested by Igor 2026-10-29, no dependency on 10-11, STATE stays on 09.4
 - Phase 13 added: App nativo iOS e Android por tenant (white-label): requested by Igor 2026-11-03 after a codebase assessment; decided one app per tenant, everything (member area and tenant admin), purchases keep the `checkoutUrl` redirect, UI is the web's own adapted; additive, the web, the PWA and the API stay as they are; discussed 2026-11-03 (13-CONTEXT.md D-600..D-615: two stages, shell first; tenant-owned store accounts; delete account with a 14-day grace; links open the app; a purchase switch per store), not planned yet, STATE stays on 09.4
+- Phase 12.1 inserted after Phase 12: Perguntas condicionais e etapas no formulário de perfil (pedido do time, 2026-11-05; reverte D-582)
 
 ## Deferred Items
 
@@ -1232,6 +1238,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T16:31:18.614Z
-Stopped at: Completed 13-13-PLAN.md
+Last session: 2026-11-05T16:57:49.938Z
+Stopped at: Completed 13-14-PLAN.md
 Resume file: None
