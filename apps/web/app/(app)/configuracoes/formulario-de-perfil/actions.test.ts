@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { adminQuestion, uuid } from '@/lib/profile-form/test-fixtures';
+import { adminQuestion, adminStep, uuid } from '@/lib/profile-form/test-fixtures';
 
 /**
  * 12-15 — the builder's server actions (D-582; T-12-33, T-12-34). The API boundary is stubbed. Asserted:
@@ -20,10 +20,14 @@ vi.mock('next/navigation', () => ({
 const {
   archiveQuestionAction,
   createQuestionAction,
+  createStepAction,
   deleteQuestionAction,
+  deleteStepAction,
   reactivateQuestionAction,
   readImpactAction,
+  reorderLayoutAction,
   reorderQuestionsAction,
+  renameStepAction,
   replaceQuestionAction,
   updateQuestionAction,
 } = await import('./actions');
@@ -547,5 +551,242 @@ describe('archiveQuestionAction and deleteQuestionAction (12-16, D-588)', () => 
     expect(mocks.apiFetch).not.toHaveBeenCalled();
     mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
     await expect(archiveQuestionAction(id)).rejects.toThrow(/^REDIRECT /);
+  });
+});
+
+// ── 12.1-16: the steps and the layout reorder ──────────────────────────────────────────────────────
+
+const STEP = adminStep({ title: 'Sobre a sua clínica', revision: 3 });
+
+describe('reorderLayoutAction (D-623, D-627)', () => {
+  const layout = {
+    steps: [
+      { id: uuid(801), questionIds: [uuid(1), uuid(2)] },
+      { id: uuid(802), questionIds: [uuid(3)] },
+    ],
+  };
+
+  it('PUTs the whole layout body to /v1/profile_form/order', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { questions: [] }));
+    expect(await reorderLayoutAction(layout)).toEqual({ ok: true });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/v1/profile_form/order');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toEqual(layout);
+  });
+
+  it('accepts a step with no question and never leaves the server tier with a malformed layout', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { questions: [] }));
+    expect(await reorderLayoutAction({ steps: [{ id: uuid(801), questionIds: [] }] })).toEqual({
+      ok: true,
+    });
+    mocks.apiFetch.mockClear();
+    expect(await reorderLayoutAction({ steps: [] })).toEqual({ ok: false, code: 'failed' });
+    expect(
+      await reorderLayoutAction({
+        steps: [
+          { id: uuid(801), questionIds: [uuid(1)] },
+          { id: uuid(802), questionIds: [uuid(1)] },
+        ],
+      }),
+    ).toEqual({ ok: false, code: 'failed' });
+    expect(await reorderLayoutAction({ steps: [{ id: 'x', questionIds: [] }] })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('maps the closed vocabulary: module off, forbidden, order_mismatch', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(refusal(404, 'MODULE_DISABLED'));
+    expect(await reorderLayoutAction(layout)).toEqual({ ok: false, code: 'moduleOff' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(403, 'FORBIDDEN'));
+    expect(await reorderLayoutAction(layout)).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValueOnce(
+      refusal(409, 'CONFLICT', { profileForm: 'order_mismatch' }),
+    );
+    expect(await reorderLayoutAction(layout)).toEqual({ ok: false, code: 'mismatch' });
+  });
+
+  it('carries the question and the opener of a coded condition_order 409', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', {
+        profileForm: 'condition_order',
+        questionId: uuid(3),
+        openerId: uuid(1),
+      }),
+    );
+    expect(await reorderLayoutAction(layout)).toEqual({
+      ok: false,
+      code: 'condition_order',
+      questionId: uuid(3),
+      openerId: uuid(1),
+    });
+  });
+
+  it('is a failure, not a throw, for anything else, and navigates on a session refusal', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(refusal(500, 'INTERNAL'));
+    expect(await reorderLayoutAction(layout)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockRejectedValueOnce(new Error('network'));
+    expect(await reorderLayoutAction(layout)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(401, 'UNAUTHENTICATED'));
+    await expect(reorderLayoutAction(layout)).rejects.toThrow(/REDIRECT/);
+    expect(mocks.redirect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createStepAction (D-627, D-633)', () => {
+  it('POSTs the title to /v1/profile_form/steps and parses the step', async () => {
+    mocks.apiFetch.mockResolvedValue(json(201, STEP));
+    expect(await createStepAction({ title: '  Sobre a sua clínica ' })).toEqual({
+      ok: true,
+      step: STEP,
+    });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/v1/profile_form/steps');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ title: 'Sobre a sua clínica' });
+  });
+
+  it('never leaves the server tier with an empty or a too long title', async () => {
+    expect(await createStepAction({ title: '   ' })).toEqual({
+      ok: false,
+      code: 'invalid',
+      issue: 'required',
+    });
+    expect(await createStepAction({ title: 'x'.repeat(61) })).toEqual({
+      ok: false,
+      code: 'invalid',
+      issue: 'too_long',
+    });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('maps 409 limit_reached, 400 issues, 403 and 404 module off', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      refusal(409, 'CONFLICT', { profileForm: 'limit_reached' }),
+    );
+    expect(await createStepAction({ title: 'Contato' })).toEqual({
+      ok: false,
+      code: 'limit_reached',
+    });
+    mocks.apiFetch.mockResolvedValueOnce(
+      refusal(400, 'VALIDATION_FAILED', { profileForm: 'too_long' }),
+    );
+    expect(await createStepAction({ title: 'Contato' })).toEqual({
+      ok: false,
+      code: 'invalid',
+      issue: 'too_long',
+    });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(403, 'FORBIDDEN'));
+    expect(await createStepAction({ title: 'Contato' })).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(404, 'MODULE_DISABLED'));
+    expect(await createStepAction({ title: 'Contato' })).toEqual({ ok: false, code: 'moduleOff' });
+  });
+
+  it('is a failure for a body that breaks the contract, a 500 and a thrown request', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(json(201, { id: 'x' }));
+    expect(await createStepAction({ title: 'Contato' })).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(500, 'INTERNAL'));
+    expect(await createStepAction({ title: 'Contato' })).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockRejectedValueOnce(new Error('network'));
+    expect(await createStepAction({ title: 'Contato' })).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('navigates on a lost session OUTSIDE the request handling', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(createStepAction({ title: 'Contato' })).rejects.toThrow(/REDIRECT/);
+  });
+});
+
+describe('renameStepAction (D-627)', () => {
+  it('PATCHes the title with the revision the admin read', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { ...STEP, revision: 4, title: 'Rotina' }));
+    const result = await renameStepAction({ id: STEP.id, revision: 3, title: 'Rotina' });
+    expect(result).toMatchObject({ ok: true, step: { title: 'Rotina', revision: 4 } });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/steps/${STEP.id}`);
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ revision: 3, title: 'Rotina' });
+  });
+
+  it('maps a stale revision to its own code, and a missing step to gone', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      refusal(409, 'CONFLICT', { profileForm: 'stale_revision' }),
+    );
+    expect(await renameStepAction({ id: STEP.id, revision: 3, title: 'Rotina' })).toEqual({
+      ok: false,
+      code: 'stale_revision',
+    });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(404, 'NOT_FOUND'));
+    expect(await renameStepAction({ id: STEP.id, revision: 3, title: 'Rotina' })).toEqual({
+      ok: false,
+      code: 'gone',
+    });
+  });
+
+  it('refuses a malformed id or title before any request', async () => {
+    expect(await renameStepAction({ id: 'nope', revision: 3, title: 'Rotina' })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    expect(await renameStepAction({ id: STEP.id, revision: 0, title: 'Rotina' })).toMatchObject({
+      ok: false,
+      code: 'invalid',
+    });
+    expect(await renameStepAction({ id: STEP.id, revision: 3, title: '' })).toEqual({
+      ok: false,
+      code: 'invalid',
+      issue: 'required',
+    });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('deleteStepAction (D-627)', () => {
+  it('DELETEs the step', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { deleted: true }));
+    expect(await deleteStepAction(STEP.id)).toEqual({ ok: true });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/steps/${STEP.id}`);
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('maps step_not_empty and last_step to their own codes: a step with questions is never deleted', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      refusal(409, 'CONFLICT', { profileForm: 'step_not_empty' }),
+    );
+    expect(await deleteStepAction(STEP.id)).toEqual({ ok: false, code: 'step_not_empty' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(409, 'CONFLICT', { profileForm: 'last_step' }));
+    expect(await deleteStepAction(STEP.id)).toEqual({ ok: false, code: 'last_step' });
+  });
+
+  it('maps a step that is gone, a lost permission and a module turned off', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(refusal(404, 'NOT_FOUND'));
+    expect(await deleteStepAction(STEP.id)).toEqual({ ok: false, code: 'gone' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(403, 'FORBIDDEN'));
+    expect(await deleteStepAction(STEP.id)).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(404, 'MODULE_DISABLED'));
+    expect(await deleteStepAction(STEP.id)).toEqual({ ok: false, code: 'moduleOff' });
+  });
+
+  it('refuses a malformed id, a body that breaks the contract and a thrown request', async () => {
+    expect(await deleteStepAction('nope')).toEqual({ ok: false, code: 'failed' });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    mocks.apiFetch.mockResolvedValueOnce(json(200, { deleted: false }));
+    expect(await deleteStepAction(STEP.id)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockRejectedValueOnce(new Error('network'));
+    expect(await deleteStepAction(STEP.id)).toEqual({ ok: false, code: 'failed' });
+  });
+});
+
+describe('logging (T-12.1-12)', () => {
+  it('logs only a status and a code for a refused step write, never the title', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.apiFetch.mockResolvedValue(refusal(500, 'INTERNAL'));
+    await createStepAction({ title: 'Titulo secreto da etapa' });
+    for (const call of spy.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain('Titulo secreto');
+    }
   });
 });
