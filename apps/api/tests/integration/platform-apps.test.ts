@@ -604,3 +604,133 @@ describe('the App tab writes through the routes (NATIVE-24, D-615, D-617)', () =
     expect((await platform(`/tenants/${id}/app`)).status).toBe(200);
   });
 });
+
+// --- Task 3: the sweep (T-13-16, T-13-17, T-13-18) -------------------------------------------------------------
+
+describe('SECURITY GATE: no secret in any response, header, log line or plain column (UI-D-628)', () => {
+  it('every route, saving or refusing, shows none of the sentinel, its key body, its ends, the Key ID, the issuer or the service-account address', async () => {
+    const id = await freshTenant('sweep', `pa-sweep-${RUN}.cliente.test`);
+    const p8 = ecPem();
+    const rsa = rsaPem();
+    const sweepKeyId = `SW${RUN.toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(-8)
+      .padStart(8, '0')}`;
+    const sweepIssuer = '5e17e1a1-bbbb-4ccc-8ddd-0123456789ab';
+    const serviceEmail = `sweep-${RUN}@sentinel-sweep.iam.gserviceaccount.com`;
+    const serviceJson = JSON.stringify({
+      type: 'service_account',
+      project_id: 'sentinel-sweep',
+      client_email: serviceEmail,
+      private_key: rsa,
+    });
+    const sentinels = [
+      ...fragmentsOf(p8, [sweepKeyId, sweepIssuer]),
+      ...fragmentsOf(rsa, [serviceEmail]),
+      serviceJson,
+    ];
+    const hostile = bodyOf(p8).slice(0, 30);
+
+    const seen: string[] = [];
+    const call = async (path: string, init: Parameters<typeof platform>[1] = {}) => {
+      const res = await platform(`/tenants/${id}${path}`, init);
+      seen.push(await res.clone().text(), JSON.stringify([...res.headers]));
+      return res;
+    };
+    const put = (path: string, body: unknown) => call(path, { method: 'PUT', body });
+
+    // The read, before and after anything is held.
+    expect((await call('/app')).status).toBe(200);
+    // The three credentials, saved.
+    expect(
+      (await put('/app/credentials/asc_key', { issuerId: sweepIssuer, keyId: sweepKeyId, p8 }))
+        .status,
+    ).toBe(200);
+    expect((await put('/app/credentials/apns_key', { keyId: sweepKeyId, p8 })).status).toBe(200);
+    expect((await put('/app/credentials/play_service_account', { json: serviceJson })).status).toBe(
+      200,
+    );
+    // The same credentials, refused for the wrong kind of file, a mismatch, a bad issuer and a wrong body.
+    expect((await put('/app/credentials/apns_key', { keyId: sweepKeyId, p8: rsa })).status).toBe(
+      400,
+    );
+    expect(
+      (await put('/app/credentials/apns_key', { keyId: sweepKeyId, p8, fileKeyId: 'ZZZZZ99999' }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await put('/app/credentials/asc_key', { issuerId: hostile, keyId: sweepKeyId, p8 })).status,
+    ).toBe(400);
+    expect(
+      (await put('/app/credentials/play_service_account', { json: `${serviceJson}x` })).status,
+    ).toBe(400);
+    expect(
+      (await put('/app/credentials/play_service_account', { keyId: sweepKeyId, p8 })).status,
+    ).toBe(400);
+    expect((await put('/app/credentials/not-a-kind', { keyId: sweepKeyId, p8 })).status).toBe(400);
+    // Every other route, fed the sentinel in each field and refused.
+    expect((await put('/app/ids', { bundleId: hostile, applicationId: sweepKeyId })).status).toBe(
+      400,
+    );
+    expect(
+      (await put('/app/links', { teamId: sweepKeyId.slice(0, 9), sha256: hostile })).status,
+    ).toBe(400);
+    expect((await put('/app/purchase', { platform: hostile, visible: true })).status).toBe(400);
+    expect((await put('/app/privacy', { url: `http://${hostile}` })).status).toBe(400);
+    expect((await put('/app/checklist/not-a-step', { done: true })).status).toBe(400);
+    expect((await put('/app/checklist/submitted', { done: hostile })).status).toBe(400);
+    // The credential never travels in a URL: the path carries only the fixed kind and step names, so the
+    // generic access log (which records the path) cannot see a value.
+    // And the same writes accepted, with plain values.
+    expect(
+      (await put('/app/ids', { bundleId: 'br.com.sweep.app', applicationId: 'br.com.sweep.app' }))
+        .status,
+    ).toBe(200);
+    expect((await put('/app/links', { teamId: 'ABCDE12345', sha256: FINGERPRINT })).status).toBe(
+      200,
+    );
+    expect((await put('/app/purchase', { platform: 'android', visible: true })).status).toBe(200);
+    expect((await put('/app/privacy', { url: 'https://cliente.com.br/privacidade' })).status).toBe(
+      200,
+    );
+    expect((await put('/app/checklist/appleAccount', { done: true })).status).toBe(200);
+    // The read again, with the three held.
+    const final = await call('/app');
+    const tab = appTabSchema.parse(await final.json());
+    expect(tab.credentials.every((credential) => credential.held)).toBe(true);
+
+    const apps = await adminSql`select * from platform.tenant_apps where tenant_id = ${id}::uuid`;
+    const creds = await adminSql<{ sealed: string }[]>`
+      select * from platform.tenant_app_credentials where tenant_id = ${id}::uuid`;
+    expect(creds).toHaveLength(3);
+    // Every column of both tables except `sealed`, every captured log line at every level, every body and header.
+    const plainColumns = JSON.stringify([apps, creds.map(({ sealed: _sealed, ...rest }) => rest)]);
+    const everything = [...seen, JSON.stringify(captured.lines), plainColumns].join('\n');
+    for (const sentinel of sentinels)
+      expect(everything, sentinel.slice(0, 12)).not.toContain(sentinel);
+    // The sealed column holds sealed strings, never a fragment of what was sealed.
+    for (const { sealed } of creds) {
+      expect(sealed.startsWith('v1:')).toBe(true);
+      for (const sentinel of sentinels) expect(sealed).not.toContain(sentinel);
+    }
+    // Logs carry ids and the kind only.
+    const events = captured.lines.filter((line) => line.includes('platform.apps.credential'));
+    expect(events.length).toBeGreaterThanOrEqual(3);
+    expect(events.join('\n')).toContain('apns_key');
+  });
+
+  it('the sub-router never unseals, whatever it is asked', async () => {
+    unsealed.calls = 0;
+    const id = await freshTenant('noopen', `pa-noopen-${RUN}.cliente.test`);
+    await platform(`/tenants/${id}/app/credentials/apns_key`, {
+      method: 'PUT',
+      body: { keyId: KEY_ID, p8: ecPem() },
+    });
+    await platform(`/tenants/${id}/app`);
+    await platform(`/tenants/${id}/app/credentials/apns_key`, {
+      method: 'PUT',
+      body: { keyId: KEY_ID, p8: rsaPem() },
+    });
+    expect(unsealed.calls).toBe(0);
+  });
+});
