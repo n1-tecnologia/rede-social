@@ -1,13 +1,22 @@
 import {
+  APP_CHECKLIST_MANUAL_KEYS,
+  type AppChecklistManualKey,
   type AppStateInput,
   type AppTab,
+  appIdsBodySchema,
+  appLinksBodySchema,
   appState,
   checklistAutoRows,
+  checklistBodySchema,
   checklistCounts,
   deriveAppIds,
   deriveIconLabel,
   deriveStoreName,
   linkVerdict,
+  type NativePlatform,
+  normalizeFingerprint,
+  privacyBodySchema,
+  purchaseBodySchema,
 } from '@rede-social/contracts/native';
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { tenantApps } from '../../db/central';
@@ -285,36 +294,138 @@ export async function readAppTab(tenantId: string, deps: AppDeps = {}): Promise<
   });
 }
 
-// RED stubs (13-09 Task 2): inert so the failing tests can load. Replaced in the GREEN commit.
+// --- The writes (13-09 Task 2) --------------------------------------------------------------------------------
+
+const refuse = (): never => {
+  throw new ApiError(400, 'VALIDATION_FAILED');
+};
+
+/**
+ * The in-process cache of the purchase switches that plan 10's `readPurchaseSwitches` fills (a bounded 15-second
+ * cache). It lives here, beside the writer that must clear it, so the switch route and the reader share one
+ * door. Nothing in this module fills it.
+ */
 export const purchaseSwitchCache = new Map<
   string,
   { ios: boolean; android: boolean; at: number }
 >();
-export function invalidatePurchaseSwitch(_tenantId: string): void {}
+
+/**
+ * Drops the cached switches of one tenant, so the instance that wrote sees the change at once and the others
+ * within the cache's TTL (PU-5). Called after every switch write.
+ */
+export function invalidatePurchaseSwitch(tenantId: string): void {
+  purchaseSwitchCache.delete(tenantId);
+}
+
+/**
+ * Saves the two store ids (D-615). Refused with 409 `IDS_LOCKED` once the app is published (`ids_locked_at`),
+ * read INSIDE the write's transaction so a concurrent publication cannot slip past. When the app was already
+ * marked published before both ids existed, the lock engages as soon as the ids do.
+ */
 export async function setAppIds(
-  _tenantId: string,
-  _input: { bundleId: string; applicationId: string },
-  _deps: AppDeps = {},
-): Promise<void> {}
+  tenantId: string,
+  input: { bundleId: string; applicationId: string },
+  deps: AppDeps = {},
+): Promise<void> {
+  const parsed = appIdsBodySchema.safeParse(input);
+  if (!parsed.success) return refuse();
+  const { bundleId, applicationId } = parsed.data;
+  await (deps.app ?? pgAppStore).write(tenantId, (current) => {
+    if (current.idsLockedAt !== null) throw new ApiError(409, 'IDS_LOCKED');
+    return {
+      bundleId,
+      applicationId,
+      ...(current.manualPublished ? { idsLockedAt: new Date() } : {}),
+    };
+  });
+}
+
+/**
+ * Saves the Apple Team ID (stored upper-case, the table's check) and the Android signing fingerprint (stored as
+ * 32 upper-case colon-separated pairs). `null` clears the value. Both are always written, so the caller sends
+ * the whole pair as the screen holds it.
+ */
 export async function setAppLinks(
-  _tenantId: string,
-  _input: { teamId: string | null; sha256: string | null },
-  _deps: AppDeps = {},
-): Promise<void> {}
+  tenantId: string,
+  input: { teamId: string | null; sha256: string | null },
+  deps: AppDeps = {},
+): Promise<void> {
+  const parsed = appLinksBodySchema.safeParse(input);
+  if (!parsed.success) return refuse();
+  const teamId = parsed.data.teamId === null ? null : parsed.data.teamId.toUpperCase();
+  let androidSha256: string[] = [];
+  if (parsed.data.sha256 !== null) {
+    const fingerprint = normalizeFingerprint(parsed.data.sha256);
+    if (fingerprint === null) return refuse();
+    androidSha256 = [fingerprint];
+  }
+  await (deps.app ?? pgAppStore).write(tenantId, () => ({ teamId, androidSha256 }));
+  // The by-host answer carries the links; nothing is cached here, so there is nothing else to drop.
+}
+
+/**
+ * Flips ONE store's purchase switch (D-617). The row is created by the first write with the OTHER switch off,
+ * and nothing in this module ever sets a switch on by itself.
+ */
 export async function setPurchaseSwitch(
-  _tenantId: string,
-  _platform: 'ios' | 'android',
-  _visible: boolean,
-  _deps: AppDeps = {},
-): Promise<void> {}
+  tenantId: string,
+  platform: NativePlatform,
+  visible: boolean,
+  deps: AppDeps = {},
+): Promise<void> {
+  const parsed = purchaseBodySchema.safeParse({ platform, visible });
+  if (!parsed.success) return refuse();
+  await (deps.app ?? pgAppStore).write(tenantId, () =>
+    parsed.data.platform === 'ios'
+      ? { purchaseIos: parsed.data.visible }
+      : { purchaseAndroid: parsed.data.visible },
+  );
+  invalidatePurchaseSwitch(tenantId);
+}
+
+/** Saves the tenant's privacy-policy URL: https only, at most 2048 characters. */
 export async function setPrivacyUrl(
-  _tenantId: string,
-  _url: string,
-  _deps: AppDeps = {},
-): Promise<void> {}
+  tenantId: string,
+  url: string,
+  deps: AppDeps = {},
+): Promise<void> {
+  const parsed = privacyBodySchema.safeParse({ url });
+  if (!parsed.success) return refuse();
+  await (deps.app ?? pgAppStore).write(tenantId, () => ({ privacyUrl: parsed.data.url }));
+}
+
+const MANUAL_COLUMN = {
+  appleAccount: 'manualAppleAccount',
+  playAccount: 'manualPlayAccount',
+  screenshots: 'manualScreenshots',
+  submitted: 'manualSubmitted',
+  published: 'manualPublished',
+} as const satisfies Record<AppChecklistManualKey, keyof AppPatch>;
+
+/**
+ * Ticks or un-ticks one of the five manual checklist rows (UI-D-627). `published` also drives the id lock
+ * (planner assumption A-13-02): ticking it sets `ids_locked_at`, but only when both ids are stored (otherwise the
+ * flag is set and the lock engages with `setAppIds`); un-ticking it clears the lock, so an operator who ticked
+ * it by mistake can undo it. A real publication is the operator's responsibility.
+ */
 export async function setChecklistFlag(
-  _tenantId: string,
-  _key: string,
-  _done: boolean,
-  _deps: AppDeps = {},
-): Promise<void> {}
+  tenantId: string,
+  key: string,
+  done: boolean,
+  deps: AppDeps = {},
+): Promise<void> {
+  const body = checklistBodySchema.safeParse({ done });
+  const manualKey = APP_CHECKLIST_MANUAL_KEYS.find((candidate) => candidate === key);
+  if (!body.success || manualKey === undefined) return refuse();
+  await (deps.app ?? pgAppStore).write(tenantId, (current) => {
+    const patch: AppPatch = { [MANUAL_COLUMN[manualKey]]: done };
+    if (manualKey === 'published') {
+      patch.idsLockedAt = done
+        ? (current.idsLockedAt ??
+          (current.bundleId !== null && current.applicationId !== null ? new Date() : null))
+        : null;
+    }
+    return patch;
+  });
+}

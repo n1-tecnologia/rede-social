@@ -131,6 +131,7 @@ let tenantId = '';
 
 async function cleanup(): Promise<void> {
   await adminSql`delete from public.tenants where slug like 'pa-%'`;
+  await adminSql`delete from platform.projects where ref like 'pa-mv-%'`;
 }
 
 beforeAll(async () => {
@@ -376,5 +377,230 @@ describe('tracer: an Apple push key is saved write-only and read back as held (N
     for (const text of [wrongKindText, unknownKindText, extraText]) {
       for (const sentinel of fragmentsOf(pem, [KEY_ID])) expect(text).not.toContain(sentinel);
     }
+  });
+});
+
+// --- Task 2: the remaining writes ----------------------------------------------------------------------------
+
+type AppRowSql = {
+  bundle_id: string | null;
+  application_id: string | null;
+  ids_locked_at: string | null;
+  team_id: string | null;
+  android_sha256: string[];
+  purchase_ios: boolean;
+  purchase_android: boolean;
+  privacy_url: string | null;
+  manual_published: boolean;
+  manual_screenshots: boolean;
+};
+const appRowOf = async (id: string) =>
+  (
+    await adminSql<AppRowSql[]>`select * from platform.tenant_apps where tenant_id = ${id}::uuid`
+  )[0];
+
+const FINGERPRINT = Array.from({ length: 32 }, (_, i) => (i * 7 + 3).toString(16).padStart(2, '0'))
+  .join(':')
+  .toUpperCase();
+
+async function freshTenant(tag: string, host: string | null): Promise<string> {
+  const slug = `pa-${tag}-${RUN}`.slice(0, 40);
+  const [tenant] = await adminSql<{ id: string }[]>`
+    insert into public.tenants (slug, display_name) values (${slug}, ${`Teste ${tag}`})
+    returning id::text as id`;
+  const id = tenant?.id ?? '';
+  if (host) {
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at, verification_status)
+      values (${id}::uuid, ${host}, true, now(), 'verified')`;
+  }
+  return id;
+}
+
+describe('the App tab writes through the routes (NATIVE-24, D-615, D-617)', () => {
+  it('a tenant with no app reads the empty form: derived ids, state none, both switches off, no row', async () => {
+    const id = await freshTenant('empty', `pa-empty-${RUN}.cliente.test`);
+    const res = await platform(`/tenants/${id}/app`);
+    expect(res.status).toBe(200);
+    const tab = appTabSchema.parse(await res.json());
+    expect(tab.appState).toBe('none');
+    expect(tab.purchase).toEqual({ ios: false, android: false });
+    expect(tab.identity.idsDefault).toBe(true);
+    expect(tab.identity.bundleId).toBe(`test.cliente.pa-empty-${RUN}`);
+    expect(tab.checklist).toMatchObject({ done: 0, total: 10 });
+    expect(await appRowOf(id)).toBeUndefined();
+  });
+
+  it('the first switch write creates the row with the OTHER switch off; the same write twice changes nothing; the read follows', async () => {
+    const id = await freshTenant('switch', `pa-switch-${RUN}.cliente.test`);
+    const put = (platformName: string, visible: boolean) =>
+      platform(`/tenants/${id}/app/purchase`, {
+        method: 'PUT',
+        body: { platform: platformName, visible },
+      });
+
+    expect((await put('ios', true)).status).toBe(200);
+    expect(await appRowOf(id)).toMatchObject({ purchase_ios: true, purchase_android: false });
+    expect((await put('ios', true)).status).toBe(200);
+    expect(await appRowOf(id)).toMatchObject({ purchase_ios: true, purchase_android: false });
+    expect(
+      appTabSchema.parse(await (await platform(`/tenants/${id}/app`)).json()).purchase,
+    ).toEqual({ ios: true, android: false });
+
+    expect((await put('ios', false)).status).toBe(200);
+    expect(await appRowOf(id)).toMatchObject({ purchase_ios: false, purchase_android: false });
+    expect((await put('windows', true)).status).toBe(400);
+  });
+
+  it('ids, links, privacy and the manual steps are saved, read back, validated, and the ids lock on publication', async () => {
+    const ids = { bundleId: 'br.com.cliente.app', applicationId: 'br.com.cliente.app' };
+    expect(
+      (await platform(`/tenants/${tenantId}/app/ids`, { method: 'PUT', body: ids })).status,
+    ).toBe(200);
+    const badIds = await platform(`/tenants/${tenantId}/app/ids`, {
+      method: 'PUT',
+      body: { bundleId: 'semponto', applicationId: 'br.com.cliente.app' },
+    });
+    expect(badIds.status).toBe(400);
+    expect(await code(badIds)).toBe('VALIDATION_FAILED');
+
+    const links = await platform(`/tenants/${tenantId}/app/links`, {
+      method: 'PUT',
+      body: { teamId: 'abcde12345', sha256: FINGERPRINT.replaceAll(':', '').toLowerCase() },
+    });
+    expect(links.status).toBe(200);
+    expect(await appRowOf(tenantId)).toMatchObject({
+      team_id: 'ABCDE12345',
+      android_sha256: [FINGERPRINT],
+    });
+    expect(
+      (
+        await platform(`/tenants/${tenantId}/app/links`, {
+          method: 'PUT',
+          body: { teamId: 'ABCDE1234', sha256: null },
+        })
+      ).status,
+    ).toBe(400);
+
+    expect(
+      (
+        await platform(`/tenants/${tenantId}/app/privacy`, {
+          method: 'PUT',
+          body: { url: 'https://cliente.com.br/privacidade' },
+        })
+      ).status,
+    ).toBe(200);
+    for (const url of [
+      'http://cliente.com.br/p',
+      'javascript:alert(1)',
+      `https://a.br/${'a'.repeat(2045)}`,
+    ]) {
+      const bad = await platform(`/tenants/${tenantId}/app/privacy`, {
+        method: 'PUT',
+        body: { url },
+      });
+      expect(bad.status, url.slice(0, 20)).toBe(400);
+    }
+
+    const shot = await platform(`/tenants/${tenantId}/app/checklist/screenshots`, {
+      method: 'PUT',
+      body: { done: true },
+    });
+    expect(shot.status).toBe(200);
+    expect(
+      (
+        await platform(`/tenants/${tenantId}/app/checklist/storeKeys`, {
+          method: 'PUT',
+          body: { done: true },
+        })
+      ).status,
+    ).toBe(400);
+
+    const tab = appTabSchema.parse(await (await platform(`/tenants/${tenantId}/app`)).json());
+    expect(tab.identity).toMatchObject({ ...ids, idsDefault: false, idsLocked: false });
+    expect(tab.links.verdict).toEqual({ ios: 'live', android: 'live' });
+    expect(tab.listing.privacyUrl).toBe('https://cliente.com.br/privacidade');
+    expect(tab.checklist.manual.screenshots).toBe(true);
+    expect(tab.appState).toBe('preparing');
+
+    // Publication locks the ids (409 IDS_LOCKED); un-ticking unlocks.
+    const publish = (done: boolean) =>
+      platform(`/tenants/${tenantId}/app/checklist/published`, { method: 'PUT', body: { done } });
+    expect((await publish(true)).status).toBe(200);
+    expect((await appRowOf(tenantId))?.ids_locked_at).not.toBeNull();
+    const locked = await platform(`/tenants/${tenantId}/app/ids`, {
+      method: 'PUT',
+      body: { bundleId: 'br.com.outro.app', applicationId: 'br.com.outro.app' },
+    });
+    expect(locked.status).toBe(409);
+    expect(await code(locked)).toBe('IDS_LOCKED');
+    expect((await appRowOf(tenantId))?.bundle_id).toBe('br.com.cliente.app');
+    expect((await publish(false)).status).toBe(200);
+    expect((await appRowOf(tenantId))?.ids_locked_at).toBeNull();
+    expect(
+      (
+        await platform(`/tenants/${tenantId}/app/ids`, {
+          method: 'PUT',
+          body: { bundleId: 'br.com.outro.app', applicationId: 'br.com.outro.app' },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  it('every write route refuses a tenant admin, a member and an anonymous caller, and 404s an unknown tenant', async () => {
+    const unknown = '00000000-0000-4000-8000-000000000000';
+    const writes: [string, unknown][] = [
+      [`/app/ids`, { bundleId: 'br.com.a.b', applicationId: 'br.com.a.b' }],
+      [`/app/links`, { teamId: 'ABCDE12345', sha256: null }],
+      [`/app/purchase`, { platform: 'ios', visible: true }],
+      [`/app/privacy`, { url: 'https://a.com.br/p' }],
+      [`/app/checklist/submitted`, { done: true }],
+    ];
+    const before = await appRowOf(tenantId);
+    for (const [path, body] of writes) {
+      for (const [token, status] of [
+        [tenantAdmin, 403],
+        [tenantMember, 403],
+        [null, 401],
+      ] as const) {
+        const res = await platform(`/tenants/${tenantId}${path}`, { method: 'PUT', token, body });
+        expect(res.status, `${path} ${token ? 'token' : 'anonymous'}`).toBe(status);
+      }
+      const missing = await platform(`/tenants/${unknown}${path}`, { method: 'PUT', body });
+      expect(missing.status, `${path} unknown`).toBe(404);
+      expect(await code(missing)).toBe('NOT_FOUND');
+    }
+    expect(await appRowOf(tenantId)).toEqual(before);
+    expect(
+      await adminSql`select 1 from platform.tenant_apps where tenant_id = ${unknown}::uuid`,
+    ).toHaveLength(0);
+  });
+
+  it('a tenant being moved is read-only on every write route (TENANT_MOVING), and its read still answers', async () => {
+    const id = await freshTenant('move', `pa-move-${RUN}.cliente.test`);
+    const [central] = await adminSql<{ id: string }[]>`
+      select id::text as id from platform.projects where is_central`;
+    const [other] = await adminSql<{ id: string }[]>`
+      insert into platform.projects (ref, api_url) values (${`pa-mv-${RUN}`.slice(0, 40)}, '')
+      returning id::text as id`;
+    await adminSql`
+      insert into platform.tenant_moves (tenant_id, from_project_id, to_project_id, state, status_before, actor)
+      values (${id}::uuid, ${central?.id ?? ''}::uuid, ${other?.id ?? ''}::uuid, 'planned', 'active', 'test')`;
+
+    const writes: [string, unknown][] = [
+      [`/app/ids`, { bundleId: 'br.com.a.b', applicationId: 'br.com.a.b' }],
+      [`/app/links`, { teamId: 'ABCDE12345', sha256: null }],
+      [`/app/purchase`, { platform: 'ios', visible: true }],
+      [`/app/privacy`, { url: 'https://a.com.br/p' }],
+      [`/app/checklist/submitted`, { done: true }],
+      [`/app/credentials/apns_key`, { keyId: KEY_ID, p8: ecPem() }],
+    ];
+    for (const [path, body] of writes) {
+      const res = await platform(`/tenants/${id}${path}`, { method: 'PUT', body });
+      expect(res.status, path).toBe(409);
+      expect(await code(res), path).toBe('TENANT_MOVING');
+    }
+    expect(await appRowOf(id)).toBeUndefined();
+    expect((await platform(`/tenants/${id}/app`)).status).toBe(200);
   });
 });

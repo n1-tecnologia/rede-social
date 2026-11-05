@@ -1,19 +1,30 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import { apiErrorEnvelopeSchema } from '@rede-social/contracts';
 import {
+  APP_CHECKLIST_MANUAL_KEYS,
   APP_CREDENTIAL_KINDS,
   type AppCredentialKind,
   apnsKeyBodySchema,
+  appIdsBodySchema,
+  appLinksBodySchema,
   appTabSchema,
   ascKeyBodySchema,
+  checklistBodySchema,
   credentialAnswerSchema,
   playServiceAccountBodySchema,
+  privacyBodySchema,
+  purchaseBodySchema,
 } from '@rede-social/contracts/native';
 import {
   CredentialRefusal,
   readAppTab,
   replaceAppCredential,
   requireTenant,
+  setAppIds,
+  setAppLinks,
+  setChecklistFlag,
+  setPrivacyUrl,
+  setPurchaseSwitch,
 } from '@rede-social/core/server/apps/index';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import type { PlatformEnv } from '@rede-social/core/server/platform/require-super-admin';
@@ -89,6 +100,90 @@ const credentialRoute = createRoute({
   },
 });
 
+const jsonBody = <T extends z.ZodType>(schema: T) => ({
+  body: { content: { 'application/json': { schema } }, required: true as const },
+});
+const okAnswer = (description: string) => ({
+  description,
+  content: { 'application/json': { schema: credentialAnswerSchema } },
+});
+const checklistParams = z.object({ id: z.uuid(), key: z.enum(APP_CHECKLIST_MANUAL_KEYS) });
+
+const idsRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/app/ids',
+  request: { params: idParams, ...jsonBody(appIdsBodySchema) },
+  responses: {
+    200: okAnswer('The iOS bundle id and the Android application id were saved'),
+    400: envelope('VALIDATION_FAILED — a malformed id; nothing was changed'),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope(
+      'IDS_LOCKED — the app is marked published, so the ids cannot change; TENANT_MOVING — the tenant is being moved',
+    ),
+  },
+});
+
+const linksRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/app/links',
+  request: { params: idParams, ...jsonBody(appLinksBodySchema) },
+  responses: {
+    200: okAnswer(
+      'The Apple Team ID and the Android signing fingerprint were saved; null clears one',
+    ),
+    400: envelope(
+      'VALIDATION_FAILED — a Team ID that is not 10 letters or digits, or a malformed fingerprint',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope('TENANT_MOVING — the tenant is being moved'),
+  },
+});
+
+const purchaseRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/app/purchase',
+  request: { params: idParams, ...jsonBody(purchaseBodySchema) },
+  responses: {
+    200: okAnswer("One store's purchase switch was set; the other is untouched"),
+    400: envelope('VALIDATION_FAILED — an unknown platform or a non-boolean'),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope('TENANT_MOVING — the tenant is being moved'),
+  },
+});
+
+const privacyRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/app/privacy',
+  request: { params: idParams, ...jsonBody(privacyBodySchema) },
+  responses: {
+    200: okAnswer('The privacy-policy address was saved'),
+    400: envelope(
+      'VALIDATION_FAILED — an address that is not https or is longer than 2048 characters',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope('TENANT_MOVING — the tenant is being moved'),
+  },
+});
+
+const checklistRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/app/checklist/{key}',
+  request: { params: checklistParams, ...jsonBody(checklistBodySchema) },
+  responses: {
+    200: okAnswer(
+      'The manual step was ticked or un-ticked; `published` also locks or unlocks the ids',
+    ),
+    400: envelope('VALIDATION_FAILED — a key outside the five manual steps'),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+    409: envelope('TENANT_MOVING — the tenant is being moved'),
+  },
+});
+
 const BODY_BY_KIND = {
   asc_key: ascKeyBodySchema,
   apns_key: apnsKeyBodySchema,
@@ -144,6 +239,63 @@ export const appsRoutes = appsRouter
 
     c.get('logger').info(
       { event: 'platform.apps.credential', userId, requestId, tenantId: id, kind },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const }, 200);
+  })
+  .openapi(idsRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    await setAppIds(id, c.req.valid('json'));
+    c.get('logger').info(
+      { event: 'platform.apps.ids', userId, requestId, tenantId: id },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const }, 200);
+  })
+  .openapi(linksRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    await setAppLinks(id, c.req.valid('json'));
+    c.get('logger').info(
+      { event: 'platform.apps.links', userId, requestId, tenantId: id },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const }, 200);
+  })
+  .openapi(purchaseRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    const { platform, visible } = c.req.valid('json');
+    await setPurchaseSwitch(id, platform, visible);
+    c.get('logger').info(
+      { event: 'platform.apps.purchase', userId, requestId, tenantId: id, platform, visible },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const }, 200);
+  })
+  .openapi(privacyRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    await setPrivacyUrl(id, c.req.valid('json').url);
+    c.get('logger').info(
+      { event: 'platform.apps.privacy', userId, requestId, tenantId: id },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true as const }, 200);
+  })
+  .openapi(checklistRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id, key } = c.req.valid('param');
+    const { done } = c.req.valid('json');
+    await setChecklistFlag(id, key, done);
+    c.get('logger').info(
+      { event: 'platform.apps.checklist', userId, requestId, tenantId: id, key, done },
       'platform write',
     );
     c.header('Cache-Control', 'no-store');

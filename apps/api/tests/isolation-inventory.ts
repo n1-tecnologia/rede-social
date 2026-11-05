@@ -151,6 +151,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // 13-09 (D-605, D-615, D-617): the App tab, super_admin only; the store credentials are write-only.
   'GET /v1/platform/tenants/:id/app': { exempt: PLATFORM_LANE },
   'PUT /v1/platform/tenants/:id/app/credentials/:kind': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/app/ids': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/app/links': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/app/purchase': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/app/privacy': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/app/checklist/:key': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/verify': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/restart': { exempt: PLATFORM_LANE },
