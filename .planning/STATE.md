@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.2"
 current_phase_name: Ramos condicionais no formulário de perfil
-current_plan: 6
+current_plan: 7
 status: executing
-stopped_at: "Phase 12.2: 5 of 21 plans done (01,02,03,04,06); paused on two gates for Igor: plan 05 sketch 019 approval (paste approved: true lines) and plan 07 db:reset word (needs >=10 GiB free, now ~5.4); resume with /gsd-execute-phase 12.2"
-last_updated: "2026-11-06T18:17:29.633Z"
+stopped_at: "Phase 12.2: 6 of 21 plans done (01-06); sketch 019 approved provisionally (plan 05 closed); next is plan 07 Task 1, which needs Igor's word for pnpm db:reset && pnpm db:seed and >=10 GiB free (6.1 now); every plan after 07 depends on it; resume with /gsd-execute-phase 12.2"
+last_updated: "2026-11-06T18:54:55.551Z"
 last_activity: 2026-11-06
 last_activity_desc: Phase 12.2 execution started
-state_head: 3537121a2cc85096bf8e392ee20af888ae676794
+state_head: df42c51e6b303f20e3eeae6505ec8148a4703104
 progress:
   total_phases: 30
   completed_phases: 0
   total_plans: 384
-  completed_plans: 340
+  completed_plans: 341
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.2 (Ramos condicionais no formulário de perfil) — EXECUTING
-Current Plan: 6
+Current Plan: 7
 Total Plans in Phase: 21
-Plan: 6 of 21
+Plan: 7 of 21
 Status: Ready to execute
 Last activity: 2026-11-06 — Phase 12.2 execution started
 
@@ -1244,6 +1244,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-06T18:17:22.497Z
-Stopped at: Phase 12.2: 5 of 21 plans done (01,02,03,04,06); paused on two gates for Igor: plan 05 sketch 019 approval (paste approved: true lines) and plan 07 db:reset word (needs >=10 GiB free, now ~5.4); resume with /gsd-execute-phase 12.2
+Last session: 2026-11-06T18:54:55.237Z
+Stopped at: Phase 12.2: 6 of 21 plans done (01-06); sketch 019 approved provisionally (plan 05 closed); next is plan 07 Task 1, which needs Igor's word for pnpm db:reset && pnpm db:seed and >=10 GiB free (6.1 now); every plan after 07 depends on it; resume with /gsd-execute-phase 12.2
 Resume file: .planning/phases/12.2-ramos-condicionais-no-formulario-de-perfil-varias-perguntas/12.2-01-PLAN.md
