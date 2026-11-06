@@ -1656,9 +1656,9 @@ describe('12.2-15 Task 1 (tracer): a branch is a block under its opener, with a 
     expect(document.getElementById(list.getAttribute('aria-labelledby') ?? '')?.textContent).toBe(
       B1_LABEL,
     );
-    const titles = Array.from(list.querySelectorAll(':scope > li > div .line-clamp-3')).map(
-      (el) => el.textContent,
-    );
+    const titles = Array.from(
+      list.querySelectorAll(':scope > li > div:first-child .line-clamp-3'),
+    ).map((el) => el.textContent);
     expect(titles).toEqual(['A clínica tem equipe?', 'Nome da clínica']);
   });
 

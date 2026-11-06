@@ -12,7 +12,6 @@ import {
   ArrowUp,
   ArrowUpDown,
   ChevronRight,
-  CornerDownRight,
   Eye,
   Info,
   Layers,
@@ -22,11 +21,20 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { describeCondition } from '@/lib/profile-form/describe-condition';
+import { type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react';
+import { type LayoutStep, layoutOf, moveUnit } from '@/lib/profile-form/branch-layout';
+import {
+  type BranchRun,
+  buildBranchTree,
+  opensCountOf,
+  type QuestionNode,
+  type StepRoot,
+  stepTree,
+  usableBranch,
+} from '@/lib/profile-form/branch-tree';
 import { typeNameKey } from '@/lib/profile-form/question-types';
 import { type ReorderLayoutResult, reorderLayoutAction, reorderQuestionsAction } from './actions';
-import { conditionOptionsText, openerIndex } from './editor-state';
+import { BranchBlock, useBranchLabeler } from './BranchBlock';
 import { StepWell } from './StepWell';
 
 export interface QuestionListProps {
@@ -65,6 +73,7 @@ export interface QuestionListProps {
 }
 
 const NO_STEPS: AdminStep[] = [];
+const NO_BRANCHES: AdminBranch[] = [];
 
 /**
  * The active questions cut into the steps' groups, each in order. A question of a step the list does not
@@ -87,61 +96,45 @@ function normalize(steps: AdminStep[], items: AdminQuestion[]): AdminQuestion[] 
   return steps.length === 0 ? items : groupByStep(steps, items).flat();
 }
 
+type Direction = 'up' | 'down';
+
 /**
- * D-623 over a candidate order: the first question that would sit at or before the opener of its condition,
- * as the pair (the conditional question, its opener), or `null`. The server enforces the same rule; this
- * check only lets the press say which two QUESTIONS conflict before anything moves.
+ * D-623 over a candidate layout: the first question that would sit at or before the opener of its branch, as
+ * the pair (the question in the branch, its opener), or `null`. The server enforces the same rule; this check
+ * only lets the press say which two QUESTIONS conflict before anything moves.
  */
 function orderViolation(
-  flat: AdminQuestion[],
+  layout: readonly LayoutStep[],
+  questions: ReadonlyMap<string, AdminQuestion>,
+  branchOpener: ReadonlyMap<string, string>,
 ): { dependent: AdminQuestion; opener: AdminQuestion } | null {
-  const index = new Map(flat.map((question, at) => [question.id, at] as const));
-  for (const [at, question] of flat.entries()) {
-    if (question.condition === null) continue;
-    const openerAt = index.get(question.condition.questionId);
+  const flat = layout.flatMap((step) => step.questionIds);
+  const index = new Map(flat.map((id, at) => [id, at] as const));
+  for (const [at, id] of flat.entries()) {
+    const dependent = questions.get(id);
+    const openerId = dependent?.branchId ? branchOpener.get(dependent.branchId) : undefined;
+    if (dependent === undefined || openerId === undefined) continue;
+    const openerAt = index.get(openerId);
     if (openerAt === undefined || openerAt < at) continue;
-    const opener = flat[openerAt];
-    if (opener) return { dependent: question, opener };
+    const opener = questions.get(openerId);
+    if (opener) return { dependent, opener };
   }
   return null;
 }
 
-type Direction = 'up' | 'down';
-
 /**
- * The sentence "Só aparece se “{opener}” for {options}." of every conditional row, by question id (12.1-17, D-621,
- * UI-D-650), built from `describeCondition` and the catalog. A condition that names no option its opener still
- * has gets no sentence rather than half of one.
- */
-function useConditionLines(items: AdminQuestion[]): Map<string, string> {
-  const t = useTranslations('profileForm');
-  const index = openerIndex(items);
-  const words = { yes: t('member.controls.yes'), no: t('member.controls.no') };
-  const lines = new Map<string, string>();
-  for (const question of items) {
-    if (question.condition === null) continue;
-    const description = describeCondition(question.condition, index);
-    if (description === null) continue;
-    const options = conditionOptionsText(description, words);
-    if (options === '') continue;
-    lines.set(question.id, t('admin.row.condition', { opener: description.openerTitle, options }));
-  }
-  return lines;
-}
-
-/**
- * The body every row shares: position, title, the condition sentence, badges and the meta line (UI-D-566,
- * UI-D-650). A row carries at most ONE condition marker, because an opener has no condition (D-622): the
- * "Condicional" pill for a shown question, "Abre N perguntas" for an opener; both are words, never colour.
+ * The body every row shares: position, title, badges and the meta line (UI-D-566, UI-D-667). A row carries at
+ * most the pill "Abre N perguntas" when it opens branches: where a question lives is the branch block around
+ * it, what a question controls is this pill, and both are words, never colour.
  */
 function RowBody({
   question,
   position,
-  conditionLine,
+  opens,
 }: {
   question: AdminQuestion;
   position: number;
-  conditionLine: string | null;
+  opens: number;
 }) {
   const t = useTranslations('profileForm');
   const answered = question.answerCount > 0;
@@ -154,25 +147,12 @@ function RowBody({
         <span className="line-clamp-3 break-words text-sm font-bold text-text">
           {question.title}
         </span>
-        {conditionLine ? (
-          <span
-            data-condition-line
-            className="line-clamp-2 break-words text-xs font-normal text-text-secondary"
-          >
-            {conditionLine}
-          </span>
-        ) : null}
         <span className="flex flex-wrap gap-2">
           <StatusPill tone="neutral">{t(typeNameKey(question.type))}</StatusPill>
-          {question.condition !== null ? (
-            <StatusPill tone="neutral">
-              <CornerDownRight aria-hidden size={12} />
-              {t('admin.row.conditional')}
-            </StatusPill>
-          ) : question.opensCount > 0 ? (
+          {opens > 0 ? (
             <StatusPill tone="neutral">
               <Split aria-hidden size={12} />
-              {t('admin.row.opens', { count: question.opensCount })}
+              {t('admin.row.opens', { count: opens })}
             </StatusPill>
           ) : null}
           {question.showOnProfile ? (
@@ -205,17 +185,30 @@ interface RowProps {
   /** The number across the WHOLE form, 1..total, in the order members see (UI-D-643). */
   position: number;
   total: number;
-  /** "Só aparece se …" for a conditional row (UI-D-650). */
-  conditionLine: string | null;
+  /** The label of the branch the row sits in, for "Fica no ramo: {label}." (UI-D-667). */
+  branchLabel: string | null;
+  /** The ACTIVE questions in the branches that hang directly on this row: "Abre N". */
+  opens: number;
   onOpen?: (question: AdminQuestion) => void;
+  /** The branch blocks that hang on this row, drawn right under its card. */
+  children?: ReactNode;
 }
 
 /**
  * One question of the builder (UI-D-566): the WHOLE row is one `button` (`min-h-11`) that opens the
  * editor. Colour and weight never carry a state alone: the required state, the position and the count
- * are words, and the position and the state are also in the accessible description.
+ * are words, and the position and the state are also in the accessible description. The branch blocks of an
+ * opener live INSIDE its `li`, under the card (UI-D-666).
  */
-function QuestionRow({ question, position, total, conditionLine, onOpen }: RowProps) {
+function QuestionRow({
+  question,
+  position,
+  total,
+  branchLabel,
+  opens,
+  onOpen,
+  children,
+}: RowProps) {
   const t = useTranslations('profileForm');
   const descriptionId = useId();
   const answered = question.answerCount > 0;
@@ -225,17 +218,15 @@ function QuestionRow({ question, position, total, conditionLine, onOpen }: RowPr
     stateWord,
     t('admin.row.answers', { count: question.answerCount }),
     answered ? t('admin.row.locked') : null,
-    conditionLine,
-    question.condition === null && question.opensCount > 0
-      ? t('admin.row.opens', { count: question.opensCount })
-      : null,
+    branchLabel === null ? null : t('admin.branches.row.inBranch', { label: branchLabel }),
+    opens > 0 ? t('admin.row.opens', { count: opens }) : null,
   ]
     .filter((part): part is string => part !== null)
     .map((part) => (part.endsWith('.') ? part : `${part}.`))
     .join(' ');
 
   return (
-    <li>
+    <li className={children ? 'flex flex-col gap-3' : undefined}>
       <Card className="p-0">
         <button
           type="button"
@@ -244,13 +235,14 @@ function QuestionRow({ question, position, total, conditionLine, onOpen }: RowPr
           onClick={onOpen ? () => onOpen(question) : undefined}
           className="flex min-h-11 w-full items-start gap-3 p-4 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
         >
-          <RowBody question={question} position={position} conditionLine={conditionLine} />
-          <ChevronRight aria-hidden size={18} className="mt-0.5 shrink-0 text-text-tertiary" />
+          <RowBody question={question} position={position} opens={opens} />
+          <ChevronRight aria-hidden size={18} className="mt-[2px] shrink-0 text-text-tertiary" />
         </button>
         <span id={descriptionId} className="sr-only">
           {description}
         </span>
       </Card>
+      {children}
     </li>
   );
 }
@@ -259,38 +251,41 @@ interface ReorderRowProps {
   question: AdminQuestion;
   /** The number across the whole form. */
   position: number;
-  /** The row's place inside its step (or inside the flat list) and how many rows that group holds. */
+  /** The row's place among its siblings (the questions of its branch run, or the unconditional ones of its step). */
   groupIndex: number;
   groupSize: number;
-  conditionLine: string | null;
+  opens: number;
   busy: boolean;
   register: (key: string, element: HTMLButtonElement | null) => void;
   onMove: (id: string, delta: -1 | 1) => void;
+  /** The branch blocks that hang on this row: its block travels with it. */
+  children?: ReactNode;
 }
 
 /**
- * A row in reorder mode (UI-D-567, UI-D-646): not an editor opener (no accidental taps). The chevron is
- * replaced by two 44x44 `IconButton`s, disabled on the first and the last row OF ITS STEP (a group of one
- * has both disabled): an arrow never moves a question to another step. While a write runs the buttons are
- * `aria-busy` and ignore presses instead of becoming `disabled`, so the focused control keeps focus through
- * the write.
+ * A row in reorder mode (UI-D-567, UI-D-646, UI-D-668): not an editor opener (no accidental taps). The chevron is
+ * replaced by two 44x44 `IconButton`s, disabled on the first and the last SIBLING (a group of one has both
+ * disabled): an arrow moves a question one place among its siblings and never to another step or branch, and
+ * an opener's whole block counts as one place. While a write runs the buttons are `aria-busy` and ignore
+ * presses instead of becoming `disabled`, so the focused control keeps focus through the write.
  */
 function ReorderRow({
   question,
   position,
   groupIndex,
   groupSize,
-  conditionLine,
+  opens,
   busy,
   register,
   onMove,
+  children,
 }: ReorderRowProps) {
   const t = useTranslations('profileForm.admin.reorder');
   return (
-    <li>
+    <li className={children ? 'flex flex-col gap-3' : undefined}>
       <Card className="p-0">
         <div className="flex min-h-11 w-full items-start gap-3 p-4">
-          <RowBody question={question} position={position} conditionLine={conditionLine} />
+          <RowBody question={question} position={position} opens={opens} />
           <span className="-my-2 -mr-2 flex shrink-0 items-center">
             <IconButton
               ref={(element) => register(`${question.id}:up`, element)}
@@ -313,27 +308,34 @@ function ReorderRow({
           </span>
         </div>
       </Card>
+      {children}
     </li>
   );
 }
 
+/** The step every question rides in when the list has no step at all: one flat group. */
+const FLAT_STEP: AdminStep = { id: 'flat', title: '', position: 1, revision: 1, questionCount: 0 };
+
 /**
- * The active list of the Perguntas tab (12-15, 12.1-16; D-582, D-623, D-627, UI-D-565..UI-D-567, UI-D-642..UI-D-646):
- * the actions row ("Adicionar pergunta", "Adicionar etapa", "Reordenar", "Ver como o membro vê"), the limit
- * lines, the "Perguntas ativas (n)" micro-title and the rows in the admin's order, which is the order
- * members see. **With one step (or none) the rows are the flat list of Phase 12; with two or more they sit
- * in step wells** under a one-time note, numbered across the whole form.
+ * The active list of the Perguntas tab (12-15, 12.1-16, 12.2-15; D-582, D-623, D-627, D-640..D-643, D-652,
+ * UI-D-565..UI-D-567, UI-D-642..UI-D-646, UI-D-666..UI-D-668): the actions row ("Adicionar pergunta",
+ * "Adicionar etapa", "Reordenar", "Ver como o membro vê"), the limit lines, the "Perguntas ativas (n)" micro-title
+ * and the rows in the admin's order, which is the order members see. **With one step (or none) the rows are the
+ * flat list of Phase 12; with two or more they sit in step wells** under a one-time note, numbered across the
+ * whole form. **A branch is a block** inside the well, indented under its opener (`BranchBlock`): the tree is
+ * built once from the read (`buildBranchTree`) and each well draws its `stepTree`.
  *
  * **Reorder is a mode with buttons, never a drag** (a drag fights the scroll of a mobile page, and the
  * buttons are the keyboard alternative). Each press moves the row (or, on a well's header, the whole step),
  * SAVES AT ONCE with one write of the WHOLE layout through the server action, keeps focus on the same
  * button at its new position (re-applied after React moves the row, because a moved node loses focus; if
  * that button is now disabled at an edge, its sibling takes the focus) and announces the new position
- * through an `aria-live="polite"` region. **An arrow moves a question only inside its step.** A press that
- * would put an opener at or after a question it opens (or a step above the step that holds an opener of one
- * of its questions) moves NOTHING and toasts which two QUESTIONS conflict; the server's coded 409 for the
- * same rule, after a race, puts the list back and says the same sentence. A failed write puts the row back
- * and toasts; a lost permission or a module turned off ends in a refresh into the page's `notFound()`.
+ * through an `aria-live="polite"` region. **An arrow moves a question one place among its siblings, inside its
+ * step and branch, and an opener's block travels with it.** A press that would put a question at or before the
+ * opener of its branch (or a step above the step that holds an opener of one of its questions) moves NOTHING
+ * and toasts which two QUESTIONS conflict; the server's coded 409 for the same rule, after a race, puts the
+ * list back and says the same sentence. A failed write puts the row back and toasts; a lost permission or a
+ * module turned off ends in a refresh into the page's `notFound()`.
  *
  * The tab is read once per request on the server: the list holds the server's copy and the optimistic
  * order only while a write is in flight, and the page refreshes when the mode ends. It shows aggregate
@@ -350,6 +352,9 @@ export function QuestionList({
   onAddStep,
   onRenameStep,
   onAddToStep,
+  branches = NO_BRANCHES,
+  onEditBranch,
+  onAddToBranch,
 }: QuestionListProps) {
   const t = useTranslations('profileForm');
   const tAdmin = useTranslations('admin');
@@ -357,11 +362,11 @@ export function QuestionList({
   const toast = useToast();
 
   // The server's list wins whenever it re-renders with a new one (after a refresh).
-  const [source, setSource] = useState({ questions, steps });
+  const [source, setSource] = useState({ questions, steps, branches });
   const [items, setItems] = useState(() => normalize(steps, questions));
   const [stepList, setStepList] = useState(steps);
-  if (source.questions !== questions || source.steps !== steps) {
-    setSource({ questions, steps });
+  if (source.questions !== questions || source.steps !== steps || source.branches !== branches) {
+    setSource({ questions, steps, branches });
     setItems(normalize(steps, questions));
     setStepList(steps);
   }
@@ -391,10 +396,28 @@ export function QuestionList({
     winner?.focus();
   }, [items]);
 
-  const conditionLines = useConditionLines(items);
+  // The one tree the whole screen is drawn from. A list with no step rides in one flat group, and a question of
+  // a step the list does not know rides with the last step (as before), so none disappears from the screen.
+  const treeSteps = stepList.length === 0 ? [FLAT_STEP] : stepList;
+  const lastStep = treeSteps[treeSteps.length - 1] ?? FLAT_STEP;
+  const knownSteps = new Set(treeSteps.map((step) => step.id));
+  const tree = buildBranchTree({
+    steps: treeSteps,
+    questions: items.map((question) =>
+      knownSteps.has(question.stepId) ? question : { ...question, stepId: lastStep.id },
+    ),
+    branches,
+  });
+  const byId = new Map(items.map((question) => [question.id, question] as const));
+  const original = (question: AdminQuestion) => byId.get(question.id) ?? question;
+  const labelOf = useBranchLabeler(tree);
+  const layout = layoutOf(tree);
+  const branchOpener = new Map(
+    tree.branches
+      .filter((branch) => branch.archivedAt === null)
+      .map((branch) => [branch.id, branch.openerQuestionId] as const),
+  );
   const wells = stepList.length > 1;
-  const groups = groupByStep(stepList, items);
-  const positions = new Map(items.map((question, at) => [question.id, at + 1] as const));
 
   /** The sentence of a refused or reverted press, naming the two QUESTIONS (D-623, UI-D-646). */
   function refusalSentence(delta: -1 | 1, dependent: AdminQuestion, opener: AdminQuestion) {
@@ -409,16 +432,19 @@ export function QuestionList({
    */
   async function apply(change: {
     nextSteps: AdminStep[];
-    nextGroups: AdminQuestion[][];
+    nextLayout: LayoutStep[];
     focusId: string;
     delta: -1 | 1;
     announce: (flat: AdminQuestion[]) => string;
   }) {
-    const { nextSteps, nextGroups, focusId, delta, announce } = change;
-    const nextItems = nextGroups.flat();
+    const { nextSteps, nextLayout, focusId, delta, announce } = change;
+    const nextItems = nextLayout
+      .flatMap((step) => step.questionIds)
+      .map((id) => byId.get(id))
+      .filter((question): question is AdminQuestion => question !== undefined);
     const direction: Direction = delta < 0 ? 'up' : 'down';
 
-    const violation = orderViolation(nextItems);
+    const violation = orderViolation(nextLayout, tree.questionById, branchOpener);
     if (violation) {
       toast.show({
         tone: 'error',
@@ -438,9 +464,9 @@ export function QuestionList({
       result =
         nextSteps.length > 0
           ? await reorderLayoutAction({
-              steps: nextSteps.map((step, at) => ({
-                id: step.id,
-                questionIds: (nextGroups[at] ?? []).map((question) => question.id),
+              steps: nextLayout.map((step) => ({
+                id: step.stepId,
+                questionIds: step.questionIds,
               })),
             })
           : await reorderQuestionsAction(nextItems.map((question) => question.id));
@@ -484,21 +510,14 @@ export function QuestionList({
 
   function moveQuestion(id: string, delta: -1 | 1) {
     if (busy) return;
-    const at = groups.findIndex((rows) => rows.some((question) => question.id === id));
-    const rows = groups[at];
-    if (!rows) return;
-    const from = rows.findIndex((question) => question.id === id);
-    const to = from + delta;
-    if (from < 0 || to < 0 || to >= rows.length) return;
-
-    const nextRows = rows.slice();
-    const [moved] = nextRows.splice(from, 1);
+    const nextLayout = moveUnit(layout, tree, id, delta < 0 ? 'up' : 'down');
+    // A press at the first or last sibling changes nothing and sends nothing.
+    if (nextLayout === layout) return;
+    const moved = byId.get(id);
     if (!moved) return;
-    nextRows.splice(to, 0, moved);
-    const nextGroups = groups.map((group, index) => (index === at ? nextRows : group));
     void apply({
       nextSteps: stepList,
-      nextGroups,
+      nextLayout,
       focusId: id,
       delta,
       announce: (flat) =>
@@ -520,12 +539,12 @@ export function QuestionList({
     const [moved] = nextSteps.splice(from, 1);
     if (!moved) return;
     nextSteps.splice(to, 0, moved);
-    const nextGroups = groups.slice();
-    const [movedRows] = nextGroups.splice(from, 1);
-    nextGroups.splice(to, 0, movedRows ?? []);
+    const nextLayout = layout.slice();
+    const [movedRows] = nextLayout.splice(from, 1);
+    if (movedRows) nextLayout.splice(to, 0, movedRows);
     void apply({
       nextSteps,
-      nextGroups,
+      nextLayout,
       focusId: `step:${id}`,
       delta,
       announce: () =>
@@ -545,34 +564,103 @@ export function QuestionList({
     if (leaving) router.refresh();
   }
 
-  const renderRows = (rows: AdminQuestion[]) => (
-    <ul className="flex flex-col gap-3">
-      {rows.map((question, groupIndex) =>
-        reordering ? (
-          <ReorderRow
-            key={question.id}
-            question={question}
-            position={positions.get(question.id) ?? groupIndex + 1}
-            groupIndex={groupIndex}
-            groupSize={rows.length}
-            conditionLine={conditionLines.get(question.id) ?? null}
-            busy={busy}
-            register={register}
-            onMove={moveQuestion}
-          />
-        ) : (
-          <QuestionRow
-            key={question.id}
-            question={question}
-            position={positions.get(question.id) ?? groupIndex + 1}
-            total={items.length}
-            conditionLine={conditionLines.get(question.id) ?? null}
-            onOpen={onOpen}
-          />
-        ),
-      )}
-    </ul>
-  );
+  /** The step "Adicionar pergunta ao ramo" hands to the sheet: the run's step, or the last step when the branch is empty. */
+  function stepForAdd(run: BranchRun): string {
+    if (run.empty) {
+      const opener = byId.get(run.branch.openerQuestionId);
+      return stepList.length > 0 ? lastStep.id : (opener?.stepId ?? lastStep.id);
+    }
+    const last = run.questions[run.questions.length - 1];
+    return stepList.length > 0 ? run.stepId : last ? original(last.question).stepId : run.stepId;
+  }
+
+  function renderRun(run: BranchRun): ReactNode {
+    const parts = labelOf(run.branch);
+    const openerStepId = tree.questionById.get(run.branch.openerQuestionId)?.stepId;
+    const openerStepTitle = run.openerInOtherStep
+      ? (stepList.find((step) => step.id === openerStepId)?.title ?? null)
+      : null;
+    return (
+      <BranchBlock
+        key={`${run.branch.id}:${run.stepId}`}
+        branch={run.branch}
+        parts={parts}
+        count={run.questions.length}
+        empty={run.empty}
+        openerStepTitle={openerStepTitle}
+        reordering={reordering}
+        busy={busy}
+        place={null}
+        addDisabled={items.length >= limit}
+        focusKey={`branch:${run.branch.id}:${run.stepId}`}
+        register={register}
+        onMove={() => {}}
+        onEdit={onEditBranch}
+        onAddQuestion={onAddToBranch ? () => onAddToBranch(run.branch, stepForAdd(run)) : undefined}
+      >
+        {run.empty
+          ? null
+          : run.questions.map((child, at) => renderQuestion(child, at, run.questions.length))}
+      </BranchBlock>
+    );
+  }
+
+  function renderQuestion(node: QuestionNode, groupIndex: number, groupSize: number): ReactNode {
+    const question = original(node.question);
+    const opens = opensCountOf(tree, question.id);
+    const inBranch = usableBranch(tree, question.branchId);
+    const blocks = node.branches.map(renderRun);
+    const nested = blocks.length > 0 ? blocks : undefined;
+    return reordering ? (
+      <ReorderRow
+        key={question.id}
+        question={question}
+        position={node.number}
+        groupIndex={groupIndex}
+        groupSize={groupSize}
+        opens={opens}
+        busy={busy}
+        register={register}
+        onMove={moveQuestion}
+      >
+        {nested}
+      </ReorderRow>
+    ) : (
+      <QuestionRow
+        key={question.id}
+        question={question}
+        position={node.number}
+        total={items.length}
+        branchLabel={inBranch ? labelOf(inBranch).label : null}
+        opens={opens}
+        onOpen={onOpen}
+      >
+        {nested}
+      </QuestionRow>
+    );
+  }
+
+  function renderRoots(roots: StepRoot[]): ReactNode {
+    const rootQuestions = roots.filter((root) => root.kind === 'question');
+    let questionAt = 0;
+    return (
+      <ul className="flex flex-col gap-3">
+        {roots.map((root) => {
+          if (root.kind === 'run') {
+            return <li key={`${root.run.branch.id}:${root.run.stepId}`}>{renderRun(root.run)}</li>;
+          }
+          const at = questionAt;
+          questionAt += 1;
+          return renderQuestion(root.node, at, rootQuestions.length);
+        })}
+      </ul>
+    );
+  }
+
+  const renderStep = (stepId: string): ReactNode => {
+    const node = stepTree(tree, stepId);
+    return node === null || node.roots.length === 0 ? null : renderRoots(node.roots);
+  };
 
   return (
     <section className="flex flex-col gap-3">
@@ -636,7 +724,7 @@ export function QuestionList({
               step={step}
               number={at + 1}
               total={stepList.length}
-              count={groups[at]?.length ?? 0}
+              count={layout[at]?.questionIds.length ?? 0}
               reordering={reordering}
               busy={busy}
               addDisabled={items.length >= limit}
@@ -645,12 +733,12 @@ export function QuestionList({
               onMove={moveStep}
               register={register}
             >
-              {renderRows(groups[at] ?? [])}
+              {renderStep(step.id)}
             </StepWell>
           ))}
         </div>
       ) : (
-        renderRows(items)
+        renderStep(treeSteps[0]?.id ?? FLAT_STEP.id)
       )}
     </section>
   );

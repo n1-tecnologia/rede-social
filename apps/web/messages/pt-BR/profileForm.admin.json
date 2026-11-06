@@ -40,6 +40,18 @@
         "opens": "Abre {count, plural, one {# pergunta} other {# perguntas}}",
         "condition": "Só aparece se “{opener}” for {options}."
       },
+      "branches": {
+        "label": "Se “{opener}” for {options}",
+        "count": "{count, plural, =0 {Sem perguntas} one {# pergunta} other {# perguntas}}",
+        "openerStep": "A pergunta que decide está na etapa “{step}”.",
+        "edit": "Editar ramo: {label}",
+        "addQuestion": "Adicionar pergunta ao ramo",
+        "addQuestionLabel": "Adicionar pergunta ao ramo: {label}",
+        "empty": "Este ramo está vazio. Ele só muda algo para os membros quando tiver uma pergunta.",
+        "row": {
+          "inBranch": "Fica no ramo: {label}."
+        }
+      },
       "reorder": {
         "up": "Subir “{title}”",
         "down": "Descer “{title}”",

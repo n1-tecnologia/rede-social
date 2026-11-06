@@ -97,6 +97,7 @@ export default async function ProfileFormPage({
           <QuestionBuilder
             questions={loaded.questions}
             steps={loaded.steps}
+            branches={loaded.branches}
             stepLimit={loaded.stepLimit}
             limit={loaded.limit}
             tenantName={bootstrap.tenant.displayName}

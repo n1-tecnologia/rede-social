@@ -60,6 +60,7 @@ interface StepOpening {
 export function QuestionBuilder({
   questions,
   steps = NO_STEPS,
+  branches,
   stepLimit = PROFILE_FORM_LIMITS.steps,
   limit,
   tenantName,
@@ -124,6 +125,7 @@ export function QuestionBuilder({
         <QuestionList
           questions={questions}
           steps={steps}
+          branches={branches}
           stepLimit={stepLimit}
           limit={limit}
           onOpen={openEdit}
