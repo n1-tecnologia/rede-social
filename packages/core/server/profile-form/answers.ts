@@ -1,4 +1,8 @@
-import type { PublicAnswers, StaffAnswers } from '@rede-social/contracts/profile-form';
+import {
+  memberBranchSchema,
+  type PublicAnswers,
+  type StaffAnswers,
+} from '@rede-social/contracts/profile-form';
 import { sql } from 'drizzle-orm';
 import { memberships } from '../../db/schema';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
@@ -52,9 +56,11 @@ type StaffRow = {
   show_on_profile: boolean;
   position: number;
   archived_at: string | Date | null;
-  condition_question_id: string | null;
-  condition_values: string[] | null;
+  branch_id: string | null;
 };
+
+/** A branch as the staff payload needs it: the opener and the opening values, never the name. */
+type BranchRow = { id: string; opener_question_id: string; open_values: string[] };
 
 /**
  * The target membership, or `null`: a `member`-role, `active`, not-deleted membership of THIS tenant. The
@@ -128,7 +134,7 @@ const iso = (value: string | Date | null): string | null =>
   value === null ? null : new Date(value).toISOString();
 
 /**
- * `{ kind: 'staff', answers }` for `admin_tenant` and `support_tenant` (PFORM-19), or `null`.
+ * `{ kind: 'staff', answers, branches }` for `admin_tenant` and `support_tenant` (PFORM-19), or `null`.
  *
  * Every ACTIVE question is listed (`answered: false` and `value: null` when the member has not answered),
  * plus every ARCHIVED question the target answered. Active questions come first in the admin's order, then
@@ -146,8 +152,7 @@ export async function staffAnswersOf(
     const rows = await tx.execute<StaffRow>(sql`
       select q.id::text as question_id, q.title, q.type, q.options, a.value,
              (a.id is not null) as answered, q.required, q.show_on_profile,
-             q.position, q.archived_at,
-             q.condition_question_id::text as condition_question_id, q.condition_values
+             q.position, q.archived_at, q.branch_id::text as branch_id
         from public.profile_form_questions q
         left join public.profile_form_answers a
           on a.tenant_id = q.tenant_id
@@ -160,6 +165,13 @@ export async function staffAnswersOf(
                 case when q.archived_at is null then q.created_at end,
                 q.archived_at desc nulls last,
                 q.id`);
+    // Every branch of the tenant, active and archived (the staff view lists archived rows), without the name
+    // (T-12.2-03): a member's own opener rows plus these tell the view which questions "Não se aplica".
+    const branches = await tx.execute<BranchRow>(sql`
+      select b.id::text as id, b.opener_question_id::text as opener_question_id, b.open_values
+        from public.profile_form_branches b
+       where b.tenant_id = ${ctx.tenantId}::uuid
+       order by b.created_at, b.id`);
     return {
       kind: 'staff',
       answers: rows.map((row) => ({
@@ -173,12 +185,18 @@ export async function staffAnswersOf(
         showOnProfile: row.show_on_profile,
         position: row.position,
         archivedAt: iso(row.archived_at),
-        // 12.1 (D-634): the condition only, never an answer value; the opener's own row supplies the value.
-        condition:
-          row.condition_question_id === null || row.condition_values === null
-            ? null
-            : { questionId: row.condition_question_id, values: row.condition_values },
+        // 12.2 (D-641): the branch only, never an answer value; the opener's own row supplies the value.
+        branchId: row.branch_id,
+        // Compatibility window: the per-question condition is gone; plan 20 removes the key.
+        condition: null,
       })),
+      branches: branches.map((branch) =>
+        memberBranchSchema.parse({
+          id: branch.id,
+          openerQuestionId: branch.opener_question_id,
+          values: branch.open_values,
+        }),
+      ),
     };
   });
 }

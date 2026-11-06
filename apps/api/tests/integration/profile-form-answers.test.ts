@@ -828,8 +828,8 @@ describe('12.2-10 staff payload: branchId per row and a top-level branches list 
         body.answers.map((row) => ({ id: row.questionId, branchId: row.branchId })),
         body.branches,
       );
-      const valueOf = new Map(body.answers.map((row) => [row.questionId, row.value]));
-      const tokensOf = (id: string) => answerTokens(valueOf.get(id) ?? undefined);
+      const valueByQuestion = new Map(body.answers.map((row) => [row.questionId, row.value]));
+      const tokensOf = (id: string) => answerTokens(valueByQuestion.get(id) ?? undefined);
       const notApplicable = body.answers
         .filter((row) => !isQuestionVisibleInTree({ branchId: row.branchId }, tree3, tokensOf))
         .map((row) => row.questionId);
