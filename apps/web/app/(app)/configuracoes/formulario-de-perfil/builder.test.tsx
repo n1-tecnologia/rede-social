@@ -7,6 +7,8 @@ import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
+import { treeLayoutOf } from '@/lib/profile-form/branch-layout';
+import { buildBranchTree } from '@/lib/profile-form/branch-tree';
 import {
   adminBranch,
   adminQuestion,
@@ -2024,5 +2026,280 @@ describe('12.2-15 Task 2: every state of a branch in the Lista is drawn from the
       );
       expect(source).not.toMatch(/(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/);
     }
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------ */
+/* 12.2-15 Task 3: reorder by blocks, the branch arrows and the refusals that name two questions       */
+/* ------------------------------------------------------------------------------------------------ */
+
+describe('12.2-15 Task 3: reorder moves blocks as units (D-652, UI-D-668)', () => {
+  const OPENER_TITLE = 'Você tem clínica, trabalha em clínica ou está aprendendo?';
+  const B1_LABEL = `Se “${OPENER_TITLE}” for “Tenho uma clínica”`;
+  const B2_LABEL = 'Se “A clínica tem equipe?” for Sim';
+  const B4_LABEL = `Se “${OPENER_TITLE}” for “Estou aprendendo”`;
+  const ids = (...keys: string[]) => keys.map((key) => clinicId(key));
+  const enterReorder = () => fireEvent.click(screen.getByRole('button', { name: 'Reordenar' }));
+  const branchUp = (label: string) =>
+    screen.getByRole('button', { name: `Subir ramo “${label}”` }) as HTMLButtonElement;
+  const branchDown = (label: string) =>
+    screen.getByRole('button', { name: `Descer ramo “${label}”` }) as HTMLButtonElement;
+  const stripLabels = () =>
+    Array.from(document.querySelectorAll('[data-branch-strip]')).map(
+      (strip) => strip.querySelector('.line-clamp-2')?.textContent,
+    );
+  const clinicList = () => {
+    const list = clinicAdminList();
+    const step = list.steps[0];
+    if (!step) throw new Error('the clinic fixture has a step');
+    return { list, step };
+  };
+  const reorderClinic = () => {
+    const { list, step } = clinicList();
+    show(list.questions, { steps: list.steps, branches: list.branches });
+    enterReorder();
+    return { list, step };
+  };
+
+  beforeEach(() => {
+    mocks.layout.mockResolvedValue({ ok: true });
+  });
+
+  it('an opener moves with its whole block: the sent layout carries Q2 and everything under it', async () => {
+    const { step } = reorderClinic();
+    await act(async () => {
+      fireEvent.click(questionDown('A clínica tem equipe?'));
+    });
+    expect(mocks.layout).toHaveBeenCalledTimes(1);
+    expect(mocks.layout).toHaveBeenCalledWith({
+      steps: [{ id: step.id, questionIds: ids('Q1', 'Q3', 'Q2', 'Q4', 'Q5', 'Q6', 'Q7') }],
+    });
+    expect(live()).toBe('“A clínica tem equipe?” agora é a pergunta 3 de 7.');
+  });
+
+  it('a question inside a branch swaps with its sibling only, and a sibling that opens a block counts as one place', async () => {
+    const { step } = reorderClinic();
+    await act(async () => {
+      fireEvent.click(questionDown('Quantos profissionais?'));
+    });
+    expect(mocks.layout).toHaveBeenCalledWith({
+      steps: [{ id: step.id, questionIds: ids('Q1', 'Q2', 'Q5', 'Q6', 'Q4', 'Q3', 'Q7') }],
+    });
+  });
+
+  it('the sent layout is already in tree order, with the same ids in the same step', async () => {
+    const { list, step } = reorderClinic();
+    await act(async () => {
+      fireEvent.click(questionUp('Nome da clínica'));
+    });
+    const sent = mocks.layout.mock.calls[0]?.[0] as {
+      steps: { id: string; questionIds: string[] }[];
+    };
+    const tree = buildBranchTree({
+      steps: list.steps,
+      questions: list.questions,
+      branches: list.branches,
+    });
+    const asLayout = sent.steps.map((entry) => ({
+      stepId: entry.id,
+      questionIds: entry.questionIds,
+    }));
+    expect(treeLayoutOf(asLayout, tree)).toEqual(asLayout);
+    expect([...(sent.steps[0]?.questionIds ?? [])].sort()).toEqual(
+      list.questions.map((question) => question.id).sort(),
+    );
+    expect(sent.steps[0]?.id).toBe(step.id);
+  });
+
+  it('an arrow never changes the step or the branch of a question', async () => {
+    const { list } = reorderClinic();
+    const stepOf = new Map(list.questions.map((question) => [question.id, question.stepId]));
+    const before = stripLabels();
+    await act(async () => {
+      fireEvent.click(questionDown('Nome da clínica'));
+    });
+    await act(async () => {
+      fireEvent.click(questionDown('A clínica tem equipe?'));
+    });
+    for (const call of mocks.layout.mock.calls) {
+      const sent = call[0] as { steps: { id: string; questionIds: string[] }[] };
+      for (const entry of sent.steps) {
+        for (const id of entry.questionIds) expect(stepOf.get(id)).toBe(entry.id);
+      }
+    }
+    // every row is still inside the same rail: the strips, in the same order, with the same rows
+    expect(stripLabels()).toEqual(before);
+    expect(
+      within(
+        screen
+          .getByRole('button', { name: 'Subir “Nome do sócio”' })
+          .closest('div.border-l-2') as HTMLElement,
+      ).getAllByText('Nome do sócio').length,
+    ).toBe(1);
+  });
+
+  it('the arrows of a lone question or of the only root are disabled and send nothing', async () => {
+    reorderClinic();
+    for (const title of [OPENER_TITLE, 'Nome do sócio', 'A clínica tem equipe?']) {
+      const upButton = questionUp(title);
+      const downButton = questionDown(title);
+      if (title === 'A clínica tem equipe?') {
+        expect(isDisabled(upButton)).toBe(true); // first of its run
+        expect(isDisabled(downButton)).toBe(false);
+      } else {
+        expect(isDisabled(upButton)).toBe(true);
+        expect(isDisabled(downButton)).toBe(true);
+      }
+      await act(async () => {
+        fireEvent.click(upButton);
+      });
+    }
+    expect(mocks.layout).not.toHaveBeenCalled();
+    expect(mocks.show).not.toHaveBeenCalled();
+  });
+
+  it('shows the branch arrows only for an opener with two runs in the step, disabled on the first and last', () => {
+    reorderClinic();
+    expect(screen.queryByRole('button', { name: /^Editar ramo/ })).toBeNull();
+    expect(isDisabled(branchUp(B1_LABEL))).toBe(true);
+    expect(isDisabled(branchDown(B1_LABEL))).toBe(false);
+    expect(isDisabled(branchUp(B4_LABEL))).toBe(false);
+    expect(isDisabled(branchDown(B4_LABEL))).toBe(true);
+    expect(branchUp(B4_LABEL).className).toContain('min-h-[44px]');
+    // Q2 has a single branch: no arrows for it
+    expect(screen.queryByRole('button', { name: `Subir ramo “${B2_LABEL}”` })).toBeNull();
+    expect(screen.queryByRole('button', { name: `Descer ramo “${B2_LABEL}”` })).toBeNull();
+  });
+
+  it('moves a branch run as a block among the runs of its opener, saves at once and announces its place', async () => {
+    const { step } = reorderClinic();
+    await act(async () => {
+      fireEvent.click(branchDown(B1_LABEL));
+    });
+    expect(mocks.layout).toHaveBeenCalledTimes(1);
+    expect(mocks.layout).toHaveBeenCalledWith({
+      steps: [{ id: step.id, questionIds: ids('Q1', 'Q7', 'Q2', 'Q4', 'Q5', 'Q6', 'Q3') }],
+    });
+    expect(stripLabels()).toEqual([B4_LABEL, B1_LABEL, B2_LABEL, 'Se “Tem sócio?” for Sim']);
+    expect(live()).toBe(`O ramo “${B1_LABEL}” agora é o ramo 2 de 2 desta pergunta.`);
+    expect(mocks.reorder).not.toHaveBeenCalled();
+  });
+
+  it('keeps focus on the moved branch control (its sibling when it is now at the edge)', async () => {
+    reorderClinic();
+    await act(async () => {
+      fireEvent.click(branchDown(B1_LABEL));
+    });
+    // B1 is now the last run: its "Descer" is disabled, so the focus lands on its "Subir"
+    expect(document.activeElement).toBe(branchUp(B1_LABEL));
+  });
+
+  it('a press at the first or last run changes nothing and sends nothing', async () => {
+    reorderClinic();
+    await act(async () => {
+      fireEvent.click(branchUp(B1_LABEL));
+      fireEvent.click(branchDown(B4_LABEL));
+    });
+    expect(mocks.layout).not.toHaveBeenCalled();
+    expect(stripLabels()[0]).toBe(B1_LABEL);
+  });
+
+  it('a server coded 409 puts the branch back and renders the same sentence naming the two questions', async () => {
+    mocks.layout.mockResolvedValue({
+      ok: false,
+      code: 'condition_order',
+      questionId: clinicId('Q7'),
+      openerId: clinicId('Q1'),
+    });
+    reorderClinic();
+    await act(async () => {
+      fireEvent.click(branchUp(B4_LABEL));
+    });
+    expect(mocks.layout).toHaveBeenCalledTimes(1);
+    expect(stripLabels()).toEqual([B1_LABEL, B2_LABEL, 'Se “Tem sócio?” for Sim', B4_LABEL]);
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: `“Onde estuda?” precisa ficar depois de “${OPENER_TITLE}”, que decide se ela aparece.`,
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(live()).toBe('');
+  });
+
+  it('puts the branch back and toasts when the write fails', async () => {
+    mocks.layout.mockResolvedValue({ ok: false, code: 'failed' });
+    reorderClinic();
+    await act(async () => {
+      fireEvent.click(branchDown(B1_LABEL));
+    });
+    expect(stripLabels()[0]).toBe(B1_LABEL);
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível salvar a nova ordem. A lista voltou como estava.',
+    });
+  });
+
+  describe('the refusals name the two QUESTIONS (D-652)', () => {
+    const X1 = adminStep({ title: 'Primeira' });
+    const X2 = adminStep({ title: 'Segunda' });
+    const XQ = adminQuestion('yes_no', { title: 'Tem clínica?', stepId: X1.id });
+    const XB = adminBranch({ openerQuestionId: XQ.id, values: ['true'], questionCount: 2 });
+    const XA = adminQuestion('short_text', {
+      title: 'Nome da clínica',
+      stepId: X2.id,
+      branchId: XB.id,
+    });
+    const XN = adminQuestion('short_text', {
+      title: 'Quantas salas?',
+      stepId: X2.id,
+      branchId: XB.id,
+    });
+    const scenario = { questions: [XQ, XA, XN], steps: [X1, X2], branches: [XB] };
+
+    it('a step arrow that puts a branch question above its opener moves NOTHING and says it must follow', async () => {
+      builder(scenario);
+      enterReorder();
+      await act(async () => {
+        fireEvent.click(stepUp('Segunda'));
+      });
+      expect(mocks.layout).not.toHaveBeenCalled();
+      expect(wellTitles()).toEqual(['Primeira', 'Segunda']);
+      expect(mocks.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message:
+          '“Nome da clínica” precisa ficar depois de “Tem clínica?”, que decide se ela aparece.',
+      });
+      expect(live()).toBe('');
+    });
+
+    it('the opener step going down moves NOTHING and says the opener must come first', async () => {
+      builder(scenario);
+      enterReorder();
+      await act(async () => {
+        fireEvent.click(stepDown('Primeira'));
+      });
+      expect(mocks.layout).not.toHaveBeenCalled();
+      expect(mocks.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message:
+          '“Tem clínica?” precisa ficar antes de “Nome da clínica”, que só aparece conforme a resposta dela.',
+      });
+    });
+
+    it('the arrows of a question that is alone with its opener in its branch are both disabled', async () => {
+      const lone = adminQuestion('short_text', { title: 'Cargo', stepId: X1.id });
+      const same = adminQuestion('short_text', {
+        title: 'Nome do negócio',
+        stepId: X1.id,
+        branchId: XB.id,
+      });
+      builder({ questions: [XQ, same, lone], steps: [X1, X2], branches: [XB] });
+      enterReorder();
+      expect(isDisabled(questionUp('Nome do negócio'))).toBe(true);
+      expect(isDisabled(questionDown('Nome do negócio'))).toBe(true);
+      await act(async () => {
+        fireEvent.click(questionUp('Nome do negócio'));
+      });
+      expect(mocks.layout).not.toHaveBeenCalled();
+    });
   });
 });

@@ -5,6 +5,7 @@ import {
   type MoveDirection,
   moveBranchRun,
   moveUnit,
+  orderViolationOf,
   treeLayoutOf,
 } from './branch-layout';
 import { type AdminBranchTree, buildBranchTree } from './branch-tree';
@@ -236,5 +237,111 @@ describe('every move keeps the form whole and in tree order (D-652, T-12.2-05)',
     moveBranchRun(layout, tree, clinicId('B4'), 'up');
     expect(JSON.stringify(layout)).toBe(before);
     expect(JSON.stringify(tree.questions)).toBe(treeBefore);
+  });
+});
+
+/**
+ * 12.2-15 task 3 (D-652, UI-D-668): the pre-check of a candidate layout. The first question that would sit at
+ * or before the opener of its branch is named together with that opener, so the press can say which two
+ * QUESTIONS conflict before anything moves. The server revalidates; this check only decides what to say.
+ */
+describe('orderViolationOf: a candidate layout that puts a question at or before its opener (D-652)', () => {
+  const X1 = adminStep({ title: 'Primeira' });
+  const X2 = adminStep({ title: 'Segunda' });
+  const opener = adminQuestion('yes_no', { title: 'Tem clínica?', stepId: X1.id });
+  const gate = adminBranch({ openerQuestionId: opener.id, values: ['true'], questionCount: 1 });
+  const inside = adminQuestion('short_text', {
+    title: 'Nome da clínica',
+    stepId: X2.id,
+    branchId: gate.id,
+  });
+  const free = adminQuestion('short_text', { title: 'Cargo', stepId: X2.id });
+  const tree = buildBranchTree({
+    steps: [X1, X2],
+    questions: [opener, inside, free],
+    branches: [gate],
+  });
+
+  it('is null for the layout the form holds', () => {
+    expect(orderViolationOf(layoutOf(tree), tree)).toBeNull();
+  });
+
+  it('names the question and its opener when a step moves above the step of the opener', () => {
+    const swapped: LayoutStep[] = [
+      { stepId: X2.id, questionIds: [inside.id, free.id] },
+      { stepId: X1.id, questionIds: [opener.id] },
+    ];
+    const found = orderViolationOf(swapped, tree);
+    expect(found?.dependent.id).toBe(inside.id);
+    expect(found?.dependent.title).toBe('Nome da clínica');
+    expect(found?.opener.id).toBe(opener.id);
+    expect(found?.opener.title).toBe('Tem clínica?');
+  });
+
+  it('passes the same steps when the opener stays earlier', () => {
+    const kept: LayoutStep[] = [
+      { stepId: X1.id, questionIds: [opener.id] },
+      { stepId: X2.id, questionIds: [free.id, inside.id] },
+    ];
+    expect(orderViolationOf(kept, tree)).toBeNull();
+  });
+
+  it('refuses a question placed right before its opener in the same step', () => {
+    const sameStep = buildBranchTree({
+      steps: [X1],
+      questions: [
+        { ...opener, stepId: X1.id },
+        { ...inside, stepId: X1.id },
+      ],
+      branches: [gate],
+    });
+    const before: LayoutStep[] = [{ stepId: X1.id, questionIds: [inside.id, opener.id] }];
+    expect(orderViolationOf(before, sameStep)?.dependent.id).toBe(inside.id);
+    const after: LayoutStep[] = [{ stepId: X1.id, questionIds: [opener.id, inside.id] }];
+    expect(orderViolationOf(after, sameStep)).toBeNull();
+  });
+
+  it('reports the FIRST violation in the order of the candidate layout', () => {
+    const second = adminQuestion('short_text', {
+      title: 'Segunda dependente',
+      stepId: X2.id,
+      branchId: gate.id,
+    });
+    const both = buildBranchTree({
+      steps: [X1, X2],
+      questions: [opener, inside, second, free],
+      branches: [gate],
+    });
+    const swapped: LayoutStep[] = [
+      { stepId: X2.id, questionIds: [second.id, inside.id, free.id] },
+      { stepId: X1.id, questionIds: [opener.id] },
+    ];
+    expect(orderViolationOf(swapped, both)?.dependent.id).toBe(second.id);
+  });
+
+  it('ignores an archived branch (its questions are unconditional, like in the Lista) and an unknown opener', () => {
+    const archived = { ...gate, archivedAt: '2026-10-20T15:30:00.000Z' };
+    const quiet = buildBranchTree({
+      steps: [X1, X2],
+      questions: [opener, inside, free],
+      branches: [archived],
+    });
+    const swapped: LayoutStep[] = [
+      { stepId: X2.id, questionIds: [inside.id, free.id] },
+      { stepId: X1.id, questionIds: [opener.id] },
+    ];
+    expect(orderViolationOf(swapped, quiet)).toBeNull();
+    const lost = [{ stepId: X2.id, questionIds: [inside.id, free.id] }];
+    expect(orderViolationOf(lost, tree)).toBeNull();
+  });
+
+  it('does not change the layout it is given', () => {
+    const swapped: LayoutStep[] = [
+      { stepId: X2.id, questionIds: [inside.id, free.id] },
+      { stepId: X1.id, questionIds: [opener.id] },
+    ];
+    const before = JSON.stringify(swapped);
+    orderViolationOf(swapped, tree);
+    expect(JSON.stringify(swapped)).toBe(before);
   });
 });

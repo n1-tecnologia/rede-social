@@ -1,4 +1,5 @@
 import { treeOrder } from '@rede-social/contracts/profile-form-branches';
+import type { AdminQuestion } from '@rede-social/contracts/profile-form';
 import { type AdminBranchTree, usableBranch, usableBranchesOf } from './branch-tree';
 
 /**
@@ -195,4 +196,14 @@ export function moveBranchRun(
       ? relocate(ids, mine.extent, { before: other.extent[0] })
       : relocate(ids, mine.extent, { after: other.extent[1] });
   return withStep(canonical, at, next, tree);
+}
+
+/**
+ * INERT STUB (12.2-15 Task 3, RED commit): the final signature, no behaviour. The GREEN commit replaces it.
+ */
+export function orderViolationOf(
+  _layout: readonly { stepId: string; questionIds: readonly string[] }[],
+  _tree: AdminBranchTree,
+): { dependent: AdminQuestion; opener: AdminQuestion } | null {
+  return null;
 }

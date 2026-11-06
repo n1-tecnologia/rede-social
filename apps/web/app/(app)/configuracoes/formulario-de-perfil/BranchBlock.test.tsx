@@ -182,6 +182,68 @@ describe('the empty state and the footer (D-641, UI-D-666)', () => {
   });
 });
 
+describe('the branch arrows of reorder mode (D-652, UI-D-668, UI-D-682)', () => {
+  const up = () =>
+    screen.getByRole('button', { name: `Subir ramo “${SENTENCE}”` }) as HTMLButtonElement;
+  const down = () =>
+    screen.getByRole('button', { name: `Descer ramo “${SENTENCE}”` }) as HTMLButtonElement;
+
+  it('swaps the pencil for 44x44 up and down arrows named with the label, when the opener has two runs', () => {
+    block({ reordering: true, place: { index: 1, size: 3 }, onEdit: vi.fn() });
+    expect(screen.queryByRole('button', { name: /^Editar ramo/ })).toBeNull();
+    for (const arrow of [up(), down()]) {
+      expect(arrow.className).toContain('min-h-[44px]');
+      expect(arrow.className).toContain('min-w-[44px]');
+      expect(arrow.disabled).toBe(false);
+    }
+  });
+
+  it('disables "Subir" on the first run and "Descer" on the last', () => {
+    block({ reordering: true, place: { index: 0, size: 2 } });
+    expect(up().disabled).toBe(true);
+    expect(down().disabled).toBe(false);
+    cleanup();
+    block({ reordering: true, place: { index: 1, size: 2 } });
+    expect(up().disabled).toBe(false);
+    expect(down().disabled).toBe(true);
+  });
+
+  it('shows no arrow for a single run, none outside reorder mode and none without a place', () => {
+    block({ reordering: true, place: { index: 0, size: 1 } });
+    expect(screen.queryByRole('button', { name: /^(Subir|Descer) ramo/ })).toBeNull();
+    cleanup();
+    block({ reordering: false, place: { index: 0, size: 2 } });
+    expect(screen.queryByRole('button', { name: /^(Subir|Descer) ramo/ })).toBeNull();
+    cleanup();
+    block({ reordering: true, place: null });
+    expect(screen.queryByRole('button', { name: /^(Subir|Descer) ramo/ })).toBeNull();
+  });
+
+  it('calls onMove with the direction, and registers both arrows under its focus key', () => {
+    const onMove = vi.fn();
+    const register = vi.fn();
+    block({
+      reordering: true,
+      place: { index: 1, size: 3 },
+      onMove,
+      register,
+      focusKey: 'branch:b',
+    });
+    fireEvent.click(up());
+    fireEvent.click(down());
+    expect(onMove.mock.calls).toEqual([[-1], [1]]);
+    const keys = register.mock.calls.map((call) => call[0]);
+    expect(keys).toContain('branch:b:up');
+    expect(keys).toContain('branch:b:down');
+  });
+
+  it('marks the arrows busy while a write runs, without disabling them', () => {
+    block({ reordering: true, busy: true, place: { index: 1, size: 3 } });
+    expect(up().getAttribute('aria-busy')).toBe('true');
+    expect(up().disabled).toBe(false);
+  });
+});
+
 describe('the floor (UI-D-682..684)', () => {
   it('writes no half-step spacing class and no hard-coded colour in the block', () => {
     const source = readFileSync(
