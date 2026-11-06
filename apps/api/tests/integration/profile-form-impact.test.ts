@@ -912,19 +912,22 @@ describe('12.2-11 D-653, PFORM-49: the impact of reactivating a block equals wha
       for (const member of [both, onlyFirst, holder]) await answer(member, opener, true);
       await answer(both, inner, true);
       await answer(holder, inner, true);
-      await answer(holder, r1);
-      await answer(holder, r2);
 
       // An ACTIVE branch has nothing to reactivate.
       expect(await impactOf(admin, { change: 'reactivate_branch', branchId: b1 })).toBe(0);
       const archived = await call(admin, 'POST', `/v1/profile_form/branches/${b1}/archive`);
       expect(archived.status).toBe(200);
+      // The holder keeps answering what the archived block asked (an answer stays with its question): the
+      // archive itself is refused while a nested branch holds answers, so these rows come after it.
+      await answer(holder, r1);
+      await answer(holder, r2);
 
       const before = await snapshot();
       const gateBefore = await gateMap();
       const impact = await impactOf(admin, { change: 'reactivate_branch', branchId: b1 });
       expect(impact).toBe(2); // `both` (R1 and R2) and `onlyFirst` (R1); the holder owes nothing
-      expect(await impactOf(admin, { change: 'reactivate_branch', branchId: b2 })).toBe(2);
+      // The nested branch alone: only `both` sees R2 (and lacks it).
+      expect(await impactOf(admin, { change: 'reactivate_branch', branchId: b2 })).toBe(1);
       expect(await snapshot()).toBe(before);
 
       // An undo of an ARCHIVED branch asks nobody.

@@ -29,10 +29,11 @@ import {
   checkReactivation,
   dependentBranchesOf,
   newPublicUnderPrivate,
+  subtreeOf,
 } from './branch-rules';
 // A call-time-only cycle with ./branches as well (which takes `adminLock`, `requireModuleOn` and `attempt` from
 // this file): neither module touches the other at load.
-import { readBranch, readBranches, refuseBranch } from './branches';
+import { readBranch, readBranches, readRuleFacts, refuseBranch } from './branches';
 import {
   addQuestion,
   applyRequestedLayout,
@@ -1359,13 +1360,27 @@ const seesBranch = () =>
     branchChainOpenSql({ branchRef: 'p.branch_id', tenant: 'p.tenant_id', member: 'members.id' }),
   );
 
-/** Members with no answer row for the question of the scope `p`. */
-const LACKS_ANSWER = sql`
+/**
+ * Members with no answer row for the question in the column `question` (a constant identifier of this file,
+ * never a caller's value), judged in the tenant of the column `tenant`.
+ */
+const lacksAnswerTo = (tenant: string, question: string) => sql`
   not exists (
     select 1 from public.profile_form_answers a
-     where a.tenant_id = p.tenant_id
+     where a.tenant_id = ${sql.raw(tenant)}
        and a.membership_id = members.id
-       and a.question_id = p.question_id)`;
+       and a.question_id = ${sql.raw(question)})`;
+
+/** Members with no answer row for the question of the scope `p`. */
+const LACKS_ANSWER = lacksAnswerTo('p.tenant_id', 'p.question_id');
+
+/** `uuid` rows of a JSON array of ids, for an `id in (...)` list that is one bound parameter. */
+const idList = (ids: readonly string[]) =>
+  sql`(select e::uuid from jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb) e)`;
+
+/** The archive stamp of the branch of the scope `p`: the identity of the block that left with it. */
+const BLOCK_STAMP = sql`(select s.archived_at from public.profile_form_branches s
+                          where s.tenant_id = p.tenant_id and s.id = p.branch_id)`;
 
 /**
  * `GET /v1/profile_form/impact` (D-585, D-634, D-644, PFORM-23, PFORM-52): how many members a change would ask
@@ -1380,7 +1395,15 @@ const LACKS_ANSWER = sql`
  *     chain;
  *   - `remove_condition` (a question leaving its branch; needs `questionId`) counts the members who do NOT see
  *     the question today and lack an answer to it: they are the ones who newly owe it. It is 0 for an
- *     unbranched, an optional or an archived question.
+ *     unbranched, an optional or an archived question;
+ *   - `undo_branch` (D-653, "Desfazer ramo"; needs `branchId`) counts the members who lack an answer to a
+ *     REQUIRED ACTIVE question that sits directly in the branch and do not see it today (the chain is closed for
+ *     them): the members who newly owe something once the branch is undone. 0 for an archived branch, an empty
+ *     one or one with no required question;
+ *   - `reactivate_branch` (D-653; needs `branchId`) counts the members who would see and lack an answer to a
+ *     required question of the block that comes back: the rows archived with the branch's own stamp, nested
+ *     branches included, judged through their chains by the answers the members still hold. 0 for an active
+ *     branch. An unknown or another tenant's `branchId` is the bare 404 for both.
  *
  * A change that asks nobody is 0. `questionId` is needed by the last three kinds (400 `invalid` without it) and
  * an unknown or foreign one is the bare 404. A count of distinct members only: no member, no answer and no
@@ -1414,6 +1437,46 @@ export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<Impa
       const branch = await readBranch(tx, ctx.tenantId, query.branchId);
       if (!branch || branch.archivedAt !== null) throw new ApiError(404, 'NOT_FOUND');
       return count({ branchId: branch.id }, seesQuestion());
+    }
+
+    if (query.change === 'undo_branch' || query.change === 'reactivate_branch') {
+      if (query.branchId === undefined) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'invalid' });
+      }
+      const branch = await readBranch(tx, ctx.tenantId, query.branchId);
+      if (!branch) throw new ApiError(404, 'NOT_FOUND');
+      const scope = { branchId: branch.id };
+
+      if (query.change === 'undo_branch') {
+        if (branch.archivedAt !== null) return { members: 0 };
+        return count(
+          scope,
+          sql`not ${seesBranch()}
+              and exists (
+                select 1 from public.profile_form_questions rq
+                 where rq.tenant_id = p.tenant_id and rq.branch_id = p.branch_id
+                   and rq.required and rq.archived_at is null
+                   and ${lacksAnswerTo('rq.tenant_id', 'rq.id')})`,
+        );
+      }
+
+      if (branch.archivedAt === null) return { members: 0 };
+      const facts = await readRuleFacts(tx, ctx.tenantId, false);
+      const subtree = subtreeOf(facts.branches, facts.questions, branch.id);
+      return count(
+        scope,
+        sql`exists (
+              select 1 from public.profile_form_questions rq
+               where rq.tenant_id = p.tenant_id and rq.required
+                 and rq.branch_id in ${idList(subtree.branchIds)}
+                 and rq.archived_at = ${BLOCK_STAMP}
+                 and exists (
+                       select 1 from public.profile_form_branches rb
+                        where rb.tenant_id = rq.tenant_id and rb.id = rq.branch_id
+                          and rb.archived_at = ${BLOCK_STAMP})
+                 and ${lacksAnswerTo('rq.tenant_id', 'rq.id')}
+                 and ${sql.raw(questionVisibleSql({ question: 'rq', tenant: 'rq.tenant_id', member: 'members.id' }))})`,
+      );
     }
 
     if (query.questionId === undefined) {
