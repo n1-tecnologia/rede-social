@@ -28,6 +28,11 @@ export const SELF_REF_ORDER: Readonly<Record<string, string>> = {
   // `(tenant_id, condition_question_id) -> (tenant_id, id)`, NO ACTION, not deferrable. An opener never carries
   // a condition (D-622), so every NULL-condition row (every possible opener) is read before every conditional
   // row by `condition_question_id asc nulls first`. Widening D-622 to chains would require changing this entry.
+  // Phase 12.2 (PFORM-55, D-640, D-641): KEPT FOR ONE RELEASE. The condition columns still exist but nothing writes
+  // them (the PF010 guard refuses a write), because the branch replaced the per-question condition. The branch pair
+  // (`profile_form_branches` <-> `profile_form_questions`) is a different shape: both keys are DEFERRABLE, so it is
+  // copied as ONE group under `set constraints all deferred`, not through this table. The cleanup release that drops
+  // the legacy columns removes this entry.
   profile_form_questions: 'condition_question_id',
 };
 

@@ -182,3 +182,71 @@ describe('orderTables with the conditional questions (PFORM-40)', () => {
     expect(SELF_REF_ORDER.feed_comments).toBe('parent_depth');
   });
 });
+
+/**
+ * 12.2-03 (PFORM-55, T-12.2-09, D-640, D-641): a question names its branch (`branch_id`) and a branch names its
+ * opener question (`opener_question_id`), so `profile_form_branches` and `profile_form_questions` reference each
+ * other. Plan 06 declares both composite keys DEFERRABLE (hand SQL), which is what lets the planner treat the pair
+ * as ONE group copied under `set constraints all deferred`, like `events` and `event_secrets`. The legacy
+ * self-reference of the questions stays in the catalog for one release, so its `SELF_REF_ORDER` entry stays too.
+ */
+describe('orderTables with the branches (PFORM-55)', () => {
+  const pairEdges = (branchKeyDeferrable: boolean): FkEdge[] => [
+    fk('profile_form_questions', 'profile_form_questions'),
+    fk('profile_form_questions', 'profile_form_steps'),
+    fk('profile_form_questions', 'profile_form_branches', true),
+    fk('profile_form_branches', 'profile_form_questions', branchKeyDeferrable),
+    fk('profile_form_answers', 'profile_form_questions'),
+    fk('feed_comments', 'feed_comments'),
+    fk('feed_comments', 'feed_posts'),
+  ];
+  const tables = [
+    'profile_form_answers',
+    'profile_form_branches',
+    'profile_form_questions',
+    'profile_form_steps',
+    'feed_comments',
+    'feed_posts',
+  ];
+
+  it('profile_form_branches and profile_form_questions as a deferrable pair become one group after the steps and before the answers', () => {
+    const { order } = orderTables(pairEdges(true), tables);
+    const pair = order.findIndex((group) => group.includes('profile_form_branches'));
+    expect(order[pair]).toEqual(['profile_form_branches', 'profile_form_questions']);
+    const steps = order.findIndex((group) => group.includes('profile_form_steps'));
+    const answers = order.findIndex((group) => group.includes('profile_form_answers'));
+    expect(steps).toBeLessThan(pair);
+    expect(pair).toBeLessThan(answers);
+    expect(order.flat().sort()).toEqual([...tables].sort());
+  });
+
+  it('the same pair with a non-deferrable key is refused with unsortable_tables naming both tables', () => {
+    let caught: unknown;
+    try {
+      orderTables(pairEdges(false), tables);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(MoveError);
+    expect((caught as MoveError).code).toBe('unsortable_tables');
+    expect((caught as MoveError).tables).toEqual([
+      'profile_form_branches',
+      'profile_form_questions',
+    ]);
+  });
+
+  it('the legacy self-reference entry of the questions stays: it is what keeps the catalog plannable next to the pair', () => {
+    expect(orderTables(pairEdges(true), tables).selfReference).toEqual({
+      feed_comments: 'parent_depth',
+      profile_form_questions: 'condition_question_id',
+    });
+    expect(() =>
+      orderTables(pairEdges(true), tables, { selfRefOrder: { feed_comments: 'parent_depth' } }),
+    ).toThrowError(/unsortable_tables: profile_form_questions/);
+  });
+
+  it('the entry table is unchanged: the two keys, in this order', () => {
+    expect(Object.keys(SELF_REF_ORDER)).toEqual(['feed_comments', 'profile_form_questions']);
+    expect(SELF_REF_ORDER.profile_form_questions).toBe('condition_question_id');
+  });
+});
