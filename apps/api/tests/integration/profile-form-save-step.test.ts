@@ -784,6 +784,7 @@ const BRANCH_NAME = 'pfs NOME-SECRETO-DO-RAMO';
 
 type Deep = {
   s1: string;
+  s2: string;
   q1: string;
   tem: string;
   trabalha: string;
@@ -809,8 +810,13 @@ type Deep = {
  *   U, unconditional
  * Every branch carries a name that no member or staff body may ever show.
  */
-async function deepTree(over: { requiredBelow?: boolean } = {}): Promise<Deep> {
+async function deepTree(
+  over: { requiredBelow?: boolean; belowStep?: boolean } = {},
+): Promise<Deep> {
   const s1 = await seedStep('S1');
+  // `belowStep` puts the questions under the branches in a LATER step, so a save of step 1 reports what is
+  // owed there instead of refusing it (D-629).
+  const s2 = over.belowStep ? await seedStep('S2') : s1;
   const [tem, trabalha, q2Yes, q2No, q3Yes, q3No] = Array.from({ length: 6 }, () =>
     crypto.randomUUID(),
   ) as [string, string, string, string, string, string];
@@ -862,12 +868,13 @@ async function deepTree(over: { requiredBelow?: boolean } = {}): Promise<Deep> {
     values: [q3Yes],
     name: BRANCH_NAME,
   });
-  const q4 = await seedQ('Q4', { stepId: s1, position: 4, branchId: b3, required });
-  const q5 = await seedQ('Q5', { stepId: s1, position: 5, branchId: b2, required });
-  const q6 = await seedQ('Q6', { stepId: s1, position: 6, branchId: b1, required });
+  const q4 = await seedQ('Q4', { stepId: s2, position: 4, branchId: b3, required });
+  const q5 = await seedQ('Q5', { stepId: s2, position: 5, branchId: b2, required });
+  const q6 = await seedQ('Q6', { stepId: s2, position: 6, branchId: b1, required });
   const u = await seedQ('U', { stepId: s1, position: 7 });
   return {
     s1,
+    s2,
     q1,
     tem,
     trabalha,
@@ -1057,4 +1064,217 @@ describe('12.2-10 tracer: a depth-3 form is read with its tree and a save that c
       expect(form.formEtag).toBe(createHash('sha256').update(text).digest('hex').slice(0, 16));
     });
   }, 30_000);
+});
+
+// ── 12.2-10 Task 2: the report is the SQL count, in form order, through every level (D-644, PFORM-52) ─────
+
+/** `app.profile_form_missing(tenant, membership)`: the SQL gate's own count for one member. */
+const sqlMissing = async (userId: string): Promise<number> => {
+  const [row] = await adminSql<{ n: number }[]>`
+    select app.profile_form_missing(m.tenant_id, m.id)::int as n
+      from public.memberships m
+     where m.tenant_id = ${labTenantId}::uuid and m.user_id = ${userId}::uuid and m.deleted_at is null`;
+  return row?.n ?? -1;
+};
+
+describe('12.2-10 D-644: missingQuestionIds is the visible required questions in form order and equals the SQL gate (PFORM-51 ordering, precision)', () => {
+  it('opening and closing branches level by level moves the report, its length equals missingRequired and the SQL count after every save', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree({ requiredBelow: true, belowStep: true });
+      const form = await readForm(member);
+      const q2 = choose(f.q2Yes);
+      const q3 = choose(f.q3Yes);
+
+      // Nothing below is owed while the top branch is shut.
+      const none = await saved(await save(member, form, {}));
+      expect(none).toEqual({ missingRequired: 0, missingQuestionIds: [] });
+
+      // Q1 tem, Q2 sim, Q3 sim: three levels open, Q4 Q5 Q6 owed, in the order of their positions.
+      const open = await saved(
+        await save(member, form, { [f.q1]: choose(f.tem), [f.q2]: q2, [f.q3]: q3 }, f.s1),
+      );
+      expect(open).toEqual({ missingRequired: 3, missingQuestionIds: [f.q4, f.q5, f.q6] });
+      expect(await sqlMissing(member.userId)).toBe(3);
+      expect(open.missingQuestionIds.length).toBe(open.missingRequired);
+
+      // Closing the innermost branch (Q3 = não) takes Q4 out; the report and the SQL drop together.
+      const no = form.questions.find((q) => q.id === f.q3)?.options.find((o) => o.label === 'Não')
+        ?.id as string;
+      const inner = await saved(await save(member, form, { [f.q3]: choose(no) }, f.s1));
+      expect(inner).toEqual({ missingRequired: 2, missingQuestionIds: [f.q5, f.q6] });
+      expect(await sqlMissing(member.userId)).toBe(2);
+
+      // Closing the top branch takes everything out.
+      const top = await saved(await save(member, form, { [f.q1]: choose(f.trabalha) }, f.s1));
+      expect(top).toEqual({ missingRequired: 0, missingQuestionIds: [] });
+      expect(await sqlMissing(member.userId)).toBe(0);
+      expect((await readForm(member)).missingRequired).toBe(0);
+    });
+  }, 60_000);
+
+  it('two required questions with the same position are reported by created_at then id, the same every time', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree({ requiredBelow: true, belowStep: true });
+      // Two more required questions in B1 at the very position of Q6.
+      const extra1 = await seedQ('E1', {
+        stepId: f.s2,
+        position: 6,
+        branchId: f.b1,
+        required: true,
+      });
+      const extra2 = await seedQ('E2', {
+        stepId: f.s2,
+        position: 6,
+        branchId: f.b1,
+        required: true,
+      });
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.q1,
+        userId: member.userId,
+        value: choose(f.tem),
+      });
+      const form = await readForm(member);
+
+      const expected = (
+        await adminSql<{ id: string }[]>`
+          select id::text as id from public.profile_form_questions
+           where id in (${f.q6}::uuid, ${extra1}::uuid, ${extra2}::uuid)
+           order by position, created_at, id`
+      ).map((row) => row.id);
+      const first = await saved(await save(member, form, {}));
+      const second = await saved(await save(member, form, {}));
+      expect(first.missingQuestionIds).toEqual(expected);
+      expect(second).toEqual(first);
+      expect(first.missingRequired).toBe(3);
+      expect(await sqlMissing(member.userId)).toBe(3);
+    });
+  }, 40_000);
+
+  it('one save that closes branch A and opens branch B applies both openers in form order: B takes its value, A is ignored and purged (PFORM-51 adjacency)', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedStep('S1');
+      const [a1, a2, b1o, b2o] = Array.from({ length: 4 }, () => crypto.randomUUID()) as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const openerA = await seedQ('openerA', {
+        type: 'single_choice',
+        stepId: s1,
+        position: 1,
+        options: [
+          { id: a1, label: 'Sim' },
+          { id: a2, label: 'Não' },
+        ],
+      });
+      const openerB = await seedQ('openerB', {
+        type: 'single_choice',
+        stepId: s1,
+        position: 2,
+        options: [
+          { id: b1o, label: 'Sim' },
+          { id: b2o, label: 'Não' },
+        ],
+      });
+      const branchA = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: openerA,
+        values: [a1],
+      });
+      const branchB = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: openerB,
+        values: [b1o],
+      });
+      const underA = await seedQ('underA', { stepId: s1, position: 3, branchId: branchA });
+      const underB = await seedQ('underB', { stepId: s1, position: 4, branchId: branchB });
+      for (const [questionId, value] of [
+        [openerA, choose(a1)],
+        [openerB, choose(b2o)],
+        [underA, 'antiga'],
+      ] as const) {
+        await seedProfileFormAnswer({
+          tenantId: labTenantId,
+          questionId,
+          userId: member.userId,
+          value,
+        });
+      }
+      const form = await readForm(member);
+
+      const result = await saved(
+        await save(
+          member,
+          form,
+          { [openerA]: choose(a2), [openerB]: choose(b1o), [underA]: 'nova', [underB]: 'abriu' },
+          s1,
+        ),
+      );
+      expect(result).toEqual({ missingRequired: 0, missingQuestionIds: [] });
+      expect(
+        (await storedAnswers(member.userId)).map((row) => [row.question_id, row.value]),
+      ).toEqual(
+        [
+          [openerA, choose(a2)],
+          [openerB, choose(b1o)],
+          [underB, 'abriu'],
+        ].sort(([x], [y]) => String(x).localeCompare(String(y))),
+      );
+    });
+  }, 40_000);
+
+  it('a form of 30 questions with 15 branches reads and saves; 30 answers pass and a 31st key is refused (PFORM-51 boundary)', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedStep('S1');
+      const openers: { id: string; yes: string }[] = [];
+      const under: string[] = [];
+      for (let index = 0; index < 15; index += 1) {
+        const yes = crypto.randomUUID();
+        const id = await seedQ(`o${index}`, {
+          type: 'single_choice',
+          stepId: s1,
+          position: index * 2 + 1,
+          options: [
+            { id: yes, label: 'Sim' },
+            { id: crypto.randomUUID(), label: 'Não' },
+          ],
+        });
+        const branch = await seedProfileFormBranch({
+          tenantId: labTenantId,
+          openerQuestionId: id,
+          values: [yes],
+        });
+        openers.push({ id, yes });
+        under.push(
+          await seedQ(`u${index}`, { stepId: s1, position: index * 2 + 2, branchId: branch }),
+        );
+      }
+      const form = await readForm(member);
+      expect(form.questions).toHaveLength(30);
+      expect(form.branches).toHaveLength(15);
+      expect(form.formEtag).toMatch(/^[0-9a-f]{16}$/);
+
+      const everything: Record<string, unknown> = {};
+      for (const [index, opener] of openers.entries()) {
+        everything[opener.id] = choose(opener.yes);
+        everything[under[index] as string] = `texto ${index}`;
+      }
+      expect(Object.keys(everything)).toHaveLength(30);
+      const ok = await saved(await save(member, form, everything));
+      expect(ok).toEqual({ missingRequired: 0, missingQuestionIds: [] });
+      expect(await storedAnswers(member.userId)).toHaveLength(30);
+
+      const tooMany = { ...everything, [crypto.randomUUID()]: 'a mais' };
+      expect(Object.keys(tooMany)).toHaveLength(31);
+      const refused = await save(member, form, tooMany);
+      expect(refused.status).toBe(400);
+      expect(await storedAnswers(member.userId)).toHaveLength(30);
+    });
+  }, 90_000);
 });

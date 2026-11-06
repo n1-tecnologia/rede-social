@@ -9,6 +9,7 @@ import {
   removeProfileFormByPrefix,
   SEED_PASSWORD,
   seedProfileFormAnswer,
+  seedProfileFormBranch,
   seedProfileFormQuestion,
   signInAs,
   withPaymentsGate,
@@ -387,4 +388,87 @@ describe('12-05 the gate only refuses (D-581, D-498)', () => {
       expect(again.status).toBe(200);
     });
   });
+});
+
+// ── 12.2-10 Task 2: the gate releases a member exactly when the report is empty, three levels deep (D-644) ──
+
+describe('12.2-10 D-644: on a depth-3 tree the SQL gate and the save report agree at every step (PFORM-52)', () => {
+  it('holds the member while the report lists a question, level by level, and releases her the moment it is empty', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      // Q1 | B1 {Q2 | B2 {Q3 | B3 {Q4 required}, Q5 required}, Q6 required}: all required below Q1.
+      const q1 = await question({ type: 'yes_no', position: 1, required: false });
+      const b1 = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: q1,
+        values: ['true'],
+      });
+      const q2 = await question({ type: 'yes_no', position: 2, required: false, branchId: b1 });
+      const b2 = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: q2,
+        values: ['true'],
+      });
+      const q3 = await question({ type: 'yes_no', position: 3, required: false, branchId: b2 });
+      const b3 = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: q3,
+        values: ['true'],
+      });
+      const q4 = await question({ position: 4, branchId: b3 });
+      const q5 = await question({ position: 5, branchId: b2 });
+      const q6 = await question({ position: 6, branchId: b1 });
+
+      const put = (questionId: string, value: unknown) =>
+        seedProfileFormAnswer({ tenantId: labTenantId, questionId, userId: member.userId, value });
+      /** The report of an empty save (the same lookup the web's stepper reads) and the gate's verdict. */
+      const state = async () => {
+        const read = await get(member, '/v1/me/profile-form');
+        const form = (await read.json()) as { formEtag: string };
+        const report = await api.request('/v1/me/profile-form/answers', {
+          method: 'PUT',
+          headers: {
+            'x-tenant-host': HOSTS.lab,
+            authorization: `Bearer ${member.token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ formEtag: form.formEtag, answers: {} }),
+        });
+        expect(report.status).toBe(200);
+        const { missingRequired, missingQuestionIds } = (await report.json()) as {
+          missingRequired: number;
+          missingQuestionIds: string[];
+        };
+        const gate = (await get(member, '/v1/me/profile')).status;
+        return { missingRequired, missingQuestionIds, gate };
+      };
+
+      // Nothing answered: Q1 is optional and the rest hang below it, so nobody is held.
+      expect(await state()).toEqual({ missingRequired: 0, missingQuestionIds: [], gate: 200 });
+      await put(q1, true);
+      expect(await state()).toEqual({ missingRequired: 1, missingQuestionIds: [q6], gate: 403 });
+      await put(q2, true);
+      expect(await state()).toEqual({
+        missingRequired: 2,
+        missingQuestionIds: [q5, q6],
+        gate: 403,
+      });
+      await put(q3, true);
+      expect(await state()).toEqual({
+        missingRequired: 3,
+        missingQuestionIds: [q4, q5, q6],
+        gate: 403,
+      });
+      await put(q4, 'a');
+      await put(q5, 'b');
+      expect(await state()).toEqual({ missingRequired: 1, missingQuestionIds: [q6], gate: 403 });
+      await put(q6, 'c');
+      // Empty report and an open gate at once, and the bootstrap agrees.
+      expect(await state()).toEqual({ missingRequired: 0, missingQuestionIds: [], gate: 200 });
+      const bootstrap = (await (await get(member, '/v1/me/bootstrap')).json()) as {
+        profileForm?: { pendingRequired: number };
+      };
+      expect(bootstrap.profileForm?.pendingRequired).toBe(0);
+    });
+  }, 60_000);
 });

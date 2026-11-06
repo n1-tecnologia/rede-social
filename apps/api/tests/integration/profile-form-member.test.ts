@@ -1,3 +1,4 @@
+import { memberFormSchema } from '@rede-social/contracts/profile-form';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -6,6 +7,8 @@ import {
   HOSTS,
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
+  seedProfileFormAnswer,
+  seedProfileFormBranch,
   seedProfileFormQuestion,
   signInAs,
   withProfileForm,
@@ -809,4 +812,100 @@ describe('12-06 "Agora não": the notice is dismissed on the server (D-586)', ()
       );
     });
   });
+});
+
+// ── 12.2-10 Task 2: the "Há perguntas novas" notice counts what the member SEES through every level (D-586, D-644) ──
+
+describe('12.2-10 D-644: newOptional counts an optional question only when every branch above it is open', () => {
+  /** Q1 | B1 {Q2 | B2 {Q3 | B3 {Q4}}}: four optional questions, three levels, every opener a yes/no. */
+  async function chain() {
+    const q1 = await question({ type: 'yes_no', position: 1, required: false });
+    const b1 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q1,
+      values: ['true'],
+    });
+    const q2 = await question({ type: 'yes_no', position: 2, required: false, branchId: b1 });
+    const b2 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q2,
+      values: ['true'],
+    });
+    const q3 = await question({ type: 'yes_no', position: 3, required: false, branchId: b2 });
+    const b3 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q3,
+      values: ['true'],
+    });
+    const q4 = await question({ position: 4, required: false, branchId: b3 });
+    return { q1, q2, q3, q4 };
+  }
+
+  const newOptional = async (who: Person): Promise<number | undefined> => {
+    const res = await call(who, 'GET', '/v1/me/bootstrap');
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { profileForm?: { newOptional: number } }).profileForm
+      ?.newOptional;
+  };
+
+  const answer = (who: Person, questionId: string, value: unknown) =>
+    seedProfileFormAnswer({ tenantId: labTenantId, questionId, userId: who.userId, value });
+
+  it('counts the question one level at a time as the member opens the chain, and not a deep one under a closed branch', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await chain();
+      // Nothing answered: only the unconditional Q1 is visible and new.
+      expect(await newOptional(member)).toBe(1);
+      await answer(member, f.q1, true);
+      expect(await newOptional(member)).toBe(1); // Q2 (depth 1) is now the one new question
+      await answer(member, f.q2, true);
+      expect(await newOptional(member)).toBe(1); // Q3 (depth 2)
+      await answer(member, f.q3, true);
+      expect(await newOptional(member)).toBe(1); // Q4 (depth 3) opens through all three
+      await answer(member, f.q4, 'dito');
+      expect(await newOptional(member)).toBe(0);
+    });
+  }, 40_000);
+
+  it('a deep question under a closed branch does not count even when a stale answer below it says yes', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await chain();
+      // Q1 = não closes B1; the planted answers to Q2 and Q3 (stored does not equal visible) must not open Q4.
+      await answer(member, f.q1, false);
+      await answer(member, f.q2, true);
+      await answer(member, f.q3, true);
+      expect(await newOptional(member)).toBe(0);
+      // The member who does open the chain sees it counted once.
+      const open = await person();
+      await answer(open, f.q1, true);
+      await answer(open, f.q2, true);
+      await answer(open, f.q3, true);
+      expect(await newOptional(open)).toBe(1);
+    });
+  }, 40_000);
+
+  it('the member form read never carries a branch name, and the strict member shape refuses one', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const q1 = await question({ type: 'yes_no', position: 1, required: false });
+      await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: q1,
+        values: ['true'],
+        name: 'pfm NOME-QUE-NAO-SAI',
+      });
+      const res = await call(member, 'GET', '/v1/me/profile-form');
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).not.toContain('NOME-QUE-NAO-SAI');
+      const parsed = memberFormSchema.safeParse(JSON.parse(text));
+      expect(parsed.success, text).toBe(true);
+      // T-12.2-03: a payload that DID carry a name would fail the contract.
+      const withName = JSON.parse(text) as { branches: Record<string, unknown>[] };
+      withName.branches = withName.branches.map((branch) => ({ ...branch, name: 'x' }));
+      expect(memberFormSchema.safeParse(withName).success).toBe(false);
+    });
+  }, 30_000);
 });
