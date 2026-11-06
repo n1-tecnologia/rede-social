@@ -334,3 +334,318 @@ begin
   end loop;
 end
 $$;
+--> statement-breakpoint
+-- ── THE QUESTION GUARD, RESTATED (the BEFORE UPDATE trigger `profile_form_questions_guard` of 12.1 keeps calling it) ──
+-- PF007 first, re-targeted from the retired per-question condition to the branches: an opener that has an ACTIVE branch may
+-- not be archived, retyped or lose an option id that the branch's opening values reference. The 12.1 clause "or gain a
+-- condition itself" is deleted on purpose: an opener may now sit inside a branch. PF007 does not depend on answers, so it
+-- runs before the early return. PF001 to PF005 keep their exact text and order. PF006 sits at the end of the answered
+-- branch: a question with answers may not enter or change a branch (D-646); leaving one passes, so "Desfazer ramo" works.
+create or replace function app.profile_form_question_guard()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_old_min jsonb;
+  v_new_min jsonb;
+  v_old_max jsonb;
+  v_new_max jsonb;
+begin
+  -- PF007 (D-632, D-646): an opener with an ACTIVE branch may not be archived, retyped or lose an option id that the
+  -- branch's opening values reference. It is independent of answers, so it runs before the early return below.
+  if exists (
+    select 1
+    from public.profile_form_branches b
+    where b.tenant_id = old.tenant_id
+      and b.opener_question_id = old.id
+      and b.archived_at is null
+  ) and (
+    (old.archived_at is null and new.archived_at is not null)
+    or new.type is distinct from old.type
+    or exists (
+      select 1
+      from jsonb_array_elements(old.options) as o(opt)
+      where exists (
+              select 1
+              from public.profile_form_branches b
+              where b.tenant_id = old.tenant_id
+                and b.opener_question_id = old.id
+                and b.archived_at is null
+                and b.open_values @> array[o.opt ->> 'id']
+            )
+        and not exists (
+              select 1
+              from jsonb_array_elements(new.options) as n(opt)
+              where n.opt ->> 'id' = o.opt ->> 'id'
+            )
+    )
+  ) then
+    raise exception 'profile form question % has active branches: it cannot be archived, retyped or lose a referenced option', old.id
+      using errcode = 'PF007';
+  end if;
+
+  -- A question nobody has answered is free to change in every other way (the services still apply their own rules).
+  if not exists (
+    select 1
+    from public.profile_form_answers a
+    where a.tenant_id = old.tenant_id
+      and a.question_id = old.id
+  ) then
+    return new;
+  end if;
+
+  -- PF001: the type is locked once the question has answers (D-587).
+  if new.type is distinct from old.type then
+    raise exception 'profile form question % has answers: its type cannot change', old.id
+      using errcode = 'PF001';
+  end if;
+
+  -- PF002: an option that has answers can be neither removed nor relabelled (adding options is free).
+  if exists (
+    select 1
+    from jsonb_array_elements(old.options) as o(opt)
+    where exists (
+            select 1
+            from public.profile_form_answers a
+            where a.tenant_id = old.tenant_id
+              and a.question_id = old.id
+              and (
+                a.value ->> 'optionId' = o.opt ->> 'id'
+                or (jsonb_typeof(a.value -> 'optionIds') = 'array'
+                    and a.value -> 'optionIds' @> to_jsonb(o.opt ->> 'id'))
+              )
+          )
+      and not exists (
+            select 1
+            from jsonb_array_elements(new.options) as n(opt)
+            where n.opt ->> 'id' = o.opt ->> 'id'
+              and n.opt ->> 'label' = o.opt ->> 'label'
+          )
+  ) then
+    raise exception 'profile form question % has answers: an answered option cannot be removed or renamed', old.id
+      using errcode = 'PF002';
+  end if;
+
+  -- PF003: "Outro" cannot be switched off while an "Outro" answer exists.
+  if old.allow_other and not new.allow_other and exists (
+    select 1
+    from public.profile_form_answers a
+    where a.tenant_id = old.tenant_id
+      and a.question_id = old.id
+      and a.value ->> 'otherText' is not null
+  ) then
+    raise exception 'profile form question % has answers: Outro cannot be turned off', old.id
+      using errcode = 'PF003';
+  end if;
+
+  -- PF004: a private answer must never become public silently (the one-way ratchet toward private, PU-1).
+  if not old.show_on_profile and new.show_on_profile then
+    raise exception 'profile form question % has answers: it cannot become public', old.id
+      using errcode = 'PF004';
+  end if;
+
+  -- PF005: a number or date limit may only widen. A bound that did not exist and now does is a narrowing too.
+  if old.type = 'number' then
+    v_old_min := old.limits -> 'min';
+    v_new_min := new.limits -> 'min';
+    v_old_max := old.limits -> 'max';
+    v_new_max := new.limits -> 'max';
+    if (jsonb_typeof(v_new_min) = 'number'
+        and (jsonb_typeof(v_old_min) is distinct from 'number'
+             or (v_new_min #>> '{}')::numeric > (v_old_min #>> '{}')::numeric))
+       or (jsonb_typeof(v_new_max) = 'number'
+        and (jsonb_typeof(v_old_max) is distinct from 'number'
+             or (v_new_max #>> '{}')::numeric < (v_old_max #>> '{}')::numeric)) then
+      raise exception 'profile form question % has answers: a number limit cannot narrow', old.id
+        using errcode = 'PF005';
+    end if;
+  elsif old.type = 'date' then
+    v_old_min := old.limits -> 'min';
+    v_new_min := new.limits -> 'min';
+    v_old_max := old.limits -> 'max';
+    v_new_max := new.limits -> 'max';
+    -- ISO days (YYYY-MM-DD) order the same as text.
+    if (jsonb_typeof(v_new_min) = 'string'
+        and (jsonb_typeof(v_old_min) is distinct from 'string'
+             or (v_new_min #>> '{}') > (v_old_min #>> '{}')))
+       or (jsonb_typeof(v_new_max) = 'string'
+        and (jsonb_typeof(v_old_max) is distinct from 'string'
+             or (v_new_max #>> '{}') < (v_old_max #>> '{}'))) then
+      raise exception 'profile form question % has answers: a date limit cannot narrow', old.id
+        using errcode = 'PF005';
+    end if;
+  end if;
+
+  -- PF006: a question with answers may not enter a branch or change its branch (D-646). Leaving a branch passes: the
+  -- service forbids a single answered question leaving one, but "Desfazer ramo" (undo) needs the trigger to let it go.
+  if new.branch_id is not null
+     and new.branch_id is distinct from old.branch_id then
+    raise exception 'profile form question % has answers: it cannot enter or change branch', old.id
+      using errcode = 'PF006';
+  end if;
+
+  return new;
+end
+$$;
+--> statement-breakpoint
+-- ── THE BRANCH GUARD (D-646) ────────────────────────────────────────────────────────────────────────
+-- Once any question of the branch, ACTIVE OR ARCHIVED, has an answer, the opener and the SET of opening values are frozen
+-- (PF006): changing them would reinterpret stored answers. A reordered or repeated value list is the same set. A name
+-- change, an archive and a revision bump pass. The BEFORE UPDATE row trigger runs after the row lock of the update, so a
+-- member save that holds the branch `for share` (lock_branches) and an admin edit cannot both commit unseen.
+create or replace function app.profile_form_branch_guard()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if (new.opener_question_id is distinct from old.opener_question_id
+      or not (old.open_values @> new.open_values and new.open_values @> old.open_values))
+     and exists (
+       select 1
+       from public.profile_form_questions q
+       join public.profile_form_answers a
+         on a.tenant_id = q.tenant_id and a.question_id = q.id
+       where q.tenant_id = old.tenant_id
+         and q.branch_id = old.id
+     ) then
+    raise exception 'profile form branch % has answers: its opener and opening values cannot change', old.id
+      using errcode = 'PF006';
+  end if;
+
+  return new;
+end
+$$;
+--> statement-breakpoint
+create trigger profile_form_branches_guard
+  before update on public.profile_form_branches
+  for each row execute function app.profile_form_branch_guard();
+--> statement-breakpoint
+-- ── THE TREE GUARD (D-644, T-12.2-07, T-12.2-02) ────────────────────────────────────────────────────
+-- Whole-tenant, so no subtree logic and no per-row reasoning: a tenant holds at most 30 active questions and 15 active
+-- branches. Two tests, the depth first.
+--   PF008: the tenant holds a chain of more than the depth limit of branches. The join below is `branch -> its opener ->
+--   that opener's branch -> ...` one level past the limit; a cycle of any length also satisfies it, so one test refuses
+--   both. An ARCHIVED branch still counts: it keeps its chain for a reactivation.
+--   PF009 (WR-06): an ACTIVE question that shows on the profile has, anywhere on its chain, an opener that does not. The
+--   service refuses it first (plan 09); this is the database backstop. Installed after the conversion above, so a legacy row
+--   cannot abort the fan-out; the triggers below fire on the columns that can break the rule and never on `writeLayout`
+--   (which sets only the position, the step and the revision).
+create or replace function app.profile_form_tree_guard()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if exists (
+    select 1
+    from public.profile_form_branches b1
+    join public.profile_form_questions o1
+      on o1.tenant_id = b1.tenant_id and o1.id = b1.opener_question_id
+    join public.profile_form_branches b2
+      on b2.tenant_id = o1.tenant_id and b2.id = o1.branch_id
+    join public.profile_form_questions o2
+      on o2.tenant_id = b2.tenant_id and o2.id = b2.opener_question_id
+    join public.profile_form_branches b3
+      on b3.tenant_id = o2.tenant_id and b3.id = o2.branch_id
+    join public.profile_form_questions o3
+      on o3.tenant_id = b3.tenant_id and o3.id = b3.opener_question_id
+    join public.profile_form_branches b4
+      on b4.tenant_id = o3.tenant_id and b4.id = o3.branch_id
+    where b1.tenant_id = new.tenant_id
+  ) then
+    raise exception 'profile form of tenant % holds a chain of branches deeper than the limit, or a cycle', new.tenant_id
+      using errcode = 'PF008';
+  end if;
+
+  if exists (
+    select 1
+    from public.profile_form_questions q
+    join public.profile_form_branches b1
+      on b1.tenant_id = q.tenant_id and b1.id = q.branch_id
+    join public.profile_form_questions o1
+      on o1.tenant_id = b1.tenant_id and o1.id = b1.opener_question_id
+    left join public.profile_form_branches b2
+      on b2.tenant_id = o1.tenant_id and b2.id = o1.branch_id
+    left join public.profile_form_questions o2
+      on o2.tenant_id = b2.tenant_id and o2.id = b2.opener_question_id
+    left join public.profile_form_branches b3
+      on b3.tenant_id = o2.tenant_id and b3.id = o2.branch_id
+    left join public.profile_form_questions o3
+      on o3.tenant_id = b3.tenant_id and o3.id = b3.opener_question_id
+    where q.tenant_id = new.tenant_id
+      and q.show_on_profile
+      and q.archived_at is null
+      and (
+        not o1.show_on_profile
+        or o2.show_on_profile is false
+        or o3.show_on_profile is false
+      )
+  ) then
+    raise exception 'profile form of tenant % shows a question on the profile under an opener that is not shown', new.tenant_id
+      using errcode = 'PF009';
+  end if;
+
+  return new;
+end
+$$;
+--> statement-breakpoint
+create trigger profile_form_branches_tree_guard
+  after insert or update of opener_question_id on public.profile_form_branches
+  for each row execute function app.profile_form_tree_guard();
+--> statement-breakpoint
+create trigger profile_form_questions_tree_guard
+  after insert or update of branch_id, show_on_profile, archived_at on public.profile_form_questions
+  for each row execute function app.profile_form_tree_guard();
+--> statement-breakpoint
+-- ── THE LEGACY GUARD, INSTALLED LAST (T-12.2-08) ────────────────────────────────────────────────────
+-- The 12.1 condition pair is retired for one release: nothing may write it any more. A previous API revision that still
+-- writes a condition during the fan-out fails loudly (PF010) instead of being ignored by the new gate. Installed after the
+-- conversion, which was the last reader of the pair. A row that already carries a condition and is updated without
+-- touching the pair passes, and so does clearing it. This function reads no table, so it needs no elevated rights.
+create or replace function app.profile_form_legacy_condition_guard()
+returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if new.condition_question_id is null then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if old.condition_question_id is not distinct from new.condition_question_id
+       and old.condition_values is not distinct from new.condition_values then
+      return new;
+    end if;
+  end if;
+
+  raise exception 'profile form question % cannot carry a condition any more: use a branch', new.id
+    using errcode = 'PF010';
+end
+$$;
+--> statement-breakpoint
+create trigger profile_form_questions_legacy_condition_guard
+  before insert or update of condition_question_id, condition_values on public.profile_form_questions
+  for each row execute function app.profile_form_legacy_condition_guard();
+--> statement-breakpoint
+-- ── GRANTS ──────────────────────────────────────────────────────────────────────────────────────────
+-- EXECUTE is revoked from PUBLIC on every function of the file (the default ACL of the public schema hands it to anon and
+-- authenticated). The gate keeps its existing grant (`api_user`, `service_role` only: it takes an arbitrary membership id and
+-- must not be callable by a session). The purge and the two lock functions are granted exactly like their 12.1 twins.
+revoke all on function app.profile_form_lock_active_v3() from public;
+--> statement-breakpoint
+revoke all on function app.profile_form_lock_branches() from public;
+--> statement-breakpoint
+revoke all on function app.profile_form_missing(uuid, uuid) from public;
+--> statement-breakpoint
+revoke all on function app.profile_form_purge_closed() from public;
+--> statement-breakpoint
+revoke all on function app.profile_form_question_guard() from public;
+--> statement-breakpoint
+revoke all on function app.profile_form_branch_guard() from public;
+--> statement-breakpoint
+revoke all on function app.profile_form_tree_guard() from public;
+--> statement-breakpoint
+revoke all on function app.profile_form_legacy_condition_guard() from public;
+--> statement-breakpoint
+grant execute on function app.profile_form_lock_active_v3() to authenticated, api_user, service_role;
+--> statement-breakpoint
+grant execute on function app.profile_form_lock_branches() to authenticated, api_user, service_role;
+--> statement-breakpoint
+grant execute on function app.profile_form_purge_closed() to authenticated, api_user, service_role;
+--> statement-breakpoint
+revoke truncate on public.profile_form_branches from authenticated;
