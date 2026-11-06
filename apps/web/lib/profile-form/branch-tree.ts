@@ -2,6 +2,7 @@ import {
   type AdminBranch,
   type AdminQuestion,
   type AdminStep,
+  PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_LIMITS,
   type ProfileFormType,
 } from '@rede-social/contracts/profile-form';
@@ -21,7 +22,7 @@ import {
  * function here reads an answer. Counts, ids, titles and labels are all that leave it (T-12.2-14).
  */
 
-import type { BranchDescription } from './describe-branch';
+import { type BranchDescription, describeBranch } from './describe-branch';
 
 /** The longest chain of branches above a question (the contracts' limit, D-644). */
 const MAX_LEVEL = PROFILE_FORM_LIMITS.branchDepth;
@@ -367,53 +368,244 @@ export function stepTree(tree: AdminBranchTree, stepId: string): StepNode | null
   return { step, roots };
 }
 
-// ── RED stubs (12.2-13 task 2): deliberately inert, replaced in full by the GREEN commit of the same task ──
+// ── Client pre-checks: what the screen offers, the server stays the authority (D-644, D-646) ──────────
 
 /** The part of a question the "Ramo" select needs; `id` is `null` for a question not saved yet. */
 export type EligibilityQuestion = {
   id: string | null;
+  /** The switch "Mostrar no perfil do membro" as it stands now (WR-06). */
   showOnProfile: boolean;
-  /** The step a NEW question is going into; it lands at the end of that step (or of the form). */
+  /** The step a NEW question is going into: it lands at the end of that step. Absent means the end of the form. */
   stepId?: string | null;
 };
 
+/** The question and every question below it, through any branch (archived ones included, like the server). */
+function descendantsOf(tree: AdminBranchTree, questionId: string): Set<string> {
+  const seen = new Set<string>([questionId]);
+  let frontier = [questionId];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const branch of tree.branchesByOpener.get(id) ?? []) {
+        for (const member of membersOf(tree, branch.id)) {
+          if (seen.has(member.id)) continue;
+          seen.add(member.id);
+          next.push(member.id);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return seen;
+}
+
+/** Whether any opener on the chain of `branchId` does not show on the member profile (WR-06, PF009). */
+function chainHasPrivateOpener(tree: AdminBranchTree, branchId: string): boolean {
+  const chain = branchChain(tree, branchId);
+  if (chain === null) return false;
+  return chain.some((branch) => {
+    const opener = tree.questionById.get(branch.openerQuestionId);
+    return opener !== undefined && !opener.showOnProfile;
+  });
+}
+
+/**
+ * The flat position a question is judged at: its own place when it is saved, else the end of the step it is
+ * going into (a new question lands at the end of the step, D-646), else the end of the form.
+ */
+function positionOf(tree: AdminBranchTree, question: EligibilityQuestion): number {
+  const own = question.id === null ? undefined : tree.flatIndex.get(question.id);
+  if (own !== undefined) return own;
+  const ordinal = question.stepId == null ? undefined : tree.stepOrdinal.get(question.stepId);
+  if (ordinal === undefined) return tree.flatIds.length;
+  return tree.flatIds.filter((id) => {
+    const step = tree.questionById.get(id)?.stepId;
+    return step !== undefined && (tree.stepOrdinal.get(step) ?? Number.MAX_SAFE_INTEGER) <= ordinal;
+  }).length;
+}
+
+/**
+ * The ACTIVE branches a question may be placed in (UI-D-669), the screen's twin of `checkMoveIntoBranch`
+ * (the server is the authority and revalidates): the opener comes strictly BEFORE the question in the
+ * flattened form (D-641), is not the question or one of its own descendants, the branch's level plus the
+ * height of the question's own sub-branches stays within `PROFILE_FORM_LIMITS.branchDepth` (D-644), and, for a
+ * public question, no opener on the branch's chain is private (UI-D-675). `leftOutForPrivacy` is true when at
+ * least one branch was left out ONLY for that last reason, so the screen can explain it. In the order of the
+ * openers in the form, then list order. Pure: a function of the admin read.
+ */
 export function eligibleBranchesFor(
-  _question: EligibilityQuestion,
-  _tree: AdminBranchTree,
+  question: EligibilityQuestion,
+  tree: AdminBranchTree,
 ): { branches: AdminBranch[]; leftOutForPrivacy: boolean } {
-  return { branches: [], leftOutForPrivacy: false };
+  const position = positionOf(tree, question);
+  const own = question.id !== null && tree.questionById.has(question.id) ? question.id : null;
+  const below = own === null ? new Set<string>() : descendantsOf(tree, own);
+  let height = 0;
+  if (own !== null) {
+    for (const sub of tree.branchesByOpener.get(own) ?? []) {
+      const measured = branchHeight(tree, sub.id);
+      if (measured === null) return { branches: [], leftOutForPrivacy: false };
+      height = Math.max(height, measured);
+    }
+  }
+  const found: { branch: AdminBranch; opener: number; list: number }[] = [];
+  let leftOutForPrivacy = false;
+  tree.branches.forEach((branch, list) => {
+    if (branch.archivedAt !== null) return;
+    const opener = tree.flatIndex.get(branch.openerQuestionId);
+    if (opener === undefined || opener >= position) return;
+    if (below.has(branch.openerQuestionId)) return;
+    const level = branchLevel(tree, branch.id);
+    if (level === null || level + height > MAX_LEVEL) return;
+    if (question.showOnProfile && chainHasPrivateOpener(tree, branch.id)) {
+      leftOutForPrivacy = true;
+      return;
+    }
+    found.push({ branch, opener, list });
+  });
+  found.sort((a, b) => a.opener - b.opener || a.list - b.list);
+  return { branches: found.map((item) => item.branch), leftOutForPrivacy };
 }
 
+/**
+ * The ACTIVE questions that may open a branch (UI-D-671), the screen's twin of `checkBranch`: one of the four
+ * opener types, before every question of the branch (D-641), not inside the branch's own subtree, with the
+ * levels above it plus the branch's own height within three (D-644), and not private when the branch holds a
+ * public question (UI-D-675). `null` is a branch about to be created (empty, height 1). In form order.
+ */
 export function eligibleOpenersFor(
-  _branch: AdminBranch | null,
-  _tree: AdminBranchTree,
+  branch: AdminBranch | null,
+  tree: AdminBranchTree,
 ): AdminQuestion[] {
-  return [];
+  const members = branch === null ? [] : membersOf(tree, branch.id);
+  const firstMember = Math.min(
+    ...members.map((member) => tree.flatIndex.get(member.id) ?? Number.MAX_SAFE_INTEGER),
+  );
+  const inside = new Set<string>();
+  for (const member of members) for (const id of descendantsOf(tree, member.id)) inside.add(id);
+  const height = branch === null ? 1 : branchHeight(tree, branch.id);
+  if (height === null) return [];
+  const hasPublic = [...inside].some((id) => tree.questionById.get(id)?.showOnProfile === true);
+  const openerTypes: readonly string[] = PROFILE_FORM_CONDITION_OPENER_TYPES;
+
+  const found: AdminQuestion[] = [];
+  for (const id of tree.flatIds) {
+    const candidate = tree.questionById.get(id);
+    if (candidate === undefined || !openerTypes.includes(candidate.type)) continue;
+    if (members.length > 0 && (tree.flatIndex.get(id) ?? 0) >= firstMember) continue;
+    if (inside.has(id) || (branch !== null && candidate.branchId === branch.id)) continue;
+    let above = 0;
+    if (candidate.branchId != null) {
+      const level = branchLevel(tree, candidate.branchId);
+      if (level === null) continue;
+      above = level;
+    }
+    if (above + height > MAX_LEVEL) continue;
+    const isPrivate =
+      !candidate.showOnProfile ||
+      (candidate.branchId != null && chainHasPrivateOpener(tree, candidate.branchId));
+    if (hasPublic && isPrivate) continue;
+    found.push(candidate);
+  }
+  return found;
 }
 
-export function publicUnderPrivateTitles(_tree: AdminBranchTree): string[] {
-  return [];
+/**
+ * The titles of the ACTIVE questions that show on the member profile and have a private opener anywhere on
+ * their chain (WR-06, PFORM-53, UI-D-675): what the server would refuse, listed from the read the builder
+ * already holds. In list order. Only titles leave.
+ */
+export function publicUnderPrivateTitles(tree: AdminBranchTree): string[] {
+  return tree.questions
+    .filter(
+      (question) =>
+        question.showOnProfile &&
+        question.branchId != null &&
+        chainHasPrivateOpener(tree, question.branchId),
+    )
+    .map((question) => question.title);
 }
 
+// ── The Fluxo: the form as a tree by branch (D-649, UI-D-676) ─────────────────────────────────────
+
+/** A question node of the Fluxo: what it is and where it sits, never an answer. */
 export type FlowQuestion = {
   id: string;
   title: string;
   type: ProfileFormType;
   required: boolean;
+  /** True when the question shows on the member profile. */
   showOnProfile: boolean;
+  /** The 1-based place of the question's step (the Fluxo draws a pill with two or more steps). */
   stepOrdinal: number;
   branches: FlowBranch[];
 };
 
+/** A branch edge of the Fluxo: the label parts (name included, admin lane only) and its questions. */
 export type FlowBranch = {
   id: string;
   label: BranchDescription | null;
+  /** The ACTIVE questions in the branch; zero for an empty branch or one whose questions are all archived. */
   questionCount: number;
   questions: FlowQuestion[];
 };
 
 export type FlowTree = { roots: FlowQuestion[]; stepCount: number };
 
-export function flowTree(_tree: AdminBranchTree): FlowTree {
-  return { roots: [], stepCount: 0 };
+/**
+ * The Fluxo's data (UI-D-676): the root list of the active unconditional questions in form order and, under
+ * each opener, its branches in layout order with their questions, to three levels. Archived questions and
+ * branches are not in it (a question in an archived branch is drawn as a root). Every active question is
+ * drawn once, even in a stored tree with a cycle.
+ */
+export function flowTree(tree: AdminBranchTree): FlowTree {
+  const placed = new Set<string>();
+
+  const draw = (
+    question: AdminQuestion,
+    depth: number,
+    path: ReadonlySet<string>,
+  ): FlowQuestion => {
+    placed.add(question.id);
+    const branches: FlowBranch[] = [];
+    if (depth < MAX_LEVEL) {
+      for (const branch of orderedBranchesOf(tree, question.id)) {
+        if (path.has(branch.id)) continue;
+        const all = membersOf(tree, branch.id);
+        const members = all
+          .filter((member) => !placed.has(member.id))
+          .sort((a, b) => (tree.flatIndex.get(a.id) ?? 0) - (tree.flatIndex.get(b.id) ?? 0));
+        if (members.length === 0 && all.length > 0) continue;
+        const next = new Set([...path, branch.id]);
+        branches.push({
+          id: branch.id,
+          label: describeBranch(branch, tree.questionById),
+          questionCount: all.length,
+          questions: members.map((member) => draw(member, depth + 1, next)),
+        });
+      }
+    }
+    return {
+      id: question.id,
+      title: question.title,
+      type: question.type,
+      required: question.required,
+      showOnProfile: question.showOnProfile,
+      stepOrdinal: tree.stepOrdinal.get(question.stepId) ?? 0,
+      branches,
+    };
+  };
+
+  const roots: FlowQuestion[] = [];
+  for (const id of tree.flatIds) {
+    const question = tree.questionById.get(id);
+    if (question === undefined || usableBranch(tree, question.branchId) !== undefined) continue;
+    roots.push(draw(question, 0, new Set()));
+  }
+  // A question the walk could not reach (a stored cycle) is drawn as a root, never dropped.
+  for (const id of tree.flatIds) {
+    const question = tree.questionById.get(id);
+    if (question !== undefined && !placed.has(id)) roots.push(draw(question, 0, new Set()));
+  }
+  return { roots, stepCount: tree.steps.length };
 }
