@@ -4,11 +4,11 @@ current_phase: "12.2"
 current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: 6
 status: executing
-stopped_at: Phase 12.2 planned (21 plans, 15 waves, checker passed with 1 advisory); next /gsd-execute-phase 12.2; sketch 019 approval is Igor's; Phase 13 stays paused at plan 14
-last_updated: "2026-11-06T18:16:44.739Z"
+stopped_at: "Phase 12.2: 5 of 21 plans done (01,02,03,04,06); paused on two gates for Igor: plan 05 sketch 019 approval (paste approved: true lines) and plan 07 db:reset word (needs >=10 GiB free, now ~5.4); resume with /gsd-execute-phase 12.2"
+last_updated: "2026-11-06T18:17:29.633Z"
 last_activity: 2026-11-06
 last_activity_desc: Phase 12.2 execution started
-state_head: fb07955c3323066c6ecbf1b4a8a31acac5328420
+state_head: 3537121a2cc85096bf8e392ee20af888ae676794
 progress:
   total_phases: 30
   completed_phases: 0
@@ -1244,6 +1244,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-06T15:42:09.641Z
-Stopped at: Phase 12.2 planned (21 plans, 15 waves)
+Last session: 2026-11-06T18:17:22.497Z
+Stopped at: Phase 12.2: 5 of 21 plans done (01,02,03,04,06); paused on two gates for Igor: plan 05 sketch 019 approval (paste approved: true lines) and plan 07 db:reset word (needs >=10 GiB free, now ~5.4); resume with /gsd-execute-phase 12.2
 Resume file: .planning/phases/12.2-ramos-condicionais-no-formulario-de-perfil-varias-perguntas/12.2-01-PLAN.md
