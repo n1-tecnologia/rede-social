@@ -1,3 +1,8 @@
+import { answerTokens } from '@rede-social/contracts/profile-form';
+import {
+  branchTreeOf,
+  isQuestionVisibleInTree,
+} from '@rede-social/contracts/profile-form-branches';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -8,6 +13,7 @@ import {
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
   seedProfileFormAnswer,
+  seedProfileFormBranch,
   seedProfileFormQuestion,
   seedProfileFormStep,
   signInAs,
@@ -50,6 +56,8 @@ let adminPerson: Person | null = null;
 // the "admin" side that edits.
 const memberSql = postgres(DB_URL, { prepare: false, max: 1 });
 const editorSql = postgres(DB_URL, { prepare: false, max: 1 });
+// 12.2-12: the second member-side connection, for two purges of one member at the same time.
+const purgeSql = postgres(DB_URL, { prepare: false, max: 1 });
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -134,6 +142,7 @@ afterAll(async () => {
     delete from public.tenant_modules where module_key = 'profile_form' and tenant_id = ${labTenantId}::uuid`;
   await memberSql.end({ timeout: 2 });
   await editorSql.end({ timeout: 2 });
+  await purgeSql.end({ timeout: 2 });
 });
 
 describe('12-06 the member’s save and an admin’s edit never interleave (T-12-16)', () => {
@@ -181,7 +190,7 @@ describe('12-06 the member’s save and an admin’s edit never interleave (T-12
         (error: { code?: string }) => error.code ?? 'error',
       );
       const editDone = watch(edit);
-      await sleep(500);
+      await untilBlocked('the waiting side of the race');
       expect(editDone(), 'the update waited for the member’s lock').toBe(false);
 
       release();
@@ -221,7 +230,7 @@ describe('12-06 the member’s save and an admin’s edit never interleave (T-12
 
       const saving = save(member, form, { [id]: 'resposta' });
       const savingDone = watch(saving);
-      await sleep(500);
+      await untilBlocked('the waiting side of the race');
       expect(savingDone(), 'the save waited for the admin’s row lock').toBe(false);
 
       release();
@@ -403,7 +412,7 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
         adminCall('PATCH', `/v1/profile_form/questions/${id}`, { revision: 1, type: 'number' }),
       );
       const patchDone = watch(patching);
-      await sleep(600);
+      await untilBlocked('the waiting side of the race');
       expect(patchDone(), 'the type change waited for the member’s lock').toBe(false);
 
       held.release();
@@ -476,7 +485,7 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
         adminCall('POST', `/v1/profile_form/questions/${first}/archive`),
       );
       const archiveDone = watch(archiving);
-      await sleep(600);
+      await untilBlocked('the waiting side of the race');
       expect(archiveDone(), 'the archive waited for the save’s lock').toBe(false);
       held.release();
       await held.committed;
@@ -503,7 +512,7 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
       await holding;
       const saving = save(other, form, { [second]: 'tarde demais' });
       const savingDone = watch(saving);
-      await sleep(600);
+      await untilBlocked('the waiting side of the race');
       expect(savingDone(), 'the save waited for the archive’s row lock').toBe(false);
       release();
       await adminTx;
@@ -622,7 +631,7 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
         }),
       );
       const patchDone = watch(patching);
-      await sleep(600);
+      await untilBlocked('the waiting side of the race');
       expect(patchDone(), 'an edit of the same row waits for the save').toBe(false);
       held.release();
       await held.committed;
@@ -639,7 +648,8 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ missingRequired: 0, missingQuestionIds: [] });
       const archived = await adminCall('GET', '/v1/profile_form/archived');
-      expect(await archived.json()).toEqual({ questions: [] });
+      // 12.2-08: the archived read also carries the archived branches (none yet).
+      expect(await archived.json()).toEqual({ questions: [], branches: [] });
       const list = await adminCall('GET', '/v1/profile_form/questions');
       // 12.1-08: the list also carries the steps (none for a form never built) and their limit.
       expect(await list.json()).toEqual({
@@ -648,35 +658,56 @@ describe('12-09 the admin side of the two-connection suite (PFORM-24, PFORM-03)'
         limit: 30,
         steps: [],
         stepLimit: 10,
+        // 12.2-08 (D-640): every list carries the tenant's branches, none yet.
+        branches: [],
       });
     });
   }, 30_000);
 });
 
-// ── 12.1-12: admin condition and step edits against a member's save (D-632, D-633, T-12.1-13) ─────────────────
+// ── 12.2-12: branch edits and step moves against a member's save (D-632, D-633, D-646, T-12.1-13, T-12.2-04) ──────
 //
-// The member's save locks the active questions `FOR SHARE` through `app.profile_form_lock_active_v2()` in the
-// canonical order; an admin's condition or step edit takes the per-tenant advisory lock (`adminLock`) and then
-// the same rows `FOR UPDATE`. Each case below pins BOTH commit orders with a held transaction on one side and
-// the REAL route on the other, and then asserts the one invariant of the phase: STORED EQUALS VISIBLE.
+// The member's save locks the active questions `FOR SHARE` through `app.profile_form_lock_active_v3()` and then the
+// branches through `app.profile_form_lock_branches()`, in the canonical order steps, questions, branches. An admin's
+// edit takes the per-tenant advisory lock (`adminLock`), then the same rows `FOR UPDATE` in the same order. Each
+// case below pins BOTH commit orders with a held transaction on one side and the REAL route on the other (the
+// held side is waited for by polling the lock catalogue, never by a long timer), and then asserts the one
+// invariant of the phase: STORED EQUALS VISIBLE through the whole chain.
+//
+// The 12.1 cases that wrote the retired per-question condition (PF010 refuses it now) are migrated onto branches
+// one for one; the races of Phase 12.2 follow in their own describe.
 
 const choose = (optionId: string) => ({ optionId, otherText: null });
 
-/** The question ids of a member's answers whose condition is not met (must always be empty). */
+/**
+ * The question ids of a member's answers that no chain keeps open (must always be empty): the contracts' rule over
+ * the stored rows, ARCHIVED questions and branches included, exactly like the SQL purge that has no archived predicate.
+ */
 async function staleAnswers(userId: string): Promise<string[]> {
-  const rows = await adminSql<{ question_id: string }[]>`
-    select a.question_id::text as question_id
+  const questions = await adminSql<{ id: string; branch_id: string | null }[]>`
+    select id::text as id, branch_id::text as branch_id from public.profile_form_questions
+     where tenant_id = ${labTenantId}::uuid`;
+  const branches = await adminSql<{ id: string; opener: string; values: string[] }[]>`
+    select id::text as id, opener_question_id::text as opener, open_values as values
+      from public.profile_form_branches where tenant_id = ${labTenantId}::uuid`;
+  const answers = await adminSql<{ question_id: string; value: unknown }[]>`
+    select a.question_id::text as question_id, a.value
       from public.profile_form_answers a
       join public.memberships m on m.id = a.membership_id
-      join public.profile_form_questions q on q.tenant_id = a.tenant_id and q.id = a.question_id
-     where m.user_id = ${userId}::uuid
-       and q.condition_question_id is not null
-       and not exists (
-         select 1 from public.profile_form_answers o
-          where o.tenant_id = a.tenant_id and o.membership_id = a.membership_id
-            and o.question_id = q.condition_question_id
-            and q.condition_values && app.profile_form_answer_tokens(o.value))`;
-  return rows.map((row) => row.question_id);
+     where m.user_id = ${userId}::uuid and a.tenant_id = ${labTenantId}::uuid`;
+  const tree = branchTreeOf(
+    questions.map((q) => ({ id: q.id, branchId: q.branch_id })),
+    branches.map((b) => ({ id: b.id, openerQuestionId: b.opener, values: b.values })),
+  );
+  const branchOf = new Map(questions.map((q) => [q.id, q.branch_id]));
+  const valueByQuestion = new Map(answers.map((a) => [a.question_id, a.value]));
+  const tokensOf = (id: string) => answerTokens(valueByQuestion.get(id));
+  return answers
+    .filter(
+      (a) =>
+        !isQuestionVisibleInTree({ branchId: branchOf.get(a.question_id) ?? null }, tree, tokensOf),
+    )
+    .map((a) => a.question_id);
 }
 
 const storedFor = async (userId: string): Promise<string[]> =>
@@ -696,11 +727,50 @@ const saveStep = (
 ): Promise<Response> =>
   call(p, 'PUT', '/v1/me/profile-form/answers', { formEtag: form.formEtag, stepId, answers });
 
-type HeldTx = { release: () => void; committed: Promise<unknown> };
+/** A response reduced to what a race classifies on: the status and the coded reason of a 409. */
+async function outcome(res: Response): Promise<{ status: number; code?: string }> {
+  const code = await profileFormCode(res.clone()).catch(() => undefined);
+  return code === undefined ? { status: res.status } : { status: res.status, code };
+}
 
 /**
- * A member's save, held open before the commit: claims, role, the `_v2` lock, then the writes the real save
- * does (`write` on the transaction) and the purge. The transaction stays open until `release()`.
+ * Waits until some statement is BLOCKED on a lock, by polling the catalogue every 25 ms: the proof that the
+ * interleaving is real (the other side holds, this side waits), with no timer long enough to force an ordering.
+ */
+async function untilBlocked(label: string): Promise<void> {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock'`;
+    if ((row?.n ?? 0) > 0) return;
+    await sleep(25);
+  }
+  throw new Error(`nobody waited for a lock: ${label}`);
+}
+
+type HeldTx = { release: () => void; committed: Promise<unknown> };
+
+/** Lets a held transaction go whatever the case did, so a failing assertion never leaves a lock behind. */
+async function releasing<T>(held: HeldTx, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } finally {
+    held.release();
+    await held.committed.catch(() => undefined);
+  }
+}
+
+const claimsOf = (member: Person) =>
+  JSON.stringify({
+    sub: member.userId,
+    role: 'authenticated',
+    tenant_id: labTenantId,
+    tenant_role: 'member',
+  });
+
+/**
+ * A member's save, held open before the commit: claims, role, the `_v3` lock, the branch lock, then the writes the
+ * real save does (`write` on the transaction) and the purge. The transaction stays open until `release()`. A
+ * failing write rejects `committed` at once instead of leaving the caller waiting for a signal that never comes.
  */
 async function holdMemberSave(
   member: Person,
@@ -714,22 +784,17 @@ async function holdMemberSave(
   const holding = new Promise<void>((resolve) => {
     held = resolve;
   });
-  const claims = JSON.stringify({
-    sub: member.userId,
-    role: 'authenticated',
-    tenant_id: labTenantId,
-    tenant_role: 'member',
-  });
   const committed = memberSql.begin(async (tx) => {
-    await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+    await tx`select set_config('request.jwt.claims', ${claimsOf(member)}, true)`;
     await tx.unsafe('set local role authenticated');
-    await tx`select id::text as id from app.profile_form_lock_active_v2()`;
+    await tx`select id::text as id from app.profile_form_lock_active_v3()`;
+    await tx`select id::text as id from app.profile_form_lock_branches()`;
     await write(tx);
     await tx`select question_id from app.profile_form_purge_closed()`;
     held();
     await gate;
   });
-  await holding;
+  await Promise.race([holding, committed]);
   return { release, committed };
 }
 
@@ -749,10 +814,13 @@ const upsertAnswer = (
 
 /**
  * An admin's edit, held open before the commit: the per-tenant advisory lock `adminLock` takes, every active
- * row `FOR UPDATE` in the canonical order (`position, created_at, id`), then `edit` on the transaction.
+ * row `FOR UPDATE` in the canonical order (`position, created_at, id`), every branch `FOR UPDATE` after them
+ * (`created_at, id`), then `edit` on the transaction. `lockQuestions: false` models the branch edit, which takes
+ * the branches alone.
  */
 async function holdAdminEdit(
   edit: (tx: postgres.TransactionSql) => Promise<void>,
+  options: { lockQuestions?: boolean } = {},
 ): Promise<HeldTx> {
   let release: () => void = () => {};
   let held: () => void = () => {};
@@ -764,19 +832,27 @@ async function holdAdminEdit(
   });
   const committed = editorSql.begin(async (tx) => {
     await tx`select pg_advisory_xact_lock(hashtextextended(${`profile_form:${labTenantId}`}, 0))`;
+    if (options.lockQuestions !== false) {
+      await tx`
+        select id from public.profile_form_questions
+         where tenant_id = ${labTenantId}::uuid and archived_at is null
+         order by position, created_at, id for update`;
+    }
     await tx`
-      select id from public.profile_form_questions
-       where tenant_id = ${labTenantId}::uuid and archived_at is null
-       order by position, created_at, id for update`;
+      select id from public.profile_form_branches
+       where tenant_id = ${labTenantId}::uuid order by created_at, id for update`;
     await edit(tx);
     held();
     await gate;
   });
-  await holding;
+  await Promise.race([holding, committed]);
   return { release, committed };
 }
 
-/** Two steps; step 1 holds an opener (Sim / Não) and its dependent (shown by Sim), step 2 holds a plain question. */
+/**
+ * Two steps; step 1 holds an opener (Sim / Não), a branch that opens on Sim and its dependent; step 2 holds a
+ * plain question. The 12.1 shape of these races, on a branch.
+ */
 async function twoStepBranch() {
   const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
   const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
@@ -792,19 +868,100 @@ async function twoStepBranch() {
       { id: no, label: 'Não' },
     ],
   });
+  const branch = await seedProfileFormBranch({
+    tenantId: labTenantId,
+    openerQuestionId: opener,
+    values: [yes],
+  });
   const dependent = await question({
     title: `${TITLE}dependente`,
     stepId: s1,
     position: 2,
-    conditionQuestionId: opener,
-    conditionValues: [yes],
+    branchId: branch,
   });
   const other = await question({ title: `${TITLE}outra`, stepId: s2, position: 3 });
-  return { s1, s2, yes, no, opener, dependent, other };
+  return { s1, s2, yes, no, opener, branch, dependent, other };
 }
 
-describe('12.1-12 D-632 and D-633: an admin condition or step edit and a member save never interleave or deadlock (T-12.1-13)', () => {
-  it('condition edit, member first: the admin waits for the save, then is refused condition_locked because the dependent now has an answer; the store stays consistent', async () => {
+/**
+ * A depth-2 tree: Q1 (Sim / Não) opens B1 on Sim; B1 holds Q2 (Sim / Não) which opens B2 on Sim; B2 holds Q3. All
+ * optional, all in step 1; step 2 holds a plain question.
+ */
+async function deepTree() {
+  const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+  const s2 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S2` });
+  const [y1, n1, y2, n2] = Array.from({ length: 4 }, () => crypto.randomUUID()) as [
+    string,
+    string,
+    string,
+    string,
+  ];
+  const q1 = await question({
+    title: `${TITLE}d1`,
+    type: 'single_choice',
+    stepId: s1,
+    position: 1,
+    options: [
+      { id: y1, label: 'Sim' },
+      { id: n1, label: 'Não' },
+    ],
+  });
+  const b1 = await seedProfileFormBranch({
+    tenantId: labTenantId,
+    openerQuestionId: q1,
+    values: [y1],
+  });
+  const q2 = await question({
+    title: `${TITLE}d2`,
+    type: 'single_choice',
+    stepId: s1,
+    position: 2,
+    branchId: b1,
+    options: [
+      { id: y2, label: 'Sim' },
+      { id: n2, label: 'Não' },
+    ],
+  });
+  const b2 = await seedProfileFormBranch({
+    tenantId: labTenantId,
+    openerQuestionId: q2,
+    values: [y2],
+  });
+  const q3 = await question({ title: `${TITLE}d3`, stepId: s1, position: 3, branchId: b2 });
+  const other = await question({ title: `${TITLE}d4`, stepId: s2, position: 4 });
+  return { s1, s2, y1, n1, y2, n2, q1, b1, q2, b2, q3, other };
+}
+
+/**
+ * Starts two calls in a chosen order and returns their results in the fixed order (a, b). The second call starts
+ * `gapMs` (at most 100) after the first, so the rounds sweep the interleavings from simultaneous to well apart;
+ * no ordering is ASSERTED, only the set of admissible end states.
+ */
+async function race2<A, B>(
+  a: () => Promise<A>,
+  b: () => Promise<B>,
+  bFirst: boolean,
+  gapMs: number,
+): Promise<[A, B]> {
+  const startB = bFirst ? b() : undefined;
+  const startA = bFirst ? undefined : a();
+  if (gapMs > 0) await sleep(gapMs);
+  const pa = startA ?? a();
+  const pb = startB ?? b();
+  return [await pa, await pb];
+}
+
+/** The gap of a round of the real races: all five gaps meet both start orders. */
+const gapFor = (round: number): number => [0, 8, 20, 45, 90][round % 5] ?? 0;
+
+const branchValues = async (branchId: string): Promise<string[]> => {
+  const [row] = await adminSql<{ values: string[] }[]>`
+    select open_values as values from public.profile_form_branches where id = ${branchId}::uuid`;
+  return [...(row?.values ?? [])].sort();
+};
+
+describe('12.2-12 D-646 and D-633: a branch edit or step edit and a member save never interleave or deadlock (T-12.1-13, T-12.2-04)', () => {
+  it('branch edit, member first: the admin waits for the save, then is refused condition_locked because a question of the branch now has an answer; the store stays consistent', async () => {
     const member = await person();
     await withProfileForm(labTenantId, async () => {
       const f = await twoStepBranch();
@@ -817,33 +974,31 @@ describe('12.1-12 D-632 and D-633: an admin condition or step edit and a member 
       const held = await holdMemberSave(member, async (tx) => {
         await upsertAnswer(tx, member, f.dependent, 'minha resposta');
       });
+      await releasing(held, async () => {
+        const [row] = await adminSql<{ revision: number }[]>`
+          select revision from public.profile_form_branches where id = ${f.branch}::uuid`;
+        const patching = Promise.resolve(
+          adminCall('PATCH', `/v1/profile_form/branches/${f.branch}`, {
+            revision: row?.revision,
+            values: [f.no],
+          }),
+        );
+        const patchDone = watch(patching);
+        await untilBlocked('the branch edit behind the member’s save');
+        expect(patchDone(), 'the branch edit waited for the member’s save').toBe(false);
 
-      const [row] = await adminSql<{ revision: number }[]>`
-        select revision from public.profile_form_questions where id = ${f.dependent}::uuid`;
-      const patching = Promise.resolve(
-        adminCall('PATCH', `/v1/profile_form/questions/${f.dependent}`, {
-          revision: row?.revision,
-          condition: { questionId: f.opener, values: [f.no] },
-        }),
-      );
-      const patchDone = watch(patching);
-      await sleep(600);
-      expect(patchDone(), 'the condition edit waited for the member’s save').toBe(false);
-
-      held.release();
-      await held.committed;
-      const refused = await patching;
-      expect(refused.status).toBe(409);
-      expect(await profileFormCode(refused)).toBe('condition_locked');
-      const [after] = await adminSql<{ condition_values: string[] }[]>`
-        select condition_values from public.profile_form_questions where id = ${f.dependent}::uuid`;
-      expect(after?.condition_values).toEqual([f.yes]);
-      expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
-      expect(await staleAnswers(member.userId)).toEqual([]);
+        held.release();
+        await held.committed;
+        const refused = await outcome(await patching);
+        expect(refused).toEqual({ status: 409, code: 'condition_locked' });
+        expect(await branchValues(f.branch)).toEqual([f.yes]);
+        expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
+        expect(await staleAnswers(member.userId)).toEqual([]);
+      });
     });
   }, 60_000);
 
-  it('condition edit, admin first: the member’s save waits for the edit, then is refused form_changed and writes nothing; the retry with the fresh etag is consistent', async () => {
+  it('branch edit, admin first: the member’s save waits for the edit, then is refused form_changed and writes nothing; the retry with the fresh etag is consistent', async () => {
     const member = await person();
     await withProfileForm(labTenantId, async () => {
       const f = await twoStepBranch();
@@ -854,37 +1009,39 @@ describe('12.1-12 D-632 and D-633: an admin condition or step edit and a member 
         value: choose(f.yes),
       });
       const stale = await readForm(member);
-      const held = await holdAdminEdit(async (tx) => {
-        await tx`
-          update public.profile_form_questions
-             set condition_values = ${tx.array([f.no])}, revision = revision + 1
-           where id = ${f.dependent}::uuid`;
-      });
-
-      const saving = Promise.resolve(
-        saveStep(member, stale, f.s1, { [f.dependent]: 'tarde demais' }),
+      const held = await holdAdminEdit(
+        async (tx) => {
+          await tx`
+            update public.profile_form_branches
+               set open_values = ${tx.array([f.no])}::text[], revision = revision + 1
+             where id = ${f.branch}::uuid`;
+        },
+        { lockQuestions: false },
       );
-      const saveDone = watch(saving);
-      await sleep(600);
-      expect(saveDone(), 'the save waited for the admin’s edit').toBe(false);
+      await releasing(held, async () => {
+        const saving = Promise.resolve(
+          saveStep(member, stale, f.s1, { [f.dependent]: 'tarde demais' }),
+        );
+        const saveDone = watch(saving);
+        await untilBlocked('the member’s save behind the branch edit');
+        expect(saveDone(), 'the save waited for the admin’s edit').toBe(false);
 
-      held.release();
-      await held.committed;
-      const refused = await saving;
-      expect(refused.status).toBe(409);
-      expect(await profileFormCode(refused)).toBe('form_changed');
-      expect(await storedFor(member.userId)).toEqual([f.opener]);
-      expect(await staleAnswers(member.userId)).toEqual([]);
+        held.release();
+        await held.committed;
+        expect(await outcome(await saving)).toEqual({ status: 409, code: 'form_changed' });
+        expect(await storedFor(member.userId)).toEqual([f.opener]);
+        expect(await staleAnswers(member.userId)).toEqual([]);
 
-      // The condition now wants Não; the member says Não and the dependent is shown, so the answer is kept.
-      const fresh = await readForm(member);
-      const ok = await saveStep(member, fresh, f.s1, {
-        [f.opener]: choose(f.no),
-        [f.dependent]: 'agora vale',
+        // The branch now wants Não; the member says Não and the dependent is shown, so the answer is kept.
+        const fresh = await readForm(member);
+        const ok = await saveStep(member, fresh, f.s1, {
+          [f.opener]: choose(f.no),
+          [f.dependent]: 'agora vale',
+        });
+        expect(ok.status, await ok.clone().text()).toBe(200);
+        expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
+        expect(await staleAnswers(member.userId)).toEqual([]);
       });
-      expect(ok.status, await ok.clone().text()).toBe(200);
-      expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
-      expect(await staleAnswers(member.userId)).toEqual([]);
     });
   }, 60_000);
 
@@ -907,28 +1064,29 @@ describe('12.1-12 D-632 and D-633: an admin condition or step edit and a member 
       const held = await holdMemberSave(member, async (tx) => {
         await upsertAnswer(tx, member, f.opener, choose(f.no));
       });
+      await releasing(held, async () => {
+        const reordering = Promise.resolve(
+          adminCall('PUT', '/v1/profile_form/order', {
+            steps: [
+              { id: f.s1, questionIds: [f.opener] },
+              { id: f.s2, questionIds: [f.dependent, f.other] },
+            ],
+          }),
+        );
+        const reorderDone = watch(reordering);
+        await untilBlocked('the reorder behind the member’s save');
+        expect(reorderDone(), 'the reorder waited for the member’s save').toBe(false);
 
-      const reordering = Promise.resolve(
-        adminCall('PUT', '/v1/profile_form/order', {
-          steps: [
-            { id: f.s1, questionIds: [f.opener] },
-            { id: f.s2, questionIds: [f.dependent, f.other] },
-          ],
-        }),
-      );
-      const reorderDone = watch(reordering);
-      await sleep(600);
-      expect(reorderDone(), 'the reorder waited for the member’s save').toBe(false);
-
-      held.release();
-      await held.committed;
-      const moved = await reordering;
-      expect(moved.status, await moved.clone().text()).toBe(200);
-      expect(await storedFor(member.userId)).toEqual([f.opener]);
-      expect(await staleAnswers(member.userId)).toEqual([]);
-      const [placed] = await adminSql<{ step_id: string }[]>`
-        select step_id::text as step_id from public.profile_form_questions where id = ${f.dependent}::uuid`;
-      expect(placed?.step_id).toBe(f.s2);
+        held.release();
+        await held.committed;
+        const moved = await reordering;
+        expect(moved.status, await moved.clone().text()).toBe(200);
+        expect(await storedFor(member.userId)).toEqual([f.opener]);
+        expect(await staleAnswers(member.userId)).toEqual([]);
+        const [placed] = await adminSql<{ step_id: string }[]>`
+          select step_id::text as step_id from public.profile_form_questions where id = ${f.dependent}::uuid`;
+        expect(placed?.step_id).toBe(f.s2);
+      });
     });
   }, 60_000);
 
@@ -955,25 +1113,24 @@ describe('12.1-12 D-632 and D-633: an admin condition or step edit and a member 
              set step_id = ${f.s2}::uuid, revision = revision + 1
            where id = ${f.dependent}::uuid`;
       });
+      await releasing(held, async () => {
+        const saving = Promise.resolve(saveStep(member, stale, f.s1, { [f.opener]: choose(f.no) }));
+        const saveDone = watch(saving);
+        await untilBlocked('the member’s save behind the step move');
+        expect(saveDone(), 'the save waited for the admin’s step move').toBe(false);
 
-      const saving = Promise.resolve(saveStep(member, stale, f.s1, { [f.opener]: choose(f.no) }));
-      const saveDone = watch(saving);
-      await sleep(600);
-      expect(saveDone(), 'the save waited for the admin’s step move').toBe(false);
+        held.release();
+        await held.committed;
+        expect(await outcome(await saving)).toEqual({ status: 409, code: 'form_changed' });
+        expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
+        expect(await staleAnswers(member.userId)).toEqual([]);
 
-      held.release();
-      await held.committed;
-      const refused = await saving;
-      expect(refused.status).toBe(409);
-      expect(await profileFormCode(refused)).toBe('form_changed');
-      expect(await storedFor(member.userId)).toEqual([f.opener, f.dependent].sort());
-      expect(await staleAnswers(member.userId)).toEqual([]);
-
-      const fresh = await readForm(member);
-      const retry = await saveStep(member, fresh, f.s1, { [f.opener]: choose(f.no) });
-      expect(retry.status, await retry.clone().text()).toBe(200);
-      expect(await storedFor(member.userId)).toEqual([f.opener]);
-      expect(await staleAnswers(member.userId)).toEqual([]);
+        const fresh = await readForm(member);
+        const retry = await saveStep(member, fresh, f.s1, { [f.opener]: choose(f.no) });
+        expect(retry.status, await retry.clone().text()).toBe(200);
+        expect(await storedFor(member.userId)).toEqual([f.opener]);
+        expect(await staleAnswers(member.userId)).toEqual([]);
+      });
     });
   }, 60_000);
 
@@ -1060,4 +1217,500 @@ describe('12.1-12 D-632 and D-633: an admin condition or step edit and a member 
       }
     });
   }, 90_000);
+});
+
+// ── 12.2-12: the races of Phase 12.2 on a depth-2 tree (T-12.2-04, T-12.2-06, PFORM-47, PFORM-51) ──────────────
+//
+// Every race below enumerates the end states it admits by NAME and asserts membership with `toContain`, never a
+// timing. Lock order, both sides: the member takes questions (FOR SHARE) then branches (FOR SHARE) then her own
+// advisory lock; an admin takes the tenant advisory lock, then questions (FOR UPDATE), then branches (FOR UPDATE).
+// A deadlock would surface as a 500 (SQLSTATE 40P01), which no state admits.
+
+const ROUNDS = 20;
+
+describe('12.2-12 T-12.2-04: a branch edit against a member’s answer ends in exactly one of two states', () => {
+  it('branch edit, held both ways: the answer committed first makes the edit condition_locked; the edit committed first makes the save form_changed', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.q1,
+        userId: member.userId,
+        value: choose(f.y1),
+      });
+      // (a) The answer to a question of B1 is in flight: the edit of B1’s opening set waits, then is refused.
+      const held = await holdMemberSave(member, async (tx) => {
+        await upsertAnswer(tx, member, f.q2, choose(f.y2));
+      });
+      await releasing(held, async () => {
+        const patching = Promise.resolve(
+          adminCall('PATCH', `/v1/profile_form/branches/${f.b1}`, {
+            revision: 1,
+            values: [f.y1, f.n1],
+          }),
+        );
+        const patchDone = watch(patching);
+        await untilBlocked('the branch edit behind the answer in flight');
+        expect(patchDone()).toBe(false);
+        held.release();
+        await held.committed;
+        const refused = await outcome(await patching);
+        const state =
+          refused.status === 409 && refused.code === 'condition_locked' ? 'answer-first' : 'other';
+        expect(['answer-first'], `edit ${refused.status}/${refused.code}`).toContain(state);
+        expect(await branchValues(f.b1)).toEqual([f.y1]);
+      });
+      expect(await storedFor(member.userId)).toEqual([f.q1, f.q2].sort());
+
+      // (b) The edit of B1 holds first: the save, which read the form before, waits and is refused.
+      await adminSql`delete from public.profile_form_answers where question_id = ${f.q2}::uuid`;
+      const stale = await readForm(member);
+      const editing = await holdAdminEdit(
+        async (tx) => {
+          await tx`
+            update public.profile_form_branches
+               set open_values = ${tx.array([f.y1, f.n1])}::text[], revision = revision + 1
+             where id = ${f.b1}::uuid`;
+        },
+        { lockQuestions: false },
+      );
+      await releasing(editing, async () => {
+        const saving = Promise.resolve(saveStep(member, stale, f.s1, { [f.q2]: choose(f.y2) }));
+        const saveDone = watch(saving);
+        await untilBlocked('the member’s save behind the branch edit');
+        expect(saveDone()).toBe(false);
+        editing.release();
+        await editing.committed;
+        const refused = await outcome(await saving);
+        const state =
+          refused.status === 409 && refused.code === 'form_changed' ? 'edit-first' : 'other';
+        expect(['edit-first'], `save ${refused.status}/${refused.code}`).toContain(state);
+        expect(await branchValues(f.b1)).toEqual([f.n1, f.y1].sort());
+        expect(await storedFor(member.userId)).toEqual([f.q1]);
+      });
+      expect(await staleAnswers(member.userId)).toEqual([]);
+    });
+  }, 90_000);
+
+  it(`branch edit, ${ROUNDS} real races of PATCH /branches/{id} against the member’s answer to a question of that branch: answer-first or edit-first, never both, never a 500`, async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      const seen = new Map<string, number>();
+      for (let round = 0; round < ROUNDS; round += 1) {
+        await adminSql`delete from public.profile_form_answers where user_id = ${member.userId}::uuid`;
+        await adminSql`
+          update public.profile_form_branches
+             set open_values = ${adminSql.array([f.y1])}::text[], revision = 1
+           where id = ${f.b1}::uuid`;
+        await seedProfileFormAnswer({
+          tenantId: labTenantId,
+          questionId: f.q1,
+          userId: member.userId,
+          value: choose(f.y1),
+        });
+        const form = await readForm(member);
+        const edit = () =>
+          adminCall('PATCH', `/v1/profile_form/branches/${f.b1}`, {
+            revision: 1,
+            values: [f.y1, f.n1],
+          }).then(outcome);
+        const answer = () => saveStep(member, form, f.s1, { [f.q2]: choose(f.y2) }).then(outcome);
+        const [editResult, saveResult] = await race2(edit, answer, round % 2 === 1, gapFor(round));
+        const state =
+          saveResult.status === 200 &&
+          editResult.status === 409 &&
+          editResult.code === 'condition_locked'
+            ? 'answer-first'
+            : editResult.status === 200 &&
+                saveResult.status === 409 &&
+                saveResult.code === 'form_changed'
+              ? 'edit-first'
+              : `other edit=${editResult.status}/${editResult.code} save=${saveResult.status}/${saveResult.code}`;
+        expect(['answer-first', 'edit-first'], `round ${round}`).toContain(state);
+        seen.set(state, (seen.get(state) ?? 0) + 1);
+
+        const answered = (await storedFor(member.userId)).includes(f.q2);
+        const values = await branchValues(f.b1);
+        if (state === 'answer-first') {
+          expect(answered, `round ${round}: the answer`).toBe(true);
+          expect(values, `round ${round}: the opening set`).toEqual([f.y1]);
+        } else {
+          expect(answered, `round ${round}: no answer under the edited branch`).toBe(false);
+          expect(values, `round ${round}: the opening set`).toEqual([f.n1, f.y1].sort());
+        }
+        expect(await staleAnswers(member.userId), `round ${round}`).toEqual([]);
+      }
+      console.info(`[12.2-12 branch edit] ${JSON.stringify([...seen])}`);
+      expect(seen.size).toBeGreaterThan(0);
+    });
+  }, 120_000);
+});
+
+describe('12.2-12 T-12.2-06: "Arquivar ramo" against a member’s save keeps the archived block’s answers', () => {
+  it('archive, held both ways: the save in flight makes the archive wait and its answer is kept; the archive holding first makes the save form_changed with no answer', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: f.q1,
+        userId: member.userId,
+        value: choose(f.y1),
+      });
+      // (a) The member's answer to Q2 is in flight: the archive waits for it, then archives; the answer stays.
+      const held = await holdMemberSave(member, async (tx) => {
+        await upsertAnswer(tx, member, f.q2, choose(f.y2));
+      });
+      await releasing(held, async () => {
+        const archiving = Promise.resolve(
+          adminCall('POST', `/v1/profile_form/branches/${f.b1}/archive`),
+        );
+        const archiveDone = watch(archiving);
+        await untilBlocked('the archive behind the answer in flight');
+        expect(archiveDone()).toBe(false);
+        held.release();
+        await held.committed;
+        const archived = await outcome(await archiving);
+        const state = archived.status === 200 ? 'save-first' : 'other';
+        expect(['save-first'], `archive ${archived.status}/${archived.code}`).toContain(state);
+      });
+      expect(await answerCountOf(f.q2)).toBe(1);
+      const [block] = await adminSql<{ branch: boolean; q2: boolean }[]>`
+        select (select archived_at is not null from public.profile_form_branches where id = ${f.b1}::uuid) as branch,
+               (select archived_at is not null from public.profile_form_questions where id = ${f.q2}::uuid) as q2`;
+      expect(block).toEqual({ branch: true, q2: true });
+      expect(await staleAnswers(member.userId)).toEqual([]);
+
+      // (b) An archive holds the block first: a save that read the form before waits, then is refused and writes nothing.
+      const other = await person();
+      const other2 = await deepTree();
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: other2.q1,
+        userId: other.userId,
+        value: choose(other2.y1),
+      });
+      const stale = await readForm(other);
+      const editing = await holdAdminEdit(async (tx) => {
+        await tx`
+          update public.profile_form_branches set archived_at = now(), revision = revision + 1
+           where id in (${other2.b1}::uuid, ${other2.b2}::uuid)`;
+        await tx`
+          update public.profile_form_questions set archived_at = now(), revision = revision + 1
+           where branch_id in (${other2.b1}::uuid, ${other2.b2}::uuid)`;
+      });
+      await releasing(editing, async () => {
+        const saving = Promise.resolve(
+          saveStep(other, stale, other2.s1, { [other2.q2]: choose(other2.y2) }),
+        );
+        const saveDone = watch(saving);
+        await untilBlocked('the member’s save behind the archive');
+        expect(saveDone()).toBe(false);
+        editing.release();
+        await editing.committed;
+        const refused = await outcome(await saving);
+        const state =
+          refused.status === 409 && refused.code === 'form_changed' ? 'archive-first' : 'other';
+        expect(['archive-first'], `save ${refused.status}/${refused.code}`).toContain(state);
+      });
+      expect(await answerCountOf(other2.q2)).toBe(0);
+      expect(await staleAnswers(other.userId)).toEqual([]);
+    });
+  }, 120_000);
+
+  it(`archive, ${ROUNDS} real races of POST /branches/{id}/archive against the member’s answer: save-first keeps the answer in the archived block, archive-first refuses the save, never a lost answer`, async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const seen = new Map<string, number>();
+      for (let round = 0; round < ROUNDS; round += 1) {
+        const f = await deepTree();
+        await seedProfileFormAnswer({
+          tenantId: labTenantId,
+          questionId: f.q1,
+          userId: member.userId,
+          value: choose(f.y1),
+        });
+        const form = await readForm(member);
+        const archive = () =>
+          adminCall('POST', `/v1/profile_form/branches/${f.b1}/archive`).then(outcome);
+        const answer = () => saveStep(member, form, f.s1, { [f.q2]: choose(f.y2) }).then(outcome);
+        const [archiveResult, saveResult] = await race2(
+          archive,
+          answer,
+          round % 2 === 1,
+          gapFor(round),
+        );
+        const state =
+          archiveResult.status === 200 && saveResult.status === 200
+            ? 'save-first'
+            : archiveResult.status === 200 &&
+                saveResult.status === 409 &&
+                saveResult.code === 'form_changed'
+              ? 'archive-first'
+              : `other archive=${archiveResult.status}/${archiveResult.code} save=${saveResult.status}/${saveResult.code}`;
+        expect(['save-first', 'archive-first'], `round ${round}`).toContain(state);
+        seen.set(state, (seen.get(state) ?? 0) + 1);
+
+        const [block] = await adminSql<{ branch: boolean }[]>`
+          select archived_at is not null as branch from public.profile_form_branches where id = ${f.b1}::uuid`;
+        expect(block?.branch, `round ${round}: the block is archived`).toBe(true);
+        // The archived block keeps every answer it had, and nothing sits below a really closed chain.
+        expect(await answerCountOf(f.q2), `round ${round}`).toBe(state === 'save-first' ? 1 : 0);
+        expect((await storedFor(member.userId)).includes(f.q1), `round ${round}: the opener`).toBe(
+          true,
+        );
+        expect(await staleAnswers(member.userId), `round ${round}`).toEqual([]);
+
+        await adminSql`delete from public.profile_form_answers where user_id = ${member.userId}::uuid`;
+        await removeProfileFormByPrefix(TITLE);
+      }
+      console.info(`[12.2-12 archive] ${JSON.stringify([...seen])}`);
+      expect(seen.size).toBeGreaterThan(0);
+    });
+  }, 180_000);
+});
+
+describe('12.2-12 PFORM-51: two saves of one member serialise and equal the same two saves run one after the other', () => {
+  it('two saves, started together: the stored answers are the result of A then B or of B then A, never a mix', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      const label = new Map([
+        [f.q1, 'Q1'],
+        [f.q2, 'Q2'],
+        [f.q3, 'Q3'],
+      ]);
+      const snapshot = async () =>
+        (
+          await adminSql<{ question_id: string; value: unknown }[]>`
+            select a.question_id::text as question_id, a.value
+              from public.profile_form_answers a
+              join public.memberships m on m.id = a.membership_id
+             where m.user_id = ${member.userId}::uuid`
+        )
+          .map(
+            (row) =>
+              `${label.get(row.question_id) ?? row.question_id}=${JSON.stringify(row.value)}`,
+          )
+          .sort()
+          .join('|');
+      const clear = () =>
+        adminSql`delete from public.profile_form_answers where user_id = ${member.userId}::uuid`;
+      // Save A opens B1 and answers inside it; save B closes B1 (and so removes what A put there).
+      const saveA = (form: Form) =>
+        saveStep(member, form, f.s1, { [f.q1]: choose(f.y1), [f.q2]: choose(f.y2) });
+      const saveB = (form: Form) => saveStep(member, form, f.s1, { [f.q1]: choose(f.n1) });
+
+      // The reference: the same two saves run one after the other, in each order.
+      await clear();
+      let form = await readForm(member);
+      expect((await saveA(form)).status).toBe(200);
+      expect((await saveB(form)).status).toBe(200);
+      const aThenB = await snapshot();
+      await clear();
+      expect((await saveB(form)).status).toBe(200);
+      expect((await saveA(form)).status).toBe(200);
+      const bThenA = await snapshot();
+      expect(aThenB).not.toBe(bThenA);
+
+      const seen = new Map<string, number>();
+      for (let round = 0; round < ROUNDS; round += 1) {
+        await clear();
+        form = await readForm(member);
+        const [a, b] = await race2(
+          () => saveA(form),
+          () => saveB(form),
+          round % 2 === 1,
+          gapFor(round),
+        );
+        expect([a.status, b.status], `round ${round}`).toEqual([200, 200]);
+        const now = await snapshot();
+        const state = now === aThenB ? 'A-then-B' : now === bThenA ? 'B-then-A' : `mixed ${now}`;
+        expect(['A-then-B', 'B-then-A'], `round ${round}`).toContain(state);
+        seen.set(state, (seen.get(state) ?? 0) + 1);
+        expect(await staleAnswers(member.userId), `round ${round}`).toEqual([]);
+      }
+      console.info(`[12.2-12 two saves] ${JSON.stringify([...seen])}`);
+      expect(seen.size).toBeGreaterThan(0);
+    });
+  }, 120_000);
+});
+
+describe('12.2-12 PFORM-47: two purges of one member delete once, and a purge against her own save equals one of the two orders', () => {
+  const purgeOnce = (via: postgres.Sql, member: Person) =>
+    via.begin(async (tx) => {
+      await tx`select set_config('request.jwt.claims', ${claimsOf(member)}, true)`;
+      await tx.unsafe('set local role authenticated');
+      return tx`select question_id::text as question_id from app.profile_form_purge_closed()`;
+    });
+
+  /** Q1 answered Não (B1 closed) while Q2 and Q3 still hold answers below it: what a purge is for. */
+  async function staleMember(member: Person, f: Awaited<ReturnType<typeof deepTree>>) {
+    await adminSql`delete from public.profile_form_answers where user_id = ${member.userId}::uuid`;
+    await seedProfileFormAnswer({
+      tenantId: labTenantId,
+      questionId: f.q1,
+      userId: member.userId,
+      value: choose(f.n1),
+    });
+    await seedProfileFormAnswer({
+      tenantId: labTenantId,
+      questionId: f.q2,
+      userId: member.userId,
+      value: choose(f.y2),
+    });
+    await seedProfileFormAnswer({
+      tenantId: labTenantId,
+      questionId: f.q3,
+      userId: member.userId,
+      value: 'abaixo',
+    });
+  }
+
+  it('two purges, the first held open: the second waits and finds nothing, and together they deleted exactly the stale answers once', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      await staleMember(member, f);
+      let release: () => void = () => {};
+      let held: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holding = new Promise<void>((resolve) => {
+        held = resolve;
+      });
+      let first: { question_id: string }[] = [];
+      const firstTx = memberSql.begin(async (tx) => {
+        await tx`select set_config('request.jwt.claims', ${claimsOf(member)}, true)`;
+        await tx.unsafe('set local role authenticated');
+        first =
+          await tx`select question_id::text as question_id from app.profile_form_purge_closed()`;
+        held();
+        await gate;
+      });
+      await Promise.race([holding, firstTx]);
+      try {
+        const second = purgeOnce(purgeSql, member);
+        const secondDone = watch(second);
+        await untilBlocked('the second purge behind the first');
+        expect(secondDone(), 'the second purge waited for the rows the first deleted').toBe(false);
+        release();
+        await firstTx;
+        const secondRows = await second;
+        const deleted = [...first, ...secondRows].map((row) => row.question_id).sort();
+        const state =
+          first.length === 2 && secondRows.length === 0
+            ? 'first-took-all'
+            : first.length === 0 && secondRows.length === 2
+              ? 'second-took-all'
+              : 'split-or-other';
+        expect(['first-took-all'], `first ${first.length} second ${secondRows.length}`).toContain(
+          state,
+        );
+        expect(deleted).toEqual([f.q2, f.q3].sort());
+        expect(new Set(deleted).size).toBe(deleted.length);
+      } finally {
+        release();
+        await firstTx.catch(() => undefined);
+      }
+      expect(await storedFor(member.userId)).toEqual([f.q1]);
+    });
+  }, 60_000);
+
+  it(`two purges, ${ROUNDS} times started together: the union of what they deleted is the stale set, no answer is deleted twice and none is missed`, async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      const seen = new Map<string, number>();
+      for (let round = 0; round < ROUNDS; round += 1) {
+        await staleMember(member, f);
+        const [a, b] = await Promise.all([
+          purgeOnce(memberSql, member),
+          purgeOnce(purgeSql, member),
+        ]);
+        const state =
+          a.length === 2 && b.length === 0
+            ? 'first-took-all'
+            : a.length === 0 && b.length === 2
+              ? 'second-took-all'
+              : a.length + b.length === 2
+                ? 'split'
+                : `other ${a.length}+${b.length}`;
+        expect(['first-took-all', 'second-took-all', 'split'], `round ${round}`).toContain(state);
+        seen.set(state, (seen.get(state) ?? 0) + 1);
+        const deleted = [...a, ...b].map((row) => row.question_id).sort();
+        expect(deleted, `round ${round}`).toEqual([f.q2, f.q3].sort());
+        expect(await storedFor(member.userId), `round ${round}`).toEqual([f.q1]);
+      }
+      console.info(`[12.2-12 two purges] ${JSON.stringify([...seen])}`);
+      expect(seen.size).toBeGreaterThan(0);
+    });
+  }, 120_000);
+
+  it(`purge against the member’s own next save, ${ROUNDS} times: the final state is "purge then save" or "save then purge", never a mix`, async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      const label = new Map([
+        [f.q1, 'Q1'],
+        [f.q2, 'Q2'],
+        [f.q3, 'Q3'],
+      ]);
+      const snapshot = async () =>
+        (
+          await adminSql<{ question_id: string; value: unknown }[]>`
+            select a.question_id::text as question_id, a.value
+              from public.profile_form_answers a
+              join public.memberships m on m.id = a.membership_id
+             where m.user_id = ${member.userId}::uuid`
+        )
+          .map(
+            (row) =>
+              `${label.get(row.question_id) ?? row.question_id}=${JSON.stringify(row.value)}`,
+          )
+          .sort()
+          .join('|');
+      // The save re-opens B1 (Q1 back to Sim); the stale Q2 and Q3 answers survive it only if the purge ran later.
+      const save = (form: Form) => saveStep(member, form, f.s1, { [f.q1]: choose(f.y1) });
+
+      await staleMember(member, f);
+      let form = await readForm(member);
+      await purgeOnce(memberSql, member);
+      expect((await save(form)).status).toBe(200);
+      const purgeThenSave = await snapshot();
+      await staleMember(member, f);
+      expect((await save(form)).status).toBe(200);
+      await purgeOnce(memberSql, member);
+      const saveThenPurge = await snapshot();
+      expect(purgeThenSave).not.toBe(saveThenPurge);
+
+      const seen = new Map<string, number>();
+      for (let round = 0; round < ROUNDS; round += 1) {
+        await staleMember(member, f);
+        form = await readForm(member);
+        const [, saved] = await race2(
+          () => purgeOnce(memberSql, member),
+          () => save(form),
+          round % 2 === 1,
+          gapFor(round),
+        );
+        expect(saved.status, `round ${round}`).toBe(200);
+        const now = await snapshot();
+        const state =
+          now === purgeThenSave
+            ? 'purge-then-save'
+            : now === saveThenPurge
+              ? 'save-then-purge'
+              : `mixed ${now}`;
+        expect(['purge-then-save', 'save-then-purge'], `round ${round}`).toContain(state);
+        seen.set(state, (seen.get(state) ?? 0) + 1);
+        expect(await staleAnswers(member.userId), `round ${round}`).toEqual([]);
+      }
+      console.info(`[12.2-12 purge against save] ${JSON.stringify([...seen])}`);
+      expect(seen.size).toBeGreaterThan(0);
+    });
+  }, 120_000);
 });
