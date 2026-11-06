@@ -7,7 +7,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { branch, form, options, question, uuid } from '@/lib/profile-form/test-fixtures';
+import {
+  branch,
+  CLINIC_OPTION_IDS,
+  clinicForm,
+  clinicId,
+  form,
+  options,
+  question,
+  uuid,
+} from '@/lib/profile-form/test-fixtures';
 import { ProfileForm, type ProfileFormProps } from './ProfileForm';
 
 /**
@@ -1714,5 +1723,378 @@ describe('edit from the profile is ONE scroll with every step under its title (D
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(Object.keys(mocks.save.mock.calls[0]?.[0] ?? {})).not.toContain('stepId');
     expect(mocks.push).toHaveBeenCalledWith('/perfil');
+  });
+});
+
+/** The clinic form with the questions in TREE order, as the server always stores them (D-652). */
+const TREE_ORDER = ['Q1', 'Q2', 'Q4', 'Q5', 'Q6', 'Q3', 'Q7'];
+const treeClinic = (stored: Record<string, unknown> = {}): MemberForm => {
+  const read = clinicForm(stored);
+  return {
+    ...read,
+    questions: TREE_ORDER.map((key) => read.questions.find((q) => q.id === clinicId(key))).filter(
+      (q): q is MemberForm['questions'][number] => q !== undefined,
+    ),
+  };
+};
+
+describe('nested blocks: closing a branch closes everything below it in one pass (12.2-14, D-645; UI-D-679)', () => {
+  /** The clinic tree with every level open: Q1 tem -> B1 (Q2 sim -> B2 (Q4, Q5 sim -> B3 (Q6)), Q3). */
+  const openClinic = (extra: Record<string, unknown> = {}, mode: 'first' | 'edit' = 'first') => {
+    const read = treeClinic({
+      Q1: { optionIds: [CLINIC_OPTION_IDS.tem], otherText: null },
+      Q2: true,
+      Q5: true,
+      ...extra,
+    });
+    return { ...read, mode };
+  };
+  const wrappers = () => document.querySelectorAll('[data-revealed-branch]');
+
+  it('draws three nested rails, each block inside its parent right after its opener', () => {
+    show(openClinic());
+    expect(wrappers()).toHaveLength(3);
+    const outer = wrappers()[0] as HTMLElement;
+    expect(outer.querySelectorAll('[data-revealed-branch]')).toHaveLength(2);
+    // B1 holds Q2, then B2 right after its opener, then Q3 after the nested block.
+    const direct = [...outer.children].map((child) =>
+      child.hasAttribute('data-revealed-branch') ? 'bloco' : (child.textContent ?? ''),
+    );
+    expect(direct[0]).toContain('A clínica tem equipe?');
+    expect(direct[1]).toBe('bloco');
+    expect(direct[2]).toContain('Nome da clínica');
+    const middle = outer.querySelector('[data-revealed-branch]') as HTMLElement;
+    expect(middle.querySelectorAll('[data-revealed-branch]')).toHaveLength(1);
+  });
+
+  it('closing the top branch removes every nested block at once and announces the count ONCE', () => {
+    show(openClinic());
+    expect(liveRegion().textContent).toBe('');
+    fireEvent.click(screen.getByRole('radio', { name: 'Trabalho em uma clínica' }));
+    expect(wrappers()).toHaveLength(0);
+    for (const title of ['A clínica tem equipe?', 'Quantos profissionais?', 'Nome do sócio']) {
+      expect(screen.queryByText(title)).toBeNull();
+    }
+    expect(liveRegion().textContent).toBe('5 perguntas saíram da lista.');
+  });
+
+  it('with the motion on, the whole tree leaves as ONE block and nothing remains', async () => {
+    mocks.reduced = false;
+    show(openClinic());
+    fireEvent.click(screen.getByRole('radio', { name: 'Trabalho em uma clínica' }));
+    await waitFor(() => expect(wrappers()).toHaveLength(0), { timeout: 3000 });
+    expect(screen.queryByLabelText('Nome da clínica')).toBeNull();
+  });
+
+  it('closing a middle branch closes the ones below it and keeps the ones above', () => {
+    show(openClinic());
+    // Q2 -> Não closes B2 and B3 but B1 (Q2, Q3) stays open.
+    const q2 = document.querySelector(`#pf-q-${clinicId('Q2')}`) as HTMLElement;
+    fireEvent.click(within(q2).getByRole('button', { name: 'Não' }));
+    expect(wrappers()).toHaveLength(1);
+    expect(screen.getByLabelText('Nome da clínica')).toBeTruthy();
+    expect(screen.queryByLabelText('Quantos profissionais?')).toBeNull();
+    expect(liveRegion().textContent).toBe('3 perguntas saíram da lista.');
+  });
+
+  it('a draft typed under a closed nested block returns when it reopens and is absent from the wire answers', async () => {
+    mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
+    const { container } = show(openClinic());
+    fireEvent.change(screen.getByLabelText('Nome do sócio'), { target: { value: 'Ana Souza' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Trabalho em uma clínica' }));
+    expect(screen.queryByLabelText('Nome do sócio')).toBeNull();
+    await save(container);
+    expect(mocks.save).not.toHaveBeenCalled();
+    // The erase dialog guards the stored answers that close; the typed draft is never part of the body.
+    const dialog = screen.getByRole('dialog');
+    expect(JSON.stringify(mocks.save.mock.calls)).not.toContain('Ana Souza');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rever respostas' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect((screen.getByLabelText('Nome do sócio') as HTMLInputElement).value).toBe('Ana Souza');
+  });
+
+  it('what is sent never holds a closed question, whatever its draft (the wire follows the chain)', async () => {
+    mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
+    // Nothing is stored here, so closing the branch erases nothing and the save goes straight out.
+    const read = { ...treeClinic(), mode: 'first' as const };
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    fireEvent.change(screen.getByLabelText('Nome da clínica'), {
+      target: { value: 'Clínica Sol' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Trabalho em uma clínica' }));
+    await save(container);
+    const body = mocks.save.mock.calls[0]?.[0] as { answers: Record<string, unknown> };
+    const sent = body.answers;
+    expect(Object.keys(sent)).toEqual([clinicId('Q1')]);
+  });
+
+  it('a flagged question inside a block keeps the danger block AND the rail', () => {
+    // Returning: Q3 ("Nome da clínica") is required, visible and unanswered, so it is flagged on arrival.
+    const read = { ...openClinic(), mode: 'returning' as const, missingRequired: 3 };
+    show(read);
+    const q3 = document.querySelector(`#pf-q-${clinicId('Q3')}`) as HTMLElement;
+    expect(q3.getAttribute('data-flagged')).not.toBeNull();
+    expect(q3.className).toContain('border-danger/40');
+    expect(q3.closest('[data-revealed-branch]')?.className).toContain(
+      'border-l-2 border-border pl-3',
+    );
+    // The rail is the block's, not the question's: the question wrapper has no rule of its own.
+    expect(q3.className).not.toContain('border-l-2');
+  });
+
+  it('no markup of the block writes a half-step spacing class, a landmark or a state by colour alone', () => {
+    show({ ...openClinic(), mode: 'returning' as const, missingRequired: 3 });
+    const half = /(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/;
+    for (const wrapper of wrappers()) {
+      expect(wrapper.className).not.toMatch(half);
+      expect(wrapper.getAttribute('role')).toBeNull();
+    }
+    // "Falta responder" is words, never colour alone.
+    expect(screen.getAllByText('Falta responder').length).toBeGreaterThan(0);
+  });
+});
+
+describe('a block whose opener is in another step is simply there on arrival (12.2-14, D-643; UI-D-679)', () => {
+  const crossStep = () => {
+    const opts = options('Tenho uma clínica', 'Não tenho');
+    const opener = question('single_choice', {
+      title: 'Tem clínica?',
+      options: opts,
+      stepId: S1,
+      answer: { optionIds: [opts[0]?.id as string], otherText: null },
+    });
+    const opens = gate(opener, opts[0]?.id as string);
+    const a = question('short_text', { title: 'Nome da clínica', stepId: S2, branchId: opens.id });
+    const b = question('short_text', {
+      title: 'Cidade da clínica',
+      stepId: S2,
+      branchId: opens.id,
+    });
+    return form([opener, a, b], { steps: steps('Um', 'Dois'), branches: [opens] });
+  };
+
+  it('arrives with the block present and no motion wrapper holding it back', async () => {
+    mocks.reduced = false;
+    mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
+    const { container } = show(crossStep());
+    expect(screen.queryByLabelText('Nome da clínica')).toBeNull();
+    await save(container);
+    expect(screen.getByRole('heading', { level: 2, name: 'Dois' })).toBeTruthy();
+    // Present at once, in ONE wrapper, not faded in from zero.
+    const wrapper = document.querySelector('[data-revealed-branch]') as HTMLElement;
+    expect(wrapper.querySelectorAll('[data-question]')).toHaveLength(2);
+    const motion = wrapper.parentElement as HTMLElement;
+    expect(motion.style.opacity).not.toBe('0');
+    expect(motion.style.height).not.toBe('0px');
+    // The change on the other step never announced anything on this one.
+    expect(liveRegion().textContent).toBe('');
+  });
+
+  it('under the stepper a change in another step moves the count silently', () => {
+    const opts = options('Tenho', 'Não tenho');
+    const opener = question('single_choice', { title: 'Tem?', options: opts, stepId: S1 });
+    const opens = gate(opener, opts[0]?.id as string);
+    const far = question('short_text', { title: 'Longe', stepId: S3, branchId: opens.id });
+    const mid = question('short_text', { title: 'Meio', stepId: S2 });
+    show(form([opener, mid, far], { steps: steps('Um', 'Dois', 'Três'), branches: [opens] }));
+    expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho' }));
+    expect(screen.getByText('Etapa 1 de 3')).toBeTruthy();
+    expect(liveRegion().textContent).toBe('');
+  });
+});
+
+describe('the one-scroll edit announces a block that opens in another step (12.2-14, UI-D-679)', () => {
+  const SECRET_VALUE = 'valor-secreto-do-membro-42';
+  const editClinic = () => {
+    const opts = options('Tenho', 'Não tenho');
+    const opener = question('single_choice', {
+      title: 'Tem clínica?',
+      options: opts,
+      stepId: S1,
+      answer: { optionIds: [opts[1]?.id as string], otherText: null },
+    });
+    const opens = gate(opener, opts[0]?.id as string);
+    const same = question('short_text', { title: 'Apelido', stepId: S1, branchId: opens.id });
+    const one = question('short_text', {
+      title: 'Nome da clínica',
+      stepId: S2,
+      branchId: opens.id,
+    });
+    const two = question('short_text', { title: 'Cidade', stepId: S3, branchId: opens.id });
+    const three = question('short_text', { title: 'Bairro', stepId: S3, branchId: opens.id });
+    // A hostile branch name never reaches the member read; if one did, nothing may draw it.
+    const hostile = { ...opens, name: 'Ramo SECRETO' } as typeof opens;
+    return form([opener, same, one, two, three], {
+      mode: 'edit',
+      steps: steps('Geral', 'Clínica', 'Contato'),
+      branches: [hostile],
+    });
+  };
+
+  it('same-step questions keep the 12.1 strings and other steps announce their step title', () => {
+    show(editClinic());
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho' }));
+    expect(liveRegion().textContent).toBe(
+      'Apareceu uma nova pergunta: Apelido. Apareceu uma nova pergunta na etapa “Clínica”. Apareceram 2 novas perguntas na etapa “Contato”.',
+    );
+    fireEvent.click(screen.getByRole('radio', { name: 'Não tenho' }));
+    expect(liveRegion().textContent).toBe(
+      'Uma pergunta saiu da lista. Uma pergunta saiu da etapa “Clínica”. 2 perguntas saíram da etapa “Contato”.',
+    );
+  });
+
+  it('exactly one polite region exists and it never holds an answer value or a branch name', () => {
+    show(editClinic());
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho' }));
+    fireEvent.change(screen.getByLabelText('Cidade'), { target: { value: SECRET_VALUE } });
+    expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('radio', { name: 'Não tenho' }));
+    expect(liveRegion().textContent).not.toContain(SECRET_VALUE);
+    expect(liveRegion().textContent).not.toContain('SECRETO');
+    expect(document.body.textContent).not.toContain('SECRETO');
+    expect(JSON.stringify(mocks.flash.mock.calls)).not.toContain(SECRET_VALUE);
+    expect(window.localStorage.length + window.sessionStorage.length).toBe(0);
+  });
+
+  it('a step whose last visible question closes loses its section', () => {
+    show(editClinic());
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho' }));
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Geral',
+      'Clínica',
+      'Contato',
+    ]);
+    fireEvent.click(screen.getByRole('radio', { name: 'Não tenho' }));
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Geral',
+    ]);
+    expect(document.querySelector('[data-revealed-branch]')).toBeNull();
+  });
+});
+
+describe('the erase dialog over a tree lists, flat and in form order, the active titles that had an answer (12.2-14, D-645; UI-D-680)', () => {
+  const stored = {
+    Q1: { optionIds: [CLINIC_OPTION_IDS.tem], otherText: null },
+    Q2: true,
+    Q3: 'Clínica Sol',
+    Q4: 7,
+    Q5: true,
+    Q6: 'Ana Souza',
+  };
+  const dialog = () => screen.queryByRole('dialog') as HTMLElement;
+
+  it('closing the top branch lists the stored titles of every level, flat, in form order', async () => {
+    mocks.save.mockResolvedValue({ ok: true, destination: '/perfil' });
+    const { container } = show({ ...treeClinic(stored), mode: 'edit' as const });
+    fireEvent.click(screen.getByRole('radio', { name: 'Trabalho em uma clínica' }));
+    await save(container);
+    expect(mocks.save).not.toHaveBeenCalled();
+    const items = within(within(dialog()).getByRole('list')).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual([
+      'A clínica tem equipe?',
+      'Quantos profissionais?',
+      'Tem sócio?',
+      'Nome do sócio',
+      'Nome da clínica',
+    ]);
+    // No branch vocabulary, no grouping, no answer value.
+    expect(dialog().textContent).not.toMatch(/ramo|grupo/i);
+    expect(dialog().textContent).not.toContain('Clínica Sol');
+    expect(dialog().textContent).not.toContain('Ana Souza');
+    expect(dialog().querySelectorAll('ul ul')).toHaveLength(0);
+  });
+
+  it('a closed question WITHOUT a stored answer is not listed', async () => {
+    const { container } = show({
+      ...treeClinic({ ...stored, Q3: undefined, Q6: undefined }),
+      mode: 'edit' as const,
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Trabalho em uma clínica' }));
+    await save(container);
+    const items = within(within(dialog()).getByRole('list')).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual([
+      'A clínica tem equipe?',
+      'Quantos profissionais?',
+      'Tem sócio?',
+    ]);
+  });
+
+  it('closing only a middle branch lists only what sat below it', async () => {
+    const { container } = show({ ...treeClinic(stored), mode: 'edit' as const });
+    const q2 = document.querySelector(`#pf-q-${clinicId('Q2')}`) as HTMLElement;
+    fireEvent.click(within(q2).getByRole('button', { name: 'Não' }));
+    await save(container);
+    const items = within(within(dialog()).getByRole('list')).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual([
+      'Quantos profissionais?',
+      'Tem sócio?',
+      'Nome do sócio',
+    ]);
+  });
+
+  const sevenForm = () => {
+    const opts = options('Tenho', 'Não tenho');
+    const opener = question('single_choice', {
+      title: 'Abre?',
+      options: opts,
+      answer: { optionIds: [opts[0]?.id as string], otherText: null },
+    });
+    const opens = gate(opener, opts[0]?.id as string);
+    // Deliberately NOT alphabetical: the list follows the form, not the titles.
+    const titles = ['Zeta', 'Alfa', 'Ômega', 'Beta', 'Delta', 'Gama', 'Épsilon'];
+    const followers = titles.map((title) =>
+      question('short_text', { title, branchId: opens.id, answer: `resposta ${title}` }),
+    );
+    return { opener, form: form([opener, ...followers], { mode: 'edit', branches: [opens] }) };
+  };
+
+  it('seven titles show five and "e mais 2 perguntas", in the order of the form (not typed, not sorted)', async () => {
+    const { form: read } = sevenForm();
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Não tenho' }));
+    await save(container);
+    const items = within(within(dialog()).getByRole('list')).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual([
+      'Zeta',
+      'Alfa',
+      'Ômega',
+      'Beta',
+      'Delta',
+      'e mais 2 perguntas',
+    ]);
+    expect(dialog().textContent).toContain('7 perguntas abaixo deixaram de se aplicar');
+  });
+
+  it('the dialog body keeps the capped scrolling region with seven titles, the title and both buttons outside it', async () => {
+    const { form: read } = sevenForm();
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Não tenho' }));
+    await save(container);
+    const region = document.querySelector('[data-confirm-body-scroll]') as HTMLElement;
+    expect(region.className).toContain('max-h-60');
+    expect(region.className).toContain('overflow-y-auto');
+    expect(region.contains(within(dialog()).getByRole('heading'))).toBe(false);
+    for (const name of ['Rever respostas', 'Apagar e salvar']) {
+      expect(region.contains(within(dialog()).getByRole('button', { name }))).toBe(false);
+    }
+  });
+
+  it('the dialog, its failure alert and its buttons are the 12.1 ones', async () => {
+    const { form: read } = sevenForm();
+    mocks.save.mockResolvedValue({ ok: false, code: 'unavailable' });
+    const { container } = show(read);
+    fireEvent.click(screen.getByRole('radio', { name: 'Não tenho' }));
+    await save(container);
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Apagar e salvar' }));
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(
+      screen.getByText(
+        'Não foi possível salvar agora. Suas respostas continuam aqui. Tente de novo.',
+      ),
+    ).toBeTruthy();
   });
 });

@@ -142,6 +142,17 @@ describe('EraseAnswersDialog: the list of titles (E7 populated, overflow, long-t
     expect(container).toBeTruthy();
   });
 
+  it('lists the titles of a whole tree flat: no nested list, no group and no branch vocabulary (12.2-14, UI-D-680)', () => {
+    open({
+      titles: ['A clínica tem equipe?', 'Quantos profissionais?', 'Tem sócio?', 'Nome do sócio'],
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelectorAll('ul')).toHaveLength(1);
+    expect(dialog.querySelectorAll('ul ul')).toHaveLength(0);
+    expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(4);
+    expect(dialog.textContent).not.toMatch(/ramo|grupo|bloco/i);
+  });
+
   it('draws a hostile title as text, never as markup (T-12.1-12)', () => {
     open({ titles: ['<img src=x onerror=alert(1)>'] });
     expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeTruthy();
