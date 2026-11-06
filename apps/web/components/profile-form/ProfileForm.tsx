@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  MemberBranch,
   MemberForm,
   MemberQuestion,
   MemberStep,
@@ -21,6 +22,7 @@ import {
   useTransition,
 } from 'react';
 import { saveProfileFormAction } from '@/app/(auth)/completar-perfil/actions';
+import { type BlockNode, blocksOf } from '@/lib/profile-form/blocks';
 import {
   type Answers,
   emptyDraft,
@@ -45,6 +47,7 @@ import {
 import { answersToErase, visibleQuestionIds } from '@/lib/profile-form/visibility';
 import { EraseAnswersDialog } from './EraseAnswersDialog';
 import { QuestionField, questionDomId } from './QuestionField';
+import { RevealedBranch } from './RevealedBranch';
 import { StepProgress } from './StepProgress';
 
 /**
@@ -109,6 +112,8 @@ export interface PreviewStatusInfo {
 type View = {
   steps: MemberStep[];
   questions: MemberQuestion[];
+  /** The form's branches (no name, T-12.2-03); a form read without them has none. */
+  branches: MemberBranch[];
   formEtag: string;
   mode: 'first' | 'returning' | 'edit';
   missingRequired: number;
@@ -120,6 +125,7 @@ function viewOf(form: MemberForm): View {
   return {
     steps: form.steps,
     questions: form.questions,
+    branches: form.branches ?? [],
     formEtag: form.formEtag,
     mode: form.mode === 'none' ? 'first' : form.mode,
     missingRequired: form.missingRequired,
@@ -259,10 +265,10 @@ export function ProfileForm({
     : null;
   const chrome = stepperOn && showSteps(view);
   const visible = visibleQuestionIds(view, answers);
-  // A conditional question that is hidden stays in the list so its reveal can animate out (UI-D-655).
+  // A question of a branch that is hidden stays in the list so its block can animate out (UI-D-679).
   const stepQuestions = questions.filter(
     (question) =>
-      (visible.has(question.id) || question.condition !== null) &&
+      (visible.has(question.id) || question.branchId != null) &&
       (!chrome || question.stepId === currentId),
   );
   // Edit (and any one-scroll layout of a form with two or more steps): one titled section per step that holds a
@@ -272,11 +278,11 @@ export function ProfileForm({
     ? view.steps
         .map((step) => ({
           step,
-          // A conditional question stays in the list while hidden so its reveal can animate out.
+          // A question of a branch stays in the list while hidden so its block can animate out.
           items: questions.filter(
             (question) =>
               question.stepId === step.id &&
-              (visible.has(question.id) || question.condition !== null),
+              (visible.has(question.id) || question.branchId != null),
           ),
         }))
         .filter((section) => section.items.some((question) => visible.has(question.id)))
@@ -377,7 +383,10 @@ export function ProfileForm({
    */
   function closedWithAnswers() {
     return answersToErase(
-      { questions: questions.map((q) => ({ ...q, answer: stored.has(q.id) ? true : null })) },
+      {
+        questions: questions.map((q) => ({ ...q, answer: stored.has(q.id) ? true : null })),
+        branches: view.branches,
+      },
       answers,
     );
   }
@@ -385,7 +394,7 @@ export function ProfileForm({
   /** What a good save leaves stored: the answered visible questions of the scope, nothing that is closed. */
   function rememberSaved() {
     const open = visibleQuestionIds(view, answers);
-    const sent = wireAnswers(questions, answers, scope);
+    const sent = wireAnswers(questions, answers, scope, view.branches);
     setStored((previous) => {
       const next = new Set(previous);
       for (const question of questions) {
@@ -404,7 +413,7 @@ export function ProfileForm({
     const result = await saveProfileFormAction({
       formEtag: view.formEtag,
       ...(chrome && currentId ? { stepId: currentId } : {}),
-      answers: wireAnswers(questions, answers, scope),
+      answers: wireAnswers(questions, answers, scope, view.branches),
       next,
       mode: view.mode,
     });
@@ -487,7 +496,7 @@ export function ProfileForm({
     if (pending || !online || eraseOpen) return;
     setNotice(null);
     setElsewhere(null);
-    const found = validateAll(questions, answers, scope);
+    const found = validateAll(questions, answers, scope, view.branches);
     if (Object.keys(found).length > 0) {
       showErrors(found);
       return;
@@ -580,10 +589,26 @@ export function ProfileForm({
     </>
   );
 
-  const cardOf = (items: MemberQuestion[], withAlerts: boolean) => (
-    <Card className="flex flex-col gap-6 p-4">
-      {withAlerts ? alerts : null}
-      {items.map((question) => (
+  /**
+   * The nodes of a card: a question outside every block is drawn only while it is visible, a block is one
+   * `RevealedBranch` that appears and leaves as a unit (UI-D-679). Inside a block every question is drawn, so
+   * the block can animate out whole; the block itself decides whether it is on screen.
+   */
+  const renderNodes = (nodes: BlockNode<MemberQuestion>[], inBlock: boolean): ReactNode => {
+    const seen = new Map<string, number>();
+    return nodes.map((node) => {
+      if (node.kind === 'block') {
+        const times = (seen.get(node.branchId) ?? 0) + 1;
+        seen.set(node.branchId, times);
+        return (
+          <RevealedBranch key={`${node.branchId}#${times}`} show={node.show}>
+            {renderNodes(node.children, true)}
+          </RevealedBranch>
+        );
+      }
+      const { question } = node;
+      if (!inBlock && !visible.has(question.id)) return null;
+      return (
         <QuestionField
           key={question.id}
           question={question}
@@ -592,12 +617,19 @@ export function ProfileForm({
           disabled={locked}
           issue={errors[question.id] ?? null}
           flagged={isFlagged(question)}
-          visible={visible.has(question.id)}
         />
-      ))}
+      );
+    });
+  };
+
+  const cardOf = (items: MemberQuestion[], withAlerts: boolean, cardKey?: string) => (
+    <Card key={cardKey} className="flex flex-col gap-6 p-4">
+      {withAlerts ? alerts : null}
+      {renderNodes(blocksOf(items, view.branches, visible, questions), false)}
     </Card>
   );
-  const questionsCard = cardOf(stepQuestions, true);
+  // The card is keyed by the step so a block that sits in the next step mounts fresh (no motion on arrival).
+  const questionsCard = cardOf(stepQuestions, true, currentId ?? undefined);
 
   return (
     <form
