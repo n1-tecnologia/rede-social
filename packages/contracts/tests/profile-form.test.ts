@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminBranchSchema,
   adminQuestionListSchema,
   adminQuestionSchema,
   adminStepSchema,
   answerEtag,
   answerTokens,
   answerValueSchema,
+  archivedQuestionListSchema,
   archivedQuestionSchema,
+  createBranchBodySchema,
   createQuestionBodySchema,
   createStepBodySchema,
   deleteStepResultSchema,
@@ -19,7 +22,9 @@ import {
   isQuestionVisible,
   layoutBodySchema,
   legacyReorderBodySchema,
+  memberBranchSchema,
   memberFormSchema,
+  memberQuestionSchema,
   memberStepSchema,
   missingIssue,
   normalizeOptionLabel,
@@ -46,6 +51,8 @@ import {
   saveAnswersBodySchema,
   saveAnswersResultSchema,
   staffAnswersSchema,
+  undoBranchResultSchema,
+  updateBranchBodySchema,
   updateQuestionBodySchema,
   updateStepBodySchema,
   visibleSteps,
@@ -143,8 +150,8 @@ describe('12-03 - the constants (D-590, D-591)', () => {
 
   it('the refusal list is closed, unique and mirrored by the lookup set', () => {
     expect(new Set(PROFILE_FORM_ISSUES).size).toBe(PROFILE_FORM_ISSUES.length);
-    expect(PROFILE_FORM_ISSUES).toHaveLength(28);
-    expect(PROFILE_FORM_ISSUES.slice(-7)).toEqual([
+    expect(PROFILE_FORM_ISSUES).toHaveLength(33);
+    expect(PROFILE_FORM_ISSUES.slice(-12, -5)).toEqual([
       'condition_locked',
       'condition_invalid',
       'condition_order',
@@ -153,7 +160,15 @@ describe('12-03 - the constants (D-590, D-591)', () => {
       'last_step',
       'unknown_step',
     ]);
-    expect(PROFILE_FORM_ISSUES.at(-1)).toBe('unknown_step');
+    // 12.2 (D-644, D-649): the five branch codes are appended LAST, in this order.
+    expect(PROFILE_FORM_ISSUES.slice(-5)).toEqual([
+      'unknown_branch',
+      'branch_depth',
+      'branch_limit',
+      'branch_archived',
+      'public_under_private',
+    ]);
+    expect(PROFILE_FORM_ISSUES.at(-1)).toBe('public_under_private');
     for (const issue of PROFILE_FORM_ISSUES) expect(PROFILE_FORM_ISSUE_SET.has(issue)).toBe(true);
     expect(PROFILE_FORM_ISSUE_SET.has('nope')).toBe(false);
   });
@@ -1175,7 +1190,11 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
   });
 
   it('12.1-10: remove_condition is the LAST impact change and the query takes the optional condition', () => {
-    expect(PROFILE_FORM_IMPACT_CHANGES.at(-1)).toBe('remove_condition');
+    expect(PROFILE_FORM_IMPACT_CHANGES.slice(-3)).toEqual([
+      'remove_condition',
+      'undo_branch',
+      'reactivate_branch',
+    ]);
     expect(PROFILE_FORM_IMPACT_CHANGES.slice(0, 4)).toEqual([
       'create_required',
       'make_required',
@@ -1654,5 +1673,240 @@ describe('12.1-01 - step and layout schemas (D-629, D-632, D-633, T-12.1-17)', (
     expect(answerEtag(list, steps)).toBe(`${A}:1|${B}:4;steps=${C}:1`);
     expect(answerEtag(list, [{ id: C, revision: 2 }])).not.toBe(answerEtag(list, steps));
     expect(answerEtag(list, [])).toBe(`${A}:1|${B}:4;steps=`);
+  });
+});
+
+describe('12.2-01 - branch bodies, reads and the optional keys (D-640, D-642, D-644, D-646, D-653)', () => {
+  const BRANCH = '77777777-7777-4777-8777-777777777777';
+  const OPENER = '55555555-5555-4555-8555-555555555555';
+  const issues = (result: { success: boolean; error?: { issues: { message: string }[] } }) =>
+    result.success ? [] : (result.error?.issues.map((issue) => issue.message) ?? []);
+
+  it('createBranchBodySchema takes an opener and 1 to 20 unique tokens, any-of', () => {
+    expect(createBranchBodySchema.parse({ openerQuestionId: OPENER, values: ['a'] })).toEqual({
+      openerQuestionId: OPENER,
+      values: ['a'],
+      name: null,
+    });
+    expect(
+      createBranchBodySchema.safeParse({ openerQuestionId: OPENER, values: ['true', 'false'] })
+        .success,
+    ).toBe(true);
+    const empty = createBranchBodySchema.safeParse({ openerQuestionId: OPENER, values: [] });
+    expect(issues(empty)).toContain('condition_invalid');
+    const many = createBranchBodySchema.safeParse({
+      openerQuestionId: OPENER,
+      values: Array.from({ length: PROFILE_FORM_LIMITS.options + 1 }, (_, index) => `v${index}`),
+    });
+    expect(issues(many)).toContain('condition_invalid');
+    const duplicate = createBranchBodySchema.safeParse({
+      openerQuestionId: OPENER,
+      values: ['a', 'a'],
+    });
+    expect(issues(duplicate)).toContain('condition_invalid');
+    expect(
+      issues(createBranchBodySchema.safeParse({ openerQuestionId: 'nope', values: ['a'] })),
+    ).toContain('condition_invalid');
+    expect(
+      createBranchBodySchema.safeParse({ openerQuestionId: OPENER, values: ['a'], extra: 1 })
+        .success,
+    ).toBe(false);
+  });
+
+  it('the branch name is trimmed, counted in code points, blank means none and a control character is invalid', () => {
+    const named = (name: unknown) =>
+      createBranchBodySchema.safeParse({ openerQuestionId: OPENER, values: ['a'], name });
+    expect(named('\u{1F600}'.repeat(PROFILE_FORM_LIMITS.branchName)).success).toBe(true);
+    expect(issues(named('\u{1F600}'.repeat(PROFILE_FORM_LIMITS.branchName + 1)))).toContain(
+      'too_long',
+    );
+    const blank = named('   ');
+    expect(blank.success && blank.data.name).toBeNull();
+    const padded = named('  Clínica  ');
+    expect(padded.success && padded.data.name).toBe('Clínica');
+    expect(issues(named('a\u0000b'))).toContain('invalid');
+    expect(issues(named('a\uD800b'))).toContain('invalid');
+    const missing = createBranchBodySchema.safeParse({ openerQuestionId: OPENER, values: ['a'] });
+    expect(missing.success && missing.data.name).toBeNull();
+  });
+
+  it('updateBranchBodySchema needs the revision, every other key is optional and a null name clears it', () => {
+    expect(updateBranchBodySchema.safeParse({}).success).toBe(false);
+    expect(updateBranchBodySchema.safeParse({ revision: 0 }).success).toBe(false);
+    expect(updateBranchBodySchema.safeParse({ revision: 1 }).success).toBe(true);
+    const cleared = updateBranchBodySchema.safeParse({ revision: 2, name: null });
+    expect(cleared.success && cleared.data.name).toBeNull();
+    const blank = updateBranchBodySchema.safeParse({ revision: 2, name: '  ' });
+    expect(blank.success && blank.data.name).toBeNull();
+    expect(
+      updateBranchBodySchema.safeParse({ revision: 2, openerQuestionId: OPENER, values: [] })
+        .success,
+    ).toBe(false);
+    expect(updateBranchBodySchema.safeParse({ revision: 2, extra: 1 }).success).toBe(false);
+  });
+
+  it('adminBranchSchema carries the name and the counts, an empty branch is a legitimate state', () => {
+    const branch = {
+      id: BRANCH,
+      openerQuestionId: OPENER,
+      values: ['a'],
+      name: null,
+      revision: 1,
+      archivedAt: null,
+      questionCount: 0,
+      answerCount: 0,
+    };
+    expect(adminBranchSchema.parse(branch)).toEqual(branch);
+    expect(adminBranchSchema.parse({ ...branch, name: 'Clínica', archivedAt: 'x' }).name).toBe(
+      'Clínica',
+    );
+    expect(adminBranchSchema.safeParse({ ...branch, revision: 0 }).success).toBe(false);
+    expect(undoBranchResultSchema.parse({ undone: true })).toEqual({ undone: true });
+    expect(undoBranchResultSchema.safeParse({ undone: false }).success).toBe(false);
+  });
+
+  it('T-12.2-03: a member or staff branch never carries a name', () => {
+    const member = { id: BRANCH, openerQuestionId: OPENER, values: ['a'] };
+    expect(memberBranchSchema.parse(member)).toEqual(member);
+    expect(memberBranchSchema.safeParse({ ...member, name: 'x' }).success).toBe(false);
+    const row = {
+      questionId: A,
+      title: 'Estado',
+      type: 'dropdown',
+      options: [{ id: B, label: 'SP' }],
+      value: null,
+      showOnProfile: false,
+      position: 2,
+      archivedAt: null,
+      answered: false,
+      required: true,
+      condition: null,
+    };
+    const staff = { kind: 'staff', answers: [{ ...row, branchId: BRANCH }], branches: [member] };
+    expect(staffAnswersSchema.parse(staff)).toEqual(staff);
+    expect(
+      staffAnswersSchema.safeParse({ ...staff, branches: [{ ...member, name: 'x' }] }).success,
+    ).toBe(false);
+    expect(
+      memberFormSchema.safeParse({
+        mode: 'first',
+        missingRequired: 0,
+        formEtag: 'e',
+        steps: [],
+        questions: [],
+        branches: [{ ...member, name: 'x' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('every new key on an existing read or body is optional (the compatibility window)', () => {
+    const base = { type: 'short_text', title: 'Nome' };
+    expect(createQuestionBodySchema.safeParse(base).success).toBe(true);
+    const placed = createQuestionBodySchema.safeParse({ ...base, branchId: BRANCH });
+    expect(placed.success && placed.data.branchId).toBe(BRANCH);
+    expect(createQuestionBodySchema.safeParse({ ...base, branchId: null }).success).toBe(true);
+    expect(issues(createQuestionBodySchema.safeParse({ ...base, branchId: 'nope' }))).toContain(
+      'unknown_branch',
+    );
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, branchId: null }).success).toBe(true);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, branchId: BRANCH }).success).toBe(
+      true,
+    );
+    expect(adminQuestionSchema.parse({ ...adminQuestion, branchId: BRANCH }).branchId).toBe(BRANCH);
+    expect(adminQuestionSchema.parse(adminQuestion).branchId).toBeUndefined();
+    expect(memberQuestionSchema.parse({ ...memberQuestion, branchId: null }).branchId).toBeNull();
+    const list = {
+      questions: [adminQuestion],
+      activeCount: 1,
+      limit: 30,
+      steps: [],
+      stepLimit: 10,
+    };
+    expect(adminQuestionListSchema.safeParse(list).success).toBe(true);
+    const branch = {
+      id: BRANCH,
+      openerQuestionId: OPENER,
+      values: ['a'],
+      name: 'Clínica',
+      revision: 1,
+      archivedAt: null,
+      questionCount: 1,
+      answerCount: 0,
+    };
+    expect(adminQuestionListSchema.parse({ ...list, branches: [branch] }).branches).toEqual([
+      branch,
+    ]);
+    expect(
+      archivedQuestionListSchema.parse({
+        questions: [{ ...adminQuestion, archivedAt: 'x', branchId: BRANCH }],
+        branches: [branch],
+      }).branches,
+    ).toEqual([branch]);
+  });
+
+  it('D-646 and D-653: the dependents refusal lists branches, and the impact query takes a branch id', () => {
+    const body = {
+      profileForm: 'has_dependents',
+      dependents: [{ id: B, title: 'Qual?' }],
+      branches: [
+        {
+          id: BRANCH,
+          name: null,
+          openerQuestionId: OPENER,
+          values: ['a'],
+          questions: [{ id: B, title: 'Qual?' }],
+        },
+      ],
+    };
+    expect(hasDependentsDetailsSchema.parse(body)).toEqual(body);
+    const { branches: _branches, ...plain } = body;
+    expect(hasDependentsDetailsSchema.parse(plain)).toEqual(plain);
+    expect(impactQuerySchema.safeParse({ change: 'undo_branch', branchId: BRANCH }).success).toBe(
+      true,
+    );
+    expect(
+      impactQuerySchema.safeParse({ change: 'reactivate_branch', branchId: BRANCH }).success,
+    ).toBe(true);
+    expect(impactQuerySchema.safeParse({ change: 'undo_branch', branchId: 'nope' }).success).toBe(
+      false,
+    );
+  });
+
+  it('answerEtag is unchanged without branches and appends the branch parts when given', () => {
+    const list = [
+      { id: A, revision: 1 },
+      { id: B, revision: 4 },
+    ];
+    expect(answerEtag(list)).toBe(`${A}:1|${B}:4`);
+    expect(answerEtag(list, [{ id: C, revision: 1 }])).toBe(`${A}:1|${B}:4;steps=${C}:1`);
+    const placed = [
+      { id: A, revision: 1, stepId: C, branchId: BRANCH },
+      list[1] as (typeof list)[number],
+    ];
+    expect(answerEtag(placed)).toBe(`${A}:1:${C}:${BRANCH}|${B}:4`);
+    expect(answerEtag(placed)).not.toBe(
+      answerEtag([{ id: A, revision: 1, stepId: C }, list[1] as (typeof list)[number]]),
+    );
+    const branches = [{ id: BRANCH, revision: 3 }];
+    expect(answerEtag(list, [{ id: C, revision: 1 }], branches)).toBe(
+      `${A}:1|${B}:4;steps=${C}:1;branches=${BRANCH}:3`,
+    );
+    expect(answerEtag(list, [{ id: C, revision: 1 }], [{ id: BRANCH, revision: 4 }])).not.toBe(
+      answerEtag(list, [{ id: C, revision: 1 }], branches),
+    );
+    expect(answerEtag(list, undefined, branches)).toBe(`${A}:1|${B}:4;steps=;branches=${BRANCH}:3`);
+  });
+
+  it('the legacy condition shapes are untouched (plan 20 removes them)', () => {
+    expect(
+      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['a'] }).success,
+    ).toBe(true);
+    expect(
+      createQuestionBodySchema.safeParse({
+        type: 'short_text',
+        title: 'T',
+        condition: { questionId: OPENER, values: ['a'] },
+      }).success,
+    ).toBe(true);
   });
 });
