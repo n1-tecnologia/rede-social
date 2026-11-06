@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addQuestion,
+  addQuestionAfterOpener,
   applyRequestedLayout,
   checkLayoutOrder,
   flatten,
@@ -310,5 +311,81 @@ describe('12.1-04 layout, behavior 9: no operation mutates its input', () => {
   it('returns a fresh layout, not the same array', () => {
     const layout = base();
     expect(layoutOf(moveQuestion(layout, 'a', 's1'))).not.toBe(layout);
+  });
+});
+
+describe('quick 261106-ei5 layout: addQuestionAfterOpener', () => {
+  const wide = (): Layout =>
+    freeze([
+      { stepId: 's1', questionIds: ['o', 'x', 'd1', 'y'] },
+      { stepId: 's2', questionIds: ['p', 'q'] },
+      { stepId: 's3', questionIds: [] },
+    ]);
+  const idsOf = (layout: Layout) => layout.map((step) => step.questionIds);
+
+  it('puts the new id right after the opener when the opener has no dependent in the step', () => {
+    const next = layoutOf(addQuestionAfterOpener(wide(), 's1', 'n', 'o', []));
+    expect(idsOf(next)).toEqual([['o', 'n', 'x', 'd1', 'y'], ['p', 'q'], []]);
+  });
+
+  it('puts the new id after the LAST dependent of the opener, skipping a non-dependent in between and a dependent of another opener', () => {
+    const layout = freeze([
+      { stepId: 's1', questionIds: ['o', 'd1', 'x', 'd2', 'e', 'y'] },
+      { stepId: 's2', questionIds: [] },
+    ]);
+    const facts = [
+      { questionId: 'd1', openerId: 'o' },
+      { questionId: 'd2', openerId: 'o' },
+      { questionId: 'e', openerId: 'x' },
+    ];
+    const next = layoutOf(addQuestionAfterOpener(layout, 's1', 'n', 'o', facts));
+    expect(idsOf(next)).toEqual([['o', 'd1', 'x', 'd2', 'n', 'e', 'y'], []]);
+  });
+
+  it('ignores a dependent of the opener in another step and one sitting before the opener', () => {
+    const layout = freeze([
+      { stepId: 's1', questionIds: ['d0', 'o', 'x'] },
+      { stepId: 's2', questionIds: ['d9', 'z'] },
+    ]);
+    const facts = [
+      { questionId: 'd0', openerId: 'o' },
+      { questionId: 'd9', openerId: 'o' },
+    ];
+    const next = layoutOf(addQuestionAfterOpener(layout, 's1', 'n', 'o', facts));
+    expect(idsOf(next)).toEqual([
+      ['d0', 'o', 'n', 'x'],
+      ['d9', 'z'],
+    ]);
+  });
+
+  it('goes to the end of the named step when the opener sits in another step', () => {
+    const next = layoutOf(addQuestionAfterOpener(wide(), 's2', 'n', 'o', []));
+    expect(idsOf(next)).toEqual([['o', 'x', 'd1', 'y'], ['p', 'q', 'n'], []]);
+  });
+
+  it('goes to the end of the named step when the opener is not in the layout', () => {
+    const next = layoutOf(addQuestionAfterOpener(wide(), 's1', 'n', 'ghost', []));
+    expect(idsOf(next)).toEqual([['o', 'x', 'd1', 'y', 'n'], ['p', 'q'], []]);
+  });
+
+  it('equals addQuestion when there is no opener', () => {
+    expect(addQuestionAfterOpener(wide(), 's2', 'n', null, [])).toEqual(
+      addQuestion(wide(), 's2', 'n'),
+    );
+  });
+
+  it('an unknown step is unknown_step and an id already in the layout is order_mismatch', () => {
+    expect(issueOf(addQuestionAfterOpener(wide(), 'nope', 'n', 'o', []))).toBe('unknown_step');
+    expect(issueOf(addQuestionAfterOpener(wide(), 's1', 'x', 'o', []))).toBe('order_mismatch');
+  });
+
+  it('does not mutate frozen inputs and returns a fresh layout', () => {
+    const layout = wide();
+    const facts = Object.freeze([Object.freeze({ questionId: 'd1', openerId: 'o' })]);
+    const snapshot = JSON.stringify(layout);
+    const next = layoutOf(addQuestionAfterOpener(layout, 's1', 'n', 'o', facts));
+    expect(JSON.stringify(layout)).toBe(snapshot);
+    expect(next).not.toBe(layout);
+    expect(idsOf(next)[0]).toEqual(['o', 'x', 'd1', 'n', 'y']);
   });
 });

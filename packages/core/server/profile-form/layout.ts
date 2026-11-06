@@ -51,6 +51,17 @@ export function addQuestion(layout: Layout, stepId: string, questionId: string):
   );
 }
 
+/** Temporary RED-commit body: ignores the opener and the facts; replaced in the next commit. */
+export function addQuestionAfterOpener(
+  layout: Layout,
+  stepId: string,
+  questionId: string,
+  _openerId: string | null,
+  _facts: readonly { questionId: string; openerId: string }[],
+): LayoutResult {
+  return addQuestion(layout, stepId, questionId);
+}
+
 /** Takes the question out of its step and appends it to the END of the target step (UI-D-647). */
 export function moveQuestion(layout: Layout, questionId: string, toStepId: string): LayoutResult {
   if (!layout.some((step) => step.stepId === toStepId)) return refuse('unknown_step');

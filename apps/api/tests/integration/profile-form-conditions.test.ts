@@ -828,6 +828,102 @@ describe('12.1-10 D-632: reactivating a shown question whose opener no longer ho
   }, 90_000);
 });
 
+// ── quick 261106-ei5: a conditional question lands right after its opener ───────────────────────────
+
+/** The ids of the active questions in the order the admin list (and the member form) renders them. */
+const orderOf = async (p: Person): Promise<string[]> =>
+  (await listOf(p)).questions.map((q) => q.id);
+
+/** The stored `[position, revision, updated_at]` of the given questions, in the order asked. */
+const placeOf = async (ids: string[]): Promise<string[]> => {
+  const rows = await adminSql<
+    { id: string; position: number; revision: number; updated_at: Date }[]
+  >`
+    select id::text as id, position, revision, updated_at
+      from public.profile_form_questions where id = any(${ids}::uuid[])`;
+  return ids.map((id) => {
+    const row = rows.find((r) => r.id === id);
+    return `${row?.position}|${row?.revision}|${row?.updated_at.toISOString()}`;
+  });
+};
+
+const firstOption = (q: Q): string => q.options[0]?.id as string;
+
+describe('quick 261106-ei5 create: a new conditional question lands right after its opener (D-623 kept)', () => {
+  it('Test A: a dependent created after an unconditional question is stored right after its opener, positions 1..3', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const o = await choice(admin, 'ei5 A opener');
+      const x = await text(admin, 'ei5 A plain');
+      const d1 = await text(admin, 'ei5 A d1', { questionId: o.id, values: [firstOption(o)] });
+      expect(await orderOf(admin)).toEqual([o.id, d1.id, x.id]);
+      expect((await listOf(admin)).questions.map((q) => q.position)).toEqual([1, 2, 3]);
+    });
+  }, 60_000);
+
+  it('Test B: a second dependent goes after the first, a plain question stays after the group, a second opener keeps its own group', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const o = await choice(admin, 'ei5 B opener');
+      const x = await text(admin, 'ei5 B plain');
+      const d1 = await text(admin, 'ei5 B d1', { questionId: o.id, values: [firstOption(o)] });
+      const d2 = await text(admin, 'ei5 B d2', { questionId: o.id, values: [firstOption(o)] });
+      expect(await orderOf(admin)).toEqual([o.id, d1.id, d2.id, x.id]);
+      const z = await text(admin, 'ei5 B last');
+      expect(await orderOf(admin)).toEqual([o.id, d1.id, d2.id, x.id, z.id]);
+      const o2 = await choice(admin, 'ei5 B opener two');
+      const w = await text(admin, 'ei5 B after o2');
+      const d3 = await text(admin, 'ei5 B d3', { questionId: o2.id, values: [firstOption(o2)] });
+      expect(await orderOf(admin)).toEqual([o.id, d1.id, d2.id, x.id, z.id, o2.id, d3.id, w.id]);
+      expect((await listOf(admin)).questions.map((q) => q.position)).toEqual([
+        1, 2, 3, 4, 5, 6, 7, 8,
+      ]);
+    });
+  }, 90_000);
+
+  it('Test C: with the opener in another step the dependent keeps the end of its own step; in the same step it follows the opener', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const o = await choice(admin, 'ei5 C opener');
+      const a2 = await text(admin, 'ei5 C a2');
+      const step2 = await createStep(admin, 'ei5 C step two');
+      const x = await text(admin, 'ei5 C x', null, { stepId: step2.id });
+      const y = await text(admin, 'ei5 C y', null, { stepId: step2.id });
+      const far = await text(
+        admin,
+        'ei5 C far',
+        { questionId: o.id, values: [firstOption(o)] },
+        { stepId: step2.id },
+      );
+      expect(await orderOf(admin)).toEqual([o.id, a2.id, x.id, y.id, far.id]);
+      const near = await text(
+        admin,
+        'ei5 C near',
+        { questionId: o.id, values: [firstOption(o)] },
+        { stepId: o.stepId },
+      );
+      expect(await orderOf(admin)).toEqual([o.id, near.id, a2.id, x.id, y.id, far.id]);
+      expect(near.stepId).toBe(o.stepId);
+      expect(far.stepId).toBe(step2.id);
+    });
+  }, 90_000);
+
+  it('Test D: a dependent of the very last question ends the form and touches no other row', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const x = await text(admin, 'ei5 D plain');
+      const o = await choice(admin, 'ei5 D opener');
+      const before = await placeOf([x.id, o.id]);
+      const d = await text(admin, 'ei5 D dependent', {
+        questionId: o.id,
+        values: [firstOption(o)],
+      });
+      expect(await orderOf(admin)).toEqual([x.id, o.id, d.id]);
+      expect(await placeOf([x.id, o.id])).toEqual(before);
+    });
+  }, 60_000);
+});
+
 // ── Task 3: the summary and the impact count only who sees a question ───────────────────────────────
 
 const get = (p: Person, path: string, params: Record<string, string> = {}) =>
