@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { Tx } from '../../db/tenant-tx';
 import { ApiError } from '../http/api-error';
+import { type BranchRuleBranch, type BranchRuleQuestion, branchFactsOf } from './branch-rules';
 import type { RuleQuestion } from './condition-rules';
 import { checkLayoutOrder, flatten, type Layout, type LayoutResult, renumber } from './layout';
 
@@ -23,6 +24,20 @@ export type LayoutRead = {
   /** The ACTIVE questions, for the condition rules. */
   questions: RuleQuestion[];
   /** `(questionId, openerId)` of every ACTIVE conditional question. */
+  facts: OrderFact[];
+};
+
+/**
+ * 12.2 (D-640, D-652): the tenant's form as the branch rules and the tree normaliser read it. Added beside the
+ * 12.1 `LayoutRead`, which stays until the callers have moved over (it is renamed in the last task of plan 09).
+ */
+export type TreeRead = {
+  layout: Layout;
+  /** EVERY question of the tenant: the ACTIVE ones in `position, created_at, id` order, then the archived ones. */
+  questions: BranchRuleQuestion[];
+  /** EVERY branch of the tenant, `created_at, id`. */
+  branches: BranchRuleBranch[];
+  /** `(questionId, openerId)` of every ACTIVE question that sits in an ACTIVE branch (`branchFactsOf`). */
   facts: OrderFact[];
 };
 
@@ -95,6 +110,104 @@ export async function readLayout(tx: Tx, tenantId: string, lockRows = false): Pr
       : [{ questionId: row.id, openerId: row.condition_question_id }],
   );
   return { layout, questions, facts };
+}
+
+type TreeQuestionRow = {
+  id: string;
+  type: string;
+  title: string;
+  show_on_profile: boolean;
+  options: { id: string }[];
+  branch_id: string | null;
+};
+
+type TreeBranchRow = {
+  id: string;
+  opener_question_id: string;
+  open_values: string[];
+  name: string | null;
+  archived: boolean;
+};
+
+/**
+ * 12.2 (D-652): the tree the writes judge over, in the CANONICAL LOCK ORDER of the phase: the steps `for update`,
+ * the ACTIVE questions in `position, created_at, id` order (`for update` when `lockRows`), the archived
+ * questions (read, never locked: an archived question is read-only to members) and last the branches
+ * `created_at, id` (`for update` when `lockRows`). `lockRows` has the meaning it has in `readLayout`: a write
+ * that can change ANY question's place takes every row and branch now, so it can never deadlock with a member's
+ * save (which takes the questions `for share` in the same order and the branches after them). The caller holds
+ * `adminLock` and has checked the live module row.
+ */
+export async function readTree(tx: Tx, tenantId: string, lockRows = false): Promise<TreeRead> {
+  const steps = await tx.execute<StoredStep>(sql`
+    select s.id::text as id
+      from public.profile_form_steps s
+     where s.tenant_id = ${tenantId}::uuid
+     order by s."position", s.created_at, s.id
+       for update`);
+  const active = await tx.execute<TreeQuestionRow & { step_id: string }>(
+    lockRows
+      ? sql`
+        select q.id::text as id, q.step_id::text as step_id, q.type, q.title, q.show_on_profile, q.options,
+               q.branch_id::text as branch_id
+          from public.profile_form_questions q
+         where q.tenant_id = ${tenantId}::uuid and q.archived_at is null
+         order by q."position", q.created_at, q.id
+           for update`
+      : sql`
+        select q.id::text as id, q.step_id::text as step_id, q.type, q.title, q.show_on_profile, q.options,
+               q.branch_id::text as branch_id
+          from public.profile_form_questions q
+         where q.tenant_id = ${tenantId}::uuid and q.archived_at is null
+         order by q."position", q.created_at, q.id`,
+  );
+  const archived = await tx.execute<TreeQuestionRow>(sql`
+    select q.id::text as id, q.type, q.title, q.show_on_profile, q.options, q.branch_id::text as branch_id
+      from public.profile_form_questions q
+     where q.tenant_id = ${tenantId}::uuid and q.archived_at is not null
+     order by q."position", q.created_at, q.id`);
+  const branchRows = await tx.execute<TreeBranchRow>(
+    lockRows
+      ? sql`
+        select b.id::text as id, b.opener_question_id::text as opener_question_id, b.open_values, b.name,
+               b.archived_at is not null as archived
+          from public.profile_form_branches b
+         where b.tenant_id = ${tenantId}::uuid
+         order by b.created_at, b.id
+           for update`
+      : sql`
+        select b.id::text as id, b.opener_question_id::text as opener_question_id, b.open_values, b.name,
+               b.archived_at is not null as archived
+          from public.profile_form_branches b
+         where b.tenant_id = ${tenantId}::uuid
+         order by b.created_at, b.id`,
+  );
+
+  const layout: Layout = steps.map((step) => ({
+    stepId: step.id,
+    questionIds: active.filter((row) => row.step_id === step.id).map((row) => row.id),
+  }));
+  const toRule = (row: TreeQuestionRow, isArchived: boolean): BranchRuleQuestion => ({
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    archived: isArchived,
+    showOnProfile: row.show_on_profile,
+    options: row.options.map((option) => ({ id: option.id })),
+    branchId: row.branch_id,
+  });
+  const questions = [
+    ...active.map((row) => toRule(row, false)),
+    ...archived.map((row) => toRule(row, true)),
+  ];
+  const branches: BranchRuleBranch[] = branchRows.map((row) => ({
+    id: row.id,
+    openerQuestionId: row.opener_question_id,
+    values: [...row.open_values],
+    archived: row.archived,
+    name: row.name,
+  }));
+  return { layout, questions, branches, facts: branchFactsOf(questions, branches) };
 }
 
 /**

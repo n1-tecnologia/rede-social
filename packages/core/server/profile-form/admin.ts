@@ -22,9 +22,15 @@ import { sql } from 'drizzle-orm';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { ApiError } from '../http/api-error';
+import {
+  type BranchRuleQuestion,
+  branchFactsOf,
+  checkMoveIntoBranch,
+  dependentBranchesOf,
+} from './branch-rules';
 // A call-time-only cycle with ./branches as well (which takes `adminLock`, `requireModuleOn` and `attempt` from
 // this file): neither module touches the other at load.
-import { readBranches } from './branches';
+import { readBranches, refuseBranch } from './branches';
 import {
   type ConditionCheck,
   checkCondition,
@@ -34,14 +40,22 @@ import {
   dependentsOf,
   type RuleQuestion,
 } from './condition-rules';
-import { addQuestionAfterOpener, applyRequestedLayout, type Layout, moveQuestion } from './layout';
+import {
+  addQuestion,
+  addQuestionAfterOpener,
+  applyRequestedLayout,
+  checkLayoutOrder,
+  type Layout,
+  moveQuestion,
+  normalizeToTree,
+} from './layout';
 import {
   assertLayoutOrder,
   dropQuestion,
   endsWith,
-  type LayoutRead,
   layoutOrThrow,
   readLayout,
+  readTree,
   swapQuestion,
   writeLayout,
 } from './layout-store';
@@ -301,7 +315,7 @@ export async function listQuestions(ctx: AdminCtx): Promise<AdminQuestionList> {
 async function targetStep(
   tx: Tx,
   tenantId: string,
-  read: LayoutRead,
+  read: { layout: Layout },
   stepId: string | undefined,
 ): Promise<{ stepId: string; layout: Layout }> {
   if (stepId !== undefined) {
@@ -361,7 +375,7 @@ function refuseCondition(check: ConditionCheck, subjectId?: string): void {
   });
 }
 
-/** D-632: the opener's refusal as the coded 409 `has_dependents` with the ACTIVE dependents it lists. */
+/** D-632: the opener's refusal as the coded 409 `has_dependents`, listing the ACTIVE dependents it names. */
 function refuseDependents(refusal: ReturnType<typeof checkOpenerChange>): void {
   if (refusal === null) return;
   throw hasDependents(refusal.dependents);
@@ -369,6 +383,18 @@ function refuseDependents(refusal: ReturnType<typeof checkOpenerChange>): void {
 
 const hasDependents = (dependents: { id: string; title: string }[]) =>
   new ApiError(409, 'CONFLICT', { profileForm: 'has_dependents', dependents });
+
+/** 12.2 (D-646): the branches an opener change would orphan, each with the titles of its ACTIVE questions. */
+const hasDependentBranches = (branches: ReturnType<typeof dependentBranchesOf>) =>
+  new ApiError(409, 'CONFLICT', { profileForm: 'has_dependents', dependents: [], branches });
+
+/** 12.2 (D-640, T-12.2-08): the retired per-question condition is refused before anything is read or written. */
+const conditionRetired = () =>
+  new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'condition_invalid' });
+
+/** A `branchId` that is not a branch of THIS tenant: a foreign and a missing id answer the same (T-12.2-01). */
+const unknownBranch = () =>
+  new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'unknown_branch' });
 
 /** `text[]` of the tokens, in order, from a JSON array (a JS array would expand into a record). */
 export const textArray = (values: readonly string[]) =>
@@ -411,30 +437,49 @@ async function guardedWrite<T>(
   const issue = guardIssueOf(out.error);
   if (!issue) throw out.error;
   if (issue === 'has_dependents') {
-    const fresh = await readLayout(tx, tenantId);
-    throw hasDependents(dependentsOf(fresh.questions, openerId));
+    const fresh = await readTree(tx, tenantId);
+    throw hasDependentBranches(dependentBranchesOf(fresh.branches, fresh.questions, openerId));
   }
   throw new ApiError(409, 'CONFLICT', { profileForm: issue });
 }
 
+/** Whether two layouts hold the same questions in the same places (same steps, same order). */
+const sameLayout = (a: Layout, b: Layout): boolean =>
+  a.length === b.length &&
+  a.every((step, i) => {
+    const other = b[i];
+    return (
+      other !== undefined &&
+      step.stepId === other.stepId &&
+      step.questionIds.length === other.questionIds.length &&
+      step.questionIds.every((id, j) => id === other.questionIds[j])
+    );
+  });
+
 /**
- * `POST /v1/profile_form/questions` (PFORM-02, D-627): a new question at the END of the named step (default:
- * the last step; the default step is created when the form has none). A question created WITH a condition whose
- * opener is in that same step is placed right after the opener, or after its last active dependent, instead
- * (quick 261106-ei5); with the opener in another step it keeps the end of the step. The body is already validated by the
- * contract (title and help text trimmed, 2 to 20 distinct options for a choice type, limits of the right
- * kind). The server decides the rest: a UUID for every option, the position (the layout is renumbered in one
- * statement, so every later step shifts by one), revision 1, `listed_at` now and the caller as the author.
+ * `POST /v1/profile_form/questions` (PFORM-02, D-627; 12.2 D-641, D-643, D-651, D-652): a new question in the
+ * named step (default: the last step; the default step is created when the form has none), INTO a branch when
+ * `branchId` is sent (null or absent means none). The question is appended at the end of its step and the
+ * layout is then put in TREE ORDER (`normalizeToTree`): a question in a branch lands at the end of that branch's
+ * run in its step, or stays at the end of the step when the branch has no run there. The body is already
+ * validated by the contract (title and help text trimmed, 2 to 20 distinct options for a choice type, limits of
+ * the right kind). The server decides the rest: a UUID for every option, the position (the layout is renumbered
+ * in one statement, so every later step shifts by one), revision 1, `listed_at` now and the caller as the author.
  *
+ *   - 400 `condition_invalid` for a non-null legacy `condition` (D-640): checked BEFORE anything is read;
  *   - 404 `MODULE_DISABLED` when the module is off (live read);
  *   - 409 `limit_reached` at 30 ACTIVE questions (counted under the advisory lock, so two simultaneous
  *     creates at 29 end with exactly 30);
- *   - 400 `unknown_step` for a `stepId` that is not a step of this tenant.
+ *   - 400 `unknown_step` for a `stepId` that is not a step of this tenant, 400 `unknown_branch` for a
+ *     `branchId` that is not a branch of this tenant;
+ *   - 409 from `checkMoveIntoBranch`: `branch_archived`, `condition_order` naming the pair (the opener's step
+ *     comes after the question's step), `branch_depth`, `public_under_private` with the titles.
  */
 export async function createQuestion(
   ctx: AdminCtx,
   body: CreateQuestionBody,
 ): Promise<AdminQuestion> {
+  if (body.condition) throw conditionRetired();
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
@@ -443,44 +488,72 @@ export async function createQuestion(
       throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
     }
 
-    const read = await readLayout(tx, ctx.tenantId);
+    const read = await readTree(tx, ctx.tenantId);
     const target = await targetStep(tx, ctx.tenantId, read, body.stepId);
-    // A question with a condition whose opener is in the SAME step goes right after the opener (or after its last
-    // active dependent); any other question goes to the end of its step. ONE function builds the layout for the
-    // order check and for the write, so the layout that is checked is the layout that is stored.
-    const openerId = body.condition ? body.condition.questionId.toLowerCase() : null;
-    const layoutWith = (questionId: string) =>
-      layoutOrThrow(
-        addQuestionAfterOpener(target.layout, target.stepId, questionId, openerId, read.facts),
-      );
-    // D-620..D-623: a condition is accepted only through the pure rule, over the layout the question will have.
-    // The opener must be an ACTIVE question of THIS tenant: a foreign and a missing id are the same refusal
-    // (T-12.1-01), and the composite foreign key is the backstop.
-    if (body.condition) {
-      const probe = crypto.randomUUID();
-      refuseCondition(
-        checkCondition({
-          questions: read.questions,
-          layout: layoutWith(probe),
-          subjectId: probe,
-          condition: { ...body.condition, questionId: body.condition.questionId.toLowerCase() },
+    const branchId = body.branchId?.toLowerCase() ?? null;
+    if (branchId !== null && !read.branches.some((branch) => branch.id === branchId)) {
+      throw unknownBranch();
+    }
+
+    // The new question as the rules see it: no answers, the branch it is asked to enter, not in the layout yet
+    // (it counts as after everything for `checkMoveIntoBranch`; the order rule is asserted below, over the
+    // tree order it will really have).
+    const id = crypto.randomUUID();
+    const created: BranchRuleQuestion = {
+      id,
+      type: body.type,
+      title: body.title,
+      archived: false,
+      showOnProfile: body.showOnProfile,
+      options: [],
+      branchId: null,
+    };
+    const entering = { ...created, branchId };
+    if (branchId !== null) {
+      refuseBranch(
+        checkMoveIntoBranch({
+          questions: [...read.questions, created],
+          branches: read.branches,
+          layout: target.layout,
+          questionId: id,
+          branchId,
+          answered: 0,
         }),
       );
     }
-    const id = await insertQuestion(tx, ctx, body, target.stepId, null);
-    const next = layoutWith(id);
-    // An append to the very end of the form moves nobody: the insert already gave it max(position) + 1, so no
-    // other row is touched and a member's save in flight is never waited for (the Phase 12 adjacency rule).
-    // Anywhere else the later questions shift, and the whole layout is renumbered in one statement.
-    if (!endsWith(next, id)) await writeLayout(tx, ctx.tenantId, next);
+    const questions = [...read.questions, entering];
+    const appended = layoutOrThrow(addQuestion(target.layout, target.stepId, id));
+    const next = normalizeToTree(appended, questions, read.branches);
+    // The order rule over the tree order the question will really have. The question does not exist yet, so a
+    // refusal names the OPENER only (the client knows the question it is creating).
+    const order = checkLayoutOrder(next, branchFactsOf(questions, read.branches));
+    if (!order.ok) {
+      throw new ApiError(409, 'CONFLICT', {
+        profileForm: 'condition_order',
+        openerId: order.openerId,
+      });
+    }
+
+    // The insert is the backstop of a race that got past the rules (PF008, PF009): the same coded 409.
+    await guardedWrite(tx, ctx.tenantId, id, () =>
+      insertQuestion(tx, ctx, body, target.stepId, null, id, branchId),
+    );
+    // An append that leaves everybody else where they were moves nobody: the insert already gave it
+    // max(position) + 1, so no other row is touched and a member's save in flight is never waited for (the
+    // Phase 12 adjacency rule). Anywhere else the later questions shift, and the whole layout is renumbered in
+    // one statement.
+    if (!(endsWith(next, id) && sameLayout(dropQuestion(next, id), target.layout))) {
+      await writeLayout(tx, ctx.tenantId, next);
+    }
     return questionAfterWrite(tx, ctx, id);
   });
 }
 
 /**
- * The insert a create and a replace share: server-made option ids, `revision` 1, `listed_at` now, the step and
- * the caller as the author. `position` is the given one, or (null) the last active position plus one; the
- * layout write that follows sets the final one. Answers the new id.
+ * The insert a create and a replace share: server-made option ids, `revision` 1, `listed_at` now, the step,
+ * the branch (D-640) and the caller as the author. `id` is chosen by the caller (the rules judge the question
+ * before it exists). `position` is the given one, or (null) the last active position plus one; the layout write
+ * that follows sets the final one. Nothing here writes the retired condition columns. Answers the new id.
  */
 async function insertQuestion(
   tx: Tx,
@@ -488,25 +561,24 @@ async function insertQuestion(
   body: CreateQuestionBody,
   stepId: string,
   position: number | null,
+  id: string,
+  branchId: string | null,
 ): Promise<string> {
   const options = isChoiceType(body.type)
     ? body.options.map((option) => ({ id: crypto.randomUUID(), label: option.label.trim() }))
     : [];
-  const condition = body.condition ?? null;
   const [created] = await tx.execute<{ id: string }>(sql`
     insert into public.profile_form_questions
-      (tenant_id, step_id, type, title, help_text, required, show_on_profile, allow_other, options, limits,
-       position, revision, listed_at, created_by_user_id, condition_question_id, condition_values)
-    values (${ctx.tenantId}::uuid, ${stepId}::uuid, ${body.type}, ${body.title}, ${body.helpText},
-            ${body.required}, ${body.showOnProfile}, ${body.allowOther}, ${JSON.stringify(options)}::jsonb,
-            ${JSON.stringify(body.limits)}::jsonb,
+      (id, tenant_id, step_id, branch_id, type, title, help_text, required, show_on_profile, allow_other, options,
+       limits, position, revision, listed_at, created_by_user_id)
+    values (${id}::uuid, ${ctx.tenantId}::uuid, ${stepId}::uuid, ${branchId}::uuid, ${body.type}, ${body.title},
+            ${body.helpText}, ${body.required}, ${body.showOnProfile}, ${body.allowOther},
+            ${JSON.stringify(options)}::jsonb, ${JSON.stringify(body.limits)}::jsonb,
             coalesce(${position}::int,
               (select coalesce(max(position), 0) + 1
                  from public.profile_form_questions
                 where tenant_id = ${ctx.tenantId}::uuid and archived_at is null)),
-            1, now(), ${ctx.userId}::uuid,
-            ${condition === null ? null : condition.questionId.toLowerCase()}::uuid,
-            ${condition === null ? sql`null::text[]` : textArray(condition.values)})
+            1, now(), ${ctx.userId}::uuid)
     returning id::text as id`);
   if (!created) throw new Error('insertQuestion: the insert returned no row');
   return created.id;
@@ -1076,6 +1148,7 @@ export async function replaceQuestion(
   ctx: AdminCtx,
   body: ReplaceQuestionBody,
 ): Promise<AdminQuestion> {
+  if (body.condition) throw conditionRetired();
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
@@ -1111,7 +1184,15 @@ export async function replaceQuestion(
       );
     }
 
-    const createdId = await insertQuestion(tx, ctx, body, old.step_id, old.position);
+    const createdId = await insertQuestion(
+      tx,
+      ctx,
+      body,
+      old.step_id,
+      old.position,
+      crypto.randomUUID(),
+      old.branch_id,
+    );
     const next = swapQuestion(read.layout, old.id, createdId);
     assertLayoutOrder(next, read.facts);
     await guardedWrite(tx, ctx.tenantId, old.id, () =>

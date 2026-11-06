@@ -119,18 +119,18 @@ const createQuestionRoute = createRoute({
   responses: {
     201: {
       description:
-        'Creates a question at the end of the named step (`stepId`; default: the last step, the default step being created when the form has none): the positions of the whole form are renumbered 1..n, `revision` is 1, every option gets a server-generated id. Title (1 to 120) and help text (at most 300) are trimmed and measured in code points; a choice type needs 2 to 20 distinct options. The body never carries an id, a position or a revision. `condition` (`{ questionId, values }`, or null/absent for an always-shown question) is accepted only through the condition rules: the opener must be an ACTIVE `dropdown`, `single_choice`, `multiple_choice` or `yes_no` question of this tenant that sits BEFORE the new one and has no condition itself, the values are option ids of the opener (`true`/`false` for yes/no; never "Outro"), and the new question must not be an opener.',
+        'Creates a question at the end of the named step (`stepId`; default: the last step, the default step being created when the form has none): the positions of the whole form are renumbered 1..n, `revision` is 1, every option gets a server-generated id. Title (1 to 120) and help text (at most 300) are trimmed and measured in code points; a choice type needs 2 to 20 distinct options. The body never carries an id, a position or a revision. `branchId` (null or absent for an unconditional question) creates the question INTO that branch: it keeps the step it was sent to and lands at the end of the branch’s run in that step in tree order (right after the opener and the questions already in the branch, nested branches included), or at the end of the step when the branch has no run there. The branch must be an ACTIVE branch of this tenant, its opener must sit before the question (an opener in a later step is `condition_order`), and the three-level and privacy rules apply. The retired per-question `condition` is refused: `null` or absent is fine, anything else is 400 `condition_invalid`.',
       content: { 'application/json': { schema: adminQuestionSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.profileForm`: `required` (an empty or whitespace-only title or option), `too_long`, `invalid`, `out_of_range`, `limit_reached` (more than 20 options) or `other_not_allowed`. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.profileForm`: `required` (an empty or whitespace-only title or option), `too_long`, `invalid`, `out_of_range`, `limit_reached` (more than 20 options), `other_not_allowed`, `unknown_step`, `unknown_branch` (a `branchId` that is not a branch of this tenant; a foreign and a missing id answer the same) or `condition_invalid` (a non-null `condition`: the per-question condition is retired, use `branchId`). Nothing is written.',
     },
     403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
     404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm`: `limit_reached` (the tenant already has 30 active questions), `condition_invalid` (the opener is of another tenant, missing, archived, of a type that cannot open, itself conditional, the new question is an opener, a value is not an option of the opener, or the values are empty or repeated) or `condition_order` with `openerId` (the opener would sit at or after the new question). A foreign and a missing opener answer the same. Nothing is written.',
+        '`CONFLICT` with `details.profileForm`: `limit_reached` (the tenant already has 30 active questions), `branch_archived` (the branch is archived; `branchId` names it), `condition_order` with `openerId` (the branch’s opener sits in a later step than the new question), `condition_invalid` (the branch cannot be walked) or `public_under_private` with `titles` (a question that shows on the profile cannot sit under a private opener). Nothing is written.',
     },
   },
 });
