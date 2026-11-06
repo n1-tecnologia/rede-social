@@ -54,47 +54,6 @@ export function addQuestion(layout: Layout, stepId: string, questionId: string):
   );
 }
 
-/**
- * Adds a new question to the named step, next to the question that opens it (quick 261106-ei5). Three outcomes:
- *   - no opener, or the opener is not in the named step (another step, or not in the layout): the END of the
- *     step, exactly like `addQuestion`;
- *   - the opener is in the named step and nothing in that step AFTER it depends on it: right after the opener;
- *   - the opener is in the named step and some questions after it depend on it (`facts`, one
- *     `{ questionId, openerId }` per active conditional question): right after the LAST of them. A question in
- *     between that does not depend on the opener, and a dependent of another opener, never stop the scan.
- * The refusals are `addQuestion`'s own (`unknown_step`, `order_mismatch`) and come first. Nothing is mutated.
- * Ids are compared as given: the caller passes lowercase uuid text.
- */
-export function addQuestionAfterOpener(
-  layout: Layout,
-  stepId: string,
-  questionId: string,
-  openerId: string | null,
-  facts: readonly { questionId: string; openerId: string }[],
-): LayoutResult {
-  const appended = addQuestion(layout, stepId, questionId);
-  if (!appended.ok || openerId === null) return appended;
-  const target = layout.find((step) => step.stepId === stepId);
-  const openerIndex = target ? target.questionIds.indexOf(openerId) : -1;
-  if (!target || openerIndex === -1) return appended;
-  const dependents = new Set(
-    facts.filter((fact) => fact.openerId === openerId).map((fact) => fact.questionId),
-  );
-  let after = openerIndex;
-  target.questionIds.forEach((id, index) => {
-    if (index > openerIndex && dependents.has(id)) after = index;
-  });
-  return accept(
-    layout.map((step) => {
-      if (step.stepId !== stepId)
-        return { stepId: step.stepId, questionIds: [...step.questionIds] };
-      const ids = [...step.questionIds];
-      ids.splice(after + 1, 0, questionId);
-      return { stepId: step.stepId, questionIds: ids };
-    }),
-  );
-}
-
 /** Takes the question out of its step and appends it to the END of the target step (UI-D-647). */
 export function moveQuestion(layout: Layout, questionId: string, toStepId: string): LayoutResult {
   if (!layout.some((step) => step.stepId === toStepId)) return refuse('unknown_step');

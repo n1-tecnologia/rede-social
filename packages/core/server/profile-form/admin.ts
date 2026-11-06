@@ -47,7 +47,7 @@ import {
   dropQuestion,
   endsWith,
   layoutOrThrow,
-  readTree,
+  readLayout,
   swapQuestion,
   writeLayout,
 } from './layout-store';
@@ -411,7 +411,7 @@ async function guardedWrite<T>(
   const issue = guardIssueOf(out.error);
   if (!issue) throw out.error;
   if (issue === 'has_dependents') {
-    const fresh = await readTree(tx, tenantId);
+    const fresh = await readLayout(tx, tenantId);
     throw hasDependentBranches(dependentBranchesOf(fresh.branches, fresh.questions, openerId));
   }
   throw new ApiError(409, 'CONFLICT', { profileForm: issue });
@@ -462,7 +462,7 @@ export async function createQuestion(
       throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
     }
 
-    const read = await readTree(tx, ctx.tenantId);
+    const read = await readLayout(tx, ctx.tenantId);
     const target = await targetStep(tx, ctx.tenantId, read, body.stepId);
     const branchId = body.branchId?.toLowerCase() ?? null;
     if (branchId !== null && !read.branches.some((branch) => branch.id === branchId)) {
@@ -726,7 +726,7 @@ export async function updateQuestion(
     // transaction never waits for a row a member's save already holds while that save waits for ours. Any
     // other edit reads it unlocked: the branch rules look at the tenant's questions and branches.
     const moves = body.stepId !== undefined || body.branchId !== undefined;
-    const read = await readTree(tx, ctx.tenantId, moves);
+    const read = await readLayout(tx, ctx.tenantId, moves);
 
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
@@ -865,7 +865,7 @@ async function otherAnswered(tx: Tx, tenantId: string, questionId: string): Prom
  * `PUT /v1/profile_form/order` (PFORM-02, PFORM-24, PFORM-27; D-582, D-623, D-627): the whole form in its new
  * order, in ONE set-based renumber (`writeLayout`) so positions stay `1..n` and the readers' order is unchanged.
  *
- *   1. `adminLock`, the live module check, then `readTree` (steps, then every ACTIVE question, `FOR UPDATE` in
+ *   1. `adminLock`, the live module check, then `readLayout` (steps, then every ACTIVE question, `FOR UPDATE` in
  *      the canonical order the member's save locks in, then the branches, so the two can never deadlock);
  *   2. two bodies for one release: the legacy `{ ids }` is accepted only while the tenant has exactly ONE step
  *      (a flat list cannot say which step each question belongs to, so a form with several steps answers
@@ -889,7 +889,7 @@ export async function reorderQuestions(
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readTree(tx, ctx.tenantId, true);
+    const read = await readLayout(tx, ctx.tenantId, true);
     const requested: Layout = (() => {
       if ('ids' in body) {
         const only = read.layout.length === 1 ? read.layout[0] : undefined;
@@ -969,7 +969,7 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
 
     // The layout first, the row after. Only the questions AFTER this one change place, so `writeLayout` takes
     // them in the canonical order, behind the row lock below (no cycle with a member's ordered share locks).
-    const read = await readTree(tx, ctx.tenantId);
+    const read = await readLayout(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     if (row.archived_at !== null) return archivedQuestionOf(tx, ctx.tenantId, row);
@@ -1025,7 +1025,7 @@ export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<Adm
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readTree(tx, ctx.tenantId);
+    const read = await readLayout(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     if (row.archived_at === null) return adminQuestionOf(tx, ctx.tenantId, row);
@@ -1121,7 +1121,7 @@ export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ delet
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readTree(tx, ctx.tenantId);
+    const read = await readLayout(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     const [answered] = await tx.execute<{ found: boolean }>(sql`
@@ -1163,7 +1163,7 @@ export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ delet
     if ('error' in out) {
       if (!hasSqlState(out.error, '23503')) throw out.error;
       // A foreign key in a race: a second writer gave the question a branch, or an answer, after the checks.
-      const fresh = await readTree(tx, ctx.tenantId);
+      const fresh = await readLayout(tx, ctx.tenantId);
       const branches = dependentBranchesOf(fresh.branches, fresh.questions, row.id);
       if (branches.length > 0) throw hasDependentBranches(branches);
       throw new ApiError(409, 'CONFLICT', { profileForm: 'has_answers' });
@@ -1203,7 +1203,7 @@ export async function replaceQuestion(
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readTree(tx, ctx.tenantId);
+    const read = await readLayout(tx, ctx.tenantId);
     const old = await readOne(tx, ctx.tenantId, body.replaces, true);
     if (!old) throw new ApiError(404, 'NOT_FOUND');
     if (old.archived_at !== null) {

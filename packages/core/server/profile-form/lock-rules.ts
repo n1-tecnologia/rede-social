@@ -16,10 +16,10 @@ import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
  * off while an "Outro" answer exists (`other_locked`), private to public (`visibility_locked`, the one-way
  * ratchet of PU-1) and narrowing a number or date limit (`limits_locked`).
  *
- * 12.1 (D-625, D-632): the trigger states two more rules, PF006 and PF007 (a condition cannot be gained or
- * changed on an answered question; an opener with active dependents cannot be archived, retyped or lose a
- * referenced option). Their pure twins live in `condition-rules.ts` (`checkConditionLock`,
- * `checkOpenerChange`); `guardIssueOf` maps both SQLSTATEs below.
+ * 12.1 (D-625, D-632): the trigger states two more rules, PF006 and PF007 (a branch membership cannot be
+ * gained, lost or changed on an answered question; an opener with an active branch cannot be archived,
+ * retyped or lose a referenced option). Their pure twins live in `branch-rules.ts` (`checkMoveIntoBranch`,
+ * `checkBranchEdit`, `checkOpenerChange`); `guardIssueOf` maps both SQLSTATEs below.
  *
  * 12.2 (D-644, D-646): the trigger states three more, PF008 (a chain deeper than `branchDepth`, or a cycle),
  * PF009 (a public question under a private opener) and PF010 (a write to the retired condition columns). Their

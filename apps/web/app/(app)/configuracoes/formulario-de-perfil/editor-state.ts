@@ -917,7 +917,7 @@ export function openerIndex(questions: readonly AdminQuestion[]) {
 
 /**
  * The ACTIVE questions that name `openerId` as their opener, with their titles, in form order. The client's
- * mirror of `dependentsOf` in `condition-rules.ts` over `AdminQuestion.condition`, so a refusal can be shown
+ * mirror of the 12.1 server rule `dependentsOf` (retired in 12.2, now `dependentBranchesOf` in `branch-rules.ts`) over `AdminQuestion.condition`, so a refusal can be shown
  * without a round trip. The server (`checkOpenerChange`) stays the authority: it answers 409 `has_dependents`
  * with its own list when the page was stale (D-632, T-12.1-02).
  */

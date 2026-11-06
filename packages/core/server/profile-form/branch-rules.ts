@@ -10,13 +10,13 @@ import { flatten, type Layout } from './layout';
  * PFORM-45, PFORM-48, PFORM-53): what a branch may be, which edits an opener refuses, when a question may
  * enter a branch, what archiving or reactivating a block needs, and the privacy twin of WR-06. No database,
  * no I/O, no clock: the service reads the facts (the tenant's questions, branches, the locked layout and the
- * answer COUNTS) and asks these functions, the `condition-rules.ts` / `lock-rules.ts` mould. A rule never sees
+ * answer COUNTS) and asks these functions, the `lock-rules.ts` mould. A rule never sees
  * an answer value: only structure, privacy flags and counts.
  *
  * A branch is its own object (an opener question, the opening answers, the questions that name it); a question
  * in a branch is visible only when EVERY branch on its chain is open, and the chain is at most
  * `PROFILE_FORM_LIMITS.branchDepth` long (D-644). The 12.1 per-question condition (one level) is gone from
- * this file; `condition-rules.ts` stays untouched until plan 09 removes its last caller.
+ * this file, and the 12.1 rule module that judged it was removed in plan 09.
  *
  * Every walk up or down the tree is bounded by `PROFILE_FORM_LIMITS.branchDepth + 1` hops and carries a visited
  * set, so a stored cycle or a depth bomb is a refusal and can never stall the service (D-644, T-12.2-07).
