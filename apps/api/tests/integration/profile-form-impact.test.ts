@@ -632,7 +632,10 @@ describe('12.2-11 D-644, D-653: the impact counts only the members who SEE the q
         change: 'create_required',
         branchId: crypto.randomUUID(),
       });
-      const foreign = await impactRes(admin, { change: 'create_required', branchId: foreignBranch });
+      const foreign = await impactRes(admin, {
+        change: 'create_required',
+        branchId: foreignBranch,
+      });
       const archived = await impactRes(admin, {
         change: 'create_required',
         branchId: archivedBranch,

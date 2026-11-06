@@ -12,7 +12,6 @@ import {
   PROFILE_FORM_LIMITS,
   type ProfileFormSummary,
   type ProfileFormType,
-  parseConditionValues,
   type ReorderBody,
   type ReplaceQuestionBody,
   type UpdateQuestionBody,
@@ -33,7 +32,7 @@ import {
 } from './branch-rules';
 // A call-time-only cycle with ./branches as well (which takes `adminLock`, `requireModuleOn` and `attempt` from
 // this file): neither module touches the other at load.
-import { readBranches, refuseBranch } from './branches';
+import { readBranch, readBranches, refuseBranch } from './branches';
 import {
   addQuestion,
   applyRequestedLayout,
@@ -56,7 +55,7 @@ import { liveModuleOn } from './member';
 // A call-time-only cycle with ./steps (which takes `adminLock` and `requireModuleOn` from this file): neither
 // module touches the other at load, only inside a function.
 import { ensureDefaultStep, readSteps } from './steps';
-import { questionVisibleSql } from './visibility-sql';
+import { branchChainOpenSql, questionVisibleSql } from './visibility-sql';
 
 /**
  * The builder's write side (Phase 12-08, D-582, D-587, D-596; PFORM-01, PFORM-02, PFORM-17, PFORM-24). Pure
@@ -1337,60 +1336,84 @@ export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
   });
 }
 
-/** Members who have an answer to `openerId` whose tokens overlap `values` (they SEE a question it opens). */
-const SEES_THROUGH = (tenantId: string, openerId: string, values: readonly string[]) => sql`
-  exists (
-    select 1 from public.profile_form_answers o
-     where o.tenant_id = ${tenantId}::uuid
-       and o.membership_id = members.id
-       and o.question_id = ${openerId}::uuid
-       and ${textArray(values)} && app.profile_form_answer_tokens(o.value))`;
+/**
+ * What a counting statement is about, as a one-row derived table `p` the shared fragment can reference by
+ * IDENTIFIER (`p.tenant_id`, `p.branch_id`, `p.question_id`): the tenant, the branch whose chain is judged and
+ * the question whose answer is missing. Every value travels as a bound parameter; the raw text of the
+ * fragment holds only the names of these columns (T-12.2-10, T-12.2-11).
+ */
+const IMPACT_SCOPE = (tenantId: string, scope: ImpactScope) => sql`
+  (select ${tenantId}::uuid as tenant_id,
+          ${scope.branchId ?? null}::uuid as branch_id,
+          ${scope.questionId ?? null}::uuid as question_id) p`;
 
-/** Members with no answer row for the question. */
-const LACKS_ANSWER = (tenantId: string, questionId: string) => sql`
+type ImpactScope = { branchId?: string | null; questionId?: string | null };
+
+/** "The member (`members.id`) sees the question of the scope `p`": no branch is always visible, else the whole chain open. */
+const seesQuestion = () =>
+  sql.raw(questionVisibleSql({ question: 'p', tenant: 'p.tenant_id', member: 'members.id' }));
+
+/** "Every branch on the chain of `p.branch_id` is open for the member (`members.id`)". */
+const seesBranch = () =>
+  sql.raw(
+    branchChainOpenSql({ branchRef: 'p.branch_id', tenant: 'p.tenant_id', member: 'members.id' }),
+  );
+
+/** Members with no answer row for the question of the scope `p`. */
+const LACKS_ANSWER = sql`
   not exists (
     select 1 from public.profile_form_answers a
-     where a.tenant_id = ${tenantId}::uuid
+     where a.tenant_id = p.tenant_id
        and a.membership_id = members.id
-       and a.question_id = ${questionId}::uuid)`;
+       and a.question_id = p.question_id)`;
 
 /**
- * `GET /v1/profile_form/impact` (D-585, D-634, PFORM-23, PFORM-38): how many members a change would ask to answer,
- * were it applied now, counting only the members who would SEE the question.
+ * `GET /v1/profile_form/impact` (D-585, D-634, D-644, PFORM-23, PFORM-52): how many members a change would ask
+ * to answer, were it applied now, counting only the members who would SEE the question THROUGH ITS WHOLE
+ * BRANCH CHAIN (the shared fragment of `visibility-sql.ts`, never a hand-copied gate).
  *
- *   - `create_required` and `replace` count every member, or, with `conditionQuestionId` and `conditionValues`,
- *     the members whose answer to that opener overlaps the values (the opener must be an ACTIVE question of this
- *     tenant: a foreign or missing id is the bare 404, which reveals nothing; one of the two parameters alone
- *     is 400 `invalid`);
- *   - `make_required` and `reactivate` count the members with no answer to `questionId`, and, for a conditional
- *     question, only those who see it;
- *   - `remove_condition` (needs `questionId`) counts the members who do NOT see the question today and lack an
- *     answer to it: they are the ones who newly owe it. It is 0 for an unconditional, an optional or an archived
- *     question.
+ *   - `create_required` and `replace` count every member, or, with `branchId` (an ACTIVE branch of this tenant:
+ *     an unknown, foreign or archived one is the bare 404, which reveals nothing), the members for whom that
+ *     branch's chain is open. The per-question condition parameters of 12.1 are retired: they are 400
+ *     `invalid`;
+ *   - `make_required` and `reactivate` count the members with no answer to `questionId` who see it through its
+ *     chain;
+ *   - `remove_condition` (a question leaving its branch; needs `questionId`) counts the members who do NOT see
+ *     the question today and lack an answer to it: they are the ones who newly owe it. It is 0 for an
+ *     unbranched, an optional or an archived question.
  *
  * A change that asks nobody is 0. `questionId` is needed by the last three kinds (400 `invalid` without it) and
- * an unknown or foreign one is the bare 404. A count only: no member and no answer is ever selected.
+ * an unknown or foreign one is the bare 404. A count of distinct members only: no member, no answer and no
+ * branch name is ever selected, and a member who newly owes two questions counts once.
  */
 export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<ImpactResult> {
   return withTenantTx(ctx, async (tx) => {
     await requireModuleOn(tx, ctx);
 
-    const count = async (where: ReturnType<typeof sql>): Promise<ImpactResult> => {
+    // The retired per-question condition parameters of 12.1 (whatever remains of the query besides the three
+    // keys this function reads) are refused, never silently ignored.
+    const { change: _change, questionId: _questionId, branchId: _branchId, ...retired } = query;
+    if (Object.values(retired).some((value) => value !== undefined)) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'invalid' });
+    }
+
+    const count = async (
+      scope: ImpactScope,
+      where: ReturnType<typeof sql>,
+    ): Promise<ImpactResult> => {
       const [counted] = await tx.execute<{ n: number | string }>(sql`
-        select count(*)::int as n from (${ACTIVE_MEMBERS(ctx.tenantId)}) members where ${where}`);
+        select count(distinct members.id)::int as n
+          from (${ACTIVE_MEMBERS(ctx.tenantId)}) members
+         cross join ${IMPACT_SCOPE(ctx.tenantId, scope)}
+         where ${where}`);
       return { members: Number(counted?.n ?? 0) };
     };
 
     if (query.change === 'create_required' || query.change === 'replace') {
-      const values =
-        query.conditionValues === undefined ? [] : parseConditionValues(query.conditionValues);
-      if ((query.conditionQuestionId === undefined) !== (values.length === 0)) {
-        throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'invalid' });
-      }
-      if (query.conditionQuestionId === undefined) return count(sql`true`);
-      const opener = await readOne(tx, ctx.tenantId, query.conditionQuestionId);
-      if (!opener || opener.archived_at !== null) throw new ApiError(404, 'NOT_FOUND');
-      return count(SEES_THROUGH(ctx.tenantId, opener.id, values));
+      if (query.branchId === undefined) return count({}, sql`true`);
+      const branch = await readBranch(tx, ctx.tenantId, query.branchId);
+      if (!branch || branch.archivedAt !== null) throw new ApiError(404, 'NOT_FOUND');
+      return count({ branchId: branch.id }, seesQuestion());
     }
 
     if (query.questionId === undefined) {
@@ -1399,10 +1422,13 @@ export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<Impa
     const row = await readOne(tx, ctx.tenantId, query.questionId);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
 
-    // 12.2 (D-640): the per-question condition is retired; `remove_condition` (a question leaving its branch)
-    // and the branch-aware counts are plan 11's (they compose the shared chain fragment). Until then it asks
-    // nobody.
-    if (query.change === 'remove_condition') return { members: 0 };
+    const scope = { questionId: row.id, branchId: row.branch_id };
+    if (query.change === 'remove_condition') {
+      if (row.archived_at !== null || !row.required || row.branch_id === null) {
+        return { members: 0 };
+      }
+      return count(scope, sql`not ${seesBranch()} and ${LACKS_ANSWER}`);
+    }
 
     const asksNobody =
       query.change === 'reactivate'
@@ -1410,6 +1436,6 @@ export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<Impa
         : row.archived_at !== null || row.required;
     if (asksNobody) return { members: 0 };
 
-    return count(LACKS_ANSWER(ctx.tenantId, row.id));
+    return count(scope, sql`${seesQuestion()} and ${LACKS_ANSWER}`);
   });
 }

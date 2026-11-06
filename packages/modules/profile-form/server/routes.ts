@@ -506,7 +506,7 @@ const summaryRoute = createRoute({
   responses: {
     200: {
       description:
-        '`{ total, complete, hasRequired }` over the tenant’s active `member` memberships (staff, blocked and invited are in no number): `complete` is the members who owe no VISIBLE required question (a conditional required question is owed only by the members whose answer to its opener opens it). Counts only.',
+        '`{ total, complete, hasRequired }` over the tenant’s active `member` memberships (staff, blocked and invited are in no number): `complete` is the members who owe no VISIBLE required question (a required question in a branch is owed only by the members for whom every branch on its chain is open, the same rule as the gate). Counts only.',
       content: { 'application/json': { schema: profileFormSummarySchema } },
     },
     403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
@@ -522,17 +522,17 @@ const impactRoute = createRoute({
   responses: {
     200: {
       description:
-        '`{ members }`: how many members a change (`create_required`, `make_required`, `reactivate`, `replace`, `remove_condition`) would ask to answer if applied now, counting only the members who SEE the question. `make_required`, `reactivate` and `remove_condition` need `questionId`. `create_required` and `replace` take the optional `conditionQuestionId` and `conditionValues` (comma-separated tokens) of the question to be created, and then count only the members whose answer to that opener overlaps the values. `remove_condition` counts the members who do not see the question today and lack an answer to it (0 for an unconditional, optional or archived question). A count only.',
+        '`{ members }`: how many members a change (`create_required`, `make_required`, `reactivate`, `replace`, `remove_condition`) would ask to answer if applied now, counting only the members who SEE the question through its WHOLE branch chain (a count of distinct members, so a member who newly owes two questions counts once). `make_required`, `reactivate` and `remove_condition` need `questionId`. `create_required` and `replace` take the optional `branchId` of an ACTIVE branch and then count only the members for whom that branch’s chain is open (every member without it). The retired 12.1 parameters `conditionQuestionId` and `conditionValues` are refused with 400. `remove_condition` (a question leaving its branch) counts the members who do not see the question today and lack an answer to it (0 for an unbranched, optional or archived question). A count only: never a member, an answer or a branch name.',
       content: { 'application/json': { schema: impactResultSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED`: an unknown `change`, a `questionId` missing where it is needed, or only one of `conditionQuestionId` and `conditionValues`.',
+        '`VALIDATION_FAILED`: an unknown `change`, a `questionId` missing where it is needed, or a retired `conditionQuestionId` or `conditionValues`.',
     },
     403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
     404: {
       description:
-        '`MODULE_DISABLED` when the module is off; otherwise `questionId` or `conditionQuestionId` is unknown, archived or another tenant’s (one bare `NOT_FOUND`).',
+        '`MODULE_DISABLED` when the module is off; otherwise `questionId` is unknown or another tenant’s, or `branchId` is unknown, archived or another tenant’s (one bare `NOT_FOUND`, the same for all).',
     },
   },
 });
