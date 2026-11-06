@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  type AdminBranch,
   type AdminQuestion,
   type AdminStep,
   PROFILE_FORM_LIMITS,
@@ -22,6 +23,8 @@ export interface QuestionBuilderProps {
   questions: AdminQuestion[];
   /** The tenant's steps in order. */
   steps?: AdminStep[];
+  /** The tenant's branches (12.2-15, D-640); absent reads as none. */
+  branches?: AdminBranch[];
   /** The most steps a tenant may have (D-633); defaults to the contract's. */
   stepLimit?: number;
   /** The most active questions a tenant may have. */

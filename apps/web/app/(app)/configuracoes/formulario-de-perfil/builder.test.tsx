@@ -6,7 +6,15 @@ import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { adminQuestion, adminStep, archivedQuestion, uuid } from '@/lib/profile-form/test-fixtures';
+import {
+  adminBranch,
+  adminQuestion,
+  adminStep,
+  archivedQuestion,
+  clinicAdminList,
+  clinicId,
+  uuid,
+} from '@/lib/profile-form/test-fixtures';
 import type { ImpactActionResult, ReactivateResult, ReorderResult } from './actions';
 
 /**
@@ -63,13 +71,30 @@ const A = adminQuestion('short_text', { title: 'Cargo' });
 const B = adminQuestion('dropdown', { title: 'Origem' });
 const C = adminQuestion('acceptance', { title: 'Regulamento' });
 
-function show(questions = [A, B, C], props: { onOpen?: (id: string) => void } = {}) {
+function show(
+  questions = [A, B, C],
+  props: {
+    onOpen?: (id: string) => void;
+    branches?: ReturnType<typeof adminBranch>[];
+    steps?: ReturnType<typeof adminStep>[];
+    onEditBranch?: (branchId: string) => void;
+    onAddToBranch?: (branchId: string, stepId: string) => void;
+  } = {},
+) {
   return render(
     <NextIntlClientProvider locale="pt-BR" messages={messages}>
       <QuestionList
         questions={questions}
         limit={30}
+        steps={props.steps}
+        branches={props.branches}
         onOpen={props.onOpen ? (question) => props.onOpen?.(question.id) : undefined}
+        onEditBranch={props.onEditBranch ? (branch) => props.onEditBranch?.(branch.id) : undefined}
+        onAddToBranch={
+          props.onAddToBranch
+            ? (branch, stepId) => props.onAddToBranch?.(branch.id, stepId)
+            : undefined
+        }
       />
     </NextIntlClientProvider>,
   );
@@ -966,16 +991,26 @@ const QA = adminQuestion('single_choice', {
   options: [{ id: uuid(9601), label: 'Tenho clínica', answerCount: 0 }],
 });
 const QB = adminQuestion('short_text', { title: 'Nome profissional', stepId: S1.id });
+/** 12.2-15: the branch that QC sits in (the opener QA lives in ANOTHER step, D-643). */
+const BR1 = adminBranch({
+  openerQuestionId: QA.id,
+  values: [uuid(9601)],
+  questionCount: 1,
+});
 const QC = adminQuestion('short_text', {
   title: 'Nome da clínica',
   stepId: S2.id,
-  condition: { questionId: QA.id, values: [uuid(9601)] },
+  branchId: BR1.id,
 });
 const QD = adminQuestion('number', { title: 'Quantas pessoas?', stepId: S2.id });
 const QE = adminQuestion('phone', { title: 'Telefone', stepId: S3.id });
 
 /** Four steps: the last one empty. The numbers across the form are QA 1, QB 2, QC 3, QD 4, QE 5. */
-const FOUR_STEPS = { questions: [QA, QB, QC, QD, QE], steps: [S1, S2, S3, S4] };
+const FOUR_STEPS = {
+  questions: [QA, QB, QC, QD, QE],
+  steps: [S1, S2, S3, S4],
+  branches: [BR1],
+};
 
 function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -986,7 +1021,11 @@ function Providers({ children }: { children: React.ReactNode }) {
 }
 
 function builder(
-  props: { questions: ReturnType<typeof adminQuestion>[]; steps: ReturnType<typeof adminStep>[] },
+  props: {
+    questions: ReturnType<typeof adminQuestion>[];
+    steps: ReturnType<typeof adminStep>[];
+    branches?: ReturnType<typeof adminBranch>[];
+  },
   limit = 30,
 ) {
   const element = (next: typeof props) => (
@@ -994,6 +1033,7 @@ function builder(
       <QuestionBuilder
         questions={next.questions}
         steps={next.steps}
+        branches={next.branches}
         limit={limit}
         tenantName="Ana Mentoria"
       />
@@ -1006,9 +1046,13 @@ function builder(
 const well = (name: string) => screen.getByRole('region', { name });
 const wellTitles = () =>
   screen.queryAllByRole('region').map((el) => el.querySelector('h3')?.textContent);
+/** The `li` that are question rows; the `li` that only wraps a branch block (12.2-15) is not a row. */
+const isRowItem = (item: HTMLElement) =>
+  !(item.firstElementChild as HTMLElement | null)?.className.includes('border-l-2');
 const rowTitles = (name: string) =>
   within(well(name))
     .queryAllByRole('listitem')
+    .filter(isRowItem)
     .map((item) => item.querySelector('.line-clamp-3')?.textContent ?? '');
 const stepUp = (title: string) => screen.getByRole('button', { name: `Subir etapa “${title}”` });
 const stepDown = (title: string) => screen.getByRole('button', { name: `Descer etapa “${title}”` });
@@ -1018,6 +1062,7 @@ const isDisabled = (el: HTMLElement) => (el as HTMLButtonElement).disabled;
 const positions = () =>
   screen
     .getAllByRole('listitem')
+    .filter(isRowItem)
     .map((item) => item.querySelector('[aria-hidden="true"].w-5')?.textContent);
 const stepsNote =
   'Os membros respondem uma etapa por vez e avançam com “Avançar”. Uma etapa sem pergunta visível para o membro é pulada.';
@@ -1489,45 +1534,6 @@ describe('12.1-16 Task 3: reorder on steps and within steps, and the refusals th
     expect(mocks.show).toHaveBeenCalledTimes(2);
   });
 
-  describe('inside one step', () => {
-    const F = adminQuestion('short_text', {
-      title: 'Qual o nome da clínica?',
-      stepId: S1.id,
-      condition: { questionId: QA.id, values: [uuid(9601)] },
-    });
-    const scenario = { questions: [QA, F, QD], steps: [S1, S2] };
-
-    it('a dependent going up past its opener moves nothing and says it must follow it', async () => {
-      builder(scenario);
-      enterReorder();
-      await act(async () => {
-        fireEvent.click(questionUp('Qual o nome da clínica?'));
-      });
-      expect(mocks.layout).not.toHaveBeenCalled();
-      expect(rowTitles('Informações gerais')).toEqual(['Tem clínica?', 'Qual o nome da clínica?']);
-      expect(mocks.show).toHaveBeenCalledWith({
-        tone: 'error',
-        message:
-          '“Qual o nome da clínica?” precisa ficar depois de “Tem clínica?”, que decide se ela aparece.',
-      });
-    });
-
-    it('an opener going down past its dependent moves nothing and says it must come first', async () => {
-      builder(scenario);
-      enterReorder();
-      await act(async () => {
-        fireEvent.click(questionDown('Tem clínica?'));
-      });
-      expect(mocks.layout).not.toHaveBeenCalled();
-      expect(rowTitles('Informações gerais')).toEqual(['Tem clínica?', 'Qual o nome da clínica?']);
-      expect(mocks.show).toHaveBeenCalledWith({
-        tone: 'error',
-        message:
-          '“Tem clínica?” precisa ficar antes de “Qual o nome da clínica?”, que só aparece conforme a resposta dela.',
-      });
-    });
-  });
-
   it('the server coded 409 (a race) puts the list back and renders the same sentence', async () => {
     mocks.layout.mockResolvedValue({
       ok: false,
@@ -1607,141 +1613,176 @@ describe('12.1-16 Task 3: reorder on steps and within steps, and the refusals th
 });
 
 /* ------------------------------------------------------------------------------------------------ */
-/* 12.1-17 Task 2: the markers of the list (D-621, D-622, UI-D-650)                                   */
+/* 12.2-15 Task 1 (tracer): a branch is a block under its opener (D-640, D-641, D-642, UI-D-666/667)  */
 /* ------------------------------------------------------------------------------------------------ */
 
-describe('12.1-17 Task 2: "Condicional", "Abre N perguntas" and the condition sentence (D-621, D-622, UI-D-650)', () => {
-  const clinic = adminQuestion('single_choice', {
-    title: 'Você tem clínica?',
-    options: [
-      { id: uuid(9601), label: 'Tenho', answerCount: 0 },
-      { id: uuid(9602), label: 'Trabalho', answerCount: 0 },
-      { id: uuid(9603), label: 'Aprendo', answerCount: 0 },
-    ],
-    opensCount: 3,
-  });
-  const team = adminQuestion('yes_no', { title: 'Você já tem equipe?', opensCount: 1 });
-  const byOne = adminQuestion('short_text', {
-    title: 'Nome da clínica',
-    condition: { questionId: clinic.id, values: [uuid(9601)] },
-  });
-  const byThree = adminQuestion('short_text', {
-    title: 'Quantas salas?',
-    condition: { questionId: clinic.id, values: [uuid(9603), uuid(9601), uuid(9602)] },
-  });
-  const byYes = adminQuestion('short_text', {
-    title: 'Quantas pessoas?',
-    condition: { questionId: team.id, values: ['true'] },
-  });
-  const byBoth = adminQuestion('short_text', {
-    title: 'Equipe de qualquer jeito',
-    condition: { questionId: team.id, values: ['false', 'true'] },
-  });
-  const plain = adminQuestion('short_text', { title: 'Nome profissional' });
-  const all = [clinic, team, byOne, byThree, byYes, byBoth, plain];
+describe('12.2-15 Task 1 (tracer): a branch is a block under its opener, with a strip and white rows', () => {
+  const OPENER_TITLE = 'Você tem clínica, trabalha em clínica ou está aprendendo?';
+  const B1_LABEL = `Se “${OPENER_TITLE}” for “Tenho uma clínica”`;
+  const B2_LABEL = 'Se “A clínica tem equipe?” for Sim';
+  const B3_LABEL = 'Se “Tem sócio?” for Sim';
+  const B4_LABEL = `Se “${OPENER_TITLE}” for “Estou aprendendo”`;
 
+  /** The clinic form of the contracts: one step, B1 (Q2, Q3), B2 (Q4, Q5), B3 (Q6), B4 (Q7). */
+  const clinic = () => clinicAdminList();
+  const showClinic = (props: Parameters<typeof show>[1] = {}) => {
+    const list = clinic();
+    return show(list.questions, { steps: list.steps, branches: list.branches, ...props });
+  };
   const rowOf = (title: string) =>
     screen.getByRole('button', { name: `Editar pergunta: ${title}` }).closest('li') as HTMLElement;
+  const strips = (root: ParentNode = document) =>
+    Array.from(root.querySelectorAll('[data-branch-strip]')) as HTMLElement[];
+  const labelOf = (strip: HTMLElement) => strip.querySelector('.line-clamp-2')?.textContent;
 
-  it('a conditional row has the neutral pill "Condicional" and the sentence under the title', () => {
-    show(all);
-    const row = rowOf('Nome da clínica');
-    expect(within(row).getByText('Condicional')).toBeTruthy();
-    const line = row.querySelector('[data-condition-line]') as HTMLElement;
-    expect(line.textContent).toBe('Só aparece se “Você tem clínica?” for “Tenho”.');
-    expect(line.className).toContain('line-clamp-2');
-    expect(line.className).toContain('break-words');
-    expect(line.className).toContain('text-xs');
-    // The pill is a neutral soft pill with the glyph, never a brand fill.
-    const pill = within(row).getByText('Condicional');
-    expect(pill.className).not.toContain('bg-brand');
-    expect(pill.querySelector('svg')).toBeTruthy();
-  });
-
-  it('lists a choice opener\'s labels quoted, in the opener order, joined by "ou"', () => {
-    show(all);
-    expect(rowOf('Quantas salas?').querySelector('[data-condition-line]')?.textContent).toBe(
-      'Só aparece se “Você tem clínica?” for “Tenho”, “Trabalho” ou “Aprendo”.',
-    );
-  });
-
-  it('writes a yes/no opener as the plain words, unquoted', () => {
-    show(all);
-    expect(rowOf('Quantas pessoas?').querySelector('[data-condition-line]')?.textContent).toBe(
-      'Só aparece se “Você já tem equipe?” for Sim.',
-    );
+  it('draws the block INSIDE the opener row, right under it, with the rail and a strip', () => {
+    showClinic();
+    const opener = rowOf(OPENER_TITLE);
+    const rails = Array.from(opener.querySelectorAll(':scope > div.border-l-2'));
+    expect(rails).toHaveLength(2); // B1 and B4: several branches of one opener are consecutive blocks
     expect(
-      rowOf('Equipe de qualquer jeito').querySelector('[data-condition-line]')?.textContent,
-    ).toBe('Só aparece se “Você já tem equipe?” for Sim ou Não.');
+      rails.map((rail) => labelOf(rail.querySelector('[data-branch-strip]') as HTMLElement)),
+    ).toEqual([B1_LABEL, B4_LABEL]);
+    expect(rails[0]?.className).toContain('ml-1 border-l-2 border-border-secondary pl-3');
+    // the block comes AFTER the opener's own white card
+    expect(opener.firstElementChild?.querySelector('button')).toBeTruthy();
+    expect(opener.firstElementChild?.className).not.toContain('border-l-2');
   });
 
-  it('an opener row has "Abre N perguntas" as a plural, and "Abre 1 pergunta" in the singular', () => {
-    show(all);
-    expect(within(rowOf('Você tem clínica?')).getByText('Abre 3 perguntas')).toBeTruthy();
-    expect(within(rowOf('Você já tem equipe?')).getByText('Abre 1 pergunta')).toBeTruthy();
+  it('puts the rows of the branch inside its rail, in a list named by the strip', () => {
+    showClinic();
+    const rail = rowOf(OPENER_TITLE).querySelector(':scope > div.border-l-2') as HTMLElement;
+    const list = rail.querySelector(':scope > ul') as HTMLElement;
+    expect(document.getElementById(list.getAttribute('aria-labelledby') ?? '')?.textContent).toBe(
+      B1_LABEL,
+    );
+    const titles = Array.from(list.querySelectorAll(':scope > li > div .line-clamp-3')).map(
+      (el) => el.textContent,
+    );
+    expect(titles).toEqual(['A clínica tem equipe?', 'Nome da clínica']);
   });
 
-  it('never renders zero: a plain row has neither marker, no "Abre 0" and no sentence', () => {
-    show(all);
-    const row = rowOf('Nome profissional');
-    expect(within(row).queryByText('Condicional')).toBeNull();
-    expect(row.textContent).not.toContain('Abre');
-    expect(row.querySelector('[data-condition-line]')).toBeNull();
+  it('writes the label of an unnamed branch as "Se “{opener}” for {options}", with no final period', () => {
+    showClinic();
+    const labels = strips().map(labelOf);
+    expect(labels).toEqual([B1_LABEL, B2_LABEL, B3_LABEL, B4_LABEL]);
+    for (const label of labels) expect(label?.endsWith('.')).toBe(false);
   });
 
-  it('a row never carries both the "Condicional" and the "Abre" pill', () => {
-    show(all);
-    for (const item of screen.getAllByRole('listitem')) {
-      const text = item.textContent ?? '';
-      expect(text.includes('Condicional') && /Abre \d/.test(text)).toBe(false);
-    }
+  it('says the count of each strip as a plural', () => {
+    showClinic();
+    const metas = strips().map((strip) =>
+      Array.from(strip.querySelectorAll('span'))
+        .map((span) => span.textContent)
+        .find((text) => /pergunta/.test(text ?? '') && !/Se “/.test(text ?? '')),
+    );
+    expect(metas).toEqual(['2 perguntas', '2 perguntas', '1 pergunta', '1 pergunta']);
   });
 
-  it('puts the same sentences in the accessible description of the row', () => {
-    show(all);
-    const button = screen.getByRole('button', { name: 'Editar pergunta: Nome da clínica' });
-    const description = document.getElementById(button.getAttribute('aria-describedby') ?? '');
-    expect(description?.textContent).toContain('Só aparece se “Você tem clínica?” for “Tenho”.');
-    const opener = screen.getByRole('button', { name: 'Editar pergunta: Você tem clínica?' });
+  it('a named branch shows the name on line 1 and the same sentence on line 2', () => {
+    const list = clinic();
+    const named = list.branches?.map((branch) =>
+      branch.id === clinicId('B1') ? { ...branch, name: 'Quem tem clínica' } : branch,
+    );
+    show(list.questions, { steps: list.steps, branches: named });
+    const strip = strips()[0] as HTMLElement;
+    const lines = Array.from(strip.querySelectorAll('.line-clamp-2')).map((el) => el.textContent);
+    expect(lines).toEqual(['Quem tem clínica', B1_LABEL]);
+    // the other three keep a single line
     expect(
-      document.getElementById(opener.getAttribute('aria-describedby') ?? '')?.textContent,
-    ).toContain('Abre 3 perguntas.');
+      strips()
+        .slice(1)
+        .map((s) => s.querySelectorAll('.line-clamp-2').length),
+    ).toEqual([1, 1, 1]);
   });
 
-  it('keeps the markers in reorder mode, where the rows are not editor openers', () => {
-    show(all);
-    fireEvent.click(reorderButton());
-    const row = screen
-      .getAllByRole('listitem')
-      .find((item) => item.textContent?.includes('Nome da clínica')) as HTMLElement;
-    expect(within(row).getByText('Condicional')).toBeTruthy();
-    expect(row.querySelector('[data-condition-line]')).toBeTruthy();
+  it('an opener wears "Abre N" for the questions of the branches that hang DIRECTLY on it', () => {
+    showClinic();
+    expect(
+      within(rowOf(OPENER_TITLE).firstElementChild as HTMLElement).getByText('Abre 3 perguntas'),
+    ).toBeTruthy();
+    expect(
+      within(rowOf('A clínica tem equipe?').firstElementChild as HTMLElement).getByText(
+        'Abre 2 perguntas',
+      ),
+    ).toBeTruthy();
+    expect(
+      within(rowOf('Tem sócio?').firstElementChild as HTMLElement).getByText('Abre 1 pergunta'),
+    ).toBeTruthy();
+    // a row that is both a member and an opener wears the pill inside the rail
+    expect(rowOf('A clínica tem equipe?').closest('div.border-l-2')).toBeTruthy();
+    // a plain leaf has no pill, and never "Abre 0"
+    expect(
+      within(rowOf('Nome do sócio').firstElementChild as HTMLElement).queryByText(/Abre/),
+    ).toBeNull();
   });
 
-  it('wraps a very long opener title inside two lines and never as markup (T-12.1-12)', () => {
-    const hostile = adminQuestion('single_choice', {
-      title: '<b>x</b> ' + 'pergunta'.repeat(20),
-      options: [{ id: uuid(9701), label: 'A', answerCount: 0 }],
-      opensCount: 1,
-    });
-    const dependent = adminQuestion('short_text', {
-      title: 'Depende',
-      condition: { questionId: hostile.id, values: [uuid(9701)] },
-    });
-    show([hostile, dependent]);
-    const line = rowOf('Depende').querySelector('[data-condition-line]') as HTMLElement;
-    expect(line.querySelector('b')).toBeNull();
-    expect(line.className).toContain('break-words');
-  });
-
-  it('leaves the Arquivadas list unchanged: a condition is not shown there', () => {
-    showArchived([
-      archivedQuestion('short_text', {
-        title: 'Antiga condicional',
-        condition: { questionId: uuid(1), values: [uuid(2)] },
-      }),
-    ]);
+  it('a question row no longer carries "Condicional" or the "Só aparece se" line', () => {
+    const { container } = showClinic();
     expect(screen.queryByText('Condicional')).toBeNull();
     expect(screen.queryByText(/Só aparece se/)).toBeNull();
+    expect(container.querySelector('[data-condition-line]')).toBeNull();
+  });
+
+  it('the accessible description of a row in a branch gains "Fica no ramo: {label}."', () => {
+    showClinic();
+    const button = screen.getByRole('button', { name: 'Editar pergunta: Nome da clínica' });
+    const description = document.getElementById(button.getAttribute('aria-describedby') ?? '');
+    expect(description?.textContent).toContain(`Fica no ramo: ${B1_LABEL}.`);
+    const root = screen.getByRole('button', { name: `Editar pergunta: ${OPENER_TITLE}` });
+    const rootDescription = document.getElementById(root.getAttribute('aria-describedby') ?? '');
+    expect(rootDescription?.textContent).not.toContain('Fica no ramo');
+    expect(rootDescription?.textContent).toContain('Abre 3 perguntas.');
+  });
+
+  it('keeps the numbers global, 1..N, in the order members see', () => {
+    showClinic();
+    const numbers = screen
+      .getAllByRole('listitem')
+      .filter(isRowItem)
+      .map((item) => item.querySelector('[aria-hidden="true"].w-5')?.textContent);
+    expect(numbers).toEqual(['1', '2', '3', '4', '5', '6', '7']);
+  });
+
+  it('opens the editor with the question that was clicked inside a block', () => {
+    const onOpen = vi.fn();
+    showClinic({ onOpen });
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Nome do sócio' }));
+    expect(onOpen).toHaveBeenCalledWith(clinicId('Q6'));
+  });
+
+  it('shows the pencil with the label and hands the branch to onEditBranch', () => {
+    const onEditBranch = vi.fn();
+    showClinic({ onEditBranch });
+    fireEvent.click(screen.getByRole('button', { name: `Editar ramo: ${B2_LABEL}` }));
+    expect(onEditBranch).toHaveBeenCalledWith(clinicId('B2'));
+  });
+
+  it('a form with no branch renders no strip, no rail and no list named by a strip', () => {
+    const { container } = show([A, B, C]);
+    expect(strips(container)).toHaveLength(0);
+    expect(container.querySelector('.border-l-2')).toBeNull();
+    expect(container.querySelector('ul[aria-labelledby]')).toBeNull();
+    expect(screen.queryByText(/Abre/)).toBeNull();
+    expect(screen.queryByText('Condicional')).toBeNull();
+  });
+
+  it('a form with branches in the read but a flat read of steps still renders one step as a flat list', () => {
+    const { container } = showClinic();
+    expect(screen.queryAllByRole('region')).toHaveLength(0);
+    expect(container.querySelector('[data-steps-note]')).toBeNull();
+  });
+
+  it('the page hands the branches of the read to the builder: a block shows through QuestionBuilder', () => {
+    const list = clinic();
+    builder({ questions: list.questions, steps: list.steps, branches: list.branches });
+    expect(strips()).toHaveLength(4);
+  });
+
+  it('leaves the Arquivadas list unchanged: no strip, no condition sentence', () => {
+    showArchived([archivedQuestion('short_text', { title: 'Antiga', branchId: clinicId('B1') })]);
+    expect(screen.queryByText('Condicional')).toBeNull();
+    expect(screen.queryByText(/Só aparece se/)).toBeNull();
+    expect(document.querySelector('[data-branch-strip]')).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  type AdminBranch,
   type AdminQuestion,
   type AdminStep,
   PROFILE_FORM_LIMITS,
@@ -55,6 +56,12 @@ export interface QuestionListProps {
   onRenameStep?: (step: AdminStep) => void;
   /** Opens the editor in create mode with this step preselected (the well's footer). */
   onAddToStep?: (step: AdminStep) => void;
+  /** The tenant's branches (12.2-15, D-640); absent reads as none. */
+  branches?: AdminBranch[];
+  /** Opens the branch sheet for a strip's pencil (plan 17 wires it). */
+  onEditBranch?: (branch: AdminBranch) => void;
+  /** Opens the question sheet in create mode inside a branch (plan 16 wires it). */
+  onAddToBranch?: (branch: AdminBranch, stepId: string) => void;
 }
 
 const NO_STEPS: AdminStep[] = [];
