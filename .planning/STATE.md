@@ -4,11 +4,11 @@ current_phase: "12.2"
 current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: 7
 status: executing
-stopped_at: "Phase 12.2: 6 of 21 plans done (01-06); sketch 019 approved provisionally (plan 05 closed); next is plan 07 Task 1, which needs Igor's word for pnpm db:reset && pnpm db:seed and >=10 GiB free (6.1 now); every plan after 07 depends on it; resume with /gsd-execute-phase 12.2"
-last_updated: "2026-11-06T18:54:55.551Z"
+stopped_at: "Phase 12.2: 6 of 21 plans done (01-06); sketch 019 approved provisionally; next is plan 07 Task 1, which only needs Igor's explicit word for pnpm db:reset && pnpm db:seed (disk is 37 GiB free, Docker up); every plan after 07 depends on it; resume with /gsd-execute-phase 12.2"
+last_updated: "2026-11-06T19:36:43.191Z"
 last_activity: 2026-11-06
 last_activity_desc: Phase 12.2 execution started
-state_head: df42c51e6b303f20e3eeae6505ec8148a4703104
+state_head: 92b0ab69076b74a4e496ceb3838baa43b83a3863
 progress:
   total_phases: 30
   completed_phases: 0
@@ -1244,6 +1244,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-06T18:54:55.237Z
-Stopped at: Phase 12.2: 6 of 21 plans done (01-06); sketch 019 approved provisionally (plan 05 closed); next is plan 07 Task 1, which needs Igor's word for pnpm db:reset && pnpm db:seed and >=10 GiB free (6.1 now); every plan after 07 depends on it; resume with /gsd-execute-phase 12.2
+Last session: 2026-11-06T19:36:42.366Z
+Stopped at: Phase 12.2: 6 of 21 plans done (01-06); sketch 019 approved provisionally; next is plan 07 Task 1, which only needs Igor's explicit word for pnpm db:reset && pnpm db:seed (disk is 37 GiB free, Docker up); every plan after 07 depends on it; resume with /gsd-execute-phase 12.2
 Resume file: .planning/phases/12.2-ramos-condicionais-no-formulario-de-perfil-varias-perguntas/12.2-01-PLAN.md
