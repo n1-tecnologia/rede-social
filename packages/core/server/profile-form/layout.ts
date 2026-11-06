@@ -209,3 +209,15 @@ export function checkLayoutOrder(
   }
   return { ok: true };
 }
+
+/**
+ * INERT STUB (12.2-04 task 3, RED commit only): returns a copy of the layout unchanged so the tests fail on
+ * their assertions. The next commit (GREEN) replaces it with the call to `treeOrder`.
+ */
+export function normalizeToTree(
+  layout: Layout,
+  _questions: readonly { id: string; branchId: string | null }[],
+  _branches: readonly { id: string; openerQuestionId: string }[],
+): Layout {
+  return copy(layout);
+}

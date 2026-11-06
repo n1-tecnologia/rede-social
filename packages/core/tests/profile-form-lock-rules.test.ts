@@ -213,6 +213,9 @@ describe('12-08 guardIssueOf: the trigger’s SQLSTATEs map to the same codes', 
     ['PF005', 'limits_locked'],
     ['PF006', 'condition_locked'],
     ['PF007', 'has_dependents'],
+    ['PF008', 'branch_depth'],
+    ['PF009', 'public_under_private'],
+    ['PF010', 'condition_invalid'],
   ])('%s is %s, bare or wrapped in a cause chain', (state, issue) => {
     expect(guardIssueOf({ code: state })).toBe(issue);
     expect(guardIssueOf(new Error('x', { cause: { code: state } }))).toBe(issue);
@@ -225,7 +228,7 @@ describe('12-08 guardIssueOf: the trigger’s SQLSTATEs map to the same codes', 
       undefined,
       'PF001',
       { code: '23505' },
-      { code: 'PF008' },
+      { code: 'PF099' },
       new Error('x'),
     ]) {
       expect(guardIssueOf(error)).toBeNull();

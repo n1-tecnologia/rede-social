@@ -7,6 +7,7 @@ import {
   flatten,
   type Layout,
   moveQuestion,
+  normalizeToTree,
   removeStep,
   renumber,
   reorderSteps,
@@ -387,5 +388,118 @@ describe('quick 261106-ei5 layout: addQuestionAfterOpener', () => {
     expect(JSON.stringify(layout)).toBe(snapshot);
     expect(next).not.toBe(layout);
     expect(idsOf(next)[0]).toEqual(['o', 'x', 'd1', 'n', 'y']);
+  });
+});
+
+describe('12.2-04 normalizeToTree (D-652): the stored order of the form is the tree', () => {
+  const idsOf = (layout: Layout) => layout.map((step) => step.questionIds);
+  type Q = { id: string; branchId: string | null };
+  const qs = (spec: Record<string, string | null>): Q[] =>
+    Object.entries(spec).map(([id, branchId]) => ({ id, branchId }));
+  const bs = (...pairs: [string, string][]) =>
+    pairs.map(([id, openerQuestionId]) => ({ id, openerQuestionId }));
+  const norm = (
+    layout: Layout,
+    questions: Q[],
+    branches: { id: string; openerQuestionId: string }[],
+  ) => idsOf(normalizeToTree(freeze(layout.map((s) => ({ ...s }))), questions, branches));
+
+  it('puts a nested block inside its parent block, right after its own opener', () => {
+    // a opens B1 (b, c); b opens B2 (d). Requested flat: a x b y c d.
+    const questions = qs({ a: null, x: null, b: 'B1', y: null, c: 'B1', d: 'B2' });
+    const result = norm(
+      [{ stepId: 's1', questionIds: ['a', 'x', 'b', 'y', 'c', 'd'] }],
+      questions,
+      bs(['B1', 'a'], ['B2', 'b']),
+    );
+    expect(result).toEqual([['a', 'b', 'd', 'c', 'x', 'y']]);
+  });
+
+  it('keeps the last question of a block and the next unconditional question as separate units', () => {
+    const questions = qs({ a: null, b: 'B1', n: null });
+    expect(
+      norm([{ stepId: 's1', questionIds: ['a', 'b', 'n'] }], questions, bs(['B1', 'a'])),
+    ).toEqual([['a', 'b', 'n']]);
+  });
+
+  it('orders two branches of one opener by their smallest requested index', () => {
+    const questions = qs({ a: null, c: 'B2', b: 'B1', d: 'B2' });
+    expect(
+      norm(
+        [{ stepId: 's1', questionIds: ['a', 'c', 'b', 'd'] }],
+        questions,
+        bs(['B1', 'a'], ['B2', 'a']),
+      ),
+    ).toEqual([['a', 'c', 'd', 'b']]);
+  });
+
+  it('never moves a question across steps: a run whose opener is in another step stays like an unconditional unit', () => {
+    const questions = qs({ a: null, x: null, b: 'B1', y: null });
+    expect(
+      norm(
+        [
+          { stepId: 's1', questionIds: ['a'] },
+          { stepId: 's2', questionIds: ['x', 'b', 'y'] },
+        ],
+        questions,
+        bs(['B1', 'a']),
+      ),
+    ).toEqual([['a'], ['x', 'b', 'y']]);
+  });
+
+  it('keeps the same step ids and the same question ids, and an empty step stays empty', () => {
+    const questions = qs({ a: null, x: null, b: 'B1' });
+    const out = normalizeToTree(
+      freeze([
+        { stepId: 's1', questionIds: ['a', 'x', 'b'] },
+        { stepId: 's2', questionIds: [] },
+      ]),
+      questions,
+      bs(['B1', 'a']),
+    );
+    expect(out.map((step) => step.stepId)).toEqual(['s1', 's2']);
+    expect([...flatten(out)].sort()).toEqual(['a', 'b', 'x']);
+    expect(idsOf(out)).toEqual([['a', 'b', 'x'], []]);
+  });
+
+  it('is idempotent', () => {
+    const questions = qs({ a: null, x: null, b: 'B1', y: null, c: 'B1', d: 'B2' });
+    const branches = bs(['B1', 'a'], ['B2', 'b']);
+    const once = normalizeToTree(
+      freeze([{ stepId: 's1', questionIds: ['a', 'x', 'b', 'y', 'c', 'd'] }]),
+      questions,
+      branches,
+    );
+    const twice = normalizeToTree(once, questions, branches);
+    expect(twice).toEqual(once);
+  });
+
+  it('does not mutate a frozen input, and an empty branch occupies no position', () => {
+    const input = freeze([{ stepId: 's1', questionIds: ['a', 'b'] }]);
+    const snapshot = JSON.stringify(input);
+    const questions = qs({ a: null, b: null });
+    const out = normalizeToTree(input, questions, bs(['B1', 'a']));
+    expect(JSON.stringify(input)).toBe(snapshot);
+    expect(renumber(out)).toEqual([
+      { id: 'a', stepId: 's1', position: 1 },
+      { id: 'b', stepId: 's1', position: 2 },
+    ]);
+  });
+
+  it('leaves a layout whose branches are consistent with its facts valid for checkLayoutOrder', () => {
+    const questions = qs({ a: null, x: null, b: 'B1', c: 'B2' });
+    const branches = bs(['B1', 'a'], ['B2', 'b']);
+    const out = normalizeToTree(
+      freeze([{ stepId: 's1', questionIds: ['x', 'a', 'c', 'b'] }]),
+      questions,
+      branches,
+    );
+    expect(idsOf(out)).toEqual([['x', 'a', 'b', 'c']]);
+    expect(
+      checkLayoutOrder(out, [
+        { questionId: 'b', openerId: 'a' },
+        { questionId: 'c', openerId: 'b' },
+      ]),
+    ).toEqual({ ok: true });
   });
 });
