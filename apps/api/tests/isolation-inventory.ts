@@ -522,6 +522,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/profile_form/steps': { case: 'phase 12.1 sweep: profile form steps' },
   'PATCH /v1/profile_form/steps/:id': { case: 'phase 12.1 sweep: profile form steps' },
   'DELETE /v1/profile_form/steps/:id': { case: 'phase 12.1 sweep: profile form steps' },
+  // 12.2-08 (PFORM-43, T-12.2-01): the branches routes take the tenant from the session. An opener id of
+  // another tenant in a create body is `condition_invalid` (the same answer as a missing one) and writes
+  // nothing; a session of the other tenant on this host is refused with TENANT_HOST_MISMATCH.
+  'POST /v1/profile_form/branches': { case: 'phase 12.2 sweep: profile form branches' },
 };
 
 /**

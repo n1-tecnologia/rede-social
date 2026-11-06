@@ -16,15 +16,18 @@ import {
   replaceQuestion,
   updateQuestion,
 } from '@rede-social/core/server/profile-form/admin';
+import { createBranch } from '@rede-social/core/server/profile-form/branches';
 import { exportAnswers } from '@rede-social/core/server/profile-form/export';
 import { createStep, deleteStep, renameStep } from '@rede-social/core/server/profile-form/steps';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
+  adminBranchSchema,
   adminQuestionListSchema,
   adminQuestionSchema,
   adminStepSchema,
   archivedQuestionListSchema,
   archivedQuestionSchema,
+  createBranchBodySchema,
   createQuestionBodySchema,
   createStepBodySchema,
   deleteStepResultSchema,
@@ -259,6 +262,32 @@ const deleteStepRoute = createRoute({
   },
 });
 
+const createBranchRoute = createRoute({
+  method: 'post',
+  path: '/branches',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: createBranchBodySchema } }, required: true },
+  },
+  responses: {
+    201: {
+      description:
+        'Creates an EMPTY branch from its opener (`openerQuestionId`) and the answers that open it (`values`, 1 to 20 unique tokens: option ids of a choice opener, `true` / `false` of a yes/no one; ANY one opens the branch). The builder creates the branch first and fills it afterwards, so the branch holds no question: `questionCount` 0, `answerCount` 0, `revision` 1, `archivedAt` null. The optional `name` is trimmed, measured in code points (at most 60) and kept on the admin side only. The new branch reads after the opener’s other branches (`created_at, id`). The opener must be an ACTIVE `dropdown`, `single_choice`, `multiple_choice` or `yes_no` question of this tenant; the branch may hang inside another branch up to three levels. A tenant has at most 15 active branches.',
+      content: { 'application/json': { schema: adminBranchSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.profileForm`: `condition_invalid` (an opener that is not a uuid, empty, repeated or more than 20 values), `too_long` (a name over 60 characters) or `invalid` (a control character in the name). Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm`: `condition_invalid` (the opener is of another tenant, missing, archived, of a type that cannot open, or a value is not one of its tokens; a foreign and a missing opener answer the same), `branch_depth` (the branch would be a fourth level) or `branch_limit` (the tenant already has 15 active branches). Nothing is written.',
+    },
+  },
+});
+
 const archivedListRoute = createRoute({
   method: 'get',
   path: '/archived',
@@ -446,6 +475,9 @@ export const profileFormRoutes = profileForm
   )
   .openapi(deleteStepRoute, async (c) =>
     c.json(await deleteStep(c.get('ctx'), c.req.valid('param').id), 200),
+  )
+  .openapi(createBranchRoute, async (c) =>
+    c.json(await createBranch(c.get('ctx'), c.req.valid('json')), 201),
   )
   .openapi(archivedListRoute, async (c) => c.json(await listArchived(c.get('ctx')), 200))
   .openapi(archiveRoute, async (c) =>

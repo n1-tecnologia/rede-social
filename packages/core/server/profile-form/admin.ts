@@ -22,6 +22,9 @@ import { sql } from 'drizzle-orm';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { ApiError } from '../http/api-error';
+// A call-time-only cycle with ./branches as well (which takes `adminLock`, `requireModuleOn` and `attempt` from
+// this file): neither module touches the other at load.
+import { readBranches } from './branches';
 import {
   type ConditionCheck,
   checkCondition,
@@ -90,6 +93,8 @@ export async function requireModuleOn(tx: Tx, ctx: Pick<AdminCtx, 'tenantId'>): 
 export type StoredQuestion = {
   id: string;
   step_id: string;
+  /** 12.2 (D-640): the branch the question sits in, or null for an unconditional one. */
+  branch_id: string | null;
   type: ProfileFormType;
   title: string;
   help_text: string | null;
@@ -182,6 +187,7 @@ export function toAdminQuestion(row: StoredQuestion, counts: Counts): AdminQuest
   return {
     id: row.id,
     stepId: row.step_id,
+    branchId: row.branch_id,
     type: row.type,
     title: row.title,
     helpText: row.help_text,
@@ -208,7 +214,7 @@ export function toAdminQuestion(row: StoredQuestion, counts: Counts): AdminQuest
 }
 
 const COLUMNS = sql.raw(`
-  q.id::text as id, q.step_id::text as step_id, q.type, q.title, q.help_text, q.required, q.show_on_profile, q.allow_other,
+  q.id::text as id, q.step_id::text as step_id, q.branch_id::text as branch_id, q.type, q.title, q.help_text, q.required, q.show_on_profile, q.allow_other,
   q.options, q.limits, q."position" as position, q.revision,
   q.condition_question_id::text as condition_question_id, q.condition_values,
   q.archived_at, q.created_at, q.listed_at`);
@@ -261,6 +267,8 @@ export async function listInTx(tx: Tx, tenantId: string): Promise<AdminQuestionL
     // D-627: the steps the tenant has, none for a form never built (a read never creates the default step).
     steps: await readSteps(tx, tenantId),
     stepLimit: PROFILE_FORM_LIMITS.steps,
+    // 12.2 (D-640): every branch of the tenant, name included (this is the admin lane), with aggregate counts.
+    branches: await readBranches(tx, tenantId),
   };
 }
 
@@ -363,7 +371,7 @@ const hasDependents = (dependents: { id: string; title: string }[]) =>
   new ApiError(409, 'CONFLICT', { profileForm: 'has_dependents', dependents });
 
 /** `text[]` of the tokens, in order, from a JSON array (a JS array would expand into a record). */
-const textArray = (values: readonly string[]) =>
+export const textArray = (values: readonly string[]) =>
   sql`array(select t.e from jsonb_array_elements_text(${JSON.stringify(values)}::jsonb)
             with ordinality as t(e, n) order by t.n)`;
 
@@ -372,7 +380,7 @@ const textArray = (values: readonly string[]) =>
  * current dependents of an opener before it refuses. Answers the value or the error; it never throws a
  * database error itself.
  */
-async function attempt<T>(
+export async function attempt<T>(
   tx: Tx,
   run: () => Promise<T>,
 ): Promise<{ value: T } | { error: unknown }> {
@@ -840,7 +848,7 @@ export async function reorderQuestions(
 const archivedAtOf = (row: StoredQuestion): string => iso(row.archived_at ?? row.created_at);
 
 /** Whether the error, or anything in its cause chain, carries the given SQLSTATE. */
-function hasSqlState(error: unknown, state: string): boolean {
+export function hasSqlState(error: unknown, state: string): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (current && typeof current === 'object' && !seen.has(current)) {
@@ -999,6 +1007,8 @@ export async function listArchived(ctx: AdminCtx): Promise<ArchivedQuestionList>
         ...toAdminQuestion(row, counts),
         archivedAt: archivedAtOf(row),
       })),
+      // 12.2 (D-640): every branch of the tenant, active and archived, so the list can name the branch of each row.
+      branches: await readBranches(tx, ctx.tenantId),
     };
   });
 }

@@ -7221,6 +7221,143 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 12.2 sweep: profile form branches — a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH on the branch create, a rede-lab opener id in his create body on the rede-demo host is condition_invalid and nothing is written in either tenant, and his own list names no rede-lab branch, each beside the rede-lab admin’s own positive control (12.2-08, PFORM-43, T-12.2-01)', async () => {
+    // | Route                         | Negative asserted here                                                     |
+    // |-------------------------------|----------------------------------------------------------------------------|
+    // | POST /v1/profile_form/branches| lab host with a demo session: 403 TENANT_HOST_MISMATCH, no row; a lab      |
+    // |                               | opener id on the demo host: 409 condition_invalid, no row in either tenant |
+    const PREFIX122 = `iso1208b-${RUN}`;
+    const TITLE122 = `${PREFIX122} `;
+    const prior = new Map<string, boolean | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean }[]>`
+        select enabled from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+      prior.set(tenantId, row?.enabled ?? null);
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'profile_form', true)
+        on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweep122 = async () => {
+      await removeProfileFormByPrefix(TITLE122);
+      await removeIdentitiesByPrefix(PREFIX122);
+    };
+    await sweep122();
+    try {
+      const make = async (host: 'lab' | 'demo') => {
+        const identity = await createSharedIdentity({
+          prefix: PREFIX122,
+          memberships: [{ host, role: 'admin_tenant', status: 'active' }],
+        });
+        return { ...identity, token: await signInAs(identity.email, identity.password) };
+      };
+      const labAdmin = await make('lab');
+      const demoAdmin = await make('demo');
+      const labOptionId = crypto.randomUUID();
+      const demoOptionId = crypto.randomUUID();
+      const labOpener = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE122}Abridor lab`,
+        type: 'single_choice',
+        options: [{ id: labOptionId, label: 'Sim' }, { label: 'Não' }],
+        position: 1,
+      });
+      const demoOpener = await seedProfileFormQuestion({
+        tenantId: tenantIds.demo,
+        adminUserId: demoAdmin.userId,
+        title: `${TITLE122}Abridor demo`,
+        type: 'single_choice',
+        options: [{ id: demoOptionId, label: 'Sim' }, { label: 'Não' }],
+        position: 1,
+      });
+      const send = (
+        who: { token: string },
+        method: string,
+        path: string,
+        host: string,
+        body?: unknown,
+      ) =>
+        api.request(path, {
+          method,
+          headers: {
+            authorization: `Bearer ${who.token}`,
+            [TENANT_HOST_HEADER]: host,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+      const branchRows = async () =>
+        adminSql<{ tenant_id: string; id: string; revision: number }[]>`
+          select tenant_id::text as tenant_id, id::text as id, revision
+            from public.profile_form_branches
+           where opener_question_id in (${labOpener}::uuid, ${demoOpener}::uuid)
+           order by id`;
+      expect(await branchRows()).toEqual([]);
+
+      // The wrong host refuses before anything runs.
+      const wrongHost = await send(demoAdmin, 'POST', '/v1/profile_form/branches', HOSTS.lab, {
+        openerQuestionId: labOpener,
+        values: [labOptionId],
+      });
+      expect(wrongHost.status).toBe(403);
+      expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+      expect(await branchRows()).toEqual([]);
+
+      // A lab opener id on the demo host is a refused opener, exactly like a missing one, and writes nothing.
+      const foreign = await send(demoAdmin, 'POST', '/v1/profile_form/branches', HOSTS.demo, {
+        openerQuestionId: labOpener,
+        values: [labOptionId],
+      });
+      expect(foreign.status).toBe(409);
+      const foreignBody = (await foreign.json()) as Envelope;
+      expect(foreignBody.error.details).toEqual({ profileForm: 'condition_invalid' });
+      expect(JSON.stringify(foreignBody)).not.toContain(labOpener);
+      expect(await branchRows()).toEqual([]);
+
+      // Positive controls: each admin branches his own opener, and the row lands in his own tenant only.
+      const labMade = await send(labAdmin, 'POST', '/v1/profile_form/branches', HOSTS.lab, {
+        openerQuestionId: labOpener,
+        values: [labOptionId],
+      });
+      expect(labMade.status).toBe(201);
+      const demoMade = await send(demoAdmin, 'POST', '/v1/profile_form/branches', HOSTS.demo, {
+        openerQuestionId: demoOpener,
+        values: [demoOptionId],
+      });
+      expect(demoMade.status).toBe(201);
+      const landed = await branchRows();
+      expect(landed.map((row) => row.tenant_id).sort()).toEqual(
+        [tenantIds.demo, tenantIds.lab].sort(),
+      );
+
+      // His own list names his branch and no lab branch.
+      const demoList = await send(demoAdmin, 'GET', '/v1/profile_form/questions', HOSTS.demo);
+      expect(demoList.status).toBe(200);
+      const demoText = await demoList.text();
+      const labBranch = landed.find((row) => row.tenant_id === tenantIds.lab);
+      const demoBranch = landed.find((row) => row.tenant_id === tenantIds.demo);
+      expect(demoText).toContain(demoBranch?.id ?? 'missing');
+      expect(demoText).not.toContain(labBranch?.id ?? 'missing');
+    } finally {
+      await sweep122();
+      for (const [tenantId, enabled] of prior) {
+        if (enabled === null) {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        } else {
+          await adminSql`
+            update public.tenant_modules set enabled = ${enabled}
+             where tenant_id = ${tenantId}::uuid and module_key = 'profile_form'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

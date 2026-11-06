@@ -768,6 +768,12 @@ export async function seedProfileFormQuestion(input: {
    */
   conditionQuestionId?: string;
   conditionValues?: string[];
+  /**
+   * 12.2-08 (D-640): the branch the question sits in. The old `conditionQuestionId` / `conditionValues` pair
+   * keeps working through a shim (plan 20 removes it): the database refuses the retired columns (PF010), so the
+   * helper finds or creates the branch for that (opener, set of values) and sets `branch_id` instead.
+   */
+  branchId?: string;
 }): Promise<string> {
   const type = input.type ?? 'short_text';
   const isChoice = ['dropdown', 'multiple_choice', 'single_choice'].includes(type);
@@ -775,21 +781,65 @@ export async function seedProfileFormQuestion(input: {
     (option) => ({ id: option.id ?? crypto.randomUUID(), label: option.label }),
   );
   const archivedAt = input.archivedAt ?? (input.archived ? new Date() : null);
+  // 12.2-08 shim: the retired condition pair becomes a branch (find the live one for the same opener and the
+  // same SET of values, or create it), so the 12.1 fixtures keep their meaning.
+  let branchId = input.branchId ?? null;
+  if (branchId === null && input.conditionQuestionId) {
+    const values = [...(input.conditionValues ?? [])].sort();
+    const [existing] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.profile_form_branches
+       where tenant_id = ${input.tenantId}::uuid
+         and opener_question_id = ${input.conditionQuestionId}::uuid
+         and archived_at is null
+         and open_values @> ${adminSql.array(values)}::text[]
+         and open_values <@ ${adminSql.array(values)}::text[]
+       order by created_at, id
+       limit 1`;
+    branchId =
+      existing?.id ??
+      (await seedProfileFormBranch({
+        tenantId: input.tenantId,
+        openerQuestionId: input.conditionQuestionId,
+        values,
+      }));
+  }
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.profile_form_questions
       (tenant_id, step_id, type, title, required, position, options, limits, allow_other,
-       show_on_profile, archived_at, listed_at, created_by_user_id, condition_question_id,
-       condition_values)
+       show_on_profile, archived_at, listed_at, created_by_user_id, branch_id)
     values (${input.tenantId}::uuid, ${input.stepId ?? null}::uuid, ${type}, ${input.title},
             ${input.required ?? false},
             ${input.position ?? 0}, ${adminSql.json(options as never)},
             ${adminSql.json((input.limits ?? {}) as never)}, ${input.allowOther ?? false},
             ${input.showOnProfile ?? false}, ${archivedAt},
             ${input.listedAt ?? adminSql`now()`}, ${input.adminUserId}::uuid,
-            ${input.conditionQuestionId ?? null}::uuid,
-            ${input.conditionValues ? adminSql.array(input.conditionValues) : null}::text[])
+            ${branchId}::uuid)
     returning id::text as id`;
   if (!row) throw new Error('seedProfileFormQuestion: no row returned');
+  return row.id;
+}
+
+/**
+ * 12.2-08 (D-640): one profile-form branch through the admin SQL (the migration role, RLS off): the opener
+ * question and the tokens that open it. `values` are stored in the order given; `archived` writes the soft
+ * state. Returns the new id. A question joins it with `seedProfileFormQuestion({ branchId })`; tear down with
+ * `removeProfileFormByPrefix` (the branch hangs on a question whose title starts with the file's prefix).
+ */
+export async function seedProfileFormBranch(input: {
+  tenantId: string;
+  openerQuestionId: string;
+  values: string[];
+  name?: string | null;
+  archived?: boolean;
+}): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.profile_form_branches
+      (tenant_id, opener_question_id, open_values, name, archived_at)
+    values (${input.tenantId}::uuid, ${input.openerQuestionId}::uuid,
+            ${adminSql.array(input.values)}::text[], ${input.name ?? null},
+            ${input.archived ? adminSql`now()` : null})
+    returning id::text as id`;
+  if (!row) throw new Error('seedProfileFormBranch: no row returned');
   return row.id;
 }
 
@@ -841,11 +891,24 @@ export async function seedProfileFormAnswer(input: {
  * matched with a plain literal here, not imported, so a drift of the contract constant fails a test.
  */
 export async function removeProfileFormByPrefix(prefix: string): Promise<void> {
-  await adminSql`
-    delete from public.profile_form_answers
-     where question_id in (select id from public.profile_form_questions
-                            where title like ${`${prefix}%`})`;
-  await adminSql`delete from public.profile_form_questions where title like ${`${prefix}%`}`;
+  // 12.2-08: a branch and its opener reference each other (both composite keys are DEFERRABLE INITIALLY
+  // IMMEDIATE), so the answers, the branches that hang on or hold a prefixed question and the questions go in
+  // ONE transaction with the keys deferred to its end. A branch that still holds a question that is NOT ours
+  // fails the end-of-transaction check, which is the right answer: the rows are not ours to remove.
+  await adminSql.begin(async (tx) => {
+    await tx`set constraints all deferred`;
+    await tx`
+      delete from public.profile_form_answers
+       where question_id in (select id from public.profile_form_questions
+                              where title like ${`${prefix}%`})`;
+    await tx`
+      delete from public.profile_form_branches b
+       where b.opener_question_id in (select id from public.profile_form_questions
+                                       where title like ${`${prefix}%`})
+          or b.id in (select branch_id from public.profile_form_questions
+                       where title like ${`${prefix}%`} and branch_id is not null)`;
+    await tx`delete from public.profile_form_questions where title like ${`${prefix}%`}`;
+  });
   await adminSql`
     delete from public.profile_form_steps s
      where (s.title like ${`${prefix}%`} or s.title = 'Informações gerais')
