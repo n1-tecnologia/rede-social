@@ -1,3 +1,8 @@
+import { answerTokens, staffAnswersSchema } from '@rede-social/contracts/profile-form';
+import {
+  branchTreeOf,
+  isQuestionVisibleInTree,
+} from '@rede-social/contracts/profile-form-branches';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -8,6 +13,7 @@ import {
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
   seedProfileFormAnswer,
+  seedProfileFormBranch,
   seedProfileFormQuestion,
   seedProfileFormStep,
   signInAs,
@@ -27,7 +33,11 @@ import {
  */
 
 type Envelope = { error: { code: string; details?: unknown } };
-type Answers = { kind: 'member' | 'staff'; answers: Record<string, unknown>[] };
+type Answers = {
+  kind: 'member' | 'staff';
+  answers: Record<string, unknown>[];
+  branches?: { id: string; openerQuestionId: string; values: string[] }[];
+};
 
 /** The body with the one per-request field removed: everything else must be byte-identical. */
 const stable = (text: string) => text.replace(/"requestId":"[^"]*"/, '"requestId":"-"');
@@ -335,6 +345,7 @@ describe('12-07 staff: PFORM-19', () => {
           expect(Object.keys(row).sort()).toEqual([
             'answered',
             'archivedAt',
+            'branchId',
             'condition',
             'options',
             'position',
@@ -498,7 +509,7 @@ describe('12-07 staff: PFORM-19', () => {
  * opener (single choice, public) with an ACTIVE and an ARCHIVED public dependent under the same condition, all
  * answered through the admin SQL, then closed by the member through the REAL save route.
  */
-describe('12.1-12 tracer: a closed answer leaves every reader and the staff row carries its condition (D-624, D-634, D-636)', () => {
+describe('12.1-12 tracer: a closed answer leaves every reader and the staff row carries its branch (D-624, D-634, D-636)', () => {
   type FormRead = { formEtag: string };
 
   const asMember = (who: Person, method: 'GET' | 'PUT', path: string, body?: unknown) =>
@@ -556,10 +567,13 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
       conditionQuestionId: opener,
       conditionValues: [yes],
     });
-    return { step, yes, no, opener, dependent, archivedDependent };
+    const [branch] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.profile_form_branches
+       where opener_question_id = ${opener}::uuid`;
+    return { step, yes, no, opener, dependent, archivedDependent, branch: branch?.id as string };
   }
 
-  it('D-636 archived: the member changes the opener, the ACTIVE and the ARCHIVED dependent answers are gone from the store, the public block and the staff view, a bystander keeps hers, and the staff row names its condition', async () => {
+  it('D-636 archived: the member changes the opener, the ACTIVE and the ARCHIVED dependent answers are gone from the store, the public block and the staff view, a bystander keeps hers, and the staff row names its branch', async () => {
     const owner = await person();
     const bystander = await person();
     const viewer = await person();
@@ -588,8 +602,13 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
         staffBefore.answers.find((row) => row.questionId === f.archivedDependent),
       ).toMatchObject({
         value: 'arquivada-publica',
-        condition: { questionId: f.opener, values: [f.yes] },
+        branchId: f.branch,
+        condition: null,
       });
+      // The payload carries the branch (opener and values, no name) so the row can be read through it.
+      expect(staffBefore.branches).toEqual([
+        { id: f.branch, openerQuestionId: f.opener, values: [f.yes] },
+      ]);
 
       // The member closes the dependents through the real save route.
       const formRes = await asMember(owner, 'GET', '/v1/me/profile-form');
@@ -630,12 +649,18 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
         questionId: f.dependent,
         answered: false,
         value: null,
-        condition: { questionId: f.opener, values: [f.yes] },
+        branchId: f.branch,
+        condition: null,
       });
-      expect(staffAfter.answers[0]).toMatchObject({ answered: true, condition: null });
+      expect(staffAfter.answers[0]).toMatchObject({
+        answered: true,
+        branchId: null,
+        condition: null,
+      });
       expect(Object.keys(staffAfter.answers[1] ?? {}).sort()).toEqual([
         'answered',
         'archivedAt',
+        'branchId',
         'condition',
         'options',
         'position',
@@ -670,6 +695,175 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
       for (const row of body.answers) expect(Object.keys(row).sort()).toEqual(MEMBER_KEYS);
     });
   }, 30_000);
+});
+
+/**
+ * 12.2-10 (D-641, T-12.2-03, PFORM-52): the staff row learns the branches. The payload carries each question's
+ * `branchId` and the tenant's branches (opener and values, never a name), and the opener rows carry their own
+ * `value`, so the staff view reads a question hidden by ANY branch above it as "Não se aplica" from the payload
+ * alone, with no visibility filter anywhere in the readers.
+ */
+describe('12.2-10 staff payload: branchId per row and a top-level branches list without a name (D-641, T-12.2-03)', () => {
+  const choose = (optionId: string) => ({ optionId, otherText: null });
+
+  /** Q1 | B1 {Q2 | B2 {Q3}} | an ARCHIVED Q4 in B2: depth 2, every branch named, every question public. */
+  async function tree() {
+    const step = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+    const [y1, n1, y2, n2] = Array.from({ length: 4 }, () => crypto.randomUUID()) as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    const q1 = await question({
+      title: `${TITLE}Q1`,
+      type: 'single_choice',
+      stepId: step,
+      position: 1,
+      options: [
+        { id: y1, label: 'Sim' },
+        { id: n1, label: 'Não' },
+      ],
+    });
+    const b1 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q1,
+      values: [y1],
+      name: 'pfa SEGREDO-UM',
+    });
+    const q2 = await question({
+      title: `${TITLE}Q2`,
+      type: 'single_choice',
+      stepId: step,
+      position: 2,
+      branchId: b1,
+      options: [
+        { id: y2, label: 'Sim' },
+        { id: n2, label: 'Não' },
+      ],
+    });
+    const b2 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q2,
+      values: [y2],
+      name: 'pfa SEGREDO-DOIS',
+    });
+    const q3 = await question({ title: `${TITLE}Q3`, stepId: step, position: 3, branchId: b2 });
+    const q4 = await question({
+      title: `${TITLE}Q4 arquivada`,
+      stepId: step,
+      position: 4,
+      branchId: b2,
+      archived: true,
+    });
+    return { y1, n1, y2, n2, q1, b1, q2, b2, q3, q4 };
+  }
+
+  it('lists every branch of the tenant with exactly id, openerQuestionId and values, and each row with its branchId', async () => {
+    const owner = await person();
+    const admin = await person('admin_tenant');
+    const support = await person('support_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const f = await tree();
+      await answer(owner.userId, f.q1, choose(f.y1));
+      await answer(owner.userId, f.q2, choose(f.y2));
+      await answer(owner.userId, f.q3, 'fundo');
+      await answer(owner.userId, f.q4, 'arquivada');
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+
+      for (const viewer of [admin, support]) {
+        const res = await read(viewer, ownerId);
+        expect(res.status).toBe(200);
+        const raw = await res.text();
+        // T-12.2-03: the stored names are nowhere in the body.
+        expect(raw).not.toContain('SEGREDO');
+        const body = JSON.parse(raw) as {
+          kind: string;
+          answers: { questionId: string; branchId: string | null; condition: unknown }[];
+          branches: { id: string; openerQuestionId: string; values: string[] }[];
+        };
+        expect(Object.keys(body).sort()).toEqual(['answers', 'branches', 'kind']);
+        expect(body.branches.map((b) => b.id).sort()).toEqual([f.b1, f.b2].sort());
+        for (const branch of body.branches) {
+          expect(Object.keys(branch).sort()).toEqual(['id', 'openerQuestionId', 'values']);
+        }
+        expect(body.branches.find((b) => b.id === f.b2)).toEqual({
+          id: f.b2,
+          openerQuestionId: f.q2,
+          values: [f.y2],
+        });
+        expect(body.answers.map((row) => [row.questionId, row.branchId, row.condition])).toEqual([
+          [f.q1, null, null],
+          [f.q2, f.b1, null],
+          [f.q3, f.b2, null],
+          [f.q4, f.b2, null],
+        ]);
+        // The contract parses it, and a payload that carried a name would not.
+        expect(staffAnswersSchema.safeParse(JSON.parse(raw)).success).toBe(true);
+        const named = JSON.parse(raw) as { branches: Record<string, unknown>[] };
+        named.branches = named.branches.map((b) => ({ ...b, name: 'x' }));
+        expect(staffAnswersSchema.safeParse(named).success).toBe(false);
+      }
+    });
+  }, 60_000);
+
+  it('a question hidden by ANY branch above it is derivable as "Não se aplica" from the payload alone, and no value leaks beside it', async () => {
+    const owner = await person();
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const f = await tree();
+      // Opener Q1 = não closes B1: Q2 is hidden by B1 and Q3 by B1 above B2, though Q2 would open B2.
+      await answer(owner.userId, f.q1, choose(f.n1));
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+      const body = (await (await read(admin, ownerId)).json()) as {
+        answers: {
+          questionId: string;
+          branchId: string | null;
+          value: unknown;
+          answered: boolean;
+        }[];
+        branches: { id: string; openerQuestionId: string; values: string[] }[];
+      };
+      const tree3 = branchTreeOf(
+        body.answers.map((row) => ({ id: row.questionId, branchId: row.branchId })),
+        body.branches,
+      );
+      const valueOf = new Map(body.answers.map((row) => [row.questionId, row.value]));
+      const tokensOf = (id: string) => answerTokens(valueOf.get(id) ?? undefined);
+      const notApplicable = body.answers
+        .filter((row) => !isQuestionVisibleInTree({ branchId: row.branchId }, tree3, tokensOf))
+        .map((row) => row.questionId);
+      expect(notApplicable).toEqual([f.q2, f.q3]);
+      expect(body.answers.find((row) => row.questionId === f.q3)).toMatchObject({
+        answered: false,
+        value: null,
+      });
+    });
+  }, 40_000);
+
+  it('a form without branches returns branches: [] and a member viewer still gets only public answered rows with no branch key', async () => {
+    const owner = await person();
+    const viewer = await person();
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const pub = await question({ position: 1, showOnProfile: true });
+      const priv = await question({ position: 2, showOnProfile: false });
+      await answer(owner.userId, pub, 'p');
+      await answer(owner.userId, priv, 's');
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+
+      const staff = (await (await read(admin, ownerId)).json()) as { branches: unknown[] };
+      expect(staff.branches).toEqual([]);
+
+      const res = await read(viewer, ownerId);
+      const raw = await res.text();
+      const body = JSON.parse(raw) as Answers;
+      expect(Object.keys(body).sort()).toEqual(['answers', 'kind']);
+      expect(body.answers.map((row) => row.questionId)).toEqual([pub]);
+      for (const row of body.answers) expect(Object.keys(row).sort()).toEqual(MEMBER_KEYS);
+      expect(raw).not.toContain('branch');
+    });
+  }, 40_000);
 });
 
 /**
