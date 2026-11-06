@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "13"
-current_phase_name: App nativo iOS e Android por tenant (white-label)
-current_plan: 14
-status: executing
-stopped_at: Phase 12.1 closed by developer closure 2026-11-06 (UAT 7/7 on his word, security 18/18, verification passed); pointer hand-moved back to Phase 13 (was plan 14, last completed 13-31)
-last_updated: "2026-11-06T12:24:11.755Z"
+current_phase: "12.2"
+current_phase_name: Ramos condicionais no formulário de perfil
+current_plan: Not started
+status: planning
+stopped_at: Phase 12.2 inserted after 12.1 on 2026-11-06 at Igor's request (branches with several questions, conditions inside conditions, a diagram of the forks); Phase 13 is paused at plan 14 (last completed 13-31) until Igor says to resume it; next /gsd-discuss-phase 12.2
+last_updated: "2026-11-06T13:58:32.417Z"
 last_activity: 2026-11-06
-last_activity_desc: Phase 12.1 closed; pointer hand-moved back to Phase 13 plan 14
-state_head: 173e6033089b6f55f39b1bdffbb7890ac4e54afa
+last_activity_desc: Phase 12.2 inserted; pointer moved from Phase 13 plan 14 to 12.2 (Igor resumes 13 by word)
+state_head: d47e6a50edae16116746bf29c7cc701f41c37d2d
 progress:
-  total_phases: 29
-  completed_phases: 1
+  total_phases: 30
+  completed_phases: 0
   total_plans: 363
   completed_plans: 335
-  percent: 3
+  percent: 0
 ---
 
 # Project State
@@ -24,18 +24,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 13 — App nativo iOS e Android por tenant (white-label)
+**Current focus:** Phase 12.2 — Ramos condicionais no formulário de perfil (Phase 13 paused at plan 14 until Igor resumes it)
 
 ## Current Position
 
-Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
-Current Plan: 14
-Total Plans in Phase: 32
-Plan: 14 of 32
-Status: Ready to execute
-Last activity: 2026-11-06 — Phase 12.1 closed; pointer hand-moved back to Phase 13 plan 14
+Phase: 12.2 (Ramos condicionais no formulário de perfil) — READY TO DISCUSS
+Current Plan: Not started
+Total Plans in Phase: 0
+Plan: 0 of 0
+Status: Ready to discuss (/gsd-discuss-phase 12.2)
+Last activity: 2026-11-06 — Phase 12.2 inserted; Phase 13 paused at plan 14
 
-Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 3%)
+Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -1232,6 +1232,7 @@ None yet.
 - Phase 12 added: Formulário de perfil do tenant: admin-built profile form (short/long text, dropdown, multiple choice, radio, more types) answered at sign-up, by members without a completed profile and again by members who had completed it before the form existed; requested by Igor 2026-10-29, no dependency on 10-11, STATE stays on 09.4
 - Phase 13 added: App nativo iOS e Android por tenant (white-label): requested by Igor 2026-11-03 after a codebase assessment; decided one app per tenant, everything (member area and tenant admin), purchases keep the `checkoutUrl` redirect, UI is the web's own adapted; additive, the web, the PWA and the API stay as they are; discussed 2026-11-03 (13-CONTEXT.md D-600..D-615: two stages, shell first; tenant-owned store accounts; delete account with a 14-day grace; links open the app; a purchase switch per store), not planned yet, STATE stays on 09.4
 - Phase 12.1 inserted after Phase 12: Perguntas condicionais e etapas no formulário de perfil (pedido do time, 2026-11-05; reverte D-582)
+- Phase 12.2 inserted after Phase 12.1: Ramos condicionais no formulário de perfil: várias perguntas por ramo, condicional dentro de condicional (reverte D-622) e diagrama das bifurcações (pedido do Igor, 2026-11-06; Fase 13 pausada até ele pedir)
 
 ## Deferred Items
 

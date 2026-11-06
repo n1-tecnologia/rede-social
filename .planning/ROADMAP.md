@@ -1705,6 +1705,19 @@ Plans:
 - Plan 01 is additive; each read shape is tightened by the plan that also fixes its consumers (08 and 09 admin, 10 admin conditions, 11 member, 12 staff), so core, api and web typecheck green at the end of every plan. The one UI-file touch before approval is plan 11's compile-only preview plumbing (planner assumption A-12.1-PLUMB).
 - Plan 07's `[BLOCKING]` task and plan 06's default-step literal need Igor's word; production `supabase db push`, every hosted run and the Playwright run under the free-space watchdog are Igor's (`12.1-MANUAL-PROOFS.md`, "Phase 12.1 release" in `docs/DEPLOY.md`). The old `app.profile_form_lock_active()` and the legacy `{ ids }` reorder body stay one release.
 
+### Phase 12.2: Ramos condicionais no formulário de perfil (INSERTED)
+
+**Goal:** The tenant admin builds the conditional part of the profile form as branches. One condition (an opener question plus the answers that open it) holds several questions at once, so the admin creates the branch once and fills it. A branch can sit inside another branch (a condition on a question that is itself conditional), with a depth limit to be decided. The builder shows the forks as a diagram or flowchart so the admin sees every bifurcation at a glance. Requested by Igor on 2026-11-06, the day Phase 12.1 went to production; the module is still off in every tenant, so no condition is stored in production yet and the model can change without migrating client data.
+**Requirements**: TBD (new PFORM-43.. to be written by /gsd-discuss-phase 12.2)
+**Depends on:** Phase 12.1
+**Reverses:** D-622 of Phase 12.1 (one level only: an opener carries no condition and a conditional question opens nothing). The same assumption lives in the SQL gate `app.profile_form_missing`, the purge `app.profile_form_purge_closed`, the PF006/PF007 guard, `checkCondition`, the `SELF_REF_ORDER` entry of the tenant move and the visibility function with its parity table, so all of them are in scope.
+**Open design points (for /gsd-discuss-phase 12.2):** (1) whether a branch is its own object (name, condition, questions inside) or only a visual grouping of questions that already carry a condition; (2) the maximum depth (for example 3 levels) and how the gate stays a plain join at that depth; (3) whether the diagram lives only in the admin builder or also in the preview; (4) whether a branch may depend on more than one answer or question (AND/OR) or only one opener; (5) what the member sees when a nested branch closes (the stored-equals-visible purge of D-633 and D-636 extends down the chain). The diagram is a new screen, so it passes the sketch gate as sketch 018 did (UI-04): no web code before Igor's approval is on disk.
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 12.2 to break down)
+
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
 **Goal**: Each tenant gets its own native iOS and Android app (own store listing, name, icon and bundle id), built from one codebase and fixed to that tenant's host. Stage 1 (this phase) is a native shell that opens the tenant's existing web screens and adds the native layer around them. Members and the tenant's staff find in it every feature of the web app, against the same API, with native push. Stage 2 (screens rebuilt 100% natively) is a later phase.
