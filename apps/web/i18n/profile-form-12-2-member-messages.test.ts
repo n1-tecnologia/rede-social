@@ -51,8 +51,10 @@ describe('profileForm.member.stepper: the other-step announcements of the one-sc
     );
     for (const key of ['revealedOtherStep', 'hiddenOtherStep']) {
       const text: string = parsed.profileForm.member.stepper[key];
-      const names = [...text.matchAll(/\{(\w+)/g)].map((match) => match[1]);
-      expect(new Set(names)).toEqual(new Set(['count', 'step']));
+      // `{count, plural, ...}` and a plain `{step}`: no other argument can carry anything else.
+      const plain = [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]);
+      expect(text.startsWith('{count, plural, ')).toBe(true);
+      expect(new Set(plain)).toEqual(new Set(['step']));
       expect(text).not.toMatch(/ramo/i);
     }
   });

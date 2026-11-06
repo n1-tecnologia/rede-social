@@ -27,11 +27,13 @@ describe('profileForm.member.stepper: verbatim strings of the Copywriting Contra
         'back',
         'finish',
         'hidden',
+        'hiddenOtherStep',
         'next',
         'pendingElsewhere',
         'progress',
         'revealedMany',
         'revealedOne',
+        'revealedOtherStep',
         'savedHint',
       ].sort(),
     );

@@ -76,7 +76,9 @@
         "pendingElsewhere": "Falta responder uma pergunta obrigatória na etapa “{step}”. Levamos você até lá.",
         "revealedOne": "Apareceu uma nova pergunta: {title}.",
         "revealedMany": "Apareceram {count} novas perguntas.",
-        "hidden": "{count, plural, one {Uma pergunta saiu da lista.} other {# perguntas saíram da lista.}}"
+        "hidden": "{count, plural, one {Uma pergunta saiu da lista.} other {# perguntas saíram da lista.}}",
+        "revealedOtherStep": "{count, plural, one {Apareceu uma nova pergunta na etapa “{step}”.} other {Apareceram # novas perguntas na etapa “{step}”.}}",
+        "hiddenOtherStep": "{count, plural, one {Uma pergunta saiu da etapa “{step}”.} other {# perguntas saíram da etapa “{step}”.}}"
       },
       "erase": {
         "title": "Apagar respostas que deixaram de valer?",

@@ -304,14 +304,25 @@ export function ProfileForm({
   function setDraft(question: MemberQuestion, next: Answers[string]) {
     setAnswers((previous) => ({ ...previous, [question.id]: next }));
     setErrors((previous) => (previous[question.id] ? without(previous, question.id) : previous));
-    announceReveal(visible, visibleQuestionIds(view, { ...answers, [question.id]: next }));
+    announceReveal(
+      visible,
+      visibleQuestionIds(view, { ...answers, [question.id]: next }),
+      question,
+    );
   }
 
   /**
-   * What an answer opened or closed on the screen the member is looking at (the current step in the stepper,
-   * the whole form otherwise). Focus never moves; this is the one announcement (UI-D-655).
+   * What an answer opened or closed, told once through the polite region (UI-D-655, UI-D-679). Focus never
+   * moves. In the stepper only the screen the member is looking at speaks (a change in another step moves the
+   * progress count silently). In the one-scroll edit the questions of the changed question's own step keep the
+   * 12.1 strings, and those of every other step are announced per step, by its title, in step order. Titles
+   * and counts only: never an answer, never a branch.
    */
-  function announceReveal(before: ReadonlySet<string>, after: ReadonlySet<string>) {
+  function announceReveal(
+    before: ReadonlySet<string>,
+    after: ReadonlySet<string>,
+    changed: MemberQuestion,
+  ) {
     const onScreen = (question: MemberQuestion) => !chrome || question.stepId === currentId;
     const appeared = questions.filter(
       (question) => onScreen(question) && after.has(question.id) && !before.has(question.id),
@@ -319,13 +330,30 @@ export function ProfileForm({
     const gone = questions.filter(
       (question) => onScreen(question) && before.has(question.id) && !after.has(question.id),
     );
+    // Only the one-scroll edit splits by step; the stepper and the one card read as 12.1 did.
+    const own = (question: MemberQuestion) => !sectioned || question.stepId === changed.stepId;
+    const sameAppeared = appeared.filter(own);
+    const sameGone = gone.filter(own);
     const parts: string[] = [];
-    if (appeared.length === 1) {
-      parts.push(t('stepper.revealedOne', { title: appeared[0]?.title ?? '' }));
-    } else if (appeared.length > 1) {
-      parts.push(t('stepper.revealedMany', { count: appeared.length }));
+    if (sameAppeared.length === 1) {
+      parts.push(t('stepper.revealedOne', { title: sameAppeared[0]?.title ?? '' }));
+    } else if (sameAppeared.length > 1) {
+      parts.push(t('stepper.revealedMany', { count: sameAppeared.length }));
     }
-    if (gone.length > 0) parts.push(t('stepper.hidden', { count: gone.length }));
+    if (sameGone.length > 0) parts.push(t('stepper.hidden', { count: sameGone.length }));
+    if (sectioned) {
+      for (const step of view.steps) {
+        if (step.id === changed.stepId) continue;
+        const opened = appeared.filter((question) => question.stepId === step.id).length;
+        const closed = gone.filter((question) => question.stepId === step.id).length;
+        if (opened > 0) {
+          parts.push(t('stepper.revealedOtherStep', { count: opened, step: step.title }));
+        }
+        if (closed > 0) {
+          parts.push(t('stepper.hiddenOtherStep', { count: closed, step: step.title }));
+        }
+      }
+    }
     setAnnouncement(parts.join(' '));
   }
 

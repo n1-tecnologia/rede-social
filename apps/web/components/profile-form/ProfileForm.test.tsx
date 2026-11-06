@@ -1642,8 +1642,8 @@ describe('edit from the profile is ONE scroll with every step under its title (D
     expect(sectionHeadings()).toEqual(['Informações gerais', 'Contato']);
     expect(container.querySelectorAll('section')).toHaveLength(2);
     expect(screen.queryByLabelText('Nome da clínica')).toBeNull();
-    // Focus stays on the opener and one polite announcement says what changed.
-    expect(liveRegion().textContent).toBe('Uma pergunta saiu da lista.');
+    // One polite announcement says what changed; the question sat in ANOTHER step, so it names the step (12.2).
+    expect(liveRegion().textContent).toBe('Uma pergunta saiu da etapa “Sobre a sua clínica”.');
   });
 
   it('PFORM-35 empty: no visible question shows the none state, never an empty card or a bare heading', () => {
