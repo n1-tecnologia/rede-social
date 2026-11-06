@@ -102,6 +102,19 @@ export function visibleStepsInTree(
   return steps.filter((step) => withVisible.has(step.id)).map((step) => step.id);
 }
 
+// ── The tree order (D-652) ───────────────────────────────────────────────────────────────────────
+
+/** RED STUB (12.2-01 Task 3): returns the layout unchanged; the GREEN commit writes the real order. */
+export type TreeOrderStep = { stepId: string; questionIds: readonly string[] };
+export type TreeOrderInput = {
+  layout: readonly TreeOrderStep[];
+  branchIdOf: ReadonlyMap<string, string | null | undefined>;
+  branches: readonly { id: string; openerQuestionId: string }[];
+};
+export function treeOrder(input: TreeOrderInput): TreeOrderStep[] {
+  return input.layout.map((step) => ({ stepId: step.stepId, questionIds: [...step.questionIds] }));
+}
+
 // ── The parity table fixture (D-645): the team's own clinic wording, never the client's list ───────
 
 export type ChainFixture = {

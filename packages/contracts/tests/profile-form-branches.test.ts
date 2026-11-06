@@ -9,6 +9,8 @@ import {
   PROFILE_FORM_CHAIN_CASES,
   PROFILE_FORM_CHAIN_FIXTURE,
   PROFILE_FORM_CHAIN_FIXTURE_ANY_OF,
+  type TreeOrderInput,
+  treeOrder,
   visibleStepsInTree,
 } from '../src/profile-form-branches';
 
@@ -250,5 +252,145 @@ describe('12.2-01 - the rule on hand-built trees (D-641, D-644)', () => {
       s1,
     ]);
     expect(visibleStepsInTree(steps, [], tree, () => ['true'])).toEqual([]);
+  });
+});
+
+describe('12.2-01 - the tree order (D-652)', () => {
+  /** A request: step id -> its question ids; `of` maps a question to its branch; `branches` lists them in caller order. */
+  const run = (
+    steps: Record<string, string[]>,
+    of: Record<string, string | null>,
+    branches: { id: string; openerQuestionId: string }[],
+  ): TreeOrderInput => ({
+    layout: Object.entries(steps).map(([stepId, questionIds]) => ({ stepId, questionIds })),
+    branchIdOf: new Map(Object.entries(of)),
+    branches,
+  });
+  const idsOf = (input: TreeOrderInput) =>
+    Object.fromEntries(treeOrder(input).map((step) => [step.stepId, [...step.questionIds]]));
+
+  it('puts a branch right after its opener and keeps the run whole', () => {
+    const input = run({ s1: ['A', 'Q2', 'C', 'Q3'] }, { A: null, Q2: 'B1', C: null, Q3: 'B1' }, [
+      { id: 'B1', openerQuestionId: 'A' },
+    ]);
+    expect(idsOf(input)).toEqual({ s1: ['A', 'Q2', 'Q3', 'C'] });
+  });
+
+  it('orders the branches of one opener by the smallest requested index of their members', () => {
+    const branches = [
+      { id: 'B1', openerQuestionId: 'A' },
+      { id: 'B2', openerQuestionId: 'A' },
+    ];
+    const of = { A: null, x: 'B2', y: 'B1', z: 'B1', x2: 'B2' };
+    expect(idsOf(run({ s1: ['A', 'x', 'y', 'z', 'x2'] }, of, branches))).toEqual({
+      s1: ['A', 'x', 'x2', 'y', 'z'],
+    });
+    expect(idsOf(run({ s1: ['A', 'y', 'x', 'z', 'x2'] }, of, branches))).toEqual({
+      s1: ['A', 'y', 'z', 'x', 'x2'],
+    });
+  });
+
+  it('sits a nested branch inside its parent block, right after its own opener', () => {
+    const input = run({ s1: ['A', 'a1', 'a2', 'b1'] }, { A: null, a1: 'B1', a2: 'B1', b1: 'B2' }, [
+      { id: 'B1', openerQuestionId: 'A' },
+      { id: 'B2', openerQuestionId: 'a1' },
+    ]);
+    expect(idsOf(input)).toEqual({ s1: ['A', 'a1', 'b1', 'a2'] });
+  });
+
+  it('places a run whose opener is in another step like an unconditional unit, in its own step', () => {
+    const input = run(
+      { s1: ['A', 'p'], s2: ['u', 'f1', 'v', 'f2'] },
+      { A: null, p: null, u: null, f1: 'B1', v: null, f2: 'B1' },
+      [{ id: 'B1', openerQuestionId: 'A' }],
+    );
+    expect(idsOf(input)).toEqual({ s1: ['A', 'p'], s2: ['u', 'f1', 'f2', 'v'] });
+  });
+
+  it('keeps a plain unconditional question where it was asked and treats unknown branches as roots', () => {
+    const input = run({ s1: ['p', 'q', 'r'] }, { p: null, q: 'GHOST', r: null }, [
+      { id: 'B1', openerQuestionId: 'p' },
+    ]);
+    expect(idsOf(input)).toEqual({ s1: ['p', 'q', 'r'] });
+  });
+
+  it('is idempotent and preserves the id multiset of every case', () => {
+    const cases = [
+      run({ s1: ['A', 'Q2', 'C', 'Q3'] }, { A: null, Q2: 'B1', C: null, Q3: 'B1' }, [
+        { id: 'B1', openerQuestionId: 'A' },
+      ]),
+      run({ s1: ['A', 'x', 'y', 'z', 'x2'] }, { A: null, x: 'B2', y: 'B1', z: 'B1', x2: 'B2' }, [
+        { id: 'B1', openerQuestionId: 'A' },
+        { id: 'B2', openerQuestionId: 'A' },
+      ]),
+      run({ s1: ['A', 'a1', 'a2', 'b1'] }, { A: null, a1: 'B1', a2: 'B1', b1: 'B2' }, [
+        { id: 'B1', openerQuestionId: 'A' },
+        { id: 'B2', openerQuestionId: 'a1' },
+      ]),
+      run(
+        { s1: ['A', 'p'], s2: ['u', 'f1', 'v', 'f2'] },
+        { A: null, p: null, u: null, f1: 'B1', v: null, f2: 'B1' },
+        [{ id: 'B1', openerQuestionId: 'A' }],
+      ),
+    ];
+    for (const input of cases) {
+      const once = treeOrder(input);
+      const twice = treeOrder({ ...input, layout: once });
+      expect(twice).toEqual(once);
+      expect(once.flatMap((step) => [...step.questionIds]).sort()).toEqual(
+        input.layout.flatMap((step) => [...step.questionIds]).sort(),
+      );
+      expect(once.map((step) => step.stepId)).toEqual(input.layout.map((step) => step.stepId));
+    }
+  });
+
+  it('treats a cycle as roots: it does not loop and returns every id exactly once', () => {
+    const input = run({ s1: ['A', 'B', 'C', 'D'] }, { A: 'X', B: 'Y', C: null, D: 'X' }, [
+      { id: 'X', openerQuestionId: 'B' },
+      { id: 'Y', openerQuestionId: 'A' },
+    ]);
+    const out = treeOrder(input);
+    expect([...(out[0]?.questionIds ?? [])].sort()).toEqual(['A', 'B', 'C', 'D']);
+    expect(treeOrder({ ...input, layout: out })).toEqual(out);
+    const selfOpened = run({ s1: ['A', 'B'] }, { A: 'X', B: null }, [
+      { id: 'X', openerQuestionId: 'A' },
+    ]);
+    expect(idsOf(selfOpened)).toEqual({ s1: ['A', 'B'] });
+  });
+
+  it('never moves a question to another step and keeps empty steps', () => {
+    const input = run({ s1: ['A'], s2: [], s3: ['f1', 'x'] }, { A: null, f1: 'B1', x: null }, [
+      { id: 'B1', openerQuestionId: 'A' },
+    ]);
+    expect(idsOf(input)).toEqual({ s1: ['A'], s2: [], s3: ['f1', 'x'] });
+  });
+
+  it('property: any random forest keeps its multiset, stays in its step and is a fixpoint', () => {
+    let seed = 12345;
+    const next = (max: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % max;
+    };
+    for (let round = 0; round < 200; round += 1) {
+      const count = 1 + next(12);
+      const questions = Array.from({ length: count }, (_, index) => `q${index}`);
+      const branchCount = next(5);
+      const branches = Array.from({ length: branchCount }, (_, index) => ({
+        id: `b${index}`,
+        openerQuestionId: questions[next(count)] as string,
+      }));
+      const of: Record<string, string | null> = {};
+      for (const question of questions) {
+        of[question] = next(3) === 0 || branchCount === 0 ? null : `b${next(branchCount)}`;
+      }
+      const shuffled = [...questions].sort(() => next(3) - 1);
+      const cut = next(count + 1);
+      const input = run({ s1: shuffled.slice(0, cut), s2: shuffled.slice(cut) }, of, branches);
+      const once = treeOrder(input);
+      expect(treeOrder({ ...input, layout: once })).toEqual(once);
+      expect(once.map((step) => [...step.questionIds].sort())).toEqual(
+        input.layout.map((step) => [...step.questionIds].sort()),
+      );
+    }
   });
 });
