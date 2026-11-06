@@ -1855,6 +1855,84 @@ describe('nested blocks: closing a branch closes everything below it in one pass
   });
 });
 
+describe('the floor of a block: 320px, targets and reduced motion (12.2-14, UI-D-679, UI-D-682, UI-D-684)', () => {
+  const LONG = 'Uma opção com um rótulo extremamente longo que precisa quebrar linha sem rolagem';
+  /** Three levels deep, with a long title and long option labels at the bottom (membro-ramo-320). */
+  const deepForm = () => {
+    const opts = options(LONG, 'Curta');
+    const top = question('single_choice', { title: 'Abre o primeiro nível?', options: opts });
+    const first = gate(top, opts[0]?.id as string);
+    const mid = question('yes_no', { title: 'Abre o segundo nível?', branchId: first.id });
+    const second = gate(mid, 'true');
+    const low = question('yes_no', { title: 'Abre o terceiro nível?', branchId: second.id });
+    const third = gate(low, 'true');
+    const deepest = question('single_choice', {
+      title: `${LONG} ${LONG}`,
+      options: options(LONG, `${LONG} ${LONG}`),
+      branchId: third.id,
+    });
+    return form([top, mid, low, deepest], { branches: [first, second, third] });
+  };
+
+  it('nests three rails and wraps a long title and long labels instead of clipping or scrolling sideways', () => {
+    show(deepForm());
+    fireEvent.click(screen.getByRole('radio', { name: LONG }));
+    const outer = document.querySelector('[data-revealed-branch]') as HTMLElement;
+    fireEvent.click(within(outer).getByRole('button', { name: 'Sim' }));
+    const middle = outer.querySelector('[data-revealed-branch]') as HTMLElement;
+    fireEvent.click(within(middle).getByRole('button', { name: 'Sim' }));
+    const rails = document.querySelectorAll('[data-revealed-branch]');
+    expect(rails).toHaveLength(3);
+    // Each rail costs 2px + 12px: three rails inside the p-4 card leave the inputs about 214px at 320px.
+    for (const rail of rails) {
+      expect(rail.className).toBe('flex flex-col gap-6 border-l-2 border-border pl-3');
+      expect(rail.className).not.toMatch(/(^| )(w-|min-w-|max-w-|overflow-x)/);
+    }
+    const deepest = rails[2] as HTMLElement;
+    // Every leaf that carries the long text breaks inside its box: the title and each option label.
+    const leaves = [...deepest.querySelectorAll('*')].filter(
+      (el) => el.children.length === 0 && (el.textContent ?? '').includes(LONG),
+    );
+    expect(leaves.length).toBeGreaterThanOrEqual(3);
+    for (const leaf of leaves)
+      expect(leaf.className, leaf.outerHTML.slice(0, 90)).toMatch(/break-words|wrap-anywhere/);
+    expect(deepest.closest('.p-4')).not.toBeNull();
+  });
+
+  it('every control inside a block is a 44px target', () => {
+    show({ ...treeClinic(), mode: 'first' as const });
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    const q2 = document.querySelector(`#pf-q-${clinicId('Q2')}`) as HTMLElement;
+    fireEvent.click(within(q2).getByRole('button', { name: 'Sim' }));
+    const wrapper = document.querySelector('[data-revealed-branch]') as HTMLElement;
+    const controls = wrapper.querySelectorAll(
+      'input:not([type="radio"]):not([type="checkbox"]), textarea, select, button',
+    );
+    expect(controls.length).toBeGreaterThan(2);
+    for (const control of controls) {
+      const target = control.closest('label') ?? control;
+      expect(`${control.className} ${target.className}`, control.outerHTML.slice(0, 80)).toMatch(
+        /(^| )(min-h-11|h-11)( |$)/,
+      );
+    }
+  });
+
+  it('under prefers-reduced-motion the block has no motion wrapper at all', () => {
+    mocks.reduced = true;
+    show({ ...treeClinic({ Q1: { optionIds: [CLINIC_OPTION_IDS.tem], otherText: null } }) });
+    const rail = document.querySelector('[data-revealed-branch]') as HTMLElement;
+    expect(rail.parentElement?.hasAttribute('style')).toBe(false);
+    expect(rail.parentElement?.className).toContain('p-4');
+  });
+
+  it('no markup of the member form writes a half-step spacing class', () => {
+    const half = /(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/;
+    for (const file of ['ProfileForm.tsx', 'RevealedBranch.tsx', 'QuestionField.tsx']) {
+      expect(readFileSync(join(__dirname, file), 'utf8'), file).not.toMatch(half);
+    }
+  });
+});
+
 describe('a block whose opener is in another step is simply there on arrival (12.2-14, D-643; UI-D-679)', () => {
   const crossStep = () => {
     const opts = options('Tenho uma clínica', 'Não tenho');

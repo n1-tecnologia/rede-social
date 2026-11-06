@@ -19,7 +19,13 @@ type StaffRow = StaffAnswers['answers'][number];
  * The API sends the rows already ordered (active first, archived newest first); this block only splits
  * them, keeping each group's order. Every value goes through the one answer mapper.
  */
-export async function StaffAnswersBlock({ answers }: { answers: StaffAnswers['answers'] }) {
+export async function StaffAnswersBlock({
+  answers,
+}: {
+  answers: StaffAnswers['answers'];
+  /** INERT in the RED commit of 12.2-14 Task 3: accepted and ignored until the GREEN commit reads it. */
+  branches?: StaffAnswers['branches'];
+}) {
   const t = await getTranslations('profileForm.profile');
   const words = answerWordsFrom(t as unknown as WordsTranslator);
   const rows = answers.map((answer) => ({

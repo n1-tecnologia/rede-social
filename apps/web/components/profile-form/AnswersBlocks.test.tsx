@@ -7,7 +7,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { options, uuid } from '@/lib/profile-form/test-fixtures';
+import { branch, options, uuid } from '@/lib/profile-form/test-fixtures';
 
 /**
  * 12-14 Task 3 (D-593, UI-D-592, UI-D-593; PFORM-18, PFORM-19; T-12-32): the public block, the staff block
@@ -290,6 +290,34 @@ describe('MemberAnswersData: the viewer picks the block, a failure is a small ro
     }
   });
 
+  it('hands the staff block the payload\'s branches, so a closed question reads "Não se aplica" (UI-D-681)', async () => {
+    const choices = options('Tenho', 'Não tenho');
+    const opens = branch({ openerQuestionId: uuid(1), values: [choices[0]?.id ?? ''] });
+    mocks.loadMemberAnswers.mockResolvedValue({
+      status: 'ok',
+      payload: {
+        kind: 'staff',
+        branches: [opens],
+        answers: [
+          staffRow(1, {
+            title: 'Tem clínica?',
+            type: 'single_choice',
+            options: choices,
+            value: { optionId: choices[1]?.id ?? null, otherText: null },
+          }),
+          staffRow(2, {
+            title: 'Nome da clínica',
+            value: null,
+            answered: false,
+            branchId: opens.id,
+          }),
+        ],
+      },
+    });
+    wrap(await MemberAnswersData({ ...props, role: 'admin_tenant' }));
+    expect(screen.getByText('Não se aplica')).toBeTruthy();
+  });
+
   it('never renders a payload of the other kind (a mix-up does not fall through)', async () => {
     mocks.loadMemberAnswers.mockResolvedValue({
       status: 'ok',
@@ -340,32 +368,32 @@ describe('MemberAnswersBlock', () => {
   });
 });
 
-describe('StaffAnswersBlock: "Não se aplica" for a closed follow-up (D-634, UI-D-659; E9 partial)', () => {
+describe('StaffAnswersBlock: "Não se aplica" for a question a branch above it closes (D-641, UI-D-659, UI-D-681; E9 partial)', () => {
   const choices = options('Tenho uma clínica', 'Estou aprendendo');
-  const opener = (answered = true) =>
+  const TEM = choices[0]?.id ?? '';
+  const APRENDE = choices[1]?.id ?? '';
+  const opener = (answeredWith: string | null = APRENDE) =>
     staffRow(1, {
       title: 'Qual é o seu caso?',
       type: 'single_choice',
       options: choices,
-      value: answered ? { optionId: choices[1]?.id ?? null, otherText: null } : null,
-      answered,
+      value: answeredWith === null ? null : { optionId: answeredWith, otherText: null },
+      answered: answeredWith !== null,
     });
+  /** B1 opens on "Tenho uma clínica"; B4 opens on "Estou aprendendo". Both hang off the first row. */
+  const b1 = branch({ openerQuestionId: uuid(1), values: [TEM] });
+  const b4 = branch({ openerQuestionId: uuid(1), values: [APRENDE] });
   const followUp = (n: number, title: string, overrides: Partial<StaffRow> = {}) =>
-    staffRow(n, {
-      title,
-      value: null,
-      answered: false,
-      condition: { questionId: uuid(1), values: [choices[0]?.id ?? ''] },
-      ...overrides,
-    });
+    staffRow(n, { title, value: null, answered: false, branchId: b1.id, ...overrides });
   const cellOf = (container: HTMLElement, title: string) => {
     const label = [...container.querySelectorAll('span')].find((el) => el.textContent === title);
     return label?.closest('div.flex-col')?.querySelectorAll(':scope > span')[1] as HTMLElement;
   };
 
-  it('reads "Não se aplica" (tertiary, no pill) for a follow-up whose opener answer does not match', async () => {
+  it('reads "Não se aplica" (tertiary, no pill) for a question whose branch the opener answer does not open', async () => {
     const ui = await StaffAnswersBlock({
       answers: [opener(), followUp(2, 'Nome da clínica'), followUp(3, 'Quantas pessoas?')],
+      branches: [b1, b4],
     });
     const { container } = wrap(ui);
     const cell = cellOf(container, 'Nome da clínica');
@@ -382,13 +410,12 @@ describe('StaffAnswersBlock: "Não se aplica" for a closed follow-up (D-634, UI-
       answers: [
         opener(),
         followUp(2, 'Nome da clínica'),
-        // Its condition IS met by the opener answer: a visible question left unanswered is skipped.
-        followUp(3, 'Como é a rotina', {
-          condition: { questionId: uuid(1), values: [choices[1]?.id ?? ''] },
-        }),
+        // Its branch IS open by the opener answer: a visible question left unanswered is skipped.
+        followUp(3, 'Como é a rotina', { branchId: b4.id }),
         staffRow(4, { title: 'Cidade', value: 'Recife' }),
         staffRow(5, { title: 'Nascimento', type: 'date', value: null, answered: false }),
       ],
+      branches: [b1, b4],
     });
     const { container } = wrap(ui);
     expect(cellOf(container, 'Nome da clínica').textContent).toBe('Não se aplica');
@@ -397,12 +424,84 @@ describe('StaffAnswersBlock: "Não se aplica" for a closed follow-up (D-634, UI-
     expect(cellOf(container, 'Cidade').textContent).toBe('Recife');
   });
 
-  it('an opener the member left unanswered does not open its follow-up either', async () => {
+  it('an opener the member left unanswered does not open its branch either', async () => {
     const ui = await StaffAnswersBlock({
-      answers: [opener(false), followUp(2, 'Nome da clínica'), staffRow(3, { title: 'Cidade' })],
+      answers: [opener(null), followUp(2, 'Nome da clínica'), staffRow(3, { title: 'Cidade' })],
+      branches: [b1, b4],
     });
     const { container } = wrap(ui);
     expect(cellOf(container, 'Nome da clínica').textContent).toBe('Não se aplica');
+  });
+
+  it('an answered row never reads "Não se aplica", whatever its chain', async () => {
+    const ui = await StaffAnswersBlock({
+      answers: [opener(), followUp(2, 'Nome da clínica', { value: 'Clínica Sol', answered: true })],
+      branches: [b1, b4],
+    });
+    const { container } = wrap(ui);
+    expect(cellOf(container, 'Nome da clínica').textContent).toBe('Clínica Sol');
+    expect(screen.queryByText('Não se aplica')).toBeNull();
+  });
+
+  /** Depth 1, 2 and 3: Q1 opens B1 (Q2 yes/no), Q2 opens B2 (Q4 yes/no), Q4 opens B3 (Q6). */
+  const deep = (q1: string, q2: boolean | null, q4: boolean | null) => {
+    const bAlpha = branch({ openerQuestionId: uuid(1), values: [TEM] });
+    const bBeta = branch({ openerQuestionId: uuid(2), values: ['true'] });
+    const bGamma = branch({ openerQuestionId: uuid(4), values: ['true'] });
+    const yesNo = (n: number, title: string, value: boolean | null, branchId: string) =>
+      staffRow(n, { title, type: 'yes_no', value, answered: value !== null, branchId });
+    return {
+      branches: [bAlpha, bBeta, bGamma],
+      answers: [
+        opener(q1),
+        yesNo(2, 'A clínica tem equipe?', q2, bAlpha.id),
+        staffRow(3, {
+          title: 'Nome da clínica',
+          value: null,
+          answered: false,
+          branchId: bAlpha.id,
+        }),
+        yesNo(4, 'Tem sócio?', q4, bBeta.id),
+        staffRow(5, { title: 'Quantos?', value: null, answered: false, branchId: bBeta.id }),
+        staffRow(6, { title: 'Nome do sócio', value: null, answered: false, branchId: bGamma.id }),
+      ],
+    };
+  };
+
+  it('depth 1, 2 and 3 with every level open: the unanswered rows read "Sem resposta"', async () => {
+    const { answers, branches } = deep(TEM, true, true);
+    const { container } = wrap(await StaffAnswersBlock({ answers, branches }));
+    for (const title of ['Nome da clínica', 'Quantos?', 'Nome do sócio']) {
+      expect(cellOf(container, title).textContent, title).toBe('Sem resposta');
+    }
+    expect(screen.queryByText('Não se aplica')).toBeNull();
+  });
+
+  it('depth 3 closed by the middle: only the rows under the closed branch read "Não se aplica"', async () => {
+    const { answers, branches } = deep(TEM, false, true);
+    const { container } = wrap(await StaffAnswersBlock({ answers, branches }));
+    expect(cellOf(container, 'Nome da clínica').textContent).toBe('Sem resposta');
+    expect(cellOf(container, 'Tem sócio?').textContent).toBe('Sim');
+    // A stale "Sim" deeper in the chain does not keep Q4's branch or Q6 alive once Q2 is "Não".
+    expect(cellOf(container, 'Quantos?').textContent).toBe('Não se aplica');
+    expect(cellOf(container, 'Nome do sócio').textContent).toBe('Não se aplica');
+  });
+
+  it('depth 3 closed by the top: every row below reads "Não se aplica"', async () => {
+    const { answers, branches } = deep(APRENDE, true, true);
+    const { container } = wrap(await StaffAnswersBlock({ answers, branches }));
+    for (const title of ['Nome da clínica', 'Quantos?', 'Nome do sócio']) {
+      expect(cellOf(container, title).textContent, title).toBe('Não se aplica');
+    }
+  });
+
+  it('a branch the payload does not list closes the row, and a payload without branches reads none', async () => {
+    const { answers } = deep(TEM, true, true);
+    const { container } = wrap(await StaffAnswersBlock({ answers, branches: [] }));
+    expect(cellOf(container, 'Nome da clínica').textContent).toBe('Não se aplica');
+    cleanup();
+    const plain = wrap(await StaffAnswersBlock({ answers: [staffRow(1, { title: 'Cidade' })] }));
+    expect(cellOf(plain.container, 'Cidade').textContent).toBe('Resposta 1');
   });
 
   it('the public block and the staff pills are untouched by the rule', async () => {
@@ -412,6 +511,7 @@ describe('StaffAnswersBlock: "Não se aplica" for a closed follow-up (D-634, UI-
         followUp(2, 'Nome da clínica', { showOnProfile: true }),
         staffRow(3, { title: 'Cidade', showOnProfile: true }),
       ],
+      branches: [b1, b4],
     });
     wrap(ui);
     expect(screen.getAllByText('Público no perfil')).toHaveLength(2);
