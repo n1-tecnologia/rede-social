@@ -1708,17 +1708,81 @@ Plans:
 ### Phase 12.2: Ramos condicionais no formulário de perfil (INSERTED)
 
 **Goal:** The tenant admin builds the conditional part of the profile form as branches. One condition (an opener question plus the answers that open it) holds several questions at once, so the admin creates the branch once and fills it. A branch can sit inside another branch (a condition on a question that is itself conditional), with a depth limit to be decided. The builder shows the forks as a diagram or flowchart so the admin sees every bifurcation at a glance. Requested by Igor on 2026-11-06, the day Phase 12.1 went to production; the module is still off in every tenant, so no condition is stored in production yet and the model can change without migrating client data.
-**Requirements**: TBD (new PFORM-43.. to be written by /gsd-discuss-phase 12.2)
+**Requirements**: PFORM-43, PFORM-44, PFORM-45, PFORM-46, PFORM-47, PFORM-48, PFORM-49, PFORM-50, PFORM-51, PFORM-52, PFORM-53, PFORM-54, PFORM-55, PFORM-56, PFORM-57, PFORM-58, PFORM-59, PFORM-60 (plus UI-04 for the sketch gate)
 **Depends on:** Phase 12.1
 **Reverses:** D-622 of Phase 12.1 (one level only: an opener carries no condition and a conditional question opens nothing). The same assumption lives in the SQL gate `app.profile_form_missing`, the purge `app.profile_form_purge_closed`, the PF006/PF007 guard, `checkCondition`, the `SELF_REF_ORDER` entry of the tenant move and the visibility function with its parity table, so all of them are in scope.
 **Open design points (for /gsd-discuss-phase 12.2):** (1) whether a branch is its own object (name, condition, questions inside) or only a visual grouping of questions that already carry a condition; (2) the maximum depth (for example 3 levels) and how the gate stays a plain join at that depth; (3) whether the diagram lives only in the admin builder or also in the preview; (4) whether a branch may depend on more than one answer or question (AND/OR) or only one opener; (5) what the member sees when a nested branch closes (the stored-equals-visible purge of D-633 and D-636 extends down the chain). The diagram is a new screen, so it passes the sketch gate as sketch 018 did (UI-04): no web code before Igor's approval is on disk.
-**Plans:** 0 plans
+**Plans:** 21 plans
 
 Decided in `/gsd-discuss-phase 12.2` on 2026-11-06 (`12.2-CONTEXT.md`, D-640..D-653): a branch is its own table (opener, opening answers, optional name) and the condition leaves the question (reverses D-621); a question belongs to at most one branch, nesting is derived from where the opener lives, up to 3 levels (reverses D-622) with a fixed-size gate join; stored equals visible extends down the chain; a branch's questions may sit in different steps; order follows the tree inside each step (replaces quick 261106-ei5's placement); "Criar ramo" starts from the opener; "Desfazer ramo" and "Arquivar ramo" act on the whole branch; the "Fluxo" view is a read-only vertical tree inside the builder, tapping opens the existing editor, and it passes the sketch gate as sketch 019 (UI-04).
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 12.2 to break down)
+**Wave 1** *(independent: the additive contract and the sketch drawing)*
+
+- [ ] 12.2-01-PLAN.md — The additive contract: the limits, the five new refusal codes, the branch bodies and reads, the bounded chain visibility rule with its 11-row parity table, the pure tree order (PFORM-43, 44, 45, 50..54, tracer)
+- [ ] 12.2-02-PLAN.md — Sketch 019: the 66 prototype-less frames of the branch blocks, the branch sheet, the refusals, the Fluxo and the member's block (PFORM-56..60, UI-04)
+
+**Wave 2** *(the schema, the pure rules and the sketch review)*
+
+- [ ] 12.2-03-PLAN.md — The branches table and the question column in one generated expand-only migration, and the unit proof that the move engine plans the circular pair (PFORM-43, 45, 55, tracer)
+- [ ] 12.2-04-PLAN.md — The pure rules: branch eligibility, depth, locks, dependents, moves, archive, the privacy twin, the tree normaliser, the guard-code map and the shared SQL fragment (PFORM-44, 45, 48, 50, 53, tracer)
+- [ ] 12.2-05-PLAN.md — Sketch 019's README, its manifest row and Igor's recorded approval (PFORM-60, UI-04, `autonomous: false`)
+
+**Wave 3**
+
+- [ ] 12.2-06-PLAN.md — The one hand-written migration: the deferrable key pair, the v3 and branch locks, the chain-aware gate and purge, the lossless conversion of any 12.1 condition, the branch, depth, privacy and legacy guards (PFORM-45..48, 53, 55, tracer)
+
+**Wave 4**
+
+- [ ] 12.2-07-PLAN.md — The `[BLOCKING]` local apply with Igor's word and pgTAP 226: the chain table replayed in SQL, the guards PF006..PF010, the conversion replay, the locks, grants and cross-tenant negatives (PFORM-45..48, 53, 55, `autonomous: false`)
+
+**Wave 5**
+
+- [ ] 12.2-08-PLAN.md — The branches API: create from an opener, edit under the lock, undo, archive and reactivate as a block, the reads with branches and the isolation sweep (PFORM-43, 44, 45, 48, 49, tracer)
+
+**Wave 6**
+
+- [ ] 12.2-09-PLAN.md — The question writes on the tree: create, move, reorder, reactivate, replace and delete with `branchId`, the privacy rule, the retirement of the 12.1 placement helper and rules (PFORM-44, 48, 50, 53, tracer)
+
+**Wave 7**
+
+- [ ] 12.2-10-PLAN.md — The member API on the chain: branches in the read, the branch-aware etag, the one-pass save with the purge down the chain, the report, the notice and the staff row (PFORM-47, 51, 52, tracer)
+- [ ] 12.2-11-PLAN.md — The admin counts through the chain: the summary, every impact kind and the new `undo_branch` and `reactivate_branch`, with the depth-3 drift test (PFORM-49, 52, tracer)
+
+**Wave 8**
+
+- [ ] 12.2-12-PLAN.md — The server proofs: the three-way parity, no stale answer in any reader, the races, the real depth-3 tenant move and the fan-out onto 12.1 rows (PFORM-46, 47, 51, 54, 55, tracer)
+- [ ] 12.2-13-PLAN.md — The pure client logic: chain visibility over drafts, the admin tree, labels, eligibility and privacy pre-checks, block-aware moves and the Fluxo's data (PFORM-54, 56, 58, 59, tracer)
+
+**Wave 9** *(web, gated by sketch 019)*
+
+- [ ] 12.2-14-PLAN.md — The member form on the tree: a branch's questions open and close as one block with a shared rail, the erase dialog over a tree and the "Não se aplica" reader (PFORM-52, 59, 60, tracer)
+- [ ] 12.2-15-PLAN.md — The builder's Lista with branch blocks: rail, strip, nested levels, the opener pill, empty and cross-step branches and reorder by blocks (PFORM-56, 60, tracer)
+
+**Wave 10**
+
+- [ ] 12.2-16-PLAN.md — Create a branch and fill it: the Ramo field, "Ramos desta pergunta", "Criar ramo" and the branch sheet in create mode (PFORM-56, 57, 60, tracer)
+
+**Wave 11**
+
+- [ ] 12.2-17-PLAN.md — Open, edit and manage a branch: edit mode, the locked state, "Desfazer ramo" with its impact and "Arquivar ramo" (PFORM-49, 57, 60, tracer)
+
+**Wave 12**
+
+- [ ] 12.2-18-PLAN.md — The refusals over branches, the privacy guard (WR-06) and the Arquivadas tab with "Reativar ramo" (PFORM-48, 49, 53, 57, 60, tracer)
+
+**Wave 13**
+
+- [ ] 12.2-19-PLAN.md — The Lista | Fluxo selector, the read-only Fluxo and the admin preview that follows branches (PFORM-56, 58, 59, 60, tracer)
+
+**Wave 14**
+
+- [ ] 12.2-20-PLAN.md — Retire the per-question condition from the contracts, the server, the fixtures and the web, with the grep gate (PFORM-43, 54)
+
+**Wave 15**
+
+- [ ] 12.2-21-PLAN.md — The Playwright spec on the clinic example, the "Phase 12.2 release" notes, the owner's ledger and the exit gate (PFORM-55..60)
 
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
