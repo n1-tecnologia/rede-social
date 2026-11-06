@@ -663,3 +663,356 @@ describe('12.2-11 D-644, D-653: the impact counts only the members who SEE the q
     });
   }, 120_000);
 });
+
+// ── Task 3: the impact of undoing a branch and of reactivating a block (D-653, PFORM-49) ─────────────
+
+/** What the gate says for every active member of the lab tenant: membership id to missing count. */
+const gateMap = async (): Promise<Map<string, number>> => {
+  const rows = await adminSql<{ id: string; n: number }[]>`
+    select m.id::text as id, app.profile_form_missing(m.tenant_id, m.id)::int as n
+      from public.memberships m
+     where m.tenant_id = ${labTenantId}::uuid and m.role = 'member' and m.status = 'active'
+       and m.blocked_at is null and m.deleted_at is null`;
+  return new Map(rows.map((row) => [row.id, row.n]));
+};
+
+/** How many members the gate holds MORE of in `after` than in `before` (a member who owes two counts once). */
+const newlyHeld = (before: Map<string, number>, after: Map<string, number>): number =>
+  [...after].filter(([id, n]) => n > (before.get(id) ?? 0)).length;
+
+describe('12.2-11 D-653, PFORM-49: the impact of undoing a branch equals what the gate then holds', () => {
+  it('counts the members, once each, who lack a required answer of the branch and do not see it; 0 for optional-only, empty and archived branches', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const see1 = await person();
+      const see2 = await person();
+      await person(); // does not see, lacks
+      await person(); // does not see, lacks
+      const answered = await person(); // does not see, but already holds the required answer
+      const opener = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        type: 'yes_no',
+        title: `${TITLE}undo opener`,
+        position: 1,
+      });
+      const branch = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: ['true'],
+      });
+      const required = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}undo required`,
+        required: true,
+        position: 2,
+        branchId: branch,
+      });
+      await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}undo optional`,
+        position: 3,
+        branchId: branch,
+      });
+      // A required question archived on its own sits in the branch but asks nobody.
+      await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}undo archived required`,
+        required: true,
+        archived: true,
+        branchId: branch,
+      });
+      await answer(see1, opener, true);
+      await answer(see2, opener, true);
+      await answer(answered, required);
+
+      const total = (await summaryOf(admin)).total;
+      const before = await snapshot();
+      const gateBefore = await gateMap();
+      const impact = await impactOf(admin, { change: 'undo_branch', branchId: branch });
+      // Everyone but the two who see the branch and the one who already answered.
+      expect(impact).toBe(total - 3);
+      expect(await snapshot()).toBe(before);
+
+      // Applying the undo makes the gate hold exactly that many members more.
+      const undone = await call(admin, 'POST', `/v1/profile_form/branches/${branch}/undo`);
+      expect(undone.status).toBe(200);
+      expect(newlyHeld(gateBefore, await gateMap())).toBe(impact);
+    });
+  }, 180_000);
+
+  it('is 0 for a branch of only optional questions, an empty branch and an archived branch', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      await person();
+      const opener = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        type: 'yes_no',
+        title: `${TITLE}zero opener`,
+        position: 1,
+      });
+      const optionalOnly = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: ['true'],
+      });
+      await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}zero optional`,
+        position: 2,
+        branchId: optionalOnly,
+      });
+      const empty = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: ['false'],
+      });
+      const archivedBranch = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: ['true', 'false'],
+        archived: true,
+      });
+      await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}zero archived-branch required`,
+        required: true,
+        archived: true,
+        branchId: archivedBranch,
+      });
+      const before = await snapshot();
+      for (const branchId of [optionalOnly, empty, archivedBranch]) {
+        expect(await impactOf(admin, { change: 'undo_branch', branchId })).toBe(0);
+      }
+      expect(await snapshot()).toBe(before);
+    });
+  }, 120_000);
+
+  it('on the depth-3 tree the impact of undoing B1 equals the members the gate newly holds', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const m1 = await person();
+      const m2 = await person();
+      const m3 = await person();
+      const stale = await person();
+      const c = await seedClinic();
+      await answer(m1, c.q1, { optionId: c.tem });
+      await answer(m2, c.q1, { optionId: c.tem });
+      await answer(m2, c.q2, true);
+      await answer(m3, c.q1, { optionId: c.tem });
+      await answer(m3, c.q2, true);
+      await answer(m3, c.q5, true);
+      await answer(stale, c.q1, { optionId: c.nao });
+      await answer(stale, c.q2, true);
+      await answer(stale, c.q5, true);
+      const total = (await summaryOf(admin)).total;
+
+      const gateBefore = await gateMap();
+      const impact = await impactOf(admin, { change: 'undo_branch', branchId: c.b1 });
+      expect(impact).toBe(total - 3); // m1, m2 and m3 see B1; every other member lacks Q3
+      const undone = await call(admin, 'POST', `/v1/profile_form/branches/${c.b1}/undo`);
+      expect(undone.status).toBe(200);
+      expect(newlyHeld(gateBefore, await gateMap())).toBe(impact);
+    });
+  }, 180_000);
+
+  it('a foreign or unknown branch is the same bare 404, and a missing branchId is 400', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const foreignOpener = await seedProfileFormQuestion({
+        tenantId: demoTenantId,
+        adminUserId,
+        type: 'yes_no',
+        title: `${TITLE}demo undo opener`,
+      });
+      const foreignBranch = await seedProfileFormBranch({
+        tenantId: demoTenantId,
+        openerQuestionId: foreignOpener,
+        values: ['true'],
+      });
+      for (const change of ['undo_branch', 'reactivate_branch']) {
+        const unknown = await impactRes(admin, { change, branchId: crypto.randomUUID() });
+        const foreign = await impactRes(admin, { change, branchId: foreignBranch });
+        expect(unknown.status, change).toBe(404);
+        expect(foreign.status, change).toBe(404);
+        const unknownBody = (await unknown.json()) as Envelope;
+        expect(unknownBody.error.code).toBe('NOT_FOUND');
+        expect(unknownBody.error.details).toBeUndefined();
+        expect(withoutRequestId(await foreign.json())).toEqual(withoutRequestId(unknownBody));
+        expect((await impactRes(admin, { change })).status, change).toBe(400);
+      }
+    });
+  }, 60_000);
+});
+
+describe('12.2-11 D-653, PFORM-49: the impact of reactivating a block equals what the gate then holds', () => {
+  it('counts the members, once each, who would see and lack a required question of the block (nested branches, stored answers)', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const both = await person(); // O = true, Q = true: sees R1 and R2
+      const onlyFirst = await person(); // O = true: sees R1 only
+      const holder = await person(); // sees both and already holds both answers
+      await person(); // sees nothing
+      const opener = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        type: 'yes_no',
+        title: `${TITLE}block opener`,
+        position: 1,
+      });
+      const b1 = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: ['true'],
+      });
+      const r1 = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}block r1`,
+        required: true,
+        position: 2,
+        branchId: b1,
+      });
+      const inner = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        type: 'yes_no',
+        title: `${TITLE}block inner opener`,
+        position: 3,
+        branchId: b1,
+      });
+      const b2 = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: inner,
+        values: ['true'],
+      });
+      const r2 = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}block r2`,
+        required: true,
+        position: 4,
+        branchId: b2,
+      });
+      // A required question archived EARLIER, on its own: not part of the block, never counted.
+      await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}block earlier`,
+        required: true,
+        archivedAt: new Date(Date.now() - 86_400_000),
+        branchId: b1,
+      });
+      for (const member of [both, onlyFirst, holder]) await answer(member, opener, true);
+      await answer(both, inner, true);
+      await answer(holder, inner, true);
+      await answer(holder, r1);
+      await answer(holder, r2);
+
+      // An ACTIVE branch has nothing to reactivate.
+      expect(await impactOf(admin, { change: 'reactivate_branch', branchId: b1 })).toBe(0);
+      const archived = await call(admin, 'POST', `/v1/profile_form/branches/${b1}/archive`);
+      expect(archived.status).toBe(200);
+
+      const before = await snapshot();
+      const gateBefore = await gateMap();
+      const impact = await impactOf(admin, { change: 'reactivate_branch', branchId: b1 });
+      expect(impact).toBe(2); // `both` (R1 and R2) and `onlyFirst` (R1); the holder owes nothing
+      expect(await impactOf(admin, { change: 'reactivate_branch', branchId: b2 })).toBe(2);
+      expect(await snapshot()).toBe(before);
+
+      // An undo of an ARCHIVED branch asks nobody.
+      expect(await impactOf(admin, { change: 'undo_branch', branchId: b1 })).toBe(0);
+
+      // The opener archived OUTSIDE the block: the count still reads the stored answers (the web refuses the
+      // reactivation separately).
+      await adminSql`update public.profile_form_questions set archived_at = now() where id = ${opener}::uuid`;
+      expect(await impactOf(admin, { change: 'reactivate_branch', branchId: b1 })).toBe(2);
+      await adminSql`update public.profile_form_questions set archived_at = null where id = ${opener}::uuid`;
+
+      const restored = await call(admin, 'POST', `/v1/profile_form/branches/${b1}/reactivate`);
+      expect(restored.status).toBe(200);
+      expect(newlyHeld(gateBefore, await gateMap())).toBe(impact);
+    });
+  }, 180_000);
+});
+
+describe('12.2-11 T-12.2-10, PFORM-49: counts only, never a member, an answer or a branch name; admin lane only', () => {
+  it('no response of the summary or of any impact kind carries an id, an e-mail, a name, a branch name or an answer value', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const m1 = await person();
+      const m2 = await person();
+      const c = await seedClinic();
+      await answer(m1, c.q1, { optionId: c.tem });
+      await answer(m1, c.q3, 'pfi-secret-answer-value');
+      await answer(m2, c.q1, { optionId: c.tem });
+      await adminSql`update public.profile_form_questions set archived_at = now() where id = ${c.q6}::uuid`;
+
+      const bodies: string[] = [];
+      const read = async (path: string) => {
+        const res = await call(admin, 'GET', path);
+        expect(res.status, path).toBe(200);
+        bodies.push(await res.text());
+      };
+      await read('/v1/profile_form/summary');
+      const asks: Record<string, string>[] = [
+        { change: 'create_required' },
+        { change: 'create_required', branchId: c.b1 },
+        { change: 'replace', branchId: c.b2 },
+        { change: 'make_required', questionId: c.q2 },
+        { change: 'reactivate', questionId: c.q6 },
+        { change: 'remove_condition', questionId: c.q3 },
+        { change: 'undo_branch', branchId: c.b1 },
+        { change: 'reactivate_branch', branchId: c.b3 },
+      ];
+      for (const params of asks) {
+        await read(`/v1/profile_form/impact?${new URLSearchParams(params).toString()}`);
+      }
+      const forbidden = [
+        m1.email,
+        m2.email,
+        m1.userId,
+        m2.userId,
+        c.q3,
+        c.b1,
+        'pfi-secret-branch',
+        'pfi-secret-answer-value',
+        TITLE,
+      ];
+      for (const body of bodies) {
+        for (const needle of forbidden) expect(body).not.toContain(needle);
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        for (const value of Object.values(parsed)) expect(typeof value).not.toBe('object');
+      }
+    });
+  }, 180_000);
+
+  it('a member and a support user are refused (403) on the summary and on every impact kind, and nothing leaks in the refusal', async () => {
+    const member = await person();
+    const support = await person('support_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const c = await seedClinic();
+      for (const who of [member, support]) {
+        for (const path of [
+          '/v1/profile_form/summary',
+          `/v1/profile_form/impact?change=undo_branch&branchId=${c.b1}`,
+          `/v1/profile_form/impact?change=reactivate_branch&branchId=${c.b1}`,
+          `/v1/profile_form/impact?change=create_required&branchId=${c.b1}`,
+        ]) {
+          const res = await call(who, 'GET', path);
+          expect(res.status, path).toBe(403);
+          const text = await res.text();
+          expect(text).not.toContain('pfi-secret-branch');
+          expect(text).not.toContain(c.b1);
+        }
+      }
+    });
+  }, 120_000);
+});
