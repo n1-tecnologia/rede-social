@@ -81,7 +81,7 @@ export async function MemberAnswersData({
     return PublicAnswersBlock({ name, answers: payload.answers });
   }
   if (STAFF_ROLES.has(role) && payload.kind === 'staff') {
-    return StaffAnswersBlock({ answers: payload.answers });
+    return StaffAnswersBlock({ answers: payload.answers, branches: payload.branches ?? [] });
   }
   return null;
 }
