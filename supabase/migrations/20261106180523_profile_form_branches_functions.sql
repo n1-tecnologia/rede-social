@@ -270,3 +270,67 @@ language sql volatile security definer set search_path = '' as $$
     )
   returning a.question_id
 $$;
+--> statement-breakpoint
+-- ── THE CONVERSION OF ANY 12.1 PER-QUESTION CONDITION INTO A BRANCH ────────────────────────────────
+-- Production holds no such row today (the module is off per tenant), so this block normally writes nothing; it exists so
+-- that a project where a form WAS built with conditions keeps its behaviour the moment the gate above starts reading
+-- branches. Per tenant that holds a legacy condition not yet pointed at a branch:
+--   a. the same per-tenant advisory lock key as `adminLock` (`profile_form:<tenant>`), so the block serialises with a
+--      concurrent admin write and with a second fan-out run of this file on the same project;
+--   b. the privacy-safe direction first: an ACTIVE legacy dependent that shows on the profile while its opener does not is
+--      switched to private, so the PF009 trigger below never meets a legacy row (the owner's read-only hosted check, query
+--      D, tells beforehand whether any such row exists). PF004 guards only the private to public direction, so this passes
+--      the 12.1 question guard that is still installed here;
+--   c. one branch per distinct (tenant, opener, sorted values), with no name, for every question of the tenant that has a
+--      condition and no branch yet, archived ones included (they keep their condition for a later reactivation);
+--   d. every such question, archived ones included, is pointed at the branch with its tenant, opener and sorted values.
+-- The legacy columns are NOT cleared (strictly expand-only), and neither `revision` nor `updated_at` is touched. A second
+-- run finds no row with a condition and no branch and writes nothing; a project with no legacy condition, or where the
+-- module was never enabled, is untouched. The 12.1 order (the opener always before its dependent) is already a valid tree
+-- order, so no layout rewrite happens here; the next layout write normalises the stored positions.
+do $$
+declare
+  t uuid;
+begin
+  for t in
+    select distinct q.tenant_id
+      from public.profile_form_questions q
+     where q.condition_question_id is not null
+       and q.branch_id is null
+     order by 1
+  loop
+    perform pg_advisory_xact_lock(hashtextextended('profile_form:' || t::text, 0));
+
+    update public.profile_form_questions d
+       set show_on_profile = false
+      from public.profile_form_questions o
+     where d.tenant_id = t
+       and d.archived_at is null
+       and d.show_on_profile
+       and d.branch_id is null
+       and d.condition_question_id is not null
+       and o.tenant_id = d.tenant_id
+       and o.id = d.condition_question_id
+       and not o.show_on_profile;
+
+    insert into public.profile_form_branches (tenant_id, opener_question_id, open_values)
+    select distinct q.tenant_id,
+           q.condition_question_id,
+           array(select v from unnest(q.condition_values) v order by v)
+      from public.profile_form_questions q
+     where q.tenant_id = t
+       and q.condition_question_id is not null
+       and q.branch_id is null;
+
+    update public.profile_form_questions q
+       set branch_id = b.id
+      from public.profile_form_branches b
+     where q.tenant_id = t
+       and q.branch_id is null
+       and q.condition_question_id is not null
+       and b.tenant_id = q.tenant_id
+       and b.opener_question_id = q.condition_question_id
+       and b.open_values = array(select v from unnest(q.condition_values) v order by v);
+  end loop;
+end
+$$;
