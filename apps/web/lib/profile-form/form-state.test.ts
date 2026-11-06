@@ -20,7 +20,7 @@ import {
   validateOnBlur,
   wireAnswers,
 } from './form-state';
-import { form, options, question } from './test-fixtures';
+import { branch, form, options, question } from './test-fixtures';
 
 /**
  * 12-12 (D-582, UI-D-582, UI-D-586, UI-D-587; T-12-30) — the pure state of the completion screen:
@@ -490,42 +490,66 @@ describe('the visible set drives the form state (12.1-13 task 1: D-631, Pitfall 
 
   function conditioned() {
     const opener = question('single_choice', { options: opts });
-    const hiddenRequired = question('short_text', {
-      required: true,
-      condition: { questionId: opener.id, values: [optA] },
-    });
-    return { opener, hiddenRequired, questions: [opener, hiddenRequired] };
+    const whenA = branch({ openerQuestionId: opener.id, values: [optA] });
+    const hiddenRequired = question('short_text', { required: true, branchId: whenA.id });
+    return { opener, hiddenRequired, whenA, questions: [opener, hiddenRequired] };
   }
 
   it('flaggedIds flags a required unanswered question only when it is visible by the stored answers', () => {
-    const { opener, hiddenRequired } = conditioned();
-    expect(flaggedIds(form([opener, hiddenRequired]))).toEqual([]);
+    const { opener, hiddenRequired, whenA } = conditioned();
+    expect(flaggedIds(form([opener, hiddenRequired], { branches: [whenA] }))).toEqual([]);
     const answered = { ...opener, answer: { optionId: optA, otherText: null } };
-    expect(flaggedIds(form([answered, hiddenRequired]))).toEqual([hiddenRequired.id]);
+    expect(flaggedIds(form([answered, hiddenRequired], { branches: [whenA] }))).toEqual([
+      hiddenRequired.id,
+    ]);
   });
 
   it('validateAll does not judge a hidden required question and judges a revealed one', () => {
-    const { opener, hiddenRequired, questions } = conditioned();
-    expect(validateAll(questions, { [opener.id]: picked(optB), [hiddenRequired.id]: '' })).toEqual(
-      {},
-    );
-    expect(validateAll(questions, { [opener.id]: picked(optA), [hiddenRequired.id]: '' })).toEqual({
+    const { opener, hiddenRequired, whenA, questions } = conditioned();
+    const branches = [whenA];
+    expect(
+      validateAll(
+        questions,
+        { [opener.id]: picked(optB), [hiddenRequired.id]: '' },
+        undefined,
+        branches,
+      ),
+    ).toEqual({});
+    expect(
+      validateAll(
+        questions,
+        { [opener.id]: picked(optA), [hiddenRequired.id]: '' },
+        undefined,
+        branches,
+      ),
+    ).toEqual({
       [hiddenRequired.id]: 'required',
     });
   });
 
   it('wireAnswers leaves a hidden question out of the body and sends a visible one', () => {
-    const { opener, hiddenRequired, questions } = conditioned();
-    const closed = wireAnswers(questions, {
-      [opener.id]: picked(optB),
-      [hiddenRequired.id]: 'typed',
-    });
+    const { opener, hiddenRequired, whenA, questions } = conditioned();
+    const closed = wireAnswers(
+      questions,
+      { [opener.id]: picked(optB), [hiddenRequired.id]: 'typed' },
+      undefined,
+      [whenA],
+    );
     expect(Object.keys(closed)).toEqual([opener.id]);
-    const open = wireAnswers(questions, {
-      [opener.id]: picked(optA),
-      [hiddenRequired.id]: 'typed',
-    });
+    const open = wireAnswers(
+      questions,
+      { [opener.id]: picked(optA), [hiddenRequired.id]: 'typed' },
+      undefined,
+      [whenA],
+    );
     expect(open[hiddenRequired.id]).toBe('typed');
+  });
+
+  it('without the branches a question that names a branch is hidden: validate and wire fail closed (D-644)', () => {
+    const { opener, hiddenRequired, questions } = conditioned();
+    const drafts = { [opener.id]: picked(optA), [hiddenRequired.id]: 'typed' };
+    expect(validateAll(questions, { ...drafts, [hiddenRequired.id]: '' })).toEqual({});
+    expect(Object.keys(wireAnswers(questions, drafts))).toEqual([opener.id]);
   });
 
   it('the step scope restricts validateAll and wireAnswers to the questions of one step', () => {
@@ -541,19 +565,17 @@ describe('the visible set drives the form state (12.1-13 task 1: D-631, Pitfall 
     expect(flaggedIds(form(all), scope)).toEqual([inStepOne.id]);
   });
 
-  it('mergeFreshForm keeps typed drafts of surviving questions and carries stepId, condition and steps', () => {
+  it('mergeFreshForm keeps typed drafts of surviving questions and carries stepId, branchId, branches and steps', () => {
     const { opener, hiddenRequired } = conditioned();
     const otherStep = '00000000-0000-4000-8000-000000000998';
-    const movedDependent = {
-      ...hiddenRequired,
-      stepId: otherStep,
-      condition: { questionId: opener.id, values: [optB] },
-    };
+    const whenB = branch({ openerQuestionId: opener.id, values: [optB] });
+    const movedDependent = { ...hiddenRequired, stepId: otherStep, branchId: whenB.id };
     const fresh = form([opener, movedDependent], {
       steps: [
         { id: opener.stepId, title: 'Etapa 1' },
         { id: otherStep, title: 'Etapa 2' },
       ],
+      branches: [whenB],
     });
     const merged = mergeFreshForm(
       { questions: [opener, hiddenRequired] },
@@ -564,23 +586,72 @@ describe('the visible set drives the form state (12.1-13 task 1: D-631, Pitfall 
     expect(merged.form.steps.map((s) => s.id)).toEqual([opener.stepId, otherStep]);
     const carried = merged.form.questions.find((q) => q.id === hiddenRequired.id);
     expect(carried?.stepId).toBe(otherStep);
-    expect(carried?.condition?.values).toEqual([optB]);
+    expect(carried?.branchId).toBe(whenB.id);
+    expect(merged.form.branches).toEqual([whenB]);
   });
 
   it('mergeFreshForm flags a newly required question only while it is visible', () => {
-    const { opener, hiddenRequired } = conditioned();
+    const { opener, hiddenRequired, whenA } = conditioned();
     const wasOptional = { ...hiddenRequired, required: false };
+    const fresh = form([opener, hiddenRequired], { branches: [whenA] });
     const shut = mergeFreshForm(
       { questions: [opener, wasOptional] },
       { [opener.id]: picked(optB), [hiddenRequired.id]: '' },
-      form([opener, hiddenRequired]),
+      fresh,
     );
     expect(shut.flagged).toEqual([]);
     const open = mergeFreshForm(
       { questions: [opener, wasOptional] },
       { [opener.id]: picked(optA), [hiddenRequired.id]: '' },
-      form([opener, hiddenRequired]),
+      fresh,
     );
     expect(open.flagged).toEqual([hiddenRequired.id]);
+  });
+
+  describe('a nested block: a question under two branches (D-641, D-644)', () => {
+    function nested() {
+      const opener = question('single_choice', { options: opts });
+      const first = branch({ openerQuestionId: opener.id, values: [optA] });
+      const middle = question('yes_no', { branchId: first.id });
+      const second = branch({ openerQuestionId: middle.id, values: ['true'] });
+      const leaf = question('short_text', { required: true, branchId: second.id });
+      const wasOptional = { ...leaf, required: false };
+      const fresh = form([opener, middle, leaf], { branches: [first, second] });
+      return { opener, middle, leaf, wasOptional, fresh };
+    }
+
+    it('keeps the draft typed under a block the fresh form still shows', () => {
+      const { opener, middle, leaf, wasOptional, fresh } = nested();
+      const merged = mergeFreshForm(
+        { questions: [opener, middle, wasOptional] },
+        { [opener.id]: picked(optA), [middle.id]: true, [leaf.id]: 'typed' },
+        fresh,
+      );
+      expect(merged.answers[leaf.id]).toBe('typed');
+      expect(merged.flagged).toEqual([]);
+    });
+
+    it('flags a newly required blank question only while every branch above it is open', () => {
+      const { opener, middle, leaf, wasOptional, fresh } = nested();
+      const current = { questions: [opener, middle, wasOptional] };
+      const open = mergeFreshForm(
+        current,
+        { [opener.id]: picked(optA), [middle.id]: true, [leaf.id]: '' },
+        fresh,
+      );
+      expect(open.flagged).toEqual([leaf.id]);
+      const middleClosed = mergeFreshForm(
+        current,
+        { [opener.id]: picked(optA), [middle.id]: false, [leaf.id]: '' },
+        fresh,
+      );
+      expect(middleClosed.flagged).toEqual([]);
+      const topClosed = mergeFreshForm(
+        current,
+        { [opener.id]: picked(optB), [middle.id]: true, [leaf.id]: '' },
+        fresh,
+      );
+      expect(topClosed.flagged).toEqual([]);
+    });
   });
 });

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AnswerWords } from './answer-view';
-import { form, options, question, uuid } from './test-fixtures';
+import { branch, form, options, question, uuid } from './test-fixtures';
 
 /**
  * 12-14 (D-584, D-593): the two profile readers never throw. `loadMyAnswers` maps the member form
@@ -114,25 +114,26 @@ const staffPayload = {
   ],
 };
 
-describe('loadMyAnswers: the derived-row rule (D-634, UI-D-659)', () => {
-  it('marks a conditional question whose opener answer does not match as hidden, and no other row', async () => {
+describe('loadMyAnswers: the derived-row rule (D-634, UI-D-659, D-641)', () => {
+  it('marks a question whose branch the opener answer does not open as hidden, and no other row', async () => {
     const choices = options('Tenho uma clínica', 'Estou aprendendo');
     const opener = question('single_choice', {
       title: 'Qual é o seu caso?',
       options: choices,
       answer: { optionId: choices[1]?.id ?? null, otherText: null },
     });
-    const closed = question('short_text', {
-      title: 'Nome da clínica',
-      condition: { questionId: opener.id, values: [choices[0]?.id ?? ''] },
-    });
+    const forClinic = branch({ openerQuestionId: opener.id, values: [choices[0]?.id ?? ''] });
+    const forStudent = branch({ openerQuestionId: opener.id, values: [choices[1]?.id ?? ''] });
+    const closed = question('short_text', { title: 'Nome da clínica', branchId: forClinic.id });
     const open = question('short_text', {
       title: 'Como é a rotina',
       answer: 'Estudo',
-      condition: { questionId: opener.id, values: [choices[1]?.id ?? ''] },
+      branchId: forStudent.id,
     });
     const plain = question('short_text', { title: 'Cidade' });
-    mocks.getMemberForm.mockResolvedValue(form([opener, closed, open, plain], { mode: 'edit' }));
+    mocks.getMemberForm.mockResolvedValue(
+      form([opener, closed, open, plain], { mode: 'edit', branches: [forClinic, forStudent] }),
+    );
     const result = await loadMyAnswers(words);
     if (result.status !== 'ok') throw new Error('expected ok');
     expect(result.rows.map((row) => [row.title, row.hidden])).toEqual([
@@ -141,6 +142,80 @@ describe('loadMyAnswers: the derived-row rule (D-634, UI-D-659)', () => {
       ['Como é a rotina', false],
       ['Cidade', false],
     ]);
+  });
+
+  it('hides a question when ANY branch on its chain is closed, however deep', async () => {
+    const choices = options('Sim', 'Não');
+    const top = question('single_choice', {
+      title: 'Topo',
+      options: choices,
+      answer: { optionId: choices[0]?.id ?? null, otherText: null },
+    });
+    const first = branch({ openerQuestionId: top.id, values: [choices[0]?.id ?? ''] });
+    const middle = question('yes_no', { title: 'Meio', answer: false, branchId: first.id });
+    const second = branch({ openerQuestionId: middle.id, values: ['true'] });
+    const leaf = question('short_text', { title: 'Folha', answer: 'x', branchId: second.id });
+    mocks.getMemberForm.mockResolvedValue(
+      form([top, middle, leaf], { mode: 'edit', branches: [first, second] }),
+    );
+    const result = await loadMyAnswers(words);
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.rows.map((row) => [row.title, row.hidden])).toEqual([
+      ['Topo', false],
+      ['Meio', false],
+      ['Folha', true],
+    ]);
+  });
+});
+
+describe('loadMemberAnswers: the staff payload carries the branches, never a name (D-645, T-12.2-03)', () => {
+  const branchRow = {
+    id: uuid(51),
+    openerQuestionId: uuid(1),
+    values: ['true'],
+  };
+
+  it('gives the staff payload an empty branch list when the read has none', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(json(200, staffPayload));
+    const result = await loadMemberAnswers('abc');
+    if (result.status !== 'ok' || result.payload.kind !== 'staff')
+      throw new Error('expected staff');
+    expect(result.payload.branches).toEqual([]);
+  });
+
+  it('carries the branches of the staff payload, id, opener and values only', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      json(200, {
+        ...staffPayload,
+        answers: [{ ...staffPayload.answers[0], branchId: branchRow.id }],
+        branches: [branchRow],
+      }),
+    );
+    const result = await loadMemberAnswers('abc');
+    if (result.status !== 'ok' || result.payload.kind !== 'staff')
+      throw new Error('expected staff');
+    expect(result.payload.branches).toEqual([branchRow]);
+    expect(result.payload.answers[0]?.branchId).toBe(branchRow.id);
+    expect(Object.keys(result.payload.branches[0] ?? {}).sort()).toEqual([
+      'id',
+      'openerQuestionId',
+      'values',
+    ]);
+  });
+
+  it('a branch that carries a name breaks the strict contract: error, nothing rendered', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      json(200, { ...staffPayload, branches: [{ ...branchRow, name: 'Donos de clínica' }] }),
+    );
+    expect(await loadMemberAnswers('abc')).toEqual({ status: 'error' });
+  });
+
+  it('the public payload is untouched', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(json(200, publicPayload));
+    const result = await loadMemberAnswers('abc');
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.payload.kind).toBe('member');
+    expect(result.payload).not.toHaveProperty('branches');
   });
 });
 

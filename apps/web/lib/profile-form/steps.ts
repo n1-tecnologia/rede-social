@@ -8,7 +8,7 @@ import { visibleQuestionIds } from './visibility';
  * order, never what a member answered, and no answer value is in any output (T-12.1-11).
  */
 
-type StepForm = Pick<MemberForm, 'steps' | 'questions'>;
+type StepForm = Pick<MemberForm, 'steps' | 'questions' | 'branches'>;
 
 /** The step chrome (title, buttons) shows only when the form has two or more configured steps. */
 export function showSteps(form: Pick<MemberForm, 'steps'>): boolean {

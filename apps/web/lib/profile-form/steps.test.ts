@@ -9,7 +9,7 @@ import {
   showSteps,
   stepPath,
 } from './steps';
-import { form, options, question, uuid } from './test-fixtures';
+import { branch, form, options, question, uuid } from './test-fixtures';
 
 /**
  * 12.1-13 task 2 (D-628, D-629, D-630, UI-D-653, UI-D-654, UI-D-657): the steps the member walks, whether
@@ -27,17 +27,32 @@ const steps = (...ids: string[]) => ids.map((id, i) => ({ id, title: `Etapa ${i 
 /** Step 1 holds the opener, step 2 only a question that appears for option A, step 3 a plain one. */
 function threeSteps() {
   const opener = question('single_choice', { options: opts, stepId: S1 });
-  const onlyWhenA = question('short_text', {
-    required: true,
-    stepId: S2,
-    condition: { questionId: opener.id, values: [optA] },
-  });
+  const whenA = branch({ openerQuestionId: opener.id, values: [optA] });
+  const onlyWhenA = question('short_text', { required: true, stepId: S2, branchId: whenA.id });
   const plain = question('short_text', { required: true, stepId: S3 });
   return {
     opener,
     onlyWhenA,
     plain,
-    f: form([opener, onlyWhenA, plain], { steps: steps(S1, S2, S3) }),
+    f: form([opener, onlyWhenA, plain], { steps: steps(S1, S2, S3), branches: [whenA] }),
+  };
+}
+
+/**
+ * Step 1 holds the opener, step 2 a yes/no that appears for option A, step 3 a required question that appears
+ * only when that yes/no is true: two branches on one chain, three steps (12.2-13, D-641).
+ */
+function chainedSteps() {
+  const opener = question('single_choice', { options: opts, stepId: S1 });
+  const first = branch({ openerQuestionId: opener.id, values: [optA] });
+  const middle = question('yes_no', { stepId: S2, branchId: first.id });
+  const second = branch({ openerQuestionId: middle.id, values: ['true'] });
+  const leaf = question('short_text', { required: true, stepId: S3, branchId: second.id });
+  return {
+    opener,
+    middle,
+    leaf,
+    f: form([opener, middle, leaf], { steps: steps(S1, S2, S3), branches: [first, second] }),
   };
 }
 
@@ -60,6 +75,31 @@ describe('stepPath: a step whose questions are all hidden is skipped (D-628)', (
     const { opener, f } = threeSteps();
     expect(stepPath(f, { [opener.id]: picked(optB) }, 'edit')).toEqual([S1, S3]);
     expect(stepPath(f, { [opener.id]: picked(optA) }, 'edit')).toEqual([S1, S2, S3]);
+  });
+
+  it('closing a branch drops the steps below it out of the path, whatever level closed (D-641)', () => {
+    const { opener, middle, f } = chainedSteps();
+    const open: Answers = { [opener.id]: picked(optA), [middle.id]: true };
+    expect(stepPath(f, open, 'first')).toEqual([S1, S2, S3]);
+    expect(stepPath(f, { ...open, [middle.id]: false }, 'first')).toEqual([S1, S2]);
+    expect(stepPath(f, { ...open, [opener.id]: picked(optB) }, 'first')).toEqual([S1]);
+    expect(stepPath(f, { ...open, [opener.id]: picked(optB) }, 'edit')).toEqual([S1]);
+  });
+
+  it('the progress shows only while the path has two steps or more', () => {
+    const { opener, middle, f } = chainedSteps();
+    const open: Answers = { [opener.id]: picked(optA), [middle.id]: true };
+    expect(showProgress(stepPath(f, open, 'first'))).toBe(true);
+    expect(showProgress(stepPath(f, { ...open, [middle.id]: false }, 'first'))).toBe(true);
+    expect(showProgress(stepPath(f, { ...open, [opener.id]: picked(optB) }, 'first'))).toBe(false);
+  });
+
+  it('returning mode lists only the steps with a visible required question still blank', () => {
+    const { opener, middle, f } = chainedSteps();
+    expect(stepPath(f, { [opener.id]: picked(optA), [middle.id]: true }, 'returning')).toEqual([
+      S3,
+    ]);
+    expect(stepPath(f, { [opener.id]: picked(optA), [middle.id]: false }, 'returning')).toEqual([]);
   });
 
   it('mode none has no path', () => {

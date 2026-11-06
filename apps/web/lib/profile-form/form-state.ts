@@ -1,4 +1,5 @@
 import {
+  type MemberBranch,
   type MemberForm,
   type MemberQuestion,
   missingIssue,
@@ -242,6 +243,7 @@ export function validateAll(
   questions: readonly MemberQuestion[],
   answers: Answers,
   scope?: ReadonlySet<string>,
+  _branches?: readonly MemberBranch[],
 ): Record<string, ProfileFormIssue> {
   const visible = visibleQuestionIds({ questions }, answers);
   const errors: Record<string, ProfileFormIssue> = {};
@@ -261,6 +263,7 @@ export function wireAnswers(
   questions: readonly MemberQuestion[],
   answers: Answers,
   scope?: ReadonlySet<string>,
+  _branches?: readonly MemberBranch[],
 ): Record<string, unknown> {
   const visible = visibleQuestionIds({ questions }, answers);
   const wire: Record<string, unknown> = {};
@@ -276,7 +279,7 @@ export function wireAnswers(
  * `scope` restricts the list to the questions of one step.
  */
 export function flaggedIds(
-  form: Pick<MemberForm, 'questions'>,
+  form: Pick<MemberForm, 'questions' | 'branches'>,
   scope?: ReadonlySet<string>,
 ): string[] {
   const visible = visibleQuestionIds(form);

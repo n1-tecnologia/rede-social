@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { adminQuestion, archivedQuestion } from './test-fixtures';
+import { adminBranch, adminQuestion, archivedQuestion } from './test-fixtures';
 
 /**
  * 12-15 — the builder's server loaders (D-596, PFORM-23): `ok`, `forbidden` (403), `moduleOff` (404) and
@@ -114,6 +114,56 @@ describe('loadAdminForm', () => {
     await loadAdminForm();
     const logged = JSON.stringify(spy.mock.calls);
     expect(logged).not.toContain('segredo');
+  });
+});
+
+describe('the branches of the admin reads (12.2-13, D-640)', () => {
+  it('loadAdminForm returns an empty list when the read has no branches key', async () => {
+    serve({
+      '/v1/profile_form/questions': json(200, listOf(1)),
+      '/v1/profile_form/summary': json(200, summary),
+    });
+    const result = await loadAdminForm();
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.branches).toEqual([]);
+  });
+
+  it('loadAdminForm returns the branches of the list, name included (the admin lane)', async () => {
+    const branch = adminBranch({ name: 'Donos de clínica', values: ['true'] });
+    serve({
+      '/v1/profile_form/questions': json(200, { ...listOf(1), branches: [branch] }),
+      '/v1/profile_form/summary': json(200, summary),
+    });
+    const result = await loadAdminForm();
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.branches).toEqual([branch]);
+  });
+
+  it('loadArchived returns empty lists when neither read has branches', async () => {
+    serve({
+      '/v1/profile_form/archived': json(200, { questions: [archivedQuestion('phone')] }),
+      '/v1/profile_form/questions': json(200, listOf(1)),
+    });
+    const result = await loadArchived();
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.branches).toEqual([]);
+    expect(result.activeBranches).toEqual([]);
+  });
+
+  it('loadArchived returns the branches of the archived questions and, apart, those of the active list', async () => {
+    const old = adminBranch({ archivedAt: '2026-10-20T15:30:00.000Z', values: ['false'] });
+    const live = adminBranch({ values: ['true'] });
+    serve({
+      '/v1/profile_form/archived': json(200, {
+        questions: [archivedQuestion('phone', { branchId: old.id })],
+        branches: [old],
+      }),
+      '/v1/profile_form/questions': json(200, { ...listOf(1), branches: [live] }),
+    });
+    const result = await loadArchived();
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.branches).toEqual([old]);
+    expect(result.activeBranches).toEqual([live]);
   });
 });
 

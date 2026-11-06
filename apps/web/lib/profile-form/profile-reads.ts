@@ -1,4 +1,5 @@
 import {
+  type MemberBranch,
   type PublicAnswers,
   publicAnswersSchema,
   type StaffAnswers,
@@ -73,7 +74,10 @@ export async function loadMyAnswers(words: AnswerWords): Promise<MyAnswersResult
 
 const memberAnswersSchema = z.discriminatedUnion('kind', [publicAnswersSchema, staffAnswersSchema]);
 
-export type MemberAnswersPayload = PublicAnswers | StaffAnswers;
+/** The staff payload with the branches always present (an empty list when the read has none), no name (12.2-13). */
+export type StaffPayload = Omit<StaffAnswers, 'branches'> & { branches: MemberBranch[] };
+
+export type MemberAnswersPayload = PublicAnswers | StaffPayload;
 
 export type MemberAnswersResult =
   | { status: 'ok'; payload: MemberAnswersPayload }
@@ -93,7 +97,10 @@ export async function loadMemberAnswers(membershipId: string): Promise<MemberAns
       console.error('profile_form.member_answers_failed', { status: res.status });
       return { status: 'error' };
     }
-    return { status: 'ok', payload: memberAnswersSchema.parse(await res.json()) };
+    return {
+      status: 'ok',
+      payload: memberAnswersSchema.parse(await res.json()) as MemberAnswersPayload,
+    };
   } catch (error) {
     console.error('profile_form.member_answers_failed', { error: errorName(error) });
     return { status: 'error' };

@@ -1,4 +1,5 @@
 import {
+  type AdminBranch,
   type AdminQuestion,
   type AdminStep,
   type ArchivedQuestion,
@@ -40,6 +41,8 @@ export type AdminFormResult =
   | {
       status: 'ok';
       questions: AdminQuestion[];
+      /** The tenant's branches, name included (admin lane only); an empty list when the read has none (12.2-13). */
+      branches: AdminBranch[];
       /** The tenant's steps in order (12.1-16); none for a form never built. */
       steps: AdminStep[];
       /** The most steps a tenant may have (D-633). */
@@ -81,6 +84,7 @@ export async function loadAdminForm(): Promise<AdminFormResult> {
     return {
       status: 'ok',
       questions: parsedList.questions,
+      branches: [],
       steps: parsedList.steps,
       stepLimit: parsedList.stepLimit,
       summary: parsedSummary,
@@ -98,6 +102,10 @@ export type ArchivedResult =
   | {
       status: 'ok';
       questions: ArchivedQuestion[];
+      /** The branches the archived questions sit in, so the list can name them; empty when the read has none (12.2-13). */
+      branches: AdminBranch[];
+      /** The branches of the ACTIVE list (12.2-13): what a reactivated question can still name. */
+      activeBranches: AdminBranch[];
       activeCount: number;
       limit: number;
       /** The ACTIVE questions (12.1-17): the openers a reactivated question may name. */
@@ -123,6 +131,8 @@ export async function loadArchived(): Promise<ArchivedResult> {
     return {
       status: 'ok',
       questions: parsedArchived.questions,
+      branches: [],
+      activeBranches: [],
       activeCount: parsedList.activeCount,
       limit: parsedList.limit,
       activeQuestions: parsedList.questions,
