@@ -1712,7 +1712,7 @@ Plans:
 **Depends on:** Phase 12.1
 **Reverses:** D-622 of Phase 12.1 (one level only: an opener carries no condition and a conditional question opens nothing). The same assumption lives in the SQL gate `app.profile_form_missing`, the purge `app.profile_form_purge_closed`, the PF006/PF007 guard, `checkCondition`, the `SELF_REF_ORDER` entry of the tenant move and the visibility function with its parity table, so all of them are in scope.
 **Open design points (for /gsd-discuss-phase 12.2):** (1) whether a branch is its own object (name, condition, questions inside) or only a visual grouping of questions that already carry a condition; (2) the maximum depth (for example 3 levels) and how the gate stays a plain join at that depth; (3) whether the diagram lives only in the admin builder or also in the preview; (4) whether a branch may depend on more than one answer or question (AND/OR) or only one opener; (5) what the member sees when a nested branch closes (the stored-equals-visible purge of D-633 and D-636 extends down the chain). The diagram is a new screen, so it passes the sketch gate as sketch 018 did (UI-04): no web code before Igor's approval is on disk.
-**Plans:** 21 plans
+**Plans:** 2/21 plans executed
 
 Decided in `/gsd-discuss-phase 12.2` on 2026-11-06 (`12.2-CONTEXT.md`, D-640..D-653): a branch is its own table (opener, opening answers, optional name) and the condition leaves the question (reverses D-621); a question belongs to at most one branch, nesting is derived from where the opener lives, up to 3 levels (reverses D-622) with a fixed-size gate join; stored equals visible extends down the chain; a branch's questions may sit in different steps; order follows the tree inside each step (replaces quick 261106-ei5's placement); "Criar ramo" starts from the opener; "Desfazer ramo" and "Arquivar ramo" act on the whole branch; the "Fluxo" view is a read-only vertical tree inside the builder, tapping opens the existing editor, and it passes the sketch gate as sketch 019 (UI-04).
 
@@ -1720,8 +1720,8 @@ Plans:
 
 **Wave 1** *(independent: the additive contract and the sketch drawing)*
 
-- [ ] 12.2-01-PLAN.md — The additive contract: the limits, the five new refusal codes, the branch bodies and reads, the bounded chain visibility rule with its 11-row parity table, the pure tree order (PFORM-43, 44, 45, 50..54, tracer)
-- [ ] 12.2-02-PLAN.md — Sketch 019: the 66 prototype-less frames of the branch blocks, the branch sheet, the refusals, the Fluxo and the member's block (PFORM-56..60, UI-04)
+- [x] 12.2-01-PLAN.md — The additive contract: the limits, the five new refusal codes, the branch bodies and reads, the bounded chain visibility rule with its 11-row parity table, the pure tree order (PFORM-43, 44, 45, 50..54, tracer)
+- [x] 12.2-02-PLAN.md — Sketch 019: the 66 prototype-less frames of the branch blocks, the branch sheet, the refusals, the Fluxo and the member's block (PFORM-56..60, UI-04)
 
 **Wave 2** *(the schema, the pure rules and the sketch review)*
 
