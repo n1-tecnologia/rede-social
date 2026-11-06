@@ -124,7 +124,9 @@ select columns_are('public', 'profile_form_questions', array[
   'id', 'tenant_id', 'type', 'title', 'help_text', 'required', 'show_on_profile', 'allow_other', 'options', 'limits',
   'position', 'archived_at', 'listed_at', 'revision', 'created_by_user_id', 'created_at', 'updated_at',
   -- Phase 12.1 (plan 03): the step and the condition of a question
-  'step_id', 'condition_question_id', 'condition_values'
+  'step_id', 'condition_question_id', 'condition_values',
+  -- Phase 12.2 (plan 03): the branch of a question
+  'branch_id'
 ], 'profile_form_questions has exactly the planned columns');
 select columns_are('public', 'profile_form_answers', array[
   'id', 'tenant_id', 'question_id', 'membership_id', 'user_id', 'value', 'created_at', 'updated_at'
