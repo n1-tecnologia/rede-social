@@ -375,8 +375,7 @@ export function checkBranch(input: {
   return OK;
 }
 
-// ── INERT STUBS (12.2-04 task 2, RED commit only): neutral values so the tests fail on assertions. ──────────
-// The next commit (GREEN) replaces everything below this line with the real rules.
+// ── Locks, dependents, moves, archive and reactivation (D-646, D-653; PFORM-48, PFORM-53) ────────────────────
 
 /** An active branch hanging on an opener, with the titles of its active questions. */
 export type BranchDependents = {
@@ -387,24 +386,62 @@ export type BranchDependents = {
   questions: BranchDependent[];
 };
 
-export function checkBranchEdit(_input: {
+const sameSet = (a: Iterable<string>, b: Iterable<string>): boolean => {
+  const left = new Set(a);
+  const right = new Set(b);
+  return left.size === right.size && [...left].every((token) => right.has(token));
+};
+
+/**
+ * D-646: a branch with an answered question (active OR archived; `answeredQuestions` is a COUNT, never a
+ * value) cannot change its opener or its opening set (compared as sets). A name change, an unchanged opener
+ * or set, and an undo (which the service does not route through here) pass at any answer count. An omitted
+ * `openerId` or `values` means "not changed". The SQL backstop is the branch guard (PF006).
+ */
+export function checkBranchEdit(input: {
   branch: BranchRuleBranch;
   openerId?: string;
   values?: readonly string[];
   answeredQuestions: number;
 }): BranchCheck {
+  const { branch, openerId, values, answeredQuestions } = input;
+  if (answeredQuestions <= 0) return OK;
+  if (openerId !== undefined && openerId !== branch.openerQuestionId)
+    return refuse('condition_locked');
+  if (values !== undefined && !sameSet(values, branch.values)) return refuse('condition_locked');
   return OK;
 }
 
+/**
+ * The ACTIVE branches that hang on `openerId`, in list order, each with the titles of its ACTIVE questions
+ * (an empty branch is listed with none). The input of every `has_dependents` body (D-646).
+ */
 export function dependentBranchesOf(
-  _branches: readonly BranchRuleBranch[],
-  _questions: readonly BranchRuleQuestion[],
-  _openerId: string,
+  branches: readonly BranchRuleBranch[],
+  questions: readonly BranchRuleQuestion[],
+  openerId: string,
 ): BranchDependents[] {
-  return [];
+  return branches
+    .filter((branch) => !branch.archived && branch.openerQuestionId === openerId)
+    .map((branch) => ({
+      id: branch.id,
+      name: branch.name,
+      openerQuestionId: branch.openerQuestionId,
+      values: [...branch.values],
+      questions: questions
+        .filter((question) => !question.archived && question.branchId === branch.id)
+        .map((question) => ({ id: question.id, title: question.title })),
+    }));
 }
 
-export function checkOpenerChange(_input: {
+/**
+ * D-646: the refusals of an opener. Archiving it (a delete is an archive that has no active dependents left),
+ * changing its type, or removing an option id that some active branch names (even an option with no answer)
+ * is `has_dependents` with the active branches the change would orphan; for removed options only the
+ * branches that name a removed id are listed. With no active branch, or when only unreferenced options go,
+ * the answer is null. The SQL backstop is the question guard (PF007).
+ */
+export function checkOpenerChange(input: {
   questions: readonly BranchRuleQuestion[];
   branches: readonly BranchRuleBranch[];
   openerId: string;
@@ -412,10 +449,54 @@ export function checkOpenerChange(_input: {
   newType?: string;
   removedOptionIds?: readonly string[];
 }): { issue: 'has_dependents'; branches: BranchDependents[] } | null {
-  return null;
+  const { questions, branches, openerId, archive, newType, removedOptionIds } = input;
+  const dependents = dependentBranchesOf(branches, questions, openerId);
+  if (dependents.length === 0) return null;
+
+  const opener = questions.find((question) => question.id === openerId);
+  const retyped = newType !== undefined && opener !== undefined && newType !== opener.type;
+  const removed = new Set(removedOptionIds ?? []);
+  const affected =
+    archive || retyped
+      ? dependents
+      : dependents.filter((dependent) => dependent.values.some((token) => removed.has(token)));
+  if (affected.length === 0) return null;
+  return { issue: 'has_dependents', branches: affected };
 }
 
-export function checkMoveIntoBranch(_input: {
+/** Whether `questionId` is the opener of some branch on the chain above (and including) `branchId`. */
+function opensChainOf(
+  questionId: string,
+  branchId: string,
+  tree: Lookups,
+): 'yes' | 'no' | 'broken' {
+  const seen = new Set<string>();
+  let current: string | null = branchId;
+  for (let hops = 0; current !== null && hops < MAX_HOPS; hops += 1) {
+    if (seen.has(current)) return 'broken';
+    seen.add(current);
+    const branch = tree.branch(current);
+    const opener = branch === undefined ? undefined : tree.question(branch.openerQuestionId);
+    if (branch === undefined || opener === undefined) return 'broken';
+    if (branch.openerQuestionId === questionId) return 'yes';
+    current = opener.branchId;
+  }
+  return 'no';
+}
+
+/**
+ * D-646, D-641, D-643, D-644: whether a question may enter, leave or change branch. `branchId` is the target
+ * (null removes the branch). A question being CREATED is passed in `questions` with `branchId: null` and left
+ * out of the layout, which counts as sitting after everything. `answered` is the question's answer COUNT. The
+ * first refusal wins: an unchanged branch passes; answers (`condition_locked`, entering, leaving or changing);
+ * a removal passes; an unknown branch (`unknown_branch`); an archived one (`branch_archived`, naming it); the
+ * question is the opener of a branch on the target's chain, so the target is its own descendant, or the chain
+ * cannot be walked (`condition_invalid`); the target's opener is not strictly before the question
+ * (`condition_order` naming the pair); the target's level plus the height of the question's own sub-branches
+ * is over the limit (`branch_depth`); a public question (or a public descendant of a moved opener) ends up
+ * under a private opener (`public_under_private`, naming the titles it ADDS).
+ */
+export function checkMoveIntoBranch(input: {
   questions: readonly BranchRuleQuestion[];
   branches: readonly BranchRuleBranch[];
   layout: Layout;
@@ -423,32 +504,162 @@ export function checkMoveIntoBranch(_input: {
   branchId: string | null;
   answered: number;
 }): BranchCheck {
+  const { questions, branches, layout, questionId, branchId, answered } = input;
+  const question = questions.find((candidate) => candidate.id === questionId);
+  if (question === undefined) return refuse('unknown_question');
+  if (branchId === question.branchId) return OK;
+  if (answered > 0) return refuse('condition_locked');
+  if (branchId === null) return OK;
+
+  const target = branches.find((branch) => branch.id === branchId);
+  if (target === undefined) return refuse('unknown_branch');
+  if (target.archived) return refuse('branch_archived', { branchId: target.id });
+
+  if (opensChainOf(questionId, target.id, lookupsOf(questions, branches)) !== 'no')
+    return invalid();
+
+  const flat = flatten(layout);
+  const openerIndex = flat.indexOf(target.openerQuestionId);
+  if (openerIndex === -1) return invalid();
+  const questionIndex = flat.indexOf(questionId);
+  if (questionIndex !== -1 && openerIndex >= questionIndex)
+    return refuse('condition_order', { questionId, openerId: target.openerQuestionId });
+
+  const level = branchLevel(target.id, questions, branches);
+  if (level === null) return invalid();
+  let below = 0;
+  for (const own of branches.filter((branch) => branch.openerQuestionId === questionId)) {
+    const height = branchHeight(own.id, questions, branches);
+    if (height === null) return invalid();
+    below = Math.max(below, height);
+  }
+  if (level + below > PROFILE_FORM_LIMITS.branchDepth) return refuse('branch_depth');
+
+  const moved = questions.map((candidate) =>
+    candidate.id === questionId ? { ...candidate, branchId } : candidate,
+  );
+  const titles = newPublicUnderPrivate(questions, branches, moved, branches);
+  if (titles.length > 0) return refuse('public_under_private', { titles });
+
   return OK;
 }
 
-export function checkReactivation(_input: {
+/**
+ * D-653: whether an archived question may become active again. A question with no branch always passes; an
+ * unknown question is `unknown_question`; a dangling branch is `unknown_branch`. Otherwise the ONE thing to
+ * do first is named: the question's branch is archived (`branch_archived` with `branchId`), the opener is
+ * archived or gone (`condition_invalid` with `openerId`), or the opener sits in an archived branch
+ * (`branch_archived` with that branch). Then the order (when the question is in the layout) and the privacy
+ * rule (`public_under_private`) run over the tree with the question active.
+ */
+export function checkReactivation(input: {
   questions: readonly BranchRuleQuestion[];
   branches: readonly BranchRuleBranch[];
   layout: Layout;
   questionId: string;
 }): BranchCheck {
+  const { questions, branches, layout, questionId } = input;
+  const question = questions.find((candidate) => candidate.id === questionId);
+  if (question === undefined) return refuse('unknown_question');
+  if (question.branchId === null) return OK;
+
+  const tree = lookupsOf(questions, branches);
+  const branch = tree.branch(question.branchId);
+  if (branch === undefined) return refuse('unknown_branch');
+  if (branch.archived) return refuse('branch_archived', { branchId: branch.id });
+  const opener = tree.question(branch.openerQuestionId);
+  if (opener === undefined || opener.archived)
+    return refuse('condition_invalid', { openerId: branch.openerQuestionId });
+  const above = opener.branchId === null ? undefined : tree.branch(opener.branchId);
+  if (above?.archived) return refuse('branch_archived', { branchId: above.id });
+
+  const flat = flatten(layout);
+  const questionIndex = flat.indexOf(questionId);
+  const openerIndex = flat.indexOf(opener.id);
+  if (questionIndex !== -1 && (openerIndex === -1 || openerIndex >= questionIndex))
+    return refuse('condition_order', { questionId, openerId: opener.id });
+
+  const active = questions.map((candidate) =>
+    candidate.id === questionId ? { ...candidate, archived: false } : candidate,
+  );
+  const titles = newPublicUnderPrivate(questions, branches, active, branches);
+  if (titles.length > 0) return refuse('public_under_private', { titles });
+
   return OK;
 }
 
-export function checkArchiveBranch(_input: {
+/**
+ * D-653: whether a branch may be archived (the block goes out together: the branch, the branches below it and
+ * their questions; the answers stay). An unknown branch is `unknown_branch`, an archived one
+ * `already_archived`. It is refused as `has_dependents`, with `dependents` naming the OPENERS, when a question
+ * of the subtree opens another ACTIVE branch that has answers (`answeredBranchIds`: ids of branches with an
+ * answered question, a COUNT-style fact). The branch's own answers do not block. The services stamp one
+ * `now()` over the whole subtree, branches first and then questions (Pitfall 4): that is not a rule here.
+ */
+export function checkArchiveBranch(input: {
   questions: readonly BranchRuleQuestion[];
   branches: readonly BranchRuleBranch[];
   branchId: string;
   answeredBranchIds: ReadonlySet<string> | readonly string[];
 }): BranchCheck {
+  const { questions, branches, branchId } = input;
+  const branch = branches.find((candidate) => candidate.id === branchId);
+  if (branch === undefined) return refuse('unknown_branch');
+  if (branch.archived) return refuse('already_archived');
+
+  const answered = new Set(input.answeredBranchIds);
+  const tree = lookupsOf(questions, branches);
+  const dependents: BranchDependent[] = [];
+  for (const nestedId of subtreeOf(branches, questions, branchId).branchIds) {
+    const nested = tree.branch(nestedId);
+    if (nestedId === branchId || nested === undefined || nested.archived || !answered.has(nestedId))
+      continue;
+    const opener = tree.question(nested.openerQuestionId);
+    if (opener === undefined || dependents.some((dependent) => dependent.id === opener.id))
+      continue;
+    dependents.push({ id: opener.id, title: opener.title });
+  }
+  if (dependents.length > 0) return refuse('has_dependents', { dependents });
   return OK;
 }
 
-export function checkReactivateBranch(_input: {
+/**
+ * D-653: whether an archived branch may come back (with the branches below it and their questions). An
+ * unknown branch is `unknown_branch`, one that is not archived `not_archived`; an opener that is archived or
+ * gone is `condition_invalid` with `openerId` (the ONE thing to reactivate first), an opener inside an
+ * archived branch is `branch_archived` with that branch. The privacy rule then runs over the tree with the
+ * restored questions active: `restoredQuestionIds` names exactly the ones the service will restore (the
+ * cascade stamp is the service's knowledge); omitted, every question of the subtree counts, the safe side.
+ */
+export function checkReactivateBranch(input: {
   questions: readonly BranchRuleQuestion[];
   branches: readonly BranchRuleBranch[];
   branchId: string;
   restoredQuestionIds?: readonly string[];
 }): BranchCheck {
+  const { questions, branches, branchId } = input;
+  const branch = branches.find((candidate) => candidate.id === branchId);
+  if (branch === undefined) return refuse('unknown_branch');
+  if (!branch.archived) return refuse('not_archived');
+
+  const tree = lookupsOf(questions, branches);
+  const opener = tree.question(branch.openerQuestionId);
+  if (opener === undefined || opener.archived)
+    return refuse('condition_invalid', { openerId: branch.openerQuestionId });
+  const above = opener.branchId === null ? undefined : tree.branch(opener.branchId);
+  if (above?.archived) return refuse('branch_archived', { branchId: above.id });
+
+  const subtree = subtreeOf(branches, questions, branchId);
+  const restored = new Set(input.restoredQuestionIds ?? subtree.questionIds);
+  const awake = new Set(subtree.branchIds);
+  const candidateQuestions = questions.map((question) =>
+    restored.has(question.id) ? { ...question, archived: false } : question,
+  );
+  const candidateBranches = branches.map((candidate) =>
+    awake.has(candidate.id) ? { ...candidate, archived: false } : candidate,
+  );
+  const titles = newPublicUnderPrivate(questions, branches, candidateQuestions, candidateBranches);
+  if (titles.length > 0) return refuse('public_under_private', { titles });
+
   return OK;
 }

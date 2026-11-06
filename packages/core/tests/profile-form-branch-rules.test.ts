@@ -864,6 +864,7 @@ describe('12.2-04 checkMoveIntoBranch (D-646): a question entering, leaving or c
       issue: 'public_under_private',
       titles: ['Titulo q2', 'Titulo q4', 'Titulo q5', 'Titulo q6'],
     });
+    // q2 itself private: q4..q6 under it are already a stored violation, so the move adds nothing new.
     const privateQ2 = qs.map((x) => (x.id === 'q2' ? { ...x, showOnProfile: false } : x));
     expect(
       checkMoveIntoBranch({
@@ -873,12 +874,8 @@ describe('12.2-04 checkMoveIntoBranch (D-646): a question entering, leaving or c
         questionId: 'q2',
         branchId: 'b4',
         answered: 0,
-      }),
-    ).toEqual({
-      ok: false,
-      issue: 'public_under_private',
-      titles: ['Titulo q4', 'Titulo q5', 'Titulo q6'],
-    });
+      }).ok,
+    ).toBe(true);
   });
 });
 
