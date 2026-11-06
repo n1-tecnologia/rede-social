@@ -326,9 +326,22 @@ describe('the tracer: a seeded tenant is copied into a bootstrapped second datab
     // The table set is the catalog's, not a list: the public tables that carry tenant_id, minus
     // tenant_domains and tenant_modules. Each new tenant table moves the pin (12.1-12: 52 to 55, the
     // `profile_form_steps` table of Phase 12.1 plus `member_blocks` and `content_reports` of the reports and
-    // blocks work, which had left this number behind).
-    expect(plan.tables.length).toBe(55);
+    // blocks work, which had left this number behind; 12.2-12: 55 to 56, the `profile_form_branches` table).
+    expect(plan.tables.length).toBe(56);
     expect(plan.tables.map((t) => t.name)).toContain('profile_form_steps');
+    expect(plan.tables.map((t) => t.name)).toContain('profile_form_branches');
+    // 12.2-12 (PFORM-55, T-12.2-09): a branch and the question that opens it reference each other through two
+    // DEFERRABLE keys, so the planner copies them as ONE group, after the steps and before the answers.
+    expect(plan.groups.find((g) => g.includes('profile_form_branches'))).toEqual([
+      'profile_form_branches',
+      'profile_form_questions',
+    ]);
+    expect(plan.order.indexOf('profile_form_steps')).toBeLessThan(
+      plan.order.indexOf('profile_form_branches'),
+    );
+    expect(plan.order.indexOf('profile_form_questions')).toBeLessThan(
+      plan.order.indexOf('profile_form_answers'),
+    );
   });
 });
 
@@ -991,18 +1004,33 @@ describe('resume, conflicts, identity safety and reports', () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------
-// 12.1-12 (PFORM-40, T-12.1-08): a conditional form with steps is copied for real
+// 12.1-12 (PFORM-40, T-12.1-08) on 12.2 branches (PFORM-55, T-12.2-09): a form with steps, branches and answers
+// is copied for real
 // ---------------------------------------------------------------------------------------------------------
 
-describe('12.1-12 PFORM-40: a tenant with steps, conditional questions and answers is copied for real (T-12.1-08)', () => {
+/** The member of the seeded demo tenant, for the rows of another tenant that the copy must leave behind. */
+async function demoMemberId(): Promise<string> {
+  const [row] = await source<{ user_id: string }[]>`
+    select user_id::text as user_id from public.memberships
+     where tenant_id = ${demoId}::uuid and deleted_at is null order by user_id limit 1`;
+  if (!row) throw new Error('the seed has no member in rede-demo');
+  return row.user_id;
+}
+
+/** `00000000-0000-4000-8000-00000000000n`: ids that sort by their rank. */
+const rankId = (rank: number): string =>
+  `00000000-0000-4000-8000-${rank.toString(16).padStart(12, '0')}`;
+
+describe('12.1-12 PFORM-40 on branches: a tenant with steps, a branch, questions and answers is copied for real (T-12.1-08, T-12.2-09)', () => {
   const MV = 'mvp ';
-  // The opener's id sorts LAST and the conditional ids sort FIRST, so a copy that went by primary key alone
-  // would insert a conditional question before its opener and break `profile_form_questions_condition_fk`.
+  // The opener's id sorts LAST and the dependents' ids sort FIRST, so a copy that went by primary key alone
+  // would insert a dependent before its opener (or the branch before the opener) and break a key.
   const OPENER = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
   const ACTIVE_DEP = '00000000-0000-4000-8000-00000000000a';
   const ARCHIVED_DEP = '00000000-0000-4000-8000-00000000000b';
+  const BRANCH = '00000000-0000-4000-8000-0000000000b1';
 
-  it('copies steps, an opener, an active and an archived conditional question and a member’s answers; every condition names its opener and every question its step in the TARGET, and the planner raises no unsortable_tables', async () => {
+  it('copies steps, an opener, a branch, an active and an archived question in it and a member’s answers; every question names its branch and step in the TARGET, and the planner raises no unsortable_tables', async () => {
     const member = await labMemberId();
     const stepOne = crypto.randomUUID();
     const stepTwo = crypto.randomUUID();
@@ -1024,15 +1052,17 @@ describe('12.1-12 PFORM-40: a tenant with steps, conditional questions and answe
         values (${OPENER}::uuid, ${labId}::uuid, ${stepOne}::uuid, 'single_choice', ${`${MV}Abridora`},
                 false, 1, ${options}, '{}'::jsonb, false, true, ${member}::uuid)`;
       await adminSql`
+        insert into public.profile_form_branches (id, tenant_id, opener_question_id, open_values)
+        values (${BRANCH}::uuid, ${labId}::uuid, ${OPENER}::uuid, ${adminSql.array([yes])})`;
+      await adminSql`
         insert into public.profile_form_questions
           (id, tenant_id, step_id, type, title, required, position, options, limits, allow_other,
-           show_on_profile, archived_at, created_by_user_id, condition_question_id, condition_values)
+           show_on_profile, archived_at, created_by_user_id, branch_id)
         values (${ACTIVE_DEP}::uuid, ${labId}::uuid, ${stepTwo}::uuid, 'short_text', ${`${MV}Ativa`},
-                false, 2, '[]'::jsonb, '{}'::jsonb, false, true, null, ${member}::uuid,
-                ${OPENER}::uuid, ${adminSql.array([yes])}),
+                false, 2, '[]'::jsonb, '{}'::jsonb, false, true, null, ${member}::uuid, ${BRANCH}::uuid),
                (${ARCHIVED_DEP}::uuid, ${labId}::uuid, ${stepTwo}::uuid, 'short_text',
                 ${`${MV}Arquivada`}, false, 3, '[]'::jsonb, '{}'::jsonb, false, true, now(),
-                ${member}::uuid, ${OPENER}::uuid, ${adminSql.array([yes])})`;
+                ${member}::uuid, ${BRANCH}::uuid)`;
       await seedProfileFormAnswer({
         tenantId: labId,
         questionId: OPENER,
@@ -1063,6 +1093,7 @@ describe('12.1-12 PFORM-40: a tenant with steps, conditional questions and answe
       const names = plan.tables.map((t) => t.name);
       for (const table of [
         'profile_form_steps',
+        'profile_form_branches',
         'profile_form_questions',
         'profile_form_answers',
       ]) {
@@ -1079,6 +1110,7 @@ describe('12.1-12 PFORM-40: a tenant with steps, conditional questions and answe
       const rows = await copyRows(plan, src, tgt);
       const copied = (table: string) => rows.tables.find((t) => t.name === table);
       expect(copied('profile_form_steps')?.inserted).toBe(2);
+      expect(copied('profile_form_branches')?.inserted).toBe(1);
       expect(copied('profile_form_questions')?.inserted).toBe(3);
       expect(copied('profile_form_answers')?.inserted).toBe(3);
       expect((await verifyCopy(plan, src, tgt)).ok).toBe(true);
@@ -1092,28 +1124,34 @@ describe('12.1-12 PFORM-40: a tenant with steps, conditional questions and answe
         [stepTwo, `${MV}Etapa 2`, 2],
       ]);
 
-      // Every question names a step that exists in the TARGET, and every condition names an opener that
-      // exists in the TARGET with no condition of its own. (The move engine keeps primary keys, so the
-      // opener's copy carries the opener's id; the foreign key makes "the copy" the only thing it can name.)
+      // The branch names its opener and its opening values in the TARGET; every question names a step that
+      // exists in the TARGET, and each question of the branch names a branch that exists there.
+      const branches = await target`
+        select id::text as id, opener_question_id::text as opener, open_values, name,
+               exists (select 1 from public.profile_form_questions o
+                        where o.tenant_id = b.tenant_id and o.id = b.opener_question_id) as opener_in_target
+          from public.profile_form_branches b where b.tenant_id = ${labId}::uuid`;
+      expect(branches).toHaveLength(1);
+      expect(branches[0]?.id).toBe(BRANCH);
+      expect(branches[0]?.opener).toBe(OPENER);
+      expect(branches[0]?.open_values).toEqual([yes]);
+      expect(branches[0]?.opener_in_target).toBe(true);
       const questions = await target`
-        select q.id::text as id, q.step_id::text as step_id,
-               q.condition_question_id::text as condition_question_id, q.condition_values,
+        select q.id::text as id, q.step_id::text as step_id, q.branch_id::text as branch_id,
                q.archived_at is not null as archived,
                exists (select 1 from public.profile_form_steps s
                         where s.tenant_id = q.tenant_id and s.id = q.step_id) as step_in_target,
-               exists (select 1 from public.profile_form_questions o
-                        where o.tenant_id = q.tenant_id and o.id = q.condition_question_id
-                          and o.condition_question_id is null) as opener_in_target
+               exists (select 1 from public.profile_form_branches b
+                        where b.tenant_id = q.tenant_id and b.id = q.branch_id) as branch_in_target
           from public.profile_form_questions q
          where q.tenant_id = ${labId}::uuid order by q.position`;
       expect(questions.map((r) => r.id)).toEqual([OPENER, ACTIVE_DEP, ARCHIVED_DEP]);
       expect(questions.map((r) => r.step_id)).toEqual([stepOne, stepTwo, stepTwo]);
       expect(questions.every((r) => r.step_in_target)).toBe(true);
-      expect(questions[0]?.condition_question_id).toBeNull();
+      expect(questions[0]?.branch_id).toBeNull();
       for (const dependent of questions.slice(1)) {
-        expect(dependent.condition_question_id).toBe(OPENER);
-        expect(dependent.condition_values).toEqual([yes]);
-        expect(dependent.opener_in_target).toBe(true);
+        expect(dependent.branch_id).toBe(BRANCH);
+        expect(dependent.branch_in_target).toBe(true);
       }
       expect(questions[2]?.archived).toBe(true);
 
@@ -1127,9 +1165,249 @@ describe('12.1-12 PFORM-40: a tenant with steps, conditional questions and answe
         [OPENER, { optionId: yes, otherText: null }],
       ]);
 
-      // A second run inserts nothing (the resume contract holds for the self-referencing table too).
+      // A second run inserts nothing (the resume contract holds for the group too).
       const again = await copyRows(plan, src, tgt);
       expect(again.tables.every((t) => t.inserted === 0)).toBe(true);
+    } finally {
+      await removeProfileFormByPrefix(MV);
+    }
+  }, 120_000);
+});
+
+describe('12.2-12 PFORM-55 (T-12.2-09): a depth-3 form whose ids sort adversarially is copied whole, whatever the order of the rows', () => {
+  const MV = 'mvq ';
+
+  /**
+   * A depth-3 tree for rede-lab: Q1 opens B1 (Q2 inside), Q2 opens B2 (Q3 inside), Q3 opens B3 (Q4 and an
+   * archived Q5 inside), and an ARCHIVED branch B4 on Q1 holds an archived Q6. Every row carries an answer
+   * except the openers of nothing. The ids are ranked by `rankOf`: the ascending variant gives the dependents
+   * the smallest ids and the deepest opener Q3 the largest; the descending variant is the exact reverse, so the
+   * source returns its rows in the opposite order.
+   */
+  async function seedDepth3(variant: 'ascending' | 'descending') {
+    const member = await labMemberId();
+    const demoMember = await demoMemberId();
+    const questionOrder = ['Q4', 'Q5', 'Q6', 'Q1', 'Q2', 'Q3'];
+    const branchOrder = ['B3', 'B2', 'B1', 'B4'];
+    const ranked = (names: string[]) => (variant === 'ascending' ? names : [...names].reverse());
+    const q = Object.fromEntries(
+      ranked(questionOrder).map((name, at) => [name, rankId(at + 1)]),
+    ) as Record<'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | 'Q6', string>;
+    const b = Object.fromEntries(
+      ranked(branchOrder).map((name, at) => [name, rankId(at + 1)]),
+    ) as Record<'B1' | 'B2' | 'B3' | 'B4', string>;
+    const yes = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const no = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const stepId = crypto.randomUUID();
+    const choice = (at: number) =>
+      adminSql.json([
+        { id: yes[at], label: 'Sim' },
+        { id: no[at], label: 'Não' },
+      ] as never);
+
+    await adminSql`
+      insert into public.profile_form_steps (id, tenant_id, title, position)
+      values (${stepId}::uuid, ${labId}::uuid, ${`${MV}Etapa`}, 1)`;
+    // Branches FIRST, then the questions, dependents before their openers, with the keys deferred to the end of
+    // the transaction: the source itself accepts any order, which is what the copy has to survive.
+    await adminSql.begin(async (tx) => {
+      await tx`set constraints all deferred`;
+      await tx`
+        insert into public.profile_form_branches (id, tenant_id, opener_question_id, open_values, archived_at)
+        values (${b.B3}::uuid, ${labId}::uuid, ${q.Q3}::uuid, ${tx.array([yes[2] as string])}, null),
+               (${b.B2}::uuid, ${labId}::uuid, ${q.Q2}::uuid, ${tx.array([yes[1] as string])}, null),
+               (${b.B1}::uuid, ${labId}::uuid, ${q.Q1}::uuid, ${tx.array([yes[0] as string])}, null),
+               (${b.B4}::uuid, ${labId}::uuid, ${q.Q1}::uuid, ${tx.array([yes[0] as string])}, now())`;
+      const text = (
+        id: string,
+        title: string,
+        position: number,
+        branch: string,
+        archived: boolean,
+      ) => tx`
+        insert into public.profile_form_questions
+          (id, tenant_id, step_id, type, title, required, position, options, limits, allow_other,
+           show_on_profile, archived_at, created_by_user_id, branch_id)
+        values (${id}::uuid, ${labId}::uuid, ${stepId}::uuid, 'short_text', ${`${MV}${title}`}, false,
+                ${position}, '[]'::jsonb, '{}'::jsonb, false, false,
+                ${archived ? tx`now()` : null}, ${member}::uuid, ${branch}::uuid)`;
+      await text(q.Q4 as string, 'Q4', 4, b.B3 as string, false);
+      await text(q.Q5 as string, 'Q5 arquivada', 5, b.B3 as string, true);
+      await text(q.Q6 as string, 'Q6 do ramo arquivado', 6, b.B4 as string, true);
+      const opener = (
+        id: string,
+        title: string,
+        position: number,
+        at: number,
+        branch: string | null,
+      ) => tx`
+        insert into public.profile_form_questions
+          (id, tenant_id, step_id, type, title, required, position, options, limits, allow_other,
+           show_on_profile, created_by_user_id, branch_id)
+        values (${id}::uuid, ${labId}::uuid, ${stepId}::uuid, 'single_choice', ${`${MV}${title}`}, false,
+                ${position}, ${choice(at)}, '{}'::jsonb, false, false, ${member}::uuid, ${branch}::uuid)`;
+      await opener(q.Q3 as string, 'Q3', 3, 2, b.B2 as string);
+      await opener(q.Q2 as string, 'Q2', 2, 1, b.B1 as string);
+      await opener(q.Q1 as string, 'Q1', 1, 0, null);
+    });
+    // Another tenant's rows of the same kind: the copy must leave every one of them behind.
+    const demoStep = crypto.randomUUID();
+    const demoOpener = crypto.randomUUID();
+    const demoBranch = crypto.randomUUID();
+    const demoDependent = crypto.randomUUID();
+    await adminSql`
+      insert into public.profile_form_steps (id, tenant_id, title, position)
+      values (${demoStep}::uuid, ${demoId}::uuid, ${`${MV}Etapa demo`}, 1)`;
+    await adminSql.begin(async (tx) => {
+      await tx`set constraints all deferred`;
+      await tx`
+        insert into public.profile_form_branches (id, tenant_id, opener_question_id, open_values)
+        values (${demoBranch}::uuid, ${demoId}::uuid, ${demoOpener}::uuid, ${tx.array([yes[0] as string])})`;
+      await tx`
+        insert into public.profile_form_questions
+          (id, tenant_id, step_id, type, title, required, position, options, limits, allow_other,
+           show_on_profile, created_by_user_id, branch_id)
+        values (${demoOpener}::uuid, ${demoId}::uuid, ${demoStep}::uuid, 'single_choice', ${`${MV}Demo abridora`},
+                false, 1, ${choice(0)}, '{}'::jsonb, false, false, ${demoMember}::uuid, null),
+               (${demoDependent}::uuid, ${demoId}::uuid, ${demoStep}::uuid, 'short_text', ${`${MV}Demo dependente`},
+                false, 2, '[]'::jsonb, '{}'::jsonb, false, false, ${demoMember}::uuid, ${demoBranch}::uuid)`;
+    });
+
+    const answer = (key: keyof typeof q, value: unknown) =>
+      seedProfileFormAnswer({
+        tenantId: labId,
+        questionId: q[key] as string,
+        userId: member,
+        value,
+      });
+    await answer('Q1', { optionId: yes[0], otherText: null });
+    await answer('Q2', { optionId: yes[1], otherText: null });
+    await answer('Q3', { optionId: yes[2], otherText: null });
+    await answer('Q4', 'profundo');
+    await answer('Q5', 'arquivada no ramo ativo');
+    await answer('Q6', 'guardada no ramo arquivado');
+    return { q, b, stepId, demoIds: [demoOpener, demoBranch, demoDependent] };
+  }
+
+  /** The ids and chains of the three tables as one comparable string, ordered by id (the test prints none). */
+  async function formOf(db: postgres.Sql, tenantId: string): Promise<string> {
+    const [row] = await db<{ j: string }[]>`
+      select jsonb_build_object(
+        'branches', (select coalesce(jsonb_agg(jsonb_build_array(b.id, b.opener_question_id, b.open_values,
+                                                                   b.archived_at is not null) order by b.id), '[]'::jsonb)
+                       from public.profile_form_branches b where b.tenant_id = ${tenantId}::uuid),
+        'questions', (select coalesce(jsonb_agg(jsonb_build_array(q.id, q.branch_id, q.step_id, q.archived_at is not null)
+                                                 order by q.id), '[]'::jsonb)
+                        from public.profile_form_questions q where q.tenant_id = ${tenantId}::uuid),
+        'answers', (select coalesce(jsonb_agg(jsonb_build_array(a.id, a.question_id, a.value) order by a.id), '[]'::jsonb)
+                      from public.profile_form_answers a where a.tenant_id = ${tenantId}::uuid)
+      )::text as j`;
+    return row?.j ?? '';
+  }
+
+  for (const variant of ['ascending', 'descending'] as const) {
+    it(`copies the depth-3 tree with the ids sorted ${variant}: every branch, question and answer lands with the same ids and the chain intact, with no row of another tenant`, async () => {
+      try {
+        const f = await seedDepth3(variant);
+        const target = await freshTarget(labId);
+        const src = side(source, labId, 'p0');
+        const tgt = side(target, labId, 'tb');
+        const plan = await planMove(src, tgt);
+        expect(plan.uncovered).toEqual([]);
+        expect(plan.schemaMismatch).toEqual([]);
+        assertCoverage(plan);
+        expect(plan.groups.find((g) => g.includes('profile_form_branches'))).toEqual([
+          'profile_form_branches',
+          'profile_form_questions',
+        ]);
+
+        await copyAuth(src, tgt);
+        const rows = await copyRows(plan, src, tgt);
+        const copied = (table: string) => rows.tables.find((t) => t.name === table)?.inserted;
+        expect(copied('profile_form_steps')).toBe(1);
+        expect(copied('profile_form_branches')).toBe(4);
+        expect(copied('profile_form_questions')).toBe(6);
+        expect(copied('profile_form_answers')).toBe(6);
+        expect((await verifyCopy(plan, src, tgt)).ok).toBe(true);
+
+        // The multiset of ids, the chains (branch of each question, opener and values of each branch), the
+        // archive marks and the answer values are the source's, row for row.
+        expect((await formOf(target, labId)) === (await formOf(source, labId))).toBe(true);
+
+        // Adjacency: no branch without its opener, no question naming a branch that is not there.
+        const [orphans] = await target<{ branches: number; questions: number }[]>`
+          select (select count(*)::int from public.profile_form_branches b
+                   where b.tenant_id = ${labId}::uuid
+                     and not exists (select 1 from public.profile_form_questions o
+                                      where o.tenant_id = b.tenant_id and o.id = b.opener_question_id)) as branches,
+                 (select count(*)::int from public.profile_form_questions q
+                   where q.tenant_id = ${labId}::uuid and q.branch_id is not null
+                     and not exists (select 1 from public.profile_form_branches b
+                                      where b.tenant_id = q.tenant_id and b.id = q.branch_id)) as questions`;
+        expect(orphans).toEqual({ branches: 0, questions: 0 });
+
+        // The answers of the archived branch and of the archived question in the active one are there.
+        const kept = await target`
+          select a.question_id::text as question_id from public.profile_form_answers a
+           where a.tenant_id = ${labId}::uuid and a.question_id in (${f.q.Q5 as string}::uuid, ${f.q.Q6 as string}::uuid)`;
+        expect(kept).toHaveLength(2);
+
+        // T-12.2-09: not one row of another tenant crossed.
+        const [foreign] = await target<{ n: number }[]>`
+          select (select count(*)::int from public.profile_form_branches where tenant_id <> ${labId}::uuid)
+               + (select count(*)::int from public.profile_form_questions where tenant_id <> ${labId}::uuid)
+               + (select count(*)::int from public.profile_form_answers where tenant_id <> ${labId}::uuid)
+               + (select count(*)::int from public.profile_form_steps where tenant_id <> ${labId}::uuid) as n`;
+        expect(foreign?.n).toBe(0);
+        const [demoRows] = await target<{ n: number }[]>`
+          select count(*)::int as n from public.profile_form_questions
+           where id = any(${f.demoIds}::uuid[])`;
+        expect(demoRows?.n).toBe(0);
+
+        // A second run inserts nothing.
+        const again = await copyRows(plan, src, tgt);
+        expect(again.tables.every((t) => t.inserted === 0)).toBe(true);
+      } finally {
+        await removeProfileFormByPrefix(MV);
+      }
+    }, 180_000);
+  }
+
+  it('PFORM-55 empty: a tenant with questions and no branch copies as before, with nothing to copy in the branches table', async () => {
+    const member = await labMemberId();
+    const stepId = crypto.randomUUID();
+    const questionId = crypto.randomUUID();
+    try {
+      await adminSql`
+        insert into public.profile_form_steps (id, tenant_id, title, position)
+        values (${stepId}::uuid, ${labId}::uuid, ${`${MV}Etapa sem ramo`}, 1)`;
+      await adminSql`
+        insert into public.profile_form_questions
+          (id, tenant_id, step_id, type, title, required, position, options, limits, allow_other,
+           show_on_profile, created_by_user_id)
+        values (${questionId}::uuid, ${labId}::uuid, ${stepId}::uuid, 'short_text', ${`${MV}Sem ramo`}, false, 1,
+                '[]'::jsonb, '{}'::jsonb, false, false, ${member}::uuid)`;
+      await seedProfileFormAnswer({
+        tenantId: labId,
+        questionId,
+        userId: member,
+        value: 'sem ramo',
+      });
+      const target = await freshTarget(labId);
+      const src = side(source, labId, 'p0');
+      const tgt = side(target, labId, 'tb');
+      const plan = await planMove(src, tgt);
+      assertCoverage(plan);
+      await copyAuth(src, tgt);
+      const rows = await copyRows(plan, src, tgt);
+      const copied = (table: string) => rows.tables.find((t) => t.name === table)?.inserted;
+      expect(copied('profile_form_branches')).toBe(0);
+      expect(copied('profile_form_questions')).toBe(1);
+      expect(copied('profile_form_answers')).toBe(1);
+      expect((await verifyCopy(plan, src, tgt)).ok).toBe(true);
+      const [branches] = await target<{ n: number }[]>`
+        select count(*)::int as n from public.profile_form_branches`;
+      expect(branches?.n).toBe(0);
     } finally {
       await removeProfileFormByPrefix(MV);
     }

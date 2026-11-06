@@ -972,3 +972,380 @@ describe('Phase 12.1 (PFORM-40): the steps and conditions migrations reach a pro
     expect(await snapshot()).toEqual(answersBefore);
   }, 300_000);
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// Phase 12.2 (PFORM-55, D-640, T-12.2-18): the two branch files fan out onto 12.1 rows, legacy conditions included
+// ---------------------------------------------------------------------------------------------------------
+
+describe('Phase 12.2 (PFORM-55): the branches migrations reach a project that already holds Phase 12.1 rows with per-question conditions', () => {
+  /** B at the Phase 12.1 schema: the two branch files are the pending tail of the tenant set. */
+  async function behindByTheBranchFiles() {
+    const all = await readMigrationDir(defaultMigrationDir('tenant'), 'tenant');
+    // The versions are READ from the files, so regenerating a migration cannot break this case.
+    const branchVersions = all
+      .filter((file) => /profile_form_branches/.test(file.name))
+      .map((file) => file.version);
+    expect(
+      branchVersions,
+      'the generated and the hand written Phase 12.2 files are in the tenant set',
+    ).toHaveLength(2);
+    expect([...branchVersions].sort()).toEqual(branchVersions);
+    const first = all.findIndex((file) => file.version === branchVersions[0]);
+    for (const file of all.filter((candidate) => /profile_form_steps/.test(candidate.name))) {
+      expect(all.findIndex((candidate) => candidate.version === file.version)).toBeLessThan(first);
+    }
+    const behind = all.length - first;
+    return { branchVersions, behind, files: await laggingB(behind) };
+  }
+
+  const userRow = (b: postgres.Sql, id: string, email: string) => b`
+    insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    values ('00000000-0000-0000-0000-000000000000', ${id}::uuid, 'authenticated', 'authenticated', ${email},
+            'x', now(), '{}'::jsonb, '{}'::jsonb, now(), now())`;
+
+  const branchesOfB = () =>
+    onB(
+      async (b) =>
+        b<
+          {
+            id: string;
+            tenant_id: string;
+            opener: string;
+            open_values: string[];
+            name: string | null;
+          }[]
+        >`
+          select id::text as id, tenant_id::text as tenant_id, opener_question_id::text as opener,
+                 open_values, name
+            from public.profile_form_branches order by tenant_id, opener_question_id, open_values, id`,
+    );
+
+  it('converts every legacy condition into one branch per distinct (opener, sorted values), keeps the legacy columns and every answer, keeps the previous API revision working, and a second run applies nothing (T-12.2-18)', async () => {
+    const { branchVersions, behind, files } = await behindByTheBranchFiles();
+    const f = await register('pform122');
+
+    const tenantId = crypto.randomUUID();
+    const quiet = crypto.randomUUID();
+    const userA = crypto.randomUUID();
+    const userB = crypto.randomUUID();
+    const [op1, op2, plain, d1, d2, d3, d4, d5, d6, quietOne, quietTwo] = Array.from(
+      { length: 11 },
+      () => crypto.randomUUID(),
+    ) as [string, string, string, string, string, string, string, string, string, string, string];
+    const yes = crypto.randomUUID();
+    const no = crypto.randomUUID();
+    const sortedPair = [yes, no].sort();
+    const reversedPair = [...sortedPair].reverse();
+    const email = (tag: string) => `fan-${tag}-${RUN}@example.test`;
+
+    await onB(async (b) => {
+      await b`
+        insert into public.tenants (id, slug, display_name, rules_text, rules_version)
+        values (${tenantId}::uuid, ${`ma-122-${RUN}`}, 'Tenant fan-out 12.2', 'Regras.', 1),
+               (${quiet}::uuid, ${`ma-122q-${RUN}`}, 'Tenant sem condicao', 'Regras.', 1)`;
+      await b`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'profile_form', true)`;
+      await userRow(b, userA, email('a'));
+      await userRow(b, userB, email('b'));
+      await b`
+        insert into public.memberships (tenant_id, user_id, role, status)
+        values (${tenantId}::uuid, ${userA}::uuid, 'member', 'active'),
+               (${tenantId}::uuid, ${userB}::uuid, 'member', 'active')`;
+      const options = b.json([
+        { id: yes, label: 'Sim' },
+        { id: no, label: 'Não' },
+      ] as never);
+      // The Phase 12.1 shape: a condition is a pair of columns of the dependent question.
+      await b`
+        insert into public.profile_form_questions
+          (id, tenant_id, type, title, required, position, options, show_on_profile, created_by_user_id,
+           archived_at, condition_question_id, condition_values)
+        values
+          (${op1}::uuid, ${tenantId}::uuid, 'single_choice', 'Fan-out abridora', false, 1, ${options}, true,
+           ${userA}::uuid, null, null, null),
+          (${op2}::uuid, ${tenantId}::uuid, 'yes_no', 'Fan-out sim ou nao', false, 2, '[]'::jsonb, false,
+           ${userA}::uuid, null, null, null),
+          (${plain}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out texto', true, 3, '[]'::jsonb, false,
+           ${userA}::uuid, null, null, null),
+          (${d1}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out D1 respondida', true, 4, '[]'::jsonb, false,
+           ${userA}::uuid, null, ${op1}::uuid, ${b.array([yes])}),
+          (${d2}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out D2 arquivada', false, 5, '[]'::jsonb, false,
+           ${userA}::uuid, now(), ${op1}::uuid, ${b.array([yes])}),
+          (${d3}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out D3 dois valores', false, 6, '[]'::jsonb, false,
+           ${userA}::uuid, null, ${op1}::uuid, ${b.array(sortedPair)}),
+          (${d4}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out D4 mesmos valores em outra ordem', false, 7,
+           '[]'::jsonb, false, ${userA}::uuid, now(), ${op1}::uuid, ${b.array(reversedPair)}),
+          (${d5}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out D5 publica sob abridora privada', false, 8,
+           '[]'::jsonb, true, ${userA}::uuid, null, ${op2}::uuid, ${b.array(['true'])}),
+          (${d6}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out D6 publica sob abridora publica', false, 9,
+           '[]'::jsonb, true, ${userA}::uuid, null, ${op1}::uuid, ${b.array([yes])}),
+          (${quietOne}::uuid, ${quiet}::uuid, 'short_text', 'Fan-out calma 1', false, 1, '[]'::jsonb, false,
+           ${userA}::uuid, null, null, null),
+          (${quietTwo}::uuid, ${quiet}::uuid, 'short_text', 'Fan-out calma 2', false, 2, '[]'::jsonb, false,
+           ${userA}::uuid, null, null, null)`;
+      await b`
+        insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+        select m.tenant_id, v.q, m.id, m.user_id, v.value
+          from public.memberships m
+          join (values (${op1}::uuid, ${userA}::uuid, ${b.json({ optionId: yes, otherText: null } as never)}),
+                       (${plain}::uuid, ${userA}::uuid, ${b.json('texto A' as never)}),
+                       (${d1}::uuid, ${userA}::uuid, ${b.json('resposta A' as never)}),
+                       (${d2}::uuid, ${userA}::uuid, ${b.json('arquivada A' as never)}))
+               as v(q, u, value) on v.u = m.user_id
+         where m.tenant_id = ${tenantId}::uuid`;
+    });
+
+    const answers = () =>
+      onB(
+        async (b) =>
+          b<
+            {
+              id: string;
+              question_id: string;
+              membership_id: string;
+              value: unknown;
+              created: string;
+              updated: string;
+            }[]
+          >`
+            select id::text as id, question_id::text as question_id, membership_id::text as membership_id,
+                   value, created_at::text as created, updated_at::text as updated
+              from public.profile_form_answers order by id`,
+      );
+    const legacyOf = () =>
+      onB(
+        async (b) =>
+          b<
+            {
+              id: string;
+              condition: string | null;
+              condition_values: string | null;
+              revision: number;
+              updated: string;
+              archived: boolean;
+              shown: boolean;
+            }[]
+          >`
+            select id::text as id, condition_question_id::text as condition, condition_values::text as condition_values,
+                   revision, updated_at::text as updated, archived_at is not null as archived,
+                   show_on_profile as shown
+              from public.profile_form_questions where tenant_id in (${tenantId}::uuid, ${quiet}::uuid) order by id`,
+      );
+    const answersBefore = await answers();
+    expect(answersBefore).toHaveLength(4);
+    const legacyBefore = await legacyOf();
+    expect(legacyBefore).toHaveLength(11);
+    // Before: the branches table does not exist in B.
+    expect(
+      await onB(async (b) => {
+        const [row] = await b<
+          { t: string | null }[]
+        >`select to_regclass('public.profile_form_branches')::text as t`;
+        return row?.t;
+      }),
+    ).toBeNull();
+    expect((await ledgerOfB()).count).toBe(files.length - behind);
+
+    const run = await migrateAll({ concurrency: 2 });
+    expect(run.exitCode).toBe(0);
+    expect(lineOf(run.lines, f.ref)).toMatchObject({ status: 'current', applied: behind });
+
+    // One branch per distinct (opener, sorted values) of the tenant that held conditions: three, with no name,
+    // none for the tenant that held none.
+    const branches = await branchesOfB();
+    expect(branches.every((row) => row.tenant_id === tenantId)).toBe(true);
+    expect(branches.every((row) => row.name === null)).toBe(true);
+    const shapeOf = (rows: { opener: string; open_values: string[] }[]) =>
+      rows.map((row) => `${row.opener}|${row.open_values.join(',')}`).sort();
+    expect(shapeOf(branches)).toEqual(
+      shapeOf([
+        { opener: op1, open_values: [yes] },
+        { opener: op1, open_values: sortedPair },
+        { opener: op2, open_values: ['true'] },
+      ]),
+    );
+
+    // Every dependent points at ITS branch (archived ones included), every other question at none.
+    const links = await onB(
+      async (b) =>
+        b<{ id: string; opener: string | null; open_values: string[] | null }[]>`
+          select q.id::text as id, br.opener_question_id::text as opener, br.open_values
+            from public.profile_form_questions q
+            left join public.profile_form_branches br on br.tenant_id = q.tenant_id and br.id = q.branch_id
+           where q.tenant_id in (${tenantId}::uuid, ${quiet}::uuid)`,
+    );
+    const linkOf = (id: string) => links.find((row) => row.id === id);
+    for (const id of [op1, op2, plain, quietOne, quietTwo]) {
+      expect(linkOf(id)).toMatchObject({ opener: null, open_values: null });
+    }
+    for (const id of [d1, d2, d6]) {
+      expect(linkOf(id)).toMatchObject({ opener: op1, open_values: [yes] });
+    }
+    for (const id of [d3, d4]) {
+      expect(linkOf(id)).toMatchObject({ opener: op1, open_values: sortedPair });
+    }
+    expect(linkOf(d5)).toMatchObject({ opener: op2, open_values: ['true'] });
+
+    // The legacy columns, the revisions and the timestamps are unchanged; the only edit is the privacy-safe one:
+    // the public dependent of the private opener became private.
+    const legacyAfter = await legacyOf();
+    expect(legacyAfter).toEqual(
+      legacyBefore.map((row) => (row.id === d5 ? { ...row, shown: false } : row)),
+    );
+    // T-12.2-18: not one answer changed (same ids, values and timestamps), and none was lost.
+    const answersAfter = await answers();
+    expect(answersAfter).toEqual(answersBefore);
+
+    // The previous API revision keeps working: the signatures of the gate and of the purge are unchanged, the
+    // `_v2` lock still returns the active questions with their legacy condition columns, and the gate reads the
+    // converted branches.
+    const signatures = await onB(
+      async (b) =>
+        b<{ proname: string; args: string; result: string }[]>`
+          select p.proname, pg_get_function_identity_arguments(p.oid) as args,
+                 pg_get_function_result(p.oid) as result
+            from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where n.nspname = 'app' and p.proname in ('profile_form_missing', 'profile_form_purge_closed')
+           order by p.proname`,
+    );
+    expect(signatures).toEqual([
+      {
+        proname: 'profile_form_missing',
+        args: 'p_tenant uuid, p_membership uuid',
+        result: 'integer',
+      },
+      { proname: 'profile_form_purge_closed', args: '', result: 'TABLE(question_id uuid)' },
+    ]);
+    const claims = (userId: string) =>
+      JSON.stringify({
+        sub: userId,
+        role: 'authenticated',
+        tenant_id: tenantId,
+        tenant_role: 'member',
+      });
+    const asMember = <T>(userId: string, run: (tx: postgres.TransactionSql) => Promise<T>) =>
+      onB(
+        (b) =>
+          b.begin(async (tx) => {
+            await tx`select set_config('request.jwt.claims', ${claims(userId)}, true)`;
+            await tx.unsafe('set local role authenticated');
+            return run(tx);
+          }) as Promise<T>,
+      );
+    const locked = await asMember(
+      userA,
+      (tx) =>
+        tx<{ id: string; condition_question_id: string | null }[]>`
+          select id::text as id, condition_question_id::text as condition_question_id
+            from app.profile_form_lock_active_v2()`,
+    );
+    expect(locked).toHaveLength(7);
+    expect(locked.find((row) => row.id === d1)?.condition_question_id).toBe(op1);
+    const purged = await asMember(
+      userA,
+      (tx) => tx`select question_id::text as question_id from app.profile_form_purge_closed()`,
+    );
+    expect(purged).toHaveLength(0);
+    const membership = (userId: string) =>
+      onB(async (b) => {
+        const [row] = await b<{ id: string }[]>`
+          select id::text as id from public.memberships
+           where tenant_id = ${tenantId}::uuid and user_id = ${userId}::uuid`;
+        return row?.id ?? '';
+      });
+    const gate = (membershipId: string) =>
+      onB(async (b) => {
+        const [row] = await b<{ n: number }[]>`
+          select app.profile_form_missing(${tenantId}::uuid, ${membershipId}::uuid) as n`;
+        return row?.n;
+      });
+    // A answered the required text and the required question of the branch she opened: owes nothing. B answered
+    // nothing: owes the unconditional one only, the conditional one is hidden until the opener says Sim.
+    expect(await gate(await membership(userA))).toBe(0);
+    expect(await gate(await membership(userB))).toBe(1);
+    await onB(async (b) => {
+      await b`
+        insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+        select m.tenant_id, ${op1}::uuid, m.id, m.user_id, ${b.json({ optionId: yes, otherText: null } as never)}
+          from public.memberships m
+         where m.tenant_id = ${tenantId}::uuid and m.user_id = ${userB}::uuid`;
+    });
+    expect(await gate(await membership(userB))).toBe(2);
+
+    // The ledger lists the two files, in order, and the project is current.
+    const listed = await onB(async (b) => {
+      const rows = await b<{ version: string }[]>`
+        select version from supabase_migrations.schema_migrations
+         where version = any(${[...branchVersions]}::text[]) order by version`;
+      return rows.map((row) => row.version);
+    });
+    expect(listed).toEqual([...branchVersions]);
+    const head = files.at(-1)?.version;
+    expect(await ledgerOfB()).toEqual({ count: files.length, head });
+    expect(await stateOf(f.projectId)).toMatchObject({ status: 'current', error_code: null });
+
+    // The second run is a no-op: nothing applied, nothing converted twice, the ledger and the state unchanged.
+    const branchesBeforeSecond = await branchesOfB();
+    const legacyBeforeSecond = await legacyOf();
+    const second = await migrateAll({ concurrency: 2 });
+    expect(second.exitCode).toBe(0);
+    expect(lineOf(second.lines, f.ref)).toMatchObject({ status: 'current', applied: 0 });
+    expect(await ledgerOfB()).toEqual({ count: files.length, head });
+    expect(await branchesOfB()).toEqual(branchesBeforeSecond);
+    expect(await legacyOf()).toEqual(legacyBeforeSecond);
+  }, 300_000);
+
+  it('a project with no legacy condition: the conversion writes no branch and leaves every question and answer as it was', async () => {
+    const { behind, files } = await behindByTheBranchFiles();
+    const f = await register('pform122e');
+    const tenantId = crypto.randomUUID();
+    const userA = crypto.randomUUID();
+    const one = crypto.randomUUID();
+    const two = crypto.randomUUID();
+    await onB(async (b) => {
+      await b`
+        insert into public.tenants (id, slug, display_name, rules_text, rules_version)
+        values (${tenantId}::uuid, ${`ma-122e-${RUN}`}, 'Tenant fan-out sem condicao', 'Regras.', 1)`;
+      await userRow(b, userA, `fan-e-${RUN}@example.test`);
+      await b`
+        insert into public.memberships (tenant_id, user_id, role, status)
+        values (${tenantId}::uuid, ${userA}::uuid, 'member', 'active')`;
+      await b`
+        insert into public.profile_form_questions
+          (id, tenant_id, type, title, required, position, options, created_by_user_id)
+        values (${one}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out simples 1', true, 1, '[]'::jsonb, ${userA}::uuid),
+               (${two}::uuid, ${tenantId}::uuid, 'short_text', 'Fan-out simples 2', false, 2, '[]'::jsonb, ${userA}::uuid)`;
+      await b`
+        insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+        select m.tenant_id, ${one}::uuid, m.id, m.user_id, ${b.json('resposta' as never)}
+          from public.memberships m
+         where m.tenant_id = ${tenantId}::uuid and m.user_id = ${userA}::uuid`;
+    });
+    const answers = () =>
+      onB(
+        async (b) =>
+          b<{ id: string; value: unknown; updated: string }[]>`
+            select id::text as id, value, updated_at::text as updated
+              from public.profile_form_answers order by id`,
+      );
+    const before = await answers();
+    expect(before).toHaveLength(1);
+
+    const run = await migrateAll({ concurrency: 2 });
+    expect(run.exitCode).toBe(0);
+    expect(lineOf(run.lines, f.ref)).toMatchObject({ status: 'current', applied: behind });
+
+    expect(await branchesOfB()).toEqual([]);
+    const linked = await onB(async (b) => {
+      const [row] = await b<{ n: number }[]>`
+        select count(*)::int as n from public.profile_form_questions
+         where tenant_id = ${tenantId}::uuid and branch_id is not null`;
+      return row?.n;
+    });
+    expect(linked).toBe(0);
+    expect(await answers()).toEqual(before);
+    expect(await ledgerOfB()).toEqual({ count: files.length, head: files.at(-1)?.version });
+  }, 300_000);
+});
