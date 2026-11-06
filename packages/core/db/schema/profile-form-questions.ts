@@ -66,6 +66,14 @@ const TENANT_ADMIN = sql`tenant_id = app.tenant_id() and app.tenant_role() = 'ad
  * both are NO ACTION, never RESTRICT: RESTRICT is checked per row, and a fixture or a sweep deletes an
  * opener and its dependent in one statement (the service raises the coded refusal first).
  *
+ * A QUESTION MAY BELONG TO ONE BRANCH (Phase 12.2; D-640, D-641). `branch_id` replaces the per-question condition
+ * above: the branch (`profile_form_branches`) names the opener and the values, and several questions share it. The
+ * opener and the branch reference each other, so BOTH composite keys, `(tenant_id, branch_id)` here and
+ * `(tenant_id, opener_question_id)` on the branch, must be DEFERRABLE and are hand SQL in
+ * `*_profile_form_branches_functions.sql` (drizzle-kit cannot express DEFERRABLE); this schema declares neither, so
+ * the snapshot stays honest. The 12.1 condition columns stay for one release as an unused legacy pair (writes are
+ * refused by the PF010 guard); a later cleanup release drops them and the move planner's self-reference entry.
+ *
  * POLICIES: every tenant lane with a real role reads the active questions; archived ones are staff-only; only
  * `admin_tenant` writes. Members and `support_tenant` write nothing.
  */
@@ -95,6 +103,8 @@ export const profileFormQuestions = pgTable(
     conditionQuestionId: uuid('condition_question_id'),
     /** D-621: the tokens of the opener's answer that show this question; null exactly when the opener is null. */
     conditionValues: text('condition_values').array(),
+    /** D-640, D-641: the branch this question belongs to (shown only while the branch is open); null = always shown. No key declared here, see the header. */
+    branchId: uuid('branch_id'),
     /** Soft state (SCHEMA-CONVENTIONS (d)2): an archived question leaves the form, its answers stay (D-588). */
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     /** Set on create and on reactivate; drives the "new optional" notice (D-586). */
@@ -154,6 +164,10 @@ export const profileFormQuestions = pgTable(
       name: 'profile_form_questions_condition_fk',
     }),
     index('profile_form_questions_step_idx').on(t.tenantId, t.stepId),
+    // Phase 12.2 (D-641): the members of a branch. No foreign key on `branch_id` here (see the header).
+    index('profile_form_questions_branch_idx')
+      .on(t.tenantId, t.branchId)
+      .where(sql`${t.branchId} is not null`),
     index('profile_form_questions_condition_idx')
       .on(t.tenantId, t.conditionQuestionId)
       .where(sql`${t.conditionQuestionId} is not null`),

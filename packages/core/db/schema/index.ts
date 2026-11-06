@@ -13,6 +13,7 @@ export * from './payment-integrations';
 export * from './payment-products';
 export * from './platform-admins';
 export * from './profile-form-answers';
+export * from './profile-form-branches';
 export * from './profile-form-questions';
 export * from './profile-form-steps';
 export * from './tenant-domains';
