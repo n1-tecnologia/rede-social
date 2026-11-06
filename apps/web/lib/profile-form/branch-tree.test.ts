@@ -8,11 +8,16 @@ import {
   branchLevel,
   buildBranchTree,
   countsOf,
+  eligibleBranchesFor,
+  eligibleOpenersFor,
+  flowTree,
   opensCountOf,
+  publicUnderPrivateTitles,
   referencedOptionCounts,
   type StepNode,
   stepTree,
 } from './branch-tree';
+import { describeBranch } from './describe-branch';
 import {
   ADMIN_STEP_ID,
   adminBranch,
@@ -277,5 +282,382 @@ describe('runs, order and the empty branch (D-642, D-643)', () => {
     stepTree(tree, ADMIN_STEP_ID);
     countsOf(tree, clinicId('B1'));
     expect(JSON.stringify(list)).toBe(before);
+  });
+});
+
+// ── Task 2: eligibility, privacy pre-checks and the Fluxo (D-644, D-646, D-649) ───────────────────
+
+/** The clinic tree with some questions changed, by key (`Q1`..`Q7`); a branch changed, by key (`B1`..`B4`). */
+const clinicWith = (
+  questions: Record<string, Partial<AdminQuestion>> = {},
+  branches: Record<string, Partial<ReturnType<typeof adminBranch>>> = {},
+) => {
+  const list = clinicAdminList();
+  const keyOfQuestion = (id: string) =>
+    ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7'].find((k) => clinicId(k) === id);
+  const keyOfBranch = (id: string) => ['B1', 'B2', 'B3', 'B4'].find((k) => clinicId(k) === id);
+  return buildBranchTree({
+    steps: list.steps,
+    questions: list.questions.map((q) => ({ ...q, ...questions[keyOfQuestion(q.id) ?? ''] })),
+    branches: (list.branches ?? []).map((b) => ({ ...b, ...branches[keyOfBranch(b.id) ?? ''] })),
+  });
+};
+const branchIds = (result: { branches: { id: string }[] }) => result.branches.map((b) => b.id);
+const keys = (found: readonly { id: string }[]) =>
+  found.map((item) =>
+    ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'B1', 'B2', 'B3', 'B4'].find(
+      (k) => clinicId(k) === item.id,
+    ),
+  );
+const subject = (key: string, showOnProfile = false) => ({ id: clinicId(key), showOnProfile });
+
+describe('eligibleBranchesFor: the branches a question may enter (D-641, D-644, D-646, UI-D-669)', () => {
+  it('lists the branches whose opener comes strictly before a new question, in opener order', () => {
+    const result = eligibleBranchesFor({ id: null, showOnProfile: false }, clinicWith());
+    expect(keys(result.branches)).toEqual(['B1', 'B4', 'B2', 'B3']);
+    expect(result.leftOutForPrivacy).toBe(false);
+  });
+
+  it('on a form where only Q1 precedes, a new question may enter B1 and B4 only', () => {
+    const s = adminStep({ id: uuid(901), position: 1 });
+    const q1 = adminQuestion('single_choice', { id: uuid(10), stepId: s.id });
+    const b1 = adminBranch({ id: uuid(950), openerQuestionId: q1.id, values: ['a'] });
+    const b4 = adminBranch({ id: uuid(951), openerQuestionId: q1.id, values: ['b'] });
+    const q2 = adminQuestion('short_text', { id: uuid(11), stepId: s.id, branchId: b1.id });
+    const tree = buildBranchTree({ steps: [s], questions: [q1, q2], branches: [b1, b4] });
+    expect(branchIds(eligibleBranchesFor({ id: null, showOnProfile: false }, tree))).toEqual([
+      b1.id,
+      b4.id,
+    ]);
+  });
+
+  it('an existing question needs its opener to come before it and not be itself or below itself', () => {
+    const tree = clinicWith();
+    expect(keys(eligibleBranchesFor(subject('Q1'), tree).branches)).toEqual([]);
+    // Q2 opens B2 (height 2): B2 and B3 hang below it, B3 opens after it.
+    expect(keys(eligibleBranchesFor(subject('Q2'), tree).branches)).toEqual(['B1', 'B4']);
+    // Q5 opens B3: B3 is its own, and B2 (opener Q2, level 2) plus B3 (height 1) still fits.
+    expect(keys(eligibleBranchesFor(subject('Q5'), tree).branches)).toEqual(['B1', 'B4', 'B2']);
+    // Q4 sits in B2 and opens nothing: B3 opens on Q5, after it.
+    expect(keys(eligibleBranchesFor(subject('Q4'), tree).branches)).toEqual(['B1', 'B4', 'B2']);
+  });
+
+  it('keeps the level plus the height of the question own sub-branches within three levels', () => {
+    const s = adminStep({ id: uuid(901), position: 1 });
+    const a = adminQuestion('yes_no', { id: uuid(10), stepId: s.id });
+    const ba = adminBranch({ id: uuid(950), openerQuestionId: a.id, values: ['true'] });
+    const b = adminQuestion('yes_no', { id: uuid(11), stepId: s.id, branchId: ba.id });
+    const bb = adminBranch({ id: uuid(951), openerQuestionId: b.id, values: ['true'] });
+    const c = adminQuestion('yes_no', { id: uuid(12), stepId: s.id, branchId: bb.id });
+    const bc = adminBranch({ id: uuid(952), openerQuestionId: c.id, values: ['true'] });
+    const d = adminQuestion('short_text', { id: uuid(13), stepId: s.id, branchId: bc.id });
+    const x = adminQuestion('yes_no', { id: uuid(14), stepId: s.id });
+    const bx = adminBranch({ id: uuid(953), openerQuestionId: x.id, values: ['true'] });
+    const y = adminQuestion('short_text', { id: uuid(15), stepId: s.id, branchId: bx.id });
+    const tree = buildBranchTree({
+      steps: [s],
+      questions: [a, b, c, d, x, y],
+      branches: [ba, bb, bc, bx],
+    });
+    expect(branchLevel(tree, bc.id)).toBe(3);
+    // x opens bx (height 1): it may enter ba (1+1) and bb (2+1), not bc (3+1) and not its own bx.
+    expect(branchIds(eligibleBranchesFor({ id: x.id, showOnProfile: false }, tree))).toEqual([
+      ba.id,
+      bb.id,
+    ]);
+    // a new question may enter any of the four, level 3 included: it opens nothing.
+    expect(branchIds(eligibleBranchesFor({ id: null, showOnProfile: false }, tree))).toEqual([
+      ba.id,
+      bb.id,
+      bc.id,
+      bx.id,
+    ]);
+    // y opens nothing and sits last: all four openers precede it.
+    expect(branchIds(eligibleBranchesFor({ id: y.id, showOnProfile: false }, tree))).toEqual([
+      ba.id,
+      bb.id,
+      bc.id,
+      bx.id,
+    ]);
+  });
+
+  it('leaves out an archived branch', () => {
+    const tree = clinicWith({}, { B4: { archivedAt: '2026-10-01T00:00:00.000Z' } });
+    expect(keys(eligibleBranchesFor({ id: null, showOnProfile: false }, tree).branches)).toEqual([
+      'B1',
+      'B2',
+      'B3',
+    ]);
+  });
+
+  it('a new question going into a step only sees openers of that step or the ones before it', () => {
+    const s1 = adminStep({ id: uuid(901), position: 1 });
+    const s2 = adminStep({ id: uuid(902), position: 2 });
+    const first = adminQuestion('yes_no', { id: uuid(10), stepId: s1.id });
+    const later = adminQuestion('yes_no', { id: uuid(11), stepId: s2.id });
+    const bFirst = adminBranch({ id: uuid(950), openerQuestionId: first.id, values: ['true'] });
+    const bLater = adminBranch({ id: uuid(951), openerQuestionId: later.id, values: ['true'] });
+    const tree = buildBranchTree({
+      steps: [s1, s2],
+      questions: [first, later],
+      branches: [bFirst, bLater],
+    });
+    expect(
+      branchIds(eligibleBranchesFor({ id: null, showOnProfile: false, stepId: s1.id }, tree)),
+    ).toEqual([bFirst.id]);
+    expect(
+      branchIds(eligibleBranchesFor({ id: null, showOnProfile: false, stepId: s2.id }, tree)),
+    ).toEqual([bFirst.id, bLater.id]);
+    expect(branchIds(eligibleBranchesFor({ id: null, showOnProfile: false }, tree))).toEqual([
+      bFirst.id,
+      bLater.id,
+    ]);
+  });
+
+  it('a public question never enters a branch whose chain holds a private opener, and says so (UI-D-675)', () => {
+    const allPrivate = clinicWith();
+    const none = eligibleBranchesFor({ id: null, showOnProfile: true }, allPrivate);
+    expect(none.branches).toEqual([]);
+    expect(none.leftOutForPrivacy).toBe(true);
+
+    const q1Public = clinicWith({ Q1: { showOnProfile: true } });
+    const some = eligibleBranchesFor({ id: null, showOnProfile: true }, q1Public);
+    expect(keys(some.branches)).toEqual(['B1', 'B4']);
+    expect(some.leftOutForPrivacy).toBe(true);
+
+    const allPublic = clinicWith({
+      Q1: { showOnProfile: true },
+      Q2: { showOnProfile: true },
+      Q5: { showOnProfile: true },
+    });
+    const every = eligibleBranchesFor({ id: null, showOnProfile: true }, allPublic);
+    expect(keys(every.branches)).toEqual(['B1', 'B4', 'B2', 'B3']);
+    expect(every.leftOutForPrivacy).toBe(false);
+
+    const privateSubject = eligibleBranchesFor({ id: null, showOnProfile: false }, allPrivate);
+    expect(keys(privateSubject.branches)).toEqual(['B1', 'B4', 'B2', 'B3']);
+    expect(privateSubject.leftOutForPrivacy).toBe(false);
+  });
+
+  it('does not say a branch was left out for privacy when it was left out for another reason', () => {
+    const tree = clinicWith({}, { B4: { archivedAt: '2026-10-01T00:00:00.000Z' } });
+    const result = eligibleBranchesFor(subject('Q1', true), tree);
+    expect(result.leftOutForPrivacy).toBe(false);
+  });
+
+  it('is a pure function of the read: the same input gives the same output and nothing is changed', () => {
+    const list = clinicAdminList();
+    const before = JSON.stringify(list);
+    const tree = buildBranchTree({
+      steps: list.steps,
+      questions: list.questions,
+      branches: list.branches,
+    });
+    const first = eligibleBranchesFor(subject('Q5'), tree);
+    const second = eligibleBranchesFor(subject('Q5'), tree);
+    expect(second).toEqual(first);
+    expect(JSON.stringify(list)).toBe(before);
+  });
+});
+
+describe('eligibleOpenersFor: the questions that may open a branch (D-641, D-644, UI-D-671)', () => {
+  it('for a new branch lists the active questions of the four opener types that fit one more level', () => {
+    expect(keys(eligibleOpenersFor(null, clinicWith()))).toEqual(['Q1', 'Q2', 'Q5']);
+  });
+
+  it('leaves out an opener already at the deepest level', () => {
+    const tree = clinicWith({ Q6: { type: 'yes_no' } });
+    expect(keys(eligibleOpenersFor(null, tree))).toEqual(['Q1', 'Q2', 'Q5']);
+  });
+
+  it('for an existing branch lists only the openers before every question of the branch, fitting its height', () => {
+    const tree = clinicWith();
+    const branch = (key: string) => {
+      const found = tree.branchById.get(clinicId(key));
+      if (found === undefined) throw new Error(key);
+      return found;
+    };
+    expect(keys(eligibleOpenersFor(branch('B1'), tree))).toEqual(['Q1']);
+    expect(keys(eligibleOpenersFor(branch('B2'), tree))).toEqual(['Q1', 'Q2']);
+    expect(keys(eligibleOpenersFor(branch('B3'), tree))).toEqual(['Q1', 'Q2', 'Q5']);
+    expect(keys(eligibleOpenersFor(branch('B4'), tree))).toEqual(['Q1', 'Q2', 'Q5']);
+  });
+
+  it('an opener that would put a public question of the branch under a private opener is left out', () => {
+    const privateTree = clinicWith({ Q4: { showOnProfile: true } });
+    const b2 = privateTree.branchById.get(clinicId('B2'));
+    if (b2 === undefined) throw new Error('B2');
+    expect(keys(eligibleOpenersFor(b2, privateTree))).toEqual([]);
+
+    const publicOpeners = clinicWith({
+      Q4: { showOnProfile: true },
+      Q1: { showOnProfile: true },
+      Q2: { showOnProfile: true },
+    });
+    const b2Again = publicOpeners.branchById.get(clinicId('B2'));
+    if (b2Again === undefined) throw new Error('B2');
+    expect(keys(eligibleOpenersFor(b2Again, publicOpeners))).toEqual(['Q1', 'Q2']);
+  });
+
+  it('is a pure function of the read', () => {
+    const list = clinicAdminList();
+    const before = JSON.stringify(list);
+    const tree = buildBranchTree({
+      steps: list.steps,
+      questions: list.questions,
+      branches: list.branches,
+    });
+    const a = eligibleOpenersFor(null, tree);
+    const b = eligibleOpenersFor(null, tree);
+    expect(b).toEqual(a);
+    expect(JSON.stringify(list)).toBe(before);
+  });
+});
+
+describe('publicUnderPrivateTitles: the titles WR-06 would refuse (PFORM-53, UI-D-675)', () => {
+  it('lists the public questions that have a private opener anywhere on their chain, at depth 1, 2 and 3', () => {
+    const tree = clinicWith({
+      Q3: { showOnProfile: true },
+      Q4: { showOnProfile: true },
+      Q6: { showOnProfile: true },
+    });
+    expect(publicUnderPrivateTitles(tree)).toEqual([
+      'Quantos profissionais?',
+      'Nome do sócio',
+      'Nome da clínica',
+    ]);
+  });
+
+  it('is empty when every opener on the chain is public, or the question is private', () => {
+    expect(publicUnderPrivateTitles(clinicWith())).toEqual([]);
+    const allPublic = clinicWith({
+      Q1: { showOnProfile: true },
+      Q2: { showOnProfile: true },
+      Q5: { showOnProfile: true },
+      Q3: { showOnProfile: true },
+      Q4: { showOnProfile: true },
+      Q6: { showOnProfile: true },
+      Q7: { showOnProfile: true },
+    });
+    expect(publicUnderPrivateTitles(allPublic)).toEqual([]);
+  });
+
+  it('a private opener in the middle of the chain is enough, even when the ones around it are public', () => {
+    const tree = clinicWith({
+      Q1: { showOnProfile: true },
+      Q5: { showOnProfile: true },
+      Q6: { showOnProfile: true },
+    });
+    expect(publicUnderPrivateTitles(tree)).toEqual(['Tem sócio?', 'Nome do sócio']);
+  });
+});
+
+describe('flowTree: the data of the Fluxo (D-649, UI-D-676)', () => {
+  it('has the unconditional questions at the root and the branches under their openers to three levels', () => {
+    const flow = flowTree(clinic());
+    expect(flow.roots.map((q) => q.id)).toEqual([clinicId('Q1')]);
+    const q1 = flow.roots[0];
+    expect(q1?.branches.map((b) => b.id)).toEqual([clinicId('B1'), clinicId('B4')]);
+    const b1 = q1?.branches[0];
+    expect(b1?.questions.map((q) => q.id)).toEqual([clinicId('Q2'), clinicId('Q3')]);
+    const b2 = b1?.questions[0]?.branches[0];
+    expect(b2?.id).toBe(clinicId('B2'));
+    expect(b2?.questions.map((q) => q.id)).toEqual([clinicId('Q4'), clinicId('Q5')]);
+    const b3 = b2?.questions[1]?.branches[0];
+    expect(b3?.id).toBe(clinicId('B3'));
+    expect(b3?.questions.map((q) => q.id)).toEqual([clinicId('Q6')]);
+    expect(b3?.questions[0]?.branches).toEqual([]);
+  });
+
+  it('carries on each question its type, required flag, public flag and step ordinal, and nothing more', () => {
+    const q1 = flowTree(clinicWith({ Q1: { showOnProfile: true, required: true } })).roots[0];
+    expect(q1).toMatchObject({
+      title: 'Você tem clínica, trabalha em clínica ou está aprendendo?',
+      type: 'single_choice',
+      required: true,
+      showOnProfile: true,
+      stepOrdinal: 1,
+    });
+    expect(Object.keys(q1 ?? {}).sort()).toEqual([
+      'branches',
+      'id',
+      'required',
+      'showOnProfile',
+      'stepOrdinal',
+      'title',
+      'type',
+    ]);
+  });
+
+  it('gives each branch its label parts and question count', () => {
+    const list = clinicAdminList();
+    const tree = clinic();
+    const edge = flowTree(tree).roots[0]?.branches[0];
+    expect(edge?.questionCount).toBe(2);
+    expect(Object.keys(edge ?? {}).sort()).toEqual(['id', 'label', 'questionCount', 'questions']);
+    const b1 = list.branches?.[0];
+    expect(edge?.label).toEqual(b1 ? describeBranch(b1, tree.questionById) : null);
+  });
+
+  it('a named branch carries its name and the answers (the admin lane only)', () => {
+    const edge = flowTree(clinicWith({}, { B1: { name: 'Donos de clínica' } })).roots[0]
+      ?.branches[0];
+    expect(edge?.label).toMatchObject({ name: 'Donos de clínica', labels: ['Tenho uma clínica'] });
+  });
+
+  it('shows an empty branch with a zero count, and leaves out an archived branch', () => {
+    const s = adminStep({ id: uuid(901), position: 1 });
+    const opener = adminQuestion('yes_no', { id: uuid(10), stepId: s.id });
+    const empty = adminBranch({ id: uuid(950), openerQuestionId: opener.id, values: ['true'] });
+    const old = adminBranch({
+      id: uuid(951),
+      openerQuestionId: opener.id,
+      values: ['false'],
+      archivedAt: '2026-10-01T00:00:00.000Z',
+    });
+    const flow = flowTree(
+      buildBranchTree({ steps: [s], questions: [opener], branches: [empty, old] }),
+    );
+    const branches = flow.roots[0]?.branches ?? [];
+    expect(branches.map((b) => b.id)).toEqual([empty.id]);
+    expect(branches[0]?.questionCount).toBe(0);
+    expect(branches[0]?.questions).toEqual([]);
+  });
+
+  it('numbers the steps and says how many there are, so the pill shows only with two or more', () => {
+    const s1 = adminStep({ id: uuid(901), position: 1 });
+    const s2 = adminStep({ id: uuid(902), position: 2 });
+    const a = adminQuestion('yes_no', { id: uuid(10), stepId: s1.id });
+    const b = adminBranch({ id: uuid(950), openerQuestionId: a.id, values: ['true'] });
+    const c = adminQuestion('short_text', { id: uuid(11), stepId: s2.id, branchId: b.id });
+    const flow = flowTree(buildBranchTree({ steps: [s1, s2], questions: [a, c], branches: [b] }));
+    expect(flow.stepCount).toBe(2);
+    expect(flow.roots[0]?.stepOrdinal).toBe(1);
+    expect(flow.roots[0]?.branches[0]?.questions[0]?.stepOrdinal).toBe(2);
+    expect(flowTree(clinic()).stepCount).toBe(1);
+  });
+
+  it('draws every question once even when the stored tree has a cycle', () => {
+    const s = adminStep({ id: uuid(901), position: 1 });
+    const a = adminBranch({ id: uuid(957), openerQuestionId: uuid(11), values: ['true'] });
+    const b = adminBranch({ id: uuid(958), openerQuestionId: uuid(10), values: ['true'] });
+    const tree = buildBranchTree({
+      steps: [s],
+      questions: [
+        adminQuestion('yes_no', { id: uuid(10), stepId: s.id, branchId: a.id }),
+        adminQuestion('yes_no', { id: uuid(11), stepId: s.id, branchId: b.id }),
+        adminQuestion('short_text', { id: uuid(12), stepId: s.id }),
+      ],
+      branches: [a, b],
+    });
+    const seen: string[] = [];
+    const walk = (nodes: readonly { id: string; branches: { questions: unknown[] }[] }[]) => {
+      for (const node of nodes) {
+        seen.push(node.id);
+        for (const branch of node.branches) walk(branch.questions as never);
+      }
+    };
+    walk(flowTree(tree).roots);
+    expect([...seen].sort()).toEqual([uuid(10), uuid(11), uuid(12)]);
   });
 });

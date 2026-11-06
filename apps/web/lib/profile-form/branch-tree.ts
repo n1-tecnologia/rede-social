@@ -3,6 +3,7 @@ import {
   type AdminQuestion,
   type AdminStep,
   PROFILE_FORM_LIMITS,
+  type ProfileFormType,
 } from '@rede-social/contracts/profile-form';
 import {
   branchChainOf,
@@ -19,6 +20,8 @@ import {
  * Only the admin lane calls this module: a branch NAME exists only in the admin shapes (T-12.2-03), and no
  * function here reads an answer. Counts, ids, titles and labels are all that leave it (T-12.2-14).
  */
+
+import type { BranchDescription } from './describe-branch';
 
 /** The longest chain of branches above a question (the contracts' limit, D-644). */
 const MAX_LEVEL = PROFILE_FORM_LIMITS.branchDepth;
@@ -362,4 +365,55 @@ export function stepTree(tree: AdminBranchTree, stepId: string): StepNode | null
     }
   }
   return { step, roots };
+}
+
+// ── RED stubs (12.2-13 task 2): deliberately inert, replaced in full by the GREEN commit of the same task ──
+
+/** The part of a question the "Ramo" select needs; `id` is `null` for a question not saved yet. */
+export type EligibilityQuestion = {
+  id: string | null;
+  showOnProfile: boolean;
+  /** The step a NEW question is going into; it lands at the end of that step (or of the form). */
+  stepId?: string | null;
+};
+
+export function eligibleBranchesFor(
+  _question: EligibilityQuestion,
+  _tree: AdminBranchTree,
+): { branches: AdminBranch[]; leftOutForPrivacy: boolean } {
+  return { branches: [], leftOutForPrivacy: false };
+}
+
+export function eligibleOpenersFor(
+  _branch: AdminBranch | null,
+  _tree: AdminBranchTree,
+): AdminQuestion[] {
+  return [];
+}
+
+export function publicUnderPrivateTitles(_tree: AdminBranchTree): string[] {
+  return [];
+}
+
+export type FlowQuestion = {
+  id: string;
+  title: string;
+  type: ProfileFormType;
+  required: boolean;
+  showOnProfile: boolean;
+  stepOrdinal: number;
+  branches: FlowBranch[];
+};
+
+export type FlowBranch = {
+  id: string;
+  label: BranchDescription | null;
+  questionCount: number;
+  questions: FlowQuestion[];
+};
+
+export type FlowTree = { roots: FlowQuestion[]; stepCount: number };
+
+export function flowTree(_tree: AdminBranchTree): FlowTree {
+  return { roots: [], stepCount: 0 };
 }

@@ -231,11 +231,21 @@ export function clinicForm(stored: Record<string, unknown> = {}): MemberForm {
   });
 }
 
-/** The clinic form as the builder reads it (one step, branches with no name). */
+/**
+ * The clinic form as the builder reads it (one step, branches with no name). The questions are stored in TREE
+ * order, as the server always stores them (D-652): Q1, then B1 (Q2 with B2 (Q4, Q5 with B3 (Q6)), Q3), then B4 (Q7).
+ */
+const CLINIC_TREE_ORDER = ['Q1', 'Q2', 'Q4', 'Q5', 'Q6', 'Q3', 'Q7'];
+
 export function clinicAdminList(): AdminQuestionList {
   const step = adminStep({ id: ADMIN_STEP_ID, title: 'Etapa 1', position: 1, questionCount: 7 });
   const opens: Record<string, number> = { Q1: 3, Q2: 2, Q5: 1 };
-  const questions = PROFILE_FORM_CHAIN_FIXTURE.questions.map((item, index) =>
+  const ordered = CLINIC_TREE_ORDER.map((key) => {
+    const found = PROFILE_FORM_CHAIN_FIXTURE.questions.find((item) => item.key === key);
+    if (found === undefined) throw new Error(`unknown clinic key ${key}`);
+    return found;
+  });
+  const questions = ordered.map((item, index) =>
     adminQuestion(item.type, {
       id: item.id,
       stepId: step.id,
