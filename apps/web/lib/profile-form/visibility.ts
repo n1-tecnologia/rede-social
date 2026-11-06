@@ -83,3 +83,14 @@ export function isNotApplicable(
     return opener === undefined ? undefined : answerTokens(opener.value);
   });
 }
+
+/**
+ * RED stub (12.2-13 task 1): deliberately inert, replaced in full by the GREEN commit of the same task.
+ */
+export function isNotApplicableInTree(
+  _row: { questionId: string; branchId?: string | null; value: unknown },
+  _rowsById: ReadonlyMap<string, { value: unknown; branchId?: string | null }>,
+  _branches: readonly { id: string; openerQuestionId: string; values: readonly string[] }[],
+): boolean {
+  return false;
+}

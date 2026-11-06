@@ -1,12 +1,15 @@
 import type {
+  AdminBranch,
   AdminQuestion,
   AdminQuestionList,
   AdminStep,
   ArchivedQuestion,
+  MemberBranch,
   MemberForm,
   MemberQuestion,
   ProfileFormType,
 } from '@rede-social/contracts/profile-form';
+import { PROFILE_FORM_CHAIN_FIXTURE } from '@rede-social/contracts/profile-form-branches';
 
 /**
  * Builders for the profile form's component and state tests (12-12). A question is what
@@ -134,4 +137,129 @@ export function archivedQuestion(
     archivedAt: '2026-10-20T15:30:00.000Z',
     ...overrides,
   };
+}
+
+/**
+ * 12.2-13: branch builders. A branch is what the member read (no name, T-12.2-03) or the admin read
+ * (name included) returns; ids are stable UUID-shaped strings so a test can name them.
+ */
+let branchCounter = 0;
+
+/** A branch of the MEMBER read: the opener, the opening answers, no name. */
+export function branch(overrides: Partial<MemberBranch> = {}): MemberBranch {
+  branchCounter += 1;
+  return {
+    id: uuid(3000 + branchCounter),
+    openerQuestionId: uuid(1),
+    values: [],
+    ...overrides,
+  };
+}
+
+/** A branch of the ADMIN read: the only shape with a name. */
+export function adminBranch(overrides: Partial<AdminBranch> = {}): AdminBranch {
+  branchCounter += 1;
+  return {
+    id: uuid(4000 + branchCounter),
+    openerQuestionId: uuid(501),
+    values: [],
+    name: null,
+    revision: 1,
+    archivedAt: null,
+    questionCount: 0,
+    answerCount: 0,
+    ...overrides,
+  };
+}
+
+/**
+ * The contracts' clinic fixture (`PROFILE_FORM_CHAIN_FIXTURE`, the parity table's own tree) as the web reads
+ * it: Q1 (three options) opens B1 on "tem" and B4 on "aprende"; B1 holds Q2 (yes/no, opens B2 on true) and
+ * Q3; B2 holds Q4 and Q5 (yes/no, opens B3 on true); B3 holds Q6; B4 holds Q7. One step, titles in pt-BR.
+ */
+export const CLINIC_OPTION_IDS = {
+  tem: '24000000-0000-4000-8000-0000000000e1',
+  trabalha: '24000000-0000-4000-8000-0000000000e2',
+  aprende: '24000000-0000-4000-8000-0000000000e3',
+} as const;
+
+const CLINIC_TITLES: Record<string, string> = {
+  Q1: 'Você tem clínica, trabalha em clínica ou está aprendendo?',
+  Q2: 'A clínica tem equipe?',
+  Q3: 'Nome da clínica',
+  Q4: 'Quantos profissionais?',
+  Q5: 'Tem sócio?',
+  Q6: 'Nome do sócio',
+  Q7: 'Onde estuda?',
+};
+
+const CLINIC_OPTION_LABELS = [
+  { id: CLINIC_OPTION_IDS.tem, label: 'Tenho uma clínica' },
+  { id: CLINIC_OPTION_IDS.trabalha, label: 'Trabalho em uma clínica' },
+  { id: CLINIC_OPTION_IDS.aprende, label: 'Estou aprendendo' },
+];
+
+/** The id of a clinic question or branch by its key (`Q1`..`Q7`, `B1`..`B4`). */
+export function clinicId(key: string): string {
+  const found =
+    PROFILE_FORM_CHAIN_FIXTURE.questions.find((item) => item.key === key) ??
+    PROFILE_FORM_CHAIN_FIXTURE.branches.find((item) => item.key === key);
+  if (found === undefined) throw new Error(`unknown clinic key ${key}`);
+  return found.id;
+}
+
+/** The clinic form as a member reads it; `stored` is the stored answer by question key (`Q1`..`Q7`). */
+export function clinicForm(stored: Record<string, unknown> = {}): MemberForm {
+  const questions = PROFILE_FORM_CHAIN_FIXTURE.questions.map((item) =>
+    question(item.type, {
+      id: item.id,
+      title: CLINIC_TITLES[item.key] ?? item.key,
+      required: item.required,
+      branchId: item.branchId,
+      options: item.key === 'Q1' ? CLINIC_OPTION_LABELS.map((option) => ({ ...option })) : [],
+      answer: (stored[item.key] ?? null) as MemberQuestion['answer'],
+    }),
+  );
+  return form(questions, {
+    branches: PROFILE_FORM_CHAIN_FIXTURE.branches.map((item) =>
+      branch({
+        id: item.id,
+        openerQuestionId: clinicId(item.openerKey),
+        values: [...item.values],
+      }),
+    ),
+  });
+}
+
+/** The clinic form as the builder reads it (one step, branches with no name). */
+export function clinicAdminList(): AdminQuestionList {
+  const step = adminStep({ id: ADMIN_STEP_ID, title: 'Etapa 1', position: 1, questionCount: 7 });
+  const opens: Record<string, number> = { Q1: 3, Q2: 2, Q5: 1 };
+  const questions = PROFILE_FORM_CHAIN_FIXTURE.questions.map((item, index) =>
+    adminQuestion(item.type, {
+      id: item.id,
+      stepId: step.id,
+      title: CLINIC_TITLES[item.key] ?? item.key,
+      required: item.required,
+      branchId: item.branchId,
+      options:
+        item.key === 'Q1'
+          ? CLINIC_OPTION_LABELS.map((option) => ({ ...option, answerCount: 0 }))
+          : [],
+      position: index + 1,
+      opensCount: opens[item.key] ?? 0,
+    }),
+  );
+  const count = (branchId: string) => questions.filter((q) => q.branchId === branchId).length;
+  return adminQuestionList(questions, {
+    steps: [step],
+    branches: PROFILE_FORM_CHAIN_FIXTURE.branches.map((item) =>
+      adminBranch({
+        id: item.id,
+        openerQuestionId: clinicId(item.openerKey),
+        values: [...item.values],
+        questionCount: count(item.id),
+      }),
+    ),
+  });
 }
