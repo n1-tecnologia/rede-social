@@ -31,13 +31,7 @@ import {
   dependentsOf,
   type RuleQuestion,
 } from './condition-rules';
-import {
-  addQuestion,
-  addQuestionAfterOpener,
-  applyRequestedLayout,
-  type Layout,
-  moveQuestion,
-} from './layout';
+import { addQuestionAfterOpener, applyRequestedLayout, type Layout, moveQuestion } from './layout';
 import {
   assertLayoutOrder,
   dropQuestion,
@@ -915,7 +909,9 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
 
 /**
  * `POST /v1/profile_form/questions/{id}/reactivate` (D-585, D-588, D-627): an archived question goes back to
- * the END of ITS OWN step (`listed_at` now, so members see it as new). Its stored `step_id` always names an
+ * ITS OWN step (`listed_at` now, so members see it as new): a conditional question whose opener is active in
+ * that same step returns right after the opener, or after the opener's last active dependent (quick
+ * 261106-ei5); any other question returns to the END of the step. Its stored `step_id` always names an
  * existing step, because deleting a step re-points the archived questions inside it. Idempotent: an active
  * question is answered unchanged. At 30 active questions it is 409 `limit_reached`. Its old answers are still
  * there, so a member who had answered it is not held again. A reactivated conditional question whose opener is
@@ -934,7 +930,15 @@ export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<Adm
       throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
     }
 
-    const next = layoutOrThrow(addQuestion(read.layout, row.step_id, row.id));
+    const next = layoutOrThrow(
+      addQuestionAfterOpener(
+        read.layout,
+        row.step_id,
+        row.id,
+        row.condition_question_id,
+        read.facts,
+      ),
+    );
     // D-632: a shown question comes back only while its opener still holds: active, still eligible, no condition
     // of its own, and before it. A refusal names the opener (`openerId`); pure, no extra lock on the hot path.
     const openerId = row.condition_question_id;
@@ -956,9 +960,11 @@ export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<Adm
       openerId !== null ? [...read.facts, { questionId: row.id, openerId }] : read.facts,
     );
 
-    // The end of ITS step is the end of the form only for the last step; there it takes max(position) + 1 of the
-    // other active questions and nobody else is touched (a save in flight is never waited for). Anywhere else
-    // the later questions shift and the whole layout is renumbered below.
+    // A conditional question returns right after its opener (or its last active dependent) when the opener is
+    // active in the same step; any other question returns to the end of its own step. An append to the very end
+    // of the form (the end of the last step) takes max(position) + 1 of the other active questions and nobody
+    // else is touched (a save in flight is never waited for). Anywhere else the later questions shift and the
+    // whole layout is renumbered below.
     await tx.execute(sql`
       update public.profile_form_questions
          set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now(),
