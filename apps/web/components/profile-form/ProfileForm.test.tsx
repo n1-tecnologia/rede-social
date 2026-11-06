@@ -7,7 +7,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { form, options, question, uuid } from '@/lib/profile-form/test-fixtures';
+import { branch, form, options, question, uuid } from '@/lib/profile-form/test-fixtures';
 import { ProfileForm, type ProfileFormProps } from './ProfileForm';
 
 /**
@@ -43,6 +43,10 @@ function show(read: MemberForm, props: Partial<ProfileFormProps> = {}) {
     </NextIntlClientProvider>,
   );
 }
+
+/** A branch the opener opens on `values` (12.2): the questions that name its id sit in it, the form lists it. */
+const gate = (opener: { id: string }, ...values: string[]) =>
+  branch({ openerQuestionId: opener.id, values });
 
 const formEl = (container: HTMLElement) => container.querySelector('form') as HTMLFormElement;
 const save = async (container: HTMLElement) => {
@@ -439,14 +443,18 @@ describe('the preview as a stepper: nothing validated, saved or confirmed (12.1-
       options: opts,
       stepId: S1,
     });
+    const opens = gate(opener, opts[0]?.id as string);
     const gated = question('short_text', {
       title: 'Depois',
       required: true,
       stepId: S2,
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+      branchId: opens.id,
     });
     const last = question('short_text', { title: 'Fim', required: true, stepId: S3 });
-    return form([opener, gated, last], { steps: steps('Um', 'Dois', 'Três') });
+    return form([opener, gated, last], {
+      steps: steps('Um', 'Dois', 'Três'),
+      branches: [opens],
+    });
   };
 
   it('uses the stepper when the form has two or more steps and the one card otherwise', () => {
@@ -759,13 +767,16 @@ describe('the stepper: Avançar saves the step, Concluir finishes (D-629, UI-D-6
   it('several configured steps with a path of one: the heading shows, progress does not, the button is Salvar', async () => {
     const a = question('short_text', { title: 'A', stepId: S1 });
     const opener = question('yes_no', { title: 'Abre?', stepId: S1 });
+    const opens = gate(opener, 'true');
     const hidden = question('short_text', {
       title: 'Escondida',
       stepId: S2,
-      condition: { questionId: opener.id, values: ['true'] },
+      branchId: opens.id,
     });
     mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
-    const { container } = show(form([a, opener, hidden], { steps: steps('Um', 'Dois') }));
+    const { container } = show(
+      form([a, opener, hidden], { steps: steps('Um', 'Dois'), branches: [opens] }),
+    );
     expect(screen.getByRole('heading', { level: 2, name: 'Um' })).toBeTruthy();
     expect(screen.queryByText(/Etapa \d de/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Salvar' })).toBeTruthy();
@@ -796,16 +807,14 @@ describe('a question that opens appears in place, announced, unflagged and calm 
       required: true,
       options: opts,
     });
+    const opens = gate(opener, opts[0]?.id as string);
     const name = question('short_text', {
       title: 'Nome da clínica',
       required: true,
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+      branchId: opens.id,
     });
-    const size = question('short_text', {
-      title: 'Quantas pessoas?',
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
-    });
-    return { opener, name, size, read: form([opener, name, size]) };
+    const size = question('short_text', { title: 'Quantas pessoas?', branchId: opens.id });
+    return { opener, name, size, read: form([opener, name, size], { branches: [opens] }) };
   };
 
   it('hides the follow-ups until the opener is answered, then shows them below it, and focus stays on the opener', () => {
@@ -840,11 +849,9 @@ describe('a question that opens appears in place, announced, unflagged and calm 
   it('names the title when exactly one question appears, and says one left in the singular', () => {
     const opts = options('Sim, uso', 'Não uso');
     const opener = question('single_choice', { title: 'Usa sistema?', options: opts });
-    const follow = question('short_text', {
-      title: 'Qual sistema?',
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
-    });
-    show(form([opener, follow]));
+    const opens = gate(opener, opts[0]?.id as string);
+    const follow = question('short_text', { title: 'Qual sistema?', branchId: opens.id });
+    show(form([opener, follow], { branches: [opens] }));
     fireEvent.click(screen.getByRole('radio', { name: 'Sim, uso' }));
     expect(liveRegion().textContent).toBe('Apareceu uma nova pergunta: Qual sistema?.');
     fireEvent.click(screen.getByRole('radio', { name: 'Não uso' }));
@@ -864,18 +871,20 @@ describe('a question that opens appears in place, announced, unflagged and calm 
     expect(read.questions.some((q) => q.id === name.id)).toBe(true);
   });
 
-  it('enters unflagged and wears the neutral rule; a failed Avançar flags it and drops the rule', async () => {
+  it('enters unflagged under the shared rail; a failed Avançar flags it and the block KEEPS its rail (UI-D-679)', async () => {
     const { read, name } = clinic();
     const { container } = show(read);
     fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
     expect(screen.queryByText('Falta responder')).toBeNull();
-    const wrapper = () =>
-      document.querySelector(`#pf-q-${name.id}`)?.closest('[data-revealed]') as HTMLElement;
-    expect(wrapper().className).toContain('border-l-2 border-border pl-3');
+    const rail = () =>
+      document.querySelector(`#pf-q-${name.id}`)?.closest('[data-revealed-branch]') as HTMLElement;
+    expect(rail().className).toContain('border-l-2 border-border pl-3');
     await save(container);
     expect(mocks.save).not.toHaveBeenCalled();
     expect(document.querySelector(`#pf-q-${name.id}`)?.getAttribute('data-flagged')).not.toBeNull();
-    expect(wrapper().className).not.toContain('border-l-2');
+    // 12.1 dropped the rule of a flagged question; with several questions on one rail it stays.
+    expect(rail().className).toContain('border-l-2 border-border pl-3');
+    expect(screen.getByText('Falta responder')).toBeTruthy();
   });
 
   it('a draft typed into a question that later closes is kept, not sent, and comes back when it reopens', async () => {
@@ -911,18 +920,74 @@ describe('a question that opens appears in place, announced, unflagged and calm 
   });
 });
 
+describe('a branch opens as ONE block under one rail (12.2-14, D-641, D-644; UI-D-679)', () => {
+  const block = () => {
+    const opts = options('Tenho uma clínica', 'Estou aprendendo');
+    const opener = question('single_choice', { title: 'Qual é o seu caso?', options: opts });
+    const opens = gate(opener, opts[0]?.id as string);
+    const a = question('short_text', { title: 'Nome da clínica', branchId: opens.id });
+    const b = question('short_text', { title: 'Quantas pessoas?', branchId: opens.id });
+    const c = question('short_text', { title: 'Cidade da clínica', branchId: opens.id });
+    const tail = question('short_text', { title: 'Contato' });
+    return {
+      opener,
+      tail,
+      read: form([opener, a, b, c, tail], { branches: [opens] }),
+    };
+  };
+
+  it('three questions open inside ONE wrapper, the opener keeps focus and a root question stays outside', () => {
+    const { read } = block();
+    show(read);
+    expect(document.querySelector('[data-revealed-branch]')).toBeNull();
+    const radio = screen.getByRole('radio', { name: 'Tenho uma clínica' });
+    radio.focus();
+    fireEvent.click(radio);
+    const wrappers = document.querySelectorAll('[data-revealed-branch]');
+    expect(wrappers).toHaveLength(1);
+    const wrapper = wrappers[0] as HTMLElement;
+    for (const label of ['Nome da clínica', 'Quantas pessoas?', 'Cidade da clínica']) {
+      expect(within(wrapper).getByLabelText(label)).toBeTruthy();
+    }
+    expect(wrapper.querySelectorAll('[data-question]')).toHaveLength(3);
+    // The opener and the root question sit outside any wrapper.
+    expect(wrapper.contains(radio)).toBe(false);
+    expect(wrapper.contains(screen.getByLabelText('Contato'))).toBe(false);
+    expect(screen.getByLabelText('Contato').closest('[data-revealed-branch]')).toBeNull();
+    // WCAG 3.2.2: nothing took focus from the opener.
+    expect(document.activeElement).toBe(radio);
+    // The wrapper is a plain group: no landmark.
+    expect(wrapper.getAttribute('role')).toBeNull();
+  });
+
+  it('the block is announced ONCE through the single polite region: the count of several', () => {
+    const { read } = block();
+    show(read);
+    expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(liveRegion().textContent).toBe('Apareceram 3 novas perguntas.');
+    expect(liveRegion().textContent).not.toContain('Nome da clínica');
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    expect(liveRegion().textContent).toBe('3 perguntas saíram da lista.');
+    expect(document.querySelector('[data-revealed-branch]')).toBeNull();
+  });
+});
+
 describe('the path follows the answers: a step with no visible question drops out (D-628, E4 empty)', () => {
   it('revealing and hiding the only question of step 2 changes the path and the Etapa x de y count', async () => {
     const opts = options('Tenho', 'Não tenho');
     const opener = question('single_choice', { title: 'Tem clínica?', options: opts, stepId: S1 });
+    const opens = gate(opener, opts[0]?.id as string);
     const only = question('short_text', {
       title: 'Nome da clínica',
       stepId: S2,
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+      branchId: opens.id,
     });
     const last = question('short_text', { title: 'Contato', stepId: S3 });
     mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
-    const { container } = show(form([opener, only, last], { steps: steps('Um', 'Dois', 'Três') }));
+    const { container } = show(
+      form([opener, only, last], { steps: steps('Um', 'Dois', 'Três'), branches: [opens] }),
+    );
     expect(screen.getByText('Etapa 1 de 2')).toBeTruthy();
     fireEvent.click(screen.getByRole('radio', { name: 'Tenho' }));
     expect(screen.getByText('Etapa 1 de 3')).toBeTruthy();
@@ -1204,20 +1269,18 @@ describe('the accessibility and 320px floor of the stepper (UI-D-660, UI-D-661, 
     const long = 'Uma opção com um rótulo extremamente longo que precisa quebrar linha sem rolagem';
     const opts = options(long, 'Curta');
     const opener = question('single_choice', { title: 'Abre?', options: opts });
-    const follow = question('short_text', {
-      title: `${long} ${long}`,
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
-    });
-    show(form([opener, follow]));
+    const opens = gate(opener, opts[0]?.id as string);
+    const follow = question('short_text', { title: `${long} ${long}`, branchId: opens.id });
+    show(form([opener, follow], { branches: [opens] }));
     fireEvent.click(screen.getByRole('radio', { name: long }));
-    const rule = document.querySelector('[data-revealed]') as HTMLElement;
-    expect(rule.className).toBe('border-l-2 border-border pl-3');
+    const rule = document.querySelector('[data-revealed-branch]') as HTMLElement;
+    expect(rule.className).toBe('flex flex-col gap-6 border-l-2 border-border pl-3');
     expect(rule.querySelector('label')?.textContent).toContain(long);
   });
 
   it('no markup of the stepper writes a half-step spacing class (UI-SPEC Spacing Scale)', () => {
     const half = /(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/;
-    for (const file of ['ProfileForm.tsx', 'StepProgress.tsx', 'RevealedField.tsx']) {
+    for (const file of ['ProfileForm.tsx', 'StepProgress.tsx', 'RevealedBranch.tsx']) {
       expect(readFileSync(join(__dirname, file), 'utf8'), file).not.toMatch(half);
     }
   });
@@ -1233,10 +1296,11 @@ describe('the erase warning before a save that deletes a stored answer (D-624, D
       stepId: S1,
       answer: { optionIds: [opts[0]?.id as string], otherText: null },
     });
+    const opens = gate(opener, opts[0]?.id as string);
     const name = question('short_text', {
       title: 'Nome da clínica',
       stepId: S1,
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+      branchId: opens.id,
       answer: SECRET,
     });
     const phone = question('short_text', { title: 'Telefone', stepId: S2 });
@@ -1244,7 +1308,11 @@ describe('the erase warning before a save that deletes a stored answer (D-624, D
       opener,
       name,
       phone,
-      read: form([opener, name, phone], { mode, steps: steps('Sobre você', 'Contato') }),
+      read: form([opener, name, phone], {
+        mode,
+        steps: steps('Sobre você', 'Contato'),
+        branches: [opens],
+      }),
     };
   };
   const dialog = () => screen.queryByRole('dialog');
@@ -1295,12 +1363,10 @@ describe('the erase warning before a save that deletes a stored answer (D-624, D
   it('a draft that closes only a never-saved answer opens nothing and saves straight away', async () => {
     const opts = options('Tenho uma clínica', 'Estou aprendendo');
     const opener = question('single_choice', { title: 'Qual é o seu caso?', options: opts });
-    const name = question('short_text', {
-      title: 'Nome da clínica',
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
-    });
+    const opens = gate(opener, opts[0]?.id as string);
+    const name = question('short_text', { title: 'Nome da clínica', branchId: opens.id });
     mocks.save.mockResolvedValue({ ok: true, destination: '/inicio' });
-    const { container } = show(form([opener, name]));
+    const { container } = show(form([opener, name], { branches: [opens] }));
     fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
     fireEvent.change(screen.getByLabelText('Nome da clínica'), { target: { value: 'rascunho' } });
     fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
@@ -1319,6 +1385,7 @@ describe('the erase warning before a save that deletes a stored answer (D-624, D
       {
         mode: 'first',
         steps: steps('Sobre você'),
+        branches: read.branches ?? [],
       },
     );
     const { container } = show(single);
@@ -1369,6 +1436,7 @@ describe('the erase warning before a save that deletes a stored answer (D-624, D
       mode: 'first',
       steps: steps('Sobre você', 'Contato'),
       formEtag: 'etag-2',
+      branches: read.branches ?? [],
     });
     mocks.save.mockResolvedValueOnce({ ok: false, code: 'changed', form: fresh });
     const { container } = show(read);
@@ -1428,15 +1496,16 @@ describe('the erase warning before a save that deletes a stored answer (D-624, D
       options: opts,
       stepId: S1,
     });
+    const opens = gate(opener, opts[0]?.id as string);
     const dependent = question('short_text', {
       title: 'Nome da clínica',
       stepId: S2,
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+      branchId: opens.id,
     });
     const tail = question('short_text', { title: 'Telefone', stepId: S2 });
     mocks.save.mockResolvedValue({ ok: true, destination: null, missingQuestionIds: [] });
     const { container } = show(
-      form([opener, dependent, tail], { steps: steps('Sobre você', 'Contato') }),
+      form([opener, dependent, tail], { steps: steps('Sobre você', 'Contato'), branches: [opens] }),
     );
     fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
     await save(container);
@@ -1465,10 +1534,11 @@ describe('edit from the profile is ONE scroll with every step under its title (D
       stepId: S1,
       answer: { optionIds: [opts[1]?.id as string], otherText: null },
     });
+    const opens = gate(opener, opts[0]?.id as string);
     const clinic = question('short_text', {
       title: 'Nome da clínica',
       stepId: S2,
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+      branchId: opens.id,
     });
     const phone = question('short_text', { title: 'Telefone', stepId: S3, answer: '11999990000' });
     return {
@@ -1479,6 +1549,7 @@ describe('edit from the profile is ONE scroll with every step under its title (D
       read: form([opener, clinic, phone], {
         mode: 'edit',
         steps: steps('Informações gerais', 'Sobre a sua clínica', 'Contato'),
+        branches: [opens],
       }),
     };
   };
@@ -1567,12 +1638,16 @@ describe('edit from the profile is ONE scroll with every step under its title (D
   });
 
   it('PFORM-35 empty: no visible question shows the none state, never an empty card or a bare heading', () => {
+    // Its opener is not in the form: the chain fails closed and the question is never shown.
+    const lost = branch({ openerQuestionId: uuid(99999), values: ['x'] });
     const ghost = question('short_text', {
       title: 'Fantasma',
       stepId: S1,
-      condition: { questionId: uuid(99999), values: ['x'] },
+      branchId: lost.id,
     });
-    const { container } = show(form([ghost], { mode: 'edit', steps: steps('Dados', 'Mais') }));
+    const { container } = show(
+      form([ghost], { mode: 'edit', steps: steps('Dados', 'Mais'), branches: [lost] }),
+    );
     expect(screen.getByText('Não há perguntas para responder')).toBeTruthy();
     expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
     expect(container.querySelectorAll('section')).toHaveLength(0);
@@ -1616,15 +1691,16 @@ describe('edit from the profile is ONE scroll with every step under its title (D
       stepId: S1,
       answer: { optionIds: [opts[0]?.id as string], otherText: null },
     });
+    const opens = gate(opener, opts[0]?.id as string);
     const clinic = question('short_text', {
       title: 'Nome da clínica',
       stepId: S2,
       answer: 'Clínica Sol',
-      condition: { questionId: opener.id, values: [opts[0]?.id as string] },
+      branchId: opens.id,
     });
     mocks.save.mockResolvedValue({ ok: true, destination: '/perfil' });
     const { container } = show(
-      form([opener, clinic], { mode: 'edit', steps: steps('Caso', 'Clínica') }),
+      form([opener, clinic], { mode: 'edit', steps: steps('Caso', 'Clínica'), branches: [opens] }),
     );
     fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
     await save(container);
