@@ -129,6 +129,7 @@ so a missing row reads as disabled.
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/profile-form/admin`
+- `@rede-social/core/server/profile-form/branches`
 - `@rede-social/core/server/profile-form/export`
 - `@rede-social/core/server/profile-form/steps`
 - `@rede-social/core/server/rbac/permissions`
