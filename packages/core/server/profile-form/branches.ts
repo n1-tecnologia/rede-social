@@ -1,4 +1,10 @@
-import type { AdminBranch, CreateBranchBody } from '@rede-social/contracts/profile-form';
+import {
+  type AdminBranch,
+  type CreateBranchBody,
+  PROFILE_FORM_LIMITS,
+  type UndoBranchResult,
+  type UpdateBranchBody,
+} from '@rede-social/contracts/profile-form';
 import { sql } from 'drizzle-orm';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import { ApiError } from '../http/api-error';
@@ -14,9 +20,15 @@ import {
   type BranchCheck,
   type BranchRuleBranch,
   type BranchRuleQuestion,
+  branchFactsOf,
+  checkArchiveBranch,
   checkBranch,
+  checkBranchEdit,
+  checkReactivateBranch,
+  subtreeOf,
 } from './branch-rules';
-import { readLayout } from './layout-store';
+import { flatten, normalizeToTree } from './layout';
+import { assertLayoutOrder, readLayout, writeLayout } from './layout-store';
 import { guardIssueOf } from './lock-rules';
 
 /**
@@ -248,5 +260,329 @@ export async function createBranch(ctx: AdminCtx, body: CreateBranchBody): Promi
     const branch = await readBranch(tx, ctx.tenantId, created);
     if (!branch) throw new Error('createBranch: the new branch is not readable');
     return branch;
+  });
+}
+
+// ── Edit, undo, archive and reactivate (D-646, D-653; PFORM-48) ─────────────────────────────────────────────
+
+const sameSet = (a: readonly string[], b: readonly string[]): boolean => {
+  const left = new Set(a);
+  const right = new Set(b);
+  return left.size === right.size && [...left].every((token) => right.has(token));
+};
+
+/** `uuid[]` of a JSON array of ids, for an `id in (...)` list that is one bound parameter. */
+const idList = (ids: readonly string[]) =>
+  sql`(select e::uuid from jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb) e)`;
+
+/** How many answers the questions of one branch hold, active and archived alike: a COUNT, never a value. */
+async function answersOfBranch(tx: Tx, tenantId: string, branchId: string): Promise<number> {
+  const [row] = await tx.execute<{ n: number | string }>(sql`
+    select count(*)::int as n
+      from public.profile_form_answers a
+      join public.profile_form_questions q on q.tenant_id = a.tenant_id and q.id = a.question_id
+     where a.tenant_id = ${tenantId}::uuid and q.branch_id = ${branchId}::uuid`);
+  return Number(row?.n ?? 0);
+}
+
+/** The ids of the branches that hold at least one answered question (active or archived question). */
+async function answeredBranchIds(tx: Tx, tenantId: string): Promise<string[]> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select distinct q.branch_id::text as id
+      from public.profile_form_answers a
+      join public.profile_form_questions q on q.tenant_id = a.tenant_id and q.id = a.question_id
+     where a.tenant_id = ${tenantId}::uuid and q.branch_id is not null`);
+  return rows.map((row) => row.id);
+}
+
+/**
+ * `PATCH /v1/profile_form/branches/{id}` (PFORM-48, D-646): the opener, the opening values and the name of a
+ * branch under the optimistic `revision`.
+ *
+ *   1. `adminLock`, the live module check, then the branch rows `FOR UPDATE`: no row (unknown, another
+ *      tenant's) is the bare 404; an archived branch is 409 `already_archived` (read-only until it comes
+ *      back); a `revision` that is not the stored one is 409 `stale_revision` and nothing changes;
+ *   2. AFTER the row lock the answers of the branch's questions are COUNTED, so an answer that committed while
+ *      this edit waited is seen (the member's save locks the branches `FOR SHARE`): with one, a different
+ *      opener or a different SET of opening values is 409 `condition_locked` (the same members in another
+ *      order are no change), while a name change always passes;
+ *   3. a different opener or set then goes through the pure `checkBranch` over the tree the branch will have
+ *      (`condition_invalid`, `condition_order`, `branch_depth`, `public_under_private`); the SQL guards are
+ *      the backstop and map to the same codes;
+ *   4. a body that changes nothing answers 200 and does NOT bump the revision; otherwise the revision and
+ *      `updated_at` move in the same statement. A `null` name clears it.
+ */
+export async function updateBranch(
+  ctx: AdminCtx,
+  id: string,
+  body: UpdateBranchBody,
+): Promise<AdminBranch> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const { layout } = await readLayout(tx, ctx.tenantId);
+    const facts = await readRuleFacts(tx, ctx.tenantId, true);
+    const branch = facts.branches.find((candidate) => candidate.id === id);
+    if (!branch) throw new ApiError(404, 'NOT_FOUND');
+    const current = await readBranch(tx, ctx.tenantId, id);
+    if (!current) throw new ApiError(404, 'NOT_FOUND');
+    if (branch.archived) throw new ApiError(409, 'CONFLICT', { profileForm: 'already_archived' });
+    if (body.revision !== current.revision) {
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'stale_revision' });
+    }
+
+    const openerId = body.openerQuestionId?.toLowerCase();
+    const openerChanged = openerId !== undefined && openerId !== branch.openerQuestionId;
+    const valuesChanged = body.values !== undefined && !sameSet(body.values, branch.values);
+    const nameChanged = body.name !== undefined && body.name !== branch.name;
+
+    refuseBranch(
+      checkBranchEdit({
+        branch,
+        ...(openerId !== undefined ? { openerId } : {}),
+        ...(body.values !== undefined ? { values: body.values } : {}),
+        answeredQuestions: await answersOfBranch(tx, ctx.tenantId, id),
+      }),
+    );
+
+    const nextOpener = openerChanged
+      ? (openerId ?? branch.openerQuestionId)
+      : branch.openerQuestionId;
+    const nextValues = valuesChanged ? (body.values ?? branch.values) : branch.values;
+    if (openerChanged || valuesChanged) {
+      refuseBranch(
+        checkBranch({
+          questions: facts.questions,
+          branches: facts.branches,
+          layout,
+          openerId: nextOpener,
+          values: nextValues,
+          branchId: id,
+        }),
+      );
+    }
+    if (!openerChanged && !valuesChanged && !nameChanged) return current;
+
+    const nextName = body.name !== undefined ? body.name : branch.name;
+    await guardedBranchWrite(tx, () =>
+      tx.execute(sql`
+        update public.profile_form_branches
+           set opener_question_id = ${nextOpener}::uuid, open_values = ${textArray(nextValues)},
+               name = ${nextName}, revision = revision + 1, updated_at = now()
+         where id = ${id}::uuid and tenant_id = ${ctx.tenantId}::uuid`),
+    );
+    const edited = await readBranch(tx, ctx.tenantId, id);
+    if (!edited) throw new Error('updateBranch: the edited branch is not readable');
+    return edited;
+  });
+}
+
+/**
+ * `POST /v1/profile_form/branches/{id}/undo` (D-653, "Desfazer ramo"): every question of the branch, active and
+ * archived, leaves it (`branch_id` null) and the branch row is deleted, in this one transaction: the questions
+ * FIRST and the branch after, because the key between them is checked at the end of each statement. The
+ * questions stay in the form where they are and become visible to every member; a branch that hangs on an
+ * opener inside this one keeps working; NO ANSWER is touched. The revision of each ACTIVE question moves (the
+ * member's etag covers it). An unknown or another tenant's id is the bare 404; undoing an empty branch just
+ * removes it.
+ */
+export async function undoBranch(ctx: AdminCtx, id: string): Promise<UndoBranchResult> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    // The active questions are locked in the canonical order first (a member's save takes them the same way),
+    // then the branches: steps, questions, branches.
+    await readLayout(tx, ctx.tenantId, true);
+    const facts = await readRuleFacts(tx, ctx.tenantId, true);
+    if (!facts.branches.some((candidate) => candidate.id === id)) {
+      throw new ApiError(404, 'NOT_FOUND');
+    }
+
+    await guardedBranchWrite(tx, async () => {
+      await tx.execute(sql`
+        update public.profile_form_questions
+           set branch_id = null,
+               revision = case when archived_at is null then revision + 1 else revision end,
+               updated_at = now()
+         where tenant_id = ${ctx.tenantId}::uuid and branch_id = ${id}::uuid`);
+      await tx.execute(sql`
+        delete from public.profile_form_branches
+         where id = ${id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    });
+    return { undone: true };
+  });
+}
+
+/**
+ * `POST /v1/profile_form/branches/{id}/archive` (D-653): the branch, every branch that hangs on an opener
+ * inside it and every question of that subtree leave the form TOGETHER with ONE timestamp (the transaction's
+ * `now()`, the identity of the block), the branches FIRST and the questions after (so the PF007 guard never
+ * sees an active branch on an archived opener), and the form is renumbered `1..n` in one set-based write.
+ * Every answer stays. Refused with `has_dependents`, naming the openers, when a question of the subtree opens
+ * another active branch that has answers. Idempotent: an archived branch answers 200 unchanged. Unknown or
+ * another tenant's id: the bare 404.
+ */
+export async function archiveBranch(ctx: AdminCtx, id: string): Promise<AdminBranch> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const read = await readLayout(tx, ctx.tenantId, true);
+    const facts = await readRuleFacts(tx, ctx.tenantId, true);
+    const branch = facts.branches.find((candidate) => candidate.id === id);
+    if (!branch) throw new ApiError(404, 'NOT_FOUND');
+    if (branch.archived) {
+      const same = await readBranch(tx, ctx.tenantId, id);
+      if (!same) throw new Error('archiveBranch: the branch is not readable');
+      return same;
+    }
+
+    refuseBranch(
+      checkArchiveBranch({
+        questions: facts.questions,
+        branches: facts.branches,
+        branchId: id,
+        answeredBranchIds: await answeredBranchIds(tx, ctx.tenantId),
+      }),
+    );
+
+    const subtree = subtreeOf(facts.branches, facts.questions, id);
+    const archivedQuestionIds = await guardedBranchWrite(tx, async () => {
+      await tx.execute(sql`
+        update public.profile_form_branches
+           set archived_at = now(), revision = revision + 1, updated_at = now()
+         where tenant_id = ${ctx.tenantId}::uuid and id in ${idList(subtree.branchIds)}
+           and archived_at is null`);
+      const rows = await tx.execute<{ id: string }>(sql`
+        update public.profile_form_questions
+           set archived_at = now(), revision = revision + 1, updated_at = now()
+         where tenant_id = ${ctx.tenantId}::uuid and branch_id in ${idList(subtree.branchIds)}
+           and archived_at is null
+        returning id::text as id`);
+      return rows.map((row) => row.id);
+    });
+
+    const gone = new Set(archivedQuestionIds);
+    await writeLayout(
+      tx,
+      ctx.tenantId,
+      read.layout.map((step) => ({
+        stepId: step.stepId,
+        questionIds: step.questionIds.filter((questionId) => !gone.has(questionId)),
+      })),
+    );
+    const archived = await readBranch(tx, ctx.tenantId, id);
+    if (!archived) throw new Error('archiveBranch: the archived branch is not readable');
+    return archived;
+  });
+}
+
+/**
+ * `POST /v1/profile_form/branches/{id}/reactivate` (D-653): restores EXACTLY the rows whose `archived_at`
+ * equals the branch's own stamp (the branch, the branches below it and their questions; a question archived
+ * alone earlier stays archived), branches first and questions after, with `listed_at` now, and returns the
+ * restored questions to the layout at the end of their own step in tree order. Refused while the opener is
+ * archived (`condition_invalid` + `openerId`) or inside an archived branch (`branch_archived`), past 30 ACTIVE
+ * questions (`limit_reached`) and past 15 ACTIVE branches (`branch_limit`); an empty branch needs no slot.
+ * Idempotent: an active branch answers 200 unchanged. Unknown or another tenant's id: the bare 404.
+ */
+export async function reactivateBranch(ctx: AdminCtx, id: string): Promise<AdminBranch> {
+  return withTenantTx(ctx, async (tx) => {
+    await adminLock(tx, ctx.tenantId);
+    await requireModuleOn(tx, ctx);
+
+    const read = await readLayout(tx, ctx.tenantId, true);
+    const facts = await readRuleFacts(tx, ctx.tenantId, true);
+    const branch = facts.branches.find((candidate) => candidate.id === id);
+    if (!branch) throw new ApiError(404, 'NOT_FOUND');
+    if (!branch.archived) {
+      const same = await readBranch(tx, ctx.tenantId, id);
+      if (!same) throw new Error('reactivateBranch: the branch is not readable');
+      return same;
+    }
+
+    // The block is the rows archived with the branch's own stamp: compared in SQL, microsecond for microsecond.
+    const subtree = subtreeOf(facts.branches, facts.questions, id);
+    const restoredQuestions = await tx.execute<{ id: string; step_id: string }>(sql`
+      select q.id::text as id, q.step_id::text as step_id
+        from public.profile_form_questions q
+       where q.tenant_id = ${ctx.tenantId}::uuid and q.branch_id in ${idList(subtree.branchIds)}
+         and q.archived_at = (select b.archived_at from public.profile_form_branches b
+                               where b.id = ${id}::uuid and b.tenant_id = ${ctx.tenantId}::uuid)
+       order by q."position", q.created_at, q.id`);
+    const restoredBranches = await tx.execute<{ id: string }>(sql`
+      select b.id::text as id
+        from public.profile_form_branches b
+       where b.tenant_id = ${ctx.tenantId}::uuid and b.id in ${idList(subtree.branchIds)}
+         and b.archived_at = (select s.archived_at from public.profile_form_branches s
+                               where s.id = ${id}::uuid and s.tenant_id = ${ctx.tenantId}::uuid)`);
+    const restoredQuestionIds = restoredQuestions.map((row) => row.id);
+    const restoredBranchIds = restoredBranches.map((row) => row.id);
+
+    refuseBranch(
+      checkReactivateBranch({
+        questions: facts.questions,
+        branches: facts.branches,
+        branchId: id,
+        restoredQuestionIds,
+      }),
+    );
+    if (
+      flatten(read.layout).length + restoredQuestionIds.length >
+      PROFILE_FORM_LIMITS.activeQuestions
+    ) {
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
+    }
+    const activeBranches = facts.branches.filter((candidate) => !candidate.archived).length;
+    if (activeBranches + restoredBranchIds.length > PROFILE_FORM_LIMITS.branches) {
+      throw new ApiError(409, 'CONFLICT', { profileForm: 'branch_limit' });
+    }
+
+    await guardedBranchWrite(tx, async () => {
+      await tx.execute(sql`
+        update public.profile_form_branches
+           set archived_at = null, revision = revision + 1, updated_at = now()
+         where tenant_id = ${ctx.tenantId}::uuid and id in ${idList(restoredBranchIds)}`);
+      if (restoredQuestionIds.length > 0) {
+        await tx.execute(sql`
+          update public.profile_form_questions
+             set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now()
+           where tenant_id = ${ctx.tenantId}::uuid and id in ${idList(restoredQuestionIds)}`);
+      }
+    });
+
+    if (restoredQuestionIds.length > 0) {
+      // Each restored question returns to the END of its own step (its stored step always exists: deleting a
+      // step re-points its archived questions), then the whole layout is put in tree order and the order rule
+      // is checked over the tree the form now has, before the one renumber.
+      const awake = new Set(restoredQuestionIds);
+      const awakeBranches = new Set(restoredBranchIds);
+      const questionsNow = facts.questions.map((question) =>
+        awake.has(question.id) ? { ...question, archived: false } : question,
+      );
+      const branchesNow = facts.branches.map((candidate) =>
+        awakeBranches.has(candidate.id) ? { ...candidate, archived: false } : candidate,
+      );
+      const appended = read.layout.map((step) => ({
+        stepId: step.stepId,
+        questionIds: [
+          ...step.questionIds,
+          ...restoredQuestions.filter((row) => row.step_id === step.stepId).map((row) => row.id),
+        ],
+      }));
+      if (flatten(appended).length !== flatten(read.layout).length + restoredQuestionIds.length) {
+        throw new Error(
+          'reactivateBranch: a restored question names a step the form does not have',
+        );
+      }
+      const ordered = normalizeToTree(appended, questionsNow, branchesNow);
+      assertLayoutOrder(ordered, branchFactsOf(questionsNow, branchesNow));
+      await writeLayout(tx, ctx.tenantId, ordered);
+    }
+    const restored = await readBranch(tx, ctx.tenantId, id);
+    if (!restored) throw new Error('reactivateBranch: the reactivated branch is not readable');
+    return restored;
   });
 }

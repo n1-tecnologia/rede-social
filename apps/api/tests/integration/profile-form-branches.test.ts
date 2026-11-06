@@ -964,10 +964,10 @@ describe('12.2-08 archive and reactivate as a block (D-653, PFORM-48)', () => {
       ]);
       expect(await answerCount([f.q3.id])).toBe(answersBefore);
 
-      // The archived read carries the archived block with every question counted.
+      // The archived read carries the archived branch with ALL its questions counted: Q2, Q3 and the one archived alone.
       const read = await archivedOf(admin);
       const readBranch = read.branches?.find((branch) => branch.id === f.b1);
-      expect(readBranch).toMatchObject({ archivedAt: archived.archivedAt, questionCount: 4 });
+      expect(readBranch).toMatchObject({ archivedAt: archived.archivedAt, questionCount: 3 });
 
       // A second archive is idempotent: same answer, the stamp does not move.
       const again = await postBranchAction(admin, f.b1, 'archive');

@@ -16,7 +16,13 @@ import {
   replaceQuestion,
   updateQuestion,
 } from '@rede-social/core/server/profile-form/admin';
-import { createBranch } from '@rede-social/core/server/profile-form/branches';
+import {
+  archiveBranch,
+  createBranch,
+  reactivateBranch,
+  undoBranch,
+  updateBranch,
+} from '@rede-social/core/server/profile-form/branches';
 import { exportAnswers } from '@rede-social/core/server/profile-form/export';
 import { createStep, deleteStep, renameStep } from '@rede-social/core/server/profile-form/steps';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
@@ -37,6 +43,8 @@ import {
   profileFormSummarySchema,
   reorderBodySchema,
   replaceQuestionBodySchema,
+  undoBranchResultSchema,
+  updateBranchBodySchema,
   updateQuestionBodySchema,
   updateStepBodySchema,
 } from '../contracts/index';
@@ -288,6 +296,94 @@ const createBranchRoute = createRoute({
   },
 });
 
+const branchParamSchema = z.object({ id: z.uuid() });
+
+const NOT_FOUND_BRANCH =
+  '`MODULE_DISABLED` when the module is off; otherwise the branch is unknown or another tenant’s. One bare `NOT_FOUND`, no details.';
+
+const updateBranchRoute = createRoute({
+  method: 'patch',
+  path: '/branches/{id}',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: {
+    params: branchParamSchema,
+    body: { content: { 'application/json': { schema: updateBranchBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The edited branch. `revision` (the one the caller read) is required and is the optimistic lock; every other key is optional and only the keys sent change: `openerQuestionId`, `values` (the same set in another order is no change) and `name` (`null` clears it; trimmed, at most 60 code points). A branch that has an answered question, active or archived, cannot change its opener or its opening set; a name change always passes. A body that changes nothing answers 200 and does NOT bump the revision; otherwise `revision` and `updated_at` move.',
+      content: { 'application/json': { schema: adminBranchSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.profileForm`: `condition_invalid` (values empty, repeated or more than 20, an opener that is not a uuid), `too_long` or `invalid` (the name), or a missing `revision`. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: NOT_FOUND_BRANCH },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm`: `stale_revision`, `already_archived` (read-only until it comes back), `condition_locked` (the branch has an answered question), `condition_invalid`, `condition_order` (the new opener at or after a question of the branch, with `openerId` and `questionId`), `branch_depth` or `public_under_private` (with `titles`). Nothing is written.',
+    },
+  },
+});
+
+const undoBranchRoute = createRoute({
+  method: 'post',
+  path: '/branches/{id}/undo',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: { params: branchParamSchema },
+  responses: {
+    200: {
+      description:
+        'Undoes the branch ("Desfazer ramo"): every question of it, active and archived, leaves the branch (`branch_id` null) and the branch row is deleted, in one transaction. The questions stay in the form where they are and become visible to every member; a branch that hangs on an opener inside it keeps working; no answer is touched. Undoing an empty branch just removes it.',
+      content: { 'application/json': { schema: undoBranchResultSchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: NOT_FOUND_BRANCH },
+  },
+});
+
+const archiveBranchRoute = createRoute({
+  method: 'post',
+  path: '/branches/{id}/archive',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: { params: branchParamSchema },
+  responses: {
+    200: {
+      description:
+        'Archives the branch AS A BLOCK: the branch, every branch that hangs on an opener inside it and every question of that subtree get the same `archived_at`, and the form is renumbered 1..n. Every answer stays. Idempotent: an archived branch answers 200 with `archivedAt` unchanged.',
+      content: { 'application/json': { schema: adminBranchSchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: NOT_FOUND_BRANCH },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm: has_dependents` and `details.dependents` (`[{ id, title }]`, the OPENERS inside the block that open another active branch with answers). Nothing changes.',
+    },
+  },
+});
+
+const reactivateBranchRoute = createRoute({
+  method: 'post',
+  path: '/branches/{id}/reactivate',
+  middleware: [requireModule('profile_form'), requirePermission('profile_form.manage')] as const,
+  request: { params: branchParamSchema },
+  responses: {
+    200: {
+      description:
+        'Reactivates the branch AS A BLOCK: restores exactly the branches and questions archived with the branch’s own stamp (a question archived alone earlier stays archived), `listed_at` now, back at the end of their own step in tree order. Idempotent: an active branch answers 200 unchanged.',
+      content: { 'application/json': { schema: adminBranchSchema } },
+    },
+    403: { description: 'The caller does not hold `profile_form.manage` in this tenant' },
+    404: { description: NOT_FOUND_BRANCH },
+    409: {
+      description:
+        '`CONFLICT` with `details.profileForm`: `condition_invalid` with `openerId` (the opener is archived: reactivate it first), `branch_archived` with `branchId` (the opener sits in an archived branch), `limit_reached` (past 30 active questions), `branch_limit` (past 15 active branches), `condition_order` or `public_under_private`. Nothing changes.',
+    },
+  },
+});
+
 const archivedListRoute = createRoute({
   method: 'get',
   path: '/archived',
@@ -478,6 +574,18 @@ export const profileFormRoutes = profileForm
   )
   .openapi(createBranchRoute, async (c) =>
     c.json(await createBranch(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(updateBranchRoute, async (c) =>
+    c.json(await updateBranch(c.get('ctx'), c.req.valid('param').id, c.req.valid('json')), 200),
+  )
+  .openapi(undoBranchRoute, async (c) =>
+    c.json(await undoBranch(c.get('ctx'), c.req.valid('param').id), 200),
+  )
+  .openapi(archiveBranchRoute, async (c) =>
+    c.json(await archiveBranch(c.get('ctx'), c.req.valid('param').id), 200),
+  )
+  .openapi(reactivateBranchRoute, async (c) =>
+    c.json(await reactivateBranch(c.get('ctx'), c.req.valid('param').id), 200),
   )
   .openapi(archivedListRoute, async (c) => c.json(await listArchived(c.get('ctx')), 200))
   .openapi(archiveRoute, async (c) =>

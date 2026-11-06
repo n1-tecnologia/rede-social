@@ -526,6 +526,12 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // another tenant in a create body is `condition_invalid` (the same answer as a missing one) and writes
   // nothing; a session of the other tenant on this host is refused with TENANT_HOST_MISMATCH.
   'POST /v1/profile_form/branches': { case: 'phase 12.2 sweep: profile form branches' },
+  'PATCH /v1/profile_form/branches/:id': { case: 'phase 12.2 sweep: profile form branches' },
+  'POST /v1/profile_form/branches/:id/undo': { case: 'phase 12.2 sweep: profile form branches' },
+  'POST /v1/profile_form/branches/:id/archive': { case: 'phase 12.2 sweep: profile form branches' },
+  'POST /v1/profile_form/branches/:id/reactivate': {
+    case: 'phase 12.2 sweep: profile form branches',
+  },
 };
 
 /**
