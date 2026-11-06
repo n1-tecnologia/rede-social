@@ -4,11 +4,11 @@ current_phase: "12.2"
 current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: Not started
 status: planning
-stopped_at: Phase 12.2 inserted after 12.1 on 2026-11-06 at Igor's request (branches with several questions, conditions inside conditions, a diagram of the forks); Phase 13 is paused at plan 14 (last completed 13-31) until Igor says to resume it; next /gsd-discuss-phase 12.2
-last_updated: "2026-11-06T13:58:32.417Z"
+stopped_at: Phase 12.2 context gathered (D-640..D-653); next /gsd-ui-phase 12.2 (sketch 019 gate) then /gsd-plan-phase 12.2; Phase 13 stays paused at plan 14 (last completed 13-31) until Igor says to resume it
+last_updated: "2026-11-06T15:10:19.446Z"
 last_activity: 2026-11-06
-last_activity_desc: Phase 12.2 inserted; pointer moved from Phase 13 plan 14 to 12.2 (Igor resumes 13 by word)
-state_head: d47e6a50edae16116746bf29c7cc701f41c37d2d
+last_activity_desc: Phase 12.2 context gathered; Phase 13 paused until Igor resumes it
+state_head: db7b94c1b4e2807e6a01bd7f3689299b8e0fcead
 progress:
   total_phases: 30
   completed_phases: 0
@@ -1244,6 +1244,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T23:53:38.011Z
-Stopped at: Phase 12.1 closed by developer closure 2026-11-06; pointer hand-moved back to Phase 13 (last completed 13-31)
-Resume file: None
+Last session: 2026-11-06T15:10:18.544Z
+Stopped at: Phase 12.2 context gathered
+Resume file: .planning/phases/12.2-ramos-condicionais-no-formulario-de-perfil-varias-perguntas/12.2-CONTEXT.md
