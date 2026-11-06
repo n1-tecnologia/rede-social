@@ -365,7 +365,8 @@ describe('12-09 archive and reactivate: idempotency, ordering, boundary and adja
       const tie = [tieA, tieB].sort();
       expect((await archivedList(admin)).map((q) => q.id)).toEqual([newest, ...tie, oldest]);
       const res = await call(admin, 'GET', '/v1/profile_form/archived');
-      expect(Object.keys((await res.json()) as object)).toEqual(['questions']);
+      // 12.2-08 (D-640): the archived list carries every branch too, so a row can name its branch.
+      expect(Object.keys((await res.json()) as object)).toEqual(['questions', 'branches']);
     });
   }, 30_000);
 

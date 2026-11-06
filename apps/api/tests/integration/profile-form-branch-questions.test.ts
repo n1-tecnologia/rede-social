@@ -1027,3 +1027,251 @@ describe('12.2-09 D-646: archive, reactivate, delete and replace on the tree', (
     });
   });
 });
+
+// ── The 12.1 condition cases, ported to branches (the deleted profile-form-conditions file) ─────────────────
+
+/** The stored place of the given questions: position, revision and the last write instant. */
+const placeOf = async (ids: string[]): Promise<string[]> => {
+  const rows = await adminSql<
+    { id: string; position: number; revision: number; updated_at: Date }[]
+  >`select id::text as id, position, revision, updated_at
+      from public.profile_form_questions where id = any(${ids}::uuid[])`;
+  return ids.map((id) => {
+    const row = rows.find((candidate) => candidate.id === id);
+    return `${row?.position}|${row?.revision}|${row?.updated_at.toISOString()}`;
+  });
+};
+
+describe('12.2-09 ports of the 12.1 illegal-condition cases: every illegal branch opener is refused and writes nothing (D-620, D-621)', () => {
+  it('a yes/no opener takes the tokens true and false; "Outro", an unknown token, another question token and an archived opener are condition_invalid', async () => {
+    const admin = await person();
+    await withProfileForm(labTenantId, async () => {
+      const gate = await plain('Porta', 1);
+      await adminSql`update public.profile_form_questions set type = 'yes_no', options = '[]'::jsonb where id = ${gate}::uuid`;
+      const other = await choice('Outro?', 2);
+      await adminSql`update public.profile_form_questions set allow_other = true where id = ${other.id}::uuid`;
+      const second = await choice('Segunda', 3);
+      const gone = await choice('Arquivado', 4, { archived: true });
+      const before = await snapshot();
+      const [branchesBefore] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.profile_form_branches where tenant_id = ${labTenantId}::uuid`;
+
+      const post = (openerQuestionId: string, values: string[]) =>
+        call(admin, 'POST', '/v1/profile_form/branches', { openerQuestionId, values });
+      for (const [opener, values] of [
+        [gate, ['maybe']],
+        [other.id, ['other']],
+        [other.id, ['Outro']],
+        [other.id, [crypto.randomUUID()]],
+        [other.id, [second.optionIds[0]]],
+        [gone.id, [gone.optionIds[0]]],
+      ] as const) {
+        const res = await post(opener, [...values]);
+        expect(res.status, `${opener} ${values}`).toBe(409);
+        expect(await found(res)).toMatchObject({ profileForm: 'condition_invalid' });
+      }
+      const [branchesAfter] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.profile_form_branches where tenant_id = ${labTenantId}::uuid`;
+      expect(branchesAfter?.n).toBe(branchesBefore?.n);
+      expect(await snapshot()).toBe(before);
+
+      // The positive controls: both yes/no tokens in one branch, and the opener's own option id.
+      const both = await post(gate, ['true', 'false']);
+      expect(both.status, await both.clone().text()).toBe(201);
+      const one = await post(other.id, [other.optionIds[0]]);
+      expect(one.status, await one.clone().text()).toBe(201);
+    });
+  });
+
+  it('a question cannot enter a branch that hangs on itself or below itself: condition_invalid, nothing written', async () => {
+    const admin = await person();
+    await withProfileForm(labTenantId, async () => {
+      // X opens bx; Y sits in bx and opens by. X cannot move into bx (its own branch) nor into by (below itself).
+      const x = await choice('X', 1);
+      const bx = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: x.id,
+        values: [x.optionIds[0]],
+      });
+      const y = await choice('Y', 2, { branchId: bx });
+      const by = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: y.id,
+        values: [y.optionIds[0]],
+      });
+      const before = await snapshot();
+      for (const branchId of [bx, by]) {
+        const res = await patch(admin, x.id, { revision: 1, branchId });
+        expect(res.status, await res.clone().text()).toBe(409);
+        expect(await found(res)).toMatchObject({ profileForm: 'condition_invalid' });
+      }
+      expect(await snapshot()).toBe(before);
+      // A question that is itself an opener CAN sit in a branch of an unrelated opener (nesting is allowed).
+      const z = await choice('Z', 3);
+      const bz = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: z.id,
+        values: [z.optionIds[0]],
+      });
+      const ok = await patch(admin, y.id, { revision: 1, branchId: bz });
+      expect(ok.status, await ok.clone().text()).toBe(200);
+    });
+  });
+});
+
+describe('12.2-09 port of the PF007 race: a branch committed after the service read maps to the same coded 409 with a fresh list', () => {
+  it('archiving an opener while a second connection gives it a branch answers has_dependents with that branch', async () => {
+    const admin = await person();
+    await withProfileForm(labTenantId, async () => {
+      const opener = await choice('Abridor', 1);
+      const late = await plain('Tardia', 2);
+      const lateTitle = `${TITLE}Tardia`;
+
+      // A second connection holds the opener's row, then gives it a branch holding `late` and commits only
+      // after the archive request has read the (stale) tree and is waiting for the row.
+      let release: () => void = () => {};
+      const hold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let locked: () => void = () => {};
+      const isLocked = new Promise<void>((resolve) => {
+        locked = resolve;
+      });
+      let branchId = '';
+      const other = adminSql.begin(async (trx) => {
+        await trx`select id from public.profile_form_questions where id = ${opener.id}::uuid for update`;
+        const [row] = await trx<{ id: string }[]>`
+          insert into public.profile_form_branches (tenant_id, opener_question_id, open_values)
+          values (${labTenantId}::uuid, ${opener.id}::uuid, ${trx.array([opener.optionIds[0]])}::text[])
+          returning id::text as id`;
+        branchId = row?.id ?? '';
+        await trx`update public.profile_form_questions set branch_id = ${branchId}::uuid where id = ${late}::uuid`;
+        locked();
+        await hold;
+      });
+      await isLocked;
+      const pending = call(admin, 'POST', `/v1/profile_form/questions/${opener.id}/archive`);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      release();
+      await other;
+      const res = await pending;
+
+      expect(res.status, await res.clone().text()).toBe(409);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('CONFLICT');
+      expect(body.error.details).toEqual({
+        profileForm: 'has_dependents',
+        dependents: [],
+        branches: [
+          {
+            id: branchId,
+            name: null,
+            openerQuestionId: opener.id,
+            values: [opener.optionIds[0]],
+            questions: [{ id: late, title: lateTitle }],
+          },
+        ],
+      });
+      expect((await rowOf(opener.id)).archived_at).toBeNull();
+    });
+  }, 60_000);
+});
+
+describe('12.2-09 ports of quick 261106-ei5: where a question of a branch lands, across steps (D-651, D-652)', () => {
+  it('with the opener in an EARLIER step the run keeps the end of its own step; in the opener step it follows the opener', async () => {
+    const admin = await person();
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({
+        tenantId: labTenantId,
+        title: `${TITLE}etapa 1`,
+        position: 1,
+      });
+      const s2 = await seedProfileFormStep({
+        tenantId: labTenantId,
+        title: `${TITLE}etapa 2`,
+        position: 2,
+      });
+      const o = await choice('C opener', 1, { stepId: s1 });
+      const bo = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: o.id,
+        values: [o.optionIds[0]],
+      });
+      await plain('C a2', 2, { stepId: s1 });
+      await plain('C x', 3, { stepId: s2 });
+      await plain('C y', 4, { stepId: s2 });
+
+      const far = await create(admin, { title: `${TITLE}C far`, stepId: s2, branchId: bo });
+      expect(far.status, await far.clone().text()).toBe(201);
+      expect(await titlesOf(admin)).toEqual(['C opener', 'C a2', 'C x', 'C y', 'C far']);
+      const near = await create(admin, { title: `${TITLE}C near`, stepId: s1, branchId: bo });
+      expect(near.status, await near.clone().text()).toBe(201);
+      expect(await titlesOf(admin)).toEqual(['C opener', 'C near', 'C a2', 'C x', 'C y', 'C far']);
+      expect(await positions()).toEqual([1, 2, 3, 4, 5, 6]);
+    });
+  });
+
+  it('a question of the very last run ends the form and touches no other row', async () => {
+    const admin = await person();
+    await withProfileForm(labTenantId, async () => {
+      const x = await plain('D plain', 1);
+      const o = await choice('D opener', 2);
+      const bo = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: o.id,
+        values: [o.optionIds[0]],
+      });
+      const before = await placeOf([x, o.id]);
+      const res = await create(admin, { title: `${TITLE}D dependent`, branchId: bo });
+      expect(res.status, await res.clone().text()).toBe(201);
+      const d = ((await res.json()) as ListedQuestion).id;
+      expect(await orderOf(admin)).toEqual([x, o.id, d]);
+      expect(await placeOf([x, o.id])).toEqual(before);
+    });
+  });
+
+  it('a question of a branch whose opener is in another step returns to the end of its own step; an unconditional one to the end of its step', async () => {
+    const admin = await person();
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedProfileFormStep({
+        tenantId: labTenantId,
+        title: `${TITLE}etapa 1`,
+        position: 1,
+      });
+      const s2 = await seedProfileFormStep({
+        tenantId: labTenantId,
+        title: `${TITLE}etapa 2`,
+        position: 2,
+      });
+      const o = await choice('F opener', 1, { stepId: s1 });
+      const bo = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: o.id,
+        values: [o.optionIds[0]],
+      });
+      const d = await plain('F dependent', 2, { stepId: s2, branchId: bo });
+      const x = await plain('F plain', 3, { stepId: s2 });
+      expect(await orderOf(admin)).toEqual([o.id, d, x]);
+      expect((await call(admin, 'POST', `/v1/profile_form/questions/${d}/archive`)).status).toBe(
+        200,
+      );
+      expect((await call(admin, 'POST', `/v1/profile_form/questions/${d}/reactivate`)).status).toBe(
+        200,
+      );
+      expect(await orderOf(admin)).toEqual([o.id, x, d]);
+      const listed = (await listOf(admin)).questions;
+      expect(
+        listed.filter((question) => question.stepId === s2).map((question) => question.id),
+      ).toEqual([x, d]);
+
+      // G: an unconditional question returns to the end of its step.
+      expect((await call(admin, 'POST', `/v1/profile_form/questions/${x}/archive`)).status).toBe(
+        200,
+      );
+      expect((await call(admin, 'POST', `/v1/profile_form/questions/${x}/reactivate`)).status).toBe(
+        200,
+      );
+      expect(await orderOf(admin)).toEqual([o.id, d, x]);
+    });
+  });
+});

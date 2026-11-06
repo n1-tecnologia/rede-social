@@ -247,6 +247,8 @@ describe('12-08 tracer: an admin creates a question through the guard chain, lis
         limit: 30,
         steps: [],
         stepLimit: 10,
+        // 12.2-08 (D-640): every list carries the tenant's branches, none yet.
+        branches: [],
       });
       const second = await question({ position: 2, title: `${TITLE}B` });
       const first = await question({ position: 1, title: `${TITLE}A` });

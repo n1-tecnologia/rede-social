@@ -10,6 +10,7 @@ import {
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
   seedProfileFormAnswer,
+  seedProfileFormBranch,
   seedProfileFormQuestion,
   seedProfileFormStep,
   signInAs,
@@ -702,7 +703,7 @@ describe('12.1-09 tracer: an admin moves a question across steps and an order th
     });
   }, 30_000);
 
-  it('condition_order: a layout that puts an opener after the question it opens is 409 naming BOTH ids, and the stored order is unchanged', async () => {
+  it('condition_order: a step above the step of an opener is 409 naming BOTH ids; inside one step the flat request is rewritten to the tree order (D-652)', async () => {
     const admin = await person('admin_tenant');
     await withProfileForm(labTenantId, async () => {
       const s1 = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
@@ -714,29 +715,29 @@ describe('12.1-09 tracer: an admin moves a question across steps and an order th
         stepId: s1,
         position: 1,
       });
+      const branch = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: [optionId],
+      });
       const dependent = await seedQ('Dependent', {
         stepId: s1,
         position: 2,
-        conditionQuestionId: opener,
-        conditionValues: [optionId],
+        branchId: branch,
       });
       const other = await seedQ('Other', { stepId: s2, position: 3 });
       const before = await activeIn(labTenantId);
 
-      // The opener after its dependent in the same step.
+      // The opener after its dependent in the same step: not refused for being flat, the server rewrites it
+      // to the tree order (the dependent right after its opener) and the stored order is the same as before.
       const swapped = await putOrder(admin, {
         steps: [
           { id: s1, questionIds: [dependent, opener] },
           { id: s2, questionIds: [other] },
         ],
       });
-      expect(swapped.status).toBe(409);
-      expect(await details(swapped)).toEqual({
-        profileForm: 'condition_order',
-        questionId: dependent,
-        openerId: opener,
-      });
-      expect(await activeIn(labTenantId)).toEqual(before);
+      expect(swapped.status, await swapped.clone().text()).toBe(200);
+      expect(idsOf(await activeIn(labTenantId))).toEqual(idsOf(before));
 
       // The dependent moved into a step ABOVE the opener's step.
       const above = await putOrder(admin, {
@@ -945,11 +946,15 @@ describe('12.1-09 D-627: an edit with stepId moves the question to the end of th
         stepId: s1,
         position: 1,
       });
+      const branch = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: [optionId],
+      });
       const dependent = await seedQ('Dependent', {
         stepId: s1,
         position: 2,
-        conditionQuestionId: opener,
-        conditionValues: [optionId],
+        branchId: branch,
       });
       const before = await activeIn(labTenantId);
 
