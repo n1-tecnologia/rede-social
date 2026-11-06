@@ -469,22 +469,22 @@ Phase 12. The tenant admin builds the profile form of their community; members a
 
 Phase 12.1 extends the form with steps and conditional questions (D-620..D-636; it reverses D-582 for the first fill and the return).
 
-- [ ] **PFORM-27**: A form has steps: a tenant-owned `profile_form_steps` row (title 1 to 60 characters, position, revision), at most 10 per tenant; every question belongs to exactly one step; the questions that exist at release move into one default step by an idempotent, expand-only backfill (the title Igor confirms, default "Informações gerais"); a form with one step renders and behaves exactly as in Phase 12. *(D-627, D-633)*
-- [ ] **PFORM-28**: `admin_tenant` creates, renames and deletes steps (a step that holds an active question, and the only step, cannot be deleted; the archived questions of a deleted step move to a surviving one), moves a question between steps and reorders steps and questions; the form's order stays ONE global `position` sequence written in one statement, and `PUT /order` accepts the legacy flat body for one release, only on a one-step tenant. *(D-623, D-627, D-633)*
-- [ ] **PFORM-29**: A question carries at most ONE condition (the opener's question id plus a set of option ids, or true or false for yes/no; the question appears when ANY listed answer is present); only dropdown, multiple choice, single choice and yes/no questions open others, the opener carries no condition and comes earlier in the form (the same step earlier, or an earlier step), "Outro" opens nothing, and a write or a reorder that breaks a rule is a coded refusal (`condition_invalid`, `condition_order`) that names the pair. *(D-620, D-621, D-622, D-623)*
-- [ ] **PFORM-30**: `app.profile_form_missing` counts a required, active question without an answer only when the member SEES it (no condition, or the opener's answer overlaps the condition's options), still one SQL function behind the same `_gate` twins and the same single round trip, with no per-type logic and no recursion; a tenant with the module off still pays one primary-key probe. *(D-631)*
-- [ ] **PFORM-31**: A question that already has answers cannot gain or change its condition (database trigger code PF006 and the service refusal `condition_locked`; removing a condition is always allowed); a question that still opens active others cannot be archived, deleted, retyped or lose an option a condition references (PF007 and a coded 409 that carries the dependents), and a shown question cannot be reactivated under an archived or ineligible opener. *(D-625, D-632)*
-- [ ] **PFORM-32**: `PUT /v1/me/profile-form/answers` accepts an optional `stepId`: it validates and saves that step's visible questions, keeps the per-value validation and the `formEtag` conflict check, no longer refuses for a required question outside the step, ignores a value sent for a hidden question and answers `{ missingRequired, missingQuestionIds }`; the hard gate still releases only when nothing visible and required is missing, and a save without `stepId` behaves as in Phase 12. *(D-629, D-631)*
-- [ ] **PFORM-33**: Stored equals visible: in the same transaction as the member's save, the answers of every question that no longer applies, active or archived, are deleted by a claims-scoped database function that can only touch her own answers, so the public block, the staff view, the CSV and the counts need no visibility filter; saving twice changes nothing. *(D-624, D-636)*
-- [ ] **PFORM-34**: The member's first fill and return are a stepper over the steps she actually has (a step with no visible question is skipped; the return shows only steps with something missing): "Etapa x de y", "Avançar" saves the step, "Voltar" never saves, "Concluir" on the last step, a question that opens appears in place with focus kept on the opener, and the stepper jumps to the first step with something missing when the server still reports one. *(D-621, D-628, D-629, D-630)*
-- [ ] **PFORM-35**: Edit from "Minhas respostas" is ONE scrollable screen with every step that has a visible question stacked under its title and a single "Salvar"; a form with one step looks exactly as in Phase 12. *(D-630)*
-- [ ] **PFORM-36**: Before any save that would delete a stored answer the member is shown which questions (titles only) and must confirm; cancelling saves nothing and the dialog never shows an answer value. *(D-626)*
-- [ ] **PFORM-37**: The builder shows steps as wells that hold their questions (one step is Phase 12's flat list), the step sheet to create, rename and delete, the condition editor and the step field in the question sheet, the "Condicional" and "Abre N perguntas" markers, one refusal list for archive, delete, retype and option removal, and the admin preview that follows steps and conditions. *(D-621, D-632, D-635)*
-- [ ] **PFORM-38**: The admin impact dialog, the form summary and the new-optional notice count only members who SEE a question (a new impact change `remove_condition` exists); the summary's `complete` equals the number of members the gate releases. *(D-634)*
-- [ ] **PFORM-39**: The readers need no filter on stored answers: "Minhas respostas" omits a question that does not apply, the staff view reads "Não se aplica" (the staff row carries its condition), the public block is untouched, and the CSV keeps one column per question (archived included) with an empty cell where a question never applied. *(D-634, D-624)*
-- [ ] **PFORM-40**: The limits live in `PROFILE_FORM_LIMITS` (30 questions, 10 steps, step title 60) and the database CHECKs read them; the three new migrations are expand-only and fan out to every project (the `step_id` backfill, the default-step trigger, the `_v2` lock beside the old one for one release), and the tenant move engine copies the self-referencing questions table. *(D-633, D-596)*
-- [ ] **PFORM-41**: One pure visibility function in `@rede-social/contracts` decides what the stepper, the preview and the readers draw, and a parity table pins it against the SQL gate and the purge on the same rows. *(D-621, D-631)*
-- [ ] **PFORM-42**: Every new screen is mobile-first (390px design, 320px must not break), fully pt-BR from the catalogs, 44px targets, in the prototype's language, and no UI task starts before sketch gate `018` carries `approved: true` pasted by the user. The one exemption is a compile-only prop and mapper edit of the admin preview in plan 12.1-11 that adds no layout, string or style (planner assumption A-12.1-PLUMB); Igor reviews it with the phase. *(UI-04 as a gate reference only, D-635)*
+- [x] **PFORM-27**: A form has steps: a tenant-owned `profile_form_steps` row (title 1 to 60 characters, position, revision), at most 10 per tenant; every question belongs to exactly one step; the questions that exist at release move into one default step by an idempotent, expand-only backfill (the title Igor confirms, default "Informações gerais"); a form with one step renders and behaves exactly as in Phase 12. *(D-627, D-633)*
+- [x] **PFORM-28**: `admin_tenant` creates, renames and deletes steps (a step that holds an active question, and the only step, cannot be deleted; the archived questions of a deleted step move to a surviving one), moves a question between steps and reorders steps and questions; the form's order stays ONE global `position` sequence written in one statement, and `PUT /order` accepts the legacy flat body for one release, only on a one-step tenant. *(D-623, D-627, D-633)*
+- [x] **PFORM-29**: A question carries at most ONE condition (the opener's question id plus a set of option ids, or true or false for yes/no; the question appears when ANY listed answer is present); only dropdown, multiple choice, single choice and yes/no questions open others, the opener carries no condition and comes earlier in the form (the same step earlier, or an earlier step), "Outro" opens nothing, and a write or a reorder that breaks a rule is a coded refusal (`condition_invalid`, `condition_order`) that names the pair. *(D-620, D-621, D-622, D-623)*
+- [x] **PFORM-30**: `app.profile_form_missing` counts a required, active question without an answer only when the member SEES it (no condition, or the opener's answer overlaps the condition's options), still one SQL function behind the same `_gate` twins and the same single round trip, with no per-type logic and no recursion; a tenant with the module off still pays one primary-key probe. *(D-631)*
+- [x] **PFORM-31**: A question that already has answers cannot gain or change its condition (database trigger code PF006 and the service refusal `condition_locked`; removing a condition is always allowed); a question that still opens active others cannot be archived, deleted, retyped or lose an option a condition references (PF007 and a coded 409 that carries the dependents), and a shown question cannot be reactivated under an archived or ineligible opener. *(D-625, D-632)*
+- [x] **PFORM-32**: `PUT /v1/me/profile-form/answers` accepts an optional `stepId`: it validates and saves that step's visible questions, keeps the per-value validation and the `formEtag` conflict check, no longer refuses for a required question outside the step, ignores a value sent for a hidden question and answers `{ missingRequired, missingQuestionIds }`; the hard gate still releases only when nothing visible and required is missing, and a save without `stepId` behaves as in Phase 12. *(D-629, D-631)*
+- [x] **PFORM-33**: Stored equals visible: in the same transaction as the member's save, the answers of every question that no longer applies, active or archived, are deleted by a claims-scoped database function that can only touch her own answers, so the public block, the staff view, the CSV and the counts need no visibility filter; saving twice changes nothing. *(D-624, D-636)*
+- [x] **PFORM-34**: The member's first fill and return are a stepper over the steps she actually has (a step with no visible question is skipped; the return shows only steps with something missing): "Etapa x de y", "Avançar" saves the step, "Voltar" never saves, "Concluir" on the last step, a question that opens appears in place with focus kept on the opener, and the stepper jumps to the first step with something missing when the server still reports one. *(D-621, D-628, D-629, D-630)*
+- [x] **PFORM-35**: Edit from "Minhas respostas" is ONE scrollable screen with every step that has a visible question stacked under its title and a single "Salvar"; a form with one step looks exactly as in Phase 12. *(D-630)*
+- [x] **PFORM-36**: Before any save that would delete a stored answer the member is shown which questions (titles only) and must confirm; cancelling saves nothing and the dialog never shows an answer value. *(D-626)*
+- [x] **PFORM-37**: The builder shows steps as wells that hold their questions (one step is Phase 12's flat list), the step sheet to create, rename and delete, the condition editor and the step field in the question sheet, the "Condicional" and "Abre N perguntas" markers, one refusal list for archive, delete, retype and option removal, and the admin preview that follows steps and conditions. *(D-621, D-632, D-635)*
+- [x] **PFORM-38**: The admin impact dialog, the form summary and the new-optional notice count only members who SEE a question (a new impact change `remove_condition` exists); the summary's `complete` equals the number of members the gate releases. *(D-634)*
+- [x] **PFORM-39**: The readers need no filter on stored answers: "Minhas respostas" omits a question that does not apply, the staff view reads "Não se aplica" (the staff row carries its condition), the public block is untouched, and the CSV keeps one column per question (archived included) with an empty cell where a question never applied. *(D-634, D-624)*
+- [x] **PFORM-40**: The limits live in `PROFILE_FORM_LIMITS` (30 questions, 10 steps, step title 60) and the database CHECKs read them; the three new migrations are expand-only and fan out to every project (the `step_id` backfill, the default-step trigger, the `_v2` lock beside the old one for one release), and the tenant move engine copies the self-referencing questions table. *(D-633, D-596)*
+- [x] **PFORM-41**: One pure visibility function in `@rede-social/contracts` decides what the stepper, the preview and the readers draw, and a parity table pins it against the SQL gate and the purge on the same rows. *(D-621, D-631)*
+- [x] **PFORM-42**: Every new screen is mobile-first (390px design, 320px must not break), fully pt-BR from the catalogs, 44px targets, in the prototype's language, and no UI task starts before sketch gate `018` carries `approved: true` pasted by the user. The one exemption is a compile-only prop and mapper edit of the admin preview in plan 12.1-11 that adds no layout, string or style (planner assumption A-12.1-PLUMB); Igor reviews it with the phase. *(UI-04 as a gate reference only, D-635)*
 
 ### Native app
 
@@ -992,22 +992,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PFORM-24 | Phase 12 (plans 06, 08, 09) | Complete |
 | PFORM-25 | Phase 12 (plans 02, 04, 18) | Pending |
 | PFORM-26 | Phase 12 (plans 01, 11-18) | Pending |
-| PFORM-27 | Phase 12.1 (plans 01, 03, 06, 07, 08, 09, 16) | Pending |
-| PFORM-28 | Phase 12.1 (plans 01, 04, 08, 09, 16) | Pending |
-| PFORM-29 | Phase 12.1 (plans 01, 03, 04, 09, 10, 17) | Pending |
-| PFORM-30 | Phase 12.1 (plans 01, 06, 07, 11) | Pending |
-| PFORM-31 | Phase 12.1 (plans 01, 04, 06, 07, 10, 17) | Pending |
-| PFORM-32 | Phase 12.1 (plans 01, 11, 14) | Pending |
-| PFORM-33 | Phase 12.1 (plans 06, 07, 11, 12) | Pending |
-| PFORM-34 | Phase 12.1 (plans 13, 14, 19) | Pending |
-| PFORM-35 | Phase 12.1 (plans 13, 15, 19) | Pending |
-| PFORM-36 | Phase 12.1 (plans 13, 15, 19) | Pending |
-| PFORM-37 | Phase 12.1 (plans 16, 17, 18, 19) | Pending |
-| PFORM-38 | Phase 12.1 (plans 10, 17) | Pending |
-| PFORM-39 | Phase 12.1 (plans 12, 13, 15) | Pending |
-| PFORM-40 | Phase 12.1 (plans 01, 03, 06, 12, 19) | Pending |
-| PFORM-41 | Phase 12.1 (plans 01, 12, 13) | Pending |
-| PFORM-42 | Phase 12.1 (plans 02, 05, 14, 15, 16, 17, 18, 19) | Pending |
+| PFORM-27 | Phase 12.1 (plans 01, 03, 06, 07, 08, 09, 16) | Complete |
+| PFORM-28 | Phase 12.1 (plans 01, 04, 08, 09, 16) | Complete |
+| PFORM-29 | Phase 12.1 (plans 01, 03, 04, 09, 10, 17) | Complete |
+| PFORM-30 | Phase 12.1 (plans 01, 06, 07, 11) | Complete |
+| PFORM-31 | Phase 12.1 (plans 01, 04, 06, 07, 10, 17) | Complete |
+| PFORM-32 | Phase 12.1 (plans 01, 11, 14) | Complete |
+| PFORM-33 | Phase 12.1 (plans 06, 07, 11, 12) | Complete |
+| PFORM-34 | Phase 12.1 (plans 13, 14, 19) | Complete |
+| PFORM-35 | Phase 12.1 (plans 13, 15, 19) | Complete |
+| PFORM-36 | Phase 12.1 (plans 13, 15, 19) | Complete |
+| PFORM-37 | Phase 12.1 (plans 16, 17, 18, 19) | Complete |
+| PFORM-38 | Phase 12.1 (plans 10, 17) | Complete |
+| PFORM-39 | Phase 12.1 (plans 12, 13, 15) | Complete |
+| PFORM-40 | Phase 12.1 (plans 01, 03, 06, 12, 19) | Complete |
+| PFORM-41 | Phase 12.1 (plans 01, 12, 13) | Complete |
+| PFORM-42 | Phase 12.1 (plans 02, 05, 14, 15, 16, 17, 18, 19) | Complete |
 | NATIVE-01 | Phase 13 (plans 02, 23) | Pending |
 | NATIVE-02 | Phase 13 (plans 03, 24, 25, 29) | Pending |
 | NATIVE-03 | Phase 13 (plans 02, 16) | Pending |

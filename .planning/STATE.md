@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "12.1"
-current_phase_name: Perguntas condicionais e etapas no formulário de perfil
-current_plan: 19
-status: verifying
-stopped_at: Phase 12.1 executed 19/19; VERIFICATION human_needed (15/16), UAT 7 pending; review 0 blocker / 8 warnings; STATE pointer was moved from Phase 13 plan 14
-last_updated: "2026-11-05T23:53:38.791Z"
-last_activity: 2026-11-05
-last_activity_desc: Phase 12.1 execution started
-state_head: 2b462fb1022acfcff82fda1e9a13b991bcd0d509
+current_phase: "13"
+current_phase_name: App nativo iOS e Android por tenant (white-label)
+current_plan: 14
+status: executing
+stopped_at: Phase 12.1 closed by developer closure 2026-11-06 (UAT 7/7 on his word, security 18/18, verification passed); pointer hand-moved back to Phase 13 (was plan 14, last completed 13-31)
+last_updated: "2026-11-06T12:24:11.755Z"
+last_activity: 2026-11-06
+last_activity_desc: Phase 12.1 closed; pointer hand-moved back to Phase 13 plan 14
+state_head: 173e6033089b6f55f39b1bdffbb7890ac4e54afa
 progress:
   total_phases: 29
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 363
   completed_plans: 335
-  percent: 0
+  percent: 3
 ---
 
 # Project State
@@ -24,24 +24,24 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 12.1 — Perguntas condicionais e etapas no formulário de perfil
+**Current focus:** Phase 13 — App nativo iOS e Android por tenant (white-label)
 
 ## Current Position
 
-Phase: 12.1 (Perguntas condicionais e etapas no formulário de perfil) — EXECUTING
-Current Plan: 19
-Total Plans in Phase: 19
-Plan: 19 of 19
-Status: Phase complete — ready for verification
-Last activity: 2026-11-05 — Phase 12.1 execution started
+Phase: 13 (App nativo iOS e Android por tenant (white-label)) — EXECUTING
+Current Plan: 14
+Total Plans in Phase: 32
+Plan: 14 of 32
+Status: Ready to execute
+Last activity: 2026-11-06 — Phase 12.1 closed; pointer hand-moved back to Phase 13 plan 14
 
-Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 3%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 126
+- Total plans completed: 145
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -60,6 +60,7 @@ Progress: [███████████████████░] 160/162
 | 08.6 | 13 | - | - |
 | 08.7 | 13 | - | - |
 | 9 | 17 | - | - |
+| 12.1 | 19 | - | - |
 
 **Recent Trend:**
 
@@ -1242,5 +1243,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-05T23:53:38.011Z
-Stopped at: Phase 12.1 executed 19/19; VERIFICATION human_needed (15/16), UAT 7 pending; review 0 blocker / 8 warnings; STATE pointer was moved from Phase 13 plan 14
-Resume file: .planning/phases/12.1-perguntas-condicionais-e-etapas-no-formulario-de-perfil/12.1-UAT.md
+Stopped at: Phase 12.1 closed by developer closure 2026-11-06; pointer hand-moved back to Phase 13 (last completed 13-31)
+Resume file: None
