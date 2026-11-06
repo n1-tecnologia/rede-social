@@ -7,6 +7,7 @@ import {
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
   seedProfileFormAnswer,
+  seedProfileFormBranch,
   seedProfileFormQuestion,
   seedProfileFormStep,
   signInAs,
@@ -27,23 +28,26 @@ import {
  */
 
 type Envelope = { error: { code: string; details?: Record<string, unknown> } };
-type Condition = { questionId: string; values: string[] };
 type FormQuestion = {
   id: string;
   type: string;
   title: string;
   required: boolean;
   stepId: string;
-  condition: Condition | null;
+  /** The compatibility key: always null since 12.2 (the per-question condition is gone). */
+  condition: null;
+  branchId: string | null;
   options: { id: string; label: string }[];
   answer: unknown;
 };
+type FormBranch = { id: string; openerQuestionId: string; values: string[] };
 type Form = {
   mode: 'none' | 'first' | 'returning' | 'edit';
   missingRequired: number;
   formEtag: string;
   steps: { id: string; title: string }[];
   questions: FormQuestion[];
+  branches: FormBranch[];
 };
 type SaveResult = { missingRequired: number; missingQuestionIds: string[] };
 
@@ -167,7 +171,7 @@ afterAll(async () => {
 // ── Task 1: the read carries steps and conditions and the etag follows them ─────────────────────────
 
 describe('12.1-11 tracer: the member form carries steps and conditions and a step move changes the etag (D-628, D-629, D-630)', () => {
-  it('reads EVERY active question with stepId and condition, the shown steps in order, and no empty step', async () => {
+  it('reads EVERY active question with stepId and branchId, the ACTIVE branches, the shown steps in order, and no empty step', async () => {
     const member = await person();
     await withProfileForm(labTenantId, async () => {
       const s1 = await seedStep('S1');
@@ -200,11 +204,17 @@ describe('12.1-11 tracer: the member form carries steps and conditions and a ste
       ]);
       expect(form.steps.map((step) => step.id)).not.toContain(empty);
       expect(form.steps.map((step) => step.id)).not.toContain(onlyArchived);
-      // The hidden dependent is in the read: the client reveals it live (D-630).
-      expect(form.questions.map((q) => [q.id, q.stepId, q.condition])).toEqual([
-        [opener, s1, null],
-        [dependent, s2, { questionId: opener, values: [yes?.id] }],
-        [plain, s2, null],
+      // The hidden dependent is in the read: the client reveals it live (D-630). Since 12.2 it names its branch.
+      const [branchRow] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.profile_form_branches
+         where opener_question_id = ${opener}::uuid`;
+      expect(form.questions.map((q) => [q.id, q.stepId, q.branchId, q.condition])).toEqual([
+        [opener, s1, null, null],
+        [dependent, s2, branchRow?.id, null],
+        [plain, s2, null, null],
+      ]);
+      expect(form.branches).toEqual([
+        { id: branchRow?.id, openerQuestionId: opener, values: [yes?.id] },
       ]);
       expect(form.formEtag).toMatch(/^[0-9a-f]{16}$/);
       // Reading again changes nothing: the etag is a pure function of the stored form.
@@ -212,7 +222,7 @@ describe('12.1-11 tracer: the member form carries steps and conditions and a ste
     });
   }, 30_000);
 
-  it('the formEtag differs after a question moves to another step even when the global order is unchanged, after a step rename and after a condition edit', async () => {
+  it('the formEtag differs after a question moves to another step even when the global order is unchanged, after a step rename and after a move into a branch', async () => {
     const admin = await person('admin_tenant');
     const member = await person();
     await withProfileForm(labTenantId, async () => {
@@ -251,20 +261,24 @@ describe('12.1-11 tracer: the member form carries steps and conditions and a ste
       expect(afterRename.steps.map((s) => s.title)).toEqual([`${TITLE}S1`, `${TITLE}S2 renomeada`]);
       expect(afterRename.formEtag).not.toBe(afterMove.formEtag);
 
-      // A condition edit bumps the question's revision.
-      const [q] = await adminSql<{ revision: number }[]>`
-        select revision from public.profile_form_questions where id = ${c}::uuid`;
-      const conditioned = await call(admin, 'PATCH', `/v1/profile_form/questions/${c}`, {
-        revision: q?.revision,
-        condition: { questionId: opener, values: ['true'] },
-      });
-      expect(conditioned.status, await conditioned.clone().text()).toBe(200);
-      const afterCondition = await readForm(member);
-      expect(afterCondition.questions.find((x) => x.id === c)?.condition).toEqual({
-        questionId: opener,
+      // Moving a question into a branch bumps the question's revision (D-640) and the branch joins the etag.
+      const branchId = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
         values: ['true'],
       });
-      expect(afterCondition.formEtag).not.toBe(afterRename.formEtag);
+      const beforeBranch = (await readForm(member)).formEtag;
+      expect(beforeBranch).not.toBe(afterRename.formEtag);
+      const [q] = await adminSql<{ revision: number }[]>`
+        select revision from public.profile_form_questions where id = ${c}::uuid`;
+      const branched = await call(admin, 'PATCH', `/v1/profile_form/questions/${c}`, {
+        revision: q?.revision,
+        branchId,
+      });
+      expect(branched.status, await branched.clone().text()).toBe(200);
+      const afterBranch = await readForm(member);
+      expect(afterBranch.questions.find((x) => x.id === c)?.branchId).toBe(branchId);
+      expect(afterBranch.formEtag).not.toBe(beforeBranch);
     });
   }, 30_000);
 
@@ -762,4 +776,285 @@ describe('12.1-11 D-586 (informational): newOptional counts an optional conditio
       expect(await newOptional(matching)).toBe(1);
     });
   }, 40_000);
+});
+
+// ── 12.2-10 tracer: a depth-3 tree is read, a save closes the top branch and nothing is held below it ─────
+
+const BRANCH_NAME = 'pfs NOME-SECRETO-DO-RAMO';
+
+type Deep = {
+  s1: string;
+  q1: string;
+  tem: string;
+  trabalha: string;
+  q2: string;
+  q2Yes: string;
+  q3: string;
+  q3Yes: string;
+  q4: string;
+  q5: string;
+  q6: string;
+  u: string;
+  b1: string;
+  b2: string;
+  b3: string;
+};
+
+/**
+ * The clinic tree, three levels, in one step and in tree order:
+ *   Q1 (opener: tem | trabalha)
+ *   B1 on Q1 = tem        holds Q2 (opener), Q6
+ *   B2 on Q2 = Q2Yes      holds Q3 (opener), Q5
+ *   B3 on Q3 = Q3Yes      holds Q4
+ *   U, unconditional
+ * Every branch carries a name that no member or staff body may ever show.
+ */
+async function deepTree(over: { requiredBelow?: boolean } = {}): Promise<Deep> {
+  const s1 = await seedStep('S1');
+  const [tem, trabalha, q2Yes, q2No, q3Yes, q3No] = Array.from({ length: 6 }, () =>
+    crypto.randomUUID(),
+  ) as [string, string, string, string, string, string];
+  const required = over.requiredBelow ?? false;
+  const q1 = await seedQ('Q1', {
+    type: 'single_choice',
+    stepId: s1,
+    position: 1,
+    options: [
+      { id: tem, label: 'Tem' },
+      { id: trabalha, label: 'Trabalha' },
+    ],
+  });
+  const b1 = await seedProfileFormBranch({
+    tenantId: labTenantId,
+    openerQuestionId: q1,
+    values: [tem],
+    name: BRANCH_NAME,
+  });
+  const q2 = await seedQ('Q2', {
+    type: 'single_choice',
+    stepId: s1,
+    position: 2,
+    branchId: b1,
+    options: [
+      { id: q2Yes, label: 'Sim' },
+      { id: q2No, label: 'Não' },
+    ],
+  });
+  const b2 = await seedProfileFormBranch({
+    tenantId: labTenantId,
+    openerQuestionId: q2,
+    values: [q2Yes],
+    name: BRANCH_NAME,
+  });
+  const q3 = await seedQ('Q3', {
+    type: 'single_choice',
+    stepId: s1,
+    position: 3,
+    branchId: b2,
+    options: [
+      { id: q3Yes, label: 'Sim' },
+      { id: q3No, label: 'Não' },
+    ],
+  });
+  const b3 = await seedProfileFormBranch({
+    tenantId: labTenantId,
+    openerQuestionId: q3,
+    values: [q3Yes],
+    name: BRANCH_NAME,
+  });
+  const q4 = await seedQ('Q4', { stepId: s1, position: 4, branchId: b3, required });
+  const q5 = await seedQ('Q5', { stepId: s1, position: 5, branchId: b2, required });
+  const q6 = await seedQ('Q6', { stepId: s1, position: 6, branchId: b1, required });
+  const u = await seedQ('U', { stepId: s1, position: 7 });
+  return {
+    s1,
+    q1,
+    tem,
+    trabalha,
+    q2,
+    q2Yes,
+    q3,
+    q3Yes,
+    q4,
+    q5,
+    q6,
+    u,
+    b1,
+    b2,
+    b3,
+  };
+}
+
+/** Plants one member's answers to the whole open tree: every level open, every question answered. */
+async function answerWholeTree(f: Deep, userId: string): Promise<void> {
+  const put = (questionId: string, value: unknown) =>
+    seedProfileFormAnswer({ tenantId: labTenantId, questionId, userId, value });
+  await put(f.q1, choose(f.tem));
+  await put(f.q2, choose(f.q2Yes));
+  await put(f.q3, choose(f.q3Yes));
+  await put(f.q4, 'quatro');
+  await put(f.q5, 'cinco');
+  await put(f.q6, 'seis');
+  await put(f.u, 'incondicional');
+}
+
+describe('12.2-10 tracer: a depth-3 form is read with its tree and a save that closes the top branch leaves nothing below it (D-641, D-644, D-645)', () => {
+  it('reads every question with its branchId, the three ACTIVE branches in the strict member shape, and no branch name anywhere in the body', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      const res = await call(member, 'GET', '/v1/me/profile-form');
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      // T-12.2-03: the stored name is nowhere in the serialized body.
+      expect(text).not.toContain('NOME-SECRETO');
+      const form = JSON.parse(text) as Form;
+      expect(form.questions.map((q) => [q.id, q.branchId, q.condition])).toEqual([
+        [f.q1, null, null],
+        [f.q2, f.b1, null],
+        [f.q3, f.b2, null],
+        [f.q4, f.b3, null],
+        [f.q5, f.b2, null],
+        [f.q6, f.b1, null],
+        [f.u, null, null],
+      ]);
+      expect(form.branches).toHaveLength(3);
+      // The exact keys of the strict shape, nothing else.
+      for (const branch of form.branches) {
+        expect(Object.keys(branch).sort()).toEqual(['id', 'openerQuestionId', 'values']);
+      }
+      expect(form.branches.find((b) => b.id === f.b2)).toEqual({
+        id: f.b2,
+        openerQuestionId: f.q2,
+        values: [f.q2Yes],
+      });
+      // Nothing is required, so the form reads `edit` and owes nothing.
+      expect(form.mode).toBe('edit');
+      expect(form.missingRequired).toBe(0);
+    });
+  }, 30_000);
+
+  it('a save of step 1 that changes Q1 from tem to trabalha deletes the answers of Q2 to Q6 in the same transaction and keeps Q1, the unconditional one and another member', async () => {
+    const member = await person();
+    const bystander = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      for (const who of [member, bystander]) await answerWholeTree(f, who.userId);
+      const form = await readForm(member);
+
+      const result = await saved(await save(member, form, { [f.q1]: choose(f.trabalha) }, f.s1));
+      expect(result).toEqual({ missingRequired: 0, missingQuestionIds: [] });
+      expect(
+        (await storedAnswers(member.userId)).map((row) => [row.question_id, row.value]),
+      ).toEqual(
+        [
+          [f.q1, choose(f.trabalha)],
+          [f.u, 'incondicional'],
+        ].sort(([x], [y]) => String(x).localeCompare(String(y))),
+      );
+      // Another member's answers are untouched, every level included.
+      expect((await storedAnswers(bystander.userId)).map((row) => row.question_id).sort()).toEqual(
+        [f.q1, f.q2, f.q3, f.q4, f.q5, f.q6, f.u].sort(),
+      );
+
+      // PFORM-33: the same body again writes nothing and the second purge deletes nothing.
+      const stamp = await mark(f.u, member.userId);
+      const again = await saved(await save(member, form, { [f.q1]: choose(f.trabalha) }, f.s1));
+      expect(again).toEqual(result);
+      expect(await mark(f.u, member.userId)).toEqual(stamp);
+      expect(await storedAnswers(member.userId)).toHaveLength(2);
+    });
+  }, 40_000);
+
+  it('a value sent for a hidden question is ignored with no error, and the same value is stored once the chain opens in the same save', async () => {
+    const closed = await person();
+    const opened = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      const form = await readForm(closed);
+
+      // Q1 = trabalha closes B1: Q2 and Q3 (valid values) are dropped without an error.
+      const ignored = await saved(
+        await save(
+          closed,
+          form,
+          { [f.q1]: choose(f.trabalha), [f.q2]: choose(f.q2Yes), [f.q3]: choose(f.q3Yes) },
+          f.s1,
+        ),
+      );
+      expect(ignored).toEqual({ missingRequired: 0, missingQuestionIds: [] });
+      expect((await storedAnswers(closed.userId)).map((row) => row.question_id)).toEqual([f.q1]);
+
+      // Positive control: tem + Q2 yes + Q3 yes opens all three levels IN THE SAME REQUEST, so Q4 is stored.
+      const stored = await saved(
+        await save(
+          opened,
+          form,
+          {
+            [f.q1]: choose(f.tem),
+            [f.q2]: choose(f.q2Yes),
+            [f.q3]: choose(f.q3Yes),
+            [f.q4]: 'fundo',
+          },
+          f.s1,
+        ),
+      );
+      expect(stored).toEqual({ missingRequired: 0, missingQuestionIds: [] });
+      expect((await storedAnswers(opened.userId)).map((row) => row.question_id).sort()).toEqual(
+        [f.q1, f.q2, f.q3, f.q4].sort(),
+      );
+    });
+  }, 40_000);
+
+  it('the formEtag changes when a branch is edited, so a member who opened the form first gets 409 form_changed with the fresh form and no name', async () => {
+    const admin = await person('admin_tenant');
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      const stale = await readForm(member);
+
+      const [branch] = await adminSql<{ revision: number }[]>`
+        select revision from public.profile_form_branches where id = ${f.b1}::uuid`;
+      const edited = await call(admin, 'PATCH', `/v1/profile_form/branches/${f.b1}`, {
+        revision: branch?.revision,
+        values: [f.tem, f.trabalha],
+      });
+      expect(edited.status, await edited.clone().text()).toBe(200);
+
+      const fresh = await readForm(member);
+      expect(fresh.formEtag).not.toBe(stale.formEtag);
+
+      const res = await save(member, stale, { [f.q1]: choose(f.tem) }, f.s1);
+      expect(res.status).toBe(409);
+      const text = await res.text();
+      expect(text).not.toContain('NOME-SECRETO');
+      const error = (JSON.parse(text) as Envelope).error;
+      expect(error.code).toBe('CONFLICT');
+      expect(error.details).toMatchObject({ profileForm: 'form_changed' });
+      const body = (error.details as { form: Form }).form;
+      expect(body.formEtag).toBe(fresh.formEtag);
+      expect(body.branches.find((b) => b.id === f.b1)?.values).toEqual([f.tem, f.trabalha]);
+      expect(await storedAnswers(member.userId)).toEqual([]);
+    });
+  }, 40_000);
+
+  it('a form without branches has the formEtag that 12.1 computed for the same questions and steps', async () => {
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const s1 = await seedStep('S1');
+      const a = await seedQ('A', { stepId: s1, position: 1 });
+      const b = await seedQ('B', { stepId: s1, position: 2 });
+      const form = await readForm(member);
+      expect(form.branches).toEqual([]);
+      const rows = await adminSql<{ id: string; revision: number }[]>`
+        select id::text as id, revision from public.profile_form_questions
+         where id in (${a}::uuid, ${b}::uuid) order by position`;
+      const [step] = await adminSql<{ revision: number }[]>`
+        select revision from public.profile_form_steps where id = ${s1}::uuid`;
+      // The 12.1 text, written out: `id:revision:step` per question, then `;steps=id:revision`.
+      const text = `${rows.map((r) => `${r.id}:${r.revision}:${s1}`).join('|')};steps=${s1}:${step?.revision}`;
+      const { createHash } = await import('node:crypto');
+      expect(form.formEtag).toBe(createHash('sha256').update(text).digest('hex').slice(0, 16));
+    });
+  }, 30_000);
 });
