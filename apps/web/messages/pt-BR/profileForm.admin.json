@@ -50,6 +50,11 @@
         "empty": "Este ramo está vazio. Ele só muda algo para os membros quando tiver uma pergunta.",
         "row": {
           "inBranch": "Fica no ramo: {label}."
+        },
+        "reorder": {
+          "up": "Subir ramo “{label}”",
+          "down": "Descer ramo “{label}”",
+          "moved": "O ramo “{label}” agora é o ramo {position} de {total} desta pergunta."
         }
       },
       "reorder": {

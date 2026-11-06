@@ -2,7 +2,7 @@
 
 import type { AdminBranch } from '@rede-social/contracts/profile-form';
 import { Button, IconButton } from '@rede-social/ui';
-import { Layers, Pencil, Plus, Split } from 'lucide-react';
+import { ArrowDown, ArrowUp, Layers, Pencil, Plus, Split } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useId } from 'react';
 import type { AdminBranchTree } from '@/lib/profile-form/branch-tree';
@@ -72,7 +72,7 @@ export interface BranchBlockProps {
   empty: boolean;
   /** The title of the step that holds the opener, when it is NOT this block's step. */
   openerStepTitle: string | null;
-  /** In reorder mode the pencil is replaced by the branch arrows (plan 15, task 3). */
+  /** In reorder mode the pencil is replaced by the branch arrows (UI-D-668). */
   reordering: boolean;
   /** A write is in flight: the arrows ignore presses and stay focusable. */
   busy: boolean;
@@ -99,6 +99,11 @@ export function BranchBlock({
   empty,
   openerStepTitle,
   reordering,
+  busy,
+  place,
+  focusKey,
+  register,
+  onMove,
   onEdit,
   onAddQuestion,
   addDisabled,
@@ -106,6 +111,9 @@ export function BranchBlock({
 }: BranchBlockProps) {
   const t = useTranslations('profileForm.admin.branches');
   const labelId = useId();
+  // In reorder mode the pencil gives way to the arrows, which show only when the opener has two or more
+  // blocks in this step: the run moves among its siblings, as a block (UI-D-668).
+  const arrows = reordering && place !== null && place.size >= 2 ? place : null;
 
   return (
     <div className="flex flex-col gap-3 ml-1 border-l-2 border-border-secondary pl-3">
@@ -130,6 +138,28 @@ export function BranchBlock({
             </span>
           ) : null}
         </div>
+        {arrows ? (
+          <div className="-mr-2 -mt-2 flex shrink-0">
+            <IconButton
+              ref={(element) => register(`${focusKey}:up`, element)}
+              icon={ArrowUp}
+              size={18}
+              label={t('reorder.up', { label: parts.label })}
+              disabled={arrows.index === 0}
+              aria-busy={busy || undefined}
+              onClick={() => onMove(-1)}
+            />
+            <IconButton
+              ref={(element) => register(`${focusKey}:down`, element)}
+              icon={ArrowDown}
+              size={18}
+              label={t('reorder.down', { label: parts.label })}
+              disabled={arrows.index === arrows.size - 1}
+              aria-busy={busy || undefined}
+              onClick={() => onMove(1)}
+            />
+          </div>
+        ) : null}
         {!reordering && onEdit ? (
           <div className="-mr-2 -mt-2 flex shrink-0">
             <IconButton

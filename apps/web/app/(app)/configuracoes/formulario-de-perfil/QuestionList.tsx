@@ -22,7 +22,13 @@ import {
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react';
-import { type LayoutStep, layoutOf, moveUnit } from '@/lib/profile-form/branch-layout';
+import {
+  type LayoutStep,
+  layoutOf,
+  moveBranchRun,
+  moveUnit,
+  orderViolationOf,
+} from '@/lib/profile-form/branch-layout';
 import {
   type BranchRun,
   buildBranchTree,
@@ -99,27 +105,23 @@ function normalize(steps: AdminStep[], items: AdminQuestion[]): AdminQuestion[] 
 type Direction = 'up' | 'down';
 
 /**
- * D-623 over a candidate layout: the first question that would sit at or before the opener of its branch, as
- * the pair (the question in the branch, its opener), or `null`. The server enforces the same rule; this check
- * only lets the press say which two QUESTIONS conflict before anything moves.
+ * Every block of a step that has rows, in the order the Lista draws them (depth first), for the branch arrows:
+ * the places of the blocks of one opener are read from here. An empty block has no place to move to.
  */
-function orderViolation(
-  layout: readonly LayoutStep[],
-  questions: ReadonlyMap<string, AdminQuestion>,
-  branchOpener: ReadonlyMap<string, string>,
-): { dependent: AdminQuestion; opener: AdminQuestion } | null {
-  const flat = layout.flatMap((step) => step.questionIds);
-  const index = new Map(flat.map((id, at) => [id, at] as const));
-  for (const [at, id] of flat.entries()) {
-    const dependent = questions.get(id);
-    const openerId = dependent?.branchId ? branchOpener.get(dependent.branchId) : undefined;
-    if (dependent === undefined || openerId === undefined) continue;
-    const openerAt = index.get(openerId);
-    if (openerAt === undefined || openerAt < at) continue;
-    const opener = questions.get(openerId);
-    if (opener) return { dependent, opener };
+function runsOfStep(roots: readonly StepRoot[]): BranchRun[] {
+  const found: BranchRun[] = [];
+  const visitRun = (run: BranchRun) => {
+    if (!run.empty) found.push(run);
+    for (const child of run.questions) visitNode(child);
+  };
+  const visitNode = (node: QuestionNode) => {
+    for (const run of node.branches) visitRun(run);
+  };
+  for (const root of roots) {
+    if (root.kind === 'run') visitRun(root.run);
+    else visitNode(root.node);
   }
-  return null;
+  return found;
 }
 
 /**
@@ -412,11 +414,23 @@ export function QuestionList({
   const original = (question: AdminQuestion) => byId.get(question.id) ?? question;
   const labelOf = useBranchLabeler(tree);
   const layout = layoutOf(tree);
-  const branchOpener = new Map(
-    tree.branches
-      .filter((branch) => branch.archivedAt === null)
-      .map((branch) => [branch.id, branch.openerQuestionId] as const),
-  );
+  // The place of every block among the blocks of its opener in its step: the arrows show for two or more.
+  const runPlaces = new Map<string, { index: number; size: number }>();
+  for (const step of treeSteps) {
+    const node = stepTree(tree, step.id);
+    if (node === null) continue;
+    const byOpener = new Map<string, BranchRun[]>();
+    for (const run of runsOfStep(node.roots)) {
+      const list = byOpener.get(run.branch.openerQuestionId) ?? [];
+      list.push(run);
+      byOpener.set(run.branch.openerQuestionId, list);
+    }
+    for (const list of byOpener.values()) {
+      for (const [index, run] of list.entries()) {
+        runPlaces.set(`${run.branch.id}:${run.stepId}`, { index, size: list.length });
+      }
+    }
+  }
   const wells = stepList.length > 1;
 
   /** The sentence of a refused or reverted press, naming the two QUESTIONS (D-623, UI-D-646). */
@@ -444,7 +458,7 @@ export function QuestionList({
       .filter((question): question is AdminQuestion => question !== undefined);
     const direction: Direction = delta < 0 ? 'up' : 'down';
 
-    const violation = orderViolation(nextLayout, tree.questionById, branchOpener);
+    const violation = orderViolationOf(nextLayout, tree);
     if (violation) {
       toast.show({
         tone: 'error',
@@ -529,6 +543,35 @@ export function QuestionList({
     });
   }
 
+  /** A block moves among the blocks of its opener in its step, as one unit (D-652, UI-D-668). */
+  function moveBranch(run: BranchRun, delta: -1 | 1) {
+    if (busy) return;
+    const place = runPlaces.get(`${run.branch.id}:${run.stepId}`);
+    if (place === undefined) return;
+    const nextLayout = moveBranchRun(
+      layout,
+      tree,
+      run.branch.id,
+      delta < 0 ? 'up' : 'down',
+      run.stepId,
+    );
+    // A press at the first or last block changes nothing and sends nothing.
+    if (nextLayout === layout) return;
+    const label = labelOf(run.branch).label;
+    void apply({
+      nextSteps: stepList,
+      nextLayout,
+      focusId: `branch:${run.branch.id}:${run.stepId}`,
+      delta,
+      announce: () =>
+        t('admin.branches.reorder.moved', {
+          label,
+          position: place.index + delta + 1,
+          total: place.size,
+        }),
+    });
+  }
+
   function moveStep(id: string, delta: -1 | 1) {
     if (busy) return;
     const from = stepList.findIndex((step) => step.id === id);
@@ -590,11 +633,11 @@ export function QuestionList({
         openerStepTitle={openerStepTitle}
         reordering={reordering}
         busy={busy}
-        place={null}
+        place={runPlaces.get(`${run.branch.id}:${run.stepId}`) ?? null}
         addDisabled={items.length >= limit}
         focusKey={`branch:${run.branch.id}:${run.stepId}`}
         register={register}
-        onMove={() => {}}
+        onMove={(delta) => moveBranch(run, delta)}
         onEdit={onEditBranch}
         onAddQuestion={onAddToBranch ? () => onAddToBranch(run.branch, stepForAdd(run)) : undefined}
       >

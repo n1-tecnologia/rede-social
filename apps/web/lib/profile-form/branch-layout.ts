@@ -1,5 +1,5 @@
-import { treeOrder } from '@rede-social/contracts/profile-form-branches';
 import type { AdminQuestion } from '@rede-social/contracts/profile-form';
+import { treeOrder } from '@rede-social/contracts/profile-form-branches';
 import { type AdminBranchTree, usableBranch, usableBranchesOf } from './branch-tree';
 
 /**
@@ -199,11 +199,29 @@ export function moveBranchRun(
 }
 
 /**
- * INERT STUB (12.2-15 Task 3, RED commit): the final signature, no behaviour. The GREEN commit replaces it.
+ * D-652 over a candidate layout: the first question that would sit at or before the opener of its branch, as
+ * the pair (the question in the branch, its opener), or `null`. The layout is read in the order members see it
+ * (the steps in order, each with its ids in order), so a step moved above the step of an opener is caught as
+ * well as a question placed before its opener inside one step. Only the DIRECT opener is checked: the opener of
+ * a nested branch is itself a question of its own branch and is checked on its own turn. An archived branch is
+ * not drawn (its questions are unconditional, like in the Lista) and a layout that does not hold the opener has
+ * nothing to compare. The server revalidates every write and answers a coded 409; this check only lets the
+ * press say which two QUESTIONS conflict before anything moves.
  */
 export function orderViolationOf(
-  _layout: readonly { stepId: string; questionIds: readonly string[] }[],
-  _tree: AdminBranchTree,
+  layout: readonly { stepId: string; questionIds: readonly string[] }[],
+  tree: AdminBranchTree,
 ): { dependent: AdminQuestion; opener: AdminQuestion } | null {
+  const flat = layout.flatMap((step) => step.questionIds);
+  const placeOf = new Map(flat.map((id, at) => [id, at] as const));
+  for (const [at, id] of flat.entries()) {
+    const dependent = tree.questionById.get(id);
+    const branch = usableBranch(tree, dependent?.branchId);
+    if (dependent === undefined || branch === undefined) continue;
+    const openerAt = placeOf.get(branch.openerQuestionId);
+    if (openerAt === undefined || openerAt < at) continue;
+    const opener = tree.questionById.get(branch.openerQuestionId);
+    if (opener !== undefined) return { dependent, opener };
+  }
   return null;
 }
