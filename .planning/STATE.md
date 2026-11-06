@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "12.2"
 current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: Not started
-status: planning
-stopped_at: Phase 12.2 context gathered (D-640..D-653); next /gsd-ui-phase 12.2 (sketch 019 gate) then /gsd-plan-phase 12.2; Phase 13 stays paused at plan 14 (last completed 13-31) until Igor says to resume it
-last_updated: "2026-11-06T15:10:19.446Z"
+status: ready_to_execute
+stopped_at: Phase 12.2 planned (21 plans, 15 waves, checker passed with 1 advisory); next /gsd-execute-phase 12.2; sketch 019 approval is Igor's; Phase 13 stays paused at plan 14
+last_updated: "2026-11-06T17:04:44.898Z"
 last_activity: 2026-11-06
-last_activity_desc: Phase 12.2 context gathered; Phase 13 paused until Igor resumes it
-state_head: db7b94c1b4e2807e6a01bd7f3689299b8e0fcead
+last_activity_desc: Phase 12.2 planned (21 plans); Phase 13 paused until Igor resumes it
+state_head: a9f221d68e667df9bcf0f88d5aa4841178a3d272
 progress:
   total_phases: 30
   completed_phases: 0
-  total_plans: 363
+  total_plans: 384
   completed_plans: 335
   percent: 0
 ---
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 12.2 (Ramos condicionais no formulário de perfil) — READY TO DISCUSS
+Phase: 12.2 (ramos-condicionais-no-formulario-de-perfil-varias-perguntas) — READY TO EXECUTE
 Current Plan: Not started
-Total Plans in Phase: 0
-Plan: 0 of 0
-Status: Ready to discuss (/gsd-discuss-phase 12.2)
-Last activity: 2026-11-06 — Phase 12.2 inserted; Phase 13 paused at plan 14
+Total Plans in Phase: 21
+Plan: 0 of 21
+Status: Ready to execute (/gsd-execute-phase 12.2)
+Last activity: 2026-11-06 — Phase 12.2 planned (21 plans in 15 waves); Phase 13 paused at plan 14
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1244,6 +1244,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-06T15:10:18.544Z
-Stopped at: Phase 12.2 context gathered
-Resume file: .planning/phases/12.2-ramos-condicionais-no-formulario-de-perfil-varias-perguntas/12.2-CONTEXT.md
+Last session: 2026-11-06T15:42:09.641Z
+Stopped at: Phase 12.2 planned (21 plans, 15 waves)
+Resume file: .planning/phases/12.2-ramos-condicionais-no-formulario-de-perfil-varias-perguntas/12.2-01-PLAN.md
