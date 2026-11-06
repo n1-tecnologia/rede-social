@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
@@ -1784,5 +1785,244 @@ describe('12.2-15 Task 1 (tracer): a branch is a block under its opener, with a 
     expect(screen.queryByText('Condicional')).toBeNull();
     expect(screen.queryByText(/Só aparece se/)).toBeNull();
     expect(document.querySelector('[data-branch-strip]')).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------ */
+/* 12.2-15 Task 2: nested, several, empty and cross-step branches, the description and the footer     */
+/* ------------------------------------------------------------------------------------------------ */
+
+describe('12.2-15 Task 2: every state of a branch in the Lista is drawn from the one tree (D-641, D-643)', () => {
+  const X1 = adminStep({ title: 'Primeira' });
+  const X2 = adminStep({ title: 'Segunda' });
+  const XQ = adminQuestion('single_choice', {
+    title: 'Atua como?',
+    stepId: X1.id,
+    options: [
+      { id: uuid(9801), label: 'Dono', answerCount: 0 },
+      { id: uuid(9802), label: 'Sócio', answerCount: 0 },
+    ],
+  });
+  const XB = adminBranch({ openerQuestionId: XQ.id, values: [uuid(9801)], questionCount: 3 });
+  const XA = adminQuestion('short_text', {
+    title: 'Nome do negócio',
+    stepId: X1.id,
+    branchId: XB.id,
+  });
+  const XC = adminQuestion('short_text', { title: 'Cidade', stepId: X2.id, branchId: XB.id });
+  const XD = adminQuestion('short_text', {
+    title: 'Telefone fixo',
+    stepId: X2.id,
+    branchId: XB.id,
+  });
+  const XE = adminQuestion('short_text', { title: 'Observação', stepId: X2.id });
+  const XB_LABEL = 'Se “Atua como?” for “Dono”';
+  const XS_LABEL = 'Se “Atua como?” for “Sócio”';
+
+  const strips = (root: ParentNode = document) =>
+    Array.from(root.querySelectorAll('[data-branch-strip]')) as HTMLElement[];
+  const railOf = (strip: HTMLElement) => strip.parentElement as HTMLElement;
+  const rowOf = (title: string) =>
+    screen.getByRole('button', { name: `Editar pergunta: ${title}` }).closest('li') as HTMLElement;
+  const railsAbove = (element: HTMLElement) => {
+    let count = 0;
+    for (let node = element.parentElement; node; node = node.parentElement) {
+      if (node.classList.contains('border-l-2')) count += 1;
+    }
+    return count;
+  };
+
+  it('nests three levels: each level of rail costs 18px, and the deepest row has exactly three rails', () => {
+    const list = clinicAdminList();
+    show(list.questions, { steps: list.steps, branches: list.branches });
+    expect(railsAbove(rowOf('Nome da clínica'))).toBe(1);
+    expect(railsAbove(rowOf('Quantos profissionais?'))).toBe(2);
+    expect(railsAbove(rowOf('Nome do sócio'))).toBe(3);
+    for (const strip of strips()) {
+      const rail = railOf(strip);
+      // ml-1 (4px) + the 2px rule + pl-3 (12px) = 18px a level
+      expect(rail.className).toContain('ml-1');
+      expect(rail.className).toContain('border-l-2');
+      expect(rail.className).toContain('pl-3');
+    }
+  });
+
+  it('a nested block sits INSIDE the row that opens it, not beside it', () => {
+    const list = clinicAdminList();
+    show(list.questions, { steps: list.steps, branches: list.branches });
+    const middle = rowOf('A clínica tem equipe?');
+    expect(middle.querySelectorAll(':scope > div.border-l-2')).toHaveLength(1);
+    const deepest = rowOf('Tem sócio?');
+    expect(deepest.querySelectorAll(':scope > div.border-l-2')).toHaveLength(1);
+  });
+
+  it('draws several branches of one opener as consecutive blocks, in layout order, never merged', () => {
+    // the list order is Sócio first, but the questions of Dono come first in the form
+    const other = adminBranch({ openerQuestionId: XQ.id, values: [uuid(9802)], questionCount: 1 });
+    const XF = adminQuestion('short_text', {
+      title: 'Qual sociedade?',
+      stepId: X1.id,
+      branchId: other.id,
+    });
+    show([XQ, XA, XF], { branches: [other, XB] });
+    const opener = rowOf('Atua como?');
+    const rails = Array.from(opener.querySelectorAll(':scope > div.border-l-2')) as HTMLElement[];
+    expect(
+      rails.map((rail) => strips(rail)[0]?.querySelector('.line-clamp-2')?.textContent),
+    ).toEqual([XB_LABEL, XS_LABEL]);
+    expect(rails[0]?.nextElementSibling).toBe(rails[1]);
+    expect(within(rails[0] as HTMLElement).queryByText('Qual sociedade?')).toBeNull();
+    expect(within(rails[1] as HTMLElement).getByText('Qual sociedade?')).toBeTruthy();
+  });
+
+  it('an EMPTY branch shows the empty line and no row, and keeps its place under the opener', () => {
+    const empty = adminBranch({ openerQuestionId: XQ.id, values: [uuid(9802)], questionCount: 0 });
+    const { container } = show([XQ, XA], { branches: [XB, empty] });
+    const block = strips()
+      .map(railOf)
+      .find((rail) => rail.textContent?.includes('Sócio')) as HTMLElement;
+    expect(
+      within(block).getByText(
+        'Este ramo está vazio. Ele só muda algo para os membros quando tiver uma pergunta.',
+      ),
+    ).toBeTruthy();
+    expect(block.querySelectorAll('li')).toHaveLength(0);
+    expect(block.querySelector('ul')).toBeNull();
+    expect(within(block).getByText('Sem perguntas')).toBeTruthy();
+    expect(container.querySelectorAll('[data-branch-empty]')).toHaveLength(1);
+    // the branch with questions still draws its row
+    expect(screen.getByRole('button', { name: 'Editar pergunta: Nome do negócio' })).toBeTruthy();
+  });
+
+  it('a branch whose questions are all archived reads as empty (nothing active is left to draw)', () => {
+    const left = adminBranch({ openerQuestionId: XQ.id, values: [uuid(9802)], questionCount: 2 });
+    show([XQ], { branches: [left] });
+    expect(document.querySelectorAll('[data-branch-empty]')).toHaveLength(1);
+    expect(screen.getByText('Sem perguntas')).toBeTruthy();
+  });
+
+  it('draws one block per step run: the run in the opener step and the run in the other step', () => {
+    show([XQ, XA, XC, XD, XE], { steps: [X1, X2], branches: [XB] });
+    const all = strips();
+    expect(all).toHaveLength(2);
+    // each strip repeats the label, and each block has its own rail
+    expect(all.map((strip) => strip.querySelector('.line-clamp-2')?.textContent)).toEqual([
+      XB_LABEL,
+      XB_LABEL,
+    ]);
+    expect(railOf(all[0] as HTMLElement)).not.toBe(railOf(all[1] as HTMLElement));
+    // the block in the first step sits under the opener; the one in the second is a root run
+    expect(rowOf('Atua como?').contains(all[0] as HTMLElement)).toBe(true);
+    expect(well('Segunda').contains(all[1] as HTMLElement)).toBe(true);
+    // the cross-step line appears only on the run whose opener is in another step
+    expect(
+      within(railOf(all[1] as HTMLElement)).getByText(
+        'A pergunta que decide está na etapa “Primeira”.',
+      ),
+    ).toBeTruthy();
+    expect(within(railOf(all[0] as HTMLElement)).queryByText(/A pergunta que decide/)).toBeNull();
+  });
+
+  it('each run counts its own rows, and the numbers stay global across the steps', () => {
+    show([XQ, XA, XC, XD, XE], { steps: [X1, X2], branches: [XB] });
+    const metas = strips().map(
+      (strip) =>
+        Array.from(strip.querySelectorAll('span'))
+          .map((span) => span.textContent ?? '')
+          .find((text) => /^\d+ perguntas?$/.test(text)) ?? '',
+    );
+    expect(metas).toEqual(['1 pergunta', '2 perguntas']);
+    expect(
+      screen
+        .getAllByRole('listitem')
+        .filter(isRowItem)
+        .map((item) => item.querySelector('[aria-hidden="true"].w-5')?.textContent),
+    ).toEqual(['1', '2', '3', '4', '5']);
+    expect(rowTitles('Segunda')).toEqual(['Cidade', 'Telefone fixo', 'Observação']);
+  });
+
+  it("a form with branches but a step with no question still renders that step's empty well", () => {
+    show([XQ, XA], { steps: [X1, X2], branches: [XB] });
+    expect(within(well('Segunda')).getByText('Sem perguntas')).toBeTruthy();
+    expect(
+      within(well('Segunda')).getByText(
+        'Esta etapa está vazia. Enquanto estiver vazia, os membros não a veem.',
+      ),
+    ).toBeTruthy();
+    expect(strips(well('Segunda'))).toHaveLength(0);
+  });
+
+  it('wires the footer: hands the branch and the step of the run to onAddToBranch', () => {
+    const onAddToBranch = vi.fn();
+    show([XQ, XA, XC, XD, XE], { steps: [X1, X2], branches: [XB], onAddToBranch });
+    const footers = screen.getAllByRole('button', {
+      name: `Adicionar pergunta ao ramo: ${XB_LABEL}`,
+    });
+    expect(footers).toHaveLength(2);
+    fireEvent.click(footers[0] as HTMLElement);
+    fireEvent.click(footers[1] as HTMLElement);
+    expect(onAddToBranch.mock.calls).toEqual([
+      [XB.id, X1.id],
+      [XB.id, X2.id],
+    ]);
+  });
+
+  it('hands the LAST step to onAddToBranch for an empty branch', () => {
+    const onAddToBranch = vi.fn();
+    const empty = adminBranch({ openerQuestionId: XQ.id, values: [uuid(9802)], questionCount: 0 });
+    show([XQ, XA, XE], { steps: [X1, X2], branches: [XB, empty], onAddToBranch });
+    fireEvent.click(
+      screen.getByRole('button', { name: `Adicionar pergunta ao ramo: ${XS_LABEL}` }),
+    );
+    expect(onAddToBranch).toHaveBeenCalledWith(empty.id, X2.id);
+  });
+
+  it('shows the footer only when the list receives onAddToBranch', () => {
+    show([XQ, XA], { branches: [XB] });
+    expect(screen.queryByRole('button', { name: /^Adicionar pergunta ao ramo/ })).toBeNull();
+    cleanup();
+    show([XQ, XA], { branches: [XB], onAddToBranch: vi.fn() });
+    const footer = screen.getByRole('button', { name: `Adicionar pergunta ao ramo: ${XB_LABEL}` });
+    expect(footer.textContent).toBe('Adicionar pergunta ao ramo');
+  });
+
+  it('a flat list (no steps) still hands the real step of the questions to the footer', () => {
+    const onAddToBranch = vi.fn();
+    show([XQ, XA], { branches: [XB], onAddToBranch });
+    fireEvent.click(screen.getByRole('button', { name: /^Adicionar pergunta ao ramo:/ }));
+    expect(onAddToBranch).toHaveBeenCalledWith(XB.id, X1.id);
+  });
+
+  it('names the pencil and the footer with the label, and clamps a 60 character name to two lines', () => {
+    const name = 'N'.repeat(60);
+    const named = { ...XB, name };
+    show([XQ, XA], { branches: [named], onEditBranch: vi.fn(), onAddToBranch: vi.fn() });
+    expect(screen.getByRole('button', { name: `Editar ramo: ${name}` })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: `Adicionar pergunta ao ramo: ${name}` }),
+    ).toBeTruthy();
+    const label = strips()[0]?.querySelector('.line-clamp-2') as HTMLElement;
+    expect(label.textContent).toBe(name);
+    expect(label.className).toContain('break-words');
+    // the answers are never hidden by the name
+    expect(within(strips()[0] as HTMLElement).getByText(XB_LABEL)).toBeTruthy();
+  });
+
+  it('keeps 44px targets on the strip and the footer, and writes no half-step spacing class', () => {
+    show([XQ, XA], { branches: [XB], onEditBranch: vi.fn(), onAddToBranch: vi.fn() });
+    const pencil = screen.getByRole('button', { name: `Editar ramo: ${XB_LABEL}` });
+    expect(pencil.className).toContain('min-h-[44px]');
+    expect(pencil.className).toContain('min-w-[44px]');
+    // the footer is the shipped ghost button with its 44px hit area (`hitArea`), like the well's footer
+    const footer = screen.getByRole('button', { name: /^Adicionar pergunta ao ramo:/ });
+    expect(footer.className).toContain('after:h-11');
+    // no markup of the list or the block writes a half-step spacing class (UI-D-684)
+    for (const file of ['QuestionList.tsx', 'BranchBlock.tsx']) {
+      const source = readFileSync(
+        join(process.cwd(), 'app/(app)/configuracoes/formulario-de-perfil', file),
+        'utf8',
+      );
+      expect(source).not.toMatch(/(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/);
+    }
   });
 });
