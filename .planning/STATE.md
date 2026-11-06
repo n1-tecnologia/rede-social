@@ -1195,6 +1195,7 @@ None yet.
 | 261027-c8f | Phase 09.3 WR-03: setProductStatus refuses (409) to reactivate a product linked to a soft-deleted community | 2026-10-27 | 2939d5a3 | — | [261027-c8f-phase-09-3-wr-03-setproductstatus-refuse](./quick/261027-c8f-phase-09-3-wr-03-setproductstatus-refuse/) |
 | 261030-g1y | Keep the validated deep-link destination when a data loader's profile-form refusal wins the race; pick one replace button in the admin spec | 2026-10-30 | 87f701d9 | complete | [261030-g1y-fix-profile-form-gate-deep-link-race-kee](./quick/261030-g1y-fix-profile-form-gate-deep-link-race-kee/) |
 | 261030-hh2 | Centre the 44px hit area of sm buttons so a 1px border no longer shaves it to 42px (shared Button primitive) | 2026-10-30 | 18d9f0f8 | complete | [261030-hh2-fix-the-44px-touch-target-of-bordered-ou](./quick/261030-hh2-fix-the-44px-touch-target-of-bordered-ou/) |
+| 261106-ei5 | Phase 12.1: a new or reactivated conditional question is stored right after its opener (same step), after the opener's last active dependent; other step and unconditional keep the end of the step; server only, not pushed | 2026-11-06 | 69620c4e | complete | [261106-ei5-phase-12-1-a-new-conditional-question-is](./quick/261106-ei5-phase-12-1-a-new-conditional-question-is/) |
 
 ### Roadmap Evolution
 
