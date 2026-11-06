@@ -83,7 +83,7 @@ let demoId = '';
 async function labMemberId(): Promise<string> {
   const [row] = await source<{ user_id: string }[]>`
     select user_id::text as user_id from public.memberships
-     where tenant_id = ${labId}::uuid order by user_id limit 1`;
+     where tenant_id = ${labId}::uuid and deleted_at is null order by user_id limit 1`;
   if (!row) throw new Error('the seed has no member in rede-lab');
   return row.user_id;
 }

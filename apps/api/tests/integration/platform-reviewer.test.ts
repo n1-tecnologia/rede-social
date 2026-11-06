@@ -92,6 +92,11 @@ async function cleanup(): Promise<void> {
   await adminSql`
     delete from public.profile_form_questions
      where tenant_id in (select id from public.tenants where slug like 'pr-%')`;
+  // 12.1: the default-step trigger gives a tenant a step with its first question, and the steps table
+  // references `tenants`, so the steps go after the questions and before the tenants.
+  await adminSql`
+    delete from public.profile_form_steps
+     where tenant_id in (select id from public.tenants where slug like 'pr-%')`;
   await adminSql`delete from public.tenants where slug like 'pr-%'`;
 }
 
