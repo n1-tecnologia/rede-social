@@ -1,3 +1,5 @@
+import { summaryStatement } from '@rede-social/core/server/profile-form/admin';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -279,4 +281,69 @@ describe('12.2-11 tracer: the summary through a depth-3 chain equals the gate (D
       expect(await gateMissing(m3)).toBe(0);
     });
   }, 180_000);
+});
+
+describe('12.2-11 the summary: the cases of 12.1 over the chain, and the raw text holds no value (PFORM-38, T-12.2-10)', () => {
+  it('no required question means everyone is complete; a required question nobody sees owes nothing; hasRequired follows the active required set', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const empty = await summaryOf(admin);
+      expect(empty.hasRequired).toBe(false);
+      expect(empty.complete).toBe(empty.total);
+      expect(empty.complete).toBe(await gateReleased(labTenantId));
+
+      const m1 = await person();
+      const c = await seedClinic();
+      // Nobody answered Q1: every required question is behind a closed branch.
+      const hidden = await summaryOf(admin);
+      expect(hidden.hasRequired).toBe(true);
+      expect(hidden.complete).toBe(hidden.total);
+      expect(hidden.complete).toBe(await gateReleased(labTenantId));
+
+      await answer(m1, c.q1, { optionId: c.tem });
+      const revealed = await summaryOf(admin);
+      expect(revealed.complete).toBe(hidden.total - 1);
+      expect(revealed.complete).toBe(await gateReleased(labTenantId));
+      expect(Number.isInteger(revealed.complete)).toBe(true);
+    });
+  }, 120_000);
+
+  it('a required question of a branch archived, or its branch undone, moves the summary exactly as the gate does', async () => {
+    const admin = await person('admin_tenant');
+    const m1 = await person();
+    await withProfileForm(labTenantId, async () => {
+      const c = await seedClinic();
+      await answer(m1, c.q1, { optionId: c.tem });
+      const before = await summaryOf(admin);
+      expect(before.complete).toBe(before.total - 1); // m1 owes Q3
+      expect(before.complete).toBe(await gateReleased(labTenantId));
+
+      // Undoing B1 makes Q3 unconditional: everybody who has not answered it owes it.
+      const undone = await call(admin, 'POST', `/v1/profile_form/branches/${c.b1}/undo`);
+      expect(undone.status).toBe(200);
+      const widened = await summaryOf(admin);
+      expect(widened.complete).toBe(await gateReleased(labTenantId));
+      expect(widened.complete).toBe(0);
+
+      // Archiving the (now unconditional) Q3, Q4 and Q6 releases everyone again.
+      for (const id of [c.q3, c.q4, c.q6]) {
+        const res = await call(admin, 'POST', `/v1/profile_form/questions/${id}/archive`);
+        expect(res.status).toBe(200);
+      }
+      const released = await summaryOf(admin);
+      expect(released.hasRequired).toBe(false);
+      expect(released.complete).toBe(released.total);
+      expect(released.complete).toBe(await gateReleased(labTenantId));
+    });
+  }, 120_000);
+
+  it('the executed text carries the chain as raw SQL but never the tenant: the tenant is a bound parameter', () => {
+    const query = new PgDialect().sqlToQuery(summaryStatement(labTenantId));
+    expect(query.sql).not.toContain(labTenantId);
+    expect(query.sql).toMatch(/\$1/);
+    expect(query.params).toContain(labTenantId);
+    expect(query.sql).toContain('app.profile_form_answer_tokens');
+    // One statement, no answer value selected: the select list holds counts and a boolean only.
+    expect(query.sql).not.toMatch(/\ba\.value\b/);
+  });
 });

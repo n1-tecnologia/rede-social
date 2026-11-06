@@ -56,6 +56,7 @@ import { liveModuleOn } from './member';
 // A call-time-only cycle with ./steps (which takes `adminLock` and `requireModuleOn` from this file): neither
 // module touches the other at load, only inside a function.
 import { ensureDefaultStep, readSteps } from './steps';
+import { questionVisibleSql } from './visibility-sql';
 
 /**
  * The builder's write side (Phase 12-08, D-582, D-587, D-596; PFORM-01, PFORM-02, PFORM-17, PFORM-24). Pure
@@ -1285,12 +1286,40 @@ const ACTIVE_MEMBERS = (tenantId: string) => sql`
      and m.deleted_at is null`;
 
 /**
- * `GET /v1/profile_form/summary` (PFORM-23, PFORM-38, D-634): `{ total, complete, hasRequired }` in ONE set-based
- * statement. `complete` is the members who owe NO required question: a required, active question with no answer
- * row of that member. 12.2 (D-640): the per-question condition is retired and the visibility of a question
- * through the branch chain (`app.profile_form_missing`, the gate) is NOT restated here yet: plan 11 rewrites
- * this statement over the shared chain fragment. Until then a member who does not see a required question in a
- * branch counts as owing it. Counts only: no answer is selected.
+ * The summary's ONE statement (D-644, D-645; PFORM-23, PFORM-38, PFORM-52). `req` is the tenant's required,
+ * active questions with the tenant and the branch they sit in; a member is complete when NO required question
+ * that the member SEES through its whole chain lacks an answer. Visibility is the shared fragment of
+ * `visibility-sql.ts` (`questionVisibleSql`), wrapped with `sql.raw` and given IDENTIFIERS only (`r`, its
+ * `tenant_id` column and `m.id`): the tenant travels as the bound parameter of the `req` filter, never inside
+ * the raw text (T-12.2-10, T-12.2-11). Exported so a test can render it and see the placeholders.
+ */
+export const summaryStatement = (tenantId: string) => sql`
+  with members as (${ACTIVE_MEMBERS(tenantId)}),
+  req as (
+    select q.id, q.tenant_id, q.branch_id
+      from public.profile_form_questions q
+     where q.tenant_id = ${tenantId}::uuid and q.required and q.archived_at is null)
+  select (select count(*) from members)::int as total,
+         (select count(*)
+            from members m
+           where not exists (
+             select 1
+               from req r
+              where ${sql.raw(questionVisibleSql({ question: 'r', tenant: 'r.tenant_id', member: 'm.id' }))}
+                and not exists (
+                      select 1 from public.profile_form_answers a
+                       where a.tenant_id = r.tenant_id
+                         and a.membership_id = m.id
+                         and a.question_id = r.id)
+           ))::int as complete,
+         exists (select 1 from req) as has_required`;
+
+/**
+ * `GET /v1/profile_form/summary` (PFORM-23, PFORM-38, D-634, D-644): `{ total, complete, hasRequired }` in ONE
+ * set-based statement. `complete` is the members who owe NO VISIBLE required question, visibility being the
+ * whole branch chain open for the member (the same rule as the gate `app.profile_form_missing`, composed from
+ * the shared fragment and never restated), so `complete` equals the gate's release count exactly. Counts only:
+ * no answer is selected.
  */
 export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
   return withTenantTx(ctx, async (tx) => {
@@ -1299,27 +1328,7 @@ export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
       total: number | string;
       complete: number | string;
       has_required: boolean;
-    }>(
-      sql`
-      with members as (${ACTIVE_MEMBERS(ctx.tenantId)}),
-      req as (
-        select q.id
-          from public.profile_form_questions q
-         where q.tenant_id = ${ctx.tenantId}::uuid and q.required and q.archived_at is null)
-      select (select count(*) from members)::int as total,
-             (select count(*)
-                from members m
-               where not exists (
-                 select 1
-                   from req r
-                  where not exists (
-                          select 1 from public.profile_form_answers a
-                           where a.tenant_id = ${ctx.tenantId}::uuid
-                             and a.membership_id = m.id
-                             and a.question_id = r.id)
-               ))::int as complete,
-             exists (select 1 from req) as has_required`,
-    );
+    }>(summaryStatement(ctx.tenantId));
     return {
       total: Number(row?.total ?? 0),
       complete: Number(row?.complete ?? 0),
