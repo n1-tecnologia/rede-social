@@ -3,6 +3,7 @@ import {
   branchTreeOf,
   isQuestionVisibleInTree,
 } from '@rede-social/contracts/profile-form-branches';
+import { exportAnswers } from '@rede-social/core/server/profile-form/export';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -1091,6 +1092,273 @@ describe('12.1-12 PFORM-39 idempotency and concurrency: the readers are repeatab
       const last = snapshots[snapshots.length - 1] as Answers;
       expect(answerOf(last, f.opener)?.value).toEqual(choose(f.no));
       expect(answerOf(last, f.dependent)).toMatchObject({ answered: false });
+    });
+  }, 60_000);
+});
+
+/**
+ * 12.2-12 (D-645, T-12.2-05, T-12.2-06, PFORM-54): no stale answer in any reader, depth 3. A member closes the top
+ * branch of a tree three levels deep through the REAL save route; afterwards "Minhas respostas" (her own form
+ * read), the public block a viewer reads, the staff row and the CSV hold nothing below the closed branch, the
+ * staff row marks every question below as hidden through the chain, and a control member who did not close it
+ * keeps every answer. An answer held by an ARCHIVED branch is readable by staff and absent from the member and
+ * public reads for as long as the chain above it is open.
+ */
+describe('12.2-12 D-645: no stale answer in any reader, depth 3 (T-12.2-05, T-12.2-06)', () => {
+  const choose = (optionId: string) => ({ optionId, otherText: null });
+
+  /** Q1 | B1 {Q2 | B2 {Q3 | B3 {Q4, archived Q5}}} and an ARCHIVED branch B4 on Q1 that holds an archived Q6. */
+  async function tree() {
+    const step = await seedProfileFormStep({ tenantId: labTenantId, title: `${TITLE}S1` });
+    const ids = Array.from({ length: 6 }, () => crypto.randomUUID());
+    const [y1, n1, y2, n2, y3, n3] = ids as [string, string, string, string, string, string];
+    const opts = (yes: string, no: string) => [
+      { id: yes, label: 'Sim' },
+      { id: no, label: 'Não' },
+    ];
+    const q1 = await question({
+      title: `${TITLE}Q1`,
+      type: 'single_choice',
+      stepId: step,
+      position: 1,
+      showOnProfile: true,
+      options: opts(y1, n1),
+    });
+    const b1 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q1,
+      values: [y1],
+    });
+    const q2 = await question({
+      title: `${TITLE}Q2`,
+      type: 'single_choice',
+      stepId: step,
+      position: 2,
+      showOnProfile: true,
+      branchId: b1,
+      options: opts(y2, n2),
+    });
+    const b2 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q2,
+      values: [y2],
+    });
+    const q3 = await question({
+      title: `${TITLE}Q3`,
+      type: 'single_choice',
+      stepId: step,
+      position: 3,
+      showOnProfile: true,
+      branchId: b2,
+      options: opts(y3, n3),
+    });
+    const b3 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q3,
+      values: [y3],
+    });
+    const q4 = await question({
+      title: `${TITLE}Q4`,
+      stepId: step,
+      position: 4,
+      showOnProfile: true,
+      branchId: b3,
+    });
+    const q5 = await question({
+      title: `${TITLE}Q5 arquivada`,
+      stepId: step,
+      position: 5,
+      showOnProfile: true,
+      branchId: b3,
+      archived: true,
+    });
+    const b4 = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q1,
+      values: [y1],
+      archived: true,
+    });
+    const q6 = await question({
+      title: `${TITLE}Q6 do ramo arquivado`,
+      stepId: step,
+      position: 6,
+      showOnProfile: true,
+      branchId: b4,
+      archived: true,
+    });
+    return { step, y1, n1, y2, y3, q1, q2, q3, q4, q5, q6, b1, b2, b3, b4 };
+  }
+
+  type F = Awaited<ReturnType<typeof tree>>;
+
+  async function fill(userId: string, f: F, tag: string) {
+    await answer(userId, f.q1, choose(f.y1));
+    await answer(userId, f.q2, choose(f.y2));
+    await answer(userId, f.q3, choose(f.y3));
+    await answer(userId, f.q4, `${tag}-q4`);
+    await answer(userId, f.q5, `${tag}-q5`);
+    await answer(userId, f.q6, `${tag}-q6`);
+  }
+
+  const asMember = (who: Person, path: string, init: RequestInit = {}) =>
+    api.request(path, {
+      ...init,
+      headers: {
+        'x-tenant-host': who.host,
+        authorization: `Bearer ${who.token}`,
+        'content-type': 'application/json',
+      },
+    });
+
+  async function closeTopBranch(owner: Person, f: F) {
+    const form = (await (await asMember(owner, '/v1/me/profile-form')).json()) as {
+      formEtag: string;
+    };
+    const saved = await asMember(owner, '/v1/me/profile-form/answers', {
+      method: 'PUT',
+      body: JSON.stringify({
+        formEtag: form.formEtag,
+        stepId: f.step,
+        answers: { [f.q1]: choose(f.n1) },
+      }),
+    });
+    expect(saved.status, await saved.clone().text()).toBe(200);
+  }
+
+  const stored = async (userId: string) =>
+    (
+      await adminSql<{ question_id: string }[]>`
+        select question_id::text as question_id from public.profile_form_answers
+         where user_id = ${userId}::uuid`
+    )
+      .map((row) => row.question_id)
+      .sort();
+
+  it('after a save that closes the top branch, her own form, the public block, the staff row and the CSV hold nothing below it, and the control member keeps everything', async () => {
+    const owner = await person();
+    const control = await person();
+    const viewer = await person();
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const f = await tree();
+      await fill(owner.userId, f, 'own');
+      await fill(control.userId, f, 'ctl');
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+      const controlId = await membershipOf(control.userId, labTenantId);
+
+      // Positive control: before the save the staff row holds every answer.
+      const before = (await (await read(admin, ownerId)).json()) as Answers;
+      expect(before.answers.filter((row) => row.answered === true)).toHaveLength(6);
+
+      await closeTopBranch(owner, f);
+
+      // The stored rows: only the opener is left, the control member is untouched.
+      expect(await stored(owner.userId)).toEqual([f.q1]);
+      expect(await stored(control.userId)).toHaveLength(6);
+
+      // "Minhas respostas": her own form read pre-fills nothing below the closed branch.
+      const mine = (await (await asMember(owner, '/v1/me/profile-form')).json()) as {
+        questions: { id: string; answer: unknown }[];
+      };
+      expect(mine.questions.filter((q) => q.answer !== null).map((q) => q.id)).toEqual([f.q1]);
+
+      // The public block of a viewer: the opener only, and no marker of what was closed.
+      const publicRaw = await (await read(viewer, ownerId)).text();
+      const publicBody = JSON.parse(publicRaw) as Answers;
+      expect(publicBody.kind).toBe('member');
+      expect(publicBody.answers.map((row) => row.questionId)).toEqual([f.q1]);
+      expect(publicRaw).not.toContain('own-q');
+
+      // The staff row: every ACTIVE question below reads as unanswered and, through the chain, as hidden; an
+      // ARCHIVED question without an answer has no row at all (it is listed only while it holds one).
+      const staff = (await (await read(admin, ownerId)).json()) as {
+        answers: {
+          questionId: string;
+          branchId: string | null;
+          value: unknown;
+          answered: boolean;
+        }[];
+        branches: { id: string; openerQuestionId: string; values: string[] }[];
+      };
+      for (const id of [f.q2, f.q3, f.q4]) {
+        expect(
+          staff.answers.find((row) => row.questionId === id),
+          id,
+        ).toMatchObject({
+          answered: false,
+          value: null,
+        });
+      }
+      for (const id of [f.q5, f.q6]) {
+        expect(
+          staff.answers.find((row) => row.questionId === id),
+          id,
+        ).toBeUndefined();
+      }
+      const tree3 = branchTreeOf(
+        staff.answers.map((row) => ({ id: row.questionId, branchId: row.branchId })),
+        staff.branches,
+      );
+      const valueByQuestion = new Map(staff.answers.map((row) => [row.questionId, row.value]));
+      const tokensOf = (id: string) => answerTokens(valueByQuestion.get(id) ?? undefined);
+      const hidden = staff.answers
+        .filter((row) => !isQuestionVisibleInTree({ branchId: row.branchId }, tree3, tokensOf))
+        .map((row) => row.questionId)
+        .sort();
+      expect(hidden).toEqual([f.q2, f.q3, f.q4].sort());
+
+      // The control member's staff row still holds all six (the closure is hers alone).
+      const controlStaff = (await (await read(admin, controlId)).json()) as Answers;
+      expect(controlStaff.answers.filter((row) => row.answered === true)).toHaveLength(6);
+
+      // The CSV: written by the SEEDED lab admin (its audit row outlives the run); the owner's markers are
+      // nowhere and each of the control member's is exactly once.
+      const [seeded] = await adminSql<{ id: string }[]>`
+        select id::text as id from auth.users where email = 'admin@rede-lab.local'`;
+      if (!seeded) throw new Error('the seeded lab admin is missing, run pnpm db:seed first');
+      const file = await exportAnswers({
+        userId: seeded.id,
+        tenantId: labTenantId,
+        role: 'admin_tenant',
+        requestId: 'pfa-readers',
+      });
+      const csv = await new Response(file.body).text();
+      for (const part of ['q4', 'q5', 'q6']) {
+        expect(csv.split(`own-${part}`).length - 1, `own-${part}`).toBe(0);
+        expect(csv.split(`ctl-${part}`).length - 1, `ctl-${part}`).toBe(1);
+      }
+    });
+  }, 90_000);
+
+  it('an answer held by an ARCHIVED branch is readable by staff and absent from the member and public reads, until the chain above it closes', async () => {
+    const owner = await person();
+    const viewer = await person();
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const f = await tree();
+      await answer(owner.userId, f.q1, choose(f.y1));
+      await answer(owner.userId, f.q6, 'guardada-q6');
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+
+      const staff = (await (await read(admin, ownerId)).json()) as Answers;
+      expect(staff.answers.find((row) => row.questionId === f.q6)).toMatchObject({
+        answered: true,
+        value: 'guardada-q6',
+      });
+      const publicRaw = await (await read(viewer, ownerId)).text();
+      expect(publicRaw).not.toContain('guardada-q6');
+      expect(publicRaw).not.toContain(f.q6);
+      const mineRaw = await (await asMember(owner, '/v1/me/profile-form')).text();
+      expect(mineRaw).not.toContain('guardada-q6');
+      expect(mineRaw).not.toContain(f.q6);
+      expect(await stored(owner.userId)).toEqual([f.q1, f.q6].sort());
+
+      // Once the opener closes the chain, the archived block's answer goes with it, in every reader.
+      await closeTopBranch(owner, f);
+      expect(await stored(owner.userId)).toEqual([f.q1]);
+      const after = (await (await read(admin, ownerId)).json()) as Answers;
+      expect(after.answers.find((row) => row.questionId === f.q6)).toBeUndefined();
+      expect(JSON.stringify(after)).not.toContain('guardada-q6');
     });
   }, 60_000);
 });

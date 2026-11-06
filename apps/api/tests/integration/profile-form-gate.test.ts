@@ -1,9 +1,20 @@
+import { answerTokens } from '@rede-social/contracts/profile-form';
+import {
+  branchTreeOf,
+  type ChainFixture,
+  isQuestionVisibleInTree,
+  PROFILE_FORM_CHAIN_CASES,
+  PROFILE_FORM_CHAIN_FIXTURE,
+  PROFILE_FORM_CHAIN_FIXTURE_BROKEN,
+} from '@rede-social/contracts/profile-form-branches';
 import { createClient } from '@supabase/supabase-js';
+import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
   api,
   createSharedIdentity,
+  deleteProfileFormTenantData,
   HOSTS,
   removeIdentitiesByPrefix,
   removeProfileFormByPrefix,
@@ -11,6 +22,7 @@ import {
   seedProfileFormAnswer,
   seedProfileFormBranch,
   seedProfileFormQuestion,
+  seedProfileFormStep,
   signInAs,
   withPaymentsGate,
   withProfileForm,
@@ -471,4 +483,292 @@ describe('12.2-10 D-644: on a depth-3 tree the SQL gate and the save report agre
       expect(bootstrap.profileForm?.pendingRequired).toBe(0);
     });
   }, 60_000);
+});
+
+// ── 12.2-12 Task 1 (tracer): the same rows through the TypeScript rule, the SQL gate and the purge (D-644, D-645, PFORM-54) ──
+
+describe('12.2-12 chain parity (PFORM-54): the rule, the gate and the purge agree on every row of PROFILE_FORM_CHAIN_CASES', () => {
+  const DB_URL = 'postgres://postgres:postgres@127.0.0.1:54322/postgres';
+  const holder = postgres(DB_URL, { prepare: false, max: 1 });
+  let chainMember: Person;
+  let chainMembershipId = '';
+
+  beforeAll(async () => {
+    chainMember = await person();
+    const [row] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.memberships
+       where user_id = ${chainMember.userId}::uuid and tenant_id = ${labTenantId}::uuid`;
+    if (!row) throw new Error('the chain member has no membership');
+    chainMembershipId = row.id;
+  });
+
+  // The module row is restored by `withProfileForm`; the lab tenant's form rows are removed in ONE transaction with
+  // the deferrable keys deferred (a branch and its opener reference each other).
+  afterEach(async () => {
+    await deleteProfileFormTenantData(labTenantId);
+  });
+
+  afterAll(async () => {
+    await holder.end({ timeout: 2 });
+  });
+
+  type Seeded = { ids: Map<string, string>; stepOne: string };
+
+  /** Option ids a choice question of the fixture needs: the values of the branches it opens plus every option a case stores. */
+  function optionIdsOf(fixture: ChainFixture, key: string): string[] {
+    const found = new Set<string>();
+    for (const branch of fixture.branches) {
+      if (branch.openerKey === key) for (const v of branch.values) found.add(v);
+    }
+    for (const row of PROFILE_FORM_CHAIN_CASES) {
+      if ((row.fixture ?? PROFILE_FORM_CHAIN_FIXTURE) !== fixture) continue;
+      const value = row.stored[key] as { optionId?: unknown; optionIds?: unknown } | undefined;
+      if (typeof value?.optionId === 'string') found.add(value.optionId);
+      if (Array.isArray(value?.optionIds)) for (const v of value.optionIds) found.add(String(v));
+    }
+    return [...found];
+  }
+
+  /** The fixture as real rows: the unconditional questions in step 1, the rest in step 2, openers before their branches. */
+  async function seedFixture(fixture: ChainFixture): Promise<Seeded> {
+    const stepOne = await seedProfileFormStep({
+      tenantId: labTenantId,
+      title: `${TITLE}S1`,
+      position: 1,
+    });
+    const stepTwo = await seedProfileFormStep({
+      tenantId: labTenantId,
+      title: `${TITLE}S2`,
+      position: 2,
+    });
+    const ids = new Map<string, string>();
+    const branchIds = new Map<string, string>();
+    const pendingQuestions = [...fixture.questions];
+    const pendingBranches = [...fixture.branches];
+    let position = 0;
+    while (pendingQuestions.length + pendingBranches.length > 0) {
+      let progressed = false;
+      for (const q of [...pendingQuestions]) {
+        const branch =
+          q.branchId === null ? undefined : fixture.branches.find((b) => b.id === q.branchId);
+        if (q.branchId !== null && !branchIds.has(branch?.key ?? '')) continue;
+        const choice = q.type === 'single_choice' || q.type === 'multiple_choice';
+        const optionIds = choice ? optionIdsOf(fixture, q.key) : [];
+        while (choice && optionIds.length < 2) optionIds.push(crypto.randomUUID());
+        position += 1;
+        ids.set(
+          q.key,
+          await seedProfileFormQuestion({
+            tenantId: labTenantId,
+            adminUserId,
+            title: `${TITLE}${q.key}`,
+            type: q.type,
+            required: q.required,
+            position,
+            stepId: q.branchId === null ? stepOne : stepTwo,
+            branchId: branch ? branchIds.get(branch.key) : undefined,
+            allowOther: q.type === 'single_choice',
+            options: choice
+              ? optionIds.map((id, at) => ({ id, label: `Opção ${at + 1}` }))
+              : undefined,
+          }),
+        );
+        pendingQuestions.splice(pendingQuestions.indexOf(q), 1);
+        progressed = true;
+      }
+      for (const b of [...pendingBranches]) {
+        const opener = ids.get(b.openerKey);
+        if (opener === undefined) continue;
+        branchIds.set(
+          b.key,
+          await seedProfileFormBranch({
+            tenantId: labTenantId,
+            openerQuestionId: opener,
+            values: [...b.values],
+          }),
+        );
+        pendingBranches.splice(pendingBranches.indexOf(b), 1);
+        progressed = true;
+      }
+      if (!progressed) throw new Error('seedFixture: the fixture is not a tree');
+    }
+    return { ids, stepOne };
+  }
+
+  /** Evaluator 1: the TypeScript rule over the contracts' fixture, the stored answers by key. */
+  function ruleOf(fixture: ChainFixture, stored: Record<string, unknown>) {
+    const keyOf = new Map(fixture.questions.map((q) => [q.id, q.key]));
+    const idOf = new Map(fixture.questions.map((q) => [q.key, q.id]));
+    const tree = branchTreeOf(
+      fixture.questions.map((q) => ({ id: q.id, branchId: q.branchId })),
+      fixture.branches.map((b) => ({
+        id: b.id,
+        openerQuestionId: idOf.get(b.openerKey) as string,
+        values: b.values,
+      })),
+    );
+    const tokensOf = (id: string) => answerTokens(stored[keyOf.get(id) ?? '']);
+    const visible = fixture.questions.filter((q) => isQuestionVisibleInTree(q, tree, tokensOf));
+    const visibleKeys = visible.map((q) => q.key);
+    return {
+      visible: visibleKeys.sort(),
+      owed: visible
+        .filter((q) => q.required && !(q.key in stored))
+        .map((q) => q.key)
+        .sort(),
+      purged: Object.keys(stored)
+        .filter((key) => !visibleKeys.includes(key))
+        .sort(),
+    };
+  }
+
+  const sorted = (list: readonly string[]) => [...list].sort();
+
+  const keysOf = (ids: Map<string, string>, wanted: string[]) => {
+    const byId = new Map([...ids].map(([key, id]) => [id, key]));
+    return wanted.map((id) => byId.get(id) ?? `?${id}`).sort();
+  };
+
+  const claims = () =>
+    JSON.stringify({
+      sub: chainMember.userId,
+      role: 'authenticated',
+      tenant_id: labTenantId,
+      tenant_role: 'member',
+    });
+
+  const gateCount = async (): Promise<number> => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select app.profile_form_missing(${labTenantId}::uuid, ${chainMembershipId}::uuid)::int as n`;
+    return row?.n ?? -1;
+  };
+
+  const storedKeys = async (ids: Map<string, string>): Promise<string[]> => {
+    const rows = await adminSql<{ question_id: string }[]>`
+      select question_id::text as question_id from public.profile_form_answers
+       where membership_id = ${chainMembershipId}::uuid`;
+    return keysOf(
+      ids,
+      rows.map((r) => r.question_id),
+    );
+  };
+
+  async function loadStored(ids: Map<string, string>, stored: Record<string, unknown>) {
+    await adminSql`delete from public.profile_form_answers where membership_id = ${chainMembershipId}::uuid`;
+    for (const [key, value] of Object.entries(stored)) {
+      await seedProfileFormAnswer({
+        tenantId: labTenantId,
+        questionId: ids.get(key) as string,
+        userId: chainMember.userId,
+        value,
+      });
+    }
+  }
+
+  for (const row of PROFILE_FORM_CHAIN_CASES) {
+    const fixture = row.fixture ?? PROFILE_FORM_CHAIN_FIXTURE;
+    const stored = row.stored as Record<string, unknown>;
+    it(`chain row (rule, gate, purge): ${row.name}`, async () => {
+      // Evaluator 1, the rule, always: it is the only evaluator of a tree the database cannot hold (row 11).
+      const rule = ruleOf(fixture, stored);
+      expect(rule.visible, 'the rule: visible').toEqual(sorted(row.visible));
+      expect(rule.owed, 'the rule: owed').toEqual(sorted(row.owed));
+      expect(rule.purged, 'the rule: purged').toEqual(sorted(row.purged));
+      // A fourth level is refused by PF008 and can never be stored: the rule is its only evaluator.
+      if (fixture === PROFILE_FORM_CHAIN_FIXTURE_BROKEN) return;
+
+      await withProfileForm(labTenantId, async () => {
+        const { ids } = await seedFixture(fixture);
+        await loadStored(ids, stored);
+
+        // Evaluator 2, the SQL gate: the owed count, and the member's own save report names the same questions.
+        expect(await gateCount(), 'the gate: owed count').toBe(row.owed.length);
+        const read = await get(chainMember, '/v1/me/profile-form');
+        const form = (await read.json()) as { formEtag: string };
+        const report = await api.request('/v1/me/profile-form/answers', {
+          method: 'PUT',
+          headers: {
+            'x-tenant-host': HOSTS.lab,
+            authorization: `Bearer ${chainMember.token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ formEtag: form.formEtag, answers: {} }),
+        });
+        expect(report.status).toBe(200);
+        const body = (await report.json()) as {
+          missingRequired: number;
+          missingQuestionIds: string[];
+        };
+        expect(body.missingRequired, 'the report: owed count').toBe(row.owed.length);
+        expect(keysOf(ids, body.missingQuestionIds), 'the report: owed keys').toEqual(
+          sorted(row.owed),
+        );
+
+        // Evaluator 3, the purge (what the member's save runs): exactly the stated keys go, the rest stays.
+        const purged = await holder.begin(async (tx) => {
+          await tx`select set_config('request.jwt.claims', ${claims()}, true)`;
+          await tx.unsafe('set local role authenticated');
+          return tx`select question_id::text as question_id from app.profile_form_purge_closed()`;
+        });
+        expect(
+          keysOf(
+            ids,
+            purged.map((r) => r.question_id),
+          ),
+          'the purge: deleted keys',
+        ).toEqual(sorted(row.purged));
+        expect(await storedKeys(ids), 'the purge: what remains').toEqual(
+          sorted(Object.keys(stored).filter((key) => !row.purged.includes(key))),
+        );
+        // A purge never changes what is owed, and a second one finds nothing.
+        expect(await gateCount(), 'the gate after the purge').toBe(row.owed.length);
+        const again = await holder.begin(async (tx) => {
+          await tx`select set_config('request.jwt.claims', ${claims()}, true)`;
+          await tx.unsafe('set local role authenticated');
+          return tx`select question_id::text as question_id from app.profile_form_purge_closed()`;
+        });
+        expect(again).toHaveLength(0);
+      });
+    }, 60_000);
+  }
+
+  it('chain row via the real save: a member save that re-sends the opener purges every closed level in the same transaction', async () => {
+    await withProfileForm(labTenantId, async () => {
+      const { ids, stepOne } = await seedFixture(PROFILE_FORM_CHAIN_FIXTURE);
+      for (const row of PROFILE_FORM_CHAIN_CASES) {
+        const stored = row.stored as Record<string, unknown>;
+        const opener = stored.Q1 as { optionId?: unknown } | undefined;
+        if (row.fixture !== undefined || typeof opener?.optionId !== 'string') continue;
+        await loadStored(ids, stored);
+        const form = (await (await get(chainMember, '/v1/me/profile-form')).json()) as {
+          formEtag: string;
+        };
+        const save = await api.request('/v1/me/profile-form/answers', {
+          method: 'PUT',
+          headers: {
+            'x-tenant-host': HOSTS.lab,
+            authorization: `Bearer ${chainMember.token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            formEtag: form.formEtag,
+            stepId: stepOne,
+            answers: { [ids.get('Q1') as string]: stored.Q1 },
+          }),
+        });
+        expect(save.status, row.name).toBe(200);
+        const body = (await save.json()) as {
+          missingRequired: number;
+          missingQuestionIds: string[];
+        };
+        expect(keysOf(ids, body.missingQuestionIds), `${row.name}: report`).toEqual(
+          sorted(row.owed),
+        );
+        expect(await storedKeys(ids), `${row.name}: remains`).toEqual(
+          sorted(Object.keys(stored).filter((key) => !row.purged.includes(key))),
+        );
+        expect(await gateCount(), `${row.name}: gate`).toBe(row.owed.length);
+      }
+    });
+  }, 90_000);
 });
