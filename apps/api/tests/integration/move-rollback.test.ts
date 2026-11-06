@@ -33,7 +33,14 @@ import {
   SUPABASE_URL,
   TGT_URL,
 } from './move-helpers';
-import { adminSql } from './setup';
+import {
+  adminSql,
+  deleteProfileFormTenantData,
+  seedProfileFormAnswer,
+  seedProfileFormBranch,
+  seedProfileFormQuestion,
+  seedProfileFormStep,
+} from './setup';
 
 /**
  * Phase 09.2-23 (DBT-34, DBT-49, D-534, D-535, D-536, T-09.2-104, T-09.2-107, T-09.2-108): the way back and the
@@ -112,7 +119,64 @@ async function codeOf(promise: Promise<unknown>): Promise<string> {
   }
 }
 
+/**
+ * 12.2-12 (a latent Phase 09.2 defect, found by the move-copy cases of this plan): a small profile form on the
+ * throwaway tenant, the group `profile_form_branches` + `profile_form_questions` (deferrable, with user
+ * triggers) plus a step and two answers. Its tables are the only ones where the engine disables triggers inside
+ * a deferred multi-table group, so the delete paths (recopy and confirm-delete) are exercised on them.
+ */
+async function seedForm(): Promise<{ answerId: string }> {
+  const step = await seedProfileFormStep({ tenantId: t.tenantId, title: 'mvrb Etapa' });
+  const yes = crypto.randomUUID();
+  const opener = await seedProfileFormQuestion({
+    tenantId: t.tenantId,
+    adminUserId: t.userId,
+    stepId: step,
+    type: 'single_choice',
+    title: 'mvrb Abridora',
+    position: 1,
+    options: [{ id: yes, label: 'Sim' }, { label: 'Nao' }],
+  });
+  const branch = await seedProfileFormBranch({
+    tenantId: t.tenantId,
+    openerQuestionId: opener,
+    values: [yes],
+  });
+  const dependent = await seedProfileFormQuestion({
+    tenantId: t.tenantId,
+    adminUserId: t.userId,
+    stepId: step,
+    title: 'mvrb Dependente',
+    position: 2,
+    branchId: branch,
+  });
+  await seedProfileFormAnswer({
+    tenantId: t.tenantId,
+    questionId: opener,
+    userId: t.userId,
+    value: { optionId: yes, otherText: null },
+  });
+  const answerId = await seedProfileFormAnswer({
+    tenantId: t.tenantId,
+    questionId: dependent,
+    userId: t.userId,
+    value: 'antes',
+  });
+  return { answerId };
+}
+
+async function formCounts(db: ReturnType<typeof connect>, tenantId: string) {
+  const [row] = await db<{ s: number; b: number; q: number; a: number }[]>`
+    select (select count(*)::int from public.profile_form_steps where tenant_id = ${tenantId}::uuid) as s,
+           (select count(*)::int from public.profile_form_branches where tenant_id = ${tenantId}::uuid) as b,
+           (select count(*)::int from public.profile_form_questions where tenant_id = ${tenantId}::uuid) as q,
+           (select count(*)::int from public.profile_form_answers where tenant_id = ${tenantId}::uuid) as a`;
+  return row;
+}
+
 afterEach(async () => {
+  // The form keys are NO ACTION, so the tenant can only go once its form is gone (idempotent).
+  if (t) await deleteProfileFormTenantData(t.tenantId);
   if (extra) {
     await adminSql`delete from public.memberships where user_id = ${extra.userId}::uuid and tenant_id = ${extra.tenantId}::uuid`;
     extra = null;
@@ -289,6 +353,26 @@ describe('recopy', () => {
     expect(await footprint(connect(SRC_URL), t.tenantId)).toEqual(sourceBefore);
   });
 
+  it('12.2-12: recopy wipes a profile form (a deferred group with user triggers) without the pending-trigger-events error, and recopies it', async () => {
+    const { answerId } = await seedForm();
+    expect(await codeOf(runMove(opts('start'), crashAfter('copied')))).toBe(
+      'other:Error: simulated crash',
+    );
+    const targetDb = connect(TGT_URL);
+    expect(await formCounts(targetDb, t.tenantId)).toEqual({ s: 1, b: 1, q: 2, a: 2 });
+    // The source answer changes after the copy: the recopy must wipe the target's form and bring the new one.
+    await adminSql`update public.profile_form_answers set value = '"depois"'::jsonb where id = ${answerId}::uuid`;
+
+    const result = await runMove(opts('recopy'), h.deps);
+    expect(result.state).toBe('done');
+    const kinds = (await eventsOf(result.moveId ?? '')).map((e) => e.kind);
+    expect(kinds).toContain('recopy_wiped');
+    expect(await formCounts(targetDb, t.tenantId)).toEqual({ s: 1, b: 1, q: 2, a: 2 });
+    const [answer] = await targetDb<{ value: string }[]>`
+      select value #>> '{}' as value from public.profile_form_answers where id = ${answerId}::uuid`;
+    expect(answer?.value).toBe('depois');
+  });
+
   it('recopy is refused after the flip', async () => {
     await moveFully();
     expect(await codeOf(runMove(opts('recopy'), h.deps))).toBe('not_done');
@@ -321,6 +405,19 @@ describe('confirm-delete', () => {
       'not_done',
     );
     expect(await footprint(connect(SRC_URL), t.tenantId)).toEqual(before);
+  });
+
+  it('12.2-12: confirm-delete removes a profile form from the source (a deferred group with user triggers) and leaves the target copy', async () => {
+    await seedForm();
+    await moveFully();
+    const target = connect(TGT_URL);
+    expect(await formCounts(target, t.tenantId)).toEqual({ s: 1, b: 1, q: 2, a: 2 });
+    expect(await formCounts(connect(SRC_URL), t.tenantId)).toEqual({ s: 1, b: 1, q: 2, a: 2 });
+
+    const result = await runMove(opts('confirm-delete', { confirmSlug: t.slug }), h.deps);
+    expect(result.outcome).toBe('source_deleted');
+    expect(await formCounts(connect(SRC_URL), t.tenantId)).toEqual({ s: 0, b: 0, q: 0, a: 0 });
+    expect(await formCounts(target, t.tenantId)).toEqual({ s: 1, b: 1, q: 2, a: 2 });
   });
 
   it('removes the tenant from the source and nothing else', async () => {

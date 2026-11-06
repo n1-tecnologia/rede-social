@@ -125,6 +125,9 @@ export async function confirmDeleteSource(
           );
           removed += result.count;
         }
+        // Flush the group's deferred key checks now (the check the commit would make; a real violation still
+        // aborts before commit): Postgres refuses to ALTER a table that has pending trigger events.
+        if (group.length > 1) await tx.unsafe('set constraints all immediate');
         for (const table of silenced) {
           await tx.unsafe(`alter table ${publicTable(table)} enable trigger user`);
         }

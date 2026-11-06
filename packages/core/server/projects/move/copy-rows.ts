@@ -187,6 +187,9 @@ export async function copyRows(
         }
         const reports: CopyTableReport[] = [];
         for (const table of group) reports.push(await copyTable(src, tgt, plan, table, size));
+        // Flush the group's deferred key checks now (the check the commit would make; a real violation still
+        // aborts before commit): Postgres refuses to ALTER a table that has pending trigger events.
+        if (group.length > 1) await tgt.unsafe('set constraints all immediate');
         for (const table of silenced) {
           await tgt.unsafe(`alter table ${publicTable(table)} enable trigger user`);
         }
