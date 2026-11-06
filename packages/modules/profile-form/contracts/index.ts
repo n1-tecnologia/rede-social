@@ -5,18 +5,22 @@
  * every module contract has.
  */
 export {
+  type AdminBranch,
   type AdminQuestion,
   type AdminQuestionList,
   type AdminStep,
   type ArchivedQuestion,
+  adminBranchSchema,
   adminQuestionListSchema,
   adminQuestionSchema,
   adminStepSchema,
   answerTokens,
   archivedQuestionListSchema,
   archivedQuestionSchema,
+  type CreateBranchBody,
   type CreateQuestionBody,
   type CreateStepBody,
+  createBranchBodySchema,
   createQuestionBodySchema,
   createStepBodySchema,
   type DeleteStepResult,
@@ -29,6 +33,8 @@ export {
   impactResultSchema,
   isQuestionVisible,
   layoutBodySchema,
+  type MemberBranch,
+  memberBranchSchema,
   memberStepSchema,
   PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_DEFAULT_STEP_TITLE,
@@ -43,12 +49,28 @@ export {
   type ReplaceQuestionBody,
   reorderBodySchema,
   replaceQuestionBodySchema,
+  type UndoBranchResult,
+  type UpdateBranchBody,
   type UpdateQuestionBody,
   type UpdateStepBody,
+  undoBranchResultSchema,
+  updateBranchBodySchema,
   updateQuestionBodySchema,
   updateStepBodySchema,
   visibleSteps,
 } from '@rede-social/contracts/profile-form';
+// 12.2 (D-641, D-652): the pure branch rules, one source for the gate's TypeScript twin, the stepper and the builder.
+export {
+  type BranchTree,
+  branchChainOf,
+  branchTreeOf,
+  isQuestionVisibleInTree,
+  type ProfileFormBranchDef,
+  type TreeOrderInput,
+  type TreeOrderStep,
+  treeOrder,
+  visibleStepsInTree,
+} from '@rede-social/contracts/profile-form-branches';
 
 /** The permission STRINGS, exported so the manifest and the web tier never retype them (D-338). */
 export const PROFILE_FORM_PERMISSIONS = {

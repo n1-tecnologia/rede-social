@@ -9,6 +9,8 @@
  *
  * TypeScript twin of the SQL gate and purge of plans 06 and 07; both are asserted against
  * `PROFILE_FORM_CHAIN_CASES`, so a new shape adds a row to that table in the same change.
+ *
+ * `treeOrder` is the second pure function of this file: the stored order of a form follows the tree (D-652).
  */
 import { PROFILE_FORM_LIMITS } from './profile-form';
 
@@ -104,15 +106,131 @@ export function visibleStepsInTree(
 
 // ── The tree order (D-652) ───────────────────────────────────────────────────────────────────────
 
-/** RED STUB (12.2-01 Task 3): returns the layout unchanged; the GREEN commit writes the real order. */
 export type TreeOrderStep = { stepId: string; questionIds: readonly string[] };
+
 export type TreeOrderInput = {
+  /** The steps in order, each with the question ids in the order the caller asked for. */
   layout: readonly TreeOrderStep[];
+  /** Each question's branch; a missing question or `null` is an unconditional one. */
   branchIdOf: ReadonlyMap<string, string | null | undefined>;
+  /** The branches in the caller's order (`created_at, id` on the server): the only tie-break between branches. */
   branches: readonly { id: string; openerQuestionId: string }[];
 };
+
+/** A run of questions that must stay consecutive: one branch's members, or a single unconditional question. */
+type Unit = { key: number; tie: number; members: number[] };
+
+const byUnit = (left: Unit, right: Unit): number => left.key - right.key || left.tie - right.tie;
+
+/**
+ * The layout in tree order (D-652): inside each step a branch's questions are consecutive and right after
+ * their opener when it sits in the same step, a nested branch sits inside its parent's block, and a run whose
+ * opener is in another step is placed like an unconditional unit. A stable pre-order of the step's forest:
+ * sibling units are ordered by the smallest requested index of their members, then by the branch's index in
+ * `branches`; the members of a run by requested index. Pure, idempotent, never moves a question to another
+ * step and never drops or repeats one. A cycle in the input is cut at its smallest requested index, which
+ * becomes a root. No recursion: the emit loop walks an explicit stack.
+ */
 export function treeOrder(input: TreeOrderInput): TreeOrderStep[] {
-  return input.layout.map((step) => ({ stepId: step.stepId, questionIds: [...step.questionIds] }));
+  const openerOf = new Map(input.branches.map((branch) => [branch.id, branch.openerQuestionId]));
+  const listIndex = new Map(input.branches.map((branch, index) => [branch.id, index]));
+  return input.layout.map((step) => ({
+    stepId: step.stepId,
+    questionIds: orderStep(step.questionIds, input.branchIdOf, openerOf, listIndex),
+  }));
+}
+
+function orderStep(
+  ids: readonly string[],
+  branchIdOf: TreeOrderInput['branchIdOf'],
+  openerOf: ReadonlyMap<string, string>,
+  listIndex: ReadonlyMap<string, number>,
+): string[] {
+  const size = ids.length;
+  const indexOf = new Map<string, number>();
+  ids.forEach((id, index) => {
+    if (!indexOf.has(id)) indexOf.set(id, index);
+  });
+  // The branch each position sits in; an unknown branch is no branch.
+  const branchAt = ids.map((id) => {
+    const branchId = branchIdOf.get(id) ?? null;
+    return branchId !== null && openerOf.has(branchId) ? branchId : null;
+  });
+  // The position of the opener, when it sits in this step and is not the question itself.
+  const parent = branchAt.map((branchId, index): number | undefined => {
+    if (branchId === null) return undefined;
+    const opener = indexOf.get(openerOf.get(branchId) as string);
+    return opener === undefined || opener === index ? undefined : opener;
+  });
+
+  // Cut every cycle at its smallest requested index.
+  for (let start = 0; start < size; start += 1) {
+    const seen = new Set<number>();
+    let cursor = start;
+    while (parent[cursor] !== undefined && !seen.has(cursor)) {
+      seen.add(cursor);
+      cursor = parent[cursor] as number;
+    }
+    if (!seen.has(cursor)) continue;
+    let smallest = cursor;
+    for (let step = parent[cursor] as number; step !== cursor; step = parent[step] as number) {
+      if (step < smallest) smallest = step;
+    }
+    parent[smallest] = undefined;
+  }
+
+  // Group: children of an opener by branch, and the parentless members of a branch (a foreign opener).
+  const childRuns = new Map<number, Map<string, number[]>>();
+  const foreignRuns = new Map<string, number[]>();
+  const roots: Unit[] = [];
+  for (let index = 0; index < size; index += 1) {
+    const branchId = branchAt[index] ?? null;
+    const opener = parent[index];
+    if (branchId === null) {
+      roots.push({ key: index, tie: 0, members: [index] });
+    } else if (opener === undefined) {
+      foreignRuns.set(branchId, [...(foreignRuns.get(branchId) ?? []), index]);
+    } else {
+      const runs = childRuns.get(opener) ?? new Map<string, number[]>();
+      runs.set(branchId, [...(runs.get(branchId) ?? []), index]);
+      childRuns.set(opener, runs);
+    }
+  }
+  const toUnit = (branchId: string, members: number[]): Unit => ({
+    key: members[0] as number,
+    tie: listIndex.get(branchId) ?? 0,
+    members,
+  });
+  for (const [branchId, members] of foreignRuns) roots.push(toUnit(branchId, members));
+  roots.sort(byUnit);
+
+  const blockOf = (opener: number): Unit[] =>
+    [...(childRuns.get(opener) ?? [])]
+      .map(([branchId, members]) => toUnit(branchId, members))
+      .sort(byUnit);
+
+  // Stable pre-order on an explicit stack: a unit expands to its members, a member to itself then its block.
+  type Task = { unit: Unit } | { member: number };
+  const out: number[] = [];
+  const emitted = new Set<number>();
+  const stack: Task[] = [...roots].reverse().map((unit) => ({ unit }));
+  while (stack.length > 0) {
+    const task = stack.pop() as Task;
+    if ('unit' in task) {
+      for (let at = task.unit.members.length - 1; at >= 0; at -= 1) {
+        stack.push({ member: task.unit.members[at] as number });
+      }
+      continue;
+    }
+    if (emitted.has(task.member)) continue;
+    emitted.add(task.member);
+    out.push(task.member);
+    const block = blockOf(task.member);
+    for (let at = block.length - 1; at >= 0; at -= 1) stack.push({ unit: block[at] as Unit });
+  }
+  // Defensive: a position the walk could not reach is appended in requested order, never dropped.
+  for (let index = 0; index < size; index += 1) if (!emitted.has(index)) out.push(index);
+  return out.map((index) => ids[index] as string);
 }
 
 // ── The parity table fixture (D-645): the team's own clinic wording, never the client's list ───────

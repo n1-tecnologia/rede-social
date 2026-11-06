@@ -20,7 +20,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 | Subpath | What it holds |
 |---|---|
 | `./module` | `profileFormModule`, the manifest |
-| `./contracts` | the permission names `PROFILE_FORM_PERMISSIONS` (`profile_form.manage`, `profile_form.read`) and a re-export of the builder API's schemas of `@rede-social/contracts/profile-form` (`createQuestionBodySchema`, `updateQuestionBodySchema`, `reorderBodySchema`, `adminQuestionSchema`, `adminQuestionListSchema`, `PROFILE_FORM_ISSUE_SET`) |
+| `./contracts` | the permission names `PROFILE_FORM_PERMISSIONS` (`profile_form.manage`, `profile_form.read`) and a re-export of the builder API's schemas of `@rede-social/contracts/profile-form` (`createQuestionBodySchema`, `updateQuestionBodySchema`, `reorderBodySchema`, `adminQuestionSchema`, `adminQuestionListSchema`, `PROFILE_FORM_ISSUE_SET`); 12.2 adds the branch bodies and reads (`createBranchBodySchema`, `updateBranchBodySchema`, `adminBranchSchema`, `memberBranchSchema`, `undoBranchResultSchema`) and the pure rules of `@rede-social/contracts/profile-form-branches` (`isQuestionVisibleInTree`, `visibleStepsInTree`, `branchTreeOf`, `branchChainOf`, `treeOrder`) |
 | `./server` | `profileFormRoutes` |
 
 `profile_form.manage` is composed for `admin_tenant` only, by construction; `profile_form.read` is
@@ -83,6 +83,20 @@ positions, so reordering options never changes what a stored answer means.
 is refused with `step_not_empty` while an active question is inside and `last_step` for the only step;
 otherwise it moves the step's ARCHIVED questions to the first remaining step and renumbers the steps 1..n. No
 question or answer is deleted. The kernel code is `@rede-social/core/server/profile-form/steps`.
+
+**Branches (12.2, contract only so far).** A branch is its own object (D-640): an opener question, the opening
+answers (any one opens it, `values`), an optional admin-only `name` (60 code points, D-642), a `revision` and an
+archive state. A question names its branch with `branchId` (at most one). The shared source is
+`@rede-social/contracts/profile-form-branches`: `isQuestionVisibleInTree` is true only when EVERY branch on the
+chain is open, the chain is at most `PROFILE_FORM_LIMITS.branchDepth` (3) long, and an unknown branch or opener, a
+cycle or a deeper chain hides the question (fail closed, no recursion, D-641, D-644); `treeOrder` puts a branch's
+questions right after their opener, a nested branch inside its parent's block, and is idempotent (D-652);
+`PROFILE_FORM_CHAIN_CASES` is the 11-row table the SQL gate and the purge replay. The member and staff branch
+shapes are strict and carry no name (T-12.2-03). `PROFILE_FORM_LIMITS` gains `branchDepth: 3`, `branches: 15`
+and `branchName: 60`; `PROFILE_FORM_ISSUES` appends, last and in this order, `unknown_branch`, `branch_depth`,
+`branch_limit`, `branch_archived` and `public_under_private`; `PROFILE_FORM_IMPACT_CHANGES` appends
+`undo_branch` and `reactivate_branch`. Every new key on an existing read or body is optional until plan 20 of
+12.2 removes the legacy per-question `condition` (deprecated, kept one release).
 
 **Aggregates only (D-593, PFORM-23).** The builder reads counts: answers per question and per option, the
 summary and the impact. No route of this package ever returns an individual member's answer, and the
