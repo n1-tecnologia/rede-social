@@ -347,3 +347,316 @@ describe('12.2-11 the summary: the cases of 12.1 over the chain, and the raw tex
     expect(query.sql).not.toMatch(/\ba\.value\b/);
   });
 });
+
+// ── Task 2: the impact of creating, replacing, requiring, reactivating and leaving a branch ─────────
+
+const impactRes = (admin: Person, params: Record<string, string>) =>
+  call(admin, 'GET', `/v1/profile_form/impact?${new URLSearchParams(params).toString()}`);
+
+const impactOf = async (admin: Person, params: Record<string, string>): Promise<number> => {
+  const res = await impactRes(admin, params);
+  const text = await res.clone().text();
+  expect(res.status, `${JSON.stringify(params)} ${text}`).toBe(200);
+  const body = (await res.json()) as { members: number };
+  expect(Object.keys(body)).toEqual(['members']); // T-12.2-10: one integer, nothing else
+  expect(Number.isInteger(body.members)).toBe(true);
+  return body.members;
+};
+
+/** The error envelope minus the per-request id, so two refusals can be compared for sameness. */
+const withoutRequestId = (body: unknown) => {
+  const { error } = body as Envelope;
+  const { requestId: _requestId, ...rest } = error as Envelope['error'] & { requestId?: string };
+  return { error: rest };
+};
+
+/** Every row the impact could touch, as one string: an impact call must leave it unchanged. */
+const snapshot = async (): Promise<string> => {
+  const questions = await adminSql`
+    select id::text as id, revision, archived_at, position, branch_id::text as branch_id,
+           step_id::text as step_id, updated_at
+      from public.profile_form_questions where tenant_id = ${labTenantId}::uuid order by id`;
+  const branches = await adminSql`
+    select id::text as id, revision, archived_at, open_values, updated_at
+      from public.profile_form_branches where tenant_id = ${labTenantId}::uuid order by id`;
+  const answers = await adminSql`
+    select coalesce(string_agg(id::text, ',' order by id), '') as ids, count(*)::int as n
+      from public.profile_form_answers where tenant_id = ${labTenantId}::uuid`;
+  return JSON.stringify({ questions, branches, answers });
+};
+
+describe('12.2-11 D-644, D-653: the impact counts only the members who SEE the question through its whole chain (PFORM-52)', () => {
+  it('create_required and replace: every member without a branch, the members for whom the chain is open with one (depth 1..3)', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const m0 = await person();
+      const m1 = await person();
+      const m2 = await person();
+      const m3 = await person();
+      const stale = await person();
+      void m0;
+      const c = await seedClinic();
+      await answer(m1, c.q1, { optionId: c.tem });
+      await answer(m2, c.q1, { optionId: c.tem });
+      await answer(m2, c.q2, true);
+      await answer(m3, c.q1, { optionId: c.tem });
+      await answer(m3, c.q2, true);
+      await answer(m3, c.q5, true);
+      await answer(stale, c.q1, { optionId: c.nao });
+      await answer(stale, c.q2, true);
+      await answer(stale, c.q5, true);
+      const total = (await summaryOf(admin)).total;
+      const before = await snapshot();
+
+      // No branch: every member, unchanged from Phase 12.
+      expect(await impactOf(admin, { change: 'create_required' })).toBe(total);
+      expect(await impactOf(admin, { change: 'replace' })).toBe(total);
+      // One level, two levels, three levels: the whole chain must be open, so the stale member is in none.
+      expect(await impactOf(admin, { change: 'create_required', branchId: c.b1 })).toBe(3);
+      expect(await impactOf(admin, { change: 'create_required', branchId: c.b2 })).toBe(2);
+      expect(await impactOf(admin, { change: 'create_required', branchId: c.b3 })).toBe(1);
+      expect(await impactOf(admin, { change: 'replace', branchId: c.b3 })).toBe(1);
+      expect(await impactOf(admin, { change: 'replace', branchId: c.b1 })).toBe(3);
+      expect(await snapshot()).toBe(before);
+    });
+  }, 180_000);
+
+  it('PFORM-38 counts 0, 1, 2 and 3 for a three-member fixture, over single-level branches', async () => {
+    const admin = await person('admin_tenant');
+    const m1 = await person();
+    const m2 = await person();
+    const m3 = await person();
+    await withProfileForm(labTenantId, async () => {
+      const [a, b, cc] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()] as const;
+      const opener = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        type: 'single_choice',
+        title: `${TITLE}opener`,
+        position: 1,
+        options: [
+          { id: a, label: 'A' },
+          { id: b, label: 'B' },
+          { id: cc, label: 'C' },
+        ],
+      });
+      const branch = (values: string[]) =>
+        seedProfileFormBranch({ tenantId: labTenantId, openerQuestionId: opener, values });
+      const ba = await branch([a]);
+      const bab = await branch([a, b]);
+      const bb = await branch([b]);
+      const babc = await branch([a, b, cc]);
+      const bc = await branch([cc]);
+      const total = (await summaryOf(admin)).total;
+      const ask = (branchId: string) => impactOf(admin, { change: 'create_required', branchId });
+
+      // Edge 0: nobody has answered the opener, so nobody would see the question.
+      expect(await ask(ba)).toBe(0);
+      expect(await impactOf(admin, { change: 'create_required' })).toBe(total);
+      await answer(m1, opener, { optionId: a });
+      await answer(m2, opener, { optionId: b });
+      // m3 has not answered. Edge 1: exactly one member sees a question opened by A.
+      expect(await ask(ba)).toBe(1);
+      expect(await ask(bab)).toBe(2);
+      expect(await impactOf(admin, { change: 'replace', branchId: bb })).toBe(1);
+      await answer(m3, opener, { optionId: cc });
+      expect(await ask(babc)).toBe(3);
+      expect(await ask(bc)).toBe(1);
+    });
+  }, 120_000);
+
+  it('a branch that opens for everyone counts every member exactly (the all-members edge)', async () => {
+    const admin = await person('admin_tenant');
+    await person();
+    await person();
+    await withProfileForm(labTenantId, async () => {
+      const opener = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        type: 'yes_no',
+        title: `${TITLE}everyone opener`,
+        position: 1,
+      });
+      const branch = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: ['true', 'false'],
+      });
+      expect(await impactOf(admin, { change: 'create_required', branchId: branch })).toBe(0);
+      await adminSql`
+        insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+        select m.tenant_id, ${opener}::uuid, m.id, m.user_id, 'true'::jsonb
+          from public.memberships m
+         where m.tenant_id = ${labTenantId}::uuid and m.role = 'member' and m.status = 'active'
+           and m.blocked_at is null and m.deleted_at is null`;
+      const total = (await summaryOf(admin)).total;
+      expect(await impactOf(admin, { change: 'create_required', branchId: branch })).toBe(total);
+      expect(await impactOf(admin, { change: 'create_required' })).toBe(total);
+    });
+  }, 120_000);
+
+  it('make_required and reactivate count the members lacking an answer who see the question through its chain', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const m1 = await person();
+      const m2 = await person();
+      const m3 = await person();
+      const stale = await person();
+      const c = await seedClinic();
+      await answer(m1, c.q1, { optionId: c.tem });
+      await answer(m2, c.q1, { optionId: c.tem });
+      await answer(m2, c.q2, true);
+      await answer(m3, c.q1, { optionId: c.tem });
+      await answer(m3, c.q2, true);
+      await answer(m3, c.q5, true);
+      await answer(stale, c.q1, { optionId: c.nao });
+      await answer(stale, c.q2, true);
+      await answer(stale, c.q5, true);
+      const before = await snapshot();
+
+      // Q2 (optional, in B1): the members of B1 who lack it are m1 only (m2, m3 answered it; stale is out).
+      expect(await impactOf(admin, { change: 'make_required', questionId: c.q2 })).toBe(1);
+      // Q5 (optional, in B2): the members of B2 are m2 and m3; m3 holds the answer, so m2 only. The stale
+      // member holds the answer to nothing new and sees nothing: not counted.
+      expect(await impactOf(admin, { change: 'make_required', questionId: c.q5 })).toBe(1);
+      // Q1 (optional, no branch): every member lacking it: the total minus the five that answered.
+      const total = (await summaryOf(admin)).total;
+      expect(await impactOf(admin, { change: 'make_required', questionId: c.q1 })).toBe(total - 4);
+      // Q3 is already required: nobody new is asked.
+      expect(await impactOf(admin, { change: 'make_required', questionId: c.q3 })).toBe(0);
+      expect(await snapshot()).toBe(before);
+
+      // reactivate: Q4 (required, in B2) archived: m2 and m3 see B2 and lack it.
+      await adminSql`update public.profile_form_questions set archived_at = now() where id = ${c.q4}::uuid`;
+      const archivedOptional = await seedProfileFormQuestion({
+        tenantId: labTenantId,
+        adminUserId,
+        title: `${TITLE}archived optional`,
+        archived: true,
+        branchId: c.b2,
+      });
+      const archivedBefore = await snapshot();
+      expect(await impactOf(admin, { change: 'reactivate', questionId: c.q4 })).toBe(2);
+      await answer(m2, c.q4);
+      expect(await impactOf(admin, { change: 'reactivate', questionId: c.q4 })).toBe(1);
+      expect(await impactOf(admin, { change: 'reactivate', questionId: archivedOptional })).toBe(0);
+      // An ACTIVE question has nothing to reactivate.
+      expect(await impactOf(admin, { change: 'reactivate', questionId: c.q3 })).toBe(0);
+      expect(await snapshot()).not.toBe(archivedBefore); // the answer above is the only difference
+      const after = await snapshot();
+      await impactOf(admin, { change: 'reactivate', questionId: c.q4 });
+      expect(await snapshot()).toBe(after);
+    });
+  }, 180_000);
+
+  it('remove_condition counts the members who do not see the question today and lack an answer; 0 where nobody is asked', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const m1 = await person();
+      const m2 = await person();
+      const m3 = await person();
+      const stale = await person();
+      const c = await seedClinic();
+      await answer(m1, c.q1, { optionId: c.tem });
+      await answer(m2, c.q1, { optionId: c.tem });
+      await answer(m2, c.q2, true);
+      await answer(m3, c.q1, { optionId: c.tem });
+      await answer(m3, c.q2, true);
+      await answer(m3, c.q5, true);
+      await answer(stale, c.q1, { optionId: c.nao });
+      await answer(stale, c.q2, true);
+      await answer(stale, c.q5, true);
+      const total = (await summaryOf(admin)).total;
+      const before = await snapshot();
+      const leaving = (questionId: string) =>
+        impactOf(admin, { change: 'remove_condition', questionId });
+
+      // Q3 (required, B1) is seen by m1, m2, m3; everyone else lacks it and does not see it.
+      expect(await leaving(c.q3)).toBe(total - 3);
+      // Q4 (required, B2): seen by m2 and m3. Q6 (required, B3): seen by m3.
+      expect(await leaving(c.q4)).toBe(total - 2);
+      expect(await leaving(c.q6)).toBe(total - 1);
+      // Optional, unbranched: asks nobody.
+      expect(await leaving(c.q2)).toBe(0);
+      expect(await leaving(c.q1)).toBe(0);
+      expect(await snapshot()).toBe(before);
+
+      // The member who does not see Q3 and answers it anyway (stale data) no longer newly owes it.
+      await answer(stale, c.q3);
+      expect(await leaving(c.q3)).toBe(total - 4);
+      // A member who SEES it and answers changes nothing (they were never counted).
+      await answer(m1, c.q3);
+      expect(await leaving(c.q3)).toBe(total - 4);
+      // An archived question asks nobody.
+      await adminSql`update public.profile_form_questions set archived_at = now() where id = ${c.q6}::uuid`;
+      expect(await leaving(c.q6)).toBe(0);
+    });
+  }, 180_000);
+
+  it('a legacy condition parameter is 400 invalid, a foreign branch is the same bare 404 as an unknown one, an archived one too', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const c = await seedClinic();
+      const foreignOpener = await seedProfileFormQuestion({
+        tenantId: demoTenantId,
+        adminUserId,
+        type: 'yes_no',
+        title: `${TITLE}demo opener`,
+      });
+      const foreignBranch = await seedProfileFormBranch({
+        tenantId: demoTenantId,
+        openerQuestionId: foreignOpener,
+        values: ['true'],
+      });
+      const archivedBranch = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: c.q2,
+        values: ['false'],
+        archived: true,
+      });
+
+      // The retired per-question condition is refused, alone or together.
+      const legacies: Record<string, string>[] = [
+        { conditionQuestionId: c.q1 },
+        { conditionValues: c.tem },
+        { conditionQuestionId: c.q1, conditionValues: c.tem },
+      ];
+      for (const legacy of legacies) {
+        for (const change of ['create_required', 'replace']) {
+          const res = await impactRes(admin, { change, ...legacy });
+          expect(res.status, JSON.stringify(legacy)).toBe(400);
+        }
+      }
+
+      const unknown = await impactRes(admin, {
+        change: 'create_required',
+        branchId: crypto.randomUUID(),
+      });
+      const foreign = await impactRes(admin, { change: 'create_required', branchId: foreignBranch });
+      const archived = await impactRes(admin, {
+        change: 'create_required',
+        branchId: archivedBranch,
+      });
+      expect(unknown.status).toBe(404);
+      expect(foreign.status).toBe(404);
+      expect(archived.status).toBe(404);
+      const unknownBody = (await unknown.json()) as Envelope;
+      expect(unknownBody.error.code).toBe('NOT_FOUND');
+      expect(unknownBody.error.details).toBeUndefined();
+      expect(withoutRequestId(await foreign.json())).toEqual(withoutRequestId(unknownBody));
+      expect(withoutRequestId(await archived.json())).toEqual(withoutRequestId(unknownBody));
+
+      // Positive control: my own active branch is counted.
+      expect(await impactOf(admin, { change: 'create_required', branchId: c.b1 })).toBe(0);
+      // The kinds that need a question still need one.
+      for (const change of ['make_required', 'reactivate', 'remove_condition']) {
+        expect((await impactRes(admin, { change })).status).toBe(400);
+      }
+      const unknownQuestion = await impactRes(admin, {
+        change: 'make_required',
+        questionId: crypto.randomUUID(),
+      });
+      expect(unknownQuestion.status).toBe(404);
+    });
+  }, 120_000);
+});
