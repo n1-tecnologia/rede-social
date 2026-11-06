@@ -238,14 +238,16 @@ export function settleOnBlur(question: MemberQuestion, rawText: string): string 
  * Every invalid draft, keyed by question id, in the admin's order (UI-D-586). Only the VISIBLE questions are
  * judged (D-631, Pitfall 10): a hidden required question never blocks. `scope` (the question ids of one step)
  * restricts the check to that step; visibility is still read over every question and draft of the form.
+ * `branches` is the form's branch list (12.2-13, D-641): without it a question that names a branch is hidden
+ * (the contracts' rule fails closed), so a caller that has the form must pass `form.branches`.
  */
 export function validateAll(
   questions: readonly MemberQuestion[],
   answers: Answers,
   scope?: ReadonlySet<string>,
-  _branches?: readonly MemberBranch[],
+  branches?: readonly MemberBranch[],
 ): Record<string, ProfileFormIssue> {
-  const visible = visibleQuestionIds({ questions }, answers);
+  const visible = visibleQuestionIds({ questions, branches }, answers);
   const errors: Record<string, ProfileFormIssue> = {};
   for (const question of questions) {
     if (!visible.has(question.id) || (scope && !scope.has(question.id))) continue;
@@ -258,14 +260,15 @@ export function validateAll(
 /**
  * The body of the save: every VISIBLE question of the screen (or of `scope`), `null` for a blank one (it
  * clears an optional answer). A hidden question is left out; the server deletes what no longer applies (D-624).
+ * `branches` is the form's branch list, as for `validateAll`: pass `form.branches` (12.2-13).
  */
 export function wireAnswers(
   questions: readonly MemberQuestion[],
   answers: Answers,
   scope?: ReadonlySet<string>,
-  _branches?: readonly MemberBranch[],
+  branches?: readonly MemberBranch[],
 ): Record<string, unknown> {
-  const visible = visibleQuestionIds({ questions }, answers);
+  const visible = visibleQuestionIds({ questions, branches }, answers);
   const wire: Record<string, unknown> = {};
   for (const question of questions) {
     if (!visible.has(question.id) || (scope && !scope.has(question.id))) continue;
@@ -323,8 +326,9 @@ export type MergedForm = {
  * A 409 `form_changed` carries the fresh form (UI-D-587): the question list is replaced in place, the typed
  * drafts of the questions that still exist (same id and type) are KEPT, the ones that went away are dropped,
  * a new or retyped question starts from its stored answer, and any newly required, still blank question is
- * flagged. The order is the fresh form's, so a new question appears where the admin put it. 12.1: the fresh
- * form carries `stepId`, `condition` and `steps`, and a hidden question is never flagged (D-631).
+ * flagged. The order is the fresh form's, so a new question appears where the admin put it. The fresh form
+ * carries `stepId`, `branchId`, `branches` and `steps`; a question hidden by ANY branch on its chain under the
+ * merged drafts is never flagged (D-631, 12.2-13, D-641).
  */
 export function mergeFreshForm(
   current: Pick<MemberForm, 'questions'>,

@@ -97,10 +97,12 @@ export async function loadMemberAnswers(membershipId: string): Promise<MemberAns
       console.error('profile_form.member_answers_failed', { status: res.status });
       return { status: 'error' };
     }
-    return {
-      status: 'ok',
-      payload: memberAnswersSchema.parse(await res.json()) as MemberAnswersPayload,
-    };
+    const parsed = memberAnswersSchema.parse(await res.json());
+    // The staff payload always carries its branches (an empty list when the read has none); the strict
+    // contract has already refused a branch that carries a name (T-12.2-03).
+    const payload: MemberAnswersPayload =
+      parsed.kind === 'staff' ? { ...parsed, branches: parsed.branches ?? [] } : parsed;
+    return { status: 'ok', payload };
   } catch (error) {
     console.error('profile_form.member_answers_failed', { error: errorName(error) });
     return { status: 'error' };

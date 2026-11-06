@@ -84,7 +84,7 @@ export async function loadAdminForm(): Promise<AdminFormResult> {
     return {
       status: 'ok',
       questions: parsedList.questions,
-      branches: [],
+      branches: parsedList.branches ?? [],
       steps: parsedList.steps,
       stepLimit: parsedList.stepLimit,
       summary: parsedSummary,
@@ -131,8 +131,8 @@ export async function loadArchived(): Promise<ArchivedResult> {
     return {
       status: 'ok',
       questions: parsedArchived.questions,
-      branches: [],
-      activeBranches: [],
+      branches: parsedArchived.branches ?? [],
+      activeBranches: parsedList.branches ?? [],
       activeCount: parsedList.activeCount,
       limit: parsedList.limit,
       activeQuestions: parsedList.questions,
