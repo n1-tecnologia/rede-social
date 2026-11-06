@@ -739,6 +739,7 @@ describe('12.2-09 PFORM-53, WR-06 (T-12.2-02): a question that shows on the prof
     const admin = await person();
     await withProfileForm(labTenantId, async () => {
       const tree = await clinic(); // every question private
+      const publicLoose = await plain('Publica solta', 5, { showOnProfile: true });
       const before = await snapshot();
 
       const flag = await patch(admin, tree.q3, { revision: 1, showOnProfile: true });
@@ -757,16 +758,14 @@ describe('12.2-09 PFORM-53, WR-06 (T-12.2-02): a question that shows on the prof
       expect(createdBody.error.details?.profileForm).toBe('public_under_private');
       expect(titlesIn(createdBody.error.details)).toEqual([`${TITLE}publica`]);
 
-      const publicLoose = await plain('Publica solta', 5, { showOnProfile: true });
       const moved = await patch(admin, publicLoose, { revision: 1, branchId: tree.b1 });
       expect(moved.status).toBe(409);
       expect(titlesIn(((await moved.json()) as Envelope).error.details)).toEqual([
         `${TITLE}Publica solta`,
       ]);
-      // Nothing but the extra seeded row changed.
-      expect((await rowOf(publicLoose)).branch_id).toBeNull();
+      // Every refusal left every row as it was.
+      expect(await snapshot()).toBe(before);
       expect(await positions()).toEqual([1, 2, 3, 4, 5]);
-      expect(before).toBeTypeOf('string');
 
       // Positive control: the same question is fine when its opener is public.
       await adminSql`update public.profile_form_questions set show_on_profile = true where id = ${tree.q1.id}::uuid`;
@@ -904,7 +903,9 @@ describe('12.2-09 D-646: archive, reactivate, delete and replace on the tree', (
     const admin = await person();
     await withProfileForm(labTenantId, async () => {
       const tree = await clinic();
-      const extra = await plain('Extra', 5, { branchId: tree.b2 });
+      const made = await create(admin, { title: `${TITLE}Extra`, branchId: tree.b2 });
+      expect(made.status, await made.clone().text()).toBe(201);
+      const extra = ((await made.json()) as ListedQuestion).id;
       expect(await titlesOf(admin)).toEqual(['Q1', 'Q2', 'Q3', 'Extra', 'Q4']);
 
       const archive = await call(admin, 'POST', `/v1/profile_form/questions/${tree.q3}/archive`);
@@ -952,11 +953,13 @@ describe('12.2-09 D-646: archive, reactivate, delete and replace on the tree', (
         title: `${TITLE}arquivada solta`,
         archived: true,
       });
-      for (let i = 0; i < 30; i += 1) await plain(`Cheia ${i}`, 10 + i);
+      // Fill the form up to exactly 30 active questions (the archived block does not count).
       const active = (await listOf(admin)).activeCount;
-      for (let i = active; i < 30; i += 1) await plain(`Mais ${i}`, 100 + i);
+      for (let i = active; i < 30; i += 1) await plain(`Cheia ${i}`, 10 + i);
+      expect((await listOf(admin)).activeCount).toBe(30);
       const full = await call(admin, 'POST', `/v1/profile_form/questions/${spare}/reactivate`);
       expect(full.status).toBe(409);
+      expect(await found(full)).toMatchObject({ profileForm: 'limit_reached' });
     });
   });
 

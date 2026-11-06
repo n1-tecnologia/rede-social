@@ -148,7 +148,7 @@ const updateQuestionRoute = createRoute({
   responses: {
     200: {
       description:
-        'The edited question. `revision` (the one the caller read) is required and is the optimistic lock; every other key is optional and only the keys sent change. Title, help text and `required` are always free. Once the question has answers the TYPE, every option that has answers (not removable, not relabelled; options may be added and reordered), switching "Outro" off while an "Outro" answer exists, narrowing a number or date limit, and private-to-public are locked. `condition` follows the same rules as a create; `null` removes it (always allowed, no answer is discarded) and a question that already has answers cannot GAIN or CHANGE a condition. An opener cannot change type or lose an option an active dependent names. A body that changes nothing answers 200 and does NOT bump the revision. `stepId` moves the question to the END of that step (the same step is a no-op) and bumps the revision once, with or without other edits.',
+        'The edited question. `revision` (the one the caller read) is required and is the optimistic lock; every other key is optional and only the keys sent change. Title, help text and `required` are always free. Once the question has answers the TYPE, every option that has answers (not removable, not relabelled; options may be added and reordered), switching "Outro" off while an "Outro" answer exists, narrowing a number or date limit, and private-to-public are locked. `branchId` moves the question into another branch (it keeps its step and goes to the END of that branch’s run in tree order) or, with `null`, out of its branch; a question that already has answers cannot enter, leave or change branch. The retired per-question `condition` is refused (400 `condition_invalid`); `null` is no change. An opener cannot change type, be archived or lose an option that an active branch names. A body that changes nothing answers 200 and does NOT bump the revision. `stepId` moves the question to the END of that step (the same step is a no-op) and bumps the revision once, with or without other edits. Every layout change is put in tree order.',
       content: { 'application/json': { schema: adminQuestionSchema } },
     },
     400: {
@@ -162,7 +162,7 @@ const updateQuestionRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm`: `stale_revision` (the stored revision moved on), `already_archived` (read-only until reactivated) or the D-587 lock that was hit: `type_locked`, `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`, `condition_locked` (the question has answers), `condition_invalid`, `condition_order` (an opener at or after a question it opens, with `openerId`), or `has_dependents` with `details.dependents` (`[{ id, title }]`: the active questions whose condition names this opener, only those naming a removed option for an option removal). Nothing is written.',
+        '`CONFLICT` with `details.profileForm`: `stale_revision` (the stored revision moved on), `already_archived` (read-only until reactivated) or the D-587 lock that was hit: `type_locked`, `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`, `condition_locked` (the question has answers and would enter, leave or change branch), `condition_invalid`, `condition_order` (the branch’s opener sits in a later step, with `questionId` and `openerId`), `branch_archived` (with `branchId`), `branch_depth` (a fourth level), `public_under_private` (with `titles`: a question that shows on the profile would sit under a private opener, or an opener would become private above one) or `has_dependents` with `details.branches` (the ACTIVE branches that hang on this opener, each with the titles of its active questions, and `details.dependents` empty; only the branches that name a removed option for an option removal). A foreign or missing `branchId` is 400 `unknown_branch`. Nothing is written.',
     },
   },
 });
@@ -184,7 +184,7 @@ const reorderRoute = createRoute({
     404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm`: `order_mismatch` (the ids are not exactly the set of active questions and steps of this tenant: one missing, an extra one, a repeat, an archived one, another tenant’s, an empty list, or the legacy `{ ids }` body on a form with several steps; nothing changes and the body never says which) or `condition_order` with `questionId` and `openerId` (the order would put an opener at or after a question it opens, or a step above the step that holds an opener of one of its questions; nothing changes).',
+        '`CONFLICT` with `details.profileForm`: `order_mismatch` (the ids are not exactly the set of active questions and steps of this tenant: one missing, an extra one, a repeat, an archived one, another tenant’s, an empty list, or the legacy `{ ids }` body on a form with several steps; nothing changes and the body never says which) or `condition_order` with `questionId` and `openerId` (a step above the step that holds the opener of one of its questions; nothing changes). A request that only splits a branch inside a step is rewritten to the tree order and answered 200.',
     },
   },
 });
@@ -417,7 +417,7 @@ const archiveRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm: has_dependents` and `details.dependents` (`[{ id, title }]`, the ACTIVE questions whose condition names this one): an opener with active dependents is not archived. Nothing changes.',
+        '`CONFLICT` with `details.profileForm: has_dependents` and `details.branches` (the ACTIVE branches that hang on this question, each with the titles of its active questions): an opener with an active branch is not archived. Nothing changes.',
     },
   },
 });
@@ -440,7 +440,7 @@ const reactivateRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm`: `limit_reached` (the tenant already has 30 active questions), or, for a conditional question, `condition_invalid` / `condition_order` with `openerId` (its opener is archived, no longer eligible, or sits after it). Nothing changes.',
+        '`CONFLICT` with `details.profileForm`: `limit_reached` (the tenant already has 30 active questions), `branch_archived` with `branchId` (its branch is archived: reactivate the branch), `condition_invalid` with `openerId` (its opener is archived), `condition_order` (the opener sits in a later step) or `public_under_private` with `titles` (it shows on the profile under a private opener). A question whose branch was undone comes back unconditional. Nothing changes.',
     },
   },
 });
@@ -462,7 +462,7 @@ const deleteRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm`: `has_answers` (at least one answer exists, so the question can only be archived) or `has_dependents` with `details.dependents` (an opener with active dependents). Nothing is deleted.',
+        '`CONFLICT` with `details.profileForm`: `has_answers` (at least one answer exists, so the question can only be archived), `has_dependents` with `details.branches` (an opener of an ACTIVE branch) or `condition_locked` (the opener has only archived branches and one of their questions holds an answer, so it cannot leave its branch). An opener of only archived branches is deleted and those branches dissolve: their questions become unconditional. Nothing is deleted on a refusal.',
     },
   },
 });
@@ -494,7 +494,7 @@ const replaceRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.profileForm`: `already_archived` (the question to replace is not active), `has_dependents` with `details.dependents` (replacing archives the old question, which an opener with active dependents refuses), or `condition_invalid` / `condition_order` for the new question’s own `condition`. Nothing is created.',
+        '`CONFLICT` with `details.profileForm`: `already_archived` (the question to replace is not active), `has_dependents` with `details.branches` (replacing archives the old question, which an opener with an active branch refuses) or `public_under_private` with `titles` (the new question shows on the profile under a private opener). The new question takes the old one’s step, branch and position. A non-null `condition` is 400 `condition_invalid`. Nothing is created.',
     },
   },
 });

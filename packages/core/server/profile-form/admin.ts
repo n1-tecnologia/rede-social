@@ -10,7 +10,6 @@ import {
   PROFILE_FORM_CHOICE_TYPES,
   PROFILE_FORM_ISSUE_SET,
   PROFILE_FORM_LIMITS,
-  type ProfileFormCondition,
   type ProfileFormSummary,
   type ProfileFormType,
   parseConditionValues,
@@ -23,26 +22,20 @@ import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { ApiError } from '../http/api-error';
 import {
+  type BranchRuleBranch,
   type BranchRuleQuestion,
   branchFactsOf,
   checkMoveIntoBranch,
+  checkOpenerChange,
+  checkReactivation,
   dependentBranchesOf,
+  newPublicUnderPrivate,
 } from './branch-rules';
 // A call-time-only cycle with ./branches as well (which takes `adminLock`, `requireModuleOn` and `attempt` from
 // this file): neither module touches the other at load.
 import { readBranches, refuseBranch } from './branches';
 import {
-  type ConditionCheck,
-  checkCondition,
-  checkConditionLock,
-  checkOpenerChange,
-  checkReactivation,
-  dependentsOf,
-  type RuleQuestion,
-} from './condition-rules';
-import {
   addQuestion,
-  addQuestionAfterOpener,
   applyRequestedLayout,
   checkLayoutOrder,
   type Layout,
@@ -54,7 +47,6 @@ import {
   dropQuestion,
   endsWith,
   layoutOrThrow,
-  readLayout,
   readTree,
   swapQuestion,
   writeLayout,
@@ -119,8 +111,6 @@ export type StoredQuestion = {
   limits: { min?: number | string; max?: number | string };
   position: number;
   revision: number;
-  condition_question_id: string | null;
-  condition_values: string[] | null;
   archived_at: string | Date | null;
   created_at: string | Date;
   listed_at: string | Date;
@@ -135,7 +125,7 @@ type OpenerCountRow = { opener_id: string; n: number | string };
 type Counts = {
   perQuestion: Map<string, number>;
   perOption: Map<string, Map<string, number>>;
-  /** ACTIVE dependents per opener (D-632): how many active questions name the key as their opener. */
+  /** 12.2 (D-640): per opener, the ACTIVE questions in the ACTIVE branches that hang directly on it. */
   opens: Map<string, number>;
 };
 
@@ -154,12 +144,14 @@ async function countsFor(
   if (questionIds.length === 0) return { perQuestion, perOption, opens };
   const idsJson = JSON.stringify(questionIds);
   const openerRows = await tx.execute<OpenerCountRow>(sql`
-    select d.condition_question_id::text as opener_id, count(*)::int as n
-      from public.profile_form_questions d
-     where d.tenant_id = ${tenantId}::uuid
-       and d.archived_at is null
-       and d.condition_question_id in (select e::uuid from jsonb_array_elements_text(${idsJson}::jsonb) e)
-     group by d.condition_question_id`);
+    select b.opener_question_id::text as opener_id, count(q.id)::int as n
+      from public.profile_form_branches b
+      join public.profile_form_questions q
+        on q.tenant_id = b.tenant_id and q.branch_id = b.id and q.archived_at is null
+     where b.tenant_id = ${tenantId}::uuid
+       and b.archived_at is null
+       and b.opener_question_id in (select e::uuid from jsonb_array_elements_text(${idsJson}::jsonb) e)
+     group by b.opener_question_id`);
   for (const row of openerRows) opens.set(row.opener_id, Number(row.n));
   const questionRows = await tx.execute<CountRow>(sql`
     select a.question_id::text as question_id, count(*)::int as n
@@ -217,10 +209,8 @@ export function toAdminQuestion(row: StoredQuestion, counts: Counts): AdminQuest
     position: row.position,
     revision: row.revision,
     answerCount: counts.perQuestion.get(row.id) ?? 0,
-    condition:
-      row.condition_question_id === null
-        ? null
-        : { questionId: row.condition_question_id, values: row.condition_values ?? [] },
+    // The reads keep emitting the retired key for the compatibility window of plan 01 (plan 20 removes it).
+    condition: null,
     opensCount: counts.opens.get(row.id) ?? 0,
     createdAt: iso(row.created_at),
     listedAt: iso(row.listed_at),
@@ -230,7 +220,6 @@ export function toAdminQuestion(row: StoredQuestion, counts: Counts): AdminQuest
 const COLUMNS = sql.raw(`
   q.id::text as id, q.step_id::text as step_id, q.branch_id::text as branch_id, q.type, q.title, q.help_text, q.required, q.show_on_profile, q.allow_other,
   q.options, q.limits, q."position" as position, q.revision,
-  q.condition_question_id::text as condition_question_id, q.condition_values,
   q.archived_at, q.created_at, q.listed_at`);
 
 /** The tenant's ACTIVE questions in the admin's order, `position, created_at, id` (the lock order too). */
@@ -331,58 +320,13 @@ async function targetStep(
 
 const unknownStep = () => new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'unknown_step' });
 
-// ── Conditions (Phase 12.1 plan 10: D-620..D-623, D-625, D-632; PFORM-29, PFORM-31) ──────────────────────────
+// ── Refusals of the tree (Phase 12.2: D-640, D-646, PFORM-53) ────────────────────────────────────────────────
 
-/** The part of a stored question the condition rules look at. */
-const ruleQuestionOf = (row: StoredQuestion): RuleQuestion => ({
-  id: row.id,
-  type: row.type,
-  title: row.title,
-  archived: row.archived_at !== null,
-  options: row.options.map((option) => ({ id: option.id })),
-  conditionQuestionId: row.condition_question_id,
-  conditionValues: row.condition_values,
-});
-
-const conditionOf = (row: StoredQuestion): ProfileFormCondition | null =>
-  row.condition_question_id === null
-    ? null
-    : { questionId: row.condition_question_id, values: row.condition_values ?? [] };
-
-/** The same opener and the same set of tokens (an order of the tokens is not a change). */
-const sameCondition = (a: ProfileFormCondition | null, b: ProfileFormCondition | null): boolean => {
-  if (a === null || b === null) return a === b;
-  const left = new Set(a.values);
-  const right = new Set(b.values);
-  return (
-    a.questionId === b.questionId &&
-    left.size === right.size &&
-    [...left].every((token) => right.has(token))
-  );
-};
-
-/**
- * The pure rule's refusal as the coded 409: `condition_invalid` or `condition_order` in `details.profileForm`,
- * with `openerId` for the order (and `questionId` when the subject exists already; a question being created has
- * none yet). Nothing is written, the caller's transaction rolls back.
- */
-function refuseCondition(check: ConditionCheck, subjectId?: string): void {
-  if (check.ok) return;
-  throw new ApiError(409, 'CONFLICT', {
-    profileForm: check.issue,
-    ...(subjectId !== undefined ? { questionId: subjectId } : {}),
-    ...(check.openerId !== undefined ? { openerId: check.openerId } : {}),
-  });
-}
-
-/** D-632: the opener's refusal as the coded 409 `has_dependents`, listing the ACTIVE dependents it names. */
-function refuseDependents(refusal: ReturnType<typeof checkOpenerChange>): void {
+/** D-646: an opener's change that would orphan an ACTIVE branch is 409 `has_dependents` listing the BRANCHES. */
+function refuseOpenerChange(refusal: ReturnType<typeof checkOpenerChange>): void {
   if (refusal === null) return;
-  throw hasDependents(refusal.dependents);
+  throw hasDependentBranches(refusal.branches);
 }
-
-const hasDependents = (dependents: { id: string; title: string }[]) =>
-  new ApiError(409, 'CONFLICT', { profileForm: 'has_dependents', dependents });
 
 /** 12.2 (D-646): the branches an opener change would orphan, each with the titles of its ACTIVE questions. */
 const hasDependentBranches = (branches: ReturnType<typeof dependentBranchesOf>) =>
@@ -395,6 +339,36 @@ const conditionRetired = () =>
 /** A `branchId` that is not a branch of THIS tenant: a foreign and a missing id answer the same (T-12.2-01). */
 const unknownBranch = () =>
   new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'unknown_branch' });
+
+/** 12.2 (PFORM-53, T-12.2-02): the titles of the public questions a change would leave under a private opener. */
+const publicUnderPrivateRefusal = (titles: string[]) =>
+  new ApiError(409, 'CONFLICT', { profileForm: 'public_under_private', titles });
+
+/**
+ * D-652: a layout in TREE ORDER. Every layout write passes through here before the one renumber: the requested
+ * layout is put in tree order (`normalizeToTree`: a client request that is already tree-ordered is a no-op, any
+ * other is rewritten, never refused for being flat) and, when `assertOrder`, the order rule is asserted over the
+ * facts derived from branch membership (409 `condition_order` naming the pair). A write that only REMOVES
+ * questions (archive, delete) cannot break the order rule, so it normalises without asserting.
+ */
+function treeLayout(
+  layout: Layout,
+  questions: readonly BranchRuleQuestion[],
+  branches: readonly BranchRuleBranch[],
+  assertOrder = true,
+): Layout {
+  const ordered = normalizeToTree(layout, questions, branches);
+  if (assertOrder) assertLayoutOrder(ordered, branchFactsOf(questions, branches));
+  return ordered;
+}
+
+/** The step a question sits in, in a layout. */
+const stepOfQuestion = (layout: Layout, questionId: string): string | undefined =>
+  layout.find((step) => step.questionIds.includes(questionId))?.stepId;
+
+/** The layout with the question taken out and appended to the END of the given step. */
+const atEndOfStep = (layout: Layout, questionId: string, stepId: string): Layout =>
+  layoutOrThrow(addQuestion(dropQuestion(layout, questionId), stepId, questionId));
 
 /** `text[]` of the tokens, in order, from a JSON array (a JS array would expand into a record). */
 export const textArray = (values: readonly string[]) =>
@@ -708,38 +682,51 @@ const unchanged = (a: Definition, b: Definition) =>
   sameLimits(a.limits, b.limits);
 
 /**
- * `PATCH /v1/profile_form/questions/{id}` (PFORM-17, PFORM-24; D-587, D-582): edits one question under the
- * lock rules and an optimistic `revision`.
+ * `PATCH /v1/profile_form/questions/{id}` (PFORM-17, PFORM-24; D-587, D-582; 12.2 D-640, D-646, D-652, PFORM-53):
+ * edits one question under the lock rules and an optimistic `revision`.
  *
+ *   0. a non-null legacy `condition` is 400 `condition_invalid` before anything is read (`null` is no change);
  *   1. `adminLock`, the live module check, then the row `FOR UPDATE`: no row (unknown, another tenant's) is
  *      the bare 404; an archived question is 409 `already_archived` (read-only until reactivated); a
  *      `revision` that is not the stored one is 409 `stale_revision` and nothing changes;
  *   2. AFTER the row lock, in a separate statement, the answer facts are read, so an answer that committed
  *      while this edit waited for the lock is seen; a member's save locks the questions `FOR SHARE` first, so
  *      it cannot slip an answer in between the facts and the update;
- *   3. the pure `checkLocks` decides FIRST (409 `CONFLICT` with `details.profileForm` in `type_locked`,
+ *   3. (D-646) `branchId` moves the question into another branch, or out of its branch with `null`: a question
+ *      WITH answers cannot enter, leave or change branch (409 `condition_locked`); the pure
+ *      `checkMoveIntoBranch` decides the rest (`unknown_branch` is a 400 for an id that is not the tenant's,
+ *      `branch_archived`, `condition_invalid`, `condition_order`, `branch_depth`, `public_under_private`); an
+ *      unanswered question keeps its step and goes to the END of the new branch's run, `null` leaves it where
+ *      the tree order puts it;
+ *   4. an opener cannot be archived, retyped or lose an option an ACTIVE branch names: 409 `has_dependents`
+ *      with `details.branches`;
+ *   5. the pure `checkLocks` decides FIRST (409 `CONFLICT` with `details.profileForm` in `type_locked`,
  *      `option_locked`, `other_locked`, `visibility_locked`, `limits_locked`); the plan-04 trigger is the
- *      backstop and its PF001..PF005 map to the same codes;
- *   4. the merged definition must be one a create would accept (400 otherwise);
- *   5. a change that alters nothing answers 200 and does NOT bump the revision; otherwise the revision is
+ *      backstop and its PF001..PF010 map to the same codes;
+ *   6. (PFORM-53) turning `showOnProfile` on under a private opener, or an opener private under a public
+ *      question, is 409 `public_under_private` with the titles;
+ *   7. the merged definition must be one a create would accept (400 otherwise);
+ *   8. a change that alters nothing answers 200 and does NOT bump the revision; otherwise the revision is
  *      bumped by one in the same statement;
- *   6. (12.1, D-627) `stepId` moves the question to the END of the target step through the layout store and
- *      bumps its revision once, with or without other edits; an id that is not a step of this tenant is 400
- *      `unknown_step`, and a move that would put an opener at or after its dependent is 409 `condition_order`.
+ *   9. (D-627, D-652) `stepId` moves the question to the END of the target step; every layout write is put in
+ *      TREE ORDER and checked against the order rule (409 `condition_order` naming the pair), then renumbered
+ *      in one statement.
  */
 export async function updateQuestion(
   ctx: AdminCtx,
   id: string,
   body: UpdateQuestionBody,
 ): Promise<AdminQuestion> {
+  if (body.condition) throw conditionRetired();
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    // A move needs the whole layout: read (and lock) it BEFORE the question row, in the canonical order, so
-    // this transaction never waits for a row a member's save already holds while that save waits for ours. Any
-    // other edit reads it unlocked: the condition rules (12.1) look at the tenant's active questions.
-    const read = await readLayout(tx, ctx.tenantId, body.stepId !== undefined);
+    // A move needs the whole tree: read (and lock) it BEFORE the question row, in the canonical order, so this
+    // transaction never waits for a row a member's save already holds while that save waits for ours. Any
+    // other edit reads it unlocked: the branch rules look at the tenant's questions and branches.
+    const moves = body.stepId !== undefined || body.branchId !== undefined;
+    const read = await readTree(tx, ctx.tenantId, moves);
 
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
@@ -751,61 +738,59 @@ export async function updateQuestion(
     }
 
     // D-627: `stepId` moves the question to the END of the target step; the same step is a no-op. A step that
-    // is not the tenant's is the 400 `unknown_step` (T-12.1-10); the order rule (D-623) is checked over the
-    // layout the move would produce, before anything is written.
-    let moved: Layout | null = null;
+    // is not the tenant's is the 400 `unknown_step` (T-12.1-10).
+    let layout: Layout = read.layout;
+    let stepMoved = false;
     if (body.stepId !== undefined) {
       const to = body.stepId.toLowerCase();
       if (!read.layout.some((step) => step.stepId === to)) throw unknownStep();
       if (to !== row.step_id) {
-        moved = layoutOrThrow(moveQuestion(read.layout, row.id, to));
-        assertLayoutOrder(moved, read.facts);
+        layout = layoutOrThrow(moveQuestion(read.layout, row.id, to));
+        stepMoved = true;
       }
     }
 
     const counts = await countsFor(tx, ctx.tenantId, [row.id]);
+    const answered = counts.perQuestion.get(row.id) ?? 0;
     const current = definitionOf(row);
     const next = nextDefinition(row, body);
 
-    // D-625, D-620..D-623: `condition` undefined leaves the stored one, `null` removes it (allowed at any answer
-    // count, nothing is discarded), an object gains or changes it: the lock first (a question with answers
-    // cannot), then the pure rule over the layout the question will have. An unchanged condition is not
-    // re-checked, so a rename passes at any answer count.
-    const storedCondition = conditionOf(row);
-    let conditionWrite: { to: ProfileFormCondition | null } | null = null;
-    if (body.condition !== undefined) {
-      const wanted: ProfileFormCondition | null =
-        body.condition === null
-          ? null
-          : { ...body.condition, questionId: body.condition.questionId.toLowerCase() };
-      const lock = checkConditionLock({
-        answerCount: counts.perQuestion.get(row.id) ?? 0,
-        current: storedCondition,
-        next: wanted,
-      });
-      if (lock) throw new ApiError(409, 'CONFLICT', { profileForm: lock });
-      if (!sameCondition(storedCondition, wanted)) {
-        refuseCondition(
-          checkCondition({
-            questions: read.questions,
-            layout: moved ?? read.layout,
-            subjectId: row.id,
-            condition: wanted,
-          }),
-          row.id,
-        );
-        conditionWrite = { to: wanted };
+    // D-646: `branchId` undefined leaves the branch, `null` leaves it, an id enters or changes it. The rule sees
+    // the question at the END of its step (so an opener in a LATER step is `condition_order`, while one in the
+    // same step is fine: the tree order puts the question right after it).
+    const wantedBranch =
+      body.branchId === undefined ? row.branch_id : (body.branchId?.toLowerCase() ?? null);
+    const branchChanged = wantedBranch !== row.branch_id;
+    let placed: Layout = layout;
+    if (branchChanged) {
+      if (wantedBranch !== null && !read.branches.some((branch) => branch.id === wantedBranch)) {
+        throw unknownBranch();
       }
+      const stepNow = stepOfQuestion(layout, row.id) ?? row.step_id;
+      const atEnd = atEndOfStep(layout, row.id, stepNow);
+      refuseBranch(
+        checkMoveIntoBranch({
+          questions: read.questions,
+          branches: read.branches,
+          layout: atEnd,
+          questionId: row.id,
+          branchId: wantedBranch,
+          answered,
+        }),
+      );
+      // Entering a branch puts the question at the end of its run; leaving it keeps the place it has.
+      if (wantedBranch !== null) placed = atEnd;
     }
 
-    // D-632: an opener that still opens others cannot change type or lose an option an ACTIVE dependent's
-    // condition names. Checked before the answer locks, as the trigger does (PF007 before PF001).
+    // D-646: an opener that still has an ACTIVE branch cannot change type or lose an option a branch names.
+    // Checked before the answer locks, as the trigger does (PF007 before PF001).
     const nextOptionIds = new Set(next.options.map((option) => option.id));
-    refuseDependents(
+    refuseOpenerChange(
       checkOpenerChange({
         questions: read.questions,
+        branches: read.branches,
         openerId: row.id,
-        nextType: next.type,
+        newType: next.type,
         removedOptionIds: current.options
           .map((option) => option.id)
           .filter((optionId) => !nextOptionIds.has(optionId)),
@@ -815,36 +800,49 @@ export async function updateQuestion(
     const locked = checkLocks({
       current,
       next,
-      answerCount: counts.perQuestion.get(row.id) ?? 0,
+      answerCount: answered,
       answeredOptionIds: new Set(counts.perOption.get(row.id)?.keys() ?? []),
       otherAnswered: await otherAnswered(tx, ctx.tenantId, row.id),
     });
     if (locked) throw new ApiError(409, 'CONFLICT', { profileForm: locked });
 
+    // PFORM-53, WR-06: a public question under a private opener, however it got there (the flag turned on, the
+    // opener made private, the question moved). Only the violations this change ADDS are refused.
+    const questionsNow = read.questions.map((question) =>
+      question.id === row.id
+        ? { ...question, showOnProfile: next.showOnProfile, branchId: wantedBranch }
+        : question,
+    );
+    if (next.showOnProfile !== row.show_on_profile || branchChanged) {
+      const titles = newPublicUnderPrivate(
+        read.questions,
+        read.branches,
+        questionsNow,
+        read.branches,
+      );
+      if (titles.length > 0) throw publicUnderPrivateRefusal(titles);
+    }
+
     assertValidDefinition(next);
-    const edited = !unchanged(current, next) || conditionWrite !== null;
-    if (!edited && moved === null) return toAdminQuestion(row, counts);
+    const edited = !unchanged(current, next);
+    if (!edited && !stepMoved && !branchChanged) return toAdminQuestion(row, counts);
 
     // The layout write bumps the revision of a question that changed step, so a move plus an edit is ONE bump.
-    if (moved !== null) await writeLayout(tx, ctx.tenantId, moved);
-    if (edited) {
-      const conditionSet =
-        conditionWrite === null
-          ? sql``
-          : conditionWrite.to === null
-            ? sql`, condition_question_id = null, condition_values = null`
-            : sql`, condition_question_id = ${conditionWrite.to.questionId}::uuid,
-                   condition_values = ${textArray(conditionWrite.to.values)}`;
+    if (stepMoved || branchChanged) {
+      await writeLayout(tx, ctx.tenantId, treeLayout(placed, questionsNow, read.branches));
+    }
+    if (edited || branchChanged) {
+      const branchSet = branchChanged ? sql`, branch_id = ${wantedBranch}::uuid` : sql``;
       // The trigger is the backstop of a race that got past the pure rules: the same coded 409, never a 500
-      // (PF007 also lists the dependents a second writer just committed).
+      // (PF007 also lists the branches a second writer just committed).
       await guardedWrite(tx, ctx.tenantId, row.id, () =>
         tx.execute(sql`
           update public.profile_form_questions
              set type = ${next.type}, title = ${next.title}, help_text = ${next.helpText},
                  required = ${next.required}, show_on_profile = ${next.showOnProfile},
                  allow_other = ${next.allowOther}, options = ${JSON.stringify(next.options)}::jsonb,
-                 limits = ${JSON.stringify(next.limits)}::jsonb${conditionSet},
-                 revision = revision + ${moved === null ? 1 : 0}::int, updated_at = now()
+                 limits = ${JSON.stringify(next.limits)}::jsonb${branchSet},
+                 revision = revision + ${stepMoved ? 0 : 1}::int, updated_at = now()
            where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`),
       );
     }
@@ -867,14 +865,16 @@ async function otherAnswered(tx: Tx, tenantId: string, questionId: string): Prom
  * `PUT /v1/profile_form/order` (PFORM-02, PFORM-24, PFORM-27; D-582, D-623, D-627): the whole form in its new
  * order, in ONE set-based renumber (`writeLayout`) so positions stay `1..n` and the readers' order is unchanged.
  *
- *   1. `adminLock`, the live module check, then `readLayout` (steps, then every ACTIVE question, `FOR UPDATE` in
- *      the canonical order the member's save locks in, so the two can never deadlock);
+ *   1. `adminLock`, the live module check, then `readTree` (steps, then every ACTIVE question, `FOR UPDATE` in
+ *      the canonical order the member's save locks in, then the branches, so the two can never deadlock);
  *   2. two bodies for one release: the legacy `{ ids }` is accepted only while the tenant has exactly ONE step
  *      (a flat list cannot say which step each question belongs to, so a form with several steps answers
  *      `order_mismatch`); the layout `{ steps: [{ id, questionIds }] }` must name every step and every active
  *      question exactly once. A missing, repeated, archived or foreign id is 409 `order_mismatch`, an id of
  *      another tenant being just an id that is not in the set, so it leaks nothing;
- *   3. D-623: a layout that puts an opener at or after a question it opens is 409 `condition_order` naming the
+ *   3. D-652: the layout is put in TREE ORDER (a branch's questions consecutive, right after their opener);
+ *      a request that is already tree-ordered is a no-op, any other is rewritten, never refused for being flat.
+ *      What stays a refusal is a question whose opener sits in a LATER step: 409 `condition_order` naming the
  *      pair, and nothing changes;
  *   4. only `position`, `step_id` and (for a question that changed step) `revision` are written. A question is
  *      never dropped: a layout that omits one is a mismatch.
@@ -889,7 +889,7 @@ export async function reorderQuestions(
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readLayout(tx, ctx.tenantId, true);
+    const read = await readTree(tx, ctx.tenantId, true);
     const requested: Layout = (() => {
       if ('ids' in body) {
         const only = read.layout.length === 1 ? read.layout[0] : undefined;
@@ -902,8 +902,13 @@ export async function reorderQuestions(
       }));
     })();
 
-    const next = layoutOrThrow(applyRequestedLayout(read.layout, requested));
-    assertLayoutOrder(next, read.facts);
+    // D-652: the order is the tree. A request that is already tree-ordered is a no-op for the normaliser, any
+    // other is rewritten; a step above the step of an opener of its questions is the one refusal (`condition_order`).
+    const next = treeLayout(
+      layoutOrThrow(applyRequestedLayout(read.layout, requested)),
+      read.questions,
+      read.branches,
+    );
     await writeLayout(tx, ctx.tenantId, next);
     return listInTx(tx, ctx.tenantId);
   });
@@ -964,15 +969,20 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
 
     // The layout first, the row after. Only the questions AFTER this one change place, so `writeLayout` takes
     // them in the canonical order, behind the row lock below (no cycle with a member's ordered share locks).
-    const read = await readLayout(tx, ctx.tenantId);
+    const read = await readTree(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     if (row.archived_at !== null) return archivedQuestionOf(tx, ctx.tenantId, row);
 
-    // D-632: an opener with active dependents is not archived (the list names them); the trigger's PF007 is
-    // the backstop of a race.
-    refuseDependents(
-      checkOpenerChange({ questions: read.questions, openerId: row.id, archive: true }),
+    // D-646: an opener with an ACTIVE branch is not archived (the refusal names the branches); the trigger's
+    // PF007 is the backstop of a race.
+    refuseOpenerChange(
+      checkOpenerChange({
+        questions: read.questions,
+        branches: read.branches,
+        openerId: row.id,
+        archive: true,
+      }),
     );
     await guardedWrite(tx, ctx.tenantId, row.id, () =>
       tx.execute(sql`
@@ -980,7 +990,18 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
            set archived_at = now(), revision = revision + 1, updated_at = now()
          where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`),
     );
-    await writeLayout(tx, ctx.tenantId, dropQuestion(read.layout, row.id));
+    await writeLayout(
+      tx,
+      ctx.tenantId,
+      treeLayout(
+        dropQuestion(read.layout, row.id),
+        read.questions.map((question) =>
+          question.id === row.id ? { ...question, archived: true } : question,
+        ),
+        read.branches,
+        false,
+      ),
+    );
     const archived = await readOne(tx, ctx.tenantId, row.id);
     if (!archived) throw new Error('archiveQuestion: the archived question is not readable');
     return archivedQuestionOf(tx, ctx.tenantId, archived);
@@ -988,21 +1009,23 @@ export async function archiveQuestion(ctx: AdminCtx, id: string): Promise<Archiv
 }
 
 /**
- * `POST /v1/profile_form/questions/{id}/reactivate` (D-585, D-588, D-627): an archived question goes back to
- * ITS OWN step (`listed_at` now, so members see it as new): a conditional question whose opener is active in
- * that same step returns right after the opener, or after the opener's last active dependent (quick
- * 261106-ei5); any other question returns to the END of the step. Its stored `step_id` always names an
- * existing step, because deleting a step re-points the archived questions inside it. Idempotent: an active
- * question is answered unchanged. At 30 active questions it is 409 `limit_reached`. Its old answers are still
- * there, so a member who had answered it is not held again. A reactivated conditional question whose opener is
- * active but sits after it would break D-623 and is 409 `condition_order`.
+ * `POST /v1/profile_form/questions/{id}/reactivate` (D-585, D-588, D-627; 12.2 D-646, D-652, PFORM-53): an
+ * archived question goes back to ITS OWN step and ITS OWN branch (`listed_at` now, so members see it as new), at
+ * the end of the branch's run in tree order (or the end of the step when it has none). Its stored `step_id`
+ * always names an existing step, because deleting a step re-points the archived questions inside it. A question
+ * whose branch was undone has no branch any more and comes back unconditional. Idempotent: an active question
+ * is answered unchanged. At 30 active questions it is 409 `limit_reached`. Its old answers are still there, so a
+ * member who had answered it is not held again. Refused, naming the one thing to bring back first:
+ * `branch_archived` (its branch is archived, `branchId`), `condition_invalid` (its opener is archived,
+ * `openerId`); `condition_order` when the opener sits in a later step; `public_under_private` (with `titles`)
+ * when it shows on the profile under a private opener.
  */
 export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<AdminQuestion> {
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readLayout(tx, ctx.tenantId);
+    const read = await readTree(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     if (row.archived_at === null) return adminQuestionOf(tx, ctx.tenantId, row);
@@ -1010,49 +1033,48 @@ export async function reactivateQuestion(ctx: AdminCtx, id: string): Promise<Adm
       throw new ApiError(409, 'CONFLICT', { profileForm: 'limit_reached' });
     }
 
-    const next = layoutOrThrow(
-      addQuestionAfterOpener(
-        read.layout,
-        row.step_id,
-        row.id,
-        row.condition_question_id,
-        read.facts,
-      ),
-    );
-    // D-632: a shown question comes back only while its opener still holds: active, still eligible, no condition
-    // of its own, and before it. A refusal names the opener (`openerId`); pure, no extra lock on the hot path.
-    const openerId = row.condition_question_id;
-    if (openerId !== null) {
-      const check = checkReactivation({
-        questions: [...read.questions, ruleQuestionOf({ ...row, archived_at: null })],
-        layout: next,
-        questionId: row.id,
-      });
-      if (!check.ok) {
-        throw new ApiError(409, 'CONFLICT', {
-          profileForm: check.issue,
-          openerId: check.openerId ?? openerId,
-        });
+    // D-646: a question in a branch comes back only while its branch and its opener hold. The refusal names the
+    // ONE thing to reactivate first; the privacy rule runs over the tree with the question active. Pure, no
+    // extra lock on the hot path.
+    const check = checkReactivation({
+      questions: read.questions,
+      branches: read.branches,
+      layout: read.layout,
+      questionId: row.id,
+    });
+    if (!check.ok) {
+      if (check.issue === 'public_under_private') {
+        throw publicUnderPrivateRefusal(check.titles ?? []);
       }
+      refuseBranch(check);
     }
-    assertLayoutOrder(
-      next,
-      openerId !== null ? [...read.facts, { questionId: row.id, openerId }] : read.facts,
+
+    // The question returns to the END of its own step and the whole layout is put in tree order: it lands at
+    // the end of its branch's run, and the order rule is asserted over the tree the form now has.
+    const questionsNow = read.questions.map((question) =>
+      question.id === row.id ? { ...question, archived: false } : question,
+    );
+    const next = treeLayout(
+      layoutOrThrow(addQuestion(read.layout, row.step_id, row.id)),
+      questionsNow,
+      read.branches,
     );
 
-    // A conditional question returns right after its opener (or its last active dependent) when the opener is
-    // active in the same step; any other question returns to the end of its own step. An append to the very end
-    // of the form (the end of the last step) takes max(position) + 1 of the other active questions and nobody
-    // else is touched (a save in flight is never waited for). Anywhere else the later questions shift and the
-    // whole layout is renumbered below.
-    await tx.execute(sql`
-      update public.profile_form_questions
-         set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now(),
-             position = (select coalesce(max(position), 0) + 1
-                           from public.profile_form_questions
-                          where tenant_id = ${ctx.tenantId}::uuid and archived_at is null)
-       where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
-    if (!endsWith(next, row.id)) await writeLayout(tx, ctx.tenantId, next);
+    // An append to the very end of the form that leaves everybody else where they were takes max(position) + 1
+    // of the other active questions and nobody else is touched (a save in flight is never waited for). Anywhere
+    // else the later questions shift and the whole layout is renumbered below.
+    await guardedWrite(tx, ctx.tenantId, row.id, () =>
+      tx.execute(sql`
+        update public.profile_form_questions
+           set archived_at = null, listed_at = now(), revision = revision + 1, updated_at = now(),
+               position = (select coalesce(max(position), 0) + 1
+                             from public.profile_form_questions
+                            where tenant_id = ${ctx.tenantId}::uuid and archived_at is null)
+         where id = ${row.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`),
+    );
+    if (!(endsWith(next, row.id) && sameLayout(dropQuestion(next, row.id), read.layout))) {
+      await writeLayout(tx, ctx.tenantId, next);
+    }
     return questionAfterWrite(tx, ctx, row.id);
   });
 }
@@ -1086,16 +1108,20 @@ export async function listArchived(ctx: AdminCtx): Promise<ArchivedQuestionList>
 }
 
 /**
- * `DELETE /v1/profile_form/questions/{id}` (D-588): only a question nobody ever answered. One answer makes it
- * 409 `has_answers`, whatever its state; the RESTRICT foreign key of plan 04 refuses the same delete in SQL and
- * its SQLSTATE 23503 maps to the same code. A second delete is the bare 404.
+ * `DELETE /v1/profile_form/questions/{id}` (D-588; 12.2 D-646): only a question nobody ever answered. One answer
+ * makes it 409 `has_answers`, whatever its state; the RESTRICT foreign key of plan 04 refuses the same delete in
+ * SQL and its SQLSTATE 23503 maps to the same code. A second delete is the bare 404. An opener of an ACTIVE
+ * branch is 409 `has_dependents` (the branches are listed). An opener of ONLY archived branches is deleted and
+ * those branches DISSOLVE in the same transaction: their questions leave them (`branch_id` null), then the
+ * branch rows go. A question of such a branch that holds an answer cannot leave it (the PF006 guard, 409
+ * `condition_locked`) and the delete is refused whole.
  */
 export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ deleted: true }> {
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readLayout(tx, ctx.tenantId);
+    const read = await readTree(tx, ctx.tenantId);
     const row = await readOne(tx, ctx.tenantId, id, true);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     const [answered] = await tx.execute<{ found: boolean }>(sql`
@@ -1105,18 +1131,29 @@ export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ delet
     if (answered?.found === true)
       throw new ApiError(409, 'CONFLICT', { profileForm: 'has_answers' });
 
-    // D-632: an opener with active dependents is not deleted. Its ARCHIVED dependents do not block, but the
-    // composite foreign key still points at it, so their condition is cleared in this transaction (an archived
-    // question is read-only to members; removing a condition is allowed at any answer count and discards no
-    // answer). Without it the delete would end in the foreign key.
-    refuseDependents(
-      checkOpenerChange({ questions: read.questions, openerId: row.id, archive: true }),
+    // D-646: an opener with an ACTIVE branch is not deleted. Its ARCHIVED branches do not block, but their
+    // composite key still points at it, so they dissolve in this transaction: the questions that sat in them
+    // leave first (no answer is touched), then the branch rows.
+    refuseOpenerChange(
+      checkOpenerChange({
+        questions: read.questions,
+        branches: read.branches,
+        openerId: row.id,
+        archive: true,
+      }),
     );
-    await tx.execute(sql`
-      update public.profile_form_questions
-         set condition_question_id = null, condition_values = null, updated_at = now()
-       where tenant_id = ${ctx.tenantId}::uuid and condition_question_id = ${row.id}::uuid
-         and archived_at is not null`);
+    await guardedWrite(tx, ctx.tenantId, row.id, async () => {
+      await tx.execute(sql`
+        update public.profile_form_questions
+           set branch_id = null, updated_at = now()
+         where tenant_id = ${ctx.tenantId}::uuid
+           and branch_id in (select b.id from public.profile_form_branches b
+                              where b.tenant_id = ${ctx.tenantId}::uuid
+                                and b.opener_question_id = ${row.id}::uuid)`);
+      await tx.execute(sql`
+        delete from public.profile_form_branches
+         where tenant_id = ${ctx.tenantId}::uuid and opener_question_id = ${row.id}::uuid`);
+    });
 
     const out = await attempt(tx, () =>
       tx.execute(sql`
@@ -1125,24 +1162,37 @@ export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ delet
     );
     if ('error' in out) {
       if (!hasSqlState(out.error, '23503')) throw out.error;
-      // A foreign key in a race: a second writer gave the question a dependent, or an answer, after the checks.
-      const dependents = dependentsOf((await readLayout(tx, ctx.tenantId)).questions, row.id);
-      if (dependents.length > 0) throw hasDependents(dependents);
+      // A foreign key in a race: a second writer gave the question a branch, or an answer, after the checks.
+      const fresh = await readTree(tx, ctx.tenantId);
+      const branches = dependentBranchesOf(fresh.branches, fresh.questions, row.id);
+      if (branches.length > 0) throw hasDependentBranches(branches);
       throw new ApiError(409, 'CONFLICT', { profileForm: 'has_answers' });
     }
-    await writeLayout(tx, ctx.tenantId, dropQuestion(read.layout, row.id));
+    await writeLayout(
+      tx,
+      ctx.tenantId,
+      treeLayout(
+        dropQuestion(read.layout, row.id),
+        read.questions.filter((question) => question.id !== row.id),
+        read.branches.filter((branch) => branch.openerQuestionId !== row.id),
+        false,
+      ),
+    );
     return { deleted: true };
   });
 }
 
 /**
- * `POST /v1/profile_form/questions/replace` (PFORM-17, D-627): the new question and the archive of the old one in
- * ONE transaction. The new question takes the old one's STEP and POSITION (its id replaces the old id in the
- * layout, in place); the old one keeps its answers, archived. The active count does not grow, so the
- * 30-question limit is not re-checked. A `stepId` in the body must still be a step of this tenant (400
- * `unknown_step`) but does not move the replacement. An old question that is not active is 409
- * `already_archived`; unknown or another tenant's id is the bare 404. Any failure of either half rolls both
- * back: the old question stays active and nothing is created.
+ * `POST /v1/profile_form/questions/replace` (PFORM-17, D-627; 12.2 D-640, D-646): the new question and the
+ * archive of the old one in ONE transaction. The new question takes the old one's STEP, BRANCH and POSITION (its
+ * id replaces the old id in the layout, in place); the old one keeps its answers, archived. The active count does
+ * not grow, so the 30-question limit is not re-checked. A `stepId` in the body must still be a step of this
+ * tenant (400 `unknown_step`) but does not move the replacement, and so does a `branchId`: the replacement stays
+ * in the old question's branch. An old question that is not active is 409 `already_archived`; unknown or another
+ * tenant's id is the bare 404; an opener of an ACTIVE branch is 409 `has_dependents`; a replacement that shows
+ * on the profile under a private opener is 409 `public_under_private`; a non-null `condition` is 400
+ * `condition_invalid`. Any failure of either half rolls both back: the old question stays active and nothing is
+ * created.
  */
 export async function replaceQuestion(
   ctx: AdminCtx,
@@ -1153,7 +1203,7 @@ export async function replaceQuestion(
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
 
-    const read = await readLayout(tx, ctx.tenantId);
+    const read = await readTree(tx, ctx.tenantId);
     const old = await readOne(tx, ctx.tenantId, body.replaces, true);
     if (!old) throw new ApiError(404, 'NOT_FOUND');
     if (old.archived_at !== null) {
@@ -1166,35 +1216,49 @@ export async function replaceQuestion(
       throw unknownStep();
     }
 
-    // D-632: replacing archives the old question, so an opener with active dependents is refused (and listed).
-    refuseDependents(
-      checkOpenerChange({ questions: read.questions, openerId: old.id, archive: true }),
+    // D-646: replacing archives the old question, so an opener with an ACTIVE branch is refused (and listed).
+    refuseOpenerChange(
+      checkOpenerChange({
+        questions: read.questions,
+        branches: read.branches,
+        openerId: old.id,
+        archive: true,
+      }),
     );
-    // The replacement's own condition (D-620..D-623) is checked over the layout it will have: it takes the old
-    // question's place, so an opener that IS the old question is no longer in the layout (condition_invalid).
-    if (body.condition) {
-      const probe = crypto.randomUUID();
-      refuseCondition(
-        checkCondition({
-          questions: read.questions,
-          layout: swapQuestion(read.layout, old.id, probe),
-          subjectId: probe,
-          condition: { ...body.condition, questionId: body.condition.questionId.toLowerCase() },
-        }),
-      );
-    }
 
-    const createdId = await insertQuestion(
-      tx,
-      ctx,
-      body,
-      old.step_id,
-      old.position,
-      crypto.randomUUID(),
-      old.branch_id,
+    // The replacement as the rules see it: it takes the old question's place in the old question's branch.
+    const createdId = crypto.randomUUID();
+    const replacement: BranchRuleQuestion = {
+      id: createdId,
+      type: body.type,
+      title: body.title,
+      archived: false,
+      showOnProfile: body.showOnProfile,
+      options: [],
+      branchId: old.branch_id,
+    };
+    const questionsNow = [
+      ...read.questions.map((question) =>
+        question.id === old.id ? { ...question, archived: true } : question,
+      ),
+      replacement,
+    ];
+    const titles = newPublicUnderPrivate(
+      read.questions,
+      read.branches,
+      questionsNow,
+      read.branches,
     );
-    const next = swapQuestion(read.layout, old.id, createdId);
-    assertLayoutOrder(next, read.facts);
+    if (titles.length > 0) throw publicUnderPrivateRefusal(titles);
+
+    await guardedWrite(tx, ctx.tenantId, createdId, () =>
+      insertQuestion(tx, ctx, body, old.step_id, old.position, createdId, old.branch_id),
+    );
+    const next = treeLayout(
+      swapQuestion(read.layout, old.id, createdId),
+      questionsNow,
+      read.branches,
+    );
     await guardedWrite(tx, ctx.tenantId, old.id, () =>
       tx.execute(sql`
         update public.profile_form_questions
@@ -1222,12 +1286,11 @@ const ACTIVE_MEMBERS = (tenantId: string) => sql`
 
 /**
  * `GET /v1/profile_form/summary` (PFORM-23, PFORM-38, D-634): `{ total, complete, hasRequired }` in ONE set-based
- * statement. `complete` is the members who owe NO VISIBLE required question: a required, active question with no
- * answer row of that member, and either no condition or an answer of that member to the opener whose tokens
- * overlap the condition values. This repeats the predicate of the gate function `app.profile_form_missing`
- * (which the tenant lane cannot call: it takes an arbitrary membership id and is granted to the API and service
- * roles only); the integration test asserts the two never drift. A member who does not see a conditional
- * required question is complete without it. Counts only: no answer is selected.
+ * statement. `complete` is the members who owe NO required question: a required, active question with no answer
+ * row of that member. 12.2 (D-640): the per-question condition is retired and the visibility of a question
+ * through the branch chain (`app.profile_form_missing`, the gate) is NOT restated here yet: plan 11 rewrites
+ * this statement over the shared chain fragment. Until then a member who does not see a required question in a
+ * branch counts as owing it. Counts only: no answer is selected.
  */
 export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
   return withTenantTx(ctx, async (tx) => {
@@ -1240,7 +1303,7 @@ export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
       sql`
       with members as (${ACTIVE_MEMBERS(ctx.tenantId)}),
       req as (
-        select q.id, q.condition_question_id, q.condition_values
+        select q.id
           from public.profile_form_questions q
          where q.tenant_id = ${ctx.tenantId}::uuid and q.required and q.archived_at is null)
       select (select count(*) from members)::int as total,
@@ -1254,13 +1317,6 @@ export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
                            where a.tenant_id = ${ctx.tenantId}::uuid
                              and a.membership_id = m.id
                              and a.question_id = r.id)
-                    and (r.condition_question_id is null
-                         or exists (
-                           select 1 from public.profile_form_answers o
-                            where o.tenant_id = ${ctx.tenantId}::uuid
-                              and o.membership_id = m.id
-                              and o.question_id = r.condition_question_id
-                              and r.condition_values && app.profile_form_answer_tokens(o.value)))
                ))::int as complete,
              exists (select 1 from req) as has_required`,
     );
@@ -1333,15 +1389,11 @@ export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<Impa
     }
     const row = await readOne(tx, ctx.tenantId, query.questionId);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
-    const condition = conditionOf(row);
 
-    if (query.change === 'remove_condition') {
-      if (condition === null || !row.required || row.archived_at !== null) return { members: 0 };
-      return count(
-        sql`not ${SEES_THROUGH(ctx.tenantId, condition.questionId, condition.values)}
-            and ${LACKS_ANSWER(ctx.tenantId, row.id)}`,
-      );
-    }
+    // 12.2 (D-640): the per-question condition is retired; `remove_condition` (a question leaving its branch)
+    // and the branch-aware counts are plan 11's (they compose the shared chain fragment). Until then it asks
+    // nobody.
+    if (query.change === 'remove_condition') return { members: 0 };
 
     const asksNobody =
       query.change === 'reactivate'
@@ -1349,11 +1401,6 @@ export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<Impa
         : row.archived_at !== null || row.required;
     if (asksNobody) return { members: 0 };
 
-    return count(
-      condition === null
-        ? LACKS_ANSWER(ctx.tenantId, row.id)
-        : sql`${LACKS_ANSWER(ctx.tenantId, row.id)}
-              and ${SEES_THROUGH(ctx.tenantId, condition.questionId, condition.values)}`,
-    );
+    return count(LACKS_ANSWER(ctx.tenantId, row.id));
   });
 }
