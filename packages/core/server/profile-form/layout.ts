@@ -1,4 +1,5 @@
 import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
+import { treeOrder } from '@rede-social/contracts/profile-form-branches';
 
 /**
  * The pure layout of the profile form (Phase 12.1, D-623, D-627; PFORM-28, PFORM-29): ONE sequence of
@@ -10,6 +11,8 @@ import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
  * statement (the 12-08 reorder shape extended with `step_id`). Every operation returns a NEW layout or a
  * coded refusal and never mutates its argument. Only `unknown_step`, `order_mismatch`, `step_not_empty`,
  * `last_step` and `condition_order` are produced here.
+ *
+ * 12.2 (D-652): the stored order follows the branch tree; `normalizeToTree` below puts a layout in tree order.
  */
 
 export type LayoutStep = { stepId: string; questionIds: readonly string[] };
@@ -211,13 +214,23 @@ export function checkLayoutOrder(
 }
 
 /**
- * INERT STUB (12.2-04 task 3, RED commit only): returns a copy of the layout unchanged so the tests fail on
- * their assertions. The next commit (GREEN) replaces it with the call to `treeOrder`.
+ * The layout in tree order (12.2-04, D-652): inside each step a branch's questions are consecutive and right
+ * after their opener when it sits in the same step, a nested branch sits inside its parent's block, and a run
+ * whose opener is in another step is placed like an unconditional unit. The same step ids and the same
+ * question ids come back (a question never changes step); idempotent. `questions` carries each question's
+ * `branchId` (null for none), `branches` is in the caller's order (`created_at, id` on the server) and is the
+ * only tie-break between sibling runs. The ordering itself is `treeOrder` of the contracts, shared with the
+ * web builder so both sides agree. Every layout write passes through this before `checkLayoutOrder` and
+ * `renumber`.
  */
 export function normalizeToTree(
   layout: Layout,
-  _questions: readonly { id: string; branchId: string | null }[],
-  _branches: readonly { id: string; openerQuestionId: string }[],
+  questions: readonly { id: string; branchId: string | null }[],
+  branches: readonly { id: string; openerQuestionId: string }[],
 ): Layout {
-  return copy(layout);
+  return treeOrder({
+    layout,
+    branchIdOf: new Map(questions.map((question) => [question.id, question.branchId] as const)),
+    branches,
+  });
 }

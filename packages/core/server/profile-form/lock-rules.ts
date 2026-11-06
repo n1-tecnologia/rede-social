@@ -20,6 +20,11 @@ import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
  * changed on an answered question; an opener with active dependents cannot be archived, retyped or lose a
  * referenced option). Their pure twins live in `condition-rules.ts` (`checkConditionLock`,
  * `checkOpenerChange`); `guardIssueOf` maps both SQLSTATEs below.
+ *
+ * 12.2 (D-644, D-646): the trigger states three more, PF008 (a chain deeper than `branchDepth`, or a cycle),
+ * PF009 (a public question under a private opener) and PF010 (a write to the retired condition columns). Their
+ * pure twins live in `branch-rules.ts` (`checkBranch`, `checkMoveIntoBranch`, `publicUnderPrivate`); the map
+ * below sends all ten back to the same codes, so the race path and the rule path answer the same coded 409.
  */
 
 export type LockLimits = { min?: number | string; max?: number | string };
@@ -92,7 +97,7 @@ export function checkLocks(input: LockInput): ProfileFormIssue | null {
   return null;
 }
 
-/** The SQLSTATEs of the plan-04 guard trigger and the code each one means. */
+/** The SQLSTATEs of the guard triggers and the code each one means. */
 const GUARD_CODES: Readonly<Record<string, ProfileFormIssue>> = {
   PF001: 'type_locked',
   PF002: 'option_locked',
@@ -101,11 +106,16 @@ const GUARD_CODES: Readonly<Record<string, ProfileFormIssue>> = {
   PF005: 'limits_locked',
   PF006: 'condition_locked',
   PF007: 'has_dependents',
+  // 12.2 (D-644, D-646): the branch guards. PF008 is the depth (or a cycle), PF009 the privacy rule (WR-06) and
+  // PF010 the retired per-question condition columns.
+  PF008: 'branch_depth',
+  PF009: 'public_under_private',
+  PF010: 'condition_invalid',
 };
 
 /**
- * The lock code a database error means when it is (or wraps, through `.cause`) one of the guard trigger's
- * SQLSTATEs PF001..PF005; otherwise `null`. The trigger is the backstop of a race that got past
+ * The lock code a database error means when it is (or wraps, through `.cause`) one of the guard triggers'
+ * SQLSTATEs PF001..PF010; otherwise `null`. The trigger is the backstop of a race that got past
  * `checkLocks`, and it must answer the same coded 409, never a 500.
  */
 export function guardIssueOf(error: unknown): ProfileFormIssue | null {
