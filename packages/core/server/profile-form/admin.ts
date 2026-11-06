@@ -31,7 +31,13 @@ import {
   dependentsOf,
   type RuleQuestion,
 } from './condition-rules';
-import { addQuestion, applyRequestedLayout, type Layout, moveQuestion } from './layout';
+import {
+  addQuestion,
+  addQuestionAfterOpener,
+  applyRequestedLayout,
+  type Layout,
+  moveQuestion,
+} from './layout';
 import {
   assertLayoutOrder,
   dropQuestion,
@@ -411,7 +417,9 @@ async function guardedWrite<T>(
 
 /**
  * `POST /v1/profile_form/questions` (PFORM-02, D-627): a new question at the END of the named step (default:
- * the last step; the default step is created when the form has none). The body is already validated by the
+ * the last step; the default step is created when the form has none). A question created WITH a condition whose
+ * opener is in that same step is placed right after the opener, or after its last active dependent, instead
+ * (quick 261106-ei5); with the opener in another step it keeps the end of the step. The body is already validated by the
  * contract (title and help text trimmed, 2 to 20 distinct options for a choice type, limits of the right
  * kind). The server decides the rest: a UUID for every option, the position (the layout is renumbered in one
  * statement, so every later step shifts by one), revision 1, `listed_at` now and the caller as the author.
@@ -435,22 +443,30 @@ export async function createQuestion(
 
     const read = await readLayout(tx, ctx.tenantId);
     const target = await targetStep(tx, ctx.tenantId, read, body.stepId);
-    // D-620..D-623: a condition is accepted only through the pure rule, over the layout the question will have
-    // (at the end of its step). The opener must be an ACTIVE question of THIS tenant: a foreign and a missing id
-    // are the same refusal (T-12.1-01), and the composite foreign key is the backstop.
+    // A question with a condition whose opener is in the SAME step goes right after the opener (or after its last
+    // active dependent); any other question goes to the end of its step. ONE function builds the layout for the
+    // order check and for the write, so the layout that is checked is the layout that is stored.
+    const openerId = body.condition ? body.condition.questionId.toLowerCase() : null;
+    const layoutWith = (questionId: string) =>
+      layoutOrThrow(
+        addQuestionAfterOpener(target.layout, target.stepId, questionId, openerId, read.facts),
+      );
+    // D-620..D-623: a condition is accepted only through the pure rule, over the layout the question will have.
+    // The opener must be an ACTIVE question of THIS tenant: a foreign and a missing id are the same refusal
+    // (T-12.1-01), and the composite foreign key is the backstop.
     if (body.condition) {
       const probe = crypto.randomUUID();
       refuseCondition(
         checkCondition({
           questions: read.questions,
-          layout: layoutOrThrow(addQuestion(target.layout, target.stepId, probe)),
+          layout: layoutWith(probe),
           subjectId: probe,
           condition: { ...body.condition, questionId: body.condition.questionId.toLowerCase() },
         }),
       );
     }
     const id = await insertQuestion(tx, ctx, body, target.stepId, null);
-    const next = layoutOrThrow(addQuestion(target.layout, target.stepId, id));
+    const next = layoutWith(id);
     // An append to the very end of the form moves nobody: the insert already gave it max(position) + 1, so no
     // other row is touched and a member's save in flight is never waited for (the Phase 12 adjacency rule).
     // Anywhere else the later questions shift, and the whole layout is renumbered in one statement.
