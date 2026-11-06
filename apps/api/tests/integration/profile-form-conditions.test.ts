@@ -924,6 +924,72 @@ describe('quick 261106-ei5 create: a new conditional question lands right after 
   }, 60_000);
 });
 
+describe('quick 261106-ei5 reactivate: a reactivated conditional question lands right after its opener (D-632 kept)', () => {
+  it('Test E: it returns after the last ACTIVE dependent, or right after the opener when none is active', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const o = await choice(admin, 'ei5 E opener');
+      const d1 = await text(admin, 'ei5 E d1', { questionId: o.id, values: [firstOption(o)] });
+      const d2 = await text(admin, 'ei5 E d2', { questionId: o.id, values: [firstOption(o)] });
+      const x = await text(admin, 'ei5 E plain');
+      expect(await orderOf(admin)).toEqual([o.id, d1.id, d2.id, x.id]);
+
+      expect((await archive(admin, d1)).status).toBe(200);
+      const back1 = await reactivate(admin, d1);
+      expect(back1.status, JSON.stringify(await back1.clone().json())).toBe(200);
+      expect(((await back1.json()) as Q).condition).toEqual({
+        questionId: o.id,
+        values: [firstOption(o)],
+      });
+      expect(await orderOf(admin)).toEqual([o.id, d2.id, d1.id, x.id]);
+      expect((await listOf(admin)).questions.map((q) => q.position)).toEqual([1, 2, 3, 4]);
+
+      expect((await archive(admin, d2)).status).toBe(200);
+      expect((await archive(admin, d1)).status).toBe(200);
+      expect((await reactivate(admin, d1)).status).toBe(200);
+      expect(await orderOf(admin)).toEqual([o.id, d1.id, x.id]);
+      expect((await listOf(admin)).questions.map((q) => q.position)).toEqual([1, 2, 3]);
+
+      expect((await reactivate(admin, d2)).status).toBe(200);
+      expect(await orderOf(admin)).toEqual([o.id, d1.id, d2.id, x.id]);
+      expect((await listOf(admin)).questions.map((q) => q.position)).toEqual([1, 2, 3, 4]);
+    });
+  }, 90_000);
+
+  it('Test F: with the opener in another step it returns to the end of its own step', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const o = await choice(admin, 'ei5 F opener');
+      const step2 = await createStep(admin, 'ei5 F step two');
+      const d = await text(
+        admin,
+        'ei5 F dependent',
+        { questionId: o.id, values: [firstOption(o)] },
+        { stepId: step2.id },
+      );
+      const x = await text(admin, 'ei5 F plain', null, { stepId: step2.id });
+      expect(await orderOf(admin)).toEqual([o.id, d.id, x.id]);
+      expect((await archive(admin, d)).status).toBe(200);
+      expect((await reactivate(admin, d)).status).toBe(200);
+      expect(await orderOf(admin)).toEqual([o.id, x.id, d.id]);
+      const listed = (await listOf(admin)).questions;
+      expect(listed.filter((q) => q.stepId === step2.id).map((q) => q.id)).toEqual([x.id, d.id]);
+    });
+  }, 90_000);
+
+  it('Test G: an unconditional question returns to the end of its step', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const a = await text(admin, 'ei5 G a');
+      const b = await text(admin, 'ei5 G b');
+      const c = await text(admin, 'ei5 G c');
+      expect((await archive(admin, a)).status).toBe(200);
+      expect((await reactivate(admin, a)).status).toBe(200);
+      expect(await orderOf(admin)).toEqual([b.id, c.id, a.id]);
+    });
+  }, 60_000);
+});
+
 // ── Task 3: the summary and the impact count only who sees a question ───────────────────────────────
 
 const get = (p: Person, path: string, params: Record<string, string> = {}) =>
