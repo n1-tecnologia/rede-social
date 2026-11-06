@@ -1113,3 +1113,130 @@ describe('12.2-08 archive and reactivate as a block (D-653, PFORM-48)', () => {
     });
   });
 });
+
+describe('12.2-08 reads: the branches ride on the builder lists as aggregates (D-640, D-642, T-12.2-03)', () => {
+  it('carries archived branches with every question counted, keeps the branch of a question archived alone, and reads no answer value', async () => {
+    const admin = await person('admin_tenant');
+    const member = await person('member');
+    await withProfileForm(labTenantId, async () => {
+      const secret = `SEGREDO-${crypto.randomUUID()}`;
+      const q1 = await opener('Q1 abridor', 1);
+      const sleeping = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: q1.id,
+        values: [q1.optionIds[0]],
+        name: 'Ramo dormindo',
+        archived: true,
+      });
+      const sleepingA = await opener('Q2 dormindo A', 2, { branchId: sleeping, archived: true });
+      const sleepingB = await opener('Q3 dormindo B', 3, { branchId: sleeping, archived: true });
+      const awake = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: q1.id,
+        values: [q1.optionIds[1]],
+        name: 'Ramo acordado',
+      });
+      const awakeActive = await opener('Q4 acordado ativo', 4, { branchId: awake });
+      const awakeSolo = await opener('Q5 acordado arquivado só', 5, {
+        branchId: awake,
+        archived: true,
+      });
+      for (const question of [sleepingA, sleepingB, awakeActive, awakeSolo]) {
+        await seedProfileFormAnswer({
+          tenantId: labTenantId,
+          questionId: question.id,
+          userId: member.userId,
+          value: secret,
+        });
+      }
+
+      const archivedRes = await call(admin, 'GET', '/v1/profile_form/archived');
+      const archivedText = await archivedRes.text();
+      expect(archivedRes.status).toBe(200);
+      const archived = JSON.parse(archivedText) as ArchivedList;
+      const archivedBranch = archived.branches?.find((branch) => branch.id === sleeping);
+      expect(archivedBranch).toMatchObject({
+        name: 'Ramo dormindo',
+        questionCount: 2,
+        answerCount: 2,
+      });
+      expect(archivedBranch?.archivedAt).not.toBeNull();
+      const awakeRead = archived.branches?.find((branch) => branch.id === awake);
+      // An active branch counts its ACTIVE questions only; its answers count every question, archived too.
+      expect(awakeRead).toMatchObject({ archivedAt: null, questionCount: 1, answerCount: 2 });
+      // The question archived alone keeps its branch; so do the archived block's questions.
+      const byId = new Map(archived.questions.map((question) => [question.id, question]));
+      expect(byId.get(awakeSolo.id)?.branchId).toBe(awake);
+      expect(byId.get(sleepingA.id)?.branchId).toBe(sleeping);
+      expect(byId.get(sleepingB.id)?.branchId).toBe(sleeping);
+      expect(byId.has(awakeActive.id)).toBe(false);
+
+      const listRes = await call(admin, 'GET', '/v1/profile_form/questions');
+      const listText = await listRes.text();
+      expect(listRes.status).toBe(200);
+      const list = JSON.parse(listText) as QuestionList & Record<string, unknown>;
+      // Nothing the list carried before is gone: the same top-level keys, the condition and the opens count.
+      expect(Object.keys(list).sort()).toEqual(
+        ['activeCount', 'branches', 'limit', 'questions', 'stepLimit', 'steps'].sort(),
+      );
+      const row = list.questions.find((question) => question.id === awakeActive.id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.branchId).toBe(awake);
+      expect(row).toHaveProperty('condition', null);
+      expect(row).toHaveProperty('opensCount');
+      expect(row).toHaveProperty('answerCount', 1);
+      // Counts only: no answer value in either payload, and no branch carries a field named `value`.
+      for (const text of [archivedText, listText]) expect(text).not.toContain(secret);
+      for (const branch of [...(list.branches ?? []), ...(archived.branches ?? [])]) {
+        expect(Object.keys(branch).sort()).toEqual(
+          [
+            'answerCount',
+            'archivedAt',
+            'id',
+            'name',
+            'openerQuestionId',
+            'questionCount',
+            'revision',
+            'values',
+          ].sort(),
+        );
+        expect(branch).not.toHaveProperty('value');
+      }
+    });
+  });
+
+  it('a tenant with no branch reads branches: [] on both lists', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      await opener('Q1 sozinha', 1);
+      expect((await listOf(admin)).branches).toEqual([]);
+      expect((await archivedOf(admin)).branches).toEqual([]);
+    });
+  });
+
+  it('removeProfileFormByPrefix leaves no branch behind, even for a branch and its opener that reference each other', async () => {
+    const q1 = await opener('Q1 abridor', 1);
+    const branch = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: q1.id,
+      values: [q1.optionIds[0]],
+    });
+    const inside = await opener('Q2 dentro', 2, { branchId: branch });
+    // A nested branch hangs on the question inside the first one.
+    await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: inside.id,
+      values: [inside.optionIds[0]],
+    });
+    expect(await branchCount()).toBe(baseline + 2);
+
+    await removeProfileFormByPrefix(TITLE);
+    expect(await branchCount()).toBe(baseline);
+    const [left] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.profile_form_questions
+       where tenant_id = ${labTenantId}::uuid and title like ${`${TITLE}%`}`;
+    expect(left?.n).toBe(0);
+  });
+});

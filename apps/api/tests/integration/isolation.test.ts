@@ -29,6 +29,7 @@ import {
   seedPaymentIntegration,
   seedPaymentMapping,
   seedProfileFormAnswer,
+  seedProfileFormBranch,
   seedProfileFormQuestion,
   seedProfileFormStep,
   setPaymentsRow,
@@ -7221,11 +7222,16 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 12.2 sweep: profile form branches — a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH on the branch create, a rede-lab opener id in his create body on the rede-demo host is condition_invalid and nothing is written in either tenant, and his own list names no rede-lab branch, each beside the rede-lab admin’s own positive control (12.2-08, PFORM-43, T-12.2-01)', async () => {
-    // | Route                         | Negative asserted here                                                     |
-    // |-------------------------------|----------------------------------------------------------------------------|
-    // | POST /v1/profile_form/branches| lab host with a demo session: 403 TENANT_HOST_MISMATCH, no row; a lab      |
-    // |                               | opener id on the demo host: 409 condition_invalid, no row in either tenant |
+  it('phase 12.2 sweep: profile form branches — a rede-demo admin on the rede-lab host is refused with TENANT_HOST_MISMATCH on all five branch routes, a rede-lab branch id on the rede-demo host is the bare 404 on the edit, the undo, the archive and the reactivate and changes nothing in rede-lab, a rede-lab opener id in his create body is condition_invalid and writes nothing, and his own list names no rede-lab branch, each beside the rede-lab admin’s own positive control (12.2-08, PFORM-43, PFORM-48, T-12.2-01)', async () => {
+    // | Route                                       | Negative asserted here                                         |
+    // |---------------------------------------------|----------------------------------------------------------------|
+    // | POST /v1/profile_form/branches              | lab host with a demo session: 403 TENANT_HOST_MISMATCH, no row;|
+    // |                                             | a lab opener id on the demo host: 409 condition_invalid, no row|
+    // | PATCH /v1/profile_form/branches/{id}        | lab host: 403; a lab id on the demo host: the bare 404, lab    |
+    // |                                             | row unchanged (revision, name, values)                         |
+    // | POST /v1/profile_form/branches/{id}/undo    | same: the lab branch and its question still stand              |
+    // | POST /v1/profile_form/branches/{id}/archive | same: nothing archived in the lab                              |
+    // | POST /v1/profile_form/branches/{id}/reactivate | same: the archived lab branch stays archived                |
     const PREFIX122 = `iso1208b-${RUN}`;
     const TITLE122 = `${PREFIX122} `;
     const prior = new Map<string, boolean | null>();
@@ -7273,6 +7279,40 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         options: [{ id: demoOptionId, label: 'Sim' }, { label: 'Não' }],
         position: 1,
       });
+      // The lab already has three branches: one with a question (undo and archive), one for the edit and one
+      // archived with its question (reactivate). The demo tenant has none of its own yet.
+      const labHolding = await seedProfileFormBranch({
+        tenantId: tenantIds.lab,
+        openerQuestionId: labOpener,
+        values: [labOptionId],
+        name: 'Ramo do lab',
+      });
+      const labMember = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE122}Membro lab`,
+        position: 2,
+        branchId: labHolding,
+      });
+      const labEditable = await seedProfileFormBranch({
+        tenantId: tenantIds.lab,
+        openerQuestionId: labOpener,
+        values: [labOptionId],
+      });
+      const labSleeping = await seedProfileFormBranch({
+        tenantId: tenantIds.lab,
+        openerQuestionId: labOpener,
+        values: [labOptionId],
+        archived: true,
+      });
+      const labSleepingMember = await seedProfileFormQuestion({
+        tenantId: tenantIds.lab,
+        adminUserId: labAdmin.userId,
+        title: `${TITLE122}Membro dormindo`,
+        position: 3,
+        branchId: labSleeping,
+        archived: true,
+      });
       const send = (
         who: { token: string },
         method: string,
@@ -7290,21 +7330,70 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         });
       const branchRows = async () =>
-        adminSql<{ tenant_id: string; id: string; revision: number }[]>`
-          select tenant_id::text as tenant_id, id::text as id, revision
+        adminSql<
+          {
+            tenant_id: string;
+            id: string;
+            revision: number;
+            name: string | null;
+            open_values: string[];
+            archived_at: Date | null;
+          }[]
+        >`
+          select tenant_id::text as tenant_id, id::text as id, revision, name, open_values, archived_at
             from public.profile_form_branches
            where opener_question_id in (${labOpener}::uuid, ${demoOpener}::uuid)
            order by id`;
-      expect(await branchRows()).toEqual([]);
+      const labQuestionRows = async () =>
+        adminSql<
+          { id: string; branch_id: string | null; archived_at: Date | null; revision: number }[]
+        >`
+          select id::text as id, branch_id::text as branch_id, archived_at, revision
+            from public.profile_form_questions
+           where id in (${labMember}::uuid, ${labSleepingMember}::uuid)
+           order by id`;
+      const seeded = await branchRows();
+      expect(seeded).toHaveLength(3);
+      const questionsBefore = await labQuestionRows();
 
-      // The wrong host refuses before anything runs.
-      const wrongHost = await send(demoAdmin, 'POST', '/v1/profile_form/branches', HOSTS.lab, {
-        openerQuestionId: labOpener,
-        values: [labOptionId],
-      });
-      expect(wrongHost.status).toBe(403);
-      expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
-      expect(await branchRows()).toEqual([]);
+      // The wrong host refuses before anything runs, on all five routes.
+      for (const [method, path, body] of [
+        [
+          'POST',
+          '/v1/profile_form/branches',
+          { openerQuestionId: labOpener, values: [labOptionId] },
+        ],
+        ['PATCH', `/v1/profile_form/branches/${labEditable}`, { revision: 1, name: 'sequestrado' }],
+        ['POST', `/v1/profile_form/branches/${labHolding}/undo`, undefined],
+        ['POST', `/v1/profile_form/branches/${labHolding}/archive`, undefined],
+        ['POST', `/v1/profile_form/branches/${labSleeping}/reactivate`, undefined],
+      ] as const) {
+        const res = await send(demoAdmin, method, path, HOSTS.lab, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await code(res), `${method} ${path}`).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await branchRows()).toEqual(seeded);
+      expect(await labQuestionRows()).toEqual(questionsBefore);
+
+      // A lab branch id on the demo host is the bare 404 on the four id routes, and the lab rows are untouched.
+      for (const [method, path, body] of [
+        ['PATCH', `/v1/profile_form/branches/${labEditable}`, { revision: 1, name: 'sequestrado' }],
+        ['POST', `/v1/profile_form/branches/${labHolding}/undo`, undefined],
+        ['POST', `/v1/profile_form/branches/${labHolding}/archive`, undefined],
+        ['POST', `/v1/profile_form/branches/${labSleeping}/reactivate`, undefined],
+      ] as const) {
+        const res = await send(demoAdmin, method, path, HOSTS.demo, body);
+        expect(res.status, `${method} ${path}`).toBe(404);
+        const text = await res.text();
+        const envelope = JSON.parse(text) as Envelope;
+        expect(envelope.error.code, `${method} ${path}`).toBe('NOT_FOUND');
+        expect(envelope.error.details, `${method} ${path}`).toBeUndefined();
+        expect(text).not.toContain(labHolding);
+        expect(text).not.toContain(labEditable);
+        expect(text).not.toContain(labSleeping);
+      }
+      expect(await branchRows()).toEqual(seeded);
+      expect(await labQuestionRows()).toEqual(questionsBefore);
 
       // A lab opener id on the demo host is a refused opener, exactly like a missing one, and writes nothing.
       const foreign = await send(demoAdmin, 'POST', '/v1/profile_form/branches', HOSTS.demo, {
@@ -7315,32 +7404,64 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       const foreignBody = (await foreign.json()) as Envelope;
       expect(foreignBody.error.details).toEqual({ profileForm: 'condition_invalid' });
       expect(JSON.stringify(foreignBody)).not.toContain(labOpener);
-      expect(await branchRows()).toEqual([]);
+      expect(await branchRows()).toEqual(seeded);
 
-      // Positive controls: each admin branches his own opener, and the row lands in his own tenant only.
-      const labMade = await send(labAdmin, 'POST', '/v1/profile_form/branches', HOSTS.lab, {
-        openerQuestionId: labOpener,
-        values: [labOptionId],
-      });
-      expect(labMade.status).toBe(201);
+      // Positive controls: the demo admin branches his own opener, and the lab admin edits, archives,
+      // reactivates and undoes his own; the row lands in the caller's tenant only.
       const demoMade = await send(demoAdmin, 'POST', '/v1/profile_form/branches', HOSTS.demo, {
         openerQuestionId: demoOpener,
         values: [demoOptionId],
       });
       expect(demoMade.status).toBe(201);
+      const demoBranch = (await demoMade.json()) as { id: string };
+      const labMade = await send(labAdmin, 'POST', '/v1/profile_form/branches', HOSTS.lab, {
+        openerQuestionId: labOpener,
+        values: [labOptionId],
+      });
+      expect(labMade.status).toBe(201);
+      const labCreated = (await labMade.json()) as { id: string };
       const landed = await branchRows();
-      expect(landed.map((row) => row.tenant_id).sort()).toEqual(
-        [tenantIds.demo, tenantIds.lab].sort(),
+      expect(landed.find((row) => row.id === demoBranch.id)?.tenant_id).toBe(tenantIds.demo);
+      expect(landed.find((row) => row.id === labCreated.id)?.tenant_id).toBe(tenantIds.lab);
+
+      const edited = await send(
+        labAdmin,
+        'PATCH',
+        `/v1/profile_form/branches/${labEditable}`,
+        HOSTS.lab,
+        { revision: 1, name: 'Editado no lab' },
       );
+      expect(edited.status).toBe(200);
+      expect(
+        (await send(labAdmin, 'POST', `/v1/profile_form/branches/${labHolding}/archive`, HOSTS.lab))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await send(
+            labAdmin,
+            'POST',
+            `/v1/profile_form/branches/${labSleeping}/reactivate`,
+            HOSTS.lab,
+          )
+        ).status,
+      ).toBe(200);
+      const undone = await send(
+        labAdmin,
+        'POST',
+        `/v1/profile_form/branches/${labEditable}/undo`,
+        HOSTS.lab,
+      );
+      expect(undone.status).toBe(200);
 
       // His own list names his branch and no lab branch.
       const demoList = await send(demoAdmin, 'GET', '/v1/profile_form/questions', HOSTS.demo);
       expect(demoList.status).toBe(200);
       const demoText = await demoList.text();
-      const labBranch = landed.find((row) => row.tenant_id === tenantIds.lab);
-      const demoBranch = landed.find((row) => row.tenant_id === tenantIds.demo);
-      expect(demoText).toContain(demoBranch?.id ?? 'missing');
-      expect(demoText).not.toContain(labBranch?.id ?? 'missing');
+      expect(demoText).toContain(demoBranch.id);
+      for (const labId of [labHolding, labEditable, labSleeping, labCreated.id]) {
+        expect(demoText).not.toContain(labId);
+      }
     } finally {
       await sweep122();
       for (const [tenantId, enabled] of prior) {

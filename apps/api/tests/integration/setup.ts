@@ -917,6 +917,24 @@ export async function removeProfileFormByPrefix(prefix: string): Promise<void> {
 }
 
 /**
+ * 12.2-08 (D-641, T-12.2-01): every row of a tenant's profile form in ONE transaction with the deferrable keys
+ * deferred to its end: the answers, the questions, the branches and the steps. A branch and its opener
+ * question reference each other (`DEFERRABLE INITIALLY IMMEDIATE`), so deleting them in two statements, in
+ * either order, fails the immediate check; with `set constraints all deferred` the order inside the
+ * transaction does not matter and the pair is checked once, at commit, when both are gone. Use it wherever a
+ * test removes a tenant's form (a throwaway tenant, a tenant reset).
+ */
+export async function deleteProfileFormTenantData(tenantId: string): Promise<void> {
+  await adminSql.begin(async (tx) => {
+    await tx`set constraints all deferred`;
+    await tx`delete from public.profile_form_answers where tenant_id = ${tenantId}::uuid`;
+    await tx`delete from public.profile_form_questions where tenant_id = ${tenantId}::uuid`;
+    await tx`delete from public.profile_form_branches where tenant_id = ${tenantId}::uuid`;
+    await tx`delete from public.profile_form_steps where tenant_id = ${tenantId}::uuid`;
+  });
+}
+
+/**
  * 09.1-05 (D-486): a tenant's payment integration, seeded the way the Pagamentos screen will create it:
  * a uuid the application chooses BEFORE the insert (the sealed token is bound to it), the token sealed
  * with the same `sealSecret` the route opens it with, written through the migration role. Returns the

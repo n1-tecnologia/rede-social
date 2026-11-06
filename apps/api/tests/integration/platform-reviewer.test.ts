@@ -3,7 +3,14 @@ import { sqlClient } from '@rede-social/core/db';
 import { createReviewer, readAppCredential } from '@rede-social/core/server/apps/index';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { adminSql, api, authAdmin, SEED_PASSWORD, signInAs } from './setup';
+import {
+  adminSql,
+  api,
+  authAdmin,
+  deleteProfileFormTenantData,
+  SEED_PASSWORD,
+  signInAs,
+} from './setup';
 
 /**
  * Every line any logger writes in this file is captured, so the sentinel scan reads what a person tailing the
@@ -89,14 +96,12 @@ async function cleanup(): Promise<void> {
   const reviewers = await adminSql<{ id: string }[]>`
     select id from auth.users where email like 'app-review+%@pr-%'`;
   for (const { id } of reviewers) await authAdmin().deleteUser(id);
-  await adminSql`
-    delete from public.profile_form_questions
-     where tenant_id in (select id from public.tenants where slug like 'pr-%')`;
   // 12.1: the default-step trigger gives a tenant a step with its first question, and the steps table
-  // references `tenants`, so the steps go after the questions and before the tenants.
-  await adminSql`
-    delete from public.profile_form_steps
-     where tenant_id in (select id from public.tenants where slug like 'pr-%')`;
+  // references `tenants`, so the form goes before the tenants. 12.2: a branch and its opener question
+  // reference each other, so the answers, questions, branches and steps go in one deferred transaction.
+  const tenants = await adminSql<{ id: string }[]>`
+    select id::text as id from public.tenants where slug like 'pr-%'`;
+  for (const { id } of tenants) await deleteProfileFormTenantData(id);
   await adminSql`delete from public.tenants where slug like 'pr-%'`;
 }
 
