@@ -374,3 +374,81 @@ export function checkBranch(input: {
 
   return OK;
 }
+
+// ── INERT STUBS (12.2-04 task 2, RED commit only): neutral values so the tests fail on assertions. ──────────
+// The next commit (GREEN) replaces everything below this line with the real rules.
+
+/** An active branch hanging on an opener, with the titles of its active questions. */
+export type BranchDependents = {
+  id: string;
+  name: string | null;
+  openerQuestionId: string;
+  values: string[];
+  questions: BranchDependent[];
+};
+
+export function checkBranchEdit(_input: {
+  branch: BranchRuleBranch;
+  openerId?: string;
+  values?: readonly string[];
+  answeredQuestions: number;
+}): BranchCheck {
+  return OK;
+}
+
+export function dependentBranchesOf(
+  _branches: readonly BranchRuleBranch[],
+  _questions: readonly BranchRuleQuestion[],
+  _openerId: string,
+): BranchDependents[] {
+  return [];
+}
+
+export function checkOpenerChange(_input: {
+  questions: readonly BranchRuleQuestion[];
+  branches: readonly BranchRuleBranch[];
+  openerId: string;
+  archive?: boolean;
+  newType?: string;
+  removedOptionIds?: readonly string[];
+}): { issue: 'has_dependents'; branches: BranchDependents[] } | null {
+  return null;
+}
+
+export function checkMoveIntoBranch(_input: {
+  questions: readonly BranchRuleQuestion[];
+  branches: readonly BranchRuleBranch[];
+  layout: Layout;
+  questionId: string;
+  branchId: string | null;
+  answered: number;
+}): BranchCheck {
+  return OK;
+}
+
+export function checkReactivation(_input: {
+  questions: readonly BranchRuleQuestion[];
+  branches: readonly BranchRuleBranch[];
+  layout: Layout;
+  questionId: string;
+}): BranchCheck {
+  return OK;
+}
+
+export function checkArchiveBranch(_input: {
+  questions: readonly BranchRuleQuestion[];
+  branches: readonly BranchRuleBranch[];
+  branchId: string;
+  answeredBranchIds: ReadonlySet<string> | readonly string[];
+}): BranchCheck {
+  return OK;
+}
+
+export function checkReactivateBranch(_input: {
+  questions: readonly BranchRuleQuestion[];
+  branches: readonly BranchRuleBranch[];
+  branchId: string;
+  restoredQuestionIds?: readonly string[];
+}): BranchCheck {
+  return OK;
+}
