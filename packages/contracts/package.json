@@ -20,6 +20,7 @@
     "./native": "./src/native.ts",
     "./payments": "./src/payments.ts",
     "./profile-form": "./src/profile-form.ts",
+    "./profile-form-branches": "./src/profile-form-branches.ts",
     "./profiles": "./src/profiles.ts",
     "./projects": "./src/projects.ts",
     "./realtime": "./src/realtime.ts",

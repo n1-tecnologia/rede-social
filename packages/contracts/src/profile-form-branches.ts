@@ -1,55 +1,105 @@
 /**
  * 12.2-01 (D-641, D-644, D-645, PFORM-44, PFORM-54): the pure branch rules of the profile form.
  *
- * RED STUB: the functions below are deliberately inert so the failing tests of this commit fail on an
- * assertion for the planned behavior (a new module cannot be RED from an import error). The GREEN commit
- * replaces every function body; the fixture and the table are the specification and stay as they are.
+ * A branch is its own object: an opener question, the opening answers (any one opens it) and the questions
+ * that name it. A question in a branch is visible only when EVERY branch on its chain is open, the chain is
+ * at most `PROFILE_FORM_LIMITS.branchDepth` long, and a malformed tree (an unknown branch or opener, a
+ * cycle, a chain deeper than the limit) hides the question: the safe direction for a member (a hidden
+ * question is never owed) and for a reader (a hidden answer is never shown). No function here recurses.
+ *
+ * TypeScript twin of the SQL gate and purge of plans 06 and 07; both are asserted against
+ * `PROFILE_FORM_CHAIN_CASES`, so a new shape adds a row to that table in the same change.
  */
-import { answerTokens } from './profile-form';
-
-void answerTokens;
+import { PROFILE_FORM_LIMITS } from './profile-form';
 
 /** A branch as the rule needs it: only what the database stores. */
 export type ProfileFormBranchDef = {
   id: string;
   openerQuestionId: string;
+  /** Option ids, or `'true'` / `'false'`; ANY one of them opens the branch. Exact, case-sensitive strings. */
   values: readonly string[];
 };
 
+/** The two lookups the rule walks. `branchIdOf` answers `undefined` for a question it does not know. */
 export type BranchTree = {
   branch: (branchId: string) => ProfileFormBranchDef | undefined;
   branchIdOf: (questionId: string) => string | null | undefined;
 };
 
+/** Builds both lookups from plain arrays (the readers hold arrays, never maps). */
 export function branchTreeOf(
-  _questions: readonly { id: string; branchId?: string | null }[],
-  _branches: readonly ProfileFormBranchDef[],
+  questions: readonly { id: string; branchId?: string | null }[],
+  branches: readonly ProfileFormBranchDef[],
 ): BranchTree {
-  return { branch: () => undefined, branchIdOf: () => undefined };
+  const byBranch = new Map(branches.map((branch) => [branch.id, branch]));
+  const byQuestion = new Map(questions.map((question) => [question.id, question.branchId ?? null]));
+  return {
+    branch: (branchId) => byBranch.get(branchId),
+    branchIdOf: (questionId) => byQuestion.get(questionId),
+  };
 }
 
+/**
+ * The branches above a branch, nearest first and the branch itself first of all: `[B3, B2, B1]` for a branch
+ * three levels deep. `null` for an unknown branch, an unknown opener, a cycle or a chain longer than
+ * `PROFILE_FORM_LIMITS.branchDepth`. A bounded walk of at most `branchDepth` hops.
+ */
 export function branchChainOf(
-  _branchId: string,
-  _tree: BranchTree,
+  branchId: string,
+  tree: BranchTree,
 ): readonly ProfileFormBranchDef[] | null {
-  return [];
+  const chain: ProfileFormBranchDef[] = [];
+  let current: string | null = branchId;
+  for (let hops = 0; current !== null; hops += 1) {
+    if (hops >= PROFILE_FORM_LIMITS.branchDepth) return null;
+    const branch = tree.branch(current);
+    if (branch === undefined) return null;
+    chain.push(branch);
+    const next = tree.branchIdOf(branch.openerQuestionId);
+    if (next === undefined) return null;
+    current = next;
+  }
+  return chain;
 }
 
+/**
+ * Whether a question is shown (D-641, D-644): no branch is always visible; with one, every branch on its
+ * chain must be open, that is the opener's tokens share at least one value with the branch's values. A
+ * stale answer deeper in the chain therefore never keeps a question visible once a branch above it closed.
+ * `tokensOf` answers `undefined` for an opener it knows nothing about, which hides the question.
+ */
 export function isQuestionVisibleInTree(
-  _question: { branchId?: string | null },
-  _tree: BranchTree,
-  _tokensOf: (questionId: string) => readonly string[] | undefined,
+  question: { branchId?: string | null },
+  tree: BranchTree,
+  tokensOf: (questionId: string) => readonly string[] | undefined,
 ): boolean {
-  return true;
+  const branchId = question.branchId ?? null;
+  if (branchId === null) return true;
+  const chain = branchChainOf(branchId, tree);
+  if (chain === null) return false;
+  return chain.every((branch) => {
+    const tokens = tokensOf(branch.openerQuestionId);
+    return tokens !== undefined && branch.values.some((value) => tokens.includes(value));
+  });
 }
 
+/**
+ * The ids of the steps that hold at least one visible question, in the given step order. A step whose
+ * questions are all hidden, and a step with no question, are absent (the 12.1 `visibleSteps` shape with
+ * `branchId` in place of `condition`).
+ */
 export function visibleStepsInTree(
   steps: readonly { id: string }[],
-  _questions: readonly { id: string; stepId: string; branchId?: string | null }[],
-  _tree: BranchTree,
-  _tokensOf: (questionId: string) => readonly string[] | undefined,
+  questions: readonly { id: string; stepId: string; branchId?: string | null }[],
+  tree: BranchTree,
+  tokensOf: (questionId: string) => readonly string[] | undefined,
 ): string[] {
-  return steps.map((step) => step.id);
+  const withVisible = new Set(
+    questions
+      .filter((question) => isQuestionVisibleInTree(question, tree, tokensOf))
+      .map((question) => question.stepId),
+  );
+  return steps.filter((step) => withVisible.has(step.id)).map((step) => step.id);
 }
 
 // ── The parity table fixture (D-645): the team's own clinic wording, never the client's list ───────

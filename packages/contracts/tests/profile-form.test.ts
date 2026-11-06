@@ -135,6 +135,9 @@ describe('12-03 - the constants (D-590, D-591)', () => {
       valueBytes: 4096,
       steps: 10,
       stepTitle: 60,
+      branchDepth: 3,
+      branches: 15,
+      branchName: 60,
     });
   });
 

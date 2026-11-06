@@ -73,6 +73,16 @@ export const PROFILE_FORM_LIMITS = {
   steps: 10,
   /** One step title, in code points (UI-D-664). */
   stepTitle: 60,
+  /**
+   * Longest chain of branches above a question (D-644): a branch inside a branch inside a branch. The SQL
+   * gate unrolls exactly this many joins and the PF008 trigger of plan 06 refuses a deeper tree; a drift
+   * test reads this number against the migration text.
+   */
+  branchDepth: 3,
+  /** ACTIVE branches per tenant, counted under the admin lock (D-644). */
+  branches: 15,
+  /** One branch name, in code points after trimming (D-642); the name is admin-only. */
+  branchName: 60,
 } as const;
 
 /**
