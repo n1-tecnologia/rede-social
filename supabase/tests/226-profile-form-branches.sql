@@ -21,7 +21,7 @@ begin;
 -- for the questions Q1..Q7 (`…000000000001..7`), the branches B1..B4 (`…0000000000b1..b4`) and the options (`…0000000000e1..e3`).
 -- Rule: a new chain row adds a row in the contracts constant AND a line here, in the same change.
 -- Fixture ids use the `24000000-…` prefix, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(132);
+select plan(236);
 
 -- ── fixture helpers (rolled back with the file) ─────────────────────────────────────────────────
 -- One question row (always inside a step; a NULL branch is an unconditional question).
@@ -675,6 +675,553 @@ select set_eq($$ select question_id::text from app.profile_form_purge_closed() $
 reset role;
 select set_eq($$ select question_id::text from public.profile_form_answers where membership_id = '24000000-0000-4000-8000-030000000003' $$, $$ select unnest(tests.pf_keys('Q1')) $$,
   'T-12.2-06: only the opener answer is left');
+
+-- ── (5) the guards: PF006, PF007, PF008, PF009, PF010 and PF001..PF005 still firing (tenant G) ─
+-- Short id helpers for the guard lab: question n of G is `…0e00000000<nn>`, branch n is `…0d00000000<nn>`.
+create function tests.gq(n int) returns uuid language sql immutable as $$ select ('24000000-0000-4000-8000-0e00000000' || lpad(n::text, 2, '0'))::uuid $$;
+create function tests.gb(n int) returns uuid language sql immutable as $$ select ('24000000-0000-4000-8000-0d00000000' || lpad(n::text, 2, '0'))::uuid $$;
+select tests.tenant('pgtap-pf3-g', 'Pf3 G', '24000000-0000-4000-8000-010000000008');
+select tests.auth_user('member1@pf3-g.local', '24000000-0000-4000-8000-02000000000c');
+insert into public.memberships (id, tenant_id, user_id, role, status) values
+  ('24000000-0000-4000-8000-03000000000c', '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-02000000000c', 'member', 'active');
+insert into public.tenant_modules (tenant_id, module_key, enabled) values ('24000000-0000-4000-8000-010000000008', 'profile_form', true);
+insert into public.profile_form_steps (id, tenant_id, title, position) values
+  ('24000000-0000-4000-8000-050000000008', '24000000-0000-4000-8000-010000000008', 'Passo G', 1);
+-- G1 opener (g1, g2, g3); G6 a second opener; branches 1 (g1), 2 (g2, g3), 3 (g1), 4 (g3), all on G1.
+select tests.pf_q(tests.gq(1), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'single_choice', 'G abridor', 1, false,
+  '[{"id":"g1","label":"G um"},{"id":"g2","label":"G dois"},{"id":"g3","label":"G tres"}]'::jsonb);
+select tests.pf_q(tests.gq(6), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'single_choice', 'G outro abridor', 6, false,
+  '[{"id":"z1","label":"Z um"},{"id":"z2","label":"Z dois"}]'::jsonb);
+select tests.pf_b(tests.gb(1), '24000000-0000-4000-8000-010000000008', tests.gq(1), array['g1']);
+select tests.pf_b(tests.gb(2), '24000000-0000-4000-8000-010000000008', tests.gq(1), array['g2', 'g3']);
+select tests.pf_b(tests.gb(3), '24000000-0000-4000-8000-010000000008', tests.gq(1), array['g1']);
+select tests.pf_b(tests.gb(4), '24000000-0000-4000-8000-010000000008', tests.gq(1), array['g3']);
+-- G2 answered, no branch; G3 answered in branch 1; G4 unanswered, no branch; G5 answered in branch 2; G7 unanswered in branch 3;
+-- G8 multiple choice with Outro answered; G9 number answered; G10 plain and unanswered (the passing control of PF001..PF005).
+select tests.pf_q(tests.gq(2), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'G dois', 2);
+select tests.pf_q(tests.gq(3), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'G tres', 3, p_branch => tests.gb(1));
+select tests.pf_q(tests.gq(4), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'G quatro', 4);
+select tests.pf_q(tests.gq(5), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'G cinco', 5, p_branch => tests.gb(2));
+select tests.pf_q(tests.gq(7), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'G sete', 7, p_branch => tests.gb(3));
+select tests.pf_q(tests.gq(8), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'multiple_choice', 'G varias', 8, false,
+  '[{"id":"m1","label":"Um"},{"id":"m2","label":"Dois"},{"id":"m3","label":"Tres"}]'::jsonb, true);
+select tests.pf_q(tests.gq(9), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'number', 'G numero', 9, p_limits => '{"min":1,"max":10}'::jsonb);
+select tests.pf_q(tests.gq(10), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'G livre', 10);
+select tests.pf_a('24000000-0000-4000-8000-010000000008', tests.gq(1), '24000000-0000-4000-8000-03000000000c', '24000000-0000-4000-8000-02000000000c', '{"optionId":"g1","otherText":null}'::jsonb);
+select tests.pf_a('24000000-0000-4000-8000-010000000008', tests.gq(2), '24000000-0000-4000-8000-03000000000c', '24000000-0000-4000-8000-02000000000c', '"x"'::jsonb);
+select tests.pf_a('24000000-0000-4000-8000-010000000008', tests.gq(3), '24000000-0000-4000-8000-03000000000c', '24000000-0000-4000-8000-02000000000c', '"y"'::jsonb);
+select tests.pf_a('24000000-0000-4000-8000-010000000008', tests.gq(5), '24000000-0000-4000-8000-03000000000c', '24000000-0000-4000-8000-02000000000c', '"z"'::jsonb);
+select tests.pf_a('24000000-0000-4000-8000-010000000008', tests.gq(8), '24000000-0000-4000-8000-03000000000c', '24000000-0000-4000-8000-02000000000c', '{"optionIds":["m1"],"otherText":"Meu"}'::jsonb);
+select tests.pf_a('24000000-0000-4000-8000-010000000008', tests.gq(9), '24000000-0000-4000-8000-03000000000c', '24000000-0000-4000-8000-02000000000c', '5'::jsonb);
+
+-- PF006 on a QUESTION (D-646): an answered question may not enter or change branch; leaving passes.
+select throws_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(1) where id = tests.gq(2) $$,
+  'PF006', null, 'D-646/PF006: an answered question cannot ENTER a branch from none');
+select lives_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(1) where id = tests.gq(4) $$,
+  'D-646/PF006: the same edit passes on a question nobody answered (positive control)');
+select throws_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(2) where id = tests.gq(3) $$,
+  'PF006', null, 'PFORM-48 adjacency: an answered question cannot move from one branch to ANOTHER');
+select lives_ok(
+  $$ update public.profile_form_questions set title = 'G tres editada' where id = tests.gq(3) $$,
+  'D-646/PF006: an edit that leaves the branch alone passes on an answered question');
+select lives_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(1) where id = tests.gq(3) $$,
+  'D-646/PF006: setting the branch to the SAME branch passes (no change)');
+select lives_ok(
+  $$ update public.profile_form_questions set branch_id = null where id = tests.gq(3) $$,
+  'PFORM-48 adjacency: setting the branch of an answered question to null passes ("Desfazer ramo" needs it)');
+select throws_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(1) where id = tests.gq(3) $$,
+  'PF006', null, 'D-646/PF006: and entering it again afterwards is refused again (it is an entry, the question still has answers)');
+
+-- PF006 on a BRANCH: the opener and the SET of opening values freeze once a question of the branch has an answer.
+select throws_ok(
+  $$ update public.profile_form_branches set opener_question_id = tests.gq(6) where id = tests.gb(2) $$,
+  'PF006', null, 'D-646/PF006: a branch with an answered question cannot change opener');
+select throws_ok(
+  $$ update public.profile_form_branches set open_values = array['g2'] where id = tests.gb(2) $$,
+  'PF006', null, 'D-646/PF006: a branch with an answered question cannot REMOVE an opening value');
+select throws_ok(
+  $$ update public.profile_form_branches set open_values = array['g2', 'g3', 'g1'] where id = tests.gb(2) $$,
+  'PF006', null, 'D-646/PF006: and cannot ADD one either');
+select lives_ok(
+  $$ update public.profile_form_branches set open_values = array['g3', 'g2'] where id = tests.gb(2) $$,
+  'D-646/PF006: the same set in ANOTHER ORDER passes');
+select lives_ok(
+  $$ update public.profile_form_branches set open_values = array['g3', 'g2', 'g3'] where id = tests.gb(2) $$,
+  'D-646/PF006: the same set with a repeated value passes');
+select lives_ok(
+  $$ update public.profile_form_branches set name = 'Renomeado', revision = revision + 1 where id = tests.gb(2) $$,
+  'D-646/PF006: a NAME change (and a revision bump) passes on a branch with answers');
+select lives_ok(
+  $$ update public.profile_form_branches set archived_at = now() where id = tests.gb(2) $$,
+  'D-646/PF006: an ARCHIVE passes on a branch with answers');
+select lives_ok(
+  $$ update public.profile_form_branches set opener_question_id = tests.gq(6), open_values = array['z1'] where id = tests.gb(3) $$,
+  'PFORM-48 empty: a branch none of whose questions has an answer can change opener and values');
+select lives_ok(
+  $$ update public.profile_form_branches set opener_question_id = tests.gq(6), open_values = array['z2'] where id = tests.gb(4) $$,
+  'PFORM-48 empty: and so can a branch with no question at all');
+select is(
+  (select (tgtype & 3) || ':' || (tgtype & 16) from pg_trigger where tgname = 'profile_form_branches_guard' and tgrelid = 'public.profile_form_branches'::regclass),
+  '3:16', 'PFORM-48 ordering: the branch guard is a BEFORE UPDATE FOR EACH ROW trigger, so it runs after the row lock of the update');
+
+-- PF007: an opener with an ACTIVE branch (D-646). Independent of answers, so it fires BEFORE the early return.
+select tests.pf_q(tests.gq(11), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'single_choice', 'H abridor', 11, false,
+  '[{"id":"h1","label":"H um"},{"id":"h2","label":"H dois"},{"id":"h3","label":"H tres"}]'::jsonb);
+select tests.pf_b(tests.gb(11), '24000000-0000-4000-8000-010000000008', tests.gq(11), array['h1']);
+select throws_ok(
+  $$ update public.profile_form_questions set archived_at = now() where id = tests.gq(11) $$,
+  'PF007', null, 'PFORM-48 ordering/PF007: an UNANSWERED opener with an active branch cannot be archived (raised before the early return)');
+select throws_ok(
+  $$ update public.profile_form_questions set type = 'dropdown' where id = tests.gq(11) $$,
+  'PF007', null, 'D-646/PF007: an opener with an active branch cannot be retyped, even with no answer');
+select throws_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"h2","label":"H dois"},{"id":"h3","label":"H tres"}]'::jsonb where id = tests.gq(11) $$,
+  'PF007', null, 'D-646/PF007: an opener cannot lose an option id that an active branch references');
+select lives_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"h1","label":"H um"},{"id":"h2","label":"H dois"}]'::jsonb where id = tests.gq(11) $$,
+  'D-646/PF007: removing an option NO active branch references passes (positive control)');
+select lives_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"h1","label":"H primeiro"},{"id":"h2","label":"H dois"}]'::jsonb where id = tests.gq(11) $$,
+  'D-646/PF007: relabelling the referenced option keeps its id and passes');
+select throws_ok(
+  $$ update public.profile_form_questions set type = 'dropdown' where id = tests.gq(1) $$,
+  'PF007', null, 'D-646/PF007 ordering: an ANSWERED opener with an active branch gets PF007, not PF001 (PF007 is tested first)');
+update public.profile_form_branches set archived_at = now() where id = tests.gb(11);
+select lives_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"h2","label":"H dois"},{"id":"h4","label":"H quatro"}]'::jsonb where id = tests.gq(11) $$,
+  'D-646/PF007 archived: once the branch is archived the opener can lose the option it referenced');
+select lives_ok(
+  $$ update public.profile_form_questions set type = 'dropdown' where id = tests.gq(11) $$,
+  'D-646/PF007 archived: and can be retyped');
+select lives_ok(
+  $$ update public.profile_form_questions set archived_at = now() where id = tests.gq(11) $$,
+  'D-646/PF007 archived: and can be archived');
+
+-- PF008: a fourth level, a move that deepens, a cycle (T-12.2-07). Chain: F1 > B21 > F2 > B22 > F3 > B23 > F4.
+select tests.pf_q(tests.gq(21), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'F1', 21);
+select tests.pf_b(tests.gb(21), '24000000-0000-4000-8000-010000000008', tests.gq(21), array['true']);
+select tests.pf_q(tests.gq(22), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'F2', 22, p_branch => tests.gb(21));
+select tests.pf_b(tests.gb(22), '24000000-0000-4000-8000-010000000008', tests.gq(22), array['true']);
+select tests.pf_q(tests.gq(23), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'F3', 23, p_branch => tests.gb(22));
+select lives_ok(
+  $$ select tests.pf_b(tests.gb(23), '24000000-0000-4000-8000-010000000008', tests.gq(23), array['true']) $$,
+  'PFORM-46 boundary: a THIRD level (a branch opened by a question that sits in a second-level branch) is accepted');
+select tests.pf_q(tests.gq(24), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'F4', 24, p_branch => tests.gb(23));
+select throws_ok(
+  $$ select tests.pf_b(tests.gb(24), '24000000-0000-4000-8000-010000000008', tests.gq(24), array['true']) $$,
+  'PF008', null, 'chain row 11 (SQL form): a branch that would make a FOURTH level is refused by PF008 at insert (one step past the limit)');
+select tests.pf_b(tests.gb(26), '24000000-0000-4000-8000-010000000008', tests.gq(21), array['true']);
+select tests.pf_q(tests.gq(27), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'F7', 27, p_branch => tests.gb(26));
+select tests.pf_b(tests.gb(27), '24000000-0000-4000-8000-010000000008', tests.gq(27), array['true']);
+select tests.pf_q(tests.gq(28), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'F8', 28, p_branch => tests.gb(27));
+select throws_ok(
+  $$ update public.profile_form_branches set opener_question_id = tests.gq(24) where id = tests.gb(26) $$,
+  'PF008', null, 'T-12.2-07: moving a two-level subtree under a third-level question (fifth level) is refused');
+select throws_ok(
+  $$ update public.profile_form_branches set opener_question_id = tests.gq(23) where id = tests.gb(26) $$,
+  'PF008', null, 'T-12.2-07: moving it under a second-level question (a fourth level for its child) is refused');
+select lives_ok(
+  $$ update public.profile_form_branches set opener_question_id = tests.gq(22) where id = tests.gb(26) $$,
+  'T-12.2-07: the positive control, moving it under a question of a first-level branch keeps three levels and passes');
+select throws_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(23) where id = tests.gq(27) $$,
+  'PF008', null, 'T-12.2-07: moving a question that opens a branch into a third-level branch makes a fourth level and is refused');
+select tests.pf_q(tests.gq(31), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'C1', 31);
+select tests.pf_q(tests.gq(32), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'C2', 32);
+select tests.pf_b(tests.gb(31), '24000000-0000-4000-8000-010000000008', tests.gq(31), array['v']);
+select tests.pf_b(tests.gb(32), '24000000-0000-4000-8000-010000000008', tests.gq(32), array['v']);
+select lives_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(32) where id = tests.gq(31) $$,
+  'T-12.2-07: the first half of a would-be cycle (C1 inside the branch C2 opens) is a legal chain and passes');
+select throws_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(31) where id = tests.gq(32) $$,
+  'PF008', null, 'T-12.2-07: closing the loop (C2 inside the branch C1 opens) is a cycle and is refused by PF008');
+
+-- PF009 (T-12.2-02, WR-06): a question shown on the profile under an opener that is not shown, at depths 1, 2 and 3.
+select tests.pf_q(tests.gq(41), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'P1 privada', 41);
+select tests.pf_b(tests.gb(41), '24000000-0000-4000-8000-010000000008', tests.gq(41), array['true']);
+select throws_ok(
+  $$ select tests.pf_q(tests.gq(42), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'P2 publica', 42, p_branch => tests.gb(41), p_show => true) $$,
+  'PF009', null, 'T-12.2-02 depth 1: a PUBLIC question inserted under a PRIVATE opener is refused');
+select lives_ok(
+  $$ select tests.pf_q(tests.gq(42), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'P2 privada', 42, p_branch => tests.gb(41)) $$,
+  'T-12.2-02 depth 1: the passing counterpart, the same question private');
+select throws_ok(
+  $$ update public.profile_form_questions set show_on_profile = true where id = tests.gq(42) $$,
+  'PF009', null, 'T-12.2-02 depth 1: making it public while the opener is private is refused');
+select lives_ok(
+  $$ update public.profile_form_questions set show_on_profile = true where id = tests.gq(41) $$,
+  'T-12.2-02: making the OPENER public first passes');
+select lives_ok(
+  $$ update public.profile_form_questions set show_on_profile = true where id = tests.gq(42) $$,
+  'T-12.2-02: and now the dependent can be public');
+select throws_ok(
+  $$ update public.profile_form_questions set show_on_profile = false where id = tests.gq(41) $$,
+  'PF009', null, 'T-12.2-02: turning the OPENER private while a public question hangs on it is refused');
+select lives_ok(
+  $$ update public.profile_form_questions set show_on_profile = false where id in (tests.gq(41), tests.gq(42)) $$,
+  'T-12.2-02: turning both private in one statement passes (the check sees the end of the statement)');
+-- A moved question: P3 is public under the public opener P4; moving it into the private P1 chain is refused.
+select tests.pf_q(tests.gq(44), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'P4 publica', 44, p_show => true);
+select tests.pf_b(tests.gb(42), '24000000-0000-4000-8000-010000000008', tests.gq(44), array['true']);
+select tests.pf_q(tests.gq(43), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'P3 publica', 43, p_branch => tests.gb(42), p_show => true);
+select throws_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(41) where id = tests.gq(43) $$,
+  'PF009', null, 'T-12.2-02: moving a PUBLIC question into a chain whose opener is private is refused');
+select tests.pf_b(tests.gb(43), '24000000-0000-4000-8000-010000000008', tests.gq(44), array['false']);
+select lives_ok(
+  $$ update public.profile_form_questions set branch_id = tests.gb(43) where id = tests.gq(43) $$,
+  'T-12.2-02: the passing counterpart, moving it to another branch of a PUBLIC opener');
+-- Depth 2: an ARCHIVED public question P5 sits under the private P1 (archived rows are not judged themselves), P6 hangs on P5.
+select tests.pf_q(tests.gq(45), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'P5 arquivada publica', 45, p_branch => tests.gb(41), p_archived => true, p_show => true);
+select tests.pf_b(tests.gb(45), '24000000-0000-4000-8000-010000000008', tests.gq(45), array['true']);
+select throws_ok(
+  $$ select tests.pf_q(tests.gq(46), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'P6 publica', 46, p_branch => tests.gb(45), p_show => true) $$,
+  'PF009', null, 'T-12.2-02 depth 2: a public question whose SECOND opener up the chain is private is refused');
+select lives_ok(
+  $$ select tests.pf_q(tests.gq(46), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'P6 privada', 46, p_branch => tests.gb(45)) $$,
+  'T-12.2-02 depth 2: the passing counterpart, the same question private');
+-- Depth 3: P7 archived public under P5 (itself archived public under the private P1), P8 hangs on P7.
+select tests.pf_q(tests.gq(47), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'yes_no', 'P7 arquivada publica', 47, p_branch => tests.gb(45), p_archived => true, p_show => true);
+select tests.pf_b(tests.gb(47), '24000000-0000-4000-8000-010000000008', tests.gq(47), array['true']);
+select throws_ok(
+  $$ select tests.pf_q(tests.gq(48), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'P8 publica', 48, p_branch => tests.gb(47), p_show => true) $$,
+  'PF009', null, 'T-12.2-02 depth 3: a public question whose THIRD opener up the chain is private is refused');
+select lives_ok(
+  $$ select tests.pf_q(tests.gq(48), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'P8 privada', 48, p_branch => tests.gb(47)) $$,
+  'T-12.2-02 depth 3: the passing counterpart, the same question private');
+
+-- PF010: the retired condition pair can no longer be written.
+select throws_ok(
+  $$ insert into public.profile_form_questions (tenant_id, step_id, type, title, position, created_by_user_id, condition_question_id, condition_values)
+     values ('24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'Legado', 60, '24000000-0000-4000-8000-020000000001', tests.gq(6), array['z1']) $$,
+  'PF010', null, 'T-12.2-08/PF010: inserting a question that carries the legacy condition pair is refused');
+select lives_ok(
+  $$ select tests.pf_q(tests.gq(60), '24000000-0000-4000-8000-010000000008', '24000000-0000-4000-8000-050000000008', 'short_text', 'Sem legado', 60) $$,
+  'T-12.2-08/PF010: the positive control, the same insert without the pair');
+select throws_ok(
+  $$ update public.profile_form_questions set condition_question_id = tests.gq(6), condition_values = array['z1'] where id = tests.gq(60) $$,
+  'PF010', null, 'T-12.2-08/PF010: updating a question to GAIN the legacy pair is refused');
+select lives_ok(
+  $$ update public.profile_form_questions set condition_question_id = null, condition_values = null, title = 'Sem legado 2' where id = tests.gq(60) $$,
+  'T-12.2-08/PF010: an update that leaves the pair null passes');
+
+-- PF001..PF005 still fire (the answered G2, G8, G9) and pass on the unanswered G10.
+select throws_ok(
+  $$ update public.profile_form_questions set type = 'long_text' where id = tests.gq(2) $$,
+  'PF001', null, 'PF001 still fires: the type of an answered question cannot change');
+select throws_ok(
+  $$ update public.profile_form_questions set options = '[{"id":"m2","label":"Dois"},{"id":"m3","label":"Tres"}]'::jsonb where id = tests.gq(8) $$,
+  'PF002', null, 'PF002 still fires: an answered option cannot be removed');
+select throws_ok(
+  $$ update public.profile_form_questions set allow_other = false where id = tests.gq(8) $$,
+  'PF003', null, 'PF003 still fires: Outro cannot be turned off while an Outro answer exists');
+select throws_ok(
+  $$ update public.profile_form_questions set show_on_profile = true where id = tests.gq(2) $$,
+  'PF004', null, 'PF004 still fires: a private answered question cannot become public');
+select throws_ok(
+  $$ update public.profile_form_questions set limits = '{"min":2,"max":10}'::jsonb where id = tests.gq(9) $$,
+  'PF005', null, 'PF005 still fires: a number minimum that rises is refused');
+select lives_ok(
+  $$ update public.profile_form_questions set type = 'long_text', show_on_profile = true where id = tests.gq(10) $$,
+  'PF001/PF004: the same edits pass on a question nobody answered (positive control)');
+
+-- ── (6) the conversion replayed on 12.1-shaped rows (tenant R) ─────────────────────────────────
+-- The statements of the `do` block of 20261106180523_profile_form_branches_functions.sql, copied into a function so they can
+-- run twice. The 12.1 rows are written with the user triggers OFF (the new guards did not exist when they were written, and
+-- the migration converts before it installs the question guard) and the conversion runs in the same state.
+create function tests.pf_convert() returns void language plpgsql as $$
+declare
+  t uuid;
+begin
+  for t in
+    select distinct q.tenant_id
+      from public.profile_form_questions q
+     where q.condition_question_id is not null
+       and q.branch_id is null
+     order by 1
+  loop
+    perform pg_advisory_xact_lock(hashtextextended('profile_form:' || t::text, 0));
+
+    update public.profile_form_questions d
+       set show_on_profile = false
+      from public.profile_form_questions o
+     where d.tenant_id = t
+       and d.archived_at is null
+       and d.show_on_profile
+       and d.branch_id is null
+       and d.condition_question_id is not null
+       and o.tenant_id = d.tenant_id
+       and o.id = d.condition_question_id
+       and not o.show_on_profile;
+
+    insert into public.profile_form_branches (tenant_id, opener_question_id, open_values)
+    select distinct q.tenant_id,
+           q.condition_question_id,
+           array(select v from unnest(q.condition_values) v order by v)
+      from public.profile_form_questions q
+     where q.tenant_id = t
+       and q.condition_question_id is not null
+       and q.branch_id is null;
+
+    update public.profile_form_questions q
+       set branch_id = b.id
+      from public.profile_form_branches b
+     where q.tenant_id = t
+       and q.branch_id is null
+       and q.condition_question_id is not null
+       and b.tenant_id = q.tenant_id
+       and b.opener_question_id = q.condition_question_id
+       and b.open_values = array(select v from unnest(q.condition_values) v order by v);
+  end loop;
+end
+$$;
+select tests.tenant('pgtap-pf3-r', 'Pf3 R', '24000000-0000-4000-8000-010000000009');
+select tests.auth_user('member1@pf3-r.local', '24000000-0000-4000-8000-02000000000d');
+insert into public.memberships (id, tenant_id, user_id, role, status) values
+  ('24000000-0000-4000-8000-03000000000d', '24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-02000000000d', 'member', 'active');
+insert into public.profile_form_steps (id, tenant_id, title, position) values
+  ('24000000-0000-4000-8000-050000000009', '24000000-0000-4000-8000-010000000009', 'Passo R', 1);
+alter table public.profile_form_questions disable trigger user;
+-- Ro1 single choice (public), Ro2 yes/no PRIVATE, Ru1 plain. Rd1 conditional + ANSWERED, Rd2 the same pair ARCHIVED,
+-- Rd3 (r2, r1) a different set, Rd4 a PUBLIC dependent of the PRIVATE Ro2.
+insert into public.profile_form_questions (id, tenant_id, step_id, type, title, required, options, position, show_on_profile, archived_at, created_by_user_id, condition_question_id, condition_values) values
+  ('24000000-0000-4000-8000-0f0000000001', '24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-050000000009', 'single_choice', 'R abridor um', false, '[{"id":"r1","label":"R um"},{"id":"r2","label":"R dois"}]', 1, true, null, '24000000-0000-4000-8000-020000000001', null, null),
+  ('24000000-0000-4000-8000-0f0000000002', '24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-050000000009', 'yes_no', 'R abridor dois', false, '[]', 2, false, null, '24000000-0000-4000-8000-020000000001', null, null),
+  ('24000000-0000-4000-8000-0f0000000003', '24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-050000000009', 'short_text', 'R plana', false, '[]', 3, false, null, '24000000-0000-4000-8000-020000000001', null, null),
+  ('24000000-0000-4000-8000-0f0000000011', '24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-050000000009', 'short_text', 'R dependente respondida', true, '[]', 4, false, null, '24000000-0000-4000-8000-020000000001', '24000000-0000-4000-8000-0f0000000001', array['r1']),
+  ('24000000-0000-4000-8000-0f0000000012', '24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-050000000009', 'short_text', 'R dependente arquivada', true, '[]', 5, false, now(), '24000000-0000-4000-8000-020000000001', '24000000-0000-4000-8000-0f0000000001', array['r1']),
+  ('24000000-0000-4000-8000-0f0000000013', '24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-050000000009', 'short_text', 'R dependente de dois', false, '[]', 6, false, null, '24000000-0000-4000-8000-020000000001', '24000000-0000-4000-8000-0f0000000001', array['r2', 'r1']),
+  ('24000000-0000-4000-8000-0f0000000014', '24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-050000000009', 'short_text', 'R dependente publica de privada', false, '[]', 7, true, null, '24000000-0000-4000-8000-020000000001', '24000000-0000-4000-8000-0f0000000002', array['true']);
+select tests.pf_a('24000000-0000-4000-8000-010000000009', '24000000-0000-4000-8000-0f0000000011', '24000000-0000-4000-8000-03000000000d', '24000000-0000-4000-8000-02000000000d', '"respondida"'::jsonb);
+select is((select count(*)::int from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000009'), 0,
+  'T-12.2-18: tenant R holds 12.1-shaped rows and no branch before the conversion');
+create temp table pf_before_a as
+  select (select string_agg(ctid::text, ',' order by id) from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000001') as qs,
+         (select string_agg(ctid::text, ',' order by id) from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000001') as bs;
+select tests.pf_convert();
+alter table public.profile_form_questions enable trigger user;
+select is((select count(*)::int from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000009'), 3,
+  'T-12.2-18: three distinct (opener, sorted values) pairs give exactly three branches');
+select set_eq(
+  $$ select opener_question_id::text || '|' || array_to_string(open_values, ',') from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000009' $$,
+  $$ values ('24000000-0000-4000-8000-0f0000000001|r1'), ('24000000-0000-4000-8000-0f0000000001|r1,r2'), ('24000000-0000-4000-8000-0f0000000002|true') $$,
+  'T-12.2-18: the branches are (Ro1, r1), (Ro1, r1 r2 SORTED) and (Ro2, true)');
+select is((select count(*)::int from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000009' and name is null and revision = 1 and archived_at is null), 3,
+  'T-12.2-18: every converted branch is nameless, revision 1 and active');
+select is((select count(distinct branch_id)::int from public.profile_form_questions where id in ('24000000-0000-4000-8000-0f0000000011', '24000000-0000-4000-8000-0f0000000012')), 1,
+  'T-12.2-18: the answered dependent and the ARCHIVED one with the same pair point at the SAME branch');
+select is((select count(*)::int from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000009' and condition_question_id is not null and branch_id is not null), 4,
+  'T-12.2-18: every legacy dependent (archived included) points at a branch');
+select is((select branch_id::text from public.profile_form_questions where id = '24000000-0000-4000-8000-0f0000000013'),
+  (select id::text from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000009' and open_values = array['r1', 'r2']),
+  'T-12.2-18: the dependent with (r2, r1) points at the branch with the SORTED set');
+select is((select count(*)::int from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000009' and branch_id is null and condition_question_id is null), 3,
+  'T-12.2-18: the openers and the plain question are untouched (no branch)');
+select is((select string_agg(condition_question_id::text || ':' || array_to_string(condition_values, ','), ';' order by id) from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000009' and condition_question_id is not null),
+  '24000000-0000-4000-8000-0f0000000001:r1;24000000-0000-4000-8000-0f0000000001:r1;24000000-0000-4000-8000-0f0000000001:r2,r1;24000000-0000-4000-8000-0f0000000002:true',
+  'T-12.2-18: the legacy columns are untouched (the values keep their original order)');
+select is((select count(*)::int from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000009' and revision = 1), 7,
+  'T-12.2-18: no revision was bumped');
+select is((select show_on_profile::text from public.profile_form_questions where id = '24000000-0000-4000-8000-0f0000000014'), 'false',
+  'T-12.2-02/T-12.2-18: the public dependent of a PRIVATE opener became private (so PF009 never meets a legacy row)');
+select is((select show_on_profile::text from public.profile_form_questions where id = '24000000-0000-4000-8000-0f0000000001'), 'true',
+  'T-12.2-18: and a public opener stays public');
+select is((select count(*)::int from public.profile_form_answers where tenant_id = '24000000-0000-4000-8000-010000000009'), 1,
+  'T-12.2-18: the answer to the answered dependent is untouched');
+create temp table pf_after_one as
+  select (select string_agg(ctid::text, ',' order by id) from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000009') as qs,
+         (select string_agg(ctid::text, ',' order by id) from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000009') as bs;
+alter table public.profile_form_questions disable trigger user;
+select tests.pf_convert();
+alter table public.profile_form_questions enable trigger user;
+select is((select count(*)::int from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000009'), 3,
+  'T-12.2-18 idempotency: a second replay adds no branch');
+select is(
+  (select qs || '|' || bs from pf_after_one),
+  (select (select string_agg(ctid::text, ',' order by id) from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000009') || '|'
+       || (select string_agg(ctid::text, ',' order by id) from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000009')),
+  'T-12.2-18 idempotency: a second replay rewrites no row (every row keeps its physical tuple)');
+select is(
+  (select qs || '|' || bs from pf_before_a),
+  (select (select string_agg(ctid::text, ',' order by id) from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000001') || '|'
+       || (select string_agg(ctid::text, ',' order by id) from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-010000000001')),
+  'T-12.2-18 empty: a tenant with no legacy condition (A) is untouched by both replays');
+-- With the guards back on: a row that already carries the pair passes an edit that leaves it alone, and clearing it passes.
+select lives_ok(
+  $$ update public.profile_form_questions set title = 'R dependente respondida editada' where id = '24000000-0000-4000-8000-0f0000000011' $$,
+  'T-12.2-08/PF010: a converted row that still carries the pair passes an edit that does not touch it (and PF006 sees no branch change)');
+select lives_ok(
+  $$ update public.profile_form_questions set condition_question_id = null, condition_values = null where id = '24000000-0000-4000-8000-0f0000000011' $$,
+  'T-12.2-08/PF010: and clearing the pair passes');
+select throws_ok(
+  $$ update public.profile_form_questions set condition_question_id = '24000000-0000-4000-8000-0f0000000001', condition_values = array['r2'] where id = '24000000-0000-4000-8000-0f0000000011' $$,
+  'PF010', null, 'T-12.2-08/PF010: and writing a pair back afterwards is refused');
+
+-- ── (7) the lock functions and the grants ──────────────────────────────────────────────────────
+select ok(pg_get_function_result('app.profile_form_lock_active_v3()'::regprocedure) like '%branch_id uuid%'
+      and pg_get_function_result('app.profile_form_lock_active_v3()'::regprocedure) not like '%condition_question_id%'
+      and pg_get_function_result('app.profile_form_lock_active_v3()'::regprocedure) not like '%condition_values%',
+  'D-596 lock v3: returns branch_id and NOT the two condition columns');
+select ok(pg_get_function_result('app.profile_form_lock_branches()'::regprocedure) not like '%name%'
+      and pg_get_function_result('app.profile_form_lock_branches()'::regprocedure) like '%opener_question_id uuid%'
+      and pg_get_function_result('app.profile_form_lock_branches()'::regprocedure) like '%open_values text[]%',
+  'D-596 lock branches: returns the opener, the opening values, the revision and the archive stamp, and NO name column');
+select tests.as_tenant('24000000-0000-4000-8000-010000000001', '24000000-0000-4000-8000-020000000003', 'member');
+select results_eq(
+  $$ select id::text from app.profile_form_lock_active_v3() $$,
+  $$ select id::text from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-010000000001' and archived_at is null order by position, created_at, id $$,
+  'D-596 lock v3: a member session reads A''s ACTIVE questions in position, created_at, id order');
+select results_eq(
+  $$ select branch_id::text from app.profile_form_lock_active_v3() where id = '24000000-0000-4000-8000-000000000007' $$,
+  array['24000000-0000-4000-8000-0000000000b4'], 'D-596 lock v3: the row carries branch_id');
+select is_empty(
+  $$ select 1 from app.profile_form_lock_active_v3() where id in ('24000000-0000-4000-8000-000000000002', '24000000-0000-4000-8000-000000000006') $$,
+  'D-596 lock v3: ARCHIVED questions are not returned');
+select set_eq(
+  $$ select id::text from app.profile_form_lock_branches() $$,
+  $$ values ('24000000-0000-4000-8000-0000000000b1'), ('24000000-0000-4000-8000-0000000000b2'), ('24000000-0000-4000-8000-0000000000b3'), ('24000000-0000-4000-8000-0000000000b4') $$,
+  'D-596 lock branches: a member of A reads exactly A''s four branches, archived ones included');
+select is((select count(*)::int from app.profile_form_lock_branches() where archived_at is not null), 3,
+  'D-596 lock branches: the archive stamp is returned (B1, B2, B3 were archived in section 4)');
+select is_empty(
+  $$ select 1 from app.profile_form_lock_branches() where id = '24000000-0000-4000-8000-0b0000000001' $$,
+  'T-12.2-01 cross-tenant: and none of B''s');
+reset role;
+select tests.as_tenant('24000000-0000-4000-8000-010000000002', '24000000-0000-4000-8000-020000000006', 'member');
+select set_eq(
+  $$ select id::text from app.profile_form_lock_branches() $$,
+  $$ values ('24000000-0000-4000-8000-0b0000000001') $$,
+  'T-12.2-01 cross-tenant: a member of B gets exactly B''s one branch and none of A''s (the positive control for the zero above)');
+select set_eq(
+  $$ select id::text from app.profile_form_lock_active_v3() $$,
+  $$ values ('24000000-0000-4000-8000-060000000001'), ('24000000-0000-4000-8000-060000000002'), ('24000000-0000-4000-8000-060000000003') $$,
+  'T-12.2-01 cross-tenant: a member of B reads exactly B''s three active questions from the v3 lock');
+reset role;
+select tests.as_tenant('24000000-0000-4000-8000-010000000004', '24000000-0000-4000-8000-020000000008', 'member');
+select is_empty($$ select 1 from app.profile_form_lock_branches() $$, 'T-12.2-01: a member of a tenant with no branch gets none');
+reset role;
+select tests.as_tenant('24000000-0000-4000-8000-010000000001', '24000000-0000-4000-8000-020000000001', 'admin_tenant');
+select lives_ok($$ select * from app.profile_form_lock_branches() $$, 'D-596 lock branches: an admin_tenant session can call it');
+reset role;
+select tests.as_tenant_without_claims();
+select is_empty($$ select 1 from app.profile_form_lock_branches() $$, 'T-12.2-01: a session with no claims reads nothing from the branch lock');
+select is_empty($$ select 1 from app.profile_form_lock_active_v3() $$, 'T-12.2-01: nor from the v3 lock');
+reset role;
+select ok(
+  has_function_privilege('authenticated', 'app.profile_form_lock_active_v3()', 'execute')
+    and has_function_privilege('api_user', 'app.profile_form_lock_active_v3()', 'execute')
+    and has_function_privilege('service_role', 'app.profile_form_lock_active_v3()', 'execute')
+    and not has_function_privilege('anon', 'app.profile_form_lock_active_v3()', 'execute'),
+  'D-596: the v3 lock is executable by authenticated, api_user and service_role, never by anon');
+select ok(
+  has_function_privilege('authenticated', 'app.profile_form_lock_branches()', 'execute')
+    and has_function_privilege('api_user', 'app.profile_form_lock_branches()', 'execute')
+    and has_function_privilege('service_role', 'app.profile_form_lock_branches()', 'execute')
+    and not has_function_privilege('anon', 'app.profile_form_lock_branches()', 'execute'),
+  'D-596: the branch lock is executable by authenticated, api_user and service_role, never by anon');
+select ok(
+  has_function_privilege('authenticated', 'app.profile_form_purge_closed()', 'execute')
+    and has_function_privilege('api_user', 'app.profile_form_purge_closed()', 'execute')
+    and has_function_privilege('service_role', 'app.profile_form_purge_closed()', 'execute')
+    and not has_function_privilege('anon', 'app.profile_form_purge_closed()', 'execute'),
+  'D-596: the purge is executable by authenticated, api_user and service_role, never by anon');
+select ok(
+  not has_function_privilege('authenticated', 'app.profile_form_missing(uuid,uuid)', 'execute')
+    and not has_function_privilege('anon', 'app.profile_form_missing(uuid,uuid)', 'execute')
+    and has_function_privilege('api_user', 'app.profile_form_missing(uuid,uuid)', 'execute')
+    and has_function_privilege('service_role', 'app.profile_form_missing(uuid,uuid)', 'execute'),
+  'D-596: the gate stays callable by api_user and service_role only, never by a session');
+select tests.as_tenant('24000000-0000-4000-8000-010000000001', '24000000-0000-4000-8000-020000000003', 'member');
+select throws_ok(
+  $$ select app.profile_form_missing('24000000-0000-4000-8000-010000000001', '24000000-0000-4000-8000-030000000003') $$,
+  '42501', null, 'D-596: a member session cannot probe the two-argument gate (42501)');
+reset role;
+select ok(
+  not (has_function_privilege('authenticated', 'app.profile_form_question_guard()', 'execute')
+    or has_function_privilege('authenticated', 'app.profile_form_branch_guard()', 'execute')
+    or has_function_privilege('authenticated', 'app.profile_form_tree_guard()', 'execute')
+    or has_function_privilege('authenticated', 'app.profile_form_legacy_condition_guard()', 'execute')
+    or has_function_privilege('anon', 'app.profile_form_tree_guard()', 'execute')),
+  'D-596: the four guard functions are revoked from public (no session can call them)');
+select is(
+  (select count(*)::int from pg_proc
+    where oid in ('app.profile_form_lock_active_v3()'::regprocedure, 'app.profile_form_lock_branches()'::regprocedure,
+                  'app.profile_form_purge_closed()'::regprocedure, 'app.profile_form_missing(uuid,uuid)'::regprocedure,
+                  'app.profile_form_question_guard()'::regprocedure, 'app.profile_form_branch_guard()'::regprocedure,
+                  'app.profile_form_tree_guard()'::regprocedure, 'app.profile_form_legacy_condition_guard()'::regprocedure)
+      and proconfig @> array['search_path=""']),
+  8, 'D-596: all eight functions of the branches migration set an empty search_path');
+
+-- ── (8) the cost: a 30-question form with a depth-3 tree and 15 branches (tenant J) ────────────
+-- Five chains: top yes/no > L1 branch > yes/no > L2 branch > yes/no > L3 branch > required text. 5 + 5 + 5 + 5 = 20 questions,
+-- 15 branches, plus 10 unconditional required questions = 30 questions. Question ids `…0a<lvl><9 digits>`, branches `…0b<lvl>…`.
+select tests.tenant('pgtap-pf3-j', 'Pf3 J', '24000000-0000-4000-8000-01000000000a');
+select tests.auth_user('member1@pf3-j.local', '24000000-0000-4000-8000-02000000000e');
+insert into public.memberships (id, tenant_id, user_id, role, status) values
+  ('24000000-0000-4000-8000-03000000000e', '24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-02000000000e', 'member', 'active');
+insert into public.tenant_modules (tenant_id, module_key, enabled) values ('24000000-0000-4000-8000-01000000000a', 'profile_form', true);
+insert into public.profile_form_steps (id, tenant_id, title, position) values
+  ('24000000-0000-4000-8000-050000000010', '24000000-0000-4000-8000-01000000000a', 'Passo J', 1);
+insert into public.profile_form_questions (id, tenant_id, step_id, type, title, required, position, created_by_user_id)
+select ('24000000-0000-4000-8000-0a0' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-050000000010',
+       'yes_no', 'J topo ' || i, false, i, '24000000-0000-4000-8000-020000000001'
+  from generate_series(1, 5) i;
+insert into public.profile_form_branches (id, tenant_id, opener_question_id, open_values)
+select ('24000000-0000-4000-8000-0b1' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-01000000000a',
+       ('24000000-0000-4000-8000-0a0' || lpad(i::text, 9, '0'))::uuid, array['true']
+  from generate_series(1, 5) i;
+insert into public.profile_form_questions (id, tenant_id, step_id, type, title, required, position, branch_id, created_by_user_id)
+select ('24000000-0000-4000-8000-0a1' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-050000000010',
+       'yes_no', 'J nivel um ' || i, false, 10 + i, ('24000000-0000-4000-8000-0b1' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-020000000001'
+  from generate_series(1, 5) i;
+insert into public.profile_form_branches (id, tenant_id, opener_question_id, open_values)
+select ('24000000-0000-4000-8000-0b2' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-01000000000a',
+       ('24000000-0000-4000-8000-0a1' || lpad(i::text, 9, '0'))::uuid, array['true']
+  from generate_series(1, 5) i;
+insert into public.profile_form_questions (id, tenant_id, step_id, type, title, required, position, branch_id, created_by_user_id)
+select ('24000000-0000-4000-8000-0a2' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-050000000010',
+       'yes_no', 'J nivel dois ' || i, false, 20 + i, ('24000000-0000-4000-8000-0b2' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-020000000001'
+  from generate_series(1, 5) i;
+insert into public.profile_form_branches (id, tenant_id, opener_question_id, open_values)
+select ('24000000-0000-4000-8000-0b3' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-01000000000a',
+       ('24000000-0000-4000-8000-0a2' || lpad(i::text, 9, '0'))::uuid, array['true']
+  from generate_series(1, 5) i;
+insert into public.profile_form_questions (id, tenant_id, step_id, type, title, required, position, branch_id, created_by_user_id)
+select ('24000000-0000-4000-8000-0a3' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-050000000010',
+       'short_text', 'J nivel tres ' || i, true, 30 + i, ('24000000-0000-4000-8000-0b3' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-020000000001'
+  from generate_series(1, 5) i;
+insert into public.profile_form_questions (id, tenant_id, step_id, type, title, required, position, created_by_user_id)
+select ('24000000-0000-4000-8000-0a4' || lpad(i::text, 9, '0'))::uuid, '24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-050000000010',
+       'short_text', 'J obrigatoria ' || i, true, 40 + i, '24000000-0000-4000-8000-020000000001'
+  from generate_series(1, 10) i;
+select is((select count(*)::int from public.profile_form_questions where tenant_id = '24000000-0000-4000-8000-01000000000a'), 30, 'T-12.2-10: the cost form holds 30 questions');
+select is((select count(*)::int from public.profile_form_branches where tenant_id = '24000000-0000-4000-8000-01000000000a'), 15, 'T-12.2-10: and 15 branches');
+select is(app.profile_form_missing('24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-03000000000e'), 10,
+  'T-12.2-10: nothing answered, the 30-question form owes only its ten unconditional required questions');
+insert into public.profile_form_answers (tenant_id, question_id, membership_id, user_id, value)
+select '24000000-0000-4000-8000-01000000000a', ('24000000-0000-4000-8000-0a' || lvl || lpad(i::text, 9, '0'))::uuid,
+       '24000000-0000-4000-8000-03000000000e', '24000000-0000-4000-8000-02000000000e', 'true'::jsonb
+  from generate_series(0, 2) lvl, generate_series(1, 5) i;
+select is(app.profile_form_missing('24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-03000000000e'), 15,
+  'PFORM-46 boundary: with all fifteen openers answered true the depth-3 form owes 5 level-3 questions and the 10 plain ones, in ONE call');
+select is(
+  (select array_length(string_to_array(regexp_replace(prosrc, '--[^\n]*', '', 'g'), ';'), 1)
+     from pg_proc where oid = 'app.profile_form_missing(uuid,uuid)'::regprocedure),
+  1, 'T-12.2-10: the gate is ONE statement (no semicolon in the body once comments are stripped)');
+select ok(
+  (select prolang = (select oid from pg_language where lanname = 'sql') and prosrc !~* '\m(loop|perform|execute|recursive)\M'
+     from pg_proc where oid = 'app.profile_form_missing(uuid,uuid)'::regprocedure),
+  'T-12.2-10: a plain SQL function: no loop, no perform, no execute, no recursion');
+update public.profile_form_answers set value = 'false'::jsonb
+ where membership_id = '24000000-0000-4000-8000-03000000000e' and question_id = '24000000-0000-4000-8000-0a2000000001';
+select is(app.profile_form_missing('24000000-0000-4000-8000-01000000000a', '24000000-0000-4000-8000-03000000000e'), 14,
+  'PFORM-46 boundary: closing one level-2 opener hides exactly its level-3 question (one step either side of 15)');
 
 select * from finish();
 rollback;
