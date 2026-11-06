@@ -1712,7 +1712,7 @@ Plans:
 **Depends on:** Phase 12.1
 **Reverses:** D-622 of Phase 12.1 (one level only: an opener carries no condition and a conditional question opens nothing). The same assumption lives in the SQL gate `app.profile_form_missing`, the purge `app.profile_form_purge_closed`, the PF006/PF007 guard, `checkCondition`, the `SELF_REF_ORDER` entry of the tenant move and the visibility function with its parity table, so all of them are in scope.
 **Open design points (for /gsd-discuss-phase 12.2):** (1) whether a branch is its own object (name, condition, questions inside) or only a visual grouping of questions that already carry a condition; (2) the maximum depth (for example 3 levels) and how the gate stays a plain join at that depth; (3) whether the diagram lives only in the admin builder or also in the preview; (4) whether a branch may depend on more than one answer or question (AND/OR) or only one opener; (5) what the member sees when a nested branch closes (the stored-equals-visible purge of D-633 and D-636 extends down the chain). The diagram is a new screen, so it passes the sketch gate as sketch 018 did (UI-04): no web code before Igor's approval is on disk.
-**Plans:** 14/21 plans executed
+**Plans:** 15/21 plans executed
 
 Decided in `/gsd-discuss-phase 12.2` on 2026-11-06 (`12.2-CONTEXT.md`, D-640..D-653): a branch is its own table (opener, opening answers, optional name) and the condition leaves the question (reverses D-621); a question belongs to at most one branch, nesting is derived from where the opener lives, up to 3 levels (reverses D-622) with a fixed-size gate join; stored equals visible extends down the chain; a branch's questions may sit in different steps; order follows the tree inside each step (replaces quick 261106-ei5's placement); "Criar ramo" starts from the opener; "Desfazer ramo" and "Arquivar ramo" act on the whole branch; the "Fluxo" view is a read-only vertical tree inside the builder, tapping opens the existing editor, and it passes the sketch gate as sketch 019 (UI-04).
 
@@ -1758,7 +1758,7 @@ Plans:
 **Wave 9** *(web, gated by sketch 019)*
 
 - [x] 12.2-14-PLAN.md — The member form on the tree: a branch's questions open and close as one block with a shared rail, the erase dialog over a tree and the "Não se aplica" reader (PFORM-52, 59, 60, tracer)
-- [ ] 12.2-15-PLAN.md — The builder's Lista with branch blocks: rail, strip, nested levels, the opener pill, empty and cross-step branches and reorder by blocks (PFORM-56, 60, tracer)
+- [x] 12.2-15-PLAN.md — The builder's Lista with branch blocks: rail, strip, nested levels, the opener pill, empty and cross-step branches and reorder by blocks (PFORM-56, 60, tracer)
 
 **Wave 10**
 
