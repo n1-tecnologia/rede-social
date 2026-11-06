@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.2"
 current_phase_name: Ramos condicionais no formulário de perfil
-current_plan: 9
+current_plan: 10
 status: executing
 stopped_at: "Phase 12.2: 6 of 21 plans done (01-06); sketch 019 approved provisionally; next is plan 07 Task 1, which only needs Igor's explicit word for pnpm db:reset && pnpm db:seed (disk is 37 GiB free, Docker up); every plan after 07 depends on it; resume with /gsd-execute-phase 12.2"
-last_updated: "2026-11-06T20:20:33.259Z"
+last_updated: "2026-11-06T21:49:29.130Z"
 last_activity: 2026-11-06
 last_activity_desc: Phase 12.2 execution started
-state_head: 4ee89f27ebae31bd97d3f8ecd494eef52f4bdee1
+state_head: 63d6c1edbdf387b6f876b9d4b36cf2a84ec362be
 progress:
   total_phases: 30
   completed_phases: 0
   total_plans: 384
-  completed_plans: 343
+  completed_plans: 344
   percent: 0
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 12.2 (Ramos condicionais no formulário de perfil) — EXECUTING
-Current Plan: 9
+Current Plan: 10
 Total Plans in Phase: 21
-Plan: 9 of 21
+Plan: 10 of 21
 Status: Ready to execute
 Last activity: 2026-11-06 — Phase 12.2 execution started
 
