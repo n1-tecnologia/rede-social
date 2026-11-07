@@ -243,13 +243,15 @@
           "delete": "Esta pergunta abre outras e não pode ser excluída agora.",
           "type": "Esta pergunta abre outras e não pode mudar de tipo agora.",
           "option": "A opção “{label}” abre outras perguntas e não pode ser removida agora.",
-          "archiveBranch": "Este ramo não pode ser arquivado agora."
+          "archiveBranch": "Este ramo não pode ser arquivado agora.",
+          "privacy": "Esta pergunta decide ramos com perguntas que aparecem no perfil e não pode deixar de aparecer agora."
         },
         "hint": "Remova a condição destas perguntas, ou arquive-as, e tente de novo:",
         "hintOption": "Tire esta opção da condição destas perguntas, ou remova a condição delas, e tente de novo:",
         "hintBranches": "Desfaça ou arquive estes ramos, e tente de novo:",
         "hintOptionBranches": "Tire esta opção da lista de respostas destes ramos, ou desfaça esses ramos, e tente de novo:",
         "hintArchiveBranch": "Estas perguntas abrem ramos que já têm respostas. Desfaça esses ramos e tente de novo:",
+        "hintPrivacy": "Tire estas perguntas do perfil, ou mude o ramo delas, e tente de novo:",
         "more": "e mais {count, plural, one {# pergunta} other {# perguntas}}"
       },
       "editor": {
@@ -322,6 +324,9 @@
           "helper": "Os outros membros veem esta resposta no perfil de quem respondeu. O membro é avisado no formulário.",
           "frozen": "Esta pergunta já tem respostas privadas, então não pode passar a ser pública. Para mostrar no perfil, crie uma nova pergunta e arquive esta.",
           "ratchet": "Se você desligar, não poderá ligar de novo enquanto houver respostas."
+        },
+        "privacy": {
+          "branchPrivate": "Esta pergunta está num ramo que depende de “{opener}”, que não aparece no perfil. Se esta aparecesse, quem vê o perfil poderia deduzir a resposta dessa pergunta. Mostre “{opener}” no perfil ou tire esta pergunta do ramo."
         },
         "locked": {
           "type": "Esta pergunta já tem {n, plural, one {# resposta} other {# respostas}}, então o tipo não pode mudar. Para usar outro tipo, crie uma nova pergunta e arquive esta.",

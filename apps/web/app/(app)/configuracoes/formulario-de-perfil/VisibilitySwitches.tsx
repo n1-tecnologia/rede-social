@@ -16,8 +16,9 @@ export interface VisibilitySwitchesProps {
    */
   lock?: { frozen: boolean; ratchet: boolean; onReplace: () => void };
   /**
-   * 12.2-18 (WR-06, UI-D-675; RED stub: accepted and not used yet): the title of the nearest opener on the question's
-   * branch chain that does not show on the profile.
+   * 12.2-18 (WR-06, PFORM-53, UI-D-675): the title of the nearest opener on the question's branch chain that does
+   * not show on the profile. The question cannot show on the profile then (the mere presence of its answer would
+   * reveal the opener's private one), so the "no perfil" switch is disabled and off, with this as its reason.
    */
   privateOpener?: string;
 }
@@ -67,6 +68,7 @@ export function VisibilitySwitches({
   onRequiredChange,
   onShowOnProfileChange,
   lock,
+  privateOpener,
 }: VisibilitySwitchesProps) {
   const t = useTranslations('profileForm.admin.editor');
   return (
@@ -82,22 +84,27 @@ export function VisibilitySwitches({
         id="pf-public"
         label={t('public.label')}
         helper={
-          lock?.frozen ? (
-            <>
-              <p>{t('public.frozen')}</p>
-              <Button variant="outline" fullWidth onClick={lock.onReplace}>
-                {t('locked.replace')}
-              </Button>
-            </>
-          ) : (
-            <>
-              <p>{t('public.helper')}</p>
-              {lock?.ratchet && showOnProfile ? <p>{t('public.ratchet')}</p> : null}
-            </>
-          )
+          <>
+            {privateOpener !== undefined ? (
+              <p className="break-words">{t('privacy.branchPrivate', { opener: privateOpener })}</p>
+            ) : null}
+            {lock?.frozen ? (
+              <>
+                <p>{t('public.frozen')}</p>
+                <Button variant="outline" fullWidth onClick={lock.onReplace}>
+                  {t('locked.replace')}
+                </Button>
+              </>
+            ) : privateOpener === undefined ? (
+              <>
+                <p>{t('public.helper')}</p>
+                {lock?.ratchet && showOnProfile ? <p>{t('public.ratchet')}</p> : null}
+              </>
+            ) : null}
+          </>
         }
-        checked={lock?.frozen ? false : showOnProfile}
-        disabled={lock?.frozen}
+        checked={lock?.frozen || privateOpener !== undefined ? false : showOnProfile}
+        disabled={lock?.frozen || privateOpener !== undefined}
         onChange={onShowOnProfileChange}
       />
     </div>

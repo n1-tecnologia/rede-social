@@ -14,10 +14,12 @@ import {
 } from '@rede-social/contracts/profile-form';
 import {
   type AdminBranchTree,
+  branchChain,
   buildBranchTree,
   type EligibilityQuestion,
   eligibleBranchesFor,
   membersOf,
+  publicUnderPrivateTitles,
   referencedOptionCounts,
   usableBranch,
   usableBranchesOf,
@@ -861,10 +863,19 @@ export function refusalOfUpdate(
 // ── 12.2-18: the privacy rule in the builder (WR-06, PFORM-53, UI-D-675) ───────────────────────────
 
 /**
- * The title of the NEAREST opener on the chain of `branchId` that does not show on the member profile, or `null`
- * (RED stub of 12.2-18: inert until the GREEN commit).
+ * The title of the NEAREST opener on the chain of `branchId` (the branch itself first, then the branch of its
+ * opener, and so on) that does not show on the member profile, or `null` (WR-06, UI-D-675). A public question
+ * under such a chain would let whoever reads the profile deduce that opener's private answer, so the switch of
+ * the question is disabled with this title as its reason. Only a title leaves.
  */
-export function privateOpenerOf(_tree: AdminBranchTree, _branchId: string | null): string | null {
+export function privateOpenerOf(tree: AdminBranchTree, branchId: string | null): string | null {
+  if (branchId === null) return null;
+  const chain = branchChain(tree, branchId);
+  if (chain === null) return null;
+  for (const branch of chain) {
+    const opener = tree.questionById.get(branch.openerQuestionId);
+    if (opener !== undefined && !opener.showOnProfile) return opener.title;
+  }
   return null;
 }
 
@@ -874,11 +885,44 @@ export type PrivacyChange =
   | { branchId: string; openerQuestionId: string };
 
 /**
- * The titles of the questions that show on the profile and would newly sit under a private opener if `change`
- * were saved (RED stub of 12.2-18: inert until the GREEN commit).
+ * The titles of the questions that show on the profile and would NEWLY sit under a private opener if `change`
+ * were saved, in list order (WR-06, PFORM-53, UI-D-675): the same set the server refuses with
+ * `public_under_private`, computed from the read the builder already holds by judging the tree before and after
+ * the change. A violation the form already holds is not repeated. The server stays the authority.
  */
-export function privacyTitlesIf(_tree: AdminBranchTree, _change: PrivacyChange): string[] {
-  return [];
+export function privacyTitlesIf(tree: AdminBranchTree, change: PrivacyChange): string[] {
+  const questions =
+    'questionId' in change
+      ? tree.questions.map((question) =>
+          question.id === change.questionId
+            ? { ...question, showOnProfile: change.showOnProfile }
+            : question,
+        )
+      : tree.questions;
+  const branches =
+    'branchId' in change
+      ? tree.branches.map((branch) =>
+          branch.id === change.branchId
+            ? { ...branch, openerQuestionId: change.openerQuestionId }
+            : branch,
+        )
+      : tree.branches;
+  const after = publicUnderPrivateTitles(
+    buildBranchTree({ steps: tree.steps, questions, branches }),
+  );
+  const already = [...publicUnderPrivateTitles(tree)];
+  const added: string[] = [];
+  for (const title of after) {
+    const at = already.indexOf(title);
+    if (at >= 0) already.splice(at, 1);
+    else added.push(title);
+  }
+  return added;
+}
+
+/** Titles as the plain list the dependents alert draws (the ids only key the rows). */
+export function titlesAsDependents(titles: readonly string[]): Dependent[] {
+  return titles.map((title, at) => ({ id: `public-${at}`, title }));
 }
 
 // ── 12.2-16: where a question sits in the tree (D-640, D-641, D-644, D-646, UI-D-669) ──────────────

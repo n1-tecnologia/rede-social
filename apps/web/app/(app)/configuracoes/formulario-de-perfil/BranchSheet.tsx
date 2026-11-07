@@ -43,6 +43,7 @@ import {
 import { useBranchLabeler } from './BranchBlock';
 import { BranchValuesPicker } from './BranchValuesPicker';
 import { DependentsAlert } from './DependentsAlert';
+import { privacyTitlesIf, titlesAsDependents } from './editor-state';
 import { SheetSelect } from './SheetSelect';
 
 interface BranchSheetBaseProps {
@@ -378,6 +379,8 @@ function EditBranchSheet({
   // "Arquivar ramo" (UI-D-672): a plain explanation; the server's refusal lands in the dependents alert.
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveDependents, setArchiveDependents] = useState<Dependent[] | null>(null);
+  // WR-06 (PFORM-53, UI-D-675): the public questions a private opener would expose, from the pre-check or the 409.
+  const [privacy, setPrivacy] = useState<Dependent[] | null>(null);
   /** What to do once the admin confirms the discard dialog; absent means close the sheet. */
   const afterDiscard = useRef<(() => void) | null>(null);
 
@@ -453,6 +456,16 @@ function EditBranchSheet({
         router.refresh();
         return;
       case 'conflict':
+        // The new opener does not show on the profile above a public question: the server's titles.
+        if (
+          result.issue === 'public_under_private' &&
+          result.titles !== undefined &&
+          result.titles.length > 0
+        ) {
+          setPrivacy(titlesAsDependents(result.titles));
+          router.refresh();
+          return;
+        }
         // A race the sheet could not see: an answer arrived, so the branch is locked now (the page re-reads it).
         setRefusal(
           result.issue === 'condition_locked'
@@ -559,6 +572,7 @@ function EditBranchSheet({
   function changeOpener(next: string) {
     if (next === openerId) return;
     setOpenerId(next);
+    setPrivacy(null);
     // Going back to the original opener brings its answers back; any other opener starts with none ticked.
     setValues(next === base.openerQuestionId ? base.values : []);
     setFieldErrors((current) => ({ ...current, values: undefined }));
@@ -571,6 +585,22 @@ function EditBranchSheet({
       setFieldErrors({ name: true });
       document.getElementById(NAME_ID)?.focus();
       return;
+    }
+
+    setPrivacy(null);
+    // WR-06 (PFORM-53): the new opener must not stop showing on the profile above a public question, at any depth.
+    // Refused here from the tree the page holds, with nothing sent; the server (`public_under_private`) is the
+    // authority behind it.
+    if (openerDirty) {
+      const exposed = privacyTitlesIf(tree, {
+        branchId: branch.id,
+        openerQuestionId: openerId,
+      });
+      if (exposed.length > 0) {
+        setRefusal(null);
+        setPrivacy(titlesAsDependents(exposed));
+        return;
+      }
     }
 
     setSaving(true);
@@ -810,6 +840,7 @@ function EditBranchSheet({
           {archiveDependents ? (
             <DependentsAlert kind="archiveBranch" dependents={archiveDependents} />
           ) : null}
+          {privacy ? <DependentsAlert kind="privacy" dependents={privacy} /> : null}
 
           <Button
             type="submit"

@@ -63,6 +63,8 @@ import {
   isOpenerType,
   lockFlags,
   optionUsage,
+  privacyTitlesIf,
+  privateOpenerOf,
   type QuestionDraft,
   type Reopening,
   refusalOfUpdate,
@@ -71,6 +73,7 @@ import {
   serverFieldError,
   serverLimitsError,
   serverOptionsErrors,
+  titlesAsDependents,
   toCreateBody,
   toUpdateBody,
   validateDraft,
@@ -237,6 +240,9 @@ export function QuestionEditorSheet({
   const textOf = (branch: AdminBranch) => labelOf(branch).label;
   const groups = stored ? dependentBranchesOf(tree, stored.id, textOf) : [];
   const usedCounts = stored ? optionUsage(tree, stored.id) : undefined;
+  // WR-06 (PFORM-53, UI-D-675): a question whose branch chain holds an opener that does not show on the profile
+  // cannot show on it either; the nearest such opener is the reason the switch gives.
+  const privateOpener = privateOpenerOf(tree, draft.branchId);
   const hasBranches = questions !== undefined && branches.length > 0;
   // A question with answers cannot enter, leave or change branch (D-646): the select is a lock row.
   const branchLocked = stored !== null && stored.answerCount > 0;
@@ -389,6 +395,19 @@ export function QuestionEditorSheet({
         toast.show({ tone: 'error', message: t('list.limit', { max: limit }) });
         return;
       case 'conflict':
+        // An opener turned private above a public question (WR-06): the server's titles, in the privacy alert.
+        if (
+          result.issue === 'public_under_private' &&
+          stored !== null &&
+          stored.showOnProfile &&
+          !draft.showOnProfile &&
+          result.titles !== undefined &&
+          result.titles.length > 0
+        ) {
+          setRefusal({ kind: 'privacy', dependents: titlesAsDependents(result.titles) });
+          router.refresh();
+          return;
+        }
         // A move into or out of a branch the server refuses lands under the "Ramo" field (D-646).
         if (BRANCH_REFUSALS.has(result.issue)) {
           setBranchRefusal(result.issue as BranchRefusal);
@@ -607,6 +626,16 @@ export function QuestionEditorSheet({
       onClose();
       return;
     }
+    // WR-06 (PFORM-53): an opener cannot stop showing on the profile while a public question hangs below it, at
+    // any depth. Refused here, from the tree the page holds, with the titles; nothing is sent. The server's
+    // `public_under_private` is the authority behind it.
+    if (stored?.showOnProfile && !draft.showOnProfile) {
+      const exposed = privacyTitlesIf(tree, { questionId: stored.id, showOnProfile: false });
+      if (exposed.length > 0) {
+        setRefusal({ kind: 'privacy', dependents: titlesAsDependents(exposed) });
+        return;
+      }
+    }
     const reopening = reopeningOf(mode, draft, question ?? null);
     if (reopening) await confirmReopening(reopening);
     else await write(false);
@@ -782,7 +811,11 @@ export function QuestionEditorSheet({
                   required={draft.required}
                   showOnProfile={draft.showOnProfile}
                   onRequiredChange={(required) => patch({ required })}
-                  onShowOnProfileChange={(showOnProfile) => patch({ showOnProfile })}
+                  onShowOnProfileChange={(showOnProfile) => {
+                    patch({ showOnProfile });
+                    if (refusal?.kind === 'privacy') setRefusal(null);
+                  }}
+                  privateOpener={privateOpener ?? undefined}
                   lock={
                     locks.visibilityFrozen || locks.visibilityRatchet
                       ? {

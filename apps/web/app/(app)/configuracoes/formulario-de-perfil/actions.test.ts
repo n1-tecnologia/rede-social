@@ -1525,3 +1525,32 @@ describe('12.2-18: has_dependents over branches and public_under_private (D-646,
     expect(result).toEqual({ ok: false, code: 'conflict', issue: 'public_under_private' });
   });
 });
+
+describe('12.2-18: updateBranchAction keeps the titles of a public_under_private conflict', () => {
+  it('carries the titles the server named and nothing else of the body', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', {
+        profileForm: 'public_under_private',
+        titles: ['Nome da clínica'],
+        secret: 'não deve passar',
+      }),
+    );
+    expect(
+      await updateBranchAction(uuid(9300), { revision: 1, openerQuestionId: uuid(9301) }),
+    ).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'public_under_private',
+      titles: ['Nome da clínica'],
+    });
+  });
+
+  it('a conflict without titles stays a plain conflict', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'condition_locked' }));
+    expect(await updateBranchAction(uuid(9300), { revision: 1, name: 'X' })).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'condition_locked',
+    });
+  });
+});

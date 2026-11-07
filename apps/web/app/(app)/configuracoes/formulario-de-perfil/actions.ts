@@ -885,7 +885,15 @@ function branchFailureOf(
     if (result.issue === 'stale_revision') {
       return { result: { ok: false, code: 'stale_revision' }, navigate: null };
     }
-    return { result: { ok: false, code: 'conflict', issue: result.issue }, navigate: null };
+    return {
+      result: {
+        ok: false,
+        code: 'conflict',
+        issue: result.issue,
+        ...(result.titles ? { titles: result.titles } : {}),
+      },
+      navigate: null,
+    };
   }
   if (result.code === 'limit' || result.code === 'forbidden' || result.code === 'moduleOff') {
     return { result: { ok: false, code: result.code }, navigate: null };
