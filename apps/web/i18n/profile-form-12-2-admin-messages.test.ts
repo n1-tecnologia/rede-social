@@ -225,3 +225,37 @@ describe('profileForm.admin.branches.sheet: the branch sheet, create mode (UI-D-
     expect(t('branches.toasts.created')).toBe('Ramo criado.');
   });
 });
+
+describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "branch", "fork" or "grupo condicional")', () => {
+  const groups: Record<string, unknown> = {
+    'editor.branch': parsed.profileForm.admin.editor.branch,
+    'editor.branches': parsed.profileForm.admin.editor.branches,
+    'branches.sheet': parsed.profileForm.admin.branches.sheet,
+    'branches.toasts': parsed.profileForm.admin.branches.toasts,
+  };
+
+  function strings(value: unknown): string[] {
+    if (typeof value === 'string') return [value];
+    if (value !== null && typeof value === 'object') return Object.values(value).flatMap(strings);
+    return [];
+  }
+
+  it('says ramo and uses curly quotes, in every string of the new groups', () => {
+    for (const [name, group] of Object.entries(groups)) {
+      for (const text of strings(group)) {
+        expect(text, `${name}: ${text}`).not.toMatch(
+          /\b(branch|fork|bifurca\w*|grupo condicional|diagrama|nó)\b/i,
+        );
+        expect(text, `${name}: ${text}`).not.toMatch(/[«»"]/);
+      }
+    }
+  });
+
+  it('puts every number in the strings through an interpolation, never typed', () => {
+    for (const [name, group] of Object.entries(groups)) {
+      for (const text of strings(group)) {
+        expect(text.replace(/\{[^}]*\}/g, ''), `${name}: ${text}`).not.toMatch(/\d/);
+      }
+    }
+  });
+});

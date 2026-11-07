@@ -422,3 +422,61 @@ describe('the floor: no half-step spacing and 44px targets (UI-D-682, UI-D-684)'
     }
   });
 });
+
+describe('the width floor with 20 options at 320px (E4 overflow and long-text, asserted by classes)', () => {
+  const wide = adminQuestion('multiple_choice', {
+    title:
+      'Um título de abridora muito longo que também precisa quebrar a linha no aparelho de 320px',
+    options: Array.from({ length: 20 }, (_, at) => ({
+      id: uuid(9800 + at),
+      label:
+        `Uma opção com um rótulo longuíssimo de oitenta caracteres para quebrar a linha ${at}`.slice(
+          0,
+          80,
+        ),
+      answerCount: 0,
+    })),
+  });
+
+  it('keeps the opener title wrapping and the 20 rows inside a shrinkable fieldset', () => {
+    show({ opener: wide });
+    const title = document.querySelector('[data-branch-opener] .break-words') as HTMLElement;
+    expect(title.className).toContain('min-w-0');
+    const picker = screen.getByRole('group', { name: 'Mostrar quando a resposta for' });
+    expect(picker.className).toContain('min-w-0');
+    expect(within(picker).getAllByRole('checkbox')).toHaveLength(20);
+    for (const each of within(picker).getAllByRole('checkbox')) {
+      expect((each as HTMLInputElement).labels?.[0]?.className).toContain('break-words');
+    }
+  });
+
+  it('keeps "Salvar ramo" and the name in the scrolling body of the sheet, never outside it', () => {
+    show({ opener: wide });
+    const body = dialog('Novo ramo').querySelector('.overflow-y-auto') as HTMLElement;
+    expect(body.className).toContain('min-h-0');
+    expect(body.contains(save())).toBe(true);
+    expect(body.contains(nameField())).toBe(true);
+    expect((nameField().closest('fieldset') as HTMLElement).className).toContain('min-w-0');
+  });
+
+  it('gives a 60-character name room: the field is full width and shrinkable', () => {
+    show();
+    type('N'.repeat(60));
+    expect(nameField().className).toContain('w-full');
+    expect(nameField().className).toContain('min-w-0');
+    expect(screen.getByText('60/60')).toBeTruthy();
+  });
+
+  it('puts the failure and the limit lines in an alert with an icon and words, not colour alone', async () => {
+    mocks.create.mockResolvedValue({ ok: false, code: 'limit' });
+    show();
+    fireEvent.click(box('Tenho uma clínica'));
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    const alert = document.querySelector('[data-branch-refusal]') as HTMLElement;
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.querySelector('svg')).toBeTruthy();
+    expect(alert.textContent?.length).toBeGreaterThan(10);
+  });
+});

@@ -2411,3 +2411,157 @@ describe('12.2-16: "Ramos desta pergunta" and "Criar ramo" (UI-D-670)', () => {
     });
   });
 });
+
+// ── 12.2-16 Task 3: the floor at 320px and for assistive technology (UI-D-682..UI-D-684) ─────────────
+
+describe('12.2-16 Task 3: the width and accessibility floor (jsdom reads classes and wiring; the pixels are plan 21)', () => {
+  const s1 = adminStep({ title: 'Informações gerais' });
+  const s2 = adminStep({ title: 'Sobre a sua clínica' });
+  const LONG = 'Uma opção com um rótulo longuíssimo de oitenta caracteres para quebrar a linha ok';
+  const wideOptions = Array.from({ length: 20 }, (_, at) => ({
+    id: uuid(9900 + at),
+    label: `${LONG} ${at}`.slice(0, 80),
+    answerCount: 0,
+  }));
+  const opener = adminQuestion('multiple_choice', {
+    stepId: s1.id,
+    title:
+      'Um título de abridora muito longo que também precisa quebrar a linha no aparelho de 320px',
+    options: wideOptions,
+    showOnProfile: true,
+  });
+  const longName = adminBranch({
+    openerQuestionId: opener.id,
+    values: [wideOptions[0]?.id as string],
+    name: 'N'.repeat(60),
+  });
+  const unnamed = adminBranch({
+    openerQuestionId: opener.id,
+    values: wideOptions.map((option) => option.id),
+    name: null,
+  });
+  const member = adminQuestion('short_text', {
+    stepId: s2.id,
+    title: 'Dentro',
+    branchId: longName.id,
+  });
+  const questions = [opener, member];
+  const branches = [longName, unnamed];
+
+  it('keeps the Ramo select a 44px, full-width, shrinkable native control with every label whole', () => {
+    mount({ mode: 'edit', question: member, questions, steps: [s1, s2], branches });
+    const select = screen.getByLabelText('Ramo') as HTMLSelectElement;
+    expect(select.className).toContain('min-h-11');
+    expect(select.className).toContain('min-w-0');
+    expect(select.className).toContain('w-full');
+    expect(select.className).toContain('appearance-none');
+    const texts = within(select)
+      .getAllByRole('option')
+      .map((option) => option.textContent);
+    expect(texts).toContain('N'.repeat(60));
+    // The 20 answers of the long sentence are all there, whole: a native picker wraps its own rows.
+    expect(texts.find((text) => text?.startsWith('Se “'))).toContain(wideOptions[19]?.label);
+    expect(select.querySelector('optgroup')?.label).toBe(opener.title);
+  });
+
+  it('keeps the sheet body scrolling inside the dialog, with the save button and the blocks in it', () => {
+    mount({
+      mode: 'edit',
+      question: opener,
+      questions,
+      steps: [s1, s2],
+      branches,
+      onCreateBranch: vi.fn(),
+    });
+    const body = dialog().querySelector('.overflow-y-auto') as HTMLElement;
+    expect(body.className).toContain('min-h-0');
+    expect(body.contains(saveButton())).toBe(true);
+    expect(body.contains(document.querySelector('[data-branches-block]') as HTMLElement)).toBe(
+      true,
+    );
+    const form = dialog().querySelector('form') as HTMLFormElement;
+    expect((form.querySelector('fieldset') as HTMLElement).className).toContain('min-w-0');
+  });
+
+  it('clamps a 60-character name to two lines in the branch rows and wraps a long label', () => {
+    mount({
+      mode: 'edit',
+      question: opener,
+      questions,
+      steps: [s1, s2],
+      branches,
+      onCreateBranch: vi.fn(),
+      onOpenBranch: vi.fn(),
+    });
+    const labels = [...document.querySelectorAll('[data-branches-block] li button .line-clamp-2')];
+    expect(labels).toHaveLength(2);
+    for (const label of labels) {
+      expect(label.className).toContain('break-words');
+      expect((label.parentElement as HTMLElement).className).toContain('min-w-0');
+    }
+    expect(labels[0]?.textContent).toBe('N'.repeat(60));
+    const row = document.querySelector('[data-branches-block] li button') as HTMLElement;
+    expect(row.className).toContain('min-h-11');
+    expect(row.className).toContain('w-full');
+  });
+
+  it('keeps a live region for the required note before it has any text', () => {
+    mount({ mode: 'edit', question: member, questions, steps: [s1, s2], branches });
+    const region = document.querySelector('[data-branch-note]') as HTMLElement;
+    expect(region.getAttribute('role')).toBe('status');
+    expect(region.textContent).toBe('');
+  });
+
+  it('ties a refusal to the Ramo field by aria and says it in words, not by colour alone', async () => {
+    mocks.update.mockResolvedValue({ ok: false, code: 'conflict', issue: 'branch_depth' });
+    mount({ mode: 'edit', question: member, questions, steps: [s1, s2], branches });
+    const select = screen.getByLabelText('Ramo') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: unnamed.id } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    const line = screen.getByRole('alert');
+    expect(line.textContent?.length).toBeGreaterThan(0);
+    expect(select.getAttribute('aria-invalid')).toBe('true');
+    expect(select.getAttribute('aria-describedby')).toContain(line.id);
+    // Editing the field takes the refusal away.
+    fireEvent.change(select, { target: { value: longName.id } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(select.getAttribute('aria-invalid')).toBeNull();
+  });
+
+  it('shows the lock as an icon plus a sentence, and the way out as a 44px outline button', () => {
+    const answered = adminQuestion('short_text', {
+      stepId: s2.id,
+      answerCount: 2,
+      branchId: longName.id,
+    });
+    mount({
+      mode: 'edit',
+      question: answered,
+      questions: [...questions, answered],
+      steps: [s1, s2],
+      branches,
+    });
+    const lock = document.querySelector('[data-branch-locked]') as HTMLElement;
+    expect(lock.querySelector('svg')).toBeTruthy();
+    expect(lock.textContent).toContain('Esta pergunta já tem 2 respostas');
+    const out = within(lock).getByRole('button', { name: 'Criar nova pergunta e arquivar esta' });
+    expect(out.className).toContain('border-border-secondary');
+  });
+
+  it('writes no half-step spacing class in the sources of the sheets', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const file of [
+      'QuestionEditorSheet.tsx',
+      'SheetSelect.tsx',
+      'BranchSheet.tsx',
+      'BranchValuesPicker.tsx',
+    ]) {
+      const source = readFileSync(join(__dirname, file), 'utf8');
+      expect(source, file).not.toMatch(
+        /(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/,
+      );
+    }
+  });
+});
