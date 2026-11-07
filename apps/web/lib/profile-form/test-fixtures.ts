@@ -40,7 +40,7 @@ export function question(
     allowOther: false,
     limits: {},
     stepId: MEMBER_STEP_ID,
-    condition: null,
+    branchId: null,
     options: [],
     answer: null,
     ...overrides,
@@ -58,6 +58,7 @@ export function form(questions: MemberQuestion[], overrides: Partial<MemberForm>
     formEtag: 'etag-1',
     steps: [{ id: MEMBER_STEP_ID, title: 'Etapa 1' }],
     questions,
+    branches: [],
     ...overrides,
   };
 }
@@ -97,6 +98,7 @@ export function adminQuestionList(
     limit: 30,
     steps: [],
     stepLimit: 10,
+    branches: [],
     ...overrides,
   };
 }
@@ -120,7 +122,7 @@ export function adminQuestion(
     position: adminCounter,
     revision: 1,
     answerCount: 0,
-    condition: null,
+    branchId: null,
     opensCount: 0,
     createdAt: '2026-10-01T12:00:00.000Z',
     listedAt: '2026-10-01T12:00:00.000Z',

@@ -6,8 +6,7 @@ import { ArrowDown, ArrowUp, Layers, Pencil, Plus, Split } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useId } from 'react';
 import type { AdminBranchTree } from '@/lib/profile-form/branch-tree';
-import { describeBranch } from '@/lib/profile-form/describe-branch';
-import { formatDisjunction } from '@/lib/profile-form/describe-condition';
+import { describeBranch, formatDisjunction } from '@/lib/profile-form/describe-branch';
 
 /**
  * A branch in the builder's Lista (12.2-15, D-640, D-641, D-642, D-643; UI-D-666, UI-D-682, UI-D-684): a block

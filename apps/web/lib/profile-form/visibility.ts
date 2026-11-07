@@ -1,9 +1,7 @@
 import {
   answerTokens,
-  isQuestionVisible,
   type MemberBranch,
   type MemberQuestion,
-  type ProfileFormCondition,
 } from '@rede-social/contracts/profile-form';
 import {
   type BranchTree,
@@ -105,21 +103,6 @@ export function isNotApplicableInTree(
     },
   };
   return !isQuestionVisibleInTree({ branchId: row.branchId ?? null }, tree, (questionId) => {
-    const opener = rowsById.get(questionId);
-    return opener === undefined ? undefined : answerTokens(opener.value);
-  });
-}
-
-/**
- * The 12.1 reading of a staff row: true when the row's own per-question condition is not met by the opener's
- * row. Kept for the compatibility window (the staff block still calls it); plan 20 of 12.2 removes it with
- * the retired condition.
- */
-export function isNotApplicable(
-  row: { questionId: string; condition: ProfileFormCondition | null; value: unknown },
-  rowsById: ReadonlyMap<string, { value: unknown }>,
-): boolean {
-  return !isQuestionVisible(row, (questionId) => {
     const opener = rowsById.get(questionId);
     return opener === undefined ? undefined : answerTokens(opener.value);
   });

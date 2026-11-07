@@ -100,6 +100,8 @@ const list = (questions: ReturnType<typeof adminQuestion>[], limit = 30) => ({
   // 12.1-08: the list now carries the tenant's steps; these tests build none.
   steps: [],
   stepLimit: 10,
+  // 12.2-20: the list always carries its branches.
+  branches: [],
 });
 
 async function html(aba?: string): Promise<string> {
@@ -373,7 +375,7 @@ describe('the states (UI-D-568)', () => {
     serve({
       questions: list([]),
       summary: { total: 8, complete: 8, hasRequired: false },
-      archived: { questions: [] },
+      archived: { questions: [], branches: [] },
     });
     const out = await html();
     const text = textOf(out);
@@ -389,7 +391,7 @@ describe('the states (UI-D-568)', () => {
     serve({
       questions: list([]),
       summary: { total: 8, complete: 3, hasRequired: true },
-      archived: { questions: [archivedQuestion('phone')] },
+      archived: { questions: [archivedQuestion('phone')], branches: [] },
     });
     const out = await html();
     expect(out).toContain('data-form-summary');
@@ -437,6 +439,7 @@ describe('the Arquivadas tab (UI-D-578)', () => {
           archivedQuestion('phone', { title: 'Telefone antigo', required: true, answerCount: 3 }),
           archivedQuestion('link', { title: 'Site antigo', answerCount: 0 }),
         ],
+        branches: [],
       },
     });
     const out = await html('arquivadas');
@@ -456,7 +459,7 @@ describe('the Arquivadas tab (UI-D-578)', () => {
   });
 
   it('shows the empty state when nothing is archived', async () => {
-    serve({ questions: list([]), archived: { questions: [] } });
+    serve({ questions: list([]), archived: { questions: [], branches: [] } });
     const text = textOf(await html('arquivadas'));
     expect(text).toContain('Nenhuma pergunta arquivada');
   });
@@ -478,7 +481,7 @@ describe('the Arquivadas tab (UI-D-578)', () => {
   });
 
   it('marks the Arquivadas tab as the selected one and Perguntas as not', async () => {
-    serve({ questions: list([]), archived: { questions: [] } });
+    serve({ questions: list([]), archived: { questions: [], branches: [] } });
     const out = await html('arquivadas');
     const tabs = [...out.matchAll(/<a[^>]*role="tab"[^>]*>.*?<\/a>/g)].map((match) => match[0]);
     const selected = tabs.filter((tab) => tab.includes('aria-selected="true"'));

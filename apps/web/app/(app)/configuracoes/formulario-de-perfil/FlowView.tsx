@@ -11,8 +11,7 @@ import {
   type FlowQuestion,
   flowTree,
 } from '@/lib/profile-form/branch-tree';
-import { capAnswers } from '@/lib/profile-form/describe-branch';
-import { formatDisjunction } from '@/lib/profile-form/describe-condition';
+import { capAnswers, formatDisjunction } from '@/lib/profile-form/describe-branch';
 import { typeNameKey } from '@/lib/profile-form/question-types';
 import { useBranchLabeler } from './BranchBlock';
 

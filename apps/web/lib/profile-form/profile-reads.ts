@@ -1,5 +1,4 @@
 import {
-  type MemberBranch,
   type PublicAnswers,
   publicAnswersSchema,
   type StaffAnswers,
@@ -74,8 +73,8 @@ export async function loadMyAnswers(words: AnswerWords): Promise<MyAnswersResult
 
 const memberAnswersSchema = z.discriminatedUnion('kind', [publicAnswersSchema, staffAnswersSchema]);
 
-/** The staff payload with the branches always present (an empty list when the read has none), no name (12.2-13). */
-export type StaffPayload = Omit<StaffAnswers, 'branches'> & { branches: MemberBranch[] };
+/** The staff payload: its rows carry the branch id and the branches carry no name (12.2-13, T-12.2-03). */
+export type StaffPayload = StaffAnswers;
 
 export type MemberAnswersPayload = PublicAnswers | StaffPayload;
 
@@ -97,11 +96,8 @@ export async function loadMemberAnswers(membershipId: string): Promise<MemberAns
       console.error('profile_form.member_answers_failed', { status: res.status });
       return { status: 'error' };
     }
-    const parsed = memberAnswersSchema.parse(await res.json());
-    // The staff payload always carries its branches (an empty list when the read has none); the strict
-    // contract has already refused a branch that carries a name (T-12.2-03).
-    const payload: MemberAnswersPayload =
-      parsed.kind === 'staff' ? { ...parsed, branches: parsed.branches ?? [] } : parsed;
+    // The strict contract has already refused a branch that carries a name (T-12.2-03).
+    const payload: MemberAnswersPayload = memberAnswersSchema.parse(await res.json());
     return { status: 'ok', payload };
   } catch (error) {
     console.error('profile_form.member_answers_failed', { error: errorName(error) });

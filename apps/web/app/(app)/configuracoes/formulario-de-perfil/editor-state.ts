@@ -25,10 +25,7 @@ import {
   usableBranch,
   usableBranchesOf,
 } from '@/lib/profile-form/branch-tree';
-import {
-  type ConditionDescription,
-  formatDisjunction,
-} from '@/lib/profile-form/describe-condition';
+import { type ConditionDescription, formatDisjunction } from '@/lib/profile-form/describe-branch';
 import { formatNumberPtBr, parseNumberPtBr } from '@/lib/profile-form/number';
 import { isChoiceType, isRangeType } from '@/lib/profile-form/question-types';
 
@@ -753,19 +750,6 @@ export function conditionOptionsText(description: ConditionDescription, words: Y
   }
   const plain = description.values.map((value) => (value === 'true' ? words.yes : words.no));
   return new Intl.ListFormat('pt-BR', { type: 'disjunction' }).format(plain);
-}
-
-/** The questions a condition can name, in the shape `describeCondition` reads. */
-export function openerIndex(questions: readonly AdminQuestion[]) {
-  return new Map(
-    questions.map(
-      (question) =>
-        [
-          question.id,
-          { title: question.title, type: question.type, options: question.options },
-        ] as const,
-    ),
-  );
 }
 
 // ── 12.2-18: the opener side over branches (D-646, UI-D-673) ──────────────────────────────────────

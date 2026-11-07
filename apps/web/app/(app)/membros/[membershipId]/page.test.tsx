@@ -136,9 +136,10 @@ describe('/membros/[membershipId] with the form answers block', () => {
             archivedAt: null,
             answered: false,
             required: false,
-            condition: null,
+            branchId: null,
           },
         ],
+        branches: [],
       }),
     );
     const out = await html();

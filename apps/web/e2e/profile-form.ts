@@ -39,9 +39,10 @@ import {
  * A run that was killed half way is repaired by the next run's `beforeAll`, which restores the module
  * before it does anything else: that is what keeps a required question from gating other specs' members.
  *
- * Phase 12.1 (plan 19) adds the steps and the conditions: `seedStep`, `stepId` and `condition` on
- * `seedQuestion`, the clinic example form and the wide 320px form, and a sweep that also removes the
- * run's steps. The trigger of migration `20261105195400` puts a question seeded WITHOUT a step in the
+ * Phase 12.1 (plan 19) adds the steps and the conditions: `seedStep`, `stepId` on `seedQuestion`, the clinic
+ * example form and the wide 320px form, and a sweep that also removes the run's steps. Phase 12.2 (plan 20)
+ * replaces the per-question condition by branches: `seedBranch`, `branchId` on `seedQuestion`, and a sweep
+ * that also removes the run's branches. The trigger of migration `20261105195400` puts a question seeded WITHOUT a step in the
  * tenant's first step (creating "Informações gerais" when there is none), so the Phase 12 specs keep
  * working unchanged and the sweep removes that default step again when the tenant holds no question.
  */
@@ -197,15 +198,30 @@ const DEFAULT_STEP_TITLE = 'Informações gerais';
  */
 export async function clearForm(tenantSlug: string, prefix: string): Promise<void> {
   const like = `${prefix}%`;
-  await sql()`
-    delete from public.profile_form_answers a
-     using public.profile_form_questions q, public.tenants t
-     where q.id = a.question_id and q.tenant_id = a.tenant_id and t.id = a.tenant_id
-       and t.slug = ${tenantSlug} and q.title like ${like}`;
-  await sql()`
-    delete from public.profile_form_questions q
-     using public.tenants t
-     where t.id = q.tenant_id and t.slug = ${tenantSlug} and q.title like ${like}`;
+  // A branch and its opener reference each other (both keys are DEFERRABLE INITIALLY IMMEDIATE), so the
+  // answers, the branches that hang on or hold a run question and the questions go in ONE transaction with
+  // the keys deferred to its end.
+  await sql().begin(async (tx) => {
+    await tx`set constraints all deferred`;
+    await tx`
+      delete from public.profile_form_answers a
+       using public.profile_form_questions q, public.tenants t
+       where q.id = a.question_id and q.tenant_id = a.tenant_id and t.id = a.tenant_id
+         and t.slug = ${tenantSlug} and q.title like ${like}`;
+    await tx`
+      delete from public.profile_form_branches b
+       using public.tenants t
+       where t.id = b.tenant_id and t.slug = ${tenantSlug}
+         and (b.opener_question_id in (select id from public.profile_form_questions
+                                        where tenant_id = b.tenant_id and title like ${like})
+              or b.id in (select branch_id from public.profile_form_questions
+                           where tenant_id = b.tenant_id and title like ${like}
+                             and branch_id is not null))`;
+    await tx`
+      delete from public.profile_form_questions q
+       using public.tenants t
+       where t.id = q.tenant_id and t.slug = ${tenantSlug} and q.title like ${like}`;
+  });
   await sql()`
     delete from public.profile_form_steps s
      using public.tenants t
@@ -239,7 +255,7 @@ export async function resetProfileForm(
 
 /**
  * What a run must leave exactly as it found it: the module row, and the count of run-prefixed questions,
- * answers, posts and accounts (the last four are zero after a clean sweep).
+ * branches, answers, posts and accounts (the last five are zero after a clean sweep).
  */
 export async function snapshot(
   tenantSlug: string = LAB,
@@ -248,6 +264,7 @@ export async function snapshot(
   module: { existed: boolean; enabled: boolean };
   steps: number;
   questions: number;
+  branches: number;
   answers: number;
   posts: number;
   accounts: number;
@@ -260,6 +277,12 @@ export async function snapshot(
   const [questions] = await sql()<{ n: number }[]>`
     select count(*)::int as n
       from public.profile_form_questions q join public.tenants t on t.id = q.tenant_id
+     where t.slug = ${tenantSlug} and q.title like ${like}`;
+  const [branches] = await sql()<{ n: number }[]>`
+    select count(*)::int as n
+      from public.profile_form_branches b
+      join public.profile_form_questions q on q.id = b.opener_question_id
+      join public.tenants t on t.id = b.tenant_id
      where t.slug = ${tenantSlug} and q.title like ${like}`;
   const [answers] = await sql()<{ n: number }[]>`
     select count(*)::int as n
@@ -277,6 +300,7 @@ export async function snapshot(
     module: await moduleState(tenantSlug),
     steps: steps?.n ?? 0,
     questions: questions?.n ?? 0,
+    branches: branches?.n ?? 0,
     answers: answers?.n ?? 0,
     posts: posts?.n ?? 0,
     accounts: accounts?.n ?? 0,
@@ -316,8 +340,8 @@ export type SeedQuestion = {
   archived?: boolean;
   /** The step the question lives in (`seedStep`); absent, the migration's trigger picks the tenant's first step. */
   stepId?: string;
-  /** Opens the question only when the opener's answer is one of `values` (option ids; `'true'` or `'false'` for yes/no). */
-  condition?: { questionId: string; values: string[] };
+  /** The branch the question sits in (`seedBranch`); absent, the question is shown to everyone. */
+  branchId?: string;
   tenantSlug?: string;
 };
 
@@ -341,8 +365,7 @@ export async function seedQuestion(input: SeedQuestion): Promise<SeededQuestion>
   const [row] = await sql()<{ id: string }[]>`
     insert into public.profile_form_questions
       (tenant_id, type, title, help_text, required, position, options, limits, allow_other,
-       show_on_profile, archived_at, created_by_user_id, step_id, condition_question_id,
-       condition_values)
+       show_on_profile, archived_at, created_by_user_id, step_id, branch_id)
     select t.id, ${type}, ${input.title}, ${input.helpText ?? null}, ${input.required ?? false},
            coalesce((select max(q.position) + 1 from public.profile_form_questions q
                       where q.tenant_id = t.id and q.archived_at is null), 0),
@@ -350,9 +373,7 @@ export async function seedQuestion(input: SeedQuestion): Promise<SeededQuestion>
            ${input.allowOther ?? false}, ${input.showOnProfile ?? false},
            ${input.archived ? new Date() : null},
            (select u.id from public.users u where u.email = ${SEED_ADMIN}),
-           ${input.stepId ?? null}::uuid, ${input.condition?.questionId ?? null}::uuid,
-           (select array_agg(v) from jsonb_array_elements_text(
-              ${input.condition ? sql().json(input.condition.values as never) : null}::jsonb) v)
+           ${input.stepId ?? null}::uuid, ${input.branchId ?? null}::uuid
       from public.tenants t where t.slug = ${tenantSlug}
     returning id::text as id`;
   if (!row) throw new Error(`seedQuestion: tenant ${tenantSlug} not found`);
@@ -513,7 +534,7 @@ export function longTitle(prefix: string, tag: string, length = 120): string {
   return `${head}${filler}`.slice(0, length).trimEnd().padEnd(length, 'x');
 }
 
-// ── Steps, conditions and the two forms of the 12.1 stories ────────────────────────────────────────
+// ── Steps, branches and the two forms of the 12.1 stories ──────────────────────────────────────────
 
 export type SeededStep = { id: string; title: string };
 
@@ -555,35 +576,56 @@ export async function stepTitles(prefix: string, tenantSlug: string = LAB): Prom
   return rows.map((row) => row.title);
 }
 
+export type SeedBranch = {
+  /** The question that decides; it must already exist (`seedQuestion`). */
+  openerQuestionId: string;
+  /** The answers that open the branch: option ids, or `'true'` / `'false'` for a yes/no opener. */
+  values: string[];
+  tenantSlug?: string;
+};
+
+/** One branch through the superuser connection (RLS off). It goes away with the opener, in `clearForm`. */
+export async function seedBranch(input: SeedBranch): Promise<string> {
+  const tenantSlug = input.tenantSlug ?? LAB;
+  const [row] = await sql()<{ id: string }[]>`
+    insert into public.profile_form_branches (tenant_id, opener_question_id, open_values)
+    select t.id, ${input.openerQuestionId}::uuid, ${sql().array(input.values)}::text[]
+      from public.tenants t where t.slug = ${tenantSlug}
+    returning id::text as id`;
+  if (!row) throw new Error(`seedBranch: tenant ${tenantSlug} not found`);
+  return row.id;
+}
+
 /** Where a question lives and what opens it, as the table stores it (`null` for a question shown to everyone). */
 export async function placementByTitle(
   title: string,
   tenantSlug: string = LAB,
 ): Promise<{
   stepTitle: string;
-  conditionQuestionId: string | null;
-  conditionValues: string[] | null;
+  branchOpenerQuestionId: string | null;
+  branchValues: string[] | null;
 } | null> {
   const rows = await sql()<
     {
       step_title: string;
-      condition_question_id: string | null;
-      condition_values: string[] | null;
+      branch_opener_question_id: string | null;
+      branch_values: string[] | null;
     }[]
   >`
-    select s.title as step_title, q.condition_question_id::text as condition_question_id,
-           q.condition_values
+    select s.title as step_title, b.opener_question_id::text as branch_opener_question_id,
+           b.open_values as branch_values
       from public.profile_form_questions q
       join public.profile_form_steps s on s.id = q.step_id and s.tenant_id = q.tenant_id
       join public.tenants t on t.id = q.tenant_id
+      left join public.profile_form_branches b on b.id = q.branch_id and b.tenant_id = q.tenant_id
      where t.slug = ${tenantSlug} and q.title = ${title}
      limit 1`;
   const row = rows[0];
   if (!row) return null;
   return {
     stepTitle: row.step_title,
-    conditionQuestionId: row.condition_question_id,
-    conditionValues: row.condition_values,
+    branchOpenerQuestionId: row.branch_opener_question_id,
+    branchValues: row.branch_values,
   };
 }
 
@@ -600,6 +642,8 @@ export type ClinicForm = {
   stepTwo: SeededStep;
   opener: SeededQuestion;
   plain: SeededQuestion;
+  /** The branch the two clinic questions sit in: opened only by 'Tenho uma clínica'. */
+  branchId: string;
   clinicRequired: SeededQuestion;
   clinicOptional: SeededQuestion;
 };
@@ -630,23 +674,27 @@ export async function seedClinicForm(
     stepId: stepOne.id,
     tenantSlug,
   });
-  const opens = { questionId: opener.id, values: [opener.optionIds[0] ?? ''] };
+  const branchId = await seedBranch({
+    openerQuestionId: opener.id,
+    values: [opener.optionIds[0] ?? ''],
+    tenantSlug,
+  });
   const clinicRequired = await seedQuestion({
     title: `${prefix} Nome da clinica`,
     type: 'short_text',
     required: true,
     stepId: stepTwo.id,
-    condition: opens,
+    branchId,
     tenantSlug,
   });
   const clinicOptional = await seedQuestion({
     title: `${prefix} Site da clinica`,
     type: 'short_text',
     stepId: stepTwo.id,
-    condition: opens,
+    branchId,
     tenantSlug,
   });
-  return { stepOne, stepTwo, opener, plain, clinicRequired, clinicOptional };
+  return { stepOne, stepTwo, opener, plain, branchId, clinicRequired, clinicOptional };
 }
 
 export type WideForm = {
@@ -654,13 +702,15 @@ export type WideForm = {
   stepTwo: SeededStep;
   /** A single choice with 20 options of 80 characters. */
   opener: SeededQuestion;
-  /** Five questions with 120-character titles, opened by the opener's FIRST option, all optional. */
+  /** The branch the five questions sit in: opened by the opener's FIRST option. */
+  branchId: string;
+  /** Five questions with 120-character titles, in that branch, all optional. */
   dependents: SeededQuestion[];
 };
 
 /**
  * The long-text form of the 320px backstops (UI-D-661): two steps with 60-character titles, an opener with
- * 20 options of 80 characters and five conditional questions with 120-character titles. Everything is
+ * 20 options of 80 characters and five questions with 120-character titles in one branch. Everything is
  * optional so a member who has not answered is never gated and lands on the pages the story measures.
  */
 export async function seedWideForm(prefix: string, tenantSlug: string = LAB): Promise<WideForm> {
@@ -676,6 +726,11 @@ export async function seedWideForm(prefix: string, tenantSlug: string = LAB): Pr
     stepId: stepOne.id,
     tenantSlug,
   });
+  const branchId = await seedBranch({
+    openerQuestionId: opener.id,
+    values: [opener.optionIds[0] ?? ''],
+    tenantSlug,
+  });
   const dependents: SeededQuestion[] = [];
   for (let n = 1; n <= 5; n += 1) {
     dependents.push(
@@ -683,12 +738,12 @@ export async function seedWideForm(prefix: string, tenantSlug: string = LAB): Pr
         title: longTitle(prefix, `dep${n}`),
         type: 'short_text',
         stepId: stepTwo.id,
-        condition: { questionId: opener.id, values: [opener.optionIds[0] ?? ''] },
+        branchId,
         tenantSlug,
       }),
     );
   }
-  return { stepOne, stepTwo, opener, dependents };
+  return { stepOne, stepTwo, opener, branchId, dependents };
 }
 
 /** Ten steps with 60-character titles, each holding one required question: the longest stepper the product allows. */

@@ -24,8 +24,8 @@ const TENANT_ADMIN = sql`tenant_id = app.tenant_id() and app.tenant_role() = 'ad
  * The branches of a tenant's profile form (Phase 12.2, PFORM-43, PFORM-45, PFORM-55; D-640, D-641, D-644):
  * one row per branch, a group of questions shown together when the answer to ONE opener question matches
  * `open_values`. A question joins a branch through `profile_form_questions.branch_id`. The branch replaces
- * the per-question condition of Phase 12.1 (`condition_question_id` / `condition_values`, which stay as an
- * unused legacy pair for one release; a later cleanup release drops them).
+ * the per-question condition of Phase 12.1 (the two legacy columns of the questions table, which stay as an
+ * unused pair for one release; a later cleanup release drops them).
  *
  * - **`opener_question_id`** names the question whose answer opens the branch; `open_values` holds the tokens
  *   (option ids, or 'true'/'false' for yes/no) any of which opens it, 1..`PROFILE_FORM_LIMITS.options` long.

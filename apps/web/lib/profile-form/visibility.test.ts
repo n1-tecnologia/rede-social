@@ -16,7 +16,6 @@ import {
 } from './test-fixtures';
 import {
   answersToErase,
-  isNotApplicable,
   isNotApplicableInTree,
   storedVisibleQuestionIds,
   tokensOfDraft,
@@ -128,14 +127,6 @@ describe('a form without branches (D-641)', () => {
     const b = question('short_text');
     const ids = visibleQuestionIds({ questions: [a, b] }, {});
     expect([...ids]).toEqual([a.id, b.id]);
-  });
-
-  it('no longer hides a question for the retired per-question condition', () => {
-    const opener = question('single_choice', { options: opts });
-    const old = question('short_text', { condition: { questionId: opener.id, values: [optA] } });
-    expect(visibleQuestionIds(form([opener, old]), { [opener.id]: choice(optB) }).has(old.id)).toBe(
-      true,
-    );
   });
 });
 
@@ -347,24 +338,5 @@ describe('the readers rules: stored equals visible (D-645)', () => {
       const all = rows({ Q1: tem, Q2: true });
       expect(typeof isNotApplicableInTree(row('Q4'), all, branches)).toBe('boolean');
     });
-  });
-
-  it('isNotApplicable (12.1): the retired per-question condition still reads for the compatibility window', () => {
-    const openerId = '00000000-0000-4000-8000-0000000000a1';
-    const rowsById = new Map<string, { value: unknown }>([
-      [openerId, { value: { optionId: optA, otherText: null } }],
-    ]);
-    const cond = (values: string[]) => ({ questionId: openerId, values });
-    const row = (condition: ReturnType<typeof cond> | null) => ({
-      questionId: 'q',
-      condition,
-      value: null,
-    });
-    expect(isNotApplicable(row(cond([optB])), rowsById)).toBe(true);
-    expect(isNotApplicable(row(cond([optA])), rowsById)).toBe(false);
-    expect(isNotApplicable(row(null), rowsById)).toBe(false);
-    const emptyOpener = new Map<string, { value: unknown }>([[openerId, { value: null }]]);
-    expect(isNotApplicable(row(cond([optA])), emptyOpener)).toBe(true);
-    expect(isNotApplicable(row(cond([optA])), new Map())).toBe(true);
   });
 });

@@ -447,11 +447,7 @@ export function QuestionEditorSheet({
         const limitsError = limits === undefined ? null : serverLimitsError(draft.type, limits);
         if (limitsError) found.limits = limitsError;
         // A branch the server does not know (or that is gone) is the stale-copy alert: nothing was saved.
-        if (
-          result.fields.branch !== undefined ||
-          result.fields.condition !== undefined ||
-          result.fields.form === 'unknown_branch'
-        ) {
+        if (result.fields.branch !== undefined || result.fields.form === 'unknown_branch') {
           setConflict(true);
           router.refresh();
           return;

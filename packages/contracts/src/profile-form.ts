@@ -46,7 +46,7 @@ export const PROFILE_FORM_CONDITION_OPENER_TYPES = [
   'single_choice',
   'yes_no',
 ] as const;
-export type ProfileFormConditionOpenerType = (typeof PROFILE_FORM_CONDITION_OPENER_TYPES)[number];
+export type ProfileFormOpenerType = (typeof PROFILE_FORM_CONDITION_OPENER_TYPES)[number];
 
 /** What the member form is doing right now (the `mode` of `GET /v1/me/profile-form`). */
 export const PROFILE_FORM_MODES = ['none', 'first', 'returning', 'edit'] as const;

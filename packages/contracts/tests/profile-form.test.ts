@@ -1190,7 +1190,7 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
     expect(archivedQuestionSchema.parse(archived)).toEqual(archived);
   });
 
-  it('12.2-20: the impact query takes questionId and branchId only; the retired condition keys are refused', () => {
+  it('12.2-20: the impact query takes questionId and branchId only; any other key is refused', () => {
     expect(PROFILE_FORM_IMPACT_CHANGES.slice(-3)).toEqual([
       'remove_condition',
       'undo_branch',
@@ -1208,20 +1208,7 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
     expect(impactQuerySchema.safeParse({ change: 'create_required', branchId: D }).success).toBe(
       true,
     );
-    // Strict: the 12.1 condition parameters are unknown keys now, and so is anything else.
-    expect(
-      impactQuerySchema.safeParse({
-        change: 'create_required',
-        conditionQuestionId: B,
-        conditionValues: `${C},true`,
-      }).success,
-    ).toBe(false);
-    expect(impactQuerySchema.safeParse({ change: 'replace', conditionQuestionId: B }).success).toBe(
-      false,
-    );
-    expect(
-      impactQuerySchema.safeParse({ change: 'replace', conditionValues: 'true' }).success,
-    ).toBe(false);
+    // Strict: any key beyond change, questionId and branchId is refused (the 12.1 condition parameters among them).
     expect(impactQuerySchema.safeParse({ change: 'replace', other: 1 }).success).toBe(false);
   });
 
@@ -1825,17 +1812,5 @@ describe('12.2-01 - branch bodies, reads and the optional keys (D-640, D-642, D-
       answerEtag(list, [{ id: C, revision: 1 }], branches),
     );
     expect(answerEtag(list, undefined, branches)).toBe(`${A}:1|${B}:4;steps=;branches=${BRANCH}:3`);
-  });
-
-  it('the retired condition shapes are gone (plan 20 of 12.2)', async () => {
-    const contracts: Record<string, unknown> = await import('../src/profile-form');
-    for (const name of [
-      'profileFormConditionSchema',
-      'isQuestionVisible',
-      'visibleSteps',
-      'parseConditionValues',
-    ]) {
-      expect(contracts[name], name).toBeUndefined();
-    }
   });
 });

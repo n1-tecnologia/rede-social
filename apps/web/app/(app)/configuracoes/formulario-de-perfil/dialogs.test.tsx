@@ -2143,7 +2143,7 @@ describe('12.2-18 Task 3: the Arquivadas tab shows archived branches as groups (
     const source = readFileSync(join(__dirname, 'ArchivedList.tsx'), 'utf8');
     expect(source).not.toMatch(/(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/);
     expect(source).not.toContain('dangerouslySetInnerHTML');
-    expect(source).not.toMatch(/conditionNote|describeCondition|question\.condition/);
+    expect(source).not.toMatch(/conditionNote|question\.condition/);
   });
 
   it('draws a hostile branch name and title as text (T-12.2-15)', () => {

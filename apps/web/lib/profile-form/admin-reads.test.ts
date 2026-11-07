@@ -32,6 +32,8 @@ const listOf = (count: number) => ({
   // 12.1-08: the list now carries the tenant's steps; these tests build none.
   steps: [],
   stepLimit: 10,
+  // 12.2-20: the list always carries its branches.
+  branches: [],
 });
 
 beforeEach(() => {
@@ -63,6 +65,7 @@ describe('loadAdminForm', () => {
       '/v1/profile_form/summary': json(200, summary),
       '/v1/profile_form/archived': json(200, {
         questions: [archivedQuestion('email'), archivedQuestion('date')],
+        branches: [],
       }),
     });
     const result = await loadAdminForm();
@@ -118,7 +121,7 @@ describe('loadAdminForm', () => {
 });
 
 describe('the branches of the admin reads (12.2-13, D-640)', () => {
-  it('loadAdminForm returns an empty list when the read has no branches key', async () => {
+  it('loadAdminForm returns an empty list when the read carries an empty one, and is an error without the key', async () => {
     serve({
       '/v1/profile_form/questions': json(200, listOf(1)),
       '/v1/profile_form/summary': json(200, summary),
@@ -126,6 +129,13 @@ describe('the branches of the admin reads (12.2-13, D-640)', () => {
     const result = await loadAdminForm();
     if (result.status !== 'ok') throw new Error('expected ok');
     expect(result.branches).toEqual([]);
+
+    const { branches: _branches, ...withoutBranches } = listOf(1);
+    serve({
+      '/v1/profile_form/questions': json(200, withoutBranches),
+      '/v1/profile_form/summary': json(200, summary),
+    });
+    expect(await loadAdminForm()).toEqual({ status: 'error' });
   });
 
   it('loadAdminForm returns the branches of the list, name included (the admin lane)', async () => {
@@ -139,15 +149,24 @@ describe('the branches of the admin reads (12.2-13, D-640)', () => {
     expect(result.branches).toEqual([branch]);
   });
 
-  it('loadArchived returns empty lists when neither read has branches', async () => {
+  it('loadArchived returns empty lists when neither read lists a branch, and is an error without the key', async () => {
     serve({
-      '/v1/profile_form/archived': json(200, { questions: [archivedQuestion('phone')] }),
+      '/v1/profile_form/archived': json(200, {
+        questions: [archivedQuestion('phone')],
+        branches: [],
+      }),
       '/v1/profile_form/questions': json(200, listOf(1)),
     });
     const result = await loadArchived();
     if (result.status !== 'ok') throw new Error('expected ok');
     expect(result.branches).toEqual([]);
     expect(result.activeBranches).toEqual([]);
+
+    serve({
+      '/v1/profile_form/archived': json(200, { questions: [archivedQuestion('phone')] }),
+      '/v1/profile_form/questions': json(200, listOf(1)),
+    });
+    expect(await loadArchived()).toEqual({ status: 'error' });
   });
 
   it('loadArchived returns the branches of the archived questions and, apart, those of the active list', async () => {
@@ -170,7 +189,10 @@ describe('the branches of the admin reads (12.2-13, D-640)', () => {
 describe('loadArchived', () => {
   it('is ok with the archived questions and the active count and limit', async () => {
     serve({
-      '/v1/profile_form/archived': json(200, { questions: [archivedQuestion('phone')] }),
+      '/v1/profile_form/archived': json(200, {
+        questions: [archivedQuestion('phone')],
+        branches: [],
+      }),
       '/v1/profile_form/questions': json(200, listOf(30)),
     });
     const result = await loadArchived();

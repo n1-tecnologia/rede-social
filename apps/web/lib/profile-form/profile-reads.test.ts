@@ -109,9 +109,10 @@ const staffPayload = {
       archivedAt: null,
       answered: true,
       required: false,
-      condition: null,
+      branchId: null,
     },
   ],
+  branches: [],
 };
 
 describe('loadMyAnswers: the derived-row rule (D-634, UI-D-659, D-641)', () => {
@@ -175,12 +176,16 @@ describe('loadMemberAnswers: the staff payload carries the branches, never a nam
     values: ['true'],
   };
 
-  it('gives the staff payload an empty branch list when the read has none', async () => {
+  it('carries an empty branch list when the read lists none, and is an error without the key', async () => {
     mocks.apiFetch.mockResolvedValueOnce(json(200, staffPayload));
     const result = await loadMemberAnswers('abc');
     if (result.status !== 'ok' || result.payload.kind !== 'staff')
       throw new Error('expected staff');
     expect(result.payload.branches).toEqual([]);
+
+    const { branches: _branches, ...withoutBranches } = staffPayload;
+    mocks.apiFetch.mockResolvedValueOnce(json(200, withoutBranches));
+    expect(await loadMemberAnswers('abc')).toEqual({ status: 'error' });
   });
 
   it('carries the branches of the staff payload, id, opener and values only', async () => {

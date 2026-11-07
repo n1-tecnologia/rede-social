@@ -412,7 +412,7 @@ describe('12.2-19 Task 3: previewForm hands the member component branches, never
     expect(byTitle.get('A clínica tem equipe?')?.branchId).toBe(BR1.id);
     expect(byTitle.get('Quantas pessoas trabalham aí?')?.branchId).toBe(BR2.id);
     expect(byTitle.get('Nome profissional')?.branchId).toBeNull();
-    for (const question of form.questions) expect(question.condition).toBeNull();
+    for (const question of form.questions) expect(question).not.toHaveProperty('condition');
   });
 
   it('asks for no branch at all when the form has none: an unconditional form, as in Phase 12', () => {
@@ -535,10 +535,9 @@ describe('12.2-19 Task 3: ticking an opener opens the whole block, through the c
 });
 
 describe('12.2-19 Task 3: the source of the preview no longer reads the retired condition', () => {
-  it('names no per-question condition except the null the member shape still requires', () => {
+  it('names no per-question condition in code: the member shape has no such key any more', () => {
     const source = readFileSync(join(__dirname, 'PreviewSheet.tsx'), 'utf8');
     const hits = source.split('\n').filter((line) => /condition/.test(line));
-    // The member question still has a `condition` key (null) until plan 20 removes the deprecated shape.
-    expect(hits.filter((line) => !/^\s*(\*|\/\/|condition: null)/.test(line))).toEqual([]);
+    expect(hits.filter((line) => !/^\s*(\*|\/\/)/.test(line))).toEqual([]);
   });
 });

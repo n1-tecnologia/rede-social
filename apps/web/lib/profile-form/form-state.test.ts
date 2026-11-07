@@ -200,7 +200,7 @@ describe('flags, the first invalid question and the blank test', () => {
     const a = question('short_text', { required: true });
     const b = question('short_text', { required: true, answer: 'ok' });
     const c = question('short_text');
-    expect(flaggedIds({ questions: [a, b, c] })).toEqual([a.id]);
+    expect(flaggedIds({ questions: [a, b, c], branches: [] })).toEqual([a.id]);
   });
 
   it('missingErrorIds keeps only the left-blank issues; firstInvalidId follows the admin order', () => {

@@ -60,14 +60,8 @@ export function previewForm(
       allowOther: question.allowOther,
       limits: question.limits,
       stepId: question.stepId,
-      // The retired per-question condition: a member question still carries the key, always null (12.2 moved it to `branchId`).
-      condition: null,
       branchId:
-        question.branchId !== null &&
-        question.branchId !== undefined &&
-        usableIds.has(question.branchId)
-          ? question.branchId
-          : null,
+        question.branchId !== null && usableIds.has(question.branchId) ? question.branchId : null,
       options: question.options.map((option) => ({ id: option.id, label: option.label })),
       answer: null,
     })),

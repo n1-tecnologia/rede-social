@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capAnswers, describeBranch } from './describe-branch';
+import { capAnswers, describeBranch, formatDisjunction } from './describe-branch';
 import { adminBranch, clinicAdminList, clinicId, options, question } from './test-fixtures';
 
 /**
@@ -107,5 +107,14 @@ describe('capAnswers: the Fluxo edge shows at most four answers (UI-D-676)', () 
   it('defaults the cap to four and honours another cap', () => {
     expect(capAnswers(opts)).toEqual({ shown: ['A', 'B', 'C', 'D'], more: 2 });
     expect(capAnswers(opts, 2)).toEqual({ shown: ['A', 'B'], more: 4 });
+  });
+});
+
+describe('formatDisjunction: the pt-BR “A”, “B” ou “C” list', () => {
+  it('joins quoted labels with the pt-BR disjunction', () => {
+    expect(formatDisjunction(['A', 'B', 'C'])).toBe('“A”, “B” ou “C”');
+    expect(formatDisjunction(['A', 'B'])).toBe('“A” ou “B”');
+    expect(formatDisjunction(['A'])).toBe('“A”');
+    expect(formatDisjunction([])).toBe('');
   });
 });

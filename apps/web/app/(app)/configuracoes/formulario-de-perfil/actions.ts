@@ -167,33 +167,16 @@ export async function readImpactAction(input: {
   change: ProfileFormImpactChange;
   questionId?: string;
   /**
-   * 12.1-17 (D-634): the condition the NEW question will have (a create or a replace), so only the members who would
-   * see it are counted. The tokens travel comma-joined, as the route reads them.
-   */
-  conditionQuestionId?: string;
-  conditionValues?: string[];
-  /**
    * 12.2-16 (D-634, D-644): the branch the NEW question will sit in (a create or a replace), so only the members
-   * for whom its whole chain is open are counted. The per-question condition keys above are retired on the
-   * server (400) and kept here only until plan 20 removes them.
+   * for whom its whole chain is open are counted.
    */
   branchId?: string;
 }): Promise<ImpactActionResult> {
-  const { conditionValues, ...rest } = input;
-  const query = impactQuerySchema.safeParse({
-    ...rest,
-    ...(conditionValues && conditionValues.length > 0
-      ? { conditionValues: conditionValues.join(',') }
-      : {}),
-  });
+  const query = impactQuerySchema.safeParse(input);
   if (!query.success) return { ok: false, code: 'failed' };
 
   const params = new URLSearchParams({ change: query.data.change });
   if (query.data.questionId) params.set('questionId', query.data.questionId);
-  if (query.data.conditionQuestionId) {
-    params.set('conditionQuestionId', query.data.conditionQuestionId);
-  }
-  if (query.data.conditionValues) params.set('conditionValues', query.data.conditionValues);
   if (query.data.branchId) params.set('branchId', query.data.branchId);
 
   let refusal: string | null = null;
@@ -280,14 +263,7 @@ export async function reactivateQuestionAction(id: string): Promise<ReactivateRe
 // ── 12-16: the question editor's writes ────────────────────────────────────────────────────────────
 
 /** The field of the sheet a refusal of a write belongs to; `form` is a refusal no single field owns. */
-export type SaveFieldKey =
-  | 'title'
-  | 'helpText'
-  | 'options'
-  | 'limits'
-  | 'condition'
-  | 'branch'
-  | 'form';
+export type SaveFieldKey = 'title' | 'helpText' | 'options' | 'limits' | 'branch' | 'form';
 
 /**
  * What a write of a question returns (UI-D-569). `invalid` is a 400: the issue code per field, which the
@@ -346,13 +322,7 @@ const TITLE_ISSUES: ReadonlySet<string> = new Set(['required', 'too_long']);
 /** The field of a contract issue's path. */
 function fieldOf(path: PropertyKey[]): SaveFieldKey {
   const head = path[0];
-  if (
-    head === 'title' ||
-    head === 'helpText' ||
-    head === 'options' ||
-    head === 'limits' ||
-    head === 'condition'
-  ) {
+  if (head === 'title' || head === 'helpText' || head === 'options' || head === 'limits') {
     return head;
   }
   // 12.2-16: a `branchId` the contract or the server refuses (`unknown_branch`) belongs to the "Ramo" field.

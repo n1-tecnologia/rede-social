@@ -798,7 +798,7 @@ describe('logging (T-12.1-12)', () => {
 
 // ── 12.1-17: the condition on the impact read, the dependents list and the reactivation race ──────
 
-describe('12.1-17: readImpactAction carries the condition of a new question (D-634)', () => {
+describe('12.1-17: readImpactAction sends the change and the question (D-634)', () => {
   it('sends remove_condition for a stored question', async () => {
     mocks.apiFetch.mockResolvedValue(json(200, { members: 4 }));
     expect(await readImpactAction({ change: 'remove_condition', questionId: IDS[0] })).toEqual({
@@ -809,42 +809,23 @@ describe('12.1-17: readImpactAction carries the condition of a new question (D-6
     const params = new URL(path, 'http://x').searchParams;
     expect(params.get('change')).toBe('remove_condition');
     expect(params.get('questionId')).toBe(IDS[0]);
-    expect(params.has('conditionQuestionId')).toBe(false);
+    expect([...params.keys()].sort()).toEqual(['change', 'questionId']);
   });
 
-  it('sends the opener and the tokens, comma-joined, for a create or a replace', async () => {
-    mocks.apiFetch.mockResolvedValue(json(200, { members: 2 }));
-    await readImpactAction({
-      change: 'create_required',
-      conditionQuestionId: IDS[1],
-      conditionValues: [uuid(9001), uuid(9002)],
-    });
+  it('carries a replace with its question and the branch of the new one', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 0 }));
+    await readImpactAction({ change: 'replace', questionId: IDS[0], branchId: IDS[1] });
     const [path] = mocks.apiFetch.mock.calls[0] as [string];
     const params = new URL(path, 'http://x').searchParams;
-    expect(params.get('conditionQuestionId')).toBe(IDS[1]);
-    expect(params.get('conditionValues')).toBe(`${uuid(9001)},${uuid(9002)}`);
+    expect(params.get('questionId')).toBe(IDS[0]);
+    expect(params.get('branchId')).toBe(IDS[1]);
   });
 
-  it('carries the literal true or false of a yes/no opener', async () => {
-    mocks.apiFetch.mockResolvedValue(json(200, { members: 0 }));
-    await readImpactAction({
-      change: 'replace',
-      questionId: IDS[0],
-      conditionQuestionId: IDS[1],
-      conditionValues: ['false'],
+  it('refuses a malformed branch id before any request', async () => {
+    expect(await readImpactAction({ change: 'create_required', branchId: 'nope' })).toEqual({
+      ok: false,
+      code: 'failed',
     });
-    const [path] = mocks.apiFetch.mock.calls[0] as [string];
-    expect(new URL(path, 'http://x').searchParams.get('conditionValues')).toBe('false');
-  });
-
-  it('refuses a malformed opener id before any request', async () => {
-    expect(
-      await readImpactAction({
-        change: 'create_required',
-        conditionQuestionId: 'nope',
-        conditionValues: ['true'],
-      }),
-    ).toEqual({ ok: false, code: 'failed' });
     expect(mocks.apiFetch).not.toHaveBeenCalled();
   });
 });
@@ -930,25 +911,26 @@ describe('12.1-17: has_dependents and condition_invalid (D-632)', () => {
     });
   });
 
-  it('a create carries the condition and the step to the API untouched', async () => {
+  it('a create carries the branch and the step to the API untouched', async () => {
     mocks.apiFetch.mockResolvedValue(json(201, adminQuestion('short_text')));
     await createQuestionAction({
       type: 'short_text',
       title: 'Nome da clínica',
       stepId: IDS[2],
-      condition: { questionId: IDS[1], values: [uuid(9001)] },
+      branchId: IDS[1],
     });
     const [, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
     const sent = JSON.parse(String(init.body));
     expect(sent.stepId).toBe(IDS[2]);
-    expect(sent.condition).toEqual({ questionId: IDS[1], values: [uuid(9001)] });
+    expect(sent.branchId).toBe(IDS[1]);
+    expect(sent).not.toHaveProperty('condition');
   });
 
-  it('an update removes the condition with an explicit null', async () => {
+  it('an update takes the question out of its branch with an explicit null', async () => {
     mocks.apiFetch.mockResolvedValue(json(200, adminQuestion('short_text')));
-    await updateQuestionAction(IDS[0] as string, { revision: 2, condition: null });
+    await updateQuestionAction(IDS[0] as string, { revision: 2, branchId: null });
     const [, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toEqual({ revision: 2, condition: null });
+    expect(JSON.parse(String(init.body))).toEqual({ revision: 2, branchId: null });
   });
 });
 
@@ -1114,7 +1096,7 @@ describe('createBranchAction (12.2-16)', () => {
     const params = new URL(path, 'http://x').searchParams;
     expect(params.get('change')).toBe('create_required');
     expect(params.get('branchId')).toBe(BRANCH.id);
-    expect(params.has('conditionQuestionId')).toBe(false);
+    expect([...params.keys()].sort()).toEqual(['branchId', 'change']);
   });
 
   it('places a refused branchId of a question write under the branch field', async () => {

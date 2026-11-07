@@ -38,17 +38,20 @@ import {
 
 /**
  * 12.1-19, Task 1: the steps and the conditional questions of the profile form in a browser, on the phone
- * project, against the real API and database (PFORM-34, 35, 36, 37, 42; UI-D-661).
+ * project, against the real API and database (PFORM-34, 35, 36, 37, 42; UI-D-661). Since 12.2-20 a question
+ * is conditional through its BRANCH: the 12.1 per-question condition is gone from the product and from the
+ * seeds.
  *
- *   1   the admin builds a second step and a conditional question through the builder; the builder
- *       refuses a layout that puts the opener after its dependent; the preview walks without answers
+ *   1   the admin builds a second step, a branch from the opener and a question inside it through the
+ *       builder; the builder refuses a layout that puts the opener after its dependent; the preview walks
+ *       without answers
  *   2   the member walks the stepper: the path grows when she opens the clinic questions, 'Avançar' saves
  *       one step, 'Concluir' leaves the gate; a second member who answers another option ends after step 1
  *   3   the erase story from 'Minhas respostas' (one scroll): the dialog lists the closed questions by
  *       TITLE, 'Rever respostas' saves nothing, 'Apagar e salvar' deletes, the staff read 'Não se aplica',
  *       and reopening the opener shows the clinic questions in place with focus still on the opener
  *   4a  the 320px backstop of the stepper with ten steps
- *   4b  the 320px backstop of the builder: wells, the question sheet with the condition editor (20 options
+ *   4b  the 320px backstop of the builder: wells, the branch sheet with the answers picker (20 options
  *       of 80 characters), the preview with long step titles
  *   4c  the 320px backstop of the member screens: the erase dialog with five 120-character titles and
  *       'Minhas respostas' when every conditional row is omitted
@@ -106,7 +109,7 @@ async function signInAdmin(page: Page): Promise<void> {
   await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
 }
 
-test('1. admin: a second step and a conditional question through the builder, a refused layout, and the preview', async ({
+test('1. admin: a second step, a branch and a question inside it through the builder, a refused layout, and the preview', async ({
   browser,
 }) => {
   await clearForm(LAB, prefix);
@@ -144,29 +147,32 @@ test('1. admin: a second step and a conditional question through the builder, a 
     await expect(page.getByRole('region', { name: stepOne.title })).toBeVisible();
     expect(await stepTitles(prefix)).toEqual([stepOne.title, stepTwoTitle]);
 
-    // A question added from the second well lands in the second step.
-    await page.getByRole('button', { name: `Adicionar pergunta à etapa: ${stepTwoTitle}` }).click();
+    // A branch from the opener: only 'Tenho uma clínica' opens it. The opener's sheet offers 'Criar ramo'.
+    await builderRow(page, opener.title).click();
+    await page
+      .getByRole('dialog', { name: 'Editar pergunta' })
+      .getByRole('button', { name: 'Criar ramo' })
+      .click();
+    const branchSheet = page.getByRole('dialog', { name: 'Novo ramo' });
+    await branchSheet.getByRole('checkbox', { name: 'Tenho uma clínica' }).check();
+    await branchSheet.getByRole('button', { name: 'Salvar ramo' }).click();
+    await expect(page.getByText('Ramo criado.')).toBeVisible();
+
+    // A question added to the branch, in the second step, is conditional on the opener.
+    await page.getByRole('button', { name: /^Adicionar pergunta ao ramo:/ }).click();
     const editor = page.getByRole('dialog', { name: 'Nova pergunta' });
     await editor.locator('label[for="pf-type-short_text"]').click();
     await editor.getByRole('textbox', { name: 'Pergunta', exact: true }).fill(dependentTitle);
-    const chosenStep = await editor
-      .locator('#pf-step')
-      .evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.textContent);
-    expect(chosenStep).toBe(stepTwoTitle);
-
-    // ...and is made conditional on the opener: only 'Tenho uma clínica' opens it.
-    await editor.getByRole('switch', { name: 'Mostrar só em alguns casos' }).click();
-    await editor.locator('#pf-condition-opener').selectOption({ label: opener.title });
-    await editor.getByRole('checkbox', { name: 'Tenho uma clínica' }).check();
+    await editor.locator('#pf-step').selectOption({ label: stepTwoTitle });
     await editor.getByRole('button', { name: 'Salvar pergunta' }).click();
     await expect(page.getByText('Pergunta adicionada.')).toBeVisible();
 
-    await expect(builderRow(page, dependentTitle)).toContainText('Condicional');
+    await expect(builderRow(page, dependentTitle)).toBeVisible();
     await expect(builderRow(page, opener.title)).toContainText('Abre 1 pergunta');
     expect(await placementByTitle(dependentTitle)).toEqual({
       stepTitle: stepTwoTitle,
-      conditionQuestionId: opener.id,
-      conditionValues: [opener.optionIds[0]],
+      branchOpenerQuestionId: opener.id,
+      branchValues: [opener.optionIds[0]],
     });
 
     // A layout that puts the opener after its dependent is refused with the sentence naming both questions.
@@ -413,13 +419,12 @@ test('4a. at 320px the stepper with ten steps keeps every control on screen', as
   }
 });
 
-test('4b. at 320px the builder wells, the condition editor and the preview keep every control on screen', async ({
+test('4b. at 320px the builder wells, the branch sheet and the preview keep every control on screen', async ({
   browser,
 }) => {
   await clearForm(LAB, prefix);
   const wide = await seedWideForm(prefix);
-  const dependent = wide.dependents[0];
-  if (!dependent) throw new Error('the wide form has no conditional question');
+  if (wide.dependents.length === 0) throw new Error('the wide form has no conditional question');
 
   const admin = await newPhonePage(browser, 320);
   try {
@@ -428,21 +433,20 @@ test('4b. at 320px the builder wells, the condition editor and the preview keep 
     await openBuilder(page);
     expect(await page.evaluate(() => window.innerWidth)).toBe(320);
 
-    // E3: the wells with 60-character step titles, 120-character question titles and the condition lines.
+    // E3: the wells with 60-character step titles, 120-character question titles and the branch strip.
     await expect(page.getByRole('region', { name: wide.stepTwo.title })).toBeVisible();
     await expectNoHorizontalScroll(page, 'E3 320px builder wells');
     await page.getByRole('button', { name: 'Reordenar' }).click();
     await expectNoHorizontalScroll(page, 'E3 320px builder wells in reorder mode');
     await page.getByRole('button', { name: 'Concluir' }).click();
 
-    // E5: the condition editor of a conditional question with a long title, an opener of 20 options of 80
-    // characters.
-    await builderRow(page, dependent.title).click();
-    const sheet = page.getByRole('dialog', { name: 'Editar pergunta' });
-    await expect(sheet.locator('[data-condition-values]')).toBeVisible();
-    await expect(sheet.locator('[data-condition-values] input[type="checkbox"]')).toHaveCount(20);
-    await expectContained(sheet, 'E5 320px condition editor');
-    await expectNoHorizontalScroll(page, 'E5 320px condition editor, page');
+    // E5: the branch sheet of a branch whose opener has 20 options of 80 characters.
+    await page.getByRole('button', { name: /^Editar ramo:/ }).click();
+    const sheet = page.getByRole('dialog', { name: 'Editar ramo' });
+    await expect(sheet.locator('[data-branch-values]').first()).toBeVisible();
+    await expect(sheet.locator('[data-branch-values] input[type="checkbox"]')).toHaveCount(20);
+    await expectContained(sheet, 'E5 320px branch sheet');
+    await expectNoHorizontalScroll(page, 'E5 320px branch sheet, page');
     await page.keyboard.press('Escape');
     await expect(sheet).toBeHidden();
 

@@ -38,7 +38,7 @@ export {
   PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_DEFAULT_STEP_TITLE,
   PROFILE_FORM_ISSUE_SET,
-  type ProfileFormConditionOpenerType,
+  type ProfileFormOpenerType,
   type ProfileFormIssue,
   type ProfileFormSummary,
   profileFormSummarySchema,

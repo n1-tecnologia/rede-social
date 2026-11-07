@@ -87,8 +87,8 @@ export function isQuestionVisibleInTree(
 
 /**
  * The ids of the steps that hold at least one visible question, in the given step order. A step whose
- * questions are all hidden, and a step with no question, are absent (the 12.1 `visibleSteps` shape with
- * `branchId` in place of `condition`).
+ * questions are all hidden, and a step with no question, are absent (over the branch tree: a question
+ * is visible when every branch above it is open).
  */
 export function visibleStepsInTree(
   steps: readonly { id: string }[],

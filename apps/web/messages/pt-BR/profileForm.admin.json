@@ -36,9 +36,7 @@
         "onProfile": "No perfil",
         "locked": "Tipo bloqueado",
         "position": "Pergunta {position} de {total}",
-        "conditional": "Condicional",
-        "opens": "Abre {count, plural, one {# pergunta} other {# perguntas}}",
-        "condition": "Só aparece se “{opener}” for {options}."
+        "opens": "Abre {count, plural, one {# pergunta} other {# perguntas}}"
       },
       "branches": {
         "label": "Se “{opener}” for {options}",
@@ -267,8 +265,6 @@
           "archiveBranch": "Este ramo não pode ser arquivado agora.",
           "privacy": "Esta pergunta decide ramos com perguntas que aparecem no perfil e não pode deixar de aparecer agora."
         },
-        "hint": "Remova a condição destas perguntas, ou arquive-as, e tente de novo:",
-        "hintOption": "Tire esta opção da condição destas perguntas, ou remova a condição delas, e tente de novo:",
         "hintBranches": "Desfaça ou arquive estes ramos, e tente de novo:",
         "hintOptionBranches": "Tire esta opção da lista de respostas destes ramos, ou desfaça esses ramos, e tente de novo:",
         "hintArchiveBranch": "Estas perguntas abrem ramos que já têm respostas. Desfaça esses ramos e tente de novo:",
@@ -369,36 +365,6 @@
             "mustFollow": "Esta pergunta depende de “{opener}”, então precisa ficar na etapa dela ou em uma depois.",
             "mustPrecede": "“{dependent}” depende desta pergunta, então ela precisa ficar na etapa de “{dependent}” ou em uma antes."
           }
-        },
-        "condition": {
-          "label": "Mostrar só em alguns casos",
-          "helper": "Sem condição, todos os membros veem esta pergunta.",
-          "opener": {
-            "label": "Pergunta que decide",
-            "placeholder": "Selecione",
-            "help": "Só aparecem aqui perguntas de escolha ou de Sim ou não, sem condição, que vêm antes desta."
-          },
-          "none": "Para usar uma condição, crie antes uma pergunta de escolha ou de Sim ou não, sem condição, que venha antes desta.",
-          "values": {
-            "legend": "Mostrar quando a resposta for",
-            "help": "Basta uma das opções marcadas para a pergunta aparecer.",
-            "otherNote": "A opção “Outro” não abre perguntas."
-          },
-          "requiredNote": "Como esta pergunta é obrigatória, só quem a vê precisa responder.",
-          "reset": "A pergunta que decide mudou, então as respostas escolhidas foram limpas.",
-          "errors": {
-            "opener": "Escolha a pergunta que decide.",
-            "values": "Escolha pelo menos uma resposta que abre esta pergunta.",
-            "stale": "Esta condição não vale mais. Escolha a pergunta e a resposta de novo."
-          },
-          "locked": {
-            "none": "Esta pergunta já tem {n, plural, one {# resposta} other {# respostas}}, então a condição não pode ser criada nem mudada. Para mudar, crie uma nova pergunta e arquive esta.",
-            "removable": "Como a pergunta já tem respostas, a condição só pode ser removida."
-          },
-          "summary": "Só aparece se “{opener}” for {options}.",
-          "remove": "Remover condição",
-          "removePending": "A condição será removida quando você salvar.",
-          "undo": "Desfazer"
         },
         "opens": {
           "title": "Esta pergunta abre {count, plural, one {# pergunta} other {# perguntas}}:",
