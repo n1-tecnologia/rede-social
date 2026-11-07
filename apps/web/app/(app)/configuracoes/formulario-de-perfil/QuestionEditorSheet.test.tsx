@@ -66,6 +66,9 @@ function mount(
     /** 12.2-16: the branches of the form, and the branch a new question starts in. */
     branches?: ReturnType<typeof adminBranch>[];
     initialBranchId?: string;
+    /** 12.2-16 Task 2: the host's two handlers for "Ramos desta pergunta". */
+    onCreateBranch?: (question: ReturnType<typeof adminQuestion>) => void;
+    onOpenBranch?: (branch: ReturnType<typeof adminBranch>) => void;
   } = {},
 ) {
   return render(
@@ -79,6 +82,8 @@ function mount(
         stepId={props.stepId}
         branches={props.branches}
         initialBranchId={props.initialBranchId}
+        onCreateBranch={props.onCreateBranch}
+        onOpenBranch={props.onOpenBranch}
         tenantName="Ana Mentoria"
         limit={30}
         onClose={onClose}
@@ -2086,6 +2091,318 @@ describe('12.2-16: the "Ramo" field of "Onde e quando aparece" (UI-D-669)', () =
       await saveWith({ ok: false, code: 'conflict', issue: 'branch_archived' });
       expect(document.querySelector('[data-conflict-alert]')).toBeTruthy();
       expect(mocks.refresh).toHaveBeenCalled();
+    });
+  });
+});
+
+// ── 12.2-16 Task 2: "Ramos desta pergunta" and "Criar ramo" (D-651, D-644, UI-D-670) ────────────────
+
+describe('12.2-16: "Ramos desta pergunta" and "Criar ramo" (UI-D-670)', () => {
+  const s1 = adminStep({ title: 'Informações gerais' });
+  const A = uuid(9801);
+  const B = uuid(9802);
+  const opener = adminQuestion('single_choice', {
+    stepId: s1.id,
+    title: 'Você tem clínica?',
+    options: [
+      { id: A, label: 'Tenho uma clínica', answerCount: 0 },
+      { id: B, label: 'Trabalho em uma clínica', answerCount: 0 },
+    ],
+  });
+  const withName = adminBranch({
+    openerQuestionId: opener.id,
+    values: [A],
+    name: 'Quem tem clínica',
+  });
+  const noName = adminBranch({ openerQuestionId: opener.id, values: [B], name: null });
+  const m1 = adminQuestion('short_text', { stepId: s1.id, branchId: withName.id });
+  const m2 = adminQuestion('short_text', { stepId: s1.id, branchId: withName.id });
+  const m3 = adminQuestion('short_text', { stepId: s1.id, branchId: noName.id });
+  const active = [opener, m1, m2, m3];
+
+  const create = vi.fn();
+  const openBranch = vi.fn();
+  beforeEach(() => {
+    create.mockReset();
+    openBranch.mockReset();
+  });
+
+  const block = () => document.querySelector('[data-branches-block]') as HTMLElement | null;
+  const createButton = () =>
+    screen.getByRole('button', { name: 'Criar ramo' }) as HTMLButtonElement;
+  const edit = (props: Parameters<typeof mount>[0] = {}) =>
+    mount({
+      mode: 'edit',
+      question: opener,
+      questions: active,
+      steps: [s1],
+      branches: [withName, noName],
+      onCreateBranch: create,
+      onOpenBranch: openBranch,
+      ...props,
+    });
+
+  it('appears for the four opener types and for no other', () => {
+    for (const type of ['dropdown', 'multiple_choice', 'single_choice', 'yes_no'] as const) {
+      const q = adminQuestion(type, { stepId: s1.id });
+      const { unmount } = mount({
+        mode: 'edit',
+        question: q,
+        questions: [q],
+        steps: [s1],
+        onCreateBranch: create,
+      });
+      expect(block(), type).toBeTruthy();
+      unmount();
+    }
+    for (const type of ['short_text', 'long_text', 'rating', 'number', 'date', 'email'] as const) {
+      const q = adminQuestion(type, { stepId: s1.id });
+      const { unmount } = mount({
+        mode: 'edit',
+        question: q,
+        questions: [q],
+        steps: [s1],
+        onCreateBranch: create,
+      });
+      expect(block(), type).toBeNull();
+      unmount();
+    }
+  });
+
+  it('follows the type the draft has now, for a question nobody answered', () => {
+    const q = adminQuestion('short_text', { stepId: s1.id });
+    mount({ mode: 'edit', question: q, questions: [q], steps: [s1], onCreateBranch: create });
+    expect(block()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
+    pick('Escolha única');
+    expect(block()).toBeTruthy();
+  });
+
+  it('comes after "Onde e quando aparece", with the micro title, the hint and the button', () => {
+    edit();
+    const where = document.querySelector('[data-where-block]') as HTMLElement;
+    expect(block()?.querySelector('h3')?.textContent).toBe('Ramos desta pergunta');
+    expect(
+      screen.getByText(
+        'Um ramo abre um grupo de perguntas só para quem responder como você definir.',
+      ),
+    ).toBeTruthy();
+    expect(
+      where.compareDocumentPosition(block() as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(createButton().className).toContain('border-border-secondary');
+    expect(createButton().querySelector('svg')).toBeTruthy();
+  });
+
+  it('is gone as the 12.1 "Esta pergunta abre N perguntas" block', () => {
+    edit({ question: { ...opener, opensCount: 3 } });
+    expect(document.querySelector('[data-opens-block]')).toBeNull();
+    expect(screen.queryByText(/^Esta pergunta abre \d/)).toBeNull();
+  });
+
+  describe('zero, one and many branches', () => {
+    it('with none says so, and still offers "Criar ramo"', () => {
+      edit({ branches: [] });
+      expect(screen.getByText('Esta pergunta ainda não abre nenhum ramo.')).toBeTruthy();
+      expect(block()?.querySelector('ul')).toBeNull();
+      expect(createButton().disabled).toBe(false);
+    });
+
+    it('with one draws one row; with two, a list of two, in the layout order', () => {
+      const { unmount } = edit({ branches: [withName] });
+      expect(block()?.querySelectorAll('li')).toHaveLength(1);
+      unmount();
+      edit();
+      const rows = [...(block()?.querySelectorAll('li button') ?? [])] as HTMLElement[];
+      expect(rows).toHaveLength(2);
+      expect(rows[0]?.textContent).toContain('Quem tem clínica');
+      expect(rows[0]?.textContent).toContain('2 perguntas');
+      expect(rows[1]?.textContent).toContain(
+        'Se “Você tem clínica?” for “Trabalho em uma clínica”',
+      );
+      expect(rows[1]?.textContent).toContain('1 pergunta');
+    });
+
+    it('draws a row as a 44px rounded button with a clamped label, a Split and a chevron', () => {
+      edit();
+      const row = block()?.querySelector('li button') as HTMLElement;
+      expect(row.className).toContain('min-h-11');
+      expect(row.className).toContain('rounded-xl');
+      expect(row.className).toContain('bg-bg-tertiary');
+      expect(row.className).toContain('w-full');
+      expect(row.querySelectorAll('svg')).toHaveLength(2);
+      expect((row.querySelector('.line-clamp-2') as HTMLElement).textContent).toBe(
+        'Quem tem clínica',
+      );
+    });
+
+    it('draws no row when the host cannot open a branch, so no row does nothing', () => {
+      edit({ onOpenBranch: undefined });
+      expect(block()?.querySelector('li')).toBeNull();
+      expect(createButton()).toBeTruthy();
+    });
+
+    it('draws a 60-character name and a long title clamped, and renders markup as text', () => {
+      const long = adminBranch({
+        openerQuestionId: opener.id,
+        values: [A],
+        name: `<b>${'n'.repeat(57)}`,
+      });
+      edit({ branches: [long] });
+      expect(document.querySelector('[data-branches-block] b')).toBeNull();
+      expect(block()?.querySelector('.line-clamp-2')?.textContent).toBe(`<b>${'n'.repeat(57)}`);
+    });
+  });
+
+  describe('"Criar ramo" and the rows close this sheet first (D-651)', () => {
+    it('hands the question to the host at once when nothing was edited', () => {
+      edit();
+      fireEvent.click(createButton());
+      expect(create).toHaveBeenCalledWith(opener);
+      expect(screen.queryByText('Descartar as alterações?')).toBeNull();
+    });
+
+    it('asks before leaving with unsaved edits, and leaves only on "Descartar"', () => {
+      edit();
+      typeTitle('Outro título');
+      fireEvent.click(createButton());
+      const ask = screen.getByRole('dialog', { name: 'Descartar as alterações?' });
+      expect(create).not.toHaveBeenCalled();
+      fireEvent.click(within(ask).getByRole('button', { name: 'Continuar editando' }));
+      expect(create).not.toHaveBeenCalled();
+      expect(titleField().value).toBe('Outro título');
+      fireEvent.click(createButton());
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Descartar as alterações?' })).getByRole(
+          'button',
+          {
+            name: 'Descartar',
+          },
+        ),
+      );
+      expect(create).toHaveBeenCalledWith(opener);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('opens a branch through the same guard', () => {
+      edit();
+      const row = block()?.querySelector('li button') as HTMLElement;
+      fireEvent.click(row);
+      expect(openBranch).toHaveBeenCalledWith(withName);
+      openBranch.mockReset();
+      typeTitle('Mudou');
+      fireEvent.click(block()?.querySelector('li button') as HTMLElement);
+      expect(openBranch).not.toHaveBeenCalled();
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Descartar as alterações?' })).getByRole(
+          'button',
+          {
+            name: 'Descartar',
+          },
+        ),
+      );
+      expect(openBranch).toHaveBeenCalledWith(withName);
+    });
+
+    it('is not offered without a host handler', () => {
+      edit({ onCreateBranch: undefined });
+      expect(screen.queryByRole('button', { name: 'Criar ramo' })).toBeNull();
+    });
+  });
+
+  describe('a NEW, unsaved question cannot create branches yet (E3 partial)', () => {
+    it('disables the button and says to save first, in create and in replace mode', () => {
+      mount({
+        questions: active,
+        steps: [s1],
+        branches: [withName],
+        onCreateBranch: create,
+      });
+      pick('Escolha única');
+      expect(createButton().disabled).toBe(true);
+      expect(
+        screen.getByText('Salve a pergunta para poder criar ramos a partir dela.'),
+      ).toBeTruthy();
+      fireEvent.click(createButton());
+      expect(create).not.toHaveBeenCalled();
+      cleanup();
+
+      mount({
+        mode: 'replace',
+        question: opener,
+        questions: active,
+        steps: [s1],
+        branches: [withName],
+        onCreateBranch: create,
+      });
+      pick('Escolha única');
+      expect(createButton().disabled).toBe(true);
+    });
+  });
+
+  describe('depth and limit (UI-D-683, the numbers come from the limits)', () => {
+    const r = adminQuestion('single_choice', { stepId: s1.id, title: 'R', options: [] });
+    const b1 = adminBranch({ openerQuestionId: r.id, values: ['x'] });
+    const q1 = adminQuestion('single_choice', { stepId: s1.id, title: 'Q1', branchId: b1.id });
+    const b2 = adminBranch({ openerQuestionId: q1.id, values: ['x'] });
+    const q2 = adminQuestion('single_choice', { stepId: s1.id, title: 'Q2', branchId: b2.id });
+    const b3 = adminBranch({ openerQuestionId: q2.id, values: ['x'] });
+    const q3 = adminQuestion('single_choice', { stepId: s1.id, title: 'Q3', branchId: b3.id });
+
+    it('replaces the list and the button by the depth sentence when the question sits 3 levels deep', () => {
+      mount({
+        mode: 'edit',
+        question: q3,
+        questions: [r, q1, q2, q3],
+        steps: [s1],
+        branches: [b1, b2, b3],
+        onCreateBranch: create,
+        onOpenBranch: openBranch,
+      });
+      const line = screen.getByText(
+        'Esta pergunta já está dentro de 3 níveis de ramo, o máximo. Ela não pode abrir outro ramo.',
+      );
+      expect(line.closest('[data-branches-block]')).toBeTruthy();
+      expect(line.parentElement?.querySelector('svg')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Criar ramo' })).toBeNull();
+      expect(block()?.querySelector('ul')).toBeNull();
+    });
+
+    it('still offers the button two levels deep', () => {
+      mount({
+        mode: 'edit',
+        question: q2,
+        questions: [r, q1, q2, q3],
+        steps: [s1],
+        branches: [b1, b2, b3],
+        onCreateBranch: create,
+      });
+      expect(createButton().disabled).toBe(false);
+    });
+
+    const many = (count: number, archived = 0) =>
+      Array.from({ length: count }, (_, at) =>
+        adminBranch({
+          openerQuestionId: opener.id,
+          values: [A],
+          archivedAt: at < archived ? '2026-10-01T12:00:00.000Z' : null,
+        }),
+      );
+
+    it('disables the button at 15 active branches and shows the limit line', () => {
+      edit({ branches: many(15) });
+      expect(createButton().disabled).toBe(true);
+      expect(
+        screen.getByText(
+          'Você chegou ao limite de 15 ramos. Desfaça ou arquive um ramo para criar outro.',
+        ),
+      ).toBeTruthy();
+    });
+
+    it('does not count archived branches, and still offers the button at 14 active ones', () => {
+      edit({ branches: many(16, 2) });
+      expect(createButton().disabled).toBe(false);
+      expect(screen.queryByText(/^Você chegou ao limite de 15 ramos/)).toBeNull();
     });
   });
 });

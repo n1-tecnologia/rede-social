@@ -145,3 +145,83 @@ describe('profileForm.admin.editor.branch: the "Ramo" field of the question shee
     );
   });
 });
+
+describe('profileForm.admin.editor.branches: "Ramos desta pergunta" and "Criar ramo" (UI-D-670)', () => {
+  it('declares the keys the Copywriting Contract names under editor.branches', () => {
+    const branches = parsed.profileForm.admin.editor.branches;
+    for (const key of ['title', 'hint', 'create', 'none', 'saveFirst', 'depth']) {
+      expect(branches).toHaveProperty(key);
+    }
+  });
+
+  it('reads every sentence verbatim, the depth number coming from the limit', () => {
+    expect(t('editor.branches.title')).toBe('Ramos desta pergunta');
+    expect(t('editor.branches.hint')).toBe(
+      'Um ramo abre um grupo de perguntas só para quem responder como você definir.',
+    );
+    expect(t('editor.branches.create')).toBe('Criar ramo');
+    expect(t('editor.branches.none')).toBe('Esta pergunta ainda não abre nenhum ramo.');
+    expect(t('editor.branches.saveFirst')).toBe(
+      'Salve a pergunta para poder criar ramos a partir dela.',
+    );
+    expect(t('editor.branches.depth', { max: 3 })).toBe(
+      'Esta pergunta já está dentro de 3 níveis de ramo, o máximo. Ela não pode abrir outro ramo.',
+    );
+  });
+
+  it('the branch limit line takes its number from the limits', () => {
+    expect(t('branches.limit', { max: 15 })).toBe(
+      'Você chegou ao limite de 15 ramos. Desfaça ou arquive um ramo para criar outro.',
+    );
+  });
+});
+
+describe('profileForm.admin.branches.sheet: the branch sheet, create mode (UI-D-671)', () => {
+  it('declares the create keys under branches.sheet and the toast under branches.toasts', () => {
+    const sheet = parsed.profileForm.admin.branches.sheet;
+    for (const key of [
+      'createTitle',
+      'opener',
+      'legend',
+      'help',
+      'otherNote',
+      'save',
+      'saving',
+      'discardBody',
+      'failed',
+    ]) {
+      expect(sheet).toHaveProperty(key);
+    }
+    for (const key of ['label', 'placeholder', 'counter', 'help', 'tooLong']) {
+      expect(sheet.name).toHaveProperty(key);
+    }
+    expect(sheet.errors).toHaveProperty('values');
+    expect(parsed.profileForm.admin.branches.toasts).toHaveProperty('created');
+  });
+
+  it('reads the titles, the picker, the name and the footer verbatim', () => {
+    expect(t('branches.sheet.createTitle')).toBe('Novo ramo');
+    expect(t('branches.sheet.opener')).toBe('Pergunta que decide');
+    expect(t('branches.sheet.legend')).toBe('Mostrar quando a resposta for');
+    expect(t('branches.sheet.help')).toBe('Basta uma das opções marcadas para o ramo abrir.');
+    expect(t('branches.sheet.otherNote')).toBe('A opção “Outro” não abre ramos.');
+    expect(t('branches.sheet.name.label')).toBe('Nome do ramo (opcional)');
+    expect(t('branches.sheet.name.placeholder')).toBe('Ex.: Quem tem clínica');
+    expect(t('branches.sheet.name.counter', { n: 17, max: 60 })).toBe('17/60');
+    expect(t('branches.sheet.name.help')).toBe(
+      'O nome só aparece para você, no construtor e no Fluxo. Os membros não o veem.',
+    );
+    expect(t('branches.sheet.name.tooLong', { max: 60 })).toBe('Use até 60 caracteres.');
+    expect(t('branches.sheet.save')).toBe('Salvar ramo');
+    expect(t('branches.sheet.saving')).toBe('Salvando…');
+  });
+
+  it('reads the validation, the discard body, the failure and the toast verbatim', () => {
+    expect(t('branches.sheet.errors.values')).toBe(
+      'Escolha pelo menos uma resposta que abre este ramo.',
+    );
+    expect(t('branches.sheet.discardBody')).toBe('As mudanças deste ramo ainda não foram salvas.');
+    expect(t('branches.sheet.failed')).toBe('Não foi possível salvar o ramo agora. Tente de novo.');
+    expect(t('branches.toasts.created')).toBe('Ramo criado.');
+  });
+});

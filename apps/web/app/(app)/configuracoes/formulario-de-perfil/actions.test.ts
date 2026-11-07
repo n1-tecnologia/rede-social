@@ -19,6 +19,7 @@ vi.mock('next/navigation', () => ({
 
 const {
   archiveQuestionAction,
+  createBranchAction,
   createQuestionAction,
   createStepAction,
   deleteQuestionAction,
@@ -944,5 +945,178 @@ describe('12.1-17: has_dependents and condition_invalid (D-632)', () => {
     await updateQuestionAction(IDS[0] as string, { revision: 2, condition: null });
     const [, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ revision: 2, condition: null });
+  });
+});
+
+// ── 12.2-16: createBranchAction (D-640, D-644, D-651; PFORM-57; T-12.2-01) ──────────────────────────
+
+describe('createBranchAction (12.2-16)', () => {
+  const OPENER = uuid(4600);
+  const TOKEN = uuid(9601);
+  const BRANCH = {
+    id: uuid(4601),
+    openerQuestionId: OPENER,
+    values: [TOKEN],
+    name: 'Quem tem clínica',
+    revision: 1,
+    archivedAt: null,
+    questionCount: 0,
+    answerCount: 0,
+  };
+  const body = { openerQuestionId: OPENER, values: [TOKEN], name: 'Quem tem clínica' };
+
+  it('POSTs the contract body to /v1/profile_form/branches and returns the parsed branch', async () => {
+    mocks.apiFetch.mockResolvedValue(json(201, BRANCH));
+    expect(await createBranchAction({ ...body, name: '  Quem tem clínica  ' })).toEqual({
+      ok: true,
+      branch: BRANCH,
+    });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/v1/profile_form/branches');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual(body);
+  });
+
+  it('sends a blank or absent name as null', async () => {
+    mocks.apiFetch.mockResolvedValue(json(201, { ...BRANCH, name: null }));
+    await createBranchAction({ openerQuestionId: OPENER, values: [TOKEN], name: '   ' });
+    await createBranchAction({ openerQuestionId: OPENER, values: [TOKEN] });
+    for (const call of mocks.apiFetch.mock.calls as [string, RequestInit][]) {
+      expect(JSON.parse(String(call[1].body))).toEqual({
+        openerQuestionId: OPENER,
+        values: [TOKEN],
+        name: null,
+      });
+    }
+  });
+
+  it('never leaves the server tier with a body the contract refuses, and names the field', async () => {
+    const none = await createBranchAction({ openerQuestionId: OPENER, values: [] });
+    expect(none).toEqual({ ok: false, code: 'invalid', fields: { values: 'condition_invalid' } });
+    const long = await createBranchAction({ ...body, name: 'x'.repeat(61) });
+    expect(long).toEqual({ ok: false, code: 'invalid', fields: { name: 'too_long' } });
+    const control = await createBranchAction({ ...body, name: 'a\u0007b' });
+    expect(control).toEqual({ ok: false, code: 'invalid', fields: { name: 'invalid' } });
+    const noOpener = await createBranchAction({ openerQuestionId: 'nope', values: [TOKEN] });
+    expect(noOpener).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { opener: 'condition_invalid' },
+    });
+    const many = await createBranchAction({
+      openerQuestionId: OPENER,
+      values: Array.from({ length: 21 }, (_, at) => `t${at}`),
+    });
+    expect(many).toEqual({ ok: false, code: 'invalid', fields: { values: 'condition_invalid' } });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('counts the name in code points: 60 emoji go through, 61 do not', async () => {
+    mocks.apiFetch.mockResolvedValue(json(201, BRANCH));
+    expect((await createBranchAction({ ...body, name: '😀'.repeat(60) })).ok).toBe(true);
+    expect(await createBranchAction({ ...body, name: '😀'.repeat(61) })).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { name: 'too_long' },
+    });
+  });
+
+  it('maps a 400 with issue paths to its fields', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      refusal(400, 'VALIDATION_FAILED', {
+        issues: [
+          { path: 'name', message: 'too_long' },
+          { path: 'values.0', message: 'condition_invalid' },
+        ],
+      }),
+    );
+    expect(await createBranchAction(body)).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { name: 'too_long', values: 'condition_invalid' },
+    });
+    mocks.apiFetch.mockResolvedValueOnce(
+      refusal(400, 'VALIDATION_FAILED', { profileForm: 'condition_invalid' }),
+    );
+    expect(await createBranchAction(body)).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { form: 'condition_invalid' },
+    });
+  });
+
+  it('maps 409 branch_limit to limit, and branch_depth and the others to conflict with the issue', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(refusal(409, 'CONFLICT', { profileForm: 'branch_limit' }));
+    expect(await createBranchAction(body)).toEqual({ ok: false, code: 'limit' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(409, 'CONFLICT', { profileForm: 'branch_depth' }));
+    expect(await createBranchAction(body)).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'branch_depth',
+    });
+    mocks.apiFetch.mockResolvedValueOnce(
+      refusal(409, 'CONFLICT', { profileForm: 'condition_invalid' }),
+    );
+    expect(await createBranchAction(body)).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'condition_invalid',
+    });
+  });
+
+  it('maps 403, MODULE_DISABLED, a bare 404, a 500, a broken body and a thrown request', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(refusal(403, 'FORBIDDEN'));
+    expect(await createBranchAction(body)).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(404, 'MODULE_DISABLED'));
+    expect(await createBranchAction(body)).toEqual({ ok: false, code: 'moduleOff' });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(404, 'NOT_FOUND'));
+    expect(await createBranchAction(body)).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'not_found',
+    });
+    mocks.apiFetch.mockResolvedValueOnce(refusal(500, 'INTERNAL'));
+    expect(await createBranchAction(body)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockResolvedValueOnce(json(201, { id: 'x' }));
+    expect(await createBranchAction(body)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockRejectedValueOnce(new Error('network'));
+    expect(await createBranchAction(body)).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('navigates on a lost session OUTSIDE the request handling, and logs no more than a status and a code', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(createBranchAction(body)).rejects.toThrow(/REDIRECT/);
+    mocks.apiFetch.mockResolvedValueOnce(refusal(500, 'INTERNAL'));
+    await createBranchAction({ ...body, name: 'Nome secreto' });
+    const logged = JSON.stringify(
+      (console.error as unknown as { mock: { calls: unknown[] } }).mock.calls,
+    );
+    expect(logged).not.toContain('Nome secreto');
+  });
+
+  it('sends the impact read the branch of a new question (D-634)', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 3 }));
+    expect(await readImpactAction({ change: 'create_required', branchId: BRANCH.id })).toEqual({
+      ok: true,
+      members: 3,
+    });
+    const [path] = mocks.apiFetch.mock.calls[0] as [string];
+    const params = new URL(path, 'http://x').searchParams;
+    expect(params.get('change')).toBe('create_required');
+    expect(params.get('branchId')).toBe(BRANCH.id);
+    expect(params.has('conditionQuestionId')).toBe(false);
+  });
+
+  it('places a refused branchId of a question write under the branch field', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(400, 'VALIDATION_FAILED', {
+        issues: [{ path: 'branchId', message: 'unknown_branch' }],
+      }),
+    );
+    expect(await updateQuestionAction(IDS[0] as string, { revision: 1, title: 'Cargo' })).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { branch: 'unknown_branch' },
+    });
   });
 });

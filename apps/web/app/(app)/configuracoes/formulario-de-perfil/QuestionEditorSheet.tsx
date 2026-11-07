@@ -98,6 +98,16 @@ export interface QuestionEditorSheetProps {
   branches?: AdminBranch[];
   /** The branch a NEW question starts in (the Lista footer "Adicionar pergunta ao ramo", D-651). */
   initialBranchId?: string;
+  /**
+   * "Criar ramo" (12.2-16, D-651): the host closes this sheet and opens the branch sheet for this question. Absent
+   * means the host cannot create a branch, and the button is not offered. RED-stage stub: not read yet.
+   */
+  onCreateBranch?: (opener: AdminQuestion) => void;
+  /**
+   * A row of "Ramos desta pergunta": the host closes this sheet and opens that branch (plan 17). Absent means the
+   * rows are not drawn, so no row exists that does nothing. RED-stage stub: not read yet.
+   */
+  onOpenBranch?: (branch: AdminBranch) => void;
   /** The tenant's display name, the `{tenant}` of the LGPD notice. */
   tenantName: string;
   /** The most active questions a tenant may have: the limit sentence when a create hits it. */

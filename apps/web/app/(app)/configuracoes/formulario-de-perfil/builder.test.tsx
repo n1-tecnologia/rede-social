@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   renameStep: vi.fn(),
   deleteStep: vi.fn(),
   layout: vi.fn(),
+  createBranch: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -54,6 +55,7 @@ vi.mock('./actions', () => ({
   renameStepAction: (...args: unknown[]) => mocks.renameStep(...args),
   deleteStepAction: (...args: unknown[]) => mocks.deleteStep(...args),
   reorderLayoutAction: (...args: unknown[]) => mocks.layout(...args),
+  createBranchAction: (...args: unknown[]) => mocks.createBranch(...args),
 }));
 vi.mock('@/app/(auth)/completar-perfil/actions', () => ({
   saveProfileFormAction: (...args: unknown[]) => mocks.save(...args),
@@ -2372,5 +2374,132 @@ describe('12.2-16 Task 1: the Lista footer adds a question into a branch (D-651)
     );
     fireEvent.click(screen.getByRole('radio', { name: /^Texto curto/ }));
     expect((screen.getByLabelText('Ramo') as HTMLSelectElement).value).toBe('');
+  });
+});
+
+describe('12.2-16 Task 2: "Criar ramo" hands over to the branch sheet, never stacked (D-651, UI-D-670)', () => {
+  const U1 = adminStep({ title: 'Geral' });
+  const OA = uuid(9901);
+  const OB = uuid(9902);
+  const OPENER = adminQuestion('single_choice', {
+    title: 'Tem clínica?',
+    stepId: U1.id,
+    options: [
+      { id: OA, label: 'Tenho', answerCount: 0 },
+      { id: OB, label: 'Não tenho', answerCount: 0 },
+    ],
+  });
+  const PLAIN = adminQuestion('short_text', { title: 'Cargo', stepId: U1.id });
+  const BR = adminBranch({ openerQuestionId: OPENER.id, values: [OA], name: 'Quem tem clínica' });
+  const MEMBER = adminQuestion('short_text', {
+    title: 'Nome da clínica',
+    stepId: U1.id,
+    branchId: BR.id,
+  });
+  const SAVED = adminBranch({ openerQuestionId: OPENER.id, values: [OB], name: null });
+
+  beforeEach(() => {
+    mocks.createBranch.mockResolvedValue({ ok: true, branch: SAVED });
+  });
+
+  const openOpener = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Tem clínica?' }));
+  const createBranchButton = () => screen.getByRole('button', { name: 'Criar ramo' });
+
+  it('closes the question sheet and opens "Novo ramo" with the opener, with one sheet in the page', () => {
+    builder({ questions: [OPENER, PLAIN], steps: [U1], branches: [] });
+    openOpener();
+    expect(screen.getByRole('dialog', { name: 'Editar pergunta' })).toBeTruthy();
+    fireEvent.click(createBranchButton());
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Novo ramo' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Editar pergunta' })).toBeNull();
+    expect(document.querySelector('[data-branch-opener]')?.textContent).toContain('Tem clínica?');
+    expect(screen.getByLabelText('Tenho')).toBeTruthy();
+  });
+
+  it('goes through the dirty guard: nothing typed is lost silently, and the sheets never overlap', () => {
+    builder({ questions: [OPENER, PLAIN], steps: [U1], branches: [] });
+    openOpener();
+    fireEvent.change(screen.getByLabelText('Pergunta'), { target: { value: 'Novo título' } });
+    fireEvent.click(createBranchButton());
+    expect(screen.queryByRole('dialog', { name: 'Novo ramo' })).toBeNull();
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Descartar as alterações?' })).getByRole('button', {
+        name: 'Continuar editando',
+      }),
+    );
+    expect(screen.getByRole('dialog', { name: 'Editar pergunta' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Novo ramo' })).toBeNull();
+
+    fireEvent.click(createBranchButton());
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Descartar as alterações?' })).getByRole('button', {
+        name: 'Descartar',
+      }),
+    );
+    expect(screen.getByRole('dialog', { name: 'Novo ramo' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Editar pergunta' })).toBeNull();
+  });
+
+  it('creates the branch, toasts, refreshes the page and closes the sheet', async () => {
+    builder({ questions: [OPENER, PLAIN], steps: [U1], branches: [] });
+    openOpener();
+    fireEvent.click(createBranchButton());
+    fireEvent.click(screen.getByLabelText('Não tenho'));
+    fireEvent.change(screen.getByLabelText('Nome do ramo (opcional)'), {
+      target: { value: 'Sem clínica' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar ramo' }));
+    });
+    expect(mocks.createBranch).toHaveBeenCalledWith({
+      openerQuestionId: OPENER.id,
+      values: [OB],
+      name: 'Sem clínica',
+    });
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Ramo criado.' });
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('closes the branch sheet without writing when the admin leaves it untouched', () => {
+    builder({ questions: [OPENER, PLAIN], steps: [U1], branches: [] });
+    openOpener();
+    fireEvent.click(createBranchButton());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mocks.createBranch).not.toHaveBeenCalled();
+  });
+
+  it('can start again after the first branch sheet: a fresh sheet per opening', () => {
+    builder({ questions: [OPENER, PLAIN], steps: [U1], branches: [] });
+    openOpener();
+    fireEvent.click(createBranchButton());
+    fireEvent.click(screen.getByLabelText('Tenho'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Descartar as alterações?' })).getByRole('button', {
+        name: 'Descartar',
+      }),
+    );
+    openOpener();
+    fireEvent.click(createBranchButton());
+    expect((screen.getByLabelText('Tenho') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('shows the branches of the opener in the sheet but draws no row yet: plan 17 wires the edit mode', () => {
+    builder({ questions: [OPENER, MEMBER], steps: [U1], branches: [BR] });
+    openOpener();
+    const block = document.querySelector('[data-branches-block]') as HTMLElement;
+    expect(block).toBeTruthy();
+    expect(block.querySelector('li')).toBeNull();
+    expect(createBranchButton()).toBeTruthy();
+  });
+
+  it('hands the sheet the question for a question that is not an opener type: no block at all', () => {
+    builder({ questions: [OPENER, PLAIN], steps: [U1], branches: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Cargo' }));
+    expect(document.querySelector('[data-branches-block]')).toBeNull();
   });
 });

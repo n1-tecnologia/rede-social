@@ -1,6 +1,7 @@
 'use server';
 
 import {
+  type AdminBranch,
   type AdminQuestion,
   type AdminStep,
   adminQuestionSchema,
@@ -771,5 +772,20 @@ export async function deleteStepAction(id: string): Promise<DeleteStepActionResu
   ) {
     return { ok: false, code: failure.code };
   }
+  return { ok: false, code: 'failed' };
+}
+
+// ── 12.2-16: the branch sheet's write (RED-stage stub, replaced in the GREEN commit) ───────────────
+
+export type BranchFieldKey = 'name' | 'values' | 'opener' | 'form';
+
+/** What `createBranchAction` answers. Inert until the GREEN commit. */
+export type SaveBranchResult =
+  | { ok: true; branch: AdminBranch }
+  | { ok: false; code: 'invalid'; fields: Partial<Record<BranchFieldKey, string>> }
+  | { ok: false; code: 'conflict'; issue: string }
+  | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };
+
+export async function createBranchAction(_body: unknown): Promise<SaveBranchResult> {
   return { ok: false, code: 'failed' };
 }
