@@ -719,7 +719,7 @@
     },
     {
       "id": "profile-form-web",
-      "why": "The tenant profile form (Phase 12): the gate that sends a member who owes a required answer to /completar-perfil with the validated next, the completion screen in its three modes and its thirteen controls, Minhas respostas, the new-questions notice and the answer blocks on /perfil and /membros/[id], the admin builder at /configuracoes/formulario-de-perfil (list, reorder, editor sheet, archive, export, preview) and the module with its catalogs; profile-form-gate.spec walks the gate and its releases, profile-form-member.spec the member screens and the 320px and 390px backstops, profile-form-admin.spec the builder, the export and its backstops, profile-form-steps.spec (Phase 12.1) the steps and the conditional questions end to end (the stepper, the reveal in place, the erase dialog, the builder wells and the condition editor, the preview) with the 320px backstops, and login and blocked.spec read the same redirect.",
+      "why": "The tenant profile form (Phase 12): the gate that sends a member who owes a required answer to /completar-perfil with the validated next, the completion screen in its three modes and its thirteen controls, Minhas respostas, the new-questions notice and the answer blocks on /perfil and /membros/[id], the admin builder at /configuracoes/formulario-de-perfil (list, reorder, editor sheet, archive, export, preview) and the module with its catalogs; profile-form-gate.spec walks the gate and its releases, profile-form-member.spec the member screens and the 320px and 390px backstops, profile-form-admin.spec the builder, the export and its backstops, profile-form-steps.spec (Phase 12.1) the steps and the conditional questions end to end (the stepper, the reveal in place, the erase dialog, the builder wells and the condition editor, the preview) with the 320px backstops, profile-form-branches.spec (Phase 12.2) the conditional branches end to end (the builder's Lista with its blocks and the opener pill, the branch sheet, the Fluxo with its edges, the preview, the member's block under one rail and the erase dialog with the titles of every level, Arquivadas) with the 320px backstops, and login and blocked.spec read the same redirect.",
       "globs": [
         "apps/web/app/(auth)/completar-perfil/**",
         "apps/web/app/(app)/configuracoes/formulario-de-perfil/**",
@@ -741,6 +741,7 @@
         "profile-form-member.spec.ts",
         "profile-form-admin.spec.ts",
         "profile-form-steps.spec.ts",
+        "profile-form-branches.spec.ts",
         "login.spec.ts",
         "blocked.spec.ts"
       ]

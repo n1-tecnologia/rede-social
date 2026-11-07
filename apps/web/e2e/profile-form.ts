@@ -42,7 +42,9 @@ import {
  * Phase 12.1 (plan 19) adds the steps and the conditions: `seedStep`, `stepId` on `seedQuestion`, the clinic
  * example form and the wide 320px form, and a sweep that also removes the run's steps. Phase 12.2 (plan 20)
  * replaces the per-question condition by branches: `seedBranch`, `branchId` on `seedQuestion`, and a sweep
- * that also removes the run's branches. The trigger of migration `20261105195400` puts a question seeded WITHOUT a step in the
+ * that also removes the run's branches (answers, branches and questions go in one transaction with the deferrable
+ * keys deferred). Plan 21 adds the depth-3 clinic form (`seedClinicTreeForm`, the team's example and not the
+ * client's list) and the long-text tree of the 320px backstops (`seedLongTreeForm`). The trigger of migration `20261105195400` puts a question seeded WITHOUT a step in the
  * tenant's first step (creating "Informações gerais" when there is none), so the Phase 12 specs keep
  * working unchanged and the sweep removes that default step again when the tenant holds no question.
  */
@@ -581,6 +583,8 @@ export type SeedBranch = {
   openerQuestionId: string;
   /** The answers that open the branch: option ids, or `'true'` / `'false'` for a yes/no opener. */
   values: string[];
+  /** The admin-only name (1 to 60 characters); absent, the branch has none and the builder reads its sentence. */
+  name?: string;
   tenantSlug?: string;
 };
 
@@ -588,8 +592,9 @@ export type SeedBranch = {
 export async function seedBranch(input: SeedBranch): Promise<string> {
   const tenantSlug = input.tenantSlug ?? LAB;
   const [row] = await sql()<{ id: string }[]>`
-    insert into public.profile_form_branches (tenant_id, opener_question_id, open_values)
-    select t.id, ${input.openerQuestionId}::uuid, ${sql().array(input.values)}::text[]
+    insert into public.profile_form_branches (tenant_id, opener_question_id, open_values, name)
+    select t.id, ${input.openerQuestionId}::uuid, ${sql().array(input.values)}::text[],
+           ${input.name ?? null}
       from public.tenants t where t.slug = ${tenantSlug}
     returning id::text as id`;
   if (!row) throw new Error(`seedBranch: tenant ${tenantSlug} not found`);
@@ -744,6 +749,257 @@ export async function seedWideForm(prefix: string, tenantSlug: string = LAB): Pr
     );
   }
   return { stepOne, stepTwo, opener, branchId, dependents };
+}
+
+export type ClinicTreeForm = {
+  stepOne: SeededStep;
+  stepTwo: SeededStep;
+  plain: SeededQuestion;
+  /** The single-choice opener: 'Tenho uma clínica' opens `ownsBranch`, 'Trabalho em uma clínica' opens `worksBranch`. */
+  opener: SeededQuestion;
+  ownsBranch: string;
+  /** Level 1, required. */
+  clinicName: SeededQuestion;
+  /** Level 1, a yes/no that opens `insuranceBranch` on Sim. */
+  insurance: SeededQuestion;
+  insuranceBranch: string;
+  /** Level 2, a yes/no that opens `operatorsBranch` on Sim. */
+  manyOperators: SeededQuestion;
+  operatorsBranch: string;
+  /** Level 3, the deepest question the product allows. */
+  operators: SeededQuestion;
+  worksBranch: string;
+  /** Level 1 of the second branch of the same opener, optional. */
+  worksWhere: SeededQuestion;
+  /** Step 2: one required question every member answers. */
+  goals: SeededQuestion;
+  /** The admin-only names of the four branches, as the builder and the Fluxo read them. */
+  names: { owns: string; insurance: string; operators: string; works: string };
+};
+
+/**
+ * The depth-3 form of the 12.2 stories (D-640, D-641, D-644), run-prefixed: step 1 holds a plain required question
+ * and the single-choice opener; 'Tenho uma clínica' opens a branch with a required question and a yes/no, that
+ * yes/no opens a second level with another yes/no, which opens the third level; 'Trabalho em uma clínica' opens a
+ * second branch of the same opener with one optional question; step 2 holds one required question. Every question
+ * outside the opener's own branch chain is optional, and the rows are created in the tree order the server stores
+ * (a block directly after its opener). These words are the team's EXAMPLE of the first client's case (Research A10);
+ * the client's real list is NOT in the repository and is never invented here.
+ */
+export async function seedClinicTreeForm(
+  prefix: string,
+  tenantSlug: string = LAB,
+): Promise<ClinicTreeForm> {
+  const stepOne = await seedStep(`${prefix} Sobre voce`, tenantSlug);
+  const stepTwo = await seedStep(`${prefix} Seus objetivos`, tenantSlug);
+  const names = {
+    owns: 'Quem tem clínica',
+    insurance: 'Convênio',
+    operators: 'Mais de uma operadora',
+    works: 'Quem trabalha em clínica',
+  };
+  const plain = await seedQuestion({
+    title: `${prefix} Seu nome profissional`,
+    type: 'short_text',
+    required: true,
+    stepId: stepOne.id,
+    tenantSlug,
+  });
+  const opener = await seedQuestion({
+    title: `${prefix} ${CLINIC_OPENER}`,
+    type: 'single_choice',
+    required: true,
+    options: CLINIC_OPTIONS,
+    stepId: stepOne.id,
+    tenantSlug,
+  });
+  const ownsBranch = await seedBranch({
+    openerQuestionId: opener.id,
+    values: [opener.optionIds[0] ?? ''],
+    name: names.owns,
+    tenantSlug,
+  });
+  const clinicName = await seedQuestion({
+    title: `${prefix} Nome da clinica`,
+    type: 'short_text',
+    required: true,
+    stepId: stepOne.id,
+    branchId: ownsBranch,
+    tenantSlug,
+  });
+  const insurance = await seedQuestion({
+    title: `${prefix} A clinica atende convenio?`,
+    type: 'yes_no',
+    stepId: stepOne.id,
+    branchId: ownsBranch,
+    tenantSlug,
+  });
+  const insuranceBranch = await seedBranch({
+    openerQuestionId: insurance.id,
+    values: ['true'],
+    name: names.insurance,
+    tenantSlug,
+  });
+  const manyOperators = await seedQuestion({
+    title: `${prefix} Atende mais de uma operadora?`,
+    type: 'yes_no',
+    stepId: stepOne.id,
+    branchId: insuranceBranch,
+    tenantSlug,
+  });
+  const operatorsBranch = await seedBranch({
+    openerQuestionId: manyOperators.id,
+    values: ['true'],
+    name: names.operators,
+    tenantSlug,
+  });
+  const operators = await seedQuestion({
+    title: `${prefix} Quais operadoras?`,
+    type: 'short_text',
+    stepId: stepOne.id,
+    branchId: operatorsBranch,
+    tenantSlug,
+  });
+  const worksBranch = await seedBranch({
+    openerQuestionId: opener.id,
+    values: [opener.optionIds[1] ?? ''],
+    name: names.works,
+    tenantSlug,
+  });
+  const worksWhere = await seedQuestion({
+    title: `${prefix} Em qual clinica voce trabalha?`,
+    type: 'short_text',
+    stepId: stepOne.id,
+    branchId: worksBranch,
+    tenantSlug,
+  });
+  const goals = await seedQuestion({
+    title: `${prefix} Qual o seu objetivo na comunidade?`,
+    type: 'short_text',
+    required: true,
+    stepId: stepTwo.id,
+    tenantSlug,
+  });
+  return {
+    stepOne,
+    stepTwo,
+    plain,
+    opener,
+    ownsBranch,
+    clinicName,
+    insurance,
+    insuranceBranch,
+    manyOperators,
+    operatorsBranch,
+    operators,
+    worksBranch,
+    worksWhere,
+    goals,
+    names,
+  };
+}
+
+export type LongTreeForm = {
+  stepOne: SeededStep;
+  /** A single choice with 20 options of 80 characters. */
+  opener: SeededQuestion;
+  /** Level 1: a 60-character name; opened by ALL 20 options (`opens: 'all'`) or by the first one only. */
+  branchA: { id: string; name: string };
+  branchB: string;
+  branchC: string;
+  /** The seven questions of the opener's whole subtree, in tree order, each with a 120-character title. */
+  chain: SeededQuestion[];
+  /** The yes/no that opens the second level (the member answers Sim to it). */
+  yesNoA: SeededQuestion;
+  /** The yes/no that opens the third level. */
+  yesNoB: SeededQuestion;
+};
+
+/**
+ * The long-text tree of the 12.2 backstops at 320px (UI-D-682, UI-D-684): a 120-character opener with 20 options of
+ * 80 characters, a first branch with a 60-character name, a yes/no that opens a second level, another that opens
+ * the third, and four more questions beside the first yes/no, so the opener's subtree holds seven questions with
+ * 120-character titles. `opens: 'all'` makes the first branch open on all 20 answers (the Fluxo edge with 20
+ * answers); `'first'` opens it on the first answer only, so choosing another one closes all seven (the erase dialog).
+ * Every question but the opener is optional.
+ */
+export async function seedLongTreeForm(
+  prefix: string,
+  opens: 'all' | 'first',
+  tenantSlug: string = LAB,
+): Promise<LongTreeForm> {
+  const stepOne = await seedStep(longTitle(prefix, 'step1', 60), tenantSlug);
+  const labels = Array.from({ length: 20 }, (_, index) =>
+    `Opcao ${String(index + 1).padStart(2, '0')} ${'a'.repeat(80)}`.slice(0, 80),
+  );
+  const opener = await seedQuestion({
+    title: longTitle(prefix, 'opener'),
+    type: 'single_choice',
+    required: true,
+    options: labels,
+    stepId: stepOne.id,
+    tenantSlug,
+  });
+  const nameA = longTitle(prefix, 'ramoA', 60);
+  const idA = await seedBranch({
+    openerQuestionId: opener.id,
+    values: opens === 'all' ? opener.optionIds : [opener.optionIds[0] ?? ''],
+    name: nameA,
+    tenantSlug,
+  });
+  const yesNoA = await seedQuestion({
+    title: longTitle(prefix, 'qa'),
+    type: 'yes_no',
+    stepId: stepOne.id,
+    branchId: idA,
+    tenantSlug,
+  });
+  const branchB = await seedBranch({
+    openerQuestionId: yesNoA.id,
+    values: ['true'],
+    tenantSlug,
+  });
+  const yesNoB = await seedQuestion({
+    title: longTitle(prefix, 'qb'),
+    type: 'yes_no',
+    stepId: stepOne.id,
+    branchId: branchB,
+    tenantSlug,
+  });
+  const branchC = await seedBranch({
+    openerQuestionId: yesNoB.id,
+    values: ['true'],
+    tenantSlug,
+  });
+  const deepest = await seedQuestion({
+    title: longTitle(prefix, 'qc'),
+    type: 'short_text',
+    stepId: stepOne.id,
+    branchId: branchC,
+    tenantSlug,
+  });
+  const chain: SeededQuestion[] = [yesNoA, yesNoB, deepest];
+  for (let n = 1; n <= 4; n += 1) {
+    chain.push(
+      await seedQuestion({
+        title: longTitle(prefix, `qd${n}`),
+        type: 'short_text',
+        stepId: stepOne.id,
+        branchId: idA,
+        tenantSlug,
+      }),
+    );
+  }
+  return {
+    stepOne,
+    opener,
+    branchA: { id: idA, name: nameA },
+    branchB,
+    branchC,
+    chain,
+    yesNoA,
+    yesNoB,
+  };
 }
 
 /** Ten steps with 60-character titles, each holding one required question: the longest stepper the product allows. */
