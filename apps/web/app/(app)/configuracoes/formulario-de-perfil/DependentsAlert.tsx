@@ -7,9 +7,12 @@ import type { RefusalKind } from './editor-state';
 /** The most titles the alert lists before "e mais N" (UI-D-651). */
 export const DEPENDENTS_SHOWN = 5;
 
+/** The refusals of the opener edits, plus "Arquivar ramo" refused over openers of branches with answers. */
+export type DependentsAlertKind = RefusalKind | 'archiveBranch';
+
 export interface DependentsAlertProps {
   /** Which edit the opener refused: archive, delete, retype, or removing one of its options. */
-  kind: RefusalKind;
+  kind: DependentsAlertKind;
   /** The questions that block it: the client's own list, or the server's 409 `dependents` (a race). */
   dependents: readonly Dependent[];
   /** The option's label, for `kind="option"` only. */

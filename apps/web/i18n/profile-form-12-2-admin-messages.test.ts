@@ -312,6 +312,39 @@ describe('profileForm.admin.branches: the locked state and "Desfazer ramo" (UI-D
   });
 });
 
+describe('profileForm.admin.branches: "Arquivar ramo" and its refusal (UI-D-672, 12.2-17)', () => {
+  it('declares the archive keys and the refusal keys exactly as the Copywriting Contract names them', () => {
+    const { archive, toasts } = parsed.profileForm.admin.branches;
+    for (const key of ['button', 'title', 'body', 'confirm', 'cancel']) {
+      expect(archive, key).toHaveProperty(key);
+    }
+    expect(toasts).toHaveProperty('archived');
+    expect(parsed.profileForm.admin.dependents.title).toHaveProperty('archiveBranch');
+    expect(parsed.profileForm.admin.dependents).toHaveProperty('hintArchiveBranch');
+  });
+
+  it('reads the dialog verbatim: title, body for one and many, the buttons and the toast', () => {
+    expect(t('branches.archive.button')).toBe('Arquivar ramo');
+    expect(t('branches.archive.title')).toBe('Arquivar este ramo?');
+    expect(t('branches.archive.body', { count: 1 })).toBe(
+      'A pergunta dele e os ramos dentro dela saem do formulário. As respostas continuam guardadas e você pode reativar o ramo depois.',
+    );
+    expect(t('branches.archive.body', { count: 4 })).toBe(
+      'As 4 perguntas dele e os ramos dentro delas saem do formulário. As respostas continuam guardadas e você pode reativar o ramo depois.',
+    );
+    expect(t('branches.archive.confirm')).toBe('Arquivar ramo');
+    expect(t('branches.archive.cancel')).toBe('Manter ramo');
+    expect(t('branches.toasts.archived')).toBe('Ramo arquivado.');
+  });
+
+  it('reads the refusal verbatim', () => {
+    expect(t('dependents.title.archiveBranch')).toBe('Este ramo não pode ser arquivado agora.');
+    expect(t('dependents.hintArchiveBranch')).toBe(
+      'Estas perguntas abrem ramos que já têm respostas. Desfaça esses ramos e tente de novo:',
+    );
+  });
+});
+
 describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "branch", "fork" or "grupo condicional")', () => {
   const groups: Record<string, unknown> = {
     'editor.branch': parsed.profileForm.admin.editor.branch,
@@ -319,6 +352,7 @@ describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "
     'branches.sheet': parsed.profileForm.admin.branches.sheet,
     'branches.toasts': parsed.profileForm.admin.branches.toasts,
     'branches.undo': parsed.profileForm.admin.branches.undo,
+    'branches.archive': parsed.profileForm.admin.branches.archive,
   };
 
   function strings(value: unknown): string[] {

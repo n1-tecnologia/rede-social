@@ -958,3 +958,20 @@ export async function undoBranchAction(id: string): Promise<UndoBranchActionResu
   }
   return { ok: false, code: 'failed' };
 }
+
+/**
+ * What "Arquivar ramo" answers. `hasDependents` is the server's 409: a question of the subtree opens a branch
+ * that has answers; `dependents` are the openers to undo first. `gone` is the bare 404.
+ */
+export type ArchiveBranchActionResult =
+  | { ok: true; branch: AdminBranch }
+  | { ok: false; code: 'hasDependents'; dependents: Dependent[] }
+  | { ok: false; code: 'gone' | 'forbidden' | 'moduleOff' | 'failed' };
+
+/**
+ * RED STUB (12.2-17 Task 3): inert on purpose, replaced in full by the GREEN commit. It answers `failed` so the
+ * tests that expect the POST fail for the missing behaviour, not for a missing export.
+ */
+export async function archiveBranchAction(_id: string): Promise<ArchiveBranchActionResult> {
+  return { ok: false, code: 'failed' };
+}

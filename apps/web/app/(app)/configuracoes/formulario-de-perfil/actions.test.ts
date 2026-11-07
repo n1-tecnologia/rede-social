@@ -18,6 +18,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 const {
+  archiveBranchAction,
   archiveQuestionAction,
   createBranchAction,
   createQuestionAction,
@@ -1345,6 +1346,83 @@ describe('undoBranchAction (12.2-17)', () => {
   it('sends a lost session to the (app) navigation, outside the try', async () => {
     mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
     await expect(undoBranchAction(BRANCH)).rejects.toThrow();
+    expect(mocks.redirect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('archiveBranchAction (12.2-17, D-653)', () => {
+  const BRANCH_ID = uuid(4720);
+  const ARCHIVED = {
+    id: BRANCH_ID,
+    openerQuestionId: uuid(4721),
+    values: ['true'],
+    name: null,
+    revision: 2,
+    archivedAt: '2026-11-06T12:00:00.000Z',
+    questionCount: 3,
+    answerCount: 0,
+  };
+
+  it('POSTs /v1/profile_form/branches/{id}/archive and returns the parsed branch', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, ARCHIVED));
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({ ok: true, branch: ARCHIVED });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/branches/${BRANCH_ID}/archive`);
+    expect(init.method).toBe('POST');
+  });
+
+  it('never leaves the server tier with a forged id', async () => {
+    expect(await archiveBranchAction('not-a-uuid')).toEqual({ ok: false, code: 'failed' });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('answers a body that breaks the contract and a thrown request as failed', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { nope: true }));
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('returns has_dependents with the openers the server named, and nothing else of the body', async () => {
+    const dependents = [
+      { id: uuid(4722), title: 'Tem equipe?' },
+      { id: uuid(4723), title: 'Tem sócio?' },
+    ];
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'has_dependents', dependents }),
+    );
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({
+      ok: false,
+      code: 'hasDependents',
+      dependents,
+    });
+  });
+
+  it('returns has_dependents with an empty list when the server list breaks the contract', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'has_dependents', dependents: [{ id: 'x' }] }),
+    );
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({
+      ok: false,
+      code: 'hasDependents',
+      dependents: [],
+    });
+  });
+
+  it('answers any other 409 as failed, the bare 404 as gone, and the shared codes as themselves', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'something_else' }));
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'NOT_FOUND'));
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({ ok: false, code: 'gone' });
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await archiveBranchAction(BRANCH_ID)).toEqual({ ok: false, code: 'moduleOff' });
+  });
+
+  it('sends a lost session to the (app) navigation, outside the try', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(archiveBranchAction(BRANCH_ID)).rejects.toThrow(/^REDIRECT /);
     expect(mocks.redirect).toHaveBeenCalledTimes(1);
   });
 });

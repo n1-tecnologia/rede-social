@@ -7,8 +7,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import { uuid } from '@/lib/profile-form/test-fixtures';
-import { DependentsAlert } from './DependentsAlert';
-import type { RefusalKind } from './editor-state';
+import { DependentsAlert, type DependentsAlertKind } from './DependentsAlert';
 
 /**
  * 12.1-17 Task 2 (D-632, UI-D-651, T-12.1-12): the ONE refusal component, against the REAL catalog. Asserted:
@@ -25,7 +24,7 @@ const dependents = (count: number) =>
     title: `Dependente ${at + 1}`,
   }));
 
-function show(kind: RefusalKind, list: ReturnType<typeof dependents>, label?: string) {
+function show(kind: DependentsAlertKind, list: ReturnType<typeof dependents>, label?: string) {
   return render(
     <NextIntlClientProvider locale="pt-BR" messages={messages}>
       <DependentsAlert kind={kind} dependents={list} label={label} />
@@ -37,7 +36,7 @@ afterEach(cleanup);
 
 describe('DependentsAlert: the four refusals (UI-D-651)', () => {
   const HINT = 'Remova a condição destas perguntas, ou arquive-as, e tente de novo:';
-  const cases: [RefusalKind, string][] = [
+  const cases: [DependentsAlertKind, string][] = [
     ['archive', 'Esta pergunta abre outras e não pode ser arquivada agora.'],
     ['delete', 'Esta pergunta abre outras e não pode ser excluída agora.'],
     ['type', 'Esta pergunta abre outras e não pode mudar de tipo agora.'],
@@ -131,5 +130,48 @@ describe('DependentsAlert: geometry and the long list (UI-D-651)', () => {
     const source = readFileSync(join(__dirname, 'DependentsAlert.tsx'), 'utf8');
     expect(source.match(/role="alert"/g)).toHaveLength(1);
     expect(source).not.toContain('dangerouslySetInnerHTML');
+  });
+});
+
+describe('DependentsAlert: "Arquivar ramo" refused over openers of branches with answers (12.2-17, UI-D-672)', () => {
+  it('names what cannot be done, what to do first, and lists the opener titles', () => {
+    show('archiveBranch', dependents(2));
+    const alert = screen.getByRole('alert');
+    expect(alert.getAttribute('data-dependents-alert')).toBe('archiveBranch');
+    expect(within(alert).getByText('Este ramo não pode ser arquivado agora.')).toBeTruthy();
+    expect(
+      within(alert).getByText(
+        'Estas perguntas abrem ramos que já têm respostas. Desfaça esses ramos e tente de novo:',
+      ),
+    ).toBeTruthy();
+    expect(
+      within(alert)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Dependente 1', 'Dependente 2']);
+  });
+
+  it('keeps the geometry of the other refusals and lists five titles, then "e mais 1 pergunta"', () => {
+    show('archiveBranch', dependents(6));
+    const alert = screen.getByRole('alert');
+    expect(alert.className).toContain('rounded-xl');
+    expect(alert.className).toContain('p-4');
+    expect(within(alert).getAllByRole('listitem')).toHaveLength(5);
+    expect(within(alert).getByText('e mais 1 pergunta')).toBeTruthy();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('renders nothing for an empty list and a hostile title as text', () => {
+    const { container, unmount } = show('archiveBranch', []);
+    expect(container.innerHTML).toBe('');
+    unmount();
+    cleanup();
+    show('archiveBranch', [{ id: uuid(9499), title: '<img src=x onerror=alert(1)>' }]);
+    expect(screen.getByRole('alert').querySelector('img')).toBeNull();
+  });
+
+  it('has no half-step spacing class in its source', () => {
+    const source = readFileSync(join(__dirname, 'DependentsAlert.tsx'), 'utf8');
+    expect(source).not.toMatch(/(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/);
   });
 });

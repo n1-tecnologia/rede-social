@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   impact: vi.fn(),
   undo: vi.fn(),
+  archive: vi.fn(),
   refresh: vi.fn(),
   show: vi.fn(),
 }));
@@ -34,6 +35,7 @@ vi.mock('./actions', () => ({
   updateBranchAction: (...args: unknown[]) => mocks.update(...args),
   readImpactAction: (...args: unknown[]) => mocks.impact(...args),
   undoBranchAction: (...args: unknown[]) => mocks.undo(...args),
+  archiveBranchAction: (...args: unknown[]) => mocks.archive(...args),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -507,6 +509,7 @@ describe('12.2-17 Task 1: edit mode', () => {
     values: [A],
     name: 'Quem tem clínica',
     revision: 3,
+    questionCount: 3,
   });
   const members = (count: number, overrides: Partial<ReturnType<typeof adminQuestion>> = {}) =>
     Array.from({ length: count }, (_, at) =>
@@ -1119,6 +1122,287 @@ describe('12.2-17 Task 1: edit mode', () => {
       });
       expect(mocks.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
       expect(onClose).toHaveBeenCalled();
+    });
+  });
+
+  // ── Task 3: "Arquivar ramo", its refusal, the divided block and the 320px floor ──────────────────────
+  describe('"Arquivar ramo" (D-653, UI-D-672)', () => {
+    const archiveButton = () => screen.getByRole('button', { name: 'Arquivar ramo' });
+    const archiveDialog = () => screen.getByRole('dialog', { name: 'Arquivar este ramo?' });
+    const openArchive = async () => {
+      await act(async () => {
+        fireEvent.click(archiveButton());
+      });
+    };
+    const confirmArchive = async () => {
+      await act(async () => {
+        fireEvent.click(within(archiveDialog()).getByRole('button', { name: 'Arquivar ramo' }));
+      });
+    };
+    const OPENERS = [
+      { id: uuid(9801), title: 'Tem equipe?' },
+      { id: uuid(9802), title: 'Tem sócio?' },
+    ];
+
+    beforeEach(() => {
+      mocks.archive.mockResolvedValue({ ok: true, branch: { ...BR, archivedAt: '2026-11-06' } });
+    });
+
+    it('is present for a branch with questions and absent for an empty one', () => {
+      const { unmount } = showEdit();
+      expect(archiveButton()).toBeTruthy();
+      unmount();
+      cleanup();
+      showEdit({ branch: { ...BR, questionCount: 0 }, questions: [QA, OPENER] });
+      expect(screen.queryByRole('button', { name: 'Arquivar ramo' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Desfazer ramo' })).toBeTruthy();
+    });
+
+    it('is not on the create sheet', () => {
+      show();
+      expect(screen.queryByRole('button', { name: 'Arquivar ramo' })).toBeNull();
+    });
+
+    it('opens the dialog without reading any member impact: archiving frees members', async () => {
+      showEdit();
+      await openArchive();
+      expect(archiveDialog()).toBeTruthy();
+      expect(mocks.impact).not.toHaveBeenCalled();
+      expect(mocks.archive).not.toHaveBeenCalled();
+    });
+
+    it('uses the brand tone with the Archive icon and dismisses with "Manter ramo"', async () => {
+      showEdit();
+      await openArchive();
+      const box = archiveDialog();
+      expect(box.querySelector('svg')?.getAttribute('class') ?? '').toContain('archive');
+      expect(within(box).getByRole('button', { name: 'Manter ramo' })).toBeTruthy();
+      expect(within(box).queryByRole('button', { name: 'Cancelar' })).toBeNull();
+      fireEvent.click(within(box).getByRole('button', { name: 'Manter ramo' }));
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'Arquivar este ramo?' })).toBeNull(),
+      );
+      expect(mocks.archive).not.toHaveBeenCalled();
+    });
+
+    it('counts the ACTIVE questions of the WHOLE subtree in the body: one, many, nested ones included', async () => {
+      const tail = ' As respostas continuam guardadas e você pode reativar o ramo depois.';
+      showEdit({ questions: [QA, OPENER, ...members(1)] });
+      await openArchive();
+      expect(archiveDialog().textContent).toContain(
+        `A pergunta dele e os ramos dentro dela saem do formulário.${tail}`,
+      );
+      cleanup();
+      showEdit({}, 3);
+      await openArchive();
+      expect(archiveDialog().textContent).toContain(
+        `As 3 perguntas dele e os ramos dentro delas saem do formulário.${tail}`,
+      );
+      cleanup();
+      // One question in the branch that opens an inner branch holding two: the dialog counts all three.
+      const inside = adminQuestion('yes_no', {
+        title: 'Tem equipe?',
+        stepId: S2.id,
+        branchId: BR.id,
+      });
+      const inner = adminBranch({ openerQuestionId: inside.id, values: ['true'] });
+      const deep = (title: string) =>
+        adminQuestion('short_text', { title, stepId: S2.id, branchId: inner.id });
+      showEdit({
+        questions: [QA, OPENER, inside, deep('Quantos?'), deep('Desde quando?')],
+        branches: [BR, inner],
+      });
+      await openArchive();
+      expect(archiveDialog().textContent).toContain(
+        'As 3 perguntas dele e os ramos dentro delas saem do formulário.',
+      );
+    });
+
+    it('never puts a branch name or an opener title in the dialog', async () => {
+      showEdit();
+      await openArchive();
+      expect(archiveDialog().textContent).not.toContain('Quem tem clínica');
+      expect(archiveDialog().textContent).not.toContain('Você tem clínica');
+    });
+
+    it('archives on confirm, toasts, refreshes and closes the sheet', async () => {
+      const { onClose } = showEdit();
+      await openArchive();
+      await confirmArchive();
+      expect(mocks.archive).toHaveBeenCalledTimes(1);
+      expect(mocks.archive).toHaveBeenCalledWith(BR.id);
+      expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Ramo arquivado.' });
+      expect(mocks.refresh).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+      expect(mocks.impact).not.toHaveBeenCalled();
+    });
+
+    it('renders the dependents alert above the footer when the server refuses, and shows no success', async () => {
+      mocks.archive.mockResolvedValue({ ok: false, code: 'hasDependents', dependents: OPENERS });
+      const { onClose } = showEdit();
+      await openArchive();
+      await confirmArchive();
+      const alert = document.querySelector(
+        '[data-dependents-alert="archiveBranch"]',
+      ) as HTMLElement;
+      expect(alert).toBeTruthy();
+      expect(alert.getAttribute('role')).toBe('alert');
+      expect(alert.textContent).toContain('Este ramo não pode ser arquivado agora.');
+      expect(alert.textContent).toContain(
+        'Estas perguntas abrem ramos que já têm respostas. Desfaça esses ramos e tente de novo:',
+      );
+      expect(Array.from(alert.querySelectorAll('li')).map((li) => li.textContent)).toEqual([
+        'Tem equipe?',
+        'Tem sócio?',
+      ]);
+      // Above the footer: before the save button and the divided block.
+      expect(alert.compareDocumentPosition(save()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        alert.compareDocumentPosition(archiveButton()) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      // No dialog result shown as success: no toast, the sheet stays open, nothing refreshed away.
+      expect(mocks.show).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: 'Arquivar este ramo?' })).toBeNull();
+      expect(dialog('Editar ramo')).toBeTruthy();
+    });
+
+    it('lists five opener titles and "e mais 1 pergunta" for six', async () => {
+      mocks.archive.mockResolvedValue({
+        ok: false,
+        code: 'hasDependents',
+        dependents: Array.from({ length: 6 }, (_, at) => ({
+          id: uuid(9810 + at),
+          title: `Abridora ${at + 1}`,
+        })),
+      });
+      showEdit();
+      await openArchive();
+      await confirmArchive();
+      const alert = document.querySelector(
+        '[data-dependents-alert="archiveBranch"]',
+      ) as HTMLElement;
+      expect(alert.querySelectorAll('li')).toHaveLength(5);
+      expect(within(alert).getByText('e mais 1 pergunta')).toBeTruthy();
+    });
+
+    it('clears the refusal on the next attempt', async () => {
+      mocks.archive.mockResolvedValueOnce({
+        ok: false,
+        code: 'hasDependents',
+        dependents: OPENERS,
+      });
+      showEdit();
+      await openArchive();
+      await confirmArchive();
+      expect(document.querySelector('[data-dependents-alert]')).toBeTruthy();
+      await openArchive();
+      await confirmArchive();
+      expect(document.querySelector('[data-dependents-alert]')).toBeNull();
+    });
+
+    it('keeps the sheet open with the failure line when the archive fails', async () => {
+      mocks.archive.mockResolvedValue({ ok: false, code: 'failed' });
+      const { onClose } = showEdit();
+      await openArchive();
+      await confirmArchive();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(mocks.show).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+      expect(screen.getByRole('alert').textContent).toContain(
+        'Não foi possível salvar o ramo agora. Tente de novo.',
+      );
+    });
+
+    it('closes and refreshes when the branch is gone, and sends a lost permission to a refresh', async () => {
+      mocks.archive.mockResolvedValue({ ok: false, code: 'gone' });
+      const first = showEdit();
+      await openArchive();
+      await confirmArchive();
+      expect(first.onClose).toHaveBeenCalled();
+      expect(mocks.refresh).toHaveBeenCalled();
+      cleanup();
+      mocks.archive.mockResolvedValue({ ok: false, code: 'forbidden' });
+      const second = showEdit();
+      await openArchive();
+      await confirmArchive();
+      expect(mocks.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
+      expect(second.onClose).toHaveBeenCalled();
+    });
+  });
+
+  describe('the divided block and the 320px floor (UI-D-682, UI-D-684, PFORM-57 adjacency)', () => {
+    it('holds both ghost buttons, 44px each, outside the save form and after the primary', () => {
+      showEdit();
+      const form = dialog('Editar ramo').querySelector('form') as HTMLFormElement;
+      const block = document.querySelector('[data-branch-manage]') as HTMLElement;
+      const undoBtn = within(block).getByRole('button', { name: 'Desfazer ramo' });
+      const archiveBtn = within(block).getByRole('button', { name: 'Arquivar ramo' });
+      expect(form.contains(block)).toBe(false);
+      expect(block.contains(save())).toBe(false);
+      expect(save().parentElement?.contains(undoBtn)).toBe(false);
+      for (const button of [undoBtn, archiveBtn]) {
+        expect(button.className).toContain('min-h-11');
+        expect(button.className).toContain('w-full');
+        expect(button.getAttribute('type')).toBe('button');
+        expect(
+          save().compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+      }
+      // A rule and a gap between the primary and the two ghosts.
+      expect(block.className).toContain('border-t');
+      expect(block.className).toContain('pt-4');
+      expect(block.className).toContain('gap-2');
+    });
+
+    it('writes no half-step spacing class in the sources of the sheet and the alert', async () => {
+      const { readFileSync } = await import('node:fs');
+      for (const file of ['BranchSheet.tsx', 'DependentsAlert.tsx']) {
+        const source = readFileSync(join(__dirname, file), 'utf8');
+        expect(source).not.toMatch(/(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/);
+      }
+    });
+
+    it('wraps a 60-character name, a long opener title, 80-character options and long titles (ramo-nome-longo-320)', () => {
+      const longOpener = adminQuestion('multiple_choice', {
+        title:
+          'Um título de abridora muito longo que também precisa quebrar a linha no aparelho de 320px',
+        stepId: S2.id,
+        options: Array.from({ length: 20 }, (_, at) => ({
+          id: uuid(9900 + at),
+          label: `Opção ${at + 1} com um texto muito longo `.padEnd(80, 'x'),
+          answerCount: 0,
+        })),
+      });
+      const longMember = adminQuestion('short_text', {
+        title:
+          'Uma pergunta do ramo com um título bem longo que precisa quebrar em duas linhas no celular',
+        stepId: S2.id,
+        branchId: BR.id,
+      });
+      showEdit({
+        branch: {
+          ...BR,
+          openerQuestionId: longOpener.id,
+          values: [uuid(9900)],
+          name: 'n'.repeat(60),
+        },
+        questions: [QA, longOpener, longMember],
+      });
+      const sheet = dialog('Editar ramo');
+      // The fieldset can shrink, so nothing pushes the sheet wider than the screen.
+      expect(sheet.querySelector('fieldset')?.className).toContain('min-w-0');
+      // Every option label wraps; the list item clamps at two lines and breaks long words.
+      const rows = sheet.querySelectorAll('[data-branch-values] label');
+      expect(rows).toHaveLength(20);
+      for (const row of Array.from(rows)) expect(row.className).toContain('break-words');
+      expect(sheet.innerHTML).toContain('break-words');
+      const item = sheet.querySelector('[data-branch-questions] li span') as HTMLElement;
+      expect(item.className).toContain('line-clamp-2');
+      expect(item.className).toContain('break-words');
+      expect((nameField() as HTMLInputElement).value).toHaveLength(60);
+      expect(nameField().className).toContain('w-full');
+      // The two ghost buttons span the width and never overflow it.
+      expect(document.querySelector('[data-branch-manage]')?.className).toContain('flex-col');
     });
   });
 });

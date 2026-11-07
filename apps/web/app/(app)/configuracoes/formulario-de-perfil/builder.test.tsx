@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => ({
   createBranch: vi.fn(),
   updateBranch: vi.fn(),
   undoBranch: vi.fn(),
+  archiveBranch: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -60,6 +61,7 @@ vi.mock('./actions', () => ({
   createBranchAction: (...args: unknown[]) => mocks.createBranch(...args),
   updateBranchAction: (...args: unknown[]) => mocks.updateBranch(...args),
   undoBranchAction: (...args: unknown[]) => mocks.undoBranch(...args),
+  archiveBranchAction: (...args: unknown[]) => mocks.archiveBranch(...args),
 }));
 vi.mock('@/app/(auth)/completar-perfil/actions', () => ({
   saveProfileFormAction: (...args: unknown[]) => mocks.save(...args),
@@ -2645,5 +2647,49 @@ describe('12.2-17 Task 1: an existing branch opens from the Lista and from its o
     expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Ramo desfeito.' });
     expect(mocks.refresh).toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('archives a branch from its sheet: confirmation, toast, refresh, sheet closed', async () => {
+    mocks.archiveBranch.mockResolvedValue({
+      ok: true,
+      branch: { ...BR, archivedAt: '2026-11-06' },
+    });
+    builder(props());
+    fireEvent.click(pencil());
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Arquivar ramo' }));
+    });
+    const confirm = screen.getByRole('dialog', { name: 'Arquivar este ramo?' });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Arquivar ramo' }));
+    });
+    expect(mocks.archiveBranch).toHaveBeenCalledWith(BR.id);
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Ramo arquivado.' });
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps the sheet open and names the openers to undo first when the server refuses', async () => {
+    mocks.archiveBranch.mockResolvedValue({
+      ok: false,
+      code: 'hasDependents',
+      dependents: [{ id: uuid(9899), title: 'Tem equipe?' }],
+    });
+    builder(props());
+    fireEvent.click(pencil());
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Arquivar ramo' }));
+    });
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Arquivar este ramo?' })).getByRole('button', {
+          name: 'Arquivar ramo',
+        }),
+      );
+    });
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+    expect(screen.getByText('Este ramo não pode ser arquivado agora.')).toBeTruthy();
+    expect(screen.getByText('Tem equipe?')).toBeTruthy();
+    expect(mocks.show).not.toHaveBeenCalled();
   });
 });
