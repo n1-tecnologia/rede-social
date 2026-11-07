@@ -1,13 +1,7 @@
 import type { AdminQuestion } from '@rede-social/contracts/profile-form';
 import { describe, expect, it } from 'vitest';
 import { buildBranchTree } from '@/lib/profile-form/branch-tree';
-import {
-  adminBranch,
-  adminQuestion,
-  adminStep,
-  archivedQuestion,
-  uuid,
-} from '@/lib/profile-form/test-fixtures';
+import { adminBranch, adminQuestion, adminStep, uuid } from '@/lib/profile-form/test-fixtures';
 import {
   addOptionRow,
   blankDraft,
@@ -15,12 +9,10 @@ import {
   canSave,
   changeType,
   checkDraftLocks,
-  checkStepChange,
   checkStepMove,
   conditionOptionsText,
   draftFromQuestion,
   draftLock,
-  eligibleOpeners,
   hasChanges,
   hasErrors,
   isDirty,
@@ -41,7 +33,6 @@ import {
   serverOptionsErrors,
   toCreateBody,
   toUpdateBody,
-  validateCondition,
   validateDraft,
   validateOptions,
 } from './editor-state';
@@ -841,217 +832,18 @@ describe('12.1-17: the draft carries the step', () => {
   });
 });
 
-describe('12.1-17: validateCondition (UI-D-648)', () => {
-  it('says nothing while the switch is off', () => {
-    expect(validateCondition({ condition: null })).toEqual({});
-  });
-  it('asks for the opener, then for at least one answer', () => {
-    expect(validateCondition({ condition: { questionId: '', values: [] } })).toEqual({
-      conditionOpener: { key: 'condition.errors.opener' },
-    });
-    expect(validateCondition({ condition: { questionId: uuid(1), values: [] } })).toEqual({
-      conditionValues: { key: 'condition.errors.values' },
-    });
-    expect(validateCondition({ condition: { questionId: uuid(1), values: ['true'] } })).toEqual({});
-  });
-});
-
-describe('12.1-17: eligibleOpeners (D-620, D-622, D-623)', () => {
+describe('12.1-17: layoutOrder (D-627)', () => {
   const s1 = adminStep({ title: 'Um' });
   const s2 = adminStep({ title: 'Dois' });
   const s3 = adminStep({ title: 'Três' });
-  const steps = [s1, s2, s3];
   const a = adminQuestion('single_choice', { stepId: s1.id, title: 'A' });
-  const b = adminQuestion('yes_no', { stepId: s1.id, title: 'B' });
-  const text = adminQuestion('short_text', { stepId: s1.id, title: 'Texto' });
   const c = adminQuestion('dropdown', { stepId: s2.id, title: 'C' });
-  const conditional = adminQuestion('multiple_choice', {
-    stepId: s2.id,
-    title: 'Condicional',
-    condition: { questionId: a.id, values: [uuid(1)] },
-  });
-  const me = adminQuestion('short_text', { stepId: s2.id, title: 'Eu' });
-  const later = adminQuestion('single_choice', { stepId: s2.id, title: 'Depois' });
   const far = adminQuestion('yes_no', { stepId: s3.id, title: 'Longe' });
-  const all = [a, b, text, c, conditional, me, later, far];
   const titles = (list: AdminQuestion[]) => list.map((q) => q.title);
 
   it('orders the layout by step, then by position', () => {
-    expect(titles(layoutOrder([far, a, c], steps))).toEqual(['A', 'C', 'Longe']);
+    expect(titles(layoutOrder([far, a, c], [s1, s2, s3]))).toEqual(['A', 'C', 'Longe']);
     expect(titles(layoutOrder([c, a], []))).toEqual(['C', 'A']);
-  });
-
-  it('offers, for an edited question, only the ACTIVE choice or yes/no ones without a condition that come before it', () => {
-    const offered = eligibleOpeners({
-      questions: all,
-      steps,
-      selfId: me.id,
-      storedStepId: me.stepId,
-      stepId: me.stepId,
-    });
-    // Texto (wrong type), Condicional (has a condition), Eu (itself), Depois and Longe (later) are absent.
-    expect(titles(offered)).toEqual(['A', 'B', 'C']);
-  });
-
-  it('never offers an archived row or a question of a type that cannot open', () => {
-    const archived = archivedQuestion('single_choice', { stepId: s1.id, title: 'Arquivada' });
-    const offered = eligibleOpeners({
-      questions: [...all, archived as unknown as AdminQuestion],
-      steps,
-      selfId: null,
-      storedStepId: null,
-      stepId: s3.id,
-    });
-    expect(titles(offered)).not.toContain('Arquivada');
-    expect(titles(offered)).not.toContain('Texto');
-  });
-
-  it('for a NEW question offers every eligible one of its step and the steps before it', () => {
-    expect(
-      titles(
-        eligibleOpeners({ questions: all, steps, selfId: null, storedStepId: null, stepId: s1.id }),
-      ),
-    ).toEqual(['A', 'B']);
-    expect(
-      titles(
-        eligibleOpeners({ questions: all, steps, selfId: null, storedStepId: null, stepId: s2.id }),
-      ),
-    ).toEqual(['A', 'B', 'C', 'Depois']);
-    expect(
-      titles(
-        eligibleOpeners({ questions: all, steps, selfId: null, storedStepId: null, stepId: s3.id }),
-      ),
-    ).toEqual(['A', 'B', 'C', 'Depois', 'Longe']);
-  });
-
-  it('for a question that MOVES, measures it at the end of the new step (never itself)', () => {
-    expect(
-      titles(
-        eligibleOpeners({
-          questions: all,
-          steps,
-          selfId: me.id,
-          storedStepId: s2.id,
-          stepId: s3.id,
-        }),
-      ),
-    ).toEqual(['A', 'B', 'C', 'Depois', 'Longe']);
-    expect(
-      titles(
-        eligibleOpeners({
-          questions: all,
-          steps,
-          selfId: me.id,
-          storedStepId: s2.id,
-          stepId: s1.id,
-        }),
-      ),
-    ).toEqual(['A', 'B']);
-  });
-
-  it('with no step known, an edited question sees those before it and a new one sees all', () => {
-    const flat = [a, text, c, me, later];
-    expect(
-      titles(
-        eligibleOpeners({
-          questions: flat,
-          steps: [],
-          selfId: me.id,
-          storedStepId: s2.id,
-          stepId: null,
-        }),
-      ),
-    ).toEqual(['A', 'C']);
-    expect(
-      titles(
-        eligibleOpeners({
-          questions: flat,
-          steps: [],
-          selfId: null,
-          storedStepId: null,
-          stepId: null,
-        }),
-      ),
-    ).toEqual(['A', 'C', 'Depois']);
-  });
-});
-
-describe('12.1-17: checkStepChange (D-623, UI-D-647)', () => {
-  const s1 = adminStep({ title: 'Um' });
-  const s2 = adminStep({ title: 'Dois' });
-  const s3 = adminStep({ title: 'Três' });
-  const steps = [s1, s2, s3];
-  const opener = adminQuestion('single_choice', { stepId: s2.id, title: 'Abridora' });
-  const shown = adminQuestion('short_text', {
-    stepId: s3.id,
-    title: 'Mostrada',
-    condition: { questionId: opener.id, values: [uuid(1)] },
-  });
-  const questions = [opener, shown];
-
-  it('is a no-op when the step does not change', () => {
-    expect(
-      checkStepChange({
-        questions,
-        steps,
-        stored: shown,
-        condition: shown.condition,
-        nextStepId: s3.id,
-      }),
-    ).toEqual({ kind: 'ok', clearOpener: false });
-  });
-
-  it('snaps back a shown question that would go above its opener, naming the opener', () => {
-    expect(
-      checkStepChange({
-        questions,
-        steps,
-        stored: shown,
-        condition: shown.condition,
-        nextStepId: s1.id,
-      }),
-    ).toEqual({ kind: 'mustFollow', opener: 'Abridora' });
-    // The opener's own step is fine: the question goes to the END of it.
-    expect(
-      checkStepChange({
-        questions,
-        steps,
-        stored: shown,
-        condition: shown.condition,
-        nextStepId: s2.id,
-      }),
-    ).toEqual({ kind: 'ok', clearOpener: false });
-  });
-
-  it('snaps back an opener that would go at or after a dependent, naming the dependent', () => {
-    expect(
-      checkStepChange({ questions, steps, stored: opener, condition: null, nextStepId: s3.id }),
-    ).toEqual({ kind: 'mustPrecede', dependent: 'Mostrada' });
-    expect(
-      checkStepChange({ questions, steps, stored: opener, condition: null, nextStepId: s1.id }),
-    ).toEqual({ kind: 'ok', clearOpener: false });
-  });
-
-  it('only clears a DRAFT opener the new step no longer allows', () => {
-    const free = adminQuestion('short_text', { stepId: s3.id });
-    expect(
-      checkStepChange({
-        questions: [...questions, free],
-        steps,
-        stored: free,
-        condition: { questionId: opener.id, values: [uuid(1)] },
-        nextStepId: s1.id,
-      }),
-    ).toEqual({ kind: 'ok', clearOpener: true });
-    expect(
-      checkStepChange({
-        questions,
-        steps,
-        stored: null,
-        condition: { questionId: opener.id, values: [uuid(1)] },
-        nextStepId: s1.id,
-      }),
-    ).toEqual({ kind: 'ok', clearOpener: true });
   });
 });
 

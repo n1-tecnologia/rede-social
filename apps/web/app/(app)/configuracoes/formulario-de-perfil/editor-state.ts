@@ -47,16 +47,6 @@ export interface OptionDraft {
   label: string;
 }
 
-/**
- * The draft of a condition (12.1-17, D-620..D-622): one opener and the tokens that open the question. While the
- * switch is on and no opener is chosen yet, `questionId` is the empty string and `values` is empty; the draft
- * `null` means "always shown". A token is an option id for a choice opener, `'true'` or `'false'` for yes/no.
- */
-export interface DraftCondition {
-  questionId: string;
-  values: string[];
-}
-
 export interface QuestionDraft {
   /** `null` until the admin picks a tile (create and replace). */
   type: ProfileFormType | null;
@@ -115,13 +105,6 @@ export function blankDraft(
     stepId,
     branchId,
   };
-}
-
-/** A condition copied, so a draft never shares its array with the stored question. */
-export function copyCondition(condition: DraftCondition | null): DraftCondition | null {
-  return condition === null
-    ? null
-    : { questionId: condition.questionId, values: [...condition.values] };
 }
 
 /**
@@ -263,14 +246,6 @@ export interface UpdateBody {
   branchId?: string | null;
 }
 
-/** Two conditions name the same opener and the same SET of tokens (the order of the tokens is not a change). */
-export function sameCondition(a: DraftCondition | null, b: DraftCondition | null): boolean {
-  if (a === null || b === null) return a === b;
-  if (a.questionId !== b.questionId || a.values.length !== b.values.length) return false;
-  const wanted = new Set(b.values);
-  return a.values.every((value) => wanted.has(value));
-}
-
 const sameLimits = (a: ProfileFormLimits, b: ProfileFormLimits) =>
   a.min === b.min && a.max === b.max;
 
@@ -373,10 +348,6 @@ export interface DraftErrors {
   limits?: FieldError;
   min?: FieldError;
   max?: FieldError;
-  /** No opener chosen while the condition switch is on (12.1-17, UI-D-648). */
-  conditionOpener?: FieldError;
-  /** An opener chosen and no answer ticked. */
-  conditionValues?: FieldError;
 }
 
 /** Whether `validateDraft` found anything wrong. */
@@ -458,20 +429,6 @@ export function validateDraft(draft: QuestionDraft, question?: AdminQuestion | n
     }
   }
   return errors;
-}
-
-/**
- * The two rules of a switched-on condition (UI-D-648): an opener is chosen, and at least one answer opens the
- * question. Nothing is said while the switch is off. The server repeats every rule (`condition_invalid`).
- */
-export function validateCondition(draft: {
-  condition: DraftCondition | null;
-}): Pick<DraftErrors, 'conditionOpener' | 'conditionValues'> {
-  const { condition } = draft;
-  if (condition === null) return {};
-  if (condition.questionId === '') return { conditionOpener: { key: 'condition.errors.opener' } };
-  if (condition.values.length === 0) return { conditionValues: { key: 'condition.errors.values' } };
-  return {};
 }
 
 /** The save button is enabled once a type is chosen and the title is not empty. */
@@ -766,112 +723,12 @@ export function layoutOrder(
   );
 }
 
-/** A step id to its place in the form, 0-based. */
-function stepRanks(steps: readonly AdminStep[]): Map<string, number> {
-  return new Map(steps.map((step, at) => [step.id, at] as const));
-}
-
 /** The one list of types that can open a question lives in the contract (D-620); this only reads it. */
 const OPENER_TYPES: readonly string[] = PROFILE_FORM_CONDITION_OPENER_TYPES;
 
 /** Whether a question of this type can decide whether another one shows (D-620). */
 export function isOpenerType(type: string): boolean {
   return OPENER_TYPES.includes(type);
-}
-
-/** What `eligibleOpeners` needs to know about the question being edited and where it will sit. */
-export interface OpenerScope {
-  /** The ACTIVE questions the builder holds, in the API's order. */
-  questions: readonly AdminQuestion[];
-  steps: readonly AdminStep[];
-  /** The question being edited, or the one being replaced (never its own opener); `null` for a new one. */
-  selfId: string | null;
-  /** Where the edited question sits today; `null` for a new or replaced one, which land at the end of a step. */
-  storedStepId: string | null;
-  /** The step the draft names (`null` means the last step, D-629). */
-  stepId: string | null;
-}
-
-/**
- * The questions the editor may offer as the opener (D-620, D-622, D-623, UI-D-648): ACTIVE (the list holds
- * nothing else), of a type that can open, carrying NO condition, never the question itself, and EARLIER in the
- * form than it: an earlier step, or the same step at an earlier position. A question that keeps its step is
- * measured at its place; one that moves, or a new one, goes to the END of its step, so every question of that
- * step and of the steps before it comes first. The server (`checkCondition`) is the authority; this only
- * keeps the editor from offering what it would refuse (T-12.1-01).
- */
-export function eligibleOpeners(scope: OpenerScope): AdminQuestion[] {
-  const { questions, steps, selfId, storedStepId, stepId } = scope;
-  const ordered = layoutOrder(questions, steps);
-  const stays = storedStepId !== null && (stepId === null || stepId === storedStepId);
-
-  let before: AdminQuestion[];
-  if (stays && selfId !== null) {
-    const at = ordered.findIndex((question) => question.id === selfId);
-    before = at === -1 ? ordered : ordered.slice(0, at);
-  } else if (steps.length > 0) {
-    const ranks = stepRanks(steps);
-    const lastRank = steps.length - 1;
-    const target = stepId === null ? lastRank : (ranks.get(stepId) ?? lastRank);
-    before = ordered.filter((question) => (ranks.get(question.stepId) ?? lastRank) <= target);
-  } else {
-    before = ordered;
-  }
-  return before.filter(
-    (question) =>
-      question.id !== selfId &&
-      question.condition === null &&
-      isOpenerType(question.type) &&
-      // The list holds ACTIVE questions only; an archived row that slipped in is never an opener.
-      !('archivedAt' in question),
-  );
-}
-
-/** What a change of the step field does (UI-D-647). */
-export type StepChange =
-  | { kind: 'ok'; clearOpener: boolean }
-  | { kind: 'mustFollow'; opener: string }
-  | { kind: 'mustPrecede'; dependent: string };
-
-/**
- * D-623 for a change of the step field. A question lands at the END of its new step, so: its stored opener
- * must sit in that step or an earlier one (otherwise the field snaps back, `mustFollow`); and a dependent of
- * it must sit in a LATER step than the new one (otherwise `mustPrecede`: at the end of the dependent's step it
- * would come after it). A draft opener that the new step no longer allows, and that is not the stored
- * condition, is only cleared (`clearOpener`), with the polite note. Moving back to the step it already has
- * is never a change.
- */
-export function checkStepChange(input: {
-  questions: readonly AdminQuestion[];
-  steps: readonly AdminStep[];
-  /** The question being edited; `null` for a new or replaced one. */
-  stored: AdminQuestion | null;
-  condition: DraftCondition | null;
-  nextStepId: string;
-}): StepChange {
-  const { questions, steps, stored, condition, nextStepId } = input;
-  if (stored && nextStepId === stored.stepId) return { kind: 'ok', clearOpener: false };
-  const ranks = stepRanks(steps);
-  const lastRank = steps.length - 1;
-  const rankOf = (id: string) => ranks.get(id) ?? lastRank;
-  const next = rankOf(nextStepId);
-
-  if (stored) {
-    const dependent = questions.find(
-      (question) => question.condition?.questionId === stored.id && rankOf(question.stepId) <= next,
-    );
-    if (dependent) return { kind: 'mustPrecede', dependent: dependent.title };
-  }
-
-  if (condition !== null && condition.questionId !== '') {
-    const opener = questions.find((question) => question.id === condition.questionId);
-    if (opener && rankOf(opener.stepId) > next) {
-      return stored?.condition?.questionId === opener.id
-        ? { kind: 'mustFollow', opener: opener.title }
-        : { kind: 'ok', clearOpener: true };
-    }
-  }
-  return { kind: 'ok', clearOpener: false };
 }
 
 /** The words of the sentence for a yes/no opener (the catalog's, never typed here). */
