@@ -269,12 +269,20 @@ async function readFormSteps(
     .map((step) => ({ id: step.id, title: step.title, revision: Number(step.revision) }));
 }
 
+/** What the etag reads of a branch: what a member renders from it (never its name or its admin revision). */
+type EtagBranch = { id: string; opener_question_id: string; open_values: readonly string[] };
+
 /**
  * The identity of the form: a short hash of each question's `id:revision:step_id` (plus the branch id as a
  * fourth segment only when the question has one) in list order, the shown steps' `id:revision` and, only when
- * the form has an active branch, the active branches' `id:revision` (D-629, D-644). A form without branches
+ * a branch holds an active question, those branches' `id:digest` (D-629, D-644). A form without branches
  * therefore hashes to exactly what 12.1 produced for the same questions and steps. A question moved between
- * steps or branches, a step rename and any branch edit, move, undo, archive or reactivate each change it.
+ * steps or branches, a step rename and a branch's opener or opening values each change it.
+ *
+ * WR-02: a branch is covered by what a member renders from it (its opener and its sorted opening values), not
+ * by its admin `revision`, and a branch with no active question is not covered at all. Renaming a branch (a
+ * label members never see, D-642) or creating an empty one therefore does not turn every in-flight save of every
+ * member into a 409 `form_changed`; the questions that later fill it carry their own branch id segment.
  */
 export function formEtagOf(
   questions: readonly {
@@ -284,8 +292,15 @@ export function formEtagOf(
     branch_id?: string | null;
   }[],
   steps: readonly { id: string; revision: number }[],
-  branches: readonly { id: string; revision: number }[] = [],
+  branches: readonly EtagBranch[] = [],
 ): string {
+  const held = new Set(questions.map((question) => question.branch_id ?? null));
+  const covered = branches
+    .filter((branch) => held.has(branch.id))
+    .map((branch) => ({
+      id: branch.id,
+      revision: `${branch.opener_question_id}~${[...branch.open_values].sort().join(',')}`,
+    }));
   const text = answerEtag(
     questions.map((question) => ({
       id: question.id,
@@ -294,7 +309,7 @@ export function formEtagOf(
       branchId: question.branch_id ?? null,
     })),
     steps,
-    branches.length === 0 ? undefined : branches,
+    covered.length === 0 ? undefined : covered,
   );
   return createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
@@ -478,7 +493,7 @@ async function reportMissing(
  *      validated, so an admin's type, option, branch or step edit and this save never interleave; then a
  *      per-member advisory lock serialises two saves of one member, so the stored answers they read are never
  *      half-written;
- *   3. a stale `formEtag` (it hashes ids, revisions, steps, branch ids and the active branches) is a 409
+ *   3. a stale `formEtag` (it hashes ids, revisions, steps, branch ids and the opener and values of the active branches that hold a question) is a 409
  *      `form_changed` carrying the fresh form, and nothing is written;
  *   4. the scope is the questions of `stepId`, or every active question without one. An unknown, empty or
  *      foreign step is 400 `unknown_step`; a key outside the scope is `unknown_question`;

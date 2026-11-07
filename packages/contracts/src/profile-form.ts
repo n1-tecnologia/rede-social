@@ -1136,13 +1136,14 @@ export type StaffAnswers = z.infer<typeof staffAnswersSchema>;
  * 12.1: a question that carries a `stepId` renders it as a third segment, and `steps` appends the step
  * `id:revision` pairs, so moving a question or renaming a step also changes the identity. 12.2: a question
  * that carries a `branchId` renders it as a fourth segment and `branches` appends the branch `id:revision`
- * pairs, so moving a question into a branch or editing a branch also changes it. Every part is only added
+ * pairs, so moving a question into a branch or editing a branch also changes it. A branch's `revision` may be a
+ * string (the server passes a digest of what a member renders, not the admin's edit counter). Every part is only added
  * when given, so every earlier call keeps its exact output.
  */
 export function answerEtag(
   questions: readonly { id: string; revision: number; stepId?: string; branchId?: string | null }[],
   steps?: readonly { id: string; revision: number }[],
-  branches?: readonly { id: string; revision: number }[],
+  branches?: readonly { id: string; revision: number | string }[],
 ): string {
   const base = questions
     .map((question) => {

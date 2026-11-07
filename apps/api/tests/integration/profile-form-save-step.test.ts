@@ -1046,6 +1046,27 @@ describe('12.2-10 tracer: a depth-3 form is read with its tree and a save that c
     });
   }, 40_000);
 
+  it('WR-02 renaming a branch (a label members never see) leaves the formEtag unchanged, so an in-flight save is not refused', async () => {
+    const admin = await person('admin_tenant');
+    const member = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await deepTree();
+      const before = await readForm(member);
+
+      const [branch] = await adminSql<{ revision: number }[]>`
+        select revision from public.profile_form_branches where id = ${f.b1}::uuid`;
+      const renamed = await call(admin, 'PATCH', `/v1/profile_form/branches/${f.b1}`, {
+        revision: branch?.revision,
+        name: 'Outro nome interno',
+      });
+      expect(renamed.status, await renamed.clone().text()).toBe(200);
+
+      expect((await readForm(member)).formEtag).toBe(before.formEtag);
+      const res = await save(member, before, { [f.q1]: choose(f.tem) }, f.s1);
+      expect(res.status, await res.clone().text()).not.toBe(409);
+    });
+  }, 40_000);
+
   it('a form without branches has the formEtag that 12.1 computed for the same questions and steps', async () => {
     const member = await person();
     await withProfileForm(labTenantId, async () => {
