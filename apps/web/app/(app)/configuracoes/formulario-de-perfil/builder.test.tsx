@@ -2586,6 +2586,32 @@ describe('12.2-17 Task 1: an existing branch opens from the Lista and from its o
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('WR-04 closes the sheet when another admin archives the branch, and does not bring it back if the branch returns', () => {
+    const view = builder(props());
+    fireEvent.click(pencil());
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+
+    // The page re-reads with the branch archived: the sheet is gone and the open flag with it.
+    view.again({ ...props(), branches: [{ ...BR, archivedAt: '2026-11-06T10:00:00.000Z' }] });
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Reactivated by someone else: nothing reopens by itself (a stale open flag would remount the sheet).
+    view.again(props());
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // And the pencil still opens it normally afterwards.
+    fireEvent.click(pencil());
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+  });
+
+  it('WR-04 closes the sheet when the branch disappears from the read', () => {
+    const view = builder(props());
+    fireEvent.click(pencil());
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+    view.again({ ...props(), branches: [] });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('retries under the new revision when the page re-reads the branch after a stale answer', async () => {
     mocks.updateBranch.mockResolvedValueOnce({ ok: false, code: 'stale_revision' });
     const view = builder(props());

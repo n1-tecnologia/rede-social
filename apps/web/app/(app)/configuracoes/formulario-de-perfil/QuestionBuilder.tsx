@@ -224,6 +224,17 @@ export function QuestionBuilder({
           (branch) => branch.id === branchOpening.branch?.id && branch.archivedAt === null,
         )
       : undefined;
+  // WR-04: the sheet of a branch that is gone (another admin archived or undid it) unmounts because nothing is
+  // left to render, so the open flag has to be dropped here: otherwise `sheetShowing` stays true (the focus goes
+  // back to nothing) and the sheet would come back on its own if the branch returned. The branch sheets keep no
+  // other state worth saving, and the page already re-read, so the draft is dropped with it, as every other
+  // "gone" answer of the sheet does (refresh and close).
+  const editedBranchGone = branchOpening?.branch !== undefined && editedBranch === undefined;
+  useEffect(() => {
+    if (!editedBranchGone) return;
+    setBranchOpen(false);
+    setBranchOpening(null);
+  }, [editedBranchGone]);
 
   return (
     <>
