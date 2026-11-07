@@ -26,6 +26,7 @@ const {
   deleteQuestionAction,
   deleteStepAction,
   reactivateQuestionAction,
+  reactivateBranchAction,
   readImpactAction,
   reorderLayoutAction,
   reorderQuestionsAction,
@@ -1551,6 +1552,114 @@ describe('12.2-18: updateBranchAction keeps the titles of a public_under_private
       ok: false,
       code: 'conflict',
       issue: 'condition_locked',
+    });
+  });
+});
+
+describe('12.2-18: reactivating a branch and a question inside an archived branch (D-653)', () => {
+  const BRANCH = uuid(4730);
+  const OPENER = uuid(4731);
+  const BACK = {
+    id: BRANCH,
+    openerQuestionId: OPENER,
+    values: ['true'],
+    name: 'Quem tem clínica',
+    revision: 5,
+    archivedAt: null,
+    questionCount: 3,
+    answerCount: 0,
+  };
+
+  it('readImpactAction asks reactivate_branch with the branch id', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 4 }));
+    expect(await readImpactAction({ change: 'reactivate_branch', branchId: BRANCH })).toEqual({
+      ok: true,
+      members: 4,
+    });
+    const [path] = mocks.apiFetch.mock.calls[0] as [string];
+    const url = new URL(path, 'http://x');
+    expect(url.searchParams.get('change')).toBe('reactivate_branch');
+    expect(url.searchParams.get('branchId')).toBe(BRANCH);
+  });
+
+  it('reactivateBranchAction POSTs /branches/{id}/reactivate and parses the branch', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, BACK));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({ ok: true, branch: BACK });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/branches/${BRANCH}/reactivate`);
+    expect(init.method).toBe('POST');
+  });
+
+  it('refuses an id that is not a uuid without a request (T-12.2-01)', async () => {
+    expect(await reactivateBranchAction('../../x')).toEqual({ ok: false, code: 'failed' });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('a body that breaks the contract is a failure, never a success', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { id: BRANCH }));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('answers the 30-question limit and the 15-branch limit as their own arms', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'limit_reached' }));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({ ok: false, code: 'limit' });
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'branch_limit' }));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({ ok: false, code: 'branchLimit' });
+  });
+
+  it('answers an archived opener with the opener id the server named', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'condition_invalid', openerId: OPENER }),
+    );
+    expect(await reactivateBranchAction(BRANCH)).toEqual({
+      ok: false,
+      code: 'openerArchived',
+      openerId: OPENER,
+    });
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'condition_invalid' }),
+    );
+    expect(await reactivateBranchAction(BRANCH)).toEqual({
+      ok: false,
+      code: 'openerArchived',
+      openerId: null,
+    });
+  });
+
+  it('any other 409 is a conflict that names its issue, the bare 404 is gone', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'branch_archived' }));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'branch_archived',
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'NOT_FOUND'));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({ ok: false, code: 'gone' });
+  });
+
+  it('maps forbidden, module off, a transport failure and a session refusal', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({ ok: false, code: 'moduleOff' });
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await reactivateBranchAction(BRANCH)).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('a question inside an archived branch answers branch_archived with the branch id', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'branch_archived', branchId: BRANCH }),
+    );
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({
+      ok: false,
+      code: 'branchArchived',
+      branchId: BRANCH,
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'branch_archived' }));
+    expect(await reactivateQuestionAction(IDS[1] as string)).toEqual({
+      ok: false,
+      code: 'branchArchived',
+      branchId: null,
     });
   });
 });

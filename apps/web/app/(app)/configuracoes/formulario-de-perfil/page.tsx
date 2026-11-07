@@ -71,6 +71,7 @@ export default async function ProfileFormPage({
       ) : (
         <ArchivedList
           questions={archived.questions}
+          branches={archived.branches}
           activeCount={archived.activeCount}
           limit={archived.limit}
           activeQuestions={archived.activeQuestions}

@@ -1054,7 +1054,7 @@ export function QuestionEditorSheet({
             ? t('impact.replaceBody', { title: question.title })
             : undefined
         }
-        conditionNote={
+        branchNote={
           impact && impact.kind !== 'unconditional' && draft.branchId !== null
             ? (branchNote() ?? undefined)
             : undefined

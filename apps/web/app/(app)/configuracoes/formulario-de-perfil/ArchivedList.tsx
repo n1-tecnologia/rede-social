@@ -1,6 +1,10 @@
 'use client';
 
-import type { AdminQuestion, ArchivedQuestion } from '@rede-social/contracts/profile-form';
+import type {
+  AdminBranch,
+  AdminQuestion,
+  ArchivedQuestion,
+} from '@rede-social/contracts/profile-form';
 import { Button, Card, ConfirmDialog, EmptyState, StatusPill, useToast } from '@rede-social/ui';
 import { Archive, ArchiveRestore, Info } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -20,6 +24,11 @@ import { ImpactDialog } from './ImpactDialog';
 export interface ArchivedListProps {
   /** The archived questions, newest archive first (the API's order). Aggregates only: counts, no answers. */
   questions: ArchivedQuestion[];
+  /**
+   * 12.2-18 (D-653): every branch of the form, active and archived (the archived read's), so a branch can be named
+   * and an archived one drawn as a group. RED stub: accepted and not used yet.
+   */
+  branches?: AdminBranch[];
   /** How many questions are active now, and the most a tenant may have: the limit check needs no write. */
   activeCount: number;
   limit: number;
@@ -289,7 +298,7 @@ export function ArchivedList({
         open={open && pending?.kind === 'impact'}
         kind="reactivate"
         members={pending?.kind === 'impact' ? pending.members : 0}
-        conditionNote={pending?.kind === 'impact' ? conditionNote(pending.question) : undefined}
+        branchNote={pending?.kind === 'impact' ? conditionNote(pending.question) : undefined}
         onConfirm={async () => {
           if (pending) await reactivate(pending.question);
         }}

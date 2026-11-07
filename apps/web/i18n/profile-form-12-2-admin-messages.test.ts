@@ -397,6 +397,54 @@ describe('profileForm.admin: the privacy rule WR-06 (PFORM-53, UI-D-675, 12.2-18
   });
 });
 
+describe('profileForm.admin.archived.branch: the Arquivadas tab over branches (UI-D-674, 12.2-18)', () => {
+  it('declares the keys the Copywriting Contract names', () => {
+    const branch = parsed.profileForm.admin.archived.branch;
+    for (const key of [
+      'meta',
+      'reactivate',
+      'reactivateLabel',
+      'wasIn',
+      'openerArchived',
+      'branchArchived',
+    ]) {
+      expect(branch, key).toHaveProperty(key);
+    }
+  });
+
+  it('the group meta is an ICU plural on the questions: one and many', () => {
+    expect(t('archived.branch.meta', { date: '14/09/2026', count: 1 })).toBe(
+      'Arquivado em 14/09/2026 · 1 pergunta',
+    );
+    expect(t('archived.branch.meta', { date: '14/09/2026', count: 4 })).toBe(
+      'Arquivado em 14/09/2026 · 4 perguntas',
+    );
+  });
+
+  it('reads the button, its label and the origin line verbatim', () => {
+    expect(t('archived.branch.reactivate')).toBe('Reativar ramo');
+    expect(t('archived.branch.reactivateLabel', { label: 'Quem tem clínica' })).toBe(
+      'Reativar ramo: Quem tem clínica',
+    );
+    expect(t('archived.branch.wasIn', { label: 'Quem tem clínica' })).toBe(
+      'Estava no ramo “Quem tem clínica”.',
+    );
+  });
+
+  it('reads the two refusals verbatim, each naming the one thing to reactivate first', () => {
+    expect(
+      t('archived.branch.openerArchived', { label: 'Quem tem clínica', opener: 'Tem clínica?' }),
+    ).toBe(
+      'Para reativar o ramo “Quem tem clínica”, reative antes “Tem clínica?”, que decide se ele aparece.',
+    );
+    expect(
+      t('archived.branch.branchArchived', { title: 'Nome da clínica', label: 'Quem tem clínica' }),
+    ).toBe(
+      'Para reativar “Nome da clínica”, reative antes o ramo “Quem tem clínica”, que decide se ela aparece.',
+    );
+  });
+});
+
 describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "branch", "fork" or "grupo condicional")', () => {
   const groups: Record<string, unknown> = {
     'editor.branch': parsed.profileForm.admin.editor.branch,
@@ -405,6 +453,7 @@ describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "
     'branches.toasts': parsed.profileForm.admin.branches.toasts,
     'branches.undo': parsed.profileForm.admin.branches.undo,
     'branches.archive': parsed.profileForm.admin.branches.archive,
+    'archived.branch': parsed.profileForm.admin.archived.branch,
     'editor.privacy': parsed.profileForm.admin.editor.privacy,
     'dependents.privacy': [
       parsed.profileForm.admin.dependents.title.privacy,

@@ -71,7 +71,9 @@ export type ReactivateResult =
   | { ok: true }
   | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' }
   // 12.1-17 (D-632): the question's own opener is not in the form any more; `openerId` is the opener the server named.
-  | { ok: false; code: 'conditionInvalid'; openerId: string | null };
+  | { ok: false; code: 'conditionInvalid'; openerId: string | null }
+  // 12.2-18 (D-653): its branch is archived; `branchId` is the branch the server named (reactivate it first).
+  | { ok: false; code: 'branchArchived'; branchId: string | null };
 
 type ErrorBody = { code?: string; details?: Record<string, unknown>; requestId?: string };
 type Envelope = { error?: ErrorBody };
@@ -1043,5 +1045,23 @@ export async function archiveBranchAction(id: string): Promise<ArchiveBranchActi
   if (result.code === 'forbidden' || result.code === 'moduleOff') {
     return { ok: false, code: result.code };
   }
+  return { ok: false, code: 'failed' };
+}
+
+/**
+ * What "Reativar ramo" answers (12.2-18, D-653). `limit` is 409 `limit_reached` (past 30 active questions),
+ * `branchLimit` 409 `branch_limit` (past 15 active branches), `openerArchived` 409 `condition_invalid` with the
+ * `openerId` to reactivate first, `conflict` any other 409 (its issue named), `gone` the bare 404.
+ */
+export type ReactivateBranchResult =
+  | { ok: true; branch: AdminBranch }
+  | { ok: false; code: 'limit' | 'branchLimit' | 'gone' | 'forbidden' | 'moduleOff' | 'failed' }
+  | { ok: false; code: 'openerArchived'; openerId: string | null }
+  | { ok: false; code: 'conflict'; issue: string };
+
+/**
+ * `POST /v1/profile_form/branches/{id}/reactivate` (RED stub of 12.2-18: inert until the GREEN commit).
+ */
+export async function reactivateBranchAction(_id: string): Promise<ReactivateBranchResult> {
   return { ok: false, code: 'failed' };
 }

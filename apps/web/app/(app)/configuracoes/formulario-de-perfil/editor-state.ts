@@ -2,6 +2,7 @@ import {
   type AdminBranch,
   type AdminQuestion,
   type AdminStep,
+  type ArchivedQuestion,
   codePoints,
   type Dependent,
   type HasDependentsDetails,
@@ -923,6 +924,35 @@ export function privacyTitlesIf(tree: AdminBranchTree, change: PrivacyChange): s
 /** Titles as the plain list the dependents alert draws (the ids only key the rows). */
 export function titlesAsDependents(titles: readonly string[]): Dependent[] {
   return titles.map((title, at) => ({ id: `public-${at}`, title }));
+}
+
+// ── 12.2-18: the Arquivadas tab over branches (D-653, UI-D-674) ────────────────────────────────────
+
+/** An archived branch with the archived questions it took with it and the archived branches nested inside it. */
+export interface ArchivedGroup {
+  branch: AdminBranch;
+  /** The questions archived WITH this branch (the same stamp), in the order they had in the form. */
+  rows: ArchivedQuestion[];
+  /** Archived branches that hang on a question of this block, archived with it. */
+  children: ArchivedGroup[];
+  /** The questions the whole block holds (own rows plus every nested group's): what "Reativar ramo" brings back. */
+  count: number;
+}
+
+/** One entry of the Arquivadas list: a branch group, or a question archived on its own. */
+export type ArchivedItem =
+  | { kind: 'group'; group: ArchivedGroup }
+  | { kind: 'question'; question: ArchivedQuestion };
+
+/**
+ * The Arquivadas list over branches (RED stub of 12.2-18: inert until the GREEN commit).
+ */
+export function archivedLayout(_input: {
+  questions: readonly ArchivedQuestion[];
+  branches: readonly AdminBranch[];
+  active: readonly AdminQuestion[];
+}): ArchivedItem[] {
+  return [];
 }
 
 // ── 12.2-16: where a question sits in the tree (D-640, D-641, D-644, D-646, UI-D-669) ──────────────

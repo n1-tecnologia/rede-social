@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   remove: vi.fn(),
   impact: vi.fn(),
   reactivate: vi.fn(),
+  reactivateBranch: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -48,6 +49,7 @@ vi.mock('./actions', () => ({
   deleteQuestionAction: (id: string) => mocks.remove(id),
   readImpactAction: (input: unknown) => mocks.impact(input),
   reactivateQuestionAction: (id: string) => mocks.reactivate(id),
+  reactivateBranchAction: (id: string) => mocks.reactivateBranch(id),
   reorderQuestionsAction: vi.fn(),
 }));
 vi.mock('@/app/(auth)/completar-perfil/actions', () => ({ saveProfileFormAction: vi.fn() }));
@@ -1406,27 +1408,43 @@ describe('12.2-18 Task 1: an option that branches name (D-646, UI-D-673)', () =>
   });
 });
 
-describe('12.1-17 Task 2: reactivating a shown question whose opener is archived (UI-D-651)', () => {
-  const opener = archivedQuestion('single_choice', {
+describe('12.2-18 Task 3: reactivation refusals name the one thing to reactivate first (D-653, UI-D-674)', () => {
+  const optA = uuid(9851);
+  const opener = adminQuestion('single_choice', {
     title: 'Você tem clínica, trabalha em clínica ou está aprendendo?',
-    options: [{ id: uuid(9851), label: 'Tenho', answerCount: 0 }],
+    options: [{ id: optA, label: 'Tenho', answerCount: 0 }],
   });
-  const shown = archivedQuestion('short_text', {
+  const branch = adminBranch({
+    openerQuestionId: opener.id,
+    values: [optA],
+    name: 'Quem tem clínica',
+    archivedAt: '2026-10-20T12:00:00.000Z',
+  });
+  // Archived on its own BEFORE the branch went: it stays a row of its own, inside an archived branch.
+  const inside = archivedQuestion('short_text', {
     title: 'Nome da clínica',
     required: true,
-    condition: { questionId: opener.id, values: [uuid(9851)] },
+    branchId: branch.id,
+    archivedAt: '2026-10-19T09:00:00.000Z',
   });
   const SENTENCE =
-    'Para reativar “Nome da clínica”, reative antes “Você tem clínica, trabalha em clínica ou está aprendendo?”, que decide se ela aparece.';
+    'Para reativar “Nome da clínica”, reative antes o ramo “Quem tem clínica”, que decide se ela aparece.';
+
+  beforeEach(() => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+    mocks.reactivate.mockResolvedValue({ ok: true });
+  });
 
   function list(
-    questions = [shown, opener],
-    activeQuestions: ReturnType<typeof adminQuestion>[] = [],
+    questions = [inside],
+    branches = [branch],
+    activeQuestions: ReturnType<typeof adminQuestion>[] = [opener],
   ) {
     return render(
       <NextIntlClientProvider locale="pt-BR" messages={messages}>
         <ArchivedList
           questions={questions}
+          branches={branches}
           activeCount={3}
           limit={30}
           activeQuestions={activeQuestions}
@@ -1438,7 +1456,7 @@ describe('12.1-17 Task 2: reactivating a shown question whose opener is archived
   const reactivate = (title: string) =>
     screen.getByRole('button', { name: `Reativar pergunta: ${title}` });
 
-  it('opens no dialog, reads no impact and toasts the one sentence', async () => {
+  it('a question inside an archived branch: opens no dialog, reads no impact and toasts the one sentence', async () => {
     list();
     await act(async () => {
       fireEvent.click(reactivate('Nome da clínica'));
@@ -1449,32 +1467,40 @@ describe('12.1-17 Task 2: reactivating a shown question whose opener is archived
     expect(mocks.reactivate).not.toHaveBeenCalled();
   });
 
-  it('lets the same question through once its opener is not archived (it is active)', async () => {
+  it('says the same sentence when the server answers branch_archived with the branch (a race)', async () => {
     mocks.impact.mockResolvedValue({ ok: true, members: 0 });
-    mocks.reactivate.mockResolvedValue({ ok: true });
-    const activeOpener = adminQuestion('single_choice', { title: 'Abridora ativa' });
-    list(
-      [{ ...shown, condition: { questionId: activeOpener.id, values: [uuid(9851)] } }],
-      [activeOpener],
-    );
+    const active = adminBranch({
+      openerQuestionId: opener.id,
+      values: [optA],
+      name: 'Quem tem clínica',
+    });
+    mocks.reactivate.mockResolvedValue({ ok: false, code: 'branchArchived', branchId: active.id });
+    list([{ ...inside, branchId: active.id }], [active]);
     await act(async () => {
       fireEvent.click(reactivate('Nome da clínica'));
     });
-    expect(mocks.reactivate).toHaveBeenCalledTimes(1);
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'error', message: SENTENCE });
+    expect(mocks.refresh).toHaveBeenCalled();
   });
 
-  it('says the same sentence when the server answers condition_invalid (a race)', async () => {
+  it('falls back to the failure toast when the server names a branch the page cannot label', async () => {
     mocks.impact.mockResolvedValue({ ok: true, members: 0 });
-    const activeOpener = adminQuestion('single_choice', { title: 'Abridora que saiu agora' });
-    mocks.reactivate.mockResolvedValue({
-      ok: false,
-      code: 'conditionInvalid',
-      openerId: activeOpener.id,
+    mocks.reactivate.mockResolvedValue({ ok: false, code: 'branchArchived', branchId: uuid(9999) });
+    list([{ ...inside, branchId: null }], []);
+    await act(async () => {
+      fireEvent.click(reactivate('Nome da clínica'));
     });
-    list(
-      [{ ...shown, condition: { questionId: activeOpener.id, values: [uuid(9851)] } }],
-      [activeOpener],
-    );
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível reativar agora. Tente de novo.',
+    });
+  });
+
+  it('keeps the 12.1 sentence for a plain question whose opener is archived (condition_invalid, a race)', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+    const gone = adminQuestion('single_choice', { title: 'Abridora que saiu agora' });
+    mocks.reactivate.mockResolvedValue({ ok: false, code: 'conditionInvalid', openerId: gone.id });
+    list([{ ...inside, branchId: null }], [], [gone]);
     await act(async () => {
       fireEvent.click(reactivate('Nome da clínica'));
     });
@@ -1485,14 +1511,14 @@ describe('12.1-17 Task 2: reactivating a shown question whose opener is archived
     });
   });
 
-  it('falls back to the failure toast when the server names an opener the page cannot title', async () => {
+  it('falls back to the failure toast when condition_invalid names an opener the page cannot title', async () => {
     mocks.impact.mockResolvedValue({ ok: true, members: 0 });
     mocks.reactivate.mockResolvedValue({
       ok: false,
       code: 'conditionInvalid',
       openerId: uuid(9999),
     });
-    list([{ ...shown, condition: { questionId: uuid(9998), values: [uuid(9851)] } }], []);
+    list([{ ...inside, branchId: null }], [], []);
     await act(async () => {
       fireEvent.click(reactivate('Nome da clínica'));
     });
@@ -1505,10 +1531,10 @@ describe('12.1-17 Task 2: reactivating a shown question whose opener is archived
 
 describe('12.1-17 Task 3: ImpactDialog for a conditional question and for a removed condition (D-634, UI-D-649)', () => {
   function impactDialog(props: {
-    kind: 'add' | 'make' | 'reactivate' | 'replace' | 'unconditional';
+    kind: 'add' | 'make' | 'reactivate' | 'reactivateBranch' | 'replace' | 'unconditional';
     members: number;
     note?: string;
-    conditionNote?: string;
+    branchNote?: string;
   }) {
     return render(
       <NextIntlClientProvider locale="pt-BR" messages={messages}>
@@ -1542,7 +1568,7 @@ describe('12.1-17 Task 3: ImpactDialog for a conditional question and for a remo
     ['replace', 'Substituir a pergunta?'],
   ] as const) {
     it(`${kind}: the condition sentence closes the body`, () => {
-      impactDialog({ kind, members: 2, conditionNote: SENTENCE });
+      impactDialog({ kind, members: 2, branchNote: SENTENCE });
       const body = screen.getByRole('dialog', { name: title }).querySelector('p');
       expect(body?.textContent?.endsWith(SENTENCE)).toBe(true);
     });
@@ -1557,24 +1583,53 @@ describe('12.1-17 Task 3: ImpactDialog for a conditional question and for a remo
   });
 
   it('the replace note comes before the condition note', () => {
-    impactDialog({ kind: 'replace', members: 2, note: 'Nota de troca.', conditionNote: SENTENCE });
+    impactDialog({ kind: 'replace', members: 2, note: 'Nota de troca.', branchNote: SENTENCE });
     const text = screen.getByRole('dialog').textContent ?? '';
     expect(text.indexOf('Nota de troca.')).toBeLessThan(text.indexOf('Só conta quem vê'));
   });
 });
 
-describe('12.1-17 Task 3: reactivating a required conditional question (UI-D-649)', () => {
+describe('12.2-18 Task 3: ImpactDialog for a block of questions (D-653, UI-D-674)', () => {
+  it('"reactivateBranch" reads like the shipped reactivation: same title, body, kept line and buttons', () => {
+    render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <ImpactDialog
+          open
+          kind="reactivateBranch"
+          members={5}
+          onConfirm={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+    const dlg = screen.getByRole('dialog', { name: 'Reativar pergunta obrigatória?' });
+    expect(dlg.textContent).toContain(
+      '5 membros vão precisar responder antes de continuar usando a comunidade.',
+    );
+    expect(dlg.textContent).toContain('As respostas guardadas continuam valendo.');
+    expect(within(dlg).getByRole('button', { name: 'Reativar e exigir' })).toBeTruthy();
+    expect(within(dlg).getByRole('button', { name: 'Voltar' })).toBeTruthy();
+  });
+});
+
+describe('12.2-18 Task 3: reactivating a required question that returns to an active branch (UI-D-649)', () => {
+  const optA = uuid(9861);
   const opener = adminQuestion('single_choice', {
     title: 'Você tem clínica?',
     options: [
-      { id: uuid(9861), label: 'Tenho uma clínica', answerCount: 0 },
+      { id: optA, label: 'Tenho uma clínica', answerCount: 0 },
       { id: uuid(9862), label: 'Estou aprendendo', answerCount: 0 },
     ],
+  });
+  const branch = adminBranch({
+    openerQuestionId: opener.id,
+    values: [optA],
+    name: 'Quem tem clínica',
   });
   const archived = archivedQuestion('short_text', {
     title: 'Nome da clínica',
     required: true,
-    condition: { questionId: opener.id, values: [uuid(9861)] },
+    branchId: branch.id,
   });
 
   function list(question = archived) {
@@ -1582,6 +1637,7 @@ describe('12.1-17 Task 3: reactivating a required conditional question (UI-D-649
       <NextIntlClientProvider locale="pt-BR" messages={messages}>
         <ArchivedList
           questions={[question]}
+          branches={[branch]}
           activeCount={3}
           limit={30}
           activeQuestions={[opener]}
@@ -1603,13 +1659,505 @@ describe('12.1-17 Task 3: reactivating a required conditional question (UI-D-649
     );
   });
 
-  it('leaves the dialog as it was for an unconditional question', async () => {
+  it('leaves the dialog as it was for a question that was in no branch', async () => {
     mocks.impact.mockResolvedValue({ ok: true, members: 3 });
-    list({ ...archived, condition: null });
+    list({ ...archived, branchId: null });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reativar pergunta: Nome da clínica' }));
     });
     const dlg = await screen.findByRole('dialog', { name: 'Reativar pergunta obrigatória?' });
     expect(dlg.textContent).not.toContain('Só conta quem vê');
+  });
+});
+
+describe('12.2-18 Task 3: the Arquivadas tab shows archived branches as groups (D-653, UI-D-674, PFORM-57)', () => {
+  const T0 = '2026-10-19T09:00:00.000Z';
+  const T1 = '2026-10-20T15:30:00.000Z';
+  const T2 = '2026-10-21T10:00:00.000Z';
+  const T3 = '2026-10-22T08:00:00.000Z';
+  const optA = uuid(9871);
+  const optB = uuid(9872);
+  const opener = adminQuestion('single_choice', {
+    title: 'Você tem clínica, trabalha em clínica ou está aprendendo?',
+    options: [
+      { id: optA, label: 'Tenho uma clínica', answerCount: 0 },
+      { id: optB, label: 'Estou aprendendo', answerCount: 0 },
+    ],
+  });
+
+  // The block G, archived at T1: two rows, a yes/no row that opens the nested branch N, and N's own row.
+  const G = adminBranch({
+    openerQuestionId: opener.id,
+    values: [optA],
+    name: 'Quem tem clínica',
+    archivedAt: T1,
+  });
+  const g1 = archivedQuestion('short_text', {
+    title: 'Nome da clínica',
+    required: true,
+    position: 1,
+    branchId: G.id,
+    archivedAt: T1,
+  });
+  const g2 = archivedQuestion('number', {
+    title: 'Quantas pessoas?',
+    position: 2,
+    branchId: G.id,
+    archivedAt: T1,
+  });
+  const g3 = archivedQuestion('yes_no', {
+    title: 'Tem equipe?',
+    position: 3,
+    branchId: G.id,
+    archivedAt: T1,
+  });
+  const N = adminBranch({
+    openerQuestionId: g3.id,
+    values: ['true'],
+    name: 'Com equipe',
+    archivedAt: T1,
+  });
+  const n1 = archivedQuestion('short_text', {
+    title: 'Quantos na equipe?',
+    position: 1,
+    branchId: N.id,
+    archivedAt: T1,
+  });
+  // A newer block H (T3) and the entries archived on their own.
+  const H = adminBranch({
+    openerQuestionId: opener.id,
+    values: [optB],
+    name: 'Quem estuda',
+    archivedAt: T3,
+  });
+  const h1 = archivedQuestion('short_text', {
+    title: 'Onde você estuda?',
+    branchId: H.id,
+    archivedAt: T3,
+  });
+  const live = adminBranch({
+    openerQuestionId: opener.id,
+    values: [optA, optB],
+    name: 'Ramo ativo',
+  });
+  const fromLive = archivedQuestion('yes_no', {
+    title: 'Usa algum sistema?',
+    branchId: live.id,
+    archivedAt: T2,
+  });
+  const earlier = archivedQuestion('short_text', {
+    title: 'Saiu antes do ramo',
+    branchId: G.id,
+    archivedAt: T0,
+  });
+  const plain = archivedQuestion('short_text', {
+    title: 'Sem ramo',
+    branchId: null,
+    archivedAt: T0,
+  });
+
+  function list(
+    over: {
+      questions?: ReturnType<typeof archivedQuestion>[];
+      branches?: ReturnType<typeof adminBranch>[];
+      activeCount?: number;
+      activeQuestions?: ReturnType<typeof adminQuestion>[];
+    } = {},
+  ) {
+    return render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <ArchivedList
+          questions={over.questions ?? [h1, g1, g2, g3, n1, fromLive, earlier, plain]}
+          branches={over.branches ?? [G, N, H, live]}
+          activeCount={over.activeCount ?? 3}
+          limit={30}
+          activeQuestions={over.activeQuestions ?? [opener]}
+          timeZone="America/Sao_Paulo"
+        />
+      </NextIntlClientProvider>,
+    );
+  }
+  const group = (id: string) =>
+    document.querySelector(`[data-archived-group="${id}"]`) as HTMLElement;
+  const blockButton = (label: string) =>
+    screen.getByRole('button', { name: `Reativar ramo: ${label}` });
+  const questionButton = (title: string) =>
+    screen.getByRole('button', { name: `Reativar pergunta: ${title}` });
+  beforeEach(() => {
+    mocks.reactivate.mockResolvedValue({ ok: true });
+    mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+  });
+
+  const BLOCK_SENTENCE =
+    'Para reativar o ramo “Quem tem clínica”, reative antes “Abridora arquivada”, que decide se ele aparece.';
+
+  it('draws the header of a group: the label, "Arquivado em {data} · N perguntas" and "Reativar ramo"', () => {
+    list();
+    const header = group(G.id).querySelector('[data-archived-header]') as HTMLElement;
+    const label = within(header).getByText('Quem tem clínica');
+    expect(label.className).toContain('text-sm');
+    expect(label.className).toContain('font-bold');
+    expect(label.className).toContain('break-words');
+    expect(label.className).toContain('line-clamp-2');
+    // the whole block counts: three rows of G plus the one of the nested branch
+    expect(within(header).getByText('Arquivado em 20/10/2026 · 4 perguntas')).toBeTruthy();
+    const button = blockButton('Quem tem clínica');
+    expect(button.textContent).toBe('Reativar ramo');
+    expect(header.contains(button)).toBe(true);
+  });
+
+  it('says "1 pergunta" for a block of one', () => {
+    list();
+    expect(within(group(H.id)).getByText('Arquivado em 22/10/2026 · 1 pergunta')).toBeTruthy();
+  });
+
+  it('keeps the header button a 44px target, with the label in its accessible name', () => {
+    list();
+    const button = blockButton('Quem tem clínica');
+    expect(button.className).toContain('after:h-11');
+    expect(button.className).toContain('after:top-1/2');
+  });
+
+  it('lists the rows of a group after its header, in the order they had, and before the next group', () => {
+    list();
+    const node = group(G.id);
+    const header = node.querySelector('[data-archived-header]') as HTMLElement;
+    const rows = Array.from(node.querySelectorAll(':scope > [data-archived-rows] > li > div')).map(
+      (el) => el.querySelector('h3')?.textContent,
+    );
+    expect(rows.slice(0, 3)).toEqual(['Nome da clínica', 'Quantas pessoas?', 'Tem equipe?']);
+    const first = within(node).getByText('Nome da clínica');
+    expect(header.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // the next top-level entry follows the whole block
+    const next = within(document.body).getByText('Usa algum sistema?');
+    expect(node.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(node.contains(next)).toBe(false);
+  });
+
+  it('puts the nested group after the rows of its parent, under the same block', () => {
+    list();
+    const node = group(G.id);
+    const nested = group(N.id);
+    expect(node.contains(nested)).toBe(true);
+    const lastRow = within(node).getByText('Tem equipe?');
+    expect(lastRow.compareDocumentPosition(nested) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(nested).getByText('Com equipe')).toBeTruthy();
+    expect(within(nested).getByText('Quantos na equipe?')).toBeTruthy();
+    expect(within(nested).getByText('Arquivado em 20/10/2026 · 1 pergunta')).toBeTruthy();
+  });
+
+  it('gives the rows a group took no "Reativar" of their own, and the nested group no "Reativar ramo"', () => {
+    list();
+    for (const title of [
+      'Nome da clínica',
+      'Quantas pessoas?',
+      'Tem equipe?',
+      'Quantos na equipe?',
+    ]) {
+      expect(
+        screen.queryByRole('button', { name: `Reativar pergunta: ${title}` }),
+        title,
+      ).toBeNull();
+    }
+    expect(screen.queryByRole('button', { name: 'Reativar ramo: Com equipe' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: /^Reativar ramo: / })).toHaveLength(2);
+  });
+
+  it('orders the top level newest archive first: the newer block, the question, the older block, the oldest', () => {
+    list();
+    const order = Array.from(document.querySelectorAll('[data-archived-list] > li')).map(
+      (item) =>
+        (item.querySelector('[data-archived-header] h3') ?? item.querySelector('h3'))?.textContent,
+    );
+    expect(order.slice(0, 3)).toEqual(['Quem estuda', 'Usa algum sistema?', 'Quem tem clínica']);
+    // the two entries archived at the same moment (T0) close the list, ordered by id
+    expect(order.slice(3).sort()).toEqual(['Saiu antes do ramo', 'Sem ramo'].sort());
+  });
+
+  it('keeps an entry archived on its own as a row, with where it was', () => {
+    list();
+    const row = screen.getByText('Usa algum sistema?').closest('li') as HTMLElement;
+    expect(within(row).getByText('Estava no ramo “Ramo ativo”.')).toBeTruthy();
+    expect(
+      within(row).getByRole('button', { name: 'Reativar pergunta: Usa algum sistema?' }),
+    ).toBeTruthy();
+    const plainRow = screen.getByText('Sem ramo').closest('li') as HTMLElement;
+    expect(within(plainRow).queryByText(/^Estava no ramo/)).toBeNull();
+  });
+
+  it('gives that line the 12/400 tertiary look', () => {
+    list();
+    const line = screen.getAllByText('Estava no ramo “Ramo ativo”.')[0] as HTMLElement;
+    expect(line.className).toContain('text-xs');
+    expect(line.className).toContain('font-normal');
+    expect(line.className).toContain('text-text-tertiary');
+  });
+
+  it('a question archived alone from an active branch reactivates through the question path', async () => {
+    mocks.reactivate.mockResolvedValue({ ok: true });
+    list();
+    await act(async () => {
+      fireEvent.click(questionButton('Usa algum sistema?'));
+    });
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Reativar pergunta?' })).getByRole('button', {
+          name: 'Reativar',
+        }),
+      );
+    });
+    expect(mocks.reactivate).toHaveBeenCalledWith(fromLive.id);
+    expect(mocks.reactivateBranch).not.toHaveBeenCalled();
+  });
+
+  it('a question archived alone before its branch went is refused with the sentence naming the branch', async () => {
+    list();
+    await act(async () => {
+      fireEvent.click(questionButton('Saiu antes do ramo'));
+    });
+    expect(mocks.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message:
+        'Para reativar “Saiu antes do ramo”, reative antes o ramo “Quem tem clínica”, que decide se ela aparece.',
+    });
+    expect(mocks.reactivate).not.toHaveBeenCalled();
+    expect(mocks.impact).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing about a branch the page cannot find: no line, no crash', () => {
+    list({ branches: [], questions: [fromLive] });
+    const row = screen.getByText('Usa algum sistema?').closest('li') as HTMLElement;
+    expect(within(row).queryByText(/^Estava no ramo/)).toBeNull();
+  });
+
+  describe('"Reativar ramo": the impact first, then the block', () => {
+    beforeEach(() => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 5 });
+      mocks.reactivateBranch.mockResolvedValue({ ok: true, branch: { ...G, archivedAt: null } });
+    });
+
+    it('reads the impact of THIS branch before any dialog, and writes only from the dialog', async () => {
+      list();
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(mocks.impact).toHaveBeenCalledWith({ change: 'reactivate_branch', branchId: G.id });
+      const dlg = await screen.findByRole('dialog', { name: 'Reativar pergunta obrigatória?' });
+      expect(dlg.textContent).toContain(
+        '5 membros vão precisar responder antes de continuar usando a comunidade.',
+      );
+      expect(mocks.reactivateBranch).not.toHaveBeenCalled();
+      await act(async () => {
+        fireEvent.click(within(dlg).getByRole('button', { name: 'Reativar e exigir' }));
+      });
+      expect(mocks.reactivateBranch).toHaveBeenCalledWith(G.id);
+      expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Pergunta reativada.' });
+      expect(mocks.refresh).toHaveBeenCalled();
+    });
+
+    it('a failed read opens nothing and writes nothing, and says so', async () => {
+      mocks.impact.mockResolvedValue({ ok: false, code: 'failed' });
+      list();
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(mocks.reactivateBranch).not.toHaveBeenCalled();
+      expect(mocks.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message:
+          'Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.',
+      });
+    });
+
+    it('a thrown read is the same failure', async () => {
+      mocks.impact.mockRejectedValue(new Error('network'));
+      list();
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(mocks.reactivateBranch).not.toHaveBeenCalled();
+    });
+
+    it('reactivates directly, with no dialog, when no member is affected', async () => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+      list();
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(mocks.reactivateBranch).toHaveBeenCalledWith(G.id);
+    });
+
+    it('"Voltar" on the dialog writes nothing', async () => {
+      list();
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      const dlg = await screen.findByRole('dialog', { name: 'Reativar pergunta obrigatória?' });
+      await act(async () => {
+        fireEvent.click(within(dlg).getByRole('button', { name: 'Voltar' }));
+      });
+      expect(mocks.reactivateBranch).not.toHaveBeenCalled();
+    });
+
+    it('respects the 30-question limit: 26 plus a block of 4 goes, 27 does not, and no request is made', async () => {
+      const { unmount } = list({ activeCount: 26 });
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(mocks.impact).toHaveBeenCalledTimes(1);
+      unmount();
+      cleanup();
+      mocks.impact.mockClear();
+      mocks.reactivateBranch.mockClear();
+      list({ activeCount: 27 });
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(mocks.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message: 'Você chegou ao limite de 30 perguntas. Arquive uma para reativar outra.',
+      });
+      expect(mocks.impact).not.toHaveBeenCalled();
+      expect(mocks.reactivateBranch).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('refuses before any read when the opener is itself archived, naming it', async () => {
+      const archivedOpener = archivedQuestion('single_choice', {
+        title: 'Abridora arquivada',
+        options: [{ id: optA, label: 'Tenho uma clínica', answerCount: 0 }],
+      });
+      const orphan = adminBranch({
+        openerQuestionId: archivedOpener.id,
+        values: [optA],
+        name: 'Quem tem clínica',
+        archivedAt: T1,
+      });
+      const row = archivedQuestion('short_text', {
+        title: 'Nome da clínica',
+        branchId: orphan.id,
+        archivedAt: T1,
+      });
+      list({ questions: [archivedOpener, row], branches: [orphan], activeQuestions: [] });
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(mocks.show).toHaveBeenCalledWith({ tone: 'error', message: BLOCK_SENTENCE });
+      expect(mocks.impact).not.toHaveBeenCalled();
+      expect(mocks.reactivateBranch).not.toHaveBeenCalled();
+    });
+
+    it('race: the server answers an archived opener and the same sentence follows', async () => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+      const gone = adminQuestion('single_choice', { title: 'Abridora arquivada' });
+      mocks.reactivateBranch.mockResolvedValue({
+        ok: false,
+        code: 'openerArchived',
+        openerId: gone.id,
+      });
+      list({ activeQuestions: [gone] });
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(mocks.show).toHaveBeenCalledWith({ tone: 'error', message: BLOCK_SENTENCE });
+      expect(mocks.refresh).toHaveBeenCalled();
+    });
+
+    it('race: an opener the page cannot title is the failure toast', async () => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+      mocks.reactivateBranch.mockResolvedValue({
+        ok: false,
+        code: 'openerArchived',
+        openerId: uuid(9999),
+      });
+      list();
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(mocks.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message: 'Não foi possível reativar agora. Tente de novo.',
+      });
+    });
+
+    it('race: the limits, a conflict, a vanished branch and a lost permission each end in one toast and a refresh', async () => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+      const cases: [Record<string, unknown>, string][] = [
+        [
+          { ok: false, code: 'limit' },
+          'Você chegou ao limite de 30 perguntas. Arquive uma para reativar outra.',
+        ],
+        [
+          { ok: false, code: 'branchLimit' },
+          'Você chegou ao limite de 15 ramos. Desfaça ou arquive um ramo para criar outro.',
+        ],
+        [
+          { ok: false, code: 'conflict', issue: 'public_under_private' },
+          'Não foi possível reativar agora. Tente de novo.',
+        ],
+        [{ ok: false, code: 'gone' }, 'Não foi possível reativar agora. Tente de novo.'],
+        [{ ok: false, code: 'failed' }, 'Não foi possível reativar agora. Tente de novo.'],
+      ];
+      for (const [answer, message] of cases) {
+        mocks.show.mockClear();
+        mocks.reactivateBranch.mockResolvedValue(answer);
+        const view = list();
+        await act(async () => {
+          fireEvent.click(blockButton('Quem tem clínica'));
+        });
+        expect(mocks.show, JSON.stringify(answer)).toHaveBeenCalledWith({ tone: 'error', message });
+        view.unmount();
+        cleanup();
+      }
+    });
+
+    it('a lost permission or a module turned off ends in a refresh, like the question path', async () => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+      mocks.reactivateBranch.mockResolvedValue({ ok: false, code: 'forbidden' });
+      list();
+      await act(async () => {
+        fireEvent.click(blockButton('Quem tem clínica'));
+      });
+      expect(mocks.refresh).toHaveBeenCalled();
+      expect(mocks.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
+    });
+  });
+
+  it('a 60-character label wraps and is clamped to two lines, and the button keeps its 44px target at 320px', () => {
+    const longName = 'Quem tem uma clínica própria com mais de uma unidade na cidade inteira';
+    const long = { ...G, name: longName.slice(0, 60) };
+    list({ branches: [long, N, H, live] });
+    const label = within(group(G.id)).getByText(longName.slice(0, 60));
+    expect(label.className).toContain('break-words');
+    expect(label.className).toContain('line-clamp-2');
+    expect(label.parentElement?.className).toContain('min-w-0');
+    const button = screen.getByRole('button', { name: `Reativar ramo: ${longName.slice(0, 60)}` });
+    expect(button.className).toContain('after:h-11');
+    expect(button.className).toContain('shrink-0');
+  });
+
+  it('draws no half-step spacing class and no raw HTML sink, and keeps the 12.1 condition code out', () => {
+    const source = readFileSync(join(__dirname, 'ArchivedList.tsx'), 'utf8');
+    expect(source).not.toMatch(/(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/);
+    expect(source).not.toContain('dangerouslySetInnerHTML');
+    expect(source).not.toMatch(/conditionNote|describeCondition|question\.condition/);
+  });
+
+  it('draws a hostile branch name and title as text (T-12.2-15)', () => {
+    const hostile = '<img src=x onerror="alert(1)">';
+    const bad = { ...G, name: hostile };
+    const row = { ...g1, title: hostile };
+    list({ branches: [bad, N, H, live], questions: [h1, row, g2, g3, n1] });
+    expect(document.querySelector('img')).toBeNull();
+    expect(within(group(G.id)).getAllByText(hostile).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the empty state when there is nothing archived', () => {
+    list({ questions: [], branches: [] });
+    expect(screen.getByText('Nenhuma pergunta arquivada')).toBeTruthy();
+    expect(document.querySelector('[data-archived-group]')).toBeNull();
   });
 });

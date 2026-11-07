@@ -1,9 +1,16 @@
 import type { AdminQuestion } from '@rede-social/contracts/profile-form';
 import { describe, expect, it } from 'vitest';
 import { buildBranchTree } from '@/lib/profile-form/branch-tree';
-import { adminBranch, adminQuestion, adminStep, uuid } from '@/lib/profile-form/test-fixtures';
+import {
+  adminBranch,
+  adminQuestion,
+  adminStep,
+  archivedQuestion,
+  uuid,
+} from '@/lib/profile-form/test-fixtures';
 import {
   addOptionRow,
+  archivedLayout,
   blankDraft,
   branchOptionsFor,
   canSave,
@@ -1455,5 +1462,174 @@ describe('12.2-18: the privacy rule in the builder (WR-06, PFORM-53, UI-D-675)',
       branches: [b1, b2, b3],
     });
     expect(privacyTitlesIf(tree, { branchId: b3.id, openerQuestionId: other.id })).toEqual([]);
+  });
+});
+
+describe('12.2-18: archivedLayout, the Arquivadas list over branches (D-653, UI-D-674, PFORM-57)', () => {
+  const T0 = '2026-10-19T09:00:00.000Z';
+  const T1 = '2026-10-20T15:30:00.000Z';
+  const T2 = '2026-10-21T10:00:00.000Z';
+  const T3 = '2026-10-22T08:00:00.000Z';
+  const opener = adminQuestion('single_choice', {
+    title: 'Você tem clínica?',
+    options: [{ id: uuid(9901), label: 'Tenho', answerCount: 0 }],
+  });
+  const archivedAt = (stamp: string) => ({ archivedAt: stamp });
+
+  // G (archived T1) holds two rows and a yes/no whose branch N (archived T1) holds one row: a nested block.
+  const g = adminBranch({
+    openerQuestionId: opener.id,
+    values: [uuid(9901)],
+    name: 'Quem tem clínica',
+    archivedAt: T1,
+  });
+  const g2 = archivedQuestion('number', {
+    title: 'Quantas pessoas?',
+    position: 2,
+    branchId: g.id,
+    ...archivedAt(T1),
+  });
+  const g1 = archivedQuestion('short_text', {
+    title: 'Nome da clínica',
+    position: 1,
+    branchId: g.id,
+    ...archivedAt(T1),
+  });
+  const gOpener = archivedQuestion('yes_no', {
+    title: 'Tem equipe?',
+    position: 3,
+    branchId: g.id,
+    ...archivedAt(T1),
+  });
+  const n = adminBranch({
+    openerQuestionId: gOpener.id,
+    values: ['true'],
+    name: 'Com equipe',
+    archivedAt: T1,
+  });
+  const n1 = archivedQuestion('short_text', {
+    title: 'Quantos na equipe?',
+    position: 1,
+    branchId: n.id,
+    ...archivedAt(T1),
+  });
+  // H (archived T3) holds one row, newer than G.
+  const h = adminBranch({
+    openerQuestionId: opener.id,
+    values: [uuid(9901)],
+    name: 'Mais novo',
+    archivedAt: T3,
+  });
+  const h1 = archivedQuestion('short_text', {
+    title: 'Do mais novo',
+    branchId: h.id,
+    ...archivedAt(T3),
+  });
+  // Standalone: one archived alone from an ACTIVE branch, one from G (before G went), one with no branch.
+  const live = adminBranch({ openerQuestionId: opener.id, values: [uuid(9901)], name: 'Ativo' });
+  const fromLive = archivedQuestion('yes_no', {
+    title: 'Saiu do ativo',
+    branchId: live.id,
+    ...archivedAt(T2),
+  });
+  const earlier = archivedQuestion('short_text', {
+    title: 'Saiu antes de G',
+    branchId: g.id,
+    ...archivedAt(T0),
+  });
+  const plain = archivedQuestion('short_text', {
+    title: 'Sem ramo',
+    branchId: null,
+    ...archivedAt(T0),
+  });
+
+  const layout = () =>
+    archivedLayout({
+      questions: [h1, g1, g2, gOpener, n1, fromLive, earlier, plain],
+      branches: [g, n, h, live],
+      active: [opener],
+    });
+  const titleOf = (item: ReturnType<typeof layout>[number]) =>
+    item.kind === 'group' ? `grupo:${item.group.branch.name}` : item.question.title;
+
+  it('orders the top level newest archive first: the newest group, then the older entries', () => {
+    expect(layout().map(titleOf)).toEqual([
+      'grupo:Mais novo',
+      'Saiu do ativo',
+      'grupo:Quem tem clínica',
+      // the same stamp T0: by id
+      ...[earlier, plain]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((question) => question.title),
+    ]);
+  });
+
+  it('puts the rows archived WITH a branch under it, in the order they had in the form', () => {
+    const group = layout().find((item) => item.kind === 'group' && item.group.branch.id === g.id);
+    expect(group?.kind === 'group' && group.group.rows.map((row) => row.title)).toEqual([
+      'Nome da clínica',
+      'Quantas pessoas?',
+      'Tem equipe?',
+    ]);
+  });
+
+  it('nests an archived branch of a question of the block, and counts the whole block', () => {
+    const top = layout().find((item) => item.kind === 'group' && item.group.branch.id === g.id);
+    if (top?.kind !== 'group') throw new Error('group G missing');
+    expect(top.group.children.map((child) => child.branch.name)).toEqual(['Com equipe']);
+    expect(top.group.children[0]?.rows.map((row) => row.title)).toEqual(['Quantos na equipe?']);
+    expect(top.group.count).toBe(4);
+    expect(top.group.children[0]?.count).toBe(1);
+    // the nested group is not a top-level entry
+    expect(layout().some((item) => item.kind === 'group' && item.group.branch.id === n.id)).toBe(
+      false,
+    );
+  });
+
+  it('keeps a question archived on its own as a question, even when its branch is archived later', () => {
+    const titles = layout().map(titleOf);
+    expect(titles).toContain('Saiu antes de G');
+    expect(titles).toContain('Saiu do ativo');
+    expect(titles).toContain('Sem ramo');
+    const top = layout().find((item) => item.kind === 'group' && item.group.branch.id === g.id);
+    expect(top?.kind === 'group' && top.group.rows.map((row) => row.title)).not.toContain(
+      'Saiu antes de G',
+    );
+  });
+
+  it('is the plain newest-first list when no branch is archived', () => {
+    const items = archivedLayout({
+      questions: [fromLive, plain],
+      branches: [live],
+      active: [opener],
+    });
+    expect(items.every((item) => item.kind === 'question')).toBe(true);
+    expect(items.map(titleOf)).toEqual(['Saiu do ativo', 'Sem ramo']);
+  });
+
+  it('shows an archived branch whose questions all left earlier as an empty group', () => {
+    const items = archivedLayout({ questions: [earlier], branches: [g], active: [opener] });
+    expect(items.map(titleOf)).toEqual(['grupo:Quem tem clínica', 'Saiu antes de G']);
+    const group = items[0];
+    expect(group?.kind === 'group' && group.group.count).toBe(0);
+  });
+
+  it('does not nest a branch archived at another moment under its opener block', () => {
+    const lonely = adminBranch({
+      openerQuestionId: gOpener.id,
+      values: ['true'],
+      name: 'Sozinho',
+      archivedAt: T2,
+    });
+    const items = archivedLayout({
+      questions: [g1, g2, gOpener],
+      branches: [g, lonely],
+      active: [opener],
+    });
+    const top = items.find((item) => item.kind === 'group' && item.group.branch.id === g.id);
+    expect(top?.kind === 'group' && top.group.children).toEqual([]);
+    expect(items.some((item) => item.kind === 'group' && item.group.branch.id === lonely.id)).toBe(
+      true,
+    );
   });
 });
