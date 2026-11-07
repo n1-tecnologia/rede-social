@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  type AdminBranch,
   type AdminQuestion,
   type AdminStep,
   codePoints,
@@ -95,6 +96,13 @@ export interface QuestionEditorSheetProps {
   questions?: AdminQuestion[];
   /** The tenant's steps in order (12.1-17): the "Etapa" field shows with two or more. */
   steps?: AdminStep[];
+  /**
+   * The tenant's branches (12.2-16, D-640): the "Ramo" field lists the eligible ones and shows only when there is
+   * at least one. RED-stage stub: declared so the tests type-check, not read yet.
+   */
+  branches?: AdminBranch[];
+  /** The branch a NEW question starts in (the Lista footer, D-651). RED-stage stub, not read yet. */
+  initialBranchId?: string;
   /** The tenant's display name, the `{tenant}` of the LGPD notice. */
   tenantName: string;
   /** The most active questions a tenant may have: the limit sentence when a create hits it. */

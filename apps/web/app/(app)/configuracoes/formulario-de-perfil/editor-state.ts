@@ -1,4 +1,5 @@
 import {
+  type AdminBranch,
   type AdminQuestion,
   type AdminStep,
   codePoints,
@@ -10,6 +11,7 @@ import {
   type ProfileFormLimits,
   type ProfileFormType,
 } from '@rede-social/contracts/profile-form';
+import type { AdminBranchTree, EligibilityQuestion } from '@/lib/profile-form/branch-tree';
 import {
   type ConditionDescription,
   formatDisjunction,
@@ -63,6 +65,11 @@ export interface QuestionDraft {
   stepId: string | null;
   /** The condition that shows the question, or `null` for an always-shown one (D-621). */
   condition: DraftCondition | null;
+  /**
+   * The branch the question sits in (12.2-16, D-640), or `null` for an unconditional one. RED-stage stub: the
+   * field exists so the tests type-check; nothing fills it yet.
+   */
+  branchId: string | null;
 }
 
 let rowCounter = 0;
@@ -82,7 +89,10 @@ function blankOptions(): OptionDraft[] {
 }
 
 /** The draft of a question that does not exist yet: no type, nothing typed, two empty rows. */
-export function blankDraft(stepId: string | null = null): QuestionDraft {
+export function blankDraft(
+  stepId: string | null = null,
+  _branchId: string | null = null,
+): QuestionDraft {
   return {
     type: null,
     title: '',
@@ -95,6 +105,7 @@ export function blankDraft(stepId: string | null = null): QuestionDraft {
     max: '',
     stepId,
     condition: null,
+    branchId: null,
   };
 }
 
@@ -142,6 +153,7 @@ export function draftFromQuestion(question: AdminQuestion): QuestionDraft {
     max: limitText(question.limits.max),
     stepId: question.stepId,
     condition: copyCondition(question.condition),
+    branchId: null,
   };
 }
 
@@ -203,6 +215,8 @@ export interface CreateBody {
   stepId?: string;
   /** Present only for a conditional question (12.1-17); a replacement does not inherit one (plan 10). */
   condition?: DraftCondition;
+  /** The branch the question sits in (12.2-16, D-640). RED-stage stub: declared, never filled yet. */
+  branchId?: string;
 }
 
 /**
@@ -250,6 +264,8 @@ export interface UpdateBody {
   stepId?: string;
   /** The new condition, or `null` to remove it (D-625); absent when it is unchanged. */
   condition?: DraftCondition | null;
+  /** The new branch, or `null` to leave its branch (12.2-16, D-646). RED-stage stub: never filled yet. */
+  branchId?: string | null;
 }
 
 /** Two conditions name the same opener and the same SET of tokens (the order of the tokens is not a change). */
@@ -510,6 +526,8 @@ export interface Reopening {
    * the members who would see it. Present only when the draft's condition is complete.
    */
   condition?: DraftCondition;
+  /** 12.2-16 (RED-stage stub): the branch the NEW question sits in, so the count is of who sees it. */
+  branchId?: string;
 }
 
 /** The draft's condition when it names an opener and at least one answer; a half-made one counts as none. */
@@ -530,8 +548,16 @@ function completeCondition(
  */
 export function reopeningOf(
   mode: EditorMode,
-  draft: Pick<QuestionDraft, 'required'> & { condition?: DraftCondition | null },
-  question: { id: string; required: boolean; condition?: DraftCondition | null } | null,
+  draft: Pick<QuestionDraft, 'required'> & {
+    condition?: DraftCondition | null;
+    branchId?: string | null;
+  },
+  question: {
+    id: string;
+    required: boolean;
+    condition?: DraftCondition | null;
+    branchId?: string | null;
+  } | null,
 ): Reopening | null {
   if (!draft.required) return null;
   const condition = completeCondition(draft.condition);
@@ -969,4 +995,39 @@ export function refusalOfUpdate(
   const used = optionUsage(questions, question.id);
   const named = removed.find((option) => used.has(option.id)) ?? removed[0];
   return { kind: 'option', dependents, label: named?.label ?? '' };
+}
+
+// ── 12.2-16: where a question sits in the tree (RED-stage stubs, replaced in the GREEN commit) ──────
+
+/** One group of the "Ramo" select: the branches that hang on one opener. */
+export interface BranchOptionGroup {
+  opener: AdminQuestion;
+  branches: AdminBranch[];
+}
+
+/** The groups of the "Ramo" select. Inert until the GREEN commit. */
+export function branchOptionsFor(
+  _question: EligibilityQuestion,
+  _tree: AdminBranchTree,
+  _keep?: string | null,
+): { groups: BranchOptionGroup[]; leftOutForPrivacy: boolean } {
+  return { groups: [], leftOutForPrivacy: false };
+}
+
+/** What a change of the step field does once the condition is a branch (D-623, UI-D-647). */
+export type StepMove =
+  | { kind: 'ok'; clearBranch: boolean }
+  | { kind: 'mustFollow'; opener: string }
+  | { kind: 'mustPrecede'; dependent: string };
+
+/** D-623 for a change of the step field, judged over branches. Inert until the GREEN commit. */
+export function checkStepMove(_input: {
+  questions: readonly AdminQuestion[];
+  steps: readonly AdminStep[];
+  branches?: readonly AdminBranch[];
+  stored: AdminQuestion | null;
+  branchId: string | null;
+  nextStepId: string;
+}): StepMove {
+  return { kind: 'ok', clearBranch: false };
 }

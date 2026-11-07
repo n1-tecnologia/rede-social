@@ -6,7 +6,7 @@ import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { adminQuestion, adminStep, uuid } from '@/lib/profile-form/test-fixtures';
+import { adminBranch, adminQuestion, adminStep, uuid } from '@/lib/profile-form/test-fixtures';
 import type { SaveQuestionResult } from './actions';
 import type { EditorMode } from './editor-state';
 
@@ -63,6 +63,9 @@ function mount(
     questions?: ReturnType<typeof adminQuestion>[];
     steps?: ReturnType<typeof adminStep>[];
     stepId?: string;
+    /** 12.2-16: the branches of the form, and the branch a new question starts in. */
+    branches?: ReturnType<typeof adminBranch>[];
+    initialBranchId?: string;
   } = {},
 ) {
   return render(
@@ -74,6 +77,8 @@ function mount(
         questions={props.questions}
         steps={props.steps}
         stepId={props.stepId}
+        branches={props.branches}
+        initialBranchId={props.initialBranchId}
         tenantName="Ana Mentoria"
         limit={30}
         onClose={onClose}
@@ -2186,5 +2191,342 @@ describe('12.1-17 Task 3: every impact dialog of a required conditional question
     const confirm = await screen.findByRole('dialog', { name: 'Substituir a pergunta?' });
     expect(confirm.textContent).toContain('“Nome da clínica” será arquivada');
     expect(confirm.textContent).toContain(SENTENCE);
+  });
+});
+
+// ── 12.2-16 Task 1: the "Ramo" field (D-640, D-641, D-644, D-646, D-651, UI-D-669) ───────────────────
+
+describe('12.2-16: the "Ramo" field of "Onde e quando aparece" (UI-D-669)', () => {
+  const s1 = adminStep({ title: 'Informações gerais' });
+  const s2 = adminStep({ title: 'Sobre a sua clínica' });
+  const steps = [s1, s2];
+  const A = uuid(9401);
+  const B = uuid(9402);
+  const C = uuid(9403);
+  const opts = [
+    { id: A, label: 'Tenho uma clínica', answerCount: 0 },
+    { id: B, label: 'Trabalho em uma clínica', answerCount: 0 },
+    { id: C, label: 'Estou aprendendo', answerCount: 0 },
+  ];
+  const clinic = adminQuestion('single_choice', {
+    stepId: s1.id,
+    title: 'Você tem clínica?',
+    options: opts,
+    showOnProfile: true,
+  });
+  const named = adminBranch({ openerQuestionId: clinic.id, values: [A], name: 'Quem tem clínica' });
+  const unnamed = adminBranch({ openerQuestionId: clinic.id, values: [C], name: null });
+  const inBranch = adminQuestion('short_text', {
+    stepId: s1.id,
+    title: 'Nome da clínica',
+    branchId: named.id,
+  });
+  const second = adminQuestion('dropdown', {
+    stepId: s2.id,
+    title: 'Segunda abridora',
+    options: opts,
+    showOnProfile: true,
+  });
+  const secondBranch = adminBranch({ openerQuestionId: second.id, values: [A], name: 'Ramo dois' });
+  const free = adminQuestion('short_text', { stepId: s2.id, title: 'Telefone' });
+  const active = [clinic, inBranch, second, free];
+  const branches = [named, unnamed, secondBranch];
+
+  const ramo = () => screen.getByLabelText('Ramo') as HTMLSelectElement;
+  const optionTexts = () =>
+    within(ramo())
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+
+  it('renders the select only when the form has at least one branch', () => {
+    const { unmount } = mount({ questions: active, steps, branches: [] });
+    pick('Texto curto');
+    expect(screen.queryByLabelText('Ramo')).toBeNull();
+    unmount();
+
+    mount({ questions: active, steps, branches });
+    pick('Texto curto');
+    expect(ramo().tagName).toBe('SELECT');
+    expect(screen.getByText('Onde e quando aparece')).toBeTruthy();
+  });
+
+  it('puts "Nenhum: todos os membros veem" first (value empty), then one optgroup per opener', () => {
+    mount({ questions: active, steps, branches, stepId: s2.id });
+    pick('Texto curto');
+    const first = ramo().options[0] as HTMLOptionElement;
+    expect(first.value).toBe('');
+    expect(first.textContent).toBe('Nenhum: todos os membros veem');
+    const groups = [...ramo().querySelectorAll('optgroup')];
+    expect(groups.map((group) => group.label)).toEqual(['Você tem clínica?', 'Segunda abridora']);
+    expect(optionTexts()).toEqual([
+      'Nenhum: todos os membros veem',
+      'Quem tem clínica',
+      'Se “Você tem clínica?” for Estou aprendendo',
+      'Ramo dois',
+    ]);
+    expect(ramo().value).toBe('');
+  });
+
+  it('shows the helper with the depth limit, linked to the field', () => {
+    mount({ questions: active, steps, branches });
+    pick('Texto curto');
+    const helper = screen.getByText(
+      'Aparecem aqui os ramos cuja pergunta que decide vem antes desta e que não passam de 3 níveis. Ao mudar de ramo, a pergunta continua na mesma etapa e vai para o fim do ramo.',
+    );
+    expect(ramo().getAttribute('aria-describedby')).toContain(helper.id);
+  });
+
+  it('leaves out a branch whose opener comes after the question', () => {
+    mount({ questions: active, steps, branches, stepId: s1.id });
+    pick('Texto curto');
+    expect(optionTexts()).toEqual([
+      'Nenhum: todos os membros veem',
+      'Quem tem clínica',
+      'Se “Você tem clínica?” for Estou aprendendo',
+    ]);
+  });
+
+  it('for a public question leaves out the branches of a private opener and says why', () => {
+    const hidden = adminQuestion('single_choice', {
+      stepId: s1.id,
+      title: 'Opinião privada',
+      options: opts,
+      showOnProfile: false,
+    });
+    const hiddenBranch = adminBranch({ openerQuestionId: hidden.id, values: [A], name: 'Privado' });
+    mount({
+      questions: [hidden, ...active],
+      steps,
+      branches: [...branches, hiddenBranch],
+      stepId: s2.id,
+    });
+    pick('Texto curto');
+    const second2 =
+      'Ramos que dependem de perguntas que não aparecem no perfil ficam de fora porque esta pergunta aparece.';
+    expect(screen.queryByText(second2)).toBeNull();
+    expect(optionTexts()).toContain('Privado');
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Mostrar no perfil do membro' }));
+    expect(optionTexts()).not.toContain('Privado');
+    expect(screen.getByText(second2)).toBeTruthy();
+  });
+
+  it('says in a polite status line that only who sees a required question must answer it', () => {
+    mount({ questions: active, steps, branches });
+    pick('Texto curto');
+    const note = 'Como esta pergunta é obrigatória, só quem a vê precisa responder.';
+    fireEvent.change(ramo(), { target: { value: named.id } });
+    expect(screen.queryByText(note)).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
+    expect(screen.getByText(note).closest('[role="status"]')).toBeTruthy();
+    fireEvent.change(ramo(), { target: { value: '' } });
+    expect(screen.queryByText(note)).toBeNull();
+  });
+
+  it('no longer holds the 12.1 condition editor', () => {
+    mount({ questions: active, steps, branches });
+    pick('Texto curto');
+    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
+    expect(screen.queryByLabelText('Pergunta que decide')).toBeNull();
+  });
+
+  it('creates with the chosen branch: branchId in the body and no condition key', async () => {
+    mount({ questions: active, steps, branches, stepId: s1.id });
+    pick('Texto curto');
+    typeTitle('Telefone da clínica');
+    fireEvent.change(ramo(), { target: { value: named.id } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    const body = mocks.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.branchId).toBe(named.id);
+    expect(body.stepId).toBe(s1.id);
+    expect('condition' in body).toBe(false);
+  });
+
+  it('starts on the branch and the step it is given (the Lista footer)', async () => {
+    mount({ questions: active, steps, branches, stepId: s1.id, initialBranchId: named.id });
+    pick('Texto curto');
+    expect(ramo().value).toBe(named.id);
+    typeTitle('Equipe');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    const body = mocks.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.branchId).toBe(named.id);
+    expect(body.stepId).toBe(s1.id);
+  });
+
+  it('an edit sends only the branch it changed, and null when the question leaves it', async () => {
+    mount({ mode: 'edit', question: inBranch, questions: active, steps, branches });
+    expect(ramo().value).toBe(named.id);
+    fireEvent.change(ramo(), { target: { value: unnamed.id } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+      revision: inBranch.revision,
+      branchId: unnamed.id,
+    });
+  });
+
+  it('an edit that leaves its branch sends branchId null', async () => {
+    mount({ mode: 'edit', question: inBranch, questions: active, steps, branches });
+    fireEvent.change(ramo(), { target: { value: '' } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+      revision: inBranch.revision,
+      branchId: null,
+    });
+  });
+
+  it('a question WITH answers shows a read-only lock row and the way out instead of the select', () => {
+    const answered = adminQuestion('short_text', {
+      stepId: s1.id,
+      title: 'Respondida',
+      answerCount: 3,
+      branchId: named.id,
+    });
+    mount({ mode: 'edit', question: answered, questions: [...active, answered], steps, branches });
+    expect(screen.queryByLabelText('Ramo')).toBeNull();
+    const row = screen.getByText(
+      'Esta pergunta já tem 3 respostas, então não pode entrar nem sair de um ramo. Para mudar, crie uma nova pergunta e arquive esta.',
+    );
+    expect(row.parentElement?.querySelector('svg')).toBeTruthy();
+    const replace = screen
+      .getAllByRole('button', { name: 'Criar nova pergunta e arquivar esta' })
+      .at(-1) as HTMLElement;
+    fireEvent.click(replace);
+    expect(onReplace).toHaveBeenCalledWith(answered);
+  });
+
+  it('says "1 resposta" in the singular on the lock row', () => {
+    const answered = adminQuestion('short_text', { stepId: s1.id, answerCount: 1 });
+    mount({ mode: 'edit', question: answered, questions: [...active, answered], steps, branches });
+    expect(
+      screen.getByText(/^Esta pergunta já tem 1 resposta, então não pode entrar/),
+    ).toBeTruthy();
+  });
+
+  it('a replacement copies the step and the branch of the replaced question', () => {
+    mount({ mode: 'replace', question: inBranch, questions: active, steps, branches });
+    expect(ramo().value).toBe(named.id);
+    expect((screen.getByLabelText('Etapa') as HTMLSelectElement).value).toBe(s1.id);
+  });
+
+  it('snaps the step back when it would put a question above the step of its branch opener', () => {
+    const lateOpener = adminQuestion('single_choice', {
+      stepId: s2.id,
+      title: 'Abridora tardia',
+      options: opts,
+    });
+    const lateBranch = adminBranch({ openerQuestionId: lateOpener.id, values: [A] });
+    const dependent = adminQuestion('short_text', {
+      stepId: s2.id,
+      title: 'Dependente',
+      branchId: lateBranch.id,
+    });
+    mount({
+      mode: 'edit',
+      question: dependent,
+      questions: [lateOpener, dependent],
+      steps,
+      branches: [lateBranch],
+    });
+    const stepSelect = screen.getByLabelText('Etapa') as HTMLSelectElement;
+    fireEvent.change(stepSelect, { target: { value: s1.id } });
+    expect(stepSelect.value).toBe(s2.id);
+    const alert = screen.getByText(
+      'Esta pergunta depende de “Abridora tardia”, então precisa ficar na etapa dela ou em uma depois.',
+    );
+    expect(alert.getAttribute('role')).toBe('alert');
+  });
+
+  it('snaps an opener back when the step would put it at or after a question of its branch', () => {
+    const opener = adminQuestion('single_choice', {
+      stepId: s1.id,
+      title: 'Abridora',
+      options: opts,
+    });
+    const openerBranch = adminBranch({ openerQuestionId: opener.id, values: [A] });
+    const dependent = adminQuestion('short_text', {
+      stepId: s2.id,
+      title: 'Dependente',
+      branchId: openerBranch.id,
+    });
+    mount({
+      mode: 'edit',
+      question: opener,
+      questions: [opener, dependent],
+      steps,
+      branches: [openerBranch],
+    });
+    const stepSelect = screen.getByLabelText('Etapa') as HTMLSelectElement;
+    fireEvent.change(stepSelect, { target: { value: s2.id } });
+    expect(stepSelect.value).toBe(s1.id);
+    expect(
+      screen
+        .getByText(
+          '“Dependente” depende desta pergunta, então ela precisa ficar na etapa de “Dependente” ou em uma antes.',
+        )
+        .getAttribute('role'),
+    ).toBe('alert');
+  });
+
+  it('clears a draft branch the new step no longer allows, with no refusal', () => {
+    mount({ questions: active, steps, branches, stepId: s2.id });
+    pick('Texto curto');
+    fireEvent.change(ramo(), { target: { value: secondBranch.id } });
+    fireEvent.change(screen.getByLabelText('Etapa'), { target: { value: s1.id } });
+    expect(ramo().value).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  describe('a refused write lands under the field (E3 error)', () => {
+    async function saveWith(result: unknown, branch = named.id) {
+      mocks.update.mockResolvedValue(result);
+      mount({ mode: 'edit', question: free, questions: active, steps, branches });
+      fireEvent.change(ramo(), { target: { value: branch } });
+      await act(async () => {
+        fireEvent.click(saveButton());
+      });
+    }
+
+    it('condition_order names the opener the question must follow', async () => {
+      await saveWith({ ok: false, code: 'conflict', issue: 'condition_order' });
+      const line = screen.getByText(
+        'Esta pergunta depende de “Você tem clínica?”, então precisa ficar na etapa dela ou em uma depois.',
+      );
+      expect(line.getAttribute('role')).toBe('alert');
+      expect(ramo().getAttribute('aria-invalid')).toBe('true');
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('branch_depth explains the level limit and keeps the draft', async () => {
+      await saveWith({ ok: false, code: 'conflict', issue: 'branch_depth' });
+      const line = screen
+        .getAllByText(/não passam de 3 níveis/)
+        .find((node) => node.getAttribute('role') === 'alert');
+      expect(line).toBeTruthy();
+      expect(ramo().value).toBe(named.id);
+    });
+
+    it('condition_locked says an answer arrived, in the lock sentence of the field', async () => {
+      await saveWith({ ok: false, code: 'conflict', issue: 'condition_locked' });
+      const line = screen.getByText(
+        'Esta pergunta já tem 1 resposta, então não pode entrar nem sair de um ramo. Para mudar, crie uma nova pergunta e arquive esta.',
+      );
+      expect(line.getAttribute('role')).toBe('alert');
+      expect(ramo().getAttribute('aria-invalid')).toBe('true');
+    });
+
+    it('a branch that vanished (unknown or archived) is the conflict alert and a refresh', async () => {
+      await saveWith({ ok: false, code: 'conflict', issue: 'branch_archived' });
+      expect(document.querySelector('[data-conflict-alert]')).toBeTruthy();
+      expect(mocks.refresh).toHaveBeenCalled();
+    });
   });
 });

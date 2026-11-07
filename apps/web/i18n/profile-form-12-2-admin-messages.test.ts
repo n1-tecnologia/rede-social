@@ -113,3 +113,35 @@ describe('profileForm.admin.branches.reorder: the branch arrows and their announ
     );
   });
 });
+
+describe('profileForm.admin.editor.branch: the "Ramo" field of the question sheet (UI-D-669)', () => {
+  it('declares the keys the Copywriting Contract names under editor.branch', () => {
+    const branch = parsed.profileForm.admin.editor.branch;
+    for (const key of ['label', 'none', 'helper', 'privateHidden', 'locked', 'requiredNote']) {
+      expect(branch).toHaveProperty(key);
+    }
+  });
+
+  it('reads the label, the empty choice and the helpers verbatim', () => {
+    expect(t('editor.branch.label')).toBe('Ramo');
+    expect(t('editor.branch.none')).toBe('Nenhum: todos os membros veem');
+    expect(t('editor.branch.helper', { max: 3 })).toBe(
+      'Aparecem aqui os ramos cuja pergunta que decide vem antes desta e que não passam de 3 níveis. Ao mudar de ramo, a pergunta continua na mesma etapa e vai para o fim do ramo.',
+    );
+    expect(t('editor.branch.privateHidden')).toBe(
+      'Ramos que dependem de perguntas que não aparecem no perfil ficam de fora porque esta pergunta aparece.',
+    );
+    expect(t('editor.branch.requiredNote')).toBe(
+      'Como esta pergunta é obrigatória, só quem a vê precisa responder.',
+    );
+  });
+
+  it('the lock sentence is an ICU plural on the answers', () => {
+    expect(t('editor.branch.locked', { n: 1 })).toBe(
+      'Esta pergunta já tem 1 resposta, então não pode entrar nem sair de um ramo. Para mudar, crie uma nova pergunta e arquive esta.',
+    );
+    expect(t('editor.branch.locked', { n: 12 })).toBe(
+      'Esta pergunta já tem 12 respostas, então não pode entrar nem sair de um ramo. Para mudar, crie uma nova pergunta e arquive esta.',
+    );
+  });
+});

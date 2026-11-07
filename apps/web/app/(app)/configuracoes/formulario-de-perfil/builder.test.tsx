@@ -2303,3 +2303,72 @@ describe('12.2-15 Task 3: reorder moves blocks as units (D-652, UI-D-668)', () =
     });
   });
 });
+
+describe('12.2-16 Task 1: the Lista footer adds a question into a branch (D-651)', () => {
+  const T1 = adminStep({ title: 'Geral' });
+  const T2 = adminStep({ title: 'Clínica' });
+  const OPT = [
+    { id: uuid(9501), label: 'Tenho', answerCount: 0 },
+    { id: uuid(9502), label: 'Não tenho', answerCount: 0 },
+  ];
+  const OPENER = adminQuestion('single_choice', {
+    title: 'Tem clínica?',
+    stepId: T1.id,
+    options: OPT,
+    opensCount: 1,
+  });
+  const BR = adminBranch({
+    openerQuestionId: OPENER.id,
+    values: [uuid(9501)],
+    name: 'Quem tem clínica',
+    questionCount: 1,
+  });
+  const MEMBER = adminQuestion('short_text', {
+    title: 'Nome da clínica',
+    stepId: T2.id,
+    branchId: BR.id,
+  });
+  const EMPTY = adminBranch({
+    openerQuestionId: OPENER.id,
+    values: [uuid(9502)],
+    name: 'Ramo vazio',
+  });
+
+  const footer = (label: string) =>
+    screen.getByRole('button', { name: `Adicionar pergunta ao ramo: ${label}` });
+
+  it('wires the footer: the create sheet opens with the branch and the step of the run chosen', async () => {
+    mocks.create.mockResolvedValue({ ok: true, question: MEMBER, pending: null });
+    builder({ questions: [OPENER, MEMBER], steps: [T1, T2], branches: [BR] });
+    fireEvent.click(footer('Quem tem clínica'));
+    expect(screen.getByRole('dialog', { name: 'Nova pergunta' })).toBeTruthy();
+    expect((screen.getByLabelText('Ramo') as HTMLSelectElement).value).toBe(BR.id);
+    expect((screen.getByLabelText('Etapa') as HTMLSelectElement).value).toBe(T2.id);
+
+    fireEvent.click(screen.getByRole('radio', { name: /^Texto curto/ }));
+    fireEvent.change(screen.getByLabelText('Pergunta'), { target: { value: 'Telefone' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar pergunta' }));
+    });
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    const body = mocks.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.branchId).toBe(BR.id);
+    expect(body.stepId).toBe(T2.id);
+    expect('condition' in body).toBe(false);
+  });
+
+  it('puts an empty branch into the last step', () => {
+    builder({ questions: [OPENER, MEMBER], steps: [T1, T2], branches: [BR, EMPTY] });
+    fireEvent.click(footer('Ramo vazio'));
+    expect((screen.getByLabelText('Ramo') as HTMLSelectElement).value).toBe(EMPTY.id);
+    expect((screen.getByLabelText('Etapa') as HTMLSelectElement).value).toBe(T2.id);
+  });
+
+  it('opens the ordinary create sheet from the top button, with no branch chosen', () => {
+    builder({ questions: [OPENER, MEMBER], steps: [T1, T2], branches: [BR] });
+    fireEvent.click(
+      screen.getAllByRole('button', { name: /^Adicionar pergunta$/ })[0] as HTMLElement,
+    );
+    expect((screen.getByLabelText('Ramo') as HTMLSelectElement).value).toBe('');
+  });
+});

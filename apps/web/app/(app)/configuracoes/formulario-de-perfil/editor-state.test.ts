@@ -1,13 +1,22 @@
 import type { AdminQuestion } from '@rede-social/contracts/profile-form';
 import { describe, expect, it } from 'vitest';
-import { adminQuestion, adminStep, archivedQuestion, uuid } from '@/lib/profile-form/test-fixtures';
+import { buildBranchTree } from '@/lib/profile-form/branch-tree';
+import {
+  adminBranch,
+  adminQuestion,
+  adminStep,
+  archivedQuestion,
+  uuid,
+} from '@/lib/profile-form/test-fixtures';
 import {
   addOptionRow,
   blankDraft,
+  branchOptionsFor,
   canSave,
   changeType,
   checkDraftLocks,
   checkStepChange,
+  checkStepMove,
   conditionOptionsText,
   draftFromQuestion,
   draftLock,
@@ -1223,5 +1232,320 @@ describe('12.1-17: reopeningOf with conditions (D-634, UI-D-649)', () => {
         { id: uuid(9), required: false, condition: cond },
       ),
     ).toEqual({ change: 'make_required', kind: 'make', questionId: uuid(9) });
+  });
+});
+
+// ── 12.2-16 Task 1: the branch in the draft (D-640, D-641, D-646, D-651, UI-D-669) ──────────────────
+
+describe('12.2-16: the draft carries the branch', () => {
+  const stepA = adminStep({ title: 'Geral' });
+  const stepB = adminStep({ title: 'Clínica' });
+  const BRANCH = uuid(4400);
+  const OTHER = uuid(4401);
+
+  it('starts with no branch, or with the one it is given (the Lista footer)', () => {
+    expect(blankDraft().branchId).toBeNull();
+    expect(blankDraft(stepB.id).branchId).toBeNull();
+    const preset = blankDraft(stepB.id, BRANCH);
+    expect(preset.stepId).toBe(stepB.id);
+    expect(preset.branchId).toBe(BRANCH);
+  });
+
+  it('copies the stored step and branch into an edit draft and into a replacement', () => {
+    const inBranch = adminQuestion('short_text', { stepId: stepB.id, branchId: BRANCH });
+    for (const draft of [draftFromQuestion(inBranch), replaceDraftFrom(inBranch)]) {
+      expect(draft.stepId).toBe(stepB.id);
+      expect(draft.branchId).toBe(BRANCH);
+    }
+    expect(draftFromQuestion(adminQuestion('short_text')).branchId).toBeNull();
+    expect(draftFromQuestion(adminQuestion('short_text', { branchId: null })).branchId).toBeNull();
+  });
+
+  it('sends the branch on create only when the draft has one, and never a condition key', () => {
+    const plain = { ...blankDraft(stepA.id), type: 'short_text' as const, title: 'Cargo' };
+    expect('branchId' in toCreateBody(plain)).toBe(false);
+    expect('condition' in toCreateBody(plain)).toBe(false);
+    const placed = toCreateBody({ ...plain, branchId: BRANCH });
+    expect(placed.branchId).toBe(BRANCH);
+    expect(placed.stepId).toBe(stepA.id);
+    expect('condition' in placed).toBe(false);
+  });
+
+  it('sends on update only a changed branch, and null when the question leaves its branch', () => {
+    const stored = adminQuestion('short_text', { title: 'Cargo', branchId: BRANCH });
+    const same = toUpdateBody(stored, draftFromQuestion(stored));
+    expect('branchId' in same).toBe(false);
+    expect(hasChanges(same)).toBe(false);
+
+    const moved = toUpdateBody(stored, { ...draftFromQuestion(stored), branchId: OTHER });
+    expect(moved.branchId).toBe(OTHER);
+    expect(hasChanges(moved)).toBe(true);
+
+    const left = toUpdateBody(stored, { ...draftFromQuestion(stored), branchId: null });
+    expect(left.branchId).toBeNull();
+    expect('condition' in left).toBe(false);
+
+    const free = adminQuestion('short_text', { title: 'Cargo' });
+    const entered = toUpdateBody(free, { ...draftFromQuestion(free), branchId: BRANCH });
+    expect(entered.branchId).toBe(BRANCH);
+    expect('branchId' in toUpdateBody(free, draftFromQuestion(free))).toBe(false);
+  });
+
+  it('counts the branch as an unsaved change, and putting it back as none', () => {
+    const stored = adminQuestion('short_text', { branchId: BRANCH });
+    const initial = draftFromQuestion(stored);
+    expect(isDirty(initial, { ...initial, branchId: null })).toBe(true);
+    expect(isDirty(initial, { ...initial, branchId: BRANCH })).toBe(false);
+  });
+});
+
+describe('12.2-16: reopeningOf over branches (D-634, D-646)', () => {
+  const BRANCH = uuid(4410);
+
+  it('a new required question in a branch carries the branch, so the count is of who sees it', () => {
+    expect(reopeningOf('create', { required: true, branchId: BRANCH }, null)).toEqual({
+      change: 'create_required',
+      kind: 'add',
+      branchId: BRANCH,
+    });
+    expect(reopeningOf('create', { required: true, branchId: null }, null)).toEqual({
+      change: 'create_required',
+      kind: 'add',
+    });
+  });
+
+  it('a required replacement carries the branch it keeps', () => {
+    expect(
+      reopeningOf(
+        'replace',
+        { required: true, branchId: BRANCH },
+        { id: uuid(9), required: false, branchId: BRANCH },
+      ),
+    ).toEqual({ change: 'replace', kind: 'replace', questionId: uuid(9), branchId: BRANCH });
+  });
+
+  it('a required question leaving its branch is the unconditional case', () => {
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, branchId: null },
+        { id: uuid(9), required: true, branchId: BRANCH },
+      ),
+    ).toEqual({ change: 'remove_condition', kind: 'unconditional', questionId: uuid(9) });
+  });
+
+  it('needs no count for an optional question, an unchanged branch or entering a branch', () => {
+    expect(
+      reopeningOf(
+        'edit',
+        { required: false, branchId: null },
+        { id: uuid(9), required: false, branchId: BRANCH },
+      ),
+    ).toBeNull();
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, branchId: BRANCH },
+        { id: uuid(9), required: true, branchId: BRANCH },
+      ),
+    ).toBeNull();
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, branchId: BRANCH },
+        { id: uuid(9), required: true, branchId: null },
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('12.2-16: branchOptionsFor, the groups of the "Ramo" select (UI-D-669, D-641, D-644)', () => {
+  const s1 = adminStep({ title: 'Um' });
+  const s2 = adminStep({ title: 'Dois' });
+  const options = [
+    { id: uuid(9101), label: 'Tenho', answerCount: 0 },
+    { id: uuid(9102), label: 'Trabalho', answerCount: 0 },
+  ];
+  const opener1 = adminQuestion('single_choice', {
+    stepId: s1.id,
+    title: 'Abridora 1',
+    options,
+    showOnProfile: true,
+  });
+  const branch1 = adminBranch({ openerQuestionId: opener1.id, values: [uuid(9101)] });
+  const branch1b = adminBranch({ openerQuestionId: opener1.id, values: [uuid(9102)] });
+  const member = adminQuestion('short_text', { stepId: s1.id, branchId: branch1.id });
+  const opener2 = adminQuestion('single_choice', {
+    stepId: s2.id,
+    title: 'Abridora 2',
+    options,
+    showOnProfile: true,
+  });
+  const branch2 = adminBranch({ openerQuestionId: opener2.id, values: [uuid(9101)] });
+  const questions = [opener1, member, opener2];
+  const tree = buildBranchTree({
+    steps: [s1, s2],
+    questions,
+    branches: [branch1, branch1b, branch2],
+  });
+
+  it('groups the branches by their opener, in form order', () => {
+    const { groups, leftOutForPrivacy } = branchOptionsFor(
+      { id: null, showOnProfile: false, stepId: s2.id },
+      tree,
+    );
+    expect(groups.map((group) => group.opener.id)).toEqual([opener1.id, opener2.id]);
+    expect(groups[0]?.branches.map((branch) => branch.id)).toEqual([branch1.id, branch1b.id]);
+    expect(groups[1]?.branches.map((branch) => branch.id)).toEqual([branch2.id]);
+    expect(leftOutForPrivacy).toBe(false);
+  });
+
+  it('leaves out a branch whose opener comes at or after the question', () => {
+    const { groups } = branchOptionsFor({ id: null, showOnProfile: false, stepId: s1.id }, tree);
+    expect(groups.map((group) => group.opener.id)).toEqual([opener1.id]);
+    const own = branchOptionsFor({ id: opener1.id, showOnProfile: false }, tree);
+    expect(own.groups).toEqual([]);
+  });
+
+  it('leaves out the branches of the question itself and of its own descendants', () => {
+    const { groups } = branchOptionsFor({ id: opener1.id, showOnProfile: false }, tree);
+    expect(groups.flatMap((group) => group.branches)).toEqual([]);
+    const afterAll = branchOptionsFor({ id: member.id, showOnProfile: false }, tree);
+    expect(afterAll.groups.map((group) => group.opener.id)).toEqual([opener1.id]);
+  });
+
+  it('leaves out a branch that would push the question and its sub-branches past three levels', () => {
+    const t1 = adminStep({ title: 'T' });
+    const r1 = adminQuestion('yes_no', { stepId: t1.id, title: 'R1' });
+    const b1 = adminBranch({ openerQuestionId: r1.id, values: ['true'] });
+    const m1 = adminQuestion('yes_no', { stepId: t1.id, title: 'M1', branchId: b1.id });
+    const b2 = adminBranch({ openerQuestionId: m1.id, values: ['true'] });
+    const m2 = adminQuestion('yes_no', { stepId: t1.id, title: 'M2', branchId: b2.id });
+    const b3 = adminBranch({ openerQuestionId: m2.id, values: ['true'] });
+    const x = adminQuestion('yes_no', { stepId: t1.id, title: 'X' });
+    const bx = adminBranch({ openerQuestionId: x.id, values: ['true'] });
+    const mx = adminQuestion('short_text', { stepId: t1.id, title: 'MX', branchId: bx.id });
+    const deep = buildBranchTree({
+      steps: [t1],
+      questions: [r1, m1, m2, x, mx],
+      branches: [b1, b2, b3, bx],
+    });
+    const { groups } = branchOptionsFor({ id: x.id, showOnProfile: false }, deep);
+    const ids = groups.flatMap((group) => group.branches.map((branch) => branch.id));
+    expect(ids).toContain(b1.id);
+    expect(ids).toContain(b2.id);
+    expect(ids).not.toContain(b3.id);
+    // A question with no branch of its own may still enter the third level.
+    const plain = branchOptionsFor({ id: null, showOnProfile: false }, deep);
+    expect(plain.groups.flatMap((group) => group.branches.map((branch) => branch.id))).toContain(
+      b3.id,
+    );
+  });
+
+  it('leaves out private-chain branches for a public question and says so', () => {
+    const q1 = adminQuestion('single_choice', {
+      stepId: s1.id,
+      title: 'Privada',
+      options,
+      showOnProfile: false,
+    });
+    const priv = adminBranch({ openerQuestionId: q1.id, values: [uuid(9101)] });
+    const privateTree = buildBranchTree({ steps: [s1], questions: [q1], branches: [priv] });
+    const publicQ = branchOptionsFor({ id: null, showOnProfile: true }, privateTree);
+    expect(publicQ.groups).toEqual([]);
+    expect(publicQ.leftOutForPrivacy).toBe(true);
+    const privateQ = branchOptionsFor({ id: null, showOnProfile: false }, privateTree);
+    expect(privateQ.groups.flatMap((group) => group.branches.map((branch) => branch.id))).toEqual([
+      priv.id,
+    ]);
+    expect(privateQ.leftOutForPrivacy).toBe(false);
+  });
+
+  it('keeps the branch the question already sits in, even when it is no longer offered', () => {
+    const archived = adminBranch({
+      openerQuestionId: opener1.id,
+      values: [uuid(9101)],
+      archivedAt: '2026-10-01T12:00:00.000Z',
+    });
+    const withArchived = buildBranchTree({
+      steps: [s1, s2],
+      questions,
+      branches: [branch1, archived],
+    });
+    const plain = branchOptionsFor({ id: null, showOnProfile: false, stepId: s1.id }, withArchived);
+    expect(plain.groups.flatMap((group) => group.branches.map((branch) => branch.id))).toEqual([
+      branch1.id,
+    ]);
+    const kept = branchOptionsFor(
+      { id: null, showOnProfile: false, stepId: s1.id },
+      withArchived,
+      archived.id,
+    );
+    expect(kept.groups.flatMap((group) => group.branches.map((branch) => branch.id))).toEqual([
+      branch1.id,
+      archived.id,
+    ]);
+  });
+});
+
+describe('12.2-16: checkStepMove (D-623, UI-D-647 over branches)', () => {
+  const s1 = adminStep({ title: 'Um' });
+  const s2 = adminStep({ title: 'Dois' });
+  const s3 = adminStep({ title: 'Três' });
+  const steps = [s1, s2, s3];
+  const opener = adminQuestion('single_choice', { stepId: s2.id, title: 'Abridora' });
+  const bx = adminBranch({ openerQuestionId: opener.id, values: [uuid(1)] });
+  const shown = adminQuestion('short_text', { stepId: s3.id, title: 'Mostrada', branchId: bx.id });
+  const questions = [opener, shown];
+  const base = { questions, steps, branches: [bx] };
+
+  it('is a no-op when the step does not change', () => {
+    expect(checkStepMove({ ...base, stored: shown, branchId: bx.id, nextStepId: s3.id })).toEqual({
+      kind: 'ok',
+      clearBranch: false,
+    });
+  });
+
+  it('snaps back a question of a branch that would go above the step of its opener', () => {
+    expect(checkStepMove({ ...base, stored: shown, branchId: bx.id, nextStepId: s1.id })).toEqual({
+      kind: 'mustFollow',
+      opener: 'Abridora',
+    });
+    expect(checkStepMove({ ...base, stored: shown, branchId: bx.id, nextStepId: s2.id })).toEqual({
+      kind: 'ok',
+      clearBranch: false,
+    });
+  });
+
+  it('snaps back an opener that would go to a step at or after a question of its branch', () => {
+    expect(checkStepMove({ ...base, stored: opener, branchId: null, nextStepId: s3.id })).toEqual({
+      kind: 'mustPrecede',
+      dependent: 'Mostrada',
+    });
+    expect(checkStepMove({ ...base, stored: opener, branchId: null, nextStepId: s1.id })).toEqual({
+      kind: 'ok',
+      clearBranch: false,
+    });
+  });
+
+  it('only clears a DRAFT branch the new step no longer allows', () => {
+    const free = adminQuestion('short_text', { stepId: s3.id, title: 'Livre' });
+    expect(
+      checkStepMove({
+        ...base,
+        questions: [...questions, free],
+        stored: free,
+        branchId: bx.id,
+        nextStepId: s1.id,
+      }),
+    ).toEqual({ kind: 'ok', clearBranch: true });
+    expect(checkStepMove({ ...base, stored: null, branchId: bx.id, nextStepId: s1.id })).toEqual({
+      kind: 'ok',
+      clearBranch: true,
+    });
+    expect(checkStepMove({ ...base, stored: null, branchId: null, nextStepId: s1.id })).toEqual({
+      kind: 'ok',
+      clearBranch: false,
+    });
   });
 });
