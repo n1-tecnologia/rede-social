@@ -1175,7 +1175,7 @@ describe('12.2-08 reads: the branches ride on the builder lists as aggregates (D
       const listText = await listRes.text();
       expect(listRes.status).toBe(200);
       const list = JSON.parse(listText) as QuestionList & Record<string, unknown>;
-      // Nothing the list carried before is gone: the same top-level keys, the condition and the opens count.
+      // Nothing the list carried before is gone: the same top-level keys and the opens count; the 12.1 condition key is gone.
       expect(Object.keys(list).sort()).toEqual(
         ['activeCount', 'branches', 'limit', 'questions', 'stepLimit', 'steps'].sort(),
       );
@@ -1184,7 +1184,7 @@ describe('12.2-08 reads: the branches ride on the builder lists as aggregates (D
         unknown
       >;
       expect(row.branchId).toBe(awake);
-      expect(row).toHaveProperty('condition', null);
+      expect(row).not.toHaveProperty('condition');
       expect(row).toHaveProperty('opensCount');
       expect(row).toHaveProperty('answerCount', 1);
       // Counts only: no answer value in either payload, and no branch carries a field named `value`.

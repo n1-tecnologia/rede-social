@@ -9,6 +9,7 @@ import {
   removeProfileFormByPrefix,
   SEED_PASSWORD,
   seedProfileFormAnswer,
+  seedProfileFormBranch,
   seedProfileFormQuestion,
   seedProfileFormStep,
   signInAs,
@@ -630,20 +631,23 @@ describe('12.1-12 the CSV carries no closed answer and keeps its columns (D-634,
           { id: no, label: 'Não' },
         ],
       });
+      const branchId = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: [yes],
+      });
       const dependent = await question({
         title: `${TITLE}Ativa`,
         stepId: step,
         position: 2,
-        conditionQuestionId: opener,
-        conditionValues: [yes],
+        branchId,
       });
       const archivedDependent = await question({
         title: `${TITLE}Arquivada`,
         stepId: step,
         position: 3,
         archived: true,
-        conditionQuestionId: opener,
-        conditionValues: [yes],
+        branchId,
       });
       for (const who of [ana, other]) {
         await answer(who.userId, opener, { optionId: yes, otherText: null });

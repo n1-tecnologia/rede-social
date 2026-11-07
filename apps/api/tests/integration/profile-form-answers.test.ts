@@ -347,7 +347,6 @@ describe('12-07 staff: PFORM-19', () => {
             'answered',
             'archivedAt',
             'branchId',
-            'condition',
             'options',
             'position',
             'questionId',
@@ -507,7 +506,7 @@ describe('12-07 staff: PFORM-19', () => {
  * 12.1-12 (D-624, D-634, D-636; PFORM-33, T-12.1-03; tracer): STORED EQUALS VISIBLE, proved across every reader.
  * No reader of stored answers carries a visibility filter, so the only thing that keeps a closed answer out of
  * the public block and the staff view is that the member's own save already deleted it. The fixture is one
- * opener (single choice, public) with an ACTIVE and an ARCHIVED public dependent under the same condition, all
+ * opener (single choice, public) with an ACTIVE and an ARCHIVED public dependent under the same branch, all
  * answered through the admin SQL, then closed by the member through the REAL save route.
  */
 describe('12.1-12 tracer: a closed answer leaves every reader and the staff row carries its branch (D-624, D-634, D-636)', () => {
@@ -551,13 +550,17 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
         { id: no, label: 'Não' },
       ],
     });
+    const branch = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: opener,
+      values: [yes],
+    });
     const dependent = await question({
       title: `${TITLE}Ativa`,
       stepId: step,
       position: 2,
       showOnProfile: true,
-      conditionQuestionId: opener,
-      conditionValues: [yes],
+      branchId: branch,
     });
     const archivedDependent = await question({
       title: `${TITLE}Arquivada dependente`,
@@ -565,13 +568,9 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
       position: 3,
       showOnProfile: true,
       archived: true,
-      conditionQuestionId: opener,
-      conditionValues: [yes],
+      branchId: branch,
     });
-    const [branch] = await adminSql<{ id: string }[]>`
-      select id::text as id from public.profile_form_branches
-       where opener_question_id = ${opener}::uuid`;
-    return { step, yes, no, opener, dependent, archivedDependent, branch: branch?.id as string };
+    return { step, yes, no, opener, dependent, archivedDependent, branch };
   }
 
   it('D-636 archived: the member changes the opener, the ACTIVE and the ARCHIVED dependent answers are gone from the store, the public block and the staff view, a bystander keeps hers, and the staff row names its branch', async () => {
@@ -604,7 +603,6 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
       ).toMatchObject({
         value: 'arquivada-publica',
         branchId: f.branch,
-        condition: null,
       });
       // The payload carries the branch (opener and values, no name) so the row can be read through it.
       expect(staffBefore.branches).toEqual([
@@ -640,7 +638,7 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
       expect(publicRaw).not.toContain(f.dependent);
       expect(publicRaw).not.toContain(f.archivedDependent);
 
-      // Staff view: the active dependent is listed UNANSWERED with its condition, the archived one (nothing
+      // Staff view: the active dependent is listed UNANSWERED with its branch, the archived one (nothing
       // left to show) is absent, and no payload gained an answer value for the sake of "Não se aplica".
       const staffRes = await read(admin, ownerId);
       const staffRaw = await staffRes.text();
@@ -651,18 +649,15 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
         answered: false,
         value: null,
         branchId: f.branch,
-        condition: null,
       });
       expect(staffAfter.answers[0]).toMatchObject({
         answered: true,
         branchId: null,
-        condition: null,
       });
       expect(Object.keys(staffAfter.answers[1] ?? {}).sort()).toEqual([
         'answered',
         'archivedAt',
         'branchId',
-        'condition',
         'options',
         'position',
         'questionId',
@@ -780,7 +775,7 @@ describe('12.2-10 staff payload: branchId per row and a top-level branches list 
         expect(raw).not.toContain('SEGREDO');
         const body = JSON.parse(raw) as {
           kind: string;
-          answers: { questionId: string; branchId: string | null; condition: unknown }[];
+          answers: { questionId: string; branchId: string | null }[];
           branches: { id: string; openerQuestionId: string; values: string[] }[];
         };
         expect(Object.keys(body).sort()).toEqual(['answers', 'branches', 'kind']);
@@ -793,11 +788,11 @@ describe('12.2-10 staff payload: branchId per row and a top-level branches list 
           openerQuestionId: f.q2,
           values: [f.y2],
         });
-        expect(body.answers.map((row) => [row.questionId, row.branchId, row.condition])).toEqual([
-          [f.q1, null, null],
-          [f.q2, f.b1, null],
-          [f.q3, f.b2, null],
-          [f.q4, f.b2, null],
+        expect(body.answers.map((row) => [row.questionId, row.branchId])).toEqual([
+          [f.q1, null],
+          [f.q2, f.b1],
+          [f.q3, f.b2],
+          [f.q4, f.b2],
         ]);
         // The contract parses it, and a payload that carried a name would not.
         expect(staffAnswersSchema.safeParse(JSON.parse(raw)).success).toBe(true);
@@ -897,14 +892,18 @@ describe('12.1-12 PFORM-39 idempotency and concurrency: the readers are repeatab
         { id: no, label: 'Não' },
       ],
     });
+    const branchId = await seedProfileFormBranch({
+      tenantId: labTenantId,
+      openerQuestionId: opener,
+      values: [yes],
+    });
     const dependent = await question({
       title: `${TITLE}Ativa`,
       stepId: step,
       position: 2,
       showOnProfile: true,
       archived: over.dependentArchived ?? false,
-      conditionQuestionId: opener,
-      conditionValues: [yes],
+      branchId,
     });
     return { step, yes, no, opener, dependent };
   }

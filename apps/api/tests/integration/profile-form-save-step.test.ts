@@ -34,8 +34,6 @@ type FormQuestion = {
   title: string;
   required: boolean;
   stepId: string;
-  /** The compatibility key: always null since 12.2 (the per-question condition is gone). */
-  condition: null;
   branchId: string | null;
   options: { id: string; label: string }[];
   answer: unknown;
@@ -188,12 +186,12 @@ describe('12.1-11 tracer: the member form carries steps and conditions and a ste
         select o ->> 'id' as id from public.profile_form_questions q,
                jsonb_array_elements(q.options) as o
          where q.id = ${opener}::uuid and o ->> 'label' = 'Sim'`;
-      const dependent = await seedQ('dependent', {
-        stepId: s2,
-        position: 2,
-        conditionQuestionId: opener,
-        conditionValues: [yes?.id as string],
+      const branchId = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: [yes?.id as string],
       });
+      const dependent = await seedQ('dependent', { stepId: s2, position: 2, branchId });
       const plain = await seedQ('plain', { stepId: s2, position: 3 });
       await seedQ('archived', { stepId: onlyArchived, position: 4, archived: true });
 
@@ -208,10 +206,10 @@ describe('12.1-11 tracer: the member form carries steps and conditions and a ste
       const [branchRow] = await adminSql<{ id: string }[]>`
         select id::text as id from public.profile_form_branches
          where opener_question_id = ${opener}::uuid`;
-      expect(form.questions.map((q) => [q.id, q.stepId, q.branchId, q.condition])).toEqual([
-        [opener, s1, null, null],
-        [dependent, s2, branchRow?.id, null],
-        [plain, s2, null, null],
+      expect(form.questions.map((q) => [q.id, q.stepId, q.branchId])).toEqual([
+        [opener, s1, null],
+        [dependent, s2, branchRow?.id],
+        [plain, s2, null],
       ]);
       expect(form.branches).toEqual([
         { id: branchRow?.id, openerQuestionId: opener, values: [yes?.id] },
@@ -377,19 +375,22 @@ async function branch(over: { dependentRequired?: boolean } = {}): Promise<Branc
       { id: no, label: 'Não' },
     ],
   });
+  const branchId = await seedProfileFormBranch({
+    tenantId: labTenantId,
+    openerQuestionId: opener,
+    values: [yes],
+  });
   const dependent = await seedQ('dependent', {
     stepId: s1,
     position: 2,
     required: over.dependentRequired ?? false,
-    conditionQuestionId: opener,
-    conditionValues: [yes],
+    branchId,
   });
   const archivedDependent = await seedQ('archived dependent', {
     stepId: s1,
     position: 3,
     archived: true,
-    conditionQuestionId: opener,
-    conditionValues: [yes],
+    branchId,
   });
   return { s1, opener, yes, no, dependent, archivedDependent };
 }
@@ -916,14 +917,14 @@ describe('12.2-10 tracer: a depth-3 form is read with its tree and a save that c
       // T-12.2-03: the stored name is nowhere in the serialized body.
       expect(text).not.toContain('NOME-SECRETO');
       const form = JSON.parse(text) as Form;
-      expect(form.questions.map((q) => [q.id, q.branchId, q.condition])).toEqual([
-        [f.q1, null, null],
-        [f.q2, f.b1, null],
-        [f.q3, f.b2, null],
-        [f.q4, f.b3, null],
-        [f.q5, f.b2, null],
-        [f.q6, f.b1, null],
-        [f.u, null, null],
+      expect(form.questions.map((q) => [q.id, q.branchId])).toEqual([
+        [f.q1, null],
+        [f.q2, f.b1],
+        [f.q3, f.b2],
+        [f.q4, f.b3],
+        [f.q5, f.b2],
+        [f.q6, f.b1],
+        [f.u, null],
       ]);
       expect(form.branches).toHaveLength(3);
       // The exact keys of the strict shape, nothing else.

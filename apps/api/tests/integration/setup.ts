@@ -763,15 +763,8 @@ export async function seedProfileFormQuestion(input: {
    */
   stepId?: string;
   /**
-   * 12.1-09: the condition that shows the question (D-621). Both or neither (the CHECK keeps them paired);
-   * `conditionValues` are option ids of the opener. The opener must exist already and carry no condition.
-   */
-  conditionQuestionId?: string;
-  conditionValues?: string[];
-  /**
-   * 12.2-08 (D-640): the branch the question sits in. The old `conditionQuestionId` / `conditionValues` pair
-   * keeps working through a shim (plan 20 removes it): the database refuses the retired columns (PF010), so the
-   * helper finds or creates the branch for that (opener, set of values) and sets `branch_id` instead.
+   * 12.2-08 (D-640): the branch the question sits in (`seedProfileFormBranch`). The database refuses the retired
+   * 12.1 condition columns (PF010), so a question is conditional through its branch only.
    */
   branchId?: string;
 }): Promise<string> {
@@ -781,28 +774,6 @@ export async function seedProfileFormQuestion(input: {
     (option) => ({ id: option.id ?? crypto.randomUUID(), label: option.label }),
   );
   const archivedAt = input.archivedAt ?? (input.archived ? new Date() : null);
-  // 12.2-08 shim: the retired condition pair becomes a branch (find the live one for the same opener and the
-  // same SET of values, or create it), so the 12.1 fixtures keep their meaning.
-  let branchId = input.branchId ?? null;
-  if (branchId === null && input.conditionQuestionId) {
-    const values = [...(input.conditionValues ?? [])].sort();
-    const [existing] = await adminSql<{ id: string }[]>`
-      select id::text as id from public.profile_form_branches
-       where tenant_id = ${input.tenantId}::uuid
-         and opener_question_id = ${input.conditionQuestionId}::uuid
-         and archived_at is null
-         and open_values @> ${adminSql.array(values)}::text[]
-         and open_values <@ ${adminSql.array(values)}::text[]
-       order by created_at, id
-       limit 1`;
-    branchId =
-      existing?.id ??
-      (await seedProfileFormBranch({
-        tenantId: input.tenantId,
-        openerQuestionId: input.conditionQuestionId,
-        values,
-      }));
-  }
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.profile_form_questions
       (tenant_id, step_id, type, title, required, position, options, limits, allow_other,
@@ -813,7 +784,7 @@ export async function seedProfileFormQuestion(input: {
             ${adminSql.json((input.limits ?? {}) as never)}, ${input.allowOther ?? false},
             ${input.showOnProfile ?? false}, ${archivedAt},
             ${input.listedAt ?? adminSql`now()`}, ${input.adminUserId}::uuid,
-            ${branchId}::uuid)
+            ${input.branchId ?? null}::uuid)
     returning id::text as id`;
   if (!row) throw new Error('seedProfileFormQuestion: no row returned');
   return row.id;

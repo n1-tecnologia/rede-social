@@ -615,11 +615,12 @@ describe('12.2-11 D-644, D-653: the impact counts only the members who SEE the q
         archived: true,
       });
 
-      // The retired per-question condition is refused, alone or together.
+      // A query key the route does not know (the 12.1 per-question condition parameters among them) is
+      // refused, alone or together, never silently ignored.
       const legacies: Record<string, string>[] = [
-        { conditionQuestionId: c.q1 },
-        { conditionValues: c.tem },
-        { conditionQuestionId: c.q1, conditionValues: c.tem },
+        { openerQuestionId: c.q1 },
+        { values: c.tem },
+        { openerQuestionId: c.q1, values: c.tem },
       ];
       for (const legacy of legacies) {
         for (const change of ['create_required', 'replace']) {

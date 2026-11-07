@@ -302,7 +302,7 @@ describe('12.2-09 tracer: a question created into a branch lands at the end of t
     });
   });
 
-  it('D-640: a non-null condition is 400 condition_invalid and writes nothing; null and absent are accepted', async () => {
+  it('D-640: the retired condition key is 400 VALIDATION_FAILED (null included) and writes nothing; absent is accepted', async () => {
     const admin = await person();
     await withProfileForm(labTenantId, async () => {
       const tree = await clinic();
@@ -312,11 +312,12 @@ describe('12.2-09 tracer: a question created into a branch lands at the end of t
         condition: { questionId: tree.q1.id, values: [tree.q1.optionIds[0]] },
       });
       expect(retired.status, await retired.clone().text()).toBe(400);
-      expect(await details(retired)).toEqual({ profileForm: 'condition_invalid' });
+      expect(((await retired.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
       expect(await snapshot()).toBe(before);
 
       const withNull = await create(admin, { title: `${TITLE}nulo`, condition: null });
-      expect(withNull.status, await withNull.clone().text()).toBe(201);
+      expect(withNull.status, await withNull.clone().text()).toBe(400);
+      expect(await snapshot()).toBe(before);
       const absent = await create(admin, { title: `${TITLE}ausente` });
       expect(absent.status, await absent.clone().text()).toBe(201);
     });
@@ -571,7 +572,7 @@ describe('12.2-09 D-646: moving a question between branches and steps', () => {
     });
   });
 
-  it('D-640: a non-null condition on an edit is 400 condition_invalid and writes nothing; condition null is no change', async () => {
+  it('D-640: the retired condition key on an edit is 400 VALIDATION_FAILED (null included) and writes nothing', async () => {
     const admin = await person();
     await withProfileForm(labTenantId, async () => {
       const tree = await clinic();
@@ -582,12 +583,12 @@ describe('12.2-09 D-646: moving a question between branches and steps', () => {
         condition: { questionId: tree.q1.id, values: [tree.q1.optionIds[0]] },
       });
       expect(res.status, await res.clone().text()).toBe(400);
-      expect(await found(res)).toMatchObject({ profileForm: 'condition_invalid' });
+      expect(((await res.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
       expect(await snapshot()).toBe(before);
 
-      const noop = await patch(admin, loose, { revision: 1, condition: null });
-      expect(noop.status, await noop.clone().text()).toBe(200);
-      expect(((await noop.json()) as ListedQuestion).revision).toBe(1);
+      const withNull = await patch(admin, loose, { revision: 1, condition: null });
+      expect(withNull.status, await withNull.clone().text()).toBe(400);
+      expect(await snapshot()).toBe(before);
     });
   });
 });
