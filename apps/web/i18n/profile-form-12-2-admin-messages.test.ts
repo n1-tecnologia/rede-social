@@ -445,6 +445,42 @@ describe('profileForm.admin.archived.branch: the Arquivadas tab over branches (U
   });
 });
 
+describe('profileForm.admin.view and flow: the selector and the Fluxo (UI-D-665, UI-D-676, UI-D-677, UI-D-682, 12.2-19)', () => {
+  it('declares the keys exactly as the Copywriting Contract names them', () => {
+    const admin = parsed.profileForm.admin;
+    for (const key of ['label', 'list', 'flow']) expect(admin.view).toHaveProperty(key);
+    for (const key of ['label', 'root', 'note', 'edge', 'moreOptions', 'childrenLabel']) {
+      expect(admin.flow).toHaveProperty(key);
+    }
+  });
+
+  it('the selector reads Como ver as perguntas, Lista, Fluxo', () => {
+    expect(t('view.label')).toBe('Como ver as perguntas');
+    expect(t('view.list')).toBe('Lista');
+    expect(t('view.flow')).toBe('Fluxo');
+  });
+
+  it('the drawing is named, labelled and explained as the contract says', () => {
+    expect(t('flow.label')).toBe('Fluxo do formulário');
+    expect(t('flow.root')).toBe('Todos os membros veem');
+    expect(t('flow.note')).toBe(
+      'O Fluxo mostra quem vê cada pergunta. Toque numa pergunta ou num ramo para editar. Para mover perguntas, volte para a Lista.',
+    );
+    expect(t('flow.childrenLabel', { label: 'Quem tem clínica' })).toBe(
+      'Perguntas do ramo: Quem tem clínica',
+    );
+  });
+
+  it('the edge carries the answers and an ICU count: none, one, many', () => {
+    expect(t('flow.edge', { options: '“A” ou “B”', count: 0 })).toBe(
+      'Se for “A” ou “B” · sem perguntas',
+    );
+    expect(t('flow.edge', { options: 'Sim', count: 1 })).toBe('Se for Sim · 1 pergunta');
+    expect(t('flow.edge', { options: 'Não', count: 3 })).toBe('Se for Não · 3 perguntas');
+    expect(t('flow.moreOptions', { count: 16 })).toBe('e mais 16');
+  });
+});
+
 describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "branch", "fork" or "grupo condicional")', () => {
   const groups: Record<string, unknown> = {
     'editor.branch': parsed.profileForm.admin.editor.branch,
@@ -459,6 +495,8 @@ describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "
       parsed.profileForm.admin.dependents.title.privacy,
       parsed.profileForm.admin.dependents.hintPrivacy,
     ],
+    view: parsed.profileForm.admin.view,
+    flow: parsed.profileForm.admin.flow,
     'dependents.hints': [
       parsed.profileForm.admin.dependents.hintBranches,
       parsed.profileForm.admin.dependents.hintOptionBranches,

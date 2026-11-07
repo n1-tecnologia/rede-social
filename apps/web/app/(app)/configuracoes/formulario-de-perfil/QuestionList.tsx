@@ -76,6 +76,12 @@ export interface QuestionListProps {
   onEditBranch?: (branch: AdminBranch) => void;
   /** Opens the question sheet in create mode inside a branch (plan 16 wires it). */
   onAddToBranch?: (branch: AdminBranch, stepId: string) => void;
+  /** INERT in the RED commit of 12.2-19: the view (Lista or Fluxo) the host holds. */
+  view?: 'lista' | 'fluxo';
+  /** INERT in the RED commit of 12.2-19: called when the admin picks the other view. */
+  onViewChange?: (view: 'lista' | 'fluxo') => void;
+  /** INERT in the RED commit of 12.2-19: the drawing rendered in place of the list body in Fluxo. */
+  flow?: ReactNode;
 }
 
 const NO_STEPS: AdminStep[] = [];

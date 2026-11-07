@@ -2694,3 +2694,165 @@ describe('12.2-17 Task 1: an existing branch opens from the Lista and from its o
     expect(mocks.show).not.toHaveBeenCalled();
   });
 });
+
+/* ------------------------------------------------------------------------------------------------ */
+/* 12.2-19: the Lista | Fluxo selector and the Fluxo in the builder (D-647, D-648; UI-D-665, UI-D-677). */
+/* ------------------------------------------------------------------------------------------------ */
+
+describe('12.2-19 Task 1 (tracer): the selector exists only with a branch, and the Fluxo opens the editors (D-647, D-648, UI-D-665)', () => {
+  const CLINIC = clinicAdminList();
+  const withBranches = () => ({
+    questions: CLINIC.questions,
+    steps: CLINIC.steps,
+    branches: CLINIC.branches ?? [],
+  });
+  const group = () => screen.getByRole('group', { name: 'Como ver as perguntas' });
+  const flowButton = () => within(group()).getByRole('button', { name: 'Fluxo' });
+  const listButton = () => within(group()).getByRole('button', { name: 'Lista' });
+  const flowSection = () => screen.queryByRole('region', { name: 'Fluxo do formulário' });
+  const Q1 = 'Você tem clínica, trabalha em clínica ou está aprendendo?';
+
+  it('renders no selector and no Fluxo for a form without a branch (byte for byte Phase 12.1)', () => {
+    builder({ questions: [QA, QB], steps: [S1, S2] });
+    expect(screen.queryByRole('group', { name: 'Como ver as perguntas' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Fluxo' })).toBeNull();
+    expect(flowSection()).toBeNull();
+  });
+
+  it('renders no selector when every branch is archived', () => {
+    const archived = (CLINIC.branches ?? []).map((branch) => ({
+      ...branch,
+      archivedAt: '2026-11-06T10:00:00.000Z',
+    }));
+    builder({ ...withBranches(), branches: archived });
+    expect(screen.queryByRole('group', { name: 'Como ver as perguntas' })).toBeNull();
+  });
+
+  it('shows the selector with a branch: Lista | Fluxo, Lista pressed, named by an sr-only element', () => {
+    builder(withBranches());
+    expect(listButton().getAttribute('aria-pressed')).toBe('true');
+    expect(flowButton().getAttribute('aria-pressed')).toBe('false');
+    const label = document.getElementById(group().getAttribute('aria-labelledby') as string);
+    expect(label?.textContent).toBe('Como ver as perguntas');
+    expect(label?.className).toContain('sr-only');
+    expect(flowSection()).toBeNull();
+    expect(document.querySelector('[data-branch-strip]')).not.toBeNull();
+  });
+
+  it('sits between the actions row and the "Perguntas ativas" micro-title, never wider than max-w-xs', () => {
+    builder(withBranches());
+    const add = screen.getByRole('button', { name: 'Adicionar pergunta' });
+    const title = screen.getByText(/^Perguntas ativas \(\d+\)$/);
+    expect(add.compareDocumentPosition(group()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(group().compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const wrapper = group().parentElement as HTMLElement;
+    expect(wrapper.className).toContain('w-full');
+    expect(wrapper.className).toContain('max-w-xs');
+  });
+
+  it('switches to the Fluxo: the drawing replaces the list, and Reordenar and Adicionar etapa hide', () => {
+    builder(withBranches());
+    fireEvent.click(flowButton());
+    expect(flowButton().getAttribute('aria-pressed')).toBe('true');
+    expect(flowSection()).not.toBeNull();
+    expect(document.querySelector('[data-branch-strip]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reordenar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Adicionar etapa' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Adicionar pergunta' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ver como o membro vê' })).toBeTruthy();
+    fireEvent.click(listButton());
+    expect(flowSection()).toBeNull();
+    expect(screen.getByRole('button', { name: 'Reordenar' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Adicionar etapa' })).toBeTruthy();
+  });
+
+  it('is disabled while Reordenar is on and enabled again when it ends', () => {
+    builder(withBranches());
+    fireEvent.click(screen.getByRole('button', { name: 'Reordenar' }));
+    expect((flowButton() as HTMLButtonElement).disabled).toBe(true);
+    expect((listButton() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    expect((flowButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('keeps the choice in component state: a re-read of the same form stays in the Fluxo', () => {
+    const view = builder(withBranches());
+    fireEvent.click(flowButton());
+    view.again({ ...withBranches(), questions: [...CLINIC.questions] });
+    expect(flowSection()).not.toBeNull();
+  });
+
+  it('falls back to the Lista when the last branch goes away, and does not come back on its own', () => {
+    const view = builder(withBranches());
+    fireEvent.click(flowButton());
+    view.again({
+      questions: CLINIC.questions.map((q) => ({ ...q, branchId: null })),
+      steps: CLINIC.steps,
+      branches: [],
+    });
+    expect(flowSection()).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Como ver as perguntas' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Reordenar' })).toBeTruthy();
+    view.again(withBranches());
+    expect(listButton().getAttribute('aria-pressed')).toBe('true');
+    expect(flowSection()).toBeNull();
+  });
+
+  it('opens the question sheet in edit mode from a node, with the question as it is', () => {
+    builder(withBranches());
+    fireEvent.click(flowButton());
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Nome da clínica' }));
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Editar pergunta' })).toBeTruthy();
+    expect((screen.getByLabelText('Pergunta') as HTMLInputElement).value).toBe('Nome da clínica');
+  });
+
+  it('opens the branch sheet in edit mode from an edge, with the branch as it is stored', () => {
+    builder(withBranches());
+    fireEvent.click(flowButton());
+    fireEvent.click(screen.getByRole('button', { name: 'Se for “Estou aprendendo” · 1 pergunta' }));
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+    expect((screen.getByLabelText('Pergunta que decide') as HTMLSelectElement).value).toBe(
+      clinicId('Q1'),
+    );
+    expect((screen.getByLabelText('Estou aprendendo') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('returns focus to the node that opened the question sheet when it closes', async () => {
+    builder(withBranches());
+    fireEvent.click(flowButton());
+    const target = screen.getByRole('button', { name: 'Editar pergunta: Nome da clínica' });
+    target.focus();
+    fireEvent.click(target);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fechar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Editar pergunta: Nome da clínica' }),
+    );
+  });
+
+  it('returns focus to the edge that opened the branch sheet even when the browser never focused it', async () => {
+    builder(withBranches());
+    fireEvent.click(flowButton());
+    const edge = screen.getByRole('button', { name: 'Se for “Estou aprendendo” · 1 pergunta' });
+    // Safari does not focus a button on tap: the tap alone must be enough to find the way back.
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.click(edge);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fechar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(edge);
+  });
+
+  it('shows a write from a sheet opened over the Fluxo on return, from the same single read', () => {
+    const view = builder(withBranches());
+    fireEvent.click(flowButton());
+    expect(screen.getByRole('button', { name: `Editar pergunta: ${Q1}` })).toBeTruthy();
+    // The page re-reads after a write: a question archived meanwhile is gone from BOTH views.
+    const without = CLINIC.questions.filter((q) => q.id !== clinicId('Q7'));
+    view.again({ ...withBranches(), questions: without });
+    expect(screen.queryByRole('button', { name: 'Editar pergunta: Onde estuda?' })).toBeNull();
+    fireEvent.click(listButton());
+    expect(screen.queryByRole('button', { name: 'Editar pergunta: Onde estuda?' })).toBeNull();
+  });
+});
