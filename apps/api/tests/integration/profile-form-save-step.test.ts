@@ -259,14 +259,15 @@ describe('12.1-11 tracer: the member form carries steps and conditions and a ste
       expect(afterRename.steps.map((s) => s.title)).toEqual([`${TITLE}S1`, `${TITLE}S2 renomeada`]);
       expect(afterRename.formEtag).not.toBe(afterMove.formEtag);
 
-      // Moving a question into a branch bumps the question's revision (D-640) and the branch joins the etag.
+      // An empty branch is not part of what a member renders, so creating one leaves the etag alone (WR-02);
+      // moving a question into it bumps the question's revision (D-640) and the branch joins the etag.
       const branchId = await seedProfileFormBranch({
         tenantId: labTenantId,
         openerQuestionId: opener,
         values: ['true'],
       });
       const beforeBranch = (await readForm(member)).formEtag;
-      expect(beforeBranch).not.toBe(afterRename.formEtag);
+      expect(beforeBranch).toBe(afterRename.formEtag);
       const [q] = await adminSql<{ revision: number }[]>`
         select revision from public.profile_form_questions where id = ${c}::uuid`;
       const branched = await call(admin, 'PATCH', `/v1/profile_form/questions/${c}`, {
