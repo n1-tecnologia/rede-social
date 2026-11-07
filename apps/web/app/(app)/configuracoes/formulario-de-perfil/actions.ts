@@ -23,6 +23,7 @@ import {
   reorderBodySchema,
   replaceQuestionBodySchema,
   type UpdateBranchBody,
+  undoBranchResultSchema,
   updateBranchBodySchema,
   updateQuestionBodySchema,
   updateStepBodySchema,
@@ -928,9 +929,32 @@ export type UndoBranchActionResult =
   | { ok: false; code: 'gone' | 'forbidden' | 'moduleOff' | 'failed' };
 
 /**
- * RED STUB (12.2-17 Task 2): inert on purpose, replaced in full by the GREEN commit. It answers `failed` so the
- * tests that expect the POST fail for the missing behaviour, not for a missing export.
+ * `POST /v1/profile_form/branches/{id}/undo` (12.2-17, D-653): "Desfazer ramo". Every question of the branch leaves
+ * it and the branch row is deleted, in one transaction; the questions stay in the form and become visible to
+ * every member; no answer is touched. The screen reads the member impact first (`readImpactAction` with
+ * `undo_branch`) and writes only when that read succeeded. The id is validated as a uuid before anything leaves
+ * the server tier (T-12.2-01); a foreign or missing branch is the server's bare 404, answered as `gone`.
  */
-export async function undoBranchAction(_id: string): Promise<UndoBranchActionResult> {
+export async function undoBranchAction(id: string): Promise<UndoBranchActionResult> {
+  if (!z.uuid().safeParse(id).success) return { ok: false, code: 'failed' };
+
+  const sent = await send('undo_branch', `/v1/profile_form/branches/${id}/undo`, {
+    method: 'POST',
+  });
+  if (sent.kind === 'ok') {
+    return undoBranchResultSchema.safeParse(sent.body).success
+      ? { ok: true }
+      : { ok: false, code: 'failed' };
+  }
+
+  const failure = failureOf('undo_branch', sent);
+  if (failure.navigate) redirect(failure.navigate);
+  const result = failure.result;
+  if (result.code === 'conflict') {
+    return { ok: false, code: result.issue === 'not_found' ? 'gone' : 'failed' };
+  }
+  if (result.code === 'forbidden' || result.code === 'moduleOff') {
+    return { ok: false, code: result.code };
+  }
   return { ok: false, code: 'failed' };
 }

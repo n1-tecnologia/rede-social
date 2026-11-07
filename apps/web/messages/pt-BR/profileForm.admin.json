@@ -82,11 +82,26 @@
           "more": "e mais {count, plural, one {# pergunta} other {# perguntas}}",
           "requiredNote": "As perguntas obrigatórias deste ramo só precisam de resposta de quem as vê.",
           "stale": "Este ramo mudou enquanto você editava. Atualizamos a lista; confira e tente de novo.",
-          "reset": "A pergunta que decide mudou, então as respostas escolhidas foram limpas."
+          "reset": "A pergunta que decide mudou, então as respostas escolhidas foram limpas.",
+          "locked": {
+            "body": "Este ramo já tem respostas em {n, plural, one {# pergunta} other {# perguntas}}, então a pergunta que decide e as respostas que o abrem não podem mudar. Para mudar, crie um novo ramo e arquive este.",
+            "hint": "Você ainda pode dar um nome a ele ou desfazê-lo."
+          }
+        },
+        "undo": {
+          "button": "Desfazer ramo",
+          "title": "Desfazer este ramo?",
+          "body": "{count, plural, =0 {O ramo está vazio e será removido.} one {A pergunta dele continua no formulário e passa a aparecer para todos os membros.} other {As # perguntas dele continuam no formulário e passam a aparecer para todos os membros.}}",
+          "impact": "{n, plural, one {# membro que hoje não vê estas perguntas vai precisar respondê-las antes de continuar usando a comunidade.} other {# membros que hoje não veem estas perguntas vão precisar respondê-las antes de continuar usando a comunidade.}} Quem já respondeu mantém a resposta.",
+          "nested": "Os ramos dentro dele continuam valendo.",
+          "confirm": "Desfazer ramo",
+          "confirmRequire": "Desfazer e exigir",
+          "cancel": "Manter ramo"
         },
         "toasts": {
           "created": "Ramo criado.",
-          "saved": "Ramo salvo."
+          "saved": "Ramo salvo.",
+          "undone": "Ramo desfeito."
         }
       },
       "reorder": {

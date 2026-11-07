@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { join } from 'node:path';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1002,7 +1002,9 @@ describe('12.2-17 Task 1: edit mode', () => {
       expect(within(box).getByRole('button', { name: 'Manter ramo' })).toBeTruthy();
       expect(within(box).queryByRole('button', { name: 'Cancelar' })).toBeNull();
       fireEvent.click(within(box).getByRole('button', { name: 'Manter ramo' }));
-      expect(screen.queryByRole('dialog', { name: 'Desfazer este ramo?' })).toBeNull();
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'Desfazer este ramo?' })).toBeNull(),
+      );
       expect(mocks.undo).not.toHaveBeenCalled();
     });
 

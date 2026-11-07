@@ -16,17 +16,27 @@ import {
   useMediaQuery,
   useToast,
 } from '@rede-social/ui';
-import { CircleAlert, Layers, Plus } from 'lucide-react';
+import { CircleAlert, Layers, Lock, Plus, Undo2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type FormEvent, useCallback, useMemo, useRef, useState } from 'react';
-import { buildBranchTree, eligibleOpenersFor, membersOf } from '@/lib/profile-form/branch-tree';
+import {
+  buildBranchTree,
+  eligibleOpenersFor,
+  membersOf,
+  usableBranchesOf,
+} from '@/lib/profile-form/branch-tree';
 import {
   type BranchFieldKey,
   createBranchAction,
+  type ImpactActionResult,
+  readImpactAction,
   type SaveBranchResult,
+  type UndoBranchActionResult,
+  undoBranchAction,
   updateBranchAction,
 } from './actions';
+import { useBranchLabeler } from './BranchBlock';
 import { BranchValuesPicker } from './BranchValuesPicker';
 import { SheetSelect } from './SheetSelect';
 
@@ -313,7 +323,7 @@ function sameSet(left: readonly string[], right: readonly string[]): boolean {
 const QUESTIONS_SHOWN = 5;
 
 /** What the edit sheet says after a refusal that is not a field's. */
-type EditRefusal = 'failed' | 'depth' | 'stale';
+type EditRefusal = 'failed' | 'depth' | 'stale' | 'locked';
 
 /**
  * The branch sheet, edit mode (12.2-17, D-640, D-642, D-646, D-653; UI-D-671, UI-D-682..UI-D-684): the SAME
@@ -356,6 +366,10 @@ function EditBranchSheet({
   const [refusal, setRefusal] = useState<EditRefusal | null>(null);
   const [saving, setSaving] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
+  // "Desfazer ramo" (UI-D-672): the impact is read first; the dialog opens with the count the server returned.
+  const [undoReading, setUndoReading] = useState(false);
+  const [undoOpen, setUndoOpen] = useState(false);
+  const [undoMembers, setUndoMembers] = useState(0);
   /** What to do once the admin confirms the discard dialog; absent means close the sheet. */
   const afterDiscard = useRef<(() => void) | null>(null);
 
@@ -363,8 +377,15 @@ function EditBranchSheet({
     () => buildBranchTree({ steps, questions, branches }),
     [steps, questions, branches],
   );
+  const labelOf = useBranchLabeler(tree);
   const opener = tree.questionById.get(openerId);
   const members = membersOf(tree, branch.id);
+  // A branch with answers cannot change its opener or its opening set (D-646); the server and PF006 are the
+  // authority, this is the screen's twin. `lockedCount` counts the questions that hold answers (at least one:
+  // the answers may belong to an archived question).
+  const locked = branch.answerCount > 0;
+  const lockedCount = Math.max(1, members.filter((member) => member.answerCount > 0).length);
+  const hasNested = members.some((member) => usableBranchesOf(tree, member.id).length > 0);
 
   // The eligible openers, plus the branch's own opener whatever the rules say today, so the select never lies.
   const openers = useMemo(() => {
@@ -376,8 +397,9 @@ function EditBranchSheet({
   }, [branch, tree, base.openerQuestionId]);
 
   const trimmed = name.trim();
-  const openerDirty = openerId !== base.openerQuestionId;
-  const valuesDirty = !sameSet(values, base.values);
+  // A locked branch ignores a draft of the opener or the answers, so a race never sends what the server refuses.
+  const openerDirty = !locked && openerId !== base.openerQuestionId;
+  const valuesDirty = !locked && !sameSet(values, base.values);
   const nameDirty = trimmed !== (base.name ?? '').trim();
   const changed = openerDirty || valuesDirty || nameDirty;
 
@@ -422,7 +444,14 @@ function EditBranchSheet({
         router.refresh();
         return;
       case 'conflict':
-        setRefusal(result.issue === 'branch_depth' ? 'depth' : 'failed');
+        // A race the sheet could not see: an answer arrived, so the branch is locked now (the page re-reads it).
+        setRefusal(
+          result.issue === 'condition_locked'
+            ? 'locked'
+            : result.issue === 'branch_depth'
+              ? 'depth'
+              : 'failed',
+        );
         router.refresh();
         return;
       case 'invalid': {
@@ -440,6 +469,55 @@ function EditBranchSheet({
       default:
         setRefusal('failed');
     }
+  }
+
+  /**
+   * "Desfazer ramo" step one: the member impact is read BEFORE any dialog (the UI-D-576 snapshot-then-confirm
+   * contract). A read that fails opens nothing and writes nothing, and says so (T-12-34).
+   */
+  async function startUndo() {
+    if (undoReading || saving) return;
+    setUndoReading(true);
+    setRefusal(null);
+    let read: ImpactActionResult = { ok: false, code: 'failed' };
+    try {
+      read = await readImpactAction({ change: 'undo_branch', branchId: branch.id });
+    } catch {
+      // Falls through to "could not calculate": nothing is written.
+    } finally {
+      setUndoReading(false);
+    }
+    if (!read.ok) {
+      if (read.code === 'forbidden') lostPermission(tAdmin('errors.forbidden'));
+      else if (read.code === 'moduleOff') lostPermission(t('errors.moduleOff'));
+      else toast.show({ tone: 'error', message: t('impact.previewFailed') });
+      return;
+    }
+    setUndoMembers(read.members);
+    setUndoOpen(true);
+  }
+
+  /** "Desfazer ramo" step two, only from the dialog's confirm. */
+  async function confirmUndo() {
+    let result: UndoBranchActionResult = { ok: false, code: 'failed' };
+    try {
+      result = await undoBranchAction(branch.id);
+    } catch {
+      // A thrown request reads like any other failed write: the sheet stays open.
+    }
+    if (result.ok) {
+      toast.show({ tone: 'success', message: t('branches.toasts.undone') });
+      router.refresh();
+      onClose();
+      return;
+    }
+    if (result.code === 'forbidden') lostPermission(tAdmin('errors.forbidden'));
+    else if (result.code === 'moduleOff') lostPermission(t('errors.moduleOff'));
+    else if (result.code === 'gone') {
+      // The branch is not there any more (another admin undid or removed it): the page re-reads.
+      router.refresh();
+      onClose();
+    } else setRefusal('failed');
   }
 
   function changeOpener(next: string) {
@@ -492,11 +570,13 @@ function EditBranchSheet({
   const refusalText =
     refusal === 'stale'
       ? ts('stale')
-      : refusal === 'depth'
-        ? te('branches.depth', { max: PROFILE_FORM_LIMITS.branchDepth })
-        : refusal === 'failed'
-          ? ts('failed')
-          : null;
+      : refusal === 'locked'
+        ? ts('locked.body', { n: lockedCount })
+        : refusal === 'depth'
+          ? te('branches.depth', { max: PROFILE_FORM_LIMITS.branchDepth })
+          : refusal === 'failed'
+            ? ts('failed')
+            : null;
 
   const stepNumberOf = (stepId: string) => (tree.stepOrdinal.get(stepId) ?? 0) as number;
   const shown = members.slice(0, QUESTIONS_SHOWN);
@@ -549,46 +629,65 @@ function EditBranchSheet({
               </div>
             ) : null}
 
-            <div className="flex min-w-0 flex-col gap-2" data-branch-opener>
-              <SheetSelect
-                id={OPENER_ID}
-                label={ts('opener')}
-                value={openerId}
-                onChange={changeOpener}
-              >
-                {groups
-                  ? groups.map((step) => {
-                      const inStep = openers.filter((candidate) => candidate.stepId === step.id);
-                      return inStep.length === 0 ? null : (
-                        <optgroup key={step.id} label={step.title}>
-                          {inStep.map(optionOf)}
-                        </optgroup>
-                      );
-                    })
-                  : openers.map(optionOf)}
-              </SheetSelect>
-              <p
-                role="status"
-                aria-live="polite"
-                data-branch-reset
-                className="text-xs font-normal text-text-secondary"
-              >
-                {openerDirty ? ts('reset') : ''}
-              </p>
-            </div>
+            {locked ? (
+              <div className="flex min-w-0 flex-col gap-2" data-branch-locked>
+                <p className="flex items-start gap-2 text-xs font-normal text-text-secondary">
+                  <Lock aria-hidden size={16} className="mt-px shrink-0" />
+                  <span className="min-w-0 flex-1 break-words">
+                    {ts('locked.body', { n: lockedCount })}
+                  </span>
+                </p>
+                <p className="break-words text-sm font-bold text-text">
+                  {labelOf(branch).sentence}
+                </p>
+                <p className="text-xs font-normal text-text-secondary">{ts('locked.hint')}</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex min-w-0 flex-col gap-2" data-branch-opener>
+                  <SheetSelect
+                    id={OPENER_ID}
+                    label={ts('opener')}
+                    value={openerId}
+                    onChange={changeOpener}
+                  >
+                    {groups
+                      ? groups.map((step) => {
+                          const inStep = openers.filter(
+                            (candidate) => candidate.stepId === step.id,
+                          );
+                          return inStep.length === 0 ? null : (
+                            <optgroup key={step.id} label={step.title}>
+                              {inStep.map(optionOf)}
+                            </optgroup>
+                          );
+                        })
+                      : openers.map(optionOf)}
+                  </SheetSelect>
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    data-branch-reset
+                    className="text-xs font-normal text-text-secondary"
+                  >
+                    {openerDirty ? ts('reset') : ''}
+                  </p>
+                </div>
 
-            {opener ? (
-              <BranchValuesPicker
-                key={opener.id}
-                opener={opener}
-                values={values}
-                error={valuesError}
-                onChange={(next) => {
-                  setValues(next);
-                  setFieldErrors((current) => ({ ...current, values: undefined }));
-                }}
-              />
-            ) : null}
+                {opener ? (
+                  <BranchValuesPicker
+                    key={opener.id}
+                    opener={opener}
+                    values={values}
+                    error={valuesError}
+                    onChange={(next) => {
+                      setValues(next);
+                      setFieldErrors((current) => ({ ...current, values: undefined }));
+                    }}
+                  />
+                ) : null}
+              </>
+            )}
 
             <div className="flex flex-col gap-1">
               <Input
@@ -682,6 +781,25 @@ function EditBranchSheet({
             {saving ? ts('saving') : ts('save')}
           </Button>
         </form>
+
+        {/* A divided block UNDER the save form, never a child of its submit row: a tap on the primary can never
+            reach these two (PFORM-57 adjacency). Each is its own 44px target. */}
+        <div
+          data-branch-manage
+          className="mt-6 flex flex-col gap-2 border-t border-border-secondary pt-4"
+        >
+          <Button
+            variant="ghost"
+            fullWidth
+            className="min-h-11"
+            loading={undoReading}
+            disabled={saving}
+            onClick={startUndo}
+          >
+            <Undo2 aria-hidden size={18} />
+            {t('branches.undo.button')}
+          </Button>
+        </div>
       </BottomSheet>
 
       {/* Beside the sheet, never inside it: a `fixed` dialog inside the sheet's transformed panel would be
@@ -702,6 +820,25 @@ function EditBranchSheet({
           afterDiscard.current = null;
           setDiscardOpen(false);
         }}
+      />
+      <ConfirmDialog
+        open={undoOpen}
+        tone="brand"
+        icon={Undo2}
+        title={t('branches.undo.title')}
+        body={[
+          t('branches.undo.body', { count: members.length }),
+          undoMembers > 0 ? t('branches.undo.impact', { n: undoMembers }) : null,
+          hasNested ? t('branches.undo.nested') : null,
+        ]
+          .filter((part): part is string => part !== null)
+          .join(' ')}
+        confirmLabel={
+          undoMembers > 0 ? t('branches.undo.confirmRequire') : t('branches.undo.confirm')
+        }
+        cancelLabel={t('branches.undo.cancel')}
+        onConfirm={confirmUndo}
+        onClose={() => setUndoOpen(false)}
       />
     </>
   );
