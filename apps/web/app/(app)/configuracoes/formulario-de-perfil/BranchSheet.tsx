@@ -5,6 +5,7 @@ import {
   type AdminQuestion,
   type AdminStep,
   codePoints,
+  type Dependent,
   PROFILE_FORM_LIMITS,
 } from '@rede-social/contracts/profile-form';
 import {
@@ -16,17 +17,20 @@ import {
   useMediaQuery,
   useToast,
 } from '@rede-social/ui';
-import { CircleAlert, Layers, Lock, Plus, Undo2 } from 'lucide-react';
+import { Archive, CircleAlert, Layers, Lock, Plus, Undo2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type FormEvent, useCallback, useMemo, useRef, useState } from 'react';
 import {
   buildBranchTree,
+  countsOf,
   eligibleOpenersFor,
   membersOf,
   usableBranchesOf,
 } from '@/lib/profile-form/branch-tree';
 import {
+  type ArchiveBranchActionResult,
+  archiveBranchAction,
   type BranchFieldKey,
   createBranchAction,
   type ImpactActionResult,
@@ -38,6 +42,7 @@ import {
 } from './actions';
 import { useBranchLabeler } from './BranchBlock';
 import { BranchValuesPicker } from './BranchValuesPicker';
+import { DependentsAlert } from './DependentsAlert';
 import { SheetSelect } from './SheetSelect';
 
 interface BranchSheetBaseProps {
@@ -370,6 +375,9 @@ function EditBranchSheet({
   const [undoReading, setUndoReading] = useState(false);
   const [undoOpen, setUndoOpen] = useState(false);
   const [undoMembers, setUndoMembers] = useState(0);
+  // "Arquivar ramo" (UI-D-672): a plain explanation; the server's refusal lands in the dependents alert.
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveDependents, setArchiveDependents] = useState<Dependent[] | null>(null);
   /** What to do once the admin confirms the discard dialog; absent means close the sheet. */
   const afterDiscard = useRef<(() => void) | null>(null);
 
@@ -385,6 +393,7 @@ function EditBranchSheet({
   // the answers may belong to an archived question).
   const locked = branch.answerCount > 0;
   const lockedCount = Math.max(1, members.filter((member) => member.answerCount > 0).length);
+  const subtreeCount = countsOf(tree, branch.id).subtree;
   const hasNested = members.some((member) => usableBranchesOf(tree, member.id).length > 0);
 
   // The eligible openers, plus the branch's own opener whatever the rules say today, so the select never lies.
@@ -517,6 +526,33 @@ function EditBranchSheet({
       // The branch is not there any more (another admin undid or removed it): the page re-reads.
       router.refresh();
       onClose();
+    } else setRefusal('failed');
+  }
+
+  /** "Arquivar ramo": no impact to read (it frees members); only the dialog's confirm writes. */
+  async function confirmArchive() {
+    setArchiveDependents(null);
+    setRefusal(null);
+    let result: ArchiveBranchActionResult = { ok: false, code: 'failed' };
+    try {
+      result = await archiveBranchAction(branch.id);
+    } catch {
+      // A thrown request reads like any other failed write: the sheet stays open.
+    }
+    if (result.ok) {
+      toast.show({ tone: 'success', message: t('branches.toasts.archived') });
+      router.refresh();
+      onClose();
+      return;
+    }
+    if (result.code === 'forbidden') lostPermission(tAdmin('errors.forbidden'));
+    else if (result.code === 'moduleOff') lostPermission(t('errors.moduleOff'));
+    else if (result.code === 'gone') {
+      router.refresh();
+      onClose();
+    } else if (result.code === 'hasDependents' && result.dependents.length > 0) {
+      // Never a success: the openers to undo first are listed above the footer and the sheet stays open.
+      setArchiveDependents(result.dependents);
     } else setRefusal('failed');
   }
 
@@ -771,6 +807,10 @@ function EditBranchSheet({
             </div>
           </fieldset>
 
+          {archiveDependents ? (
+            <DependentsAlert kind="archiveBranch" dependents={archiveDependents} />
+          ) : null}
+
           <Button
             type="submit"
             fullWidth
@@ -799,6 +839,18 @@ function EditBranchSheet({
             <Undo2 aria-hidden size={18} />
             {t('branches.undo.button')}
           </Button>
+          {branch.questionCount > 0 ? (
+            <Button
+              variant="ghost"
+              fullWidth
+              className="min-h-11"
+              disabled={saving}
+              onClick={() => setArchiveOpen(true)}
+            >
+              <Archive aria-hidden size={18} />
+              {t('branches.archive.button')}
+            </Button>
+          ) : null}
         </div>
       </BottomSheet>
 
@@ -839,6 +891,17 @@ function EditBranchSheet({
         cancelLabel={t('branches.undo.cancel')}
         onConfirm={confirmUndo}
         onClose={() => setUndoOpen(false)}
+      />
+      <ConfirmDialog
+        open={archiveOpen}
+        tone="brand"
+        icon={Archive}
+        title={t('branches.archive.title')}
+        body={t('branches.archive.body', { count: subtreeCount })}
+        confirmLabel={t('branches.archive.confirm')}
+        cancelLabel={t('branches.archive.cancel')}
+        onConfirm={confirmArchive}
+        onClose={() => setArchiveOpen(false)}
       />
     </>
   );

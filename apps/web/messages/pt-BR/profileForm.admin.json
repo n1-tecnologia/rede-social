@@ -98,10 +98,18 @@
           "confirmRequire": "Desfazer e exigir",
           "cancel": "Manter ramo"
         },
+        "archive": {
+          "button": "Arquivar ramo",
+          "title": "Arquivar este ramo?",
+          "body": "{count, plural, one {A pergunta dele e os ramos dentro dela saem do formulário.} other {As # perguntas dele e os ramos dentro delas saem do formulário.}} As respostas continuam guardadas e você pode reativar o ramo depois.",
+          "confirm": "Arquivar ramo",
+          "cancel": "Manter ramo"
+        },
         "toasts": {
           "created": "Ramo criado.",
           "saved": "Ramo salvo.",
-          "undone": "Ramo desfeito."
+          "undone": "Ramo desfeito.",
+          "archived": "Ramo arquivado."
         }
       },
       "reorder": {
@@ -234,10 +242,12 @@
           "archive": "Esta pergunta abre outras e não pode ser arquivada agora.",
           "delete": "Esta pergunta abre outras e não pode ser excluída agora.",
           "type": "Esta pergunta abre outras e não pode mudar de tipo agora.",
-          "option": "A opção “{label}” abre outras perguntas e não pode ser removida agora."
+          "option": "A opção “{label}” abre outras perguntas e não pode ser removida agora.",
+          "archiveBranch": "Este ramo não pode ser arquivado agora."
         },
         "hint": "Remova a condição destas perguntas, ou arquive-as, e tente de novo:",
         "hintOption": "Tire esta opção da condição destas perguntas, ou remova a condição delas, e tente de novo:",
+        "hintArchiveBranch": "Estas perguntas abrem ramos que já têm respostas. Desfaça esses ramos e tente de novo:",
         "more": "e mais {count, plural, one {# pergunta} other {# perguntas}}"
       },
       "editor": {

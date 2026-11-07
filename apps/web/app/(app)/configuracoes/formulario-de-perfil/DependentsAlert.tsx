@@ -42,7 +42,13 @@ export function DependentsAlert({ kind, dependents, label = '' }: DependentsAler
         {t(`dependents.title.${kind}`, { label })}
       </span>
       <span className="text-xs font-normal text-text-secondary">
-        {t(kind === 'option' ? 'dependents.hintOption' : 'dependents.hint')}
+        {t(
+          kind === 'option'
+            ? 'dependents.hintOption'
+            : kind === 'archiveBranch'
+              ? 'dependents.hintArchiveBranch'
+              : 'dependents.hint',
+        )}
       </span>
       <ul
         aria-label={t('editor.opens.listLabel')}

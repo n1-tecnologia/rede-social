@@ -969,9 +969,35 @@ export type ArchiveBranchActionResult =
   | { ok: false; code: 'gone' | 'forbidden' | 'moduleOff' | 'failed' };
 
 /**
- * RED STUB (12.2-17 Task 3): inert on purpose, replaced in full by the GREEN commit. It answers `failed` so the
- * tests that expect the POST fail for the missing behaviour, not for a missing export.
+ * `POST /v1/profile_form/branches/{id}/archive` (12.2-17, D-653): "Arquivar ramo". The branch, every branch that
+ * hangs on an opener inside it and every question of that subtree leave the form together and every answer
+ * stays; it frees members, so it needs no impact count. The server refuses with 409 `has_dependents` when a
+ * question of the subtree opens a branch that HAS ANSWERS; the openers come back in `dependents` (titles only)
+ * and the screen renders them in the dependents alert, never as a success. Any other 409 is `failed`; the bare
+ * 404 is `gone`. The id is validated as a uuid before anything leaves the server tier (T-12.2-01).
  */
-export async function archiveBranchAction(_id: string): Promise<ArchiveBranchActionResult> {
+export async function archiveBranchAction(id: string): Promise<ArchiveBranchActionResult> {
+  if (!z.uuid().safeParse(id).success) return { ok: false, code: 'failed' };
+
+  const sent = await send('archive_branch', `/v1/profile_form/branches/${id}/archive`, {
+    method: 'POST',
+  });
+  if (sent.kind === 'ok') {
+    const branch = adminBranchSchema.safeParse(sent.body);
+    return branch.success ? { ok: true, branch: branch.data } : { ok: false, code: 'failed' };
+  }
+
+  const failure = failureOf('archive_branch', sent);
+  if (failure.navigate) redirect(failure.navigate);
+  const result = failure.result;
+  if (result.code === 'conflict') {
+    if (result.issue === 'has_dependents') {
+      return { ok: false, code: 'hasDependents', dependents: result.dependents ?? [] };
+    }
+    return { ok: false, code: result.issue === 'not_found' ? 'gone' : 'failed' };
+  }
+  if (result.code === 'forbidden' || result.code === 'moduleOff') {
+    return { ok: false, code: result.code };
+  }
   return { ok: false, code: 'failed' };
 }
