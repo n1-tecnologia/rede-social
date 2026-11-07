@@ -5,10 +5,10 @@ current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: 21
 status: verifying
 stopped_at: "Phase 12.2 EXECUTED 21/21 on 2026-11-06 (nothing pushed, 154 commits ahead of origin/master): code review 0 critical/4 warnings (WR-01..04), regression gate green, verification human_needed 16/16 truths in code; 8 owner items (M1..M8) persisted as 12.2-UAT.md; phase NOT marked complete; next /gsd-verify-work 12.2 after Igor's proofs; Phase 13 stays paused at plan 14"
-last_updated: "2026-11-07T02:28:18.218Z"
+last_updated: "2026-11-07T11:25:30.832Z"
 last_activity: 2026-11-06
 last_activity_desc: Phase 12.2 execution started
-state_head: bb65de74c75c70cceb587b63e80b870149c0a320
+state_head: 965462596a406d9d9c5255aebfedda3b270b75b0
 progress:
   total_phases: 30
   completed_phases: 0
@@ -1196,6 +1196,7 @@ None yet.
 | 261030-g1y | Keep the validated deep-link destination when a data loader's profile-form refusal wins the race; pick one replace button in the admin spec | 2026-10-30 | 87f701d9 | complete | [261030-g1y-fix-profile-form-gate-deep-link-race-kee](./quick/261030-g1y-fix-profile-form-gate-deep-link-race-kee/) |
 | 261030-hh2 | Centre the 44px hit area of sm buttons so a 1px border no longer shaves it to 42px (shared Button primitive) | 2026-10-30 | 18d9f0f8 | complete | [261030-hh2-fix-the-44px-touch-target-of-bordered-ou](./quick/261030-hh2-fix-the-44px-touch-target-of-bordered-ou/) |
 | 261106-ei5 | Phase 12.1: a new or reactivated conditional question is stored right after its opener (same step), after the opener's last active dependent; other step and unconditional keep the end of the step; server only, not pushed | 2026-11-06 | 69620c4e | complete | [261106-ei5-phase-12-1-a-new-conditional-question-is](./quick/261106-ei5-phase-12-1-a-new-conditional-question-is/) |
+| 48 | 12.2 CI fix: save-step tracer expected an empty branch to change the member formEtag (stale after WR-02) | 2026-11-07 | 96546259 | — | — |
 
 ### Roadmap Evolution
 
