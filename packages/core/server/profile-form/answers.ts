@@ -9,6 +9,7 @@ import { type Tx, withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { membershipOfRecord } from '../tenancy/membership-scope';
 import { liveModuleOn } from './member';
+import { questionVisibleSql } from './visibility-sql';
 
 /**
  * The READING side of the privacy promise (Phase 12-07, D-593, PFORM-18, PFORM-19): what one member sees of
@@ -96,6 +97,12 @@ async function ownMembershipId(tx: Tx, ctx: Ctx): Promise<string | null> {
  * Only answered rows of questions that are `show_on_profile` and not archived are returned, in the admin's
  * order. Each row carries `questionId`, `title`, `type`, `options` and `value` and nothing else: no e-mail,
  * no membership id, no flag, no staff-only marker.
+ *
+ * WR-03: an answer of a question whose branch chain is CLOSED for the target is never returned, whatever is
+ * stored (the shared `questionVisibleSql` fragment, a second layer beside the member's own purge on save).
+ * The fragment reads the target's answers to the openers on the chain under the VIEWER's row-level policy, which
+ * shows a public answer only: every opener on the chain of a public question is public (PFORM-53), and one that
+ * is not hides the answer, the safe direction.
  */
 export async function publicAnswersOf(
   ctx: Ctx,
@@ -116,6 +123,9 @@ export async function publicAnswersOf(
          and a.membership_id = ${target}::uuid
          and q.show_on_profile
          and q.archived_at is null
+         and ${sql.raw(
+           questionVisibleSql({ question: 'q', tenant: 'a.tenant_id', member: 'a.membership_id' }),
+         )}
        order by q.position, q.created_at, q.id`);
     return {
       kind: 'member',

@@ -8,6 +8,7 @@ import { moduleLogger } from '../logging';
 import { recordModerationAction } from '../moderation/log';
 import { answerText, CSV_BOM, csvCell, csvRow, type ExportQuestion } from './csv';
 import { liveModuleOn } from './member';
+import { questionVisibleSql } from './visibility-sql';
 
 const log = moduleLogger('profile-form-export');
 
@@ -26,6 +27,10 @@ const log = moduleLogger('profile-form-export');
  * statements: **the `m.tenant_id = ${ctx.tenantId}` and `a.tenant_id = ${ctx.tenantId}` predicates on every
  * statement are the only isolation** (T-12-25). `ctx.tenantId` is the membership of record from
  * `requireAuth`, never input; WHO may call is the route's `requirePermission('profile_form.manage')`.
+ *
+ * CLOSED BRANCHES (review WR-03). A cell is written only for a question the member SEES: one whose branch chain
+ * is closed for her carries no cell, whatever an old row still holds (the shared `questionVisibleSql` fragment,
+ * a second layer beside the purge that runs when she saves). Archived questions keep their cells.
  *
  * ROW SET (assumption A-12-02, planner decision (b), Igor to confirm at UAT): every live `member`-role
  * membership of the tenant, `active` AND `blocked`; invited memberships, staff and soft-deleted memberships
@@ -136,7 +141,12 @@ async function readPage(
              coalesce(
                (select jsonb_object_agg(a.question_id::text, a.value)
                   from profile_form_answers a
-                 where a.tenant_id = ${ctx.tenantId}::uuid and a.membership_id = m.id),
+                  join profile_form_questions q
+                    on q.tenant_id = a.tenant_id and q.id = a.question_id
+                 where a.tenant_id = ${ctx.tenantId}::uuid and a.membership_id = m.id
+                   and ${sql.raw(
+                     questionVisibleSql({ question: 'q', tenant: 'a.tenant_id', member: 'm.id' }),
+                   )}),
                '{}'::jsonb) as answers
         from memberships m
         join users u on u.id = m.user_id

@@ -573,6 +573,30 @@ describe('12.1-12 tracer: a closed answer leaves every reader and the staff row 
     return { step, yes, no, opener, dependent, archivedDependent, branch };
   }
 
+  it('WR-03 a stale answer under a CLOSED branch (a row the purge never saw) is not returned to a member viewer, while the open branch of a bystander still is', async () => {
+    const owner = await person();
+    const bystander = await person();
+    const viewer = await person();
+    await withProfileForm(labTenantId, async () => {
+      const f = await fixture();
+      // The owner says "Não" (the branch is closed for her) yet a row is planted under it, as a missed purge path
+      // (a restore, an import) would leave; the bystander says "Sim" and keeps hers.
+      await answer(owner.userId, f.opener, choose(f.no));
+      await answer(owner.userId, f.dependent, 'fechada-mas-guardada');
+      await answer(bystander.userId, f.opener, choose(f.yes));
+      await answer(bystander.userId, f.dependent, 'aberta');
+      const ownerId = await membershipOf(owner.userId, labTenantId);
+      const bystanderId = await membershipOf(bystander.userId, labTenantId);
+
+      const closed = (await (await read(viewer, ownerId)).json()) as Answers;
+      expect(closed.answers.map((row) => row.questionId)).toEqual([f.opener]);
+      expect(JSON.stringify(closed)).not.toContain('fechada-mas-guardada');
+
+      const open = (await (await read(viewer, bystanderId)).json()) as Answers;
+      expect(open.answers.map((row) => row.questionId)).toEqual([f.opener, f.dependent]);
+    });
+  }, 60_000);
+
   it('D-636 archived: the member changes the opener, the ACTIVE and the ARCHIVED dependent answers are gone from the store, the public block and the staff view, a bystander keeps hers, and the staff row names its branch', async () => {
     const owner = await person();
     const bystander = await person();

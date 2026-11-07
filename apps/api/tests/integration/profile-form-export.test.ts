@@ -607,8 +607,8 @@ describe('12-10 tenant isolation (PFORM-08 route half, T-12-25)', () => {
 });
 
 /**
- * 12.1-12 (D-624, D-634, D-636; PFORM-39 idempotency; T-12.1-03): the CSV reads the stored rows with NO
- * visibility filter, and that is correct because stored equals visible. A member answers an opener, an ACTIVE
+ * 12.1-12 (D-624, D-634, D-636; PFORM-39 idempotency; T-12.1-03): the CSV used to read the stored rows with NO
+ * visibility filter because stored equals visible (since WR-03 it also applies the chain, as a second layer). A member answers an opener, an ACTIVE
  * and an ARCHIVED conditional question, then closes them through the real save route: both cells are empty,
  * the columns stay (one column per question, archived included), and two exports return identical bytes.
  * Both exports are made by the seeded lab admin (each writes one append-only moderation row, as in 12-10).
@@ -710,6 +710,45 @@ describe('12.1-12 the CSV carries no closed answer and keeps its columns (D-634,
 
       // PFORM-39 idempotency: a second export of the unchanged data is the same file.
       expect(await csvOf()).toBe(firstText);
+    });
+  }, 60_000);
+});
+
+describe('WR-03 the CSV never carries a stale answer under a closed branch', () => {
+  it('a row planted under a branch closed for the member leaves an empty cell, the open member keeps hers', async () => {
+    await withProfileForm(labTenantId, async () => {
+      const closed = await member('member', { displayName: 'pfx Ana Fechada' });
+      const open = await member('member', { displayName: 'pfx Bia Aberta' });
+      const yes = crypto.randomUUID();
+      const no = crypto.randomUUID();
+      const opener = await question({
+        title: `${TITLE}Abridora`,
+        type: 'single_choice',
+        position: 1,
+        options: [
+          { id: yes, label: 'Sim' },
+          { id: no, label: 'Não' },
+        ],
+      });
+      const branchId = await seedProfileFormBranch({
+        tenantId: labTenantId,
+        openerQuestionId: opener,
+        values: [yes],
+      });
+      await question({ title: `${TITLE}Dependente`, position: 2, branchId });
+      const dependent = await question({ title: `${TITLE}Dependente 2`, position: 3, branchId });
+      await answer(closed.userId, opener, { optionId: no, otherText: null });
+      await answer(closed.userId, dependent, 'guardada-fechada');
+      await answer(open.userId, opener, { optionId: yes, otherText: null });
+      await answer(open.userId, dependent, 'guardada-aberta');
+
+      const res = await callExport(labAdmin.token);
+      expect(res.status).toBe(200);
+      const csv = parseCsv(await bodyOf(res));
+      const cell = (email: string) =>
+        mine(csv).get(email)?.[csv.header.indexOf(`${TITLE}Dependente 2`)];
+      expect(cell(closed.email)).toBe('');
+      expect(cell(open.email)).toBe('guardada-aberta');
     });
   }, 60_000);
 });
