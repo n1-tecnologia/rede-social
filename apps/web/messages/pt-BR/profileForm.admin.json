@@ -59,6 +59,7 @@
         "limit": "Você chegou ao limite de {max} ramos. Desfaça ou arquive um ramo para criar outro.",
         "sheet": {
           "createTitle": "Novo ramo",
+          "editTitle": "Editar ramo",
           "opener": "Pergunta que decide",
           "legend": "Mostrar quando a resposta for",
           "help": "Basta uma das opções marcadas para o ramo abrir.",
@@ -76,10 +77,16 @@
           "save": "Salvar ramo",
           "saving": "Salvando…",
           "discardBody": "As mudanças deste ramo ainda não foram salvas.",
-          "failed": "Não foi possível salvar o ramo agora. Tente de novo."
+          "failed": "Não foi possível salvar o ramo agora. Tente de novo.",
+          "questions": "Perguntas deste ramo",
+          "more": "e mais {count, plural, one {# pergunta} other {# perguntas}}",
+          "requiredNote": "As perguntas obrigatórias deste ramo só precisam de resposta de quem as vê.",
+          "stale": "Este ramo mudou enquanto você editava. Atualizamos a lista; confira e tente de novo.",
+          "reset": "A pergunta que decide mudou, então as respostas escolhidas foram limpas."
         },
         "toasts": {
-          "created": "Ramo criado."
+          "created": "Ramo criado.",
+          "saved": "Ramo salvo."
         }
       },
       "reorder": {

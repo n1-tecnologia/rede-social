@@ -2536,7 +2536,9 @@ describe('12.2-17 Task 1: an existing branch opens from the Lista and from its o
     expect((screen.getByLabelText('Nome do ramo (opcional)') as HTMLInputElement).value).toBe(
       'Quem tem clínica',
     );
-    expect(screen.getByText('Nome da clínica')).toBeTruthy();
+    expect(
+      within(screen.getByRole('dialog', { name: 'Editar ramo' })).getByText('Nome da clínica'),
+    ).toBeTruthy();
   });
 
   it('opens the same sheet from a row of "Ramos desta pergunta", with one sheet in the page', () => {

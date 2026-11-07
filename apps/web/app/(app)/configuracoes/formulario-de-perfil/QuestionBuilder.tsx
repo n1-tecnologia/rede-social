@@ -18,6 +18,7 @@ import { QuestionList } from './QuestionList';
 import { StepSheet, type StepSheetMode } from './StepSheet';
 
 const NO_STEPS: AdminStep[] = [];
+const NO_BRANCHES: AdminBranch[] = [];
 
 export interface QuestionBuilderProps {
   /** The ACTIVE questions in the order members see them. */
@@ -45,11 +46,19 @@ interface Opening {
   branchId?: string;
 }
 
-interface BranchOpening {
-  id: number;
-  /** The question that decides; its newest copy is read from `questions` at render, so a refresh brings it. */
-  opener: AdminQuestion;
-}
+type BranchOpening =
+  | {
+      id: number;
+      /** Create mode: the question that decides; its newest copy is read from `questions` at render. */
+      opener: AdminQuestion;
+      branch?: undefined;
+    }
+  | {
+      id: number;
+      /** Edit mode: the branch; its newest copy is read from `branches` at render, so a refresh brings its revision. */
+      branch: AdminBranch;
+      opener?: undefined;
+    };
 
 interface StepOpening {
   id: number;
@@ -101,6 +110,14 @@ export function QuestionBuilder({
     setOpening(null);
     setOpen(false);
     setBranchOpening((current) => ({ id: (current?.id ?? 0) + 1, opener }));
+    setBranchOpen(true);
+  }, []);
+  // 12.2-17: the same hand-off for an existing branch, from the strip's pencil and from a row of "Ramos desta
+  // pergunta" (the question sheet has already left through its dirty guard). Never two sheets mounted together.
+  const openEditBranch = useCallback((branch: AdminBranch) => {
+    setOpening(null);
+    setOpen(false);
+    setBranchOpening((current) => ({ id: (current?.id ?? 0) + 1, branch }));
     setBranchOpen(true);
   }, []);
   const closeBranch = useCallback(() => setBranchOpen(false), []);
@@ -166,6 +183,14 @@ export function QuestionBuilder({
     ? questions.filter((question) => question.stepId === renamed.id).length
     : 0;
 
+  // The branch being edited, in its newest copy; one that was archived or undone meanwhile closes the sheet.
+  const editedBranch =
+    branchOpening?.branch !== undefined
+      ? (branches ?? NO_BRANCHES).find(
+          (branch) => branch.id === branchOpening.branch?.id && branch.archivedAt === null,
+        )
+      : undefined;
+
   return (
     <>
       {showList ? (
@@ -181,6 +206,7 @@ export function QuestionBuilder({
           onRenameStep={openRenameStep}
           onAddToStep={openCreateIn}
           onAddToBranch={openCreateInBranch}
+          onEditBranch={openEditBranch}
           onPreview={openPreview}
         />
       ) : (
@@ -219,9 +245,10 @@ export function QuestionBuilder({
           onClose={close}
           onReplace={openReplace}
           onCreateBranch={openCreateBranch}
+          onOpenBranch={openEditBranch}
         />
       ) : null}
-      {branchOpening ? (
+      {branchOpening?.opener ? (
         <BranchSheet
           key={branchOpening.id}
           open={branchOpen}
@@ -232,6 +259,19 @@ export function QuestionBuilder({
           steps={steps}
           onClose={closeBranch}
           onSaved={closeBranch}
+        />
+      ) : null}
+      {editedBranch ? (
+        <BranchSheet
+          key={branchOpening?.id}
+          open={branchOpen}
+          branch={editedBranch}
+          questions={questions}
+          branches={branches ?? NO_BRANCHES}
+          steps={steps}
+          onClose={closeBranch}
+          onSaved={closeBranch}
+          onAddQuestion={openCreateInBranch}
         />
       ) : null}
       {stepOpening ? (

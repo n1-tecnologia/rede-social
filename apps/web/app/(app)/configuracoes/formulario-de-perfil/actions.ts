@@ -22,6 +22,8 @@ import {
   profileFormSummarySchema,
   reorderBodySchema,
   replaceQuestionBodySchema,
+  type UpdateBranchBody,
+  updateBranchBodySchema,
   updateQuestionBodySchema,
   updateStepBodySchema,
 } from '@rede-social/contracts/profile-form';
@@ -805,6 +807,67 @@ function branchFieldOf(head: PropertyKey | undefined): BranchFieldKey {
   return 'form';
 }
 
+/** The body of a 400 from a branch write, as per-field issue codes (the first issue of a field wins). */
+function invalidFromEnvelope(envelope: ErrorBody): Extract<SaveBranchResult, { code: 'invalid' }> {
+  const fields: Partial<Record<BranchFieldKey, string>> = {};
+  const issues = envelope.details?.issues;
+  if (Array.isArray(issues)) {
+    for (const entry of issues as { path?: unknown; message?: unknown }[]) {
+      const head = typeof entry.path === 'string' ? entry.path.split('.')[0] : undefined;
+      const key = branchFieldOf(head);
+      if (fields[key] === undefined) fields[key] = String(entry.message ?? 'invalid');
+    }
+  } else {
+    // The route lifts the first issue code to `details.profileForm`: the path is lost.
+    const lifted = envelope.details?.profileForm;
+    fields.form = typeof lifted === 'string' ? lifted : 'invalid';
+  }
+  return { ok: false, code: 'invalid', fields };
+}
+
+/**
+ * The closed vocabulary of a failed branch write (create and edit): a 400 per field; 409 `branch_limit` as
+ * `limit`; 409 `stale_revision` as its own code; any other 409 and a bare 404 as a `conflict` that names the
+ * issue; the shared codes of `failureOf`. A 401 or a session-level 403 is the `(app)` navigation, done by the
+ * caller OUTSIDE any try/catch.
+ */
+function branchFailureOf(
+  label: string,
+  sent: Exclude<Sent, { kind: 'ok' }>,
+): { result: Extract<SaveBranchResult, { ok: false }>; navigate: string | null } {
+  if (sent.kind === 'error' && sent.status === 400 && sent.envelope?.code === 'VALIDATION_FAILED') {
+    return { result: invalidFromEnvelope(sent.envelope), navigate: null };
+  }
+  const failure = failureOf(label, sent);
+  if (failure.navigate)
+    return { result: { ok: false, code: 'failed' }, navigate: failure.navigate };
+  const result = failure.result;
+  if (result.code === 'conflict') {
+    if (result.issue === 'branch_limit')
+      return { result: { ok: false, code: 'limit' }, navigate: null };
+    if (result.issue === 'stale_revision') {
+      return { result: { ok: false, code: 'stale_revision' }, navigate: null };
+    }
+    return { result: { ok: false, code: 'conflict', issue: result.issue }, navigate: null };
+  }
+  if (result.code === 'limit' || result.code === 'forbidden' || result.code === 'moduleOff') {
+    return { result: { ok: false, code: result.code }, navigate: null };
+  }
+  return { result: { ok: false, code: 'failed' }, navigate: null };
+}
+
+/** A body the contract refuses, as per-field issue codes of the branch sheet. */
+function invalidFromIssues(
+  issues: readonly { path: PropertyKey[]; message: string }[],
+): Extract<SaveBranchResult, { code: 'invalid' }> {
+  const fields: Partial<Record<BranchFieldKey, string>> = {};
+  for (const issue of issues) {
+    const key = branchFieldOf(issue.path[0]);
+    if (fields[key] === undefined) fields[key] = issue.message;
+  }
+  return { ok: false, code: 'invalid', fields };
+}
+
 /**
  * `POST /v1/profile_form/branches`: a new, EMPTY branch from its opener (D-651). The body is validated here with
  * the contract's own schema first (answers 1 to 20 and unique, the name trimmed, at most 60 CODE POINTS, a
@@ -814,14 +877,7 @@ function branchFieldOf(head: PropertyKey | undefined): BranchFieldKey {
  */
 export async function createBranchAction(body: unknown): Promise<SaveBranchResult> {
   const parsed = createBranchBodySchema.safeParse(body);
-  if (!parsed.success) {
-    const fields: Partial<Record<BranchFieldKey, string>> = {};
-    for (const issue of parsed.error.issues) {
-      const key = branchFieldOf(issue.path[0]);
-      if (fields[key] === undefined) fields[key] = issue.message;
-    }
-    return { ok: false, code: 'invalid', fields };
-  }
+  if (!parsed.success) return invalidFromIssues(parsed.error.issues);
 
   const sent = await send('create_branch', '/v1/profile_form/branches', {
     method: 'POST',
@@ -833,40 +889,35 @@ export async function createBranchAction(body: unknown): Promise<SaveBranchResul
     return branch.success ? { ok: true, branch: branch.data } : { ok: false, code: 'failed' };
   }
 
-  if (sent.kind === 'error' && sent.status === 400 && sent.envelope?.code === 'VALIDATION_FAILED') {
-    const fields: Partial<Record<BranchFieldKey, string>> = {};
-    const issues = sent.envelope.details?.issues;
-    if (Array.isArray(issues)) {
-      for (const entry of issues as { path?: unknown; message?: unknown }[]) {
-        const head = typeof entry.path === 'string' ? entry.path.split('.')[0] : undefined;
-        const key = branchFieldOf(head);
-        if (fields[key] === undefined) fields[key] = String(entry.message ?? 'invalid');
-      }
-    } else {
-      // The route lifts the first issue code to `details.profileForm`: the path is lost.
-      const lifted = sent.envelope.details?.profileForm;
-      fields.form = typeof lifted === 'string' ? lifted : 'invalid';
-    }
-    return { ok: false, code: 'invalid', fields };
-  }
-
-  const failure = failureOf('create_branch', sent);
+  const failure = branchFailureOf('create_branch', sent);
   if (failure.navigate) redirect(failure.navigate);
-  const result = failure.result;
-  if (result.code === 'conflict') {
-    if (result.issue === 'branch_limit') return { ok: false, code: 'limit' };
-    return { ok: false, code: 'conflict', issue: result.issue };
-  }
-  if (result.code === 'limit' || result.code === 'forbidden' || result.code === 'moduleOff') {
-    return { ok: false, code: result.code };
-  }
-  return { ok: false, code: 'failed' };
+  return failure.result;
 }
 
 /**
- * RED STUB (12.2-17 Task 1): inert on purpose, replaced in full by the GREEN commit. It answers `failed` so the
- * tests that expect the PATCH fail for the missing behaviour, not for a missing export.
+ * `PATCH /v1/profile_form/branches/{id}` (12.2-17, D-640, D-642, D-646): the edit of a branch under the optimistic
+ * `revision` the admin read. Only the keys sent change (`openerQuestionId`, `values`, `name`; a `null` name clears
+ * it). The id is validated as a uuid and the body with the contract's own schema before anything leaves the
+ * server tier. A stale revision is its own code, so the sheet keeps the draft and the page re-reads the branch;
+ * `condition_locked` (an answer arrived between the page read and the tap) and every other 409 come back as a
+ * `conflict` that names the issue. A foreign id is the server's bare 404 (T-12.2-01).
  */
-export async function updateBranchAction(_id: string, _body: unknown): Promise<SaveBranchResult> {
-  return { ok: false, code: 'failed' };
+export async function updateBranchAction(id: string, body: unknown): Promise<SaveBranchResult> {
+  if (!z.uuid().safeParse(id).success) return { ok: false, code: 'failed' };
+  const parsed = updateBranchBodySchema.safeParse(body);
+  if (!parsed.success) return invalidFromIssues(parsed.error.issues);
+
+  const sent = await send('update_branch', `/v1/profile_form/branches/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parsed.data satisfies UpdateBranchBody),
+  });
+  if (sent.kind === 'ok') {
+    const branch = adminBranchSchema.safeParse(sent.body);
+    return branch.success ? { ok: true, branch: branch.data } : { ok: false, code: 'failed' };
+  }
+
+  const failure = branchFailureOf('update_branch', sent);
+  if (failure.navigate) redirect(failure.navigate);
+  return failure.result;
 }
