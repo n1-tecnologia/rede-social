@@ -793,6 +793,8 @@ export type SaveBranchResult =
   | { ok: true; branch: AdminBranch }
   | { ok: false; code: 'invalid'; fields: Partial<Record<BranchFieldKey, string>> }
   | { ok: false; code: 'conflict'; issue: string }
+  // 12.2-17: the edit's optimistic lock (409 `stale_revision`): the branch changed while the admin edited it.
+  | { ok: false; code: 'stale_revision' }
   | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };
 
 /** The field of a branch body's issue path. */
@@ -858,5 +860,13 @@ export async function createBranchAction(body: unknown): Promise<SaveBranchResul
   if (result.code === 'limit' || result.code === 'forbidden' || result.code === 'moduleOff') {
     return { ok: false, code: result.code };
   }
+  return { ok: false, code: 'failed' };
+}
+
+/**
+ * RED STUB (12.2-17 Task 1): inert on purpose, replaced in full by the GREEN commit. It answers `failed` so the
+ * tests that expect the PATCH fail for the missing behaviour, not for a missing export.
+ */
+export async function updateBranchAction(_id: string, _body: unknown): Promise<SaveBranchResult> {
   return { ok: false, code: 'failed' };
 }

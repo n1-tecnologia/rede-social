@@ -30,6 +30,7 @@ const {
   reorderQuestionsAction,
   renameStepAction,
   replaceQuestionAction,
+  updateBranchAction,
   updateQuestionAction,
 } = await import('./actions');
 
@@ -1123,6 +1124,145 @@ describe('createBranchAction (12.2-16)', () => {
       ok: false,
       code: 'invalid',
       fields: { branch: 'unknown_branch' },
+    });
+  });
+});
+
+// ── 12.2-17: updateBranchAction (D-640, D-642, D-646; PFORM-49; T-12.2-01) ──────────────────────────
+
+describe('updateBranchAction (12.2-17)', () => {
+  const OPENER = uuid(4700);
+  const TOKEN = uuid(9701);
+  const BRANCH = {
+    id: uuid(4701),
+    openerQuestionId: OPENER,
+    values: [TOKEN],
+    name: 'Quem tem clínica',
+    revision: 4,
+    archivedAt: null,
+    questionCount: 2,
+    answerCount: 0,
+  };
+
+  it('PATCHes /v1/profile_form/branches/{id} with only the keys sent and returns the parsed branch', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, BRANCH));
+    expect(await updateBranchAction(BRANCH.id, { revision: 3, name: ' Novo nome ' })).toEqual({
+      ok: true,
+      branch: BRANCH,
+    });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/branches/${BRANCH.id}`);
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ revision: 3, name: 'Novo nome' });
+  });
+
+  it('sends a null name to clear it and the new opener and answers when given', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, BRANCH));
+    await updateBranchAction(BRANCH.id, {
+      revision: 3,
+      openerQuestionId: OPENER,
+      values: [TOKEN],
+      name: null,
+    });
+    const [, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      revision: 3,
+      openerQuestionId: OPENER,
+      values: [TOKEN],
+      name: null,
+    });
+  });
+
+  it('never leaves the server tier with a forged id or a body the contract refuses', async () => {
+    expect(await updateBranchAction('not-a-uuid', { revision: 1 })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    expect(await updateBranchAction(BRANCH.id, { revision: 0 })).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { form: 'invalid' },
+    });
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, values: [] })).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { values: 'condition_invalid' },
+    });
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x'.repeat(61) })).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { name: 'too_long' },
+    });
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, extra: true })).toMatchObject({
+      ok: false,
+      code: 'invalid',
+    });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('answers a 409 stale_revision as its own code', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: 'stale_revision' }));
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x' })).toEqual({
+      ok: false,
+      code: 'stale_revision',
+    });
+  });
+
+  it('answers the other 409s as a conflict that names the issue', async () => {
+    for (const issue of [
+      'condition_locked',
+      'branch_depth',
+      'already_archived',
+      'condition_order',
+    ]) {
+      mocks.apiFetch.mockResolvedValue(refusal(409, 'CONFLICT', { profileForm: issue }));
+      expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x' })).toEqual({
+        ok: false,
+        code: 'conflict',
+        issue,
+      });
+    }
+  });
+
+  it('answers a bare 404 as a conflict (not_found), a 400 per field, and the shared codes', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'NOT_FOUND'));
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x' })).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'not_found',
+    });
+    mocks.apiFetch.mockResolvedValue(
+      refusal(400, 'VALIDATION_FAILED', {
+        issues: [{ path: 'values', message: 'condition_invalid' }],
+      }),
+    );
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x' })).toEqual({
+      ok: false,
+      code: 'invalid',
+      fields: { values: 'condition_invalid' },
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x' })).toEqual({
+      ok: false,
+      code: 'forbidden',
+    });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x' })).toEqual({
+      ok: false,
+      code: 'moduleOff',
+    });
+  });
+
+  it('answers a thrown request and a body that breaks the contract as failed, redirecting only outside the try', async () => {
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x' })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockResolvedValue(json(200, { nope: true }));
+    expect(await updateBranchAction(BRANCH.id, { revision: 1, name: 'x' })).toEqual({
+      ok: false,
+      code: 'failed',
     });
   });
 });

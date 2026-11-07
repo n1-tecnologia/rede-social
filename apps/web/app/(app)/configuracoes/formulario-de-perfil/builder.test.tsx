@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   deleteStep: vi.fn(),
   layout: vi.fn(),
   createBranch: vi.fn(),
+  updateBranch: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -56,6 +57,7 @@ vi.mock('./actions', () => ({
   deleteStepAction: (...args: unknown[]) => mocks.deleteStep(...args),
   reorderLayoutAction: (...args: unknown[]) => mocks.layout(...args),
   createBranchAction: (...args: unknown[]) => mocks.createBranch(...args),
+  updateBranchAction: (...args: unknown[]) => mocks.updateBranch(...args),
 }));
 vi.mock('@/app/(auth)/completar-perfil/actions', () => ({
   saveProfileFormAction: (...args: unknown[]) => mocks.save(...args),
@@ -2390,12 +2392,6 @@ describe('12.2-16 Task 2: "Criar ramo" hands over to the branch sheet, never sta
     ],
   });
   const PLAIN = adminQuestion('short_text', { title: 'Cargo', stepId: U1.id });
-  const BR = adminBranch({ openerQuestionId: OPENER.id, values: [OA], name: 'Quem tem clínica' });
-  const MEMBER = adminQuestion('short_text', {
-    title: 'Nome da clínica',
-    stepId: U1.id,
-    branchId: BR.id,
-  });
   const SAVED = adminBranch({ openerQuestionId: OPENER.id, values: [OB], name: null });
 
   beforeEach(() => {
@@ -2488,18 +2484,143 @@ describe('12.2-16 Task 2: "Criar ramo" hands over to the branch sheet, never sta
     expect((screen.getByLabelText('Tenho') as HTMLInputElement).checked).toBe(false);
   });
 
-  it('shows the branches of the opener in the sheet but draws no row yet: plan 17 wires the edit mode', () => {
-    builder({ questions: [OPENER, MEMBER], steps: [U1], branches: [BR] });
-    openOpener();
-    const block = document.querySelector('[data-branches-block]') as HTMLElement;
-    expect(block).toBeTruthy();
-    expect(block.querySelector('li')).toBeNull();
-    expect(createBranchButton()).toBeTruthy();
-  });
-
   it('hands the sheet the question for a question that is not an opener type: no block at all', () => {
     builder({ questions: [OPENER, PLAIN], steps: [U1], branches: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Cargo' }));
     expect(document.querySelector('[data-branches-block]')).toBeNull();
+  });
+});
+
+describe('12.2-17 Task 1: an existing branch opens from the Lista and from its opener (D-640, UI-D-671)', () => {
+  const V1 = adminStep({ title: 'Geral' });
+  const V2 = adminStep({ title: 'Clínica' });
+  const OA = uuid(9801);
+  const OB = uuid(9802);
+  const OPENER = adminQuestion('single_choice', {
+    title: 'Tem clínica?',
+    stepId: V1.id,
+    options: [
+      { id: OA, label: 'Tenho', answerCount: 0 },
+      { id: OB, label: 'Não tenho', answerCount: 0 },
+    ],
+    opensCount: 1,
+  });
+  const BR = adminBranch({
+    openerQuestionId: OPENER.id,
+    values: [OA],
+    name: 'Quem tem clínica',
+    revision: 2,
+    questionCount: 1,
+  });
+  const MEMBER = adminQuestion('short_text', {
+    title: 'Nome da clínica',
+    stepId: V2.id,
+    branchId: BR.id,
+  });
+
+  beforeEach(() => {
+    mocks.updateBranch.mockResolvedValue({ ok: true, branch: { ...BR, revision: 3 } });
+  });
+
+  const props = () => ({ questions: [OPENER, MEMBER], steps: [V1, V2], branches: [BR] });
+  const pencil = () => screen.getByRole('button', { name: 'Editar ramo: Quem tem clínica' });
+
+  it('opens the edit sheet from the pencil of the strip, with the branch as it is stored', () => {
+    builder(props());
+    fireEvent.click(pencil());
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+    expect((screen.getByLabelText('Pergunta que decide') as HTMLSelectElement).value).toBe(
+      OPENER.id,
+    );
+    expect((screen.getByLabelText('Tenho') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Nome do ramo (opcional)') as HTMLInputElement).value).toBe(
+      'Quem tem clínica',
+    );
+    expect(screen.getByText('Nome da clínica')).toBeTruthy();
+  });
+
+  it('opens the same sheet from a row of "Ramos desta pergunta", with one sheet in the page', () => {
+    builder(props());
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Tem clínica?' }));
+    expect(screen.getByRole('dialog', { name: 'Editar pergunta' })).toBeTruthy();
+    const block = document.querySelector('[data-branches-block]') as HTMLElement;
+    fireEvent.click(within(block).getByRole('button', { name: /Quem tem clínica/ }));
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Editar pergunta' })).toBeNull();
+  });
+
+  it('goes through the dirty guard of the question sheet before it opens the branch', () => {
+    builder(props());
+    fireEvent.click(screen.getByRole('button', { name: 'Editar pergunta: Tem clínica?' }));
+    fireEvent.change(screen.getByLabelText('Pergunta'), { target: { value: 'Outro título' } });
+    const block = document.querySelector('[data-branches-block]') as HTMLElement;
+    fireEvent.click(within(block).getByRole('button', { name: /Quem tem clínica/ }));
+    expect(screen.queryByRole('dialog', { name: 'Editar ramo' })).toBeNull();
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Descartar as alterações?' })).getByRole('button', {
+        name: 'Descartar',
+      }),
+    );
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Editar pergunta' })).toBeNull();
+  });
+
+  it('saves under the revision of the branch, toasts, refreshes and closes the sheet', async () => {
+    builder(props());
+    fireEvent.click(pencil());
+    fireEvent.click(screen.getByLabelText('Não tenho'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar ramo' }));
+    });
+    expect(mocks.updateBranch).toHaveBeenCalledWith(BR.id, { revision: 2, values: [OA, OB] });
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Ramo salvo.' });
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('retries under the new revision when the page re-reads the branch after a stale answer', async () => {
+    mocks.updateBranch.mockResolvedValueOnce({ ok: false, code: 'stale_revision' });
+    const view = builder(props());
+    fireEvent.click(pencil());
+    fireEvent.click(screen.getByLabelText('Não tenho'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar ramo' }));
+    });
+    expect(screen.getByRole('dialog', { name: 'Editar ramo' })).toBeTruthy();
+    view.again({ ...props(), branches: [{ ...BR, revision: 7 }] });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar ramo' }));
+    });
+    expect(mocks.updateBranch).toHaveBeenLastCalledWith(BR.id, { revision: 7, values: [OA, OB] });
+  });
+
+  it('turns "Adicionar pergunta ao ramo" into the create sheet with the branch and its last step', () => {
+    builder(props());
+    fireEvent.click(pencil());
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar pergunta ao ramo' }));
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Nova pergunta' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /^Texto curto/ }));
+    expect((screen.getByLabelText('Ramo') as HTMLSelectElement).value).toBe(BR.id);
+    expect((screen.getByLabelText('Etapa') as HTMLSelectElement).value).toBe(V2.id);
+  });
+
+  it('opens a fresh sheet per opening, and never an edit sheet for an archived or vanished branch', () => {
+    const view = builder(props());
+    fireEvent.click(pencil());
+    fireEvent.change(screen.getByLabelText('Nome do ramo (opcional)'), { target: { value: 'x' } });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Descartar as alterações?' })).getByRole('button', {
+        name: 'Descartar',
+      }),
+    );
+    fireEvent.click(pencil());
+    expect((screen.getByLabelText('Nome do ramo (opcional)') as HTMLInputElement).value).toBe(
+      'Quem tem clínica',
+    );
+    view.again({ ...props(), branches: [] });
+    expect(screen.queryByRole('dialog', { name: 'Editar ramo' })).toBeNull();
   });
 });

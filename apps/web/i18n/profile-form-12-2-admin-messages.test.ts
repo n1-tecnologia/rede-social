@@ -226,6 +226,36 @@ describe('profileForm.admin.branches.sheet: the branch sheet, create mode (UI-D-
   });
 });
 
+describe('profileForm.admin.branches: the edit mode of the branch sheet (UI-D-671, 12.2-17)', () => {
+  it('declares the edit keys under branches.sheet and branches.toasts', () => {
+    const { sheet, toasts } = parsed.profileForm.admin.branches;
+    for (const key of ['editTitle', 'questions', 'more', 'requiredNote', 'stale', 'reset']) {
+      expect(sheet, key).toHaveProperty(key);
+    }
+    expect(toasts).toHaveProperty('saved');
+  });
+
+  it('reads the title, the questions block, the stale line and the toast verbatim', () => {
+    expect(t('branches.sheet.editTitle')).toBe('Editar ramo');
+    expect(t('branches.sheet.questions')).toBe('Perguntas deste ramo');
+    expect(t('branches.sheet.requiredNote')).toBe(
+      'As perguntas obrigatórias deste ramo só precisam de resposta de quem as vê.',
+    );
+    expect(t('branches.sheet.stale')).toBe(
+      'Este ramo mudou enquanto você editava. Atualizamos a lista; confira e tente de novo.',
+    );
+    expect(t('branches.sheet.reset')).toBe(
+      'A pergunta que decide mudou, então as respostas escolhidas foram limpas.',
+    );
+    expect(t('branches.toasts.saved')).toBe('Ramo salvo.');
+  });
+
+  it('the "e mais" line is an ICU plural: one and many', () => {
+    expect(t('branches.sheet.more', { count: 1 })).toBe('e mais 1 pergunta');
+    expect(t('branches.sheet.more', { count: 2 })).toBe('e mais 2 perguntas');
+  });
+});
+
 describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "branch", "fork" or "grupo condicional")', () => {
   const groups: Record<string, unknown> = {
     'editor.branch': parsed.profileForm.admin.editor.branch,

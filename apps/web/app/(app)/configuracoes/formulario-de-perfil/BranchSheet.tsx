@@ -23,17 +23,37 @@ import { type FormEvent, useCallback, useRef, useState } from 'react';
 import { type BranchFieldKey, createBranchAction, type SaveBranchResult } from './actions';
 import { BranchValuesPicker } from './BranchValuesPicker';
 
-export interface BranchSheetProps {
+interface BranchSheetBaseProps {
   open: boolean;
-  /** The question that decides (D-651: the branch is created from it); read-only in create mode. */
-  opener: AdminQuestion;
   /** The tenant's steps in order: the opener's step shows as a pill from two steps on. */
   steps: AdminStep[];
   /** MUST be stable (`useCallback`): the shipped focus trap re-arms when it changes. */
   onClose: () => void;
-  /** The branch was created: the host closes the sheet (the page was already refreshed here). */
+  /** The branch was saved: the host closes the sheet (the page was already refreshed here). */
   onSaved: (branch: AdminBranch) => void;
 }
+
+/** Create mode (12.2-16): the branch is created from its opener (D-651). */
+export interface BranchSheetCreateProps extends BranchSheetBaseProps {
+  /** The question that decides (D-651: the branch is created from it); read-only in create mode. */
+  opener: AdminQuestion;
+  branch?: undefined;
+}
+
+/** Edit mode (12.2-17): an existing branch, judged against the one admin read the page holds. */
+export interface BranchSheetEditProps extends BranchSheetBaseProps {
+  opener?: undefined;
+  /** The branch in its newest copy (the host re-reads it from `branches` at render). */
+  branch: AdminBranch;
+  /** The ACTIVE questions in stored order. */
+  questions: AdminQuestion[];
+  /** Every branch of the read, archived ones included. */
+  branches: AdminBranch[];
+  /** "Adicionar pergunta ao ramo": the host opens the question sheet with the branch and this step. */
+  onAddQuestion?: (branch: AdminBranch, stepId: string) => void;
+}
+
+export type BranchSheetProps = BranchSheetCreateProps | BranchSheetEditProps;
 
 const NAME_ID = 'pf-branch-name';
 
@@ -54,7 +74,13 @@ type Refusal = 'failed' | 'limit' | 'depth';
  * as the limit lines, any other refusal as the failure line, and a transport failure KEEPS the draft. React text
  * only: the opener title and the name are admin-typed (T-12.2-15).
  */
-export function BranchSheet({ open, opener, steps, onClose, onSaved }: BranchSheetProps) {
+function CreateBranchSheet({
+  open,
+  opener,
+  steps,
+  onClose,
+  onSaved,
+}: Omit<BranchSheetCreateProps, 'branch'>) {
   const t = useTranslations('profileForm.admin');
   const ts = useTranslations('profileForm.admin.branches.sheet');
   const te = useTranslations('profileForm.admin.editor');
@@ -267,4 +293,18 @@ export function BranchSheet({ open, opener, steps, onClose, onSaved }: BranchShe
       />
     </>
   );
+}
+
+/**
+ * RED STUB (12.2-17 Task 1): the edit mode is inert on purpose and replaced in full by the GREEN commit.
+ */
+function EditBranchSheet(_props: BranchSheetEditProps) {
+  return null;
+}
+
+/** The branch sheet: create mode from an opener (12.2-16), edit mode from a branch (12.2-17). */
+export function BranchSheet(props: BranchSheetProps) {
+  if (props.branch !== undefined) return <EditBranchSheet {...props} />;
+  const { branch: _branch, ...create } = props;
+  return <CreateBranchSheet {...create} />;
 }

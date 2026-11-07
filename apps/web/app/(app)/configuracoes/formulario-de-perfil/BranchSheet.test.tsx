@@ -17,13 +17,19 @@ import { adminBranch, adminQuestion, adminStep, uuid } from '@/lib/profile-form/
  * dirty guard and discard dialog, the pending state and the not-closable-while-saving rule.
  */
 
-const mocks = vi.hoisted(() => ({ create: vi.fn(), refresh: vi.fn(), show: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  create: vi.fn(),
+  update: vi.fn(),
+  refresh: vi.fn(),
+  show: vi.fn(),
+}));
 
 MotionGlobalConfig.skipAnimations = true;
 const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
 
 vi.mock('./actions', () => ({
   createBranchAction: (...args: unknown[]) => mocks.create(...args),
+  updateBranchAction: (...args: unknown[]) => mocks.update(...args),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -52,7 +58,7 @@ const OPENER = adminQuestion('single_choice', {
 const YESNO = adminQuestion('yes_no', { title: 'A clínica tem equipe?', stepId: S1.id });
 const SAVED = adminBranch({ openerQuestionId: OPENER.id, values: [A], name: 'Quem tem clínica' });
 
-function show(props: Partial<React.ComponentProps<typeof BranchSheet>> = {}) {
+function show(props: Partial<import('./BranchSheet').BranchSheetCreateProps> = {}) {
   const onClose = vi.fn();
   const onSaved = vi.fn();
   render(
@@ -478,5 +484,343 @@ describe('the width floor with 20 options at 320px (E4 overflow and long-text, a
     expect(alert.getAttribute('role')).toBe('alert');
     expect(alert.querySelector('svg')).toBeTruthy();
     expect(alert.textContent?.length).toBeGreaterThan(10);
+  });
+});
+
+// ── 12.2-17 Task 1: edit mode, the tracer (D-640, D-642, UI-D-671, UI-D-682) ───────────────────────────
+
+describe('12.2-17 Task 1: edit mode', () => {
+  const QA = adminQuestion('single_choice', {
+    title: 'Qual é a sua área de atuação?',
+    stepId: S1.id,
+    options: [
+      { id: uuid(9611), label: 'Estética', answerCount: 0 },
+      { id: uuid(9612), label: 'Odontologia', answerCount: 0 },
+    ],
+  });
+  const BR = adminBranch({
+    openerQuestionId: OPENER.id,
+    values: [A],
+    name: 'Quem tem clínica',
+    revision: 3,
+  });
+  const members = (count: number, overrides: Partial<ReturnType<typeof adminQuestion>> = {}) =>
+    Array.from({ length: count }, (_, at) =>
+      adminQuestion('short_text', {
+        title: `Pergunta do ramo ${at + 1}`,
+        stepId: S2.id,
+        branchId: BR.id,
+        ...overrides,
+      }),
+    );
+
+  function showEdit(
+    props: Partial<import('./BranchSheet').BranchSheetEditProps> = {},
+    memberCount = 3,
+  ) {
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+    const onAddQuestion = vi.fn();
+    const questions = props.questions ?? [QA, OPENER, ...members(memberCount)];
+    const view = render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <BranchSheet
+          open
+          branch={BR}
+          questions={questions}
+          branches={[BR]}
+          steps={[S1, S2]}
+          onClose={onClose}
+          onSaved={onSaved}
+          onAddQuestion={onAddQuestion}
+          {...props}
+        />
+      </NextIntlClientProvider>,
+    );
+    return { onClose, onSaved, onAddQuestion, ...view };
+  }
+
+  const openerSelect = () => screen.getByLabelText('Pergunta que decide') as HTMLSelectElement;
+  const listItems = () => {
+    const list = document.querySelector('[data-branch-questions] ul') as HTMLElement | null;
+    return list ? Array.from(list.querySelectorAll('li')) : [];
+  };
+
+  beforeEach(() => {
+    mocks.update.mockResolvedValue({ ok: true, branch: { ...BR, revision: 4 } });
+  });
+
+  it('opens "Editar ramo" with the opener select grouped by step, the ticked answers and the name', () => {
+    showEdit();
+    expect(screen.getByRole('heading', { name: 'Editar ramo' })).toBeTruthy();
+    expect(openerSelect().value).toBe(OPENER.id);
+    const groups = Array.from(openerSelect().querySelectorAll('optgroup')).map((group) => [
+      group.label,
+      Array.from(group.querySelectorAll('option')).map((option) => option.textContent),
+    ]);
+    expect(groups).toEqual([
+      ['Informações gerais', ['Qual é a sua área de atuação?']],
+      ['Sobre a sua clínica', ['Você tem clínica, trabalha em clínica ou está aprendendo?']],
+    ]);
+    expect(box('Tenho uma clínica').checked).toBe(true);
+    expect(box('Trabalho em uma clínica').checked).toBe(false);
+    expect(nameField().value).toBe('Quem tem clínica');
+    expect(screen.getByText('16/60')).toBeTruthy();
+    expect(screen.queryByText('Novo ramo')).toBeNull();
+  });
+
+  it('never offers an opener that comes after a question of the branch or sits inside it', () => {
+    const later = adminQuestion('yes_no', { title: 'Depois do ramo', stepId: S2.id });
+    const inside = adminQuestion('yes_no', {
+      title: 'Dentro do ramo',
+      stepId: S2.id,
+      branchId: BR.id,
+    });
+    showEdit({ questions: [QA, OPENER, ...members(2), inside, later] });
+    const labels = Array.from(openerSelect().querySelectorAll('option')).map((o) => o.textContent);
+    expect(labels).not.toContain('Depois do ramo');
+    expect(labels).not.toContain('Dentro do ramo');
+    expect(labels).toContain('Qual é a sua área de atuação?');
+  });
+
+  it('clears the ticked answers when the opener changes and says so in a polite status line', () => {
+    showEdit();
+    expect(document.querySelector('[data-branch-reset]')?.textContent ?? '').toBe('');
+    fireEvent.change(openerSelect(), { target: { value: QA.id } });
+    expect(openerSelect().value).toBe(QA.id);
+    const note = document.querySelector('[data-branch-reset]') as HTMLElement;
+    expect(note.getAttribute('role')).toBe('status');
+    expect(note.getAttribute('aria-live')).toBe('polite');
+    expect(note.textContent).toBe(
+      'A pergunta que decide mudou, então as respostas escolhidas foram limpas.',
+    );
+    expect(box('Estética').checked).toBe(false);
+    expect(save().hasAttribute('disabled')).toBe(true);
+    fireEvent.click(box('Odontologia'));
+    expect(save().hasAttribute('disabled')).toBe(false);
+  });
+
+  it('puts the original answers back, and removes the note, when the original opener is picked again', () => {
+    showEdit();
+    fireEvent.change(openerSelect(), { target: { value: QA.id } });
+    fireEvent.change(openerSelect(), { target: { value: OPENER.id } });
+    expect(box('Tenho uma clínica').checked).toBe(true);
+    expect(document.querySelector('[data-branch-reset]')?.textContent ?? '').toBe('');
+    expect(save().hasAttribute('disabled')).toBe(true);
+  });
+
+  it('lists up to 5 questions of the branch, then "e mais N", with the step pill from two steps', () => {
+    showEdit({}, 7);
+    expect(screen.getByText('Perguntas deste ramo')).toBeTruthy();
+    expect(listItems()).toHaveLength(5);
+    expect(listItems()[0]?.textContent).toContain('Pergunta do ramo 1');
+    expect(listItems()[0]?.textContent).toContain('Etapa 2');
+    expect(screen.getByText('e mais 2 perguntas')).toBeTruthy();
+  });
+
+  it('reads "e mais 1 pergunta" for six and no "e mais" line for five or fewer', () => {
+    const { unmount } = showEdit({}, 6);
+    expect(screen.getByText('e mais 1 pergunta')).toBeTruthy();
+    unmount();
+    cleanup();
+    showEdit({}, 5);
+    expect(listItems()).toHaveLength(5);
+    expect(screen.queryByText(/^e mais/)).toBeNull();
+  });
+
+  it('draws no step pill when the form has a single step', () => {
+    showEdit({ steps: [S2], questions: [OPENER, ...members(2)] });
+    expect(listItems()).toHaveLength(2);
+    expect(listItems()[0]?.textContent).not.toContain('Etapa');
+  });
+
+  it('shows the empty line instead of a list for a branch with no question, and still offers to add one', () => {
+    const { onAddQuestion } = showEdit({ questions: [QA, OPENER] });
+    expect(listItems()).toHaveLength(0);
+    expect(
+      screen.getByText(
+        'Este ramo está vazio. Ele só muda algo para os membros quando tiver uma pergunta.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar pergunta ao ramo' }));
+    // An empty branch goes to the last step of the form.
+    expect(onAddQuestion).toHaveBeenCalledWith(BR, S2.id);
+  });
+
+  it('says the required questions of the branch only need an answer from who sees them, only when one exists', () => {
+    const sentence = 'As perguntas obrigatórias deste ramo só precisam de resposta de quem as vê.';
+    const { unmount } = showEdit();
+    expect(screen.queryByText(sentence)).toBeNull();
+    unmount();
+    cleanup();
+    showEdit({ questions: [QA, OPENER, ...members(2, { required: true })] });
+    expect(screen.getByText(sentence)).toBeTruthy();
+  });
+
+  it('hands the question sheet the branch and the step of its last question', () => {
+    const { onAddQuestion } = showEdit({}, 3);
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar pergunta ao ramo' }));
+    expect(onAddQuestion).toHaveBeenCalledWith(BR, S2.id);
+  });
+
+  it('asks before leaving through "Adicionar pergunta ao ramo" with an unsaved change', () => {
+    const { onAddQuestion } = showEdit();
+    type('Outro nome');
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar pergunta ao ramo' }));
+    expect(onAddQuestion).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(dialog('Descartar as alterações?')).getByRole('button', { name: 'Descartar' }),
+    );
+    expect(onAddQuestion).toHaveBeenCalledWith(BR, S2.id);
+  });
+
+  it('hides "Adicionar pergunta ao ramo" when the host gives no way to add', () => {
+    showEdit({ onAddQuestion: undefined });
+    expect(screen.queryByRole('button', { name: 'Adicionar pergunta ao ramo' })).toBeNull();
+  });
+
+  it('keeps "Salvar ramo" disabled until something changed, and while no answer is ticked', () => {
+    showEdit();
+    expect(save().hasAttribute('disabled')).toBe(true);
+    fireEvent.click(box('Tenho uma clínica'));
+    expect(save().hasAttribute('disabled')).toBe(true);
+    fireEvent.click(box('Trabalho em uma clínica'));
+    expect(save().hasAttribute('disabled')).toBe(false);
+  });
+
+  it('sends only the name, under the revision, when only the name changed', async () => {
+    const { onSaved } = showEdit();
+    type('  Quem trabalha em clínica  ');
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.update).toHaveBeenCalledWith(BR.id, {
+      revision: 3,
+      name: 'Quem trabalha em clínica',
+    });
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Ramo salvo.' });
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledWith({ ...BR, revision: 4 });
+  });
+
+  it('sends only the answers, in the opener order, when only the answers changed', async () => {
+    showEdit();
+    fireEvent.click(box('Estou aprendendo'));
+    fireEvent.click(box('Trabalho em uma clínica'));
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(mocks.update).toHaveBeenCalledWith(BR.id, { revision: 3, values: [A, B, C] });
+  });
+
+  it('sends the new opener together with its new answers, and a cleared name as null', async () => {
+    showEdit();
+    fireEvent.change(openerSelect(), { target: { value: QA.id } });
+    fireEvent.click(box('Odontologia'));
+    type('');
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(mocks.update).toHaveBeenCalledWith(BR.id, {
+      revision: 3,
+      openerQuestionId: QA.id,
+      values: [uuid(9612)],
+      name: null,
+    });
+  });
+
+  it('does not treat the same answers in another tick order as a change', () => {
+    showEdit({ branch: { ...BR, values: [A, B] } });
+    fireEvent.click(box('Tenho uma clínica'));
+    fireEvent.click(box('Tenho uma clínica'));
+    expect(save().hasAttribute('disabled')).toBe(true);
+  });
+
+  it('shows a stale revision in the sheet, refreshes, and keeps what the admin typed', async () => {
+    mocks.update.mockResolvedValue({ ok: false, code: 'stale_revision' });
+    const { onSaved } = showEdit();
+    type('Meu nome');
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(
+      'Este ramo mudou enquanto você editava. Atualizamos a lista; confira e tente de novo.',
+    );
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(nameField().value).toBe('Meu nome');
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(mocks.show).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+  });
+
+  it('retries under the newest revision once the page has re-read the branch', async () => {
+    mocks.update.mockResolvedValueOnce({ ok: false, code: 'stale_revision' });
+    const { rerender } = showEdit();
+    type('Meu nome');
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    rerender(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <BranchSheet
+          open
+          branch={{ ...BR, revision: 5 }}
+          questions={[QA, OPENER]}
+          branches={[{ ...BR, revision: 5 }]}
+          steps={[S1, S2]}
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(mocks.update).toHaveBeenLastCalledWith(BR.id, { revision: 5, name: 'Meu nome' });
+  });
+
+  it('shows the depth line and keeps the draft for a 409 branch_depth', async () => {
+    mocks.update.mockResolvedValue({ ok: false, code: 'conflict', issue: 'branch_depth' });
+    showEdit();
+    type('Meu nome');
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(screen.getByRole('alert').textContent).toContain('3');
+    expect(nameField().value).toBe('Meu nome');
+  });
+
+  it('refuses a 61-character name under the field and sends nothing', async () => {
+    showEdit();
+    type('x'.repeat(61));
+    await act(async () => {
+      fireEvent.submit(nameField().closest('form') as HTMLFormElement);
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(screen.getByText('Use até 60 caracteres.')).toBeTruthy();
+  });
+
+  it('asks before closing with an unsaved change, and closes at once when nothing changed', () => {
+    const { onClose } = showEdit();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    cleanup();
+    const second = showEdit();
+    type('Outro');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(second.onClose).not.toHaveBeenCalled();
+    expect(dialog('Descartar as alterações?')).toBeTruthy();
+  });
+
+  it('renders a hostile opener title, branch name and question title as text', () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    showEdit({
+      branch: { ...BR, name: hostile },
+      questions: [QA, OPENER, ...members(1, { title: hostile })],
+    });
+    expect(nameField().value).toBe(hostile);
+    expect(document.querySelector('[data-branch-questions] img')).toBeNull();
+    expect(listItems()[0]?.textContent).toContain(hostile);
   });
 });
