@@ -11,8 +11,10 @@ import {
   checkDraftLocks,
   checkStepMove,
   conditionOptionsText,
+  dependentBranchesOf,
   draftFromQuestion,
   draftLock,
+  groupsFromServer,
   hasChanges,
   hasErrors,
   isDirty,
@@ -23,7 +25,9 @@ import {
   moveOptionRow,
   narrowsLimits,
   type OptionDraft,
+  optionUsage,
   parseLimits,
+  refusalOfUpdate,
   removeOptionRow,
   renameOptionRow,
   reopeningOf,
@@ -1195,5 +1199,155 @@ describe('12.2-16: checkStepMove (D-623, UI-D-647 over branches)', () => {
       kind: 'ok',
       clearBranch: false,
     });
+  });
+});
+
+describe('12.2-18: the refusals of an opener over branches (D-646, UI-D-673)', () => {
+  const step = adminStep({ title: 'Geral' });
+  const ids = [uuid(9701), uuid(9702), uuid(9703)];
+  const options = [
+    { id: ids[0] as string, label: 'Tenho', answerCount: 0 },
+    { id: ids[1] as string, label: 'Trabalho', answerCount: 0 },
+    { id: ids[2] as string, label: 'Aprendo', answerCount: 0 },
+  ];
+  const opener = adminQuestion('single_choice', {
+    stepId: step.id,
+    title: 'Abridora',
+    options,
+  });
+  const other = adminQuestion('single_choice', { stepId: step.id, title: 'Outra', options });
+  const first = adminBranch({
+    openerQuestionId: opener.id,
+    values: [ids[0] as string],
+    name: 'Quem tem',
+  });
+  const second = adminBranch({
+    openerQuestionId: opener.id,
+    values: [ids[0] as string, ids[1] as string],
+  });
+  const empty = adminBranch({ openerQuestionId: opener.id, values: [ids[2] as string] });
+  const archived = adminBranch({
+    openerQuestionId: opener.id,
+    values: [ids[2] as string],
+    archivedAt: '2026-10-01T10:00:00.000Z',
+  });
+  const foreign = adminBranch({ openerQuestionId: other.id, values: [ids[0] as string] });
+  const inFirst = [
+    adminQuestion('short_text', { stepId: step.id, title: 'A1', branchId: first.id }),
+    adminQuestion('short_text', { stepId: step.id, title: 'A2', branchId: first.id }),
+  ];
+  const inSecond = adminQuestion('short_text', {
+    stepId: step.id,
+    title: 'B1',
+    branchId: second.id,
+  });
+  const inForeign = adminQuestion('short_text', {
+    stepId: step.id,
+    title: 'F1',
+    branchId: foreign.id,
+  });
+  const tree = buildBranchTree({
+    steps: [step],
+    questions: [opener, other, ...inFirst, inSecond, inForeign],
+    branches: [first, second, empty, archived, foreign],
+  });
+  const labelOf = (branch: { name: string | null; id: string }) =>
+    branch.name ?? `ramo ${branch.id}`;
+
+  it('lists the ACTIVE branches of the opener with the titles of their questions, in list order', () => {
+    const groups = dependentBranchesOf(tree, opener.id, labelOf);
+    expect(groups.map((group) => group.id)).toEqual([first.id, second.id, empty.id]);
+    expect(groups.map((group) => group.label)).toEqual([
+      'Quem tem',
+      `ramo ${second.id}`,
+      `ramo ${empty.id}`,
+    ]);
+    expect(groups.map((group) => group.questions.map((question) => question.title))).toEqual([
+      ['A1', 'A2'],
+      ['B1'],
+      [],
+    ]);
+  });
+
+  it('is empty for a question that opens nothing, and never lists an archived branch', () => {
+    expect(dependentBranchesOf(tree, inFirst[0]?.id as string, labelOf)).toEqual([]);
+    const groups = dependentBranchesOf(tree, opener.id, labelOf);
+    expect(groups.some((group) => group.id === archived.id)).toBe(false);
+  });
+
+  it('never carries an id or a title of another opener', () => {
+    const groups = dependentBranchesOf(tree, opener.id, labelOf);
+    expect(JSON.stringify(groups)).not.toContain('F1');
+    expect(groups.some((group) => group.id === foreign.id)).toBe(false);
+  });
+
+  it('counts, per option, the ACTIVE branches whose opening set holds it', () => {
+    const usage = optionUsage(tree, opener.id);
+    expect(usage.get(ids[0] as string)).toBe(2);
+    expect(usage.get(ids[1] as string)).toBe(1);
+    // the third option is held by one active (empty) branch and one archived one: only the active counts
+    expect(usage.get(ids[2] as string)).toBe(1);
+    expect(optionUsage(tree, inFirst[0]?.id as string).size).toBe(0);
+  });
+
+  it('reads the groups of a server 409 from the server data, even for a branch the page does not know', () => {
+    const groups = groupsFromServer(
+      [
+        {
+          id: first.id,
+          name: 'Nome novo',
+          openerQuestionId: opener.id,
+          values: [ids[0] as string],
+          questions: [{ id: uuid(9710), title: 'Surgiu agora' }],
+        },
+        {
+          id: uuid(9711),
+          name: null,
+          openerQuestionId: opener.id,
+          values: [ids[1] as string],
+          questions: [],
+        },
+      ],
+      tree,
+      (branch) => branch.name ?? `sem nome ${branch.values.join(',')}`,
+    );
+    expect(groups).toEqual([
+      { id: first.id, label: 'Nome novo', questions: [{ id: uuid(9710), title: 'Surgiu agora' }] },
+      { id: uuid(9711), label: `sem nome ${ids[1]}`, questions: [] },
+    ]);
+  });
+
+  const groupsOf = () => dependentBranchesOf(tree, opener.id, labelOf);
+  const draftOf = () => draftFromQuestion(opener);
+
+  it('a retype is the "type" refusal with the groups', () => {
+    const refusal = refusalOfUpdate(opener, { ...draftOf(), type: 'dropdown' }, groupsOf(), tree);
+    expect(refusal?.kind).toBe('type');
+    expect(refusal?.groups).toEqual(groupsOf());
+  });
+
+  it('a removed option that a branch names is the "option" refusal, named by its label', () => {
+    const kept = draftOf().options.filter((row) => row.id !== ids[1]);
+    const refusal = refusalOfUpdate(opener, { ...draftOf(), options: kept }, groupsOf(), tree);
+    expect(refusal?.kind).toBe('option');
+    expect(refusal?.label).toBe('Trabalho');
+    expect(refusal?.groups).toEqual(groupsOf());
+  });
+
+  it('names the first removed option that a branch uses, not just the first removed', () => {
+    const only = draftOf().options.filter((row) => row.id !== ids[0]);
+    // ids[2] is used only by the empty active branch, ids[0] by two: removing 0 and 2 names 0 first
+    const refusal = refusalOfUpdate(
+      opener,
+      { ...draftOf(), options: only.filter((row) => row.id !== ids[2]) },
+      groupsOf(),
+      tree,
+    );
+    expect(refusal?.label).toBe('Tenho');
+  });
+
+  it('is nothing for an empty list or for a save that removed nothing', () => {
+    expect(refusalOfUpdate(opener, { ...draftOf(), type: 'dropdown' }, [], tree)).toBeNull();
+    expect(refusalOfUpdate(opener, draftOf(), groupsOf(), tree)).toBeNull();
   });
 });

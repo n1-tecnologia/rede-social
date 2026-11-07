@@ -8,7 +8,12 @@ import { NextIntlClientProvider } from 'next-intl';
 import { type ReactNode, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { adminQuestion, archivedQuestion, uuid } from '@/lib/profile-form/test-fixtures';
+import {
+  adminBranch,
+  adminQuestion,
+  archivedQuestion,
+  uuid,
+} from '@/lib/profile-form/test-fixtures';
 
 /**
  * 12-17 Task 1 (D-595, UI-D-579; PFORM-21, T-12-37): the export confirmation of the summary card against
@@ -909,10 +914,10 @@ describe('the list: names, live region, 44px targets and no raw HTML (UI-D-596)'
 });
 
 /* ------------------------------------------------------------------------------------------------ */
-/* 12.1-17 Task 2: the opener's refusals, the used option and the reactivation toast (D-632, UI-D-651) */
+/* 12.2-18 Task 1: the opener's refusals over branches and the used option (D-646, UI-D-673)         */
 /* ------------------------------------------------------------------------------------------------ */
 
-describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose a used option (D-632, UI-D-651)', () => {
+describe('12.2-18 Task 1: an opener cannot be archived, deleted, retyped or lose a used option while branches hang on it (D-646, UI-D-673)', () => {
   const onClose = vi.fn();
   const optionIds = [uuid(9801), uuid(9802), uuid(9803)];
   const baseOptions = [
@@ -921,26 +926,36 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
     { id: optionIds[2] as string, label: 'Estou aprendendo', answerCount: 0 },
   ];
 
-  /** An opener and `count` questions that depend on it through its first option (or none). */
-  function world(count: number, overrides: Partial<ReturnType<typeof adminQuestion>> = {}) {
+  type Spec = { name: string | null; titles: string[]; values?: string[] };
+
+  /** An opener and the branches that hang on it, each with the questions that sit in it. */
+  function world(specs: Spec[], overrides: Partial<ReturnType<typeof adminQuestion>> = {}) {
     const opener = adminQuestion('single_choice', {
       title: 'Você tem clínica?',
       options: baseOptions,
-      opensCount: count,
+      opensCount: specs.reduce((sum, spec) => sum + spec.titles.length, 0),
       ...overrides,
     });
-    const dependents = Array.from({ length: count }, (_, at) =>
-      adminQuestion('short_text', {
-        title: `Dependente ${at + 1}`,
-        condition: { questionId: opener.id, values: [optionIds[0] as string] },
+    const branches = specs.map((spec) =>
+      adminBranch({
+        openerQuestionId: opener.id,
+        values: spec.values ?? [optionIds[0] as string],
+        name: spec.name,
+        questionCount: spec.titles.length,
       }),
     );
-    return { opener, dependents, questions: [opener, ...dependents] };
+    const members = specs.flatMap((spec, at) =>
+      spec.titles.map((title) =>
+        adminQuestion('short_text', { title, branchId: branches[at]?.id as string }),
+      ),
+    );
+    return { opener, branches, members, questions: [opener, ...members] };
   }
 
   function sheet(
     question: ReturnType<typeof adminQuestion>,
     questions: ReturnType<typeof adminQuestion>[],
+    branches: ReturnType<typeof adminBranch>[],
   ) {
     return render(
       <NextIntlClientProvider locale="pt-BR" messages={messages}>
@@ -949,6 +964,7 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
           mode="edit"
           question={question}
           questions={questions}
+          branches={branches}
           steps={[]}
           tenantName="Ana Mentoria"
           limit={30}
@@ -964,11 +980,16 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
       .getAllByRole('listitem')
       .map((li) => li.textContent);
 
+  const TWO: Spec[] = [
+    { name: 'Quem tem clínica', titles: ['Nome da clínica', 'Quantas salas?'] },
+    { name: 'Quem estuda', titles: ['Onde você estuda?'], values: [optionIds[2] as string] },
+  ];
+
   beforeEach(() => onClose.mockReset());
 
-  it('archive: the client refuses from the list it holds, with the list, and opens no dialog', () => {
-    const { opener, questions } = world(3, { answerCount: 4 });
-    sheet(opener, questions);
+  it('archive: the client refuses from the tree it holds, with the branches and their titles, and opens no dialog', () => {
+    const { opener, questions, branches } = world(TWO, { answerCount: 4 });
+    sheet(opener, questions, branches);
     fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
     const alert = alertOf() as HTMLElement;
     expect(alert.getAttribute('role')).toBe('alert');
@@ -976,14 +997,33 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
     expect(
       within(alert).getByText('Esta pergunta abre outras e não pode ser arquivada agora.'),
     ).toBeTruthy();
-    expect(titles(alert)).toEqual(['Dependente 1', 'Dependente 2', 'Dependente 3']);
+    expect(
+      within(alert).getByText('Desfaça ou arquive estes ramos, e tente de novo:'),
+    ).toBeTruthy();
+    expect(titles(alert)).toEqual(['Nome da clínica', 'Quantas salas?', 'Onde você estuda?']);
+    expect(
+      within(within(alert).getByRole('list', { name: 'Quem tem clínica' })).getAllByRole(
+        'listitem',
+      ),
+    ).toHaveLength(2);
     expect(screen.queryByRole('dialog', { name: 'Arquivar esta pergunta?' })).toBeNull();
     expect(mocks.archive).not.toHaveBeenCalled();
   });
 
+  it('an unnamed branch is labelled by its condition sentence', () => {
+    const { opener, questions, branches } = world([{ name: null, titles: ['Nome da clínica'] }], {
+      answerCount: 1,
+    });
+    sheet(opener, questions, branches);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    expect(
+      within(alertOf() as HTMLElement).getByText('Se “Você tem clínica?” for “Tenho uma clínica”'),
+    ).toBeTruthy();
+  });
+
   it('delete: refused the same way, with the delete title', () => {
-    const { opener, questions } = world(2);
-    sheet(opener, questions);
+    const { opener, questions, branches } = world([TWO[0] as Spec]);
+    sheet(opener, questions, branches);
     fireEvent.click(screen.getByRole('button', { name: 'Excluir pergunta' }));
     const alert = alertOf() as HTMLElement;
     expect(
@@ -994,8 +1034,8 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
   });
 
   it('the alert sits directly above the footer button, inside the sheet', () => {
-    const { opener, questions } = world(1);
-    sheet(opener, questions);
+    const { opener, questions, branches } = world([TWO[0] as Spec]);
+    sheet(opener, questions, branches);
     fireEvent.click(screen.getByRole('button', { name: 'Excluir pergunta' }));
     const alert = alertOf() as HTMLElement;
     const saveButton = screen.getByRole('button', { name: 'Salvar pergunta' });
@@ -1003,8 +1043,8 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
   });
 
   it('retype: "Trocar tipo" does not open the grid, the alert appears under the type row', () => {
-    const { opener, questions } = world(2);
-    sheet(opener, questions);
+    const { opener, questions, branches } = world(TWO);
+    sheet(opener, questions, branches);
     fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
     expect(screen.queryByRole('group', { name: 'Tipo de resposta' })).toBeNull();
     const alert = alertOf() as HTMLElement;
@@ -1012,52 +1052,96 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
     expect(
       within(alert).getByText('Esta pergunta abre outras e não pode mudar de tipo agora.'),
     ).toBeTruthy();
-    // Under the type row, before the title field.
     const title = screen.getByLabelText('Pergunta');
     expect(alert.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('a question that opens nothing archives and retypes as before', () => {
+  it('a question that opens nothing archives and retypes as before, even when other branches exist', () => {
+    const { opener, questions, branches } = world([TWO[0] as Spec]);
     const lone = adminQuestion('single_choice', {
       title: 'Sozinha',
       options: baseOptions,
       answerCount: 2,
     });
-    sheet(lone, [lone]);
+    sheet(lone, [lone, ...questions], branches);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    expect(alertOf()).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Arquivar esta pergunta?' })).toBeTruthy();
+    expect(opener).toBeTruthy();
+  });
+
+  it('draws five titles in total across the groups, then "e mais 3 perguntas"', () => {
+    const { opener, questions, branches } = world(
+      [
+        { name: 'Primeiro', titles: ['P1', 'P2', 'P3'] },
+        { name: 'Segundo', titles: ['S1', 'S2', 'S3'] },
+        { name: 'Terceiro', titles: ['T1', 'T2'] },
+      ],
+      { answerCount: 1 },
+    );
+    sheet(opener, questions, branches);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    const alert = alertOf() as HTMLElement;
+    expect(titles(alert)).toEqual(['P1', 'P2', 'P3', 'S1', 'S2']);
+    expect(within(alert).getByText('e mais 3 perguntas')).toBeTruthy();
+  });
+
+  it('a branch with no question is listed by its label only', () => {
+    const { opener, questions, branches } = world(
+      [
+        { name: 'Ramo vazio', titles: [] },
+        { name: 'Ramo cheio', titles: ['Uma'] },
+      ],
+      { answerCount: 1 },
+    );
+    sheet(opener, questions, branches);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    const alert = alertOf() as HTMLElement;
+    expect(within(alert).getByText('Ramo vazio')).toBeTruthy();
+    expect(within(alert).queryByRole('list', { name: 'Ramo vazio' })).toBeNull();
+    expect(titles(alert)).toEqual(['Uma']);
+  });
+
+  it('an archived branch does not block the opener', () => {
+    const { opener, questions, branches } = world([TWO[0] as Spec], { answerCount: 1 });
+    const archivedBranch = {
+      ...(branches[0] as (typeof branches)[number]),
+      archivedAt: '2026-10-01T10:00:00.000Z',
+    };
+    sheet(opener, questions, [archivedBranch]);
     fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
     expect(alertOf()).toBeNull();
     expect(screen.getByRole('dialog', { name: 'Arquivar esta pergunta?' })).toBeTruthy();
   });
 
-  it('lists five titles and "e mais 2 perguntas" for seven, and "e mais 1 pergunta" for six', () => {
-    const seven = world(7, { answerCount: 1 });
-    const { unmount } = sheet(seven.opener, seven.questions);
+  it('race: the server list renders the same alert as the client pre-check for the same data', async () => {
+    const spec: Spec[] = [
+      { name: 'Quem tem clínica', titles: ['Nome da clínica', 'Quantas salas?'] },
+      { name: 'Quem estuda', titles: ['Onde você estuda?'] },
+    ];
+    const known = world(spec, { answerCount: 2 });
+    const first = sheet(known.opener, known.questions, known.branches);
     fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
-    expect(titles(alertOf() as HTMLElement)).toHaveLength(5);
-    expect(within(alertOf() as HTMLElement).getByText('e mais 2 perguntas')).toBeTruthy();
-    unmount();
-    const six = world(6, { answerCount: 1 });
-    sheet(six.opener, six.questions);
-    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
-    expect(within(alertOf() as HTMLElement).getByText('e mais 1 pergunta')).toBeTruthy();
-  });
+    const fromClient = (alertOf() as HTMLElement).innerHTML;
+    first.unmount();
+    cleanup();
 
-  it('race: archive reaches the server, which answers its own dependents list', async () => {
-    // The page does not know the dependents (opensCount 0): the confirmation opens, the server refuses.
-    const lone = adminQuestion('single_choice', {
-      title: 'Sozinha',
-      options: baseOptions,
-      answerCount: 2,
-    });
+    // The page does not know the branches (a second admin made them): the confirmation opens, the server refuses.
     mocks.archive.mockResolvedValue({
       ok: false,
       code: 'hasDependents',
-      dependents: Array.from({ length: 6 }, (_, at) => ({
-        id: uuid(9900 + at),
-        title: `Nova ${at + 1}`,
+      dependents: [],
+      branches: known.branches.map((branch) => ({
+        id: branch.id,
+        name: branch.name,
+        openerQuestionId: branch.openerQuestionId,
+        values: branch.values,
+        questions: known.members
+          .filter((member) => member.branchId === branch.id)
+          .map((member) => ({ id: member.id, title: member.title })),
       })),
     });
-    sheet(lone, [lone]);
+    sheet(known.opener, [known.opener], []);
     fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
     await act(async () => {
       fireEvent.click(
@@ -1069,20 +1153,66 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
     });
     const alert = alertOf() as HTMLElement;
     expect(alert.getAttribute('data-dependents-alert')).toBe('archive');
-    expect(titles(alert)).toHaveLength(5);
-    expect(within(alert).getByText('e mais 1 pergunta')).toBeTruthy();
+    expect(alert.innerHTML).toBe(fromClient);
     expect(onClose).not.toHaveBeenCalled();
     expect(mocks.refresh).toHaveBeenCalled();
   });
 
-  it('race: a delete answered with has_dependents shows the delete alert', async () => {
+  it('race: a server list of more than five titles shows five and "e mais 1 pergunta"', async () => {
+    const lone = adminQuestion('single_choice', {
+      title: 'Sozinha',
+      options: baseOptions,
+      answerCount: 2,
+    });
+    mocks.archive.mockResolvedValue({
+      ok: false,
+      code: 'hasDependents',
+      dependents: [],
+      branches: [
+        {
+          id: uuid(9900),
+          name: 'Surgiu agora',
+          openerQuestionId: lone.id,
+          values: [optionIds[0] as string],
+          questions: Array.from({ length: 6 }, (_, at) => ({
+            id: uuid(9901 + at),
+            title: `Nova ${at + 1}`,
+          })),
+        },
+      ],
+    });
+    sheet(lone, [lone], []);
+    fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Arquivar esta pergunta?' })).getByRole(
+          'button',
+          { name: 'Arquivar' },
+        ),
+      );
+    });
+    const alert = alertOf() as HTMLElement;
+    expect(titles(alert)).toHaveLength(5);
+    expect(within(alert).getByText('e mais 1 pergunta')).toBeTruthy();
+  });
+
+  it('race: a delete answered with has_dependents shows the delete alert with the branch', async () => {
     const lone = adminQuestion('single_choice', { title: 'Sozinha', options: baseOptions });
     mocks.remove.mockResolvedValue({
       ok: false,
       code: 'hasDependents',
-      dependents: [{ id: uuid(9910), title: 'Surgiu agora' }],
+      dependents: [],
+      branches: [
+        {
+          id: uuid(9910),
+          name: 'Ramo novo',
+          openerQuestionId: lone.id,
+          values: [optionIds[0] as string],
+          questions: [{ id: uuid(9911), title: 'Surgiu agora' }],
+        },
+      ],
     });
-    sheet(lone, [lone]);
+    sheet(lone, [lone], []);
     fireEvent.click(screen.getByRole('button', { name: 'Excluir pergunta' }));
     await act(async () => {
       fireEvent.click(
@@ -1093,6 +1223,7 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
     });
     const alert = alertOf() as HTMLElement;
     expect(alert.getAttribute('data-dependents-alert')).toBe('delete');
+    expect(within(alert).getByText('Ramo novo')).toBeTruthy();
     expect(titles(alert)).toEqual(['Surgiu agora']);
   });
 
@@ -1102,9 +1233,18 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
       ok: false,
       code: 'conflict',
       issue: 'has_dependents',
-      dependents: [{ id: uuid(9911), title: 'Depende agora' }],
+      dependents: [],
+      branches: [
+        {
+          id: uuid(9912),
+          name: 'Ramo novo',
+          openerQuestionId: lone.id,
+          values: [optionIds[0] as string],
+          questions: [{ id: uuid(9913), title: 'Depende agora' }],
+        },
+      ],
     });
-    sheet(lone, [lone]);
+    sheet(lone, [lone], []);
     fireEvent.click(screen.getByRole('button', { name: 'Trocar tipo' }));
     fireEvent.click(screen.getByRole('radio', { name: /^Lista suspensa/ }));
     await act(async () => {
@@ -1116,7 +1256,7 @@ describe('12.1-17 Task 2: an opener cannot be archived, deleted, retyped or lose
   });
 });
 
-describe('12.1-17 Task 2: an option used by a condition (D-632, UI-D-651)', () => {
+describe('12.2-18 Task 1: an option that branches name (D-646, UI-D-673)', () => {
   const onClose = vi.fn();
   const ids = [uuid(9821), uuid(9822), uuid(9823)];
   const options = [
@@ -1124,30 +1264,32 @@ describe('12.1-17 Task 2: an option used by a condition (D-632, UI-D-651)', () =
     { id: ids[1] as string, label: 'Trabalho em uma clínica', answerCount: 0 },
     { id: ids[2] as string, label: 'Estou aprendendo', answerCount: 0 },
   ];
-  const opener = adminQuestion('single_choice', {
-    title: 'Você tem clínica?',
-    options,
-    opensCount: 3,
+  const opener = adminQuestion('single_choice', { title: 'Você tem clínica?', options });
+  // The first option opens two branches, the second opens one of them too, the third opens none.
+  const branchA = adminBranch({
+    openerQuestionId: opener.id,
+    values: [ids[0] as string],
+    name: 'Quem tem clínica',
   });
-  const dependents = [0, 1, 2].map((at) =>
-    adminQuestion('short_text', {
-      title: `Dependente ${at + 1}`,
-      // The first option opens three questions, the second opens the last one too.
-      condition: {
-        questionId: opener.id,
-        values: at === 2 ? [ids[0] as string, ids[1] as string] : [ids[0] as string],
-      },
-    }),
-  );
+  const branchB = adminBranch({
+    openerQuestionId: opener.id,
+    values: [ids[0] as string, ids[1] as string],
+    name: 'Quem atende',
+  });
+  const memberA = adminQuestion('short_text', { title: 'Nome da clínica', branchId: branchA.id });
+  const memberB = adminQuestion('short_text', { title: 'Quantas salas?', branchId: branchB.id });
+  const questions = [opener, memberA, memberB];
+  const branches = [branchA, branchB];
 
-  function sheet(question = opener, questions = [opener, ...dependents]) {
+  function sheet(question = opener, all = questions, list = branches) {
     return render(
       <NextIntlClientProvider locale="pt-BR" messages={messages}>
         <QuestionEditorSheet
           open
           mode="edit"
           question={question}
-          questions={questions}
+          questions={all}
+          branches={list}
           steps={[]}
           tenantName="Ana Mentoria"
           limit={30}
@@ -1160,7 +1302,7 @@ describe('12.1-17 Task 2: an option used by a condition (D-632, UI-D-651)', () =
 
   beforeEach(() => onClose.mockReset());
 
-  it('shows Split in place of the remove button, with the count and the screen-reader text', () => {
+  it('shows Split in place of the remove button, with "Abre N ramos" and the screen-reader text', () => {
     sheet();
     expect(screen.queryByRole('button', { name: 'Remover opção 1' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Remover opção 2' })).toBeNull();
@@ -1169,12 +1311,27 @@ describe('12.1-17 Task 2: an option used by a condition (D-632, UI-D-651)', () =
     expect(used).toHaveLength(2);
     expect(used[0]?.className).toContain('size-11');
     expect(used[0]?.textContent).toBe('Opção usada em uma condição. Não pode ser removida.');
-    expect(screen.getByText('Abre 3 perguntas')).toBeTruthy();
-    expect(screen.getByText('Abre 1 pergunta')).toBeTruthy();
+    expect(screen.getByText('Abre 2 ramos')).toBeTruthy();
+    expect(screen.getByText('Abre 1 ramo')).toBeTruthy();
+    expect(screen.queryByText(/Abre \d+ perguntas?/)).toBeNull();
     const note = screen.getByText(
       'As opções que abrem perguntas não podem ser removidas. Você pode renomear e mudar a ordem.',
     );
     expect(note.closest('[role="status"]')).toBeTruthy();
+  });
+
+  it('renders no caption at all for an option no branch names (zero never renders)', () => {
+    sheet();
+    expect(screen.queryByText('Abre 0 ramos')).toBeNull();
+    expect(screen.queryByText(/Abre 0/)).toBeNull();
+  });
+
+  it('an archived branch does not hold its option', () => {
+    const archived = { ...branchB, archivedAt: '2026-10-01T10:00:00.000Z' };
+    sheet(opener, questions, [branchA, archived]);
+    expect(screen.getByRole('button', { name: 'Remover opção 2' })).toBeTruthy();
+    expect(screen.getByText('Abre 1 ramo')).toBeTruthy();
+    expect(screen.queryByText('Abre 2 ramos')).toBeNull();
   });
 
   it('rename and reorder still work on a used option, and the id stays stable', async () => {
@@ -1192,27 +1349,36 @@ describe('12.1-17 Task 2: an option used by a condition (D-632, UI-D-651)', () =
     expect(body.options[1]?.label).toBe('Tenho clínica própria');
   });
 
-  it('shows no used-option note, no Split and no caption for an opener-free question', () => {
+  it('shows no used-option note, no Split and no caption for a question no branch hangs on', () => {
     const lone = adminQuestion('single_choice', { title: 'Sozinha', options });
-    sheet(lone, [lone]);
+    sheet(lone, [lone], branches);
     expect(document.querySelector('[data-option-used]')).toBeNull();
     expect(screen.queryByText(/não podem ser removidas\. Você pode renomear/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Remover opção 1' })).toBeTruthy();
   });
 
-  it('race: the server refuses a removed option and the alert names it, with the list', async () => {
-    // The page did not know about the dependents (the list it holds has none), so the remove button is there.
+  it('race: the server refuses a removed option and the alert names it, with the branches', async () => {
+    // The page did not know about the branches (the list it holds has none), so the remove button is there.
     const lone = adminQuestion('single_choice', { title: 'Sozinha', options });
     mocks.update.mockResolvedValue({
       ok: false,
       code: 'conflict',
       issue: 'has_dependents',
-      dependents: [
-        { id: uuid(9930), title: 'Quantas salas?' },
-        { id: uuid(9931), title: 'Nome da clínica' },
+      dependents: [],
+      branches: [
+        {
+          id: uuid(9930),
+          name: 'Quem estuda',
+          openerQuestionId: lone.id,
+          values: [ids[2] as string],
+          questions: [
+            { id: uuid(9931), title: 'Onde você estuda?' },
+            { id: uuid(9932), title: 'Nome da clínica' },
+          ],
+        },
       ],
     });
-    sheet(lone, [lone]);
+    sheet(lone, [lone], []);
     fireEvent.click(screen.getByRole('button', { name: 'Remover opção 3' }));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Salvar pergunta' }));
@@ -1225,10 +1391,16 @@ describe('12.1-17 Task 2: an option used by a condition (D-632, UI-D-651)', () =
       ),
     ).toBeTruthy();
     expect(
+      within(alert).getByText(
+        'Tire esta opção da lista de respostas destes ramos, ou desfaça esses ramos, e tente de novo:',
+      ),
+    ).toBeTruthy();
+    expect(within(alert).getByText('Quem estuda')).toBeTruthy();
+    expect(
       within(alert)
         .getAllByRole('listitem')
         .map((li) => li.textContent),
-    ).toEqual(['Quantas salas?', 'Nome da clínica']);
+    ).toEqual(['Onde você estuda?', 'Nome da clínica']);
   });
 });
 

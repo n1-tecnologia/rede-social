@@ -345,6 +345,34 @@ describe('profileForm.admin.branches: "Arquivar ramo" and its refusal (UI-D-672,
   });
 });
 
+describe('profileForm.admin.dependents over branches (UI-D-673, 12.2-18)', () => {
+  it('declares the keys the Copywriting Contract names', () => {
+    const { dependents, editor } = parsed.profileForm.admin;
+    expect(dependents).toHaveProperty('hintBranches');
+    expect(dependents).toHaveProperty('hintOptionBranches');
+    expect(editor.options).toHaveProperty('usedBy');
+  });
+
+  it('reads the two retitled hints verbatim', () => {
+    expect(t('dependents.hintBranches')).toBe('Desfaça ou arquive estes ramos, e tente de novo:');
+    expect(t('dependents.hintOptionBranches')).toBe(
+      'Tire esta opção da lista de respostas destes ramos, ou desfaça esses ramos, e tente de novo:',
+    );
+  });
+
+  it('the caption of an option counts branches: one and many', () => {
+    expect(t('editor.options.usedBy', { count: 1 })).toBe('Abre 1 ramo');
+    expect(t('editor.options.usedBy', { count: 2 })).toBe('Abre 2 ramos');
+  });
+
+  it('keeps the titles of the 12.1 refusals', () => {
+    expect(t('dependents.title.archive')).toBe(
+      'Esta pergunta abre outras e não pode ser arquivada agora.',
+    );
+    expect(t('dependents.more', { count: 3 })).toBe('e mais 3 perguntas');
+  });
+});
+
 describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "branch", "fork" or "grupo condicional")', () => {
   const groups: Record<string, unknown> = {
     'editor.branch': parsed.profileForm.admin.editor.branch,
@@ -353,6 +381,10 @@ describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "
     'branches.toasts': parsed.profileForm.admin.branches.toasts,
     'branches.undo': parsed.profileForm.admin.branches.undo,
     'branches.archive': parsed.profileForm.admin.branches.archive,
+    'dependents.hints': [
+      parsed.profileForm.admin.dependents.hintBranches,
+      parsed.profileForm.admin.dependents.hintOptionBranches,
+    ],
   };
 
   function strings(value: unknown): string[] {

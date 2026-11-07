@@ -123,8 +123,9 @@ describe('profileForm.admin: the refusals and the used option (UI-D-651)', () =>
   });
 
   it('the option row', () => {
-    expect(t('editor.options.usedBy', { count: 1 })).toBe('Abre 1 pergunta');
-    expect(t('editor.options.usedBy', { count: 2 })).toBe('Abre 2 perguntas');
+    // 12.2-18 (UI-D-673): the caption counts branches now; pinned in profile-form-12-2-admin-messages.test.ts.
+    expect(t('editor.options.usedBy', { count: 1 })).toBe('Abre 1 ramo');
+    expect(t('editor.options.usedBy', { count: 2 })).toBe('Abre 2 ramos');
     expect(t('editor.options.usedLocked')).toBe(
       'Opção usada em uma condição. Não pode ser removida.',
     );

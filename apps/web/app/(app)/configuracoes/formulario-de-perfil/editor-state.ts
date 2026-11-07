@@ -4,6 +4,7 @@ import {
   type AdminStep,
   codePoints,
   type Dependent,
+  type HasDependentsDetails,
   normalizeOptionLabel,
   PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_LIMITS,
@@ -763,62 +764,63 @@ export function openerIndex(questions: readonly AdminQuestion[]) {
   );
 }
 
-// ── 12.1-17: the opener side (D-632, UI-D-650, UI-D-651) ───────────────────────────────────────────
+// ── 12.2-18: the opener side over branches (D-646, UI-D-673) ──────────────────────────────────────
+
+/** A branch as the server's 409 `has_dependents` lists it (D-646): label parts and the titles of its questions. */
+export type DependentBranchWire = NonNullable<HasDependentsDetails['branches']>[number];
+
+/** One branch that blocks an edit of its opener: its label and the titles of its ACTIVE questions. */
+export interface DependentGroup {
+  id: string;
+  label: string;
+  questions: Dependent[];
+}
 
 /**
- * The ACTIVE questions that name `openerId` as their opener, with their titles, in form order. The client's
- * mirror of the 12.1 server rule `dependentsOf` (retired in 12.2, now `dependentBranchesOf` in `branch-rules.ts`) over `AdminQuestion.condition`, so a refusal can be shown
- * without a round trip. The server (`checkOpenerChange`) stays the authority: it answers 409 `has_dependents`
- * with its own list when the page was stale (D-632, T-12.1-02).
+ * The ACTIVE branches that hang on `openerId`, each with the titles of the ACTIVE questions in it, in list order
+ * (RED stub of 12.2-18: inert until the GREEN commit).
  */
-export function dependentsOf(questions: readonly AdminQuestion[], openerId: string): Dependent[] {
-  return layoutOrder(questions, []).flatMap((question) =>
-    question.condition?.questionId === openerId ? [{ id: question.id, title: question.title }] : [],
-  );
+export function dependentBranchesOf(
+  _tree: AdminBranchTree,
+  _openerId: string,
+  _labelOf: (branch: AdminBranch) => string,
+): DependentGroup[] {
+  return [];
 }
 
-/** Option id to the number of ACTIVE questions whose condition names that option of `openerId`. */
-export function optionUsage(
-  questions: readonly AdminQuestion[],
-  openerId: string,
-): Map<string, number> {
-  const usage = new Map<string, number>();
-  for (const question of questions) {
-    if (question.condition?.questionId !== openerId) continue;
-    for (const value of question.condition.values) usage.set(value, (usage.get(value) ?? 0) + 1);
-  }
-  return usage;
+/** The groups a server `has_dependents` 409 stands for (RED stub of 12.2-18: inert until the GREEN commit). */
+export function groupsFromServer(
+  _branches: readonly DependentBranchWire[],
+  _tree: AdminBranchTree,
+  _labelOf: (branch: AdminBranch) => string,
+): DependentGroup[] {
+  return [];
 }
 
-/** What the dependents alert is about: the edit the opener refuses (UI-D-651). */
-export type RefusalKind = 'archive' | 'delete' | 'type' | 'option';
+/** Option token to the number of ACTIVE branches whose opening set holds it (RED stub: inert). */
+export function optionUsage(_tree: AdminBranchTree, _openerId: string): Map<string, number> {
+  return new Map();
+}
 
-/** A refusal to show: the kind, the questions that block it and, for an option, the option's label. */
+/** What the dependents alert is about: the edit the opener refuses, or the privacy rule (UI-D-673, UI-D-675). */
+export type RefusalKind = 'archive' | 'delete' | 'type' | 'option' | 'privacy';
+
+/** A refusal to show: the kind, the branches (or titles) that block it and, for an option, the option's label. */
 export interface DependentsRefusal {
   kind: RefusalKind;
-  dependents: Dependent[];
+  groups?: DependentGroup[];
+  dependents?: Dependent[];
   label?: string;
 }
 
-/**
- * The refusal a server `has_dependents` 409 stands for, from what the save was changing (UI-D-651): a new type
- * is a retype; otherwise it is an option that left the list, named by its LABEL (the first one a dependent's
- * condition uses, else the first removed). `null` when the save removed nothing that explains it.
- */
+/** The refusal a server `has_dependents` 409 stands for (RED stub of 12.2-18: inert until the GREEN commit). */
 export function refusalOfUpdate(
-  question: AdminQuestion,
-  draft: QuestionDraft,
-  dependents: Dependent[],
-  questions: readonly AdminQuestion[],
+  _question: AdminQuestion,
+  _draft: QuestionDraft,
+  _groups: DependentGroup[],
+  _tree: AdminBranchTree,
 ): DependentsRefusal | null {
-  if (dependents.length === 0) return null;
-  if (draft.type !== question.type) return { kind: 'type', dependents };
-  const kept = new Set(draft.options.flatMap((option) => (option.id ? [option.id] : [])));
-  const removed = question.options.filter((option) => !kept.has(option.id));
-  if (removed.length === 0) return null;
-  const used = optionUsage(questions, question.id);
-  const named = removed.find((option) => used.has(option.id)) ?? removed[0];
-  return { kind: 'option', dependents, label: named?.label ?? '' };
+  return null;
 }
 
 // ── 12.2-16: where a question sits in the tree (D-640, D-641, D-644, D-646, UI-D-669) ──────────────

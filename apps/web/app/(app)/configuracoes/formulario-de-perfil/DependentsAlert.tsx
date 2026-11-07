@@ -2,7 +2,7 @@
 
 import type { Dependent } from '@rede-social/contracts/profile-form';
 import { useTranslations } from 'next-intl';
-import type { RefusalKind } from './editor-state';
+import type { DependentGroup, RefusalKind } from './editor-state';
 
 /** The most titles the alert lists before "e mais N" (UI-D-651). */
 export const DEPENDENTS_SHOWN = 5;
@@ -14,7 +14,9 @@ export interface DependentsAlertProps {
   /** Which edit the opener refused: archive, delete, retype, or removing one of its options. */
   kind: DependentsAlertKind;
   /** The questions that block it: the client's own list, or the server's 409 `dependents` (a race). */
-  dependents: readonly Dependent[];
+  dependents?: readonly Dependent[];
+  /** 12.2-18 (D-646): the branches that block it, each with the titles of its questions (RED stub: not drawn yet). */
+  groups?: readonly DependentGroup[];
   /** The option's label, for `kind="option"` only. */
   label?: string;
 }
@@ -27,7 +29,7 @@ export interface DependentsAlertProps {
  * toast. Titles are admin-typed, so they are React text with `break-words`, never HTML (T-12.1-12). It renders
  * nothing for an empty list: a refusal always names at least one dependent.
  */
-export function DependentsAlert({ kind, dependents, label = '' }: DependentsAlertProps) {
+export function DependentsAlert({ kind, dependents = [], label = '' }: DependentsAlertProps) {
   const t = useTranslations('profileForm.admin');
   if (dependents.length === 0) return null;
   const shown = dependents.slice(0, DEPENDENTS_SHOWN);

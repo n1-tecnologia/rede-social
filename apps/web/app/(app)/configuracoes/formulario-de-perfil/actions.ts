@@ -32,6 +32,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import type { DependentBranchWire } from './editor-state';
 
 /**
  * The builder's server actions on the TENANT LANE (12-15, D-582, D-585, D-588, UI-D-567, UI-D-576,
@@ -289,7 +290,16 @@ export type SaveQuestionResult =
   | { ok: true; question: AdminQuestion; pending: number | null }
   | { ok: false; code: 'invalid'; fields: Partial<Record<SaveFieldKey, string>> }
   // `dependents` rides with `has_dependents` (12.1-17, D-632): the questions that name this one as their opener.
-  | { ok: false; code: 'conflict'; issue: string; dependents?: Dependent[] }
+  // 12.2-18 (D-646): `branches` is the 409 `has_dependents` list over branches, `titles` the public questions of a
+  // 409 `public_under_private`.
+  | {
+      ok: false;
+      code: 'conflict';
+      issue: string;
+      dependents?: Dependent[];
+      branches?: DependentBranchWire[];
+      titles?: string[];
+    }
   | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };
 
 type Sent =
@@ -511,7 +521,12 @@ export type RemoveResult =
   | { ok: true }
   | { ok: false; code: 'hasAnswers' | 'gone' | 'forbidden' | 'moduleOff' | 'failed' }
   // 12.1-17 (D-632): the question still opens others; `dependents` is the server's list (a race the page missed).
-  | { ok: false; code: 'hasDependents'; dependents: Dependent[] };
+  | {
+      ok: false;
+      code: 'hasDependents';
+      dependents: Dependent[];
+      branches?: DependentBranchWire[];
+    };
 
 async function remove(
   label: 'archive' | 'delete',

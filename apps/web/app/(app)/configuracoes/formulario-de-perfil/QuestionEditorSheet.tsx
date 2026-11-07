@@ -53,9 +53,10 @@ import {
   conditionOptionsText,
   type DependentsRefusal,
   type DraftErrors,
-  dependentsOf,
+  dependentBranchesOf,
   draftFromQuestion,
   type EditorMode,
+  groupsFromServer,
   hasChanges,
   hasErrors,
   isDirty,
@@ -224,8 +225,6 @@ export function QuestionEditorSheet({
 
   const activeQuestions = questions ?? NO_QUESTIONS;
   const showStepField = steps.length >= 2;
-  const dependents = stored ? dependentsOf(activeQuestions, stored.id) : [];
-  const usedCounts = stored ? optionUsage(activeQuestions, stored.id) : undefined;
 
   // The tree the "Ramo" field is judged against (D-641, D-644): built from the one read the page holds.
   const tree = useMemo(
@@ -233,6 +232,11 @@ export function QuestionEditorSheet({
     [steps, activeQuestions, branches],
   );
   const labelOf = useBranchLabeler(tree);
+  // The ACTIVE branches that hang on this question (D-646): they block its archive, delete, retype and option
+  // removal, and the refusal lists them with the titles of their questions (UI-D-673).
+  const textOf = (branch: AdminBranch) => labelOf(branch).label;
+  const groups = stored ? dependentBranchesOf(tree, stored.id, textOf) : [];
+  const usedCounts = stored ? optionUsage(tree, stored.id) : undefined;
   const hasBranches = questions !== undefined && branches.length > 0;
   // A question with answers cannot enter, leave or change branch (D-646): the select is a lock row.
   const branchLocked = stored !== null && stored.answerCount > 0;
@@ -391,12 +395,13 @@ export function QuestionEditorSheet({
           return;
         }
         if (result.issue === 'has_dependents') {
-          // Another admin gave this question a dependent after the page was read: show the server's list.
+          // Another admin gave this question a branch after the page was read: show the server's list.
+          const listed = groupsFromServer(result.branches ?? [], tree, textOf);
           const shown =
             mode === 'edit' && question
-              ? refusalOfUpdate(question, draft, result.dependents ?? [], activeQuestions)
-              : result.dependents?.length
-                ? { kind: 'archive' as const, dependents: result.dependents }
+              ? refusalOfUpdate(question, draft, listed, tree)
+              : listed.length > 0
+                ? { kind: 'archive' as const, groups: listed }
                 : null;
           if (shown) {
             setRefusal(shown);
@@ -544,15 +549,17 @@ export function QuestionEditorSheet({
       return;
     }
     switch (result.code) {
-      case 'hasDependents':
-        if (result.dependents.length > 0) {
-          setRefusal({ kind, dependents: result.dependents });
+      case 'hasDependents': {
+        const listed = groupsFromServer(result.branches ?? [], tree, textOf);
+        if (listed.length > 0) {
+          setRefusal({ kind, groups: listed });
           router.refresh();
           return;
         }
         setConflict(true);
         router.refresh();
         return;
+      }
       case 'hasAnswers':
         // An answer arrived between the page read and the tap: archive instead (D-588).
         toast.show({ tone: 'error', message: t('delete.hasAnswers') });
@@ -576,8 +583,8 @@ export function QuestionEditorSheet({
 
   function askRemove(kind: ArchiveKind) {
     // The page already holds who depends on this question: refuse here, with the list, before any dialog or request.
-    if (dependents.length > 0) {
-      setRefusal({ kind, dependents });
+    if (groups.length > 0) {
+      setRefusal({ kind, groups });
       return;
     }
     setRefusal(null);
@@ -682,11 +689,15 @@ export function QuestionEditorSheet({
               droppedOptions={
                 stored !== null && isChoiceType(stored.type) && !isChoiceType(draft.type)
               }
-              blocked={dependents.length > 0}
-              onBlocked={() => setRefusal({ kind: 'type', dependents })}
+              blocked={groups.length > 0}
+              onBlocked={() => setRefusal({ kind: 'type', groups })}
             />
             {refusal?.kind === 'type' ? (
-              <DependentsAlert kind="type" dependents={refusal.dependents} />
+              <DependentsAlert
+                kind="type"
+                groups={refusal.groups}
+                dependents={refusal.dependents}
+              />
             ) : null}
 
             {draft.type !== null ? (
@@ -960,6 +971,7 @@ export function QuestionEditorSheet({
           {refusal && refusal.kind !== 'type' ? (
             <DependentsAlert
               kind={refusal.kind}
+              groups={refusal.groups}
               dependents={refusal.dependents}
               label={refusal.label}
             />

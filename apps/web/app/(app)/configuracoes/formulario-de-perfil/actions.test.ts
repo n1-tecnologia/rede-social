@@ -1426,3 +1426,102 @@ describe('archiveBranchAction (12.2-17, D-653)', () => {
     expect(mocks.redirect).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('12.2-18: has_dependents over branches and public_under_private (D-646, PFORM-53)', () => {
+  const branches = [
+    {
+      id: uuid(9101),
+      name: 'Quem tem clínica',
+      openerQuestionId: uuid(9100),
+      values: ['tem'],
+      questions: [
+        { id: uuid(9102), title: 'Nome da clínica' },
+        { id: uuid(9103), title: 'Quantas salas?' },
+      ],
+    },
+    {
+      id: uuid(9104),
+      name: null,
+      openerQuestionId: uuid(9100),
+      values: ['aprende'],
+      questions: [],
+    },
+  ];
+
+  it('an update answered with has_dependents keeps details.branches on the conflict', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'has_dependents', dependents: [], branches }),
+    );
+    expect(await updateQuestionAction(IDS[0] as string, { revision: 1, title: 'X' })).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'has_dependents',
+      dependents: [],
+      branches,
+    });
+  });
+
+  it('drops a branches list that breaks the contract instead of trusting it', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', {
+        profileForm: 'has_dependents',
+        dependents: [],
+        branches: [{ id: 'x', questions: 'nope' }],
+      }),
+    );
+    const result = await updateQuestionAction(IDS[0] as string, { revision: 1, title: 'X' });
+    expect(result).toMatchObject({ ok: false, code: 'conflict', issue: 'has_dependents' });
+    expect('branches' in result).toBe(false);
+  });
+
+  it('archive and delete answer hasDependents with the branches', async () => {
+    mocks.apiFetch.mockImplementation(() =>
+      Promise.resolve(
+        refusal(409, 'CONFLICT', { profileForm: 'has_dependents', dependents: [], branches }),
+      ),
+    );
+    expect(await archiveQuestionAction(IDS[0] as string)).toEqual({
+      ok: false,
+      code: 'hasDependents',
+      dependents: [],
+      branches,
+    });
+    expect(await deleteQuestionAction(IDS[0] as string)).toEqual({
+      ok: false,
+      code: 'hasDependents',
+      dependents: [],
+      branches,
+    });
+  });
+
+  it('a public_under_private conflict carries the titles the server named, and nothing else of the body', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', {
+        profileForm: 'public_under_private',
+        titles: ['Nome da clínica', 'Telefone da clínica'],
+        secret: 'não deve passar',
+      }),
+    );
+    const result = await updateQuestionAction(IDS[0] as string, {
+      revision: 1,
+      showOnProfile: false,
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: 'conflict',
+      issue: 'public_under_private',
+      titles: ['Nome da clínica', 'Telefone da clínica'],
+    });
+  });
+
+  it('drops titles that are not a list of strings', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      refusal(409, 'CONFLICT', { profileForm: 'public_under_private', titles: [1, { a: 2 }] }),
+    );
+    const result = await updateQuestionAction(IDS[0] as string, {
+      revision: 1,
+      showOnProfile: false,
+    });
+    expect(result).toEqual({ ok: false, code: 'conflict', issue: 'public_under_private' });
+  });
+});
