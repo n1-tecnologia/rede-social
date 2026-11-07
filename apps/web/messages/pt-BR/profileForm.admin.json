@@ -247,6 +247,8 @@
         },
         "hint": "Remova a condição destas perguntas, ou arquive-as, e tente de novo:",
         "hintOption": "Tire esta opção da condição destas perguntas, ou remova a condição delas, e tente de novo:",
+        "hintBranches": "Desfaça ou arquive estes ramos, e tente de novo:",
+        "hintOptionBranches": "Tire esta opção da lista de respostas destes ramos, ou desfaça esses ramos, e tente de novo:",
         "hintArchiveBranch": "Estas perguntas abrem ramos que já têm respostas. Desfaça esses ramos e tente de novo:",
         "more": "e mais {count, plural, one {# pergunta} other {# perguntas}}"
       },
@@ -279,7 +281,7 @@
           "up": "Subir opção {n}",
           "down": "Descer opção {n}",
           "remove": "Remover opção {n}",
-          "usedBy": "Abre {count, plural, one {# pergunta} other {# perguntas}}",
+          "usedBy": "Abre {count, plural, one {# ramo} other {# ramos}}",
           "usedLocked": "Opção usada em uma condição. Não pode ser removida.",
           "usedNote": "As opções que abrem perguntas não podem ser removidas. Você pode renomear e mudar a ordem.",
           "err": {

@@ -979,6 +979,8 @@ describe('12.2-18 Task 1: an opener cannot be archived, deleted, retyped or lose
     within(el)
       .getAllByRole('listitem')
       .map((li) => li.textContent);
+  // React's generated ids differ between two renders; everything else must be identical.
+  const sameMarkup = (html: string) => html.replace(/_r_[a-z0-9]+_/g, '_r_');
 
   const TWO: Spec[] = [
     { name: 'Quem tem clínica', titles: ['Nome da clínica', 'Quantas salas?'] },
@@ -1122,7 +1124,7 @@ describe('12.2-18 Task 1: an opener cannot be archived, deleted, retyped or lose
     const known = world(spec, { answerCount: 2 });
     const first = sheet(known.opener, known.questions, known.branches);
     fireEvent.click(screen.getByRole('button', { name: 'Arquivar pergunta' }));
-    const fromClient = (alertOf() as HTMLElement).innerHTML;
+    const fromClient = sameMarkup((alertOf() as HTMLElement).innerHTML);
     first.unmount();
     cleanup();
 
@@ -1153,7 +1155,7 @@ describe('12.2-18 Task 1: an opener cannot be archived, deleted, retyped or lose
     });
     const alert = alertOf() as HTMLElement;
     expect(alert.getAttribute('data-dependents-alert')).toBe('archive');
-    expect(alert.innerHTML).toBe(fromClient);
+    expect(sameMarkup(alert.innerHTML)).toBe(fromClient);
     expect(onClose).not.toHaveBeenCalled();
     expect(mocks.refresh).toHaveBeenCalled();
   });

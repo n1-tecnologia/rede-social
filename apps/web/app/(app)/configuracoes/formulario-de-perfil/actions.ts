@@ -15,6 +15,7 @@ import {
   type Dependent,
   deleteStepResultSchema,
   dependentSchema,
+  hasDependentsDetailsSchema,
   impactQuerySchema,
   impactResultSchema,
   layoutBodySchema,
@@ -382,12 +383,27 @@ function failureOf(
       issue === 'has_dependents'
         ? z.array(dependentSchema).safeParse(envelope?.details?.dependents)
         : null;
+    // 12.2-18 (D-646): the branches the change would orphan; parsed with the contract's own shape, which drops any
+    // key it does not name, and dropped whole when it breaks the contract.
+    const listedBranches =
+      issue === 'has_dependents'
+        ? hasDependentsDetailsSchema.shape.branches.safeParse(envelope?.details?.branches)
+        : null;
+    // PFORM-53: the titles of the public questions a `public_under_private` change would expose.
+    const listedTitles =
+      issue === 'public_under_private'
+        ? z.array(z.string()).safeParse(envelope?.details?.titles)
+        : null;
     return {
       result: {
         ok: false,
         code: 'conflict',
         issue: issue ?? 'conflict',
         ...(listed?.success ? { dependents: listed.data } : {}),
+        ...(listedBranches?.success && listedBranches.data && listedBranches.data.length > 0
+          ? { branches: listedBranches.data }
+          : {}),
+        ...(listedTitles?.success ? { titles: listedTitles.data } : {}),
       },
       navigate: null,
     };
@@ -544,7 +560,12 @@ async function remove(
   if (result.ok) return { ok: false, code: 'failed' };
   if (result.code === 'conflict') {
     if (result.issue === 'has_dependents') {
-      return { ok: false, code: 'hasDependents', dependents: result.dependents ?? [] };
+      return {
+        ok: false,
+        code: 'hasDependents',
+        dependents: result.dependents ?? [],
+        ...(result.branches ? { branches: result.branches } : {}),
+      };
     }
     return { ok: false, code: result.issue === 'has_answers' ? 'hasAnswers' : 'gone' };
   }

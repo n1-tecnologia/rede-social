@@ -18,6 +18,7 @@ import {
   type EligibilityQuestion,
   eligibleBranchesFor,
   membersOf,
+  referencedOptionCounts,
   usableBranch,
   usableBranchesOf,
 } from '@/lib/profile-form/branch-tree';
@@ -778,28 +779,51 @@ export interface DependentGroup {
 
 /**
  * The ACTIVE branches that hang on `openerId`, each with the titles of the ACTIVE questions in it, in list order
- * (RED stub of 12.2-18: inert until the GREEN commit).
+ * (D-646, UI-D-673): the client's mirror of the server's `dependentBranchesOf`, so a refusal can be shown without
+ * a round trip. A branch with no question is still listed (it blocks the same), with an empty `questions`. The
+ * server stays the authority: it answers 409 `has_dependents` with its own list when the page was stale.
  */
 export function dependentBranchesOf(
-  _tree: AdminBranchTree,
-  _openerId: string,
-  _labelOf: (branch: AdminBranch) => string,
+  tree: AdminBranchTree,
+  openerId: string,
+  labelOf: (branch: AdminBranch) => string,
 ): DependentGroup[] {
-  return [];
+  return usableBranchesOf(tree, openerId).map((branch) => ({
+    id: branch.id,
+    label: labelOf(branch),
+    questions: membersOf(tree, branch.id).map((member) => ({ id: member.id, title: member.title })),
+  }));
 }
 
-/** The groups a server `has_dependents` 409 stands for (RED stub of 12.2-18: inert until the GREEN commit). */
+/**
+ * The groups a server `has_dependents` 409 stands for (a race). The label is built from what the SERVER sent
+ * (name, opener, answers), which is fresher than the page's copy; a branch the page does not know yet still gets
+ * its sentence, because the opener is on the page. Only ids, names and titles are read, never an answer.
+ */
 export function groupsFromServer(
-  _branches: readonly DependentBranchWire[],
-  _tree: AdminBranchTree,
-  _labelOf: (branch: AdminBranch) => string,
+  branches: readonly DependentBranchWire[],
+  tree: AdminBranchTree,
+  labelOf: (branch: AdminBranch) => string,
 ): DependentGroup[] {
-  return [];
+  return branches.map((wire) => {
+    const known = tree.branchById.get(wire.id);
+    const asBranch: AdminBranch = {
+      id: wire.id,
+      openerQuestionId: wire.openerQuestionId,
+      values: wire.values,
+      name: wire.name,
+      revision: known?.revision ?? 1,
+      archivedAt: null,
+      questionCount: wire.questions.length,
+      answerCount: known?.answerCount ?? 0,
+    };
+    return { id: wire.id, label: labelOf(asBranch), questions: wire.questions };
+  });
 }
 
-/** Option token to the number of ACTIVE branches whose opening set holds it (RED stub: inert). */
-export function optionUsage(_tree: AdminBranchTree, _openerId: string): Map<string, number> {
-  return new Map();
+/** Option token to the number of ACTIVE branches whose opening set holds it ("Abre N ramos", D-646). */
+export function optionUsage(tree: AdminBranchTree, openerId: string): Map<string, number> {
+  return referencedOptionCounts(tree, openerId);
 }
 
 /** What the dependents alert is about: the edit the opener refuses, or the privacy rule (UI-D-673, UI-D-675). */
@@ -813,14 +837,25 @@ export interface DependentsRefusal {
   label?: string;
 }
 
-/** The refusal a server `has_dependents` 409 stands for (RED stub of 12.2-18: inert until the GREEN commit). */
+/**
+ * The refusal a server `has_dependents` 409 stands for, from what the save was changing (UI-D-673): a new type is
+ * a retype; otherwise it is an option that left the list, named by its LABEL (the first one a branch names, else
+ * the first removed). `null` when there is no group or the save removed nothing that explains it.
+ */
 export function refusalOfUpdate(
-  _question: AdminQuestion,
-  _draft: QuestionDraft,
-  _groups: DependentGroup[],
-  _tree: AdminBranchTree,
+  question: AdminQuestion,
+  draft: QuestionDraft,
+  groups: DependentGroup[],
+  tree: AdminBranchTree,
 ): DependentsRefusal | null {
-  return null;
+  if (groups.length === 0) return null;
+  if (draft.type !== question.type) return { kind: 'type', groups };
+  const kept = new Set(draft.options.flatMap((option) => (option.id ? [option.id] : [])));
+  const removed = question.options.filter((option) => !kept.has(option.id));
+  if (removed.length === 0) return null;
+  const used = optionUsage(tree, question.id);
+  const named = removed.find((option) => used.has(option.id)) ?? removed[0];
+  return { kind: 'option', groups, label: named?.label ?? '' };
 }
 
 // ── 12.2-16: where a question sits in the tree (D-640, D-641, D-644, D-646, UI-D-669) ──────────────
