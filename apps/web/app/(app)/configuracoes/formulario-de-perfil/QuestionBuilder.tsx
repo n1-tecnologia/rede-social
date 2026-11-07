@@ -9,12 +9,14 @@ import {
 import { Button, EmptyState } from '@rede-social/ui';
 import { ClipboardList, Layers, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { buildBranchTree } from '@/lib/profile-form/branch-tree';
 import { BranchSheet } from './BranchSheet';
 import type { EditorMode } from './editor-state';
+import { FlowView } from './FlowView';
 import { PreviewSheet } from './PreviewSheet';
 import { QuestionEditorSheet } from './QuestionEditorSheet';
-import { QuestionList } from './QuestionList';
+import { type ListView, QuestionList } from './QuestionList';
 import { StepSheet, type StepSheetMode } from './StepSheet';
 
 const NO_STEPS: AdminStep[] = [];
@@ -96,6 +98,15 @@ export function QuestionBuilder({
   const [stepOpen, setStepOpen] = useState(false);
   const [branchOpening, setBranchOpening] = useState<BranchOpening | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
+  // 12.2-19 (D-647, UI-D-665): Lista or Fluxo is component state, never the URL. The Fluxo exists only while the
+  // form has an active branch: when the last one is undone or archived the view falls back to the Lista, and it
+  // does not come back on its own when a branch is created later.
+  const [view, setView] = useState<ListView>('lista');
+  const hasBranch = (branches ?? NO_BRANCHES).some((branch) => branch.archivedAt === null);
+  if (!hasBranch && view !== 'lista') setView('lista');
+  // The node or edge of the Fluxo that opened a sheet: focus goes back to it when the sheets are gone, even on a
+  // browser that never focused the button when it was tapped (UI-D-677, UI-D-682).
+  const flowTrigger = useRef<HTMLElement | null>(null);
 
   // A question sheet and a branch sheet are never mounted together: every way into the question sheet goes
   // through `showQuestion`, which drops a branch sheet that was still closing, and `openCreateBranch` drops the
@@ -121,6 +132,20 @@ export function QuestionBuilder({
     setBranchOpen(true);
   }, []);
   const closeBranch = useCallback(() => setBranchOpen(false), []);
+  const openFromFlowQuestion = useCallback(
+    (question: AdminQuestion, trigger: HTMLElement) => {
+      flowTrigger.current = trigger;
+      showQuestion((current) => ({ id: (current?.id ?? 0) + 1, mode: 'edit', question }));
+    },
+    [showQuestion],
+  );
+  const openFromFlowBranch = useCallback(
+    (branch: AdminBranch, trigger: HTMLElement) => {
+      flowTrigger.current = trigger;
+      openEditBranch(branch);
+    },
+    [openEditBranch],
+  );
 
   const openCreate = useCallback(
     () =>
@@ -168,6 +193,15 @@ export function QuestionBuilder({
     [showQuestion],
   );
   const close = useCallback(() => setOpen(false), []);
+  // Once no sheet is showing, the trigger that opened one from the Fluxo (if it is still on the page) takes the
+  // focus back. A hand-off between the two sheets keeps one of them showing, so this waits for the last close.
+  const sheetShowing = open || branchOpen;
+  useEffect(() => {
+    if (sheetShowing) return;
+    const trigger = flowTrigger.current;
+    flowTrigger.current = null;
+    if (trigger?.isConnected) trigger.focus();
+  }, [sheetShowing]);
   const openPreview = useCallback(() => setPreviewOpen(true), []);
   const closePreview = useCallback(() => setPreviewOpen(false), []);
 
@@ -208,6 +242,18 @@ export function QuestionBuilder({
           onAddToBranch={openCreateInBranch}
           onEditBranch={openEditBranch}
           onPreview={openPreview}
+          view={view}
+          onViewChange={setView}
+          flow={
+            view === 'fluxo' && hasBranch ? (
+              <FlowView
+                tree={buildBranchTree({ steps, questions, branches })}
+                steps={steps}
+                onOpenQuestion={openFromFlowQuestion}
+                onOpenBranch={openFromFlowBranch}
+              />
+            ) : undefined
+          }
         />
       ) : (
         <EmptyState

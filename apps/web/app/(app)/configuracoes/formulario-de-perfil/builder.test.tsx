@@ -2825,7 +2825,7 @@ describe('12.2-19 Task 1 (tracer): the selector exists only with a branch, and t
     const target = screen.getByRole('button', { name: 'Editar pergunta: Nome da clínica' });
     target.focus();
     fireEvent.click(target);
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fechar' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(document.activeElement).toBe(
       screen.getByRole('button', { name: 'Editar pergunta: Nome da clínica' }),
@@ -2839,7 +2839,7 @@ describe('12.2-19 Task 1 (tracer): the selector exists only with a branch, and t
     // Safari does not focus a button on tap: the tap alone must be enough to find the way back.
     (document.activeElement as HTMLElement | null)?.blur();
     fireEvent.click(edge);
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fechar' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(document.activeElement).toBe(edge);
   });

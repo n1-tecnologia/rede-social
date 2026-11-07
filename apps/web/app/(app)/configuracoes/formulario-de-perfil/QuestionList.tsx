@@ -6,7 +6,15 @@ import {
   type AdminStep,
   PROFILE_FORM_LIMITS,
 } from '@rede-social/contracts/profile-form';
-import { Button, Card, IconButton, SectionTitle, StatusPill, useToast } from '@rede-social/ui';
+import {
+  Button,
+  Card,
+  IconButton,
+  SectionTitle,
+  SegmentedControl,
+  StatusPill,
+  useToast,
+} from '@rede-social/ui';
 import {
   ArrowDown,
   ArrowUp,
@@ -76,13 +84,19 @@ export interface QuestionListProps {
   onEditBranch?: (branch: AdminBranch) => void;
   /** Opens the question sheet in create mode inside a branch (plan 16 wires it). */
   onAddToBranch?: (branch: AdminBranch, stepId: string) => void;
-  /** INERT in the RED commit of 12.2-19: the view (Lista or Fluxo) the host holds. */
-  view?: 'lista' | 'fluxo';
-  /** INERT in the RED commit of 12.2-19: called when the admin picks the other view. */
-  onViewChange?: (view: 'lista' | 'fluxo') => void;
-  /** INERT in the RED commit of 12.2-19: the drawing rendered in place of the list body in Fluxo. */
+  /**
+   * The view the host holds (12.2-19, D-647): `lista` (the default) or `fluxo`. The selector shows only when
+   * `onViewChange` is given AND the form has an active branch.
+   */
+  view?: ListView;
+  /** Called when the admin picks the other view. Without it the list shows no selector. */
+  onViewChange?: (view: ListView) => void;
+  /** The drawing (`FlowView`) rendered in place of the list body while `view` is `fluxo`. */
   flow?: ReactNode;
 }
+
+/** The two ways to look at the same questions (D-647). */
+export type ListView = 'lista' | 'fluxo';
 
 const NO_STEPS: AdminStep[] = [];
 const NO_BRANCHES: AdminBranch[] = [];
@@ -363,8 +377,12 @@ export function QuestionList({
   branches = NO_BRANCHES,
   onEditBranch,
   onAddToBranch,
+  view = 'lista',
+  onViewChange,
+  flow,
 }: QuestionListProps) {
   const t = useTranslations('profileForm');
+  const viewLabelId = useId();
   const tAdmin = useTranslations('admin');
   const router = useRouter();
   const toast = useToast();
@@ -438,6 +456,11 @@ export function QuestionList({
     }
   }
   const wells = stepList.length > 1;
+  // 12.2-19 (D-647, UI-D-665): the selector exists only when there is something to draw, and the Fluxo replaces
+  // the list body only when the host handed a drawing. It is read-only, so Reordenar and Adicionar etapa hide.
+  const hasBranch = branches.some((branch) => branch.archivedAt === null);
+  const selector = onViewChange !== undefined && hasBranch;
+  const fluxo = selector && view === 'fluxo' && flow !== undefined;
 
   /** The sentence of a refused or reverted press, naming the two QUESTIONS (D-623, UI-D-646). */
   function refusalSentence(delta: -1 | 1, dependent: AdminQuestion, opener: AdminQuestion) {
@@ -720,7 +743,7 @@ export function QuestionList({
             {t('admin.actions.add')}
           </Button>
         ) : null}
-        {onAddStep ? (
+        {onAddStep && !fluxo ? (
           <Button
             variant="outline"
             size="md"
@@ -731,17 +754,19 @@ export function QuestionList({
             {t('admin.steps.add')}
           </Button>
         ) : null}
-        <Button variant="outline" size="md" aria-pressed={reordering} onClick={toggleReordering}>
-          <ArrowUpDown aria-hidden size={18} />
-          {reordering ? t('admin.actions.reorderDone') : t('admin.actions.reorder')}
-        </Button>
+        {fluxo ? null : (
+          <Button variant="outline" size="md" aria-pressed={reordering} onClick={toggleReordering}>
+            <ArrowUpDown aria-hidden size={18} />
+            {reordering ? t('admin.actions.reorderDone') : t('admin.actions.reorder')}
+          </Button>
+        )}
         {onPreview ? (
           <Button variant="ghost" size="md" disabled={items.length === 0} onClick={onPreview}>
             {t('admin.preview.open')}
           </Button>
         ) : null}
       </div>
-      {onAddStep && stepList.length >= stepLimit ? (
+      {onAddStep && !fluxo && stepList.length >= stepLimit ? (
         <p data-step-limit-line className="text-xs font-normal text-text-tertiary">
           {t('admin.steps.limit', { max: stepLimit })}
         </p>
@@ -751,8 +776,26 @@ export function QuestionList({
           {t('admin.list.limit', { max: limit })}
         </p>
       ) : null}
+      {selector ? (
+        <>
+          <span id={viewLabelId} className="sr-only">
+            {t('admin.view.label')}
+          </span>
+          <SegmentedControl
+            labelId={viewLabelId}
+            className="w-full max-w-xs"
+            options={[
+              { value: 'lista', label: t('admin.view.list') },
+              { value: 'fluxo', label: t('admin.view.flow') },
+            ]}
+            value={view}
+            disabled={reordering || busy}
+            onChange={(value) => onViewChange?.(value === 'fluxo' ? 'fluxo' : 'lista')}
+          />
+        </>
+      ) : null}
       <SectionTitle variant="micro">{t('admin.list.title', { count: items.length })}</SectionTitle>
-      {wells ? (
+      {wells && !fluxo ? (
         <div
           role="status"
           data-steps-note
@@ -765,7 +808,9 @@ export function QuestionList({
       <p aria-live="polite" aria-atomic="true" data-reorder-live className="sr-only">
         {announcement}
       </p>
-      {wells ? (
+      {fluxo ? (
+        flow
+      ) : wells ? (
         <div className="flex flex-col gap-3">
           {stepList.map((step, at) => (
             <StepWell

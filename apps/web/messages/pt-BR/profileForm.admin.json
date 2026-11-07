@@ -112,6 +112,19 @@
           "archived": "Ramo arquivado."
         }
       },
+      "view": {
+        "label": "Como ver as perguntas",
+        "list": "Lista",
+        "flow": "Fluxo"
+      },
+      "flow": {
+        "label": "Fluxo do formulário",
+        "root": "Todos os membros veem",
+        "note": "O Fluxo mostra quem vê cada pergunta. Toque numa pergunta ou num ramo para editar. Para mover perguntas, volte para a Lista.",
+        "edge": "Se for {options} · {count, plural, =0 {sem perguntas} one {# pergunta} other {# perguntas}}",
+        "moreOptions": "e mais {count}",
+        "childrenLabel": "Perguntas do ramo: {label}"
+      },
       "reorder": {
         "up": "Subir “{title}”",
         "down": "Descer “{title}”",
