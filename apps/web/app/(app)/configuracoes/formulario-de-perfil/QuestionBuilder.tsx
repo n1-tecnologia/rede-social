@@ -10,6 +10,7 @@ import { Button, EmptyState } from '@rede-social/ui';
 import { ClipboardList, Layers, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useState } from 'react';
+import { BranchSheet } from './BranchSheet';
 import type { EditorMode } from './editor-state';
 import { PreviewSheet } from './PreviewSheet';
 import { QuestionEditorSheet } from './QuestionEditorSheet';
@@ -44,6 +45,12 @@ interface Opening {
   branchId?: string;
 }
 
+interface BranchOpening {
+  id: number;
+  /** The question that decides; its newest copy is read from `questions` at render, so a refresh brings it. */
+  opener: AdminQuestion;
+}
+
 interface StepOpening {
   id: number;
   mode: StepSheetMode;
@@ -58,6 +65,10 @@ interface StepOpening {
  * esta" in replace mode, and "Ver como o membro vê" opens the preview sheet (12-17) over the live active
  * questions. The page reads on the server; this holds only which
  * opening is showing, and the page refreshes after every write.
+ *
+ * **One sheet at a time (12.2-16, D-651, UI-D-670).** "Criar ramo" in the question sheet asks that sheet to
+ * leave through its dirty guard; the host then drops it and opens the branch sheet in create mode. The two are
+ * never mounted together, so they can never stack.
  */
 export function QuestionBuilder({
   questions,
@@ -74,30 +85,52 @@ export function QuestionBuilder({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [stepOpening, setStepOpening] = useState<StepOpening | null>(null);
   const [stepOpen, setStepOpen] = useState(false);
+  const [branchOpening, setBranchOpening] = useState<BranchOpening | null>(null);
+  const [branchOpen, setBranchOpen] = useState(false);
 
-  const openCreate = useCallback(() => {
-    setOpening((current) => ({ id: (current?.id ?? 0) + 1, mode: 'create', question: null }));
+  // A question sheet and a branch sheet are never mounted together: every way into the question sheet goes
+  // through `showQuestion`, which drops a branch sheet that was still closing, and `openCreateBranch` drops the
+  // question sheet before the branch sheet opens.
+  const showQuestion = useCallback((next: (current: Opening | null) => Opening) => {
+    setBranchOpening(null);
+    setBranchOpen(false);
+    setOpening(next);
     setOpen(true);
   }, []);
-  const openCreateIn = useCallback((step: AdminStep) => {
-    setOpening((current) => ({
-      id: (current?.id ?? 0) + 1,
-      mode: 'create',
-      question: null,
-      stepId: step.id,
-    }));
-    setOpen(true);
+  const openCreateBranch = useCallback((opener: AdminQuestion) => {
+    setOpening(null);
+    setOpen(false);
+    setBranchOpening((current) => ({ id: (current?.id ?? 0) + 1, opener }));
+    setBranchOpen(true);
   }, []);
-  const openCreateInBranch = useCallback((branch: AdminBranch, stepId: string) => {
-    setOpening((current) => ({
-      id: (current?.id ?? 0) + 1,
-      mode: 'create',
-      question: null,
-      stepId,
-      branchId: branch.id,
-    }));
-    setOpen(true);
-  }, []);
+  const closeBranch = useCallback(() => setBranchOpen(false), []);
+
+  const openCreate = useCallback(
+    () =>
+      showQuestion((current) => ({ id: (current?.id ?? 0) + 1, mode: 'create', question: null })),
+    [showQuestion],
+  );
+  const openCreateIn = useCallback(
+    (step: AdminStep) =>
+      showQuestion((current) => ({
+        id: (current?.id ?? 0) + 1,
+        mode: 'create',
+        question: null,
+        stepId: step.id,
+      })),
+    [showQuestion],
+  );
+  const openCreateInBranch = useCallback(
+    (branch: AdminBranch, stepId: string) =>
+      showQuestion((current) => ({
+        id: (current?.id ?? 0) + 1,
+        mode: 'create',
+        question: null,
+        stepId,
+        branchId: branch.id,
+      })),
+    [showQuestion],
+  );
   const openAddStep = useCallback(() => {
     setStepOpening((current) => ({ id: (current?.id ?? 0) + 1, mode: 'create', step: null }));
     setStepOpen(true);
@@ -107,14 +140,16 @@ export function QuestionBuilder({
     setStepOpen(true);
   }, []);
   const closeStep = useCallback(() => setStepOpen(false), []);
-  const openEdit = useCallback((question: AdminQuestion) => {
-    setOpening((current) => ({ id: (current?.id ?? 0) + 1, mode: 'edit', question }));
-    setOpen(true);
-  }, []);
-  const openReplace = useCallback((question: AdminQuestion) => {
-    setOpening((current) => ({ id: (current?.id ?? 0) + 1, mode: 'replace', question }));
-    setOpen(true);
-  }, []);
+  const openEdit = useCallback(
+    (question: AdminQuestion) =>
+      showQuestion((current) => ({ id: (current?.id ?? 0) + 1, mode: 'edit', question })),
+    [showQuestion],
+  );
+  const openReplace = useCallback(
+    (question: AdminQuestion) =>
+      showQuestion((current) => ({ id: (current?.id ?? 0) + 1, mode: 'replace', question })),
+    [showQuestion],
+  );
   const close = useCallback(() => setOpen(false), []);
   const openPreview = useCallback(() => setPreviewOpen(true), []);
   const closePreview = useCallback(() => setPreviewOpen(false), []);
@@ -183,6 +218,20 @@ export function QuestionBuilder({
           limit={limit}
           onClose={close}
           onReplace={openReplace}
+          onCreateBranch={openCreateBranch}
+        />
+      ) : null}
+      {branchOpening ? (
+        <BranchSheet
+          key={branchOpening.id}
+          open={branchOpen}
+          opener={
+            questions.find((question) => question.id === branchOpening.opener.id) ??
+            branchOpening.opener
+          }
+          steps={steps}
+          onClose={closeBranch}
+          onSaved={closeBranch}
         />
       ) : null}
       {stepOpening ? (

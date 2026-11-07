@@ -1232,68 +1232,6 @@ describe('12.1-17 Task 2: an option used by a condition (D-632, UI-D-651)', () =
   });
 });
 
-describe('12.1-17 Task 2: the read-only block of an opener (UI-D-650)', () => {
-  const ids = [uuid(9841), uuid(9842)];
-  const options = [
-    { id: ids[0] as string, label: 'A', answerCount: 0 },
-    { id: ids[1] as string, label: 'B', answerCount: 0 },
-  ];
-
-  function open(count: number) {
-    const opener = adminQuestion('single_choice', {
-      title: 'Abridora',
-      options,
-      opensCount: count,
-    });
-    const deps = Array.from({ length: count }, (_, at) =>
-      adminQuestion('short_text', {
-        title: `Dependente ${at + 1}`,
-        condition: { questionId: opener.id, values: [ids[0] as string] },
-      }),
-    );
-    return render(
-      <NextIntlClientProvider locale="pt-BR" messages={messages}>
-        <QuestionEditorSheet
-          open
-          mode="edit"
-          question={opener}
-          questions={[opener, ...deps]}
-          steps={[]}
-          tenantName="Ana Mentoria"
-          limit={30}
-          onClose={vi.fn()}
-        />
-      </NextIntlClientProvider>,
-    );
-  }
-  const block = () => document.querySelector('[data-opens-block]') as HTMLElement | null;
-
-  it('says how many it opens, lists up to five and gives the hint; no condition editor appears', () => {
-    open(3);
-    const el = block() as HTMLElement;
-    expect(within(el).getByText('Esta pergunta abre 3 perguntas:')).toBeTruthy();
-    expect(within(el).getByRole('list', { name: 'Perguntas que dependem desta' })).toBeTruthy();
-    expect(within(el).getAllByRole('listitem')).toHaveLength(3);
-    expect(
-      within(el).getByText(
-        'Elas só aparecem para quem responder como você definiu. Para arquivar ou mudar esta pergunta, ajuste essas antes.',
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
-    expect(el.querySelector('[role="alert"]')).toBeNull();
-  });
-
-  it('says "e mais 2" for seven, and the singular for one', () => {
-    const { unmount } = open(7);
-    expect(within(block() as HTMLElement).getAllByRole('listitem')).toHaveLength(5);
-    expect(within(block() as HTMLElement).getByText('e mais 2 perguntas')).toBeTruthy();
-    unmount();
-    open(1);
-    expect(within(block() as HTMLElement).getByText('Esta pergunta abre 1 pergunta:')).toBeTruthy();
-    expect(within(block() as HTMLElement).queryByText(/^e mais/)).toBeNull();
-  });
-});
-
 describe('12.1-17 Task 2: reactivating a shown question whose opener is archived (UI-D-651)', () => {
   const opener = archivedQuestion('single_choice', {
     title: 'Você tem clínica, trabalha em clínica ou está aprendendo?',

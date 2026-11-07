@@ -1796,6 +1796,11 @@ describe('12.2-16: the "Ramo" field of "Onde e quando aparece" (UI-D-669)', () =
   const branches = [named, unnamed, secondBranch];
 
   const ramo = () => screen.getByLabelText('Ramo') as HTMLSelectElement;
+
+  beforeEach(() => {
+    mocks.update.mockResolvedValue({ ok: true, question: inBranch, pending: null });
+  });
+
   const optionTexts = () =>
     within(ramo())
       .getAllByRole('option')

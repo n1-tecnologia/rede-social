@@ -4,9 +4,12 @@ import {
   type AdminBranch,
   type AdminQuestion,
   type AdminStep,
+  adminBranchSchema,
   adminQuestionSchema,
   adminStepSchema,
+  type CreateBranchBody,
   type CreateQuestionBody,
+  createBranchBodySchema,
   createQuestionBodySchema,
   createStepBodySchema,
   type Dependent,
@@ -775,17 +778,85 @@ export async function deleteStepAction(id: string): Promise<DeleteStepActionResu
   return { ok: false, code: 'failed' };
 }
 
-// ── 12.2-16: the branch sheet's write (RED-stage stub, replaced in the GREEN commit) ───────────────
+// ── 12.2-16: the branch sheet's write (D-640, D-644, D-651; PFORM-57; T-12.2-01) ───────────────────
 
+/** The field of the branch sheet a refusal belongs to; `form` is a refusal no single field owns. */
 export type BranchFieldKey = 'name' | 'values' | 'opener' | 'form';
 
-/** What `createBranchAction` answers. Inert until the GREEN commit. */
+/**
+ * What `createBranchAction` answers. `invalid` is a refused body (the contract here, or the server's 400): the
+ * issue code per field, which the sheet renders under that field. `limit` is 409 `branch_limit` (15 active
+ * branches). `conflict` is any other 409 (`branch_depth`: a third level too deep; `condition_invalid`: the
+ * opener or its answers changed meanwhile) or a bare 404 (`not_found`).
+ */
 export type SaveBranchResult =
   | { ok: true; branch: AdminBranch }
   | { ok: false; code: 'invalid'; fields: Partial<Record<BranchFieldKey, string>> }
   | { ok: false; code: 'conflict'; issue: string }
   | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };
 
-export async function createBranchAction(_body: unknown): Promise<SaveBranchResult> {
+/** The field of a branch body's issue path. */
+function branchFieldOf(head: PropertyKey | undefined): BranchFieldKey {
+  if (head === 'name') return 'name';
+  if (head === 'values') return 'values';
+  if (head === 'openerQuestionId') return 'opener';
+  return 'form';
+}
+
+/**
+ * `POST /v1/profile_form/branches`: a new, EMPTY branch from its opener (D-651). The body is validated here with
+ * the contract's own schema first (answers 1 to 20 and unique, the name trimmed, at most 60 CODE POINTS, a
+ * control character refused, a blank name sent as `null`), so a malformed body never leaves the server tier and
+ * comes back per field. The server re-validates every rule and every id (a foreign opener is the same refusal as
+ * a missing one, T-12.2-01). Only a status and a code reach a log line, never a name or an answer.
+ */
+export async function createBranchAction(body: unknown): Promise<SaveBranchResult> {
+  const parsed = createBranchBodySchema.safeParse(body);
+  if (!parsed.success) {
+    const fields: Partial<Record<BranchFieldKey, string>> = {};
+    for (const issue of parsed.error.issues) {
+      const key = branchFieldOf(issue.path[0]);
+      if (fields[key] === undefined) fields[key] = issue.message;
+    }
+    return { ok: false, code: 'invalid', fields };
+  }
+
+  const sent = await send('create_branch', '/v1/profile_form/branches', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parsed.data satisfies CreateBranchBody),
+  });
+  if (sent.kind === 'ok') {
+    const branch = adminBranchSchema.safeParse(sent.body);
+    return branch.success ? { ok: true, branch: branch.data } : { ok: false, code: 'failed' };
+  }
+
+  if (sent.kind === 'error' && sent.status === 400 && sent.envelope?.code === 'VALIDATION_FAILED') {
+    const fields: Partial<Record<BranchFieldKey, string>> = {};
+    const issues = sent.envelope.details?.issues;
+    if (Array.isArray(issues)) {
+      for (const entry of issues as { path?: unknown; message?: unknown }[]) {
+        const head = typeof entry.path === 'string' ? entry.path.split('.')[0] : undefined;
+        const key = branchFieldOf(head);
+        if (fields[key] === undefined) fields[key] = String(entry.message ?? 'invalid');
+      }
+    } else {
+      // The route lifts the first issue code to `details.profileForm`: the path is lost.
+      const lifted = sent.envelope.details?.profileForm;
+      fields.form = typeof lifted === 'string' ? lifted : 'invalid';
+    }
+    return { ok: false, code: 'invalid', fields };
+  }
+
+  const failure = failureOf('create_branch', sent);
+  if (failure.navigate) redirect(failure.navigate);
+  const result = failure.result;
+  if (result.code === 'conflict') {
+    if (result.issue === 'branch_limit') return { ok: false, code: 'limit' };
+    return { ok: false, code: 'conflict', issue: result.issue };
+  }
+  if (result.code === 'limit' || result.code === 'forbidden' || result.code === 'moduleOff') {
+    return { ok: false, code: result.code };
+  }
   return { ok: false, code: 'failed' };
 }

@@ -2463,12 +2463,12 @@ describe('12.2-16 Task 2: "Criar ramo" hands over to the branch sheet, never sta
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('closes the branch sheet without writing when the admin leaves it untouched', () => {
+  it('closes the branch sheet without writing when the admin leaves it untouched', async () => {
     builder({ questions: [OPENER, PLAIN], steps: [U1], branches: [] });
     openOpener();
     fireEvent.click(createBranchButton());
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(mocks.createBranch).not.toHaveBeenCalled();
   });
 

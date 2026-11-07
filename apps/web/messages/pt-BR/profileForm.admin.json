@@ -55,6 +55,31 @@
           "up": "Subir ramo “{label}”",
           "down": "Descer ramo “{label}”",
           "moved": "O ramo “{label}” agora é o ramo {position} de {total} desta pergunta."
+        },
+        "limit": "Você chegou ao limite de {max} ramos. Desfaça ou arquive um ramo para criar outro.",
+        "sheet": {
+          "createTitle": "Novo ramo",
+          "opener": "Pergunta que decide",
+          "legend": "Mostrar quando a resposta for",
+          "help": "Basta uma das opções marcadas para o ramo abrir.",
+          "otherNote": "A opção “Outro” não abre ramos.",
+          "name": {
+            "label": "Nome do ramo (opcional)",
+            "placeholder": "Ex.: Quem tem clínica",
+            "counter": "{n}/{max}",
+            "help": "O nome só aparece para você, no construtor e no Fluxo. Os membros não o veem.",
+            "tooLong": "Use até {max} caracteres."
+          },
+          "errors": {
+            "values": "Escolha pelo menos uma resposta que abre este ramo."
+          },
+          "save": "Salvar ramo",
+          "saving": "Salvando…",
+          "discardBody": "As mudanças deste ramo ainda não foram salvas.",
+          "failed": "Não foi possível salvar o ramo agora. Tente de novo."
+        },
+        "toasts": {
+          "created": "Ramo criado."
         }
       },
       "reorder": {
@@ -349,6 +374,14 @@
           "privateHidden": "Ramos que dependem de perguntas que não aparecem no perfil ficam de fora porque esta pergunta aparece.",
           "locked": "Esta pergunta já tem {n, plural, one {# resposta} other {# respostas}}, então não pode entrar nem sair de um ramo. Para mudar, crie uma nova pergunta e arquive esta.",
           "requiredNote": "Como esta pergunta é obrigatória, só quem a vê precisa responder."
+        },
+        "branches": {
+          "title": "Ramos desta pergunta",
+          "hint": "Um ramo abre um grupo de perguntas só para quem responder como você definir.",
+          "create": "Criar ramo",
+          "none": "Esta pergunta ainda não abre nenhum ramo.",
+          "saveFirst": "Salve a pergunta para poder criar ramos a partir dela.",
+          "depth": "Esta pergunta já está dentro de {max} níveis de ramo, o máximo. Ela não pode abrir outro ramo."
         }
       },
       "export": {

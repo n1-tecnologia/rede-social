@@ -25,7 +25,7 @@ export interface SheetSelectProps {
  * A native `<select>` in the shipped `Input` look (UI-D-647, UI-D-669): the label above (14/400 secondary), the
  * 16px control with a trailing `ChevronDown` 18, a 12/400 tertiary helper and a `role="alert"` error line. Native
  * on purpose: nothing a phone's own picker already does is rebuilt here. Shared by the "Etapa" and "Ramo"
- * fields of the question sheet (moved out of `ConditionEditor.tsx` in 12.2-16).
+ * fields of the question sheet (moved out of the retired 12.1 condition editor in 12.2-16).
  */
 export function SheetSelect({
   id,

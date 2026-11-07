@@ -995,8 +995,14 @@ describe('createBranchAction (12.2-16)', () => {
     expect(none).toEqual({ ok: false, code: 'invalid', fields: { values: 'condition_invalid' } });
     const long = await createBranchAction({ ...body, name: 'x'.repeat(61) });
     expect(long).toEqual({ ok: false, code: 'invalid', fields: { name: 'too_long' } });
-    const control = await createBranchAction({ ...body, name: 'a\u0007b' });
-    expect(control).toEqual({ ok: false, code: 'invalid', fields: { name: 'invalid' } });
+    // The contracts' one definition of an unsafe name: NUL and a lone surrogate (a BEL is stored like in every other text).
+    for (const unsafe of ['a\u0000b', 'a\ud800b']) {
+      expect(await createBranchAction({ ...body, name: unsafe })).toEqual({
+        ok: false,
+        code: 'invalid',
+        fields: { name: 'invalid' },
+      });
+    }
     const noOpener = await createBranchAction({ openerQuestionId: 'nope', values: [TOKEN] });
     expect(noOpener).toEqual({
       ok: false,

@@ -17,11 +17,17 @@ import {
   useMediaQuery,
   useToast,
 } from '@rede-social/ui';
-import { Archive, CircleAlert, Info, Lock, Trash2 } from 'lucide-react';
+import { Archive, ChevronRight, CircleAlert, Info, Lock, Split, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type FormEvent, useCallback, useMemo, useRef, useState } from 'react';
-import { buildBranchTree, usableBranch } from '@/lib/profile-form/branch-tree';
+import {
+  branchLevel,
+  buildBranchTree,
+  membersOf,
+  orderedBranchesOf,
+  usableBranch,
+} from '@/lib/profile-form/branch-tree';
 import { describeBranch } from '@/lib/profile-form/describe-branch';
 import { isChoiceType } from '@/lib/profile-form/question-types';
 import { ArchiveDialog, type ArchiveKind } from './ArchiveDialog';
@@ -37,7 +43,7 @@ import {
   updateQuestionAction,
 } from './actions';
 import { useBranchLabeler } from './BranchBlock';
-import { DEPENDENTS_SHOWN, DependentsAlert } from './DependentsAlert';
+import { DependentsAlert } from './DependentsAlert';
 import {
   blankDraft,
   branchOptionsFor,
@@ -53,6 +59,7 @@ import {
   hasChanges,
   hasErrors,
   isDirty,
+  isOpenerType,
   lockFlags,
   optionUsage,
   type QuestionDraft,
@@ -100,12 +107,12 @@ export interface QuestionEditorSheetProps {
   initialBranchId?: string;
   /**
    * "Criar ramo" (12.2-16, D-651): the host closes this sheet and opens the branch sheet for this question. Absent
-   * means the host cannot create a branch, and the button is not offered. RED-stage stub: not read yet.
+   * means the host cannot create a branch, and the whole block "Ramos desta pergunta" is not offered.
    */
   onCreateBranch?: (opener: AdminQuestion) => void;
   /**
    * A row of "Ramos desta pergunta": the host closes this sheet and opens that branch (plan 17). Absent means the
-   * rows are not drawn, so no row exists that does nothing. RED-stage stub: not read yet.
+   * rows are not drawn, so no row exists that does nothing.
    */
   onOpenBranch?: (branch: AdminBranch) => void;
   /** The tenant's display name, the `{tenant}` of the LGPD notice. */
@@ -169,6 +176,8 @@ export function QuestionEditorSheet({
   steps = NO_STEPS,
   branches = NO_BRANCHES,
   initialBranchId,
+  onCreateBranch,
+  onOpenBranch,
   tenantName,
   limit,
   onClose,
@@ -195,8 +204,9 @@ export function QuestionEditorSheet({
   const [saving, setSaving] = useState(false);
   const [gridOpen, setGridOpen] = useState(draft.type === null);
   const [discardOpen, setDiscardOpen] = useState(false);
-  // What a confirmed discard does: close the sheet, or leave for the replace flow.
-  const [afterDiscard, setAfterDiscard] = useState<'close' | 'replace'>('close');
+  // What a confirmed discard does: close the sheet, leave for the replace flow, or hand over to a branch sheet.
+  const [afterDiscard, setAfterDiscard] = useState<'close' | 'replace' | 'branch'>('close');
+  const handOver = useRef<(() => void) | null>(null);
   // The 409 of the truth: another admin changed the question, or answers arrived and a lock now applies.
   const [conflict, setConflict] = useState(false);
   // The archive or delete confirmation; `removeKind` is kept for the dialog's exit animation.
@@ -215,8 +225,6 @@ export function QuestionEditorSheet({
   const activeQuestions = questions ?? NO_QUESTIONS;
   const showStepField = steps.length >= 2;
   const dependents = stored ? dependentsOf(activeQuestions, stored.id) : [];
-  // An opener shows what it opens (12.1 block, replaced by "Ramos desta pergunta" in 12.2-16 Task 2).
-  const isOpener = stored !== null && stored.opensCount > 0;
   const usedCounts = stored ? optionUsage(activeQuestions, stored.id) : undefined;
 
   // The tree the "Ramo" field is judged against (D-641, D-644): built from the one read the page holds.
@@ -240,6 +248,16 @@ export function QuestionEditorSheet({
       )
     : null;
   const yesNoWords = { yes: tc('yes'), no: tc('no') };
+
+  // "Ramos desta pergunta" (D-651, UI-D-670): only for the four types that can open a branch, and only when the
+  // host can create one. The depth and the limit come from the limits, never from a string.
+  const showBranchesBlock =
+    onCreateBranch !== undefined && draft.type !== null && isOpenerType(draft.type);
+  const ownBranches = stored ? orderedBranchesOf(tree, stored.id) : [];
+  const storedLevel = stored?.branchId ? branchLevel(tree, stored.branchId) : null;
+  const depthReached = storedLevel !== null && storedLevel >= PROFILE_FORM_LIMITS.branchDepth;
+  const branchLimitReached =
+    branches.filter((branch) => branch.archivedAt === null).length >= PROFILE_FORM_LIMITS.branches;
 
   /** "Só conta quem vê esta pergunta: …" for the branch the draft sits in, or `null` (the impact dialog). */
   function branchNote(): string | null {
@@ -275,6 +293,20 @@ export function QuestionEditorSheet({
       return;
     }
     onReplace(question);
+  }
+
+  /**
+   * Leaves this sheet for a branch sheet (D-651, UI-D-670): the sheet closes FIRST, through the dirty guard, so
+   * nothing typed is lost silently, and only then does the host open the branch sheet. Never stacked.
+   */
+  function leaveFor(go: () => void) {
+    if (dirty) {
+      handOver.current = go;
+      setAfterDiscard('branch');
+      setDiscardOpen(true);
+      return;
+    }
+    go();
   }
 
   function patch(change: Partial<QuestionDraft>) {
@@ -834,30 +866,81 @@ export function QuestionEditorSheet({
                   </div>
                 ) : null}
 
-                {isOpener && stored ? (
-                  <div className="flex flex-col gap-2" data-opens-block>
-                    <p className="break-words text-sm font-bold text-text">
-                      {te('opens.title', { count: stored.opensCount })}
-                    </p>
-                    <ul
-                      aria-label={te('opens.listLabel')}
-                      className="flex list-disc flex-col gap-1 pl-4 text-sm text-text"
-                    >
-                      {dependents.slice(0, DEPENDENTS_SHOWN).map((dependent) => (
-                        <li key={dependent.id} className="break-words">
-                          {dependent.title}
-                        </li>
-                      ))}
-                    </ul>
-                    {stored.opensCount > Math.min(dependents.length, DEPENDENTS_SHOWN) &&
-                    dependents.length > 0 ? (
-                      <p className="text-xs font-normal text-text-secondary">
-                        {t('dependents.more', {
-                          count: stored.opensCount - Math.min(dependents.length, DEPENDENTS_SHOWN),
-                        })}
+                {showBranchesBlock ? (
+                  <div className="flex flex-col gap-3" data-branches-block>
+                    <SectionTitle variant="micro" as="h3">
+                      {te('branches.title')}
+                    </SectionTitle>
+                    <p className="text-xs font-normal text-text-tertiary">{te('branches.hint')}</p>
+                    {depthReached ? (
+                      <p className="flex items-start gap-2 break-words text-xs font-normal text-text-secondary">
+                        <Info aria-hidden size={16} className="mt-px shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          {te('branches.depth', { max: PROFILE_FORM_LIMITS.branchDepth })}
+                        </span>
                       </p>
-                    ) : null}
-                    <p className="text-xs font-normal text-text-tertiary">{te('opens.hint')}</p>
+                    ) : (
+                      <>
+                        {ownBranches.length === 0 ? (
+                          <p className="text-xs font-normal text-text-secondary">
+                            {te('branches.none')}
+                          </p>
+                        ) : onOpenBranch ? (
+                          <ul aria-label={te('branches.title')} className="flex flex-col gap-2">
+                            {ownBranches.map((branch) => (
+                              <li key={branch.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => leaveFor(() => onOpenBranch(branch))}
+                                  className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-bg-tertiary px-3 py-2 text-left"
+                                >
+                                  <Split
+                                    aria-hidden
+                                    size={16}
+                                    className="shrink-0 text-text-tertiary"
+                                  />
+                                  <span className="flex min-w-0 flex-1 flex-col">
+                                    <span className="line-clamp-2 break-words text-sm font-bold text-text">
+                                      {labelOf(branch).label}
+                                    </span>
+                                    <span className="text-xs font-normal text-text-secondary">
+                                      {t('branches.count', {
+                                        count: membersOf(tree, branch.id).length,
+                                      })}
+                                    </span>
+                                  </span>
+                                  <ChevronRight
+                                    aria-hidden
+                                    size={16}
+                                    className="shrink-0 text-text-tertiary"
+                                  />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        <Button
+                          variant="outline"
+                          fullWidth
+                          disabled={stored === null || branchLimitReached || saving}
+                          onClick={() => {
+                            if (stored) leaveFor(() => onCreateBranch?.(stored));
+                          }}
+                        >
+                          <Split aria-hidden size={18} />
+                          {te('branches.create')}
+                        </Button>
+                        {stored === null ? (
+                          <p className="text-xs font-normal text-text-tertiary">
+                            {te('branches.saveFirst')}
+                          </p>
+                        ) : branchLimitReached ? (
+                          <p className="text-xs font-normal text-text-tertiary">
+                            {t('branches.limit', { max: PROFILE_FORM_LIMITS.branches })}
+                          </p>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 ) : null}
               </>
@@ -943,6 +1026,7 @@ export function QuestionEditorSheet({
         cancelLabel={te('discard.cancel')}
         onConfirm={() => {
           if (afterDiscard === 'replace' && question) onReplace?.(question);
+          else if (afterDiscard === 'branch') handOver.current?.();
           else onClose();
         }}
         onClose={() => setDiscardOpen(false)}
