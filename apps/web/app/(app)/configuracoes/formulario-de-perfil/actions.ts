@@ -921,3 +921,16 @@ export async function updateBranchAction(id: string, body: unknown): Promise<Sav
   if (failure.navigate) redirect(failure.navigate);
   return failure.result;
 }
+
+/** What "Desfazer ramo" answers: `gone` is a branch that is not there any more (the server's bare 404). */
+export type UndoBranchActionResult =
+  | { ok: true }
+  | { ok: false; code: 'gone' | 'forbidden' | 'moduleOff' | 'failed' };
+
+/**
+ * RED STUB (12.2-17 Task 2): inert on purpose, replaced in full by the GREEN commit. It answers `failed` so the
+ * tests that expect the POST fail for the missing behaviour, not for a missing export.
+ */
+export async function undoBranchAction(_id: string): Promise<UndoBranchActionResult> {
+  return { ok: false, code: 'failed' };
+}

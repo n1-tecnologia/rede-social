@@ -30,6 +30,7 @@ const {
   reorderQuestionsAction,
   renameStepAction,
   replaceQuestionAction,
+  undoBranchAction,
   updateBranchAction,
   updateQuestionAction,
 } = await import('./actions');
@@ -1264,5 +1265,86 @@ describe('updateBranchAction (12.2-17)', () => {
       ok: false,
       code: 'failed',
     });
+  });
+});
+
+// ── 12.2-17 Task 2: the impact of undoing a branch, and undoBranchAction (D-653; T-12.2-01) ──────────
+
+describe('readImpactAction with undo_branch (12.2-17)', () => {
+  const BRANCH = uuid(4710);
+
+  it('GETs the impact with change=undo_branch and the branch id, and returns the count', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 6 }));
+    expect(await readImpactAction({ change: 'undo_branch', branchId: BRANCH })).toEqual({
+      ok: true,
+      members: 6,
+    });
+    const [path] = mocks.apiFetch.mock.calls[0] as [string];
+    const url = new URL(path, 'http://x');
+    expect(url.pathname).toBe('/v1/profile_form/impact');
+    expect(url.searchParams.get('change')).toBe('undo_branch');
+    expect(url.searchParams.get('branchId')).toBe(BRANCH);
+  });
+
+  it('never leaves the server tier with a branch id that is not a uuid', async () => {
+    expect(await readImpactAction({ change: 'undo_branch', branchId: 'nope' })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('answers a refusal as a failed read, so the caller writes nothing', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'NOT_FOUND'));
+    expect(await readImpactAction({ change: 'undo_branch', branchId: BRANCH })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+    mocks.apiFetch.mockResolvedValue(json(200, { members: 'many' }));
+    expect(await readImpactAction({ change: 'undo_branch', branchId: BRANCH })).toEqual({
+      ok: false,
+      code: 'failed',
+    });
+  });
+});
+
+describe('undoBranchAction (12.2-17)', () => {
+  const BRANCH = uuid(4711);
+
+  it('POSTs /v1/profile_form/branches/{id}/undo and reads { undone: true } as ok', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { undone: true }));
+    expect(await undoBranchAction(BRANCH)).toEqual({ ok: true });
+    const [path, init] = mocks.apiFetch.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/v1/profile_form/branches/${BRANCH}/undo`);
+    expect(init.method).toBe('POST');
+  });
+
+  it('never leaves the server tier with a forged id', async () => {
+    expect(await undoBranchAction('not-a-uuid')).toEqual({ ok: false, code: 'failed' });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('answers a body that breaks the contract and a thrown request as failed', async () => {
+    mocks.apiFetch.mockResolvedValue(json(200, { undone: false }));
+    expect(await undoBranchAction(BRANCH)).toEqual({ ok: false, code: 'failed' });
+    mocks.apiFetch.mockRejectedValue(new Error('network'));
+    expect(await undoBranchAction(BRANCH)).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('answers the bare 404 as gone, and the shared codes as themselves', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'NOT_FOUND'));
+    expect(await undoBranchAction(BRANCH)).toEqual({ ok: false, code: 'gone' });
+    mocks.apiFetch.mockResolvedValue(refusal(403, 'FORBIDDEN'));
+    expect(await undoBranchAction(BRANCH)).toEqual({ ok: false, code: 'forbidden' });
+    mocks.apiFetch.mockResolvedValue(refusal(404, 'MODULE_DISABLED'));
+    expect(await undoBranchAction(BRANCH)).toEqual({ ok: false, code: 'moduleOff' });
+    mocks.apiFetch.mockResolvedValue(refusal(500, 'INTERNAL'));
+    expect(await undoBranchAction(BRANCH)).toEqual({ ok: false, code: 'failed' });
+  });
+
+  it('sends a lost session to the (app) navigation, outside the try', async () => {
+    mocks.apiFetch.mockResolvedValue(refusal(401, 'UNAUTHENTICATED'));
+    await expect(undoBranchAction(BRANCH)).rejects.toThrow();
+    expect(mocks.redirect).toHaveBeenCalledTimes(1);
   });
 });

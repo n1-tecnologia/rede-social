@@ -20,6 +20,8 @@ import { adminBranch, adminQuestion, adminStep, uuid } from '@/lib/profile-form/
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
+  impact: vi.fn(),
+  undo: vi.fn(),
   refresh: vi.fn(),
   show: vi.fn(),
 }));
@@ -30,6 +32,8 @@ const messages = loadMessages(join(process.cwd(), 'messages', 'pt-BR'));
 vi.mock('./actions', () => ({
   createBranchAction: (...args: unknown[]) => mocks.create(...args),
   updateBranchAction: (...args: unknown[]) => mocks.update(...args),
+  readImpactAction: (...args: unknown[]) => mocks.impact(...args),
+  undoBranchAction: (...args: unknown[]) => mocks.undo(...args),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
@@ -822,5 +826,297 @@ describe('12.2-17 Task 1: edit mode', () => {
     expect(nameField().value).toBe(hostile);
     expect(document.querySelector('[data-branch-questions] img')).toBeNull();
     expect(listItems()[0]?.textContent).toContain(hostile);
+  });
+
+  // ── Task 2: a branch with answers is locked (D-646) ───────────────────────────────────────────────
+  describe('a branch with answers is locked (D-646, UI-D-671)', () => {
+    const answered = (count: number) =>
+      members(3).map((member, at) => (at < count ? { ...member, answerCount: 2 } : member));
+    const lockedProps = (answeredCount = 2) => ({
+      branch: { ...BR, answerCount: 5 },
+      questions: [QA, OPENER, ...answered(answeredCount)],
+    });
+    const lockedSentence = (n: string) =>
+      `Este ramo já tem respostas em ${n}, então a pergunta que decide e as respostas que o abrem não podem mudar. Para mudar, crie um novo ramo e arquive este.`;
+
+    it('replaces the opener select and the answers picker by ONE read-only row with the lock', () => {
+      showEdit(lockedProps());
+      const row = document.querySelector('[data-branch-locked]') as HTMLElement;
+      expect(row).toBeTruthy();
+      expect(row.querySelector('svg')?.getAttribute('class') ?? '').toContain('lock');
+      expect(row.textContent).toContain(lockedSentence('2 perguntas'));
+      expect(row.textContent).toContain(
+        'Se “Você tem clínica, trabalha em clínica ou está aprendendo?” for “Tenho uma clínica”',
+      );
+      expect(row.textContent).toContain('Você ainda pode dar um nome a ele ou desfazê-lo.');
+      expect(screen.queryByLabelText('Pergunta que decide')).toBeNull();
+      expect(dialog('Editar ramo').querySelector('select')).toBeNull();
+      expect(screen.queryByRole('group', { name: 'Mostrar quando a resposta for' })).toBeNull();
+      expect(screen.queryByRole('checkbox')).toBeNull();
+      expect(document.querySelector('[data-branch-reset]')).toBeNull();
+    });
+
+    it('reads the singular for one question and never zero for a branch whose answers are archived', () => {
+      const { unmount } = showEdit(lockedProps(1));
+      expect(screen.getByText(/respostas em 1 pergunta,/)).toBeTruthy();
+      unmount();
+      cleanup();
+      showEdit(lockedProps(0));
+      expect(screen.getByText(/respostas em 1 pergunta,/)).toBeTruthy();
+    });
+
+    it('renders none of it for a branch without answers: the select and the picker are there', () => {
+      showEdit();
+      expect(document.querySelector('[data-branch-locked]')).toBeNull();
+      expect(screen.queryByText(/Este ramo já tem respostas/)).toBeNull();
+      expect(openerSelect()).toBeTruthy();
+      expect(screen.getByRole('group', { name: 'Mostrar quando a resposta for' })).toBeTruthy();
+    });
+
+    it('keeps the name editable and the footer: only the name travels, under the revision', async () => {
+      showEdit(lockedProps());
+      expect(save().hasAttribute('disabled')).toBe(true);
+      type('Outro nome');
+      expect(save().hasAttribute('disabled')).toBe(false);
+      await act(async () => {
+        fireEvent.click(save());
+      });
+      expect(mocks.update).toHaveBeenCalledWith(BR.id, { revision: 3, name: 'Outro nome' });
+    });
+
+    it('shows a coded condition_locked (an answer arrived meanwhile) in the sheet and refreshes', async () => {
+      mocks.update.mockResolvedValue({ ok: false, code: 'conflict', issue: 'condition_locked' });
+      showEdit();
+      fireEvent.click(box('Trabalho em uma clínica'));
+      await act(async () => {
+        fireEvent.click(save());
+      });
+      expect(screen.getByRole('alert').textContent).toContain('Este ramo já tem respostas em');
+      expect(screen.getByRole('alert').textContent).toContain('crie um novo ramo e arquive este.');
+      expect(mocks.refresh).toHaveBeenCalled();
+    });
+
+    it('keeps the long sentence and a long condition inside the width (break-words, min-w-0)', () => {
+      showEdit(lockedProps());
+      const row = document.querySelector('[data-branch-locked]') as HTMLElement;
+      expect(row.className).toContain('min-w-0');
+      expect(row.innerHTML).toContain('break-words');
+    });
+  });
+
+  // ── Task 2: "Desfazer ramo" reads the member impact before it confirms (D-653, UI-D-672) ─────────────
+  describe('"Desfazer ramo" (D-653, UI-D-672)', () => {
+    const undoButton = () => screen.getByRole('button', { name: 'Desfazer ramo' });
+    const undoDialog = () => screen.getByRole('dialog', { name: 'Desfazer este ramo?' });
+    const nested = () => {
+      const inside = adminQuestion('yes_no', {
+        title: 'Tem equipe?',
+        stepId: S2.id,
+        branchId: BR.id,
+      });
+      const inner = adminBranch({ openerQuestionId: inside.id, values: ['true'] });
+      return { questions: [QA, OPENER, inside], branches: [BR, inner] };
+    };
+    const press = async () => {
+      await act(async () => {
+        fireEvent.click(undoButton());
+      });
+    };
+
+    beforeEach(() => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+      mocks.undo.mockResolvedValue({ ok: true });
+    });
+
+    it('sits in a divided block under the save button, outside the save form', () => {
+      showEdit();
+      const form = dialog('Editar ramo').querySelector('form') as HTMLFormElement;
+      expect(form.contains(undoButton())).toBe(false);
+      const block = undoButton().closest('[data-branch-manage]') as HTMLElement;
+      expect(block).toBeTruthy();
+      expect(block.className).toContain('border-t');
+      expect(
+        save().compareDocumentPosition(undoButton()) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(undoButton().className).toContain('min-h-11');
+      expect(undoButton().className).toContain('w-full');
+    });
+
+    it('is not on the create sheet', () => {
+      show();
+      expect(screen.queryByRole('button', { name: 'Desfazer ramo' })).toBeNull();
+    });
+
+    it('reads the impact of THIS branch first and opens the dialog only when the read returns', async () => {
+      let release: (value: unknown) => void = () => {};
+      mocks.impact.mockReturnValue(new Promise((resolve) => (release = resolve)));
+      showEdit();
+      await press();
+      expect(mocks.impact).toHaveBeenCalledWith({ change: 'undo_branch', branchId: BR.id });
+      expect(screen.queryByRole('dialog', { name: 'Desfazer este ramo?' })).toBeNull();
+      expect(mocks.undo).not.toHaveBeenCalled();
+      await act(async () => {
+        release({ ok: true, members: 0 });
+      });
+      expect(undoDialog()).toBeTruthy();
+      expect(mocks.undo).not.toHaveBeenCalled();
+    });
+
+    it('opens nothing and saves nothing when the read fails, and says so', async () => {
+      mocks.impact.mockResolvedValue({ ok: false, code: 'failed' });
+      showEdit();
+      await press();
+      expect(screen.queryByRole('dialog', { name: 'Desfazer este ramo?' })).toBeNull();
+      expect(mocks.undo).not.toHaveBeenCalled();
+      expect(mocks.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message:
+          'Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.',
+      });
+    });
+
+    it('treats a thrown read like a failed one', async () => {
+      mocks.impact.mockRejectedValue(new Error('network'));
+      showEdit();
+      await press();
+      expect(screen.queryByRole('dialog', { name: 'Desfazer este ramo?' })).toBeNull();
+      expect(mocks.undo).not.toHaveBeenCalled();
+      expect(mocks.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
+    });
+
+    it('sends a lost permission to a refresh with its own toast, without a dialog', async () => {
+      mocks.impact.mockResolvedValue({ ok: false, code: 'forbidden' });
+      const { onClose } = showEdit();
+      await press();
+      expect(screen.queryByRole('dialog', { name: 'Desfazer este ramo?' })).toBeNull();
+      expect(mocks.refresh).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+      expect(mocks.undo).not.toHaveBeenCalled();
+    });
+
+    it('uses the brand tone with the Undo2 icon, and "Manter ramo" (never Cancelar) to dismiss', async () => {
+      showEdit();
+      await press();
+      const box = undoDialog();
+      expect(box.querySelector('svg')?.getAttribute('class') ?? '').toContain('undo');
+      expect(within(box).getByRole('button', { name: 'Manter ramo' })).toBeTruthy();
+      expect(within(box).queryByRole('button', { name: 'Cancelar' })).toBeNull();
+      fireEvent.click(within(box).getByRole('button', { name: 'Manter ramo' }));
+      expect(screen.queryByRole('dialog', { name: 'Desfazer este ramo?' })).toBeNull();
+      expect(mocks.undo).not.toHaveBeenCalled();
+    });
+
+    it('reads the body by the number of questions of the branch: none, one, many', async () => {
+      const cases: [number, string][] = [
+        [0, 'O ramo está vazio e será removido.'],
+        [1, 'A pergunta dele continua no formulário e passa a aparecer para todos os membros.'],
+        [
+          3,
+          'As 3 perguntas dele continuam no formulário e passam a aparecer para todos os membros.',
+        ],
+      ];
+      for (const [count, sentence] of cases) {
+        cleanup();
+        showEdit({ questions: [QA, OPENER, ...members(count)] });
+        await press();
+        expect(undoDialog().textContent).toContain(sentence);
+        expect(undoDialog().textContent).not.toContain('Os ramos dentro dele');
+      }
+    });
+
+    it('confirms with "Desfazer ramo" when no member will have to answer, and adds no member sentence', async () => {
+      showEdit();
+      await press();
+      const box = undoDialog();
+      expect(within(box).getByRole('button', { name: 'Desfazer ramo' })).toBeTruthy();
+      expect(within(box).queryByRole('button', { name: 'Desfazer e exigir' })).toBeNull();
+      expect(box.textContent).not.toContain('vai precisar respondê-las');
+      expect(box.textContent).not.toContain('vão precisar respondê-las');
+    });
+
+    it('adds the member sentence and confirms with "Desfazer e exigir" when members will have to answer', async () => {
+      mocks.impact.mockResolvedValue({ ok: true, members: 1 });
+      showEdit();
+      await press();
+      const box = undoDialog();
+      expect(box.textContent).toContain(
+        '1 membro que hoje não vê estas perguntas vai precisar respondê-las antes de continuar usando a comunidade. Quem já respondeu mantém a resposta.',
+      );
+      expect(within(box).getByRole('button', { name: 'Desfazer e exigir' })).toBeTruthy();
+      cleanup();
+      mocks.impact.mockResolvedValue({ ok: true, members: 12 });
+      showEdit();
+      await press();
+      expect(undoDialog().textContent).toContain(
+        '12 membros que hoje não veem estas perguntas vão precisar respondê-las antes de continuar usando a comunidade.',
+      );
+    });
+
+    it('says the branches inside it keep working only when branches hang inside it', async () => {
+      showEdit(nested());
+      await press();
+      expect(undoDialog().textContent).toContain('Os ramos dentro dele continuam valendo.');
+      cleanup();
+      showEdit();
+      await press();
+      expect(undoDialog().textContent).not.toContain('Os ramos dentro dele continuam valendo.');
+    });
+
+    it('never puts a branch name or an opener title in the dialog', async () => {
+      showEdit();
+      await press();
+      expect(undoDialog().textContent).not.toContain('Quem tem clínica');
+      expect(undoDialog().textContent).not.toContain('Você tem clínica');
+    });
+
+    it('undoes the branch on confirm, toasts, refreshes and closes the sheet', async () => {
+      const { onClose } = showEdit();
+      await press();
+      await act(async () => {
+        fireEvent.click(within(undoDialog()).getByRole('button', { name: 'Desfazer ramo' }));
+      });
+      expect(mocks.undo).toHaveBeenCalledTimes(1);
+      expect(mocks.undo).toHaveBeenCalledWith(BR.id);
+      expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Ramo desfeito.' });
+      expect(mocks.refresh).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it('keeps the sheet open with the failure line when the undo fails, and never toasts a success', async () => {
+      mocks.undo.mockResolvedValue({ ok: false, code: 'failed' });
+      const { onClose } = showEdit();
+      await press();
+      await act(async () => {
+        fireEvent.click(within(undoDialog()).getByRole('button', { name: 'Desfazer ramo' }));
+      });
+      expect(onClose).not.toHaveBeenCalled();
+      expect(mocks.show).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+      expect(screen.getByRole('alert').textContent).toContain(
+        'Não foi possível salvar o ramo agora. Tente de novo.',
+      );
+    });
+
+    it('closes the sheet and refreshes when the branch is gone already', async () => {
+      mocks.undo.mockResolvedValue({ ok: false, code: 'gone' });
+      const { onClose } = showEdit();
+      await press();
+      await act(async () => {
+        fireEvent.click(within(undoDialog()).getByRole('button', { name: 'Desfazer ramo' }));
+      });
+      expect(mocks.refresh).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+      expect(mocks.show).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
+    it('sends a lost permission on the undo itself to a refresh with its toast', async () => {
+      mocks.undo.mockResolvedValue({ ok: false, code: 'forbidden' });
+      const { onClose } = showEdit();
+      await press();
+      await act(async () => {
+        fireEvent.click(within(undoDialog()).getByRole('button', { name: 'Desfazer ramo' }));
+      });
+      expect(mocks.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 });

@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   layout: vi.fn(),
   createBranch: vi.fn(),
   updateBranch: vi.fn(),
+  undoBranch: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -58,6 +59,7 @@ vi.mock('./actions', () => ({
   reorderLayoutAction: (...args: unknown[]) => mocks.layout(...args),
   createBranchAction: (...args: unknown[]) => mocks.createBranch(...args),
   updateBranchAction: (...args: unknown[]) => mocks.updateBranch(...args),
+  undoBranchAction: (...args: unknown[]) => mocks.undoBranch(...args),
 }));
 vi.mock('@/app/(auth)/completar-perfil/actions', () => ({
   saveProfileFormAction: (...args: unknown[]) => mocks.save(...args),
@@ -2624,5 +2626,24 @@ describe('12.2-17 Task 1: an existing branch opens from the Lista and from its o
     );
     view.again({ ...props(), branches: [] });
     expect(screen.queryByRole('dialog', { name: 'Editar ramo' })).toBeNull();
+  });
+
+  it('undoes a branch from its sheet: impact read, confirmation, toast, refresh, sheet closed', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 2 });
+    mocks.undoBranch.mockResolvedValue({ ok: true });
+    builder(props());
+    fireEvent.click(pencil());
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Desfazer ramo' }));
+    });
+    expect(mocks.impact).toHaveBeenCalledWith({ change: 'undo_branch', branchId: BR.id });
+    const confirm = screen.getByRole('dialog', { name: 'Desfazer este ramo?' });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Desfazer e exigir' }));
+    });
+    expect(mocks.undoBranch).toHaveBeenCalledWith(BR.id);
+    expect(mocks.show).toHaveBeenCalledWith({ tone: 'success', message: 'Ramo desfeito.' });
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

@@ -256,12 +256,69 @@ describe('profileForm.admin.branches: the edit mode of the branch sheet (UI-D-67
   });
 });
 
+describe('profileForm.admin.branches: the locked state and "Desfazer ramo" (UI-D-671, UI-D-672, 12.2-17)', () => {
+  it('declares the locked and undo keys exactly as the Copywriting Contract names them', () => {
+    const { sheet, undo, toasts } = parsed.profileForm.admin.branches;
+    expect(sheet.locked).toHaveProperty('body');
+    expect(sheet.locked).toHaveProperty('hint');
+    for (const key of [
+      'button',
+      'title',
+      'body',
+      'impact',
+      'nested',
+      'confirm',
+      'confirmRequire',
+      'cancel',
+    ]) {
+      expect(undo, key).toHaveProperty(key);
+    }
+    expect(toasts).toHaveProperty('undone');
+  });
+
+  it('reads the locked sentence with the plural of the questions, verbatim', () => {
+    expect(t('branches.sheet.locked.body', { n: 1 })).toBe(
+      'Este ramo já tem respostas em 1 pergunta, então a pergunta que decide e as respostas que o abrem não podem mudar. Para mudar, crie um novo ramo e arquive este.',
+    );
+    expect(t('branches.sheet.locked.body', { n: 4 })).toBe(
+      'Este ramo já tem respostas em 4 perguntas, então a pergunta que decide e as respostas que o abrem não podem mudar. Para mudar, crie um novo ramo e arquive este.',
+    );
+    expect(t('branches.sheet.locked.hint')).toBe(
+      'Você ainda pode dar um nome a ele ou desfazê-lo.',
+    );
+  });
+
+  it('reads the dialog verbatim: title, body for none, one and many, the member sentence, the buttons', () => {
+    expect(t('branches.undo.button')).toBe('Desfazer ramo');
+    expect(t('branches.undo.title')).toBe('Desfazer este ramo?');
+    expect(t('branches.undo.body', { count: 0 })).toBe('O ramo está vazio e será removido.');
+    expect(t('branches.undo.body', { count: 1 })).toBe(
+      'A pergunta dele continua no formulário e passa a aparecer para todos os membros.',
+    );
+    expect(t('branches.undo.body', { count: 3 })).toBe(
+      'As 3 perguntas dele continuam no formulário e passam a aparecer para todos os membros.',
+    );
+    expect(t('branches.undo.impact', { n: 1 })).toBe(
+      '1 membro que hoje não vê estas perguntas vai precisar respondê-las antes de continuar usando a comunidade. Quem já respondeu mantém a resposta.',
+    );
+    expect(t('branches.undo.impact', { n: 5 })).toBe(
+      '5 membros que hoje não veem estas perguntas vão precisar respondê-las antes de continuar usando a comunidade. Quem já respondeu mantém a resposta.',
+    );
+    expect(t('branches.undo.nested')).toBe('Os ramos dentro dele continuam valendo.');
+    expect(t('branches.undo.confirm')).toBe('Desfazer ramo');
+    expect(t('branches.undo.confirmRequire')).toBe('Desfazer e exigir');
+    expect(t('branches.undo.cancel')).toBe('Manter ramo');
+    expect(t('branches.toasts.undone')).toBe('Ramo desfeito.');
+  });
+});
+
 describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "branch", "fork" or "grupo condicional")', () => {
   const groups: Record<string, unknown> = {
     'editor.branch': parsed.profileForm.admin.editor.branch,
     'editor.branches': parsed.profileForm.admin.editor.branches,
     'branches.sheet': parsed.profileForm.admin.branches.sheet,
     'branches.toasts': parsed.profileForm.admin.branches.toasts,
+    'branches.undo': parsed.profileForm.admin.branches.undo,
   };
 
   function strings(value: unknown): string[] {
