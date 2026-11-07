@@ -243,6 +243,13 @@ export async function reactivateQuestionAction(id: string): Promise<ReactivateRe
       const code = refusalOf(res.status, envelope);
       if (code === 'forbidden' || code === 'moduleOff' || code === 'limit') {
         result = { ok: false, code };
+      } else if (res.status === 409 && envelope?.details?.profileForm === 'branch_archived') {
+        const branchId = envelope.details.branchId;
+        result = {
+          ok: false,
+          code: 'branchArchived',
+          branchId: typeof branchId === 'string' ? branchId : null,
+        };
       } else if (res.status === 409 && envelope?.details?.profileForm === 'condition_invalid') {
         const openerId = envelope.details.openerId;
         result = {
@@ -1060,8 +1067,44 @@ export type ReactivateBranchResult =
   | { ok: false; code: 'conflict'; issue: string };
 
 /**
- * `POST /v1/profile_form/branches/{id}/reactivate` (RED stub of 12.2-18: inert until the GREEN commit).
+ * `POST /v1/profile_form/branches/{id}/reactivate` (12.2-18, D-653): "Reativar ramo". The branch, the questions
+ * archived with it and the branches nested in it come back together, in one transaction, every answer valid
+ * again. The screen reads the member impact first (`readImpactAction` with `reactivate_branch`) and writes only
+ * when that read succeeded. The id is validated as a uuid before anything leaves the server tier (T-12.2-01); a
+ * foreign or missing branch is the server's bare 404, answered as `gone`. The refusals are typed: `limit` and
+ * `branchLimit` (409), `openerArchived` (409 `condition_invalid`, with the opener to reactivate first), and every
+ * other 409 as a `conflict` that names its issue. Only a status and a code reach a log line.
  */
-export async function reactivateBranchAction(_id: string): Promise<ReactivateBranchResult> {
+export async function reactivateBranchAction(id: string): Promise<ReactivateBranchResult> {
+  if (!z.uuid().safeParse(id).success) return { ok: false, code: 'failed' };
+
+  const sent = await send('reactivate_branch', `/v1/profile_form/branches/${id}/reactivate`, {
+    method: 'POST',
+  });
+  if (sent.kind === 'ok') {
+    const branch = adminBranchSchema.safeParse(sent.body);
+    return branch.success ? { ok: true, branch: branch.data } : { ok: false, code: 'failed' };
+  }
+
+  const failure = failureOf('reactivate_branch', sent);
+  if (failure.navigate) redirect(failure.navigate);
+  const result = failure.result;
+  if (result.code === 'limit') return { ok: false, code: 'limit' };
+  if (result.code === 'conflict') {
+    if (result.issue === 'branch_limit') return { ok: false, code: 'branchLimit' };
+    if (result.issue === 'not_found') return { ok: false, code: 'gone' };
+    if (result.issue === 'condition_invalid') {
+      const openerId = sent.kind === 'error' ? sent.envelope?.details?.openerId : undefined;
+      return {
+        ok: false,
+        code: 'openerArchived',
+        openerId: typeof openerId === 'string' ? openerId : null,
+      };
+    }
+    return { ok: false, code: 'conflict', issue: result.issue };
+  }
+  if (result.code === 'forbidden' || result.code === 'moduleOff') {
+    return { ok: false, code: result.code };
+  }
   return { ok: false, code: 'failed' };
 }

@@ -1545,22 +1545,40 @@ describe('12.2-18: archivedLayout, the Arquivadas list over branches (D-653, UI-
 
   const layout = () =>
     archivedLayout({
-      questions: [h1, g1, g2, gOpener, n1, fromLive, earlier, plain],
+      questions: [h1, fromLive, g1, g2, gOpener, n1, earlier, plain],
       branches: [g, n, h, live],
       active: [opener],
     });
   const titleOf = (item: ReturnType<typeof layout>[number]) =>
     item.kind === 'group' ? `grupo:${item.group.branch.name}` : item.question.title;
 
-  it('orders the top level newest archive first: the newest group, then the older entries', () => {
+  it('keeps the API order: the newer block, the question, the older block, the oldest', () => {
     expect(layout().map(titleOf)).toEqual([
       'grupo:Mais novo',
       'Saiu do ativo',
       'grupo:Quem tem clínica',
-      // the same stamp T0: by id
-      ...[earlier, plain]
-        .sort((a, b) => a.id.localeCompare(b.id))
-        .map((question) => question.title),
+      'Saiu antes de G',
+      'Sem ramo',
+    ]);
+  });
+
+  it('puts a block with no row of its own before the first entry that is older than it', () => {
+    const lonely = adminBranch({
+      openerQuestionId: opener.id,
+      values: [uuid(9901)],
+      name: 'Vazio',
+      archivedAt: T2,
+    });
+    const items = archivedLayout({
+      questions: [h1, fromLive, earlier],
+      branches: [h, live, lonely],
+      active: [opener],
+    });
+    expect(items.map(titleOf)).toEqual([
+      'grupo:Mais novo',
+      'Saiu do ativo',
+      'grupo:Vazio',
+      'Saiu antes de G',
     ]);
   });
 

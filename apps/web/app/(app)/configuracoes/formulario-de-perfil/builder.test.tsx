@@ -53,6 +53,7 @@ vi.mock('./actions', () => ({
   reorderQuestionsAction: (ids: string[]) => mocks.reorder(ids),
   readImpactAction: (input: unknown) => mocks.impact(input),
   reactivateQuestionAction: (id: string) => mocks.reactivate(id),
+  reactivateBranchAction: vi.fn(),
   createQuestionAction: (...args: unknown[]) => mocks.create(...args),
   createStepAction: (...args: unknown[]) => mocks.createStep(...args),
   renameStepAction: (...args: unknown[]) => mocks.renameStep(...args),

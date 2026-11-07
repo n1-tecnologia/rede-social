@@ -193,6 +193,14 @@
         "done": "Pergunta reativada.",
         "failed": "Não foi possível reativar agora. Tente de novo.",
         "openerArchived": "Para reativar “{title}”, reative antes “{opener}”, que decide se ela aparece.",
+        "branch": {
+          "meta": "Arquivado em {date} · {count, plural, one {# pergunta} other {# perguntas}}",
+          "reactivate": "Reativar ramo",
+          "reactivateLabel": "Reativar ramo: {label}",
+          "wasIn": "Estava no ramo “{label}”.",
+          "openerArchived": "Para reativar o ramo “{label}”, reative antes “{opener}”, que decide se ele aparece.",
+          "branchArchived": "Para reativar “{title}”, reative antes o ramo “{label}”, que decide se ela aparece."
+        },
         "empty": {
           "title": "Nenhuma pergunta arquivada",
           "body": "Quando você arquivar uma pergunta, ela aparece aqui com as respostas guardadas."

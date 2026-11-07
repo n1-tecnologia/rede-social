@@ -1767,7 +1767,7 @@ describe('12.2-18 Task 3: the Arquivadas tab shows archived branches as groups (
     return render(
       <NextIntlClientProvider locale="pt-BR" messages={messages}>
         <ArchivedList
-          questions={over.questions ?? [h1, g1, g2, g3, n1, fromLive, earlier, plain]}
+          questions={over.questions ?? [h1, fromLive, g1, g2, g3, n1, earlier, plain]}
           branches={over.branches ?? [G, N, H, live]}
           activeCount={over.activeCount ?? 3}
           limit={30}
@@ -1829,7 +1829,7 @@ describe('12.2-18 Task 3: the Arquivadas tab shows archived branches as groups (
     const first = within(node).getByText('Nome da clínica');
     expect(header.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // the next top-level entry follows the whole block
-    const next = within(document.body).getByText('Usa algum sistema?');
+    const next = within(document.body).getByText('Saiu antes do ramo');
     expect(node.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(node.contains(next)).toBe(false);
   });
@@ -1863,7 +1863,7 @@ describe('12.2-18 Task 3: the Arquivadas tab shows archived branches as groups (
     expect(screen.getAllByRole('button', { name: /^Reativar ramo: / })).toHaveLength(2);
   });
 
-  it('orders the top level newest archive first: the newer block, the question, the older block, the oldest', () => {
+  it('keeps the API order at the top level: the newer block, the question, the older block, the oldest', () => {
     list();
     const order = Array.from(document.querySelectorAll('[data-archived-list] > li')).map(
       (item) =>
@@ -2018,7 +2018,7 @@ describe('12.2-18 Task 3: the Arquivadas tab shows archived branches as groups (
       });
       expect(mocks.show).toHaveBeenCalledWith({
         tone: 'error',
-        message: 'Você chegou ao limite de 30 perguntas. Arquive uma para reativar outra.',
+        message: 'Você chegou ao limite de 30 perguntas ativas. Arquive uma para adicionar outra.',
       });
       expect(mocks.impact).not.toHaveBeenCalled();
       expect(mocks.reactivateBranch).not.toHaveBeenCalled();
@@ -2088,7 +2088,7 @@ describe('12.2-18 Task 3: the Arquivadas tab shows archived branches as groups (
       const cases: [Record<string, unknown>, string][] = [
         [
           { ok: false, code: 'limit' },
-          'Você chegou ao limite de 30 perguntas. Arquive uma para reativar outra.',
+          'Você chegou ao limite de 30 perguntas ativas. Arquive uma para adicionar outra.',
         ],
         [
           { ok: false, code: 'branchLimit' },

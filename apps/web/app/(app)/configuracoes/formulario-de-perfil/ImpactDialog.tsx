@@ -54,8 +54,10 @@ export function ImpactDialog({
   onClose,
 }: ImpactDialogProps) {
   const t = useTranslations('profileForm.admin.impact');
+  // A block of questions that comes back with its branch reads like one question coming back (12.2-18, D-653).
+  const base = kind === 'reactivateBranch' ? 'reactivate' : kind;
   const body = t(kind === 'unconditional' ? 'unconditionalBody' : 'body', { n: members });
-  const text = [body, kind === 'reactivate' ? t('kept') : note, branchNote]
+  const text = [body, base === 'reactivate' ? t('kept') : note, branchNote]
     .filter((part): part is string => typeof part === 'string' && part !== '')
     .join(' ');
   return (
@@ -63,9 +65,9 @@ export function ImpactDialog({
       open={open}
       tone="brand"
       icon={Users}
-      title={t(`${kind}Title`)}
+      title={t(`${base}Title`)}
       body={text}
-      confirmLabel={t(`${kind}Confirm`)}
+      confirmLabel={t(`${base}Confirm`)}
       cancelLabel={t('cancel')}
       onConfirm={onConfirm}
       onClose={onClose}

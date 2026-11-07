@@ -945,14 +945,109 @@ export type ArchivedItem =
   | { kind: 'question'; question: ArchivedQuestion };
 
 /**
- * The Arquivadas list over branches (RED stub of 12.2-18: inert until the GREEN commit).
+ * The Arquivadas list over branches (D-653, UI-D-674, PFORM-57). A branch archived by "Arquivar ramo" is a GROUP
+ * holding the questions that went with it, told apart from a question archived on its own by the archive STAMP:
+ * the server stamps a branch and everything it takes with the same instant, so a question whose `branchId` is the
+ * branch and whose `archivedAt` equals the branch's went with it. Everything else (archived alone, before or after
+ * its branch, or never in a branch) stays a question entry. A branch archived with its parent block (the same
+ * stamp, its opener inside that block) nests under it; one archived at another moment is a group of its own.
+ *
+ * Order: `questions` arrives newest archive first, then by id (the API's order, which the shipped list keeps), so
+ * the list keeps it: a question entry stays where it is and a group takes the place of its first row, because its
+ * rows carry the group's own stamp. A group with no row of its own (every question left earlier) goes before the
+ * first older entry. Inside a group the rows keep the order they had in the form (`position`) and the nested
+ * groups follow them, newest archive first then by id. Pure: ids, titles and stamps in, the same out.
  */
-export function archivedLayout(_input: {
+export function archivedLayout(input: {
   questions: readonly ArchivedQuestion[];
   branches: readonly AdminBranch[];
   active: readonly AdminQuestion[];
 }): ArchivedItem[] {
-  return [];
+  const { questions, branches, active } = input;
+  const known = new Map<string, AdminQuestion>();
+  for (const question of active) known.set(question.id, question);
+  for (const question of questions) known.set(question.id, question);
+  const branchById = new Map(branches.map((branch) => [branch.id, branch]));
+
+  const groupOfRow = new Map<string, ArchivedGroup>();
+  const groups = new Map<string, ArchivedGroup>();
+  for (const branch of branches) {
+    if (branch.archivedAt === null) continue;
+    const rows = questions
+      .filter((row) => row.branchId === branch.id && row.archivedAt === branch.archivedAt)
+      .sort((a, b) => a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const group: ArchivedGroup = { branch, rows, children: [], count: rows.length };
+    for (const row of rows) groupOfRow.set(row.id, group);
+    groups.set(branch.id, group);
+  }
+
+  /** The group this one nests under: the archived branch of its opener, archived at the same instant. */
+  const parentOf = (group: ArchivedGroup): ArchivedGroup | undefined => {
+    const opener = known.get(group.branch.openerQuestionId);
+    const above = opener?.branchId ? branchById.get(opener.branchId) : undefined;
+    if (above === undefined || above.archivedAt === null) return undefined;
+    if (above.archivedAt !== group.branch.archivedAt) return undefined;
+    return groups.get(above.id);
+  };
+  /** The top of the chain of parents; a cycle (never stored) leaves the group where it is rather than looping. */
+  const topOf = (group: ArchivedGroup): ArchivedGroup => {
+    let top = group;
+    for (let steps = 0; steps <= groups.size; steps += 1) {
+      const parent = parentOf(top);
+      if (parent === undefined) return top;
+      if (parent === group) return group;
+      top = parent;
+    }
+    return group;
+  };
+
+  const roots = new Set<ArchivedGroup>();
+  for (const group of groups.values()) {
+    const top = topOf(group);
+    if (top === group) roots.add(group);
+    else parentOf(group)?.children.push(group);
+  }
+  const stampOfGroup = (group: ArchivedGroup) => group.branch.archivedAt ?? '';
+  const settle = (group: ArchivedGroup): number => {
+    group.children.sort((a, b) => {
+      if (stampOfGroup(a) !== stampOfGroup(b)) return stampOfGroup(a) < stampOfGroup(b) ? 1 : -1;
+      return a.branch.id < b.branch.id ? -1 : a.branch.id > b.branch.id ? 1 : 0;
+    });
+    group.count = group.rows.length + group.children.reduce((sum, child) => sum + settle(child), 0);
+    return group.count;
+  };
+  for (const root of roots) settle(root);
+
+  // A question entry stays where the API put it; a group takes the place of its first row (or of its first nested
+  // row), once.
+  const items: ArchivedItem[] = [];
+  const placed = new Set<ArchivedGroup>();
+  for (const question of questions) {
+    const group = groupOfRow.get(question.id);
+    if (group === undefined) {
+      items.push({ kind: 'question', question });
+      continue;
+    }
+    const root = topOf(group);
+    if (!placed.has(root)) {
+      placed.add(root);
+      items.push({ kind: 'group', group: root });
+    }
+  }
+  // A block that took no row at all goes before the first entry that is older than it.
+  const stampOfItem = (item: ArchivedItem) =>
+    item.kind === 'group' ? stampOfGroup(item.group) : item.question.archivedAt;
+  const lonely = [...roots]
+    .filter((root) => !placed.has(root))
+    .sort((a, b) => {
+      if (stampOfGroup(a) !== stampOfGroup(b)) return stampOfGroup(a) < stampOfGroup(b) ? 1 : -1;
+      return a.branch.id < b.branch.id ? -1 : a.branch.id > b.branch.id ? 1 : 0;
+    });
+  for (const group of lonely) {
+    const at = items.findIndex((item) => stampOfItem(item) < stampOfGroup(group));
+    items.splice(at === -1 ? items.length : at, 0, { kind: 'group', group });
+  }
+  return items;
 }
 
 // ── 12.2-16: where a question sits in the tree (D-640, D-641, D-644, D-646, UI-D-669) ──────────────
