@@ -31,7 +31,6 @@ export {
   type ImpactResult,
   impactQuerySchema,
   impactResultSchema,
-  isQuestionVisible,
   layoutBodySchema,
   type MemberBranch,
   memberBranchSchema,
@@ -39,11 +38,9 @@ export {
   PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_DEFAULT_STEP_TITLE,
   PROFILE_FORM_ISSUE_SET,
-  type ProfileFormCondition,
   type ProfileFormConditionOpenerType,
   type ProfileFormIssue,
   type ProfileFormSummary,
-  profileFormConditionSchema,
   profileFormSummarySchema,
   type ReorderBody,
   type ReplaceQuestionBody,
@@ -57,7 +54,6 @@ export {
   updateBranchBodySchema,
   updateQuestionBodySchema,
   updateStepBodySchema,
-  visibleSteps,
 } from '@rede-social/contracts/profile-form';
 // 12.2 (D-641, D-652): the pure branch rules, one source for the gate's TypeScript twin, the stepper and the builder.
 export {

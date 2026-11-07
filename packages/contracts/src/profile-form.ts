@@ -388,10 +388,6 @@ export type AnswerValue = z.infer<typeof answerValueSchema>;
 
 // ── 12.1-01: the visibility rule (D-621, D-628, PFORM-41) ──────────────────────────────────────
 
-/** @deprecated Phase 12.2 moves the condition to a branch (D-640); plan 20 of 12.2 removes this shape once the web is migrated. */
-/** A condition on the shown question: one opener and the tokens that open it (D-621, D-622). */
-export type ProfileFormCondition = { questionId: string; values: string[] };
-
 /**
  * The tokens a STORED answer value contributes to a condition (D-621): an option id for a choice
  * answer, the literal `'true'` or `'false'` for a yes/no answer. "Outro" (no option id), an empty
@@ -410,47 +406,13 @@ export function answerTokens(stored: unknown): string[] {
   return typeof stored.optionId === 'string' ? [stored.optionId] : [];
 }
 
-/**
- * Whether a question is shown (D-621, D-631): no condition is always visible; with one, the opener must
- * have an answer whose tokens share at least one value with the condition. An opener the caller knows
- * nothing about (`undefined`) or one with no tokens hides the question. Pure; the server recomputes it
- * on every save, the browser's copy is a convenience (T-12.1-16).
- *
- * @deprecated Use `isQuestionVisibleInTree` of `@rede-social/contracts/profile-form-branches` (D-641); plan 20 of 12.2 removes this function.
- */
-export function isQuestionVisible(
-  question: { condition: ProfileFormCondition | null },
-  tokensOf: (questionId: string) => readonly string[] | undefined,
-): boolean {
-  if (question.condition === null) return true;
-  const opener = tokensOf(question.condition.questionId);
-  return opener !== undefined && question.condition.values.some((value) => opener.includes(value));
-}
-
-/**
- * The ids of the steps that hold at least one visible question, in the given step order (D-628). A step
- * whose questions are all hidden, and a step with no question, are absent.
- *
- * @deprecated Use `visibleStepsInTree` of `@rede-social/contracts/profile-form-branches` (D-641); plan 20 of 12.2 removes this function.
- */
-export function visibleSteps(
-  steps: readonly { id: string }[],
-  questions: readonly { id: string; stepId: string; condition: ProfileFormCondition | null }[],
-  tokensOf: (questionId: string) => readonly string[] | undefined,
-): string[] {
-  const withVisible = new Set(
-    questions.filter((question) => isQuestionVisible(question, tokensOf)).map((q) => q.stepId),
-  );
-  return steps.filter((step) => withVisible.has(step.id)).map((step) => step.id);
-}
-
 const CASE_A = '11111111-1111-4111-8111-111111111111';
 const CASE_B = '22222222-2222-4222-8222-222222222222';
 const CASE_C = '33333333-3333-4333-8333-333333333333';
 
 /**
- * The parity table (PFORM-41): `(stored opener value, condition values) -> visible`. The contracts unit
- * test runs each row through `answerTokens` and `isQuestionVisible`; the pgTAP file of plan 07 and the
+ * The parity table (PFORM-41): `(stored opener value, opening values of a branch) -> visible`. The contracts
+ * unit test runs each row through `answerTokens` plus a token-overlap check; the pgTAP file of plan 07 and the
  * integration test of plan 12 run the same rows through the SQL helper and the gate.
  */
 export const PROFILE_FORM_VISIBILITY_CASES: readonly {
@@ -680,35 +642,6 @@ function checkDefinition(body: QuestionDefinitionBody, ctx: DefinitionIssueCtx):
   }
 }
 
-/**
- * The condition of a shown question (D-621, D-622): exactly one opener and the tokens that open it, no
- * chain and no parent. A token is an option id for a choice opener, `'true'` or `'false'` for yes/no. The
- * question is shown when ANY token is among the opener's answer tokens.
- *
- * @deprecated Phase 12.2 moves the condition to a branch (D-640); plan 20 of 12.2 removes this schema.
- */
-export const profileFormConditionSchema = z
-  .object({
-    questionId: z.uuid({ error: 'condition_invalid' }),
-    values: z
-      .array(
-        z
-          .string({ error: 'condition_invalid' })
-          .min(1, 'condition_invalid')
-          .max(64, 'condition_invalid'),
-        {
-          error: 'condition_invalid',
-        },
-      )
-      .min(1, 'condition_invalid')
-      .max(PROFILE_FORM_LIMITS.options, 'condition_invalid'),
-  })
-  .strict()
-  .refine(
-    (condition) => new Set(condition.values).size === condition.values.length,
-    'condition_invalid',
-  );
-
 const createQuestionShape = z
   .object({
     type: typeField,
@@ -724,9 +657,6 @@ const createQuestionShape = z
     limits: limitsSchema.default({}),
     /** Which step the question lands in; absent means the last step (D-629). */
     stepId: z.uuid({ error: 'unknown_step' }).optional(),
-    /** @deprecated Phase 12.2 (D-640): name a branch with `branchId`; plan 20 of 12.2 removes this key. */
-    /** The condition that shows the question; absent or null means always shown (D-621). */
-    condition: profileFormConditionSchema.nullable().optional(),
     /** The branch the question sits in (D-640); absent or null means the question is unconditional. */
     branchId: z.uuid({ error: 'unknown_branch' }).nullable().optional(),
   })
@@ -763,9 +693,6 @@ export const updateQuestionBodySchema = z
       .optional(),
     limits: limitsSchema.optional(),
     stepId: z.uuid({ error: 'unknown_step' }).optional(),
-    /** @deprecated Phase 12.2 (D-640): move the question with `branchId`; plan 20 of 12.2 removes this key. */
-    /** `null` removes the condition (D-625); absent leaves it as it is. */
-    condition: profileFormConditionSchema.nullable().optional(),
     /** `null` takes the question out of its branch (D-640); absent leaves it where it is. */
     branchId: z.uuid({ error: 'unknown_branch' }).nullable().optional(),
   })
@@ -867,8 +794,7 @@ export type ReorderBody = z.infer<typeof reorderBodySchema>;
 
 /**
  * The opening answers of a branch (D-640): 1 to `PROFILE_FORM_LIMITS.options` unique tokens, each an option
- * id of a choice opener or `'true'` / `'false'` of a yes/no opener; ANY one of them opens the branch. Same
- * rules as the legacy condition values, kept as its own constant so the legacy schema stays as it is.
+ * id of a choice opener or `'true'` / `'false'` of a yes/no opener; ANY one of them opens the branch.
  */
 const branchValuesField = z
   .array(
@@ -997,15 +923,14 @@ const storedValueSchema = z.union([z.string(), z.number(), z.boolean(), choiceOn
 
 /**
  * One question of the member form (`GET /v1/me/profile-form`). 12.1 (D-628, D-630): the form carries EVERY
- * active question, hidden ones included, each with the step it sits in and the condition that shows it, so the
- * client can reveal and hide live while the answers are typed.
+ * active question, hidden ones included, each with the step it sits in and the branch that shows it (12.2,
+ * D-640), so the client can reveal and hide live while the answers are typed.
  */
 export const memberQuestionSchema = z.object({
   ...questionCore,
   stepId: z.uuid(),
-  condition: profileFormConditionSchema.nullable(),
-  /** 12.2 (D-640): the branch the question sits in; optional until plan 20 tightens it. */
-  branchId: z.uuid().nullable().optional(),
+  /** 12.2 (D-640): the branch the question sits in, or null for an unconditional one. */
+  branchId: z.uuid().nullable(),
   options: z.array(optionSchema),
   answer: storedValueSchema.nullable(),
 });
@@ -1021,8 +946,8 @@ export const memberFormSchema = z.object({
   formEtag: z.string(),
   steps: z.array(memberStepSchema),
   questions: z.array(memberQuestionSchema),
-  /** 12.2 (D-640): the branches of the form, without a name (T-12.2-03); optional until plan 20. */
-  branches: z.array(memberBranchSchema).optional(),
+  /** 12.2 (D-640): the branches of the form, without a name (T-12.2-03). */
+  branches: z.array(memberBranchSchema),
 });
 export type MemberForm = z.infer<typeof memberFormSchema>;
 
@@ -1071,10 +996,8 @@ const adminCore = {
   position: z.number().int(),
   revision: z.number().int().min(1),
   answerCount: z.number().int().min(0),
-  /** The condition that shows the question, or null for an always-shown one (12.1, D-621). */
-  condition: profileFormConditionSchema.nullable(),
-  /** 12.2 (D-640): the branch the question sits in; optional until plan 20 tightens it. */
-  branchId: z.uuid().nullable().optional(),
+  /** 12.2 (D-640): the branch the question sits in, or null for an unconditional one. */
+  branchId: z.uuid().nullable(),
   /** How many ACTIVE questions name this one as their opener (D-632); 0 for a question that opens nothing. */
   opensCount: z.number().int().min(0),
   createdAt: z.string(),
@@ -1099,8 +1022,8 @@ export const adminQuestionListSchema = z.object({
   steps: z.array(adminStepSchema),
   /** The most steps a tenant may have (`PROFILE_FORM_LIMITS.steps`, D-633). */
   stepLimit: z.number().int().min(1),
-  /** 12.2 (D-640): the tenant's branches, name included (admin only); optional until plan 20. */
-  branches: z.array(adminBranchSchema).optional(),
+  /** 12.2 (D-640): the tenant's branches, name included (admin only). */
+  branches: z.array(adminBranchSchema),
 });
 export type AdminQuestionList = z.infer<typeof adminQuestionListSchema>;
 
@@ -1111,7 +1034,7 @@ export type ArchivedQuestion = z.infer<typeof archivedQuestionSchema>;
 export const archivedQuestionListSchema = z.object({
   questions: z.array(archivedQuestionSchema),
   /** 12.2 (D-640): the branches the archived questions sit in, so the list can name them. */
-  branches: z.array(adminBranchSchema).optional(),
+  branches: z.array(adminBranchSchema),
 });
 export type ArchivedQuestionList = z.infer<typeof archivedQuestionListSchema>;
 
@@ -1136,29 +1059,19 @@ export const PROFILE_FORM_IMPACT_CHANGES = [
 export type ProfileFormImpactChange = (typeof PROFILE_FORM_IMPACT_CHANGES)[number];
 
 /**
- * `GET /impact`: how many members a change would ask to answer. 12.1 (D-634): `create_required` and `replace`
- * may carry the condition the new question will have (`conditionQuestionId` and `conditionValues`, comma
- * separated tokens, see `parseConditionValues`), so only the members who would SEE the question are counted.
+ * `GET /impact`: how many members a change would ask to answer. 12.2 (D-653): `create_required` and `replace`
+ * may carry the `branchId` the new question will sit in, so only the members who would SEE the question are
+ * counted. Strict: any other key is refused.
  */
 export const impactQuerySchema = z
   .object({
     change: z.enum(PROFILE_FORM_IMPACT_CHANGES),
     questionId: z.uuid().optional(),
-    conditionQuestionId: z.uuid().optional(),
-    conditionValues: z.string().max(2000).optional(),
     /** 12.2 (D-653): the branch an `undo_branch` or `reactivate_branch` change is about. */
     branchId: z.uuid().optional(),
   })
   .strict();
 export type ImpactQuery = z.infer<typeof impactQuerySchema>;
-
-/** The tokens of an impact query's `conditionValues`: split on commas, trimmed, empties dropped. */
-export function parseConditionValues(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
-}
 
 export const impactResultSchema = z.object({ members: z.number().int().min(0) });
 export type ImpactResult = z.infer<typeof impactResultSchema>;
@@ -1203,16 +1116,14 @@ export const staffAnswersSchema = z
           archivedAt: z.string().nullable(),
           answered: z.boolean(),
           required: z.boolean(),
-          // 12.1 (D-634, UI-D-659): the question's own condition, so the staff view can read an unanswered
-          // conditional question as "Não se aplica" from the opener's row. No answer value rides here.
-          condition: profileFormConditionSchema.nullable(),
-          // 12.2 (D-640): the branch the question sits in, so the staff view can read "Não se aplica" from the chain.
-          branchId: z.uuid().nullable().optional(),
+          // 12.2 (D-640): the branch the question sits in, so the staff view can read an unanswered
+          // conditional question as "Não se aplica" from the chain. No answer value rides here.
+          branchId: z.uuid().nullable(),
         })
         .strict(),
     ),
     /** 12.2 (T-12.2-03): the branches WITHOUT a name; strict, so a name fails parsing. */
-    branches: z.array(memberBranchSchema).optional(),
+    branches: z.array(memberBranchSchema),
   })
   .strict();
 export type StaffAnswers = z.infer<typeof staffAnswersSchema>;

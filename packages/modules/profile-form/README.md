@@ -95,8 +95,9 @@ questions right after their opener, a nested branch inside its parent's block, a
 shapes are strict and carry no name (T-12.2-03). `PROFILE_FORM_LIMITS` gains `branchDepth: 3`, `branches: 15`
 and `branchName: 60`; `PROFILE_FORM_ISSUES` appends, last and in this order, `unknown_branch`, `branch_depth`,
 `branch_limit`, `branch_archived` and `public_under_private`; `PROFILE_FORM_IMPACT_CHANGES` appends
-`undo_branch` and `reactivate_branch`. Every new key on an existing read or body is optional until plan 20 of
-12.2 removes the legacy per-question `condition` (deprecated, kept one release).
+`undo_branch` and `reactivate_branch`. The per-question `condition` of 12.1 is gone from every shape (plan 20
+of 12.2): `branchId` (`uuid | null`) is required on every question read and `branches` on every list and form
+read; the database columns of the old pair stay one release, written by nothing and refused by PF010.
 
 **Aggregates only (D-593, PFORM-23).** The builder reads counts: answers per question and per option, the
 summary and the impact. No route of this package ever returns an individual member's answer, and the

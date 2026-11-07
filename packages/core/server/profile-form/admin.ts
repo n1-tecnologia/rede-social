@@ -210,8 +210,6 @@ export function toAdminQuestion(row: StoredQuestion, counts: Counts): AdminQuest
     position: row.position,
     revision: row.revision,
     answerCount: counts.perQuestion.get(row.id) ?? 0,
-    // The reads keep emitting the retired key for the compatibility window of plan 01 (plan 20 removes it).
-    condition: null,
     opensCount: counts.opens.get(row.id) ?? 0,
     createdAt: iso(row.created_at),
     listedAt: iso(row.listed_at),
@@ -333,10 +331,6 @@ function refuseOpenerChange(refusal: ReturnType<typeof checkOpenerChange>): void
 const hasDependentBranches = (branches: ReturnType<typeof dependentBranchesOf>) =>
   new ApiError(409, 'CONFLICT', { profileForm: 'has_dependents', dependents: [], branches });
 
-/** 12.2 (D-640, T-12.2-08): the retired per-question condition is refused before anything is read or written. */
-const conditionRetired = () =>
-  new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'condition_invalid' });
-
 /** A `branchId` that is not a branch of THIS tenant: a foreign and a missing id answer the same (T-12.2-01). */
 const unknownBranch = () =>
   new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'unknown_branch' });
@@ -441,7 +435,6 @@ const sameLayout = (a: Layout, b: Layout): boolean =>
  * the right kind). The server decides the rest: a UUID for every option, the position (the layout is renumbered
  * in one statement, so every later step shifts by one), revision 1, `listed_at` now and the caller as the author.
  *
- *   - 400 `condition_invalid` for a non-null legacy `condition` (D-640): checked BEFORE anything is read;
  *   - 404 `MODULE_DISABLED` when the module is off (live read);
  *   - 409 `limit_reached` at 30 ACTIVE questions (counted under the advisory lock, so two simultaneous
  *     creates at 29 end with exactly 30);
@@ -454,7 +447,6 @@ export async function createQuestion(
   ctx: AdminCtx,
   body: CreateQuestionBody,
 ): Promise<AdminQuestion> {
-  if (body.condition) throw conditionRetired();
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
@@ -686,7 +678,6 @@ const unchanged = (a: Definition, b: Definition) =>
  * `PATCH /v1/profile_form/questions/{id}` (PFORM-17, PFORM-24; D-587, D-582; 12.2 D-640, D-646, D-652, PFORM-53):
  * edits one question under the lock rules and an optimistic `revision`.
  *
- *   0. a non-null legacy `condition` is 400 `condition_invalid` before anything is read (`null` is no change);
  *   1. `adminLock`, the live module check, then the row `FOR UPDATE`: no row (unknown, another tenant's) is
  *      the bare 404; an archived question is 409 `already_archived` (read-only until reactivated); a
  *      `revision` that is not the stored one is 409 `stale_revision` and nothing changes;
@@ -718,7 +709,6 @@ export async function updateQuestion(
   id: string,
   body: UpdateQuestionBody,
 ): Promise<AdminQuestion> {
-  if (body.condition) throw conditionRetired();
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
@@ -1191,15 +1181,13 @@ export async function deleteQuestion(ctx: AdminCtx, id: string): Promise<{ delet
  * tenant (400 `unknown_step`) but does not move the replacement, and so does a `branchId`: the replacement stays
  * in the old question's branch. An old question that is not active is 409 `already_archived`; unknown or another
  * tenant's id is the bare 404; an opener of an ACTIVE branch is 409 `has_dependents`; a replacement that shows
- * on the profile under a private opener is 409 `public_under_private`; a non-null `condition` is 400
- * `condition_invalid`. Any failure of either half rolls both back: the old question stays active and nothing is
- * created.
+ * on the profile under a private opener is 409 `public_under_private`. Any failure of either half rolls both
+ * back: the old question stays active and nothing is created.
  */
 export async function replaceQuestion(
   ctx: AdminCtx,
   body: ReplaceQuestionBody,
 ): Promise<AdminQuestion> {
-  if (body.condition) throw conditionRetired();
   return withTenantTx(ctx, async (tx) => {
     await adminLock(tx, ctx.tenantId);
     await requireModuleOn(tx, ctx);
@@ -1389,8 +1377,7 @@ const BLOCK_STAMP = sql`(select s.archived_at from public.profile_form_branches 
  *
  *   - `create_required` and `replace` count every member, or, with `branchId` (an ACTIVE branch of this tenant:
  *     an unknown, foreign or archived one is the bare 404, which reveals nothing), the members for whom that
- *     branch's chain is open. The per-question condition parameters of 12.1 are retired: they are 400
- *     `invalid`;
+ *     branch's chain is open;
  *   - `make_required` and `reactivate` count the members with no answer to `questionId` who see it through its
  *     chain;
  *   - `remove_condition` (a question leaving its branch; needs `questionId`) counts the members who do NOT see
@@ -1412,13 +1399,6 @@ const BLOCK_STAMP = sql`(select s.archived_at from public.profile_form_branches 
 export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<ImpactResult> {
   return withTenantTx(ctx, async (tx) => {
     await requireModuleOn(tx, ctx);
-
-    // The retired per-question condition parameters of 12.1 (whatever remains of the query besides the three
-    // keys this function reads) are refused, never silently ignored.
-    const { change: _change, questionId: _questionId, branchId: _branchId, ...retired } = query;
-    if (Object.values(retired).some((value) => value !== undefined)) {
-      throw new ApiError(400, 'VALIDATION_FAILED', { profileForm: 'invalid' });
-    }
 
     const count = async (
       scope: ImpactScope,

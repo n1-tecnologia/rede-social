@@ -356,8 +356,6 @@ async function formFromRows(
     allowOther: row.allow_other,
     limits: row.limits,
     stepId: row.step_id,
-    // Compatibility window (plan 20 removes the key): the per-question condition no longer exists.
-    condition: null,
     branchId: row.branch_id,
     options: row.options,
     answer: answers.get(row.id) ?? null,

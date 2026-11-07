@@ -187,8 +187,6 @@ export async function staffAnswersOf(
         archivedAt: iso(row.archived_at),
         // 12.2 (D-641): the branch only, never an answer value; the opener's own row supplies the value.
         branchId: row.branch_id,
-        // Compatibility window: the per-question condition is gone; plan 20 removes the key.
-        condition: null,
       })),
       branches: branches.map((branch) =>
         memberBranchSchema.parse({

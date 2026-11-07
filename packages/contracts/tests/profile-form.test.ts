@@ -19,7 +19,6 @@ import {
   hasUnsafeChars,
   impactQuerySchema,
   impactResultSchema,
-  isQuestionVisible,
   layoutBodySchema,
   legacyReorderBodySchema,
   memberBranchSchema,
@@ -41,9 +40,7 @@ import {
   type ProfileFormQuestionDef,
   type ProfileFormType,
   parseAnswer,
-  parseConditionValues,
   profileFormBootstrapSchema,
-  profileFormConditionSchema,
   profileFormSummarySchema,
   publicAnswersSchema,
   reorderBodySchema,
@@ -55,7 +52,6 @@ import {
   updateBranchBodySchema,
   updateQuestionBodySchema,
   updateStepBodySchema,
-  visibleSteps,
 } from '../src/profile-form';
 
 /**
@@ -66,6 +62,7 @@ import {
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const C = '33333333-3333-4333-8333-333333333333';
+const D = '44444444-4444-4444-8444-444444444444';
 const OTHER_QUESTION_OPTION = '99999999-9999-4999-8999-999999999999';
 
 function q(
@@ -958,7 +955,7 @@ const memberQuestion = {
   allowOther: true,
   limits: {},
   stepId: C,
-  condition: null,
+  branchId: null,
   answer: { optionIds: [B], otherText: null },
 };
 
@@ -969,6 +966,7 @@ describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
       missingRequired: 1,
       formEtag: 'abc',
       steps: [{ id: C, title: 'Sobre você' }],
+      branches: [],
       questions: [
         memberQuestion,
         { ...memberQuestion, id: B, type: 'rating', options: [], allowOther: false, answer: null },
@@ -987,12 +985,12 @@ describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
     expect(memberFormSchema.safeParse({ ...sample, mode: 'other' }).success).toBe(false);
   });
 
-  it('12.1-11: the member form carries steps and each question its stepId and condition (D-628, D-630)', () => {
+  it('12.1-11: the member form carries steps and each question its stepId and branchId (D-628, D-630, D-640)', () => {
     const conditional = {
       ...memberQuestion,
       id: B,
       stepId: A,
-      condition: { questionId: C, values: [B] },
+      branchId: D,
     };
     const sample = {
       mode: 'first',
@@ -1002,6 +1000,7 @@ describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
         { id: C, title: 'Sobre você' },
         { id: A, title: 'Detalhes' },
       ],
+      branches: [{ id: D, openerQuestionId: C, values: [B] }],
       questions: [memberQuestion, conditional],
     };
     expect(memberFormSchema.parse(sample)).toEqual(sample);
@@ -1009,14 +1008,11 @@ describe('12-03 - member shapes (PFORM-07, PFORM-12, PFORM-16)', () => {
     expect(memberFormSchema.safeParse(withoutSteps).success).toBe(false);
     const { stepId: _stepId, ...noStep } = memberQuestion;
     expect(memberFormSchema.safeParse({ ...sample, questions: [noStep] }).success).toBe(false);
-    const { condition: _condition, ...noCondition } = memberQuestion;
-    expect(memberFormSchema.safeParse({ ...sample, questions: [noCondition] }).success).toBe(false);
-    expect(
-      memberFormSchema.safeParse({
-        ...sample,
-        questions: [{ ...memberQuestion, condition: { questionId: C, values: [] } }],
-      }).success,
-    ).toBe(false);
+    // D-640: the branch key is required on every question and the list of branches on the form.
+    const { branchId: _branchId, ...noBranch } = memberQuestion;
+    expect(memberFormSchema.safeParse({ ...sample, questions: [noBranch] }).success).toBe(false);
+    const { branches: _branches, ...withoutBranches } = sample;
+    expect(memberFormSchema.safeParse(withoutBranches).success).toBe(false);
   });
 
   it('saveAnswersBodySchema keys the answers by question id, at most 30 keys', () => {
@@ -1082,7 +1078,7 @@ const adminQuestion = {
   position: 1,
   revision: 2,
   answerCount: 3,
-  condition: null,
+  branchId: null,
   opensCount: 0,
   createdAt: '2026-10-29T10:00:00.000Z',
   listedAt: '2026-10-29T10:00:00.000Z',
@@ -1116,15 +1112,26 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
       limit: 30,
       steps: [step],
       stepLimit: PROFILE_FORM_LIMITS.steps,
+      branches: [],
     };
     expect(adminQuestionListSchema.parse(list)).toEqual(list);
     // The empty form: no question and no step (a read never creates the default step).
-    const empty = { questions: [], activeCount: 0, limit: 30, steps: [], stepLimit: 10 };
+    const empty = {
+      questions: [],
+      activeCount: 0,
+      limit: 30,
+      steps: [],
+      stepLimit: 10,
+      branches: [],
+    };
     expect(adminQuestionListSchema.parse(empty)).toEqual(empty);
     // Both new keys are required, and a step needs its count.
     expect(
       adminQuestionListSchema.safeParse({ questions: [], activeCount: 0, limit: 30 }).success,
     ).toBe(false);
+    // D-640: the list of branches is required too (the compatibility window of plan 01 is closed).
+    const { branches: _branches, ...withoutBranches } = list;
+    expect(adminQuestionListSchema.safeParse(withoutBranches).success).toBe(false);
     expect(adminQuestionListSchema.safeParse({ ...list, stepLimit: 0 }).success).toBe(false);
     expect(
       adminQuestionListSchema.safeParse({ ...list, steps: [{ ...step, questionCount: undefined }] })
@@ -1163,33 +1170,27 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
     expect(impactQuerySchema.safeParse({ change: 'replace', questionId: 'x' }).success).toBe(false);
   });
 
-  it('12.1-10: the admin question carries condition (nullable) and opensCount (an integer from 0)', () => {
-    const conditional = {
-      ...adminQuestion,
-      condition: { questionId: B, values: [C] },
-      opensCount: 0,
-    };
+  it('12.2-20: the admin question carries branchId (nullable, required) and opensCount (an integer from 0)', () => {
+    const conditional = { ...adminQuestion, branchId: D, opensCount: 0 };
     expect(adminQuestionSchema.parse(conditional)).toEqual(conditional);
     const opener = { ...adminQuestion, opensCount: 2 };
     expect(adminQuestionSchema.parse(opener)).toEqual(opener);
-    const { condition: _c, ...withoutCondition } = adminQuestion;
-    expect(adminQuestionSchema.safeParse(withoutCondition).success).toBe(false);
+    const { branchId: _b, ...withoutBranch } = adminQuestion;
+    expect(adminQuestionSchema.safeParse(withoutBranch).success).toBe(false);
+    expect(adminQuestionSchema.safeParse({ ...adminQuestion, branchId: 'nope' }).success).toBe(
+      false,
+    );
     const { opensCount: _o, ...withoutOpens } = adminQuestion;
     expect(adminQuestionSchema.safeParse(withoutOpens).success).toBe(false);
     expect(adminQuestionSchema.safeParse({ ...adminQuestion, opensCount: -1 }).success).toBe(false);
     expect(adminQuestionSchema.safeParse({ ...adminQuestion, opensCount: 1.5 }).success).toBe(
       false,
     );
-    // The condition is the shared schema: an empty value set is refused.
-    expect(
-      adminQuestionSchema.safeParse({ ...adminQuestion, condition: { questionId: B, values: [] } })
-        .success,
-    ).toBe(false);
     const archived = { ...conditional, archivedAt: '2026-10-30T10:00:00.000Z' };
     expect(archivedQuestionSchema.parse(archived)).toEqual(archived);
   });
 
-  it('12.1-10: remove_condition is the LAST impact change and the query takes the optional condition', () => {
+  it('12.2-20: the impact query takes questionId and branchId only; the retired condition keys are refused', () => {
     expect(PROFILE_FORM_IMPACT_CHANGES.slice(-3)).toEqual([
       'remove_condition',
       'undo_branch',
@@ -1204,28 +1205,24 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
     expect(impactQuerySchema.safeParse({ change: 'remove_condition', questionId: A }).success).toBe(
       true,
     );
+    expect(impactQuerySchema.safeParse({ change: 'create_required', branchId: D }).success).toBe(
+      true,
+    );
+    // Strict: the 12.1 condition parameters are unknown keys now, and so is anything else.
     expect(
       impactQuerySchema.safeParse({
         change: 'create_required',
         conditionQuestionId: B,
         conditionValues: `${C},true`,
       }).success,
-    ).toBe(true);
-    // Strict, a uuid opener and a bounded value list.
-    expect(
-      impactQuerySchema.safeParse({ change: 'replace', conditionQuestionId: 'x' }).success,
     ).toBe(false);
+    expect(impactQuerySchema.safeParse({ change: 'replace', conditionQuestionId: B }).success).toBe(
+      false,
+    );
     expect(
-      impactQuerySchema.safeParse({ change: 'replace', conditionValues: 'a'.repeat(2001) }).success,
+      impactQuerySchema.safeParse({ change: 'replace', conditionValues: 'true' }).success,
     ).toBe(false);
     expect(impactQuerySchema.safeParse({ change: 'replace', other: 1 }).success).toBe(false);
-  });
-
-  it('12.1-10: parseConditionValues splits on commas, trims and drops empty tokens', () => {
-    expect(parseConditionValues('a, b ,,c,')).toEqual(['a', 'b', 'c']);
-    expect(parseConditionValues('true')).toEqual(['true']);
-    expect(parseConditionValues('')).toEqual([]);
-    expect(parseConditionValues(' , ,')).toEqual([]);
   });
 
   it('publicAnswersSchema rejects an unknown key at either level (strictness)', () => {
@@ -1262,27 +1259,31 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
       archivedAt: null,
       answered: false,
       required: true,
-      condition: null,
+      branchId: null,
     };
-    const sample = { kind: 'staff', answers: [row] };
+    const sample = { kind: 'staff', answers: [row], branches: [] };
     expect(staffAnswersSchema.parse(sample)).toEqual(sample);
     expect(
-      staffAnswersSchema.safeParse({ kind: 'staff', answers: [{ ...row, extra: 1 }] }).success,
+      staffAnswersSchema.safeParse({ kind: 'staff', answers: [{ ...row, extra: 1 }], branches: [] })
+        .success,
     ).toBe(false);
-    // 12.1 (D-634, UI-D-659): the row carries its condition (or null) and the key is required.
-    const conditioned = { ...row, condition: { questionId: B, values: ['true'] } };
-    expect(staffAnswersSchema.parse({ kind: 'staff', answers: [conditioned] }).answers[0]).toEqual(
-      conditioned,
-    );
-    const { condition: _omitted, ...withoutCondition } = row;
+    // 12.2 (D-640): the row carries its branch id (or null), the key is required, and so is the list of branches.
+    const branched = { ...row, branchId: D };
     expect(
-      staffAnswersSchema.safeParse({ kind: 'staff', answers: [withoutCondition] }).success,
+      staffAnswersSchema.parse({ kind: 'staff', answers: [branched], branches: [] }).answers[0],
+    ).toEqual(branched);
+    const { branchId: _omitted, ...withoutBranch } = row;
+    expect(
+      staffAnswersSchema.safeParse({ kind: 'staff', answers: [withoutBranch], branches: [] })
+        .success,
     ).toBe(false);
-    // Only a condition shape, never an answer value, can ride on the row.
+    expect(staffAnswersSchema.safeParse({ kind: 'staff', answers: [row] }).success).toBe(false);
+    // The per-question condition of 12.1 is no key of the row any more (strict), and no answer value rides on it.
     expect(
       staffAnswersSchema.safeParse({
         kind: 'staff',
-        answers: [{ ...row, condition: { questionId: B, values: ['true'], value: 'x' } }],
+        answers: [{ ...row, condition: null }],
+        branches: [],
       }).success,
     ).toBe(false);
     // The public rows are not touched: no condition key is accepted there.
@@ -1395,11 +1396,6 @@ describe('12-REVIEW WR-02 - NUL and unpaired surrogates are refused as invalid, 
 });
 
 describe('12.1-01 - the visibility rule: stored answer to tokens to visible (D-621, D-628, PFORM-41)', () => {
-  const OPENER = '55555555-5555-4555-8555-555555555555';
-  const STEP_1 = '66666666-6666-4666-8666-666666666661';
-  const STEP_2 = '66666666-6666-4666-8666-666666666662';
-  const STEP_3 = '66666666-6666-4666-8666-666666666663';
-
   it('answerTokens reads the three stored shapes and nothing else', () => {
     expect(answerTokens(true)).toEqual(['true']);
     expect(answerTokens(false)).toEqual(['false']);
@@ -1408,37 +1404,6 @@ describe('12.1-01 - the visibility rule: stored answer to tokens to visible (D-6
     expect(answerTokens({ optionIds: [A, B], otherText: null })).toEqual([A, B]);
     expect(answerTokens({ optionIds: [], otherText: 'x' })).toEqual([]);
     for (const other of ['text', 7, null, undefined]) expect(answerTokens(other)).toEqual([]);
-  });
-
-  it('isQuestionVisible: no condition is visible, a condition needs one shared token', () => {
-    const tokens = (map: Record<string, string[]>) => (id: string) => map[id];
-    expect(isQuestionVisible({ condition: null }, () => undefined)).toBe(true);
-    const shown = { condition: { questionId: OPENER, values: [A, B] } };
-    expect(isQuestionVisible(shown, tokens({ [OPENER]: [B, C] }))).toBe(true);
-    expect(isQuestionVisible(shown, tokens({ [OPENER]: [C] }))).toBe(false);
-    expect(isQuestionVisible(shown, tokens({}))).toBe(false);
-    expect(isQuestionVisible(shown, tokens({ [OPENER]: [] }))).toBe(false);
-  });
-
-  it('visibleSteps keeps the step order, drops a step with only hidden or no questions', () => {
-    const steps = [{ id: STEP_1 }, { id: STEP_2 }, { id: STEP_3 }];
-    const shown = (id: string, stepId: string) => ({
-      id,
-      stepId,
-      condition: { questionId: OPENER, values: ['true'] },
-    });
-    const tokensOf = (id: string) => (id === OPENER ? ['false'] : undefined);
-    // step 1: one free question among hidden ones; step 2: only hidden; step 3: no question at all.
-    const questions = [
-      { id: OPENER, stepId: STEP_1, condition: null },
-      shown(A, STEP_1),
-      shown(B, STEP_2),
-      shown(C, STEP_2),
-    ];
-    expect(visibleSteps(steps, questions, tokensOf)).toEqual([STEP_1]);
-    expect(visibleSteps(steps, questions, () => ['true'])).toEqual([STEP_1, STEP_2]);
-    expect(visibleSteps([...steps].reverse(), questions, () => ['true'])).toEqual([STEP_2, STEP_1]);
-    expect(visibleSteps(steps, [], tokensOf)).toEqual([]);
   });
 
   it('the parity table has the planned breadth', () => {
@@ -1461,21 +1426,19 @@ describe('12.1-01 - the visibility rule: stored answer to tokens to visible (D-6
     expect(PROFILE_FORM_VISIBILITY_CASES.some((row) => !row.expected)).toBe(true);
   });
 
+  // The TypeScript twin of the SQL gate (pgTAP 225 asserts the same rows on `app.profile_form_answer_tokens`):
+  // a branch opens when ANY of its values is among the tokens of the opener's stored answer.
   for (const row of PROFILE_FORM_VISIBILITY_CASES) {
     it(`parity row: ${row.name}`, () => {
       const tokens = answerTokens(row.stored);
-      const visible = isQuestionVisible(
-        { condition: { questionId: OPENER, values: row.values } },
-        () => tokens,
-      );
-      expect(visible).toBe(row.expected);
+      const opens = row.values.some((value) => tokens.includes(value));
+      expect(opens).toBe(row.expected);
     });
   }
 });
 
-describe('12.1-01 - limits, opener types and the condition schema (D-620, D-621, D-633, T-12.1-17)', () => {
+describe('12.1-01 - limits, opener types and the question bodies (D-620, D-621, D-633, T-12.1-17)', () => {
   const OPENER = '55555555-5555-4555-8555-555555555555';
-  const tokens = (count: number) => Array.from({ length: count }, (_, i) => `token-${i}`);
 
   it('the opener types are the four of D-620, in the order of PROFILE_FORM_TYPES, and nothing else', () => {
     expect(PROFILE_FORM_CONDITION_OPENER_TYPES).toEqual([
@@ -1503,55 +1466,9 @@ describe('12.1-01 - limits, opener types and the condition schema (D-620, D-621,
     }
   });
 
-  it('a condition is strict { questionId, values } with 1 to 20 unique non-empty tokens', () => {
+  it('create, update and replace accept the optional stepId and branchId, and refuse the retired condition (D-640)', () => {
     expect(
-      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['true'] }).success,
-    ).toBe(true);
-    expect(
-      profileFormConditionSchema.safeParse({ questionId: OPENER, values: tokens(20) }).success,
-    ).toBe(true);
-    expect(
-      profileFormConditionSchema.safeParse({ questionId: OPENER, values: tokens(21) }).success,
-    ).toBe(false);
-    expect(profileFormConditionSchema.safeParse({ questionId: OPENER, values: [] }).success).toBe(
-      false,
-    );
-    expect(profileFormConditionSchema.safeParse({ questionId: OPENER, values: [''] }).success).toBe(
-      false,
-    );
-    expect(
-      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['x'.repeat(64)] })
-        .success,
-    ).toBe(true);
-    expect(
-      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['x'.repeat(65)] })
-        .success,
-    ).toBe(false);
-    expect(
-      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['a', 'a'] }).success,
-    ).toBe(false);
-    expect(
-      profileFormConditionSchema.safeParse({ questionId: 'nope', values: ['a'] }).success,
-    ).toBe(false);
-    // D-622: no chain, no parent.
-    expect(
-      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['a'], parent: OPENER })
-        .success,
-    ).toBe(false);
-  });
-
-  it('a refused condition carries the condition_invalid code the route hook lifts', () => {
-    const result = profileFormConditionSchema.safeParse({ questionId: OPENER, values: [] });
-    expect(result.success).toBe(false);
-    const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
-    expect(messages).toEqual(['condition_invalid']);
-    expect(PROFILE_FORM_ISSUE_SET.has('condition_invalid')).toBe(true);
-  });
-
-  it('create, update and replace accept the optional stepId and condition, and update takes null to remove one', () => {
-    const condition = { questionId: OPENER, values: ['true'] };
-    expect(
-      createQuestionBodySchema.safeParse({ type: 'short_text', title: 'x', stepId: A, condition })
+      createQuestionBodySchema.safeParse({ type: 'short_text', title: 'x', stepId: A, branchId: D })
         .success,
     ).toBe(true);
     expect(createQuestionBodySchema.safeParse({ type: 'short_text', title: 'x' }).success).toBe(
@@ -1570,18 +1487,29 @@ describe('12.1-01 - limits, opener types and the condition schema (D-620, D-621,
         title: 'x',
         replaces: A,
         stepId: B,
-        condition,
+        branchId: D,
       }).success,
     ).toBe(true);
-    expect(updateQuestionBodySchema.safeParse({ revision: 1, condition }).success).toBe(true);
-    expect(updateQuestionBodySchema.safeParse({ revision: 1, condition: null }).success).toBe(true);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, branchId: D }).success).toBe(true);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, branchId: null }).success).toBe(true);
     expect(updateQuestionBodySchema.safeParse({ revision: 1, stepId: A }).success).toBe(true);
+    // The 12.1 per-question condition is no key of any body any more: the strict shapes refuse it.
+    const condition = { questionId: OPENER, values: ['true'] };
     expect(
-      updateQuestionBodySchema.safeParse({
-        revision: 1,
-        condition: { questionId: OPENER, values: [] },
+      createQuestionBodySchema.safeParse({ type: 'short_text', title: 'x', condition }).success,
+    ).toBe(false);
+    expect(
+      replaceQuestionBodySchema.safeParse({
+        type: 'short_text',
+        title: 'x',
+        replaces: A,
+        condition,
       }).success,
     ).toBe(false);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, condition }).success).toBe(false);
+    expect(updateQuestionBodySchema.safeParse({ revision: 1, condition: null }).success).toBe(
+      false,
+    );
   });
 
   it('saveAnswersBodySchema takes an optional stepId and stays strict', () => {
@@ -1780,7 +1708,6 @@ describe('12.2-01 - branch bodies, reads and the optional keys (D-640, D-642, D-
       archivedAt: null,
       answered: false,
       required: true,
-      condition: null,
     };
     const staff = { kind: 'staff', answers: [{ ...row, branchId: BRANCH }], branches: [member] };
     expect(staffAnswersSchema.parse(staff)).toEqual(staff);
@@ -1799,7 +1726,7 @@ describe('12.2-01 - branch bodies, reads and the optional keys (D-640, D-642, D-
     ).toBe(false);
   });
 
-  it('every new key on an existing read or body is optional (the compatibility window)', () => {
+  it('branchId is optional on the bodies and required on every read (the compatibility window is closed, plan 20)', () => {
     const base = { type: 'short_text', title: 'Nome' };
     expect(createQuestionBodySchema.safeParse(base).success).toBe(true);
     const placed = createQuestionBodySchema.safeParse({ ...base, branchId: BRANCH });
@@ -1813,7 +1740,7 @@ describe('12.2-01 - branch bodies, reads and the optional keys (D-640, D-642, D-
       true,
     );
     expect(adminQuestionSchema.parse({ ...adminQuestion, branchId: BRANCH }).branchId).toBe(BRANCH);
-    expect(adminQuestionSchema.parse(adminQuestion).branchId).toBeUndefined();
+    expect(adminQuestionSchema.parse(adminQuestion).branchId).toBeNull();
     expect(memberQuestionSchema.parse({ ...memberQuestion, branchId: null }).branchId).toBeNull();
     const list = {
       questions: [adminQuestion],
@@ -1822,7 +1749,10 @@ describe('12.2-01 - branch bodies, reads and the optional keys (D-640, D-642, D-
       steps: [],
       stepLimit: 10,
     };
-    expect(adminQuestionListSchema.safeParse(list).success).toBe(true);
+    // Required now: a list without `branches` no longer parses.
+    expect(adminQuestionListSchema.safeParse(list).success).toBe(false);
+    expect(archivedQuestionListSchema.safeParse({ questions: [] }).success).toBe(false);
+    expect(adminQuestionListSchema.safeParse({ ...list, branches: [] }).success).toBe(true);
     const branch = {
       id: BRANCH,
       openerQuestionId: OPENER,
@@ -1897,16 +1827,15 @@ describe('12.2-01 - branch bodies, reads and the optional keys (D-640, D-642, D-
     expect(answerEtag(list, undefined, branches)).toBe(`${A}:1|${B}:4;steps=;branches=${BRANCH}:3`);
   });
 
-  it('the legacy condition shapes are untouched (plan 20 removes them)', () => {
-    expect(
-      profileFormConditionSchema.safeParse({ questionId: OPENER, values: ['a'] }).success,
-    ).toBe(true);
-    expect(
-      createQuestionBodySchema.safeParse({
-        type: 'short_text',
-        title: 'T',
-        condition: { questionId: OPENER, values: ['a'] },
-      }).success,
-    ).toBe(true);
+  it('the retired condition shapes are gone (plan 20 of 12.2)', async () => {
+    const contracts: Record<string, unknown> = await import('../src/profile-form');
+    for (const name of [
+      'profileFormConditionSchema',
+      'isQuestionVisible',
+      'visibleSteps',
+      'parseConditionValues',
+    ]) {
+      expect(contracts[name], name).toBeUndefined();
+    }
   });
 });
