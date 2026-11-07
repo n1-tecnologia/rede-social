@@ -341,6 +341,14 @@
           "numberInvalid": "Informe um número.",
           "saveFailed": "Não foi possível salvar a pergunta agora. Suas alterações continuam aqui. Tente de novo.",
           "conflict": "Esta pergunta foi alterada enquanto você editava. Feche e abra de novo para ver a versão atual."
+        },
+        "branch": {
+          "label": "Ramo",
+          "none": "Nenhum: todos os membros veem",
+          "helper": "Aparecem aqui os ramos cuja pergunta que decide vem antes desta e que não passam de {max} níveis. Ao mudar de ramo, a pergunta continua na mesma etapa e vai para o fim do ramo.",
+          "privateHidden": "Ramos que dependem de perguntas que não aparecem no perfil ficam de fora porque esta pergunta aparece.",
+          "locked": "Esta pergunta já tem {n, plural, one {# resposta} other {# respostas}}, então não pode entrar nem sair de um ramo. Para mudar, crie uma nova pergunta e arquive esta.",
+          "requiredNote": "Como esta pergunta é obrigatória, só quem a vê precisa responder."
         }
       },
       "export": {

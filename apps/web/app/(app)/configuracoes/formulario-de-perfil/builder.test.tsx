@@ -2342,10 +2342,10 @@ describe('12.2-16 Task 1: the Lista footer adds a question into a branch (D-651)
     builder({ questions: [OPENER, MEMBER], steps: [T1, T2], branches: [BR] });
     fireEvent.click(footer('Quem tem clínica'));
     expect(screen.getByRole('dialog', { name: 'Nova pergunta' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /^Texto curto/ }));
     expect((screen.getByLabelText('Ramo') as HTMLSelectElement).value).toBe(BR.id);
     expect((screen.getByLabelText('Etapa') as HTMLSelectElement).value).toBe(T2.id);
 
-    fireEvent.click(screen.getByRole('radio', { name: /^Texto curto/ }));
     fireEvent.change(screen.getByLabelText('Pergunta'), { target: { value: 'Telefone' } });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Salvar pergunta' }));
@@ -2360,6 +2360,7 @@ describe('12.2-16 Task 1: the Lista footer adds a question into a branch (D-651)
   it('puts an empty branch into the last step', () => {
     builder({ questions: [OPENER, MEMBER], steps: [T1, T2], branches: [BR, EMPTY] });
     fireEvent.click(footer('Ramo vazio'));
+    fireEvent.click(screen.getByRole('radio', { name: /^Texto curto/ }));
     expect((screen.getByLabelText('Ramo') as HTMLSelectElement).value).toBe(EMPTY.id);
     expect((screen.getByLabelText('Etapa') as HTMLSelectElement).value).toBe(T2.id);
   });
@@ -2369,6 +2370,7 @@ describe('12.2-16 Task 1: the Lista footer adds a question into a branch (D-651)
     fireEvent.click(
       screen.getAllByRole('button', { name: /^Adicionar pergunta$/ })[0] as HTMLElement,
     );
+    fireEvent.click(screen.getByRole('radio', { name: /^Texto curto/ }));
     expect((screen.getByLabelText('Ramo') as HTMLSelectElement).value).toBe('');
   });
 });

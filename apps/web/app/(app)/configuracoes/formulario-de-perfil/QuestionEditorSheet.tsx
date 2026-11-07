@@ -17,11 +17,12 @@ import {
   useMediaQuery,
   useToast,
 } from '@rede-social/ui';
-import { Archive, CircleAlert, Info, Trash2 } from 'lucide-react';
+import { Archive, CircleAlert, Info, Lock, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { type FormEvent, useCallback, useRef, useState } from 'react';
-import { describeCondition } from '@/lib/profile-form/describe-condition';
+import { type FormEvent, useCallback, useMemo, useRef, useState } from 'react';
+import { buildBranchTree, usableBranch } from '@/lib/profile-form/branch-tree';
+import { describeBranch } from '@/lib/profile-form/describe-branch';
 import { isChoiceType } from '@/lib/profile-form/question-types';
 import { ArchiveDialog, type ArchiveKind } from './ArchiveDialog';
 import {
@@ -35,31 +36,24 @@ import {
   type SaveQuestionResult,
   updateQuestionAction,
 } from './actions';
-import {
-  CONDITION_OPENER_ID,
-  ConditionEditor,
-  LockedCondition,
-  SheetSelect,
-} from './ConditionEditor';
+import { useBranchLabeler } from './BranchBlock';
 import { DEPENDENTS_SHOWN, DependentsAlert } from './DependentsAlert';
 import {
   blankDraft,
+  branchOptionsFor,
   canSave,
   changeType,
-  checkStepChange,
+  checkStepMove,
   conditionOptionsText,
-  copyCondition,
   type DependentsRefusal,
   type DraftErrors,
   dependentsOf,
   draftFromQuestion,
   type EditorMode,
-  eligibleOpeners,
   hasChanges,
   hasErrors,
   isDirty,
   lockFlags,
-  openerIndex,
   optionUsage,
   type QuestionDraft,
   type Reopening,
@@ -76,6 +70,7 @@ import {
 import { ImpactDialog } from './ImpactDialog';
 import { LimitsFields } from './LimitsFields';
 import { OptionsEditor } from './OptionsEditor';
+import { SheetSelect } from './SheetSelect';
 import { TypePicker } from './TypePicker';
 import { VisibilitySwitches } from './VisibilitySwitches';
 
@@ -90,18 +85,18 @@ export interface QuestionEditorSheetProps {
    */
   stepId?: string;
   /**
-   * The ACTIVE questions the builder holds (12.1-17): the openers the condition editor may offer. Absent means the
-   * caller does not know them, and then the sheet shows no condition block at all.
+   * The ACTIVE questions the builder holds (12.1-17): the tree the "Ramo" field is judged against. Absent means
+   * the caller does not know them, and then the sheet shows no "Onde e quando aparece" block at all.
    */
   questions?: AdminQuestion[];
   /** The tenant's steps in order (12.1-17): the "Etapa" field shows with two or more. */
   steps?: AdminStep[];
   /**
    * The tenant's branches (12.2-16, D-640): the "Ramo" field lists the eligible ones and shows only when there is
-   * at least one. RED-stage stub: declared so the tests type-check, not read yet.
+   * at least one. Absent reads as none.
    */
   branches?: AdminBranch[];
-  /** The branch a NEW question starts in (the Lista footer, D-651). RED-stage stub, not read yet. */
+  /** The branch a NEW question starts in (the Lista footer "Adicionar pergunta ao ramo", D-651). */
   initialBranchId?: string;
   /** The tenant's display name, the `{tenant}` of the LGPD notice. */
   tenantName: string;
@@ -116,7 +111,23 @@ export interface QuestionEditorSheetProps {
 const TITLE_ID = 'pf-title';
 const HELP_ID = 'pf-help';
 const STEP_ID = 'pf-step';
+const BRANCH_ID = 'pf-branch';
 const NO_STEPS: AdminStep[] = [];
+const NO_BRANCHES: AdminBranch[] = [];
+const NO_QUESTIONS: AdminQuestion[] = [];
+
+/** The refusals of a move into or out of a branch that land under the "Ramo" field (D-641, D-644, D-646). */
+type BranchRefusal =
+  | 'condition_order'
+  | 'branch_depth'
+  | 'condition_locked'
+  | 'public_under_private';
+const BRANCH_REFUSALS: ReadonlySet<string> = new Set<BranchRefusal>([
+  'condition_order',
+  'branch_depth',
+  'condition_locked',
+  'public_under_private',
+]);
 
 /**
  * The question editor (12-16, D-585, D-590, D-593, D-594, UI-D-569..UI-D-573; PFORM-02, PFORM-22): ONE
@@ -146,6 +157,8 @@ export function QuestionEditorSheet({
   stepId,
   questions,
   steps = NO_STEPS,
+  branches = NO_BRANCHES,
+  initialBranchId,
   tenantName,
   limit,
   onClose,
@@ -163,7 +176,7 @@ export function QuestionEditorSheet({
     if (mode === 'edit' && question) return draftFromQuestion(question);
     if (mode === 'replace' && question) return replaceDraftFrom(question);
     // A new question lands in the step the sheet was opened from, or in the last one (D-629).
-    return blankDraft(stepId ?? steps[steps.length - 1]?.id ?? null);
+    return blankDraft(stepId ?? steps[steps.length - 1]?.id ?? null, initialBranchId ?? null);
   });
   const stored = mode === 'edit' ? (question ?? null) : null;
   const locks = lockFlags(stored);
@@ -182,45 +195,52 @@ export function QuestionEditorSheet({
   // `impact` keeps the figure for the dialog's exit animation; `impactOpen` is what the dialog follows.
   const [impact, setImpact] = useState<{ members: number; kind: Reopening['kind'] } | null>(null);
   const [impactOpen, setImpactOpen] = useState(false);
-  // The condition block (12.1-17): the step field's refusal, the editor's own "answers cleared" note and the 409.
-  const [stepRefusal, setStepRefusal] = useState<ReturnType<typeof checkStepChange> | null>(null);
-  const [resetNote, setResetNote] = useState(false);
-  const [conditionStale, setConditionStale] = useState(false);
+  // "Onde e quando aparece": the step field's refusal (D-623) and the refusal of a move into a branch (D-641..D-646).
+  const [stepRefusal, setStepRefusal] = useState<ReturnType<typeof checkStepMove> | null>(null);
+  const [branchRefusal, setBranchRefusal] = useState<BranchRefusal | null>(null);
   // The opener edits the question refuses (12.1-17, D-632): archive, delete, retype, remove an option. The alert
   // renders from the list the page holds (no round trip) or from the server's 409 list (a race).
   const [refusal, setRefusal] = useState<DependentsRefusal | null>(null);
 
-  const activeQuestions = questions ?? [];
+  const activeQuestions = questions ?? NO_QUESTIONS;
   const showStepField = steps.length >= 2;
-  const showConditions = questions !== undefined;
   const dependents = stored ? dependentsOf(activeQuestions, stored.id) : [];
-  // An opener has no condition of its own (D-622): it shows what it opens, not the condition editor.
+  // An opener shows what it opens (12.1 block, replaced by "Ramos desta pergunta" in 12.2-16 Task 2).
   const isOpener = stored !== null && stored.opensCount > 0;
   const usedCounts = stored ? optionUsage(activeQuestions, stored.id) : undefined;
-  // A question with answers cannot gain or change a condition (D-625), only lose it: the switch becomes a lock row.
-  const conditionLocked = stored !== null && stored.answerCount > 0;
-  const conditionWords = { yes: tc('yes'), no: tc('no') };
 
-  /** The "Só aparece se …" sentence of a condition against the questions the builder holds, or `null`. */
-  function conditionSentence(
-    condition: { questionId: string; values: string[] },
-    sentenceKey: 'condition.summary' | 'impact.conditionalNote',
-  ): string | null {
-    const described = describeCondition(condition, openerIndex(activeQuestions));
+  // The tree the "Ramo" field is judged against (D-641, D-644): built from the one read the page holds.
+  const tree = useMemo(
+    () => buildBranchTree({ steps, questions: activeQuestions, branches }),
+    [steps, activeQuestions, branches],
+  );
+  const labelOf = useBranchLabeler(tree);
+  const hasBranches = questions !== undefined && branches.length > 0;
+  // A question with answers cannot enter, leave or change branch (D-646): the select is a lock row.
+  const branchLocked = stored !== null && stored.answerCount > 0;
+  const showBranchField = hasBranches && !branchLocked;
+  const showBranchLock = hasBranches && branchLocked;
+  const branchChoices = showBranchField
+    ? branchOptionsFor(
+        question && mode !== 'create'
+          ? { id: question.id, showOnProfile: draft.showOnProfile }
+          : { id: null, showOnProfile: draft.showOnProfile, stepId: draft.stepId },
+        tree,
+        draft.branchId,
+      )
+    : null;
+  const yesNoWords = { yes: tc('yes'), no: tc('no') };
+
+  /** "Só conta quem vê esta pergunta: …" for the branch the draft sits in, or `null` (the impact dialog). */
+  function branchNote(): string | null {
+    const branch = usableBranch(tree, draft.branchId);
+    if (branch === undefined) return null;
+    const described = describeBranch(branch, tree.questionById);
     if (described === null) return null;
-    const options = conditionOptionsText(described, conditionWords);
+    const options = conditionOptionsText(described, yesNoWords);
     if (options === '') return null;
-    return sentenceKey === 'condition.summary'
-      ? te('condition.summary', { opener: described.openerTitle, options })
-      : t('impact.conditionalNote', { opener: described.openerTitle, options });
+    return t('impact.conditionalNote', { opener: described.openerTitle, options });
   }
-  const openers = eligibleOpeners({
-    questions: activeQuestions,
-    steps,
-    selfId: question && mode !== 'create' ? question.id : null,
-    storedStepId: stored?.stepId ?? null,
-    stepId: draft.stepId,
-  });
 
   const dirty = isDirty(initial, draft);
 
@@ -268,39 +288,23 @@ export function QuestionEditorSheet({
       id = target ? `pf-option-${target.key}` : null;
     } else if (found.min || found.limits) id = 'pf-min';
     else if (found.max) id = 'pf-max';
-    else if (found.conditionOpener) id = CONDITION_OPENER_ID;
     if (id) document.getElementById(id)?.focus();
-    else if (found.conditionValues) {
-      document
-        .querySelector<HTMLElement>(
-          '[data-condition-editor] fieldset input, [data-condition-editor] fieldset button',
-        )
-        ?.focus();
-    }
-  }
-
-  /** The opener changed meanwhile (409): nothing was saved, the choice is cleared and the page re-reads. */
-  function staleCondition() {
-    setConditionStale(true);
-    setResetNote(false);
-    setDraft((current) =>
-      current.condition ? { ...current, condition: { questionId: '', values: [] } } : current,
-    );
-    router.refresh();
   }
 
   /**
    * A change of the step field (UI-D-647). A change that breaks D-623 is NOT applied: the select stays on the
-   * step it had and a `role="alert"` line says which question forces it. One that only makes the draft opener
-   * ineligible clears the opener and says so politely.
+   * step it had and a `role="alert"` line says which question forces it. One that only makes the draft branch
+   * ineligible clears the branch (the "Ramo" select then reads "Nenhum"). The question stays in its branch's
+   * rules: it goes to the END of the new step.
    */
   function changeStep(nextStepId: string) {
     if (nextStepId === draft.stepId) return;
-    const result = checkStepChange({
+    const result = checkStepMove({
       questions: activeQuestions,
       steps,
+      branches,
       stored,
-      condition: draft.condition,
+      branchId: draft.branchId,
       nextStepId,
     });
     if (result.kind !== 'ok') {
@@ -308,15 +312,17 @@ export function QuestionEditorSheet({
       return;
     }
     setStepRefusal(null);
+    setBranchRefusal(null);
     setDraft((current) => ({
       ...current,
       stepId: nextStepId,
-      condition:
-        result.clearOpener && current.condition
-          ? { questionId: '', values: [] }
-          : current.condition,
+      branchId: result.clearBranch ? null : current.branchId,
     }));
-    if (result.clearOpener) setResetNote(true);
+  }
+
+  function changeBranch(next: string) {
+    setBranchRefusal(null);
+    patch({ branchId: next === '' ? null : next });
   }
 
   function lostPermission(message: string) {
@@ -337,8 +343,9 @@ export function QuestionEditorSheet({
         toast.show({ tone: 'error', message: t('list.limit', { max: limit }) });
         return;
       case 'conflict':
-        if (result.issue === 'condition_invalid') {
-          staleCondition();
+        // A move into or out of a branch the server refuses lands under the "Ramo" field (D-646).
+        if (BRANCH_REFUSALS.has(result.issue)) {
+          setBranchRefusal(result.issue as BranchRefusal);
           return;
         }
         if (result.issue === 'has_dependents') {
@@ -373,8 +380,14 @@ export function QuestionEditorSheet({
         const limits = result.fields.limits;
         const limitsError = limits === undefined ? null : serverLimitsError(draft.type, limits);
         if (limitsError) found.limits = limitsError;
-        if (result.fields.condition !== undefined) {
-          staleCondition();
+        // A branch the server does not know (or that is gone) is the stale-copy alert: nothing was saved.
+        if (
+          result.fields.branch !== undefined ||
+          result.fields.condition !== undefined ||
+          result.fields.form === 'unknown_branch'
+        ) {
+          setConflict(true);
+          router.refresh();
           return;
         }
         if (hasErrors(found)) {
@@ -449,12 +462,7 @@ export function QuestionEditorSheet({
       read = await readImpactAction({
         change: reopening.change,
         ...(reopening.questionId ? { questionId: reopening.questionId } : {}),
-        ...(reopening.condition
-          ? {
-              conditionQuestionId: reopening.condition.questionId,
-              conditionValues: reopening.condition.values,
-            }
-          : {}),
+        ...(reopening.branchId ? { branchId: reopening.branchId } : {}),
       });
     } catch {
       // Falls through to "could not calculate": nothing is written.
@@ -555,12 +563,35 @@ export function QuestionEditorSheet({
     else await write(false);
   }
 
+  /** The line under the "Ramo" field for a refusal the server sent (D-646); reuses the approved sentences. */
+  function branchErrorOf(): string | undefined {
+    switch (branchRefusal) {
+      case 'condition_order': {
+        const branch = draft.branchId ? tree.branchById.get(draft.branchId) : undefined;
+        const opener = branch ? tree.questionById.get(branch.openerQuestionId) : undefined;
+        return opener
+          ? te('step.errors.mustFollow', { opener: opener.title })
+          : te('errors.conflict');
+      }
+      case 'branch_depth':
+        return te('branch.helper', { max: PROFILE_FORM_LIMITS.branchDepth });
+      case 'condition_locked':
+        // An answer arrived since the page was read, so there is at least one.
+        return te('branch.locked', { n: Math.max(stored?.answerCount ?? 0, 1) });
+      case 'public_under_private':
+        return te('branch.privateHidden');
+      default:
+        return undefined;
+    }
+  }
+
   const title =
     mode === 'replace' ? te('replaceTitle') : mode === 'edit' ? te('editTitle') : te('createTitle');
   const acceptance = draft.type === 'acceptance';
   const titleError = errors.title ? te(errors.title.key, errors.title.values) : undefined;
   const helpError = errors.helpText ? te(errors.helpText.key, errors.helpText.values) : undefined;
   const titleCount = codePoints(draft.title);
+  const branchError = branchErrorOf();
 
   return (
     <>
@@ -710,7 +741,7 @@ export function QuestionEditorSheet({
                   }
                 />
 
-                {showStepField || (showConditions && !isOpener) ? (
+                {showStepField || showBranchField || showBranchLock ? (
                   <div className="flex flex-col gap-4" data-where-block>
                     <SectionTitle variant="micro" as="h3">
                       {te('where.title')}
@@ -737,45 +768,58 @@ export function QuestionEditorSheet({
                         ))}
                       </SheetSelect>
                     ) : null}
-                    {conditionLocked && showConditions && !isOpener && stored ? (
-                      <LockedCondition
-                        answerCount={stored.answerCount}
-                        summary={
-                          stored.condition === null
-                            ? null
-                            : (conditionSentence(stored.condition, 'condition.summary') ?? '')
-                        }
-                        removing={stored.condition !== null && draft.condition === null}
-                        onRemove={() => patch({ condition: null })}
-                        onUndo={() => patch({ condition: copyCondition(stored.condition) })}
-                        onReplace={onReplace ? startReplace : undefined}
-                      />
-                    ) : showConditions && !isOpener ? (
-                      <ConditionEditor
-                        condition={draft.condition}
-                        openers={openers}
-                        steps={steps}
-                        required={draft.required}
-                        openerError={
-                          errors.conditionOpener
-                            ? te(errors.conditionOpener.key, errors.conditionOpener.values)
-                            : undefined
-                        }
-                        valuesError={
-                          errors.conditionValues
-                            ? te(errors.conditionValues.key, errors.conditionValues.values)
-                            : undefined
-                        }
-                        stale={conditionStale}
-                        resetNote={resetNote}
-                        onChange={(condition, reset) => {
-                          patch({ condition });
-                          setResetNote(reset === true);
-                          setConditionStale(false);
-                          clear('conditionOpener');
-                          clear('conditionValues');
-                        }}
-                      />
+                    {branchChoices ? (
+                      <div className="flex flex-col" data-branch-field>
+                        <SheetSelect
+                          id={BRANCH_ID}
+                          label={te('branch.label')}
+                          value={draft.branchId ?? ''}
+                          onChange={changeBranch}
+                          helper={te('branch.helper', { max: PROFILE_FORM_LIMITS.branchDepth })}
+                          extraHelper={
+                            branchChoices.leftOutForPrivacy ? te('branch.privateHidden') : undefined
+                          }
+                          error={branchError}
+                        >
+                          <option value="">{te('branch.none')}</option>
+                          {branchChoices.groups.map((group) => (
+                            <optgroup key={group.opener.id} label={group.opener.title}>
+                              {group.branches.map((branch) => (
+                                <option key={branch.id} value={branch.id}>
+                                  {labelOf(branch).label}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </SheetSelect>
+                        <div role="status" data-branch-note>
+                          {draft.required && draft.branchId ? (
+                            <p className="mt-2 flex items-start gap-2 text-xs font-normal text-text-secondary">
+                              <Info aria-hidden size={16} className="mt-px shrink-0" />
+                              <span className="min-w-0 flex-1">{te('branch.requiredNote')}</span>
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    {showBranchLock && stored ? (
+                      <div className="flex flex-col gap-3" data-branch-locked>
+                        <p className="flex items-start gap-2 break-words text-xs font-normal text-text-secondary">
+                          <Lock
+                            aria-hidden
+                            size={16}
+                            className="mt-px shrink-0 text-text-tertiary"
+                          />
+                          <span className="min-w-0 flex-1">
+                            {te('branch.locked', { n: stored.answerCount })}
+                          </span>
+                        </p>
+                        {onReplace ? (
+                          <Button variant="outline" fullWidth onClick={startReplace}>
+                            {te('locked.replace')}
+                          </Button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 ) : null}
@@ -873,8 +917,8 @@ export function QuestionEditorSheet({
             : undefined
         }
         conditionNote={
-          impact && impact.kind !== 'unconditional' && draft.condition !== null
-            ? (conditionSentence(draft.condition, 'impact.conditionalNote') ?? undefined)
+          impact && impact.kind !== 'unconditional' && draft.branchId !== null
+            ? (branchNote() ?? undefined)
             : undefined
         }
         onConfirm={() => write(true)}

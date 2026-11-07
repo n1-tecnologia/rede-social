@@ -40,6 +40,8 @@ interface Opening {
   question: AdminQuestion | null;
   /** The step a new question lands in; absent means the last step (D-629). */
   stepId?: string;
+  /** The branch a new question starts in (the Lista footer, D-651); absent means none. */
+  branchId?: string;
 }
 
 interface StepOpening {
@@ -83,6 +85,16 @@ export function QuestionBuilder({
       mode: 'create',
       question: null,
       stepId: step.id,
+    }));
+    setOpen(true);
+  }, []);
+  const openCreateInBranch = useCallback((branch: AdminBranch, stepId: string) => {
+    setOpening((current) => ({
+      id: (current?.id ?? 0) + 1,
+      mode: 'create',
+      question: null,
+      stepId,
+      branchId: branch.id,
     }));
     setOpen(true);
   }, []);
@@ -133,6 +145,7 @@ export function QuestionBuilder({
           onAddStep={openAddStep}
           onRenameStep={openRenameStep}
           onAddToStep={openCreateIn}
+          onAddToBranch={openCreateInBranch}
           onPreview={openPreview}
         />
       ) : (
@@ -162,8 +175,10 @@ export function QuestionBuilder({
           mode={opening.mode}
           question={opening.question}
           stepId={opening.stepId}
+          initialBranchId={opening.branchId}
           questions={questions}
           steps={steps}
+          branches={branches}
           tenantName={tenantName}
           limit={limit}
           onClose={close}

@@ -161,6 +161,12 @@ export async function readImpactAction(input: {
    */
   conditionQuestionId?: string;
   conditionValues?: string[];
+  /**
+   * 12.2-16 (D-634, D-644): the branch the NEW question will sit in (a create or a replace), so only the members
+   * for whom its whole chain is open are counted. The per-question condition keys above are retired on the
+   * server (400) and kept here only until plan 20 removes them.
+   */
+  branchId?: string;
 }): Promise<ImpactActionResult> {
   const { conditionValues, ...rest } = input;
   const query = impactQuerySchema.safeParse({
@@ -177,6 +183,7 @@ export async function readImpactAction(input: {
     params.set('conditionQuestionId', query.data.conditionQuestionId);
   }
   if (query.data.conditionValues) params.set('conditionValues', query.data.conditionValues);
+  if (query.data.branchId) params.set('branchId', query.data.branchId);
 
   let refusal: string | null = null;
   let result: ImpactActionResult = { ok: false, code: 'failed' };
@@ -255,7 +262,14 @@ export async function reactivateQuestionAction(id: string): Promise<ReactivateRe
 // ── 12-16: the question editor's writes ────────────────────────────────────────────────────────────
 
 /** The field of the sheet a refusal of a write belongs to; `form` is a refusal no single field owns. */
-export type SaveFieldKey = 'title' | 'helpText' | 'options' | 'limits' | 'condition' | 'form';
+export type SaveFieldKey =
+  | 'title'
+  | 'helpText'
+  | 'options'
+  | 'limits'
+  | 'condition'
+  | 'branch'
+  | 'form';
 
 /**
  * What a write of a question returns (UI-D-569). `invalid` is a 400: the issue code per field, which the
@@ -314,6 +328,8 @@ function fieldOf(path: PropertyKey[]): SaveFieldKey {
   ) {
     return head;
   }
+  // 12.2-16: a `branchId` the contract or the server refuses (`unknown_branch`) belongs to the "Ramo" field.
+  if (head === 'branchId') return 'branch';
   return 'form';
 }
 

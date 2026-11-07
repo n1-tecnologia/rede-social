@@ -1471,39 +1471,15 @@ describe('no raw HTML anywhere in the editor (T-12-35)', () => {
 
 // ── 12.1-17 Task 1: the step field and the condition editor inside the sheet (UI-D-647, UI-D-648) ──
 
-describe('12.1-17: "Onde e quando aparece" (D-620..D-623, UI-D-647, UI-D-648)', () => {
+describe('12.1-17: "Onde e quando aparece", the Etapa field (D-623, UI-D-647)', () => {
   const s1 = adminStep({ title: 'Informações gerais' });
   const s2 = adminStep({ title: 'Sobre a sua clínica' });
   const steps = [s1, s2];
-  const opts = (...labels: string[]) =>
-    labels.map((label, at) => ({ id: uuid(9300 + at), label, answerCount: 0 }));
-  const clinic = adminQuestion('single_choice', {
-    stepId: s1.id,
-    title: 'Você tem clínica?',
-    options: opts('Tenho uma clínica', 'Trabalho em uma clínica', 'Estou aprendendo'),
-  });
-  const team = adminQuestion('yes_no', { stepId: s1.id, title: 'Você já tem equipe?' });
   const plain = adminQuestion('short_text', { stepId: s1.id, title: 'Nome profissional' });
-  const shown = adminQuestion('short_text', {
-    stepId: s2.id,
-    title: 'Nome da clínica',
-    condition: { questionId: clinic.id, values: [uuid(9300)] },
-  });
-  const later = adminQuestion('dropdown', {
-    stepId: s2.id,
-    title: 'Depois desta',
-    options: opts('Um', 'Dois'),
-  });
   const target = adminQuestion('short_text', { stepId: s2.id, title: 'Telefone da clínica' });
-  const active = [clinic, team, plain, shown, later, target];
+  const active = [plain, target];
 
   const stepSelect = () => screen.getByLabelText('Etapa') as HTMLSelectElement;
-  const conditionSwitch = () => screen.getByRole('switch', { name: 'Mostrar só em alguns casos' });
-  const openerSelect = () => screen.getByLabelText('Pergunta que decide') as HTMLSelectElement;
-  const openerTitles = () =>
-    within(openerSelect())
-      .getAllByRole('option')
-      .map((option) => option.textContent);
 
   it('shows the block after the two switch rows, before the footer', () => {
     mount({ questions: active, steps });
@@ -1519,11 +1495,10 @@ describe('12.1-17: "Onde e quando aparece" (D-620..D-623, UI-D-647, UI-D-648)', 
     expect(block.querySelector('h3')?.textContent).toBe('Onde e quando aparece');
   });
 
-  it('shows no condition block when the caller does not hold the question list', () => {
+  it('shows no block when the caller does not hold the question list', () => {
     mount();
     pick('Texto curto');
     expect(screen.queryByText('Onde e quando aparece')).toBeNull();
-    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
   });
 
   it('offers the "Etapa" select only with two or more steps, defaulting to the last', () => {
@@ -1543,12 +1518,11 @@ describe('12.1-17: "Onde e quando aparece" (D-620..D-623, UI-D-647, UI-D-648)', 
     ).toBeTruthy();
     unmount();
 
+    // One step and no branch: nothing to decide, so no block at all (the condition left the sheet).
     mount({ questions: active, steps: [s1] });
     pick('Texto curto');
     expect(screen.queryByLabelText('Etapa')).toBeNull();
-    // With one step the block holds only the condition.
-    expect(screen.getByText('Onde e quando aparece')).toBeTruthy();
-    expect(conditionSwitch()).toBeTruthy();
+    expect(screen.queryByText('Onde e quando aparece')).toBeNull();
   });
 
   it('opens on the step the sheet was opened from', () => {
@@ -1557,523 +1531,37 @@ describe('12.1-17: "Onde e quando aparece" (D-620..D-623, UI-D-647, UI-D-648)', 
     expect(stepSelect().value).toBe(s1.id);
   });
 
-  it('lists ONLY legal openers: no wrong type, no conditional, none later, not itself', () => {
-    mount({ mode: 'edit', question: plain, questions: active, steps });
-    fireEvent.click(conditionSwitch());
-    // "Nome profissional" is itself; "Nome da clínica" has a condition; "Depois desta" is later.
-    expect(openerTitles()).toEqual(['Selecione', 'Você tem clínica?', 'Você já tem equipe?']);
-    const groups = [...openerSelect().querySelectorAll('optgroup')].map((g) => g.label);
-    expect(groups).toEqual(['Informações gerais']);
-  });
-
-  it('with no eligible opener the switch is disabled and a note says what to create first', () => {
-    mount({ questions: [plain], steps: [s1, s2] });
-    pick('Texto curto');
-    expect(conditionSwitch().hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/crie antes uma pergunta de escolha ou de Sim ou não/)).toBeTruthy();
-  });
-
-  it('moves focus into the opener select when the switch turns on', () => {
-    mount({ questions: active, steps });
-    pick('Texto curto');
-    fireEvent.click(conditionSwitch());
-    expect(document.activeElement).toBe(openerSelect());
-  });
-
-  it('the value picker follows the type of the chosen opener', () => {
-    mount({ questions: active, steps });
-    pick('Texto curto');
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
-    expect(screen.getAllByRole('checkbox')).toHaveLength(3);
-    fireEvent.change(openerSelect(), { target: { value: team.id } });
-    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
-    expect(screen.getByRole('button', { name: 'Sim' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Não' })).toBeTruthy();
-  });
-
-  it('changing the opener clears the ticked answers and says so in a status line', () => {
-    mount({ questions: active, steps });
-    pick('Texto curto');
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
-    fireEvent.click(screen.getAllByRole('checkbox')[0] as HTMLElement);
-    fireEvent.change(openerSelect(), { target: { value: team.id } });
-    expect(
-      screen
-        .getByText('A pergunta que decide mudou, então as respostas escolhidas foram limpas.')
-        .closest('[role="status"]'),
-    ).toBeTruthy();
-  });
-
-  it('a required question shows the "só quem a vê" line', () => {
-    mount({ questions: active, steps });
-    pick('Texto curto');
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
-    expect(screen.queryByText(/só quem a vê precisa responder/)).toBeNull();
-    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
-    expect(
-      screen.getByText('Como esta pergunta é obrigatória, só quem a vê precisa responder.'),
-    ).toBeTruthy();
-  });
-
-  it('refuses to save without an opener, then without an answer, with the inline messages', async () => {
-    mount({ questions: active, steps });
-    pick('Texto curto');
-    typeTitle('Telefone da clínica');
-    fireEvent.click(conditionSwitch());
-    await act(async () => {
-      fireEvent.click(saveButton());
-    });
-    expect(mocks.create).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert').textContent).toBe('Escolha a pergunta que decide.');
-    expect(openerSelect().getAttribute('aria-invalid')).toBe('true');
-    expect(document.activeElement).toBe(openerSelect());
-
-    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
-    expect(screen.queryByText('Escolha a pergunta que decide.')).toBeNull();
-    await act(async () => {
-      fireEvent.click(saveButton());
-    });
-    expect(mocks.create).not.toHaveBeenCalled();
-    expect(
-      screen
-        .getByText('Escolha pelo menos uma resposta que abre esta pergunta.')
-        .getAttribute('role'),
-    ).toBe('alert');
-  });
-
-  it('saves the condition and the step through the create action', async () => {
+  it('saves the step through the create action, with no branch and no condition key', async () => {
     mount({ questions: active, steps, stepId: s2.id });
     pick('Texto curto');
-    typeTitle('Telefone da clínica');
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
-    const boxes = screen.getAllByRole('checkbox');
-    fireEvent.click(boxes[1] as HTMLElement);
-    fireEvent.click(boxes[0] as HTMLElement);
+    typeTitle('Telefone');
     await act(async () => {
       fireEvent.click(saveButton());
     });
     expect(mocks.create).toHaveBeenCalledTimes(1);
     const body = mocks.create.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body.stepId).toBe(s2.id);
-    expect(body.condition).toEqual({
-      questionId: clinic.id,
-      values: [uuid(9300), uuid(9301)],
-    });
+    expect(Object.keys(body)).not.toContain('branchId');
+    expect(Object.keys(body)).not.toContain('condition');
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('a yes/no opener saves the literal "true" or "false"', async () => {
-    mount({ questions: active, steps });
-    pick('Texto curto');
-    typeTitle('Quantas pessoas?');
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: team.id } });
-    fireEvent.click(screen.getByRole('button', { name: 'Não' }));
-    await act(async () => {
-      fireEvent.click(saveButton());
-    });
-    const sent = mocks.create.mock.calls[0]?.[0] as { condition: unknown };
-    expect(sent.condition).toEqual({ questionId: team.id, values: ['false'] });
-  });
-
-  it('sends no condition key when the switch was turned on and off again', async () => {
-    mount({ questions: active, steps });
-    pick('Texto curto');
-    typeTitle('Telefone');
-    fireEvent.click(conditionSwitch());
-    fireEvent.click(conditionSwitch());
-    await act(async () => {
-      fireEvent.click(saveButton());
-    });
-    expect(Object.keys(mocks.create.mock.calls[0]?.[0] as object)).not.toContain('condition');
-  });
-
-  it('an edit sends the new condition and the new step, and only them', async () => {
+  it('an edit sends the new step and only it', async () => {
     mocks.update.mockResolvedValue({
       ok: true,
       question: adminQuestion('short_text'),
       pending: null,
     });
     mount({ mode: 'edit', question: target, questions: active, steps });
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
-    fireEvent.click(screen.getAllByRole('checkbox')[2] as HTMLElement);
+    fireEvent.change(stepSelect(), { target: { value: s1.id } });
     await act(async () => {
       fireEvent.click(saveButton());
     });
-    expect(mocks.update).toHaveBeenCalledTimes(1);
-    expect(mocks.update.mock.calls[0]?.[1]).toEqual({
-      revision: target.revision,
-      condition: { questionId: clinic.id, values: [uuid(9302)] },
-    });
-  });
-
-  it('snaps a shown question back when the step would put it above its opener', () => {
-    const lateOpener = adminQuestion('single_choice', {
-      stepId: s2.id,
-      title: 'Você tem clínica?',
-      options: opts('Tenho uma clínica', 'Estou aprendendo'),
-    });
-    const dependent = adminQuestion('short_text', {
-      stepId: s2.id,
-      title: 'Nome da clínica',
-      condition: { questionId: lateOpener.id, values: [uuid(9300)] },
-    });
-    mount({ mode: 'edit', question: dependent, questions: [lateOpener, dependent], steps });
-    expect(stepSelect().value).toBe(s2.id);
-    fireEvent.change(stepSelect(), { target: { value: s1.id } });
-    expect(stepSelect().value).toBe(s2.id);
-    const alert = screen.getByText(
-      'Esta pergunta depende de “Você tem clínica?”, então precisa ficar na etapa dela ou em uma depois.',
-    );
-    expect(alert.getAttribute('role')).toBe('alert');
-    expect(stepSelect().getAttribute('aria-invalid')).toBe('true');
-    // The opener's own step is fine: the question goes to the end of it.
-    fireEvent.change(stepSelect(), { target: { value: s2.id } });
-  });
-
-  it('snaps an opener back when the step would put it at or after its dependent', () => {
-    const opener = adminQuestion('single_choice', {
-      stepId: s1.id,
-      title: 'Abridora',
-      options: opts('A', 'B'),
-      opensCount: 1,
-    });
-    const dependent = adminQuestion('short_text', {
-      stepId: s2.id,
-      title: 'Nome da clínica',
-      condition: { questionId: opener.id, values: [uuid(9300)] },
-    });
-    mount({ mode: 'edit', question: opener, questions: [opener, dependent], steps });
-    fireEvent.change(stepSelect(), { target: { value: s2.id } });
-    expect(stepSelect().value).toBe(s1.id);
-    expect(
-      screen
-        .getByText(
-          '“Nome da clínica” depende desta pergunta, então ela precisa ficar na etapa de “Nome da clínica” ou em uma antes.',
-        )
-        .getAttribute('role'),
-    ).toBe('alert');
-  });
-
-  it('recomputes the opener list on a step change and clears an opener that is no longer legal', () => {
-    mount({ questions: active, steps, stepId: s2.id });
-    pick('Texto curto');
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
-    // Moving to the first step keeps "Você tem clínica?" (same step, earlier position than the end).
-    fireEvent.change(stepSelect(), { target: { value: s1.id } });
-    expect(openerSelect().value).toBe(clinic.id);
-    // A step that comes BEFORE the opener's step cannot hold the question: only possible with a later opener.
-  });
-
-  it('clears a draft opener the new step no longer allows, with the polite note', () => {
-    const lateOpener = adminQuestion('yes_no', { stepId: s2.id, title: 'Já na etapa dois?' });
-    mount({ questions: [clinic, lateOpener], steps, stepId: s2.id });
-    pick('Texto curto');
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: lateOpener.id } });
-    fireEvent.change(stepSelect(), { target: { value: s1.id } });
-    expect(openerSelect().value).toBe('');
-    expect(
-      screen.getByText('A pergunta que decide mudou, então as respostas escolhidas foram limpas.'),
-    ).toBeTruthy();
-    expect(openerTitles()).toEqual(['Selecione', 'Você tem clínica?']);
-  });
-
-  it('shows the 409 line, clears the choice and refreshes when the opener changed meanwhile', async () => {
-    mocks.create.mockResolvedValue({ ok: false, code: 'conflict', issue: 'condition_invalid' });
-    mount({ questions: active, steps });
-    pick('Texto curto');
-    typeTitle('Telefone');
-    fireEvent.click(conditionSwitch());
-    fireEvent.change(openerSelect(), { target: { value: clinic.id } });
-    fireEvent.click(screen.getAllByRole('checkbox')[0] as HTMLElement);
-    await act(async () => {
-      fireEvent.click(saveButton());
-    });
-    expect(
-      screen
-        .getByText('Esta condição não vale mais. Escolha a pergunta e a resposta de novo.')
-        .getAttribute('role'),
-    ).toBe('alert');
-    expect(openerSelect().value).toBe('');
-    expect(mocks.refresh).toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-    // It is the condition's line, not the generic "changed while you edited" banner.
-    expect(dialog().querySelector('[data-conflict-alert]')).toBeNull();
-  });
-
-  it('a replacement copies the step and the condition of the replaced question', () => {
-    mount({ mode: 'replace', question: shown, questions: active, steps });
-    pick('Texto curto');
-    expect(stepSelect().value).toBe(s2.id);
-    expect(conditionSwitch().getAttribute('aria-checked')).toBe('true');
-    expect(openerSelect().value).toBe(clinic.id);
+    expect(mocks.update.mock.calls[0]?.[1]).toEqual({ revision: target.revision, stepId: s1.id });
   });
 });
 
-// ── 12.1-17 Task 3: an answered question's condition and the impact before a removal (D-625, D-634) ──
-
-describe('12.1-17 Task 3: the condition of a question with answers (D-625, UI-D-649)', () => {
-  const ids = [uuid(9411), uuid(9412), uuid(9413)];
-  const clinic = adminQuestion('single_choice', {
-    title: 'Você tem clínica?',
-    options: [
-      { id: ids[0] as string, label: 'Tenho uma clínica', answerCount: 0 },
-      { id: ids[1] as string, label: 'Trabalho em uma clínica', answerCount: 0 },
-      { id: ids[2] as string, label: 'Estou aprendendo', answerCount: 0 },
-    ],
-  });
-  const team = adminQuestion('yes_no', { title: 'Você já tem equipe?' });
-  const conditional = (overrides: Partial<ReturnType<typeof adminQuestion>> = {}) =>
-    adminQuestion('short_text', {
-      title: 'Nome da clínica',
-      answerCount: 5,
-      condition: { questionId: clinic.id, values: [ids[0] as string, ids[1] as string] },
-      ...overrides,
-    });
-  const locked = () => document.querySelector('[data-condition-locked]') as HTMLElement | null;
-  const removeButton = () => screen.queryByRole('button', { name: 'Remover condição' });
-
-  function open(question: ReturnType<typeof adminQuestion>, onReplaceFn = onReplace) {
-    return render(
-      <NextIntlClientProvider locale="pt-BR" messages={messages}>
-        <QuestionEditorSheet
-          open
-          mode="edit"
-          question={question}
-          questions={[clinic, team, question]}
-          steps={[]}
-          tenantName="Ana Mentoria"
-          limit={30}
-          onClose={onClose}
-          onReplace={onReplaceFn}
-        />
-      </NextIntlClientProvider>,
-    );
-  }
-
-  it('with answers and NO condition, the switch is a lock row with the plural and the way out', () => {
-    open(adminQuestion('short_text', { title: 'Cargo', answerCount: 5 }));
-    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
-    const row = locked() as HTMLElement;
-    expect(row.getAttribute('data-condition-locked')).toBe('none');
-    expect(row.querySelector('svg')).toBeTruthy();
-    expect(row.textContent).toContain(
-      'Esta pergunta já tem 5 respostas, então a condição não pode ser criada nem mudada. Para mudar, crie uma nova pergunta e arquive esta.',
-    );
-    fireEvent.click(
-      within(row).getByRole('button', { name: 'Criar nova pergunta e arquivar esta' }),
-    );
-    expect(onReplace).toHaveBeenCalledTimes(1);
-  });
-
-  it('says "1 resposta" in the singular', () => {
-    open(adminQuestion('short_text', { title: 'Cargo', answerCount: 1 }));
-    expect(locked()?.textContent).toContain('Esta pergunta já tem 1 resposta, então');
-  });
-
-  it('with answers and a condition, shows the lock, the sentence, the line and a ghost "Remover condição"', () => {
-    open(conditional());
-    const row = locked() as HTMLElement;
-    expect(row.getAttribute('data-condition-locked')).toBe('removable');
-    expect(row.textContent).toContain(
-      'Só aparece se “Você tem clínica?” for “Tenho uma clínica” ou “Trabalho em uma clínica”.',
-    );
-    expect(row.textContent).toContain(
-      'Como a pergunta já tem respostas, a condição só pode ser removida.',
-    );
-    expect(removeButton()).toBeTruthy();
-    // Nothing of the free editor: no select, no checkbox, no switch.
-    expect(screen.queryByLabelText('Pergunta que decide')).toBeNull();
-    expect(screen.queryByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeNull();
-    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
-  });
-
-  it('writes a yes/no condition in the plain words', () => {
-    open(
-      adminQuestion('short_text', {
-        title: 'Quantas pessoas?',
-        answerCount: 2,
-        condition: { questionId: team.id, values: ['true'] },
-      }),
-    );
-    expect(locked()?.textContent).toContain('Só aparece se “Você já tem equipe?” for Sim.');
-  });
-
-  it('"Remover condição" only MARKS the draft, with "Desfazer", and writes nothing', () => {
-    open(conditional());
-    fireEvent.click(removeButton() as HTMLElement);
-    expect(removeButton()).toBeNull();
-    expect(screen.getByText('A condição será removida quando você salvar.')).toBeTruthy();
-    expect(mocks.update).not.toHaveBeenCalled();
-    expect(mocks.impact).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Desfazer' }));
-    expect(removeButton()).toBeTruthy();
-    expect(screen.queryByText('A condição será removida quando você salvar.')).toBeNull();
-  });
-
-  it('gives the pending row and the undo a 44px hit area', () => {
-    open(conditional());
-    fireEvent.click(removeButton() as HTMLElement);
-    const undo = screen.getByRole('button', { name: 'Desfazer' });
-    // The transparent 44px target of the small button (UI-D-443).
-    expect(undo.className).toContain('after:h-11');
-  });
-
-  it('counts the marked removal as an unsaved change, and undoing it as none', () => {
-    open(conditional());
-    fireEvent.click(removeButton() as HTMLElement);
-    fireEvent.click(screen.getByRole('button', { name: 'Desfazer' }));
-    // Back to the stored condition: closing asks nothing.
-    closeSheet();
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it('removing on an OPTIONAL question writes at once with condition null and reads no impact', async () => {
-    const question = conditional({ required: false });
-    mocks.update.mockResolvedValue({ ok: true, question, pending: null });
-    open(question);
-    fireEvent.click(removeButton() as HTMLElement);
-    await act(async () => {
-      fireEvent.click(saveButton());
-    });
-    expect(mocks.impact).not.toHaveBeenCalled();
-    expect(mocks.update).toHaveBeenCalledTimes(1);
-    expect(mocks.update.mock.calls[0]?.[1]).toEqual({
-      revision: question.revision,
-      condition: null,
-    });
-  });
-
-  describe('removing it from a REQUIRED question reads the impact BEFORE the write', () => {
-    async function removeAndSave(question: ReturnType<typeof adminQuestion>) {
-      open(question);
-      fireEvent.click(removeButton() as HTMLElement);
-      await act(async () => {
-        fireEvent.click(saveButton());
-      });
-    }
-
-    it('opens "Remover a condição?" with the plural body when members would newly owe an answer', async () => {
-      const question = conditional({ required: true });
-      mocks.impact.mockResolvedValue({ ok: true, members: 4 });
-      mocks.update.mockResolvedValue({ ok: true, question, pending: 4 });
-      await removeAndSave(question);
-      expect(mocks.impact).toHaveBeenCalledWith({
-        change: 'remove_condition',
-        questionId: question.id,
-      });
-      const confirm = await screen.findByRole('dialog', { name: 'Remover a condição?' });
-      expect(confirm.textContent).toContain(
-        '4 membros que hoje não veem esta pergunta vão precisar respondê-la antes de continuar usando a comunidade. Quem já respondeu mantém a resposta.',
-      );
-      // Nothing is written until the admin confirms.
-      expect(mocks.update).not.toHaveBeenCalled();
-      expect(within(confirm).getByRole('button', { name: 'Voltar' })).toBeTruthy();
-      await act(async () => {
-        fireEvent.click(within(confirm).getByRole('button', { name: 'Remover e exigir' }));
-      });
-      expect(mocks.update).toHaveBeenCalledTimes(1);
-      expect(mocks.update.mock.calls[0]?.[1]).toEqual({
-        revision: question.revision,
-        condition: null,
-      });
-      // The impact was read first, then the update.
-      expect(mocks.impact.mock.invocationCallOrder[0]).toBeLessThan(
-        mocks.update.mock.invocationCallOrder[0] as number,
-      );
-    });
-
-    it('uses the singular body for one member', async () => {
-      mocks.impact.mockResolvedValue({ ok: true, members: 1 });
-      await removeAndSave(conditional({ required: true }));
-      const confirm = await screen.findByRole('dialog', { name: 'Remover a condição?' });
-      expect(confirm.textContent).toContain(
-        '1 membro que hoje não vê esta pergunta vai precisar respondê-la antes de continuar usando a comunidade.',
-      );
-    });
-
-    it('writes nothing when the admin goes back', async () => {
-      mocks.impact.mockResolvedValue({ ok: true, members: 3 });
-      await removeAndSave(conditional({ required: true }));
-      const confirm = await screen.findByRole('dialog', { name: 'Remover a condição?' });
-      await act(async () => {
-        fireEvent.click(within(confirm).getByRole('button', { name: 'Voltar' }));
-      });
-      expect(mocks.update).not.toHaveBeenCalled();
-    });
-
-    it('writes directly, with no dialog, when no member is affected', async () => {
-      const question = conditional({ required: true });
-      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
-      mocks.update.mockResolvedValue({ ok: true, question, pending: 0 });
-      await removeAndSave(question);
-      expect(screen.queryByRole('dialog', { name: 'Remover a condição?' })).toBeNull();
-      expect(mocks.update).toHaveBeenCalledTimes(1);
-      expect(mocks.update.mock.calls[0]?.[1]).toEqual({
-        revision: question.revision,
-        condition: null,
-      });
-    });
-
-    it('saves NOTHING when the impact cannot be read, and says so', async () => {
-      mocks.impact.mockResolvedValue({ ok: false, code: 'failed' });
-      await removeAndSave(conditional({ required: true }));
-      expect(mocks.update).not.toHaveBeenCalled();
-      expect(mocks.show).toHaveBeenCalledWith({
-        tone: 'error',
-        message:
-          'Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.',
-      });
-      expect(onClose).not.toHaveBeenCalled();
-    });
-
-    it('does the same when a free question (no answers) loses its condition with the switch', async () => {
-      const question = conditional({ required: true, answerCount: 0 });
-      mocks.impact.mockResolvedValue({ ok: true, members: 2 });
-      open(question);
-      fireEvent.click(screen.getByRole('switch', { name: 'Mostrar só em alguns casos' }));
-      await act(async () => {
-        fireEvent.click(saveButton());
-      });
-      expect(mocks.impact).toHaveBeenCalledWith({
-        change: 'remove_condition',
-        questionId: question.id,
-      });
-      expect(await screen.findByRole('dialog', { name: 'Remover a condição?' })).toBeTruthy();
-    });
-  });
-
-  it('a question with answers is not offered a new condition even from a replace', () => {
-    // The replacement is a NEW question: the full editor, with the condition copied.
-    render(
-      <NextIntlClientProvider locale="pt-BR" messages={messages}>
-        <QuestionEditorSheet
-          open
-          mode="replace"
-          question={conditional()}
-          questions={[clinic, team, conditional()]}
-          steps={[]}
-          tenantName="Ana Mentoria"
-          limit={30}
-          onClose={onClose}
-          onReplace={onReplace}
-        />
-      </NextIntlClientProvider>,
-    );
-    pick('Texto curto');
-    expect(locked()).toBeNull();
-    expect(screen.getByRole('switch', { name: 'Mostrar só em alguns casos' })).toBeTruthy();
-  });
-});
-
-describe('12.1-17 Task 3: every impact dialog of a required conditional question (D-634, UI-D-649)', () => {
+describe('12.2-16: every impact dialog of a required question in a branch (D-634, D-646)', () => {
   const ids = [uuid(9421), uuid(9422)];
   const clinic = adminQuestion('single_choice', {
     title: 'Você tem clínica?',
@@ -2083,31 +1571,33 @@ describe('12.1-17 Task 3: every impact dialog of a required conditional question
     ],
   });
   const team = adminQuestion('yes_no', { title: 'Você já tem equipe?' });
+  const clinicBranch = adminBranch({
+    openerQuestionId: clinic.id,
+    values: [ids[0] as string, ids[1] as string],
+  });
+  const teamBranch = adminBranch({ openerQuestionId: team.id, values: ['true'] });
+  const branches = [clinicBranch, teamBranch];
   const SENTENCE =
     'Só conta quem vê esta pergunta: quem respondeu “Você tem clínica?” com “Tenho uma clínica” ou “Trabalho em uma clínica”.';
+  const ramo = () => screen.getByLabelText('Ramo') as HTMLSelectElement;
 
-  async function createConditionalRequired() {
-    mocks.impact.mockResolvedValue({ ok: true, members: 5 });
-    mount({ questions: [clinic, team], steps: [] });
+  async function createRequiredIn(branchId: string, title = 'Nome da clínica') {
+    mount({ questions: [clinic, team], steps: [], branches });
     pick('Texto curto');
-    typeTitle('Nome da clínica');
+    typeTitle(title);
     fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
-    fireEvent.click(screen.getByRole('switch', { name: 'Mostrar só em alguns casos' }));
-    fireEvent.change(screen.getByLabelText('Pergunta que decide'), {
-      target: { value: clinic.id },
-    });
-    for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box);
+    fireEvent.change(ramo(), { target: { value: branchId } });
     await act(async () => {
       fireEvent.click(saveButton());
     });
   }
 
-  it('ADD: the impact request carries the opener and the tokens, and the dialog ends with the sentence', async () => {
-    await createConditionalRequired();
+  it('ADD: the impact request carries the branch, and the dialog ends with the sentence', async () => {
+    mocks.impact.mockResolvedValue({ ok: true, members: 5 });
+    await createRequiredIn(clinicBranch.id);
     expect(mocks.impact).toHaveBeenCalledWith({
       change: 'create_required',
-      conditionQuestionId: clinic.id,
-      conditionValues: [ids[0], ids[1]],
+      branchId: clinicBranch.id,
     });
     const confirm = await screen.findByRole('dialog', { name: 'Adicionar pergunta obrigatória?' });
     expect(confirm.textContent).toContain(
@@ -2118,20 +1608,10 @@ describe('12.1-17 Task 3: every impact dialog of a required conditional question
 
   it('ADD with a yes/no opener names the plain word, unquoted', async () => {
     mocks.impact.mockResolvedValue({ ok: true, members: 2 });
-    mount({ questions: [clinic, team], steps: [] });
-    pick('Texto curto');
-    typeTitle('Quantas pessoas?');
-    fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
-    fireEvent.click(screen.getByRole('switch', { name: 'Mostrar só em alguns casos' }));
-    fireEvent.change(screen.getByLabelText('Pergunta que decide'), { target: { value: team.id } });
-    fireEvent.click(screen.getByRole('button', { name: 'Sim' }));
-    await act(async () => {
-      fireEvent.click(saveButton());
-    });
+    await createRequiredIn(teamBranch.id, 'Quantas pessoas?');
     expect(mocks.impact).toHaveBeenCalledWith({
       change: 'create_required',
-      conditionQuestionId: team.id,
-      conditionValues: ['true'],
+      branchId: teamBranch.id,
     });
     const confirm = await screen.findByRole('dialog', { name: 'Adicionar pergunta obrigatória?' });
     expect(confirm.textContent).toContain(
@@ -2139,9 +1619,9 @@ describe('12.1-17 Task 3: every impact dialog of a required conditional question
     );
   });
 
-  it('adds no sentence for a required question with no condition', async () => {
+  it('adds no sentence for a required question with no branch', async () => {
     mocks.impact.mockResolvedValue({ ok: true, members: 5 });
-    mount({ questions: [clinic, team], steps: [] });
+    mount({ questions: [clinic, team], steps: [], branches });
     pick('Texto curto');
     typeTitle('Cargo');
     fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
@@ -2153,13 +1633,13 @@ describe('12.1-17 Task 3: every impact dialog of a required conditional question
     expect(confirm.textContent).not.toContain('Só conta quem vê');
   });
 
-  it('MAKE REQUIRED on a conditional question ends with the sentence', async () => {
+  it('MAKE REQUIRED on a question in a branch ends with the sentence', async () => {
     const shown = adminQuestion('short_text', {
       title: 'Nome da clínica',
-      condition: { questionId: clinic.id, values: [ids[0] as string, ids[1] as string] },
+      branchId: clinicBranch.id,
     });
     mocks.impact.mockResolvedValue({ ok: true, members: 3 });
-    mount({ mode: 'edit', question: shown, questions: [clinic, shown], steps: [] });
+    mount({ mode: 'edit', question: shown, questions: [clinic, shown], steps: [], branches });
     fireEvent.click(screen.getByRole('switch', { name: 'Obrigatória' }));
     await act(async () => {
       fireEvent.click(saveButton());
@@ -2169,15 +1649,15 @@ describe('12.1-17 Task 3: every impact dialog of a required conditional question
     expect(confirm.textContent).toContain(SENTENCE);
   });
 
-  it('REPLACE: the request carries the copied condition, and the dialog has both notes', async () => {
+  it('REPLACE: the request carries the copied branch, and the dialog has both notes', async () => {
     const old = adminQuestion('short_text', {
       title: 'Nome da clínica',
       required: true,
       answerCount: 4,
-      condition: { questionId: clinic.id, values: [ids[0] as string, ids[1] as string] },
+      branchId: clinicBranch.id,
     });
     mocks.impact.mockResolvedValue({ ok: true, members: 2 });
-    mount({ mode: 'replace', question: old, questions: [clinic, old], steps: [] });
+    mount({ mode: 'replace', question: old, questions: [clinic, old], steps: [], branches });
     pick('Texto curto');
     await act(async () => {
       fireEvent.click(saveButton());
@@ -2185,12 +1665,90 @@ describe('12.1-17 Task 3: every impact dialog of a required conditional question
     expect(mocks.impact).toHaveBeenCalledWith({
       change: 'replace',
       questionId: old.id,
-      conditionQuestionId: clinic.id,
-      conditionValues: [ids[0], ids[1]],
+      branchId: clinicBranch.id,
     });
     const confirm = await screen.findByRole('dialog', { name: 'Substituir a pergunta?' });
     expect(confirm.textContent).toContain('“Nome da clínica” será arquivada');
     expect(confirm.textContent).toContain(SENTENCE);
+  });
+
+  describe('a REQUIRED question leaving its branch reads the impact BEFORE the write', () => {
+    const inBranch = (overrides = {}) =>
+      adminQuestion('short_text', {
+        title: 'Nome da clínica',
+        required: true,
+        branchId: clinicBranch.id,
+        ...overrides,
+      });
+
+    async function leaveAndSave(question: ReturnType<typeof adminQuestion>) {
+      mount({ mode: 'edit', question, questions: [clinic, question], steps: [], branches });
+      fireEvent.change(ramo(), { target: { value: '' } });
+      await act(async () => {
+        fireEvent.click(saveButton());
+      });
+    }
+
+    it('opens "Remover a condição?" when members would newly owe an answer, and writes only on confirm', async () => {
+      const question = inBranch();
+      mocks.impact.mockResolvedValue({ ok: true, members: 4 });
+      mocks.update.mockResolvedValue({ ok: true, question, pending: 4 });
+      await leaveAndSave(question);
+      expect(mocks.impact).toHaveBeenCalledWith({
+        change: 'remove_condition',
+        questionId: question.id,
+      });
+      const confirm = await screen.findByRole('dialog', { name: 'Remover a condição?' });
+      expect(confirm.textContent).toContain(
+        '4 membros que hoje não veem esta pergunta vão precisar respondê-la antes de continuar usando a comunidade.',
+      );
+      expect(mocks.update).not.toHaveBeenCalled();
+      await act(async () => {
+        fireEvent.click(within(confirm).getByRole('button', { name: 'Remover e exigir' }));
+      });
+      expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+        revision: question.revision,
+        branchId: null,
+      });
+      expect(mocks.impact.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.update.mock.invocationCallOrder[0] as number,
+      );
+    });
+
+    it('writes directly, with no dialog, when no member is affected', async () => {
+      const question = inBranch();
+      mocks.impact.mockResolvedValue({ ok: true, members: 0 });
+      mocks.update.mockResolvedValue({ ok: true, question, pending: 0 });
+      await leaveAndSave(question);
+      expect(screen.queryByRole('dialog', { name: 'Remover a condição?' })).toBeNull();
+      expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+        revision: question.revision,
+        branchId: null,
+      });
+    });
+
+    it('saves NOTHING when the impact cannot be read, and says so', async () => {
+      mocks.impact.mockResolvedValue({ ok: false, code: 'failed' });
+      await leaveAndSave(inBranch());
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message:
+          'Não foi possível calcular quantos membros serão afetados. Nada foi salvo. Tente de novo.',
+      });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('reads no impact for an OPTIONAL question that leaves its branch', async () => {
+      const question = inBranch({ required: false });
+      mocks.update.mockResolvedValue({ ok: true, question, pending: null });
+      await leaveAndSave(question);
+      expect(mocks.impact).not.toHaveBeenCalled();
+      expect(mocks.update.mock.calls[0]?.[1]).toEqual({
+        revision: question.revision,
+        branchId: null,
+      });
+    });
   });
 });
 
@@ -2261,7 +1819,7 @@ describe('12.2-16: the "Ramo" field of "Onde e quando aparece" (UI-D-669)', () =
     expect(optionTexts()).toEqual([
       'Nenhum: todos os membros veem',
       'Quem tem clínica',
-      'Se “Você tem clínica?” for Estou aprendendo',
+      'Se “Você tem clínica?” for “Estou aprendendo”',
       'Ramo dois',
     ]);
     expect(ramo().value).toBe('');
@@ -2282,7 +1840,7 @@ describe('12.2-16: the "Ramo" field of "Onde e quando aparece" (UI-D-669)', () =
     expect(optionTexts()).toEqual([
       'Nenhum: todos os membros veem',
       'Quem tem clínica',
-      'Se “Você tem clínica?” for Estou aprendendo',
+      'Se “Você tem clínica?” for “Estou aprendendo”',
     ]);
   });
 
@@ -2413,6 +1971,7 @@ describe('12.2-16: the "Ramo" field of "Onde e quando aparece" (UI-D-669)', () =
 
   it('a replacement copies the step and the branch of the replaced question', () => {
     mount({ mode: 'replace', question: inBranch, questions: active, steps, branches });
+    pick('Texto curto');
     expect(ramo().value).toBe(named.id);
     expect((screen.getByLabelText('Etapa') as HTMLSelectElement).value).toBe(s1.id);
   });

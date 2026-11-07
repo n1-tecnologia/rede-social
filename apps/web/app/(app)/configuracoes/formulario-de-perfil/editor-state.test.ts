@@ -36,7 +36,6 @@ import {
   renameOptionRow,
   reopeningOf,
   replaceDraftFrom,
-  sameCondition,
   serverFieldError,
   serverLimitsError,
   serverOptionsErrors,
@@ -812,102 +811,33 @@ describe('the limits refusal before any request (UI-D-574)', () => {
   });
 });
 
-// ── 12.1-17 Task 1: the step and the condition in the draft (D-620..D-623, UI-D-647, UI-D-648) ────
+// ── 12.1-17 Task 1: the step in the draft (D-627, UI-D-647); the condition moved to the branch (12.2-16) ──
 
-describe('12.1-17: the draft carries the step and the condition', () => {
+describe('12.1-17: the draft carries the step', () => {
   const stepA = adminStep({ title: 'Geral' });
   const stepB = adminStep({ title: 'Clínica' });
-  const opener = adminQuestion('single_choice', {
-    stepId: stepA.id,
-    options: [
-      { id: uuid(9001), label: 'Tenho', answerCount: 0 },
-      { id: uuid(9002), label: 'Trabalho', answerCount: 0 },
-    ],
-  });
 
-  it('starts without a condition and with the step it is given', () => {
-    expect(blankDraft().condition).toBeNull();
+  it('starts with the step it is given, or none', () => {
     expect(blankDraft().stepId).toBeNull();
     expect(blankDraft(stepB.id).stepId).toBe(stepB.id);
   });
 
-  it('copies the stored step and condition into an edit draft and into a replacement', () => {
-    const shown = adminQuestion('short_text', {
-      stepId: stepB.id,
-      condition: { questionId: opener.id, values: [uuid(9001)] },
-    });
-    for (const draft of [draftFromQuestion(shown), replaceDraftFrom(shown)]) {
-      expect(draft.stepId).toBe(stepB.id);
-      expect(draft.condition).toEqual({ questionId: opener.id, values: [uuid(9001)] });
-      // A copy: ticking a value in the draft never edits the stored question.
-      expect(draft.condition?.values).not.toBe(shown.condition?.values);
-    }
-  });
-
-  it('sends the step and the condition on create only when the draft has them', () => {
+  it('sends the step on create only when the draft has one', () => {
     const plain = { ...blankDraft(), type: 'short_text' as const, title: 'Nome' };
     expect(Object.keys(toCreateBody(plain))).not.toContain('stepId');
-    expect(Object.keys(toCreateBody(plain))).not.toContain('condition');
-    const body = toCreateBody({
-      ...plain,
-      stepId: stepB.id,
-      condition: { questionId: opener.id, values: [uuid(9002)] },
-    });
-    expect(body.stepId).toBe(stepB.id);
-    expect(body.condition).toEqual({ questionId: opener.id, values: [uuid(9002)] });
+    expect(toCreateBody({ ...plain, stepId: stepB.id }).stepId).toBe(stepB.id);
   });
 
-  it('sends on update ONLY a changed step, and a changed or removed condition', () => {
-    const shown = adminQuestion('short_text', {
-      stepId: stepA.id,
-      condition: { questionId: opener.id, values: [uuid(9001), uuid(9002)] },
-    });
+  it('sends on update ONLY a changed step', () => {
+    const shown = adminQuestion('short_text', { stepId: stepA.id });
     const same = draftFromQuestion(shown);
     expect(hasChanges(toUpdateBody(shown, same))).toBe(false);
-    // The order of the tokens is not a change.
-    expect(
-      hasChanges(
-        toUpdateBody(shown, {
-          ...same,
-          condition: { questionId: opener.id, values: [uuid(9002), uuid(9001)] },
-        }),
-      ),
-    ).toBe(false);
     expect(toUpdateBody(shown, { ...same, stepId: stepB.id }).stepId).toBe(stepB.id);
-    expect(toUpdateBody(shown, { ...same, condition: null }).condition).toBeNull();
-    expect(
-      toUpdateBody(shown, { ...same, condition: { questionId: opener.id, values: [uuid(9001)] } })
-        .condition,
-    ).toEqual({ questionId: opener.id, values: [uuid(9001)] });
-    // A question with no condition that gets one.
-    const free = adminQuestion('short_text', { stepId: stepA.id });
-    expect(
-      toUpdateBody(free, {
-        ...draftFromQuestion(free),
-        condition: { questionId: opener.id, values: [uuid(9001)] },
-      }).condition,
-    ).toEqual({ questionId: opener.id, values: [uuid(9001)] });
   });
 
-  it('compares conditions as sets', () => {
-    expect(sameCondition(null, null)).toBe(true);
-    expect(sameCondition(null, { questionId: 'a', values: ['x'] })).toBe(false);
-    expect(
-      sameCondition(
-        { questionId: 'a', values: ['x', 'y'] },
-        { questionId: 'a', values: ['y', 'x'] },
-      ),
-    ).toBe(true);
-    expect(
-      sameCondition({ questionId: 'a', values: ['x'] }, { questionId: 'b', values: ['x'] }),
-    ).toBe(false);
-  });
-
-  it('counts the step and the condition as unsaved changes', () => {
-    const shown = adminQuestion('short_text', { stepId: stepA.id });
-    const draft = draftFromQuestion(shown);
+  it('counts the step as an unsaved change', () => {
+    const draft = draftFromQuestion(adminQuestion('short_text', { stepId: stepA.id }));
     expect(isDirty(draft, { ...draft, stepId: stepB.id })).toBe(true);
-    expect(isDirty(draft, { ...draft, condition: { questionId: '', values: [] } })).toBe(true);
   });
 });
 
@@ -923,16 +853,6 @@ describe('12.1-17: validateCondition (UI-D-648)', () => {
       conditionValues: { key: 'condition.errors.values' },
     });
     expect(validateCondition({ condition: { questionId: uuid(1), values: ['true'] } })).toEqual({});
-  });
-  it('is part of validateDraft', () => {
-    const draft = {
-      ...blankDraft(),
-      type: 'short_text' as const,
-      title: 'Nome',
-      condition: { questionId: '', values: [] },
-    };
-    expect(validateDraft(draft).conditionOpener).toEqual({ key: 'condition.errors.opener' });
-    expect(hasErrors(validateDraft({ ...draft, condition: null }))).toBe(false);
   });
 });
 
@@ -1156,86 +1076,22 @@ describe('12.1-17: conditionOptionsText (UI-D-650)', () => {
   });
 });
 
-describe('12.1-17: reopeningOf with conditions (D-634, UI-D-649)', () => {
-  const cond = { questionId: uuid(1), values: [uuid(2), uuid(3)] };
-
-  it('a new required question carries its complete condition, so the count is of who sees it', () => {
-    expect(reopeningOf('create', { required: true, condition: cond }, null)).toEqual({
-      change: 'create_required',
-      kind: 'add',
-      condition: cond,
-    });
-  });
-
-  it('carries no condition while it is half made, and none when the question is unconditional', () => {
-    expect(
-      reopeningOf('create', { required: true, condition: { questionId: '', values: [] } }, null),
-    ).toEqual({ change: 'create_required', kind: 'add' });
-    expect(
-      reopeningOf(
-        'create',
-        { required: true, condition: { questionId: uuid(1), values: [] } },
-        null,
-      ),
-    ).toEqual({ change: 'create_required', kind: 'add' });
-    expect(reopeningOf('create', { required: true, condition: null }, null)).toEqual({
-      change: 'create_required',
-      kind: 'add',
-    });
-  });
-
-  it('a required replacement carries the condition it will have', () => {
-    expect(
-      reopeningOf('replace', { required: true, condition: cond }, { id: uuid(9), required: false }),
-    ).toEqual({ change: 'replace', kind: 'replace', questionId: uuid(9), condition: cond });
-  });
-
-  it('removing the condition of a question that stays required is the unconditional case', () => {
+describe('12.1-17: reopeningOf keeps the Phase 12 cases', () => {
+  it('making an optional question required is still "make", in or out of a branch', () => {
     expect(
       reopeningOf(
         'edit',
-        { required: true, condition: null },
-        { id: uuid(9), required: true, condition: cond },
-      ),
-    ).toEqual({ change: 'remove_condition', kind: 'unconditional', questionId: uuid(9) });
-  });
-
-  it('needs no count for an optional question, an unchanged condition or no stored condition', () => {
-    expect(
-      reopeningOf(
-        'edit',
-        { required: false, condition: null },
-        { id: uuid(9), required: false, condition: cond },
-      ),
-    ).toBeNull();
-    expect(
-      reopeningOf(
-        'edit',
-        { required: true, condition: cond },
-        { id: uuid(9), required: true, condition: cond },
-      ),
-    ).toBeNull();
-    expect(
-      reopeningOf(
-        'edit',
-        { required: true, condition: null },
-        { id: uuid(9), required: true, condition: null },
-      ),
-    ).toBeNull();
-  });
-
-  it('keeps the Phase 12 cases: making an optional question required is still "make"', () => {
-    expect(
-      reopeningOf(
-        'edit',
-        { required: true, condition: cond },
-        { id: uuid(9), required: false, condition: cond },
+        { required: true, branchId: uuid(1) },
+        { id: uuid(9), required: false, branchId: uuid(1) },
       ),
     ).toEqual({ change: 'make_required', kind: 'make', questionId: uuid(9) });
+    expect(reopeningOf('edit', { required: true }, { id: uuid(9), required: false })).toEqual({
+      change: 'make_required',
+      kind: 'make',
+      questionId: uuid(9),
+    });
   });
 });
-
-// ── 12.2-16 Task 1: the branch in the draft (D-640, D-641, D-646, D-651, UI-D-669) ──────────────────
 
 describe('12.2-16: the draft carries the branch', () => {
   const stepA = adminStep({ title: 'Geral' });

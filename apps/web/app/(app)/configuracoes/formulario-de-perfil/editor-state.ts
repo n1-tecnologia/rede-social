@@ -11,7 +11,15 @@ import {
   type ProfileFormLimits,
   type ProfileFormType,
 } from '@rede-social/contracts/profile-form';
-import type { AdminBranchTree, EligibilityQuestion } from '@/lib/profile-form/branch-tree';
+import {
+  type AdminBranchTree,
+  buildBranchTree,
+  type EligibilityQuestion,
+  eligibleBranchesFor,
+  membersOf,
+  usableBranch,
+  usableBranchesOf,
+} from '@/lib/profile-form/branch-tree';
 import {
   type ConditionDescription,
   formatDisjunction,
@@ -63,11 +71,9 @@ export interface QuestionDraft {
   max: string;
   /** The step the question sits in (12.1-17, D-627); `null` while the form has no step the sheet knows. */
   stepId: string | null;
-  /** The condition that shows the question, or `null` for an always-shown one (D-621). */
-  condition: DraftCondition | null;
   /**
-   * The branch the question sits in (12.2-16, D-640), or `null` for an unconditional one. RED-stage stub: the
-   * field exists so the tests type-check; nothing fills it yet.
+   * The branch the question sits in (12.2-16, D-640, D-651), or `null` for an unconditional one. The condition
+   * that shows a question is the BRANCH's: the draft only knows which branch it is in.
    */
   branchId: string | null;
 }
@@ -88,10 +94,13 @@ function blankOptions(): OptionDraft[] {
   ];
 }
 
-/** The draft of a question that does not exist yet: no type, nothing typed, two empty rows. */
+/**
+ * The draft of a question that does not exist yet: no type, nothing typed, two empty rows. `branchId` presets
+ * the branch it starts in (the Lista footer "Adicionar pergunta ao ramo", D-651).
+ */
 export function blankDraft(
   stepId: string | null = null,
-  _branchId: string | null = null,
+  branchId: string | null = null,
 ): QuestionDraft {
   return {
     type: null,
@@ -104,8 +113,7 @@ export function blankDraft(
     min: '',
     max: '',
     stepId,
-    condition: null,
-    branchId: null,
+    branchId,
   };
 }
 
@@ -152,20 +160,18 @@ export function draftFromQuestion(question: AdminQuestion): QuestionDraft {
     min: limitText(question.limits.min),
     max: limitText(question.limits.max),
     stepId: question.stepId,
-    condition: copyCondition(question.condition),
-    branchId: null,
+    branchId: question.branchId ?? null,
   };
 }
 
 /**
  * The draft of a replacement (UI-D-574): the old title, help text, `required` and `showOnProfile` are
- * copied, and so are the step and the condition (12.1-17, UI-D-647), so the admin picks the new type from an
+ * copied, and so are the step and the branch (12.2-16, UI-D-669), so the admin picks the new type from an
  * open grid. The old answers are not read.
  */
 export function replaceDraftFrom(question: AdminQuestion): QuestionDraft {
   return {
-    ...blankDraft(question.stepId),
-    condition: copyCondition(question.condition),
+    ...blankDraft(question.stepId, question.branchId ?? null),
     title: question.title,
     helpText: question.helpText ?? '',
     required: question.required,
@@ -213,9 +219,7 @@ export interface CreateBody {
   limits: ProfileFormLimits;
   /** Present only when the draft names a step (12.1-17); absent means the last step (D-629). */
   stepId?: string;
-  /** Present only for a conditional question (12.1-17); a replacement does not inherit one (plan 10). */
-  condition?: DraftCondition;
-  /** The branch the question sits in (12.2-16, D-640). RED-stage stub: declared, never filled yet. */
+  /** Present only for a question inside a branch (12.2-16, D-640); absent means unconditional. */
   branchId?: string;
 }
 
@@ -238,14 +242,7 @@ export function toCreateBody(draft: QuestionDraft): CreateBody {
     options: choice ? draft.options.map((option) => ({ label: option.label.trim() })) : [],
     limits: parseLimits(draft).limits,
     ...(draft.stepId ? { stepId: draft.stepId } : {}),
-    ...(draft.condition
-      ? {
-          condition: {
-            questionId: draft.condition.questionId,
-            values: [...draft.condition.values],
-          },
-        }
-      : {}),
+    ...(draft.branchId ? { branchId: draft.branchId } : {}),
   };
 }
 
@@ -262,9 +259,7 @@ export interface UpdateBody {
   limits?: ProfileFormLimits;
   /** The step the question moves to (12.1-17); absent when it stays. */
   stepId?: string;
-  /** The new condition, or `null` to remove it (D-625); absent when it is unchanged. */
-  condition?: DraftCondition | null;
-  /** The new branch, or `null` to leave its branch (12.2-16, D-646). RED-stage stub: never filled yet. */
+  /** The new branch, or `null` to leave its branch (12.2-16, D-646); absent when it is unchanged. */
   branchId?: string | null;
 }
 
@@ -323,9 +318,7 @@ export function toUpdateBody(question: AdminQuestion, draft: QuestionDraft): Upd
   }
 
   if (draft.stepId !== null && draft.stepId !== question.stepId) body.stepId = draft.stepId;
-  if (!sameCondition(draft.condition, question.condition)) {
-    body.condition = copyCondition(draft.condition);
-  }
+  if (draft.branchId !== (question.branchId ?? null)) body.branchId = draft.branchId;
   return body;
 }
 
@@ -347,7 +340,7 @@ function snapshot(draft: QuestionDraft): string {
     min: draft.min,
     max: draft.max,
     stepId: draft.stepId,
-    condition: draft.condition,
+    branchId: draft.branchId,
   });
 }
 
@@ -464,7 +457,6 @@ export function validateDraft(draft: QuestionDraft, question?: AdminQuestion | n
       errors.limits = { key: 'locked.limitsRefused' };
     }
   }
-  Object.assign(errors, validateCondition(draft));
   return errors;
 }
 
@@ -472,9 +464,9 @@ export function validateDraft(draft: QuestionDraft, question?: AdminQuestion | n
  * The two rules of a switched-on condition (UI-D-648): an opener is chosen, and at least one answer opens the
  * question. Nothing is said while the switch is off. The server repeats every rule (`condition_invalid`).
  */
-export function validateCondition(
-  draft: Pick<QuestionDraft, 'condition'>,
-): Pick<DraftErrors, 'conditionOpener' | 'conditionValues'> {
+export function validateCondition(draft: {
+  condition: DraftCondition | null;
+}): Pick<DraftErrors, 'conditionOpener' | 'conditionValues'> {
   const { condition } = draft;
   if (condition === null) return {};
   if (condition.questionId === '') return { conditionOpener: { key: 'condition.errors.opener' } };
@@ -522,59 +514,34 @@ export interface Reopening {
   kind: 'add' | 'make' | 'replace' | 'unconditional';
   questionId?: string;
   /**
-   * The condition the NEW question will have (a create or a replace, 12.1-17, D-634): the impact then counts only
-   * the members who would see it. Present only when the draft's condition is complete.
+   * The branch the NEW question will sit in (a create or a replace, 12.2-16, D-634): the impact then counts only
+   * the members for whom that branch's whole chain is open.
    */
-  condition?: DraftCondition;
-  /** 12.2-16 (RED-stage stub): the branch the NEW question sits in, so the count is of who sees it. */
   branchId?: string;
-}
-
-/** The draft's condition when it names an opener and at least one answer; a half-made one counts as none. */
-function completeCondition(
-  condition: DraftCondition | null | undefined,
-): DraftCondition | undefined {
-  return condition != null && condition.questionId !== '' && condition.values.length > 0
-    ? (copyCondition(condition) ?? undefined)
-    : undefined;
 }
 
 /**
  * Whether saving this draft REOPENS the form (D-585, D-634, UI-D-576, UI-D-649): a new required question, an
- * optional question turned required, a replacement that is required, or the removal of the condition of a
- * question that stays required (members who do not see it today will owe an answer). Making a required
- * question optional, editing anything else, or replacing with an optional one frees members and needs no count.
- * A create and a replace carry the condition the new question will have, so the count is of who would see it.
+ * optional question turned required, a replacement that is required, or a required question that LEAVES its
+ * branch (members who do not see it today will owe an answer). Making a required question optional, editing
+ * anything else, entering a branch (fewer members owe it) or replacing with an optional one frees members and
+ * needs no count. A create and a replace carry the branch the new question will sit in, so the count is of who
+ * would see it.
  */
 export function reopeningOf(
   mode: EditorMode,
-  draft: Pick<QuestionDraft, 'required'> & {
-    condition?: DraftCondition | null;
-    branchId?: string | null;
-  },
-  question: {
-    id: string;
-    required: boolean;
-    condition?: DraftCondition | null;
-    branchId?: string | null;
-  } | null,
+  draft: Pick<QuestionDraft, 'required'> & { branchId?: string | null },
+  question: { id: string; required: boolean; branchId?: string | null } | null,
 ): Reopening | null {
   if (!draft.required) return null;
-  const condition = completeCondition(draft.condition);
-  if (mode === 'create') {
-    return { change: 'create_required', kind: 'add', ...(condition ? { condition } : {}) };
-  }
+  const branch = draft.branchId ? { branchId: draft.branchId } : {};
+  if (mode === 'create') return { change: 'create_required', kind: 'add', ...branch };
   if (!question) return null;
   if (mode === 'replace') {
-    return {
-      change: 'replace',
-      kind: 'replace',
-      questionId: question.id,
-      ...(condition ? { condition } : {}),
-    };
+    return { change: 'replace', kind: 'replace', questionId: question.id, ...branch };
   }
   if (!question.required) return { change: 'make_required', kind: 'make', questionId: question.id };
-  if (question.condition && draft.condition == null) {
+  if (question.branchId && !draft.branchId) {
     return { change: 'remove_condition', kind: 'unconditional', questionId: question.id };
   }
   return null;
@@ -997,7 +964,7 @@ export function refusalOfUpdate(
   return { kind: 'option', dependents, label: named?.label ?? '' };
 }
 
-// ── 12.2-16: where a question sits in the tree (RED-stage stubs, replaced in the GREEN commit) ──────
+// ── 12.2-16: where a question sits in the tree (D-640, D-641, D-644, D-646, UI-D-669) ──────────────
 
 /** One group of the "Ramo" select: the branches that hang on one opener. */
 export interface BranchOptionGroup {
@@ -1005,13 +972,41 @@ export interface BranchOptionGroup {
   branches: AdminBranch[];
 }
 
-/** The groups of the "Ramo" select. Inert until the GREEN commit. */
+/**
+ * The groups of the "Ramo" select (UI-D-669): the branches `eligibleBranchesFor` offers, grouped by their opener
+ * in form order and, inside a group, in list order. `keep` is the branch the question already sits in: it is
+ * listed even when it is no longer offered (archived, or past a rule since), so the select always shows the
+ * truth instead of silently reading "Nenhum". `leftOutForPrivacy` says at least one branch was left out only
+ * because the question shows on the profile (the second helper line).
+ */
 export function branchOptionsFor(
-  _question: EligibilityQuestion,
-  _tree: AdminBranchTree,
-  _keep?: string | null,
+  question: EligibilityQuestion,
+  tree: AdminBranchTree,
+  keep: string | null = null,
 ): { groups: BranchOptionGroup[]; leftOutForPrivacy: boolean } {
-  return { groups: [], leftOutForPrivacy: false };
+  const { branches, leftOutForPrivacy } = eligibleBranchesFor(question, tree);
+  const offered = [...branches];
+  if (keep !== null && !offered.some((branch) => branch.id === keep)) {
+    const kept = tree.branchById.get(keep);
+    if (kept !== undefined) offered.push(kept);
+  }
+  const byOpener = new Map<string, AdminBranch[]>();
+  for (const branch of offered) {
+    const list = byOpener.get(branch.openerQuestionId) ?? [];
+    list.push(branch);
+    byOpener.set(branch.openerQuestionId, list);
+  }
+  const listIndex = (branch: AdminBranch) => tree.branches.indexOf(branch);
+  const groups: BranchOptionGroup[] = [];
+  for (const [openerId, list] of byOpener) {
+    const opener = tree.questionById.get(openerId);
+    if (opener === undefined) continue;
+    groups.push({ opener, branches: list.sort((a, b) => listIndex(a) - listIndex(b)) });
+  }
+  const place = (group: BranchOptionGroup) =>
+    tree.flatIndex.get(group.opener.id) ?? Number.MAX_SAFE_INTEGER;
+  groups.sort((a, b) => place(a) - place(b));
+  return { groups, leftOutForPrivacy };
 }
 
 /** What a change of the step field does once the condition is a branch (D-623, UI-D-647). */
@@ -1020,14 +1015,46 @@ export type StepMove =
   | { kind: 'mustFollow'; opener: string }
   | { kind: 'mustPrecede'; dependent: string };
 
-/** D-623 for a change of the step field, judged over branches. Inert until the GREEN commit. */
-export function checkStepMove(_input: {
+/**
+ * D-623 for a change of the step field, judged over branches. A question lands at the END of its new step, so:
+ * a question that SITS in a branch must go to the step of that branch's opener or a later one (otherwise the
+ * field snaps back, `mustFollow`, naming the opener); and an OPENER must go to a step BEFORE every question of
+ * the branches it opens (otherwise `mustPrecede`, naming the first such question). A branch the draft chose but
+ * the question does not yet sit in, and that the new step no longer allows, is only cleared (`clearBranch`).
+ * Moving back to the step it already has is never a change. The server (`condition_order`) is the authority.
+ */
+export function checkStepMove(input: {
   questions: readonly AdminQuestion[];
   steps: readonly AdminStep[];
   branches?: readonly AdminBranch[];
+  /** The question being edited; `null` for a new or replaced one. */
   stored: AdminQuestion | null;
+  /** The branch the draft names. */
   branchId: string | null;
   nextStepId: string;
 }): StepMove {
+  const { questions, steps, stored, branchId, nextStepId } = input;
+  if (stored && nextStepId === stored.stepId) return { kind: 'ok', clearBranch: false };
+  const tree = buildBranchTree({ steps, questions, branches: input.branches });
+  const last = Math.max(steps.length - 1, 0);
+  const rankOf = (id: string) => (tree.stepOrdinal.get(id) ?? last + 1) - 1;
+  const next = rankOf(nextStepId);
+
+  if (stored) {
+    for (const branch of usableBranchesOf(tree, stored.id)) {
+      const dependent = membersOf(tree, branch.id).find((member) => rankOf(member.stepId) <= next);
+      if (dependent) return { kind: 'mustPrecede', dependent: dependent.title };
+    }
+  }
+
+  const chosen = usableBranch(tree, branchId);
+  if (chosen !== undefined) {
+    const opener = tree.questionById.get(chosen.openerQuestionId);
+    if (opener !== undefined && rankOf(opener.stepId) > next) {
+      return (stored?.branchId ?? null) === chosen.id
+        ? { kind: 'mustFollow', opener: opener.title }
+        : { kind: 'ok', clearBranch: true };
+    }
+  }
   return { kind: 'ok', clearBranch: false };
 }
