@@ -2893,3 +2893,36 @@ describe('12.2-19 Task 3: "Ver como o membro vê" in the builder follows the bra
     expect(within(preview()).queryByLabelText('Nome da clínica')).toBeNull();
   });
 });
+
+describe('12.2-19 Task 3: the floor of the new surfaces (UI-D-684)', () => {
+  const CLINIC = clinicAdminList();
+  const source = (file: string) => readFileSync(join(__dirname, file), 'utf8');
+
+  it('writes no half-step spacing class in the Fluxo or the Lista sources', () => {
+    for (const file of ['FlowView.tsx', 'QuestionList.tsx']) {
+      expect(source(file), file).not.toMatch(
+        /(^|[^a-z])(gap|p|m|px|py|mt|mb|ml|mr)-(0\.5|1\.5|2\.5|3\.5)/,
+      );
+    }
+  });
+
+  it('keeps every target of the new surfaces at 44px: the selector options, the nodes and the edges', () => {
+    builder({ questions: CLINIC.questions, steps: CLINIC.steps, branches: CLINIC.branches ?? [] });
+    const group = screen.getByRole('group', { name: 'Como ver as perguntas' });
+    for (const button of within(group).getAllByRole('button')) {
+      expect(button.className).toContain('h-11');
+    }
+    fireEvent.click(within(group).getByRole('button', { name: 'Fluxo' }));
+    const drawing = screen.getByRole('region', { name: 'Fluxo do formulário' });
+    for (const button of within(drawing).getAllByRole('button')) {
+      expect(button.className).toContain('min-h-11');
+    }
+  });
+
+  it('draws the Fluxo with no brand fill (the page keeps one: Adicionar pergunta)', () => {
+    builder({ questions: CLINIC.questions, steps: CLINIC.steps, branches: CLINIC.branches ?? [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Fluxo' }));
+    const drawing = screen.getByRole('region', { name: 'Fluxo do formulário' });
+    expect(drawing.innerHTML).not.toMatch(/bg-brand|text-brand|bg-primary/);
+  });
+});

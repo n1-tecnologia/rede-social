@@ -331,7 +331,13 @@ export function QuestionBuilder({
           onClose={closeStep}
         />
       ) : null}
-      <PreviewSheet open={previewOpen} questions={questions} steps={steps} onClose={closePreview} />
+      <PreviewSheet
+        open={previewOpen}
+        questions={questions}
+        steps={steps}
+        branches={branches}
+        onClose={closePreview}
+      />
     </>
   );
 }

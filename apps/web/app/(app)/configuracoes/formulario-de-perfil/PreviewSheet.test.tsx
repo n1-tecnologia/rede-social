@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { memberBranchSchema } from '@rede-social/contracts/profile-form';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -430,7 +430,7 @@ describe('12.2-19 Task 3: previewForm hands the member component branches, never
 });
 
 describe('12.2-19 Task 3: ticking an opener opens the whole block, through the chain (D-651, UI-D-678)', () => {
-  it('opens ONE wrapper with every question of the branch when the opener is ticked', () => {
+  it('opens ONE wrapper with every question of the branch when the opener is ticked', async () => {
     open([O1, N1, CN], [T1], vi.fn(), [BR1]);
     expect(document.querySelector('[data-revealed-branch]')).toBeNull();
     expect(screen.queryByLabelText('Nome da clínica')).toBeNull();
@@ -439,7 +439,7 @@ describe('12.2-19 Task 3: ticking an opener opens the whole block, through the c
     expect(blocks).toHaveLength(1);
     expect(within(blocks[0] as HTMLElement).getByLabelText('Nome da clínica')).toBeTruthy();
     fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
-    expect(document.querySelector('[data-revealed-branch]')).toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-revealed-branch]')).toBeNull());
   });
 
   it('opens the nested block inside the first one when the nested opener is answered', () => {
@@ -509,12 +509,12 @@ describe('12.2-19 Task 3: ticking an opener opens the whole block, through the c
     expect(status().textContent).toBe(expected({ [O1.id]: choice(WORK.id), [Y.id]: true }));
   });
 
-  it('Recomeçar clears every answer and closes the blocks', () => {
+  it('Recomeçar clears every answer and closes the blocks', async () => {
     openNested();
     fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
     expect(document.querySelectorAll('[data-revealed-branch]')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Recomeçar' }));
-    expect(document.querySelector('[data-revealed-branch]')).toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-revealed-branch]')).toBeNull());
     expect(status().textContent).toBe(summary('2 etapas', '3 perguntas'));
     expect(
       (screen.getByRole('radio', { name: 'Tenho uma clínica' }) as HTMLInputElement).checked,

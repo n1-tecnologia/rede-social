@@ -17,7 +17,7 @@ export interface PreviewSheetProps {
   questions: AdminQuestion[];
   /** The builder's steps in order. */
   steps?: AdminStep[];
-  /** INERT in the RED commit of 12.2-19: the builder's branches, handed to `previewForm` in GREEN. */
+  /** The builder's branches (12.2-19, D-651): the preview follows them exactly as the member does. */
   branches?: AdminBranch[];
   onClose: () => void;
 }
@@ -31,10 +31,13 @@ export interface PreviewSheetProps {
 export function previewForm(
   questions: AdminQuestion[],
   steps: AdminStep[] = [],
-  // INERT in the RED commit of 12.2-19: the branches are mapped in GREEN.
-  _branches: AdminBranch[] = [],
+  branches: AdminBranch[] = [],
 ): MemberForm {
   const held = new Set(questions.map((question) => question.stepId));
+  // Only ACTIVE branches are handed over, as the Lista and the Fluxo draw them: a question whose branch is
+  // archived or unknown reads as unconditional, never as a hidden one. The member shape has no name (T-12.2-03).
+  const usable = branches.filter((branch) => branch.archivedAt === null);
+  const usableIds = new Set(usable.map((branch) => branch.id));
   return {
     mode: 'first',
     missingRequired: 0,
@@ -42,6 +45,11 @@ export function previewForm(
     steps: steps
       .filter((step) => held.has(step.id))
       .map((step) => ({ id: step.id, title: step.title })),
+    branches: usable.map((branch) => ({
+      id: branch.id,
+      openerQuestionId: branch.openerQuestionId,
+      values: [...branch.values],
+    })),
     questions: questions.map((question) => ({
       id: question.id,
       type: question.type,
@@ -52,7 +60,14 @@ export function previewForm(
       allowOther: question.allowOther,
       limits: question.limits,
       stepId: question.stepId,
-      condition: question.condition,
+      // The retired per-question condition: a member question still carries the key, always null (12.2 moved it to `branchId`).
+      condition: null,
+      branchId:
+        question.branchId !== null &&
+        question.branchId !== undefined &&
+        usableIds.has(question.branchId)
+          ? question.branchId
+          : null,
       options: question.options.map((option) => ({ id: option.id, label: option.label })),
       answer: null,
     })),
@@ -103,7 +118,7 @@ function PreviewStatus({ info }: { info: PreviewStatusInfo }) {
  * ghost "Recomeçar" that clears every preview answer. The sheet closes through "Fechar", the backdrop or Escape; the handle is pointer-only, so
  * the screen reader meets exactly one "Fechar".
  */
-export function PreviewSheet({ open, questions, steps, onClose }: PreviewSheetProps) {
+export function PreviewSheet({ open, questions, steps, branches, onClose }: PreviewSheetProps) {
   const t = useTranslations('profileForm.admin.preview');
   const desktop = useMediaQuery('(min-width: 768px)');
 
@@ -116,7 +131,7 @@ export function PreviewSheet({ open, questions, steps, onClose }: PreviewSheetPr
       dismiss="handle"
     >
       <ProfileForm
-        form={previewForm(questions, steps)}
+        form={previewForm(questions, steps, branches)}
         preview
         onClose={onClose}
         previewNote={t('skipNote')}
