@@ -3888,6 +3888,208 @@ the three migrations and the backfill on one hosted project that holds Phase 12 
 under the free-space watchdog, your confirmation of the sketch defaults and of the copy, the first client's real
 question list in a staging tenant, this release order itself, and the later cleanup.
 
+## Phase 12.2 release (conditional branches)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 12.2 has been pushed, deployed or applied to a hosted project, and no agent touches production. No
+command here prints a secret. Phase 12.2 ships ON TOP of the Phase 12 and 12.1 releases above (the profile form,
+its steps and its per-question conditions) and is inert until a tenant's admin creates a branch. The proofs only
+the owner can run (a real phone, one hosted tenant project, a real tenant move, the browser run that needs more
+than 10 GiB of disk, the reading of the design defaults) are in the ledger
+`.planning/phases/12.2-ramos-condicionais-no-formulario-de-perfil-varias-perguntas/12.2-MANUAL-PROOFS.md` (M1 to
+M8); it ships with every row `pending`, and a row becomes `passed` only with the evidence you paste and your own
+date.
+
+Phase 12.2 replaces the 12.1 condition of a single question by **branches**: a branch is a group of questions
+that one or more answers of an opener question open, to three levels deep (a question inside a branch can
+itself open another branch). The member sees the visible questions of a branch appear and leave as one block;
+closing a branch closes everything below it; the erase dialog lists, flat and in form order, the questions
+whose answers stop applying. The admin builder shows the blocks indented in the Lista, draws the same form as a
+read-only tree in the Fluxo, creates and edits a branch in its own sheet, and undoes or archives it.
+
+### What ships
+
+- **Two tenant migrations, applied in timestamp order, both expand-only** (a new table, a new nullable column,
+  new functions, replaced functions that keep their signatures; nothing dropped, no answer rewritten):
+  - `20261106174037_profile_form_branches.sql` (generated): the table `profile_form_branches` (the opener, the
+    opening values 1 to 20, an optional name of 1 to 60 characters, a revision, an archive instant) with its
+    CHECKs, indexes and row policies, and on `profile_form_questions` the nullable column `branch_id` with a
+    partial index. The two composite keys that tie the two tables together are NOT here (see the next file).
+  - `20261106180523_profile_form_branches_functions.sql` (custom, applied by the runner as ONE file in one
+    transaction), in this order: the pair of composite keys, DEFERRABLE INITIALLY IMMEDIATE, between branches and
+    questions (the tenant move copies the two tables as one group); `app.profile_form_lock_active_v3` and
+    `app.profile_form_lock_branches` (new); `create or replace` of the gate `app.profile_form_missing` and the
+    purge `app.profile_form_purge_closed`, same signatures, with a chain of three levels; the lossless conversion
+    of any 12.1 per-question condition into a branch (one branch per distinct opener and set of values, the
+    question pointed at it, every answer untouched, a no-op on a project with no stored condition, idempotent);
+    `create or replace` of the question guard `app.profile_form_question_guard` (the opener rule re-aimed at
+    branches); the branch guard; the tree guard (**PF008**: a chain deeper than three levels or a cycle;
+    **PF009**: a question shown on the profile under an opener that is not shown, WR-06); and last the legacy
+    guard (**PF010**), which refuses a write of the retired 12.1 condition pair.
+- **The API:** `POST /v1/profile_form/branches`, `PATCH /v1/profile_form/branches/{id}`, and
+  `POST /v1/profile_form/branches/{id}/undo`, `/archive` and `/reactivate`; `branchId` on the question create and
+  edit; the admin list and the archived read carry `branches`; the member form carries `branches` and each
+  question's `branchId`; the impact read learns `undo_branch` and `reactivate_branch`. The 12.1 `condition` key
+  is gone from every body and answer (a body that sends it is a generic 400).
+- **The web:** the Lista with its blocks, strips and footers, the "Ramo" select and the "Ramos desta pergunta"
+  block of the question sheet, the branch sheet, the Fluxo and the Lista | Fluxo selector, the grouped refusals,
+  the Arquivadas groups, the preview, the member block under one rail and the erase dialog.
+- **What does NOT ship:** no worker job, no cron, no queue; **no environment variable, secret or GitHub
+  variable** is added; nothing is seeded. **The module stays OFF per tenant** exactly as Phase 12 left it: this
+  release does not switch anything on.
+
+### Read-only check on EVERY hosted project (run before anything else)
+
+Run these four queries on each hosted tenant project, **including the one that holds several tenants** (the
+shared project), in the Supabase SQL editor or with `psql` and a read-only role. They only read. They tell you
+whether the module is on anywhere, whether a 12.1 condition is stored, who built a form, and whether the
+privacy leak WR-06 already exists in stored data. Paste the shapes and counts in ledger row M2.
+
+```sql
+-- A. is the module on anywhere on this project?
+select tenant_id, enabled from public.tenant_modules where module_key = 'profile_form';
+-- B. any stored condition (active or archived)?
+select count(*) as legacy_conditions from public.profile_form_questions where condition_question_id is not null;
+-- C. any question at all (the form was ever built)?
+select tenant_id, count(*) as questions, count(*) filter (where archived_at is null) as active
+  from public.profile_form_questions group by tenant_id;
+-- D. WR-06 pre-existing leak (only matters if B is above 0): a public dependent of a non-public opener
+select count(*) from public.profile_form_questions d
+  join public.profile_form_questions o on o.tenant_id = d.tenant_id and o.id = d.condition_question_id
+ where d.show_on_profile and d.archived_at is null and not o.show_on_profile;
+```
+
+Expected: A shows `enabled = false` or no row, B is `0`. The release is correct either way (the conversion keeps
+a tenant with stored conditions behaving the same and leaves a tenant with none untouched); the check decides
+two things: whether the **cleanup** release below may ship, and whether the release needs a quiet window
+(the module on somewhere).
+
+### Order: migrations on every tenant project, then the API and the worker together from a REBUILT image, then the web
+
+1. **Local checks first.** `pnpm db:migrate-all -- --dry-run` lists what is pending per project and writes
+   nothing; the two files above must be the pending ones on a project that already has Phase 12.1.
+   `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty local
+   second database. The case "Phase 12.2 (PFORM-55)" of `apps/api/tests/integration/migrate-all.test.ts` proves
+   on the local second database that the two files fan out onto a project that already holds 12.1 rows with
+   per-question conditions, convert every one into a branch, keep the legacy columns and every answer, keep the
+   previous API revision working, and that a second run applies nothing.
+2. **Rehearse the conversion on a copy or on the homolog project BEFORE production** (ledger row M3). The
+   conversion writes data into every project that stored a condition; it is idempotent, but a rehearsal on a
+   project that holds real 12.1 rows is the only proof the local stack cannot give (T-12.2-18).
+3. **The two migrations reach EVERY tenant project through the ledgered `migrateAll`** (the Phase 09.2 Cloud Run
+   Job, D-544: databases before API and worker). They apply in the order of their names; the runner is
+   serialised per database and idempotent, so a re-run is safe.
+4. **Rebuild the API image.** The image bakes the migrations manifest (built by
+   `scripts/build-migrations-manifest.mjs`; the Dockerfile copies it with both migration sets to
+   `/app/migrations`); an image built before these two files does not know them, and a production boot without
+   the manifest stops with `migrations manifest empty`.
+5. **The API and the worker TOGETHER**, from that rebuilt image, as in the Phase 09.2 pipeline. The worker does
+   not use the form, but one image keeps the two revisions equal.
+6. **The web LAST**, because its screens read fields and routes the new API returns.
+
+These steps are consecutive; nothing else belongs between them. **Why this order (T-12.2-18).** The migrations
+only add or replace with unchanged signatures, so the previous API revision keeps working against the new
+database. The reverse is the dangerous one: the new API calls `app.profile_form_lock_active_v3` and
+`app.profile_form_lock_branches` and reads the `branch_id` column and the `profile_form_branches` table, none of
+which exists before the migrations, so applying the API first would call functions that do not exist yet and fail
+the first member save; the schema gate holds such a project out as `updating` instead of letting a member meet the
+error. The tenant move needs the fix of plan 12 (`copy-rows.ts`, `delete-source.ts`, `rollback.ts`): it is proved
+on the local stack only and reaches production with the API of this release (ledger row M4).
+
+### What keeps the previous API revision working during the fan-out
+
+- `app.profile_form_lock_active_v2()` is **kept**; the new API calls the `_v3` twin.
+- The replaced gate, purge and question guard keep their signatures and their short-circuits (module off, not a
+  live member).
+- The legacy columns `condition_question_id` and `condition_values`, with their key, CHECK and partial index, are
+  **kept** and not nulled after the conversion; they are no longer read by the gate.
+- **PF010 is loud on purpose.** A previous API revision that writes a condition during the fan-out is refused
+  with a visible error instead of being silently ignored by the new gate. A form without conditions is not
+  affected.
+
+### Deferred cleanups (one release after the API of this release is live on every project; none written by Phase 12.2)
+
+The read-only check above (query B equal to `0` on every project, or the conversion run everywhere) decides when:
+
+- **Drop the legacy `condition_question_id` and `condition_values` columns** with their composite key, the pair
+  CHECK and the partial index.
+- **Drop `app.profile_form_lock_active_v2()`** (and the 12.1 leftover `app.profile_form_lock_active()`).
+- **Remove the `SELF_REF_ORDER` entry** of `profile_form_questions` in the move engine (the deferrable pair is
+  copied as one group now).
+- **Drop PF010 together with the columns** (its guard function and trigger go with the columns it protects).
+- **Remove the legacy `{ ids }` body of `PUT /v1/profile_form/order`** that 12.1 left for one release.
+
+### Rollback limit
+
+- **Migrations are never rolled back** (forward-only; there is no down migration). Roll forward with a fix.
+- **The previous API revision against the new schema keeps working** for forms without conditions and without
+  branches: it knows no branch, its reads of the legacy columns still answer, and the gate (SQL) is the same
+  function with the same signature. Once an admin has authored a branch, the previous revision knows nothing about
+  it and would ask the branch's questions of every member, so turn the module off for that tenant before rolling
+  the API back.
+- **The new API against an old schema is held out `updating`.** Do not release the API before the migrations reach
+  every project.
+- **Rolling the web back** removes the blocks, the branch sheet and the Fluxo; the stored branches stay. Turn the
+  module off for a tenant that uses them first.
+- **The quickest release of every member** is still the module switch (off) in the platform Módulos tab.
+
+### Smoke checks
+
+Read-only SQL on a tenant project, after the Job:
+
+```sql
+select to_regclass('public.profile_form_branches');
+-- non-null
+select column_name from information_schema.columns
+ where table_schema = 'public' and table_name = 'profile_form_questions' and column_name = 'branch_id';
+-- one row
+select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and proname in ('profile_form_lock_active_v3', 'profile_form_lock_branches',
+   'profile_form_branch_guard', 'profile_form_tree_guard', 'profile_form_legacy_condition_guard',
+   'profile_form_lock_active_v2');
+-- six rows: the v2 lock function is still there
+select tgname from pg_trigger where not tgisinternal and tgname in ('profile_form_branches_guard',
+   'profile_form_branches_tree_guard', 'profile_form_questions_tree_guard',
+   'profile_form_questions_legacy_condition_guard');
+-- four rows
+select conname from pg_constraint
+ where conname in ('profile_form_branches_opener_fk', 'profile_form_questions_branch_fk');
+-- two rows
+select version from supabase_migrations.schema_migrations
+ where version in ('20261106174037', '20261106180523') order by version;
+-- two rows
+select count(*) from public.profile_form_questions where condition_question_id is not null and branch_id is null;
+-- 0: every stored condition was converted
+```
+
+And the central check of the Phase 09.2 section: the Job's step summary shows exit code `0` and every project
+`current`.
+
+### Notes for the reader of this release
+
+- **The first client's question list is not in the repository** and is never invented in code, tests or notes:
+  the clinic example in the browser spec and in the seeds is the team's own wording.
+- **The design approval was recorded provisionally** (sketch 019: you answered "aprovado, pode atualizar ai" in
+  chat on 2026-11-06 and the orchestrator wrote the approval keys on your instruction, `approval_kind:
+  provisional`). Ledger row M6 asks you to turn it into a reading: the researcher defaults PU-1 to PU-12, the
+  findings F-A, F-B and F-C of the sketch, and the copy the UI-SPEC does not give (the plans mapped it onto
+  sentences already approved; each plan summary lists where).
+- **Behaviours that differ from the plan text**, so the verifier is not surprised: "Desfazer ramo" counts only
+  the questions directly in the branch (a required question of a nested branch that opens only through a stale
+  answer is not counted); a control character other than NUL and a lone surrogate is accepted in a branch name
+  like in every other text of the form; the branch-name field's `maxLength` of 60 counts UTF-16 units while the
+  counter and the server count code points (60 emoji cannot be typed on a phone); the move-engine fix of plan 12
+  corrected a defect that was latent since Phase 09.2 (a deferrable group with user triggers); the 12.1 columns
+  stay readable by the previous API during the window.
+
+### Manual proofs (hosted)
+
+The ledger lists them (M1 to M8): the builder, the Fluxo and the member block on a real phone against a hosted
+tenant project and the real-browser look at what only jsdom covered; the read-only check on every hosted project;
+the two migrations and the conversion on one hosted project that holds 12.1 rows; a real tenant move of a
+depth-3 form; the Playwright spec run under the free-space watchdog; your reading of the design and the open
+product calls; this release order itself; and the later cleanup.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
