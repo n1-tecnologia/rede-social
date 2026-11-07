@@ -593,6 +593,47 @@ describe('12.2-11 D-644, D-653: the impact counts only the members who SEE the q
     });
   }, 180_000);
 
+  it('WR-01 move_branch counts who sees the destination chain, lacks an answer and did not already owe it (required A -> B, optional -> required with a move)', async () => {
+    const admin = await person('admin_tenant');
+    await withProfileForm(labTenantId, async () => {
+      const m1 = await person();
+      const m2 = await person();
+      const m3 = await person();
+      const stale = await person();
+      const c = await seedClinic();
+      await answer(m1, c.q1, { optionId: c.tem });
+      await answer(m2, c.q1, { optionId: c.tem });
+      await answer(m2, c.q2, true);
+      await answer(m3, c.q1, { optionId: c.tem });
+      await answer(m3, c.q2, true);
+      await answer(m3, c.q5, true);
+      await answer(stale, c.q1, { optionId: c.nao });
+      await answer(stale, c.q2, true);
+      await answer(stale, c.q5, true);
+      const total = (await summaryOf(admin)).total;
+      const moving = (questionId: string, branchId?: string) =>
+        impactOf(admin, { change: 'move_branch', questionId, ...(branchId ? { branchId } : {}) });
+
+      // Q4 (required, B2: seen by m2 and m3) moving to B1 (seen by m1, m2, m3): m1 newly owes it.
+      expect(await moving(c.q4, c.b1)).toBe(1);
+      // Q3 (required, B1) moving to B2 (a subset of B1): nobody newly owes it.
+      expect(await moving(c.q3, c.b2)).toBe(0);
+      // Q4 leaving every branch: everyone except the members of B2 newly owes it.
+      expect(await moving(c.q4)).toBe(total - 2);
+      // Q5 (optional, B2) turned required AND moved to B1: nobody owed it before, so the members of B1 who lack
+      // it count (m1 and m2; m3 holds the answer).
+      expect(await moving(c.q5, c.b1)).toBe(2);
+      // Q2 (optional, B1) turned required AND leaving its branch: every member without an answer (m2, m3 and
+      // the stale one hold it).
+      expect(await moving(c.q2)).toBe(total - 3);
+      // An unbranched required question was owed by everyone: a move asks nobody. An archived one asks nobody.
+      await adminSql`update public.profile_form_questions set required = true where id = ${c.q1}::uuid`;
+      expect(await moving(c.q1, c.b1)).toBe(0);
+      await adminSql`update public.profile_form_questions set archived_at = now() where id = ${c.q6}::uuid`;
+      expect(await moving(c.q6, c.b1)).toBe(0);
+    });
+  }, 180_000);
+
   it('a legacy condition parameter is 400 invalid, a foreign branch is the same bare 404 as an unknown one, an archived one too', async () => {
     const admin = await person('admin_tenant');
     await withProfileForm(labTenantId, async () => {

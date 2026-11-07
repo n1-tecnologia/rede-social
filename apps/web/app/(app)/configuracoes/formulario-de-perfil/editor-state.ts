@@ -468,13 +468,14 @@ export function serverLimitsError(type: ProfileFormType | null, code: string): F
 /** What a reopening write is called by the impact read and the dialog, and which question it concerns. */
 export interface Reopening {
   /** The `change` of `GET /impact`. */
-  change: 'create_required' | 'make_required' | 'replace' | 'remove_condition';
+  change: 'create_required' | 'make_required' | 'replace' | 'remove_condition' | 'move_branch';
   /** The dialog's case (its title and confirm label). */
   kind: 'add' | 'make' | 'replace' | 'unconditional';
   questionId?: string;
   /**
    * The branch the NEW question will sit in (a create or a replace, 12.2-16, D-634): the impact then counts only
-   * the members for whom that branch's whole chain is open.
+   * the members for whom that branch's whole chain is open. For `move_branch` it is the branch the question moves
+   * TO (absent: out of any branch).
    */
   branchId?: string;
 }
@@ -482,7 +483,9 @@ export interface Reopening {
 /**
  * Whether saving this draft REOPENS the form (D-585, D-634, UI-D-576, UI-D-649): a new required question, an
  * optional question turned required, a replacement that is required, or a required question that LEAVES its
- * branch (members who do not see it today will owe an answer). Making a required question optional, editing
+ * branch (members who do not see it today will owe an answer), or a required question that moves from one
+ * branch to another, or an optional one turned required while it changes branch (WR-01: counted over the
+ * destination chain, `move_branch`). Making a required question optional, editing
  * anything else, entering a branch (fewer members owe it) or replacing with an optional one frees members and
  * needs no count. A create and a replace carry the branch the new question will sit in, so the count is of who
  * would see it.
@@ -499,9 +502,21 @@ export function reopeningOf(
   if (mode === 'replace') {
     return { change: 'replace', kind: 'replace', questionId: question.id, ...branch };
   }
-  if (!question.required) return { change: 'make_required', kind: 'make', questionId: question.id };
+  const moved = (question.branchId ?? null) !== (draft.branchId ?? null);
+  if (!question.required) {
+    // WR-01: becoming required in the same save that changes the branch is owed by who sees the NEW chain, not by
+    // who saw the stored one, so the server counts the destination (`move_branch`).
+    return moved
+      ? { change: 'move_branch', kind: 'make', questionId: question.id, ...branch }
+      : { change: 'make_required', kind: 'make', questionId: question.id };
+  }
   if (question.branchId && !draft.branchId) {
     return { change: 'remove_condition', kind: 'unconditional', questionId: question.id };
+  }
+  // WR-01: a required question that goes from one branch to another is owed by whoever sees the new chain and did
+  // not see the old one. (Entering a branch from none asks nobody new: fewer members owe it.)
+  if (question.branchId && draft.branchId && moved) {
+    return { change: 'move_branch', kind: 'make', questionId: question.id, ...branch };
   }
   return null;
 }

@@ -1334,9 +1334,18 @@ export async function getSummary(ctx: AdminCtx): Promise<ProfileFormSummary> {
 const IMPACT_SCOPE = (tenantId: string, scope: ImpactScope) => sql`
   (select ${tenantId}::uuid as tenant_id,
           ${scope.branchId ?? null}::uuid as branch_id,
+          ${scope.fromBranchId ?? null}::uuid as from_branch_id,
           ${scope.questionId ?? null}::uuid as question_id) p`;
 
-type ImpactScope = { branchId?: string | null; questionId?: string | null };
+/**
+ * `fromBranchId` is the branch the question sits in TODAY when a change moves it (`move_branch`): the chain a
+ * member had to open to owe it before the move.
+ */
+type ImpactScope = {
+  branchId?: string | null;
+  fromBranchId?: string | null;
+  questionId?: string | null;
+};
 
 /** "The member (`members.id`) sees the question of the scope `p`": no branch is always visible, else the whole chain open. */
 const seesQuestion = () =>
@@ -1358,6 +1367,16 @@ const lacksAnswerTo = (tenant: string, question: string) => sql`
      where a.tenant_id = ${sql.raw(tenant)}
        and a.membership_id = members.id
        and a.question_id = ${sql.raw(question)})`;
+
+/** "Every branch on the chain of `p.from_branch_id` (where the question sits today) is open for the member." */
+const sawBeforeTheMove = () =>
+  sql.raw(
+    branchChainOpenSql({
+      branchRef: 'p.from_branch_id',
+      tenant: 'p.tenant_id',
+      member: 'members.id',
+    }),
+  );
 
 /** Members with no answer row for the question of the scope `p`. */
 const LACKS_ANSWER = lacksAnswerTo('p.tenant_id', 'p.question_id');
@@ -1383,6 +1402,13 @@ const BLOCK_STAMP = sql`(select s.archived_at from public.profile_form_branches 
  *   - `remove_condition` (a question leaving its branch; needs `questionId`) counts the members who do NOT see
  *     the question today and lack an answer to it: they are the ones who newly owe it. It is 0 for an
  *     unbranched, an optional or an archived question;
+ *   - `move_branch` (needs `questionId`; the optional `branchId` is the ACTIVE branch the question is moving TO,
+ *     none meaning it leaves its branch; an unknown, foreign or archived one is the bare 404) is a question that
+ *     ends up REQUIRED in a different branch than the one it is stored in (WR-01): it counts the members who see
+ *     it through the NEW chain, lack an answer and did not already owe it through the OLD chain (an optional
+ *     question was owed by nobody, a required one by whoever saw its old chain, everyone if it had no branch).
+ *     It is the count of a change of branch of a required question, alone or together with `make_required`, and
+ *     0 for an archived question;
  *   - `undo_branch` (D-653, "Desfazer ramo"; needs `branchId`) counts the members who lack an answer to a
  *     REQUIRED ACTIVE question that sits directly in the branch and do not see it today (the chain is closed for
  *     them): the members who newly owe something once the branch is undone. 0 for an archived branch, an empty
@@ -1464,6 +1490,25 @@ export async function getImpact(ctx: AdminCtx, query: ImpactQuery): Promise<Impa
     }
     const row = await readOne(tx, ctx.tenantId, query.questionId);
     if (!row) throw new ApiError(404, 'NOT_FOUND');
+
+    if (query.change === 'move_branch') {
+      let destination: string | null = null;
+      if (query.branchId !== undefined) {
+        const target = await readBranch(tx, ctx.tenantId, query.branchId);
+        if (!target || target.archivedAt !== null) throw new ApiError(404, 'NOT_FOUND');
+        destination = target.id;
+      }
+      if (row.archived_at !== null) return { members: 0 };
+      // Required with no branch today: every member already owed it, so a move can add nobody.
+      const owedBefore = row.required && row.branch_id !== null;
+      if (row.required && row.branch_id === null) return { members: 0 };
+      return count(
+        { questionId: row.id, branchId: destination, fromBranchId: row.branch_id },
+        owedBefore
+          ? sql`${seesQuestion()} and not ${sawBeforeTheMove()} and ${LACKS_ANSWER}`
+          : sql`${seesQuestion()} and ${LACKS_ANSWER}`,
+      );
+    }
 
     const scope = { questionId: row.id, branchId: row.branch_id };
     if (query.change === 'remove_condition') {

@@ -1020,6 +1020,63 @@ describe('12.2-16: reopeningOf over branches (D-634, D-646)', () => {
   });
 });
 
+describe('12.2 review WR-01: a change of branch of a required question is a reopening', () => {
+  const A = uuid(4411);
+  const B = uuid(4412);
+
+  it('a required question already required, moved from branch A to branch B, reads the destination chain', () => {
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, branchId: B },
+        { id: uuid(9), required: true, branchId: A },
+      ),
+    ).toEqual({ change: 'move_branch', kind: 'make', questionId: uuid(9), branchId: B });
+  });
+
+  it('an optional question turned required while it changes branch counts the NEW chain, not the stored one', () => {
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, branchId: B },
+        { id: uuid(9), required: false, branchId: A },
+      ),
+    ).toEqual({ change: 'move_branch', kind: 'make', questionId: uuid(9), branchId: B });
+    // From no branch into one, and out of a branch into none (no destination is sent).
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, branchId: B },
+        { id: uuid(9), required: false, branchId: null },
+      ),
+    ).toEqual({ change: 'move_branch', kind: 'make', questionId: uuid(9), branchId: B });
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, branchId: null },
+        { id: uuid(9), required: false, branchId: A },
+      ),
+    ).toEqual({ change: 'move_branch', kind: 'make', questionId: uuid(9) });
+  });
+
+  it('keeps make_required when the branch does not change, and asks nothing when it is made optional', () => {
+    expect(
+      reopeningOf(
+        'edit',
+        { required: true, branchId: A },
+        { id: uuid(9), required: false, branchId: A },
+      ),
+    ).toEqual({ change: 'make_required', kind: 'make', questionId: uuid(9) });
+    expect(
+      reopeningOf(
+        'edit',
+        { required: false, branchId: B },
+        { id: uuid(9), required: true, branchId: A },
+      ),
+    ).toBeNull();
+  });
+});
+
 describe('12.2-16: branchOptionsFor, the groups of the "Ramo" select (UI-D-669, D-641, D-644)', () => {
   const s1 = adminStep({ title: 'Um' });
   const s2 = adminStep({ title: 'Dois' });

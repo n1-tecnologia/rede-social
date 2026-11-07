@@ -1055,6 +1055,8 @@ export const PROFILE_FORM_IMPACT_CHANGES = [
   // 12.2 (D-653): appended LAST so the pinned order of the earlier keys holds.
   'undo_branch',
   'reactivate_branch',
+  // 12.2 review WR-01: a REQUIRED question that ends up in another branch; appended LAST so the pinned order holds.
+  'move_branch',
 ] as const;
 export type ProfileFormImpactChange = (typeof PROFILE_FORM_IMPACT_CHANGES)[number];
 
@@ -1067,7 +1069,7 @@ export const impactQuerySchema = z
   .object({
     change: z.enum(PROFILE_FORM_IMPACT_CHANGES),
     questionId: z.uuid().optional(),
-    /** 12.2 (D-653): the branch an `undo_branch` or `reactivate_branch` change is about. */
+    /** 12.2 (D-653): the branch an `undo_branch` or `reactivate_branch` change is about; for `move_branch`, the branch the question moves TO (absent: out of any branch). */
     branchId: z.uuid().optional(),
   })
   .strict();

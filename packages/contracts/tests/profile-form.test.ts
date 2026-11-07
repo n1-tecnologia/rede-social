@@ -1191,10 +1191,11 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
   });
 
   it('12.2-20: the impact query takes questionId and branchId only; any other key is refused', () => {
-    expect(PROFILE_FORM_IMPACT_CHANGES.slice(-3)).toEqual([
+    expect(PROFILE_FORM_IMPACT_CHANGES.slice(-4)).toEqual([
       'remove_condition',
       'undo_branch',
       'reactivate_branch',
+      'move_branch',
     ]);
     expect(PROFILE_FORM_IMPACT_CHANGES.slice(0, 4)).toEqual([
       'create_required',
@@ -1202,6 +1203,12 @@ describe('12-03 - admin and read shapes (PFORM-02, PFORM-18, PFORM-19, PFORM-23)
       'reactivate',
       'replace',
     ]);
+    expect(
+      impactQuerySchema.safeParse({ change: 'move_branch', questionId: A, branchId: D }).success,
+    ).toBe(true);
+    expect(impactQuerySchema.safeParse({ change: 'move_branch', questionId: A }).success).toBe(
+      true,
+    );
     expect(impactQuerySchema.safeParse({ change: 'remove_condition', questionId: A }).success).toBe(
       true,
     );
