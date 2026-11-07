@@ -2856,3 +2856,40 @@ describe('12.2-19 Task 1 (tracer): the selector exists only with a branch, and t
     expect(screen.queryByRole('button', { name: 'Editar pergunta: Onde estuda?' })).toBeNull();
   });
 });
+
+describe('12.2-19 Task 3: "Ver como o membro vê" in the builder follows the branches it holds (D-651, UI-D-678)', () => {
+  const CLINIC = clinicAdminList();
+  const named = () => ({
+    questions: CLINIC.questions,
+    steps: CLINIC.steps,
+    branches: (CLINIC.branches ?? []).map((branch) =>
+      branch.id === clinicId('B1') ? { ...branch, name: 'Quem tem clínica' } : branch,
+    ),
+  });
+  const preview = () => screen.getByRole('dialog', { name: 'Como o membro vê' });
+
+  it('opens the whole block under the opener, then the nested one, and never shows a branch name', () => {
+    builder(named());
+    fireEvent.click(screen.getByRole('button', { name: 'Ver como o membro vê' }));
+    expect(within(preview()).queryByLabelText('Nome da clínica')).toBeNull();
+    expect(preview().querySelector('[data-revealed-branch]')).toBeNull();
+    fireEvent.click(within(preview()).getByRole('radio', { name: 'Tenho uma clínica' }));
+    const first = preview().querySelectorAll('[data-revealed-branch]');
+    expect(first).toHaveLength(1);
+    expect(within(first[0] as HTMLElement).getByLabelText('Nome da clínica')).toBeTruthy();
+    expect(within(first[0] as HTMLElement).getByText('A clínica tem equipe?')).toBeTruthy();
+    fireEvent.click(within(preview()).getAllByRole('button', { name: 'Sim' })[0] as HTMLElement);
+    expect(preview().querySelectorAll('[data-revealed-branch]').length).toBeGreaterThanOrEqual(2);
+    expect(within(preview()).getByText('Tem sócio?')).toBeTruthy();
+    expect(preview().textContent).not.toContain('Quem tem clínica');
+  });
+
+  it('opens from the Fluxo too, over the same branches', () => {
+    builder(named());
+    fireEvent.click(screen.getByRole('button', { name: 'Fluxo' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ver como o membro vê' }));
+    fireEvent.click(within(preview()).getByRole('radio', { name: 'Estou aprendendo' }));
+    expect(within(preview()).getByLabelText('Onde estuda?')).toBeTruthy();
+    expect(within(preview()).queryByLabelText('Nome da clínica')).toBeNull();
+  });
+});

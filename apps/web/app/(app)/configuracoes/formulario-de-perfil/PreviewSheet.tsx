@@ -1,6 +1,11 @@
 'use client';
 
-import type { AdminQuestion, AdminStep, MemberForm } from '@rede-social/contracts/profile-form';
+import type {
+  AdminBranch,
+  AdminQuestion,
+  AdminStep,
+  MemberForm,
+} from '@rede-social/contracts/profile-form';
 import { BottomSheet, Button, useMediaQuery } from '@rede-social/ui';
 import { ListChecks, RotateCcw } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -12,6 +17,8 @@ export interface PreviewSheetProps {
   questions: AdminQuestion[];
   /** The builder's steps in order. */
   steps?: AdminStep[];
+  /** INERT in the RED commit of 12.2-19: the builder's branches, handed to `previewForm` in GREEN. */
+  branches?: AdminBranch[];
   onClose: () => void;
 }
 
@@ -21,7 +28,12 @@ export interface PreviewSheetProps {
  * `missingRequired: 0`) and the option rows carry an id and a label only, so not even an aggregate count
  * reaches the member screen. The `formEtag` is a dummy because a preview never saves.
  */
-export function previewForm(questions: AdminQuestion[], steps: AdminStep[] = []): MemberForm {
+export function previewForm(
+  questions: AdminQuestion[],
+  steps: AdminStep[] = [],
+  // INERT in the RED commit of 12.2-19: the branches are mapped in GREEN.
+  _branches: AdminBranch[] = [],
+): MemberForm {
   const held = new Set(questions.map((question) => question.stepId));
   return {
     mode: 'first',

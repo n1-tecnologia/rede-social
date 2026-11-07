@@ -2,14 +2,20 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { memberBranchSchema } from '@rede-social/contracts/profile-form';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { adminQuestion, adminStep, uuid } from '@/lib/profile-form/test-fixtures';
+import type { Answers } from '@/lib/profile-form/form-state';
+import { stepPath } from '@/lib/profile-form/steps';
+import { adminBranch, adminQuestion, adminStep, uuid } from '@/lib/profile-form/test-fixtures';
+import { visibleQuestionIds } from '@/lib/profile-form/visibility';
 
 /**
+ * 12.2-19 (D-651, UI-D-678; PFORM-59, PFORM-60; T-12.2-03): the preview is the member component and follows
+ * BRANCHES, not the retired per-question condition, and the branch name never reaches it.
  * 12.1-18 (D-627, D-628; UI-D-652, UI-D-660, UI-D-661; PFORM-37, PFORM-42; T-12.1-09, T-12.1-11) — the
  * admin's "Como o membro vê" as the member's own stepper: it advances with no answers, counts what a member
  * would see under the answers ticked, restarts, closes through "Fechar", and never reaches an action. The
@@ -50,11 +56,17 @@ const name = adminQuestion('short_text', {
   required: true,
   stepId: S1.id,
 });
+const BR = adminBranch({
+  openerQuestionId: opener.id,
+  values: [OWN.id],
+  name: 'Quem tem clínica',
+  questionCount: 1,
+});
 const clinic = adminQuestion('short_text', {
   title: 'Nome da clínica',
   required: true,
   stepId: S2.id,
-  condition: { questionId: opener.id, values: [OWN.id] },
+  branchId: BR.id,
 });
 const phone = adminQuestion('short_text', {
   title: 'Telefone para contato',
@@ -66,10 +78,17 @@ function open(
   questions = [opener, name, clinic, phone],
   steps = [S1, S2, S3],
   onClose: () => void = vi.fn(),
+  branches = [BR],
 ) {
   return render(
     <NextIntlClientProvider locale="pt-BR" messages={messages}>
-      <PreviewSheet open questions={questions} steps={steps} onClose={onClose} />
+      <PreviewSheet
+        open
+        questions={questions}
+        steps={steps}
+        branches={branches}
+        onClose={onClose}
+      />
     </NextIntlClientProvider>,
   );
 }
@@ -162,12 +181,13 @@ describe('the preview runs the member stepper over the admin questions (UI-D-652
       stepId: S1.id,
       options: [OWN, WORK],
     });
+    const gate = adminBranch({ openerQuestionId: opening.id, values: [OWN.id], questionCount: 1 });
     const gated = adminQuestion('short_text', {
       title: 'Só depois',
       stepId: S3.id,
-      condition: { questionId: opening.id, values: [OWN.id] },
+      branchId: gate.id,
     });
-    open([opening, gated], [S1, S3]);
+    open([opening, gated], [S1, S3], vi.fn(), [gate]);
     expect(status().textContent).toBe('Com estas respostas, o membro vê 1 etapa e 1 pergunta.');
   });
 
@@ -305,5 +325,220 @@ describe('the preview never reaches an action or shows a stored answer (T-12.1-1
     expect(mocks.save).not.toHaveBeenCalled();
     expect(mocks.push).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------ */
+/* 12.2-19 Task 3: the preview follows branches with the member rules and no branch name (D-651).     */
+/* ------------------------------------------------------------------------------------------------ */
+
+const { previewForm } = await import('./PreviewSheet');
+
+const choice = (id: string): Answers[string] => ({ optionIds: [id], other: false, otherText: '' });
+
+/** Three steps: O1 and N in step 1; a branch of O1 holds CN (step 1) and Y (step 2); Y opens TEAM (step 3). */
+const T1 = adminStep({ title: 'Geral', questionCount: 3 });
+const T2 = adminStep({ title: 'Equipe', questionCount: 1 });
+const T3 = adminStep({ title: 'Fim', questionCount: 2 });
+const O1 = adminQuestion('single_choice', {
+  title: 'Você tem clínica?',
+  required: true,
+  stepId: T1.id,
+  options: [OWN, WORK, LEARN],
+});
+const N1 = adminQuestion('short_text', { title: 'Nome profissional', stepId: T1.id });
+const BR1 = adminBranch({
+  openerQuestionId: O1.id,
+  values: [OWN.id],
+  name: 'Quem tem clínica',
+  questionCount: 2,
+});
+const CN = adminQuestion('short_text', {
+  title: 'Nome da clínica',
+  required: true,
+  stepId: T1.id,
+  branchId: BR1.id,
+});
+const Y = adminQuestion('yes_no', {
+  title: 'A clínica tem equipe?',
+  stepId: T2.id,
+  branchId: BR1.id,
+});
+const BR2 = adminBranch({
+  openerQuestionId: Y.id,
+  values: ['true'],
+  name: 'Clínica com equipe',
+  questionCount: 1,
+});
+const TEAM = adminQuestion('number', {
+  title: 'Quantas pessoas trabalham aí?',
+  stepId: T3.id,
+  branchId: BR2.id,
+});
+const P1 = adminQuestion('phone', { title: 'Telefone para contato', stepId: T3.id });
+const NESTED = [O1, N1, CN, Y, TEAM, P1];
+const NESTED_STEPS = [T1, T2, T3];
+const NESTED_BRANCHES = [BR1, BR2];
+const openNested = () => open(NESTED, NESTED_STEPS, vi.fn(), NESTED_BRANCHES);
+const summary = (steps: string, questions: string) =>
+  `Com estas respostas, o membro vê ${steps} e ${questions}.`;
+
+describe('12.2-19 Task 3: previewForm hands the member component branches, never a name (D-651, T-12.2-03)', () => {
+  it('returns the branches in the member shape: id, opener and values, nothing else', () => {
+    const form = previewForm(NESTED, NESTED_STEPS, NESTED_BRANCHES);
+    expect(form.branches).toEqual([
+      { id: BR1.id, openerQuestionId: O1.id, values: [OWN.id] },
+      { id: BR2.id, openerQuestionId: Y.id, values: ['true'] },
+    ]);
+    for (const member of form.branches ?? []) {
+      expect(Object.keys(member).sort()).toEqual(['id', 'openerQuestionId', 'values']);
+      expect(memberBranchSchema.safeParse(member).success).toBe(true);
+    }
+  });
+
+  it('never carries a branch name anywhere in the serialized form', () => {
+    const text = JSON.stringify(previewForm(NESTED, NESTED_STEPS, NESTED_BRANCHES));
+    expect(text).not.toContain('Quem tem clínica');
+    expect(text).not.toContain('Clínica com equipe');
+    expect(text).not.toContain('"name"');
+    expect(text).not.toContain('answerCount');
+    expect(text).not.toContain('revision');
+  });
+
+  it('copies the branch of each question and leaves nobody under the retired condition', () => {
+    const form = previewForm(NESTED, NESTED_STEPS, NESTED_BRANCHES);
+    const byTitle = new Map(form.questions.map((question) => [question.title, question]));
+    expect(byTitle.get('Nome da clínica')?.branchId).toBe(BR1.id);
+    expect(byTitle.get('A clínica tem equipe?')?.branchId).toBe(BR1.id);
+    expect(byTitle.get('Quantas pessoas trabalham aí?')?.branchId).toBe(BR2.id);
+    expect(byTitle.get('Nome profissional')?.branchId).toBeNull();
+    for (const question of form.questions) expect(question.condition).toBeNull();
+  });
+
+  it('asks for no branch at all when the form has none: an unconditional form, as in Phase 12', () => {
+    const form = previewForm([N1, P1], [T1, T3]);
+    expect(form.branches).toEqual([]);
+    expect(form.questions.every((question) => question.branchId === null)).toBe(true);
+  });
+
+  it('does not hand over an archived branch: its questions read as unconditional, as in the Lista', () => {
+    const gone = { ...BR1, archivedAt: '2026-11-01T10:00:00.000Z' };
+    const form = previewForm([O1, CN], [T1], [gone]);
+    expect(form.branches).toEqual([]);
+    expect(form.questions.find((question) => question.id === CN.id)?.branchId).toBeNull();
+  });
+});
+
+describe('12.2-19 Task 3: ticking an opener opens the whole block, through the chain (D-651, UI-D-678)', () => {
+  it('opens ONE wrapper with every question of the branch when the opener is ticked', () => {
+    open([O1, N1, CN], [T1], vi.fn(), [BR1]);
+    expect(document.querySelector('[data-revealed-branch]')).toBeNull();
+    expect(screen.queryByLabelText('Nome da clínica')).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    const blocks = document.querySelectorAll('[data-revealed-branch]');
+    expect(blocks).toHaveLength(1);
+    expect(within(blocks[0] as HTMLElement).getByLabelText('Nome da clínica')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    expect(document.querySelector('[data-revealed-branch]')).toBeNull();
+  });
+
+  it('opens the nested block inside the first one when the nested opener is answered', () => {
+    const one = adminStep({ title: 'Única', questionCount: 4 });
+    const o = adminQuestion('single_choice', {
+      title: 'Você tem clínica?',
+      stepId: one.id,
+      options: [OWN, WORK, LEARN],
+    });
+    const b1 = adminBranch({ openerQuestionId: o.id, values: [OWN.id], questionCount: 2 });
+    const y = adminQuestion('yes_no', {
+      title: 'A clínica tem equipe?',
+      stepId: one.id,
+      branchId: b1.id,
+    });
+    const b2 = adminBranch({ openerQuestionId: y.id, values: ['true'], questionCount: 1 });
+    const team = adminQuestion('number', {
+      title: 'Quantas pessoas?',
+      stepId: one.id,
+      branchId: b2.id,
+    });
+    open([o, y, team], [one], vi.fn(), [b1, b2]);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(document.querySelectorAll('[data-revealed-branch]')).toHaveLength(1);
+    expect(screen.queryByLabelText('Quantas pessoas?')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Sim' }));
+    const blocks = document.querySelectorAll('[data-revealed-branch]');
+    expect(blocks).toHaveLength(2);
+    expect((blocks[0] as HTMLElement).contains(blocks[1] as HTMLElement)).toBe(true);
+    expect(within(blocks[1] as HTMLElement).getByLabelText('Quantas pessoas?')).toBeTruthy();
+  });
+
+  it('counts steps and questions through the branch chain, and the chain closes with its opener', () => {
+    openNested();
+    expect(status().textContent).toBe(summary('2 etapas', '3 perguntas'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(status().textContent).toBe(summary('3 etapas', '5 perguntas'));
+    expect(eyebrow()).toBe('Etapa 1 de 3');
+    advance();
+    expect(screen.getByRole('heading', { level: 2, name: 'Equipe' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sim' }));
+    expect(status().textContent).toBe(summary('3 etapas', '6 perguntas'));
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Estou aprendendo' }));
+    // Y is still answered "Sim" in the draft, but it sits in a closed branch: the whole chain is closed.
+    expect(status().textContent).toBe(summary('2 etapas', '3 perguntas'));
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('the status line equals what the shared visibility function returns for the same answers', () => {
+    openNested();
+    const form = previewForm(NESTED, NESTED_STEPS, NESTED_BRANCHES);
+    const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+    const expected = (drafts: Answers) =>
+      summary(
+        plural(stepPath(form, drafts, 'first').length, 'etapa', 'etapas'),
+        plural(visibleQuestionIds(form, drafts).size, 'pergunta', 'perguntas'),
+      );
+    expect(status().textContent).toBe(expected({}));
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(status().textContent).toBe(expected({ [O1.id]: choice(OWN.id) }));
+    advance();
+    fireEvent.click(screen.getByRole('button', { name: 'Sim' }));
+    expect(status().textContent).toBe(expected({ [O1.id]: choice(OWN.id), [Y.id]: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Trabalho em uma clínica' }));
+    expect(status().textContent).toBe(expected({ [O1.id]: choice(WORK.id), [Y.id]: true }));
+  });
+
+  it('Recomeçar clears every answer and closes the blocks', () => {
+    openNested();
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    expect(document.querySelectorAll('[data-revealed-branch]')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Recomeçar' }));
+    expect(document.querySelector('[data-revealed-branch]')).toBeNull();
+    expect(status().textContent).toBe(summary('2 etapas', '3 perguntas'));
+    expect(
+      (screen.getByRole('radio', { name: 'Tenho uma clínica' }) as HTMLInputElement).checked,
+    ).toBe(false);
+  });
+
+  it('shows no branch name in the sheet, the block or the announcements', () => {
+    openNested();
+    fireEvent.click(screen.getByRole('radio', { name: 'Tenho uma clínica' }));
+    advance();
+    fireEvent.click(screen.getByRole('button', { name: 'Sim' }));
+    const text = document.body.textContent ?? '';
+    expect(text).not.toContain('Quem tem clínica');
+    expect(text).not.toContain('Clínica com equipe');
+    const live = Array.from(document.querySelectorAll('[aria-live]')).map((el) => el.textContent);
+    for (const line of live) expect(line ?? '').not.toMatch(/Quem tem clínica|Clínica com equipe/);
+  });
+});
+
+describe('12.2-19 Task 3: the source of the preview no longer reads the retired condition', () => {
+  it('names no per-question condition except the null the member shape still requires', () => {
+    const source = readFileSync(join(__dirname, 'PreviewSheet.tsx'), 'utf8');
+    const hits = source.split('\n').filter((line) => /condition/.test(line));
+    // The member question still has a `condition` key (null) until plan 20 removes the deprecated shape.
+    expect(hits.filter((line) => !/^\s*(\*|\/\/|condition: null)/.test(line))).toEqual([]);
   });
 });
