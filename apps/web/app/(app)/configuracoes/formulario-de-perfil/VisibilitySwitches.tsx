@@ -15,6 +15,11 @@ export interface VisibilitySwitchesProps {
    * may be turned off, and a line warns it cannot be turned on again while answers exist.
    */
   lock?: { frozen: boolean; ratchet: boolean; onReplace: () => void };
+  /**
+   * 12.2-18 (WR-06, UI-D-675; RED stub: accepted and not used yet): the title of the nearest opener on the question's
+   * branch chain that does not show on the profile.
+   */
+  privateOpener?: string;
 }
 
 interface RowProps {

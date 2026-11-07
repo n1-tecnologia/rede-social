@@ -2565,3 +2565,319 @@ describe('12.2-16 Task 3: the width and accessibility floor (jsdom reads classes
     }
   });
 });
+
+describe('12.2-18 Task 2: WR-06 in the question sheet (PFORM-53, D-646, UI-D-675)', () => {
+  const step = adminStep({ title: 'Geral' });
+  const yes = uuid(9811);
+  const options = [
+    { id: yes, label: 'Sim', answerCount: 0 },
+    { id: uuid(9812), label: 'Não', answerCount: 0 },
+  ];
+  const opener = (title: string, overrides: Partial<ReturnType<typeof adminQuestion>> = {}) =>
+    adminQuestion('single_choice', { stepId: step.id, title, options, ...overrides });
+
+  /**
+   * A chain of `depth` levels: Abridora 1 opens a branch that holds Abridora 2, which opens a branch that holds
+   * Abridora 3 (and so on), and the question under test sits in the deepest branch. The openers listed in
+   * `privateAt` do not show on the profile.
+   */
+  function chain(depth: 1 | 2 | 3, privateAt: number[]) {
+    const openers: ReturnType<typeof adminQuestion>[] = [];
+    const branches: ReturnType<typeof adminBranch>[] = [];
+    for (let level = 1; level <= depth; level += 1) {
+      const above = branches[level - 2];
+      const made = opener(`Abridora ${level}`, {
+        showOnProfile: !privateAt.includes(level),
+        ...(above ? { branchId: above.id } : {}),
+      });
+      openers.push(made);
+      branches.push(adminBranch({ openerQuestionId: made.id, values: [yes] }));
+    }
+    const member = adminQuestion('short_text', {
+      stepId: step.id,
+      title: 'Nome da clínica',
+      showOnProfile: false,
+      branchId: branches[depth - 1]?.id as string,
+    });
+    return { openers, branches, member, questions: [...openers, member] };
+  }
+
+  beforeEach(() => {
+    mocks.update.mockResolvedValue({
+      ok: true,
+      question: adminQuestion('short_text'),
+      pending: null,
+    });
+  });
+
+  const publicSwitch = () =>
+    screen.getByRole('switch', { name: 'Mostrar no perfil do membro' }) as HTMLButtonElement;
+  const helperOf = () => (document.getElementById('pf-public-helper') as HTMLElement).textContent;
+  const sentence = (name: string) =>
+    `Esta pergunta está num ramo que depende de “${name}”, que não aparece no perfil. Se esta aparecesse, quem vê o perfil poderia deduzir a resposta dessa pergunta. Mostre “${name}” no perfil ou tire esta pergunta do ramo.`;
+
+  for (const [depth, privateAt, named] of [
+    [1, [1], 'Abridora 1'],
+    [2, [1], 'Abridora 1'],
+    [2, [2], 'Abridora 2'],
+    [3, [1], 'Abridora 1'],
+    [3, [3], 'Abridora 3'],
+    [3, [1, 3], 'Abridora 3'],
+  ] as const) {
+    it(`depth ${depth}, private at ${privateAt.join(' and ')}: the switch is disabled and off, naming the nearest private opener`, () => {
+      const world = chain(depth, [...privateAt]);
+      mount({
+        mode: 'edit',
+        question: world.member,
+        questions: world.questions,
+        branches: world.branches,
+        steps: [step],
+      });
+      expect(publicSwitch().disabled).toBe(true);
+      expect(publicSwitch().getAttribute('aria-checked')).toBe('false');
+      expect(helperOf()).toBe(sentence(named));
+      expect(publicSwitch().getAttribute('aria-describedby')).toBe('pf-public-helper');
+      // only the opener's title is named: no other question of the chain, and not the question itself
+      for (const other of ['Abridora 2', 'Abridora 3', 'Abridora 1', 'Nome da clínica']) {
+        if (other !== named) expect(helperOf()).not.toContain(other);
+      }
+    });
+  }
+
+  it('leaves the switch enabled, with the ordinary helper, on a chain of public openers', () => {
+    const world = chain(3, []);
+    mount({
+      mode: 'edit',
+      question: world.member,
+      questions: world.questions,
+      branches: world.branches,
+      steps: [step],
+    });
+    expect(publicSwitch().disabled).toBe(false);
+    expect(helperOf()).toContain('Os outros membros veem esta resposta no perfil');
+    expect(helperOf()).not.toContain('que não aparece no perfil');
+  });
+
+  it('a question outside any branch keeps its switch', () => {
+    const lone = adminQuestion('short_text', { stepId: step.id, title: 'Sozinha' });
+    const world = chain(1, [1]);
+    mount({
+      mode: 'edit',
+      question: lone,
+      questions: [lone, ...world.questions],
+      branches: world.branches,
+      steps: [step],
+    });
+    expect(publicSwitch().disabled).toBe(false);
+  });
+
+  it('a click on the disabled switch changes nothing and sends nothing', async () => {
+    const world = chain(1, [1]);
+    mount({
+      mode: 'edit',
+      question: world.member,
+      questions: world.questions,
+      branches: world.branches,
+      steps: [step],
+    });
+    fireEvent.click(publicSwitch());
+    expect(publicSwitch().getAttribute('aria-checked')).toBe('false');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  /** An opener that shows on the profile, a branch under it, and a public question (and a deeper one) below. */
+  function exposed() {
+    const top = opener('Você tem clínica?', { showOnProfile: true });
+    const topBranch = adminBranch({ openerQuestionId: top.id, values: [yes], name: 'Quem tem' });
+    const middle = opener('A clínica tem equipe?', {
+      showOnProfile: true,
+      branchId: topBranch.id,
+    });
+    const deepBranch = adminBranch({ openerQuestionId: middle.id, values: [yes] });
+    const leaf = adminQuestion('short_text', {
+      stepId: step.id,
+      title: 'Quantas pessoas?',
+      showOnProfile: true,
+      branchId: deepBranch.id,
+    });
+    const quiet = adminQuestion('short_text', {
+      stepId: step.id,
+      title: 'Nome interno',
+      showOnProfile: false,
+      branchId: topBranch.id,
+    });
+    return {
+      top,
+      middle,
+      leaf,
+      branches: [topBranch, deepBranch],
+      questions: [top, middle, leaf, quiet],
+    };
+  }
+  const privacyAlert = () =>
+    document.querySelector('[data-dependents-alert="privacy"]') as HTMLElement | null;
+
+  it('turning an opener private while a public question hangs below at any depth is refused, listing them, and sends nothing', async () => {
+    const world = exposed();
+    mount({
+      mode: 'edit',
+      question: world.top,
+      questions: world.questions,
+      branches: world.branches,
+      steps: [step],
+    });
+    fireEvent.click(publicSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    const alert = privacyAlert() as HTMLElement;
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(
+      within(alert).getByText(
+        'Esta pergunta decide ramos com perguntas que aparecem no perfil e não pode deixar de aparecer agora.',
+      ),
+    ).toBeTruthy();
+    expect(
+      within(alert).getByText(
+        'Tire estas perguntas do perfil, ou mude o ramo delas, e tente de novo:',
+      ),
+    ).toBeTruthy();
+    expect(
+      within(alert)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['A clínica tem equipe?', 'Quantas pessoas?']);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('the alert sits directly above the footer button, inside the sheet', async () => {
+    const world = exposed();
+    mount({
+      mode: 'edit',
+      question: world.top,
+      questions: world.questions,
+      branches: world.branches,
+      steps: [step],
+    });
+    fireEvent.click(publicSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect((privacyAlert() as HTMLElement).nextElementSibling).toBe(saveButton());
+  });
+
+  it('turning the switch back on takes the alert away', async () => {
+    const world = exposed();
+    mount({
+      mode: 'edit',
+      question: world.top,
+      questions: world.questions,
+      branches: world.branches,
+      steps: [step],
+    });
+    fireEvent.click(publicSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(privacyAlert()).toBeTruthy();
+    fireEvent.click(publicSwitch());
+    expect(privacyAlert()).toBeNull();
+  });
+
+  it('an opener with no public question below turns private and saves as before', async () => {
+    const top = opener('Você tem clínica?', { showOnProfile: true });
+    const branch = adminBranch({ openerQuestionId: top.id, values: [yes] });
+    const quiet = adminQuestion('short_text', {
+      stepId: step.id,
+      title: 'Interna',
+      showOnProfile: false,
+      branchId: branch.id,
+    });
+    mocks.update.mockResolvedValue({ ok: true, question: top, pending: null });
+    mount({
+      mode: 'edit',
+      question: top,
+      questions: [top, quiet],
+      branches: [branch],
+      steps: [step],
+    });
+    fireEvent.click(publicSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(privacyAlert()).toBeNull();
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('race: a server public_under_private renders the same alert with the titles it named', async () => {
+    // The page does not know the branch (a second admin made it): the pre-check passes, the server refuses.
+    const top = opener('Você tem clínica?', { showOnProfile: true });
+    mocks.update.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      issue: 'public_under_private',
+      titles: ['Surgiu agora', 'Outra que surgiu'],
+    });
+    mount({ mode: 'edit', question: top, questions: [top], branches: [], steps: [step] });
+    fireEvent.click(publicSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    const alert = privacyAlert() as HTMLElement;
+    expect(
+      within(alert).getByText(
+        'Esta pergunta decide ramos com perguntas que aparecem no perfil e não pode deixar de aparecer agora.',
+      ),
+    ).toBeTruthy();
+    expect(
+      within(alert)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Surgiu agora', 'Outra que surgiu']);
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('the client pre-check and the server race draw the same markup for the same titles', async () => {
+    const world = exposed();
+    const first = mount({
+      mode: 'edit',
+      question: world.top,
+      questions: world.questions,
+      branches: world.branches,
+      steps: [step],
+    });
+    fireEvent.click(publicSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    const normalize = (html: string) => html.replace(/_r_[a-z0-9]+_/g, '_r_');
+    const fromClient = normalize((privacyAlert() as HTMLElement).innerHTML);
+    first.unmount();
+    cleanup();
+
+    mocks.update.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      issue: 'public_under_private',
+      titles: ['A clínica tem equipe?', 'Quantas pessoas?'],
+    });
+    mount({
+      mode: 'edit',
+      question: world.top,
+      questions: [world.top],
+      branches: [],
+      steps: [step],
+    });
+    fireEvent.click(publicSwitch());
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(normalize((privacyAlert() as HTMLElement).innerHTML)).toBe(fromClient);
+  });
+});

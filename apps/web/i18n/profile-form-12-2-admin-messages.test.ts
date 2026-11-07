@@ -373,6 +373,30 @@ describe('profileForm.admin.dependents over branches (UI-D-673, 12.2-18)', () =>
   });
 });
 
+describe('profileForm.admin: the privacy rule WR-06 (PFORM-53, UI-D-675, 12.2-18)', () => {
+  it('declares the keys the Copywriting Contract names', () => {
+    const { dependents, editor } = parsed.profileForm.admin;
+    expect(editor.privacy).toHaveProperty('branchPrivate');
+    expect(dependents.title).toHaveProperty('privacy');
+    expect(dependents).toHaveProperty('hintPrivacy');
+  });
+
+  it('reads the switch helper verbatim, the opener title coming from the question', () => {
+    expect(t('editor.privacy.branchPrivate', { opener: 'Você tem clínica?' })).toBe(
+      'Esta pergunta está num ramo que depende de “Você tem clínica?”, que não aparece no perfil. Se esta aparecesse, quem vê o perfil poderia deduzir a resposta dessa pergunta. Mostre “Você tem clínica?” no perfil ou tire esta pergunta do ramo.',
+    );
+  });
+
+  it('reads the refusal verbatim', () => {
+    expect(t('dependents.title.privacy')).toBe(
+      'Esta pergunta decide ramos com perguntas que aparecem no perfil e não pode deixar de aparecer agora.',
+    );
+    expect(t('dependents.hintPrivacy')).toBe(
+      'Tire estas perguntas do perfil, ou mude o ramo delas, e tente de novo:',
+    );
+  });
+});
+
 describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "branch", "fork" or "grupo condicional")', () => {
   const groups: Record<string, unknown> = {
     'editor.branch': parsed.profileForm.admin.editor.branch,
@@ -381,6 +405,11 @@ describe('the vocabulary of the new strings (Copywriting Contract: ramo, never "
     'branches.toasts': parsed.profileForm.admin.branches.toasts,
     'branches.undo': parsed.profileForm.admin.branches.undo,
     'branches.archive': parsed.profileForm.admin.branches.archive,
+    'editor.privacy': parsed.profileForm.admin.editor.privacy,
+    'dependents.privacy': [
+      parsed.profileForm.admin.dependents.title.privacy,
+      parsed.profileForm.admin.dependents.hintPrivacy,
+    ],
     'dependents.hints': [
       parsed.profileForm.admin.dependents.hintBranches,
       parsed.profileForm.admin.dependents.hintOptionBranches,

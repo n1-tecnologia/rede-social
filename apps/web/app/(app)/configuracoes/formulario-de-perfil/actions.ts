@@ -831,7 +831,7 @@ export type BranchFieldKey = 'name' | 'values' | 'opener' | 'form';
 export type SaveBranchResult =
   | { ok: true; branch: AdminBranch }
   | { ok: false; code: 'invalid'; fields: Partial<Record<BranchFieldKey, string>> }
-  | { ok: false; code: 'conflict'; issue: string }
+  | { ok: false; code: 'conflict'; issue: string; titles?: string[] }
   // 12.2-17: the edit's optimistic lock (409 `stale_revision`): the branch changed while the admin edited it.
   | { ok: false; code: 'stale_revision' }
   | { ok: false; code: 'limit' | 'forbidden' | 'moduleOff' | 'failed' };

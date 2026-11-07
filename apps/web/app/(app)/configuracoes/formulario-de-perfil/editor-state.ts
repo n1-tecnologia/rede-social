@@ -858,6 +858,29 @@ export function refusalOfUpdate(
   return { kind: 'option', groups, label: named?.label ?? '' };
 }
 
+// ── 12.2-18: the privacy rule in the builder (WR-06, PFORM-53, UI-D-675) ───────────────────────────
+
+/**
+ * The title of the NEAREST opener on the chain of `branchId` that does not show on the member profile, or `null`
+ * (RED stub of 12.2-18: inert until the GREEN commit).
+ */
+export function privateOpenerOf(_tree: AdminBranchTree, _branchId: string | null): string | null {
+  return null;
+}
+
+/** A change the privacy pre-check judges: a question's own switch, or the opener of a branch. */
+export type PrivacyChange =
+  | { questionId: string; showOnProfile: boolean }
+  | { branchId: string; openerQuestionId: string };
+
+/**
+ * The titles of the questions that show on the profile and would newly sit under a private opener if `change`
+ * were saved (RED stub of 12.2-18: inert until the GREEN commit).
+ */
+export function privacyTitlesIf(_tree: AdminBranchTree, _change: PrivacyChange): string[] {
+  return [];
+}
+
 // ── 12.2-16: where a question sits in the tree (D-640, D-641, D-644, D-646, UI-D-669) ──────────────
 
 /** One group of the "Ramo" select: the branches that hang on one opener. */

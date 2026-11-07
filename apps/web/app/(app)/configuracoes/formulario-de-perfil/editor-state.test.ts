@@ -27,6 +27,8 @@ import {
   type OptionDraft,
   optionUsage,
   parseLimits,
+  privacyTitlesIf,
+  privateOpenerOf,
   refusalOfUpdate,
   removeOptionRow,
   renameOptionRow,
@@ -1349,5 +1351,109 @@ describe('12.2-18: the refusals of an opener over branches (D-646, UI-D-673)', (
   it('is nothing for an empty list or for a save that removed nothing', () => {
     expect(refusalOfUpdate(opener, { ...draftOf(), type: 'dropdown' }, [], tree)).toBeNull();
     expect(refusalOfUpdate(opener, draftOf(), groupsOf(), tree)).toBeNull();
+  });
+});
+
+describe('12.2-18: the privacy rule in the builder (WR-06, PFORM-53, UI-D-675)', () => {
+  const step = adminStep({ title: 'Geral' });
+  const opt = [
+    { id: uuid(9801), label: 'Sim', answerCount: 0 },
+    { id: uuid(9802), label: 'Não', answerCount: 0 },
+  ];
+  const q = (title: string, overrides: Partial<AdminQuestion> = {}) =>
+    adminQuestion('single_choice', { stepId: step.id, title, options: opt, ...overrides });
+
+  // O1 -> B1 { O2 -> B2 { O3 -> B3 { Q } } }: a chain of three levels, every opener a choice question.
+  const o1 = q('Abridora 1', { showOnProfile: true });
+  const b1 = adminBranch({ openerQuestionId: o1.id, values: [uuid(9801)] });
+  const o2 = q('Abridora 2', { showOnProfile: true, branchId: b1.id });
+  const b2 = adminBranch({ openerQuestionId: o2.id, values: [uuid(9801)] });
+  const o3 = q('Abridora 3', { showOnProfile: true, branchId: b2.id });
+  const b3 = adminBranch({ openerQuestionId: o3.id, values: [uuid(9801)] });
+  const leaf = adminQuestion('short_text', {
+    stepId: step.id,
+    title: 'Folha pública',
+    showOnProfile: true,
+    branchId: b3.id,
+  });
+  const quiet = adminQuestion('short_text', {
+    stepId: step.id,
+    title: 'Folha privada',
+    showOnProfile: false,
+    branchId: b1.id,
+  });
+  const make = (questions: AdminQuestion[]) =>
+    buildBranchTree({ steps: [step], questions, branches: [b1, b2, b3] });
+  const allPublic = make([o1, o2, o3, leaf, quiet]);
+
+  it('finds no private opener on a chain of public ones, or without a branch', () => {
+    expect(privateOpenerOf(allPublic, b3.id)).toBeNull();
+    expect(privateOpenerOf(allPublic, null)).toBeNull();
+    expect(privateOpenerOf(allPublic, uuid(9899))).toBeNull();
+  });
+
+  it('names the private opener at depth 1, 2 and 3', () => {
+    const one = make([{ ...o1, showOnProfile: false }, o2, o3, leaf]);
+    expect(privateOpenerOf(one, b1.id)).toBe('Abridora 1');
+    const two = make([o1, { ...o2, showOnProfile: false }, o3, leaf]);
+    expect(privateOpenerOf(two, b2.id)).toBe('Abridora 2');
+    expect(privateOpenerOf(two, b1.id)).toBeNull();
+    const three = make([o1, o2, { ...o3, showOnProfile: false }, leaf]);
+    expect(privateOpenerOf(three, b3.id)).toBe('Abridora 3');
+    expect(privateOpenerOf(three, b2.id)).toBeNull();
+  });
+
+  it('names the NEAREST private opener when several are private', () => {
+    const tree = make([{ ...o1, showOnProfile: false }, o2, { ...o3, showOnProfile: false }, leaf]);
+    expect(privateOpenerOf(tree, b3.id)).toBe('Abridora 3');
+    expect(privateOpenerOf(tree, b2.id)).toBe('Abridora 1');
+  });
+
+  it('lists the public questions at any depth that a private opener would expose, in list order', () => {
+    const titles = privacyTitlesIf(allPublic, { questionId: o1.id, showOnProfile: false });
+    expect(titles).toEqual(['Abridora 2', 'Abridora 3', 'Folha pública']);
+  });
+
+  it('does not list a private question, and lists nothing for a question that opens nothing', () => {
+    const titles = privacyTitlesIf(allPublic, { questionId: o1.id, showOnProfile: false });
+    expect(titles).not.toContain('Folha privada');
+    expect(privacyTitlesIf(allPublic, { questionId: leaf.id, showOnProfile: false })).toEqual([]);
+  });
+
+  it('lists nothing when a question is turned public, or already private', () => {
+    expect(privacyTitlesIf(allPublic, { questionId: o1.id, showOnProfile: true })).toEqual([]);
+  });
+
+  it('never repeats a violation the form already holds', () => {
+    const already = make([{ ...o1, showOnProfile: false }, o2, o3, leaf]);
+    // O1 is private already: turning O2 private adds only what O2 newly exposes below it
+    expect(privacyTitlesIf(already, { questionId: o2.id, showOnProfile: false })).toEqual([]);
+  });
+
+  it('judges a branch moved to a private opener by the public questions below it', () => {
+    const other = q('Outra abridora', { showOnProfile: false });
+    const tree = buildBranchTree({
+      steps: [step],
+      questions: [other, o1, o2, o3, leaf],
+      branches: [b1, b2, b3],
+    });
+    expect(privacyTitlesIf(tree, { branchId: b3.id, openerQuestionId: other.id })).toEqual([
+      'Folha pública',
+    ]);
+    expect(privacyTitlesIf(tree, { branchId: b1.id, openerQuestionId: other.id })).toEqual([
+      'Abridora 2',
+      'Abridora 3',
+      'Folha pública',
+    ]);
+  });
+
+  it('a branch moved to a public opener exposes nothing', () => {
+    const other = q('Outra pública', { showOnProfile: true });
+    const tree = buildBranchTree({
+      steps: [step],
+      questions: [other, o1, o2, o3, leaf],
+      branches: [b1, b2, b3],
+    });
+    expect(privacyTitlesIf(tree, { branchId: b3.id, openerQuestionId: other.id })).toEqual([]);
   });
 });

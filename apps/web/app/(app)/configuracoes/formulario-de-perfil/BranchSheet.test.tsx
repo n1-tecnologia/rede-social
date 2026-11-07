@@ -1406,3 +1406,215 @@ describe('12.2-17 Task 1: edit mode', () => {
     });
   });
 });
+
+describe('12.2-18 Task 2: WR-06 in the branch sheet (PFORM-53, D-646, UI-D-675)', () => {
+  const QA = adminQuestion('single_choice', {
+    title: 'Qual é a sua área de atuação?',
+    stepId: S1.id,
+    showOnProfile: true,
+    options: [
+      { id: uuid(9621), label: 'Estética', answerCount: 0 },
+      { id: uuid(9622), label: 'Odontologia', answerCount: 0 },
+    ],
+  });
+  const PUBLIC_OPENER = { ...OPENER, showOnProfile: true };
+  const BR = adminBranch({
+    openerQuestionId: OPENER.id,
+    values: [A],
+    name: 'Quem tem clínica',
+    revision: 3,
+    questionCount: 2,
+  });
+  const inside = [1, 2].map((at) =>
+    adminQuestion('short_text', {
+      title: `Pública ${at}`,
+      stepId: S2.id,
+      showOnProfile: true,
+      branchId: BR.id,
+    }),
+  );
+  const publicQuestions = [QA, PUBLIC_OPENER, ...inside];
+
+  const element = (questions: ReturnType<typeof adminQuestion>[], onSaved = vi.fn()) => (
+    <NextIntlClientProvider locale="pt-BR" messages={messages}>
+      <BranchSheet
+        open
+        branch={BR}
+        questions={questions}
+        branches={[BR]}
+        steps={[S1, S2]}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />
+    </NextIntlClientProvider>
+  );
+  const openerSelect = () => screen.getByLabelText('Pergunta que decide') as HTMLSelectElement;
+  const privacyAlert = () =>
+    document.querySelector('[data-dependents-alert="privacy"]') as HTMLElement | null;
+  const TITLE =
+    'Esta pergunta decide ramos com perguntas que aparecem no perfil e não pode deixar de aparecer agora.';
+
+  beforeEach(() => {
+    mocks.update.mockResolvedValue({ ok: true, branch: { ...BR, revision: 4 } });
+  });
+
+  it('never offers an opener that does not show on the profile while the branch holds a public question', () => {
+    const quiet = adminQuestion('yes_no', { title: 'Opinião privada', stepId: S1.id });
+    render(element([quiet, ...publicQuestions]));
+    const labels = Array.from(openerSelect().querySelectorAll('option')).map((o) => o.textContent);
+    expect(labels).not.toContain('Opinião privada');
+    expect(labels).toContain('Qual é a sua área de atuação?');
+  });
+
+  it('refuses on save when the chosen opener stopped showing on the profile, listing the public questions, and sends nothing', async () => {
+    const onSaved = vi.fn();
+    const view = render(element(publicQuestions, onSaved));
+    fireEvent.change(openerSelect(), { target: { value: QA.id } });
+    fireEvent.click(screen.getByLabelText('Odontologia'));
+    // Another admin turns that opener private and the page re-reads under the open sheet.
+    view.rerender(element([{ ...QA, showOnProfile: false }, PUBLIC_OPENER, ...inside], onSaved));
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    const alert = privacyAlert() as HTMLElement;
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(within(alert).getByText(TITLE)).toBeTruthy();
+    expect(
+      within(alert).getByText(
+        'Tire estas perguntas do perfil, ou mude o ramo delas, e tente de novo:',
+      ),
+    ).toBeTruthy();
+    expect(
+      within(alert)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Pública 1', 'Pública 2']);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(mocks.show).not.toHaveBeenCalled();
+  });
+
+  it('lists a public question at a deeper level too', async () => {
+    const deepOpener = adminQuestion('yes_no', {
+      title: 'Abre um ramo fundo',
+      stepId: S2.id,
+      showOnProfile: true,
+      branchId: BR.id,
+    });
+    const deepBranchReal = adminBranch({ openerQuestionId: deepOpener.id, values: ['true'] });
+    const deepLeaf = adminQuestion('short_text', {
+      title: 'Folha funda',
+      stepId: S2.id,
+      showOnProfile: true,
+      branchId: deepBranchReal.id,
+    });
+    const questions = [QA, PUBLIC_OPENER, deepOpener, deepLeaf];
+    const view = render(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <BranchSheet
+          open
+          branch={BR}
+          questions={questions}
+          branches={[BR, deepBranchReal]}
+          steps={[S1, S2]}
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+    fireEvent.change(openerSelect(), { target: { value: QA.id } });
+    fireEvent.click(screen.getByLabelText('Odontologia'));
+    view.rerender(
+      <NextIntlClientProvider locale="pt-BR" messages={messages}>
+        <BranchSheet
+          open
+          branch={BR}
+          questions={[{ ...QA, showOnProfile: false }, PUBLIC_OPENER, deepOpener, deepLeaf]}
+          branches={[BR, deepBranchReal]}
+          steps={[S1, S2]}
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(
+      within(privacyAlert() as HTMLElement)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Abre um ramo fundo', 'Folha funda']);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('changing the opener back takes the alert away, and the save goes through', async () => {
+    const view = render(element(publicQuestions));
+    fireEvent.change(openerSelect(), { target: { value: QA.id } });
+    fireEvent.click(screen.getByLabelText('Odontologia'));
+    view.rerender(element([{ ...QA, showOnProfile: false }, PUBLIC_OPENER, ...inside]));
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(privacyAlert()).toBeTruthy();
+    fireEvent.change(openerSelect(), { target: { value: OPENER.id } });
+    expect(privacyAlert()).toBeNull();
+  });
+
+  it('race: a server public_under_private renders the same alert and keeps the sheet open', async () => {
+    const onSaved = vi.fn();
+    mocks.update.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      issue: 'public_under_private',
+      titles: ['Pública 1', 'Pública 2'],
+    });
+    render(element(publicQuestions, onSaved));
+    fireEvent.change(nameField(), { target: { value: 'Outro nome' } });
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    const alert = privacyAlert() as HTMLElement;
+    expect(within(alert).getByText(TITLE)).toBeTruthy();
+    expect(
+      within(alert)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Pública 1', 'Pública 2']);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(mocks.show).not.toHaveBeenCalled();
+    expect(mocks.refresh).toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Editar ramo' })).toBeTruthy();
+  });
+
+  it('a server public_under_private with no titles falls back to the failure line, never an empty alert', async () => {
+    mocks.update.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      issue: 'public_under_private',
+    });
+    render(element(publicQuestions));
+    fireEvent.change(nameField(), { target: { value: 'Outro nome' } });
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect(privacyAlert()).toBeNull();
+    expect(screen.getByText('Não foi possível salvar o ramo agora. Tente de novo.')).toBeTruthy();
+  });
+
+  it('the alert sits directly above the save button', async () => {
+    mocks.update.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      issue: 'public_under_private',
+      titles: ['Pública 1'],
+    });
+    render(element(publicQuestions));
+    fireEvent.change(nameField(), { target: { value: 'Outro nome' } });
+    await act(async () => {
+      fireEvent.click(save());
+    });
+    expect((privacyAlert() as HTMLElement).nextElementSibling).toBe(save());
+  });
+});
