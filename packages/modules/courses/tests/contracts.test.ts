@@ -60,6 +60,7 @@ import {
   learnOutlineLessonSchema,
   learnOutlineModuleSchema,
   learnProgressSchema,
+  learnTrackSchema,
   lessonDetailSchema,
   lessonInputSchema,
   lessonListSchema,
@@ -1257,5 +1258,149 @@ describe('courses member lives contracts (08.5-04, D-431..D-434, COURSE-23, COUR
     expect(learnLiveSchema.safeParse({ ...full, externalUrl: 'https://x.example' }).success).toBe(
       false,
     );
+  });
+});
+
+describe('the Topo of a track and of a course (NOVF-02, D-696, D-699)', () => {
+  const learnTrack = {
+    id: id(40),
+    title: 'Trilha',
+    coverAssetId: null,
+    percent: 0,
+    coursesDone: 0,
+    total: 1,
+    currentIndex: 1,
+    lessonCount: 1,
+    durationSeconds: 0,
+    resumeCourseId: id(41),
+    mine: false,
+    suggested: true,
+    courses: [
+      {
+        id: id(41),
+        title: 'Curso',
+        coverAssetId: null,
+        state: 'a_seguir',
+        locked: false,
+        lessonCount: 1,
+        durationSeconds: 0,
+        done: 0,
+        percent: 0,
+      },
+    ],
+  };
+
+  it('top_cover_invalid is a course issue code, so the route hook turns it into details.courses', () => {
+    expect(COURSE_ISSUES).toContain('top_cover_invalid');
+    expect(COURSE_ISSUE_SET.has('top_cover_invalid')).toBe(true);
+  });
+
+  it('the create bodies: absent is null (no write), null and a uuid pass, a non-uuid names its own code, an unknown key still fails', () => {
+    const track = trackInputSchema.parse({ title: 'x' });
+    expect(track.topCoverAssetId).toBeNull();
+    expect(courseInputSchema.parse(base).topCoverAssetId).toBeNull();
+    for (const [schema, body] of [
+      [trackInputSchema, { title: 'x' }],
+      [courseInputSchema, base],
+    ] as const) {
+      expect(schema.safeParse({ ...body, topCoverAssetId: null }).success).toBe(true);
+      expect(schema.safeParse({ ...body, topCoverAssetId: id(1) }).success).toBe(true);
+      expect(issueOf({ ...body, topCoverAssetId: 'nope' }, schema)).toBe('top_cover_invalid');
+      // The card cover keeps its own code beside the Topo (the two are independent keys).
+      expect(issueOf({ ...body, coverAssetId: 'nope' }, schema)).toBe('cover_invalid');
+      expect(schema.safeParse({ ...body, topCover: id(1) }).success).toBe(false);
+    }
+    // The same asset as card cover and Topo is valid input (adjacency).
+    expect(
+      trackInputSchema.parse({ title: 'x', coverAssetId: id(1), topCoverAssetId: id(1) }),
+    ).toMatchObject({ coverAssetId: id(1), topCoverAssetId: id(1) });
+  });
+
+  it('the patch bodies: the Topo alone satisfies the one-key rule, null clears, absent stays absent, {} still fails patch_empty', () => {
+    for (const schema of [trackPatchSchema, coursePatchSchema]) {
+      expect(schema.parse({ topCoverAssetId: null })).toEqual({ topCoverAssetId: null });
+      expect(schema.parse({ topCoverAssetId: id(1) })).toEqual({ topCoverAssetId: id(1) });
+      expect(issueOf({}, schema)).toBe('patch_empty');
+      expect(issueOf({ topCoverAssetId: 'nope' }, schema)).toBe('top_cover_invalid');
+      // No default is re-applied: a patch of one other key never carries the Topo.
+      expect(schema.parse({ coverAssetId: null })).toEqual({ coverAssetId: null });
+      expect(schema.safeParse({ topCover: null }).success).toBe(false);
+    }
+  });
+
+  it('the answers: the Topo is optional and nullable on the four read schemas, a non-uuid fails, and the schemas stay strict', () => {
+    const trackDetail = {
+      id: id(1),
+      title: 'Do zero',
+      subtitle: '',
+      audience: '',
+      description: '',
+      coverAssetId: null,
+      status: 'active',
+      archivedAt: null,
+      createdAt: '2026-10-13T11:00:00.000000Z',
+      courses: [],
+      courseCount: 0,
+    };
+    const courseDetail = {
+      id: id(2),
+      title: 'Curso',
+      tagline: '',
+      description: '',
+      category: null,
+      level: null,
+      coverAssetId: null,
+      instructorName: 'Dra. Ana',
+      instructorPhotoAssetId: null,
+      outcomes: [],
+      certificateHours: null,
+      status: 'draft',
+      publishedAt: null,
+      archivedAt: null,
+      createdAt: '2026-10-13T11:00:00.000000Z',
+      products: [],
+      modules: [],
+      moduleCount: 0,
+      lessonCount: 0,
+      durationSeconds: 0,
+      hasUnreadyVideo: false,
+      unreadyLessonIds: [],
+    };
+    const learnCourse = {
+      id: id(15),
+      title: 'Curso',
+      tagline: '',
+      description: '',
+      coverAssetId: null,
+      category: null,
+      level: null,
+      instructorName: 'Dra. Ana',
+      instructorPhotoAssetId: null,
+      outcomes: [],
+      certificateHours: null,
+      locked: false,
+      modules: [],
+      progress: {
+        done: 0,
+        total: 0,
+        percent: 0,
+        nextLessonId: null,
+        firstLessonId: null,
+        firstFreeLessonId: null,
+      },
+    };
+    for (const [schema, body] of [
+      [trackDetailSchema, trackDetail],
+      [courseDetailSchema, courseDetail],
+      [learnCourseSchema, learnCourse],
+      [learnTrackSchema, learnTrack],
+    ] as const) {
+      // An older producer that never sends the key still parses (D-696).
+      expect(schema.safeParse(body).success).toBe(true);
+      expect(schema.safeParse({ ...body, topCoverAssetId: null }).success).toBe(true);
+      expect(schema.safeParse({ ...body, topCoverAssetId: id(9) }).success).toBe(true);
+      expect(schema.safeParse({ ...body, topCoverAssetId: 'nope' }).success).toBe(false);
+      expect(schema.safeParse({ ...body, topCoverUrl: 'x' }).success).toBe(false);
+    }
   });
 });

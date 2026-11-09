@@ -790,6 +790,27 @@ describe('trackStates (D-439, COURSE-35)', () => {
   const states = (view: { courses: { id: string; state: string }[] } | undefined) =>
     (view?.courses ?? []).map((item) => [item.id, item.state]);
 
+  it('NOVF-02: each track carries its own stored Topo or null, never the card cover or another track’s Topo (adjacency and empty)', () => {
+    const rows = [...lessons(C1, 1, 0), ...lessons(C2, 1, 10)];
+    const A = '50000000-0000-4000-8000-00000000000a';
+    const B = '50000000-0000-4000-8000-00000000000b';
+    const views = trackStates(
+      [
+        { ...track(1, [C1]), coverAssetId: A, topCoverAssetId: A },
+        { ...track(2, [C2]), coverAssetId: A, topCoverAssetId: null },
+        { ...track(3, [C1, C2]), coverAssetId: null, topCoverAssetId: B },
+      ],
+      [course(C1), course(C2)],
+      rows,
+    );
+    // The same asset as card cover and Topo is kept twice; null is kept as null (no fallback to A).
+    expect(views.map((view) => [view.coverAssetId, view.topCoverAssetId])).toEqual([
+      [A, A],
+      [A, null],
+      [null, B],
+    ]);
+  });
+
   it('a track of three courses (complete, started, untouched) → concluida, em_andamento, a_seguir, with the full view', () => {
     const done = lessons(C1, 1, 0, 1, { completedAt: T1, touchedAt: T1 });
     const started = patch(lessons(C2, 2, 10), 0, { touchedAt: T2 });

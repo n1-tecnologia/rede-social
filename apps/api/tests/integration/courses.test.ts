@@ -1541,6 +1541,90 @@ describe('course admin', () => {
     expect(cleared).toEqual({ ...withTop, topCoverAssetId: null });
   });
 
+  it('top cover edges (NOVF-02, course): adjacency, empty, ordering, idempotency and concurrency of the Topo', async () => {
+    const cols = (courseId: string) =>
+      adminSql<{ top: string | null; card: string | null }[]>`
+        select top_cover_asset_id::text as top, cover_asset_id::text as card
+          from public.courses where id = ${courseId}::uuid`;
+    const same = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const other = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+
+    // Adjacency: the same asset as card cover and Topo is stored twice; clearing one leaves the other.
+    const twin = await createCourse({ coverAssetId: same, topCoverAssetId: same });
+    expect(await cols(twin.id)).toEqual([{ top: same, card: same }]);
+    const topCleared = await json<CourseDetail>(
+      await patchCourse(twin.id, { topCoverAssetId: null }),
+      200,
+    );
+    expect(topCleared).toMatchObject({ coverAssetId: same, topCoverAssetId: null });
+    const cardCleared = await json<CourseDetail>(
+      await patchCourse(twin.id, { topCoverAssetId: same, coverAssetId: null }),
+      200,
+    );
+    expect(cardCleared).toMatchObject({ coverAssetId: null, topCoverAssetId: same });
+
+    // Empty: absent on create is null; an absent key on edit changes nothing; the Topo alone is a patch.
+    const bare = await createCourse();
+    expect(await cols(bare.id)).toEqual([{ top: null, card: null }]);
+    const set = await json<CourseDetail>(
+      await patchCourse(bare.id, { topCoverAssetId: other }),
+      200,
+    );
+    expect(set.topCoverAssetId).toBe(other);
+    const untouched = await json<CourseDetail>(
+      await patchCourse(bare.id, { tagline: 'Novo' }),
+      200,
+    );
+    expect(untouched).toEqual({ ...set, tagline: 'Novo' });
+    expect(await cols(bare.id)).toEqual([{ top: other, card: null }]);
+
+    // Ordering: a Topo write moves no published course in the member catalogue
+    // (published_at desc, id desc).
+    const published: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const course = await createCourse({ title: `${PREFIX} ordem ${i}` });
+      expect((await setStatus(course.id, 'published')).status).toBe(200);
+      published.push(course.id);
+    }
+    const catalogue = async () =>
+      (
+        await json<{ items: { id: string }[] }>(
+          await request('GET', '/v1/courses/learn/courses', tokens.demoMember),
+          200,
+        )
+      ).items.map((item) => item.id);
+    const before = await catalogue();
+    const mine = before.filter((id) => published.includes(id));
+    expect(mine).toEqual([...published].reverse());
+    await json<CourseDetail>(
+      await patchCourse(published[1] ?? '', { topCoverAssetId: other }),
+      200,
+    );
+    expect(await catalogue()).toEqual(before);
+
+    // Idempotency: the same edit twice stores the same columns and answers the same body.
+    const first = await json<CourseDetail>(
+      await patchCourse(bare.id, { topCoverAssetId: same }),
+      200,
+    );
+    const stored = await cols(bare.id);
+    const second = await json<CourseDetail>(
+      await patchCourse(bare.id, { topCoverAssetId: same }),
+      200,
+    );
+    expect(second).toEqual(first);
+    expect(await cols(bare.id)).toEqual(stored);
+
+    // Concurrency: a card-only edit and a Topo-only edit in parallel leave BOTH columns set.
+    const racer = await createCourse();
+    const [a, b] = await Promise.all([
+      patchCourse(racer.id, { coverAssetId: same }),
+      patchCourse(racer.id, { topCoverAssetId: other }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(await cols(racer.id)).toEqual([{ top: other, card: same }]);
+  });
+
   it('08.4 D-418: the course routes refuse the link key and read the products the product route wrote; the detail lists them archived included in product catalogue order, and with the store off the detail still answers and the gate is open (D-405)', async () => {
     const course = await createCourse();
     const coursesBefore = await adminSql<{ n: number }[]>`
@@ -3039,6 +3123,75 @@ describe('tracks', () => {
       await patchTrack(withTop.id, { topCoverAssetId: null }, tokens.labAdmin, HOSTS.lab),
     );
     expect((await json<TrackDetail>(await getTrack(withTop.id), 200)).topCoverAssetId).toBe(top);
+  });
+
+  it('top cover edges (NOVF-02, track): adjacency, empty, ordering, idempotency and concurrency of the Topo', async () => {
+    const cols = (trackId: string) =>
+      adminSql<{ top: string | null; card: string | null }[]>`
+        select top_cover_asset_id::text as top, cover_asset_id::text as card
+          from public.course_tracks where id = ${trackId}::uuid`;
+    const same = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const other = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+
+    // Adjacency: the same asset as card cover and Topo is stored in two independent columns, and
+    // clearing one leaves the other.
+    const twin = await createTrack({ coverAssetId: same, topCoverAssetId: same });
+    expect(await cols(twin.id)).toEqual([{ top: same, card: same }]);
+    const topCleared = await json<TrackDetail>(
+      await patchTrack(twin.id, { topCoverAssetId: null }),
+      200,
+    );
+    expect(topCleared).toMatchObject({ coverAssetId: same, topCoverAssetId: null });
+    const cardCleared = await json<TrackDetail>(
+      await patchTrack(twin.id, { topCoverAssetId: same, coverAssetId: null }),
+      200,
+    );
+    expect(cardCleared).toMatchObject({ coverAssetId: null, topCoverAssetId: same });
+
+    // Empty: an absent key on create is null; null clears; an absent key on edit changes nothing;
+    // the Topo alone satisfies the one-key rule.
+    const bare = await createTrack();
+    expect(await cols(bare.id)).toEqual([{ top: null, card: null }]);
+    const set = await json<TrackDetail>(await patchTrack(bare.id, { topCoverAssetId: other }), 200);
+    expect(set.topCoverAssetId).toBe(other);
+    const untouched = await json<TrackDetail>(await patchTrack(bare.id, { subtitle: 'Novo' }), 200);
+    expect(untouched).toEqual({ ...set, subtitle: 'Novo' });
+    expect(await cols(bare.id)).toEqual([{ top: other, card: null }]);
+    const empty = await patchTrack(bare.id, {});
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as Envelope).error.details).toEqual({ courses: 'patch_empty' });
+
+    // Ordering: a Topo write moves no track in the list (created_at desc, id desc).
+    const [t1, t2, t3] = [await createTrack(), await createTrack(), await createTrack()];
+    const before = (await listTracks('limit=50')).items.map((row) => row.id);
+    expect(before.indexOf(t3?.id ?? '')).toBeLessThan(before.indexOf(t2?.id ?? ''));
+    expect(before.indexOf(t2?.id ?? '')).toBeLessThan(before.indexOf(t1?.id ?? ''));
+    await json<TrackDetail>(await patchTrack(t2?.id ?? '', { topCoverAssetId: other }), 200);
+    const after = (await listTracks('limit=50')).items.map((row) => row.id);
+    expect(after).toEqual(before);
+
+    // Idempotency: the same edit twice stores the same columns and answers the same body.
+    const first = await json<TrackDetail>(
+      await patchTrack(t1?.id ?? '', { topCoverAssetId: same }),
+      200,
+    );
+    const stored = await cols(t1?.id ?? '');
+    const second = await json<TrackDetail>(
+      await patchTrack(t1?.id ?? '', { topCoverAssetId: same }),
+      200,
+    );
+    expect(second).toEqual(first);
+    expect(await cols(t1?.id ?? '')).toEqual(stored);
+
+    // Concurrency: an edit of only the card cover and an edit of only the Topo, in parallel, leave
+    // BOTH columns set (each writes only the keys it carries, on the locked row).
+    const racer = await createTrack();
+    const [a, b] = await Promise.all([
+      patchTrack(racer.id, { coverAssetId: same }),
+      patchTrack(racer.id, { topCoverAssetId: other }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(await cols(racer.id)).toEqual([{ top: other, card: same }]);
   });
 
   it('order (COURSE-10, D-414, D-415, P39, P40, P41, P42): two published courses take positions 1, 2 with courseCount 2; a draft, an archived, a rede-lab, an unknown and a non-uuid id are 400 course_invalid with nothing written; a duplicate is 400; the same list twice keeps the rows; the reversed list swaps positions and keeps created_at; [] clears; the same course sits in two tracks', async () => {

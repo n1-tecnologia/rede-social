@@ -1342,6 +1342,60 @@ describe('NOVF-01 track texts on the member read', () => {
     expect(after.tracks.find((track) => track.id === withTop)?.topCoverAssetId).toBe(top);
   });
 
+  it('NOVF-02 tracks Topo edges: the same asset as card cover and Topo reads twice, a Topo write moves no track, the same edit twice reads the same, and clearing the Topo leaves the card cover', async () => {
+    await sweepTracks();
+    const tenantId = await demoTenantId();
+    const same = await readyCoverImage(tenantId, 'edge-same');
+    const other = await readyCoverImage(tenantId, 'edge-other');
+    const first = await adminTrack({ title: `${NVF} borda 1` });
+    const second = await adminTrack({ title: `${NVF} borda 2` });
+    const third = await adminTrack({ title: `${NVF} borda 3` });
+    const order = async () => (await readTracksText(tokens.member)).tracks.map((track) => track.id);
+    const before = await order();
+    expect(before.filter((id) => [first, second, third].includes(id))).toEqual([
+      third,
+      second,
+      first,
+    ]);
+
+    // Adjacency: one asset as card cover and Topo on the same track, a different Topo on the next.
+    expect(
+      (
+        await admin('PATCH', `/v1/courses/tracks/${second}`, {
+          coverAssetId: same,
+          topCoverAssetId: same,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await admin('PATCH', `/v1/courses/tracks/${first}`, { topCoverAssetId: other })).status,
+    ).toBe(200);
+    // Ordering: neither write moved a track.
+    expect(await order()).toEqual(before);
+    const read = (await readTracksText(tokens.member)).tracks;
+    expect(read.find((track) => track.id === second)).toMatchObject({
+      coverAssetId: same,
+      topCoverAssetId: same,
+    });
+    expect(read.find((track) => track.id === first)).toMatchObject({
+      coverAssetId: null,
+      topCoverAssetId: other,
+    });
+    expect(read.find((track) => track.id === third)).toMatchObject({ topCoverAssetId: null });
+
+    // Idempotency: the same edit twice reads the same; clearing the Topo leaves the card cover.
+    expect(
+      (await admin('PATCH', `/v1/courses/tracks/${first}`, { topCoverAssetId: other })).status,
+    ).toBe(200);
+    expect((await readTracksText(tokens.member)).tracks).toEqual(read);
+    expect(
+      (await admin('PATCH', `/v1/courses/tracks/${second}`, { topCoverAssetId: null })).status,
+    ).toBe(200);
+    expect(
+      (await readTracksText(tokens.member)).tracks.find((track) => track.id === second),
+    ).toMatchObject({ coverAssetId: same, topCoverAssetId: null });
+  });
+
   it('NOVF-01 empty school: a tenant with no active track still answers { tracks: [] }', async () => {
     await sweepTracks();
     await sweepFile();
