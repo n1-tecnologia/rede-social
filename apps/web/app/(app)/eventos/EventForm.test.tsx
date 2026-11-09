@@ -104,28 +104,43 @@ vi.mock('./actions', () => ({
   deleteEventAction: remove,
 }));
 
-/** The options the form hands the upload hook: the cover test drives `onPicked`/`onCompleted`. */
-const uploadOptions = vi.hoisted(() => ({
-  current: null as null | {
+/**
+ * One stateful stand-in per `useSignedUpload` call, in the form's own order: the first is the
+ * horizontal cover, the second the vertical poster (12.3-08, UI-D-693). `uploads.list[n]` lets a test
+ * finish or hold an upload and reads what the form asked of it.
+ */
+type UploadStub = {
+  pick: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
+  options: {
     onPicked?: (file: File) => void;
     onCompleted: (asset: { id: string; variants: { width: number }[] }) => void;
-  },
-}));
+  };
+  setState: (state: string) => void;
+  setProgress: (percent: number) => void;
+};
+const uploads = vi.hoisted(() => ({ list: [] as UploadStub[] }));
 
-vi.mock('@/components/media/useSignedUpload', () => ({
-  useSignedUpload: (options: NonNullable<typeof uploadOptions.current>) => {
-    uploadOptions.current = options;
-    return {
-      state: 'idle',
-      progress: 0,
-      error: null,
-      pick: vi.fn(),
-      reject: vi.fn(),
-      cancel: vi.fn(),
-      reset: vi.fn(),
-    };
-  },
-}));
+vi.mock('@/components/media/useSignedUpload', async () => {
+  const React = await import('react');
+  return {
+    useSignedUpload: (options: UploadStub['options']) => {
+      const [state, setState] = React.useState('idle');
+      const [progress, setProgress] = React.useState(0);
+      const slot = React.useRef<number | null>(null);
+      if (slot.current === null) slot.current = uploads.list.length;
+      const own = React.useRef({
+        pick: vi.fn(),
+        reject: vi.fn(),
+        cancel: vi.fn(),
+        reset: vi.fn(),
+      }).current;
+      uploads.list[slot.current] = { ...own, options, setState, setProgress };
+      return { state, progress, error: null, ...own };
+    },
+  };
+});
 
 const { EventForm } = await import('./EventForm');
 
@@ -227,6 +242,7 @@ beforeEach(() => {
   ]) {
     mock.mockReset();
   }
+  uploads.list.length = 0;
   create.mockResolvedValue({ ok: true, eventId: EVENT_ID });
   update.mockResolvedValue({ ok: true, eventId: EVENT_ID });
   fetchMock.mockReset().mockImplementation(async () => json(PAULISTA));
@@ -1059,8 +1075,8 @@ describe('EventForm — the cover shows as soon as it is uploaded (2026-10-06)',
 
     // `complete` answers an image still `processing`: no variant yet.
     act(() => {
-      uploadOptions.current?.onPicked?.(new File(['jpg'], 'capa.jpg', { type: 'image/jpeg' }));
-      uploadOptions.current?.onCompleted({
+      uploads.list[0]?.options.onPicked?.(new File(['jpg'], 'capa.jpg', { type: 'image/jpeg' }));
+      uploads.list[0]?.options.onCompleted({
         id: '0c000000-0000-4000-8000-0000000000c1',
         variants: [],
       });
@@ -1082,64 +1098,188 @@ describe('EventForm — the cover shows as soon as it is uploaded (2026-10-06)',
   });
 });
 
-describe('EventForm — a cover field per shape (2026-10-24, the standing one front only)', () => {
-  it('the standing cover is its own field: picked, shown, replaced and removed in the browser, never uploaded', () => {
-    const made: string[] = [];
-    const revoked: string[] = [];
-    const originals = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
-    const setStatic = (name: 'createObjectURL' | 'revokeObjectURL', value: unknown) =>
-      Object.defineProperty(URL, name, { configurable: true, writable: true, value });
-    setStatic('createObjectURL', () => {
-      const url = `blob:em-pe-${made.length + 1}`;
-      made.push(url);
-      return url;
+describe('EventForm — the vertical poster as a real, independent upload (NOVF-04, UI-D-693)', () => {
+  const POSTER = '0b000000-0000-4000-8000-0000000000b1';
+  const NEW_POSTER = '0b000000-0000-4000-8000-0000000000b2';
+  const COVER = '0c000000-0000-4000-8000-0000000000c1';
+  const asset = (id: string) => ({ id, variants: [{ width: 640 }] });
+  const done = (slot: number, id: string) =>
+    act(() => {
+      uploads.list[slot]?.options.onCompleted(asset(id));
     });
-    setStatic('revokeObjectURL', (url: string) => revoked.push(url));
-    try {
-      renderCreate();
-      const field = document.querySelector('[data-event-poster-field]') as HTMLElement;
-      expect(field.textContent).toContain(lookup('events', 'form.cover.as.poster'));
-      // The lying field keeps its own hooks; the standing one starts empty.
-      expect(document.querySelector('[data-event-cover-preview]')).not.toBeNull();
-      expect(field.querySelector('[data-event-poster-local]')).toBeNull();
+  const hold = (slot: number, state: string, progress = 0) =>
+    act(() => {
+      uploads.list[slot]?.setState(state);
+      uploads.list[slot]?.setProgress(progress);
+    });
+  const posterField = () => document.querySelector('[data-event-poster-field]') as HTMLElement;
+  const posterError = () => document.querySelector('[data-event-poster-error]');
+  const posterRemove = () =>
+    screen.queryByRole('button', { name: lookup('events', 'form.cover.posterRemove') });
+  const submitForm = async () => {
+    await act(async () => {
+      fireEvent.submit(document.querySelector('[data-event-form]') as HTMLFormElement);
+    });
+  };
+  const sentBody = (mock: typeof update, arg = 0) =>
+    mock.mock.calls[0]?.[arg] as Record<string, unknown>;
 
-      const input = field.querySelector('[data-event-poster-input]') as HTMLInputElement;
-      fireEvent.change(input, {
-        target: { files: [new File(['jpg'], 'em-pe.jpg', { type: 'image/jpeg' })] },
-      });
-      expect(field.querySelector('[data-event-poster-local]')?.getAttribute('src')).toBe(
-        'blob:em-pe-1',
-      );
-      // Nothing went through the upload machine: the lying cover is untouched.
-      expect(uploadOptions.current?.onCompleted).toBeDefined();
-      expect(document.querySelector('[data-event-cover-preview] img')).toBeNull();
+  const stored = {
+    title: 'Encontro anual',
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    format: 'online' as const,
+    venueName: '',
+    address: '',
+    meetingUrl: 'https://meet.example.com/x',
+    start: { date: '2026-10-12', time: '19:00' },
+    end: { date: '2026-10-12', time: '21:00' },
+  };
+  const renderEditWith = (initial: Record<string, unknown> = {}) =>
+    render(
+      <EventForm
+        mode="edit"
+        eventId={EVENT_ID}
+        initial={{ ...stored, ...initial }}
+        tenantName="Rede Demo"
+        zoneLabel={ZONE}
+      />,
+    );
 
-      // Replaced: the old picture's URL is released.
-      fireEvent.change(input, {
-        target: { files: [new File(['png'], 'outra.png', { type: 'image/png' })] },
-      });
-      expect(field.querySelector('[data-event-poster-local]')?.getAttribute('src')).toBe(
-        'blob:em-pe-2',
-      );
-      expect(revoked).toContain('blob:em-pe-1');
+  it('1. the poster is a second upload of its own: a poster and a cover are two different ids in the save', async () => {
+    renderCreate();
+    expect(uploads.list).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /Online/ }));
+    type('event-title', 'Encontro anual');
+    type('event-start-date', '2026-10-12');
+    type('event-start-time', '19:00');
+    type('event-url', 'https://meet.example.com/x');
+    await done(0, COVER);
+    await done(1, POSTER);
+    await submitForm();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(sentBody(create)).toMatchObject({ coverAssetId: COVER, posterAssetId: POSTER });
+  });
 
-      // Not an image: ignored.
-      fireEvent.change(input, {
-        target: { files: [new File(['%PDF'], 'doc.pdf', { type: 'application/pdf' })] },
-      });
-      expect(field.querySelector('[data-event-poster-local]')?.getAttribute('src')).toBe(
-        'blob:em-pe-2',
-      );
+  it('2. every save sends the poster key: null for a poster never set, never omitted', async () => {
+    renderCreate();
+    fireEvent.click(screen.getByRole('button', { name: /Online/ }));
+    type('event-title', 'Sem pôster');
+    type('event-start-date', '2026-10-12');
+    type('event-start-time', '19:00');
+    type('event-url', 'https://meet.example.com/x');
+    await submitForm();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect('posterAssetId' in sentBody(create)).toBe(true);
+    expect(sentBody(create).posterAssetId).toBeNull();
+  });
 
-      fireEvent.click(
-        screen.getByRole('button', { name: lookup('events', 'form.cover.posterRemove') }),
-      );
-      expect(field.querySelector('[data-event-poster-local]')).toBeNull();
-      expect(revoked).toContain('blob:em-pe-2');
-    } finally {
-      setStatic('createObjectURL', originals.create);
-      setStatic('revokeObjectURL', originals.revoke);
-    }
+  it('3. an edit that changes something else re-sends the stored poster id (a PUT replaces the whole event)', async () => {
+    renderEditWith({ posterAssetId: POSTER, posterVariantWidths: [640] });
+    type('event-title', 'Outro nome');
+    await submitForm();
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update.mock.calls[0]?.[0]).toBe(EVENT_ID);
+    expect(sentBody(update, 1).posterAssetId).toBe(POSTER);
+  });
+
+  it('4. removing the stored poster sends null, and a poster-only edit is a real change', async () => {
+    renderEditWith({ posterAssetId: POSTER, posterVariantWidths: [640] });
+    fireEvent.click(posterRemove() as HTMLElement);
+    expect(posterRemove()).toBeNull();
+    // Leaving now asks first: the poster alone made the form dirty.
+    fireEvent.click(screen.getByRole('button', { name: E.form.close }));
+    expect(screen.getByRole('dialog', { name: E.confirm.discard.titleEdit })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar editando' }));
+    await submitForm();
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(sentBody(update, 1).posterAssetId).toBeNull();
+  });
+
+  it('5. the stored poster opens in its own frame and the add or change label follows it', () => {
+    renderEditWith({ posterAssetId: POSTER, posterVariantWidths: [640] });
+    expect(posterRemove()).not.toBeNull();
+    expect(
+      screen.getAllByRole('button', { name: lookup('events', 'form.cover.posterChange') }).length,
+    ).toBeGreaterThan(0);
+    cleanup();
+    renderEditWith();
+    expect(posterRemove()).toBeNull();
+    expect(
+      screen.getAllByRole('button', { name: lookup('events', 'form.cover.posterAdd') }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('6. the poster has its own progress and Cancelar; Save is disabled while EITHER image uploads', async () => {
+    renderEditWith();
+    type('event-title', 'Outro nome');
+    expect(submitButton()?.disabled).toBe(false);
+
+    await hold(1, 'progress', 40);
+    expect(submitButton()?.disabled).toBe(true);
+    const bar = within(posterField()).getByRole('progressbar');
+    expect(bar.getAttribute('aria-valuenow')).toBe('40');
+    // Only the poster block draws a bar.
+    expect(document.querySelectorAll('[role="progressbar"]')).toHaveLength(1);
+    fireEvent.click(within(posterField()).getByRole('button', { name: lookup('media', 'cancel') }));
+    expect(uploads.list[1]?.cancel).toHaveBeenCalledTimes(1);
+    expect(uploads.list[0]?.cancel).not.toHaveBeenCalled();
+
+    await hold(1, 'idle');
+    expect(submitButton()?.disabled).toBe(false);
+    await hold(0, 'preparing');
+    expect(submitButton()?.disabled).toBe(true);
+    await hold(0, 'idle');
+    expect(submitButton()?.disabled).toBe(false);
+  });
+
+  it('7. poster_invalid shows its own sentence under the poster block only, keeps the draft and the top card stays quiet', async () => {
+    update.mockResolvedValue({ ok: false, code: 'poster_invalid' });
+    renderEditWith();
+    await done(1, NEW_POSTER);
+    await submitForm();
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(posterError()?.textContent).toBe(
+      'Não foi possível usar esta imagem como capa vertical. Escolha outra.',
+    );
+    expect(posterError()?.getAttribute('role')).toBe('alert');
+    expect(within(posterField()).getByText(/capa vertical\. Escolha outra/)).toBeTruthy();
+    // The cover's own refusal line is a different one.
+    expect(alerts()).toHaveLength(1);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('8. the poster helper names the fallbacks and the tenant', () => {
+    renderEditWith();
+    expect(posterField().textContent).toContain(
+      'Opcional. Sem capa vertical, a lista usa a capa horizontal ou as cores de Rede Demo.',
+    );
+  });
+
+  it('9. a poster picked while a cover is set stays independent: the horizontal cover id is untouched', async () => {
+    renderEditWith({ coverAssetId: COVER, coverVariantWidths: [640] });
+    await done(1, NEW_POSTER);
+    type('event-title', 'Outro nome');
+    await submitForm();
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(sentBody(update, 1)).toMatchObject({ coverAssetId: COVER, posterAssetId: NEW_POSTER });
+  });
+
+  it('10. the pick goes through the poster upload machine: its input, a drop on the frame', () => {
+    renderEditWith();
+    const file = new File(['x'], 'p.jpg', { type: 'image/jpeg' });
+    fireEvent.change(posterField().querySelector('[data-event-poster-input]') as HTMLElement, {
+      target: { files: [file] },
+    });
+    expect(uploads.list[1]?.pick).toHaveBeenCalledWith(file);
+    expect(uploads.list[0]?.pick).not.toHaveBeenCalled();
+    const dropped = new File(['y'], 'q.jpg', { type: 'image/jpeg' });
+    fireEvent.drop(posterField().querySelector('[data-event-poster-preview]') as HTMLElement, {
+      dataTransfer: { files: [dropped] },
+    });
+    expect(uploads.list[1]?.pick).toHaveBeenLastCalledWith(dropped);
+    expect(uploads.list[0]?.pick).not.toHaveBeenCalled();
   });
 });
 
