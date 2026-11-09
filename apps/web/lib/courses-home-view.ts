@@ -12,6 +12,7 @@ import {
   coursePercent,
   type HomeHeroView,
   memberCourseHref,
+  optionalWords,
   streakBadgeView,
 } from '@/lib/courses-member-view';
 import { type CoursesTranslator, formatLessonDuration } from '@/lib/courses-view';
@@ -413,12 +414,6 @@ interface TrackCardInput {
   audience?: string;
 }
 
-/** A manager's optional words, trimmed; `null` when there is nothing to show. */
-function trackWords(value: string | undefined): string | null {
-  const text = value?.trim() ?? '';
-  return text ? text : null;
-}
-
 function fromTrack(track: LearnTrack): TrackCardInput {
   const current = track.courses[Math.min(track.currentIndex, track.courses.length) - 1];
   return {
@@ -485,8 +480,8 @@ function trackCardView(
     percent,
     ariaLabel: t('courses.member.home.shelf.aria', { course: input.title, state: line }),
     featured: input.mine || input.suggested,
-    subtitle: trackWords(input.subtitle),
-    audience: trackWords(input.audience),
+    subtitle: optionalWords(input.subtitle),
+    audience: optionalWords(input.audience),
   };
 }
 

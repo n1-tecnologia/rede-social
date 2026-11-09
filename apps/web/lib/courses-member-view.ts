@@ -2085,8 +2085,13 @@ export interface TrackDetailView {
   description: string | null;
 }
 
-/** A manager's optional words, trimmed; `null` when there is nothing to show. */
-function optionalWords(value: string | undefined): string | null {
+/**
+ * A track's optional words (subtitle, "Para quem é", description), trimmed. The member read sends
+ * an unwritten text as an empty string (12.3-01), so empty, blank and absent all read as `null`:
+ * nothing is drawn for it, no heading and no gap (UI-D-692). The ONE reading both the track cards
+ * and the track page use.
+ */
+export function optionalWords(value: string | undefined): string | null {
   const text = value?.trim() ?? '';
   return text ? text : null;
 }
