@@ -329,6 +329,16 @@ describe('the two galleries — "Meus eventos" and "Outros eventos"', () => {
     expect(view.coverAlt).toBe('Capa do evento Encontro anual');
     expect(view.grayscale).toBe(false);
 
+    // 12.3-08: the card carries both images as stored; the list picks (lib/cover-fallback.ts).
+    expect(view.posterAssetId).toBeNull();
+    expect(view.posterVariantWidths).toEqual([]);
+    const withPoster = eventCardView(
+      event({ posterAssetId: '44444444-4444-4444-8444-444444444444', posterVariantWidths: [640] }),
+      { tz: SP, nowMs: before, t },
+    );
+    expect(withPoster.posterAssetId).toBe('44444444-4444-4444-8444-444444444444');
+    expect(withPoster.posterVariantWidths).toEqual([640]);
+
     const mine = eventCardView(event({ viewerStatus: 'going' }), { tz: SP, nowMs: before, t });
     expect(mine.badge.label).toBe('Inscrito');
     expect(mine.note).toBe('Faltam 11 dias');

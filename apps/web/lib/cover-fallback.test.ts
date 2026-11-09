@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { courseTopCover, moduleCardCover, moduleTopCover, trackTopCover } from './cover-fallback';
+import {
+  courseTopCover,
+  eventListPoster,
+  moduleCardCover,
+  moduleTopCover,
+  trackTopCover,
+} from './cover-fallback';
 
 /**
  * 12.3-07 — the fallback ladder of the Topo (NOVF-02, UI-D-692), computed in the web and never in the
@@ -75,5 +81,47 @@ describe('the Topo of a module', () => {
   it('is null with no image anywhere, so the page draws the brand gradient', () => {
     expect(moduleTopCover({ coverAssetId: null, topCoverAssetId: null }, null)).toBeNull();
     expect(moduleTopCover({}, null)).toBeNull();
+  });
+});
+
+/**
+ * 12.3-08 — the poster of an event's list card (NOVF-04, UI-D-693): the vertical poster, else the
+ * horizontal cover (cropped as the list always did), else null (the brand gradient). The event's own
+ * page never calls this: it keeps the horizontal cover.
+ */
+const POSTER = '44444444-4444-4444-8444-444444444444';
+
+describe('the list poster of an event', () => {
+  it('is its own vertical poster, with the poster ladder, when it has one', () => {
+    expect(
+      eventListPoster({
+        posterAssetId: POSTER,
+        posterVariantWidths: [320, 640],
+        coverAssetId: CARD,
+        coverVariantWidths: [480, 960],
+      }),
+    ).toEqual({ assetId: POSTER, widths: [320, 640] });
+  });
+
+  it('falls back to the horizontal cover and its ladder (poster null or absent from an older answer)', () => {
+    const cover = { coverAssetId: CARD, coverVariantWidths: [480, 960] };
+    expect(eventListPoster({ ...cover, posterAssetId: null, posterVariantWidths: [] })).toEqual({
+      assetId: CARD,
+      widths: [480, 960],
+    });
+    expect(eventListPoster(cover)).toEqual({ assetId: CARD, widths: [480, 960] });
+  });
+
+  it('is null with neither image, so the card draws the brand gradient', () => {
+    expect(eventListPoster({ coverAssetId: null, coverVariantWidths: [] })).toEqual({
+      assetId: null,
+      widths: [],
+    });
+  });
+
+  it('keeps a poster without a cover, and a poster without a ladder yet reads an empty one', () => {
+    expect(
+      eventListPoster({ posterAssetId: POSTER, coverAssetId: null, coverVariantWidths: [] }),
+    ).toEqual({ assetId: POSTER, widths: [] });
   });
 });

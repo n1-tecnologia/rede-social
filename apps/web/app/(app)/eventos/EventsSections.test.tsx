@@ -163,3 +163,93 @@ describe('EventsSections', () => {
     ]);
   });
 });
+
+/**
+ * 12.3-08 (NOVF-04, UI-D-693): the list card draws the vertical poster when the event has one, else
+ * the horizontal cover as it always did, else the brand gradient. The event's own page keeps the
+ * horizontal cover (it never reads the poster; see `lib/events-view.ts`'s detail view).
+ */
+describe('EventsSections — the poster of the list card (NOVF-04, UI-D-693)', () => {
+  const POSTER = '0b000000-0000-4000-8000-0000000000b1';
+  const COVER = '0c000000-0000-4000-8000-0000000000c1';
+  const imageSrc = (id: string) =>
+    screen
+      .getByRole('link', { name: new RegExp(`Evento ${id},`) })
+      .querySelector('[data-testid="event-cover-media"] img')
+      ?.getAttribute('src') ?? '';
+
+  it('5. poster first: a card with a poster and a cover draws the poster, not the cover', () => {
+    // happy-dom loads no image: say every picture decoded, so `MediaImage` keeps its `<img>`.
+    const decoded = vi
+      .spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get')
+      .mockReturnValue(640);
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{
+          mine: [],
+          others: [
+            card('both', {
+              posterAssetId: POSTER,
+              posterVariantWidths: [640],
+              coverAssetId: COVER,
+              coverVariantWidths: [640],
+            }),
+          ],
+        }}
+      />,
+    );
+    expect(imageSrc('both')).toContain(POSTER);
+    expect(imageSrc('both')).not.toContain(COVER);
+    decoded.mockRestore();
+  });
+
+  it('6. without a poster the card keeps the horizontal cover cropped, as before; a null or an older answer is the same', () => {
+    const decoded = vi
+      .spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get')
+      .mockReturnValue(640);
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{
+          mine: [],
+          others: [
+            card('nulled', {
+              posterAssetId: null,
+              posterVariantWidths: [],
+              coverAssetId: COVER,
+              coverVariantWidths: [640],
+            }),
+            card('older', { coverAssetId: COVER, coverVariantWidths: [640] }),
+          ],
+        }}
+      />,
+    );
+    expect(imageSrc('nulled')).toContain(COVER);
+    expect(imageSrc('older')).toContain(COVER);
+    decoded.mockRestore();
+  });
+
+  it('7. a poster with no horizontal cover still draws the poster', () => {
+    const decoded = vi
+      .spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get')
+      .mockReturnValue(640);
+    render(
+      <EventsSections
+        tenantName={TENANT}
+        initial={{
+          mine: [],
+          others: [card('only', { posterAssetId: POSTER, posterVariantWidths: [640] })],
+        }}
+      />,
+    );
+    expect(imageSrc('only')).toContain(POSTER);
+    decoded.mockRestore();
+  });
+
+  it('8. with neither image the card draws the brand gradient', () => {
+    render(<EventsSections tenantName={TENANT} initial={{ mine: [], others: [card('none')] }} />);
+    expect(screen.getByTestId('event-cover-fallback')).toBeTruthy();
+    expect(screen.queryByTestId('event-cover-media')).toBeNull();
+  });
+});
