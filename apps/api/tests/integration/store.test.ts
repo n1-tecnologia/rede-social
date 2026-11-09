@@ -4115,7 +4115,7 @@ describe('store front writes (12.3-12)', () => {
     // runs; the save waits on the delete, then finishes after the commit.
     await freshStore();
     const name = `${PREFIX} race db`;
-    let saving: Promise<Response> | undefined;
+    let saving: Response | Promise<Response> | undefined;
     await adminSql.begin(async (tx) => {
       await tx`
         insert into public.store_products (tenant_id, created_by_user_id, name, price_cents, category_id)
