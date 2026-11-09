@@ -472,3 +472,58 @@ describe('GET /v1/me/counters — the live refetch answers exactly the bootstrap
     expect(restored.counters.conversationsBadge).toBe('dot');
   });
 });
+
+describe('the phone menu on the bootstrap, never on the public host answer (12.3-15, D-697, D-698)', () => {
+  const MENU = { bar: ['home', 'courses', 'store'], top: ['chat', 'events'], hidden: ['tracks'] };
+  const sweep = () =>
+    adminSql`update public.tenants set branding = branding - 'phoneMenu' where slug = 'rede-demo'`;
+
+  afterAll(async () => {
+    await sweep();
+  });
+
+  it('18b. no menu saved: the bootstrap carries no phoneMenu key', async () => {
+    await sweep();
+    const body = bootstrapSchema.parse(await (await bootstrap()).json());
+    expect('phoneMenu' in body.tenant.branding).toBe(false);
+  });
+
+  it('19. a member, a support member and an admin read the same saved menu, and the public host answer has no phoneMenu', async () => {
+    const adminToken = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+    const saved = await api.request('/v1/admin/branding/phone-menu', {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        'content-type': 'application/json',
+        'x-tenant-host': HOSTS.demo,
+      },
+      body: JSON.stringify(MENU),
+    });
+    expect(saved.status).toBe(200);
+    try {
+      for (const email of [MEMBER, 'support@rede-demo.local', 'admin@rede-demo.local']) {
+        const res = await api.request('/v1/me/bootstrap', {
+          headers: {
+            authorization: `Bearer ${await signInAs(email, SEED_PASSWORD)}`,
+            'x-tenant-host': HOSTS.demo,
+          },
+        });
+        expect(res.status, email).toBe(200);
+        const body = bootstrapSchema.parse(await res.json());
+        // Verbatim, in the saved order, for every role (D-698).
+        expect(body.tenant.branding.phoneMenu, email).toEqual(MENU);
+      }
+
+      const publicRes = await api.request(
+        `/v1/public/tenants/by-host?host=${encodeURIComponent(HOSTS.demo)}`,
+      );
+      expect(publicRes.status).toBe(200);
+      const publicBody = (await publicRes.json()) as { branding: Record<string, unknown> };
+      expect(publicBody.branding).not.toHaveProperty('phoneMenu');
+      expect(JSON.stringify(publicBody)).not.toContain('phoneMenu');
+      expect(hostTenantSchema.strict().safeParse(publicBody).success).toBe(true);
+    } finally {
+      await sweep();
+    }
+  });
+});

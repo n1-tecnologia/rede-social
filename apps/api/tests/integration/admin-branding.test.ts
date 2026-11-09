@@ -664,6 +664,91 @@ describe('phone menu rules and the delete (12.3-15, D-697, D-698, OQ-5)', () => 
   });
 });
 
+describe('phone menu edges (12.3-15, NOVF-10)', () => {
+  const body = (bar: string[], top: string[] = [], hidden: string[] = []) => ({ bar, top, hidden });
+  const keys = (n: number, prefix = 'k') => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+
+  it('phone menu adjacency: the bar of 2 and of 6 is accepted, 1 and 7 are 400; the top of 2 is accepted, 3 is 400', async () => {
+    for (const bar of [
+      ['home', 'a'],
+      ['home', ...keys(5)],
+    ]) {
+      expect((await putMenu(tokens.admin, body(bar))).status, `bar ${bar.length}`).toBe(200);
+      expect(await storedMenu(ids.demo)).toEqual(body(bar));
+    }
+    for (const [bar, code] of [
+      [['home'], 'bar_too_small'],
+      [['home', ...keys(6)], 'bar_too_large'],
+    ] as const) {
+      const res = await putMenu(tokens.admin, body([...bar]));
+      expect(res.status, code).toBe(400);
+      expect((await envelope(res)).error.details).toEqual({ phoneMenu: code });
+    }
+    const last = body(['home', ...keys(5)]);
+    expect(await storedMenu(ids.demo)).toEqual(last);
+
+    expect((await putMenu(tokens.admin, body(['home', 'a'], ['b', 'c']))).status).toBe(200);
+    const three = await putMenu(tokens.admin, body(['home', 'a'], ['b', 'c', 'd']));
+    expect(three.status).toBe(400);
+    expect((await envelope(three)).error.details).toEqual({ phoneMenu: 'top_too_large' });
+    expect(await storedMenu(ids.demo)).toEqual(body(['home', 'a'], ['b', 'c']));
+  });
+
+  it('phone menu adjacency: a key in two lists is 400; 16 keys in a list pass the schema and 17 are refused', async () => {
+    expect((await putMenu(tokens.admin, PHONE_MENU)).status).toBe(200);
+    const twice = await putMenu(tokens.admin, body(['home', 'a'], [], ['a']));
+    expect(twice.status).toBe(400);
+    expect((await envelope(twice)).error.details).toEqual({ phoneMenu: 'key_repeated' });
+
+    const sixteen = body(['home', 'a'], [], keys(16, 'h'));
+    expect((await putMenu(tokens.admin, sixteen)).status).toBe(200);
+    expect(await storedMenu(ids.demo)).toEqual(sixteen);
+    const seventeen = await putMenu(tokens.admin, body(['home', 'a'], [], keys(17, 'h')));
+    expect(seventeen.status).toBe(400);
+    expect((await envelope(seventeen)).error.code).toBe('VALIDATION_FAILED');
+    expect(await storedMenu(ids.demo)).toEqual(sixteen);
+  });
+
+  it('phone menu empty: no saved menu means no key anywhere; empty top and hidden are valid; an empty bar is 400', async () => {
+    expect((await deleteMenu(tokens.admin)).status).toBe(200);
+    expect(await storedMenu(ids.demo)).toBeUndefined();
+    const read = await adminBrand(await request('/v1/admin/branding', tokens.admin));
+    expect('phoneMenu' in read.tenant.branding).toBe(false);
+
+    expect((await putMenu(tokens.admin, body(['home', 'a'], [], []))).status).toBe(200);
+    expect(await storedMenu(ids.demo)).toEqual(body(['home', 'a'], [], []));
+
+    const empty = await putMenu(tokens.admin, body([]));
+    expect(empty.status).toBe(400);
+    expect((await envelope(empty)).error.details).toEqual({ phoneMenu: 'bar_too_small' });
+    expect(await storedMenu(ids.demo)).toEqual(body(['home', 'a'], [], []));
+  });
+
+  it('phone menu ordering: the saved order is the array order, verbatim in the jsonb, the brand and the bootstrap', async () => {
+    const unsorted = body(['home', 'zeta', 'alpha', 'mid'], ['yy', 'bb'], ['z9', 'a1', 'm5']);
+    expect((await putMenu(tokens.admin, unsorted)).status).toBe(200);
+    expect(await storedMenu(ids.demo)).toEqual(unsorted);
+    expect(
+      (await adminBrand(await request('/v1/admin/branding', tokens.admin))).tenant.branding
+        .phoneMenu,
+    ).toEqual(unsorted);
+    const shell = (await (await request('/v1/me/bootstrap', tokens.admin)).json()) as {
+      tenant: { branding: { phoneMenu?: unknown } };
+    };
+    expect(shell.tenant.branding.phoneMenu).toEqual(unsorted);
+
+    // The same keys in the other order are a different menu, saved as sent (nothing is sorted).
+    const reversed = body(
+      [...unsorted.bar].reverse().filter((k) => k !== 'home'),
+      [],
+      [],
+    );
+    reversed.bar.unshift('home');
+    expect((await putMenu(tokens.admin, reversed)).status).toBe(200);
+    expect(await storedMenu(ids.demo)).toEqual(reversed);
+  });
+});
+
 describe('gates on every route', () => {
   const routes: { label: string; method: string; path: string; body?: unknown }[] = [
     { label: 'read', method: 'GET', path: '/v1/admin/branding' },

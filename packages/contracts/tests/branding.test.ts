@@ -666,3 +666,27 @@ describe('validatePhoneMenu — the rules the web applies, on the server (12.3-1
     expect(JSON.stringify(body)).toBe(before);
   });
 });
+
+describe('the phone menu stays an authenticated fact (12.3-15, D-697, T-12.3-04)', () => {
+  const MENU = { bar: ['home', 'courses'], top: ['chat'], hidden: ['events'] };
+
+  it('the public host projection has no phoneMenu and the strict host schema refuses it', () => {
+    const host = toHostBranding(resolveBranding({ phoneMenu: MENU }));
+    expect(host).not.toHaveProperty('phoneMenu');
+    expect(hostBrandingSchema.safeParse({ ...host, phoneMenu: MENU }).success).toBe(false);
+    expect(hostBrandingSchema.safeParse(host).success).toBe(true);
+  });
+
+  it('the admin brand answer carries the menu when saved and no key when absent', () => {
+    const contrast = contrastReport(
+      deriveBrandColors({ primary: '#1d4ed8', secondary: '#60a5fa' }),
+    );
+    const answer = (stored: unknown) => ({
+      tenant: { displayName: 'X', branding: resolveBranding(stored), contrast },
+    });
+    expect(
+      adminBrandingSchema.parse(answer({ phoneMenu: MENU })).tenant.branding.phoneMenu,
+    ).toEqual(MENU);
+    expect('phoneMenu' in adminBrandingSchema.parse(answer({})).tenant.branding).toBe(false);
+  });
+});

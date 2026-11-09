@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { countersSchema } from '../src/bootstrap';
+import { bootstrapSchema, countersSchema } from '../src/bootstrap';
+import { resolveBranding } from '../src/branding';
 
 /**
  * 07 review A-WR-07: an additive bootstrap field is tolerant on the reader side, so a web build that
@@ -29,5 +30,24 @@ describe('bootstrap counters contract', () => {
         conversationsBadge: 'badge',
       }).success,
     ).toBe(false);
+  });
+});
+
+/**
+ * 12.3-15 (D-697): the bootstrap's tenant brand reuses `tenantBrandingSchema`, which STRIPS undeclared
+ * keys, so declaring `phoneMenu` there is what carries the menu to the shell; absent, the key is not
+ * invented.
+ */
+describe('bootstrap tenant brand and the phone menu', () => {
+  const MENU = { bar: ['home', 'courses'], top: ['chat'], hidden: ['events'] };
+  const brandShape = bootstrapSchema.shape.tenant.shape.branding;
+
+  it('keeps tenant.branding.phoneMenu when present', () => {
+    expect(brandShape.parse(resolveBranding({ phoneMenu: MENU })).phoneMenu).toEqual(MENU);
+  });
+
+  it('carries no phoneMenu key when none was saved, and reads a corrupt one as none', () => {
+    expect('phoneMenu' in brandShape.parse(resolveBranding({}))).toBe(false);
+    expect(brandShape.parse({ phoneMenu: { bar: 'x' } }).phoneMenu).toBeUndefined();
   });
 });
