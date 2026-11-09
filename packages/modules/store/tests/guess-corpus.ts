@@ -1,0 +1,83 @@
+/**
+ * The shared name-to-category corpus of the store (12.3, D-692, NOVF-08).
+ *
+ * One list, two consumers: the TypeScript unit test of the guess rule (plan 11) and the pgTAP file
+ * that proves `app.store_guess_category(text)` answers the same (plan 10, which quotes these rows).
+ * The initial load classifies every existing product by its NAME through that SQL function, so the
+ * function and the web's rule (`guessStoreCategory`, `apps/web/lib/store-categories.ts`) must never
+ * disagree.
+ *
+ * Every expected value below was PRODUCED by running the web's current `guessStoreCategory` on the
+ * name (a throwaway script, 2026-11-09), never typed from memory. A change to the word lists or their
+ * order changes this file, the TypeScript test and the SQL function together.
+ */
+export const GUESS_CORPUS: ReadonlyArray<readonly [name: string, expected: string]> = [
+  ['Formação Marketing para Clínicas', 'cursos'],
+  ['Masterclass Lábios Naturais', 'cursos'],
+  ['E-book: Primeira Consulta', 'livros'],
+  ['Livro: Harmonização Facial na Prática', 'livros'],
+  ['Guia de Precificação para Clínicas', 'livros'],
+  ['Kit de Protocolos de Bioestimuladores', 'materiais'],
+  ['Jaleco Premium Bordado', 'roupas'],
+  ['Camiseta Oversized Rede Demo', 'roupas'],
+  ['Boné Aba Curva Rede Demo', 'roupas'],
+  ['Perfume Signature 100 ml', 'perfumes'],
+  ['Body Splash Pele de Seda 200 ml', 'perfumes'],
+  ['Dermapen Pro Sem Fio', 'equipamentos'],
+  ['Luminária LED de Bancada', 'equipamentos'],
+  ['Ring Light Profissional 18 polegadas', 'equipamentos'],
+  ['Mentoria Individual: Agenda Cheia', 'servicos'],
+  ['Pacote Skinbooster: 3 Sessões', 'servicos'],
+  ['Kit Ring Light para Atendimento', 'equipamentos'],
+  ['Curso de Atendimento ao Paciente', 'cursos'],
+  ['FRAGRÂNCIA AMADEIRADA', 'perfumes'],
+  ['ebook de receitas', 'livros'],
+  ['Ledger de vendas', 'outros'],
+  ['Cursinho', 'outros'],
+  ['Vale-presente', 'outros'],
+  ['', 'outros'],
+  ['JALECO BRANCO', 'roupas'],
+  ['Fragrância Cítrica', 'perfumes'],
+  ['Eau de Parfum Noir', 'perfumes'],
+  ['Body Splash Vanilla', 'perfumes'],
+  ['Kit LED', 'equipamentos'],
+  ['Ring Light', 'equipamentos'],
+  ['Planilha de Custos', 'materiais'],
+  ['Workshop de Peeling', 'cursos'],
+  ['Aula Avulsa de Drenagem', 'cursos'],
+  ['Consultoria Financeira', 'servicos'],
+  ['Apostila de Anatomia', 'livros'],
+  ['Manual do Aluno', 'livros'],
+  ['Touca Descartável', 'roupas'],
+  ['Calça Scrub Azul', 'roupas'],
+  ['Máquina de Microagulhamento', 'equipamentos'],
+  ['Maca Dobrável', 'equipamentos'],
+  ['Laser Diodo 808', 'equipamentos'],
+  ['Ponteiras para Dermapen', 'equipamentos'],
+  ['Tripé de Mesa', 'equipamentos'],
+  ['Essência Floral', 'perfumes'],
+  ['Colônia Infantil', 'perfumes'],
+  ['Sessão de Detox', 'servicos'],
+  ['Pacote de Imersão', 'cursos'],
+  ['Imersão Master', 'cursos'],
+  ['Treinamento em Vendas', 'cursos'],
+  ['Roteiro de Atendimento', 'materiais'],
+  ['Checklist Pré-Consulta', 'materiais'],
+  ['Template de Contrato', 'materiais'],
+  ['Camisa Polo', 'roupas'],
+  ['Blusa Manga Longa', 'roupas'],
+  ['Avental Impermeável', 'roupas'],
+  ['Kit Perfumes e Livros', 'livros'],
+  ['Livro de Perfumes', 'livros'],
+  ['Curso Online de Laser', 'equipamentos'],
+  ['Mentoria em Vendas e Livro', 'livros'],
+  ['  Perfume  ', 'perfumes'],
+  ['Planilha e Curso', 'materiais'],
+  ['Equipamento Ultrassom', 'equipamentos'],
+  ['led', 'equipamentos'],
+  ['ledger', 'outros'],
+  ['e-book', 'livros'],
+  ['body splash', 'perfumes'],
+  ['eau de parfum', 'perfumes'],
+  ['ring light', 'equipamentos'],
+];

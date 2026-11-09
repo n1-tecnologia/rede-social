@@ -1170,6 +1170,20 @@
       "when": 1794251316955,
       "tag": "20261109190836_store_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1794251394328,
+      "tag": "20261109190954_store_categories_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1794251445697,
+      "tag": "20261109191045_store_categories_backfill",
+      "breakpoints": true
     }
   ]
 }
