@@ -1,0 +1,1 @@
+No external API integration: Phase 12.3 only changes the project's own Hono API, Postgres and Next.js screens; the detector fired on the apps/api/tests/integration path, not on a third-party service, SDK or webhook.
