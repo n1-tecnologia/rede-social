@@ -267,6 +267,7 @@
         "priceInvalid": "Informe um valor como 19,90.",
         "priceTooHigh": "O valor máximo é R$ 100.000,00.",
         "imageInvalid": "Não foi possível usar esta imagem. Escolha outra.",
+        "categoryInvalid": "Essa categoria não existe mais. Escolha outra.",
         "save": "Não foi possível salvar. Revise os campos e tente novamente.",
         "lockPreview": "Não foi possível conferir o impacto. Tente salvar de novo."
       }

@@ -49,8 +49,6 @@ import { useSignedUpload } from '@/components/media/useSignedUpload';
 import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import { STORE_MANAGE_PATH } from '@/lib/store-area';
 import { guessStoreCategory } from '@/lib/store-categories';
-import { NO_CATEGORY } from '@/lib/store-setup';
-import { saveProductCategory } from '@/lib/store-setup-client';
 import {
   type LockWarningView,
   lockWarningView,
@@ -157,13 +155,19 @@ export interface ProductFormProps {
    */
   payment?: ProductFormPayment | null;
   /**
-   * 2026-10-28 (the product owner: "um menu dropdown com as categorias que o user criou"): the
-   * store's categories as Gerenciar keeps them, in its order, for the "Categoria" menu.
+   * The store's categories as the API keeps them (`GET /v1/store/front`, D-694), in the store's order,
+   * for the "Categoria" menu; empty (or unreadable) hides the field and no category is ever sent.
    */
   categories?: readonly { id: string; name: string }[];
-  /** Edit mode: the product's category now (`null` = none). A create starts from its name's guess. */
+  /** Edit mode: the product's category slug now (`null` = none). A create starts from its name's guess. */
   initialCategory?: string | null;
 }
+
+/**
+ * The menu's id for "Sem categoria" (12.3-14): never a slug (a slug starts with a letter or a digit),
+ * sent to the API as `null`.
+ */
+const NO_CATEGORY = '_';
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
 /** Announced at these percentages only, not on every tick (the `CommunityForm` rule). */
@@ -265,16 +269,25 @@ export function ProductForm({
   );
 
   /**
-   * The category the menu shows: the one picked here, else (a create) the one the name tells while
-   * the store keeps it, else none. `NO_CATEGORY` is "Sem categoria".
+   * The category the menu shows (D-694, UI-D-689): the one picked here, else (a create) the one the
+   * name tells while the store holds it (`guessStoreCategory`, the server's own rule), else none;
+   * an edit starts on the stored one. `NO_CATEGORY` is "Sem categoria". The payload carries exactly
+   * what this shows, so a product is never saved into a category the admin did not see.
    */
-  const startPicked = mode === 'edit' ? (initialCategory ?? NO_CATEGORY) : null;
+  const storedCategory =
+    initialCategory !== null && categories.some((entry) => entry.id === initialCategory)
+      ? initialCategory
+      : NO_CATEGORY;
+  const startPicked = mode === 'edit' ? storedCategory : null;
   const [pickedCategory, setPickedCategory] = useState<string | null>(startPicked);
+  /** UI-D-689: a refused category, drawn under its field until the next pick. */
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const guessedCategory = guessStoreCategory(name);
   const category =
     pickedCategory ??
     (categories.some((entry) => entry.id === guessedCategory) ? guessedCategory : NO_CATEGORY);
   const categoryChanged = categories.length > 0 && pickedCategory !== startPicked;
+  const categoryWire = category === NO_CATEGORY ? null : category;
   const categoryLabelId = useId();
   const categoryHintId = useId();
 
@@ -420,6 +433,8 @@ export function ProductForm({
         ...(communities !== null ? { communityIds: selected } : {}),
         ...(courses !== null ? { courseIds: selectedCourses } : {}),
         ...(lives !== null ? { liveIds: selectedLives } : {}),
+        // A store with no category hides the field: nothing is sent and the server guesses (D-694).
+        ...(categories.length > 0 ? { category: categoryWire } : {}),
       };
     }
     const patch: ProductPatch = {};
@@ -430,6 +445,7 @@ export function ProductForm({
     if (linksChanged) patch.communityIds = selected;
     if (coursesChanged) patch.courseIds = selectedCourses;
     if (livesChanged) patch.liveIds = selectedLives;
+    if (categoryChanged) patch.category = categoryWire;
     return patch;
   };
 
@@ -456,6 +472,9 @@ export function ProductForm({
         return;
       case 'too_many_lives':
         setLiveError(t('form.errors.tooManyLives', { max: STORE_MAX_LINKS }));
+        return;
+      case 'category_invalid':
+        setCategoryError(t('form.errors.categoryInvalid'));
         return;
       default:
         toast.show({ tone: 'error', message: t('form.errors.save') });
@@ -540,11 +559,6 @@ export function ProductForm({
       savedMapping.current = { id: mappingId, link: mappingLink };
     }
 
-    // 2026-10-28: the product's category, kept on this device (`lib/store-setup.ts`).
-    if (savedId !== null && categories.length > 0 && (mode !== 'edit' || categoryChanged)) {
-      saveProductCategory(savedId, category);
-    }
-
     const done = {
       tone: 'success',
       message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
@@ -560,6 +574,7 @@ export function ProductForm({
   const submit = () => {
     setNameError(undefined);
     setServerPriceError(undefined);
+    setCategoryError(null);
     setPriceTouched(true);
     if (name.trim().length === 0) {
       setNameError(t('form.errors.nameRequired'));
@@ -860,11 +875,10 @@ export function ProductForm({
           }}
         />
 
-        {/* ── (2b) Categoria: the storefront's shelf for this product. 2026-10-28 (the product
-            owner: "um menu dropdown com as categorias que o user criou"): a menu of the store's
-            categories (Gerenciar), "Sem categoria" last; a new product starts on the one its name
-            tells until one is picked. The API keeps no category yet: the choice is kept on this
-            device (`saveProductCategory`) once the product is saved, never sent. ── */}
+        {/* ── (2b) Categoria: the storefront's shelf for this product. 12.3-14 (D-694, UI-D-689): a
+            menu of the store's own categories (the API front), "Sem categoria" last; a new product
+            starts on the one its name tells until one is picked. The choice is sent with the save
+            (its slug, or null for none) and a refusal draws its sentence under the field. ── */}
         {categories.length > 0 ? (
           <div data-product-category-field className="flex flex-col gap-1.5">
             <span id={categoryLabelId} className="text-sm font-normal text-text-secondary">
@@ -876,11 +890,19 @@ export function ProductForm({
                 { id: NO_CATEGORY, label: t('form.category.none') },
               ]}
               value={category}
-              onChange={setPickedCategory}
+              onChange={(id) => {
+                setPickedCategory(id);
+                setCategoryError(null);
+              }}
               labelId={categoryLabelId}
               describedBy={categoryHintId}
               optionAttribute="product-category"
             />
+            {categoryError ? (
+              <p role="alert" className="text-sm font-normal text-danger">
+                {categoryError}
+              </p>
+            ) : null}
             <p id={categoryHintId} className="text-xs font-normal text-text-tertiary">
               {t('form.category.helper')}
             </p>

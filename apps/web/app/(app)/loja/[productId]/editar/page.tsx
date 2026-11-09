@@ -8,9 +8,8 @@ import { requireBootstrap } from '@/lib/bootstrap';
 import { listAllCommunities } from '@/lib/communities';
 import { listProductFormCourses, listProductFormLives } from '@/lib/courses';
 import { loadProductFormPayment } from '@/lib/product-payment';
-import { getProduct } from '@/lib/store';
-import { categoryOf, storeCategoryList } from '@/lib/store-setup';
-import { readStoreSetup } from '@/lib/store-setup-cookie';
+import { getProduct, getStoreFront } from '@/lib/store';
+import { storeCategoryList } from '@/lib/store-categories';
 import {
   type ProductFormCommunity,
   type ProductFormCourse,
@@ -60,15 +59,15 @@ export default async function EditProductPage({
   const paymentsOn =
     bootstrap.modules.some((module) => module.key === 'payments') &&
     bootstrap.permissions.includes(PAYMENTS_PERMISSIONS.manage);
-  const [result, all, courseLoad, liveLoad, payment, t, store] = await Promise.all([
+  const [result, all, courseLoad, liveLoad, payment, t, front] = await Promise.all([
     getProduct(productId),
     communitiesOn ? listAllCommunities() : Promise.resolve(null),
     coursesOn ? listProductFormCourses() : Promise.resolve(null),
     coursesOn ? listProductFormLives() : Promise.resolve(null),
     paymentsOn ? loadProductFormPayment(productId) : Promise.resolve(null),
     getTranslations(),
-    // 2026-10-28: the store's categories (Gerenciar) for the "Categoria" menu.
-    readStoreSetup(),
+    // 12.3-14 (D-694): the store's own categories (the API front) for the "Categoria" menu.
+    getStoreFront(),
   ]);
   if (result.status === 'redirect') redirect(result.path);
   if (result.status !== 'ok') notFound();
@@ -102,7 +101,11 @@ export default async function EditProductPage({
           capped: liveLoad.capped,
         };
 
-  const categories = storeCategoryList(store.setup, t).map(({ id, name }) => ({ id, name }));
+  // An unreadable front gives no categories: the field is hidden and the edit sends none (D-696).
+  const categories = storeCategoryList(front?.categories ?? [], t).map(({ id, name }) => ({
+    id,
+    name,
+  }));
 
   return (
     <ProductForm
@@ -115,7 +118,7 @@ export default async function EditProductPage({
       lives={lives}
       payment={payment}
       categories={categories}
-      initialCategory={categoryOf(result.product, categories, store.assignments)}
+      initialCategory={result.product.category ?? null}
     />
   );
 }

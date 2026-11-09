@@ -19,10 +19,9 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { CSSProperties } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getProduct } from '@/lib/store';
+import { getProduct, getStoreFront } from '@/lib/store';
+import { storeCategoryList } from '@/lib/store-categories';
 import { relatedItems, storeHref, storeItems } from '@/lib/store-front-view';
-import { categoryOf, storeCategoryList } from '@/lib/store-setup';
-import { readStoreSetup } from '@/lib/store-setup-cookie';
 import {
   type ProductUnlockRow,
   productPageView,
@@ -101,14 +100,14 @@ export default async function ProductPage({
   }>;
 }) {
   const [{ productId }, query] = await Promise.all([params, searchParams]);
-  const [t, bootstrap, result, catalog, store] = await Promise.all([
+  const [t, bootstrap, result, catalog, front] = await Promise.all([
     getTranslations(),
     requireBootstrap(),
     getProduct(productId),
     // "Você também pode gostar" (2026-10-27): the storefront's catalogue, read beside the product.
     readStoreCatalog(),
-    // 2026-10-28: the store's categories and each product's, as Gerenciar keeps them.
-    readStoreSetup(),
+    // 12.3-14 (D-694): the store's own categories, read from the API front (no cookie).
+    getStoreFront(),
   ]);
 
   if (result.status === 'redirect') redirect(result.path);
@@ -139,9 +138,12 @@ export default async function ProductPage({
 
   const product = result.product;
   // The storefront's category (2026-10-27): its chip over the name and the shelf under the page.
-  // 2026-10-28: the store's own (Gerenciar), so a product may have none (then no chip).
-  const categories = storeCategoryList(store.setup, t);
-  const categoryId = categoryOf(product, categories, store.assignments);
+  // 12.3-14 (D-693, D-694): the product's category is the slug the API sent, shown only while the
+  // store still holds it; a product with none (or an unreadable front) has no chip and no guess.
+  const categories = storeCategoryList(front?.categories ?? [], t);
+  const categoryId = categories.some((entry) => entry.id === product.category)
+    ? (product.category ?? null)
+    : null;
   const category = categories.find((entry) => entry.id === categoryId) ?? null;
   const related = catalog
     ? relatedItems(storeItems(catalog, t, { categories }), product.id, categoryId, RELATED_MAX)

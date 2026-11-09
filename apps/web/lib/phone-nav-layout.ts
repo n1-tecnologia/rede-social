@@ -7,8 +7,8 @@ import type { PhoneLayout } from '@rede-social/core/ui';
  * itens no header do app", "somente no mobile"): the bottom bar's items in order, the items moved
  * to the top beside Notificações and the support chat, and the items hidden on the phone.
  *
- * ⚠ Front only until the API keeps it (the tenant has no nav setting): a cookie on THIS device, as
- * the store's setup (`lib/store-setup.ts`). Its value is `b:<keys>|t:<keys>|h:<keys>`, the keys
+ * ⚠ Front only until the API keeps it (the tenant has no nav setting): a cookie on THIS device (the
+ * store's own setup was one until 12.3 moved it to the API). Its value is `b:<keys>|t:<keys>|h:<keys>`, the keys
  * joined by dots, read leniently (a cookie is user input): an unknown or repeated key is dropped and
  * a key keeps its first list. Before it, 2026-10-28's `rede_nav_order` kept the bar's order alone;
  * it is still read as the bar when the layout cookie is absent.
