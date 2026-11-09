@@ -5,12 +5,12 @@ current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: 21
 status: verifying
 stopped_at: "Phase 12.2 EXECUTED 21/21 on 2026-11-06 (nothing pushed, 154 commits ahead of origin/master): code review 0 critical/4 warnings (WR-01..04), regression gate green, verification human_needed 16/16 truths in code; 8 owner items (M1..M8) persisted as 12.2-UAT.md; phase NOT marked complete; next /gsd-verify-work 12.2 after Igor's proofs; Phase 13 stays paused at plan 14"
-last_updated: "2026-11-07T11:25:30.832Z"
+last_updated: "2026-11-09T15:34:05.472Z"
 last_activity: 2026-11-06
 last_activity_desc: Phase 12.2 execution started
-state_head: 965462596a406d9d9c5255aebfedda3b270b75b0
+state_head: be6374a3da3bed8b5a03415217e199ee89d85bc6
 progress:
-  total_phases: 30
+  total_phases: 31
   completed_phases: 0
   total_plans: 384
   completed_plans: 356
@@ -1234,6 +1234,7 @@ None yet.
 - Phase 13 added: App nativo iOS e Android por tenant (white-label): requested by Igor 2026-11-03 after a codebase assessment; decided one app per tenant, everything (member area and tenant admin), purchases keep the `checkoutUrl` redirect, UI is the web's own adapted; additive, the web, the PWA and the API stay as they are; discussed 2026-11-03 (13-CONTEXT.md D-600..D-615: two stages, shell first; tenant-owned store accounts; delete account with a 14-day grace; links open the app; a purchase switch per store), not planned yet, STATE stays on 09.4
 - Phase 12.1 inserted after Phase 12: Perguntas condicionais e etapas no formulário de perfil (pedido do time, 2026-11-05; reverte D-582)
 - Phase 12.2 inserted after Phase 12.1: Ramos condicionais no formulário de perfil: várias perguntas por ramo, condicional dentro de condicional (reverte D-622) e diagrama das bifurcações (pedido do Igor, 2026-11-06; Fase 13 pausada até ele pedir)
+- Phase 12.3 inserted after Phase 12.2: Pendências de backend do front de novembro: os 10 itens da Parte 1 do documento 'O que mudou no front' (branch ATUALIZAÇÕES-NOVEMBRO, be6374a3) que o front já mostra mas o back ainda não guarda
 
 ## Deferred Items
 

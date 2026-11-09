@@ -1784,6 +1784,22 @@ Plans:
 
 - [x] 12.2-21-PLAN.md — The Playwright spec on the clinic example, the "Phase 12.2 release" notes, the owner's ledger and the exit gate (PFORM-55..60)
 
+### Phase 12.3: Pendências de backend do front de novembro (INSERTED)
+
+**Goal:** The ten items of Part 1 of the team's document "O que mudou no front" (branch `ATUALIZAÇÕES-NOVEMBRO`, brought to master locally on 2026-11-09 as `be6374a3`) stop being front-only previews and are kept by the backend: the three track texts reach the member read (1.1); a track, a course, a module and an event keep a second cover (1.2 to 1.5); the store keeps the Início's featured product, the "Em destaque" list of up to five, the admin's own categories and each product's category (1.6 to 1.9); the tenant keeps the phone menu its admin arranged (1.10). The web then drops its per-device cookies (`rede_home_promo`, `rede_store_setup`, `rede_store_cats`, `rede_nav_layout`) and reads the API, so what the admin sets is what every member sees.
+**Requirements**: TBD (draft NOVF-01..NOVF-10, one per item; written in /gsd-discuss-phase 12.3)
+**Depends on:** Phase 06 (events), Phase 08.2 (store), Phase 08.3 to 08.6 (courses and member area). Runs after 12.2 closes and before Phase 13.
+**Source:** `~/Downloads/O que mudou no front - Área de membros, Loja e Menu do app.pdf` (not in the repo, public) and the summary in `12.3-SOURCE.md`. Part 2 of the document (17 front-only screens) is already merged and is NOT this phase.
+**Plans:** 0 plans
+
+Open design points (for /gsd-discuss-phase 12.3): (1) where the phone menu (1.10) lives: it belongs to no module, so `tenants.branding` (jsonb) or another place; (2) the writer for 1.6 and 1.7 in `tenant_modules.settings`: today only the platform route (super_admin) writes it, so the store module needs its own `admin_tenant` route; (3) whether the eight built-in categories become rows of the new table (1.8) and what an existing product gets (none, or the one its name suggests, as the web guesses today); (4) the contract of `category` on the product (1.9): today an enum of the eight, it becomes the category id; (5) the name of the second cover column and its fallback (no top cover = the card cover, as the web does today); (6) what happens to the cookies already set on an admin's device when the API starts answering.
+
+Constraints from the document and the code: every new response field enters the contract as optional (`.optional()` or `.default()`), because the web parses the API strictly and the web of this branch ships before or with the API; the new columns are optional and the migrations run in every tenant project (Phase 09.2); suggested order: 1.1 alone (no migration), then the covers 1.2 to 1.5 (one migration), then the store 1.6 to 1.9, then the menu 1.10. Out of scope: selling physical goods (shipping, stock, sizes), which touches checkout and the gateway.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 12.3 to break down)
+
 ### Phase 13: App nativo iOS e Android por tenant (white-label)
 
 **Goal**: Each tenant gets its own native iOS and Android app (own store listing, name, icon and bundle id), built from one codebase and fixed to that tenant's host. Stage 1 (this phase) is a native shell that opens the tenant's existing web screens and adds the native layer around them. Members and the tenant's staff find in it every feature of the web app, against the same API, with native push. Stage 2 (screens rebuilt 100% natively) is a later phase.
