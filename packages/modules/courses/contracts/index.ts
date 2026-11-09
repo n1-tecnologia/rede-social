@@ -1100,6 +1100,9 @@ export const learnOutlineModuleSchema = z
     number: z.number().int().min(1),
     requiresPrevious: z.boolean(),
     lockReason: z.enum(MODULE_LOCK_REASONS).nullable(),
+    /** The module's own card cover and Topo, null when empty (NOVF-03, D-696, D-699). */
+    coverAssetId: z.uuid().nullable().optional(),
+    topCoverAssetId: z.uuid().nullable().optional(),
     lessons: z.array(learnOutlineLessonSchema),
   })
   .strict();

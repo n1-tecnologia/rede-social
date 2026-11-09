@@ -196,6 +196,33 @@ async function readOutline(tx: Tx, courseId: string): Promise<OutlineRow[]> {
      order by o.course_seq`);
 }
 
+/** A live module's two optional images, read beside the outline (NOVF-03, D-696). */
+type ModuleCoverRow = {
+  id: string;
+  cover_asset_id: string | null;
+  top_cover_asset_id: string | null;
+};
+
+/**
+ * The module covers of a course's live modules, ONE extra statement in the same tenant
+ * transaction as the outline: `app.course_outline` has a fixed return table that this phase does
+ * not change (a new column would need a drop, which is not expand-only while the old API serves).
+ * Read under the member's RLS and filtered by the course, so no module of another course or tenant
+ * can be merged; `groupModules` keys the result by module id.
+ */
+async function readModuleCovers(
+  tx: Tx,
+  ctx: RequestContext,
+  courseId: string,
+): Promise<ModuleCoverRow[]> {
+  return tx.execute<ModuleCoverRow>(sql`
+    select id, cover_asset_id, top_cover_asset_id
+      from course_modules
+     where tenant_id = ${ctx.tenantId}::uuid
+       and course_id = ${courseId}::uuid
+       and deleted_at is null`);
+}
+
 /** One outline row as the contract's lesson: exactly the EP-14 keys, never content. */
 function outlineLesson(row: OutlineRow): LearnOutlineLesson {
   return {
@@ -218,7 +245,12 @@ function outlineLesson(row: OutlineRow): LearnOutlineLesson {
  * lessons is held by the module rule, else `purchase` when the course is locked and any of its
  * lessons is held by the purchase, else null.
  */
-function groupModules(rows: readonly OutlineRow[], courseLocked: boolean): LearnOutlineModule[] {
+function groupModules(
+  rows: readonly OutlineRow[],
+  courseLocked: boolean,
+  covers: readonly ModuleCoverRow[],
+): LearnOutlineModule[] {
+  const coversById = new Map(covers.map((cover) => [cover.id, cover]));
   const modules: LearnOutlineModule[] = [];
   const byId = new Map<string, LearnOutlineModule>();
   for (const row of rows) {
@@ -231,6 +263,9 @@ function groupModules(rows: readonly OutlineRow[], courseLocked: boolean): Learn
         number: row.module_number,
         requiresPrevious: row.module_requires_previous,
         lockReason: null,
+        // A module the covers statement did not see (removed in between) reads as empty.
+        coverAssetId: coversById.get(row.module_id)?.cover_asset_id ?? null,
+        topCoverAssetId: coversById.get(row.module_id)?.top_cover_asset_id ?? null,
         lessons: [],
       };
       byId.set(row.module_id, module);
@@ -277,11 +312,12 @@ export async function getLearnCourse(ctx: RequestContext, courseId: string): Pro
     const course = await readPublishedCourse(tx, ctx, courseId);
     if (!course) return null;
     const rows = await readOutline(tx, course.id);
-    return { course, rows };
+    const covers = await readModuleCovers(tx, ctx, course.id);
+    return { course, rows, covers };
   });
   if (!answer) throw new ApiError(404, 'NOT_FOUND');
-  const { course, rows } = answer;
-  const modules = groupModules(rows, course.locked);
+  const { course, rows, covers } = answer;
+  const modules = groupModules(rows, course.locked, covers);
 
   log.info(
     {
