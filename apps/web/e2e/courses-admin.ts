@@ -778,6 +778,13 @@ export async function courseCoverAssetId(courseId: string): Promise<string | nul
   return rows[0]?.cover_asset_id ?? null;
 }
 
+/** A course's stored Topo asset id (NOVF-02: its own image, independent of the card cover), or null. */
+export async function courseTopCoverAssetId(courseId: string): Promise<string | null> {
+  const rows = await sql()<{ top_cover_asset_id: string | null }[]>`
+    select top_cover_asset_id::text as top_cover_asset_id from public.courses where id = ${courseId}::uuid`;
+  return rows[0]?.top_cover_asset_id ?? null;
+}
+
 export type LessonAssetState = {
   id: string;
   status: string;

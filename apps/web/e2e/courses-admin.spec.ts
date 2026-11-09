@@ -15,6 +15,7 @@ import {
   courseModules,
   courseProductIds,
   courseStatus,
+  courseTopCoverAssetId,
   createCourse,
   createCoursesTenant,
   createLesson,
@@ -3570,7 +3571,7 @@ test.describe('backstops', () => {
     await expect(row.getByTestId('lesson-row-thumb')).toHaveAttribute('data-thumb', 'failed');
   });
 
-  test('E08/populated: a landscape cover shows the 3:4 centre crop in the form preview and the list thumb, and 16:10 on the course page, all the same asset', async ({
+  test('E08/populated: a landscape card cover and a different Topo are two independent assets: each has its own preview in the form, both are saved, the list thumb and the course page keep the card cover, and the reopened form shows both', async ({
     page,
   }) => {
     test.setTimeout(240_000);
@@ -3613,6 +3614,33 @@ test.describe('backstops', () => {
     ).toEqual({ fit: 'cover', position: '50% 50%' });
     const coverId = await waitForReadyCoverIn(tenant.slug, since);
 
+    // NOVF-02 (UI-D-691): the Topo is a picker of its own, with its own input, preview and asset:
+    // a different, wider picture goes in through ITS input and the card's preview does not move.
+    const topSince = new Date(Date.now() - 1_000);
+    await form(page)
+      .locator(`input[type="file"][aria-label="${C.coverField.topCover.add}"]`)
+      .setInputFiles({
+        name: 'topo.png',
+        mimeType: 'image/png',
+        buffer: landscapePng(1600, 400),
+      });
+    const topPreview = page.locator('[data-course-top-cover-preview]');
+    const topLocal = page.locator('[data-course-top-cover-local]');
+    await expect(topLocal).toBeVisible({ timeout: 60_000 });
+    const topBox = await boxOf(topPreview);
+    expect(topBox.width / topBox.height).toBeCloseTo(4, 1);
+    await expect
+      .poll(() => topLocal.evaluate((node) => (node as HTMLImageElement).naturalWidth), {
+        timeout: 30_000,
+      })
+      .toBe(1600);
+    // Two independent previews: the card's is still the first picture, not the Topo's.
+    await expect
+      .poll(() => local.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+      .toBe(1200);
+    const topId = await waitForReadyCoverIn(tenant.slug, topSince);
+    expect(topId).not.toBe(coverId);
+
     await expect(submit(page)).toBeEnabled();
     await submit(page).click();
     await expect(toast(page, C.toasts.courseCreated)).toBeVisible();
@@ -3620,6 +3648,7 @@ test.describe('backstops', () => {
     const saved = await courseByTitle(title);
     if (!saved) throw new Error('the course was not saved');
     expect(await courseCoverAssetId(saved.id)).toBe(coverId);
+    expect(await courseTopCoverAssetId(saved.id)).toBe(topId);
 
     // The list thumb: the SAME asset at 3:4.
     const row = page.getByRole('link', { name: `${title}, ${C.status.draft}`, exact: true });
@@ -3635,8 +3664,8 @@ test.describe('backstops', () => {
       })
       .toBeGreaterThan(0);
 
-    // The course page hero: the SAME asset at 16:10 (2026-10-23: panoramic 21:9 from 1024px, the
-    // wide desktop page).
+    // The admin's course page hero keeps the card cover (the Topo is what MEMBERS see on the page;
+    // 2026-10-23: panoramic 21:9 from 1024px, the wide desktop page).
     await row.click();
     await expect(page).toHaveURL(new RegExp(`/cursos/${saved.id}$`));
     const hero = page.getByTestId('course-hero');
@@ -3663,13 +3692,13 @@ test.describe('backstops', () => {
       }),
     ).toEqual({ fit: 'cover', position: '50% 50%', landscape: true });
 
-    // Reopened in the form: the saved asset in the 3:4 preview.
+    // Reopened in the form: each saved asset in its own preview (the card's 16:9, the Topo's 4:1).
     await page.goto(`${tenant.origin}/cursos/${saved.id}/editar`);
     await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
     const reopened = page.locator('[data-course-cover-preview]');
     await expect(reopened).toBeVisible();
     const reopenedBox = await boxOf(reopened);
-    expect(reopenedBox.width / reopenedBox.height).toBeCloseTo(0.75, 2);
+    expect(reopenedBox.width / reopenedBox.height).toBeCloseTo(16 / 9, 1);
     const reopenedImg = reopened.locator('img').first();
     expect(await reopenedImg.getAttribute('src')).toContain(coverId);
     await expect
@@ -3678,5 +3707,16 @@ test.describe('backstops', () => {
       })
       .toBeGreaterThan(0);
     await expect(page.locator('[data-course-cover-fallback]')).toHaveCount(0);
+    const reopenedTop = page.locator('[data-course-top-cover-preview]');
+    const reopenedTopBox = await boxOf(reopenedTop);
+    expect(reopenedTopBox.width / reopenedTopBox.height).toBeCloseTo(4, 1);
+    const reopenedTopImg = reopenedTop.locator('img').first();
+    expect(await reopenedTopImg.getAttribute('src')).toContain(topId);
+    await expect
+      .poll(() => reopenedTopImg.evaluate((node) => (node as HTMLImageElement).naturalWidth), {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(0);
+    await expect(page.locator('[data-course-top-cover-fallback]')).toHaveCount(0);
   });
 });
