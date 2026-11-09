@@ -2042,6 +2042,83 @@ describe('modules', () => {
     expect(withLesson.lessons.map((l) => l.id)).toEqual([lesson.id]);
   });
 
+  it('module cover (NOVF-03, OQ-1, D-699): a ready cover attaches as the module card cover and as its Topo on create and edit and the module reads and the course detail carry both; a partial edit keeps the other image; a pending, wrong-purpose, rede-lab or unknown asset is 400 by its own code; a module with none reads both null', async () => {
+    const { course, modules } = await courseWithModules(1);
+    const [bare] = modules as [ModuleView];
+    // Control: no image reads null on create and on every read.
+    expect(bare).toMatchObject({ coverAssetId: null, topCoverAssetId: null });
+    expect((await getCourse(course.id)).modules[0]).toMatchObject({
+      coverAssetId: null,
+      topCoverAssetId: null,
+    });
+
+    // Positive control on create: both ready demo covers attach and read back from the detail.
+    const card = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const top = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const created = await createModule(course.id, { coverAssetId: card, topCoverAssetId: top });
+    expect(created).toMatchObject({ coverAssetId: card, topCoverAssetId: top });
+    const detail = await getCourse(course.id);
+    expect(detail.modules.find((m) => m.id === created.id)).toEqual(created);
+
+    // Partial edits: the Topo alone keeps the card cover, the card cover alone keeps the Topo.
+    const other = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const topOnly = await json<ModuleView>(
+      await patchModule(bare.id, { topCoverAssetId: top }),
+      200,
+    );
+    expect(topOnly).toEqual({ ...bare, topCoverAssetId: top });
+    const cardOnly = await json<ModuleView>(
+      await patchModule(bare.id, { coverAssetId: card }),
+      200,
+    );
+    expect(cardOnly).toEqual({ ...bare, coverAssetId: card, topCoverAssetId: top });
+    const topChanged = await json<ModuleView>(
+      await patchModule(bare.id, { topCoverAssetId: other }),
+      200,
+    );
+    expect(topChanged).toMatchObject({ coverAssetId: card, topCoverAssetId: other });
+
+    // The negatives beside them, on create AND on edit: ONE answer by name per key, no foreign tell.
+    const pending = await seedAsset(demoTenantId, 'image', 'cover', 'pending');
+    const labCover = await seedAsset(labTenantId, 'image', 'cover', 'ready');
+    const postCover = await seedAsset(demoTenantId, 'image', 'post', 'ready');
+    const video = await seedAsset(demoTenantId, 'video', 'cover', 'ready');
+    for (const [key, issue] of [
+      ['coverAssetId', 'cover_invalid'],
+      ['topCoverAssetId', 'top_cover_invalid'],
+    ] as const) {
+      for (const bad of [pending, labCover, postCover, video, randomUUID(), 'not-a-uuid']) {
+        const onCreate = await request(
+          'POST',
+          `/v1/courses/${course.id}/modules`,
+          tokens.demoAdmin,
+          { title: `${PREFIX} m`, [key]: bad },
+        );
+        expect(onCreate.status, `${key} ${bad}`).toBe(400);
+        expect(((await onCreate.json()) as Envelope).error.details).toEqual({ courses: issue });
+        const onEdit = await patchModule(bare.id, { [key]: bad });
+        expect(onEdit.status, `${key} ${bad}`).toBe(400);
+        expect(((await onEdit.json()) as Envelope).error.details).toEqual({ courses: issue });
+      }
+    }
+    // Nothing was written by any refusal.
+    expect((await getCourse(course.id)).modules.map((m) => m.id)).toEqual([bare.id, created.id]);
+    expect(
+      (await getCourse(course.id)).modules.find((m) => m.id === bare.id),
+    ).toMatchObject({ coverAssetId: card, topCoverAssetId: other });
+
+    // The lab admin cannot reach the demo module: the bare 404, both images intact.
+    await expectBare404(
+      await patchModule(bare.id, { topCoverAssetId: null }, tokens.labAdmin, HOSTS.lab),
+    );
+    // `null` clears one image and leaves the other.
+    const cleared = await json<ModuleView>(
+      await patchModule(bare.id, { topCoverAssetId: null }),
+      200,
+    );
+    expect(cleared).toMatchObject({ coverAssetId: card, topCoverAssetId: null });
+  });
+
   it('remove (COURSE-05, D-408, P17, PR-5): a soft delete drops the module from the detail, keeps its lesson rows and every progress row, answers the bare 404 the second time, leaves a gap in position until the next reorder renumbers 1..N', async () => {
     const { course, modules } = await courseWithModules(3);
     const [m1, m2, m3] = modules as [ModuleView, ModuleView, ModuleView];
