@@ -100,6 +100,7 @@ type CourseRow = {
   category_name: string | null;
   level: string | null;
   cover_asset_id: string | null;
+  top_cover_asset_id: string | null;
   instructor_name: string;
   instructor_photo_asset_id: string | null;
   outcomes: string[];
@@ -619,8 +620,8 @@ async function readDetail(
 ): Promise<CourseDetail | null> {
   const courseRows = await tx.execute<CourseRow>(sql`
     select c.id, c.title, c.tagline, c.description, c.category_id, k.name as category_name,
-           c.level, c.cover_asset_id, c.instructor_name, c.instructor_photo_asset_id, c.outcomes,
-           c.certificate_hours, c.status,
+           c.level, c.cover_asset_id, c.top_cover_asset_id, c.instructor_name,
+           c.instructor_photo_asset_id, c.outcomes, c.certificate_hours, c.status,
            to_char(c.published_at at time zone 'utc', ${ISO_MICROSECONDS}) as published_at,
            to_char(c.archived_at at time zone 'utc', ${ISO_MICROSECONDS}) as archived_at,
            to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at
@@ -649,6 +650,7 @@ async function readDetail(
         : null,
     level: course.level as CourseLevel | null,
     coverAssetId: course.cover_asset_id,
+    topCoverAssetId: course.top_cover_asset_id,
     instructorName: course.instructor_name,
     instructorPhotoAssetId: course.instructor_photo_asset_id,
     outcomes: course.outcomes,
@@ -675,16 +677,18 @@ async function readDetail(
 export async function createCourse(ctx: RequestContext, input: CourseInput): Promise<CourseDetail> {
   const detail = await withTenantTx(ctx, async (tx) => {
     await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
+    await resolveCoverAsset(tx, ctx, input.topCoverAssetId, 'top_cover_invalid');
     await resolveCoverAsset(tx, ctx, input.instructorPhotoAssetId, 'photo_invalid');
     await resolveCategory(tx, ctx, input.categoryId);
 
     const inserted = await tx.execute<{ id: string }>(sql`
       insert into courses
              (tenant_id, created_by_user_id, title, tagline, description, category_id, level,
-              cover_asset_id, instructor_name, instructor_photo_asset_id, outcomes, certificate_hours)
+              cover_asset_id, top_cover_asset_id, instructor_name, instructor_photo_asset_id,
+              outcomes, certificate_hours)
       values (${ctx.tenantId}::uuid, ${ctx.userId}::uuid, ${input.title}, ${input.tagline},
               ${input.description}, ${input.categoryId}::uuid, ${input.level},
-              ${input.coverAssetId}::uuid, ${input.instructorName},
+              ${input.coverAssetId}::uuid, ${input.topCoverAssetId}::uuid, ${input.instructorName},
               ${input.instructorPhotoAssetId}::uuid,
               (select coalesce(array_agg(o.value order by o.ordinality), '{}'::text[])
                  from jsonb_array_elements_text(${JSON.stringify(input.outcomes)}::jsonb)
@@ -902,6 +906,9 @@ export async function updateCourse(
     if (patch.coverAssetId !== undefined) {
       await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
     }
+    if (patch.topCoverAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, patch.topCoverAssetId, 'top_cover_invalid');
+    }
     if (patch.instructorPhotoAssetId !== undefined) {
       await resolveCoverAsset(tx, ctx, patch.instructorPhotoAssetId, 'photo_invalid');
     }
@@ -915,6 +922,9 @@ export async function updateCourse(
     if (patch.level !== undefined) sets.push(sql`level = ${patch.level}`);
     if (patch.coverAssetId !== undefined) {
       sets.push(sql`cover_asset_id = ${patch.coverAssetId}::uuid`);
+    }
+    if (patch.topCoverAssetId !== undefined) {
+      sets.push(sql`top_cover_asset_id = ${patch.topCoverAssetId}::uuid`);
     }
     if (patch.instructorName !== undefined) {
       sets.push(sql`instructor_name = ${patch.instructorName}`);

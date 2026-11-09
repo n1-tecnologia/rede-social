@@ -148,6 +148,8 @@ const courseDescriptionField = z
 const courseCategoryField = z.uuid('category_invalid').nullable();
 const courseLevelField = z.enum(COURSE_LEVELS, 'level_invalid').nullable();
 const courseCoverField = z.uuid('cover_invalid').nullable();
+/** NOVF-02 (D-699): the course's second image ("Topo"), validated like the card cover. */
+const courseTopCoverField = z.uuid('top_cover_invalid').nullable();
 /** D-412: free text, no membership FK. */
 const instructorNameField = z
   .string()
@@ -178,6 +180,7 @@ export const courseInputSchema = z
     categoryId: courseCategoryField.default(null),
     level: courseLevelField.default(null),
     coverAssetId: courseCoverField.default(null),
+    topCoverAssetId: courseTopCoverField.default(null),
     instructorName: instructorNameField,
     instructorPhotoAssetId: instructorPhotoField.default(null),
     outcomes: outcomesField.default([]),
@@ -200,6 +203,7 @@ export const coursePatchSchema = z
     categoryId: courseCategoryField.optional(),
     level: courseLevelField.optional(),
     coverAssetId: courseCoverField.optional(),
+    topCoverAssetId: courseTopCoverField.optional(),
     instructorName: instructorNameField.optional(),
     instructorPhotoAssetId: instructorPhotoField.optional(),
     outcomes: outcomesField.optional(),
@@ -632,6 +636,8 @@ export const courseDetailSchema = z
     category: z.object({ id: z.uuid(), name: z.string() }).strict().nullable(),
     level: z.enum(COURSE_LEVELS).nullable(),
     coverAssetId: z.uuid().nullable(),
+    /** NOVF-02 (D-699): the stored Topo or null, never a computed fallback; optional for an older web (D-696). */
+    topCoverAssetId: z.uuid().nullable().optional(),
     instructorName: z.string(),
     instructorPhotoAssetId: z.uuid().nullable(),
     outcomes: z.array(z.string()),
@@ -1117,6 +1123,8 @@ export const learnCourseSchema = z
     tagline: z.string(),
     description: z.string(),
     coverAssetId: z.uuid().nullable(),
+    /** NOVF-02 (D-699): the stored Topo or null, never a computed fallback; optional for an older web (D-696). */
+    topCoverAssetId: z.uuid().nullable().optional(),
     category: z.object({ id: z.uuid(), name: z.string() }).strict().nullable(),
     level: z.enum(COURSE_LEVELS).nullable(),
     instructorName: z.string(),

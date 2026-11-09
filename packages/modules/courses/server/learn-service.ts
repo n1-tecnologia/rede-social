@@ -111,6 +111,7 @@ type CourseHeaderRow = {
   category_name: string | null;
   level: string | null;
   cover_asset_id: string | null;
+  top_cover_asset_id: string | null;
   instructor_name: string;
   instructor_photo_asset_id: string | null;
   outcomes: string[];
@@ -168,8 +169,8 @@ async function readPublishedCourse(
 ): Promise<CourseHeaderRow | null> {
   const rows = await tx.execute<CourseHeaderRow>(sql`
     select c.id, c.title, c.tagline, c.description, c.category_id, k.name as category_name,
-           c.level, c.cover_asset_id, c.instructor_name, c.instructor_photo_asset_id, c.outcomes,
-           c.certificate_hours,
+           c.level, c.cover_asset_id, c.top_cover_asset_id, c.instructor_name,
+           c.instructor_photo_asset_id, c.outcomes, c.certificate_hours,
            c.id = any (${LOCKED_COURSE_IDS}) as locked
       from courses c
       left join course_categories k on k.id = c.category_id and k.tenant_id = c.tenant_id
@@ -302,6 +303,7 @@ export async function getLearnCourse(ctx: RequestContext, courseId: string): Pro
     tagline: course.tagline,
     description: course.description,
     coverAssetId: course.cover_asset_id,
+    topCoverAssetId: course.top_cover_asset_id,
     category:
       course.category_id && course.category_name !== null
         ? { id: course.category_id, name: course.category_name }
