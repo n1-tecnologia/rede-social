@@ -284,6 +284,35 @@ describe('the tracks row', () => {
       description: null,
     });
   });
+
+  // 12.3-02 (UI-D-692, D-700): the member read now sends the three texts as strings, empty when the
+  // admin wrote nothing; an empty or blank string is absent on the card and on the page alike.
+  it('the empty and the whitespace-only string are absent on the card and on the page', () => {
+    const empty = { subtitle: '', audience: '', description: '' };
+    const blank = { subtitle: '  ', audience: ' \t', description: '\n ' };
+    const cards = trackCardsView([track('t1', empty), track('t2', blank)], t);
+    for (const card of cards) {
+      expect(card).toMatchObject({ subtitle: null, audience: null });
+    }
+    for (const texts of [empty, blank]) {
+      expect(trackDetailView(track('t3', texts), t)).toMatchObject({
+        subtitle: null,
+        audience: null,
+        description: null,
+      });
+    }
+  });
+
+  it('a track with texts and one without lay out the same apart from the texts', () => {
+    const [withTexts, without] = trackCardsView(
+      [
+        track('t1', { subtitle: 'Do básico', audience: 'Iniciantes' }),
+        track('t1', { subtitle: '' }),
+      ],
+      t,
+    );
+    expect({ ...withTexts, subtitle: null, audience: null }).toEqual(without);
+  });
 });
 
 describe("the school's areas and the panel's promotion", () => {

@@ -50,12 +50,14 @@ import {
   memberLessonRowView,
   memberTracksHref,
   newLessonView,
+  optionalWords,
   otherTrackView,
   progressTabView,
   relativeDayLabel,
   selectedTrackId,
   shelfRowView,
   streakBadgeView,
+  trackDetailView,
   trackStepView,
   trackTabView,
 } from './courses-member-view';
@@ -2214,5 +2216,70 @@ describe('homeLiveView (D-444, D-446, UI-D-452, COURSE-32)', () => {
       expect(view.href.startsWith('/cursos/lives/')).toBe(true);
       expect(JSON.stringify(view)).not.toContain('http');
     }
+  });
+});
+
+/* ── 12.3-02: the track's three optional texts (NOVF-01, UI-D-692, D-700) ─────────────────────── */
+
+describe('optionalWords (UI-D-692: an empty string is absent)', () => {
+  it('a present text is trimmed and kept', () => {
+    expect(optionalWords('Do básico ao avançado')).toBe('Do básico ao avançado');
+    expect(optionalWords('  Para quem começa  ')).toBe('Para quem começa');
+  });
+
+  it('the empty string is absent', () => {
+    expect(optionalWords('')).toBeNull();
+  });
+
+  it('a whitespace-only string is absent', () => {
+    expect(optionalWords('   ')).toBeNull();
+    expect(optionalWords('\n\t ')).toBeNull();
+  });
+
+  it('an undefined text is absent', () => {
+    expect(optionalWords(undefined)).toBeNull();
+  });
+});
+
+describe("trackDetailView: the track's own texts from the member read (NOVF-01, UI-D-692)", () => {
+  it('present texts reach the page trimmed, in their places', () => {
+    const view = trackDetailView(
+      learnTrack({
+        subtitle: ' Do zero ao avançado ',
+        audience: 'Quem está começando',
+        description: '  Uma trilha completa.  ',
+      }),
+      t,
+    );
+    expect(view).toMatchObject({
+      subtitle: 'Do zero ao avançado',
+      audience: 'Quem está começando',
+      description: 'Uma trilha completa.',
+    });
+  });
+
+  it('empty strings (what the API sends for an unwritten text) draw nothing: no heading, no line', () => {
+    const view = trackDetailView(learnTrack({ subtitle: '', audience: '', description: '' }), t);
+    expect(view).toMatchObject({ subtitle: null, audience: null, description: null });
+  });
+
+  it('whitespace-only texts draw nothing either', () => {
+    const view = trackDetailView(
+      learnTrack({ subtitle: '   ', audience: ' \t ', description: '\n  \n' }),
+      t,
+    );
+    expect(view).toMatchObject({ subtitle: null, audience: null, description: null });
+  });
+
+  it('one text absent does not hide the others', () => {
+    const view = trackDetailView(
+      learnTrack({ subtitle: '', audience: 'Quem está começando', description: ' ' }),
+      t,
+    );
+    expect(view).toMatchObject({
+      subtitle: null,
+      audience: 'Quem está começando',
+      description: null,
+    });
   });
 });
