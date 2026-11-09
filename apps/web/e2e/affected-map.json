@@ -796,6 +796,17 @@
         "apps/web/app/(app)/comunidades/[communityId]/DeleteCommunityControl.tsx"
       ],
       "specs": ["events.spec.ts", "comunidades.spec.ts"]
+    },
+    {
+      "id": "phone-menu",
+      "why": "The phone menu the administrator arranges in Configurações › Menu do app (12.3-16, D-697): the page and its actions, the editor, the API client and the place rules; the saved menu is applied by the shell's phone chrome for every member, which shell.spec and the member-area spec draw.",
+      "globs": [
+        "apps/web/app/(app)/configuracoes/menu/**",
+        "apps/web/components/admin/PhoneMenuEditor*",
+        "apps/web/lib/phone-nav-layout*",
+        "apps/web/lib/phone-menu*"
+      ],
+      "specs": ["shell.spec.ts", "courses-member-area.spec.ts"]
     }
   ]
 }
