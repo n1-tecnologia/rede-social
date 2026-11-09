@@ -67,3 +67,32 @@ export function moduleTopCover(
 ): string | null {
   return module.topCoverAssetId ?? module.coverAssetId ?? courseCoverAssetId;
 }
+
+/**
+ * The image of an event's card in the LIST, 12.3-08 (NOVF-04, UI-D-693, D-696, D-699): the vertical
+ * poster with its own ladder, else the horizontal cover with its ladder (cropped as the list always
+ * did), else no image (the card then draws the brand gradient). The API answers each AS STORED and
+ * never computes this; `posterAssetId` and `posterVariantWidths` are optional because an older answer
+ * lacks them. The event's own page does not call this: it keeps the horizontal cover.
+ */
+export interface EventListImageIds {
+  coverAssetId: string | null;
+  coverVariantWidths: readonly number[];
+  posterAssetId?: string | null | undefined;
+  posterVariantWidths?: readonly number[] | undefined;
+}
+
+export interface EventListImage {
+  assetId: string | null;
+  widths: readonly number[];
+}
+
+export function eventListPoster(event: EventListImageIds): EventListImage {
+  if (event.posterAssetId) {
+    return { assetId: event.posterAssetId, widths: event.posterVariantWidths ?? [] };
+  }
+  if (event.coverAssetId) {
+    return { assetId: event.coverAssetId, widths: event.coverVariantWidths };
+  }
+  return { assetId: null, widths: [] };
+}

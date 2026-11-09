@@ -5,6 +5,7 @@ import { Button, Card, cn, EmptyState, PullToRefresh, Skeleton } from '@rede-soc
 import { CalendarDays, Plus, TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useId, useState } from 'react';
+import { eventListPoster } from '@/lib/cover-fallback';
 import type { EventCardView, EventSectionsView } from '@/lib/events-view';
 import { refreshEventSectionsAction } from './actions';
 
@@ -123,25 +124,29 @@ function Gallery({
       {cards.length > 0 ? (
         <div className={POSTERS_WRAP}>
           <ul className={POSTERS}>
-            {cards.map((card, index) => (
-              <li key={card.id} className={POSTER_CELL}>
-                <EventPoster
-                  href={card.href}
-                  ariaLabel={card.ariaLabel}
-                  title={card.title}
-                  category={card.category}
-                  place={card.place}
-                  placeKind={card.placeKind}
-                  badge={card.badge}
-                  note={card.note}
-                  coverAssetId={card.coverAssetId}
-                  coverVariantWidths={card.coverVariantWidths}
-                  coverAlt={card.coverAlt}
-                  grayscale={card.grayscale}
-                  eager={index < 2}
-                />
-              </li>
-            ))}
+            {cards.map((card, index) => {
+              // 12.3-08 (UI-D-693): the vertical poster, else the horizontal cover, else the gradient.
+              const image = eventListPoster(card);
+              return (
+                <li key={card.id} className={POSTER_CELL}>
+                  <EventPoster
+                    href={card.href}
+                    ariaLabel={card.ariaLabel}
+                    title={card.title}
+                    category={card.category}
+                    place={card.place}
+                    placeKind={card.placeKind}
+                    badge={card.badge}
+                    note={card.note}
+                    coverAssetId={image.assetId}
+                    coverVariantWidths={image.widths}
+                    coverAlt={card.coverAlt}
+                    grayscale={card.grayscale}
+                    eager={index < 2}
+                  />
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : (

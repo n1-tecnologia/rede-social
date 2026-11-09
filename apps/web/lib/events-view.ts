@@ -408,6 +408,12 @@ export type EventCardView = {
   ariaLabel: string;
   coverAssetId: string | null;
   coverVariantWidths: number[];
+  /**
+   * 2026-11-09 (12.3-08, D-696): the stored vertical poster and its ladder, null and `[]` with none
+   * or from an older answer. The list picks poster, else cover (`eventListPoster`).
+   */
+  posterAssetId?: string | null;
+  posterVariantWidths?: number[];
   coverAlt: string;
   grayscale: boolean;
 };
@@ -443,6 +449,8 @@ export function eventCardView(
     ariaLabel: t('poster.label', { title: event.title, when }),
     coverAssetId: event.coverAssetId,
     coverVariantWidths: event.coverVariantWidths,
+    posterAssetId: event.posterAssetId ?? null,
+    posterVariantWidths: event.posterVariantWidths ?? [],
     coverAlt: t('cover.alt', { title: event.title }),
     grayscale: event.status === 'cancelled',
   };

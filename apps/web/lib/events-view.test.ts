@@ -1039,3 +1039,19 @@ describe('2026-10-06 — the REINE detail pieces', () => {
     expect(eventMapView('', '')).toBeNull();
   });
 });
+
+describe('the event page keeps the horizontal cover (12.3-08, UI-D-693)', () => {
+  it('an event with a vertical poster still heads its OWN page with the horizontal cover and its ladder', () => {
+    const view = eventDetailView(
+      detail({
+        coverAssetId: '0c000000-0000-4000-8000-0000000000c1',
+        coverVariantWidths: [480, 960],
+        posterAssetId: '0b000000-0000-4000-8000-0000000000b1',
+        posterVariantWidths: [320, 640],
+      }),
+      { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t },
+    );
+    expect(view.hero.coverAssetId).toBe('0c000000-0000-4000-8000-0000000000c1');
+    expect(view.hero.coverVariantWidths).toEqual([480, 960]);
+  });
+});
