@@ -349,6 +349,12 @@ const moduleTitleField = z
 const moduleSummaryField = z.string().trim().max(MODULE_MAX_SUMMARY, 'description_too_long');
 /** D-406: "Exige concluir o módulo anterior" — modeled and editable now, enforced in the member phase. */
 const requiresPreviousField = z.boolean();
+/**
+ * A module's two optional images (NOVF-03, OQ-1, D-699): its card cover and its Topo, each refused
+ * by its own issue code. Empty means the course's image; the web computes that fallback.
+ */
+const moduleCoverField = z.uuid('cover_invalid').nullable();
+const moduleTopCoverField = z.uuid('top_cover_invalid').nullable();
 
 /** `POST /v1/courses/{courseId}/modules`. The position is the next one; the body never carries it. */
 export const moduleInputSchema = z
@@ -356,6 +362,8 @@ export const moduleInputSchema = z
     title: moduleTitleField,
     summary: moduleSummaryField.default(''),
     requiresPrevious: requiresPreviousField.default(false),
+    coverAssetId: moduleCoverField.default(null),
+    topCoverAssetId: moduleTopCoverField.default(null),
   })
   .strict();
 export type ModuleInput = z.infer<typeof moduleInputSchema>;
@@ -365,6 +373,8 @@ export const modulePatchSchema = z
     title: moduleTitleField.optional(),
     summary: moduleSummaryField.optional(),
     requiresPrevious: requiresPreviousField.optional(),
+    coverAssetId: moduleCoverField.optional(),
+    topCoverAssetId: moduleTopCoverField.optional(),
   })
   .strict()
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
@@ -498,6 +508,9 @@ export const moduleViewSchema = z
     summary: z.string(),
     position: z.number().int().min(1),
     requiresPrevious: z.boolean(),
+    /** The module's own card cover and Topo, null when empty (D-696, D-699). */
+    coverAssetId: z.uuid().nullable().optional(),
+    topCoverAssetId: z.uuid().nullable().optional(),
     lessonCount: z.number().int().min(0),
     durationSeconds: z.number().int().min(0),
     lessons: z.array(lessonViewSchema),

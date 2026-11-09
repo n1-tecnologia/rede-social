@@ -2103,9 +2103,10 @@ describe('modules', () => {
     }
     // Nothing was written by any refusal.
     expect((await getCourse(course.id)).modules.map((m) => m.id)).toEqual([bare.id, created.id]);
-    expect(
-      (await getCourse(course.id)).modules.find((m) => m.id === bare.id),
-    ).toMatchObject({ coverAssetId: card, topCoverAssetId: other });
+    expect((await getCourse(course.id)).modules.find((m) => m.id === bare.id)).toMatchObject({
+      coverAssetId: card,
+      topCoverAssetId: other,
+    });
 
     // The lab admin cannot reach the demo module: the bare 404, both images intact.
     await expectBare404(

@@ -119,6 +119,8 @@ type ModuleRow = {
   summary: string;
   position: number;
   requires_previous: boolean;
+  cover_asset_id: string | null;
+  top_cover_asset_id: string | null;
 };
 
 type LessonRow = {
@@ -167,6 +169,8 @@ function moduleView(row: ModuleRow, lessons: LessonView[]): ModuleView {
     summary: row.summary,
     position: row.position,
     requiresPrevious: row.requires_previous,
+    coverAssetId: row.cover_asset_id,
+    topCoverAssetId: row.top_cover_asset_id,
     lessonCount: lessons.length,
     durationSeconds: lessons.reduce((sum, lesson) => sum + (lesson.durationSeconds ?? 0), 0),
     lessons,
@@ -591,7 +595,7 @@ async function readLessonRows(
  */
 async function readModulesOf(tx: Tx, ctx: RequestContext, courseId: string): Promise<ModuleView[]> {
   const moduleRows = await tx.execute<ModuleRow>(sql`
-    select id, title, summary, position, requires_previous
+    select id, title, summary, position, requires_previous, cover_asset_id, top_cover_asset_id
       from course_modules
      where tenant_id = ${ctx.tenantId}::uuid
        and course_id = ${courseId}::uuid
@@ -977,17 +981,22 @@ export async function createModule(
 ): Promise<ModuleView> {
   const view = await withTenantTx(ctx, async (tx) => {
     if (!(await lockCourse(tx, ctx, courseId))) return null;
+    await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
+    await resolveCoverAsset(tx, ctx, input.topCoverAssetId, 'top_cover_invalid');
     const rows = await tx.execute<ModuleRow>(sql`
-      insert into course_modules (tenant_id, course_id, title, summary, position, requires_previous)
+      insert into course_modules (tenant_id, course_id, title, summary, position, requires_previous,
+                                  cover_asset_id, top_cover_asset_id)
       select ${ctx.tenantId}::uuid, ${courseId}::uuid, ${input.title}, ${input.summary},
              next.position,
-             case when next.position = 1 then false else ${input.requiresPrevious}::boolean end
+             case when next.position = 1 then false else ${input.requiresPrevious}::boolean end,
+             ${input.coverAssetId}::uuid, ${input.topCoverAssetId}::uuid
         from (select coalesce(max(position), 0) + 1 as position
                 from course_modules
                where tenant_id = ${ctx.tenantId}::uuid
                  and course_id = ${courseId}::uuid
                  and deleted_at is null) as next
-      returning id, title, summary, position, requires_previous`);
+      returning id, title, summary, position, requires_previous, cover_asset_id,
+                top_cover_asset_id`);
     const row = rows[0];
     if (!row) throw new ApiError(500, 'INTERNAL');
     return moduleView(row, []);
@@ -1112,7 +1121,7 @@ async function readModule(
   moduleId: string,
 ): Promise<ModuleView | null> {
   const rows = await tx.execute<ModuleRow>(sql`
-    select id, title, summary, position, requires_previous
+    select id, title, summary, position, requires_previous, cover_asset_id, top_cover_asset_id
       from course_modules
      where id = ${moduleId}::uuid
        and tenant_id = ${ctx.tenantId}::uuid
@@ -1138,9 +1147,21 @@ export async function updateModule(
   const view = await withTenantTx(ctx, async (tx) => {
     const module = await lockModule(tx, ctx, moduleId);
     if (!module) return null;
+    if (patch.coverAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
+    }
+    if (patch.topCoverAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, patch.topCoverAssetId, 'top_cover_invalid');
+    }
     const sets = [sql`updated_at = now()`];
     if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
     if (patch.summary !== undefined) sets.push(sql`summary = ${patch.summary}`);
+    if (patch.coverAssetId !== undefined) {
+      sets.push(sql`cover_asset_id = ${patch.coverAssetId}::uuid`);
+    }
+    if (patch.topCoverAssetId !== undefined) {
+      sets.push(sql`top_cover_asset_id = ${patch.topCoverAssetId}::uuid`);
+    }
     if (patch.requiresPrevious !== undefined) {
       const isFirst = (await firstModuleId(tx, ctx, module.course_id)) === module.id;
       sets.push(sql`requires_previous = ${isFirst ? false : patch.requiresPrevious}::boolean`);
