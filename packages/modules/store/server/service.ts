@@ -847,32 +847,36 @@ type FrontRow = { promo_product_id: string | null; featured_product_ids: string[
  * is filtered by the tenant and runs under RLS. The server never guesses anything for a product here
  * (D-693): a product with no category simply sits in no shelf.
  */
+async function readFront(tx: Tx, ctx: RequestContext): Promise<StoreFront> {
+  const categories = await tx.execute<{ id: string; name: string; icon: string }>(sql`
+    select slug as id, name, icon
+      from store_categories
+     where tenant_id = ${ctx.tenantId}::uuid
+     order by position, slug`);
+  const rows = await tx.execute<FrontRow>(sql`
+    select (select p.id
+              from store_products p
+             where p.tenant_id = f.tenant_id
+               and p.id = f.promo_product_id
+               and p.status = 'active') as promo_product_id,
+           (select array_agg(p.id order by u.ord)
+              from unnest(f.featured_product_ids) with ordinality as u(id, ord)
+              join store_products p on p.id = u.id and p.tenant_id = f.tenant_id
+             where p.status = 'active') as featured_product_ids
+      from store_front f
+     where f.tenant_id = ${ctx.tenantId}::uuid`);
+  const row = rows[0];
+  return {
+    categories: categories as StoreFront['categories'],
+    promoProductId: row?.promo_product_id ?? null,
+    featuredProductIds: row?.featured_product_ids ?? [],
+  };
+}
+
 export async function getFront(ctx: RequestContext): Promise<StoreFront> {
   const front = await withTenantTx(ctx, async (tx) => {
     await ensureSeeded(tx, ctx);
-    const categories = await tx.execute<{ id: string; name: string; icon: string }>(sql`
-      select slug as id, name, icon
-        from store_categories
-       where tenant_id = ${ctx.tenantId}::uuid
-       order by position, slug`);
-    const rows = await tx.execute<FrontRow>(sql`
-      select (select p.id
-                from store_products p
-               where p.tenant_id = f.tenant_id
-                 and p.id = f.promo_product_id
-                 and p.status = 'active') as promo_product_id,
-             (select array_agg(p.id order by u.ord)
-                from unnest(f.featured_product_ids) with ordinality as u(id, ord)
-                join store_products p on p.id = u.id and p.tenant_id = f.tenant_id
-               where p.status = 'active') as featured_product_ids
-        from store_front f
-       where f.tenant_id = ${ctx.tenantId}::uuid`);
-    const row = rows[0];
-    return {
-      categories: categories as StoreFront['categories'],
-      promoProductId: row?.promo_product_id ?? null,
-      featuredProductIds: row?.featured_product_ids ?? [],
-    };
+    return readFront(tx, ctx);
   });
 
   log.info(
@@ -886,6 +890,71 @@ export async function getFront(ctx: RequestContext): Promise<StoreFront> {
       hasPromo: front.promoProductId !== null,
     },
     'store front read',
+  );
+  return front;
+}
+
+/**
+ * The first step of every front write (D-699, T-12.3-08): claims the once-only category seed (so a store
+ * that never read its front is never seeded after the admin's own writes), makes sure the tenant's ONE
+ * `store_front` row exists and takes its row lock, held to the end of the transaction. Every promo,
+ * featured and whole-list category write of a tenant serializes here, so two saves never interleave and a
+ * stale draft is judged against the list as it is now. The row is written in the tenant lane under the
+ * `admin_tenant` policies (the route's permission is the first gate, RLS the second).
+ */
+async function lockFront(tx: Tx, ctx: RequestContext): Promise<void> {
+  await ensureSeeded(tx, ctx);
+  await tx.execute(sql`
+    insert into store_front (tenant_id) values (${ctx.tenantId}::uuid)
+    on conflict (tenant_id) do nothing`);
+  await tx.execute(sql`
+    select tenant_id from store_front where tenant_id = ${ctx.tenantId}::uuid for update`);
+}
+
+/** How many of `ids` are ACTIVE products of THIS tenant, read under RLS (the write's own check, T-12.3-03). */
+async function countActiveProducts(
+  tx: Tx,
+  ctx: RequestContext,
+  ids: readonly string[],
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  const rows = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n
+      from store_products
+     where tenant_id = ${ctx.tenantId}::uuid
+       and status = 'active'
+       and id = any(${uuidArray(ids)}::uuid[])`);
+  return rows[0]?.n ?? 0;
+}
+
+/**
+ * `PUT /v1/store/front/promo` (D-699, NOVF-05): saves the Início's featured product, or clears it with
+ * `null`. The id must be an ACTIVE product of THIS tenant (`400 { store: 'promo_invalid' }` otherwise,
+ * the same code for an unknown, a foreign and an archived id), checked under the row lock. A later
+ * archive of the product is dropped by the READ, never by this write. Answers the fresh front.
+ */
+export async function setPromo(ctx: RequestContext, productId: string | null): Promise<StoreFront> {
+  const front = await withTenantTx(ctx, async (tx) => {
+    await lockFront(tx, ctx);
+    if (productId !== null && (await countActiveProducts(tx, ctx, [productId])) !== 1) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { store: 'promo_invalid' });
+    }
+    await tx.execute(sql`
+      update store_front
+         set promo_product_id = ${productId}::uuid, updated_at = now()
+       where tenant_id = ${ctx.tenantId}::uuid`);
+    return readFront(tx, ctx);
+  });
+
+  log.info(
+    {
+      event: 'store.front_promo_saved',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      hasPromo: productId !== null,
+    },
+    'store front promo saved',
   );
   return front;
 }

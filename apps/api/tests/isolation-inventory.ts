@@ -286,6 +286,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // 12.3-11 (NOVF-05, NOVF-11): the store front read; the category slug on create and edit is proved in
   // the same case beside it (a rede-demo slug from a rede-lab admin is a 400, never a link).
   'GET /v1/store/front': { case: 'phase 12.3 sweep: store' },
+  // 12.3-12 (D-699): the admin writes of the front; each has its cross-tenant case in 'phase 12.3 sweep:
+  // store front writes' (a lab admin naming a demo id, a demo admin on the lab host, member and support).
+  'PUT /v1/store/front/promo': { case: 'phase 12.3 sweep: store front writes' },
   'GET /v1/store/products': { case: 'phase 08.2 sweep: store' },
   'GET /v1/store/products/:productId': { case: 'phase 08.2 sweep: store' },
   'GET /v1/store/community-access': { case: 'phase 08.2 sweep: store' },

@@ -14,6 +14,7 @@ import {
   communityAccessSchema,
   courseAccessListSchema,
   courseAccessSchema,
+  frontPromoBodySchema,
   grantBodySchema,
   grantResultSchema,
   liveAccessListSchema,
@@ -49,6 +50,7 @@ import {
   purchaseProduct,
   revokeAccess,
   setProductStatus,
+  setPromo,
   updateProduct,
 } from './service';
 
@@ -147,6 +149,29 @@ const getFrontRoute = createRoute({
         'The store front for every member: `categories` (`id` is the slug, `name`, `icon`) in the storefront’s order, `promoProductId` (the promo product, only while it is ACTIVE, else null) and `featuredProductIds` (the ACTIVE featured products in the admin’s order, at most 5). A store that never had categories answers its eight built-ins on the first read: the one-time seed runs inside this call.',
       content: { 'application/json': { schema: storeFrontSchema } },
     },
+    404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
+  },
+});
+
+const putFrontPromoRoute = createRoute({
+  method: 'put',
+  path: '/front/promo',
+  // The literal, the createProduct precedent: what guards the storefront's writes is greppable here.
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: frontPromoBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The fresh store front (`categories`, `promoProductId`, `featuredProductIds`). `{ productId: null }` clears the promo; the same body twice leaves one row and the same answer. The promo may also be one of the featured products. An archived product saved as the promo is dropped by the READ, not by this write.',
+      content: { 'application/json': { schema: storeFrontSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.store: promo_invalid` (the id is not an ACTIVE product of this tenant: unknown, another tenant’s or archived all answer the same code). A missing key, an unknown key or a non-uuid is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
     404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
   },
 });
@@ -477,6 +502,9 @@ export const storeRoutes = store
     return c.json(await getProduct(ctx, c.req.valid('param').productId, canManage), 200);
   })
   .openapi(getFrontRoute, async (c) => c.json(await getFront(c.get('ctx')), 200))
+  .openapi(putFrontPromoRoute, async (c) =>
+    c.json(await setPromo(c.get('ctx'), c.req.valid('json').productId), 200),
+  )
   .openapi(listCommunityAccessRoute, async (c) =>
     c.json(await listCommunityAccess(c.get('ctx')), 200),
   )

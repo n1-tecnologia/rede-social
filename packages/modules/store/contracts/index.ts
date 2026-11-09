@@ -325,6 +325,49 @@ export const storeFrontSchema = z
 export type StoreFront = z.infer<typeof storeFrontSchema>;
 
 /**
+ * `PUT /v1/store/front/promo` (D-699, NOVF-05): the product the Início features, or `null` to clear it.
+ * Strict; the service owns the refusal (`promo_invalid`: not an ACTIVE product of this tenant).
+ */
+export const frontPromoBodySchema = z.object({ productId: z.uuid().nullable() }).strict();
+export type FrontPromoBody = z.infer<typeof frontPromoBodySchema>;
+
+/**
+ * `PUT /v1/store/front/featured` (D-699, NOVF-06): the "Em destaque" products in the admin's order,
+ * `[]` to use the most recent ones. The schema cap is generous on purpose: the service owns the codes
+ * (`too_many_featured` above `STORE_FEATURED_MAX`, `featured_invalid` for a repeat or a non-active id).
+ */
+export const frontFeaturedBodySchema = z
+  .object({ productIds: z.array(z.uuid()).max(100) })
+  .strict();
+export type FrontFeaturedBody = z.infer<typeof frontFeaturedBodySchema>;
+
+/**
+ * One entry of the whole-list category save (D-690, OQ-4): an existing row carries its `id` (the slug)
+ * and keeps it, a new row carries none and the server mints the slug. The name and the icon are plain
+ * strings here and the service owns their codes (`category_name_required`, `category_name_too_long`,
+ * `category_name_taken`, `category_icon_invalid`); a malformed `id` is `category_invalid` at once. The
+ * raw name has a generous cap so a megabyte body cannot reach the service.
+ */
+export const categoryEntrySchema = z
+  .object({
+    id: z.string().regex(STORE_CATEGORY_SLUG_RE, 'category_invalid').optional(),
+    name: z.string().max(200, 'category_name_too_long'),
+    icon: z.string().max(64, 'category_icon_invalid'),
+  })
+  .strict();
+export type CategoryEntry = z.infer<typeof categoryEntrySchema>;
+
+/**
+ * `PUT /v1/store/categories` (OQ-4: ONE whole list, draft-and-save): the schema cap of 50 leaves the
+ * `too_many_categories` refusal (above `STORE_CATEGORY_MAX`) to the service. Strict: no tenant id, no
+ * slug for a new row and no position are taken from the body; the order of the array is the position.
+ */
+export const categoriesBodySchema = z
+  .object({ categories: z.array(categoryEntrySchema).max(50) })
+  .strict();
+export type CategoriesBody = z.infer<typeof categoriesBodySchema>;
+
+/**
  * The product's field rules, ONE definition shared by the create body and the patch body (08.2-05),
  * so a name that passes one passes the other. Defaults live on the create body only: a patch that
  * omits a key leaves that column alone.
