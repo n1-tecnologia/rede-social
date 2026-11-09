@@ -7621,6 +7621,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
   it('phase 12.3 sweep: store front writes — a rede-lab admin cannot save a rede-demo product as the promo (400 promo_invalid, nothing written), a rede-demo admin on the rede-lab host is refused, and a member or support session is 403, each beside the same-tenant admin positive control (12.3-12, NOVF-05, T-12.3-02, T-12.3-03)', async () => {
     // | Route                     | Negative asserted here                                                     |
     // |---------------------------|----------------------------------------------------------------------------|
+    // | PUT /v1/store/front/featured | the same four negatives with featured_invalid and the stored list unchanged |
     // | PUT /v1/store/front/promo | a lab admin naming a demo product: 400 promo_invalid, the lab row is not    |
     // |                           | written; a demo admin on the lab host: 403 TENANT_HOST_MISMATCH; a demo     |
     // |                           | member and support session: 403                                             |
@@ -7695,6 +7696,52 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         });
         expect(res.status).toBe(403);
         expect(await storedPromo(tenantIds.demo)).toBe(demoProductId);
+      }
+
+      // The featured list: the same negatives, each beside its own-tenant positive control.
+      const storedFeatured = async (tenantId: string) => {
+        const [row] = await adminSql<{ ids: string[] }[]>`
+          select featured_product_ids::text[] as ids from public.store_front
+           where tenant_id = ${tenantId}::uuid`;
+        return row?.ids ?? [];
+      };
+      const demoList = await send('PUT', '/v1/store/front/featured', tokens.demoAdmin, HOSTS.demo, {
+        productIds: [demoProductId],
+      });
+      expect(demoList.status).toBe(200);
+      expect(await storedFeatured(tenantIds.demo)).toEqual([demoProductId]);
+      const foreignList = await send(
+        'PUT',
+        '/v1/store/front/featured',
+        tokens.labAdmin,
+        HOSTS.lab,
+        {
+          productIds: [labProductId, demoProductId],
+        },
+      );
+      expect(foreignList.status).toBe(400);
+      expect(((await foreignList.json()) as Envelope).error.details).toEqual({
+        store: 'featured_invalid',
+      });
+      expect(await storedFeatured(tenantIds.lab)).toEqual([]);
+      const labList = await send('PUT', '/v1/store/front/featured', tokens.labAdmin, HOSTS.lab, {
+        productIds: [labProductId],
+      });
+      expect(labList.status).toBe(200);
+      expect(await storedFeatured(tenantIds.lab)).toEqual([labProductId]);
+      await expectHostRefused(
+        await send('PUT', '/v1/store/front/featured', tokens.demoAdmin, HOSTS.lab, {
+          productIds: [],
+        }),
+        'featured on the lab host',
+      );
+      expect(await storedFeatured(tenantIds.lab)).toEqual([labProductId]);
+      for (const token of [tokens.demoMember, demoSupport]) {
+        const res = await send('PUT', '/v1/store/front/featured', token, HOSTS.demo, {
+          productIds: [],
+        });
+        expect(res.status).toBe(403);
+        expect(await storedFeatured(tenantIds.demo)).toEqual([demoProductId]);
       }
     } finally {
       await sweepWrites();

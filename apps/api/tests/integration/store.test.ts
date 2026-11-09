@@ -3692,4 +3692,135 @@ describe('store front writes (12.3-12)', () => {
     expect(stored.rows).toBe(1);
     expect([a.id, b.id]).toContain(stored.promo);
   });
+
+  const putFeatured = (body: unknown, token = tokens.demoAdmin) =>
+    put('/v1/store/front/featured', token, body);
+
+  async function makeProducts(label: string, count: number): Promise<string[]> {
+    const ids: string[] = [];
+    for (let n = 1; n <= count; n += 1) {
+      ids.push((await createProduct(`${PREFIX} ${label} ${n}`, 100 * n, [])).id);
+    }
+    return ids;
+  }
+
+  it('featured: an admin saves up to five products in order, a member reads that order, reordering two changes only them, [] clears', async () => {
+    const ids = await makeProducts('feat order', 5);
+    await adminSql`delete from public.store_front where tenant_id = ${demoTenantId}::uuid`;
+    // A store with no front row answers an empty list.
+    expect(
+      (await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember)).featuredProductIds,
+    ).toEqual([]);
+
+    const order = [ids[3], ids[0], ids[4], ids[1], ids[2]] as string[];
+    const saved = await putFeatured({ productIds: order });
+    expect(saved.status).toBe(200);
+    const answer = (await saved.json()) as FrontAnswer;
+    expect(answer.featuredProductIds).toEqual(order);
+    expect((await storedFront()).featured).toEqual(order);
+    expect(await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember)).toEqual(answer);
+    // Two reads in a row answer the same sequence (the categories by position, the ids as stored).
+    expect(await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember)).toEqual(answer);
+
+    // Reordering the first two changes only their order.
+    const swapped = [order[1], order[0], ...order.slice(2)] as string[];
+    expect(
+      ((await (await putFeatured({ productIds: swapped })).json()) as FrontAnswer)
+        .featuredProductIds,
+    ).toEqual(swapped);
+
+    // Idempotent: the same list twice leaves the same row and the same answer.
+    const first = await (await putFeatured({ productIds: swapped })).json();
+    const second = await (await putFeatured({ productIds: swapped })).json();
+    expect(second).toEqual(first);
+    expect((await storedFront()).rows).toBe(1);
+
+    const cleared = await putFeatured({ productIds: [] });
+    expect(cleared.status).toBe(200);
+    expect(((await cleared.json()) as FrontAnswer).featuredProductIds).toEqual([]);
+    expect((await storedFront()).featured).toEqual([]);
+  });
+
+  it('featured: five are accepted and six are too_many_featured; a repeated, archived, unknown or foreign id is featured_invalid; nothing is written on a refusal', async () => {
+    const ids = await makeProducts('feat bound', 6);
+    const five = ids.slice(0, 5);
+    expect((await putFeatured({ productIds: five })).status).toBe(200);
+    expect((await storedFront()).featured).toEqual(five);
+
+    const six = await putFeatured({ productIds: ids });
+    expect(six.status).toBe(400);
+    expect(((await six.json()) as Envelope).error.details).toEqual({ store: 'too_many_featured' });
+
+    const archived = await createProduct(`${PREFIX} feat archived`, 100, []);
+    expect((await archive(archived.id)).status).toBe(200);
+    const foreign = await insertProduct(
+      labTenantId,
+      `${PREFIX} feat foreign`,
+      '2026-01-01T00:00:00Z',
+    );
+    const bad: string[][] = [
+      [ids[0] as string, ids[0] as string],
+      [ids[0] as string, archived.id],
+      [ids[0] as string, randomUUID()],
+      [foreign],
+    ];
+    for (const productIds of bad) {
+      const res = await putFeatured({ productIds });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ store: 'featured_invalid' });
+      expect((await storedFront()).featured).toEqual(five);
+    }
+
+    // Strict body: a missing key, an unknown key, a non-uuid and an absurd length are generic 400s.
+    const huge = Array.from({ length: 101 }, () => randomUUID());
+    for (const body of [
+      {},
+      { productIds: five, tenantId: demoTenantId },
+      { productIds: ['x'] },
+      { productIds: huge },
+    ]) {
+      const res = await putFeatured(body);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+    }
+    expect((await storedFront()).featured).toEqual(five);
+    await putFeatured({ productIds: [] });
+  });
+
+  it('featured: an archived product is dropped by the read and the others keep their relative order; a member and support are 403', async () => {
+    const [a, b, c] = (await makeProducts('feat drop', 3)) as [string, string, string];
+    expect((await putFeatured({ productIds: [c, a, b] })).status).toBe(200);
+    expect((await archive(a)).status).toBe(200);
+    const front = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(front.featuredProductIds).toEqual([c, b]);
+    // The stored row keeps the archived id: the read drops it, the write does not.
+    expect((await storedFront()).featured).toEqual([c, a, b]);
+
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      const res = await putFeatured({ productIds: [b] }, token);
+      expect(res.status).toBe(403);
+      expect((await storedFront()).featured).toEqual([c, a, b]);
+    }
+    await putFeatured({ productIds: [] });
+  });
+
+  it('featured edge concurrency: parallel saves of two different lists end with one of the two lists whole, never a mix (NOVF-06)', async () => {
+    const ids = await makeProducts('feat race', 4);
+    const listA = [ids[0], ids[1]] as string[];
+    const listB = [ids[3], ids[2], ids[1]] as string[];
+    for (let round = 0; round < 3; round += 1) {
+      await adminSql`delete from public.store_front where tenant_id = ${demoTenantId}::uuid`;
+      const results = await Promise.all([
+        putFeatured({ productIds: listA }),
+        putFeatured({ productIds: listB }),
+      ]);
+      expect(results.map((res) => res.status)).toEqual([200, 200]);
+      const stored = await storedFront();
+      expect(stored.rows).toBe(1);
+      expect([JSON.stringify(listA), JSON.stringify(listB)]).toContain(
+        JSON.stringify(stored.featured),
+      );
+    }
+    await putFeatured({ productIds: [] });
+  });
 });
