@@ -45,6 +45,9 @@ export default async function EditEventPage({ params }: { params: Promise<{ even
         description: event.description,
         coverAssetId: event.coverAssetId,
         coverVariantWidths: event.coverVariantWidths,
+        // 12.3-08: an API that predates the poster sends none: the form then sends `null`.
+        posterAssetId: event.posterAssetId ?? null,
+        posterVariantWidths: event.posterVariantWidths ?? [],
         category: event.category ?? '',
         capacity: event.capacity,
         format: event.format,

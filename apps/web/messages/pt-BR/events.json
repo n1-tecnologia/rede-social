@@ -242,7 +242,8 @@
         },
         "posterAdd": "Adicionar capa vertical",
         "posterChange": "Trocar capa vertical",
-        "posterRemove": "Remover capa vertical"
+        "posterRemove": "Remover capa vertical",
+        "posterHelper": "Opcional. Sem capa vertical, a lista usa a capa horizontal ou as cores de {tenant}."
       },
       "name": {
         "label": "Nome do evento",
@@ -344,6 +345,7 @@
         "urlRequired": "Informe o link da transmissão.",
         "urlInvalid": "Use um link que comece com https://.",
         "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra.",
+        "posterInvalid": "Não foi possível usar esta imagem como capa vertical. Escolha outra.",
         "capacityInvalid": "Informe um número de vagas de 1 a 100.000, ou deixe em branco.",
         "descriptionTooLong": "A descrição com as informações úteis passou de {max} caracteres. Encurte a descrição ou as listas."
       },

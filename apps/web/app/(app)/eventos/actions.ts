@@ -269,21 +269,35 @@ function eventWriteRefusal(error: unknown): EventWriteResult {
 }
 
 /**
- * Which of the TWO bare 404s this was (the communities 05-09 rule): the API answers ONE 404 for a
- * missing event and for a missing NEW cover, deliberately (D-23). On a create there is no event id
- * to have missed, so a 404 on a body carrying a cover is the cover. On an update the event is
- * re-read: still there means the 404 was the cover. The re-read is outside any catch, so its
- * `redirect()` on an expired session throws as it must.
+ * Which of the bare 404s this was (the communities 05-09 rule): the API answers ONE 404 for a missing
+ * event and for a missing NEW image (the cover, or since 12.3-06 the vertical poster), deliberately
+ * (D-23). On a create there is no event id to have missed, so a 404 on a body carrying an image is
+ * that image: the cover first, else the poster. On an update the event is re-read: still there means
+ * the 404 was an image, and only an image whose id CHANGED can be the one refused (the API tolerates
+ * a stored id re-sent, even a retired one). The re-read is outside any catch, so its `redirect()` on
+ * an expired session throws as it must. A poster refused for a wrong purpose, kind or status is not
+ * a 404 at all: it is `details.event = 'poster_invalid'`, mapped by `eventWriteRefusal`.
  */
 async function coverAwareRefusal(
   result: EventWriteResult,
-  submittedCoverAssetId: string | null,
+  submitted: { cover: string | null; poster: string | null },
   eventId: string | null,
 ): Promise<EventWriteResult> {
-  if (result.ok || result.code !== 'not_found' || submittedCoverAssetId === null) return result;
-  if (eventId === null) return { ok: false, code: 'cover_invalid' };
+  if (result.ok || result.code !== 'not_found') return result;
+  if (submitted.cover === null && submitted.poster === null) return result;
+  if (eventId === null) {
+    return { ok: false, code: submitted.cover !== null ? 'cover_invalid' : 'poster_invalid' };
+  }
   const event = await loadEvent(eventId);
-  return event.status === 'ok' ? { ok: false, code: 'cover_invalid' } : result;
+  if (event.status !== 'ok') return result;
+  if (submitted.cover !== null && submitted.cover !== event.event.coverAssetId) {
+    return { ok: false, code: 'cover_invalid' };
+  }
+  if (submitted.poster !== null && submitted.poster !== (event.event.posterAssetId ?? null)) {
+    return { ok: false, code: 'poster_invalid' };
+  }
+  // Both ids are the stored ones: the 404 is not about an image the admin just chose.
+  return result;
 }
 
 /** The first closed code a failed parse carries, the route `defaultHook`'s own lookup. */
@@ -313,7 +327,11 @@ export async function createEventAction(input: unknown): Promise<EventWriteResul
   }
 
   if (refusal) redirect(refusal);
-  result = await coverAwareRefusal(result, body.data.coverAssetId ?? null, null);
+  result = await coverAwareRefusal(
+    result,
+    { cover: body.data.coverAssetId ?? null, poster: body.data.posterAssetId ?? null },
+    null,
+  );
   if (result.ok) revalidatePath('/eventos');
   return result;
 }
@@ -339,7 +357,11 @@ export async function updateEventAction(
   }
 
   if (refusal) redirect(refusal);
-  result = await coverAwareRefusal(result, body.data.coverAssetId ?? null, eventId);
+  result = await coverAwareRefusal(
+    result,
+    { cover: body.data.coverAssetId ?? null, poster: body.data.posterAssetId ?? null },
+    eventId,
+  );
   if (result.ok) {
     revalidatePath('/eventos');
     revalidatePath(`/eventos/${eventId}`);

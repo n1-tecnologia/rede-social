@@ -1,6 +1,7 @@
 'use client';
 
 import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
+import { MediaImage } from '@rede-social/core/ui';
 import {
   EVENT_DEFAULT_DURATION_MINUTES,
   EVENT_MAX_ADDRESS,
@@ -28,7 +29,7 @@ import {
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Plus, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, LoaderCircle, Plus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useId, useRef, useState, useTransition } from 'react';
@@ -134,6 +135,12 @@ export type EventFormInitial = {
   description: string;
   coverAssetId: string | null;
   coverVariantWidths: readonly number[];
+  /**
+   * 2026-11-09 (12.3-08, D-696): the stored vertical poster and its variant ladder. Absent (a host
+   * that predates it) is "no poster": the form then sends `posterAssetId: null`.
+   */
+  posterAssetId?: string | null;
+  posterVariantWidths?: readonly number[];
   /** 2026-10-03. Absent (a host that predates it) is "no category" / "no limit". */
   category?: string;
   capacity?: number | null;
@@ -366,29 +373,51 @@ export function EventForm({
   });
 
   /**
-   * 2026-10-24 — the STANDING cover (the list's 4:5 poster), its own field beside the lying one, at
-   * the product owner's request. FRONT ONLY so far: the API stores one cover per event, so this
-   * picture lives in the browser (a local object URL) and is not sent on save; the list keeps the
-   * lying cover until the API takes a second one. Nothing is uploaded for it.
+   * 2026-11-09 (12.3-08, NOVF-04, UI-D-693) — the STANDING cover, the list's 4:5 poster: a real,
+   * independent upload. A second `useSignedUpload` + `useCoverPreview` pair (purpose `cover`) with its
+   * own asset id, progress, announcement and error, apart from the horizontal cover's. The id travels
+   * in EVERY save, `null` for a poster removed or never set: an event edit replaces the whole event,
+   * so an absent key would clear the stored poster.
    */
-  const [posterUrl, setPosterUrl] = useState<string | null>(null);
+  const startPoster = start.posterAssetId ?? null;
+  const [posterAssetId, setPosterAssetId] = useState<string | null>(startPoster);
+  const [posterWidths, setPosterWidths] = useState<readonly number[]>(
+    start.posterVariantWidths && start.posterVariantWidths.length > 0
+      ? start.posterVariantWidths
+      : PURPOSE_WIDTHS.cover,
+  );
+  const [posterError, setPosterError] = useState<string | null>(null);
   const posterInputRef = useRef<HTMLInputElement>(null);
   const [posterDragging, setPosterDragging] = useState(false);
+  const posterPreview = useCoverPreview(posterAssetId);
+  const posterUpload = useSignedUpload({
+    kind: 'image',
+    purpose: 'cover',
+    successKey: null,
+    onPicked: posterPreview.onPicked,
+    onCompleted: (asset) => {
+      posterPreview.onUploaded(asset.id);
+      setPosterAssetId(asset.id);
+      const widths = asset.variants.map((variant) => variant.width);
+      setPosterWidths(widths.length > 0 ? widths : PURPOSE_WIDTHS.cover);
+      setPosterError(null);
+      setFormError(null);
+    },
+  });
+  const posterUploading = posterUpload.state === 'preparing' || posterUpload.state === 'progress';
+  const posterAnnounced = QUARTILES.includes(posterUpload.progress)
+    ? tm('progress', { percent: posterUpload.progress })
+    : '';
   const pickPoster = (file: File | undefined) => {
-    if (!file?.type.startsWith('image/')) return;
-    setPosterUrl(URL.createObjectURL(file));
+    if (!file?.type.startsWith('image/') || posterUploading) return;
+    void posterUpload.pick(file);
   };
-  // The previous picture's URL is released when it is replaced, removed or the form goes away.
-  useEffect(() => {
-    if (!posterUrl) return;
-    return () => URL.revokeObjectURL(posterUrl);
-  }, [posterUrl]);
 
   const uploading = upload.state === 'preparing' || upload.state === 'progress';
   const announced = QUARTILES.includes(upload.progress)
     ? tm('progress', { percent: upload.progress })
     : '';
-  const busy = pending || uploading;
+  const busy = pending || uploading || posterUploading;
   const inPerson = format === 'in_person';
   const structured = addressMode === 'structured';
 
@@ -424,6 +453,7 @@ export function EventForm({
         title,
         description: storedDescription,
         coverAssetId,
+        posterAssetId,
         category,
         capacity,
         ...scheduleField,
@@ -437,6 +467,7 @@ export function EventForm({
         title,
         description: storedDescription,
         coverAssetId,
+        posterAssetId,
         category,
         capacity,
         ...scheduleField,
@@ -454,6 +485,7 @@ export function EventForm({
       storedDescription,
       storedSchedule,
       coverAssetId,
+      posterAssetId,
       category,
       capacityText,
       format,
@@ -470,6 +502,7 @@ export function EventForm({
       composeEventDescription(initialSplit.text, initialExtras),
       normaliseSchedule(initialSchedule),
       start.coverAssetId,
+      startPoster,
       initialCategory,
       initialCapacity,
       start.format,
@@ -610,6 +643,8 @@ export function EventForm({
     switch (code) {
       case 'cover_invalid':
         return t('form.errors.coverInvalid');
+      case 'poster_invalid':
+        return t('form.errors.posterInvalid');
       case 'not_found':
         return t('notFound.title');
       default:
@@ -620,6 +655,7 @@ export function EventForm({
   const submit = () => {
     setSubmitted(true);
     setFormError(null);
+    setPosterError(null);
     const parsed = eventInputSchema.safeParse(payload);
     if (!parsed.success) {
       const tooLong = parsed.error.issues.some((issue) => issue.path[0] === 'description');
@@ -648,7 +684,9 @@ export function EventForm({
         else if (!returnAfterSave(router, landing, done)) router.push(landing);
         return;
       }
-      setFormError(messageFor(result.code));
+      // The poster's refusal sits under its own block, never in the top card (UI-D-693).
+      if (result.code === 'poster_invalid') setPosterError(messageFor(result.code));
+      else setFormError(messageFor(result.code));
     });
   };
 
@@ -767,8 +805,8 @@ export function EventForm({
           <div className="flex flex-col gap-2">
             <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
             {/* 2026-10-24: a cover FIELD per shape, side by side (the product owner's request): the
-                LYING one, the event's page (saved), and the STANDING one, the list's poster (front
-                only so far: see `posterUrl`). */}
+                LYING one, the event's page, and the STANDING one, the list's poster: two real
+                uploads with their own state (12.3-08, UI-D-693). */}
             <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_216px] sm:items-start">
               <div className="flex min-w-0 flex-col gap-2">
                 <span className="text-xs font-semibold text-text">{t('form.cover.as.hero')}</span>
@@ -888,8 +926,8 @@ export function EventForm({
                 )}
               </div>
 
-              {/* The STANDING cover, the list's poster: its own picture, picked by a tap or a drop
-                  on its frame or by its button (front only so far: kept in the browser). */}
+              {/* The STANDING cover, the list's poster: its own picture and its own upload, picked by
+                  a tap or a drop on its frame or by its button (12.3-08, UI-D-693). */}
               <div
                 data-event-poster-field
                 className="flex max-w-[220px] flex-col gap-2 sm:max-w-none"
@@ -898,7 +936,10 @@ export function EventForm({
                 <button
                   type="button"
                   data-event-poster-preview
-                  aria-label={posterUrl ? t('form.cover.posterChange') : t('form.cover.posterAdd')}
+                  aria-label={
+                    posterAssetId ? t('form.cover.posterChange') : t('form.cover.posterAdd')
+                  }
+                  disabled={posterUploading}
                   onClick={() => posterInputRef.current?.click()}
                   onDragEnter={(event) => {
                     event.preventDefault();
@@ -915,20 +956,38 @@ export function EventForm({
                     pickPoster(event.dataTransfer.files[0]);
                   }}
                   className={cn(
-                    'relative block aspect-[4/5] w-full overflow-hidden rounded-xl border border-border bg-bg-tertiary transition-opacity active:opacity-90',
+                    'relative block aspect-[4/5] w-full overflow-hidden rounded-xl border border-border bg-bg-tertiary transition-opacity active:opacity-90 disabled:cursor-progress',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
                     posterDragging && 'ring-2 ring-brand ring-offset-2 ring-offset-bg',
                   )}
                 >
-                  {posterUrl ? (
+                  {posterPreview.previewUrl || posterAssetId ? (
                     <>
-                      {/* biome-ignore lint/performance/noImgElement: a local object URL of the picked file; next/image cannot load it (the `CommunityCover` precedent) */}
-                      <img
-                        src={posterUrl}
-                        alt=""
-                        data-event-poster-local
-                        className="absolute inset-0 h-full w-full object-cover"
-                      />
+                      {posterPreview.previewUrl ? (
+                        // biome-ignore lint/performance/noImgElement: a local object URL of the file being uploaded; next/image cannot load it (the `CommunityCover` precedent)
+                        <img
+                          src={posterPreview.previewUrl}
+                          alt=""
+                          data-event-poster-local
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                      ) : posterAssetId ? (
+                        <MediaImage
+                          assetId={posterAssetId}
+                          widths={posterWidths}
+                          alt=""
+                          sizes="216px"
+                          ratio=""
+                          className="absolute inset-0 h-full w-full"
+                          fallback={
+                            <span
+                              aria-hidden
+                              className="block h-full w-full"
+                              style={{ backgroundImage: 'var(--brand-gradient)' }}
+                            />
+                          }
+                        />
+                      ) : null}
                       <span
                         aria-hidden
                         className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent"
@@ -938,12 +997,24 @@ export function EventForm({
                   ) : (
                     <span
                       aria-hidden
+                      data-event-poster-fallback
                       className="absolute inset-0 flex items-center justify-center"
                       style={{ backgroundImage: 'var(--brand-gradient)' }}
                     >
                       <ImageIcon aria-hidden size={24} className="text-white/80" />
                     </span>
                   )}
+                  {posterUploading ? (
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 flex items-center justify-center bg-black/35"
+                    >
+                      <LoaderCircle
+                        size={24}
+                        className="animate-spin text-white motion-reduce:animate-none"
+                      />
+                    </span>
+                  ) : null}
                 </button>
                 <CoverSizeHint kind="eventPoster" />
                 <input
@@ -953,7 +1024,9 @@ export function EventForm({
                   className="sr-only"
                   tabIndex={-1}
                   data-event-poster-input
-                  aria-label={posterUrl ? t('form.cover.posterChange') : t('form.cover.posterAdd')}
+                  aria-label={
+                    posterAssetId ? t('form.cover.posterChange') : t('form.cover.posterAdd')
+                  }
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     event.target.value = '';
@@ -965,22 +1038,73 @@ export function EventForm({
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={posterUploading}
                     onClick={() => posterInputRef.current?.click()}
                   >
                     <ImageIcon aria-hidden size={16} />
-                    {posterUrl ? t('form.cover.posterChange') : t('form.cover.posterAdd')}
+                    {posterAssetId ? t('form.cover.posterChange') : t('form.cover.posterAdd')}
                   </Button>
-                  {posterUrl ? (
+                  {posterAssetId ? (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => setPosterUrl(null)}
+                      disabled={posterUploading}
+                      onClick={() => {
+                        setPosterAssetId(null);
+                        setPosterError(null);
+                        posterUpload.reset();
+                      }}
                     >
                       {t('form.cover.posterRemove')}
                     </Button>
                   ) : null}
                 </div>
+
+                {posterUpload.state === 'progress' ? (
+                  <div className="flex flex-col gap-2">
+                    <div
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={posterUpload.progress}
+                      className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
+                    >
+                      <div
+                        className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
+                        style={{ width: `${posterUpload.progress}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs tabular-nums text-text-tertiary">
+                        {tm('progress', { percent: posterUpload.progress })}
+                      </span>
+                      <Button type="button" variant="ghost" size="sm" onClick={posterUpload.cancel}>
+                        {tm('cancel')}
+                      </Button>
+                    </div>
+                  </div>
+                ) : posterUpload.state === 'processing' ? (
+                  <p className="text-xs text-text-tertiary">{tm('photo.preparing')}</p>
+                ) : null}
+
+                <span aria-live="polite" className="sr-only">
+                  {posterAnnounced}
+                </span>
+
+                {posterUpload.error || posterError ? (
+                  <p
+                    role="alert"
+                    data-event-poster-error
+                    className="text-sm font-normal text-danger"
+                  >
+                    {posterUpload.error ?? posterError}
+                  </p>
+                ) : (
+                  <p className="text-xs font-normal text-text-tertiary">
+                    {t('form.cover.posterHelper', { tenant: tenantName })}
+                  </p>
+                )}
               </div>
             </div>
           </div>
