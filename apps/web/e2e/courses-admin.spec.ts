@@ -1425,6 +1425,14 @@ test.describe('curriculum', () => {
     await expect(dialog).toBeVisible();
     await expect(page.locator('#module-title')).toBeFocused();
     await expect(dialog.locator('button[type="submit"]')).toBeDisabled();
+    // 12.3-08 (NOVF-03, UI-D-691): the sheet holds two REAL pickers, each with its own file input,
+    // its own helper and no "remove" until an image exists (the local-preview-only blocks are gone).
+    await expect(dialog.locator('[data-module-cover-preview]')).toBeVisible();
+    await expect(dialog.locator('[data-module-top-cover-preview]')).toBeVisible();
+    await expect(dialog.getByText(C.module.form.coverHelper)).toBeVisible();
+    await expect(dialog.getByText(C.module.form.topCoverHelper)).toBeVisible();
+    await expect(dialog.locator('[data-module-cover-remove]')).toHaveCount(0);
+    await expect(dialog.locator('[data-module-top-cover-remove]')).toHaveCount(0);
     // The first module: the switch present but disabled, with its helper (D-406).
     const firstSwitch = dialog.getByRole('switch', { name: C.module.form.requiresPrevious });
     await expect(firstSwitch).toBeDisabled();

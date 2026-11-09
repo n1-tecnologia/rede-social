@@ -810,6 +810,8 @@ test.describe('events admin', () => {
   const SLUG = 'e2e-events-admin';
   const ZONE = 'America/Sao_Paulo';
   const PHOTO = `${fileURLToPath(new URL('./fixtures/', import.meta.url))}post-a.jpg`;
+  /** 12.3-08: the vertical poster is a different picture, so the two assets are told apart. */
+  const POSTER_PHOTO = `${fileURLToPath(new URL('./fixtures/', import.meta.url))}post-b.jpg`;
   const MEETING_HOST = 'meet.example.test';
   const MEETING_URL = `https://${MEETING_HOST}/e2e-sala`;
   const TITLE = 'Encontro admin e2e';
@@ -832,6 +834,8 @@ test.describe('events admin', () => {
   let tenant: EventsTenant | null = null;
   let stopWorker: (() => Promise<void>) | null = null;
   let inPersonId = '';
+  /** The ready asset of the in-person event's vertical poster, set by test 1. */
+  let posterAssetId = '';
 
   /** Answers every CEP lookup with `CEP`, and returns the paths the page asked for. */
   async function stubCep(page: Page): Promise<string[]> {
@@ -954,12 +958,24 @@ test.describe('events admin', () => {
     const since = new Date(Date.now() - 1_000);
     const choosing = page.waitForEvent('filechooser');
     // The sr-only file input carries the same name, so the visible BUTTON is picked by tag.
-    await page.locator('[data-event-form] button', { hasText: E.form.cover.add }).click();
+    // 12.3-08: matched by its exact name, since the poster's "Adicionar capa vertical" also holds it.
+    await page.getByRole('button', { name: E.form.cover.add, exact: true }).click();
     await (await choosing).setFiles(PHOTO);
     await expect(
       page.locator('[data-event-cover-preview] [data-testid="event-cover-image"]'),
     ).toBeVisible({ timeout: 60_000 });
-    await waitForReadyCover(tenant.tenantId, since);
+    const coverAssetId = await waitForReadyCover(tenant.tenantId, since);
+
+    // NOVF-04 (UI-D-693): the vertical poster is its own real upload, independent of the cover.
+    const posterSince = new Date(Date.now() - 1_000);
+    const posterChoosing = page.waitForEvent('filechooser');
+    await page
+      .locator('[data-event-poster-field] button', { hasText: E.form.cover.posterAdd })
+      .click();
+    await (await posterChoosing).setFiles(POSTER_PHOTO);
+    await expect(page.locator('[data-event-poster-local]')).toBeVisible({ timeout: 60_000 });
+    posterAssetId = await waitForReadyCover(tenant.tenantId, posterSince);
+    expect(posterAssetId).not.toBe(coverAssetId);
 
     const date = tenantDate(3);
     await page.locator('#event-title').fill(TITLE);
@@ -1007,6 +1023,17 @@ test.describe('events admin', () => {
     await expect(toast(page, E.toasts.created)).toBeVisible();
     inPersonId = eventIdFrom(page);
     await expect(page.getByTestId('event-hero-title')).toHaveText(TITLE);
+    // The event's own page keeps the horizontal cover; the list card draws the poster (UI-D-693).
+    await expect(page.getByTestId('event-cover-media').locator('img').first()).toHaveAttribute(
+      'src',
+      new RegExp(coverAssetId),
+    );
+    await page.goto(`${tenant.origin}/eventos`);
+    await expect(
+      posterFor(page, TITLE).getByTestId('event-cover-media').locator('img').first(),
+    ).toHaveAttribute('src', new RegExp(posterAssetId));
+    await page.goBack();
+    await expect(page.getByTestId('event-hero-title')).toHaveText(TITLE);
     // The parts went in as ONE string, printed as one line with the room; the link searches the
     // canonical line alone.
     await expect(page.getByTestId('event-maps-link')).toHaveText(ADDRESS_LINE);
@@ -1045,6 +1072,12 @@ test.describe('events admin', () => {
     await expect(page.locator('#event-end-time')).toHaveValue('21:00');
     await expect(page.locator('#event-title')).toHaveValue(TITLE);
     await expect(page.getByText(E.form.editNote)).toBeVisible();
+    // NOVF-04: the saved poster comes back in its own frame, and a rename below does not clear it
+    // (an event edit replaces the whole event, so the form re-sends the poster id).
+    await expect(page.locator('[data-event-poster-preview] img').first()).toHaveAttribute(
+      'src',
+      new RegExp(posterAssetId),
+    );
     // PDF item #10: the composed address comes back as its parts, never as a free text.
     await expect(page.locator('#event-address')).toHaveCount(0);
     await expect(page.locator('#event-cep')).toHaveValue('01310-200');
@@ -1064,6 +1097,11 @@ test.describe('events admin', () => {
     await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
     await expect(toast(page, E.toasts.saved)).toBeVisible();
     await expect(page.getByTestId('event-hero-title')).toHaveText(RENAMED);
+    await page.goto(`${tenant.origin}/eventos/${inPersonId}/editar`);
+    await expect(page.locator('[data-event-poster-preview] img').first()).toHaveAttribute(
+      'src',
+      new RegExp(posterAssetId),
+    );
 
     // Online, a link typed, back to Presencial, save: still in person, and NO link stored.
     await page.goto(`${tenant.origin}/eventos/${inPersonId}/editar`);
