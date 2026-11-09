@@ -86,6 +86,7 @@ export const COURSE_ISSUES = [
   'hours_invalid',
   'level_invalid',
   'cover_invalid',
+  'top_cover_invalid',
   'photo_invalid',
   'category_invalid',
   'category_exists',
@@ -676,6 +677,8 @@ const trackSubtitleField = z.string().trim().max(TRACK_MAX_SUBTITLE, 'tagline_to
 const trackAudienceField = z.string().trim().max(TRACK_MAX_AUDIENCE, 'tagline_too_long');
 const trackDescriptionField = z.string().trim().max(TRACK_MAX_DESCRIPTION, 'description_too_long');
 const trackCoverField = z.uuid('cover_invalid').nullable();
+/** NOVF-02 (D-699): the track's second image ("Topo"), validated like the card cover. */
+const trackTopCoverField = z.uuid('top_cover_invalid').nullable();
 
 /** `POST /v1/courses/tracks`. The course list is NOT here: it travels by `PUT …/order` alone. */
 export const trackInputSchema = z
@@ -685,6 +688,7 @@ export const trackInputSchema = z
     audience: trackAudienceField.default(''),
     description: trackDescriptionField.default(''),
     coverAssetId: trackCoverField.default(null),
+    topCoverAssetId: trackTopCoverField.default(null),
   })
   .strict();
 export type TrackInput = z.infer<typeof trackInputSchema>;
@@ -697,6 +701,7 @@ export const trackPatchSchema = z
     audience: trackAudienceField.optional(),
     description: trackDescriptionField.optional(),
     coverAssetId: trackCoverField.optional(),
+    topCoverAssetId: trackTopCoverField.optional(),
   })
   .strict()
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
@@ -772,6 +777,8 @@ export const trackDetailSchema = z
     audience: z.string(),
     description: z.string(),
     coverAssetId: z.uuid().nullable(),
+    /** NOVF-02 (D-699): the stored Topo or null, never a computed fallback; optional for an older web (D-696). */
+    topCoverAssetId: z.uuid().nullable().optional(),
     status: z.enum(TRACK_STATUSES),
     archivedAt: z.iso.datetime().nullable(),
     createdAt: z.iso.datetime(),
@@ -1654,6 +1661,8 @@ export const learnTrackSchema = z
     id: z.uuid(),
     title: z.string(),
     coverAssetId: z.uuid().nullable(),
+    /** NOVF-02 (D-699): the stored Topo or null, never a computed fallback; optional for an older web (D-696). */
+    topCoverAssetId: z.uuid().nullable().optional(),
     percent: z.number().int().min(0).max(100),
     coursesDone: z.number().int().min(0),
     total: z.number().int().min(1),

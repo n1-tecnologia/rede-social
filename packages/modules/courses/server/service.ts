@@ -173,7 +173,7 @@ function moduleView(row: ModuleRow, lessons: LessonView[]): ModuleView {
 }
 
 /**
- * A cover-type image (a course cover, a category cover or the instructor photo), resolved INSIDE
+ * A cover-type image (a course or track cover or Topo, a category cover or the instructor photo), resolved INSIDE
  * the writing transaction in the caller's lane. Anything that is not a ready `cover` image of THIS
  * tenant — a wrong purpose, kind or status, AND an unknown, removed or another tenant's id — is ONE
  * `400 { courses: issue }` (08.3-04, T-08.3-02): the body reference is refused BY NAME, the
@@ -186,7 +186,7 @@ async function resolveCoverAsset(
   tx: Tx,
   ctx: RequestContext,
   assetId: string | null,
-  issue: 'cover_invalid' | 'photo_invalid',
+  issue: 'cover_invalid' | 'top_cover_invalid' | 'photo_invalid',
 ): Promise<void> {
   if (assetId === null) return;
   const rows = await tx.execute<AssetRow>(sql`
@@ -1901,6 +1901,7 @@ type TrackDbRow = {
   audience: string;
   description: string;
   cover_asset_id: string | null;
+  top_cover_asset_id: string | null;
   status: string;
   archived_at: string | null;
   created_at: string;
@@ -1966,7 +1967,8 @@ async function readTrack(
   trackId: string,
 ): Promise<TrackDetail | null> {
   const rows = await tx.execute<TrackDbRow>(sql`
-    select t.id, t.title, t.subtitle, t.audience, t.description, t.cover_asset_id, t.status,
+    select t.id, t.title, t.subtitle, t.audience, t.description, t.cover_asset_id,
+           t.top_cover_asset_id, t.status,
            to_char(t.archived_at at time zone 'utc', ${ISO_MICROSECONDS}) as archived_at,
            to_char(t.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at
       from course_tracks t
@@ -1982,6 +1984,7 @@ async function readTrack(
     audience: track.audience,
     description: track.description,
     coverAssetId: track.cover_asset_id,
+    topCoverAssetId: track.top_cover_asset_id,
     status: track.status as TrackStatus,
     archivedAt: track.archived_at,
     createdAt: track.created_at,
@@ -2064,10 +2067,12 @@ export async function listTracks(ctx: RequestContext, query: TrackListQuery): Pr
 export async function createTrack(ctx: RequestContext, input: TrackInput): Promise<TrackDetail> {
   const detail = await withTenantTx(ctx, async (tx) => {
     await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
+    await resolveCoverAsset(tx, ctx, input.topCoverAssetId, 'top_cover_invalid');
     const inserted = await tx.execute<{ id: string }>(sql`
-      insert into course_tracks (tenant_id, title, subtitle, audience, description, cover_asset_id)
+      insert into course_tracks
+             (tenant_id, title, subtitle, audience, description, cover_asset_id, top_cover_asset_id)
       values (${ctx.tenantId}::uuid, ${input.title}, ${input.subtitle}, ${input.audience},
-              ${input.description}, ${input.coverAssetId}::uuid)
+              ${input.description}, ${input.coverAssetId}::uuid, ${input.topCoverAssetId}::uuid)
       returning id`);
     const track = inserted[0];
     if (!track) throw new ApiError(500, 'INTERNAL');
@@ -2111,6 +2116,9 @@ export async function updateTrack(
     if (patch.coverAssetId !== undefined) {
       await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
     }
+    if (patch.topCoverAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, patch.topCoverAssetId, 'top_cover_invalid');
+    }
     const sets = [sql`updated_at = now()`];
     if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
     if (patch.subtitle !== undefined) sets.push(sql`subtitle = ${patch.subtitle}`);
@@ -2118,6 +2126,9 @@ export async function updateTrack(
     if (patch.description !== undefined) sets.push(sql`description = ${patch.description}`);
     if (patch.coverAssetId !== undefined) {
       sets.push(sql`cover_asset_id = ${patch.coverAssetId}::uuid`);
+    }
+    if (patch.topCoverAssetId !== undefined) {
+      sets.push(sql`top_cover_asset_id = ${patch.topCoverAssetId}::uuid`);
     }
     await tx.execute(sql`
       update course_tracks

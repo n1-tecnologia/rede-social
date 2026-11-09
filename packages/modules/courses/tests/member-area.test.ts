@@ -308,7 +308,14 @@ function track(
     description: `Descrição ${n}`,
   },
 ): MemberTrackRow {
-  return { id: TR(n), title: `Trilha ${n}`, coverAssetId: null, ...texts, courseIds };
+  return {
+    id: TR(n),
+    title: `Trilha ${n}`,
+    coverAssetId: null,
+    topCoverAssetId: null,
+    ...texts,
+    courseIds,
+  };
 }
 
 const kinds = (items: { courseId: string; kind: string }[]) =>
@@ -796,6 +803,7 @@ describe('trackStates (D-439, COURSE-35)', () => {
       id: TR(1),
       title: 'Trilha 1',
       coverAssetId: null,
+      topCoverAssetId: null,
       subtitle: 'Subtítulo 1',
       audience: 'Para quem é 1',
       description: 'Descrição 1',

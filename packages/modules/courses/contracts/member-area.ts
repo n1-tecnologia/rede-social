@@ -302,6 +302,8 @@ export interface MemberTrackRow {
   id: string;
   title: string;
   coverAssetId: string | null;
+  /** The track's Topo as stored, or null: the API never computes a fallback (NOVF-02, D-699). */
+  topCoverAssetId: string | null;
   /** The words the admin wrote on the track form; `''` when left empty (NOVF-01, D-699). */
   subtitle: string;
   audience: string;
@@ -703,6 +705,8 @@ export interface TrackView {
   id: string;
   title: string;
   coverAssetId: string | null;
+  /** The track's Topo as stored, or null (NOVF-02, D-699). */
+  topCoverAssetId: string | null;
   /** The track's subtitle, "Para quem é" and description as the admin saved them (`''` when empty). */
   subtitle: string;
   audience: string;
@@ -803,6 +807,7 @@ export function trackStates(
       id: track.id,
       title: track.title,
       coverAssetId: track.coverAssetId,
+      topCoverAssetId: track.topCoverAssetId,
       subtitle: track.subtitle,
       audience: track.audience,
       description: track.description,

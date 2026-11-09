@@ -496,6 +496,7 @@ describe('courses contracts (08.3-01)', () => {
       audience: '',
       description: '',
       coverAssetId: null,
+      topCoverAssetId: null,
     });
     expect(issueOf({ title: '   ' }, trackInputSchema)).toBe('title_required');
     expect(issueOf({ title: 'x'.repeat(121) }, trackInputSchema)).toBe('title_too_long');
