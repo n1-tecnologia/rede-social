@@ -8,7 +8,6 @@ import { trackCardsView } from '@/lib/courses-home-view';
 import { getLearnTracks } from '@/lib/courses-learn';
 import { type TrackDetailView, trackDetailView, trackFromParam } from '@/lib/courses-member-view';
 import { memberScreenHref } from '@/lib/member-area';
-import { withTrackWordsLocalView } from '@/lib/track-words-local-view';
 import {
   DETAIL_GRID,
   HeroChip,
@@ -94,11 +93,7 @@ export async function MemberTracksTab({
   tenantName: string;
   preview: boolean;
 }) {
-  const [t, result] = await Promise.all([
-    getTranslations(),
-    // ⚠ TEMPORARY LOCAL VIEW (2026-10-27): remove this `.then` with `track-words-local-view.ts`.
-    getLearnTracks().then((read) => withTrackWordsLocalView(read, preview)),
-  ]);
+  const [t, result] = await Promise.all([getTranslations(), getLearnTracks()]);
   if (result.status === 'redirect') redirect(result.path);
   if (result.status === 'disabled') notFound();
 

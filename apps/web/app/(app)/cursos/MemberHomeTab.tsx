@@ -19,6 +19,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { neverStarted, startHero, suggestedStart, swapShelf } from '@/lib/courses-home-plan';
 import {
   homeAreasView,
   homeGreetingView,
@@ -30,7 +31,6 @@ import {
   quickCourses,
   quickCourseView,
 } from '@/lib/courses-home-view';
-import { neverStarted, startHero, suggestedStart, swapShelf } from '@/lib/courses-home-plan';
 import {
   getLearnCatalogueAll,
   getLearnCourse,
@@ -53,7 +53,6 @@ import { memberScreenHref } from '@/lib/member-area';
 import { resumeSpotLocalView } from '@/lib/resume-spot-local-view';
 import { getLiveAccess, getProducts } from '@/lib/store';
 import { lockedLiveView, priceLabel } from '@/lib/store-view';
-import { withTrackWordsLocalView } from '@/lib/track-words-local-view';
 import { HomeAreas } from './HomeAreas';
 import { HomeContinueFloat } from './HomeContinueFloat';
 import {
@@ -212,8 +211,7 @@ export async function MemberHomeTab({
       getTranslations(),
       getLearnOverview(),
       getLearnProgress(),
-      // ⚠ TEMPORARY LOCAL VIEW (2026-10-27): remove this `.then` with `track-words-local-view.ts`.
-      getLearnTracks().then((read) => withTrackWordsLocalView(read, preview)),
+      getLearnTracks(),
       getLearnCatalogueAll(),
       // The panel's promotion: the store's active products (a failed read only drops the product).
       storeOn ? promoProducts(canPickPromo) : Promise.resolve(null),
