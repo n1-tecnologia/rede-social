@@ -5,6 +5,7 @@ import {
   buyerSchema,
   buyersPageSchema,
   buyersQuerySchema,
+  categoriesBodySchema,
   cleanCategoryName,
   communityAccessListSchema,
   communityAccessSchema,
@@ -12,6 +13,8 @@ import {
   courseAccessListSchema,
   courseAccessSchema,
   ENTITLEMENT_SOURCES,
+  frontFeaturedBodySchema,
+  frontPromoBodySchema,
   GRANT_OUTCOMES,
   grantBodySchema,
   grantResultSchema,
@@ -775,5 +778,67 @@ describe('store categories contract (12.3-11)', () => {
         featuredProductIds: [id(1), id(2), id(3), id(4), id(5), id(6)],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('the front write bodies (12.3-12, D-696, D-699, OQ-4)', () => {
+  it('the promo body is strict: a uuid or null, nothing else', () => {
+    expect(frontPromoBodySchema.safeParse({ productId: id(1) }).success).toBe(true);
+    expect(frontPromoBodySchema.safeParse({ productId: null }).success).toBe(true);
+    expect(frontPromoBodySchema.safeParse({}).success).toBe(false);
+    expect(frontPromoBodySchema.safeParse({ productId: 'x' }).success).toBe(false);
+    expect(frontPromoBodySchema.safeParse({ productId: id(1), tenantId: id(2) }).success).toBe(
+      false,
+    );
+  });
+
+  it('the featured body is strict and leaves the five-product refusal to the service (a schema cap of 100)', () => {
+    expect(frontFeaturedBodySchema.safeParse({ productIds: [] }).success).toBe(true);
+    expect(frontFeaturedBodySchema.safeParse({ productIds: [id(1), id(2)] }).success).toBe(true);
+    // Six passes the schema on purpose: `too_many_featured` is the service's code, not a generic issue.
+    const six = Array.from({ length: STORE_FEATURED_MAX + 1 }, (_, n) => id(n + 1));
+    expect(frontFeaturedBodySchema.safeParse({ productIds: six }).success).toBe(true);
+    const huge = Array.from({ length: 101 }, (_, n) => id(n + 1));
+    expect(frontFeaturedBodySchema.safeParse({ productIds: huge }).success).toBe(false);
+    expect(frontFeaturedBodySchema.safeParse({}).success).toBe(false);
+    expect(frontFeaturedBodySchema.safeParse({ productIds: ['x'] }).success).toBe(false);
+    expect(frontFeaturedBodySchema.safeParse({ productIds: [], extra: 1 }).success).toBe(false);
+  });
+
+  it('the categories body: an optional slug id, a name and an icon, strict; the 20-category and name limits are the service’s', () => {
+    const entry = { name: 'Livros', icon: 'book-open' };
+    expect(categoriesBodySchema.safeParse({ categories: [] }).success).toBe(true);
+    expect(categoriesBodySchema.safeParse({ categories: [entry] }).success).toBe(true);
+    expect(
+      categoriesBodySchema.safeParse({ categories: [{ ...entry, id: 'livros' }] }).success,
+    ).toBe(true);
+    // 21 passes the schema (the service answers too_many_categories); the cap of 50 is the schema's.
+    const many = (n: number) => Array.from({ length: n }, (_, k) => ({ ...entry, name: `C${k}` }));
+    expect(many(STORE_CATEGORY_MAX + 1)).toHaveLength(21);
+    expect(
+      categoriesBodySchema.safeParse({ categories: many(STORE_CATEGORY_MAX + 1) }).success,
+    ).toBe(true);
+    expect(categoriesBodySchema.safeParse({ categories: many(51) }).success).toBe(false);
+    // A name over 30 and an unknown icon pass the schema too: their codes are the service's.
+    expect(
+      categoriesBodySchema.safeParse({
+        categories: [{ name: 'x'.repeat(STORE_CATEGORY_NAME_MAX + 1), icon: 'rocket' }],
+      }).success,
+    ).toBe(true);
+    // Mass assignment: a position, a tenant id or an unknown key is refused; a bad id is category_invalid.
+    expect(
+      categoriesBodySchema.safeParse({ categories: [{ ...entry, position: 1 }] }).success,
+    ).toBe(false);
+    expect(categoriesBodySchema.safeParse({ categories: [], tenantId: id(1) }).success).toBe(false);
+    expect(categoriesBodySchema.safeParse({}).success).toBe(false);
+    expect(issueOf({ categories: [{ ...entry, id: 'Livros' }] }, categoriesBodySchema)).toBe(
+      'category_invalid',
+    );
+    expect(issueOf({ categories: [{ ...entry, id: '' }] }, categoriesBodySchema)).toBe(
+      'category_invalid',
+    );
+    expect(
+      issueOf({ categories: [{ name: 'x'.repeat(201), icon: 'tag' }] }, categoriesBodySchema),
+    ).toBe('category_name_too_long');
   });
 });

@@ -3823,4 +3823,359 @@ describe('store front writes (12.3-12)', () => {
     }
     await putFeatured({ productIds: [] });
   });
+
+  type Entry = { id?: string; name: string; icon: string };
+  const putCategories = (categories: Entry[], token = tokens.demoAdmin) =>
+    put('/v1/store/categories', token, { categories });
+  const entry = (name: string, id?: string, icon = 'tag'): Entry =>
+    id === undefined ? { name, icon } : { id, name, icon };
+
+  /** The stored categories of the demo tenant through the admin connection, in position order. */
+  async function storedCategories(): Promise<
+    { id: string; slug: string; name: string; icon: string; position: number }[]
+  > {
+    return adminSql<{ id: string; slug: string; name: string; icon: string; position: number }[]>`
+      select id::text as id, slug, name, icon, position
+        from public.store_categories where tenant_id = ${demoTenantId}::uuid
+       order by position, slug`;
+  }
+  const slugsOf = async () => (await storedCategories()).map((row) => row.slug);
+
+  /** A store with its eight built-ins and nothing else (read first, so the seed marker is claimed). */
+  async function freshStore(): Promise<FrontAnswer> {
+    await sweepFront();
+    const front = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(front.categories).toHaveLength(8);
+    return front;
+  }
+
+  const refusal = async (res: Response) => ((await res.json()) as Envelope).error.details;
+  const catProduct = async (name: string, category?: string | null): Promise<ProductDetail> => {
+    const res = await post('/v1/store/products', tokens.demoAdmin, {
+      name: `${PREFIX} ${name}`,
+      priceCents: 100,
+      ...(category === undefined ? {} : { category }),
+    });
+    expect(res.status).toBe(201);
+    return (await res.json()) as ProductDetail;
+  };
+
+  it('categories: a save keeps the slug on a rename, mints one for a new row, orders by the body and deletes the omitted, leaving their products with no category (OQ-4, D-690, D-693)', async () => {
+    await freshStore();
+    const before = await storedCategories();
+    const cursosRow = before.find((row) => row.slug === 'cursos');
+    const book = await catProduct('Livro categorias', 'livros');
+    expect(book.category).toBe('livros');
+
+    const res = await putCategories([
+      entry('Outros', 'outros', 'package'),
+      entry('Cursos online', 'cursos', 'graduation-cap'),
+      entry('Skin care & Cia', undefined, 'heart'),
+    ]);
+    expect(res.status).toBe(200);
+    const answer = (await res.json()) as FrontAnswer;
+    expect(answer.categories).toEqual([
+      { id: 'outros', name: 'Outros', icon: 'package' },
+      { id: 'cursos', name: 'Cursos online', icon: 'graduation-cap' },
+      { id: 'skin-care-cia', name: 'Skin care & Cia', icon: 'heart' },
+    ]);
+    const after = await storedCategories();
+    expect(after.map((row) => [row.slug, row.position])).toEqual([
+      ['outros', 1],
+      ['cursos', 2],
+      ['skin-care-cia', 3],
+    ]);
+    // A rename keeps the row itself (its uuid), so the products that point at it stay put.
+    expect(after.find((row) => row.slug === 'cursos')?.id).toBe(cursosRow?.id);
+    expect(await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember)).toEqual(answer);
+
+    // The deleted category left its product with no category: no key on the detail or the card.
+    const detail = await getJson<ProductDetail>(`/v1/store/products/${book.id}`, tokens.demoMember);
+    expect('category' in detail).toBe(false);
+    const list = await getJson<{ items: { id: string }[] }>(
+      '/v1/store/products?limit=50',
+      tokens.demoMember,
+    );
+    const card = list.items.find((item) => item.id === book.id);
+    expect(card).toBeDefined();
+    expect(card && 'category' in card).toBe(false);
+
+    // Idempotent: the same order twice leaves the same positions and the same slugs.
+    const again = await putCategories(answer.categories.map((c) => entry(c.name, c.id, c.icon)));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual(answer);
+    expect((await storedCategories()).map((row) => [row.slug, row.position])).toEqual(
+      after.map((row) => [row.slug, row.position]),
+    );
+  });
+
+  it('categories: 20 are accepted and 21 are too_many_categories; 30 code points are accepted and 31 are category_name_too_long, an emoji counting as one; nothing is written on a refusal', async () => {
+    await freshStore();
+    const names = (n: number) => Array.from({ length: n }, (_, k) => entry(`Cat ${k + 1}`));
+    const twenty = await putCategories(names(20));
+    expect(twenty.status).toBe(200);
+    expect(await storedCategories()).toHaveLength(20);
+    const saved = await slugsOf();
+
+    const twentyOne = await putCategories(names(21));
+    expect(twentyOne.status).toBe(400);
+    expect(await refusal(twentyOne)).toEqual({ store: 'too_many_categories' });
+    expect(await slugsOf()).toEqual(saved);
+
+    expect((await putCategories([entry('a'.repeat(30))])).status).toBe(200);
+    const over = await putCategories([entry('a'.repeat(31))]);
+    expect(over.status).toBe(400);
+    expect(await refusal(over)).toEqual({ store: 'category_name_too_long' });
+    expect(await slugsOf()).toEqual(['a'.repeat(20)]);
+
+    // An emoji is one code point: 30 of them fit, 31 do not.
+    expect((await putCategories([entry('\u{1F600}'.repeat(30))])).status).toBe(200);
+    const emoji = await putCategories([entry('\u{1F600}'.repeat(31))]);
+    expect(emoji.status).toBe(400);
+    expect(await refusal(emoji)).toEqual({ store: 'category_name_too_long' });
+    // The slug of a name with no plain letters is the fixed fallback.
+    expect(await slugsOf()).toEqual(['categoria']);
+
+    // The name is trimmed and space-folded before it is counted: 30 letters inside spaces fit.
+    const padded = await putCategories([entry(`  ${'b'.repeat(14)}   ${'c'.repeat(15)}  `)]);
+    expect(padded.status).toBe(200);
+    expect((await storedCategories())[0]?.name).toBe(`${'b'.repeat(14)} ${'c'.repeat(15)}`);
+    // NFC: a decomposed "é" is stored composed and the slug is plain letters (accents stripped).
+    expect((await putCategories([entry('Cafe\u0301s')])).status).toBe(200);
+    const [cafe] = await storedCategories();
+    expect(cafe?.name).toBe('Caf\u00e9s');
+    expect(cafe?.slug).toBe('cafes');
+  });
+
+  it('categories: an empty or blank name, a repeated name by case or spacing, an icon outside the list and a malformed id are refused with their closed code and write nothing', async () => {
+    await freshStore();
+    const saved = await slugsOf();
+    const cases: [Entry[], Record<string, string>][] = [
+      [[entry('')], { store: 'category_name_required' }],
+      [[entry('   ')], { store: 'category_name_required' }],
+      [[entry('Livros', 'livros'), entry(' livros ')], { store: 'category_name_taken' }],
+      [[entry('Skin care'), entry('SKIN  CARE')], { store: 'category_name_taken' }],
+      [[entry('Cursos', 'cursos'), entry('CURSOS')], { store: 'category_name_taken' }],
+      [[{ name: 'Foguete', icon: 'rocket' }], { store: 'category_icon_invalid' }],
+      [[entry('Bom', 'Bad Id')], { store: 'category_invalid' }],
+    ];
+    for (const [categories, details] of cases) {
+      const res = await putCategories(categories);
+      expect(res.status, JSON.stringify(categories)).toBe(400);
+      expect(await refusal(res)).toEqual(details);
+      expect(await slugsOf()).toEqual(saved);
+    }
+    // A position, a tenant id or an unknown key in the body is a generic 400, never read.
+    for (const body of [
+      { categories: [{ name: 'X', icon: 'tag', position: 1 }] },
+      { categories: [], tenantId: demoTenantId },
+      {},
+    ]) {
+      const res = await put('/v1/store/categories', tokens.demoAdmin, body);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+    }
+    expect(await slugsOf()).toEqual(saved);
+  });
+
+  it('categories: swapping the names of two categories in one save succeeds; a name freed by a deleted row can be taken by a new one with a fresh slug; two names that mint the same slug get -2 (NOVF-07 adjacency)', async () => {
+    await freshStore();
+    const rest = (await storedCategories())
+      .filter((row) => !['cursos', 'livros'].includes(row.slug))
+      .map((row) => entry(row.name, row.slug, row.icon));
+    const swap = await putCategories([
+      entry('Livros', 'cursos', 'graduation-cap'),
+      entry('Cursos', 'livros', 'book-open'),
+      ...rest,
+    ]);
+    expect(swap.status).toBe(200);
+    const swapped = await storedCategories();
+    expect(swapped.find((row) => row.slug === 'cursos')?.name).toBe('Livros');
+    expect(swapped.find((row) => row.slug === 'livros')?.name).toBe('Cursos');
+
+    // A case-only rename is not a collision with itself.
+    expect((await putCategories([entry('CURSOS', 'livros', 'book-open')])).status).toBe(200);
+    expect((await storedCategories()).map((row) => [row.slug, row.name])).toEqual([
+      ['livros', 'CURSOS'],
+    ]);
+
+    // The omitted row frees its name in the same save; the new row gets a fresh slug, never the old one.
+    const reuse = await putCategories([entry('Livros')]);
+    expect(reuse.status).toBe(200);
+    expect(await slugsOf()).toEqual(['livros-2']);
+    const again = await putCategories([entry('Outro'), entry('Livros', 'livros-2')]);
+    expect(again.status).toBe(200);
+    expect(await slugsOf()).toEqual(['outro', 'livros-2']);
+    // Two new names that differ but mint one slug.
+    const twins = await putCategories([entry('Skin care'), entry('Skin-care')]);
+    expect(twins.status).toBe(200);
+    expect(await slugsOf()).toEqual(['skin-care', 'skin-care-2']);
+    // A new name whose plain letters equal KEPT rows' slugs gets the next free one.
+    const three = await putCategories([
+      entry('Skin care', 'skin-care'),
+      entry('Skin-care', 'skin-care-2'),
+      entry('Skin.care'),
+    ]);
+    expect(three.status).toBe(200);
+    expect(await slugsOf()).toEqual(['skin-care', 'skin-care-2', 'skin-care-3']);
+  });
+
+  it('categories: a stale draft is refused whole: an id that no longer exists or a repeated id is category_invalid and nothing is written, so a category another admin just made survives (Pitfall 7, T-12.3-08)', async () => {
+    await freshStore();
+    const draft = (await storedCategories()).map((row) => entry(row.name, row.slug, row.icon));
+    // Another admin deleted "perfumes" after this editor loaded: the stale draft still names it.
+    await adminSql`
+      delete from public.store_categories where tenant_id = ${demoTenantId}::uuid and slug = 'perfumes'`;
+    // ... and made a new one this draft never saw.
+    await adminSql`
+      insert into public.store_categories (tenant_id, slug, name, icon, position)
+      values (${demoTenantId}::uuid, 'novidade', 'Novidade', 'gift', 9)`;
+    const before = await storedCategories();
+
+    const stale = await putCategories(draft);
+    expect(stale.status).toBe(400);
+    expect(await refusal(stale)).toEqual({ store: 'category_invalid' });
+    expect(await storedCategories()).toEqual(before);
+    expect(await slugsOf()).toContain('novidade');
+
+    const repeated = await putCategories([entry('Cursos', 'cursos'), entry('Cursos 2', 'cursos')]);
+    expect(repeated.status).toBe(400);
+    expect(await refusal(repeated)).toEqual({ store: 'category_invalid' });
+    expect(await storedCategories()).toEqual(before);
+
+    // A saved list that names only what exists (and the new one) is the positive control.
+    const fresh = (await storedCategories()).map((row) => entry(row.name, row.slug, row.icon));
+    expect((await putCategories(fresh)).status).toBe(200);
+  });
+
+  it('categories: an empty list leaves the store with no category for good; a store that never read its front is claimed before the save and never re-seeded (D-691)', async () => {
+    await freshStore();
+    const product = await catProduct('Livro vazio', 'livros');
+    expect(product.category).toBe('livros');
+    const empty = await putCategories([]);
+    expect(empty.status).toBe(200);
+    expect(((await empty.json()) as FrontAnswer).categories).toEqual([]);
+    expect(await storedCategories()).toEqual([]);
+    expect((await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember)).categories).toEqual(
+      [],
+    );
+    expect(await storedCategories()).toEqual([]);
+    const detail = await getJson<ProductDetail>(
+      `/v1/store/products/${product.id}`,
+      tokens.demoAdmin,
+    );
+    expect('category' in detail).toBe(false);
+
+    // Never read: no front row and no marker. The save claims the seed first, then replaces the list.
+    await sweepFront();
+    const first = await putCategories([entry('Só uma')]);
+    expect(first.status).toBe(200);
+    expect(await slugsOf()).toEqual(['so-uma']);
+    const read = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(read.categories.map((c) => c.id)).toEqual(['so-uma']);
+    expect(await slugsOf()).toEqual(['so-uma']);
+  });
+
+  it('categories: a member and a support member are 403 and the list is unchanged; another tenant’s admin on this host is refused', async () => {
+    await freshStore();
+    const before = await storedCategories();
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      const res = await putCategories([entry('Invasor')], token);
+      expect(res.status).toBe(403);
+      expect(await storedCategories()).toEqual(before);
+    }
+    const foreign = await put(
+      '/v1/store/categories',
+      tokens.labAdmin,
+      { categories: [] },
+      HOSTS.demo,
+    );
+    expect(foreign.status).toBe(403);
+    expect(await storedCategories()).toEqual(before);
+  });
+
+  it('categories edge concurrency (NOVF-07): two parallel saves leave one of the two lists whole, never a mix', async () => {
+    for (let round = 0; round < 3; round += 1) {
+      await freshStore();
+      const listA = [entry('Alfa'), entry('Beta')];
+      const listB = [entry('Gama'), entry('Delta'), entry('Beta')];
+      const results = await Promise.all([putCategories(listA), putCategories(listB)]);
+      expect(results.map((res) => res.status)).toEqual([200, 200]);
+      const names = (await storedCategories()).map((row) => row.name);
+      expect([
+        JSON.stringify(['Alfa', 'Beta']),
+        JSON.stringify(['Gama', 'Delta', 'Beta']),
+      ]).toContain(JSON.stringify(names));
+    }
+  });
+
+  it('categories edge concurrency (NOVF-09): a product write naming a category that a save deletes ends in one of two states, in either order, and never keeps an id no category holds', async () => {
+    // Order 1: the product write commits first, the delete then leaves it with none. A transaction on the
+    // admin connection holds the product row (and so a share lock on its category row) while the save
+    // runs; the save waits on the delete, then finishes after the commit.
+    await freshStore();
+    const name = `${PREFIX} race db`;
+    let saving: Promise<Response> | undefined;
+    await adminSql.begin(async (tx) => {
+      await tx`
+        insert into public.store_products (tenant_id, created_by_user_id, name, price_cents, category_id)
+        select ${demoTenantId}::uuid, m.user_id, ${name}, 100,
+               (select c.id from public.store_categories c
+                 where c.tenant_id = ${demoTenantId}::uuid and c.slug = 'livros')
+          from public.memberships m
+         where m.tenant_id = ${demoTenantId}::uuid and m.role = 'admin_tenant'
+         limit 1`;
+      saving = putCategories([entry('Outros', 'outros', 'package')]);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    const saved = await saving;
+    expect(saved?.status).toBe(200);
+    const [row] = await adminSql<{ category_id: string | null }[]>`
+      select category_id::text from public.store_products where name = ${name}`;
+    expect(row?.category_id).toBeNull();
+    expect(await slugsOf()).toEqual(['outros']);
+
+    // Order 2: the delete commits first, so the product write naming it is category_invalid.
+    await freshStore();
+    expect((await putCategories([entry('Outros', 'outros', 'package')])).status).toBe(200);
+    const late = await post('/v1/store/products', tokens.demoAdmin, {
+      name: `${PREFIX} race late`,
+      priceCents: 100,
+      category: 'livros',
+    });
+    expect(late.status).toBe(400);
+    expect(await refusal(late)).toEqual({ store: 'category_invalid' });
+    const [none] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.store_products where name = ${`${PREFIX} race late`}`;
+    expect(none?.n).toBe(0);
+
+    // Both at once, three rounds: whichever order wins, the invariant holds.
+    for (let round = 0; round < 3; round += 1) {
+      await freshStore();
+      const raceName = `${PREFIX} race both ${round}`;
+      const [save, create] = await Promise.all([
+        putCategories([entry('Outros', 'outros', 'package')]),
+        post('/v1/store/products', tokens.demoAdmin, {
+          name: raceName,
+          priceCents: 100,
+          category: 'livros',
+        }),
+      ]);
+      expect(save.status).toBe(200);
+      if (create.status === 201) {
+        const [stored] = await adminSql<{ category_id: string | null }[]>`
+          select category_id::text from public.store_products where name = ${raceName}`;
+        expect(stored?.category_id).toBeNull();
+      } else {
+        expect(create.status).toBe(400);
+        expect(await refusal(create)).toEqual({ store: 'category_invalid' });
+      }
+      const [orphans] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n
+          from public.store_products p
+         where p.tenant_id = ${demoTenantId}::uuid and p.category_id is not null
+           and not exists (select 1 from public.store_categories c where c.id = p.category_id)`;
+      expect(orphans?.n).toBe(0);
+    }
+  });
 });

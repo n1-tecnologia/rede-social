@@ -7621,6 +7621,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
   it('phase 12.3 sweep: store front writes — a rede-lab admin cannot save a rede-demo product as the promo (400 promo_invalid, nothing written), a rede-demo admin on the rede-lab host is refused, and a member or support session is 403, each beside the same-tenant admin positive control (12.3-12, NOVF-05, T-12.3-02, T-12.3-03)', async () => {
     // | Route                     | Negative asserted here                                                     |
     // |---------------------------|----------------------------------------------------------------------------|
+    // | PUT /v1/store/categories | a lab admin naming a demo slug: category_invalid, both lists unchanged;   |
+    // |                           | the demo admin on the lab host, a member and support: refused              |
     // | PUT /v1/store/front/featured | the same four negatives with featured_invalid and the stored list unchanged |
     // | PUT /v1/store/front/promo | a lab admin naming a demo product: 400 promo_invalid, the lab row is not    |
     // |                           | written; a demo admin on the lab host: 403 TENANT_HOST_MISMATCH; a demo     |
@@ -7743,6 +7745,53 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         expect(res.status).toBe(403);
         expect(await storedFeatured(tenantIds.demo)).toEqual([demoProductId]);
       }
+
+      // The categories: a lab admin's whole-list save touches the lab's rows only, a demo-only slug is
+      // category_invalid for the lab, a demo admin on the lab host is refused, member and support are 403.
+      const storedSlugs = async (tenantId: string) =>
+        (
+          await adminSql<{ slug: string }[]>`
+            select slug from public.store_categories where tenant_id = ${tenantId}::uuid
+             order by position, slug`
+        ).map((row) => row.slug);
+      await adminSql`
+        insert into public.store_categories (tenant_id, slug, name, icon, position)
+        values (${tenantIds.demo}::uuid, 'iso124-demo-only', 'Demo so', 'tag', 20)`;
+      const demoSlugs = await storedSlugs(tenantIds.demo);
+      const labCategories = await send('PUT', '/v1/store/categories', tokens.labAdmin, HOSTS.lab, {
+        categories: [{ name: 'Lab so', icon: 'tag' }],
+      });
+      expect(labCategories.status).toBe(200);
+      expect(await storedSlugs(tenantIds.lab)).toEqual(['lab-so']);
+      expect(await storedSlugs(tenantIds.demo)).toEqual(demoSlugs);
+      const labForeign = await send('PUT', '/v1/store/categories', tokens.labAdmin, HOSTS.lab, {
+        categories: [{ id: 'iso124-demo-only', name: 'Demo so', icon: 'tag' }],
+      });
+      expect(labForeign.status).toBe(400);
+      expect(((await labForeign.json()) as Envelope).error.details).toEqual({
+        store: 'category_invalid',
+      });
+      expect(await storedSlugs(tenantIds.lab)).toEqual(['lab-so']);
+      expect(await storedSlugs(tenantIds.demo)).toEqual(demoSlugs);
+      await expectHostRefused(
+        await send('PUT', '/v1/store/categories', tokens.demoAdmin, HOSTS.lab, { categories: [] }),
+        'categories on the lab host',
+      );
+      expect(await storedSlugs(tenantIds.lab)).toEqual(['lab-so']);
+      for (const token of [tokens.demoMember, demoSupport]) {
+        const res = await send('PUT', '/v1/store/categories', token, HOSTS.demo, {
+          categories: [],
+        });
+        expect(res.status).toBe(403);
+        expect(await storedSlugs(tenantIds.demo)).toEqual(demoSlugs);
+      }
+      // The demo admin's own save is the positive control: its list changes, the lab's does not.
+      const demoSave = await send('PUT', '/v1/store/categories', tokens.demoAdmin, HOSTS.demo, {
+        categories: [{ id: 'iso124-demo-only', name: 'Demo so', icon: 'tag' }],
+      });
+      expect(demoSave.status).toBe(200);
+      expect(await storedSlugs(tenantIds.demo)).toEqual(['iso124-demo-only']);
+      expect(await storedSlugs(tenantIds.lab)).toEqual(['lab-so']);
     } finally {
       await sweepWrites();
       await restoreLab();
