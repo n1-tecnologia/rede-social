@@ -1790,7 +1790,7 @@ Plans:
 **Requirements**: NOVF-01, NOVF-02, NOVF-03, NOVF-04, NOVF-05, NOVF-06, NOVF-07, NOVF-08, NOVF-09, NOVF-10, NOVF-11
 **Depends on:** Phase 06 (events), Phase 08.2 (store), Phase 08.3 to 08.6 (courses and member area). Runs after 12.2 closes and before Phase 13.
 **Source:** `~/Downloads/O que mudou no front - Área de membros, Loja e Menu do app.pdf` (not in the repo, public) and the summary in `12.3-SOURCE.md`. Part 2 of the document (17 front-only screens) is already merged and is NOT this phase.
-**Plans:** 14/17 plans executed
+**Plans:** 15/17 plans executed
 
 Open design points (for /gsd-discuss-phase 12.3): (1) where the phone menu (1.10) lives: it belongs to no module, so `tenants.branding` (jsonb) or another place; (2) the writer for 1.6 and 1.7 in `tenant_modules.settings`: today only the platform route (super_admin) writes it, so the store module needs its own `admin_tenant` route; (3) whether the eight built-in categories become rows of the new table (1.8) and what an existing product gets (none, or the one its name suggests, as the web guesses today); (4) the contract of `category` on the product (1.9): today an enum of the eight, it becomes the category id; (5) the name of the second cover column and its fallback (no top cover = the card cover, as the web does today); (6) what happens to the cookies already set on an admin's device when the API starts answering.
 
@@ -1831,7 +1831,7 @@ Plans:
 
 **Wave 6** *(the store web part two and the menu web)*
 
-- [ ] 12.3-14-PLAN.md — Block C, the web, part two: the product form's category, the Início's "Destaque da loja", the end of the cookie libraries and the spec updates (NOVF-05, 09, 11, tracer)
+- [x] 12.3-14-PLAN.md — Block C, the web, part two: the product form's category, the Início's "Destaque da loja", the end of the cookie libraries and the spec updates (NOVF-05, 09, 11, tracer)
 - [ ] 12.3-16-PLAN.md — Block D, the web: the menu editor saves through the API, the layout applies it for every member, the cookie reader goes (NOVF-10, tracer)
 
 **Wave 7**
