@@ -3031,3 +3031,131 @@ describe('08.5 store', () => {
     expect(await ledger()).toEqual({ orders: 1, active: 1 });
   });
 });
+
+/**
+ * 12.3-11 (NOVF-05..09, NOVF-11; D-690, D-691, D-693, D-694, OQ-2, OQ-3): the store front's read side
+ * and the product's category on create. The category id in the contract is the SLUG; an absent
+ * `category` key on create means "apply the name guess", an explicit `null` means "Sem categoria".
+ *
+ * Every case writes its categories through the lazy seed (the seed leaves a store with none) and the
+ * describe's own sweep removes the `store_categories` and `store_front` rows of both seed tenants, so
+ * a rerun starts from the same empty state.
+ */
+describe('store front and product category (12.3-11)', () => {
+  const BUILT_IN = [
+    ['cursos', 'Cursos', 'graduation-cap'],
+    ['livros', 'Livros', 'book-open'],
+    ['materiais', 'Materiais', 'file-text'],
+    ['roupas', 'Roupas', 'shirt'],
+    ['perfumes', 'Perfumes', 'spray-can'],
+    ['equipamentos', 'Equipamentos', 'wrench'],
+    ['servicos', 'Serviços', 'calendar-check'],
+    ['outros', 'Outros', 'package'],
+  ] as const;
+
+  type FrontAnswer = {
+    categories: { id: string; name: string; icon: string }[];
+    promoProductId: string | null;
+    featuredProductIds: string[];
+  };
+  type Card = { id: string; category?: string };
+
+  /** Drops every category and front row of the two seed tenants (products' links go to null). */
+  async function sweepCategories(): Promise<void> {
+    await adminSql`
+      delete from public.store_front where tenant_id in (${demoTenantId}::uuid, ${labTenantId}::uuid)`;
+    await adminSql`
+      delete from public.store_categories
+       where tenant_id in (${demoTenantId}::uuid, ${labTenantId}::uuid)`;
+  }
+
+  /** The category rows and marker rows a tenant holds, through the admin connection. */
+  async function seedState(tenantId: string): Promise<{ categories: number; markers: number }> {
+    const [row] = await adminSql<{ categories: number; markers: number }[]>`
+      select (select count(*)::int from public.store_categories where tenant_id = ${tenantId}::uuid)
+               as categories,
+             (select count(*)::int from public.store_front
+               where tenant_id = ${tenantId}::uuid and categories_seeded_at is not null) as markers`;
+    return row ?? { categories: -1, markers: -1 };
+  }
+
+  const createRaw = (body: Record<string, unknown>, token = tokens.demoAdmin) =>
+    post('/v1/store/products', token, body);
+
+  beforeAll(async () => {
+    await storeOn(demoTenantId);
+    await sweepCategories();
+  });
+
+  afterAll(async () => {
+    await sweepCategories();
+  });
+
+  it('front: the first read of a store that never had categories seeds the eight built-ins for that tenant only', async () => {
+    expect(await seedState(demoTenantId)).toEqual({ categories: 0, markers: 0 });
+
+    const front = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(front.categories.map((c) => [c.id, c.name, c.icon])).toEqual(BUILT_IN);
+    expect(front.promoProductId).toBeNull();
+    expect(front.featuredProductIds).toEqual([]);
+
+    expect(await seedState(demoTenantId)).toEqual({ categories: 8, markers: 1 });
+    // The positive control above is the seed itself; the negative: the other tenant was not touched.
+    expect(await seedState(labTenantId)).toEqual({ categories: 0, markers: 0 });
+    // A second read answers the same and writes nothing more.
+    expect(await getJson<FrontAnswer>('/v1/store/front', tokens.demoAdmin)).toEqual(front);
+    expect(await seedState(demoTenantId)).toEqual({ categories: 8, markers: 1 });
+  });
+
+  it('front: a product created with NO category key lands in the category its name suggests (OQ-3)', async () => {
+    const res = await createRaw({ name: `${PREFIX} Livro: Guia de Peles`, priceCents: 1990 });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as ProductDetail;
+    expect(created.category).toBe('livros');
+
+    const read = await getJson<ProductDetail>(
+      `/v1/store/products/${created.id}`,
+      tokens.demoMember,
+    );
+    expect(read.category).toBe('livros');
+    const list = await getJson<{ items: Card[] }>('/v1/store/products?limit=50', tokens.demoMember);
+    expect(list.items.find((card) => card.id === created.id)?.category).toBe('livros');
+  });
+
+  it('front: an explicit null stores none (no key on the card) and an unknown slug is 400 category_invalid', async () => {
+    const none = await createRaw({
+      name: `${PREFIX} Livro sem prateleira`,
+      priceCents: 500,
+      category: null,
+    });
+    expect(none.status).toBe(201);
+    const created = (await none.json()) as ProductDetail;
+    expect('category' in created).toBe(false);
+    const list = await getJson<{ items: Card[] }>('/v1/store/products?limit=50', tokens.demoMember);
+    const card = list.items.find((item) => item.id === created.id);
+    expect(card).toBeDefined();
+    expect(card && 'category' in card).toBe(false);
+
+    const unknown = await createRaw({
+      name: `${PREFIX} Perfume X`,
+      priceCents: 500,
+      category: 'nao-existe',
+    });
+    expect(unknown.status).toBe(400);
+    const body = (await unknown.json()) as Envelope;
+    expect(body.error.details).toEqual({ store: 'category_invalid' });
+    // Nothing was written for the refused body.
+    const [count] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.store_products where name = ${`${PREFIX} Perfume X`}`;
+    expect(count?.n).toBe(0);
+
+    // The positive control: a known slug of this tenant is accepted and stored as chosen.
+    const chosen = await createRaw({
+      name: `${PREFIX} Perfume Y`,
+      priceCents: 500,
+      category: 'roupas',
+    });
+    expect(chosen.status).toBe(201);
+    expect(((await chosen.json()) as ProductDetail).category).toBe('roupas');
+  });
+});
