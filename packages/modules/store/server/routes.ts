@@ -10,6 +10,7 @@ import {
 import {
   buyersPageSchema,
   buyersQuerySchema,
+  categoriesBodySchema,
   communityAccessListSchema,
   communityAccessSchema,
   courseAccessListSchema,
@@ -49,6 +50,7 @@ import {
   listProducts,
   lockPreview,
   purchaseProduct,
+  replaceCategories,
   revokeAccess,
   setFeatured,
   setProductStatus,
@@ -194,6 +196,28 @@ const putFrontFeaturedRoute = createRoute({
     400: {
       description:
         '`VALIDATION_FAILED` with `details.store`: `too_many_featured` (more than 5 ids) or `featured_invalid` (a repeated id, or an id that is not an ACTIVE product of this tenant; unknown, foreign and archived answer the same code). A missing key, an unknown key, a non-uuid or more than 100 ids is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
+  },
+});
+
+const putCategoriesRoute = createRoute({
+  method: 'put',
+  path: '/categories',
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: categoriesBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The fresh store front. The body is the WHOLE list (OQ-4: draft and save, one atomic call): `categories` in the storefront’s order, each `{ id?, name, icon }`. A row with an `id` (the slug) keeps it and a rename changes only the name; a row with none is new and the server mints its slug; the positions are the array order; a category left out is deleted and its products are left with no category. At most 20; a name of at most 30 code points after NFC, trim and space folding; unique ignoring case and spacing; an icon from the contract’s list of 20. `[]` leaves the store with no category for good (the seed never runs again).',
+      content: { 'application/json': { schema: storeFrontSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.store`: `too_many_categories`, `category_name_required`, `category_name_too_long`, `category_name_taken`, `category_icon_invalid`, or `category_invalid` (an `id` that is malformed, repeated, or no longer a category of this tenant: a stale draft is refused whole). A position, a tenant id or any unknown key is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
     404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
@@ -531,6 +555,9 @@ export const storeRoutes = store
   )
   .openapi(putFrontFeaturedRoute, async (c) =>
     c.json(await setFeatured(c.get('ctx'), c.req.valid('json').productIds), 200),
+  )
+  .openapi(putCategoriesRoute, async (c) =>
+    c.json(await replaceCategories(c.get('ctx'), c.req.valid('json').categories), 200),
   )
   .openapi(listCommunityAccessRoute, async (c) =>
     c.json(await listCommunityAccess(c.get('ctx')), 200),

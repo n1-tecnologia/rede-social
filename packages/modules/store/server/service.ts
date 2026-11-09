@@ -10,6 +10,7 @@ import { sql } from 'drizzle-orm';
 import type {
   BuyersPage,
   BuyersQuery,
+  CategoryEntry,
   CommunityAccess,
   CommunityAccessList,
   CourseAccess,
@@ -40,7 +41,14 @@ import type {
   RevokeResult,
   StoreFront,
 } from '../contracts/index';
-import { guessStoreCategory, STORE_FEATURED_MAX } from '../contracts/index';
+import {
+  guessStoreCategory,
+  newCategoryId,
+  STORE_CATEGORY_ICONS,
+  STORE_CATEGORY_MAX,
+  STORE_CATEGORY_NAME_MAX,
+  STORE_FEATURED_MAX,
+} from '../contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-store');
@@ -998,6 +1006,182 @@ export async function setFeatured(
       featuredCount: productIds.length,
     },
     'store front featured saved',
+  );
+  return front;
+}
+
+const CATEGORY_ICON_SET: ReadonlySet<string> = new Set(STORE_CATEGORY_ICONS);
+
+/**
+ * A category name as kept (D-690, OQ-6): NFC, control characters dropped, runs of space folded to one,
+ * trimmed. It is COUNTED in Unicode code points (an emoji is one, the tenant display-name rule). The
+ * placeholder name of the two-pass update begins with a control character, so a kept name can never
+ * collide with it.
+ */
+function foldCategoryName(raw: string): string {
+  return raw
+    .normalize('NFC')
+    .replace(/\p{Cc}/gu, (char) => (/\s/u.test(char) ? ' ' : ''))
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+type WantedCategory = { id: string | undefined; name: string; icon: string };
+
+/**
+ * The pure half of the whole-list save (D-690, D-691, OQ-6): every refusal that needs no database, in a
+ * fixed order (count, then per entry name, length and icon, then duplicate names, then repeated ids), so
+ * a refused body never opens a transaction.
+ */
+function wantedCategories(entries: readonly CategoryEntry[]): WantedCategory[] {
+  const refuse = (code: string): never => {
+    throw new ApiError(400, 'VALIDATION_FAILED', { store: code });
+  };
+  if (entries.length > STORE_CATEGORY_MAX) refuse('too_many_categories');
+  const wanted = entries.map((entry) => {
+    const name = foldCategoryName(entry.name);
+    if (name === '') refuse('category_name_required');
+    if (Array.from(name).length > STORE_CATEGORY_NAME_MAX) refuse('category_name_too_long');
+    if (!CATEGORY_ICON_SET.has(entry.icon)) refuse('category_icon_invalid');
+    return { id: entry.id, name, icon: entry.icon };
+  });
+  const names = new Set<string>();
+  for (const { name } of wanted) {
+    const key = name.toLowerCase();
+    if (names.has(key)) refuse('category_name_taken');
+    names.add(key);
+  }
+  const ids = new Set<string>();
+  for (const { id } of wanted) {
+    if (id === undefined) continue;
+    if (ids.has(id)) refuse('category_invalid');
+    ids.add(id);
+  }
+  return wanted;
+}
+
+/** Postgres' SQLSTATE and constraint name, walked out of whatever the driver wrapped the error in. */
+function pgViolation(error: unknown): { code: string; constraint: string } | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current !== null && current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (typeof candidate.code === 'string' && /^[0-9A-Z]{5}$/.test(candidate.code)) {
+      return {
+        code: candidate.code,
+        constraint: typeof candidate.constraint_name === 'string' ? candidate.constraint_name : '',
+      };
+    }
+    current = candidate.cause;
+  }
+  return null;
+}
+
+/**
+ * `PUT /v1/store/categories` (D-699, OQ-4, OQ-6, D-690, D-691, D-693): replaces the store's category list
+ * as ONE whole list, atomically, under the `store_front` row lock (so two saves, and a save against a
+ * stale editor, never interleave: Pitfall 7, T-12.3-08).
+ *
+ *  - The save first claims the seed marker (`lockFront`), so a store that never read its front is never
+ *    seeded after the admin's own list is saved, and a save of `[]` leaves the store with none for good.
+ *  - An `id` in the body that no longer exists for this tenant, or a repeated id, is
+ *    `400 { store: 'category_invalid' }` and NOTHING is written: a stale draft never deletes a category
+ *    another admin just made. Rows are deleted only when omitted from a valid body.
+ *  - A kept row keeps its row and its slug; a rename changes only the name. A new row (no id) gets
+ *    `newCategoryId(name, slugs held before the save)`. The positions are the body order, 1..n.
+ *  - The kept rows are updated in TWO passes (the renamed ones take a unique placeholder first), so a
+ *    swap of two names never trips the unique index `(tenant_id, lower(name))`.
+ *  - A deleted category leaves its products with no category through the `on delete set null` key. A
+ *    product write that names it meanwhile either commits first (the delete then nulls it) or finds the
+ *    row gone (`category_invalid`): the product write takes a key-share lock on the row (`findCategory`).
+ *
+ * The log line carries counts, never a name.
+ */
+export async function replaceCategories(
+  ctx: RequestContext,
+  entries: readonly CategoryEntry[],
+): Promise<StoreFront> {
+  const wanted = wantedCategories(entries);
+  let counts = { kept: 0, added: 0, removed: 0 };
+
+  let front: StoreFront;
+  try {
+    front = await withTenantTx(ctx, async (tx) => {
+      await lockFront(tx, ctx);
+      const existing = await tx.execute<{ slug: string; name: string }>(sql`
+        select slug, name from store_categories
+         where tenant_id = ${ctx.tenantId}::uuid`);
+      const held = new Map(existing.map((row) => [row.slug, row.name]));
+      for (const { id } of wanted) {
+        if (id !== undefined && !held.has(id)) {
+          throw new ApiError(400, 'VALIDATION_FAILED', { store: 'category_invalid' });
+        }
+      }
+
+      const keptSlugs = wanted.flatMap(({ id }) => (id === undefined ? [] : [id]));
+      // Slugs are plain `[a-z0-9-]` (the schema's pattern), so the array literal needs no escaping.
+      await tx.execute(sql`
+        delete from store_categories
+         where tenant_id = ${ctx.tenantId}::uuid
+           and slug <> all(${`{${keptSlugs.join(',')}}`}::text[])`);
+
+      // Pass 1: every kept row whose name changes takes its own placeholder (a control character and the
+      // slug: unique per tenant, and no kept name can equal it).
+      for (const { id, name } of wanted) {
+        if (id !== undefined && held.get(id) !== name) {
+          await tx.execute(sql`
+            update store_categories set name = chr(1) || slug
+             where tenant_id = ${ctx.tenantId}::uuid and slug = ${id}`);
+        }
+      }
+
+      // Pass 2 and the inserts, in the body order: the position is the index.
+      const taken = new Set(held.keys());
+      let position = 0;
+      for (const { id, name, icon } of wanted) {
+        position += 1;
+        if (id !== undefined) {
+          await tx.execute(sql`
+            update store_categories
+               set name = ${name}, icon = ${icon}, position = ${position}, updated_at = now()
+             where tenant_id = ${ctx.tenantId}::uuid and slug = ${id}`);
+        } else {
+          const slug = newCategoryId(name, taken);
+          taken.add(slug);
+          await tx.execute(sql`
+            insert into store_categories (tenant_id, slug, name, icon, position)
+            values (${ctx.tenantId}::uuid, ${slug}, ${name}, ${icon}, ${position})`);
+        }
+      }
+      counts = {
+        kept: keptSlugs.length,
+        added: wanted.length - keptSlugs.length,
+        removed: existing.length - keptSlugs.length,
+      };
+      return readFront(tx, ctx);
+    });
+  } catch (error) {
+    // The unique index on `lower(name)` is the arbiter where the JS and the database fold a case
+    // differently: the same code as the service check.
+    const violation = pgViolation(error);
+    if (violation?.code === '23505' && violation.constraint === 'store_categories_tenant_name_uq') {
+      throw new ApiError(400, 'VALIDATION_FAILED', { store: 'category_name_taken' });
+    }
+    throw error;
+  }
+
+  log.info(
+    {
+      event: 'store.categories_saved',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      keptCount: counts.kept,
+      addedCount: counts.added,
+      removedCount: counts.removed,
+    },
+    'store categories saved',
   );
   return front;
 }
