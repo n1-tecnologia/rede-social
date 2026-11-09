@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
-import { getStoreFront, saveStoreCategories, setStoreFeatured } from './store';
+import { getStoreFront, saveStoreCategories, setStoreFeatured, setStorePromo } from './store';
 
 /**
  * 12.3-13 (D-696, D-699, UI-D-690): the storefront's one read and the two setup saves.
@@ -153,5 +153,38 @@ describe('saveStoreCategories', () => {
     });
     vi.mocked(apiFetch).mockResolvedValueOnce(json({}, 500));
     expect(await saveStoreCategories([{ name: 'x', icon: 'tag' }])).toEqual({ status: 'error' });
+  });
+});
+
+describe('setStorePromo', () => {
+  it('PUTs the chosen product id and answers the fresh front', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json({ ...FRONT, promoProductId: P2 }));
+    expect(await setStorePromo(P2)).toEqual({
+      status: 'ok',
+      front: { ...FRONT, promoProductId: P2 },
+    });
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? [];
+    expect(path).toBe('/v1/store/front/promo');
+    expect(init?.method).toBe('PUT');
+    expect(JSON.parse(String(init?.body))).toEqual({ productId: P2 });
+  });
+
+  it('null clears the promotion ("Mais recente da loja")', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(FRONT));
+    await setStorePromo(null);
+    expect(JSON.parse(String(vi.mocked(apiFetch).mock.calls[0]?.[1]?.body))).toEqual({
+      productId: null,
+    });
+  });
+
+  it('maps promo_invalid to an issue; anything else is an error and a thrown fetch never escapes', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      refusal(400, 'VALIDATION_ERROR', { store: 'promo_invalid' }),
+    );
+    expect(await setStorePromo(P1)).toEqual({ status: 'issue', issue: 'promo_invalid' });
+    vi.mocked(apiFetch).mockResolvedValue(refusal(500, 'INTERNAL'));
+    expect(await setStorePromo(P1)).toEqual({ status: 'error' });
+    vi.mocked(apiFetch).mockRejectedValue(new Error('network'));
+    expect(await setStorePromo(P1)).toEqual({ status: 'error' });
   });
 });

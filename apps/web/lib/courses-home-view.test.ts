@@ -19,12 +19,13 @@ import {
   homeStatsView,
   homeTrackCards,
   popularCategories,
+  promoNeedsLoad,
+  promoProductFor,
   quickCourses,
   quickCourseView,
   trackCardsView,
 } from './courses-home-view';
 import { type HomeHeroView, trackDetailView } from './courses-member-view';
-import { promoWithProduct } from './home-promo';
 
 /**
  * 2026-10-26 — Início's view builders on the academy reference (the greeting by the school's hour,
@@ -366,20 +367,27 @@ describe("the school's areas and the panel's promotion", () => {
     expect(view.cta.href).toBe('/area-membros/cursos?ver=aluno');
   });
 
-  it("the administrator's pick is drawn exactly as the server draws that product", () => {
-    const base = {
-      productImages: ['img-1', 'img-2'],
-      courseCovers: ['cover-1'],
-      courseCount: 3,
-      trackCount: 1,
-      tenant: 'Escola Demo',
-      t,
-    };
-    const newest = { id: 'p-new', name: 'Formação X', price: 'R$ 97,00' };
-    const picked = { id: 'p-old', name: 'Mentoria Y', price: 'Grátis' };
-    expect(promoWithProduct(homePromoView({ ...base, product: newest }), picked)).toEqual(
-      homePromoView({ ...base, product: picked }),
-    );
+  it('the promotion is the featured product when it is among the newest on sale (D-699)', () => {
+    const forSale = [{ id: 'p-new' }, { id: 'p-mid' }, { id: 'p-old' }];
+    expect(promoProductFor(forSale, 'p-old', null)).toEqual({ id: 'p-old' });
+    expect(promoNeedsLoad(forSale, 'p-old')).toBe(false);
+  });
+
+  it('a featured product outside the newest is the one loaded by its own id', () => {
+    const forSale = [{ id: 'p-new' }, { id: 'p-mid' }];
+    expect(promoNeedsLoad(forSale, 'p-far')).toBe(true);
+    expect(promoProductFor(forSale, 'p-far', { id: 'p-far' })).toEqual({ id: 'p-far' });
+  });
+
+  it('with no promotion, an archived or gone one, or a load that did not match, the newest leads', () => {
+    const forSale = [{ id: 'p-new' }, { id: 'p-mid' }];
+    expect(promoProductFor(forSale, null, null)).toEqual({ id: 'p-new' });
+    expect(promoNeedsLoad(forSale, null)).toBe(false);
+    // The API names none for an archived product, and a load that came back archived is dropped.
+    expect(promoProductFor(forSale, 'p-far', null)).toEqual({ id: 'p-new' });
+    expect(promoProductFor(forSale, 'p-far', { id: 'p-other' })).toEqual({ id: 'p-new' });
+    expect(promoProductFor([], null, null)).toBeNull();
+    expect(promoProductFor([], 'p-far', null)).toBeNull();
   });
 });
 

@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   setStoreFeatured: vi.fn(),
   saveStoreCategories: vi.fn(),
+  setStorePromo: vi.fn(),
   revalidate: vi.fn(),
 }));
 
@@ -23,6 +24,7 @@ vi.mock('@/lib/store', () => ({
   purchaseProduct: vi.fn(),
   setStoreFeatured: mocks.setStoreFeatured,
   saveStoreCategories: mocks.saveStoreCategories,
+  setStorePromo: mocks.setStorePromo,
 }));
 vi.mock('@/lib/store-revalidate', () => ({ revalidateStoreScreens: mocks.revalidate }));
 vi.mock('@/lib/bootstrap', () => ({
@@ -32,7 +34,9 @@ vi.mock('@/lib/bootstrap', () => ({
 }));
 vi.mock('next-intl/server', () => ({ getTranslations: vi.fn() }));
 
-const { saveStoreCategoriesAction, setStoreFeaturedAction } = await import('./actions');
+const { saveStoreCategoriesAction, setStoreFeaturedAction, setStorePromoAction } = await import(
+  './actions'
+);
 
 const P1 = '11111111-1111-4111-8111-111111111111';
 const P2 = '22222222-2222-4222-8222-222222222222';
@@ -132,5 +136,42 @@ describe('saveStoreCategoriesAction', () => {
     expect(await saveStoreCategoriesAction(LIST)).toEqual({ ok: false, code: 'generic' });
     mocks.saveStoreCategories.mockResolvedValue({ status: 'redirect', path: '/entrar' });
     await expect(saveStoreCategoriesAction(LIST)).rejects.toThrow('REDIRECT /entrar');
+  });
+});
+
+describe('setStorePromoAction (12.3-14, D-699)', () => {
+  it('sends the product id, answers ok and revalidates the store screens', async () => {
+    mocks.setStorePromo.mockResolvedValue({ status: 'ok', front: FRONT });
+    expect(await setStorePromoAction(P1)).toEqual({ ok: true });
+    expect(mocks.setStorePromo).toHaveBeenCalledWith(P1);
+    expect(mocks.revalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('null is valid ("Mais recente da loja")', async () => {
+    mocks.setStorePromo.mockResolvedValue({ status: 'ok', front: FRONT });
+    expect(await setStorePromoAction(null)).toEqual({ ok: true });
+    expect(mocks.setStorePromo).toHaveBeenCalledWith(null);
+  });
+
+  it('refuses a malformed body before any request: not a uuid, not a string, undefined', async () => {
+    for (const bad of ['not-a-uuid', 123, undefined, {}, [P1]]) {
+      expect(await setStorePromoAction(bad)).toEqual({ ok: false, code: 'generic' });
+    }
+    expect(mocks.setStorePromo).not.toHaveBeenCalled();
+  });
+
+  it("answers the API's refusal as a code and a failure as generic, never revalidating", async () => {
+    mocks.setStorePromo.mockResolvedValue({ status: 'issue', issue: 'promo_invalid' });
+    expect(await setStorePromoAction(P1)).toEqual({ ok: false, code: 'promo_invalid' });
+    mocks.setStorePromo.mockResolvedValue({ status: 'error' });
+    expect(await setStorePromoAction(P1)).toEqual({ ok: false, code: 'generic' });
+    mocks.setStorePromo.mockResolvedValue({ status: 'disabled' });
+    expect(await setStorePromoAction(P1)).toEqual({ ok: false, code: 'generic' });
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+
+  it('a navigation the bootstrap knows redirects outside any try/catch', async () => {
+    mocks.setStorePromo.mockResolvedValue({ status: 'redirect', path: '/entrar' });
+    await expect(setStorePromoAction(P1)).rejects.toThrow('REDIRECT /entrar');
   });
 });
