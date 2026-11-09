@@ -3509,3 +3509,187 @@ describe('store front and product category (12.3-11)', () => {
     }
   });
 });
+
+/**
+ * 12.3-12 (NOVF-05, NOVF-06, NOVF-07, NOVF-09, NOVF-11; D-690, D-691, D-693, D-696, D-699, OQ-4, OQ-6):
+ * the admin writes of the store front. `PUT /v1/store/front/promo`, `PUT /v1/store/front/featured` and
+ * the whole-list `PUT /v1/store/categories`, each answering the fresh front. Every case that writes
+ * through the API reads the stored row back through the admin connection, so a 200 is never trusted
+ * on its own; each refusal asserts that nothing was written.
+ */
+describe('store front writes (12.3-12)', () => {
+  type FrontAnswer = {
+    categories: { id: string; name: string; icon: string }[];
+    promoProductId: string | null;
+    featuredProductIds: string[];
+  };
+
+  const put = (path: string, token: string, body: unknown, host = HOSTS.demo) =>
+    request(path, token, { method: 'PUT', body: JSON.stringify(body) }, host);
+  const putPromo = (body: unknown, token = tokens.demoAdmin) =>
+    put('/v1/store/front/promo', token, body);
+
+  async function sweepFront(): Promise<void> {
+    await adminSql`
+      delete from public.store_front where tenant_id in (${demoTenantId}::uuid, ${labTenantId}::uuid)`;
+    await adminSql`
+      delete from public.store_categories
+       where tenant_id in (${demoTenantId}::uuid, ${labTenantId}::uuid)`;
+  }
+
+  /** The stored front row of the demo tenant through the admin connection. */
+  async function storedFront(): Promise<{
+    rows: number;
+    promo: string | null;
+    featured: string[];
+  }> {
+    const rows = await adminSql<{ promo: string | null; featured: string[] }[]>`
+      select promo_product_id::text as promo,
+             featured_product_ids::text[] as featured
+        from public.store_front where tenant_id = ${demoTenantId}::uuid`;
+    return { rows: rows.length, promo: rows[0]?.promo ?? null, featured: rows[0]?.featured ?? [] };
+  }
+
+  const archive = (productId: string) =>
+    request(`/v1/store/products/${productId}/status`, tokens.demoAdmin, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'archived' }),
+    });
+
+  beforeAll(async () => {
+    await storeOn(demoTenantId);
+    await sweepFront();
+  });
+
+  afterAll(async () => {
+    await sweepFront();
+  });
+
+  it('promo: an admin saves the featured product and a member reads it; null clears it; the same body twice leaves one row', async () => {
+    const product = await createProduct(`${PREFIX} promo a`, 1000, []);
+    // A store with no front row answers no promo.
+    expect((await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember)).promoProductId).toBe(
+      null,
+    );
+
+    const saved = await putPromo({ productId: product.id });
+    expect(saved.status).toBe(200);
+    const answer = (await saved.json()) as FrontAnswer;
+    expect(answer.promoProductId).toBe(product.id);
+    expect(answer.categories).toHaveLength(8);
+    expect((await storedFront()).promo).toBe(product.id);
+    expect(await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember)).toEqual(answer);
+
+    // Idempotent: the same promo twice leaves exactly one row and the same answer.
+    const again = await putPromo({ productId: product.id });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual(answer);
+    expect((await storedFront()).rows).toBe(1);
+
+    // Null clears; clearing the promo leaves the featured list as it was.
+    await adminSql`
+      update public.store_front set featured_product_ids = ${`{${product.id}}`}::uuid[]
+       where tenant_id = ${demoTenantId}::uuid`;
+    const cleared = await putPromo({ productId: null });
+    expect(cleared.status).toBe(200);
+    const clearedBody = (await cleared.json()) as FrontAnswer;
+    expect(clearedBody.promoProductId).toBeNull();
+    expect(clearedBody.featuredProductIds).toEqual([product.id]);
+    expect(await storedFront()).toMatchObject({ rows: 1, promo: null, featured: [product.id] });
+    await adminSql`
+      update public.store_front set featured_product_ids = '{}'::uuid[]
+       where tenant_id = ${demoTenantId}::uuid`;
+  });
+
+  it('promo: the promo may also be a featured product, both stored independently (NOVF-05 adjacency)', async () => {
+    const product = await createProduct(`${PREFIX} promo both`, 1000, []);
+    await adminSql`
+      update public.store_front set featured_product_ids = ${`{${product.id}}`}::uuid[]
+       where tenant_id = ${demoTenantId}::uuid`;
+    expect((await putPromo({ productId: product.id })).status).toBe(200);
+    const front = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(front.promoProductId).toBe(product.id);
+    expect(front.featuredProductIds).toEqual([product.id]);
+    await adminSql`
+      update public.store_front
+         set promo_product_id = null, featured_product_ids = '{}'::uuid[]
+       where tenant_id = ${demoTenantId}::uuid`;
+  });
+
+  it('promo: an archived, unknown or another tenant’s product is 400 promo_invalid and nothing is written; null and the bad shapes behave', async () => {
+    const good = await createProduct(`${PREFIX} promo keep`, 1000, []);
+    expect((await putPromo({ productId: good.id })).status).toBe(200);
+
+    const archived = await createProduct(`${PREFIX} promo archived`, 1000, []);
+    expect((await archive(archived.id)).status).toBe(200);
+    const foreign = await insertProduct(
+      labTenantId,
+      `${PREFIX} promo foreign`,
+      '2026-01-01T00:00:00Z',
+    );
+
+    for (const productId of [archived.id, randomUUID(), foreign]) {
+      const res = await putPromo({ productId });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ store: 'promo_invalid' });
+      // Nothing was written: the saved promo is still the good one.
+      expect((await storedFront()).promo).toBe(good.id);
+    }
+
+    // Strict body: a missing key, an unknown key, a non-uuid and a tenant id are generic 400s.
+    for (const body of [{}, { productId: good.id, tenantId: demoTenantId }, { productId: 'x' }]) {
+      const res = await putPromo(body);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+    }
+    expect((await storedFront()).promo).toBe(good.id);
+    expect((await putPromo({ productId: null })).status).toBe(200);
+    expect((await storedFront()).promo).toBeNull();
+  });
+
+  it('promo: a member and a support member are 403 and the stored promo is unchanged; an admin of the same call succeeds', async () => {
+    const product = await createProduct(`${PREFIX} promo guarded`, 1000, []);
+    expect((await putPromo({ productId: product.id })).status).toBe(200);
+    const other = await createProduct(`${PREFIX} promo guarded 2`, 1000, []);
+
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      const res = await putPromo({ productId: other.id }, token);
+      expect(res.status).toBe(403);
+      expect((await storedFront()).promo).toBe(product.id);
+    }
+    expect((await putPromo({ productId: other.id })).status).toBe(200);
+    expect((await storedFront()).promo).toBe(other.id);
+  });
+
+  it('promo: the module off is the bare MODULE_DISABLED 404 and writes nothing', async () => {
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${demoTenantId}::uuid and module_key = 'store'`;
+    moduleFlags.invalidate(demoTenantId);
+    try {
+      const before = await storedFront();
+      const res = await putPromo({ productId: null });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('MODULE_DISABLED');
+      expect(body.error).not.toHaveProperty('details');
+      expect(await storedFront()).toEqual(before);
+    } finally {
+      await storeOn(demoTenantId);
+    }
+  });
+
+  it('promo edge concurrency: two admins saving different promos at once end with ONE row holding one of the two (NOVF-05)', async () => {
+    const a = await createProduct(`${PREFIX} promo race a`, 1000, []);
+    const b = await createProduct(`${PREFIX} promo race b`, 1000, []);
+    await adminSql`delete from public.store_front where tenant_id = ${demoTenantId}::uuid`;
+    const results = await Promise.all([
+      putPromo({ productId: a.id }),
+      putPromo({ productId: b.id }),
+    ]);
+    expect(results.map((res) => res.status)).toEqual([200, 200]);
+    const stored = await storedFront();
+    expect(stored.rows).toBe(1);
+    expect([a.id, b.id]).toContain(stored.promo);
+  });
+});

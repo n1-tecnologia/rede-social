@@ -7618,6 +7618,91 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 12.3 sweep: store front writes — a rede-lab admin cannot save a rede-demo product as the promo (400 promo_invalid, nothing written), a rede-demo admin on the rede-lab host is refused, and a member or support session is 403, each beside the same-tenant admin positive control (12.3-12, NOVF-05, T-12.3-02, T-12.3-03)', async () => {
+    // | Route                     | Negative asserted here                                                     |
+    // |---------------------------|----------------------------------------------------------------------------|
+    // | PUT /v1/store/front/promo | a lab admin naming a demo product: 400 promo_invalid, the lab row is not    |
+    // |                           | written; a demo admin on the lab host: 403 TENANT_HOST_MISMATCH; a demo     |
+    // |                           | member and support session: 403                                             |
+    const name = `st-iso124-${RUN}`;
+    const restoreDemo = await withStoreEnabled('demo');
+    const restoreLab = await withStoreEnabled('lab');
+    const sweepWrites = async () => {
+      await adminSql`delete from public.store_front where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+      await adminSql`delete from public.store_products where name = ${name}`;
+      await adminSql`delete from public.store_categories where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+    };
+    const storedPromo = async (tenantId: string) => {
+      const [row] = await adminSql<{ promo: string | null }[]>`
+        select promo_product_id::text as promo from public.store_front where tenant_id = ${tenantId}::uuid`;
+      return row === undefined ? 'no-row' : row.promo;
+    };
+    try {
+      await sweepWrites();
+      const demoProduct = await send('POST', '/v1/store/products', tokens.demoAdmin, HOSTS.demo, {
+        name,
+        priceCents: 990,
+      });
+      expect(demoProduct.status).toBe(201);
+      const demoProductId = ((await demoProduct.json()) as { id: string }).id;
+      const labProduct = await send('POST', '/v1/store/products', tokens.labAdmin, HOSTS.lab, {
+        name,
+        priceCents: 990,
+      });
+      expect(labProduct.status).toBe(201);
+      const labProductId = ((await labProduct.json()) as { id: string }).id;
+
+      // Positive controls: each admin saves their OWN product as the promo.
+      const demoOwn = await send('PUT', '/v1/store/front/promo', tokens.demoAdmin, HOSTS.demo, {
+        productId: demoProductId,
+      });
+      expect(demoOwn.status).toBe(200);
+      expect(((await demoOwn.json()) as { promoProductId: string | null }).promoProductId).toBe(
+        demoProductId,
+      );
+
+      // The lab admin names the demo product: the same code as an unknown id, nothing written for lab.
+      const lookBefore = await storedPromo(tenantIds.lab);
+      const foreign = await send('PUT', '/v1/store/front/promo', tokens.labAdmin, HOSTS.lab, {
+        productId: demoProductId,
+      });
+      expect(foreign.status).toBe(400);
+      expect(((await foreign.json()) as Envelope).error.details).toEqual({
+        store: 'promo_invalid',
+      });
+      expect(await storedPromo(tenantIds.lab)).toBe(lookBefore);
+      expect(await storedPromo(tenantIds.demo)).toBe(demoProductId);
+      const labOwn = await send('PUT', '/v1/store/front/promo', tokens.labAdmin, HOSTS.lab, {
+        productId: labProductId,
+      });
+      expect(labOwn.status).toBe(200);
+      expect(await storedPromo(tenantIds.lab)).toBe(labProductId);
+
+      // A demo session on the lab host is refused before any store code runs; the lab promo holds.
+      await expectHostRefused(
+        await send('PUT', '/v1/store/front/promo', tokens.demoAdmin, HOSTS.lab, {
+          productId: null,
+        }),
+        'promo on the lab host',
+      );
+      expect(await storedPromo(tenantIds.lab)).toBe(labProductId);
+
+      // Member and support: 403, the demo promo is unchanged.
+      const demoSupport = await signInAs('support@rede-demo.local', SEED_PASSWORD);
+      for (const token of [tokens.demoMember, demoSupport]) {
+        const res = await send('PUT', '/v1/store/front/promo', token, HOSTS.demo, {
+          productId: null,
+        });
+        expect(res.status).toBe(403);
+        expect(await storedPromo(tenantIds.demo)).toBe(demoProductId);
+      }
+    } finally {
+      await sweepWrites();
+      await restoreLab();
+      await restoreDemo();
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|
