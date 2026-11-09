@@ -194,8 +194,9 @@ export function StoreHero({
 }
 
 /**
- * "Categorias": one tile per category with products (its glyph, its name, how many), a row that
- * scrolls on a phone and fills the wide frame; the tile of the page being shown is marked.
+ * "Categorias": one tile per category of the store, products or not (its glyph, its name, how many;
+ * 12.3-13, UI-D-690), a row that scrolls on a phone and fills the wide frame; the tile of the page
+ * being shown is marked.
  */
 export function StoreCategoryTiles({
   tiles,
@@ -301,7 +302,11 @@ export function StoreShelf({
   );
 }
 
-/** The storefront: the hero, the categories (when more than one) and a shelf per category. */
+/**
+ * The storefront: the hero, the categories (when more than one) and a shelf per category with
+ * products, from the API's front (`storeFrontView`); a store with no front or no category is the
+ * plain grid instead (`StoreListing`), chosen by the screen.
+ */
 export function StoreFront({
   view,
   labels,
