@@ -82,6 +82,7 @@ type Body = {
   title: string;
   description?: string;
   coverAssetId?: string | null;
+  posterAssetId?: string | null;
   format: 'in_person' | 'online';
   venueName?: string | null;
   address?: string | null;
@@ -170,6 +171,21 @@ async function seedCover(label: string): Promise<string> {
       from public.users u where u.email = 'admin@rede-demo.local'
     returning id`;
   if (!row) throw new Error(`could not seed the ${label} cover`);
+  coverAssets.push(row.id);
+  return row.id;
+}
+
+/** A demo-tenant asset in a given purpose and status, for the poster's refusal cases. */
+async function seedAsset(label: string, purpose: string, status: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+       variant_widths, filename, ready_at)
+    select ${tenantIds.demo}::uuid, u.id, 'image', ${purpose}, ${status}, 'supabase', 'image/webp',
+           262144, 1200, 1500, '{240,480,720}'::int[], ${`12.3-06-${label}`}, now()
+      from public.users u where u.email = 'admin@rede-demo.local'
+    returning id`;
+  if (!row) throw new Error(`could not seed the ${label} asset`);
   coverAssets.push(row.id);
   return row.id;
 }
@@ -511,5 +527,74 @@ describe('events admin', () => {
       select count(*)::int as n from public.events
        where id = ${created.id}::uuid and deleted_at is null`;
     expect(still?.n).toBe(1);
+  });
+
+  it('10. poster tracer (NOVF-04, D-699): an event created with a poster returns it with its ladder in the create answer, the list, the detail and the edit read; an event without one reads null and []', async () => {
+    const poster = await seedAsset('poster-10', 'cover', 'ready');
+    const created = await create({ ...inPerson('poster tracer'), posterAssetId: poster });
+    expect(created.posterAssetId).toBe(poster);
+    expect(created.posterVariantWidths).toEqual([240, 480, 720]);
+    // The horizontal cover was not given, so it stays empty: the two images are independent.
+    expect(created.coverAssetId).toBeNull();
+
+    const listed = (await memberUpcoming()).find((item) => item.id === created.id);
+    expect(listed?.posterAssetId).toBe(poster);
+    expect(listed?.posterVariantWidths).toEqual([240, 480, 720]);
+
+    const detail = (await (
+      await request(`/v1/events/${created.id}`, tokens.demoMember)
+    ).json()) as EventSummary;
+    expect(detail.posterAssetId).toBe(poster);
+    expect(detail.posterVariantWidths).toEqual([240, 480, 720]);
+
+    const edit = (await (await editRead(created.id)).json()) as EventEdit;
+    expect(edit.posterAssetId).toBe(poster);
+    expect(edit.posterVariantWidths).toEqual([240, 480, 720]);
+
+    const plain = await create(inPerson('poster ausente'));
+    expect(plain.posterAssetId).toBeNull();
+    expect(plain.posterVariantWidths).toEqual([]);
+    const plainEdit = (await (await editRead(plain.id)).json()) as EventEdit;
+    expect(plainEdit.posterAssetId).toBeNull();
+    expect(plainEdit.posterVariantWidths).toEqual([]);
+  });
+
+  it('11. poster refusals on create: another tenant asset is a bare 404, a feed image or a pending cover is poster_invalid, beside a ready cover that is accepted', async () => {
+    const ok = await seedAsset('poster-11-ok', 'cover', 'ready');
+    const accepted = await request('/v1/events', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ ...inPerson('poster ok'), posterAssetId: ok }),
+    });
+    expect(accepted.status).toBe(201);
+
+    const [foreign] = await adminSql<{ id: string }[]>`
+      select id from public.media_assets where tenant_id = ${tenantIds.lab}::uuid limit 1`;
+    expect(foreign?.id).toBeTruthy();
+    const wrongPurpose = await seedAsset('poster-11-post', 'post', 'ready');
+    const pending = await seedAsset('poster-11-pending', 'cover', 'pending');
+    const before = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.events where title like ${`${TEST_TITLE_PREFIX}%`}`;
+
+    const miss = await request('/v1/events', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ ...inPerson('poster alheio'), posterAssetId: foreign?.id }),
+    });
+    expect(miss.status).toBe(404);
+    const missError = await envelope(miss);
+    expect(missError.code).toBe('NOT_FOUND');
+    expect(Object.hasOwn(missError, 'details')).toBe(false);
+
+    for (const asset of [wrongPurpose, pending]) {
+      const refused = await request('/v1/events', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ ...inPerson('poster invalido'), posterAssetId: asset }),
+      });
+      expect(refused.status).toBe(400);
+      expect((await envelope(refused)).details).toEqual({ event: 'poster_invalid' });
+    }
+    // Nothing was written by any refusal.
+    const after = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.events where title like ${`${TEST_TITLE_PREFIX}%`}`;
+    expect(after[0]?.n).toBe(before[0]?.n);
   });
 });
