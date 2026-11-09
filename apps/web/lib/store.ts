@@ -28,7 +28,10 @@ import {
   purchaseResultSchema,
   STORE_ISSUE_SET,
   STORE_PAGE_SIZE,
+  type StoreFront,
   type StoreIssue,
+  storeCategorySchema,
+  storeFrontSchema,
 } from '@rede-social/module-store/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
@@ -82,6 +85,44 @@ export async function getProducts(query: ProductQueryInput): Promise<ProductPage
   const res = await apiFetch(`/v1/store/products?${search.toString()}`);
   if (!res.ok) throw await apiError(res);
   return productPageSchema.parse(await res.json());
+}
+
+/**
+ * The front's answer read tolerantly (12.3, D-696): the contract's own shape, but a key the API adds
+ * later (on the front or on a category) is ignored instead of refusing the whole answer, so a newer
+ * API never takes the storefront down.
+ */
+const tolerantFrontSchema = storeFrontSchema
+  .extend({ categories: storeCategorySchema.strip().array() })
+  .strip();
+
+/**
+ * `GET /v1/store/front` (12.3-11, D-694, D-699): the store's categories in its order, the Início's
+ * promo product and the "Em destaque" ids, ONE call for the whole storefront. The API answers only
+ * ACTIVE promo and featured products and seeds a never-read store's eight categories on this first read.
+ *
+ * `null` on ANY failure (transport, 5xx, the store off between the bootstrap and the read, a
+ * refusal, an answer that does not parse) — UI-D-690: the storefront then shows the products alone,
+ * with no chips and no hero, and never an error the member cannot fix. Never throws.
+ */
+export async function getStoreFront(): Promise<StoreFront | null> {
+  try {
+    const res = await apiFetch('/v1/store/front');
+    if (res.ok) {
+      const parsed = tolerantFrontSchema.safeParse(await res.json());
+      if (parsed.success) return parsed.data;
+      console.error('store.front_unreadable');
+      return null;
+    }
+    const error = await apiError(res);
+    if (error.code !== STORE_MODULE_DISABLED) {
+      console.error('store.front_failed', { status: res.status, code: error.code });
+    }
+    return null;
+  } catch (error) {
+    console.error('store.front_failed', { error: String(error) });
+    return null;
+  }
 }
 
 /**

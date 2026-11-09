@@ -1,13 +1,12 @@
-import type { ProductCard } from '@rede-social/module-store/contracts';
+import type { ProductCard, StoreFront } from '@rede-social/module-store/contracts';
 import type { getTranslations } from 'next-intl/server';
 import { STORE_PATH } from '@/lib/store-area';
-import { plainText } from '@/lib/store-categories';
 import {
-  categoryOf,
-  type StoreAssignments,
+  plainText,
   type StoreCategoryIcon,
   type StoreCategoryView,
-} from '@/lib/store-setup';
+  storeCategoryList,
+} from '@/lib/store-categories';
 import { type ProductCardView, productCardView } from '@/lib/store-view';
 
 type Translator = Awaited<ReturnType<typeof getTranslations>>;
@@ -21,7 +20,8 @@ type Translator = Awaited<ReturnType<typeof getTranslations>>;
 
 /**
  * A product on the storefront: the card's view, its category, its chip and its price for sorting.
- * 2026-10-28: the categories are the store's own (`lib/store-setup.ts`), so a product may have none.
+ * The categories are the store's own (`GET /v1/store/front`) and the product's is the slug the API
+ * sent (12.3, D-693), so a product may have none.
  */
 export interface StoreItemView extends ProductCardView {
   /** The category's id, or `null` (the product then sits in no shelf). */
@@ -79,20 +79,25 @@ export function storeHref(query: Partial<StoreQuery>): string {
   return text ? `${STORE_PATH}?${text}` : STORE_PATH;
 }
 
-/** The store's categories and each product's (`lib/store-setup.ts`). */
+/** The store's own categories (`storeFrontContext`). */
 export interface StoreCategoryContext {
   categories: readonly StoreCategoryView[];
-  assignments: StoreAssignments;
 }
 
-/** Every product as a storefront item, in the API's order. */
+/**
+ * Every product as a storefront item, in the API's order. A product's category is the slug the API
+ * sent, kept only while the store still holds it: the web NEVER guesses one from the name (D-693), so
+ * a product with none, or with a stale slug, sits in no shelf.
+ */
 export function storeItems(
   products: readonly ProductCard[],
   t: Translator,
-  { categories, assignments }: StoreCategoryContext,
+  { categories }: StoreCategoryContext,
 ): StoreItemView[] {
   return products.map((product) => {
-    const category = categoryOf(product, categories, assignments);
+    const category = categories.some((entry) => entry.id === product.category)
+      ? (product.category ?? null)
+      : null;
     return {
       ...productCardView(product, t, { managerArchived: false }),
       category,
@@ -154,7 +159,10 @@ const HERO_SIDE = 4;
 /** The most a shelf carries (a phone scrolls them; a desktop shows one row and "Ver tudo"). */
 export const SHELF_MAX = 8;
 
-/** One tile per category with products, in the store's order. */
+/**
+ * One tile per category, in the store's order. A category with no product keeps its tile at count 0
+ * (UI-D-690): the store's categories are the admin's to arrange, products or not.
+ */
 export function storeCategoryTiles(
   items: readonly StoreItemView[],
   active: string | null,
@@ -162,29 +170,51 @@ export function storeCategoryTiles(
   categories: readonly StoreCategoryView[],
 ): StoreCategoryTileView[] {
   const groups = byCategory(items);
-  return categories.flatMap(({ id: key, name, icon }) => {
-    const size = groups.get(key)?.length ?? 0;
-    if (size === 0) return [];
-    const count = t('store.categories.count', { n: size });
-    return [
-      {
-        key,
-        icon,
-        name,
-        count,
-        ariaLabel: t('store.categories.aria', { category: name, count }),
-        href: storeHref({ categoria: key }),
-        active: key === active,
-      },
-    ];
+  return categories.map(({ id: key, name, icon }) => {
+    const count = t('store.categories.count', { n: groups.get(key)?.length ?? 0 });
+    return {
+      key,
+      icon,
+      name,
+      count,
+      ariaLabel: t('store.categories.aria', { category: name, count }),
+      href: storeHref({ categoria: key }),
+      active: key === active,
+    };
   });
 }
 
 /**
+ * What the storefront reads from `GET /v1/store/front` (12.3, D-699, UI-D-690): the store's categories
+ * for the screens, the products of the hero (the saved featured list; with none, the Início's promo
+ * product leads; with neither, the newest do) and whether the storefront is `plain`. A `plain`
+ * storefront has no chips, no hero and no shelf: the whole catalogue is the grid. That is the front
+ * call having failed (the products show, silently) or the admin having deleted every category.
+ */
+export interface StoreFrontContext {
+  categories: readonly StoreCategoryView[];
+  featured: readonly string[];
+  plain: boolean;
+}
+
+export function storeFrontContext(front: StoreFront | null, t: Translator): StoreFrontContext {
+  if (front === null) return { categories: [], featured: [], plain: true };
+  const categories = storeCategoryList(front.categories, t);
+  const featured =
+    front.featuredProductIds.length > 0
+      ? front.featuredProductIds
+      : front.promoProductId
+        ? [front.promoProductId]
+        : [];
+  return { categories, featured, plain: categories.length === 0 };
+}
+
+/**
  * The storefront: the hero (the featured products Gerenciar picked, the first large, the rest beside
- * it and then the newest; by default the newest), the categories with products, and a shelf per
- * category in the store's order (its newest first, "Ver tudo" to the category's page). An empty store
- * has no hero, no tiles and no shelf. A featured id no longer on sale is skipped.
+ * it and then the newest; by default the newest), the category tiles (every category, products or
+ * not), and a shelf per category with products in the store's order (its newest first, "Ver tudo" to
+ * the category's page). An empty store has no hero and no shelf. A featured id no longer on sale is
+ * dropped silently and the newest complete the row.
  */
 export function storeFrontView(
   items: readonly StoreItemView[],

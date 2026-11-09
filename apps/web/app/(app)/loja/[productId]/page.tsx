@@ -144,12 +144,7 @@ export default async function ProductPage({
   const categoryId = categoryOf(product, categories, store.assignments);
   const category = categories.find((entry) => entry.id === categoryId) ?? null;
   const related = catalog
-    ? relatedItems(
-        storeItems(catalog, t, { categories, assignments: store.assignments }),
-        product.id,
-        categoryId,
-        RELATED_MAX,
-      )
+    ? relatedItems(storeItems(catalog, t, { categories }), product.id, categoryId, RELATED_MAX)
     : [];
   const canManage = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
   const communitiesOn = bootstrap.modules.some((module) => module.key === 'communities');

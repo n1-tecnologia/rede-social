@@ -1,24 +1,19 @@
-import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
+import type { StoreFront as StoreFrontAnswer } from '@rede-social/module-store/contracts';
 import { buttonClasses, cn, MemberSkin } from '@rede-social/ui';
 import { CircleAlert, ShoppingBag } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { Suspense } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { readHomePromoChoice } from '@/lib/home-promo-cookie';
 import { STORE_SCREENS, type StoreScreen } from '@/lib/store-area';
 import {
+  type StoreFrontContext,
   type StoreQuery,
   storeCategoryTiles,
+  storeFrontContext,
   storeFrontView,
   storeItems,
   storeListingView,
 } from '@/lib/store-front-view';
-import {
-  type StoreAssignments,
-  type StoreCategoryView,
-  storeCategoryList,
-} from '@/lib/store-setup';
-import { readStoreSetup } from '@/lib/store-setup-cookie';
 import { productCardView } from '@/lib/store-view';
 import { CatalogueSearch } from '../cursos/CatalogueSearch';
 import { MEMBER_EMPTY_WIDE, MemberEmptyCard } from '../cursos/MemberEmptyCard';
@@ -51,24 +46,25 @@ const PLAIN_QUERY: StoreQuery = { categoria: null, busca: null, ordem: 'recentes
  * of Início (the newest, or the administrator's pick on his device). Comprados keeps the paged grid
  * (`ProductGrid`). The module gate lives in `layout.tsx`.
  *
- * 2026-10-28 — the categories, each product's category and "Em destaque" are the ones Gerenciar
- * keeps (`lib/store-setup.ts`, on this device until the API keeps them); without a featured list
- * there, the "Destaque da loja" of Início leads the hero as before.
+ * 12.3-13 (D-693, D-699, UI-D-690) — the categories, "Em destaque" and the promo are the store's own,
+ * read from `GET /v1/store/front` by the page and handed in as `front` (no cookie is read any more); a
+ * product's category is the slug the API sent, never a guess. Without a saved featured list the Início's
+ * promo product leads the hero. When the front call failed (`front` is `null`) or the store has no
+ * category, the storefront is the products newest-first with no chips and no hero, silently.
  */
 export async function StoreBrowseScreen({
   screen,
+  front = null,
   query = PLAIN_QUERY,
 }: {
   screen: StoreScreen;
+  front?: StoreFrontAnswer | null;
   query?: StoreQuery;
 }) {
-  const [bootstrap, t, store] = await Promise.all([
-    requireBootstrap(),
-    getTranslations(),
-    readStoreSetup(),
-  ]);
+  const [bootstrap, t] = await Promise.all([requireBootstrap(), getTranslations()]);
   const tenantName = bootstrap.tenant.displayName;
-  const categories = storeCategoryList(store.setup, t);
+  const context = storeFrontContext(front, t);
+  const categories = context.categories;
   const listing = screen === 'produtos' && (query.categoria !== null || query.busca !== null);
 
   let header: { title: string; subtitle: string | null };
@@ -138,14 +134,7 @@ export async function StoreBrowseScreen({
           }
         >
           {screen === 'produtos' ? (
-            <StoreFrontBody
-              query={query}
-              tenantName={tenantName}
-              canManage={bootstrap.permissions.includes(STORE_PERMISSIONS.manage)}
-              categories={categories}
-              assignments={store.assignments}
-              featured={store.setup.featured}
-            />
+            <StoreFrontBody query={query} tenantName={tenantName} context={context} />
           ) : (
             <StoreBrowseBody screen={screen} tenantName={tenantName} />
           )}
@@ -162,23 +151,14 @@ export async function StoreBrowseScreen({
 async function StoreFrontBody({
   query,
   tenantName,
-  canManage,
-  categories,
-  assignments,
-  featured,
+  context,
 }: {
   query: StoreQuery;
   tenantName: string;
-  canManage: boolean;
-  categories: readonly StoreCategoryView[];
-  assignments: StoreAssignments;
-  featured: readonly string[];
+  context: StoreFrontContext;
 }) {
-  const [products, t, promoId] = await Promise.all([
-    readStoreCatalog(),
-    getTranslations(),
-    canManage && featured.length === 0 ? readHomePromoChoice() : Promise.resolve(null),
-  ]);
+  const { categories, featured, plain } = context;
+  const [products, t] = await Promise.all([readStoreCatalog(), getTranslations()]);
 
   if (products === null) {
     return (
@@ -198,7 +178,7 @@ async function StoreFrontBody({
     );
   }
 
-  const items = storeItems(products, t, { categories, assignments });
+  const items = storeItems(products, t, { categories });
   if (items.length === 0) {
     return (
       <MemberEmptyCard
@@ -211,7 +191,8 @@ async function StoreFrontBody({
     );
   }
 
-  if (query.categoria !== null || query.busca !== null) {
+  // A category's page, the search, or the whole catalogue as one grid (no front, no category).
+  if (query.categoria !== null || query.busca !== null || plain) {
     return (
       <StoreListing
         view={storeListingView(items, query, t, categories)}
@@ -241,7 +222,7 @@ async function StoreFrontBody({
     <StoreFront
       view={storeFrontView(items, t, {
         categories,
-        featured: featured.length > 0 ? featured : promoId ? [promoId] : [],
+        featured,
       })}
       labels={{
         hero: {

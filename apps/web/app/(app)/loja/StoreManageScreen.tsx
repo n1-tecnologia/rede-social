@@ -152,7 +152,7 @@ async function StoreSetupBody() {
   if (products === null) return null;
   const builtIn = builtInCategories(t);
   const categories = storeCategoryList(store.setup, t);
-  const items = storeItems(products, t, { categories, assignments: store.assignments });
+  const items = storeItems(products, t, { categories });
   const counts: Record<string, number> = {};
   for (const item of items) {
     if (item.category !== null) counts[item.category] = (counts[item.category] ?? 0) + 1;

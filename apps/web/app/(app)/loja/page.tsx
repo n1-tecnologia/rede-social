@@ -1,10 +1,10 @@
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { redirect } from 'next/navigation';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { getStoreFront } from '@/lib/store';
 import { legacyStoreFilterRedirect } from '@/lib/store-area';
+import { storeCategoryIds } from '@/lib/store-categories';
 import { parseStoreQuery } from '@/lib/store-front-view';
-import { storeCategoryIds } from '@/lib/store-setup';
-import { readStoreSetup } from '@/lib/store-setup-cookie';
 import { StoreBrowseScreen } from './StoreBrowseScreen';
 
 /**
@@ -23,6 +23,11 @@ import { StoreBrowseScreen } from './StoreBrowseScreen';
  * 2026-10-27 — the storefront (`StoreBrowseScreen`): `?categoria=` opens a category's page,
  * `?busca=` the search and `?ordem=` orders either (`parseStoreQuery`, lenient: anything unknown is
  * the plain storefront).
+ *
+ * 12.3-13 (D-699): the categories, "Em destaque" and the promo come from ONE call, `GET
+ * /v1/store/front` (`getStoreFront`), read here next to the bootstrap and handed to the screen; a
+ * failed call is `null` and the storefront shows the products alone (UI-D-690). An unknown
+ * `?categoria=` slug is "all".
  */
 export default async function StorePage({
   searchParams,
@@ -34,7 +39,11 @@ export default async function StorePage({
     ordem?: string | string[];
   }>;
 }) {
-  const [bootstrap, params] = await Promise.all([requireBootstrap(), searchParams]);
+  const [bootstrap, params, front] = await Promise.all([
+    requireBootstrap(),
+    searchParams,
+    getStoreFront(),
+  ]);
   const to = legacyStoreFilterRedirect(
     params.filtro,
     bootstrap.permissions.includes(STORE_PERMISSIONS.manage),
@@ -44,7 +53,8 @@ export default async function StorePage({
   return (
     <StoreBrowseScreen
       screen="produtos"
-      query={parseStoreQuery(params, storeCategoryIds((await readStoreSetup()).setup))}
+      front={front}
+      query={parseStoreQuery(params, storeCategoryIds(front))}
     />
   );
 }

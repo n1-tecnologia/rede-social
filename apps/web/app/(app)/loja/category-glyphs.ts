@@ -21,7 +21,7 @@ import {
   Tag,
   Wrench,
 } from 'lucide-react';
-import type { StoreCategoryIcon } from '@/lib/store-setup';
+import type { StoreCategoryIcon } from '@/lib/store-categories';
 
 /** Each category glyph (`STORE_CATEGORY_ICONS`) as its lucide icon: the tiles and Gerenciar. */
 export const STORE_CATEGORY_GLYPH: Record<StoreCategoryIcon, LucideIcon> = {
