@@ -61,6 +61,20 @@ vi.mock('../curriculum-actions', () => ({
 
 vi.mock('../course-actions', () => ({ setCourseStatusAction: setStatus }));
 
+// The module sheet holds two upload machines (12.3-08); this file never uploads, and the real hook
+// reaches the media server actions (and the server env) through its imports.
+vi.mock('@/components/media/useSignedUpload', () => ({
+  useSignedUpload: () => ({
+    state: 'idle',
+    progress: 0,
+    error: null,
+    pick: vi.fn(),
+    reject: vi.fn(),
+    cancel: vi.fn(),
+    reset: vi.fn(),
+  }),
+}));
+
 vi.mock('@/components/media/useAssetReadiness', () => ({
   useAssetReadiness: () => ({ phase: 'waiting' }),
 }));
@@ -425,6 +439,8 @@ describe('CurriculumEditor (UI-D-395, UI-D-397)', () => {
         title: 'Finalização',
         summary: '',
         requiresPrevious: false,
+        coverAssetId: null,
+        topCoverAssetId: null,
       }),
     );
     await waitFor(() => expect(titles()).toEqual(['Fundamentos', 'Técnica', 'Finalização']));

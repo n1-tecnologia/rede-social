@@ -1,5 +1,6 @@
 'use client';
 
+import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import {
   MODULE_MAX_SUMMARY,
   MODULE_MAX_TITLE,
@@ -16,11 +17,12 @@ import {
   useMediaQuery,
   useToast,
 } from '@rede-social/ui';
-import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { CoverSizeHint } from '@/components/media/CoverSizeHint';
+import { useCoverPreview } from '@/components/media/useCoverPreview';
+import { useSignedUpload } from '@/components/media/useSignedUpload';
 import { DANGER_OVERRIDES } from '../admin-styles';
 import { CoverField } from '../CoverField';
 import { PagePreview } from '../CoverPreviews';
@@ -64,9 +66,10 @@ export interface ModuleSheetProps {
   onRemoved: (id: string) => void;
 }
 
-/** The cover field's accepted types, and its upload state: always idle (the preview is local). */
+/** The cover field's accepted types. */
 const MODULE_COVER_ACCEPT = mediaAcceptFor('image', 'cover');
-const IDLE_UPLOAD = { state: 'idle', progress: 0, error: null } as const;
+/** Announced at these percentages only, not on every tick (the `CommunityForm` rule). */
+const QUARTILES = [25, 50, 75, 100];
 
 export function ModuleSheet({
   open,
@@ -103,18 +106,57 @@ export function ModuleSheet({
 
   const titleRef = useRef<HTMLInputElement>(null);
 
-  // 2026-10-27 (the product owner: "o ato de criar um módulo ... tenha o campo de imagem do módulo
-  // assim como no curso e trilha", then "faça só o front"): the module's cover blocks. A module has
-  // no cover column yet, so the picked image is a LOCAL preview only (an object URL, revoked when it
-  // changes or the sheet closes): nothing is uploaded and nothing is saved with the module until the
-  // API carries a module cover.
-  const [localCover, setLocalCover] = useState<string | null>(null);
-  useEffect(
-    () => () => {
-      if (localCover) URL.revokeObjectURL(localCover);
+  // 12.3-08 (NOVF-03, OQ-1, UI-D-691): a module has TWO image columns, so the sheet holds two real
+  // pickers, each its own Phase 3 upload machine (purpose `cover`) and its own asset id: the card
+  // image (16:9) and the Topo (4:1). An empty one is sent as null and never filled from the other or
+  // from the course's cover: the member pages compute that fallback (`lib/cover-fallback.ts`).
+  const startCover = module?.coverAssetId ?? null;
+  const startTopCover = module?.topCoverAssetId ?? null;
+  const [coverAssetId, setCoverAssetId] = useState<string | null>(startCover);
+  const [coverWidths, setCoverWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
+  const [topCoverAssetId, setTopCoverAssetId] = useState<string | null>(startTopCover);
+  const [topCoverWidths, setTopCoverWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const [topCoverError, setTopCoverError] = useState<string | null>(null);
+
+  const coverPreview = useCoverPreview(coverAssetId);
+  const coverUpload = useSignedUpload({
+    kind: 'image',
+    purpose: 'cover',
+    // No toast: the preview replacing the gradient IS the confirmation; nothing is saved yet.
+    successKey: null,
+    onPicked: coverPreview.onPicked,
+    onCompleted: (asset) => {
+      coverPreview.onUploaded(asset.id);
+      setCoverAssetId(asset.id);
+      const widths = asset.variants.map((variant) => variant.width);
+      setCoverWidths(widths.length > 0 ? widths : PURPOSE_WIDTHS.cover);
+      setCoverError(null);
     },
-    [localCover],
-  );
+  });
+  const coverUploading = coverUpload.state === 'preparing' || coverUpload.state === 'progress';
+  const coverAnnounced = QUARTILES.includes(coverUpload.progress)
+    ? tm('progress', { percent: coverUpload.progress })
+    : '';
+
+  const topPreview = useCoverPreview(topCoverAssetId);
+  const topUpload = useSignedUpload({
+    kind: 'image',
+    purpose: 'cover',
+    successKey: null,
+    onPicked: topPreview.onPicked,
+    onCompleted: (asset) => {
+      topPreview.onUploaded(asset.id);
+      setTopCoverAssetId(asset.id);
+      const widths = asset.variants.map((variant) => variant.width);
+      setTopCoverWidths(widths.length > 0 ? widths : PURPOSE_WIDTHS.cover);
+      setTopCoverError(null);
+    },
+  });
+  const topUploading = topUpload.state === 'preparing' || topUpload.state === 'progress';
+  const topAnnounced = QUARTILES.includes(topUpload.progress)
+    ? tm('progress', { percent: topUpload.progress })
+    : '';
 
   // UI-D-407: the title field on open, after the shipped trap's own first-focus has run.
   useEffect(() => {
@@ -127,8 +169,13 @@ export function ModuleSheet({
     serverTitleError ??
     (titleTouched && title.trim().length === 0 ? t('module.form.errors.titleRequired') : undefined);
   const dirty =
-    title !== startTitle || summary !== startSummary || requiresPrevious !== startRequires;
+    title !== startTitle ||
+    summary !== startSummary ||
+    requiresPrevious !== startRequires ||
+    coverAssetId !== startCover ||
+    topCoverAssetId !== startTopCover;
   const valid = title.trim().length > 0;
+  const busy = pending || coverUploading || topUploading;
   const submittable = valid && (mode === 'new' || dirty);
 
   const requestClose = () => {
@@ -144,6 +191,12 @@ export function ModuleSheet({
       case 'title_required':
       case 'title_too_long':
         setServerTitleError(t('module.form.errors.titleRequired'));
+        return;
+      case 'cover_invalid':
+        setCoverError(t('form.errors.imageInvalid'));
+        return;
+      case 'top_cover_invalid':
+        setTopCoverError(t('coverField.topCover.invalid'));
         return;
       case 'disabled':
         toast.show({ tone: 'error', message: t('errors.disabled') });
@@ -161,15 +214,18 @@ export function ModuleSheet({
         if (title !== startTitle) patch.title = title;
         if (summary !== startSummary) patch.summary = summary;
         if (requiresPrevious !== startRequires) patch.requiresPrevious = requiresPrevious;
+        // The PATCH carries only what changed; an image removed is an explicit null.
+        if (coverAssetId !== startCover) patch.coverAssetId = coverAssetId;
+        if (topCoverAssetId !== startTopCover) patch.topCoverAssetId = topCoverAssetId;
         result = await updateModuleAction(courseId, module.id, patch);
       } else {
-        // The module's images are written by the sheet of plan 12.3-08; until then none is sent.
+        // A create always names both images, null for one never set (never the other's id).
         const body: ModuleInput = {
           title,
           summary,
           requiresPrevious,
-          coverAssetId: null,
-          topCoverAssetId: null,
+          coverAssetId,
+          topCoverAssetId,
         };
         result = await createModuleAction(courseId, body);
       }
@@ -189,6 +245,8 @@ export function ModuleSheet({
 
   const submit = () => {
     setServerTitleError(undefined);
+    setCoverError(null);
+    setTopCoverError(null);
     setTitleTouched(true);
     if (!valid) return;
     startTransition(async () => {
@@ -249,22 +307,47 @@ export function ModuleSheet({
             layout="blocks"
             frameLabel={t('coverField.as.moduleCard')}
             accept={MODULE_COVER_ACCEPT}
-            assetId={null}
-            widths={PURPOSE_WIDTHS.cover}
-            previewUrl={localCover}
+            assetId={coverAssetId}
+            widths={coverWidths}
+            previewUrl={coverPreview.previewUrl}
             sizes="360px"
-            upload={IDLE_UPLOAD}
-            error={null}
+            upload={coverUpload}
+            error={coverError}
             helper={t('module.form.coverHelper')}
-            alsoAs={[
-              {
-                key: 'page',
-                ratio: 'banner',
-                label: t('coverField.as.modulePage'),
-                sizeHint: <CoverSizeHint kind="moduleBanner" />,
-                decor: <PagePreview title={title.trim()} line={summary.trim()} />,
+            announced={coverAnnounced}
+            topCover={{
+              assetId: topCoverAssetId,
+              widths: topCoverWidths,
+              previewUrl: topPreview.previewUrl,
+              upload: topUpload,
+              error: topCoverError,
+              announced: topAnnounced,
+              ratio: 'banner',
+              sizeHint: <CoverSizeHint kind="moduleBanner" />,
+              helper: t('module.form.topCoverHelper'),
+              fallbackStatus: t('coverField.topCover.fallback'),
+              decor: <PagePreview title={title.trim()} line={summary.trim()} />,
+              labels: {
+                field: t('coverField.as.modulePage'),
+                add: t('coverField.topCover.add'),
+                change: t('coverField.topCover.change'),
+                remove: t('coverField.topCover.remove'),
+                preview: t('coverField.topCover.preview'),
+                pickFile: t('coverField.pickFile'),
+                camera: t('coverField.camera'),
+                dropHere: t('coverField.topCover.dropHere'),
+                progress: (percent) => tm('progress', { percent }),
+                processing: tm('photo.preparing'),
+                cancel: tm('cancel'),
               },
-            ]}
+              onPick: (file) => void topUpload.pick(file),
+              onRemove: () => {
+                setTopCoverAssetId(null);
+                setTopCoverError(null);
+                topUpload.reset();
+              },
+              onCancel: topUpload.cancel,
+            }}
             sizeHint={<CoverSizeHint kind="moduleCard" />}
             labels={{
               pickFile: t('coverField.pickFile'),
@@ -279,9 +362,15 @@ export function ModuleSheet({
               preview: t('form.cover.preview'),
               progress: (percent) => tm('progress', { percent }),
               processing: tm('photo.preparing'),
+              cancel: tm('cancel'),
             }}
-            onPick={(file) => setLocalCover(URL.createObjectURL(file))}
-            onRemove={() => setLocalCover(null)}
+            onPick={(file) => void coverUpload.pick(file)}
+            onRemove={() => {
+              setCoverAssetId(null);
+              setCoverError(null);
+              coverUpload.reset();
+            }}
+            onCancel={coverUpload.cancel}
           />
 
           <Input
@@ -331,8 +420,8 @@ export function ModuleSheet({
             variant="brand"
             size="md"
             fullWidth
-            disabled={!submittable || pending}
-            loading={pending}
+            disabled={!submittable || busy}
+            loading={busy}
           >
             {submitLabel}
           </Button>

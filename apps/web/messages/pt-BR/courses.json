@@ -288,6 +288,7 @@
         "createTitle": "Novo módulo",
         "cover": "Capa do módulo",
         "coverHelper": "Opcional. Sem capa, o módulo usa a do curso.",
+        "topCoverHelper": "Opcional. Sem imagem própria, o topo usa a imagem do cartão do módulo e, sem ela, a capa do curso.",
         "editTitle": "Editar módulo",
         "title": "Título",
         "titlePlaceholder": "Ex.: Fundamentos",
