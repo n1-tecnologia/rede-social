@@ -917,6 +917,8 @@ export interface TrackFormDefaults {
   audience: string;
   description: string;
   coverAssetId: string | null;
+  /** NOVF-02: the track's own Topo (page top); null when it has none (the card image shows instead). */
+  topCoverAssetId: string | null;
   /** EVERY linked course in `position` order, its current status included. */
   courses: TrackFormCourse[];
   status: TrackStatus;
@@ -930,6 +932,7 @@ export function trackFormDefaults(track: TrackDetail): TrackFormDefaults {
     audience: track.audience,
     description: track.description,
     coverAssetId: track.coverAssetId,
+    topCoverAssetId: track.topCoverAssetId ?? null,
     courses: track.courses.map((course) => ({
       id: course.id,
       title: course.title,

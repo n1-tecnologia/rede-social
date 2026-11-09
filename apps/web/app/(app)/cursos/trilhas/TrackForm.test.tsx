@@ -477,6 +477,8 @@ const hold = (slot: number, state: string, progress = 0) =>
     uploads.list[slot]?.setState(state);
     uploads.list[slot]?.setProgress(progress);
   });
+const fileInput = (name: string) =>
+  document.querySelector(`input[type="file"][aria-label="${name}"]`) as HTMLInputElement;
 const topBlock = () => document.querySelector('[data-cover-block="top"]') as HTMLElement;
 const topRemove = () =>
   document.querySelector('[data-track-top-cover-remove]') as HTMLButtonElement | null;
@@ -506,8 +508,8 @@ describe('TrackForm — the Topo as its own upload (NOVF-02, UI-D-691)', () => {
 
   it('14. the Topo block is a picker of its own: its own input named by the new labels, its own helper, hooks beside the card hooks', async () => {
     renderCreate();
-    expect(screen.getByLabelText('Adicionar imagem do topo')).toBeTruthy();
-    expect(screen.getByLabelText('Adicionar capa')).toBeTruthy();
+    expect(fileInput('Adicionar imagem do topo')).toBeTruthy();
+    expect(fileInput('Adicionar capa')).toBeTruthy();
     expect(
       within(topBlock()).getByText('Opcional. Sem imagem própria, o topo usa a imagem do cartão.'),
     ).toBeTruthy();
@@ -517,14 +519,18 @@ describe('TrackForm — the Topo as its own upload (NOVF-02, UI-D-691)', () => {
     expect(topRemove()).toBeNull();
 
     await done(1, TOP_ID);
-    expect(screen.getByLabelText('Trocar imagem do topo')).toBeTruthy();
+    expect(fileInput('Trocar imagem do topo')).toBeTruthy();
     // The card input kept its own name.
-    expect(screen.getByLabelText('Adicionar capa')).toBeTruthy();
+    expect(fileInput('Adicionar capa')).toBeTruthy();
     expect(topRemove()?.textContent).toContain('Remover imagem do topo');
     expect(topFallback()).toBeNull();
   });
 
   it('15. an empty Topo shows the card image cropped with the fallback line; with no card image either, the brand gradient and no line', async () => {
+    // happy-dom loads no image: say every picture decoded, so `MediaImage` keeps its `<img>`.
+    const decoded = vi
+      .spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get')
+      .mockReturnValue(640);
     renderCreate();
     expect(topFallback()).not.toBeNull();
     expect(topImages()).toHaveLength(0);
@@ -538,6 +544,7 @@ describe('TrackForm — the Topo as its own upload (NOVF-02, UI-D-691)', () => {
     expect(within(topBlock()).queryByText('Sem imagem própria: mostrando a do cartão.')).toBeNull();
     expect(topImages().some((img) => img.getAttribute('src')?.includes(TOP_ID))).toBe(true);
     expect(topImages().some((img) => img.getAttribute('src')?.includes(CARD_ID))).toBe(false);
+    decoded.mockRestore();
   });
 
   it('16. removing the Topo sends topCoverAssetId null and leaves the card id alone', async () => {
@@ -626,7 +633,7 @@ describe('TrackForm — the Topo as its own upload (NOVF-02, UI-D-691)', () => {
     expect(uploads.list[1]?.pick).not.toHaveBeenCalled();
 
     const topFile = new File(['y'], 'topo.png', { type: 'image/png' });
-    fireEvent.change(screen.getByLabelText('Adicionar imagem do topo'), {
+    fireEvent.change(fileInput('Adicionar imagem do topo'), {
       target: { files: [topFile] },
     });
     expect(uploads.list[1]?.pick).toHaveBeenCalledWith(topFile);

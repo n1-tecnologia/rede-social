@@ -629,6 +629,16 @@
       "ways": "Arraste uma imagem até o quadro, cole com Ctrl+V ou escolha um arquivo.",
       "waysTouch": "Escolha da galeria ou tire uma foto.",
       "dropHere": "Solte para usar como capa",
+      "topCover": {
+        "add": "Adicionar imagem do topo",
+        "change": "Trocar imagem do topo",
+        "remove": "Remover imagem do topo",
+        "preview": "Prévia do topo",
+        "helper": "Opcional. Sem imagem própria, o topo usa a imagem do cartão.",
+        "fallback": "Sem imagem própria: mostrando a do cartão.",
+        "dropHere": "Solte para usar no topo",
+        "invalid": "Não foi possível usar esta imagem no topo. Escolha outra."
+      },
       "as": {
         "horizontal": "Horizontal · página do curso e Início",
         "panoramic": "Panorâmica · destaque no computador",

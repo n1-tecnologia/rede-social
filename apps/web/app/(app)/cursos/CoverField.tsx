@@ -4,7 +4,15 @@ import { MediaImage } from '@rede-social/core/ui';
 import { GLASS_CHIP } from '@rede-social/module-courses/ui';
 import { Button, cn } from '@rede-social/ui';
 import { Camera, Image as ImageIcon, LoaderCircle, Upload, X } from 'lucide-react';
-import { type DragEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import {
+  type DragEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import type { SignedUploadState } from '@/components/media/useSignedUpload';
 
 export interface CoverFieldLabels {
@@ -36,6 +44,43 @@ export interface CoverFieldLabels {
 
 /** The proportions a cover is shown at, for the frame and the "also shown as" previews. */
 export type CoverRatio = 'poster' | 'wide' | 'video' | 'panoramic' | 'tile' | 'banner';
+
+/**
+ * 2026-11-09 (NOVF-02, UI-D-691): the "Topo" block as a picker of its OWN, with its own asset. It is
+ * the same machine as the card block, held a second time by the host: its own upload and preview
+ * state, progress, announcement, remove control and error line. Hooks, beside the card's
+ * `data-{hook}-cover-*` ones (which stay as they are):
+ *  - `data-{hook}-top-cover-preview`: the frame (a button, a click or a drop picks a file);
+ *  - `data-{hook}-top-cover-local`: the picture of the file being uploaded;
+ *  - `data-{hook}-top-cover-fallback`: the empty state (the card image's status line, or the gradient);
+ *  - `data-{hook}-top-cover-error`: the block's own refusal (`top_cover_invalid`);
+ *  - `data-{hook}-top-cover-remove`: "Remover imagem do topo".
+ */
+export interface CoverTopBlock {
+  /** The Topo's own asset id; null draws the fallback (the card image, else the gradient). */
+  assetId: string | null;
+  widths: readonly number[];
+  /** The local object URL of the Topo being uploaded (`useCoverPreview`). */
+  previewUrl: string | null;
+  upload: { state: SignedUploadState; progress: number; error: string | null };
+  /** The block's own refusal (the server's `top_cover_invalid`). */
+  error: string | null;
+  announced?: string;
+  /** The block's own size line. */
+  sizeHint?: ReactNode;
+  /** Drawn over the frame's picture (the page's own eyebrow and title). */
+  decor?: ReactNode;
+  /** The frame's proportion; the 4:1 banner by default. */
+  ratio?: CoverRatio;
+  helper?: string;
+  /** "Sem imagem própria: mostrando a do cartão.": the line while the Topo is empty and the card shows. */
+  fallbackStatus?: string;
+  /** `field` is the block's title ("Topo · página da trilha"); the rest are the block's own words. */
+  labels: CoverFieldLabels;
+  onPick: (file: File) => void;
+  onRemove: () => void;
+  onCancel?: () => void;
+}
 
 export interface CoverFieldProps {
   /** The form's hook family: `data-{hook}-cover-preview`, `-local`, `-fallback`, `-error`. */
@@ -95,6 +140,11 @@ export interface CoverFieldProps {
    * default) is the field as it always was.
    */
   layout?: 'inline' | 'blocks';
+  /**
+   * 2026-11-09: with `layout="blocks"`, a second picker of its own under the card block, in place of
+   * the `alsoAs` view of the same image (see `CoverTopBlock`). A paste still goes to the card block.
+   */
+  topCover?: CoverTopBlock;
   /**
    * 2026-10-23: the ideal size of the image (`CoverSizeHint`), under the frame and before the
    * pickers; not on a read-only field.
@@ -209,6 +259,7 @@ export function CoverField({
   frameLabel,
   frameDecor,
   layout = 'inline',
+  topCover,
   sizeHint,
   labels,
   onPick,
@@ -217,13 +268,24 @@ export function CoverField({
 }: CoverFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
+  const topInputRef = useRef<HTMLInputElement>(null);
+  const topCameraRef = useRef<HTMLInputElement>(null);
   const labelId = useId();
+  const topLabelId = useId();
   const [dragging, setDragging] = useState(false);
+  const [topDragging, setTopDragging] = useState(false);
   const uploading = upload.state === 'preparing' || upload.state === 'progress';
+  const topUploading =
+    topCover !== undefined &&
+    (topCover.upload.state === 'preparing' || topCover.upload.state === 'progress');
+  const withTop = layout === 'blocks' && topCover !== undefined;
   const hasCover = assetId !== null || previewUrl !== null;
   const action = assetId ? labels.change : labels.add;
   const hooks = (part: 'preview' | 'local' | 'fallback' | 'error' | 'remove') => ({
     [`data-${hook}-cover-${part}`]: true,
+  });
+  const topHooks = (part: 'preview' | 'local' | 'fallback' | 'error' | 'remove') => ({
+    [`data-${hook}-top-cover-${part}`]: true,
   });
 
   // A pasted image becomes the cover, unless the paste is text going into a field.
@@ -356,48 +418,121 @@ export function CoverField({
     </button>
   );
 
-  const pickRow = (main: boolean): ReactNode =>
-    labels.pickFile || labels.camera ? (
+  const pickRowFor = (
+    refs: { input: RefObject<HTMLInputElement | null>; camera: RefObject<HTMLInputElement | null> },
+    busy: boolean,
+    words: CoverFieldLabels,
+    main: boolean,
+  ): ReactNode =>
+    words.pickFile || words.camera ? (
       <div className="flex flex-wrap items-center gap-2">
-        {labels.pickFile ? (
+        {words.pickFile ? (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={uploading}
+            disabled={busy}
             data-cover-pick=""
-            onClick={() => inputRef.current?.click()}
+            onClick={() => refs.input.current?.click()}
           >
             <Upload aria-hidden size={14} className="shrink-0" />
-            {labels.pickFile}
+            {words.pickFile}
           </Button>
         ) : null}
-        {labels.camera && main ? (
+        {words.camera && main ? (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={uploading}
+            disabled={busy}
             data-cover-camera=""
             className="hidden pointer-coarse:inline-flex"
-            onClick={() => cameraRef.current?.click()}
+            onClick={() => refs.camera.current?.click()}
           >
             <Camera aria-hidden size={14} className="shrink-0" />
-            {labels.camera}
+            {words.camera}
           </Button>
         ) : null}
-        {labels.ways && main ? (
+        {words.ways && main ? (
           <span className="hidden text-xs text-text-tertiary pointer-fine:inline">
-            {labels.ways}
+            {words.ways}
           </span>
         ) : null}
-        {labels.waysTouch && main ? (
+        {words.waysTouch && main ? (
           <span className="hidden text-xs text-text-tertiary pointer-coarse:inline">
-            {labels.waysTouch}
+            {words.waysTouch}
           </span>
         ) : null}
       </div>
     ) : null;
+
+  const pickRow = (main: boolean): ReactNode =>
+    pickRowFor({ input: inputRef, camera: cameraRef }, uploading, labels, main);
+
+  /** The progress bar, the polite announcement, the error line and the helper of ONE image. */
+  const status = (s: {
+    upload: CoverFieldProps['upload'];
+    error: string | null;
+    announced: string | undefined;
+    helper: string | undefined;
+    words: CoverFieldLabels;
+    onCancel: (() => void) | undefined;
+    errorHooks: Record<string, boolean>;
+  }): ReactNode => (
+    <>
+      {s.upload.state === 'progress' ? (
+        <div className="flex flex-col gap-2">
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={s.upload.progress}
+            className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
+          >
+            <div
+              className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
+              style={{ width: `${s.upload.progress}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs tabular-nums text-text-tertiary">
+              {s.words.progress(s.upload.progress)}
+            </span>
+            {s.onCancel && s.words.cancel ? (
+              <Button type="button" variant="ghost" size="sm" onClick={s.onCancel}>
+                {s.words.cancel}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : s.upload.state === 'processing' ? (
+        <p className="text-xs text-text-tertiary">{s.words.processing}</p>
+      ) : null}
+
+      {s.announced !== undefined ? (
+        <span aria-live="polite" className="sr-only">
+          {s.announced}
+        </span>
+      ) : null}
+
+      {s.upload.error || s.error ? (
+        <p role="alert" {...s.errorHooks} className="text-sm font-normal text-danger">
+          {s.upload.error ?? s.error}
+        </p>
+      ) : null}
+      {s.helper ? <p className="text-xs font-normal text-text-tertiary">{s.helper}</p> : null}
+    </>
+  );
+
+  const cardStatus = {
+    upload,
+    error,
+    announced,
+    helper,
+    words: labels,
+    onCancel,
+    errorHooks: hooks('error'),
+  };
 
   const previews =
     alsoAs && alsoAs.length > 0 ? (
@@ -419,6 +554,176 @@ export function CoverField({
         ))}
       </ul>
     ) : null;
+
+  /** The Topo block (NOVF-02, UI-D-691): its own frame, picker, progress, remove control and error. */
+  const topBlock = (() => {
+    if (!withTop || !topCover) return null;
+    const ratioKey = topCover.ratio ?? 'banner';
+    const action = topCover.assetId ? topCover.labels.change : topCover.labels.add;
+    const cardShows = previewUrl !== null || assetId !== null;
+    const ownPicture = topCover.previewUrl ? (
+      // biome-ignore lint/performance/noImgElement: a local object URL of the file being uploaded; next/image cannot load it (the `CommunityCover` precedent)
+      <img
+        src={topCover.previewUrl}
+        alt={topCover.labels.preview}
+        {...topHooks('local')}
+        className="h-full w-full object-cover object-center"
+      />
+    ) : topCover.assetId ? (
+      <MediaImage
+        assetId={topCover.assetId}
+        widths={topCover.widths}
+        alt={topCover.labels.preview}
+        sizes="640px"
+        ratio=""
+        className="h-full w-full"
+        fallback={
+          <span
+            aria-hidden
+            className="block h-full w-full"
+            style={{ backgroundImage: 'var(--brand-gradient)' }}
+          />
+        }
+      />
+    ) : cardShows ? (
+      // No image of its own: the card image, cropped to the Topo's proportion.
+      picture(false, '640px')
+    ) : (
+      <span
+        {...topHooks('fallback')}
+        aria-hidden
+        className="flex h-full w-full items-center justify-center"
+        style={{ backgroundImage: 'var(--brand-gradient)' }}
+      >
+        <ImageIcon aria-hidden size={24} className="text-white/80" />
+      </span>
+    );
+    const frameStyle = cn(
+      'relative block overflow-hidden rounded-2xl border border-border bg-bg-tertiary',
+      BLOCK_FRAME[ratioKey],
+    );
+    const emptyAndShowingCard = topCover.assetId === null && !topCover.previewUrl && cardShows;
+
+    return (
+      <section data-cover-block="top" className="flex flex-col gap-2.5 border-t border-border pt-6">
+        <div className="flex min-h-6 items-center justify-between gap-3">
+          <p id={topLabelId} className="text-xs font-semibold text-text">
+            {topCover.labels.field}
+          </p>
+          {topCover.assetId && !readOnly ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              hitArea
+              {...topHooks('remove')}
+              disabled={topUploading}
+              className="h-7 shrink-0 px-2 text-xs font-semibold text-text-secondary hover:text-danger"
+              onClick={topCover.onRemove}
+            >
+              <X aria-hidden size={14} className="shrink-0" />
+              {topCover.labels.remove}
+            </Button>
+          ) : null}
+        </div>
+        {readOnly ? (
+          <div {...topHooks('preview')} className={frameStyle}>
+            {ownPicture}
+            {topCover.decor}
+          </div>
+        ) : (
+          <button
+            type="button"
+            {...topHooks('preview')}
+            aria-label={`${action} · ${topCover.labels.field}`}
+            aria-describedby={topLabelId}
+            disabled={topUploading}
+            onClick={() => topInputRef.current?.click()}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setTopDragging(true);
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'copy';
+            }}
+            onDragLeave={() => setTopDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setTopDragging(false);
+              const file = firstImage(event.dataTransfer.files);
+              if (file && !topUploading) topCover.onPick(file);
+            }}
+            className={cn(
+              frameStyle,
+              'group text-left transition-opacity active:opacity-90 disabled:cursor-progress',
+              FOCUS,
+              topDragging && 'ring-2 ring-brand ring-offset-2 ring-offset-bg',
+            )}
+          >
+            {ownPicture}
+            {topCover.decor}
+            <span
+              aria-hidden
+              className={cn(
+                GLASS_CHIP,
+                'pointer-events-none absolute right-2 bottom-2 max-w-[calc(100%-1rem)] group-hover:bg-black/70',
+              )}
+            >
+              <ImageIcon aria-hidden size={11} className="shrink-0" />
+              {action}
+            </span>
+            {topDragging && topCover.labels.dropHere ? (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-0 flex items-center justify-center bg-brand/70 p-3 text-center text-sm font-bold text-white"
+              >
+                {topCover.labels.dropHere}
+              </span>
+            ) : null}
+            {topUploading ? (
+              <span
+                aria-hidden
+                className="absolute inset-0 flex items-center justify-center bg-black/35"
+              >
+                <LoaderCircle
+                  size={24}
+                  className="animate-spin text-white motion-reduce:animate-none"
+                />
+              </span>
+            ) : null}
+          </button>
+        )}
+        {readOnly ? null : topCover.sizeHint}
+        {readOnly
+          ? null
+          : pickRowFor(
+              { input: topInputRef, camera: topCameraRef },
+              topUploading,
+              topCover.labels,
+              true,
+            )}
+        {readOnly ? null : (
+          <>
+            {emptyAndShowingCard && topCover.fallbackStatus ? (
+              <p {...topHooks('fallback')} className="text-xs font-normal text-text-tertiary">
+                {topCover.fallbackStatus}
+              </p>
+            ) : null}
+            {status({
+              upload: topCover.upload,
+              error: topCover.error,
+              announced: topCover.announced,
+              helper: topCover.helper,
+              words: topCover.labels,
+              onCancel: topCover.onCancel,
+              errorHooks: topHooks('error'),
+            })}
+          </>
+        )}
+      </section>
+    );
+  })();
 
   return (
     <div id={dropzoneId} className="flex flex-col gap-2">
@@ -450,8 +755,10 @@ export function CoverField({
             {frame}
             {readOnly ? null : sizeHint}
             {readOnly ? null : pickRow(true)}
+            {readOnly || !withTop ? null : status(cardStatus)}
           </section>
-          {(alsoAs ?? []).map((also) => (
+          {topBlock}
+          {(withTop ? [] : (alsoAs ?? [])).map((also) => (
             <section
               key={also.key}
               data-cover-block={also.key}
@@ -553,47 +860,40 @@ export function CoverField({
             />
           ) : null}
 
-          {upload.state === 'progress' ? (
-            <div className="flex flex-col gap-2">
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={upload.progress}
-                className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
-              >
-                <div
-                  className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
-                  style={{ width: `${upload.progress}%` }}
+          {withTop && topCover ? (
+            <>
+              <input
+                ref={topInputRef}
+                type="file"
+                accept={accept}
+                className="sr-only"
+                aria-label={topCover.assetId ? topCover.labels.change : topCover.labels.add}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) topCover.onPick(file);
+                }}
+              />
+              {topCover.labels.camera ? (
+                <input
+                  ref={topCameraRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-label={`${topCover.labels.camera} · ${topCover.labels.field}`}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (file) topCover.onPick(file);
+                  }}
                 />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs tabular-nums text-text-tertiary">
-                  {labels.progress(upload.progress)}
-                </span>
-                {onCancel && labels.cancel ? (
-                  <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-                    {labels.cancel}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          ) : upload.state === 'processing' ? (
-            <p className="text-xs text-text-tertiary">{labels.processing}</p>
+              ) : null}
+            </>
           ) : null}
 
-          {announced !== undefined ? (
-            <span aria-live="polite" className="sr-only">
-              {announced}
-            </span>
-          ) : null}
-
-          {upload.error || error ? (
-            <p role="alert" {...hooks('error')} className="text-sm font-normal text-danger">
-              {upload.error ?? error}
-            </p>
-          ) : null}
-          {helper ? <p className="text-xs font-normal text-text-tertiary">{helper}</p> : null}
+          {withTop ? null : status(cardStatus)}
         </>
       )}
     </div>

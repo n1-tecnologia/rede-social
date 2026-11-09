@@ -119,6 +119,7 @@ const EMPTY: TrackFormDefaults = {
   audience: '',
   description: '',
   coverAssetId: null,
+  topCoverAssetId: null,
   courses: [],
   status: 'active',
 };
@@ -192,12 +193,16 @@ export function TrackForm({
   const [description, setDescription] = useState(start.description);
   const [coverAssetId, setCoverAssetId] = useState<string | null>(start.coverAssetId);
   const [coverWidths, setCoverWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
+  /** NOVF-02: the Topo is its own image with its own id, never a copy of the card's (UI-D-691). */
+  const [topCoverAssetId, setTopCoverAssetId] = useState<string | null>(start.topCoverAssetId);
+  const [topCoverWidths, setTopCoverWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
   /** The draft list, first to last, every row with its current status (UI-D-402). */
   const [selected, setSelected] = useState<TrackFormCourse[]>(() => [...start.courses]);
 
   const [titleTouched, setTitleTouched] = useState(false);
   const [serverTitleError, setServerTitleError] = useState<string | undefined>(undefined);
   const [coverError, setCoverError] = useState<string | null>(null);
+  const [topCoverError, setTopCoverError] = useState<string | null>(null);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -230,6 +235,26 @@ export function TrackForm({
     ? tm('progress', { percent: coverUpload.progress })
     : '';
 
+  /* ── The Topo: a second machine of the same kind, its own asset (NOVF-02, UI-D-691) ───────────── */
+  const topPreview = useCoverPreview(topCoverAssetId);
+  const topUpload = useSignedUpload({
+    kind: 'image',
+    purpose: 'cover',
+    successKey: null,
+    onPicked: topPreview.onPicked,
+    onCompleted: (asset) => {
+      topPreview.onUploaded(asset.id);
+      setTopCoverAssetId(asset.id);
+      const widths = asset.variants.map((variant) => variant.width);
+      setTopCoverWidths(widths.length > 0 ? widths : PURPOSE_WIDTHS.cover);
+      setTopCoverError(null);
+    },
+  });
+  const topUploading = topUpload.state === 'preparing' || topUpload.state === 'progress';
+  const topAnnounced = QUARTILES.includes(topUpload.progress)
+    ? tm('progress', { percent: topUpload.progress })
+    : '';
+
   /* ── Verdicts, dirtiness and the submit gate ─────────────────────────────────────────────────── */
   const titleError =
     serverTitleError ??
@@ -243,11 +268,12 @@ export function TrackForm({
     subtitle !== start.subtitle ||
     audience !== start.audience ||
     description !== start.description ||
-    coverAssetId !== start.coverAssetId;
+    coverAssetId !== start.coverAssetId ||
+    topCoverAssetId !== start.topCoverAssetId;
   const dirty = fieldsChanged || listChanged;
 
   const valid = title.trim().length > 0;
-  const busy = pending || coverUploading;
+  const busy = pending || coverUploading || topUploading;
   const submittable = valid && (mode === 'create' || dirty);
   const archived = mode === 'edit' && start.status === 'archived';
 
@@ -265,7 +291,7 @@ export function TrackForm({
   /** The create body, or the edit patch with ONLY the changed keys (no defaults re-applied). */
   const fieldPayload = (): TrackInput | TrackPatch => {
     if (mode === 'create' && createdId.current === null) {
-      return { title, subtitle, audience, description, coverAssetId };
+      return { title, subtitle, audience, description, coverAssetId, topCoverAssetId };
     }
     const patch: TrackPatch = {};
     if (title !== start.title) patch.title = title;
@@ -273,6 +299,7 @@ export function TrackForm({
     if (audience !== start.audience) patch.audience = audience;
     if (description !== start.description) patch.description = description;
     if (coverAssetId !== start.coverAssetId) patch.coverAssetId = coverAssetId;
+    if (topCoverAssetId !== start.topCoverAssetId) patch.topCoverAssetId = topCoverAssetId;
     return patch;
   };
 
@@ -285,6 +312,9 @@ export function TrackForm({
         return;
       case 'cover_invalid':
         setCoverError(t('form.errors.imageInvalid'));
+        return;
+      case 'top_cover_invalid':
+        setTopCoverError(t('coverField.topCover.invalid'));
         return;
       case 'course_invalid':
         toast.show({ tone: 'error', message: t('track.form.errors.courseInvalid') });
@@ -356,6 +386,7 @@ export function TrackForm({
   const submit = () => {
     setServerTitleError(undefined);
     setCoverError(null);
+    setTopCoverError(null);
     setTitleTouched(true);
     if (!valid) return;
     startTransition(async () => {
@@ -487,20 +518,44 @@ export function TrackForm({
               cta={t('member.home.access')}
             />
           }
-          alsoAs={[
-            {
-              key: 'page',
-              ratio: 'banner',
-              label: t('coverField.as.trackPage'),
-              sizeHint: <CoverSizeHint kind="trackBanner" />,
-              decor: (
-                <PagePreview
-                  eyebrow={t('member.tracks.step', { n: 1, total: Math.max(1, selected.length) })}
-                  title={title.trim()}
-                />
-              ),
+          topCover={{
+            assetId: topCoverAssetId,
+            widths: topCoverWidths,
+            previewUrl: topPreview.previewUrl,
+            upload: topUpload,
+            error: topCoverError,
+            announced: topAnnounced,
+            ratio: 'banner',
+            sizeHint: <CoverSizeHint kind="trackBanner" />,
+            helper: t('coverField.topCover.helper'),
+            fallbackStatus: t('coverField.topCover.fallback'),
+            decor: (
+              <PagePreview
+                eyebrow={t('member.tracks.step', { n: 1, total: Math.max(1, selected.length) })}
+                title={title.trim()}
+              />
+            ),
+            labels: {
+              field: t('coverField.as.trackPage'),
+              add: t('coverField.topCover.add'),
+              change: t('coverField.topCover.change'),
+              remove: t('coverField.topCover.remove'),
+              preview: t('coverField.topCover.preview'),
+              pickFile: t('coverField.pickFile'),
+              camera: t('coverField.camera'),
+              dropHere: t('coverField.topCover.dropHere'),
+              progress: (percent) => tm('progress', { percent }),
+              processing: tm('photo.preparing'),
+              cancel: tm('cancel'),
             },
-          ]}
+            onPick: (file) => void topUpload.pick(file),
+            onRemove: () => {
+              setTopCoverAssetId(null);
+              setTopCoverError(null);
+              topUpload.reset();
+            },
+            onCancel: topUpload.cancel,
+          }}
           sizeHint={<CoverSizeHint kind="trackCard" />}
           labels={{
             pickFile: t('coverField.pickFile'),

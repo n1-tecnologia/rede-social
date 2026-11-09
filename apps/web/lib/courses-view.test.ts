@@ -751,6 +751,7 @@ describe('trackFormDefaults and publishedTrackCourseIds (UI-D-402, D-415)', () =
       audience: 'Para quem está começando',
       description: '',
       coverAssetId: A,
+      topCoverAssetId: null,
       courses: [
         { id: L1, title: 'Publicado', coverAssetId: null, status: 'published' },
         { id: L2, title: 'Despublicado', coverAssetId: A, status: 'draft' },
@@ -759,6 +760,12 @@ describe('trackFormDefaults and publishedTrackCourseIds (UI-D-402, D-415)', () =
     });
     // A fresh array: the form's draft never aliases the page's detail.
     expect(defaults.courses).not.toBe(detail.courses);
+  });
+
+  it("NOVF-02: the Topo is the detail's own id, or null when an older answer lacks the key", () => {
+    expect(trackFormDefaults({ ...detail, topCoverAssetId: L1 }).topCoverAssetId).toBe(L1);
+    expect(trackFormDefaults({ ...detail, topCoverAssetId: null }).topCoverAssetId).toBeNull();
+    expect(trackFormDefaults(detail).topCoverAssetId).toBeNull();
   });
 
   it('the saved ids are the published rows only, in draft order; none → []', () => {
