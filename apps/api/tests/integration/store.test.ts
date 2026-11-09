@@ -495,6 +495,8 @@ describe('catalogue', () => {
       currency: 'BRL',
       imageAssetId: null,
       status: 'active',
+      // 12.3 (OQ-3): a create with no category key applies the name guess; this name matches nothing.
+      category: 'outros',
       owned: true,
       purchase: { mode: 'simulated', checkoutUrl: null },
     });
@@ -583,6 +585,8 @@ describe('catalogue', () => {
       currency: 'BRL',
       imageAssetId: null,
       status: 'active',
+      // 12.3 (OQ-3): no category key on create applies the name guess; this name matches nothing.
+      category: 'outros',
       owned: false,
       communities: [],
       unlockedCourses: [],
@@ -3157,5 +3161,147 @@ describe('store front and product category (12.3-11)', () => {
     });
     expect(chosen.status).toBe(201);
     expect(((await chosen.json()) as ProductDetail).category).toBe('roupas');
+  });
+
+  const patchRaw = (productId: string, body: unknown, token = tokens.demoAdmin) =>
+    request(`/v1/store/products/${productId}`, token, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  const putStatusRaw = (productId: string, status: string) =>
+    request(`/v1/store/products/${productId}/status`, tokens.demoAdmin, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
+
+  /** A product's stored category slug through the admin connection (null when it has none). */
+  async function storedSlug(productId: string): Promise<string | null> {
+    const [row] = await adminSql<{ slug: string | null }[]>`
+      select c.slug
+        from public.store_products p
+        left join public.store_categories c on c.id = p.category_id
+       where p.id = ${productId}::uuid`;
+    return row?.slug ?? null;
+  }
+
+  it('front: an edit with an absent category key keeps it, null clears it, a slug sets it, an unknown or malformed slug is 400 category_invalid and changes nothing (D-693, OQ-3)', async () => {
+    const created = await createRaw({ name: `${PREFIX} Perfume Edit`, priceCents: 700 });
+    const product = (await created.json()) as ProductDetail;
+    expect(product.category).toBe('perfumes');
+
+    // Absent key: another field changes, the category stays.
+    const renamed = await patchRaw(product.id, { priceCents: 800 });
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as ProductDetail).category).toBe('perfumes');
+
+    // A slug sets it; the same edit twice stores the same category and answers the same card (idempotency).
+    const first = await patchRaw(product.id, { category: 'roupas' });
+    const second = await patchRaw(product.id, { category: 'roupas' });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstBody = (await first.json()) as ProductDetail;
+    const secondBody = (await second.json()) as ProductDetail;
+    expect(firstBody.category).toBe('roupas');
+    expect(secondBody).toEqual(firstBody);
+    expect(await storedSlug(product.id)).toBe('roupas');
+
+    // The refusals leave the stored category alone: unknown slug, uppercase, accent, space, 25 characters, empty.
+    for (const bad of ['nao-existe', 'Livros', 'serviços', 'a b', 'a'.repeat(25), '']) {
+      const res = await patchRaw(product.id, { category: bad });
+      expect(res.status, `slug ${JSON.stringify(bad)}`).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ store: 'category_invalid' });
+    }
+    expect(await storedSlug(product.id)).toBe('roupas');
+
+    // null clears it: the detail and the list carry no key, and the product sits in no shelf.
+    const cleared = await patchRaw(product.id, { category: null });
+    expect(cleared.status).toBe(200);
+    expect('category' in ((await cleared.json()) as ProductDetail)).toBe(false);
+    expect(await storedSlug(product.id)).toBeNull();
+    const detail = await getJson<ProductDetail>(
+      `/v1/store/products/${product.id}`,
+      tokens.demoMember,
+    );
+    expect('category' in detail).toBe(false);
+    const list = await getJson<{ items: Card[] }>('/v1/store/products?limit=50', tokens.demoMember);
+    const card = list.items.find((item) => item.id === product.id);
+    expect(card && 'category' in card).toBe(false);
+  });
+
+  it('front: the server never guesses a category for an existing product on a read (D-693)', async () => {
+    const id = await insertProduct(demoTenantId, `${PREFIX} Livro antigo`, '2026-01-02T10:00:00Z');
+    // A product written outside the API, with no category: its name tells "livros", the read must not.
+    const detail = await getJson<ProductDetail>(`/v1/store/products/${id}`, tokens.demoMember);
+    expect('category' in detail).toBe(false);
+    const list = await getJson<{ items: Card[] }>('/v1/store/products?limit=50', tokens.demoMember);
+    const card = list.items.find((item) => item.id === id);
+    expect(card).toBeDefined();
+    expect(card && 'category' in card).toBe(false);
+    expect(await storedSlug(id)).toBeNull();
+  });
+
+  it('front: a saved promo or featured id that points at an archived product is dropped, and the featured ids keep the stored order', async () => {
+    const ids: string[] = [];
+    for (const label of ['Alfa', 'Beta', 'Gama']) {
+      const res = await createRaw({ name: `${PREFIX} Destaque ${label}`, priceCents: 100 });
+      expect(res.status).toBe(201);
+      ids.push(((await res.json()) as ProductDetail).id);
+    }
+    const [alfa, beta, gama] = ids as [string, string, string];
+    // The front's writes are plan 12's routes: the row is written here through the admin connection.
+    await adminSql`
+      update public.store_front
+         set promo_product_id = ${alfa}::uuid,
+             featured_product_ids = ${`{${gama},${alfa},${beta}}`}::uuid[]
+       where tenant_id = ${demoTenantId}::uuid`;
+
+    const before = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(before.promoProductId).toBe(alfa);
+    expect(before.featuredProductIds).toEqual([gama, alfa, beta]);
+
+    expect((await putStatusRaw(alfa, 'archived')).status).toBe(200);
+    const after = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(after.promoProductId).toBeNull();
+    expect(after.featuredProductIds).toEqual([gama, beta]);
+    // The stored row still names the archived product: the read drops it, it never rewrites the row.
+    const [stored] = await adminSql<{ promo: string | null; n: number }[]>`
+      select promo_product_id::text as promo, cardinality(featured_product_ids)::int as n
+        from public.store_front where tenant_id = ${demoTenantId}::uuid`;
+    expect(stored).toEqual({ promo: alfa, n: 3 });
+
+    // Reactivated, it is back in its stored place.
+    expect((await putStatusRaw(alfa, 'active')).status).toBe(200);
+    const again = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(again.promoProductId).toBe(alfa);
+    expect(again.featuredProductIds).toEqual([gama, alfa, beta]);
+    await adminSql`
+      update public.store_front
+         set promo_product_id = null, featured_product_ids = '{}'::uuid[]
+       where tenant_id = ${demoTenantId}::uuid`;
+  });
+
+  it('front: two parallel first reads on a fresh store leave exactly eight category rows and one marker (D-691, T-12.3-06)', async () => {
+    await sweepCategories();
+    expect(await seedState(demoTenantId)).toEqual({ categories: 0, markers: 0 });
+
+    const answers = await Promise.all(
+      [tokens.demoMember, tokens.demoAdmin, tokens.demoSupport, tokens.demoMember].map((token) =>
+        request('/v1/store/front', token),
+      ),
+    );
+    for (const res of answers) expect(res.status).toBe(200);
+    const bodies = (await Promise.all(answers.map((res) => res.json()))) as FrontAnswer[];
+    for (const body of bodies) {
+      expect(body.categories.map((category) => category.id)).toEqual(
+        BUILT_IN.map(([slug]) => slug),
+      );
+    }
+    expect(await seedState(demoTenantId)).toEqual({ categories: 8, markers: 1 });
+
+    // Once only: an admin who deleted every category is not seeded again by the next read.
+    await adminSql`delete from public.store_categories where tenant_id = ${demoTenantId}::uuid`;
+    const empty = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(empty.categories).toEqual([]);
+    expect(await seedState(demoTenantId)).toEqual({ categories: 0, markers: 1 });
   });
 });

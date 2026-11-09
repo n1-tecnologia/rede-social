@@ -7479,6 +7479,145 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 12.3 sweep: store front — a rede-lab member’s front names no rede-demo category, promo or featured product, a rede-lab admin cannot give a product a rede-demo category slug on create or edit, and a rede-demo session on the rede-lab host is refused, each beside its same-tenant positive control (12.3-11, NOVF-05, NOVF-09, NOVF-11, T-12.3-03)', async () => {
+    // | Route                          | Negative asserted here                                                      |
+    // |--------------------------------|-----------------------------------------------------------------------------|
+    // | GET  /v1/store/front           | the lab member's answer lists no demo-only category and names no demo promo  |
+    // |                                | or featured id; a demo member on the lab host: 403 TENANT_HOST_MISMATCH      |
+    // | POST /v1/store/products        | a demo-only slug from the lab admin: 400 category_invalid, nothing written;  |
+    // |                                | a slug both tenants hold ("livros") lands on the LAB's own category row      |
+    // | PATCH /v1/store/products/{id}  | the same demo-only slug in a lab edit: 400, the stored category is unchanged |
+    //
+    // Both seed tenants get `store` ON for the case and their rows go back in `finally`. Each tenant
+    // gets ONE category the other lacks, written through the admin connection (the writes of the
+    // categories are plan 12's routes). The built-in eight exist in both, so "livros" is the adjacency.
+    const name = `st-iso123-${RUN}`;
+    const demoOnly = 'iso123-demo-only';
+    const labOnly = 'iso123-lab-only';
+    const restoreDemo = await withStoreEnabled('demo');
+    const restoreLab = await withStoreEnabled('lab');
+    const front = (token: string, host: string) => send('GET', '/v1/store/front', token, host);
+    type Front = {
+      categories: { id: string }[];
+      promoProductId: string | null;
+      featuredProductIds: string[];
+    };
+    const sweepFront = async () => {
+      await adminSql`delete from public.store_front where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+      await adminSql`delete from public.store_products where name = ${name}`;
+      await adminSql`delete from public.store_categories where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+    };
+    try {
+      await sweepFront();
+      // Positive controls: each tenant's first read seeds and answers its own eight.
+      const demoFirst = await front(tokens.demoMember, HOSTS.demo);
+      const labFirst = await front(tokens.labMember, HOSTS.lab);
+      expect(demoFirst.status).toBe(200);
+      expect(labFirst.status).toBe(200);
+      expect(((await demoFirst.json()) as Front).categories).toHaveLength(8);
+      expect(((await labFirst.json()) as Front).categories).toHaveLength(8);
+
+      for (const [tenantId, slug] of [
+        [tenantIds.demo, demoOnly],
+        [tenantIds.lab, labOnly],
+      ] as const) {
+        await adminSql`
+          insert into public.store_categories (tenant_id, slug, name, icon, position)
+          values (${tenantId}::uuid, ${slug}, ${slug}, 'tag', 20)`;
+      }
+      const demoProduct = await send('POST', '/v1/store/products', tokens.demoAdmin, HOSTS.demo, {
+        name,
+        priceCents: 990,
+        category: demoOnly,
+      });
+      expect(demoProduct.status).toBe(201);
+      const demoProductId = ((await demoProduct.json()) as { id: string; category?: string }).id;
+      await adminSql`
+        update public.store_front
+           set promo_product_id = ${demoProductId}::uuid,
+               featured_product_ids = ${`{${demoProductId}}`}::uuid[]
+         where tenant_id = ${tenantIds.demo}::uuid`;
+
+      // The demo read names its own extras; the lab read names nothing of demo (the negative).
+      const demoRead = (await (await front(tokens.demoMember, HOSTS.demo)).json()) as Front;
+      expect(demoRead.categories.map((category) => category.id)).toContain(demoOnly);
+      expect(demoRead.promoProductId).toBe(demoProductId);
+      expect(demoRead.featuredProductIds).toEqual([demoProductId]);
+      const labRaw = await (await front(tokens.labMember, HOSTS.lab)).text();
+      const labRead = JSON.parse(labRaw) as Front;
+      expect(labRead.categories.map((category) => category.id)).toContain(labOnly);
+      expect(labRead.categories.map((category) => category.id)).not.toContain(demoOnly);
+      expect(labRead.promoProductId).toBeNull();
+      expect(labRead.featuredProductIds).toEqual([]);
+      expect(labRaw).not.toContain(demoProductId);
+
+      // The demo session on the lab host is refused before any store code runs.
+      await expectHostRefused(await front(tokens.demoMember, HOSTS.lab), 'front on the lab host');
+      await expectHostRefused(
+        await send('POST', '/v1/store/products', tokens.demoAdmin, HOSTS.lab, {
+          name,
+          priceCents: 990,
+        }),
+        'create on the lab host',
+      );
+
+      // A demo-only slug from the lab admin: 400 category_invalid, nothing written. Beside it the
+      // lab admin's own slug is accepted (the positive control).
+      const foreign = await send('POST', '/v1/store/products', tokens.labAdmin, HOSTS.lab, {
+        name,
+        priceCents: 990,
+        category: demoOnly,
+      });
+      expect(foreign.status).toBe(400);
+      expect(((await foreign.json()) as Envelope).error.details).toEqual({
+        store: 'category_invalid',
+      });
+      const [none] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_products
+         where tenant_id = ${tenantIds.lab}::uuid and name = ${name}`;
+      expect(none?.n).toBe(0);
+      const own = await send('POST', '/v1/store/products', tokens.labAdmin, HOSTS.lab, {
+        name,
+        priceCents: 990,
+        category: labOnly,
+      });
+      expect(own.status).toBe(201);
+      const labProductId = ((await own.json()) as { id: string; category?: string }).id;
+
+      // Edit: the demo-only slug is refused and the stored category stays the lab's own.
+      const foreignEdit = await send(
+        'PATCH',
+        `/v1/store/products/${labProductId}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { category: demoOnly },
+      );
+      expect(foreignEdit.status).toBe(400);
+      expect(((await foreignEdit.json()) as Envelope).error.details).toEqual({
+        store: 'category_invalid',
+      });
+      // Adjacency: a slug both tenants hold resolves to the LAB's own row, never the demo's.
+      const shared = await send(
+        'PATCH',
+        `/v1/store/products/${labProductId}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { category: 'livros' },
+      );
+      expect(shared.status).toBe(200);
+      const [owner] = await adminSql<{ tenant_id: string }[]>`
+        select c.tenant_id::text as tenant_id
+          from public.store_products p
+          join public.store_categories c on c.id = p.category_id
+         where p.id = ${labProductId}::uuid`;
+      expect(owner?.tenant_id).toBe(tenantIds.lab);
+    } finally {
+      await sweepFront();
+      await restoreLab();
+      await restoreDemo();
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

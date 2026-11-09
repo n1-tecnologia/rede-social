@@ -283,6 +283,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/chat/conversations/:conversationId/read': { case: 'phase 7 sweep' },
   'GET /v1/chat/inbox': { case: 'phase 7 sweep' },
   // ── /v1/store (08.2) ────────────────────────────────────────────────────────────────────────
+  // 12.3-11 (NOVF-05, NOVF-11): the store front read; the category slug on create and edit is proved in
+  // the same case beside it (a rede-demo slug from a rede-lab admin is a 400, never a link).
+  'GET /v1/store/front': { case: 'phase 12.3 sweep: store' },
   'GET /v1/store/products': { case: 'phase 08.2 sweep: store' },
   'GET /v1/store/products/:productId': { case: 'phase 08.2 sweep: store' },
   'GET /v1/store/community-access': { case: 'phase 08.2 sweep: store' },
