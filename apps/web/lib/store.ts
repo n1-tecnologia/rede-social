@@ -191,6 +191,15 @@ export async function saveStoreCategories(
 }
 
 /**
+ * `PUT /v1/store/front/promo { productId }` (12.3-14, NOVF-05, D-699): the product the Início features
+ * for every member, or `null` for "Mais recente da loja". The API refuses a product that is not an
+ * ACTIVE one of this store (`promo_invalid`).
+ */
+export async function setStorePromo(productId: string | null): Promise<FrontWriteOutcome> {
+  return putFront('/v1/store/front/promo', { productId }, 'promo');
+}
+
+/**
  * `getProduct`'s answer: the product, the ONE not-found (unknown, another tenant's, or archived for
  * a non-holder: the API answers one bare 404 for all of them), the store being off, a refusal path,
  * or a read failure.

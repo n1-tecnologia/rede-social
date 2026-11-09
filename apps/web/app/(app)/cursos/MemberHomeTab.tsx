@@ -28,6 +28,8 @@ import {
   homeStatsView,
   homeTrackCards,
   popularCategories,
+  promoNeedsLoad,
+  promoProductFor,
   quickCourses,
   quickCourseView,
 } from '@/lib/courses-home-view';
@@ -48,10 +50,9 @@ import {
   newLessonView,
 } from '@/lib/courses-member-view';
 import type { CoursesTranslator } from '@/lib/courses-view';
-import { readHomePromoChoice } from '@/lib/home-promo-cookie';
 import { memberScreenHref } from '@/lib/member-area';
 import { resumeSpotLocalView } from '@/lib/resume-spot-local-view';
-import { getLiveAccess, getProducts } from '@/lib/store';
+import { getLiveAccess, getProduct, getProducts, getStoreFront } from '@/lib/store';
 import { lockedLiveView, priceLabel } from '@/lib/store-view';
 import { HomeAreas } from './HomeAreas';
 import { HomeContinueFloat } from './HomeContinueFloat';
@@ -181,8 +182,8 @@ export function HomeSkeleton() {
  *     (overall progress, lessons, the streak, courses completed); at the left the hero when the
  *     member is NOT resuming ("Comece por aqui", "Você está em dia", with its CTA; resuming, it is
  *     the card at the top) over "Últimas aulas" (the week's new lessons as text rows); at the right
- *     the promotion (the store's newest product, which the administrator can swap with the pencil,
- *     `HomePromoChoice`; else the catalogue) over a moving collage of the school's images;
+ *     the promotion (the product the API names for every member, else the store's newest; the
+ *     administrator changes it with the pencil, `HomePromoChoice`; else the catalogue) over a moving collage of the school's images;
  *  7. the next live (`HomeLive` `next`), across the row like a banner, with its reminder or buy path;
  *  8. "Mais de {tenant}" (`HomeAreas`): the school's other areas, from the menu;
  *  9. the floating "Continuar assistindo" (`HomeContinueFloat`) on a desktop, while the card at the
@@ -206,17 +207,17 @@ export async function MemberHomeTab({
   const storeOn = bootstrap.modules.some((module) => module.key === 'store');
   // The panel's promotion is the administrator's to pick (`HomePromoChoice`): the store's manager.
   const canPickPromo = storeOn && bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
-  const [t, result, progressRead, tracksRead, catalogueRead, products, promoPick] =
-    await Promise.all([
-      getTranslations(),
-      getLearnOverview(),
-      getLearnProgress(),
-      getLearnTracks(),
-      getLearnCatalogueAll(),
-      // The panel's promotion: the store's active products (a failed read only drops the product).
-      storeOn ? promoProducts(canPickPromo) : Promise.resolve(null),
-      canPickPromo ? readHomePromoChoice() : Promise.resolve(null),
-    ]);
+  const [t, result, progressRead, tracksRead, catalogueRead, products, front] = await Promise.all([
+    getTranslations(),
+    getLearnOverview(),
+    getLearnProgress(),
+    getLearnTracks(),
+    getLearnCatalogueAll(),
+    // The panel's promotion: the store's active products (a failed read only drops the product).
+    storeOn ? promoProducts(canPickPromo) : Promise.resolve(null),
+    // D-699: the promotion every member sees is the API's (`promoProductId`), not a device's.
+    storeOn ? getStoreFront() : Promise.resolve(null),
+  ]);
   if (result.status === 'redirect') redirect(result.path);
   if (result.status === 'disabled') notFound();
 
@@ -267,18 +268,29 @@ export async function MemberHomeTab({
   const hero = overview.hero ? homeHeroView(overview.hero, t, { preview }) : null;
   const newLessons = overview.newLessons?.map((item) => newLessonView(item, t, preview)) ?? [];
   const areas = homeAreasView(bootstrap.modules, t, preview);
-  // The store's NEWEST active product by default (the API lists them newest first); for the
-  // administrator, THIS device's pick while it is still for sale (`lib/home-promo.ts`).
+  // The store's promotion (D-699, UI-D-688): the product the API names for every member while it is
+  // for sale, else the NEWEST active one (the API lists them newest first). A named product outside
+  // the products read is loaded by its own id here on the server, so there is no spinner and no
+  // layout shift; an archived or gone one falls back to the newest.
   const forSale = (products ?? []).map((item) => ({
     id: item.id,
     name: item.name,
     price: priceLabel(item.priceCents, t),
     imageAssetId: item.imageAssetId,
   }));
-  const newest = forSale[0] ?? null;
-  const promoChoice = forSale.some((item) => item.id === promoPick) ? promoPick : null;
+  const promoId = front?.promoProductId ?? null;
+  const loadedPromo =
+    promoId !== null && promoNeedsLoad(forSale, promoId)
+      ? await loadPromoProduct(promoId, t)
+      : null;
+  const featured = promoProductFor(forSale, promoId, loadedPromo);
+  const newest = forSale[0] ?? featured;
+  const savedChoice = featured !== null && featured.id === promoId ? promoId : null;
+  // The administrator's sheet lists every product on sale, plus the named one when it is beyond them.
+  const promoOptions =
+    loadedPromo && featured === loadedPromo ? [...forSale, loadedPromo] : forSale;
   const promo = homePromoView({
-    product: newest,
+    product: featured,
     productImages: forSale.map((item) => item.imageAssetId),
     courseCovers: catalogue?.map((card) => card.coverAssetId) ?? [],
     courseCount: catalogue?.length ?? 0,
@@ -412,22 +424,30 @@ export async function MemberHomeTab({
                 canPickPromo && newest ? (
                   <HomePromoChoice
                     view={promo}
-                    options={forSale.map((item) => ({
+                    options={promoOptions.map((item) => ({
                       id: item.id,
                       name: item.name,
                       price: item.price,
                       thumb: productThumb(item.imageAssetId),
                     }))}
-                    initialChoice={promoChoice}
+                    initialChoice={savedChoice}
                     labels={{
                       open: t('courses.member.home.promo.edit.open'),
                       title: t('courses.member.home.promo.edit.title'),
                       helper: t('courses.member.home.promo.edit.helper'),
+                      scope: t('courses.member.home.promo.edit.scope'),
                       latest: t('courses.member.home.promo.edit.latest'),
                       latestLine: t('courses.member.home.promo.edit.latestLine', {
                         product: newest.name,
                       }),
-                      device: t('courses.member.home.promo.edit.device'),
+                      save: t('store.setup.save'),
+                      saving: t('store.setup.saving'),
+                      cancel: t('store.setup.cancel'),
+                      saved: t('courses.member.home.promo.edit.saved'),
+                      errors: {
+                        promo_invalid: t('courses.member.home.promo.edit.errors.promo_invalid'),
+                        generic: t('courses.member.home.promo.edit.errors.generic'),
+                      },
                     }}
                   />
                 ) : undefined
@@ -588,6 +608,25 @@ function productThumb(imageAssetId: string | null): ReactNode {
   ) : (
     <span className="block h-full w-full" style={{ backgroundImage: 'var(--brand-gradient)' }} />
   );
+}
+
+/**
+ * The product the API names for the promotion when it is outside the products already read (12.3-14,
+ * D-699): read by its own id on the server. `null` unless it is an ACTIVE product (an archived, gone or
+ * unreadable one falls back to the newest, never an error on the Início).
+ */
+async function loadPromoProduct(
+  id: string,
+  t: Awaited<ReturnType<typeof getTranslations>>,
+): Promise<{ id: string; name: string; price: string; imageAssetId: string | null } | null> {
+  const read = await getProduct(id);
+  if (read.status !== 'ok' || read.product.status !== 'active') return null;
+  return {
+    id: read.product.id,
+    name: read.product.name,
+    price: priceLabel(read.product.priceCents, t),
+    imageAssetId: read.product.imageAssetId,
+  };
 }
 
 /**

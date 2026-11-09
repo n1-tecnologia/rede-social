@@ -319,6 +319,11 @@ describe('the catalog words of the sheet', () => {
       LABELS.errors.promo_invalid,
     );
     expect(t('courses.member.home.promo.edit.errors.generic')).toBe(LABELS.errors.generic);
-    expect(JSON.stringify(messages)).not.toContain('só neste aparelho');
+    const edit = (
+      messages as unknown as {
+        courses: { member: { home: { promo: { edit: Record<string, unknown> } } } };
+      }
+    ).courses.member.home.promo.edit;
+    expect(edit).not.toHaveProperty('device');
   });
 });

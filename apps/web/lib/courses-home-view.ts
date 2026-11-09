@@ -201,13 +201,40 @@ export interface HomePromoView {
   cta: { href: string; label: string };
 }
 
+/**
+ * The Início's promotion product (12.3-14, D-699): the one the API names (`promoProductId`) while it
+ * is among the products read for the page (`forSale`, the newest first) or was loaded by its own id
+ * (`loaded`, only ever the named one); else the newest. The API names none for an archived or gone
+ * product and the caller drops a loaded one that is not active, so those fall back to the newest.
+ */
+export function promoProductFor<T extends { id: string }>(
+  forSale: readonly T[],
+  promoId: string | null,
+  loaded: T | null,
+): T | null {
+  if (promoId !== null) {
+    const among = forSale.find((item) => item.id === promoId);
+    if (among) return among;
+    if (loaded && loaded.id === promoId) return loaded;
+  }
+  return forSale[0] ?? null;
+}
+
+/** The named promotion is not among the products already read: it is loaded by its own id (no spinner). */
+export function promoNeedsLoad(
+  forSale: readonly { id: string }[],
+  promoId: string | null,
+): boolean {
+  return promoId !== null && !forSale.some((item) => item.id === promoId);
+}
+
 /** The collage's distinct images, at most. */
 const PROMO_IMAGES = 12;
 
 /**
- * The promotion at the panel's right: the store's newest active product (its name, its price, a
- * link to its page; the administrator can pick another one, `lib/home-promo.ts`), else the
- * catalogue (how many courses and tracks, a link to Cursos). The collage takes the products'
+ * The promotion at the panel's right: the store's featured product (its name, its price, a link to
+ * its page; the administrator picks it, the API keeps it for every member, `promoProductFor`), else
+ * the catalogue (how many courses and tracks, a link to Cursos). The collage takes the products'
  * images first, then the course covers, each once.
  */
 export function homePromoView({

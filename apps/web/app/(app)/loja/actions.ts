@@ -4,6 +4,7 @@ import { priceCentsSchema } from '@rede-social/contracts/money';
 import {
   categoriesBodySchema,
   frontFeaturedBodySchema,
+  frontPromoBodySchema,
   type ProductCommunity,
   type ProductFilter,
   type ProductUnlockCourse,
@@ -24,6 +25,7 @@ import {
   purchaseProduct,
   saveStoreCategories,
   setStoreFeatured,
+  setStorePromo,
 } from '@/lib/store';
 import { revalidateStoreScreens } from '@/lib/store-revalidate';
 import { type ProductCardView, productCardView, productManageView } from '@/lib/store-view';
@@ -242,4 +244,15 @@ export async function saveStoreCategoriesAction(
   const body = categoriesBodySchema.safeParse({ categories });
   if (!body.success) return localRefusal(body.error.issues.map((issue) => issue.message));
   return saveResult(await saveStoreCategories(body.data.categories));
+}
+
+/**
+ * `PUT /v1/store/front/promo` (12.3-14, NOVF-05, D-699): the product the Início features for every
+ * member, or `null` for "Mais recente da loja". Parsed with the contract's strict schema first; the API
+ * owns the refusal (`promo_invalid`: not an ACTIVE product of this store).
+ */
+export async function setStorePromoAction(productId: unknown): Promise<StoreSetupSaveResult> {
+  const body = frontPromoBodySchema.safeParse({ productId });
+  if (!body.success) return localRefusal(body.error.issues.map((issue) => issue.message));
+  return saveResult(await setStorePromo(body.data.productId));
 }

@@ -327,7 +327,12 @@
             "helper": "Escolha o produto que aparece neste espaço do Início.",
             "latest": "Mais recente da loja",
             "latestLine": "Padrão · {product}",
-            "device": "Por enquanto, a escolha vale só neste aparelho."
+            "scope": "Todos os membros veem este produto no Início.",
+            "saved": "Destaque da loja salvo.",
+            "errors": {
+              "promo_invalid": "Esse produto não está mais à venda. Atualizamos a lista; escolha de novo.",
+              "generic": "Não foi possível salvar o destaque. Tente de novo."
+            }
           }
         }
       },
