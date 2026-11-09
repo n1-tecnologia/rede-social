@@ -24,8 +24,8 @@ import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
 import { brandScope } from '@/lib/brand-scope';
 import { env } from '@/lib/env';
 import { iconsFor } from '@/lib/manifest';
+import { savedPhoneLayout } from '@/lib/phone-nav-layout';
 import { requirePlatformTenants } from '@/lib/platform';
-import { readPhoneNavLayout } from '@/lib/phone-nav-layout-cookie';
 import { areasFor, collapsingTabsFor, tabDotsFor } from '@/lib/registry';
 import { MAIN_SLOTS, shellTabs } from '@/lib/shell-tabs';
 import { coordinatesForRequest, SupabaseCoordinatesUnavailableError } from '@/lib/supabase/server';
@@ -141,8 +141,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // under Principal with the tabs; the other slots stay the Atalhos at the rail's foot. 2026-10-24:
   // the Loja slot owns an area too ("· Loja"), so the areas are read over the tabs AND the slots.
   // 2026-10-28: on the phone the Loja leaves the TopBar for the BottomNav, as its last tab.
-  // 2026-11-05: the phone's bar and top follow the "Menu do app" chosen in Configurações on this
-  // device (`lib/phone-nav-layout.ts`); the desktop never reads it.
+  // 2026-11-05: the phone's bar and top follow the "Menu do app" the administrator arranged in
+  // Configurações. 12.3-16 (D-695, D-697): it is kept by the API in the tenant's brand, so it comes
+  // with the bootstrap and applies to EVERY member on the next load (`savedPhoneLayout`, none = the
+  // shell's own menu); the desktop never reads it.
   const nav = withPhoneLayout(
     withPhoneTabSlots(
       withRailMainSlots(
@@ -162,7 +164,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       ),
       MAIN_SLOTS,
     ),
-    await readPhoneNavLayout(),
+    savedPhoneLayout(branding),
   );
   const dotBoundaries = dots.flatMap(([, dot]) => (dot.until ? [dot.until] : []));
 

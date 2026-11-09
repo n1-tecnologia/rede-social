@@ -6,7 +6,7 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { PhoneMenuEditor } from '@/components/admin/PhoneMenuEditor';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { readPhoneNavLayout } from '@/lib/phone-nav-layout-cookie';
+import { savedPhoneLayout } from '@/lib/phone-nav-layout';
 import { MAIN_SLOTS, shellTabs } from '@/lib/shell-tabs';
 import { getHostTenant } from '@/lib/tenant-host';
 
@@ -20,9 +20,9 @@ const item = ({ key, label, icon }: NavItem) => ({ key, label, icon });
  * on a tenant host; the platform host has no such menu.
  *
  * The items are the caller's own shell (`shellTabs`, the layout's builder, with the Loja moved to the
- * bar as the layout does), so the editor shows the bar the app draws: what this device keeps now
- * (`readPhoneNavLayout`) and the shell's own menu for "Restaurar o padrão". The counter slots
- * (Notificações, Suporte) stay at the top and are only drawn.
+ * bar as the layout does), so the editor shows the bar the app draws: what the school keeps now (the
+ * bootstrap brand's saved menu, 12.3-16) and the shell's own menu for "Restaurar o padrão". The
+ * counter slots (Notificações, Suporte) stay at the top and are only drawn.
  */
 export default async function AdminMenuPage() {
   const hostTenant = await getHostTenant();
@@ -31,12 +31,12 @@ export default async function AdminMenuPage() {
   const bootstrap = await requireBootstrap();
   if (!bootstrap.permissions.includes(KERNEL_PERMISSIONS.tenantManage)) notFound();
 
-  const [t, tApp, tRoot, layout] = await Promise.all([
+  const [t, tApp, tRoot] = await Promise.all([
     getTranslations('admin'),
     getTranslations('app'),
     getTranslations(),
-    readPhoneNavLayout(),
   ]);
+  const branding = resolveBranding(bootstrap.tenant.branding);
 
   const nav = withPhoneTabSlots(
     shellTabs(
@@ -57,9 +57,8 @@ export default async function AdminMenuPage() {
   ];
   const keys = (list: readonly NavItem[]) =>
     list.filter((entry) => !isFixedTopSlot(entry)).map((entry) => entry.key);
-  const now = phoneChrome(nav.tabs, nav.topbar, layout);
+  const now = phoneChrome(nav.tabs, nav.topbar, savedPhoneLayout(branding));
   const shell = phoneChrome(nav.tabs, nav.topbar);
-  const branding = resolveBranding(bootstrap.tenant.branding);
 
   return (
     <div data-testid="menu-screen" className="mx-auto flex w-full max-w-[680px] flex-col gap-4">

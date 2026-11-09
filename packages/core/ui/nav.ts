@@ -150,8 +150,9 @@ export interface ShellNav {
    * 2026-11-05: where each item sits on the PHONE (the product owner: "personalizar hotbar do
    * usuário selecionando quais itens ele quer que entre ali, a ordem dos itens clicando segurando e
    * arrastando, escolhendo se vai ter algum desses itens no header", "somente no mobile"). Absent,
-   * the shell's own placement. The desktop never reads it. Never from the bootstrap: the host
-   * decides it (`withPhoneLayout`, `phoneChrome`).
+   * the shell's own placement. The desktop never reads it. 12.3-16: it arrives through the tenant's
+   * brand in the bootstrap (`branding.phoneMenu`, the same for every member and role) and the host
+   * applies it per request with `withPhoneLayout`; `phoneChrome` decides the placement.
    */
   phoneLayout?: PhoneLayout;
 }
