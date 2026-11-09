@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "12.2"
-current_phase_name: Ramos condicionais no formulário de perfil
-current_plan: 21
-status: verifying
+current_phase: "12.3"
+current_phase_name: Pendências de backend do front de novembro
+current_plan: 1
+status: executing
 stopped_at: "Phase 12.2 EXECUTED 21/21 on 2026-11-06 (nothing pushed, 154 commits ahead of origin/master): code review 0 critical/4 warnings (WR-01..04), regression gate green, verification human_needed 16/16 truths in code; 8 owner items (M1..M8) persisted as 12.2-UAT.md; phase NOT marked complete; next /gsd-verify-work 12.2 after Igor's proofs; Phase 13 stays paused at plan 14; planned ahead: Phase 12.3 UI-SPEC approved 2026-11-09 (next /gsd-plan-phase 12.3), STATE pointer stays on 12.2"
-last_updated: "2026-11-09T17:06:23.524Z"
-last_activity: 2026-11-06
-last_activity_desc: Phase 12.2 execution started
-state_head: 9138afaf93eeb0f3469ddeff300290045e3fc598
+last_updated: "2026-11-09T18:52:15.767Z"
+last_activity: 2026-11-09
+last_activity_desc: Phase 12.3 execution started
+state_head: 1e3e20adc5160d3391a6b5cca01754f6444691e9
 progress:
   total_phases: 31
   completed_phases: 0
-  total_plans: 384
+  total_plans: 401
   completed_plans: 356
   percent: 0
 ---
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 12.2 — Ramos condicionais no formulário de perfil
+**Current focus:** Phase 12.3 — Pendências de backend do front de novembro
 
 ## Current Position
 
-Phase: 12.2 (Ramos condicionais no formulário de perfil) — EXECUTING
-Current Plan: 21
-Total Plans in Phase: 21
-Plan: 21 of 21
-Status: Phase complete — ready for verification
-Last activity: 2026-11-06 — Phase 12.2 execution started
+Phase: 12.3 (Pendências de backend do front de novembro) — EXECUTING
+Current Plan: 1
+Total Plans in Phase: 17
+Plan: 1 of 17
+Status: Executing Phase 12.3
+Last activity: 2026-11-09 — Phase 12.3 execution started
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
