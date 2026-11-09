@@ -50,17 +50,40 @@ vi.mock('../track-actions', () => ({
   replaceTrackCoursesAction: replaceCourses,
 }));
 
-vi.mock('@/components/media/useSignedUpload', () => ({
-  useSignedUpload: () => ({
-    state: 'idle',
-    progress: 0,
-    error: null,
-    pick: vi.fn(),
-    reject: vi.fn(),
-    cancel: vi.fn(),
-    reset: vi.fn(),
-  }),
-}));
+/**
+ * One stateful stand-in per `useSignedUpload` call, in the form's own order: the first is the card
+ * image, the second the Topo (NOVF-02, UI-D-691). `uploads.list[n]` lets a test finish or hold an
+ * upload and reads what the form asked of it.
+ */
+type UploadStub = {
+  pick: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
+  options: { onCompleted: (asset: unknown) => void };
+  setState: (state: string) => void;
+  setProgress: (percent: number) => void;
+};
+const uploads = vi.hoisted(() => ({ list: [] as UploadStub[] }));
+
+vi.mock('@/components/media/useSignedUpload', async () => {
+  const React = await import('react');
+  return {
+    useSignedUpload: (options: UploadStub['options']) => {
+      const [state, setState] = React.useState('idle');
+      const [progress, setProgress] = React.useState(0);
+      const slot = React.useRef<number | null>(null);
+      if (slot.current === null) slot.current = uploads.list.length;
+      const own = React.useRef({
+        pick: vi.fn(),
+        reject: vi.fn(),
+        cancel: vi.fn(),
+        reset: vi.fn(),
+      }).current;
+      uploads.list[slot.current] = { ...own, options, setState, setProgress };
+      return { state, progress, error: null, ...own };
+    },
+  };
+});
 
 const { TrackForm, sameOrder } = await import('./TrackForm');
 
@@ -94,6 +117,7 @@ const EDIT_INITIAL = {
   audience: 'Para quem está começando',
   description: '',
   coverAssetId: null,
+  topCoverAssetId: null,
   courses: [
     {
       id: C1,
@@ -152,6 +176,7 @@ async function submit() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  uploads.list.length = 0;
 });
 afterEach(cleanup);
 
@@ -275,6 +300,7 @@ describe('TrackForm — create (UI-D-402, E12 empty)', () => {
       audience: '',
       description: '',
       coverAssetId: null,
+      topCoverAssetId: null,
     });
     expect(replaceCourses).toHaveBeenCalledWith(TRACK, [C2, C1]);
     expect(update).not.toHaveBeenCalled();
@@ -432,5 +458,185 @@ describe('TrackForm — edit (UI-D-402, E12 partial, UI-D-404)', () => {
     fireEvent.change(titleInput(), { target: { value: 'Ainda editável' } });
     await submit();
     await waitFor(() => expect(update).toHaveBeenCalledWith(TRACK, { title: 'Ainda editável' }));
+  });
+});
+
+/* ── NOVF-02, UI-D-691: the Topo is its own picker with its own asset ──────────────────────────── */
+
+const CARD_ID = '66666666-6666-4666-8666-666666666666';
+const TOP_ID = '77777777-7777-4777-8777-777777777777';
+const NEW_TOP_ID = '88888888-8888-4888-8888-888888888888';
+
+const asset = (id: string) => ({ id, variants: [{ width: 640 }] });
+const done = (slot: number, id: string) =>
+  act(() => {
+    uploads.list[slot]?.options.onCompleted(asset(id));
+  });
+const hold = (slot: number, state: string, progress = 0) =>
+  act(() => {
+    uploads.list[slot]?.setState(state);
+    uploads.list[slot]?.setProgress(progress);
+  });
+const topBlock = () => document.querySelector('[data-cover-block="top"]') as HTMLElement;
+const topRemove = () =>
+  document.querySelector('[data-track-top-cover-remove]') as HTMLButtonElement | null;
+const topError = () => document.querySelector('[data-track-top-cover-error]');
+const topFallback = () => document.querySelector('[data-track-top-cover-fallback]');
+const topImages = () => Array.from(topBlock().querySelectorAll('img'));
+
+describe('TrackForm — the Topo as its own upload (NOVF-02, UI-D-691)', () => {
+  it('13. a card image and a Topo are two uploads: create sends two different ids, coverAssetId and topCoverAssetId', async () => {
+    create.mockResolvedValue({ ok: true, trackId: TRACK, status: 'active' });
+    renderCreate();
+    expect(uploads.list).toHaveLength(2);
+    fireEvent.change(titleInput(), { target: { value: 'Do zero' } });
+    await done(0, CARD_ID);
+    await done(1, TOP_ID);
+    await submit();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith({
+      title: 'Do zero',
+      subtitle: '',
+      audience: '',
+      description: '',
+      coverAssetId: CARD_ID,
+      topCoverAssetId: TOP_ID,
+    });
+  });
+
+  it('14. the Topo block is a picker of its own: its own input named by the new labels, its own helper, hooks beside the card hooks', async () => {
+    renderCreate();
+    expect(screen.getByLabelText('Adicionar imagem do topo')).toBeTruthy();
+    expect(screen.getByLabelText('Adicionar capa')).toBeTruthy();
+    expect(
+      within(topBlock()).getByText('Opcional. Sem imagem própria, o topo usa a imagem do cartão.'),
+    ).toBeTruthy();
+    expect(document.querySelector('[data-track-top-cover-preview]')).not.toBeNull();
+    expect(document.querySelector('[data-track-cover-preview]')).not.toBeNull();
+    // Nothing of its own yet: no remove control.
+    expect(topRemove()).toBeNull();
+
+    await done(1, TOP_ID);
+    expect(screen.getByLabelText('Trocar imagem do topo')).toBeTruthy();
+    // The card input kept its own name.
+    expect(screen.getByLabelText('Adicionar capa')).toBeTruthy();
+    expect(topRemove()?.textContent).toContain('Remover imagem do topo');
+    expect(topFallback()).toBeNull();
+  });
+
+  it('15. an empty Topo shows the card image cropped with the fallback line; with no card image either, the brand gradient and no line', async () => {
+    renderCreate();
+    expect(topFallback()).not.toBeNull();
+    expect(topImages()).toHaveLength(0);
+    expect(within(topBlock()).queryByText('Sem imagem própria: mostrando a do cartão.')).toBeNull();
+
+    await done(0, CARD_ID);
+    expect(within(topBlock()).getByText('Sem imagem própria: mostrando a do cartão.')).toBeTruthy();
+    expect(topImages().some((img) => img.getAttribute('src')?.includes(CARD_ID))).toBe(true);
+
+    await done(1, TOP_ID);
+    expect(within(topBlock()).queryByText('Sem imagem própria: mostrando a do cartão.')).toBeNull();
+    expect(topImages().some((img) => img.getAttribute('src')?.includes(TOP_ID))).toBe(true);
+    expect(topImages().some((img) => img.getAttribute('src')?.includes(CARD_ID))).toBe(false);
+  });
+
+  it('16. removing the Topo sends topCoverAssetId null and leaves the card id alone', async () => {
+    update.mockResolvedValue({ ok: true, trackId: TRACK, status: 'active' });
+    renderEdit({
+      initial: { ...EDIT_INITIAL, coverAssetId: CARD_ID, topCoverAssetId: TOP_ID },
+    });
+    expect(submitButton().disabled).toBe(true);
+    fireEvent.click(topRemove() as HTMLButtonElement);
+    expect(topRemove()).toBeNull();
+    expect(document.querySelector('[data-track-cover-remove]')).not.toBeNull();
+    expect(submitButton().disabled).toBe(false);
+    await submit();
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledWith(TRACK, { topCoverAssetId: null });
+  });
+
+  it('17. a create with a card image and no Topo sends topCoverAssetId null, never the card id', async () => {
+    create.mockResolvedValue({ ok: true, trackId: TRACK, status: 'active' });
+    renderCreate();
+    fireEvent.change(titleInput(), { target: { value: 'Só o cartão' } });
+    await done(0, CARD_ID);
+    await submit();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ coverAssetId: CARD_ID, topCoverAssetId: null }),
+    );
+  });
+
+  it('18. each block has its own progress and Cancelar; Save is disabled while EITHER upload is in flight', async () => {
+    renderEdit();
+    fireEvent.change(titleInput(), { target: { value: 'Outro título' } });
+    expect(submitButton().disabled).toBe(false);
+
+    await hold(1, 'progress', 40);
+    expect(submitButton().disabled).toBe(true);
+    expect(within(topBlock()).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('40');
+    expect(within(topBlock()).getByText('40% enviado')).toBeTruthy();
+    // Only the Topo block draws a bar.
+    expect(document.querySelectorAll('[role="progressbar"]')).toHaveLength(1);
+    fireEvent.click(within(topBlock()).getByRole('button', { name: 'Cancelar envio' }));
+    expect(uploads.list[1]?.cancel).toHaveBeenCalledTimes(1);
+    expect(uploads.list[0]?.cancel).not.toHaveBeenCalled();
+
+    await hold(1, 'idle');
+    expect(submitButton().disabled).toBe(false);
+    await hold(0, 'preparing');
+    expect(submitButton().disabled).toBe(true);
+    await hold(0, 'idle');
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('19. a top_cover_invalid refusal shows its sentence under the Topo block only, keeps the draft and toasts nothing', async () => {
+    update.mockResolvedValue({ ok: false, code: 'top_cover_invalid' });
+    renderEdit();
+    await done(1, NEW_TOP_ID);
+    await submit();
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledWith(TRACK, { topCoverAssetId: NEW_TOP_ID });
+    expect(topError()?.textContent).toBe(
+      'Não foi possível usar esta imagem no topo. Escolha outra.',
+    );
+    expect(topError()?.getAttribute('role')).toBe('alert');
+    expect(document.querySelector('[data-track-cover-error]')).toBeNull();
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('20. a cover_invalid refusal stays under the card block, not the Topo block', async () => {
+    update.mockResolvedValue({ ok: false, code: 'cover_invalid' });
+    renderEdit();
+    await done(0, CARD_ID);
+    await submit();
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(document.querySelector('[data-track-cover-error]')).not.toBeNull();
+    expect(topError()).toBeNull();
+  });
+
+  it('21. a paste lands in the card block and the Topo block ignores it; each input and a drop feed their own block', () => {
+    renderCreate();
+    const file = new File(['x'], 'foto.png', { type: 'image/png' });
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', { value: { files: [file] } });
+    document.dispatchEvent(paste);
+    expect(uploads.list[0]?.pick).toHaveBeenCalledWith(file);
+    expect(uploads.list[1]?.pick).not.toHaveBeenCalled();
+
+    const topFile = new File(['y'], 'topo.png', { type: 'image/png' });
+    fireEvent.change(screen.getByLabelText('Adicionar imagem do topo'), {
+      target: { files: [topFile] },
+    });
+    expect(uploads.list[1]?.pick).toHaveBeenCalledWith(topFile);
+    expect(uploads.list[0]?.pick).toHaveBeenCalledTimes(1);
+
+    const dropped = new File(['z'], 'solta.png', { type: 'image/png' });
+    fireEvent.drop(document.querySelector('[data-track-top-cover-preview]') as HTMLElement, {
+      dataTransfer: { files: [dropped] },
+    });
+    expect(uploads.list[1]?.pick).toHaveBeenLastCalledWith(dropped);
+    expect(uploads.list[0]?.pick).toHaveBeenCalledTimes(1);
   });
 });
