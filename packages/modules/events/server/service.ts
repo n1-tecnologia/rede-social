@@ -1051,11 +1051,13 @@ export async function updateEvent(
          where e.tenant_id = ${ctx.tenantId}::uuid
            and e.id = ${eventId}::uuid
            and e.deleted_at is null
-           and (e.title, e.description, e.cover_asset_id, e.poster_asset_id, e.category,
-                e.capacity, e.schedule, e.format, e.venue_name, e.address, e.starts_at, e.ends_at)
+           and (e.title, e.description, e.cover_asset_id, e.poster_asset_id,
+                e.category, e.capacity, e.schedule, e.format, e.venue_name, e.address,
+                e.starts_at, e.ends_at)
                is distinct from
-               (n.title, n.description, n.cover_asset_id, n.poster_asset_id, n.category,
-                n.capacity, n.schedule, n.format, n.venue_name, n.address, n.starts_at, n.ends_at)
+               (n.title, n.description, n.cover_asset_id, n.poster_asset_id,
+                n.category, n.capacity, n.schedule, n.format, n.venue_name, n.address,
+                n.starts_at, n.ends_at)
         returning to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                   to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at`);
 
