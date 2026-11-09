@@ -1477,3 +1477,154 @@ describe('ProductForm — the Pagamento block (UI-D-524, D-502)', () => {
     expect(linkInput().maxLength).toBe(2048);
   });
 });
+
+/* ── 12.3-14: the "Categoria" field fed by the API (D-693, D-694, UI-D-689) ──────────────────── */
+
+const STORE_CATEGORIES_VIEW = [
+  { id: 'cursos', name: 'Cursos' },
+  { id: 'livros', name: 'Livros' },
+  { id: 'roupas', name: 'Roupas' },
+  { id: 'skin-care', name: 'Skin care' },
+];
+
+const categoryField = () => document.querySelector('[data-product-category-field]');
+const categoryTrigger = () =>
+  categoryField()?.querySelector('[role="combobox"]') as HTMLButtonElement;
+const categoryValue = () => categoryTrigger()?.textContent ?? '';
+
+function pickCategory(id: string) {
+  fireEvent.click(categoryTrigger());
+  const row = document.querySelector(`[data-product-category="${id}"]`) as HTMLElement;
+  fireEvent.click(row);
+}
+
+describe('ProductForm — the category field (12.3-14, D-694, UI-D-689)', () => {
+  it('C1. the menu lists the store categories in its order, "Sem categoria" last, with the helper', () => {
+    renderCreate({ categories: STORE_CATEGORIES_VIEW });
+    const rows = [...document.querySelectorAll('[data-product-category]')].map((row) =>
+      row.getAttribute('data-product-category'),
+    );
+    expect(rows).toEqual(['cursos', 'livros', 'roupas', 'skin-care', '_']);
+    expect(screen.getByText('Crie e organize as categorias no Gerenciar da loja.')).toBeTruthy();
+    expect(document.querySelector('[data-product-category="_"]')?.textContent).toContain(
+      'Sem categoria',
+    );
+  });
+
+  it('C2. a new product starts on the category its name suggests, and follows the name until touched', () => {
+    renderCreate({ categories: STORE_CATEGORIES_VIEW });
+    expect(categoryValue()).toContain('Sem categoria');
+
+    fireEvent.change(nameInput(), { target: { value: 'Curso de marketing' } });
+    expect(categoryValue()).toContain('Cursos');
+    fireEvent.change(nameInput(), { target: { value: 'Livro de receitas' } });
+    expect(categoryValue()).toContain('Livros');
+
+    pickCategory('skin-care');
+    fireEvent.change(nameInput(), { target: { value: 'Curso de marketing' } });
+    expect(categoryValue()).toContain('Skin care');
+  });
+
+  it('C3. a suggestion the store does not hold starts on "Sem categoria"', () => {
+    renderCreate({ categories: [{ id: 'skin-care', name: 'Skin care' }] });
+    fireEvent.change(nameInput(), { target: { value: 'Curso de marketing' } });
+    expect(categoryValue()).toContain('Sem categoria');
+  });
+
+  it('C4. the field is hidden when the store has no category, and a create sends no category key', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ categories: [] });
+    expect(categoryField()).toBeNull();
+    fillValidCreate();
+    await save();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty('category');
+  });
+
+  it('C5. a create sends exactly the slug the field shows, the suggestion included', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ categories: STORE_CATEGORIES_VIEW });
+    fireEvent.change(nameInput(), { target: { value: 'Curso de marketing' } });
+    typePrice('19,90');
+    await save();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ category: 'cursos' });
+
+    cleanup();
+    vi.clearAllMocks();
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ categories: STORE_CATEGORIES_VIEW });
+    fireEvent.change(nameInput(), { target: { value: 'Curso de marketing' } });
+    typePrice('19,90');
+    pickCategory('skin-care');
+    await save();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ category: 'skin-care' });
+  });
+
+  it('C6. "Sem categoria" on a create sends null, never an absent key', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ categories: STORE_CATEGORIES_VIEW });
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('19,90');
+    await save();
+    expect(create.mock.calls[0]?.[0]).toHaveProperty('category', null);
+  });
+
+  it('C7. an edit starts on the stored category and sends the key only when it changed', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ categories: STORE_CATEGORIES_VIEW, initialCategory: 'livros' });
+    expect(categoryValue()).toContain('Livros');
+    // The name is edited: the stored category is not re-guessed from the new name.
+    fireEvent.change(nameInput(), { target: { value: 'Curso de marketing' } });
+    expect(categoryValue()).toContain('Livros');
+    await save();
+    expect(update.mock.calls[0]?.[1]).not.toHaveProperty('category');
+
+    cleanup();
+    vi.clearAllMocks();
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ categories: STORE_CATEGORIES_VIEW, initialCategory: 'livros' });
+    pickCategory('roupas');
+    expect(submitButton().disabled).toBe(false);
+    await save();
+    expect(update.mock.calls[0]?.[1]).toEqual({ category: 'roupas' });
+  });
+
+  it('C8. an edit of a product with none starts on "Sem categoria"; choosing it again sends nothing, clearing sends null', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ categories: STORE_CATEGORIES_VIEW, initialCategory: null });
+    expect(categoryValue()).toContain('Sem categoria');
+
+    cleanup();
+    vi.clearAllMocks();
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ categories: STORE_CATEGORIES_VIEW, initialCategory: 'livros' });
+    pickCategory('_');
+    await save();
+    expect(update.mock.calls[0]?.[1]).toEqual({ category: null });
+  });
+
+  it('C9. category_invalid shows the sentence under the field, keeps every value and clears on the next pick', async () => {
+    create.mockResolvedValueOnce({ ok: false, code: 'category_invalid' });
+    renderCreate({ categories: STORE_CATEGORIES_VIEW });
+    fireEvent.change(nameInput(), { target: { value: 'Curso de marketing' } });
+    typePrice('19,90');
+    await save();
+
+    const error = categoryField()?.querySelector('[role="alert"]');
+    expect(error?.textContent).toBe('Essa categoria não existe mais. Escolha outra.');
+    expect(nameInput().value).toBe('Curso de marketing');
+    expect(priceInput().value).toBe('19,90');
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+
+    pickCategory('livros');
+    expect(categoryField()?.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('C10. the names offered are the store names as sent (30 characters at most by the contract)', () => {
+    const long = 'x'.repeat(30);
+    renderCreate({ categories: [{ id: 'longa', name: long }] });
+    expect(document.querySelector('[data-product-category="longa"]')?.textContent).toContain(long);
+  });
+});

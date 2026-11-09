@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProductDetail } from '@rede-social/module-store/contracts';
+import { type ProductDetail, STORE_BUILT_IN_CATEGORIES } from '@rede-social/module-store/contracts';
 import { cleanup, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +17,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   product: null as unknown,
   permissions: [] as string[],
+  /** The store front the API answers; `null` = the call failed (12.3-14, D-694, UI-D-690). */
+  front: null as unknown,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -54,13 +56,8 @@ vi.mock('@/lib/store', () => ({
   getProduct: async () => ({ status: 'ok', product: mocks.product }),
   // The storefront's catalogue for "Você também pode gostar" (2026-10-27): empty here.
   getProducts: async () => ({ items: [], nextCursor: null }),
-}));
-// 2026-10-28: the store's setup (Gerenciar) is a per-device cookie; here the built-in store.
-vi.mock('@/lib/store-setup-cookie', () => ({
-  readStoreSetup: async () => ({
-    setup: { categories: null, featured: [] },
-    assignments: new Map(),
-  }),
+  // 12.3-14 (D-694, D-695): the store's categories come from the API front, never a cookie.
+  getStoreFront: async () => mocks.front,
 }));
 vi.mock('@rede-social/core/ui', () => ({ MediaImage: () => null }));
 vi.mock('./PurchaseControl', () => ({
@@ -116,6 +113,11 @@ async function renderPage(p: ProductDetail) {
 
 beforeEach(() => {
   mocks.permissions = [];
+  mocks.front = {
+    categories: STORE_BUILT_IN_CATEGORIES.map(({ slug, name, icon }) => ({ id: slug, name, icon })),
+    promoProductId: null,
+    featuredProductIds: [],
+  };
 });
 afterEach(cleanup);
 
@@ -207,14 +209,30 @@ describe('the "Imagem ao lado" layout (2026-10-24)', () => {
     expect(headings[0]?.getAttribute('data-testid')).toBe('store-product-name');
   });
 
-  it('draws the state pill beside the category chip ("Mentoria" reads as a service), with its glyph', async () => {
-    await renderPage(product({ owned: true }));
+  it('draws the state pill beside the category chip (the API says "servicos"), with its glyph', async () => {
+    await renderPage(product({ owned: true, category: 'servicos' }));
     const pill = screen.getByTestId('store-product-pill');
     expect(pill.textContent).toBe('Comprado');
     expect(pill.querySelector('svg')).not.toBeNull();
     const chip = pill.parentElement?.firstElementChild;
     expect(chip?.textContent).toBe('Serviço');
     expect(chip?.getAttribute('href')).toBe('/loja?categoria=servicos');
+  });
+
+  it('draws no category chip for a product with none, even when its name tells one (D-693)', async () => {
+    await renderPage(product({ name: 'Mentoria em grupo' }));
+    expect(screen.queryByTestId('store-product-category')).toBeNull();
+  });
+
+  it('draws no category chip when the store front cannot be read', async () => {
+    mocks.front = null;
+    await renderPage(product({ category: 'servicos' }));
+    expect(screen.queryByTestId('store-product-category')).toBeNull();
+  });
+
+  it('draws no chip for a category slug the store no longer holds', async () => {
+    await renderPage(product({ category: 'sumiu' }));
+    expect(screen.queryByTestId('store-product-category')).toBeNull();
   });
 
   it('orders the sections: about, the unlocks with their count, then the manager card', async () => {
