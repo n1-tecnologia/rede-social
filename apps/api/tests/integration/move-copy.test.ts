@@ -326,10 +326,12 @@ describe('the tracer: a seeded tenant is copied into a bootstrapped second datab
     // The table set is the catalog's, not a list: the public tables that carry tenant_id, minus
     // tenant_domains and tenant_modules. Each new tenant table moves the pin (12.1-12: 52 to 55, the
     // `profile_form_steps` table of Phase 12.1 plus `member_blocks` and `content_reports` of the reports and
-    // blocks work, which had left this number behind; 12.2-12: 55 to 56, the `profile_form_branches` table).
-    expect(plan.tables.length).toBe(56);
+    // blocks work, which had left this number behind; 12.2-12: 55 to 56, the `profile_form_branches` table;
+    // 12.3: 56 to 58, store_categories and store_front).
+    expect(plan.tables.length).toBe(58);
     expect(plan.tables.map((t) => t.name)).toContain('profile_form_steps');
     expect(plan.tables.map((t) => t.name)).toContain('profile_form_branches');
+    expect(plan.tables.map((t) => t.name)).toContain('store_categories');
     // 12.2-12 (PFORM-55, T-12.2-09): a branch and the question that opens it reference each other through two
     // DEFERRABLE keys, so the planner copies them as ONE group, after the steps and before the answers.
     expect(plan.groups.find((g) => g.includes('profile_form_branches'))).toEqual([
