@@ -23,6 +23,8 @@ import {
   NAVY,
   NEUTRAL_BRAND,
   normalizeBrandLook,
+  PHONE_MENU_MAX_KEYS,
+  phoneMenuSchema,
   relativeLuminance,
   resolveBranding,
   tenantBrandingSchema,
@@ -565,5 +567,45 @@ describe('own-art icon marker (09.3, D-562, D-563, PEND-10, PEND-11)', () => {
     const host = toHostBranding(resolveBranding({ iconOwnArt: true }));
     expect(host).not.toHaveProperty('iconOwnArt');
     expect(hostBrandingSchema.safeParse({ ...host, iconOwnArt: true }).success).toBe(false);
+  });
+});
+
+describe('the phone menu key of the stored brand (12.3-15, D-697)', () => {
+  const MENU = { bar: ['home', 'courses', 'store'], top: ['chat'], hidden: ['events'] };
+
+  it('an absent key adds nothing: parse({}) has no phoneMenu and resolve carries none', () => {
+    expect('phoneMenu' in tenantBrandingSchema.parse({})).toBe(false);
+    expect('phoneMenu' in resolveBranding({})).toBe(false);
+    expect(resolveBranding({}).phoneMenu).toBeUndefined();
+  });
+
+  it('a stored menu is carried by resolveBranding, and a rewrite rebuilt from it keeps it', () => {
+    expect(resolveBranding({ phoneMenu: MENU }).phoneMenu).toEqual(MENU);
+    const rewritten = resolveBranding(resolveBranding({ phoneMenu: MENU }));
+    expect(rewritten.phoneMenu).toEqual(MENU);
+  });
+
+  it('a corrupt stored value reads as the shell menu instead of throwing', () => {
+    for (const bad of [
+      'nope',
+      42,
+      { bar: 'home', top: [], hidden: [] },
+      { bar: ['Home'], top: [], hidden: [] },
+      { bar: ['home'], top: [], hidden: [], extra: true },
+    ]) {
+      expect(resolveBranding({ phoneMenu: bad }).phoneMenu).toBeUndefined();
+    }
+  });
+
+  it('the schema holds at most 16 keys per list, each matching the key pattern', () => {
+    const keys = (n: number) => Array.from({ length: n }, (_, i) => `k${i}`);
+    expect(PHONE_MENU_MAX_KEYS).toBe(16);
+    expect(phoneMenuSchema.safeParse({ bar: keys(16), top: [], hidden: [] }).success).toBe(true);
+    expect(phoneMenuSchema.safeParse({ bar: keys(17), top: [], hidden: [] }).success).toBe(false);
+    expect(phoneMenuSchema.safeParse({ bar: ['a b'], top: [], hidden: [] }).success).toBe(false);
+    expect(phoneMenuSchema.safeParse({ bar: ['-a'], top: [], hidden: [] }).success).toBe(false);
+    expect(phoneMenuSchema.safeParse({ bar: ['a'.repeat(33)], top: [], hidden: [] }).success).toBe(
+      false,
+    );
   });
 });

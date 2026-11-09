@@ -141,6 +141,15 @@ async function uploadBytes(
 const completeUpload = (token: string, uploadId: string, host?: string) =>
   request(`/v1/admin/branding/uploads/${uploadId}/complete`, token, { method: 'POST', host });
 
+const putMenu = (token: string, body: unknown, host?: string) =>
+  request('/v1/admin/branding/phone-menu', token, { method: 'PUT', body, host });
+
+const PHONE_MENU = { bar: ['home', 'courses', 'store'], top: ['chat'], hidden: ['events'] };
+
+async function storedMenu(tenantId: string): Promise<unknown> {
+  return (await brandRow(tenantId)).branding.phoneMenu;
+}
+
 const patchTenant = (token: string, body: unknown, host?: string) =>
   request('/v1/admin/tenant', token, { method: 'PATCH', body, host });
 
@@ -512,6 +521,50 @@ describe('last write wins between the super_admin and the admin (D-342)', () => 
       (await platformColors(ids.demo, { primary: '#1d4ed8', secondary: '#60a5fa' })).status,
     ).toBe(200);
     expect(await storedPrimary(ids.demo)).toBe('#1d4ed8');
+  });
+});
+
+describe('phone menu (12.3-15, D-697)', () => {
+  it('an admin saves a valid phone menu: 200 no-store, the brand carries it and the stored jsonb holds it', async () => {
+    const labBefore = await brandRow(ids.lab);
+    const res = await putMenu(tokens.admin, PHONE_MENU);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect((await adminBrand(res)).tenant.branding.phoneMenu).toEqual(PHONE_MENU);
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+    expect(await brandRow(ids.lab)).toEqual(labBefore);
+
+    const read = await adminBrand(await request('/v1/admin/branding', tokens.admin));
+    expect(read.tenant.branding.phoneMenu).toEqual(PHONE_MENU);
+    const bootstrap = await request('/v1/me/bootstrap', tokens.admin);
+    const shell = (await bootstrap.json()) as { tenant: { branding: { phoneMenu?: unknown } } };
+    expect(shell.tenant.branding.phoneMenu).toEqual(PHONE_MENU);
+  });
+
+  it('phone menu keeps: a logo upload completion, a colour save and an icon-override removal leave the saved menu as it was', async () => {
+    expect((await putMenu(tokens.admin, PHONE_MENU)).status).toBe(200);
+
+    const logo = await uploadBytes(tokens.admin, 'logo', LOGO_PNG);
+    expect((await completeUpload(tokens.admin, logo.uploadId)).status).toBe(200);
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+
+    const colours = await putColors(tokens.admin, { primary: '#0f766e', secondary: '#14b8a6' });
+    expect(colours.status).toBe(200);
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+
+    const icon = await uploadBytes(tokens.admin, 'icon', SQUARE_PNG);
+    const completed = await adminBrand(await completeUpload(tokens.admin, icon.uploadId));
+    expect(completed.tenant.branding.iconUrl).not.toBeNull();
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+
+    const removed = await request('/v1/admin/branding/icon', tokens.admin, { method: 'DELETE' });
+    expect(removed.status).toBe(200);
+    expect((await adminBrand(removed)).tenant.branding.iconUrl).toBeNull();
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+    expect(
+      (await adminBrand(await request('/v1/admin/branding', tokens.admin))).tenant.branding
+        .phoneMenu,
+    ).toEqual(PHONE_MENU);
   });
 });
 

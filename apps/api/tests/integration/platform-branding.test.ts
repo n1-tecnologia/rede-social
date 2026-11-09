@@ -751,6 +751,50 @@ describe('square-icon override — set, derive from it, remove, derive from the 
   });
 });
 
+describe('phone menu keeps — the platform-lane writers rebuild the whole brand (12.3-15, RESEARCH Pitfall 1)', () => {
+  const MENU = { bar: ['home', 'courses'], top: ['chat'], hidden: ['events'] };
+  const SQUARE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="#10b981"/></svg>`;
+  let tenantId = '';
+
+  async function stored(): Promise<unknown> {
+    const [row] = await adminSql<{ menu: unknown }[]>`
+      select branding->'phoneMenu' as menu from public.tenants where id = ${tenantId}::uuid`;
+    return row?.menu;
+  }
+
+  it('0. fixture: a tenant with a saved menu', async () => {
+    tenantId = (await createThrowawayTenant('pb-menu')).id;
+    await adminSql`
+      update public.tenants set branding = branding || ${adminSql.json({ phoneMenu: MENU })}
+       where id = ${tenantId}::uuid`;
+    expect(await stored()).toEqual(MENU);
+  });
+
+  it('1. phone menu keeps: a logo upload completion leaves it', async () => {
+    const { res } = await uploadAndComplete(tenantId, 'logo', 'image/png', LOGO_PNG);
+    expect(res.status).toBe(200);
+    expect(await stored()).toEqual(MENU);
+  });
+
+  it('2. phone menu keeps: a colour save leaves it', async () => {
+    const res = await putColors(tenantId, { primary: '#1d4ed8', secondary: '#60a5fa' });
+    expect(res.status).toBe(200);
+    expect(await stored()).toEqual(MENU);
+  });
+
+  it('3. phone menu keeps: an icon-override removal leaves it', async () => {
+    const squarePng = (
+      await deriveIconSet(Buffer.from(SQUARE_SVG), { primaryHex: PRIMARY, mime: 'image/svg+xml' })
+    ).i512;
+    const { res } = await uploadAndComplete(tenantId, 'icon', 'image/png', squarePng);
+    expect(res.status).toBe(200);
+    expect(await stored()).toEqual(MENU);
+    const removed = await platform(`/tenants/${tenantId}/branding/icon`, { method: 'DELETE' });
+    expect(removed.status).toBe(200);
+    expect(await stored()).toEqual(MENU);
+  });
+});
+
 describe('own-art icon (09.3, D-562, D-563)', () => {
   const SQUARE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="#10b981"/></svg>`;
   const GREEN = { r: 16, g: 185, b: 129, a: 255 };
