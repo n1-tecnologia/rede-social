@@ -4090,6 +4090,367 @@ the two migrations and the conversion on one hosted project that holds 12.1 rows
 depth-3 form; the Playwright spec run under the free-space watchdog; your reading of the design and the open
 product calls; this release order itself; and the later cleanup.
 
+## Phase 12.3 release (the November front's backend)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 12.3 has been pushed, deployed or applied to a hosted project, and no agent touches homolog or production.
+No command here prints a secret. Phase 12.3 ships ON TOP of the Phase 12, 12.1 and 12.2 releases above. The proofs
+only the owner can run (a real phone, the homolog deploy, every hosted project, the browser runs that need more
+disk than the build machine had, the reading of the defaults the planner took) are in the ledger
+`.planning/phases/12.3-pendencias-de-backend-do-front-de-novembro/12.3-MANUAL-PROOFS.md`; it ships with every row
+`pending`, and a row becomes `passed` only with the evidence you paste and your own date.
+
+Phase 12.3 turns the ten items of Part 1 of the team's November document (the member area, the store and the
+app menu) from per-device cookies and browser-only previews into things the backend keeps, in four blocks, each
+with its own release notes below:
+
+| Block | Items | What the backend keeps | Migration |
+|-------|-------|------------------------|-----------|
+| A | 1.1 | the three track texts (subtitle, "Para quem é", description) on the member read | none |
+| B | 1.2 to 1.5 | the second cover of a track, a course, a module (the "Topo") and of an event (the vertical poster) | one file |
+| C | 1.6 to 1.9 | the Início's "Destaque da loja", the storefront's "Em destaque", the store's own categories and each product's category | three files |
+| D | 1.10 | the phone menu the admin arranged, returned by the bootstrap | none |
+
+### Read-only check on EVERY hosted project (run before anything else)
+
+Run these three queries on each hosted tenant project, **including the one that holds several tenants**, in the
+Supabase SQL editor or with `psql` and a read-only role. They only read. Paste the shapes and counts in the
+ledger; never a project reference or a tenant name.
+
+```sql
+-- A. Is any of this release already on the project? (expected before the release: two nulls)
+select to_regclass('public.store_categories'), to_regclass('public.store_front');
+-- B. How many products will the one-time load of Block C classify, per tenant?
+select tenant_id, count(*) as products from public.store_products group by tenant_id;
+-- C. Which of this release's versions are already recorded?
+select version from supabase_migrations.schema_migrations
+ where version in ('20261109185807', '20261109190836', '20261109190954', '20261109191045') order by version;
+-- expected before the release: no row
+```
+
+The release is correct whatever these show; they tell you how long the load will take (B) and whether a project is
+already ahead (A and C). A project with no product (the central project, a store never used) is left to the lazy
+seed and gets no row from the load.
+
+### The web releases ONCE, after Block D's API is in production
+
+The web of this branch carries the team's whole front and every rewiring of the four blocks. It reads routes and
+fields the new API returns, and it parses the answers with strict contracts. So:
+
+- **A web build that calls a route the API does not have yet must never reach production** (D-696). Block A, B, C
+  and D each release their migrations, API and worker alone and early; the web goes out **once**, after the API
+  of block D is live on every project (D-699).
+- **If the web is released per block instead, that conflicts with D-695** (the cookies are ignored and nothing is
+  imported, so a web ahead of its API would lose what the admin set) **and the decision must be reopened first.**
+- **Every new answer key is optional** in the contracts, so a web that does not know a key keeps working and the
+  bootstrap strips what it does not know. This is what lets the API go first.
+- **What the old web does against the new API during the window** (the web is the previous release for as long as
+  you keep it): it never reads the new keys; it sends no category on a product create (the server applies the name
+  guess, see Block C); it saves an event without the poster key (the poster is cleared, see Block B); it never
+  calls the phone-menu route (the menu is simply not used).
+
+### The five cookies are ignored; the old choices are NOT migrated (D-695)
+
+Once the API answers, the web ignores the five per-device cookies of the provisional front: the Início's
+featured product (`rede_home_promo`), the store setup with its featured list and categories (`rede_store_setup`),
+the product categories (`rede_store_cats`), the phone menu (`rede_nav_layout`) and its older bar-order cookie
+(`rede_nav_order`). The code that read and wrote them is deleted. **Their values are not imported anywhere:** a
+school's admin who had arranged the featured product, the featured list, the order of the categories or the phone
+menu in a browser must set them again, once, in the screens that now save to the server (they apply to every
+member from then on). Nothing in this release promises that an old per-device choice carries over; tell each
+school's admin before the web is released (ledger row M16).
+
+### Order, common to the four blocks: migrations on every tenant project, then the API and the worker together from a REBUILT image, then (once, last) the web
+
+1. **Local checks first.** `pnpm db:migrate-all -- --dry-run` lists what is pending per project and writes
+   nothing; the four migration files below must be the pending ones on a project that already has Phase 12.2.
+   `bash scripts/db-two-databases.sh --reset` (`pnpm db:two`) applies the whole tenant set to an empty local
+   second database.
+2. **The migrations reach EVERY tenant project through the ledgered `migrateAll`** (the Phase 09.2 Cloud Run Job,
+   D-544: databases before API and worker), in the order of their timestamps: the covers file first, then the
+   three store files (`20261109185807_second_covers.sql`, `20261109190836_store_categories.sql`,
+   `20261109190954_store_categories_functions.sql`, `20261109191045_store_categories_backfill.sql`). Blocks A and
+   D add no migration. The runner is serialised per database and idempotent, so a re-run is safe.
+3. **Rebuild the API image.** The image bakes the migrations manifest (built by
+   `scripts/build-migrations-manifest.mjs`); an image built before these files does not know them, and a
+   production boot without the manifest stops with `migrations manifest empty`.
+4. **The API and the worker TOGETHER**, from that rebuilt image, as in the Phase 09.2 pipeline. The worker does
+   not use any of this, but one image keeps the two revisions equal.
+5. **The web LAST and ONCE**, after block D's API is live everywhere.
+
+These steps are consecutive; nothing else belongs between them. An **interrupted fan-out on one project is
+re-run safely**: the covers file is plain column additions, and the store load is idempotent (the marker row is
+claimed in one statement and every update is guarded by "category still empty"), so running the Job again on the
+project that stopped half-way finishes it and changes nothing on the others. **Why this order.** The migrations
+only add (columns, tables, functions) and the previous API revision never selects the new columns and tables, so
+it keeps working against the new database; the reverse is the dangerous one: the new API reads the new columns and
+calls the new functions, so applying it before the migrations would fail the first read, and the schema gate holds
+such a project out as `updating`.
+
+### Block A: the track texts (no migration)
+
+**What ships.** `GET /v1/courses/learn/tracks` (the member read of tracks) returns each active track's `subtitle`,
+`audience` ("Para quem é") and `description` from the columns `course_tracks` already had, as strings that are empty
+when the admin left them empty (the web treats an empty string as absent). The contract keys were already
+optional, so nothing in a schema changed. The web drops the admin-only local preview that fetched the texts from
+the management read.
+
+**Order.** API and worker only (rebuilt image, no migration). The web with the rest, once.
+
+**What keeps the previous API revision working.** There is nothing to keep: the previous API returns no texts and
+the web reads an absent key as empty.
+
+**Rollback limit.** Roll the API back freely; the texts keep showing as empty until it is forward again.
+
+**Smoke checks.** A member of a tenant with a track that has a subtitle, an audience and a description opens the
+tracks tab (or calls `GET /v1/courses/learn/tracks`): the three texts are there; an archived track and another
+tenant's track are not.
+
+### Block B: the second covers (one migration)
+
+**What ships.** One expand-only migration, `20261109185807_second_covers.sql` (generated): five optional uuid
+columns, each with a plain foreign key to `media_assets` (`on delete no action`) and nothing else: no default, no
+NOT NULL, no backfill, no index. They are `course_tracks.top_cover_asset_id`, `courses.top_cover_asset_id`,
+`course_modules.cover_asset_id`, `course_modules.top_cover_asset_id` and `events.poster_asset_id`.
+
+- **The API.** Create and edit of a track, a course and a module accept the Topo (`topCoverAssetId`, and for a
+  module also `coverAssetId`); create and edit of an event accept `posterAssetId`. A new image id goes through the
+  same checker as the card cover: it must be a ready image of the `cover` purpose of the same tenant. The reads
+  return the new keys (optional; `null` when empty); the events list returns the poster and its width ladder
+  (`posterVariantWidths`). The member's course read returns each module's two images through **one extra
+  statement** in the same read transaction (the lesson read is untouched).
+- **The refusals.** For courses, tracks and modules every miss of an image id (wrong purpose or kind, not ready,
+  unknown, another tenant's) is **one `400` with `details.courses` = `cover_invalid` or `top_cover_invalid`**; it
+  is not a bare `404` (the shared checker answers one code on purpose, so the answer never tells a foreign id from
+  an unknown one; this differs from the plan's prose, decided in the plan 04 summary). For events a foreign,
+  unknown or retired poster id is a bare `404` and a wrong purpose, kind or status is `400` with `details.event` =
+  `poster_invalid` (singular `event`, like the existing cover refusals).
+- **The fallbacks are the web's, never the API's** (D-69: a missing cover takes the brand gradient). A track or
+  course Topo falls back to its card cover; a module card falls back to the course's cover; a module Topo falls
+  back to its own card cover, then the course's; the events list draws the poster, else the horizontal cover.
+- **The web.** The forms send the second image: on create both ids are always sent, on an edit of a track, course
+  or module **an image id is sent only when it changed** (`null` for a removal), which is the forms' existing
+  patch rule and differs from the plan's prose ("both on every save"); the event form always re-sends
+  `posterAssetId`.
+
+**Order.** The migration on every tenant project, then the API and the worker (rebuilt image), then the web once.
+
+**What keeps the previous API revision working.** It never selects the five columns, so it keeps working against
+the new schema and leaves them untouched (an event saved through the previous API keeps its poster).
+
+**An older web saving an event without the poster key CLEARS the stored poster.** The event `PUT` is a whole
+replacement: against the new API an absent `posterAssetId` means "no poster", exactly as an absent `coverAssetId`
+means "no cover". This is acceptable only because the web ships last and the new web always re-sends the poster
+it read; it is the reason a web older than this branch must not edit events after the API of this block is live
+(NOVF-11: the poster is cleared across the window, nothing else is).
+
+**Rollback limit.** The migration is never rolled back (forward-only). The previous API against the new schema
+works; the stored second covers stay in the columns and are simply not shown. Rolling the web back removes the
+second blocks of the forms.
+
+**Smoke checks.** On a tenant project after the Job:
+
+```sql
+select table_name, column_name from information_schema.columns
+ where table_schema = 'public' and (table_name, column_name) in (
+   ('course_tracks', 'top_cover_asset_id'), ('courses', 'top_cover_asset_id'),
+   ('course_modules', 'cover_asset_id'), ('course_modules', 'top_cover_asset_id'),
+   ('events', 'poster_asset_id'));
+-- five rows
+select version from supabase_migrations.schema_migrations where version = '20261109185807';
+-- one row
+```
+
+And through the app, as an admin: a course saved with a Topo shows it on the member's course page; a module saved
+with its two images shows them on the module card and page; an event saved with a poster shows it on the events
+list and keeps it after a rename.
+
+### Block C: the store (three migration files, one one-time load)
+
+**What ships.** Three migration files, applied in this order, all expand-only:
+
+- `20261109190836_store_categories.sql` (generated): the table `store_categories` (a slug, a name of 1 to 30
+  characters, an icon, a position, `unique (tenant_id, slug)` and `unique (tenant_id, lower(name))`, RLS with
+  writes for `admin_tenant` only), the table `store_front` (one row per tenant: the Início's promo product, the
+  featured list of at most 5, and the marker `categories_seeded_at`, RLS) and the optional
+  `store_products.category_id` (`on delete set null`: deleting a category leaves its products with none).
+- `20261109190954_store_categories_functions.sql` (custom): `revoke truncate` on the two new tables;
+  `app.store_guess_category(text)`, the web's name rule ported to SQL; `app.store_seed_categories_for(uuid)`, the
+  owner-only seam that claims the once-only marker and writes the eight built-in categories (cursos, livros,
+  materiais, roupas, perfumes, equipamentos, servicos, outros); `app.store_seed_categories()`, the tenant-pinned
+  lazy seed granted to `authenticated`; and `app.store_categories_initial_load()`, owner-only.
+- `20261109191045_store_categories_backfill.sql` (custom): the one call of the initial load.
+
+**The API.** `GET /v1/store/front` (categories, the featured list, the promo product, readable by every member of
+a tenant with the store on), `PUT /v1/store/front/promo`, `PUT /v1/store/front/featured` and
+`PUT /v1/store/categories` (the whole list replaced in one call, atomic under a row lock), all three writes behind
+`store.product.manage`; product create and edit accept `category` (the category's slug; `null` is "Sem
+categoria"), and the product card and page return it. The limits are the server's, exported through the store
+contract: at most 20 categories, a name of at most 30 characters (counted in code points, unique ignoring case), one
+of 20 icons; at most 5 featured products. A category's identity in the contract is its **slug**, set at creation
+and unchanged by a rename, so a `?categoria=` link keeps working; the eight built-ins keep their own slugs.
+
+**The one-time initial load (D-692, costly).** It is run by the **third file** in **every** project, driven by the
+products that physically exist in that project and never by `tenant_modules` rows (the central project holds
+mirrors of tenants that live elsewhere and must keep no store row). For every tenant that has at least one product
+in the project and no marker, it writes the eight built-in categories and puts each of its uncategorised products
+in the category its name suggests, **with the same rule the web used** (a name that matches nothing goes to
+"Outros"), and **it does not touch `updated_at`**. A tenant with no product gets nothing from the load: its
+categories are seeded by the first read or write of its store (the lazy seed, once per store, by the marker). The
+seeding runs once per store and never again, so an admin who deleted a category or all of them is not re-seeded.
+The load prints one notice per project (`store categories: N store(s) seeded, M product(s) categorized by name`);
+keep the numbers for ledger row M12.
+
+**The emergency undo query (the owner's, never run by an agent).** The load is the one costly, hard-to-reverse step
+of the phase. If it must be undone, undo **only** what it wrote and nothing an admin chose afterwards: the
+products with a category whose `updated_at` is not after the tenant's marker, i.e. rows never edited since the
+load.
+
+```sql
+update public.store_products p
+   set category_id = null
+  from public.store_front f
+ where f.tenant_id = p.tenant_id
+   and f.categories_seeded_at is not null
+   and p.category_id is not null
+   and p.updated_at <= f.categories_seeded_at;
+```
+
+Count first with `select count(*)` and the same `from` and `where`. A product an admin edited after the load has
+a later `updated_at` and is not touched, so a category the admin chose is not erased; a product the admin edited
+for any other reason (a price) after the load keeps the loaded category, which is the safe side. The categories
+and the marker rows themselves stay (an admin may already use them). Run it per project, and try it on the
+homolog project first.
+
+**Products created through the previous API between the load and the new API.** The load categorises what exists
+when the Job runs. A product the previous API creates after that (a window of minutes if the API follows the Job at
+once) has no category, and the new web does not guess any (D-693). The new API covers the window that matters: a
+create with **no `category` key** (an older web) gets the server's name guess, an explicit `null` is "Sem
+categoria", so D-693 holds across the web's window. For the rare product left without a category by the old API,
+the admin picks one in the product form; the read-only count is
+`select count(*) from public.store_products where category_id is null` per project.
+
+**Order.** The three files in timestamp order (after the covers file), on every project; then the API and the
+worker; then the web once. The Job must reach every project **before** the API.
+
+**What keeps the previous API revision working.** It never reads the two tables, the column or the functions, so it
+keeps serving products, orders and access exactly as before; a product it creates simply has no category until
+the new API is live. The tenant move engine derives its tables from the catalogue: the two new tables are copied
+with a tenant (its test pins the table count at 58); `store_front` and `store_categories` carry only the tenant's
+own rows.
+
+**Rollback limit.** Migrations are never rolled back (forward-only). The previous API against the new schema
+works. The one costly step is the load: its undo is the owner's query above, per project, and it is meaningful
+only until admins start editing products. Rolling the web back brings the cookies' provisional screens back
+(and none of the saved choices show in them).
+
+**Smoke checks.** On a tenant project after the Job (read-only):
+
+```sql
+select to_regclass('public.store_categories'), to_regclass('public.store_front');
+-- both non-null
+select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and proname in ('store_guess_category', 'store_seed_categories_for',
+   'store_seed_categories', 'store_categories_initial_load');
+-- four rows
+select version from supabase_migrations.schema_migrations
+ where version in ('20261109190836', '20261109190954', '20261109191045') order by version;
+-- three rows
+select tenant_id, count(*) from public.store_categories group by tenant_id;
+-- eight for every tenant that had products, before any admin edit
+select count(*) from public.store_products p
+  join public.store_front f on f.tenant_id = p.tenant_id
+ where p.category_id is null and f.categories_seeded_at is not null;
+-- 0 right after the load
+select count(*) from public.store_products p
+  join public.store_front f on f.tenant_id = p.tenant_id
+ where p.updated_at > f.categories_seeded_at;
+-- 0 right after the load: no product's updated_at moved because of it
+```
+
+Through the app, as a member of a tenant with the store on: the storefront answers `GET /v1/store/front` with the
+eight categories and each existing product sits in the shelf its name suggests (the storefront is the same as the
+day before); as the admin, saving the featured list or the categories is seen by another member on the next load.
+
+### Block D: the phone menu (no migration)
+
+**What ships.** The tenant keeps the menu its admin arranged in its brand: a new optional key `phoneMenu`
+(`{ bar, top, hidden }`, three lists of keys) in `tenants.branding`, absent meaning "the shell's own menu", added
+with no backfill. `PUT /v1/admin/branding/phone-menu` (saves) and `DELETE /v1/admin/branding/phone-menu` (clears:
+"Restaurar o padrão") for a caller holding `tenant.manage`. The server validates the rules the web applied: the
+bar holds 2 to 6 items, the top at most 2 own items, Início only in the bar and required there, Perfil never at
+the top, no key in two lists, each key `^[a-z0-9][a-z0-9-]{0,31}$`, at most 16 keys per list. A rule refusal is
+`400` with `details.phoneMenu` one of `bar_too_small`, `bar_too_large`, `top_too_large`, `key_repeated`,
+`home_not_in_bar`, `profile_at_top`; 17 keys in one list is a plain `400` from the body schema; the server does not
+reject an unknown key (a key with no item, a module off, is ignored by the shell). The bootstrap returns it inside
+the tenant's branding (`branding.phoneMenu`, optional). **It is an authenticated fact and never enters the public
+by-host answer.** One menu per school, the same for every role, phone only; the desktop menu does not change.
+Saving a logo, colours or the app icon keeps the menu (the three branding writers that rebuild the brand now carry
+it).
+
+**Order.** API and worker (rebuilt image), no migration. The web once.
+
+**What keeps the previous API revision working.** Until the web is released nobody calls the route, and the
+previous API has no menu. **Three keeps-the-menu guarantees hold on the new API:** a logo upload, a colour change
+and an icon removal do not drop a saved menu; clearing removes only that key; a corrupt stored value reads as "the
+shell's own menu".
+
+**The phone-menu save fails until block D's API is in production.** The web of this branch can show the editor
+only after the API answers the route; a web released earlier would answer its save with the generic failure
+sentence (this is one more reason the web ships last).
+
+**Rollback limit.** Rolling the API back to a revision **older than this block** is not harmless: the previous
+branding writers (logo upload, colours, icon removal) rebuild the brand from its resolved shape and would drop the
+`phoneMenu` key on the next save, silently erasing the menu. So after an admin has saved a menu, do not roll the
+API back past this block without telling that school's admin; the stored value is in `tenants.branding` and can be
+re-saved from the editor.
+
+**Smoke checks.** As an admin of a test tenant: save a menu in Configurações, Menu do app; the bootstrap of a
+**member of the same tenant** carries `branding.phoneMenu` and their phone chrome follows it on the next load; the
+public by-host answer of the same tenant does **not** carry it; "Restaurar o padrão" removes it; saving a logo
+afterwards keeps a saved menu.
+
+### Notes for the reader of this release
+
+- **The behaviours that differ from the plan text**, so the verifier is not surprised: a foreign or unknown image
+  id on a course, track or module is a `400` by name, not a bare `404` (above); an edit sends the changed image ids
+  only (above); `top_cover_invalid` is a new `COURSE_ISSUES` code the web maps to its own sentence; the category
+  order of the front is `position, slug`; the whole-list categories save folds names itself (NFC, code points) and
+  refuses a name over 30 characters with `category_name_too_long`.
+- **Slug history gap (categories save).** "A slug the tenant ever held is never minted again" is enforced inside
+  one save (a new row never reuses a slug deleted in the same save) but not across saves: there is no slug-history
+  table (a new table would have been an architectural change), so a slug deleted in an earlier save can be minted
+  again by a later one. Products lose their category on delete, so no product keeps a stale slug; only an old
+  bookmarked `?categoria=` link could land on a different category.
+- **A known name-rule divergence.** `unaccent` also folds letters NFD does not decompose, so a name such as
+  "Łed" is classified `equipamentos` by the SQL load and `outros` by the old web; the shared corpus of 68 names
+  proves the two rules agree everywhere else and pins this one case.
+- **The web-build lesson of the wave 6 gate.** A client component must import the client-safe contracts subpath
+  (for example `@rede-social/contracts/branding`), never the package index: the index pulls `node:fs` into the
+  client bundle and only `next build` catches it. The static-routes check (`check:static-routes`) therefore also
+  needs a **fresh** build; run `next build` before it and before releasing the web.
+- **A bisect caveat.** The commit `fdbec456` (the phone menu's read path) does not type-check alone: it deletes
+  what the editor still imported and the next commit, `9f06e218`, restores it. Do not bisect to it.
+- **Provisional states removed by the web.** The four store and menu cookies and the older bar-order cookie, and
+  the admin-only local preview of the track texts. The "Continue de onde parou" 40% example shown to the admin stays
+  as a layout aid (the API stores no admin progress).
+- **Not done here, by decision.** Selling physical goods (shipping, stock, sizes) needs checkout and the payment
+  gateway: its own phase. A menu per role or per language: not needed while one menu per school is enough.
+- **The e2e debt the web release must clear first.** `store.spec.ts` still asserts a list named "Produtos de
+  {tenant}" (around lines 229, 430 and 583) that the storefront redesign no longer draws, and its `createProduct`
+  fixture inserts products with no category, which on the API-driven storefront sit in no shelf; the web plans of
+  this phase could not run Playwright (disk, no server). An end-to-end pass on a running stack is needed before the
+  web ships (ledger row M14).
+
+### Manual proofs (hosted)
+
+The ledger lists them (M1 to M16): the phone menu, the covers, the storefront and the Início's featured product on a
+real phone; the visual backstops at 320 and 390 px; the homolog deploy and its smoke checks; the read-only check on
+every hosted project; each block's production steps in order and then the web once; the hosted check of the
+categories and of the untouched `updated_at`; the Playwright specs that could not run; your reading of the
+planner's answers OQ-1 to OQ-6 and the defaults PU-1 to PU-7; and telling each school's admin to set their choices
+again.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
