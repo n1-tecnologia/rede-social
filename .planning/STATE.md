@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "12.3"
 current_phase_name: Pendências de backend do front de novembro
-current_plan: 1
-status: executing
-stopped_at: "Phase 12.2 EXECUTED 21/21 on 2026-11-06 (nothing pushed, 154 commits ahead of origin/master): code review 0 critical/4 warnings (WR-01..04), regression gate green, verification human_needed 16/16 truths in code; 8 owner items (M1..M8) persisted as 12.2-UAT.md; phase NOT marked complete; next /gsd-verify-work 12.2 after Igor's proofs; Phase 13 stays paused at plan 14; planned ahead: Phase 12.3 UI-SPEC approved 2026-11-09 (next /gsd-plan-phase 12.3), STATE pointer stays on 12.2"
-last_updated: "2026-11-09T18:52:15.767Z"
+current_plan: 17
+status: verifying
+stopped_at: "Phase 12.3 EXECUTED 17/17 on 2026-11-09 (nothing pushed, local commits ahead of origin/master): code review 0 critical/3 warnings (WR-01..03, open), regression gate green (turbo typecheck+test 41/41), verification human_needed 12/12 truths in code; 6 owner items (M1..M16 ledger) persisted as 12.3-UAT.md; exit gate stopped at pnpm lint (team front merge findings, not 12.3's) and the six Playwright specs never ran (owner row M14); phase NOT marked complete; next /gsd-verify-work 12.3 after Igor's proofs; Phase 12.2 still awaits its own verify-work (12.2-UAT.md) and Phase 13 stays paused at plan 14"
+last_updated: "2026-11-09T23:00:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Phase 12.3 execution started
+last_activity_desc: Phase 12.3 executed, verification human_needed
 state_head: 1e3e20adc5160d3391a6b5cca01754f6444691e9
 progress:
   total_phases: 31
   completed_phases: 0
   total_plans: 401
-  completed_plans: 356
+  completed_plans: 373
   percent: 0
 ---
 
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 12.3 (Pendências de backend do front de novembro) — EXECUTING
-Current Plan: 1
+Phase: 12.3 (Pendências de backend do front de novembro) — EXECUTED, VERIFICATION human_needed
+Current Plan: 17
 Total Plans in Phase: 17
-Plan: 1 of 17
-Status: Executing Phase 12.3
-Last activity: 2026-11-09 — Phase 12.3 execution started
+Plan: 17 of 17
+Status: Phase executed, awaiting the owner's proofs (12.3-UAT.md)
+Last activity: 2026-11-09 — Phase 12.3 executed, verification human_needed
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
