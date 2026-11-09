@@ -49,6 +49,7 @@ import {
   memberAreaRedirectHref,
   memberLessonRowView,
   memberTracksHref,
+  modulePageView,
   newLessonView,
   optionalWords,
   otherTrackView,
@@ -2295,5 +2296,27 @@ describe("trackDetailView: the track's own texts from the member read (NOVF-01, 
       audience: 'Quem está começando',
       description: null,
     });
+  });
+});
+
+describe("modulePageView: the module's own images from the member read (NOVF-03, UI-D-692)", () => {
+  const CARD = '99999999-9999-4999-8999-999999999991';
+  const TOP = '99999999-9999-4999-8999-999999999992';
+  const COURSE_COVER = '99999999-9999-4999-8999-999999999993';
+
+  it("carries the module's stored card cover and Topo beside the course cover, null for an older answer", () => {
+    const withImages = course({
+      coverAssetId: COURSE_COVER,
+      modules: [mod(1, [lesson(1)], { coverAssetId: CARD, topCoverAssetId: TOP })],
+    });
+    const view = modulePageView(withImages, uuid(101), false, t);
+    expect(view?.coverAssetId).toBe(COURSE_COVER);
+    expect(view?.moduleCoverAssetId).toBe(CARD);
+    expect(view?.moduleTopCoverAssetId).toBe(TOP);
+
+    const older = course({ coverAssetId: COURSE_COVER, modules: [mod(1, [lesson(1)])] });
+    const bare = modulePageView(older, uuid(101), false, t);
+    expect(bare?.moduleCoverAssetId).toBeNull();
+    expect(bare?.moduleTopCoverAssetId).toBeNull();
   });
 });

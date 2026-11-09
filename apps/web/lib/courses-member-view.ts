@@ -2609,7 +2609,11 @@ export interface ModulePageView {
   courseId: string;
   courseTitle: string;
   courseHref: string;
+  /** The COURSE's cover: the last rung of the module's fallback ladder and the lesson cards' art. */
   coverAssetId: string | null;
+  /** The module's own card cover and Topo as stored, null when empty; the page picks (D-696, D-699). */
+  moduleCoverAssetId: string | null;
+  moduleTopCoverAssetId: string | null;
   moduleId: string;
   numeral: string;
   title: string;
@@ -2648,6 +2652,8 @@ export function modulePageView(
     courseTitle: course.title,
     courseHref: memberCourseHref(course.id, preview),
     coverAssetId: course.coverAssetId,
+    moduleCoverAssetId: module.coverAssetId ?? null,
+    moduleTopCoverAssetId: module.topCoverAssetId ?? null,
     moduleId: module.id,
     numeral,
     title: module.title,

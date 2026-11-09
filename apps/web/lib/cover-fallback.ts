@@ -32,3 +32,38 @@ export function trackTopCover(track: TopCoverIds): string | null {
 export function courseTopCover(course: TopCoverIds): string | null {
   return topOrCard(course);
 }
+
+/**
+ * A module's two images, 12.3-08 (NOVF-03, UI-D-692, PU-2, D-696, D-699). Like the Topo above, the API
+ * answers each AS STORED (its own `coverAssetId` and `topCoverAssetId`, or null) and the sheet never
+ * writes one into the other or the course's cover into either, so the page decides what to draw. Both
+ * keys are optional in the input: an older answer lacks them (D-696) and reads as "no image".
+ */
+export interface ModuleCoverIds {
+  /** The module's own card cover; null or absent when it has none. */
+  coverAssetId?: string | null | undefined;
+  /** The module's own Topo; null or absent when it has none. */
+  topCoverAssetId?: string | null | undefined;
+}
+
+/**
+ * The image of a module's CARD (the course page's "Módulos"): its own card cover, else the course's
+ * cover, else null (the card then draws the brand gradient).
+ */
+export function moduleCardCover(
+  module: Pick<ModuleCoverIds, 'coverAssetId'>,
+  courseCoverAssetId: string | null,
+): string | null {
+  return module.coverAssetId ?? courseCoverAssetId;
+}
+
+/**
+ * The image at the top of a module's PAGE: its own Topo, else its own card cover, else the course's
+ * cover, else null (the page then draws the brand gradient).
+ */
+export function moduleTopCover(
+  module: ModuleCoverIds,
+  courseCoverAssetId: string | null,
+): string | null {
+  return module.topCoverAssetId ?? module.coverAssetId ?? courseCoverAssetId;
+}

@@ -5,6 +5,7 @@ import { BookOpen, CircleCheck, Play } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import type { ModulePageView } from '@/lib/courses-member-view';
 import type { CoursesTranslator } from '@/lib/courses-view';
+import { moduleTopCover } from '@/lib/cover-fallback';
 import {
   DETAIL_GRID,
   HeroChip,
@@ -19,7 +20,8 @@ import { riseStyle } from '../../../rise';
  * what the course page's module card opens. Top to bottom:
  *
  *  - on a phone, the sticky `PageHeader` (back to the course);
- *  - the reference's hero: the course cover as the ground with the module's name drawn very large
+ *  - the reference's hero: the module's Topo as the ground (else its card cover, else the course's
+ *    cover, else the brand gradient: `moduleTopCover`, 12.3-08) with the module's name drawn very large
  *    and faint behind the words, the way back to the course (from `md`), the title (the page's h1),
  *    "Aprofunde seus conhecimentos com as aulas deste módulo.", the chips ("12 aulas",
  *    "1 concluídas", "8% completo") and the module's next lesson ("Começar aula" / "Retomar aula");
@@ -50,7 +52,10 @@ export async function MemberModulePage({ view }: { view: ModulePageView }) {
 
         <MemberDetailHero
           back={{ href: view.courseHref, label: view.courseTitle }}
-          coverAssetId={view.coverAssetId}
+          coverAssetId={moduleTopCover(
+            { coverAssetId: view.moduleCoverAssetId, topCoverAssetId: view.moduleTopCoverAssetId },
+            view.coverAssetId,
+          )}
           eyebrow={view.pill}
           title={view.title}
           description={t('courses.member.modulePage.sub')}

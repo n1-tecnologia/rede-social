@@ -16,7 +16,7 @@ import {
   moduleCardViews,
 } from '@/lib/courses-member-view';
 import { type CoursesTranslator, formatCourseDuration } from '@/lib/courses-view';
-import { courseTopCover } from '@/lib/cover-fallback';
+import { courseTopCover, moduleCardCover } from '@/lib/cover-fallback';
 import { memberScreenHref } from '@/lib/member-area';
 import { getCourseAccess } from '@/lib/store';
 import { lockedCourseView } from '@/lib/store-view';
@@ -83,6 +83,8 @@ export async function MemberCoursePage({ course, preview, storeOn }: MemberCours
   });
   const curriculum = curriculumView(course, preview, t);
   const modules = moduleCardViews(course, preview, t);
+  // 12.3-08: each module card draws its own card cover, else the course's (UI-D-692).
+  const outlineById = new Map(course.modules.map((outline) => [outline.id, outline]));
   const noLessons = curriculum.lessonCount === 0;
   const archived = locked && access?.archivedTag === true;
   const duration = formatCourseDuration(courseSeconds(course));
@@ -296,7 +298,10 @@ export async function MemberCoursePage({ course, preview, storeOn }: MemberCours
                     pill={module.pill}
                     meta={module.meta}
                     state={module.state}
-                    coverAssetId={course.coverAssetId}
+                    coverAssetId={moduleCardCover(
+                      outlineById.get(module.id) ?? {},
+                      course.coverAssetId,
+                    )}
                     coverWidths={PURPOSE_WIDTHS.cover}
                   />
                 </li>
