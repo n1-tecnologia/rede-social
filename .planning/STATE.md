@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "12.3"
-current_phase_name: Pendências de backend do front de novembro
-current_plan: 17
+current_phase: "12.2"
+current_phase_name: Ramos condicionais no formulário de perfil
+current_plan: 21
 status: verifying
-stopped_at: "Phase 12.3 EXECUTED 17/17 on 2026-11-09 (nothing pushed, local commits ahead of origin/master): code review 0 critical/3 warnings (WR-01..03, open), regression gate green (turbo typecheck+test 41/41), verification human_needed 12/12 truths in code; 6 owner items (M1..M16 ledger) persisted as 12.3-UAT.md; exit gate stopped at pnpm lint (team front merge findings, not 12.3's) and the six Playwright specs never ran (owner row M14); phase NOT marked complete; next /gsd-verify-work 12.3 after Igor's proofs; Phase 12.2 still awaits its own verify-work (12.2-UAT.md) and Phase 13 stays paused at plan 14"
-last_updated: "2026-11-09T23:00:00.000Z"
+stopped_at: "Phase 12.3 CLOSED 2026-11-09 by developer closure (UAT 6/6 on Igor's word, he tests in production directly; security 56/56 closed, threats_open 0; verification passed): nothing pushed or deployed, M1..M16 ledger and the release are his, NOVF-02 wording (bare 404 vs the 400 by name) still to amend, pnpm lint red from the front merge (8 findings, none this phase's); STATE back on 12.2 (executed 21/21, verification human_needed, next /gsd-verify-work 12.2 after his proofs); Phase 13 stays paused at plan 14"
+last_updated: "2026-11-09T23:55:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Phase 12.3 executed, verification human_needed
-state_head: 1e3e20adc5160d3391a6b5cca01754f6444691e9
+last_activity_desc: Phase 12.3 closed by developer closure, STATE back on 12.2
+state_head: 57dc2c28c93d88a4f7fc2430d10eff8820710e33
 progress:
   total_phases: 31
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 401
   completed_plans: 373
-  percent: 0
+  percent: 3
 ---
 
 # Project State
@@ -24,24 +24,24 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 12.3 — Pendências de backend do front de novembro
+**Current focus:** Phase 12.2 — Ramos condicionais no formulário de perfil (awaiting the owner's proofs, 12.2-UAT.md)
 
 ## Current Position
 
-Phase: 12.3 (Pendências de backend do front de novembro) — EXECUTED, VERIFICATION human_needed
-Current Plan: 17
-Total Plans in Phase: 17
-Plan: 17 of 17
-Status: Phase executed, awaiting the owner's proofs (12.3-UAT.md)
-Last activity: 2026-11-09 — Phase 12.3 executed, verification human_needed
+Phase: 12.2 (Ramos condicionais no formulário de perfil) — EXECUTED, VERIFICATION human_needed
+Current Plan: 21
+Total Plans in Phase: 21
+Plan: 21 of 21
+Status: Phase executed, awaiting the owner's proofs (12.2-UAT.md); Phase 12.3 closed 2026-11-09
+Last activity: 2026-11-09 — Phase 12.3 closed by developer closure, STATE back on 12.2
 
-Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 3%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 145
+- Total plans completed: 162
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -61,6 +61,7 @@ Progress: [███████████████████░] 160/162
 | 08.7 | 13 | - | - |
 | 9 | 17 | - | - |
 | 12.1 | 19 | - | - |
+| 12.3 | 17 | - | - |
 
 **Recent Trend:**
 
@@ -1247,5 +1248,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-09T17:06:22.743Z
-Stopped at: Phase 12.2 EXECUTED 21/21 on 2026-11-06 (nothing pushed, 154 commits ahead of origin/master): code review 0 critical/4 warnings (WR-01..04), regression gate green, verification human_needed 16/16 truths in code; 8 owner items (M1..M8) persisted as 12.2-UAT.md; phase NOT marked complete; next /gsd-verify-work 12.2 after Igor's proofs; Phase 13 stays paused at plan 14; planned ahead: Phase 12.3 UI-SPEC approved 2026-11-09 (next /gsd-plan-phase 12.3), STATE pointer stays on 12.2
+Stopped at: Phase 12.3 CLOSED 2026-11-09 by developer closure (UAT 6/6 on Igor's word, security 56/56, verification passed); STATE back on 12.2, Phase 13 stays paused at plan 14
 Resume file: .planning/phases/12.2-ramos-condicionais-no-formulario-de-perfil-varias-perguntas/12.2-01-PLAN.md
