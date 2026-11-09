@@ -8,6 +8,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -39,6 +40,52 @@ const tenantReadAdminWritePolicies = (table: string) => [
   }),
   pgPolicy(`${table}_delete_admin`, { for: 'delete', to: authenticatedRole, using: TENANT_ADMIN }),
 ];
+
+/**
+ * The categories a store keeps (12.3, NOVF-05..09; D-690, D-691, D-692). A per-tenant list the admin
+ * manages; the storefront shelves its products by them.
+ *
+ * THREE THINGS A REVIEWER MUST NOT "FIX":
+ *
+ * 1. **The SLUG is the contract's category id** (OQ-2). It is kept by a rename, so the
+ *    `?categoria=` link keeps working, and the eight old enum values stay valid slugs. The table keeps
+ *    its own `uuid` primary key (the foreign key of `store_products.category_id`) and a `slug` column.
+ * 2. **The 20-row cap lives in the service** (plan 12), not here: a CHECK cannot count rows.
+ * 3. **The icon CHECK is length and character class only.** The list of glyphs is a contract constant
+ *    (`STORE_CATEGORY_ICONS`), so adding a glyph is a contract change and never a migration.
+ *
+ * Read by the tenant, written by the admin claim only (`tenantReadAdminWritePolicies`). Names are
+ * unique per store ignoring case (OQ-6). Seeded once per store by `app.store_seed_categories_for`
+ * (`*_store_categories_functions.sql`), claimed by `store_front.categories_seeded_at`.
+ */
+export const storeCategories = pgTable(
+  'store_categories',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    /** The contract's category id (OQ-2): lowercase letters and digits with inner hyphens, at most 24. */
+    slug: text().notNull(),
+    name: text().notNull(),
+    /** One glyph of the contract's list; the database checks only length and character class. */
+    icon: text().notNull(),
+    position: integer().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('store_categories_tenant_slug_uq').on(t.tenantId, t.slug),
+    // One name per store, ignoring case (OQ-6); the service answers a conflict first.
+    uniqueIndex('store_categories_tenant_name_uq').on(t.tenantId, sql`lower(${t.name})`),
+    index('store_categories_tenant_position_idx').on(t.tenantId, t.position),
+    check('store_categories_slug_chk', sql`${t.slug} ~ '^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$'`),
+    check('store_categories_icon_chk', sql`${t.icon} ~ '^[a-z0-9-]{1,32}$'`),
+    check('store_categories_name_chk', sql`char_length(${t.name}) between 1 and 30`),
+    check('store_categories_position_chk', sql`${t.position} >= 0`),
+    ...tenantReadAdminWritePolicies('store_categories'),
+  ],
+).enableRLS();
 
 /**
  * The store module's tables (08.2, STORE-01..21; RESEARCH §Entitlement Storage, Option B):
@@ -98,6 +145,11 @@ export const storeProducts = pgTable(
     description: text().notNull().default(''),
     /** NULLABLE (D-69): an image-less product renders the brand gradient. A `cover` asset. */
     imageAssetId: uuid('image_asset_id').references(() => mediaAssets.id),
+    /**
+     * OPTIONAL (D-694): the product's category. `on delete set null`, never `restrict`: a deleted
+     * category leaves its products uncategorized. Nothing is required; existing products are untouched.
+     */
+    categoryId: uuid('category_id').references(() => storeCategories.id, { onDelete: 'set null' }),
     /** Integer cents (STORE-02); mirrored by `STORE_MAX_PRICE_CENTS` in `@rede-social/contracts/money`. */
     priceCents: integer('price_cents').notNull(),
     currency: text().notNull().default('BRL'),
@@ -113,11 +165,42 @@ export const storeProducts = pgTable(
       t.createdAt.desc().nullsFirst(),
       t.id.desc().nullsFirst(),
     ),
+    index('store_products_tenant_category_idx').on(t.tenantId, t.categoryId),
     check('store_products_price_chk', sql`${t.priceCents} between 0 and 10000000`),
     check('store_products_currency_chk', sql`${t.currency} in ('BRL')`),
     check('store_products_status_chk', sql`${t.status} in ('active','archived')`),
     // Read by the tenant, written by the admin claim only (CR-01; the header above).
     ...tenantReadAdminWritePolicies('store_products'),
+  ],
+).enableRLS();
+
+/**
+ * The store's front row (12.3, D-691): one row per tenant, `tenant_id` is the primary key. Carries
+ * `categories_seeded_at`, the marker that CLAIMS the once-only category seed (`insert ... on conflict
+ * do update ... where categories_seeded_at is null returning`), so a store whose admin deleted some or
+ * every category is never re-seeded. `promo_product_id` and `featured_product_ids` hold the storefront's
+ * promo and "Em destaque" picks; the cap of five is a CHECK, the rest of the rules are the service's.
+ */
+export const storeFront = pgTable(
+  'store_front',
+  {
+    tenantId: uuid('tenant_id')
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    promoProductId: uuid('promo_product_id').references(() => storeProducts.id, {
+      onDelete: 'set null',
+    }),
+    featuredProductIds: uuid('featured_product_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    /** NULL until the once-only seed claimed this store; never reset, in any project. */
+    categoriesSeededAt: timestamp('categories_seeded_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('store_front_featured_chk', sql`cardinality(${t.featuredProductIds}) <= 5`),
+    ...tenantReadAdminWritePolicies('store_front'),
   ],
 ).enableRLS();
 
