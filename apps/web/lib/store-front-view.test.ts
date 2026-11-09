@@ -1,31 +1,31 @@
 import { fileURLToPath } from 'node:url';
-import type { ProductCard } from '@rede-social/module-store/contracts';
+import {
+  type ProductCard,
+  STORE_BUILT_IN_CATEGORIES,
+  type StoreFront,
+} from '@rede-social/module-store/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
+import { storeCategoryList } from './store-categories';
 import {
   parseStoreQuery,
   relatedItems,
+  storeFrontContext,
   storeFrontView,
   storeHref,
   storeItems,
   storeListingView,
 } from './store-front-view';
-import {
-  EMPTY_STORE_SETUP,
-  NO_CATEGORY,
-  productKey,
-  STORE_CATEGORY_MAX,
-  storeCategoryList,
-} from './store-setup';
 
 /**
  * 2026-10-27 — the storefront's view (the product owner: "cards maiores, destaque em itens, esquema
  * de prateleiras de itens, categorias"): the hero, the category tiles, a shelf per category, a
  * category's page and the search with their orders. Words from the real pt-BR catalog.
  *
- * 2026-10-28: the categories are the store's own (`lib/store-setup.ts`): the built-in eight here,
- * and one case with the categories and the featured list Gerenciar keeps.
+ * 12.3-13 (D-693, D-699, UI-D-690): the categories, the featured ids and the promo are the API's
+ * (`GET /v1/store/front`) and each product's category is the slug the API sent: the web never
+ * guesses one, and a failed front call degrades to the products alone.
  */
 
 const catalogDir = fileURLToPath(new URL('../messages/pt-BR/', import.meta.url));
@@ -38,6 +38,7 @@ let seq = 0;
 function product(
   name: string,
   priceCents: number,
+  category: string | undefined,
   overrides: Partial<ProductCard> = {},
 ): ProductCard {
   seq += 1;
@@ -49,27 +50,33 @@ function product(
     imageAssetId: null,
     status: 'active',
     owned: false,
+    ...(category === undefined ? {} : { category }),
     ...overrides,
   };
 }
 
-// The API's order: newest first.
+// The API's order: newest first; the category is the one the API sent.
 const PRODUCTS = [
-  product('Perfume Signature 100 ml', 32900),
-  product('Dermapen Pro Sem Fio', 189000),
-  product('Jaleco Premium Bordado', 24900),
-  product('Body Splash Pele de Seda 200 ml', 7990),
-  product('Camiseta Oversized Rede Demo', 8990),
-  product('Boné Aba Curva Rede Demo', 6990),
-  product('E-book: Primeira Consulta', 0, { owned: true }),
+  product('Perfume Signature 100 ml', 32900, 'perfumes'),
+  product('Dermapen Pro Sem Fio', 189000, 'equipamentos'),
+  product('Jaleco Premium Bordado', 24900, 'roupas'),
+  product('Body Splash Pele de Seda 200 ml', 7990, 'perfumes'),
+  product('Camiseta Oversized Rede Demo', 8990, 'roupas'),
+  product('Boné Aba Curva Rede Demo', 6990, 'roupas'),
+  product('E-book: Primeira Consulta', 0, 'livros', { owned: true }),
 ];
-const CATEGORIES = storeCategoryList(EMPTY_STORE_SETUP, t);
+const BUILT_IN = STORE_BUILT_IN_CATEGORIES.map(({ slug, name, icon }) => ({
+  id: slug,
+  name,
+  icon,
+}));
+const CATEGORIES = storeCategoryList(BUILT_IN, t);
 const IDS = CATEGORIES.map((category) => category.id);
-const ITEMS = storeItems(PRODUCTS, t, { categories: CATEGORIES, assignments: new Map() });
+const ITEMS = storeItems(PRODUCTS, t, { categories: CATEGORIES });
 const ID = (index: number) => PRODUCTS[index]?.id ?? '';
 
 describe('storeItems', () => {
-  it('each product with its category, its chip and its price', () => {
+  it('each product with the category the API sent, its chip and its price', () => {
     expect(ITEMS.map((item) => [item.category, item.tag])).toEqual([
       ['perfumes', 'Perfume'],
       ['equipamentos', 'Equipamento'],
@@ -83,6 +90,28 @@ describe('storeItems', () => {
     expect(ITEMS[6]?.pill).toEqual({ kind: 'owned', label: 'Comprado' });
     expect(ITEMS[6]?.priceLabel).toBe('Grátis');
   });
+
+  it('never guesses: a product the API gave no category sits in no shelf, whatever its name says', () => {
+    // "Perfume Signature" would be guessed as perfumes by the old name rule.
+    const items = storeItems(
+      [product('Perfume Signature 100 ml', 32900, undefined), PRODUCTS[1] as ProductCard],
+      t,
+      { categories: CATEGORIES },
+    );
+    expect(items.map((item) => [item.category, item.tag])).toEqual([
+      [null, ''],
+      ['equipamentos', 'Equipamento'],
+    ]);
+    const view = storeFrontView(items, t, { categories: CATEGORIES });
+    expect(view.shelves.map((shelf) => shelf.key)).toEqual(['equipamentos']);
+    expect(view.shelves[0]?.items.map((item) => item.name)).toEqual(['Dermapen Pro Sem Fio']);
+  });
+
+  it('a category the store no longer keeps (a stale slug) reads as none', () => {
+    const [item] = storeItems([product('Vela', 1000, 'aromas')], t, { categories: CATEGORIES });
+    expect(item?.category).toBeNull();
+    expect(item?.tag).toBe('');
+  });
 });
 
 describe('storeFrontView', () => {
@@ -95,14 +124,25 @@ describe('storeFrontView', () => {
       'Body Splash Pele de Seda 200 ml',
       'Camiseta Oversized Rede Demo',
     ]);
-    // The storefront's order (livros, roupas, perfumes, equipamentos), only the ones with products.
+    // Every category keeps its chip, in the store's order; the ones with no product say so.
     expect(view.categories.map((tile) => [tile.key, tile.count, tile.href])).toEqual([
+      ['cursos', 'Nenhum produto', '/loja?categoria=cursos'],
       ['livros', '1 produto', '/loja?categoria=livros'],
+      ['materiais', 'Nenhum produto', '/loja?categoria=materiais'],
       ['roupas', '3 produtos', '/loja?categoria=roupas'],
       ['perfumes', '2 produtos', '/loja?categoria=perfumes'],
       ['equipamentos', '1 produto', '/loja?categoria=equipamentos'],
+      ['servicos', 'Nenhum produto', '/loja?categoria=servicos'],
+      ['outros', 'Nenhum produto', '/loja?categoria=outros'],
     ]);
-    expect(view.categories[1]?.ariaLabel).toBe('Roupas, 3 produtos');
+    expect(view.categories[3]?.ariaLabel).toBe('Roupas, 3 produtos');
+    // An empty shelf is not drawn.
+    expect(view.shelves.map((shelf) => shelf.key)).toEqual([
+      'livros',
+      'roupas',
+      'perfumes',
+      'equipamentos',
+    ]);
     const roupas = view.shelves.find((shelf) => shelf.key === 'roupas');
     expect(roupas).toMatchObject({
       title: 'Roupas',
@@ -129,13 +169,13 @@ describe('storeFrontView', () => {
       'Jaleco Premium Bordado',
       'Body Splash Pele de Seda 200 ml',
     ]);
-    // An id that is not for sale any more falls back to the newest.
+    // An id that is not for sale any more is dropped silently and the newest take its place.
     expect(
       storeFrontView(ITEMS, t, { categories: CATEGORIES, featured: ['gone'] }).hero?.main.name,
     ).toBe('Perfume Signature 100 ml');
   });
 
-  it('the featured list in its order: the first large, the others beside it, then the newest', () => {
+  it('the featured list in its order: the first large, the others beside it, then the newest up to five', () => {
     const view = storeFrontView(ITEMS, t, {
       categories: CATEGORIES,
       featured: [ID(5), 'gone', ID(2)],
@@ -149,32 +189,31 @@ describe('storeFrontView', () => {
     ]);
   });
 
-  it("Gerenciar's categories: its names, glyphs and order, a product's choice over its name", () => {
+  it("the store's own categories: its names, glyphs and order", () => {
     const categories = storeCategoryList(
-      {
-        categories: [
-          { id: 'skincare', name: 'Skincare', icon: 'sparkles' },
-          { id: 'roupas', name: 'Vestuário', icon: 'shirt' },
-          { id: 'perfumes', name: 'Perfumes', icon: 'spray-can' },
-        ],
-        featured: [],
-      },
+      [
+        { id: 'skincare', name: 'Skincare', icon: 'sparkles' },
+        { id: 'roupas', name: 'Vestuário', icon: 'shirt' },
+        { id: 'perfumes', name: 'Perfumes', icon: 'spray-can' },
+      ],
       t,
     );
-    const items = storeItems(PRODUCTS, t, {
-      categories,
-      assignments: new Map([
-        [productKey(ID(3)), 'skincare'],
-        [productKey(ID(5)), NO_CATEGORY],
-      ]),
-    });
+    const items = storeItems(
+      [
+        product('Sérum', 9000, 'skincare'),
+        product('Jaleco', 24900, 'roupas'),
+        product('Camiseta', 8990, 'roupas'),
+        product('Colônia', 7990, 'perfumes'),
+        product('Sem categoria', 100, undefined),
+      ],
+      t,
+      { categories },
+    );
     expect(items.map((item) => [item.category, item.tag])).toEqual([
-      ['perfumes', 'Perfume'],
-      [null, ''],
-      ['roupas', 'Vestuário'],
       ['skincare', 'Skincare'],
       ['roupas', 'Vestuário'],
-      [null, ''],
+      ['roupas', 'Vestuário'],
+      ['perfumes', 'Perfume'],
       [null, ''],
     ]);
     const view = storeFrontView(items, t, { categories });
@@ -190,15 +229,68 @@ describe('storeFrontView', () => {
     expect(
       storeListingView(items, parseStoreQuery({ categoria: 'skincare' }, ids), t, categories).title,
     ).toBe('Skincare');
-    expect(STORE_CATEGORY_MAX).toBe(20);
   });
 
-  it('an empty store has no hero, no tile and no shelf', () => {
-    expect(storeFrontView([], t, { categories: CATEGORIES })).toEqual({
-      hero: null,
-      categories: [],
-      shelves: [],
-    });
+  it('an empty store has no hero, no tile of products and no shelf', () => {
+    const view = storeFrontView([], t, { categories: CATEGORIES });
+    expect(view.hero).toBeNull();
+    expect(view.shelves).toEqual([]);
+  });
+});
+
+describe('storeFrontContext', () => {
+  const front = (over: Partial<StoreFront> = {}): StoreFront => ({
+    categories: BUILT_IN,
+    promoProductId: null,
+    featuredProductIds: [],
+    ...over,
+  });
+
+  it("reads the API's categories and featured ids; a saved featured list leads over the promo", () => {
+    const context = storeFrontContext(
+      front({ featuredProductIds: [ID(1), ID(2)], promoProductId: ID(3) }),
+      t,
+    );
+    expect(context.categories.map((category) => category.id)).toEqual(IDS);
+    expect(context.featured).toEqual([ID(1), ID(2)]);
+    expect(context.plain).toBe(false);
+  });
+
+  it('with no featured list the promo product leads the hero; with neither, the newest do', () => {
+    expect(storeFrontContext(front({ promoProductId: ID(3) }), t).featured).toEqual([ID(3)]);
+    expect(storeFrontContext(front(), t).featured).toEqual([]);
+  });
+
+  it('a failed front call is the products alone: no chips, no hero, newest first', () => {
+    const context = storeFrontContext(null, t);
+    expect(context).toEqual({ categories: [], featured: [], plain: true });
+  });
+
+  it('with no category left there are no chips and the whole catalogue shows as the grid', () => {
+    const context = storeFrontContext(front({ categories: [] }), t);
+    expect(context.categories).toEqual([]);
+    expect(context.plain).toBe(true);
+  });
+
+  it('an unknown ?categoria= slug means all, with or without a front', () => {
+    const ids = (value: StoreFront | null) =>
+      storeFrontContext(value, t).categories.map((category) => category.id);
+    expect(parseStoreQuery({ categoria: 'carros' }, ids(front())).categoria).toBeNull();
+    expect(parseStoreQuery({ categoria: 'livros' }, ids(null)).categoria).toBeNull();
+    expect(parseStoreQuery({ categoria: 'livros' }, ids(front())).categoria).toBe('livros');
+  });
+
+  it('a category with no product keeps its chip at 0 and its page opens empty', () => {
+    const view = storeFrontView(ITEMS, t, storeFrontContext(front(), t));
+    expect(view.categories.find((tile) => tile.key === 'cursos')?.count).toBe('Nenhum produto');
+    const listing = storeListingView(
+      ITEMS,
+      parseStoreQuery({ categoria: 'cursos' }, IDS),
+      t,
+      CATEGORIES,
+    );
+    expect(listing.items).toEqual([]);
+    expect(listing.sub).toBe('Nenhum produto');
   });
 });
 
