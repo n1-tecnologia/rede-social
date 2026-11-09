@@ -161,6 +161,8 @@ export const courses = pgTable(
     level: text(),
     /** NULLABLE (D-69): a `cover` image, or the brand gradient. */
     coverAssetId: uuid('cover_asset_id').references(() => mediaAssets.id),
+    /** Optional second image (the Topo). Empty means the card cover; the web computes that fallback, it is never stored (D-699). */
+    topCoverAssetId: uuid('top_cover_asset_id').references(() => mediaAssets.id),
     /** D-412: free text, no membership FK. */
     instructorName: text('instructor_name').notNull(),
     instructorPhotoAssetId: uuid('instructor_photo_asset_id').references(() => mediaAssets.id),
@@ -237,6 +239,10 @@ export const courseModules = pgTable(
      * NON-EMPTY live module is complete; a stale `true` on the first module locks nothing.
      */
     requiresPrevious: boolean('requires_previous').notNull().default(false),
+    /** Optional card cover of the module. Empty means the course's cover; the web computes that fallback, it is never stored (D-699). */
+    coverAssetId: uuid('cover_asset_id').references(() => mediaAssets.id),
+    /** Optional second image (the Topo). Empty means the module's card cover, then the course's; never stored (D-699). */
+    topCoverAssetId: uuid('top_cover_asset_id').references(() => mediaAssets.id),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -436,6 +442,8 @@ export const courseTracks = pgTable(
     audience: text().notNull().default(''),
     description: text().notNull().default(''),
     coverAssetId: uuid('cover_asset_id').references(() => mediaAssets.id),
+    /** Optional second image (the Topo). Empty means the card cover; the web computes that fallback, it is never stored (D-699). */
+    topCoverAssetId: uuid('top_cover_asset_id').references(() => mediaAssets.id),
     /** `'active' | 'archived'`. */
     status: text().notNull().default('active'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),

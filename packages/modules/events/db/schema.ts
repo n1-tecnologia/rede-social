@@ -81,6 +81,8 @@ export const events = pgTable(
     description: text().notNull().default(''),
     /** NULLABLE (D-69). Null takes the `--brand-gradient` fallback. */
     coverAssetId: uuid('cover_asset_id').references(() => mediaAssets.id),
+    /** Optional vertical poster. Empty means the card cover; the web computes that fallback, it is never stored (D-699). */
+    posterAssetId: uuid('poster_asset_id').references(() => mediaAssets.id),
     /** `'in_person' | 'online'`, the XOR discriminator (D-213). */
     format: text().notNull(),
     venueName: text('venue_name'),
