@@ -139,8 +139,13 @@
       "moved": "{item} agora está na posição {position} de {total}.",
       "restore": "Restaurar o padrão",
       "save": "Salvar",
-      "saved": "Menu salvo neste aparelho.",
-      "device": "Vale só no celular. Por enquanto, só neste aparelho."
+      "saving": "Salvando…",
+      "saved": "Menu salvo.",
+      "scope": "Vale só no celular. Todos os membros veem este menu.",
+      "errors": {
+        "rules": "O menu não segue as regras. Atualize a página e tente de novo.",
+        "generic": "Não foi possível salvar o menu. Tente de novo."
+      }
     }
   }
 }

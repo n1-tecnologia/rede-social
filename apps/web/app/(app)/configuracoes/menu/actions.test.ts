@@ -96,6 +96,8 @@ describe('clearPhoneMenuAction', () => {
       status: 'redirect',
       path: '/configuracoes?erro=sem-permissao',
     });
-    await expect(clearPhoneMenuAction()).rejects.toThrow('REDIRECT /configuracoes?erro=sem-permissao');
+    await expect(clearPhoneMenuAction()).rejects.toThrow(
+      'REDIRECT /configuracoes?erro=sem-permissao',
+    );
   });
 });

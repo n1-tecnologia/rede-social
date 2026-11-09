@@ -9,6 +9,7 @@ import { requireBootstrap } from '@/lib/bootstrap';
 import { savedPhoneLayout } from '@/lib/phone-nav-layout';
 import { MAIN_SLOTS, shellTabs } from '@/lib/shell-tabs';
 import { getHostTenant } from '@/lib/tenant-host';
+import { clearPhoneMenuAction, savePhoneMenuAction } from './actions';
 
 /** What the editor needs of a nav item. */
 const item = ({ key, label, icon }: NavItem) => ({ key, label, icon });
@@ -74,6 +75,8 @@ export default async function AdminMenuPage() {
         initial={{ bar: keys(now.bar), top: keys(now.top) }}
         defaults={{ bar: keys(shell.bar), top: keys(shell.top) }}
         brand={{ displayName: bootstrap.tenant.displayName, logoUrl: branding.logoUrl }}
+        onSave={savePhoneMenuAction}
+        onClear={clearPhoneMenuAction}
       />
     </div>
   );

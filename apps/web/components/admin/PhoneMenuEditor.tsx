@@ -1,21 +1,19 @@
 'use client';
 
+import {
+  PHONE_BAR_MAX,
+  PHONE_BAR_MIN,
+  PHONE_TOP_MAX,
+  type PhoneMenu,
+  validatePhoneMenu,
+} from '@rede-social/contracts';
 import { iconFor, TenantLogo } from '@rede-social/core/ui';
 import { Button, Card, cn, SectionTitle, useToast } from '@rede-social/ui';
 import { Reorder, useReducedMotion } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
-import {
-  encodePhoneNavLayout,
-  LEGACY_NAV_ORDER_COOKIE,
-  PHONE_BAR_MAX,
-  PHONE_BAR_MIN,
-  PHONE_NAV_LAYOUT_COOKIE,
-  PHONE_TOP_MAX,
-  type PhonePlacement,
-  placementAllowed,
-} from '@/lib/phone-nav-layout';
+import { type PhonePlacement, placementAllowed } from '@/lib/phone-nav-layout';
 
 /** One item of the phone's menu, as the shell draws it. */
 export interface PhoneMenuItem {
@@ -42,27 +40,19 @@ export interface PhoneMenuEditorProps {
   defaults: PhoneMenuPlaces;
   /** The tenant's identity for the preview's top bar. */
   brand: { displayName: string; logoUrl: string | null };
+  /** Keeps the menu in the tenant's brand (`savePhoneMenuAction`): the three lists, each in order. */
+  onSave: (menu: PhoneMenu) => Promise<PhoneMenuSaveOutcome>;
+  /** Forgets the saved menu, back to the shell's own (`clearPhoneMenuAction`). */
+  onClear: () => Promise<PhoneMenuSaveOutcome>;
 }
+
+/** What a save or a clear answers: done, or a refusal the editor words (`admin.menu.errors`). */
+export type PhoneMenuSaveOutcome = { ok: true } | { ok: false; code: 'rules' | 'generic' };
 
 const PLACES: readonly PhonePlacement[] = ['bar', 'top', 'hidden'];
 
 const same = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((key, index) => key === b[index]);
-
-/** Writes (or, for the shell's own menu, forgets) the layout on THIS device; the old order goes. */
-function keepLayout(places: PhoneMenuPlaces, hidden: string[], isDefault: boolean): void {
-  const secure = location.protocol === 'https:' ? '; secure' : '';
-  const write = (name: string, value: string) => {
-    const life = value === '' ? 'max-age=0' : 'max-age=31536000';
-    // biome-ignore lint/suspicious/noDocumentCookie: the theme's reason (`ThemeToggle`): the Cookie Store API is not available on every supported mobile browser; this is a per-device preference
-    document.cookie = `${name}=${value}; path=/; ${life}; samesite=lax${secure}`;
-  };
-  write(
-    PHONE_NAV_LAYOUT_COOKIE,
-    isDefault ? '' : encodePhoneNavLayout({ bar: places.bar, top: places.top, hidden }),
-  );
-  write(LEGACY_NAV_ORDER_COOKIE, '');
-}
 
 /**
  * 2026-11-05 — Configurações › Menu do app (the product owner: "personalizar hotbar do usuário
@@ -76,10 +66,22 @@ function keepLayout(places: PhoneMenuPlaces, hidden: string[], isDefault: boolea
  * Oculto. The rules: the bar holds two to six, the top two extras at the most, Início stays in the
  * bar and Perfil never goes to the top (its avatar is already there).
  *
- * Saved on this device (`lib/phone-nav-layout.ts`) until the API keeps it; the route refreshes, so
- * the real phone menu follows at once. The desktop never reads it.
+ * 12.3-16 (D-697, D-698, UI-D-686, UI-D-694): "Salvar" keeps the menu in the tenant's brand through the
+ * API, one menu for the whole school and every role, and the route refreshes, so the real phone menu
+ * follows at once for every member on their next load. A draft equal to the shell's own menu CLEARS the
+ * saved one instead ("Restaurar o padrão" only fills the draft), so a module enabled later appears at
+ * its own default place. The rules come from the contract; the server refuses what breaks them anyway.
+ * The desktop never reads it.
  */
-export function PhoneMenuEditor({ items, fixed, initial, defaults, brand }: PhoneMenuEditorProps) {
+export function PhoneMenuEditor({
+  items,
+  fixed,
+  initial,
+  defaults,
+  brand,
+  onSave,
+  onClear,
+}: PhoneMenuEditorProps) {
   const t = useTranslations('admin.menu');
   const router = useRouter();
   const toast = useToast();
@@ -88,6 +90,9 @@ export function PhoneMenuEditor({ items, fixed, initial, defaults, brand }: Phon
   const [top, setTop] = useState<string[]>(initial.top);
   const [saved, setSaved] = useState<PhoneMenuPlaces>(initial);
   const [announcement, setAnnouncement] = useState('');
+  const [pending, setPending] = useState(false);
+  /** The refusal or failure sentence of the footer row, or `null` (`role="alert"`). */
+  const [failure, setFailure] = useState<string | null>(null);
   /** The item whose button must hold the focus once a keyboard move has re-rendered. */
   const refocus = useRef<string | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
@@ -163,8 +168,28 @@ export function PhoneMenuEditor({ items, fixed, initial, defaults, brand }: Phon
     }
   };
 
-  const save = () => {
-    keepLayout({ bar, top }, hidden, isDefault);
+  const save = async () => {
+    if (pending) return;
+    setFailure(null);
+    // The items the shell knows and the draft leaves out of both bars: only known keys are sent.
+    const menu: PhoneMenu = { bar: [...bar], top: [...top], hidden };
+    // The shared rules stop a menu the API would refuse (a stale layout; the buttons never allow one).
+    if (!isDefault && validatePhoneMenu(menu) !== null) {
+      setFailure(t('errors.rules'));
+      return;
+    }
+    setPending(true);
+    let result: PhoneMenuSaveOutcome;
+    try {
+      result = isDefault ? await onClear() : await onSave(menu);
+    } catch {
+      result = { ok: false, code: 'generic' };
+    }
+    setPending(false);
+    if (!result.ok) {
+      setFailure(t(result.code === 'rules' ? 'errors.rules' : 'errors.generic'));
+      return;
+    }
     setSaved({ bar: [...bar], top: [...top] });
     toast.show({ tone: 'success', message: t('saved') });
     router.refresh();
@@ -371,13 +396,18 @@ export function PhoneMenuEditor({ items, fixed, initial, defaults, brand }: Phon
       </Card>
 
       <div className="flex flex-col gap-3 px-4 pb-6 md:px-0">
-        <p className="text-xs font-normal text-text-tertiary">{t('device')}</p>
+        <p className="text-xs font-normal text-text-tertiary">{t('scope')}</p>
+        {failure ? (
+          <p role="alert" className="text-sm font-normal text-danger">
+            {failure}
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="ghost"
             size="md"
             data-testid="menu-restore"
-            disabled={isDefault}
+            disabled={isDefault || pending}
             onClick={restore}
             className="mr-auto px-2"
           >
@@ -387,11 +417,12 @@ export function PhoneMenuEditor({ items, fixed, initial, defaults, brand }: Phon
             variant="brand"
             size="md"
             data-testid="menu-save"
-            disabled={!dirty}
+            disabled={!dirty || pending}
+            loading={pending}
             onClick={save}
             className="min-w-32"
           >
-            {t('save')}
+            {pending ? t('saving') : t('save')}
           </Button>
         </div>
       </div>
