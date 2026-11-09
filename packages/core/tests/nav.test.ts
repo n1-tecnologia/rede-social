@@ -604,6 +604,16 @@ describe('phoneChrome and withPhoneLayout (2026-11-05: the phone menu the admini
     expect(keys(empty.bar)).toEqual(keys(phoneChrome(nav.tabs, nav.topbar).bar));
   });
 
+  it('12.3-16 (NOVF-10): a layout that names some items leaves the others after them; a module on later still shows; a key with no item is ignored', () => {
+    // The layout was saved before Eventos and Loja existed on the phone: it names neither.
+    const saved = { bar: ['profile', 'home', 'ghost-module'], top: ['also-gone'], hidden: [] };
+    const chrome = phoneChrome(nav.tabs, nav.topbar, saved);
+    expect(keys(chrome.bar)).toEqual(['profile', 'home', 'communities', 'events', 'store']);
+    expect(keys(chrome.top)).toEqual(['notifications']);
+    expect(keys(chrome.bar)).not.toContain('ghost-module');
+    expect(keys(chrome.top)).not.toContain('also-gone');
+  });
+
   it('withPhoneLayout keeps the layout, and null leaves the nav as it was', () => {
     const layout = { bar: ['home'], top: [], hidden: [] };
     expect(withPhoneLayout(nav, layout).phoneLayout).toBe(layout);
