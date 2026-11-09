@@ -1,6 +1,6 @@
 # Pendências de backend
 
-Ajustes de 09/10, de 12/10, de 15/10 e de 20/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-26. Os itens 3, 11, 12, 13 e 14 foram feitos na Fase 09.3 (26/10); os itens 1, 2, 4, 5, 6 e 8 continuam abertos.
+Ajustes de 09/10, de 12/10, de 15/10 e de 20/10 (branch `FRONT-AJUSTES`) e a Parte 1 do documento de novembro (branch `ATUALIZAÇÕES-NOVEMBRO`, itens 15 a 24). Atualizado em 2026-11-09. Os itens 3, 11, 12, 13 e 14 foram feitos na Fase 09.3 (26/10); os itens 15 a 24 foram feitos na Fase 12.3 (09/11, no código local, ainda sem publicar); os itens 1, 2, 4, 5, 6 e 8 continuam abertos.
 
 ## Feed e perfil
 
@@ -126,3 +126,67 @@ Os outros itens do PDF ficaram só no front: vídeos sem a barra do player e com
 - **Back:** migration trocando a CHECK `story_highlights_title_chk` e a constante no contrato (os formulários acompanham sozinhos). Proposta: 50 caracteres. O nome aparece numa linha embaixo do círculo do destaque, então nomes longos vão aparecer cortados com reticências.
 - **Por quê:** o cliente pediu nomes de destaque maiores.
 - **Feito (26/10):** limite em 50 caracteres no contrato (`STORY_HIGHLIGHT_MAX_TITLE`), na checagem do serviço e na CHECK `story_highlights_title_chk` (migration que a troca). O nome longo aparece cortado em uma linha, com reticências, embaixo do círculo, e inteiro quando o destaque abre. Baixar o limite de novo exige uma decisão sobre os dados.
+
+## Pendências do front de novembro (Parte 1 do documento "O que mudou no front")
+
+A Parte 1 do documento da equipe tinha dez coisas que o front já mostrava, mas que o back não guardava (cookies do aparelho ou prévia só no navegador). A Fase 12.3 passou as dez para o back, em quatro blocos: A (item 15), B (itens 16 a 19), C (itens 20 a 23) e D (item 24). A Parte 2 do documento (17 telas só de front) já estava na master. O web desta branch sai **uma vez**, depois da API do bloco D em produção, e **ignora os cookies sem importar o que tinham**: o admin de cada escola refaz, uma vez, o produto em destaque, a lista "Em destaque", a ordem das categorias e o menu do celular se os tinha arrumado num navegador. Os passos de publicação e as provas só do dono estão em `docs/DEPLOY.md` ("Phase 12.3 release") e em `.planning/phases/12.3-pendencias-de-backend-do-front-de-novembro/12.3-MANUAL-PROOFS.md`.
+
+### 15. Textos da trilha para o membro (feito em 09/11)
+
+- **O que mudou:** o card e a página da trilha mostram o subtítulo, o "Para quem é" e a descrição. Até agora, só o admin via esses textos (por uma prévia local que os buscava na leitura de gestão).
+- **Back:** `GET /v1/courses/learn/tracks` devolve `subtitle`, `audience` e `description` de cada trilha ativa, vindos das colunas que `course_tracks` já tinha, como texto (vazio quando o admin deixou em branco; o front trata vazio como ausente). Sem migration e sem mudança de contrato (as chaves já eram opcionais).
+- **Feito (09/11, Fase 12.3, bloco A):** a leitura do membro traz os três textos; a prévia local do admin saiu do web. Trilha arquivada e trilha de outro tenant continuam fora.
+
+### 16. Topo da trilha (feito em 09/11)
+
+- **O que mudou:** o formulário da trilha mostra dois blocos de imagem (o cartão e o "Topo", 4:1), mas só salvava uma.
+- **Back:** coluna opcional `course_tracks.top_cover_asset_id`; criar e editar a trilha aceitam `topCoverAssetId` (a mesma checagem da capa do cartão); a leitura do admin e a do membro devolvem a chave. Vazio = a página usa a imagem do cartão (a regra de queda é do web, e sem imagem vale o degradê da marca).
+- **Feito (09/11, Fase 12.3, bloco B):** migration `20261109185807_second_covers.sql` (uma só, para os itens 16 a 19), API e formulário. Uma imagem recusada (tipo, estado ou outro tenant) responde `400` com `details.courses = 'top_cover_invalid'`, e não um 404 seco.
+
+### 17. Topo do curso (feito em 09/11)
+
+- **O que mudou:** o mesmo par de blocos (cartão e Topo) no formulário do curso, com um salvamento só.
+- **Back:** coluna opcional `courses.top_cover_asset_id`, aceita ao criar e editar o curso e devolvida nas leituras do admin e do membro (`learnCourseSchema`).
+- **Feito (09/11, Fase 12.3, bloco B):** a página do curso desenha o Topo, com a queda para a imagem do cartão. A listagem e os cartões do catálogo seguem com a imagem do cartão.
+
+### 18. Capa do módulo (feito em 09/11)
+
+- **O que mudou:** a folha do módulo tinha os dois blocos (cartão 16:9 e Topo 4:1) só como prévia local; o cartão e a página do módulo usavam a capa do curso.
+- **Back:** duas colunas opcionais em `course_modules` (`cover_asset_id` e `top_cover_asset_id`), aceitas ao criar e editar o módulo; a leitura do curso para o membro devolve as duas imagens de cada módulo, com um único comando a mais na mesma transação.
+- **Feito (09/11, Fase 12.3, bloco B):** o cartão do módulo cai para a capa do curso; o Topo do módulo cai para a capa do cartão do módulo e, depois, para a do curso. Na edição, cada imagem só vai quando mudou (a regra de edição que os formulários já tinham).
+
+### 19. Capa vertical do evento (feito em 09/11)
+
+- **O que mudou:** o formulário do evento tem "Vertical · lista de eventos" (1080x1350, 4:5), mas só como prévia no navegador.
+- **Back:** coluna opcional `events.poster_asset_id`; criar e editar o evento aceitam `posterAssetId`; a lista, o detalhe e a leitura de edição devolvem o pôster e a lista de larguras (`posterVariantWidths`). Um pôster de outro tenant ou desconhecido é 404 seco; tipo, estado ou propósito errado é `400` com `details.event = 'poster_invalid'`.
+- **Feito (09/11, Fase 12.3, bloco B):** a lista `/eventos` desenha o pôster (com a queda para a capa horizontal); a página do evento segue com a capa horizontal. **Atenção:** o salvamento do evento troca o evento inteiro, então um web mais antigo que salva um evento sem a chave do pôster apaga o pôster guardado. Por isso o web novo sai por último e sempre reenvia o pôster que leu.
+
+### 20. "Destaque da loja" do Início (feito em 09/11)
+
+- **O que mudou:** o produto em destaque do Início vinha de um cookie (`rede_home_promo`) e só o aparelho do admin o via; o membro sempre via o produto mais novo.
+- **Back:** a tabela `store_front` (uma linha por tenant) guarda o produto; `PUT /v1/store/front/promo` (permissão `store.product.manage`) o salva e `GET /v1/store/front` o devolve para todos os membros. Um produto arquivado ou apagado cai na leitura e vale o mais novo; "Mais recente da loja" limpa a escolha.
+- **Feito (09/11, Fase 12.3, bloco C):** todo membro vê o produto que o admin escolheu. O cookie é ignorado e o valor antigo não é importado.
+
+### 21. "Em destaque" da loja (feito em 09/11)
+
+- **O que mudou:** a lista de até 5 produtos (o primeiro é o card grande) vinha do cookie `rede_store_setup`.
+- **Back:** a mesma linha de `store_front` guarda a lista, ordenada, no máximo 5; `PUT /v1/store/front/featured` a salva e `GET /v1/store/front` a devolve. Produto que saiu de venda cai na leitura e o resto é completado com os mais novos; "Usar os mais recentes" limpa a lista.
+- **Feito (09/11, Fase 12.3, bloco C):** a vitrine lê a lista do servidor, igual para todos.
+
+### 22. Categorias da loja feitas pelo admin (feito em 09/11)
+
+- **O que mudou:** as categorias (nome, ícone, ordem) vinham do cookie; as oito do padrão valiam enquanto o admin não mexia.
+- **Back:** a tabela `store_categories` (por tenant, com RLS e teste cruzado de isolamento) com os limites que antes eram do web e agora são do servidor: no máximo 20 categorias, nome de até 30 caracteres (único ignorando maiúsculas), um de 20 ícones. A identidade da categoria é um *slug* que nasce na criação e não muda com o nome (o link `?categoria=` continua valendo; as oito do padrão mantêm os seus). `PUT /v1/store/categories` troca a lista inteira de uma vez; apagar uma categoria deixa os produtos dela sem categoria. As oito do padrão são linhas reais e editáveis, plantadas uma vez por loja (marcador em `store_front`), nunca de novo: quem apagou uma ou todas não é replantado.
+- **Feito (09/11, Fase 12.3, bloco C):** migrations `20261109190836_store_categories.sql`, `20261109190954_store_categories_functions.sql` e `20261109191045_store_categories_backfill.sql`. Fica registrado: o histórico de slugs não é guardado entre salvamentos (um slug apagado num salvamento pode ser criado de novo por um salvamento posterior).
+
+### 23. Categoria de cada produto (feito em 09/11)
+
+- **O que mudou:** a categoria de cada produto vinha do cookie `rede_store_cats`, e sem escolha o web adivinhava pelo nome.
+- **Back:** coluna opcional `store_products.category_id` ligada às categorias (apagar a categoria deixa `null`); criar e editar o produto aceitam `category` (o slug; `null` é "Sem categoria"), e o cartão e a página do produto devolvem o slug. Uma **carga inicial única**, na terceira migration, põe cada produto existente na categoria que o nome sugere, com a mesma regra do web ("Outros" quando nada combina), sem mexer em `updated_at`: a vitrine fica igual no dia da publicação. Criar um produto sem a chave `category` (um web mais antigo) aplica o palpite pelo nome no servidor.
+- **Feito (09/11, Fase 12.3, bloco C):** o palpite por nome do web saiu; o servidor é a única fonte. A carga é cara de desfazer: a consulta de emergência do dono (só os produtos que ninguém editou desde a carga) está no `docs/DEPLOY.md`.
+
+### 24. Menu do app no celular (feito em 09/11)
+
+- **O que mudou:** o "Menu do app" (Configurações > Administração) guardava barra, topo e ocultos num cookie por aparelho (`rede_nav_layout`, e o mais antigo `rede_nav_order`).
+- **Back:** a chave opcional `phoneMenu` na marca do tenant (`tenants.branding`), sem backfill: ausente quer dizer o menu do próprio shell. `PUT` e `DELETE /v1/admin/branding/phone-menu` (permissão `tenant.manage`) salvam e limpam, e o servidor valida as regras que eram do web: a barra tem de 2 a 6 itens, o topo até 2 próprios, Início só na barra, Perfil nunca no topo, no máximo 16 chaves por lista. O bootstrap devolve o menu dentro da marca (opcional) e ele **nunca** entra na resposta pública do host. Um menu só por escola, igual para todos os papéis, só no celular.
+- **Feito (09/11, Fase 12.3, bloco D):** salvar logo, cores ou ícone do app mantém o menu salvo. Até a API do bloco D estar em produção, o salvamento do menu falha com a frase genérica; por isso o web sai por último.
