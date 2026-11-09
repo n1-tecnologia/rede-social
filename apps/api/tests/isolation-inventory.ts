@@ -143,6 +143,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/admin/branding/uploads': { case: 'storage sweep' },
   'POST /v1/admin/branding/uploads/:uploadId/complete': { case: 'storage sweep' },
   'DELETE /v1/admin/branding/icon': { case: 'phase 8 sweep' },
+  // 12.3-15 (D-697): the phone menu writes; each has its cross-tenant case in 'phase 12.3 sweep: phone menu'.
+  'PUT /v1/admin/branding/phone-menu': { case: 'phase 12.3 sweep: phone menu' },
+  'DELETE /v1/admin/branding/phone-menu': { case: 'phase 12.3 sweep: phone menu' },
   'PATCH /v1/admin/tenant': { case: 'phase 8 sweep' },
   'GET /v1/admin/rules': { case: 'phase 8 sweep' },
   'PUT /v1/admin/rules': { case: 'phase 8 sweep' },

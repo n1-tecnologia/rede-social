@@ -23,12 +23,14 @@ import {
   NAVY,
   NEUTRAL_BRAND,
   normalizeBrandLook,
+  PHONE_MENU_ISSUES,
   PHONE_MENU_MAX_KEYS,
   phoneMenuSchema,
   relativeLuminance,
   resolveBranding,
   tenantBrandingSchema,
   toHostBranding,
+  validatePhoneMenu,
   WHITE,
   withDarkPrimary,
 } from '../src/branding';
@@ -607,5 +609,60 @@ describe('the phone menu key of the stored brand (12.3-15, D-697)', () => {
     expect(phoneMenuSchema.safeParse({ bar: ['a'.repeat(33)], top: [], hidden: [] }).success).toBe(
       false,
     );
+  });
+});
+
+describe('validatePhoneMenu — the rules the web applies, on the server (12.3-15, D-697, OQ-5)', () => {
+  const menu = (bar: string[], top: string[] = [], hidden: string[] = []) => ({ bar, top, hidden });
+
+  it('a valid menu is null, the closed vocabulary has one code per rule', () => {
+    expect(validatePhoneMenu(menu(['home', 'courses'], ['chat'], ['events']))).toBeNull();
+    expect([...PHONE_MENU_ISSUES].sort()).toEqual(
+      [
+        'bar_too_large',
+        'bar_too_small',
+        'home_not_in_bar',
+        'key_repeated',
+        'profile_at_top',
+        'top_too_large',
+      ].sort(),
+    );
+  });
+
+  it('the bar holds 2 to 6: 1 and 7 are refused, 2 and 6 are accepted', () => {
+    expect(validatePhoneMenu(menu(['home']))).toBe('bar_too_small');
+    expect(validatePhoneMenu(menu([]))).toBe('bar_too_small');
+    expect(validatePhoneMenu(menu(['home', 'a']))).toBeNull();
+    expect(validatePhoneMenu(menu(['home', 'a', 'b', 'c', 'd', 'e']))).toBeNull();
+    expect(validatePhoneMenu(menu(['home', 'a', 'b', 'c', 'd', 'e', 'f']))).toBe('bar_too_large');
+  });
+
+  it('the top holds at most 2: 3 is refused, 0 and 2 are accepted', () => {
+    expect(validatePhoneMenu(menu(['home', 'a'], []))).toBeNull();
+    expect(validatePhoneMenu(menu(['home', 'a'], ['b', 'c']))).toBeNull();
+    expect(validatePhoneMenu(menu(['home', 'a'], ['b', 'c', 'd']))).toBe('top_too_large');
+  });
+
+  it('a key sits in one list only, even when it repeats inside a list', () => {
+    expect(validatePhoneMenu(menu(['home', 'a'], ['a']))).toBe('key_repeated');
+    expect(validatePhoneMenu(menu(['home', 'a'], [], ['a']))).toBe('key_repeated');
+    expect(validatePhoneMenu(menu(['home', 'a', 'a']))).toBe('key_repeated');
+    expect(validatePhoneMenu(menu(['home', 'a'], ['b'], ['b']))).toBe('key_repeated');
+  });
+
+  it('home is required in the bar, profile never goes to the top', () => {
+    expect(validatePhoneMenu(menu(['a', 'b']))).toBe('home_not_in_bar');
+    expect(validatePhoneMenu(menu(['a', 'b'], [], ['home']))).toBe('home_not_in_bar');
+    expect(validatePhoneMenu(menu(['a', 'b'], ['home']))).toBe('home_not_in_bar');
+    expect(validatePhoneMenu(menu(['home', 'a'], ['profile']))).toBe('profile_at_top');
+    expect(validatePhoneMenu(menu(['home', 'profile'], ['a']))).toBeNull();
+    expect(validatePhoneMenu(menu(['home', 'a'], [], ['profile']))).toBeNull();
+  });
+
+  it('order is the caller order: nothing is sorted, deduplicated or rewritten', () => {
+    const body = menu(['home', 'z', 'a'], ['m', 'b'], ['y', 'c']);
+    const before = JSON.stringify(body);
+    expect(validatePhoneMenu(body)).toBeNull();
+    expect(JSON.stringify(body)).toBe(before);
   });
 });

@@ -144,6 +144,9 @@ const completeUpload = (token: string, uploadId: string, host?: string) =>
 const putMenu = (token: string, body: unknown, host?: string) =>
   request('/v1/admin/branding/phone-menu', token, { method: 'PUT', body, host });
 
+const deleteMenu = (token: string, host?: string) =>
+  request('/v1/admin/branding/phone-menu', token, { method: 'DELETE', host });
+
 const PHONE_MENU = { bar: ['home', 'courses', 'store'], top: ['chat'], hidden: ['events'] };
 
 async function storedMenu(tenantId: string): Promise<unknown> {
@@ -568,6 +571,99 @@ describe('phone menu (12.3-15, D-697)', () => {
   });
 });
 
+describe('phone menu rules and the delete (12.3-15, D-697, D-698, OQ-5)', () => {
+  const body = (bar: string[], top: string[] = [], hidden: string[] = []) => ({ bar, top, hidden });
+  const REFUSED: [string, ReturnType<typeof body>][] = [
+    ['bar_too_small', body(['home'])],
+    ['bar_too_large', body(['home', 'a', 'b', 'c', 'd', 'e', 'f'])],
+    ['top_too_large', body(['home', 'a'], ['b', 'c', 'd'])],
+    ['key_repeated', body(['home', 'a'], ['a'])],
+    ['home_not_in_bar', body(['a', 'b'], [], ['home'])],
+    ['profile_at_top', body(['home', 'a'], ['profile'])],
+  ];
+
+  it('phone menu: every refusal code is a 400 with details.phoneMenu and writes nothing', async () => {
+    expect((await putMenu(tokens.admin, PHONE_MENU)).status).toBe(200);
+    for (const [code, menu] of REFUSED) {
+      const res = await putMenu(tokens.admin, menu);
+      expect(res.status, code).toBe(400);
+      const { error } = await envelope(res);
+      expect(error.code, code).toBe('VALIDATION_FAILED');
+      expect(error.details, code).toEqual({ phoneMenu: code });
+      expect(await storedMenu(ids.demo), code).toEqual(PHONE_MENU);
+    }
+  });
+
+  it('phone menu: a malformed body is a 400 and a tenant id cannot ride along', async () => {
+    for (const bad of [
+      { bar: ['home', 'a'], top: [] },
+      { bar: ['home', 'Bad Key'], top: [], hidden: [] },
+      { bar: ['home', 'a'], top: [], hidden: [], tenantId: ids.lab },
+      { bar: ['home', 'a'], top: [], hidden: Array.from({ length: 17 }, (_, i) => `k${i}`) },
+    ]) {
+      const res = await putMenu(tokens.admin, bad);
+      expect(res.status).toBe(400);
+      expect((await envelope(res)).error.code).toBe('VALIDATION_FAILED');
+    }
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+    expect(await storedMenu(ids.lab)).toBeUndefined();
+  });
+
+  it('phone menu: member, support and the other tenant admin cannot change it, beside the admin positive control', async () => {
+    const other = body(['home', 'tracks'], [], ['store']);
+    for (const token of [tokens.member, tokens.support]) {
+      for (const send of [() => putMenu(token, other), () => deleteMenu(token)]) {
+        const res = await send();
+        expect(res.status).toBe(403);
+        expect((await envelope(res)).error.code).toBe('FORBIDDEN');
+      }
+    }
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+
+    // The lab admin's save lands on the lab only; a demo session on the lab host is the host mismatch.
+    const labSave = await putMenu(tokens.labAdmin, other, HOSTS.lab);
+    expect(labSave.status).toBe(200);
+    expect(await storedMenu(ids.lab)).toEqual(other);
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+    for (const send of [
+      () => putMenu(tokens.admin, PHONE_MENU, HOSTS.lab),
+      () => deleteMenu(tokens.admin, HOSTS.lab),
+    ]) {
+      const res = await send();
+      expect(res.status).toBe(403);
+      expect((await envelope(res)).error.code).toBe('TENANT_HOST_MISMATCH');
+    }
+    expect(await storedMenu(ids.lab)).toEqual(other);
+    expect((await deleteMenu(tokens.labAdmin, HOSTS.lab)).status).toBe(200);
+    expect(await storedMenu(ids.lab)).toBeUndefined();
+    expect(await storedMenu(ids.demo)).toEqual(PHONE_MENU);
+  });
+
+  it('phone menu: DELETE restores the shell menu, answers the brand no-store, and is idempotent', async () => {
+    expect((await putMenu(tokens.admin, PHONE_MENU)).status).toBe(200);
+    const res = await deleteMenu(tokens.admin);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const brand = await adminBrand(res);
+    expect(brand.tenant.branding.phoneMenu).toBeUndefined();
+    expect('phoneMenu' in (await brandRow(ids.demo)).branding).toBe(false);
+
+    const before = await brandRow(ids.demo);
+    const [stamp] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text from public.tenants where id = ${ids.demo}::uuid`;
+    const again = await deleteMenu(tokens.admin);
+    expect(again.status).toBe(200);
+    expect(await brandRow(ids.demo)).toEqual(before);
+    const [after] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text from public.tenants where id = ${ids.demo}::uuid`;
+    expect(after?.updated_at).toBe(stamp?.updated_at);
+
+    const bootstrap = await request('/v1/me/bootstrap', tokens.admin);
+    const shell = (await bootstrap.json()) as { tenant: { branding: Record<string, unknown> } };
+    expect('phoneMenu' in shell.tenant.branding).toBe(false);
+  });
+});
+
 describe('gates on every route', () => {
   const routes: { label: string; method: string; path: string; body?: unknown }[] = [
     { label: 'read', method: 'GET', path: '/v1/admin/branding' },
@@ -589,6 +685,13 @@ describe('gates on every route', () => {
       path: `/v1/admin/branding/uploads/logo-${randomUUID()}.png/complete`,
     },
     { label: 'remove icon', method: 'DELETE', path: '/v1/admin/branding/icon' },
+    {
+      label: 'phone menu save',
+      method: 'PUT',
+      path: '/v1/admin/branding/phone-menu',
+      body: { bar: ['home', 'courses'], top: [], hidden: [] },
+    },
+    { label: 'phone menu clear', method: 'DELETE', path: '/v1/admin/branding/phone-menu' },
     {
       label: 'display name',
       method: 'PATCH',

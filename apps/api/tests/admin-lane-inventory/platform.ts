@@ -68,6 +68,18 @@ export const platform: readonly AdminLaneEntry[] = [
         7,
         'writes the tenant row on the tenant project and pushes the central mirror afterwards',
       ],
+      [
+        'setPhoneMenu',
+        'T',
+        15,
+        'writes the one phoneMenu key of the tenant row on the tenant project and pushes the central mirror afterwards (12.3-15)',
+      ],
+      [
+        'clearPhoneMenu',
+        'T',
+        15,
+        'removes the phoneMenu key of the tenant row on the tenant project and pushes the central mirror afterwards (12.3-15)',
+      ],
     ],
     'migrated',
   ),

@@ -7799,6 +7799,98 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 12.3 sweep: phone menu — a rede-demo admin saves and clears the rede-demo menu only, a rede-demo session on the rede-lab host is refused, a member or support session is 403, and each tenant bootstrap carries its own menu, each beside the same-tenant admin positive control (12.3-15, NOVF-10, NOVF-11, T-12.3-02)', async () => {
+    // | Route                                | Negative asserted here                                        |
+    // |--------------------------------------|---------------------------------------------------------------|
+    // | PUT /v1/admin/branding/phone-menu    | the demo admin on the lab host: 403 TENANT_HOST_MISMATCH and   |
+    // |                                      | the lab menu holds; member and support: 403; the lab admin's   |
+    // |                                      | save never reaches the demo row                                |
+    // | DELETE /v1/admin/branding/phone-menu | the same host and role refusals; the lab clear leaves the demo |
+    // |                                      | menu stored                                                   |
+    const demoMenu = { bar: ['home', 'courses', 'store'], top: ['chat'], hidden: ['events'] };
+    const labMenu = { bar: ['home', 'tracks'], top: [], hidden: ['store'] };
+    const stored = async (tenantId: string): Promise<unknown> => {
+      const [row] = await adminSql<{ menu: unknown }[]>`
+        select branding->'phoneMenu' as menu from public.tenants where id = ${tenantId}::uuid`;
+      return row?.menu ?? null;
+    };
+    const sweepMenus = async () => {
+      await adminSql`
+        update public.tenants set branding = branding - 'phoneMenu'
+         where id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+    };
+    const menuOf = async (token: string, host: string) =>
+      (
+        (await (await send('GET', '/v1/me/bootstrap', token, host)).json()) as {
+          tenant: { branding: { phoneMenu?: unknown } };
+        }
+      ).tenant.branding.phoneMenu;
+    try {
+      await sweepMenus();
+      // Positive controls: each admin saves their OWN menu and the other tenant's row is untouched.
+      const demoSave = await send(
+        'PUT',
+        '/v1/admin/branding/phone-menu',
+        tokens.demoAdmin,
+        HOSTS.demo,
+        demoMenu,
+      );
+      expect(demoSave.status).toBe(200);
+      expect(await stored(tenantIds.demo)).toEqual(demoMenu);
+      expect(await stored(tenantIds.lab)).toBeNull();
+      const labSave = await send(
+        'PUT',
+        '/v1/admin/branding/phone-menu',
+        tokens.labAdmin,
+        HOSTS.lab,
+        labMenu,
+      );
+      expect(labSave.status).toBe(200);
+      expect(await stored(tenantIds.lab)).toEqual(labMenu);
+      expect(await stored(tenantIds.demo)).toEqual(demoMenu);
+
+      // Each tenant's bootstrap carries its own menu.
+      expect(await menuOf(tokens.demoMember, HOSTS.demo)).toEqual(demoMenu);
+      expect(await menuOf(tokens.labAdmin, HOSTS.lab)).toEqual(labMenu);
+
+      // A demo session on the lab host is refused before any branding code runs; the lab menu holds.
+      await expectHostRefused(
+        await send('PUT', '/v1/admin/branding/phone-menu', tokens.demoAdmin, HOSTS.lab, demoMenu),
+        'phone menu save on the lab host',
+      );
+      await expectHostRefused(
+        await send('DELETE', '/v1/admin/branding/phone-menu', tokens.demoAdmin, HOSTS.lab),
+        'phone menu clear on the lab host',
+      );
+      expect(await stored(tenantIds.lab)).toEqual(labMenu);
+
+      // Member and support: 403 on both routes; the demo menu holds.
+      const demoSupport = await signInAs('support@rede-demo.local', SEED_PASSWORD);
+      for (const token of [tokens.demoMember, demoSupport]) {
+        const put = await send('PUT', '/v1/admin/branding/phone-menu', token, HOSTS.demo, labMenu);
+        expect(put.status).toBe(403);
+        const del = await send('DELETE', '/v1/admin/branding/phone-menu', token, HOSTS.demo);
+        expect(del.status).toBe(403);
+        expect(await stored(tenantIds.demo)).toEqual(demoMenu);
+      }
+
+      // The lab admin's clear is the positive control of the delete: the lab goes back to the shell
+      // menu and the demo menu stays.
+      const labClear = await send(
+        'DELETE',
+        '/v1/admin/branding/phone-menu',
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(labClear.status).toBe(200);
+      expect(await stored(tenantIds.lab)).toBeNull();
+      expect(await stored(tenantIds.demo)).toEqual(demoMenu);
+      expect(await menuOf(tokens.demoMember, HOSTS.demo)).toEqual(demoMenu);
+    } finally {
+      await sweepMenus();
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|
