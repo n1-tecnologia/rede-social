@@ -1472,6 +1472,75 @@ describe('course admin', () => {
     await adminSql`delete from public.courses where id = ${labCourse.id}::uuid`;
   });
 
+  it('top cover (NOVF-02, D-699): a ready cover attaches as the course Topo on create and edit beside the card cover and the admin reads carry it; a pending, wrong-purpose, rede-lab or unknown asset is 400 top_cover_invalid by name; null clears it; a course with none reads topCoverAssetId null', async () => {
+    // Control: no Topo reads null on create and on read, the card cover untouched.
+    const card = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const none = await createCourse({ coverAssetId: card });
+    expect(none.topCoverAssetId).toBeNull();
+    expect(none.coverAssetId).toBe(card);
+    expect((await getCourse(none.id)).topCoverAssetId).toBeNull();
+
+    // Positive control on create: a ready demo cover attaches and reads back from the detail.
+    const top = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const withTop = await createCourse({ coverAssetId: card, topCoverAssetId: top });
+    expect(withTop).toMatchObject({ coverAssetId: card, topCoverAssetId: top });
+    expect(await getCourse(withTop.id)).toEqual(withTop);
+    // Positive control on edit: the Topo set later leaves every other field as it was.
+    const edited = await json<CourseDetail>(
+      await patchCourse(none.id, { topCoverAssetId: top }),
+      200,
+    );
+    expect(edited).toEqual({ ...none, topCoverAssetId: top });
+
+    // The negatives beside them, on create AND on edit: ONE answer by name, no foreign / unknown tell.
+    const pending = await seedAsset(demoTenantId, 'image', 'cover', 'pending');
+    const labCover = await seedAsset(labTenantId, 'image', 'cover', 'ready');
+    const postCover = await seedAsset(demoTenantId, 'image', 'post', 'ready');
+    const video = await seedAsset(demoTenantId, 'video', 'cover', 'ready');
+    for (const topCoverAssetId of [
+      pending,
+      labCover,
+      postCover,
+      video,
+      randomUUID(),
+      'not-a-uuid',
+    ]) {
+      const onCreate = await request('POST', '/v1/courses', tokens.demoAdmin, {
+        title: `${PREFIX} t`,
+        instructorName: 'Dra. Ana',
+        topCoverAssetId,
+      });
+      expect(onCreate.status, String(topCoverAssetId)).toBe(400);
+      expect(((await onCreate.json()) as Envelope).error.details).toEqual({
+        courses: 'top_cover_invalid',
+      });
+      const onEdit = await patchCourse(withTop.id, { topCoverAssetId });
+      expect(onEdit.status, String(topCoverAssetId)).toBe(400);
+      expect(((await onEdit.json()) as Envelope).error.details).toEqual({
+        courses: 'top_cover_invalid',
+      });
+    }
+    expect(await getCourse(withTop.id)).toEqual(withTop);
+
+    // The lab admin cannot reach the demo course: the bare 404, the Topo intact.
+    const labEdit = await request(
+      'PATCH',
+      `/v1/courses/${withTop.id}`,
+      tokens.labAdmin,
+      { topCoverAssetId: null },
+      HOSTS.lab,
+    );
+    expect(labEdit.status).toBe(404);
+    expect((await getCourse(withTop.id)).topCoverAssetId).toBe(top);
+
+    // `null` clears the Topo and leaves the card cover.
+    const cleared = await json<CourseDetail>(
+      await patchCourse(withTop.id, { topCoverAssetId: null }),
+      200,
+    );
+    expect(cleared).toEqual({ ...withTop, topCoverAssetId: null });
+  });
+
   it('08.4 D-418: the course routes refuse the link key and read the products the product route wrote; the detail lists them archived included in product catalogue order, and with the store off the detail still answers and the gate is open (D-405)', async () => {
     const course = await createCourse();
     const coursesBefore = await adminSql<{ n: number }[]>`

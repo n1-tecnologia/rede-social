@@ -1413,3 +1413,65 @@ describe('08.5 live page', () => {
     expect((await get('/v1/courses/learn/lives/x', tokens.member)).status).toBe(400);
   });
 });
+
+/**
+ * NOVF-02 (12.3-04, D-699, D-696): the member's course page carries the course's Topo beside the
+ * card cover, as stored or null (never a computed fallback), and never another tenant's asset.
+ */
+describe('NOVF-02 course Topo on the member read', () => {
+  async function readyCover(slug: 'rede-demo' | 'rede-lab', label: string): Promise<string> {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+         variant_widths, filename, ready_at)
+      select t.id, m.user_id, 'image', 'cover', 'ready', 'supabase', 'image/webp', 262144, 1600,
+             700, '{320,640,960,1280}'::int[], ${`${PREFIX}-${label}.webp`}, now()
+        from public.tenants t
+        join public.memberships m on m.tenant_id = t.id and m.role = 'admin_tenant'
+       where t.slug = ${slug}
+       order by m.joined_at
+       fetch first 1 rows only
+      returning id::text as id`;
+    if (!row) throw new Error(`could not seed the ${label} cover`);
+    return row.id;
+  }
+  const readCourse = async (courseId: string, token = tokens.member) => {
+    const res = await get(`/v1/courses/learn/courses/${courseId}`, token);
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    return { course: learnCourseSchema.parse(JSON.parse(raw)), raw };
+  };
+
+  it('a member reads the Topo the admin saved beside the card cover; a course with none reads null; another tenant’s asset is refused and never appears', async () => {
+    const card = await readyCover('rede-demo', 'topo-card');
+    const top = await readyCover('rede-demo', 'topo-top');
+    const withTop = await publishedCourse('com topo', [[{ title: 'aula 1' }]]);
+    const without = await publishedCourse('sem topo', [[{ title: 'aula 1' }]]);
+    for (const [id, body] of [
+      [withTop.courseId, { coverAssetId: card, topCoverAssetId: top }],
+      [without.courseId, { coverAssetId: card }],
+    ] as const) {
+      expect((await admin('PATCH', `/v1/courses/${id}`, body)).status).toBe(200);
+    }
+
+    // Positive control: both images travel together; the course with none answers null, card kept.
+    for (const token of [tokens.member, tokens.support, tokens.admin]) {
+      const read = await readCourse(withTop.courseId, token);
+      expect(read.course).toMatchObject({ coverAssetId: card, topCoverAssetId: top });
+    }
+    expect((await readCourse(without.courseId)).course).toMatchObject({
+      coverAssetId: card,
+      topCoverAssetId: null,
+    });
+
+    // Negative: a rede-lab asset cannot be written into a demo course, and never reaches a member.
+    const labTop = await readyCover('rede-lab', 'topo-lab');
+    const refused = await admin('PATCH', `/v1/courses/${withTop.courseId}`, {
+      topCoverAssetId: labTop,
+    });
+    expect(refused.status).toBe(400);
+    const after = await readCourse(withTop.courseId);
+    expect(after.raw).not.toContain(labTop);
+    expect(after.course.topCoverAssetId).toBe(top);
+  });
+});
