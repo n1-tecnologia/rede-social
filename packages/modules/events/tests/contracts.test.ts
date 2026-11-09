@@ -678,3 +678,82 @@ describe('2026-10-07 — the schedule (quick 261007-n1g)', () => {
     expect(normaliseEventSchedule(many(250))).toHaveLength(EVENT_SCHEDULE_MAX_ITEMS);
   });
 });
+
+describe('2026-11-09 — the vertical poster (12.3-06, NOVF-04, D-696, D-699)', () => {
+  const asset = '33333333-3333-4333-8333-333333333333';
+  const editBody = {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 't',
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    category: null,
+    capacity: null,
+    format: 'in_person',
+    venueName: 'Sede',
+    address: 'Rua das Flores, 100',
+    meetingUrl: null,
+    start: { date: '2026-10-12', time: '19:00' },
+    end: { date: '2026-10-12', time: '21:00' },
+    status: 'active',
+    startsAt: '2026-10-12T22:00:00.000000Z',
+    endsAt: '2026-10-13T00:00:00.000000Z',
+  };
+
+  it('39. poster_invalid is in the closed vocabulary and the route lifts it', () => {
+    expect(EVENT_ISSUES).toContain('poster_invalid');
+    expect(EVENT_ISSUE_SET.has('poster_invalid')).toBe(true);
+    expect(new Set(EVENT_ISSUES).size).toBe(EVENT_ISSUES.length);
+  });
+
+  it('40. the input takes posterAssetId as an optional, nullable uuid and stays strict', () => {
+    expect(refusal(base)).toBeNull();
+    expect(refusal({ ...base, posterAssetId: asset })).toBeNull();
+    expect(refusal({ ...base, posterAssetId: null })).toBeNull();
+    expect(refusal({ ...base, coverAssetId: asset, posterAssetId: asset })).toBeNull();
+    expect(refusal({ ...base, posterAssetId: 'not-a-uuid' })).toBe('generic');
+    expect(refusal({ ...base, posterAssetId: 42 })).toBe('generic');
+    expect(refusal({ ...base, posterUrl: 'https://example.test/p.png' })).toBe('generic');
+  });
+
+  it('41. the summary, the detail and the edit read take the poster keys as optional (an older API still parses)', () => {
+    const summary = {
+      id: '11111111-1111-4111-8111-111111111111',
+      title: 't',
+      format: 'online',
+      category: null,
+      capacity: null,
+      venueName: null,
+      address: null,
+      coverAssetId: null,
+      coverVariantWidths: [],
+      startsAt: '2026-10-12T22:00:00.000000Z',
+      endsAt: '2026-10-13T00:00:00.000000Z',
+      status: 'active',
+      viewerStatus: null,
+      viewerCheckedInAt: null,
+      confirmedCount: 0,
+      presentCount: 0,
+    };
+    for (const schema of [eventSummarySchema, eventDetailSchema]) {
+      const payload = schema === eventDetailSchema ? detail : summary;
+      expect(schema.safeParse(payload).success).toBe(true);
+      expect(
+        schema.safeParse({ ...payload, posterAssetId: asset, posterVariantWidths: [240, 480] })
+          .success,
+      ).toBe(true);
+      expect(
+        schema.safeParse({ ...payload, posterAssetId: null, posterVariantWidths: [] }).success,
+      ).toBe(true);
+      expect(schema.safeParse({ ...payload, posterAssetId: 'x' }).success).toBe(false);
+      expect(schema.safeParse({ ...payload, posterVariantWidths: ['240'] }).success).toBe(false);
+    }
+    expect(eventEditSchema.safeParse(editBody).success).toBe(true);
+    expect(
+      eventEditSchema.safeParse({ ...editBody, posterAssetId: asset, posterVariantWidths: [240] })
+        .success,
+    ).toBe(true);
+    expect(eventEditSchema.safeParse({ ...editBody, posterAssetId: 7 }).success).toBe(false);
+    expect(eventEditSchema.safeParse({ ...editBody, poster: asset }).success).toBe(false);
+  });
+});

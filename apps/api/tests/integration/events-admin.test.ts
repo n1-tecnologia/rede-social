@@ -597,4 +597,162 @@ describe('events admin', () => {
       select count(*)::int as n from public.events where title like ${`${TEST_TITLE_PREFIX}%`}`;
     expect(after[0]?.n).toBe(before[0]?.n);
   });
+
+  it('12. poster edit: a poster-only PUT is a real change (stored, updated_at moved), an identical PUT matches no row, a foreign or unusable new poster is refused beside the accepted one', async () => {
+    const first = await seedAsset('poster-12-a', 'cover', 'ready');
+    const second = await seedAsset('poster-12-b', 'cover', 'ready');
+    const body = inPerson('poster edicao');
+    const created = await create(body);
+    expect(created.posterAssetId).toBeNull();
+
+    // Only the poster changes: NOT reported as unchanged.
+    const stamp0 = await updatedAtOf(created.id);
+    const before = updates.length;
+    const set = await put(created.id, { ...body, posterAssetId: first });
+    expect(set.status, JSON.stringify(await set.clone().json())).toBe(200);
+    const setBody = (await set.json()) as EventSummary;
+    expect(setBody.posterAssetId).toBe(first);
+    expect(setBody.posterVariantWidths).toEqual([240, 480, 720]);
+    const stamp1 = await updatedAtOf(created.id);
+    expect(stamp1).not.toBe(stamp0);
+    await settle();
+    const mine = updates.slice(before).filter((u) => u.eventId === created.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]?.timesChanged).toBe(false);
+    const [stored] = await adminSql<{ poster_asset_id: string | null }[]>`
+      select poster_asset_id from public.events where id = ${created.id}::uuid`;
+    expect(stored?.poster_asset_id).toBe(first);
+
+    // An identical PUT, poster included, matches no row and emits nothing.
+    const again = await put(created.id, { ...body, posterAssetId: first });
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as EventSummary).posterAssetId).toBe(first);
+    await settle();
+    expect(await updatedAtOf(created.id)).toBe(stamp1);
+    expect(updates.slice(before).filter((u) => u.eventId === created.id)).toHaveLength(1);
+
+    // Swapping to another ready poster is a change again (the positive control of the refusals).
+    const swapped = await put(created.id, { ...body, posterAssetId: second });
+    expect(swapped.status).toBe(200);
+    expect(((await swapped.json()) as EventSummary).posterAssetId).toBe(second);
+    const stamp2 = await updatedAtOf(created.id);
+    expect(stamp2).not.toBe(stamp1);
+
+    // Refusals: nothing written, updated_at and the stored poster intact.
+    const [foreign] = await adminSql<{ id: string }[]>`
+      select id from public.media_assets where tenant_id = ${tenantIds.lab}::uuid limit 1`;
+    const feedImage = await seedAsset('poster-12-post', 'post', 'ready');
+    const miss = await put(created.id, { ...body, posterAssetId: foreign?.id ?? null });
+    expect(miss.status).toBe(404);
+    const missError = await envelope(miss);
+    expect(missError.code).toBe('NOT_FOUND');
+    expect(Object.hasOwn(missError, 'details')).toBe(false);
+    const invalid = await put(created.id, { ...body, posterAssetId: feedImage });
+    expect(invalid.status).toBe(400);
+    expect((await envelope(invalid)).details).toEqual({ event: 'poster_invalid' });
+    expect(await updatedAtOf(created.id)).toBe(stamp2);
+    const [kept] = await adminSql<{ poster_asset_id: string | null }[]>`
+      select poster_asset_id from public.events where id = ${created.id}::uuid`;
+    expect(kept?.poster_asset_id).toBe(second);
+  });
+
+  it('13. poster adjacency and empty: the same asset as cover and poster is stored twice, an absent or null poster clears only the poster, a poster with no cover reads right', async () => {
+    const shared = await seedAsset('poster-13-shared', 'cover', 'ready');
+    const body = { ...inPerson('poster adjacente'), coverAssetId: shared, posterAssetId: shared };
+    const created = await create(body);
+    expect(created.coverAssetId).toBe(shared);
+    expect(created.posterAssetId).toBe(shared);
+
+    // The key is ABSENT (an older web): the whole-event replacement clears the poster, not the cover.
+    const { posterAssetId: _dropped, ...withoutPoster } = body;
+    const cleared = await put(created.id, withoutPoster);
+    expect(cleared.status).toBe(200);
+    const clearedBody = (await cleared.json()) as EventSummary;
+    expect(clearedBody.posterAssetId).toBeNull();
+    expect(clearedBody.posterVariantWidths).toEqual([]);
+    expect(clearedBody.coverAssetId).toBe(shared);
+    const [one] = await adminSql<
+      { cover_asset_id: string | null; poster_asset_id: string | null }[]
+    >`
+      select cover_asset_id, poster_asset_id from public.events where id = ${created.id}::uuid`;
+    expect(one).toEqual({ cover_asset_id: shared, poster_asset_id: null });
+
+    // Back on, then an EXPLICIT null clears it too.
+    expect((await put(created.id, body)).status).toBe(200);
+    const nulled = await put(created.id, { ...body, posterAssetId: null });
+    expect(nulled.status).toBe(200);
+    expect(((await nulled.json()) as EventSummary).posterAssetId).toBeNull();
+    const [two] = await adminSql<
+      { cover_asset_id: string | null; poster_asset_id: string | null }[]
+    >`
+      select cover_asset_id, poster_asset_id from public.events where id = ${created.id}::uuid`;
+    expect(two).toEqual({ cover_asset_id: shared, poster_asset_id: null });
+
+    // The reverse: a poster with no horizontal cover, then a cover with no poster.
+    const onlyPoster = await put(created.id, { ...body, coverAssetId: null });
+    expect(onlyPoster.status).toBe(200);
+    const onlyPosterBody = (await onlyPoster.json()) as EventSummary;
+    expect(onlyPosterBody.coverAssetId).toBeNull();
+    expect(onlyPosterBody.coverVariantWidths).toEqual([]);
+    expect(onlyPosterBody.posterAssetId).toBe(shared);
+    expect(onlyPosterBody.posterVariantWidths).toEqual([240, 480, 720]);
+    const edit = (await (await editRead(created.id)).json()) as EventEdit;
+    expect(edit.coverAssetId).toBeNull();
+    expect(edit.posterAssetId).toBe(shared);
+  });
+
+  it('14. poster ordering: the list sequence is the same with and without posters', async () => {
+    const poster = await seedAsset('poster-14', 'cover', 'ready');
+    const bodies = [inPerson('poster ordem a', 6), inPerson('poster ordem b', 7)];
+    const events: EventSummary[] = [];
+    for (const body of bodies) events.push(await create(body));
+    const withoutPosters = (await memberUpcoming()).map((item) => item.id);
+    expect(withoutPosters).toEqual(expect.arrayContaining(events.map((e) => e.id)));
+
+    for (const [index, event] of events.entries()) {
+      const edited = await put(event.id, { ...(bodies[index] as Body), posterAssetId: poster });
+      expect(edited.status).toBe(200);
+    }
+    const withPosters = await memberUpcoming();
+    expect(withPosters.map((item) => item.id)).toEqual(withoutPosters);
+    expect(withPosters.filter((item) => item.posterAssetId === poster)).toHaveLength(2);
+  });
+
+  it('15. poster concurrency and stale reference: two parallel edits both succeed and one wins whole, and a retired poster re-sent is healed to null instead of failing', async () => {
+    const a = await seedAsset('poster-15-a', 'cover', 'ready');
+    const b = await seedAsset('poster-15-b', 'cover', 'ready');
+    const body = inPerson('poster paralelo');
+    const created = await create(body);
+
+    const [one, two] = await Promise.all([
+      put(created.id, { ...body, posterAssetId: a }),
+      put(created.id, { ...body, posterAssetId: b }),
+    ]);
+    expect(one.status).toBe(200);
+    expect(two.status).toBe(200);
+    const [stored] = await adminSql<{ poster_asset_id: string | null }[]>`
+      select poster_asset_id from public.events where id = ${created.id}::uuid`;
+    expect([a, b]).toContain(stored?.poster_asset_id);
+    const edit = (await (await editRead(created.id)).json()) as EventEdit;
+    expect(edit.posterAssetId).toBe(stored?.poster_asset_id);
+
+    // The admin retires the stored poster: every read drops it at once, the stored column still holds it.
+    const dead = stored?.poster_asset_id as string;
+    await adminSql`update public.media_assets set deleted_at = now() where id = ${dead}::uuid`;
+    const retired = (await (await editRead(created.id)).json()) as EventEdit;
+    expect(retired.posterAssetId).toBeNull();
+    expect(retired.posterVariantWidths).toEqual([]);
+    const memberDetail = (await (
+      await request(`/v1/events/${created.id}`, tokens.demoMember)
+    ).json()) as EventSummary;
+    expect(memberDetail.posterAssetId).toBeNull();
+
+    // Re-sending the dead id asserts nothing new: healed to null, 200, once.
+    const healed = await put(created.id, { ...body, posterAssetId: dead });
+    expect(healed.status, JSON.stringify(await healed.clone().json())).toBe(200);
+    expect(((await healed.json()) as EventSummary).posterAssetId).toBeNull();
+    const [after] = await adminSql<{ poster_asset_id: string | null }[]>`
+      select poster_asset_id from public.events where id = ${created.id}::uuid`;
+    expect(after?.poster_asset_id).toBeNull();
+  });
 });
