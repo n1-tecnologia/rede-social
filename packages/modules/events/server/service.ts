@@ -104,6 +104,9 @@ type EventRow = {
   address?: string | null;
   cover_asset_id: string | null;
   cover_variant_widths: number[] | null;
+  /** 2026-11-09 (12.3-06). Optional in the TYPE only so a hand-built test row may omit them. */
+  poster_asset_id?: string | null;
+  poster_variant_widths?: number[] | null;
   status: EventStatus;
   starts_at: string;
   ends_at: string;
@@ -154,6 +157,9 @@ export const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  *    `media_assets_tenant_select` decides visibility in this lane. When the join misses (the admin
  *    retired the asset: the policy hides `deleted_at is not null`), the id is NULLED too, so every
  *    surface takes the D-69 gradient branch instead of a veil over an empty ladder (06 review WR-04);
+ *  - (2026-11-09, 12.3-06) the vertical poster's id and ladder, through a SECOND `left join
+ *    media_assets pa` in the same statement, nulled the same way when the asset was retired: the
+ *    page stays ONE statement (`feed-query-budget.test.ts`);
  *  - the VIEWER's own attendance row (`me`), through the unique
  *    `event_attendances_tenant_event_user_uq`: only the caller's row, never anyone else's (D-206);
  *  - the two D-219 counts, from a lateral aggregate served by
@@ -176,6 +182,8 @@ const eventColumns = sql`
            e.address,
            case when a.id is null then null else e.cover_asset_id end as cover_asset_id,
            a.variant_widths as cover_variant_widths,
+           case when pa.id is null then null else e.poster_asset_id end as poster_asset_id,
+           pa.variant_widths as poster_variant_widths,
            e.status,
            to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
            to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at,
@@ -188,6 +196,7 @@ const eventColumns = sql`
 const eventSource = (viewerId: string) => sql`
       from events e
       left join media_assets a on a.id = e.cover_asset_id
+      left join media_assets pa on pa.id = e.poster_asset_id
       left join event_attendances me
              on me.tenant_id = e.tenant_id
             and me.event_id = e.id
@@ -216,6 +225,8 @@ const toEvent = (row: EventRow): EventSummary => ({
   address: row.address ?? null,
   coverAssetId: row.cover_asset_id,
   coverVariantWidths: row.cover_variant_widths ?? [],
+  posterAssetId: row.poster_asset_id ?? null,
+  posterVariantWidths: row.poster_variant_widths ?? [],
   startsAt: row.starts_at,
   endsAt: row.ends_at,
   status: row.status,
@@ -357,17 +368,22 @@ type CoverAssetRow = { kind: string; purpose: string; status: string };
  *  - a row of THIS tenant that is not `purpose = 'cover'`, `kind = 'image'`, `status = 'ready'`:
  *    `400 { event: 'cover_invalid' }`, information the caller already had.
  * A null id performs no lookup: "no cover" is a first-class value (D-69).
+ *
+ * (2026-11-09, 12.3-06) The vertical poster is checked by THIS function too, with `poster_invalid` as
+ * the refusal code: same lookup, same accepted tuple, same bare 404, so the two images can never
+ * disagree about what a usable asset is.
  */
 async function resolveCoverAsset(
   tx: Tx,
   ctx: RequestContext,
   coverAssetId: string | null,
+  issue: 'cover_invalid' | 'poster_invalid' = 'cover_invalid',
 ): Promise<void> {
   if (coverAssetId === null) return;
   const asset = await loadCoverAsset(tx, ctx, coverAssetId);
   if (!asset) throw new ApiError(404, 'NOT_FOUND');
   if (!isUsableCover(asset)) {
-    throw new ApiError(400, 'VALIDATION_FAILED', { event: 'cover_invalid' });
+    throw new ApiError(400, 'VALIDATION_FAILED', { event: issue });
   }
 }
 
@@ -461,6 +477,7 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
   const address = inPerson ? orNull(input.address) : null;
   const meetingUrl = inPerson ? null : orNull(input.meetingUrl);
   const coverAssetId = input.coverAssetId ?? null;
+  const posterAssetId = input.posterAssetId ?? null;
   const category = orNull(input.category);
   const capacity = input.capacity ?? null;
   const schedule = normaliseEventSchedule(input.schedule ?? []);
@@ -470,16 +487,18 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
     created = await withTenantTx(ctx, async (tx) => {
       // FIRST statement: a refused cover writes nothing at all.
       await resolveCoverAsset(tx, ctx, coverAssetId);
+      await resolveCoverAsset(tx, ctx, posterAssetId, 'poster_invalid');
 
       const inserted = await tx.execute<{ id: string }>(sql`
         insert into events (tenant_id, created_by_user_id, title, description, cover_asset_id,
-                            category, capacity, schedule, format, venue_name, address, starts_at,
-                            ends_at)
+                            poster_asset_id, category, capacity, schedule, format, venue_name,
+                            address, starts_at, ends_at)
         select ${ctx.tenantId}::uuid,
                ${ctx.userId}::uuid,
                ${input.title},
                ${input.description},
                ${coverAssetId}::uuid,
+               ${posterAssetId}::uuid,
                ${category}::text,
                ${capacity}::int,
                ${JSON.stringify(schedule)}::jsonb,
@@ -540,6 +559,7 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
       titleLength: input.title.length,
       descriptionLength: input.description.length,
       hasCover: created.cover_asset_id !== null,
+      hasPoster: created.poster_asset_id != null,
       hasCategory: category !== null,
       capacity,
       // A count, never the words (Pitfall 12).
@@ -801,6 +821,8 @@ type EventEditRow = {
   description: string;
   cover_asset_id: string | null;
   cover_variant_widths: number[] | null;
+  poster_asset_id: string | null;
+  poster_variant_widths: number[] | null;
   category: string | null;
   capacity: number | null;
   format: EventFormat;
@@ -842,6 +864,8 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
              e.description,
              case when a.id is null then null else e.cover_asset_id end as cover_asset_id,
              a.variant_widths as cover_variant_widths,
+             case when pa.id is null then null else e.poster_asset_id end as poster_asset_id,
+             pa.variant_widths as poster_variant_widths,
              e.category,
              e.capacity,
              e.schedule,
@@ -859,6 +883,7 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
         from events e
         join tenants t on t.id = e.tenant_id
         left join media_assets a on a.id = e.cover_asset_id
+        left join media_assets pa on pa.id = e.poster_asset_id
         left join event_secrets s on s.tenant_id = e.tenant_id and s.event_id = e.id
        where e.tenant_id = ${ctx.tenantId}::uuid
          and e.id = ${eventId}::uuid
@@ -873,6 +898,8 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
     description: row.description,
     coverAssetId: row.cover_asset_id,
     coverVariantWidths: row.cover_variant_widths ?? [],
+    posterAssetId: row.poster_asset_id,
+    posterVariantWidths: row.poster_variant_widths ?? [],
     category: row.category,
     capacity: row.capacity === null ? null : Number(row.capacity),
     format: row.format,

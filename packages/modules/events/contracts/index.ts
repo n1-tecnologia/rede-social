@@ -143,6 +143,11 @@ export type EventPeriod = (typeof EVENT_PERIODS)[number];
  *    (`409`), decided by the guard trigger's step 7 (constraint `event_attendances_capacity`);
  *  - `photo_invalid`: an asset of THIS tenant that is not the caller's own ready `post` image, or
  *    one that is already another event's photo (`400`). A foreign or unknown asset stays a bare 404.
+ *
+ * 2026-11-09 (12.3-06) adds one:
+ *  - `poster_invalid`: the vertical poster (`posterAssetId`) is an asset of THIS tenant that is not a
+ *    ready `cover` image (`400`), the cover's own rule under its own code. A foreign or unknown
+ *    asset stays a bare 404.
  */
 export const EVENT_ISSUES = [
   'name_required',
@@ -151,6 +156,7 @@ export const EVENT_ISSUES = [
   'url_required',
   'url_invalid',
   'cover_invalid',
+  'poster_invalid',
   'rsvp_closed',
   'cancelled',
   'attendance_locked',
@@ -286,6 +292,12 @@ export const eventInputSchema = z
     title: z.string().trim().max(EVENT_MAX_TITLE).default(''),
     description: z.string().trim().max(EVENT_MAX_DESCRIPTION).default(''),
     coverAssetId: z.uuid().nullable().optional(),
+    /**
+     * 2026-11-09 (12.3-06, D-699): the vertical 4:5 poster the list prints, beside the horizontal
+     * cover the event page prints. Checked like `coverAssetId` (`poster_invalid`). The `PUT` is a
+     * whole-event replacement, so an absent key clears the stored poster, as it does the cover.
+     */
+    posterAssetId: z.uuid().nullable().optional(),
     /** Trimmed; `''`, null and absent are all stored as "no category" (null, never `''`). */
     category: z.string().trim().max(EVENT_MAX_CATEGORY).nullable().optional(),
     /**
@@ -401,6 +413,12 @@ export const eventSummarySchema = z
     coverAssetId: z.uuid().nullable(),
     /** The cover's variant ladder; `[]` when there is no cover (the D-69 gradient branch). */
     coverVariantWidths: z.array(z.number().int()),
+    /**
+     * 2026-11-09 (12.3-06, D-696, D-699): the vertical poster and its variant ladder, the stored id or
+     * null, `[]` with none. Optional so a strict web reads an API that predates them.
+     */
+    posterAssetId: z.uuid().nullable().optional(),
+    posterVariantWidths: z.array(z.number().int()).optional(),
     startsAt: z.string(),
     endsAt: z.string(),
     status: z.enum(EVENT_STATUSES),
@@ -549,6 +567,9 @@ export const eventEditSchema = z
     description: z.string(),
     coverAssetId: z.uuid().nullable(),
     coverVariantWidths: z.array(z.number().int()),
+    /** 2026-11-09 (12.3-06, D-696): the stored poster and its ladder; optional like the summary's. */
+    posterAssetId: z.uuid().nullable().optional(),
+    posterVariantWidths: z.array(z.number().int()).optional(),
     /** 2026-10-03: the stored category and limit, null for none (the form shows an empty field). */
     category: z.string().nullable(),
     capacity: z.number().int().positive().nullable(),
