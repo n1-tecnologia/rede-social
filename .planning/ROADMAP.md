@@ -1790,7 +1790,7 @@ Plans:
 **Requirements**: NOVF-01, NOVF-02, NOVF-03, NOVF-04, NOVF-05, NOVF-06, NOVF-07, NOVF-08, NOVF-09, NOVF-10, NOVF-11
 **Depends on:** Phase 06 (events), Phase 08.2 (store), Phase 08.3 to 08.6 (courses and member area). Runs after 12.2 closes and before Phase 13.
 **Source:** `~/Downloads/O que mudou no front - Área de membros, Loja e Menu do app.pdf` (not in the repo, public) and the summary in `12.3-SOURCE.md`. Part 2 of the document (17 front-only screens) is already merged and is NOT this phase.
-**Plans:** 4/17 plans executed
+**Plans:** 5/17 plans executed
 
 Open design points (for /gsd-discuss-phase 12.3): (1) where the phone menu (1.10) lives: it belongs to no module, so `tenants.branding` (jsonb) or another place; (2) the writer for 1.6 and 1.7 in `tenant_modules.settings`: today only the platform route (super_admin) writes it, so the store module needs its own `admin_tenant` route; (3) whether the eight built-in categories become rows of the new table (1.8) and what an existing product gets (none, or the one its name suggests, as the web guesses today); (4) the contract of `category` on the product (1.9): today an enum of the eight, it becomes the category id; (5) the name of the second cover column and its fallback (no top cover = the card cover, as the web does today); (6) what happens to the cookies already set on an admin's device when the API starts answering.
 
@@ -1809,7 +1809,7 @@ Plans:
 
 - [ ] 12.3-02-PLAN.md — Block A, the web: delete the manager-only local preview of the track texts, an empty text is absent (NOVF-01, tracer)
 - [x] 12.3-04-PLAN.md — Block B, the API for tracks and courses: the Topo written, validated and read (NOVF-02, 11, tracer)
-- [ ] 12.3-06-PLAN.md — Block B, the API for events: the vertical poster, a poster-only edit is a real change (NOVF-04, 11, tracer)
+- [x] 12.3-06-PLAN.md — Block B, the API for events: the vertical poster, a poster-only edit is a real change (NOVF-04, 11, tracer)
 - [x] 12.3-09-PLAN.md — Block C, the database: the categories and front tables, the product column, the once-only seed, the one-time load by name, applied locally with Igor's word (NOVF-05..09, tracer, `autonomous: false`)
 
 **Wave 3** *(modules, the covers web, the store proofs and reads)*
