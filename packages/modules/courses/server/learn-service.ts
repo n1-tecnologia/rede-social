@@ -969,7 +969,14 @@ type MemberLessonSqlRow = {
   lesson_created_at: string;
 };
 
-type MemberTrackSqlRow = { id: string; title: string; cover_asset_id: string | null };
+type MemberTrackSqlRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  subtitle: string;
+  audience: string;
+  description: string;
+};
 type MemberLiveSqlRow = {
   id: string;
   title: string;
@@ -1008,6 +1015,9 @@ function memberTrackRows(
     id: track.id,
     title: track.title,
     coverAssetId: track.cover_asset_id,
+    subtitle: track.subtitle,
+    audience: track.audience,
+    description: track.description,
     courseIds: paths.get(track.id) ?? [],
   }));
 }
@@ -1074,7 +1084,7 @@ async function readMemberArea(tx: Tx, ctx: RequestContext): Promise<MemberAreaRe
      order by x.course_id, x.course_seq`);
   // D-438 / A14: the active tracks in the admin order, and their paths in path order.
   const trackRows = await tx.execute<MemberTrackSqlRow>(sql`
-    select t.id, t.title, t.cover_asset_id
+    select t.id, t.title, t.cover_asset_id, t.subtitle, t.audience, t.description
       from course_tracks t
      where t.tenant_id = ${ctx.tenantId}::uuid
        and t.status = 'active'

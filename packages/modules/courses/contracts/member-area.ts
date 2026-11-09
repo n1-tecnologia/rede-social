@@ -302,6 +302,10 @@ export interface MemberTrackRow {
   id: string;
   title: string;
   coverAssetId: string | null;
+  /** The words the admin wrote on the track form; `''` when left empty (NOVF-01, D-699). */
+  subtitle: string;
+  audience: string;
+  description: string;
   courseIds: readonly string[];
 }
 
@@ -699,6 +703,10 @@ export interface TrackView {
   id: string;
   title: string;
   coverAssetId: string | null;
+  /** The track's subtitle, "Para quem é" and description as the admin saved them (`''` when empty). */
+  subtitle: string;
+  audience: string;
+  description: string;
   /** `floor(doneLessons * 100 / totalLessons)` over the path's live lessons (lesson-weighted). */
   percent: number;
   coursesDone: number;
@@ -795,6 +803,9 @@ export function trackStates(
       id: track.id,
       title: track.title,
       coverAssetId: track.coverAssetId,
+      subtitle: track.subtitle,
+      audience: track.audience,
+      description: track.description,
       percent: lessonCount === 0 ? 0 : Math.floor((done * 100) / lessonCount),
       coursesDone: views.filter((view) => view.state === 'concluida').length,
       total: views.length,
