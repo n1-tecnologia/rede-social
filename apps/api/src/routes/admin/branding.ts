@@ -7,6 +7,7 @@ import {
   brandingColorsBodySchema,
   brandingUploadBodySchema,
   brandingUploadSchema,
+  phoneMenuSchema,
 } from '@rede-social/contracts';
 import { KERNEL_PERMISSIONS } from '@rede-social/contracts/moderation';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
@@ -15,6 +16,7 @@ import {
   completeBrandingUpload,
   removeIconOverride,
   setBrandingColors,
+  setPhoneMenu,
   startBrandingUpload,
 } from '@rede-social/core/server/platform/branding';
 import { getTenantDetail } from '@rede-social/core/server/platform/tenants';
@@ -154,6 +156,27 @@ const removeIconRoute = createRoute({
   },
 });
 
+const putPhoneMenuRoute = createRoute({
+  method: 'put',
+  path: '/phone-menu',
+  middleware: [manage] as const,
+  request: {
+    body: {
+      content: { 'application/json': { schema: phoneMenuSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: brandResponse(
+      "The phone menu saved in the tenant's brand (bar, top and hidden keys in the saved order); the bootstrap carries it to every role",
+    ),
+    400: envelope(
+      'VALIDATION_FAILED — a malformed body, or { phoneMenu: <code> } for a menu that breaks a rule (nothing persisted)',
+    ),
+    403: envelope('FORBIDDEN — the caller does not hold `tenant.manage` in this tenant'),
+  },
+});
+
 export const adminBrandingRoutes = branding
   .openapi(readRoute, async (c) => {
     const body = await brandOf(c.get('ctx').tenantId);
@@ -239,6 +262,16 @@ export const adminBrandingRoutes = branding
       },
       'tenant brand icon override removed',
     );
+    c.header('Cache-Control', 'no-store');
+    return c.json(body, 200);
+  })
+  .openapi(putPhoneMenuRoute, async (c) => {
+    const ctx = c.get('ctx');
+    await setPhoneMenu(ctx.tenantId, c.req.valid('json'), {
+      userId: ctx.userId,
+      logger: c.get('logger'),
+    });
+    const body = await brandOf(ctx.tenantId);
     c.header('Cache-Control', 'no-store');
     return c.json(body, 200);
   });

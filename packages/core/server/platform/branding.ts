@@ -12,6 +12,7 @@ import {
   deriveBrandColors,
   mimeToExtension,
   normalizeBrandLook,
+  type PhoneMenu,
   type ResolvedBranding,
   resolveBranding,
   type TenantBranding,
@@ -651,6 +652,49 @@ export async function setBrandingLook(
     'branding look saved',
   );
   return result;
+}
+
+/**
+ * `PUT /v1/admin/branding/phone-menu` (12.3-15, D-697): the WHOLE phone menu replaces the stored one.
+ * Merged into the jsonb, never rewritten (the row is locked first, then ONE statement sets the one key),
+ * so the logo, the icon set, the pair and the look are never touched. The menu is bound as a JSON
+ * parameter cast to jsonb, never interpolated (T-12.3-09), and the log line carries ids and list lengths
+ * only (T-12.3-10). Every host of the tenant leaves the host cache after commit and the mirror follows.
+ */
+export async function setPhoneMenu(
+  tenantId: string,
+  menu: PhoneMenu,
+  actor: PlatformActor,
+): Promise<void> {
+  if (!(await tenantExists(tenantId))) throw new ApiError(404, 'NOT_FOUND');
+  await withAdminTx({ tenantId }, async (tx) => {
+    const [row] = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1)
+      .for('update');
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    await tx.execute(sql`
+      update public.tenants
+         set branding = branding || jsonb_build_object('phoneMenu', ${JSON.stringify(menu)}::jsonb),
+             updated_at = now()
+       where id = ${tenantId}::uuid`);
+  });
+
+  await pushToCentral(tenantId, ['branding']);
+  await invalidateAllTenantHosts(tenantId);
+  logFor(actor, 'platform.branding').info(
+    {
+      event: 'platform.branding.phone_menu',
+      userId: actor.userId,
+      tenantId,
+      bar: menu.bar.length,
+      top: menu.top.length,
+      hidden: menu.hidden.length,
+    },
+    'phone menu saved',
+  );
 }
 
 /**

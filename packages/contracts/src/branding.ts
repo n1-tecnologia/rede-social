@@ -189,6 +189,44 @@ export function normalizeBrandLook(look: BrandLook): BrandLook {
   };
 }
 
+// ── The phone menu (12.3-15, D-697, D-698) ───────────────────────────────────────────────────────
+//
+// The menu the tenant's administrator arranged for the phone: the bottom bar's items in order, the
+// items moved to the top beside the counters, and the items hidden on the phone. ONE menu per school
+// for every role and language (D-698). The values are the web's own (`apps/web/lib/phone-nav-layout.ts`,
+// which imports them from here since plan 16) so the server and the editor apply one rule.
+
+/** A tab or slot key: lowercase, digits and dashes, 1 to 32 characters, never a leading dash. */
+export const PHONE_MENU_KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/** The bar holds two to six items (six fit the 320px phone). */
+export const PHONE_BAR_MIN = 2;
+export const PHONE_BAR_MAX = 6;
+/** The administrator's own items at the top, beside the counter slots. */
+export const PHONE_TOP_MAX = 2;
+/** Início always stays in the bar (and is required there). */
+export const PHONE_MENU_BAR_ONLY = ['home'] as const;
+/** Início never goes to the top, and Perfil never either (its avatar is already there). */
+export const PHONE_MENU_NEVER_TOP = ['home', 'profile'] as const;
+/** At most this many keys PER LIST (the web's own behaviour). */
+export const PHONE_MENU_MAX_KEYS = 16;
+
+const phoneMenuKeysSchema = z.array(z.string().regex(PHONE_MENU_KEY_RE)).max(PHONE_MENU_MAX_KEYS);
+
+/**
+ * The menu as stored and as sent: three lists of keys, strict. The ORDER of each list is the saved
+ * order and is never sorted or deduplicated by the server; the rules that cross lists (sizes, a key in
+ * two lists, `home` and `profile`) are `validatePhoneMenu`. Unknown keys are kept: the server cannot
+ * know the web's tab and slot vocabulary.
+ */
+export const phoneMenuSchema = z
+  .object({
+    bar: phoneMenuKeysSchema,
+    top: phoneMenuKeysSchema,
+    hidden: phoneMenuKeysSchema,
+  })
+  .strict();
+export type PhoneMenu = z.infer<typeof phoneMenuSchema>;
+
 /**
  * The public brand facts carried by `GET /v1/public/tenants/by-host` (T-02-04): logo, favicon, the
  * icon set, the five colors and, since 2026-10-03, the look (so the logged-out pages show the
@@ -229,6 +267,13 @@ export const tenantBrandingSchema = z.object({
   iconOwnArt: z.boolean().default(false),
   colors: brandColorsSchema.partial().default({}),
   look: brandLookSchema.prefault({}),
+  /**
+   * The phone menu its administrator arranged (12.3-15, D-697): ABSENT means the shell's own menu, so
+   * no tenant needs a backfill and the previous API ignores the key. Optional, NOT a default, so
+   * `parse({})` has no such key; `.catch(undefined)` reads a corrupt stored value as "no menu" instead
+   * of failing the bootstrap. An authenticated fact: never in the public by-host answer.
+   */
+  phoneMenu: phoneMenuSchema.optional().catch(undefined),
 });
 /** What is stored: loose, anything may be missing. Use `resolveBranding()` before rendering. */
 export type TenantBranding = z.input<typeof tenantBrandingSchema>;
@@ -249,6 +294,11 @@ export type ResolvedBranding = {
   colors: BrandColors;
   /** The look beyond the pair, canonical (`normalizeBrandLook`); all `null` for an older brand. */
   look: BrandLook;
+  /**
+   * The phone menu of the tenant (12.3-15): present only when the administrator saved one. Carried
+   * here so the writers that rebuild the whole object from a resolved brand keep it.
+   */
+  phoneMenu?: PhoneMenu;
 };
 
 /** the platform's neutral fallback — visible only on generic hosts and on tenants with no brand yet. */
@@ -419,6 +469,7 @@ export function resolveBranding(raw: unknown): ResolvedBranding {
       look.darkColors.primary,
     ),
     look,
+    ...(parsed.phoneMenu ? { phoneMenu: parsed.phoneMenu } : {}),
   };
 }
 
