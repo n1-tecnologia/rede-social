@@ -40,7 +40,7 @@ import type {
   RevokeResult,
   StoreFront,
 } from '../contracts/index';
-import { guessStoreCategory } from '../contracts/index';
+import { guessStoreCategory, STORE_FEATURED_MAX } from '../contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-store');
@@ -955,6 +955,49 @@ export async function setPromo(ctx: RequestContext, productId: string | null): P
       hasPromo: productId !== null,
     },
     'store front promo saved',
+  );
+  return front;
+}
+
+/**
+ * `PUT /v1/store/front/featured` (D-699, NOVF-06): saves the "Em destaque" products in the admin's order
+ * (`[]` clears it: "Usar os mais recentes"). Under the row lock: more than `STORE_FEATURED_MAX` ids is
+ * `400 { store: 'too_many_featured' }`; a repeated id, or any id that is not an ACTIVE product of THIS
+ * tenant (unknown, foreign and archived answer the same), is `400 { store: 'featured_invalid' }`. Nothing
+ * is written on a refusal. Answers the fresh front.
+ */
+export async function setFeatured(
+  ctx: RequestContext,
+  productIds: readonly string[],
+): Promise<StoreFront> {
+  const front = await withTenantTx(ctx, async (tx) => {
+    await lockFront(tx, ctx);
+    if (productIds.length > STORE_FEATURED_MAX) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { store: 'too_many_featured' });
+    }
+    const distinct = new Set(productIds);
+    if (
+      distinct.size !== productIds.length ||
+      (await countActiveProducts(tx, ctx, productIds)) !== productIds.length
+    ) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { store: 'featured_invalid' });
+    }
+    await tx.execute(sql`
+      update store_front
+         set featured_product_ids = ${uuidArray(productIds)}::uuid[], updated_at = now()
+       where tenant_id = ${ctx.tenantId}::uuid`);
+    return readFront(tx, ctx);
+  });
+
+  log.info(
+    {
+      event: 'store.front_featured_saved',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      featuredCount: productIds.length,
+    },
+    'store front featured saved',
   );
   return front;
 }

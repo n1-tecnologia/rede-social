@@ -289,6 +289,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // 12.3-12 (D-699): the admin writes of the front; each has its cross-tenant case in 'phase 12.3 sweep:
   // store front writes' (a lab admin naming a demo id, a demo admin on the lab host, member and support).
   'PUT /v1/store/front/promo': { case: 'phase 12.3 sweep: store front writes' },
+  'PUT /v1/store/front/featured': { case: 'phase 12.3 sweep: store front writes' },
   'GET /v1/store/products': { case: 'phase 08.2 sweep: store' },
   'GET /v1/store/products/:productId': { case: 'phase 08.2 sweep: store' },
   'GET /v1/store/community-access': { case: 'phase 08.2 sweep: store' },

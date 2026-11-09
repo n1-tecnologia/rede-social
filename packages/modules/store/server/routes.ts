@@ -14,6 +14,7 @@ import {
   communityAccessSchema,
   courseAccessListSchema,
   courseAccessSchema,
+  frontFeaturedBodySchema,
   frontPromoBodySchema,
   grantBodySchema,
   grantResultSchema,
@@ -49,6 +50,7 @@ import {
   lockPreview,
   purchaseProduct,
   revokeAccess,
+  setFeatured,
   setProductStatus,
   setPromo,
   updateProduct,
@@ -170,6 +172,28 @@ const putFrontPromoRoute = createRoute({
     400: {
       description:
         '`VALIDATION_FAILED` with `details.store: promo_invalid` (the id is not an ACTIVE product of this tenant: unknown, another tenant’s or archived all answer the same code). A missing key, an unknown key or a non-uuid is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
+  },
+});
+
+const putFrontFeaturedRoute = createRoute({
+  method: 'put',
+  path: '/front/featured',
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: frontFeaturedBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The fresh store front. `productIds` is the "Em destaque" list in the admin’s order, at most 5; `[]` clears it. The same list twice leaves the same row and answer. An archived product kept in the list is dropped by the READ, the others keep their relative order.',
+      content: { 'application/json': { schema: storeFrontSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.store`: `too_many_featured` (more than 5 ids) or `featured_invalid` (a repeated id, or an id that is not an ACTIVE product of this tenant; unknown, foreign and archived answer the same code). A missing key, an unknown key, a non-uuid or more than 100 ids is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
     404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
@@ -504,6 +528,9 @@ export const storeRoutes = store
   .openapi(getFrontRoute, async (c) => c.json(await getFront(c.get('ctx')), 200))
   .openapi(putFrontPromoRoute, async (c) =>
     c.json(await setPromo(c.get('ctx'), c.req.valid('json').productId), 200),
+  )
+  .openapi(putFrontFeaturedRoute, async (c) =>
+    c.json(await setFeatured(c.get('ctx'), c.req.valid('json').productIds), 200),
   )
   .openapi(listCommunityAccessRoute, async (c) =>
     c.json(await listCommunityAccess(c.get('ctx')), 200),
