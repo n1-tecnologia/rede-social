@@ -6,7 +6,7 @@ import {
   PHONE_TOP_MAX,
   type PhoneMenu,
   validatePhoneMenu,
-} from '@rede-social/contracts';
+} from '@rede-social/contracts/branding';
 import { iconFor, TenantLogo } from '@rede-social/core/ui';
 import { Button, Card, cn, SectionTitle, useToast } from '@rede-social/ui';
 import { Reorder, useReducedMotion } from 'motion/react';

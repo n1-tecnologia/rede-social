@@ -1,4 +1,8 @@
-import { PHONE_MENU_BAR_ONLY, PHONE_MENU_NEVER_TOP, type PhoneMenu } from '@rede-social/contracts';
+import {
+  PHONE_MENU_BAR_ONLY,
+  PHONE_MENU_NEVER_TOP,
+  type PhoneMenu,
+} from '@rede-social/contracts/branding';
 import type { PhoneLayout } from '@rede-social/core/ui';
 
 /**
