@@ -417,6 +417,8 @@ export interface CourseFormDefaults {
   categoryName: string | null;
   level: CourseLevel | null;
   coverAssetId: string | null;
+  /** NOVF-02: the course's own Topo (page top); null when it has none (the card image shows instead). */
+  topCoverAssetId: string | null;
   instructorName: string;
   instructorPhotoAssetId: string | null;
   outcomes: string[];
@@ -434,6 +436,7 @@ export function courseFormDefaults(course: CourseDetail): CourseFormDefaults {
     categoryName: course.category?.name ?? null,
     level: course.level,
     coverAssetId: course.coverAssetId,
+    topCoverAssetId: course.topCoverAssetId ?? null,
     instructorName: course.instructorName,
     instructorPhotoAssetId: course.instructorPhotoAssetId,
     outcomes: [...course.outcomes],

@@ -398,6 +398,8 @@ export interface CourseHeroView {
   /** Empty → "O que você vai dominar" is absent. */
   outcomes: string[];
   coverAssetId: string | null;
+  /** NOVF-02: the course's own Topo as stored; the page draws `courseTopCover(hero)` (Topo, else the card cover). */
+  topCoverAssetId: string | null;
   coverAlt: string;
   /** The category as a glass chip on the hero; null without one. */
   categoryPill: string | null;
@@ -451,6 +453,7 @@ export function courseHeroView(course: LearnCourse, t: CoursesTranslator): Cours
     description: course.description.trim() ? course.description : null,
     outcomes: course.outcomes.filter((outcome) => outcome.trim() !== ''),
     coverAssetId: course.coverAssetId,
+    topCoverAssetId: course.topCoverAssetId ?? null,
     coverAlt: t('courses.alt.course', { title: course.title }),
     categoryPill: course.category?.name?.trim() ? course.category.name : null,
     overline: t('courses.member.course.overline', {
@@ -2053,6 +2056,8 @@ export interface TrackDetailView {
   id: string;
   title: string;
   coverAssetId: string | null;
+  /** NOVF-02: the track's own Topo as stored; the page draws `trackTopCover(view)` (Topo, else the card cover). */
+  topCoverAssetId: string | null;
   /** The Trilhas list (`/area-membros/trilhas`), `ver=aluno` in preview. */
   backHref: string;
   pill: { kind: TrackPillKind; label: string } | null;
@@ -2116,6 +2121,7 @@ export function trackDetailView(
     id: track.id,
     title: track.title,
     coverAssetId: track.coverAssetId,
+    topCoverAssetId: track.topCoverAssetId ?? null,
     subtitle: optionalWords(track.subtitle),
     audience: optionalWords(track.audience),
     description: optionalWords(track.description),

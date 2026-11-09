@@ -7,6 +7,7 @@ import { getTranslations } from 'next-intl/server';
 import { trackCardsView } from '@/lib/courses-home-view';
 import { getLearnTracks } from '@/lib/courses-learn';
 import { type TrackDetailView, trackDetailView, trackFromParam } from '@/lib/courses-member-view';
+import { trackTopCover } from '@/lib/cover-fallback';
 import { memberScreenHref } from '@/lib/member-area';
 import {
   DETAIL_GRID,
@@ -238,7 +239,7 @@ function TrackPage({
           phone: true,
           testId: 'courses-track-back',
         }}
-        coverAssetId={view.coverAssetId}
+        coverAssetId={trackTopCover(view)}
         eyebrow={view.eyebrow}
         title={view.title}
         // 2026-10-27: the manager's subtitle, under the title, when the member read carries it.

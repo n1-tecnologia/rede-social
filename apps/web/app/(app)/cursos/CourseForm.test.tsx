@@ -52,17 +52,35 @@ vi.mock('./course-actions', () => ({
   setCourseStatusAction: setStatus,
 }));
 
-vi.mock('@/components/media/useSignedUpload', () => ({
-  useSignedUpload: () => ({
-    state: 'idle',
-    progress: 0,
-    error: null,
-    pick: vi.fn(),
-    reject: vi.fn(),
-    cancel: vi.fn(),
-    reset: vi.fn(),
-  }),
-}));
+/**
+ * One stateful stand-in per `useSignedUpload` call, in the form's own order: the card image, the Topo
+ * (NOVF-02, UI-D-691), then the instructor photo.
+ */
+type UploadStub = {
+  pick: ReturnType<typeof vi.fn>;
+  options: { onCompleted: (asset: unknown) => void };
+  setState: (state: string) => void;
+};
+const uploads = vi.hoisted(() => ({ list: [] as UploadStub[] }));
+
+vi.mock('@/components/media/useSignedUpload', async () => {
+  const React = await import('react');
+  return {
+    useSignedUpload: (options: UploadStub['options']) => {
+      const [state, setState] = React.useState('idle');
+      const slot = React.useRef<number | null>(null);
+      if (slot.current === null) slot.current = uploads.list.length;
+      const own = React.useRef({
+        pick: vi.fn(),
+        reject: vi.fn(),
+        cancel: vi.fn(),
+        reset: vi.fn(),
+      }).current;
+      uploads.list[slot.current] = { pick: own.pick, options, setState };
+      return { state, progress: 0, error: null, ...own };
+    },
+  };
+});
 
 const { CourseForm, hoursVerdict } = await import('./CourseForm');
 
@@ -90,6 +108,7 @@ const EDIT_INITIAL = {
   categoryName: 'Lábios',
   level: 'iniciante' as const,
   coverAssetId: null,
+  topCoverAssetId: null,
   instructorName: 'Dra. Ana Souza',
   instructorPhotoAssetId: null,
   outcomes: ['Marcar os pontos', 'Escolher o produto'],
@@ -128,6 +147,7 @@ const levelChip = (key: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  uploads.list.length = 0;
 });
 afterEach(cleanup);
 
@@ -205,6 +225,7 @@ describe('CourseForm — create (UI-D-393)', () => {
       categoryId: null,
       level: null,
       coverAssetId: null,
+      topCoverAssetId: null,
       instructorName: 'Dra. Ana',
       instructorPhotoAssetId: null,
       outcomes: [],
@@ -539,5 +560,72 @@ describe('CourseForm — edit (UI-D-393, UI-D-417)', () => {
     expect(document.querySelector('[data-course-archived-note]')?.textContent).toBe(
       'Este curso foi arquivado. Ele não aparece para os membros.',
     );
+  });
+});
+
+/* ── NOVF-02, UI-D-691: the Topo is its own picker with its own asset ──────────────────────────── */
+
+const CARD_ID = '66666666-6666-4666-8666-666666666666';
+const TOP_ID = '77777777-7777-4777-8777-777777777777';
+
+const asset = (id: string) => ({ id, variants: [{ width: 640 }] });
+const done = (slot: number, id: string) =>
+  act(() => {
+    uploads.list[slot]?.options.onCompleted(asset(id));
+  });
+const topRemove = () =>
+  document.querySelector('[data-course-top-cover-remove]') as HTMLButtonElement | null;
+
+describe('CourseForm — the Topo as its own upload (NOVF-02, UI-D-691)', () => {
+  it('19. a card image and a Topo are two uploads: create sends two different ids; the photo is a third', async () => {
+    create.mockResolvedValue({ ok: true, courseId: COURSE, status: 'draft' });
+    renderCreate();
+    expect(uploads.list).toHaveLength(3);
+    fireEvent.change(titleInput(), { target: { value: 'Harmonização facial' } });
+    fireEvent.change(instructorInput(), { target: { value: 'Dra. Ana' } });
+    await done(0, CARD_ID);
+    await done(1, TOP_ID);
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        coverAssetId: CARD_ID,
+        topCoverAssetId: TOP_ID,
+        instructorPhotoAssetId: null,
+      }),
+    );
+    expect(document.querySelector('[data-course-top-cover-preview]')).not.toBeNull();
+  });
+
+  it('20. removing the Topo on edit sends topCoverAssetId null and leaves the card id alone', async () => {
+    update.mockResolvedValue({ ok: true, courseId: COURSE, status: 'draft' });
+    renderEdit({ initial: { ...EDIT_INITIAL, coverAssetId: CARD_ID, topCoverAssetId: TOP_ID } });
+    fireEvent.click(topRemove() as HTMLButtonElement);
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(update).toHaveBeenCalledWith(COURSE, { topCoverAssetId: null });
+  });
+
+  it('21. Save waits for the Topo upload, and a top_cover_invalid shows under the Topo block only', async () => {
+    update.mockResolvedValue({ ok: false, code: 'top_cover_invalid' });
+    renderEdit();
+    fireEvent.change(titleInput(), { target: { value: 'Outro título' } });
+    expect(submitButton().disabled).toBe(false);
+    await act(async () => {
+      uploads.list[1]?.setState('progress');
+    });
+    expect(submitButton().disabled).toBe(true);
+    await act(async () => {
+      uploads.list[1]?.setState('idle');
+    });
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(document.querySelector('[data-course-top-cover-error]')?.textContent).toBe(
+      'Não foi possível usar esta imagem no topo. Escolha outra.',
+    );
+    expect(document.querySelector('[data-course-cover-error]')).toBeNull();
   });
 });

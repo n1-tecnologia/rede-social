@@ -16,10 +16,10 @@ import {
   moduleCardViews,
 } from '@/lib/courses-member-view';
 import { type CoursesTranslator, formatCourseDuration } from '@/lib/courses-view';
+import { courseTopCover } from '@/lib/cover-fallback';
 import { memberScreenHref } from '@/lib/member-area';
 import { getCourseAccess } from '@/lib/store';
 import { lockedCourseView } from '@/lib/store-view';
-import { MemberEmptyCard } from '../MemberEmptyCard';
 import {
   DETAIL_GRID,
   HeroChip,
@@ -27,6 +27,7 @@ import {
   MemberDetailSection,
   MemberProgressPanel,
 } from '../MemberDetail';
+import { MemberEmptyCard } from '../MemberEmptyCard';
 import { MemberSectionHeader } from '../MemberSection';
 import { ReadMoreText } from '../ReadMoreText';
 import { riseStyle } from '../rise';
@@ -201,7 +202,7 @@ export async function MemberCoursePage({ course, preview, storeOn }: MemberCours
             href: memberScreenHref('cursos', {}, preview),
             label: t('courses.member.catalogue.title'),
           }}
-          coverAssetId={hero.coverAssetId}
+          coverAssetId={courseTopCover(hero)}
           eyebrow={hero.overline}
           title={hero.title}
           description={hero.tagline}

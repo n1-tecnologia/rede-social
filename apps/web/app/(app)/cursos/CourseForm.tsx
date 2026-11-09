@@ -132,6 +132,7 @@ const EMPTY: CourseFormDefaults = {
   categoryName: null,
   level: null,
   coverAssetId: null,
+  topCoverAssetId: null,
   instructorName: '',
   instructorPhotoAssetId: null,
   outcomes: [],
@@ -195,6 +196,9 @@ export function CourseForm({
   const [level, setLevel] = useState<CourseLevel | null>(start.level);
   const [coverAssetId, setCoverAssetId] = useState<string | null>(start.coverAssetId);
   const [coverWidths, setCoverWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
+  /** NOVF-02: the Topo is its own image with its own id, never a copy of the card's (UI-D-691). */
+  const [topCoverAssetId, setTopCoverAssetId] = useState<string | null>(start.topCoverAssetId);
+  const [topCoverWidths, setTopCoverWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
   const [instructorName, setInstructorName] = useState(start.instructorName);
   const [photoAssetId, setPhotoAssetId] = useState<string | null>(start.instructorPhotoAssetId);
   const [photoWidths, setPhotoWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
@@ -215,6 +219,7 @@ export function CourseForm({
   const [serverHoursError, setServerHoursError] = useState<string | undefined>(undefined);
   const [outcomesError, setOutcomesError] = useState<string | null>(null);
   const [coverError, setCoverError] = useState<string | null>(null);
+  const [topCoverError, setTopCoverError] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [categoryError, setCategoryError] = useState<string | null>(null);
 
@@ -256,6 +261,26 @@ export function CourseForm({
   const coverUploading = coverUpload.state === 'preparing' || coverUpload.state === 'progress';
   const coverAnnounced = QUARTILES.includes(coverUpload.progress)
     ? tm('progress', { percent: coverUpload.progress })
+    : '';
+
+  /* ── The Topo: a second machine of the same kind, its own asset (NOVF-02, UI-D-691) ────────────── */
+  const topPreview = useCoverPreview(topCoverAssetId);
+  const topUpload = useSignedUpload({
+    kind: 'image',
+    purpose: 'cover',
+    successKey: null,
+    onPicked: topPreview.onPicked,
+    onCompleted: (asset) => {
+      topPreview.onUploaded(asset.id);
+      setTopCoverAssetId(asset.id);
+      const widths = asset.variants.map((variant) => variant.width);
+      setTopCoverWidths(widths.length > 0 ? widths : PURPOSE_WIDTHS.cover);
+      setTopCoverError(null);
+    },
+  });
+  const topUploading = topUpload.state === 'preparing' || topUpload.state === 'progress';
+  const topAnnounced = QUARTILES.includes(topUpload.progress)
+    ? tm('progress', { percent: topUpload.progress })
     : '';
 
   /* ── The instructor photo: the same machine, a 64px round preview (D-412, UI-D-409) ────────── */
@@ -306,6 +331,7 @@ export function CourseForm({
     categoryId !== start.categoryId ||
     level !== start.level ||
     coverAssetId !== start.coverAssetId ||
+    topCoverAssetId !== start.topCoverAssetId ||
     instructorName !== start.instructorName ||
     photoAssetId !== start.instructorPhotoAssetId ||
     !sameList(sentOutcomes, start.outcomes) ||
@@ -313,7 +339,7 @@ export function CourseForm({
 
   const valid =
     title.trim().length > 0 && instructorName.trim().length > 0 && hours.kind !== 'invalid';
-  const busy = pending || coverUploading || photoUploading;
+  const busy = pending || coverUploading || topUploading || photoUploading;
   const submittable = valid && (mode === 'create' || dirty);
 
   const close = () => {
@@ -334,6 +360,7 @@ export function CourseForm({
         categoryId,
         level,
         coverAssetId,
+        topCoverAssetId,
         instructorName,
         instructorPhotoAssetId: photoAssetId,
         outcomes: sentOutcomes,
@@ -347,6 +374,7 @@ export function CourseForm({
     if (categoryId !== start.categoryId) patch.categoryId = categoryId;
     if (level !== start.level) patch.level = level;
     if (coverAssetId !== start.coverAssetId) patch.coverAssetId = coverAssetId;
+    if (topCoverAssetId !== start.topCoverAssetId) patch.topCoverAssetId = topCoverAssetId;
     if (instructorName !== start.instructorName) patch.instructorName = instructorName;
     if (photoAssetId !== start.instructorPhotoAssetId) patch.instructorPhotoAssetId = photoAssetId;
     if (!sameList(sentOutcomes, start.outcomes)) patch.outcomes = sentOutcomes;
@@ -374,6 +402,9 @@ export function CourseForm({
       case 'cover_invalid':
         setCoverError(t('form.errors.imageInvalid'));
         return;
+      case 'top_cover_invalid':
+        setTopCoverError(t('coverField.topCover.invalid'));
+        return;
       case 'photo_invalid':
         setPhotoError(t('form.errors.imageInvalid'));
         return;
@@ -394,6 +425,7 @@ export function CourseForm({
     setServerHoursError(undefined);
     setOutcomesError(null);
     setCategoryError(null);
+    setTopCoverError(null);
   };
 
   /** Runs the write; resolves once the outcome has been shown (or the page left). */
@@ -547,15 +579,39 @@ export function CourseForm({
             error={coverError}
             helper={t('form.cover.helper', { tenant: tenantName })}
             announced={coverAnnounced}
-            alsoAs={[
-              {
-                key: 'page',
-                ratio: 'banner',
-                label: t('coverField.as.coursePage'),
-                sizeHint: <CoverSizeHint kind="courseBanner" />,
-                decor: <PagePreview title={title.trim()} line={tagline.trim()} />,
+            topCover={{
+              assetId: topCoverAssetId,
+              widths: topCoverWidths,
+              previewUrl: topPreview.previewUrl,
+              upload: topUpload,
+              error: topCoverError,
+              announced: topAnnounced,
+              ratio: 'banner',
+              sizeHint: <CoverSizeHint kind="courseBanner" />,
+              helper: t('coverField.topCover.helper'),
+              fallbackStatus: t('coverField.topCover.fallback'),
+              decor: <PagePreview title={title.trim()} line={tagline.trim()} />,
+              labels: {
+                field: t('coverField.as.coursePage'),
+                add: t('coverField.topCover.add'),
+                change: t('coverField.topCover.change'),
+                remove: t('coverField.topCover.remove'),
+                preview: t('coverField.topCover.preview'),
+                pickFile: t('coverField.pickFile'),
+                camera: t('coverField.camera'),
+                dropHere: t('coverField.topCover.dropHere'),
+                progress: (percent) => tm('progress', { percent }),
+                processing: tm('photo.preparing'),
+                cancel: tm('cancel'),
               },
-            ]}
+              onPick: (file) => void topUpload.pick(file),
+              onRemove: () => {
+                setTopCoverAssetId(null);
+                setTopCoverError(null);
+                topUpload.reset();
+              },
+              onCancel: topUpload.cancel,
+            }}
             sizeHint={<CoverSizeHint kind="courseCard" />}
             labels={{
               pickFile: t('coverField.pickFile'),

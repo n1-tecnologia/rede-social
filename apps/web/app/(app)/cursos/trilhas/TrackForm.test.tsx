@@ -479,7 +479,7 @@ const hold = (slot: number, state: string, progress = 0) =>
   });
 const fileInput = (name: string) =>
   document.querySelector(`input[type="file"][aria-label="${name}"]`) as HTMLInputElement;
-const topBlock = () => document.querySelector('[data-cover-block="top"]') as HTMLElement;
+const topBlock = () => document.querySelector('[data-cover-block="page"]') as HTMLElement;
 const topRemove = () =>
   document.querySelector('[data-track-top-cover-remove]') as HTMLButtonElement | null;
 const topError = () => document.querySelector('[data-track-top-cover-error]');

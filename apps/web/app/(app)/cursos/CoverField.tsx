@@ -605,7 +605,10 @@ export function CoverField({
     const emptyAndShowingCard = topCover.assetId === null && !topCover.previewUrl && cardShows;
 
     return (
-      <section data-cover-block="top" className="flex flex-col gap-2.5 border-t border-border pt-6">
+      <section
+        data-cover-block="page"
+        className="flex flex-col gap-2.5 border-t border-border pt-6"
+      >
         <div className="flex min-h-6 items-center justify-between gap-3">
           <p id={topLabelId} className="text-xs font-semibold text-text">
             {topCover.labels.field}

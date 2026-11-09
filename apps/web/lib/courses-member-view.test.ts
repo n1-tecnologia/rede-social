@@ -759,6 +759,13 @@ describe('curriculumOpenModules (UI-D-429, EP-12)', () => {
 });
 
 describe('courseHeroView / courseSeconds (UI-D-427, E05 populated)', () => {
+  it('NOVF-02: the hero carries the stored Topo beside the card cover, null for an older answer', () => {
+    const top = '99999999-9999-4999-8999-999999999999';
+    expect(courseHeroView(course({ topCoverAssetId: top }), t).topCoverAssetId).toBe(top);
+    expect(courseHeroView(course({ topCoverAssetId: null }), t).topCoverAssetId).toBeNull();
+    expect(courseHeroView(course(), t).topCoverAssetId).toBeNull();
+  });
+
   it('empty description and outcomes are null / empty (the sections are absent)', () => {
     const view = courseHeroView(course({ outcomes: ['', '  '] }), t);
     expect(view.description).toBeNull();
@@ -2256,6 +2263,13 @@ describe("trackDetailView: the track's own texts from the member read (NOVF-01, 
       audience: 'Quem está começando',
       description: 'Uma trilha completa.',
     });
+  });
+
+  it('NOVF-02: the page carries the stored Topo beside the card cover, null for an older answer', () => {
+    const top = '99999999-9999-4999-8999-999999999999';
+    expect(trackDetailView(learnTrack({ topCoverAssetId: top }), t).topCoverAssetId).toBe(top);
+    expect(trackDetailView(learnTrack({ topCoverAssetId: null }), t).topCoverAssetId).toBeNull();
+    expect(trackDetailView(learnTrack(), t).topCoverAssetId).toBeNull();
   });
 
   it('empty strings (what the API sends for an unwritten text) draw nothing: no heading, no line', () => {
