@@ -1475,3 +1475,88 @@ describe('NOVF-02 course Topo on the member read', () => {
     expect(after.course.topCoverAssetId).toBe(top);
   });
 });
+
+/**
+ * NOVF-03 (12.3-05, OQ-1, D-699, D-696): the member's course page carries each module's own card
+ * cover and Topo beside its titles, as stored or null, merged by module id from ONE extra statement
+ * (`app.course_outline` is untouched), in the outline's module order, and never another course's or
+ * tenant's module.
+ */
+describe('NOVF-03 module covers on the member read', () => {
+  async function readyCover(slug: 'rede-demo' | 'rede-lab', label: string): Promise<string> {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+         variant_widths, filename, ready_at)
+      select t.id, m.user_id, 'image', 'cover', 'ready', 'supabase', 'image/webp', 262144, 1600,
+             700, '{320,640,960,1280}'::int[], ${`${PREFIX}-${label}.webp`}, now()
+        from public.tenants t
+        join public.memberships m on m.tenant_id = t.id and m.role = 'admin_tenant'
+       where t.slug = ${slug}
+       order by m.joined_at
+       fetch first 1 rows only
+      returning id::text as id`;
+    if (!row) throw new Error(`could not seed the ${label} cover`);
+    return row.id;
+  }
+  const readCourse = async (courseId: string, token = tokens.member) => {
+    const res = await get(`/v1/courses/learn/courses/${courseId}`, token);
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    return { course: learnCourseSchema.parse(JSON.parse(raw)), raw };
+  };
+  const patchModule = (moduleId: string, body: Record<string, unknown>) =>
+    admin('PATCH', `/v1/courses/modules/${moduleId}`, body);
+
+  it('a member reads each module with its own card cover and Topo, null for a module with none, in module order; another tenant’s asset is refused and never appears', async () => {
+    const card = await readyCover('rede-demo', 'mod-card');
+    const top = await readyCover('rede-demo', 'mod-top');
+    const built = await publishedCourse('capas de modulo', [
+      [{ title: 'a1' }],
+      [{ title: 'b1' }],
+      [{ title: 'c1' }],
+    ]);
+    const [first, second, third] = built.moduleIds as [string, string, string];
+    expect((await patchModule(first, { coverAssetId: card, topCoverAssetId: top })).status).toBe(
+      200,
+    );
+    expect((await patchModule(third, { topCoverAssetId: top })).status).toBe(200);
+
+    // Positive control, for the member and for the staff: the stored values, in module order.
+    for (const token of [tokens.member, tokens.support, tokens.admin]) {
+      const { course } = await readCourse(built.courseId, token);
+      expect(course.modules.map((m) => m.id)).toEqual([first, second, third]);
+      const orAbsent = (value: string | null | undefined) =>
+        value === undefined ? 'absent' : value;
+      expect(
+        course.modules.map((m) => [orAbsent(m.coverAssetId), orAbsent(m.topCoverAssetId)]),
+      ).toEqual([
+        [card, top],
+        [null, null],
+        [null, top],
+      ]);
+      // The lessons ride unchanged inside their modules.
+      expect(course.modules.map((m) => m.lessons.length)).toEqual([1, 1, 1]);
+    }
+
+    // Negative: a rede-lab asset cannot be written into a demo module and never reaches a member.
+    const labCover = await readyCover('rede-lab', 'mod-lab');
+    const refused = await patchModule(second, {
+      coverAssetId: labCover,
+      topCoverAssetId: labCover,
+    });
+    expect(refused.status).toBe(400);
+    const after = await readCourse(built.courseId);
+    expect(after.raw).not.toContain(labCover);
+    expect(after.course.modules[1]).toMatchObject({ coverAssetId: null, topCoverAssetId: null });
+
+    // Another course's module covers never attach here: a sibling course with its own covers.
+    const sibling = await publishedCourse('outro curso', [[{ title: 'd1' }]]);
+    const siblingCover = await readyCover('rede-demo', 'mod-sibling');
+    const siblingModule = sibling.moduleIds[0] as string;
+    expect((await patchModule(siblingModule, { coverAssetId: siblingCover })).status).toBe(200);
+    const mine = await readCourse(built.courseId);
+    expect(mine.raw).not.toContain(siblingCover);
+    expect(mine.course.modules.map((m) => m.id)).not.toContain(siblingModule);
+  });
+});
