@@ -925,6 +925,10 @@ describe('08.6 tracks', () => {
       id: fx.tracks.ta,
       title: `${TRK} trilha TA`,
       coverAssetId: null,
+      // NOVF-01: the three texts always travel; a track saved without any answers three ''.
+      subtitle: '',
+      audience: '',
+      description: '',
       percent: 0,
       coursesDone: 0,
       total: 2,
@@ -1081,6 +1085,119 @@ describe('08.6 tracks', () => {
     const res = await learnRequest('GET', '/v1/courses/learn/tracks', token, host);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ tracks: [] });
+  });
+});
+
+/**
+ * NOVF-01 (12.3-01, D-699, D-700): the member read of tracks carries the three words the admin
+ * writes on a track form (subtitle, "Para quem é", description), read from the existing columns.
+ * The school holds exactly this file's rows (the earlier describes' are swept first):
+ *  - one PUBLISHED demo course X, linked to every track the cases create;
+ *  - a track created through the ADMIN route with all three texts (the positive control), an
+ *    ARCHIVED one and a rede-lab one (the negatives, each carrying texts that must never appear).
+ * The cases run in declaration order and build on each other's rows.
+ */
+describe('NOVF-01 track texts on the member read', () => {
+  const NVF = `${PREFIX}-n`;
+  const fx = { X: { id: '', lessonIds: [] as string[] }, labCourse: '' };
+  let labAdminToken = '';
+  const admin = (method: string, path: string, body?: unknown) =>
+    learnRequest(method, path, tokens.admin, HOSTS.demo, body);
+
+  /** A track through the ADMIN route (create, then the one order write), over the course X. */
+  async function adminTrack(body: Record<string, unknown>): Promise<string> {
+    const id = await created(await admin('POST', '/v1/courses/tracks', body), 'track');
+    const order = await admin('PUT', `/v1/courses/tracks/${id}/order`, { ids: [fx.X.id] });
+    expect(order.status).toBe(200);
+    return id;
+  }
+
+  beforeAll(async () => {
+    await sweepFile();
+    restores.push(await withModuleEnabled('demo', 'store'));
+    restores.push(await withModuleEnabled('lab', 'courses'));
+    labAdminToken = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
+    fx.X = await buildMemberCourse(NVF, 'X', 1);
+    // A published lab course (a course with no lesson publishes at once) in a lab track with texts.
+    const labSend = (method: string, path: string, body?: unknown) =>
+      learnRequest(method, path, labAdminToken, HOSTS.lab, body);
+    fx.labCourse = await created(
+      await labSend('POST', '/v1/courses', {
+        title: `${NVF} curso lab`,
+        instructorName: 'Dra. Lia',
+      }),
+      'lab course',
+    );
+    expect(
+      (await labSend('PUT', `/v1/courses/${fx.labCourse}/status`, { status: 'published' })).status,
+    ).toBe(200);
+  });
+
+  it('D-699: a member reads the subtitle, the audience and the description the admin saved, through the real route', async () => {
+    const texts = {
+      subtitle: 'Do zero ao primeiro projeto',
+      audience: 'Para quem está começando',
+      description: 'Uma trilha em três passos.\nCom aspas "assim" e acentos: ação 🎓',
+    };
+    const id = await adminTrack({ title: `${NVF} trilha completa`, ...texts });
+    const { tracks } = await readTracksText(tokens.member);
+    const mine = tracks.find((track) => track.id === id);
+    expect(mine).toBeDefined();
+    expect(mine?.subtitle).toBe(texts.subtitle);
+    expect(mine?.audience).toBe(texts.audience);
+    expect(mine?.description).toBe(texts.description);
+  });
+
+  it('T-12.3-03: an archived track and another tenant’s track never reach a member, with their texts, beside the positive control', async () => {
+    const live = await adminTrack({
+      title: `${NVF} trilha viva`,
+      subtitle: 'texto-vivo-sub',
+      audience: 'texto-vivo-aud',
+      description: 'texto-vivo-desc',
+    });
+    const archived = await adminTrack({
+      title: `${NVF} trilha arquivada`,
+      subtitle: 'texto-arquivado-sub',
+      audience: 'texto-arquivado-aud',
+      description: 'texto-arquivado-desc',
+    });
+    const status = await admin('PUT', `/v1/courses/tracks/${archived}/status`, {
+      status: 'archived',
+    });
+    expect(status.status).toBe(200);
+    const labSend = (method: string, path: string, body?: unknown) =>
+      learnRequest(method, path, labAdminToken, HOSTS.lab, body);
+    const labTrack = await created(
+      await labSend('POST', '/v1/courses/tracks', {
+        title: `${NVF} trilha lab`,
+        subtitle: 'texto-lab-sub',
+        audience: 'texto-lab-aud',
+        description: 'texto-lab-desc',
+      }),
+      'lab track',
+    );
+    expect(
+      (await labSend('PUT', `/v1/courses/tracks/${labTrack}/order`, { ids: [fx.labCourse] }))
+        .status,
+    ).toBe(200);
+
+    const { tracks, raw } = await readTracksText(tokens.member);
+    // Positive control: the live track is there with its words.
+    expect(tracks.find((track) => track.id === live)).toMatchObject({
+      subtitle: 'texto-vivo-sub',
+      audience: 'texto-vivo-aud',
+      description: 'texto-vivo-desc',
+    });
+    for (const never of [archived, labTrack, 'texto-arquivado', 'texto-lab']) {
+      expect(raw).not.toContain(never);
+    }
+    // And the lab member's own read never carries the demo words either.
+    const lab = await readTracksText(
+      await signInAs('member@rede-lab.local', SEED_PASSWORD),
+      HOSTS.lab,
+    );
+    expect(lab.raw).toContain('texto-lab-sub');
+    expect(lab.raw).not.toContain('texto-vivo');
   });
 });
 

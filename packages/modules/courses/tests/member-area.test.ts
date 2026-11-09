@@ -299,8 +299,16 @@ describe('courseProgressOf', () => {
 });
 
 /** An active track over `courseIds` in path order. */
-function track(n: number, courseIds: string[]): MemberTrackRow {
-  return { id: TR(n), title: `Trilha ${n}`, coverAssetId: null, courseIds };
+function track(
+  n: number,
+  courseIds: string[],
+  texts: Pick<MemberTrackRow, 'subtitle' | 'audience' | 'description'> = {
+    subtitle: `Subtítulo ${n}`,
+    audience: `Para quem é ${n}`,
+    description: `Descrição ${n}`,
+  },
+): MemberTrackRow {
+  return { id: TR(n), title: `Trilha ${n}`, coverAssetId: null, ...texts, courseIds };
 }
 
 const kinds = (items: { courseId: string; kind: string }[]) =>
@@ -788,6 +796,9 @@ describe('trackStates (D-439, COURSE-35)', () => {
       id: TR(1),
       title: 'Trilha 1',
       coverAssetId: null,
+      subtitle: 'Subtítulo 1',
+      audience: 'Para quem é 1',
+      description: 'Descrição 1',
       percent: 20,
       coursesDone: 1,
       total: 3,
@@ -833,6 +844,16 @@ describe('trackStates (D-439, COURSE-35)', () => {
         },
       ],
     });
+  });
+
+  it('NOVF-01: the subtitle, the audience and the description of a track reach its view untouched', () => {
+    const texts = {
+      subtitle: '  Do zero ao primeiro projeto ',
+      audience: 'Para quem está começando',
+      description: 'Linha 1\nLinha 2 — "aspas" e emoji 🎓',
+    };
+    const [view] = trackStates([track(1, [C1], texts)], [course(C1)], lessons(C1, 1, 0));
+    expect(view).toMatchObject(texts);
   });
 
   it('a locked untouched course → bloqueada; a locked completed course → concluida (complete wins); a locked started course → bloqueada', () => {
