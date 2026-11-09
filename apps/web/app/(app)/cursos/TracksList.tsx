@@ -10,6 +10,7 @@ import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { CourseRowView } from '@/lib/courses-view';
 import { loadMoreTracksAction, refreshTracksAction } from './actions';
+import { OUTLINE_LINK, WIDE_EMPTY } from './admin-styles';
 
 export interface TracksListProps {
   /** Which list this is; the TAB decides it on the server and remounts the list per filter. */
@@ -23,17 +24,18 @@ export interface TracksListProps {
   initialError?: boolean;
 }
 
-/** The 64px 16:10 thumb: one rung is enough, the ladder starts at 640. */
-const THUMB_SIZES = '64px';
+/**
+ * The cover card's width: the whole column on a phone, half of it from 640px, a third of the wide
+ * column from `xl` (2026-10-23).
+ */
+const THUMB_SIZES =
+  '(min-width: 1280px) 410px, (min-width: 768px) 500px, (min-width: 640px) 50vw, 100vw';
 
-/** The first rows load eagerly; the rest are lazy. */
-const EAGER_ROWS = 4;
+/** The first cards load eagerly; the rest are lazy. */
+const EAGER_ROWS = 2;
 
-/** Three row skeletons on load more (UI-D-401). */
+/** Card skeletons on load more (UI-D-401): one grid row, two cards, three from `xl`. */
 const LOAD_MORE_SKELETONS = [0, 1, 2];
-
-const LINK_BRAND =
-  'inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 /** The gradient thumb a failed cover falls back to, the same size as the row's box (D-69). */
 const GRADIENT_THUMB = (
@@ -47,9 +49,11 @@ const GRADIENT_THUMB = (
 
 function NextRowsSkeleton() {
   return (
-    <div aria-busy>
+    <div aria-busy className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {LOAD_MORE_SKELETONS.map((index) => (
-        <RowSkeleton key={index} variant="wide" />
+        <div key={index} className={index === 2 ? 'hidden xl:block' : undefined}>
+          <RowSkeleton variant="cover" />
+        </div>
       ))}
     </div>
   );
@@ -75,8 +79,18 @@ const EMPTY_KEYS: Record<TrackFilter, { title: string; body: string; testId: str
  *
  * Every row arrives as a finished view (the published-only count, the "Arquivada" pill, the
  * accessible name), so nothing here formats, counts or sorts (P09, D-415). The thumb is the host's
- * `MediaImage` on the `cover` ladder at 16:10 (`TrackRow`'s `wide` slot); a cover that fails to load
- * falls back to the gradient thumb of the same size (D-69).
+ * `MediaImage` on the `cover` ladder at 16:10; a cover that fails to load falls back to the gradient
+ * of the same box (D-69).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): each track is a 16:10
+ * COVER CARD (`TrackRow` → `CoverCard`: the title and the meta over the art, "Arquivada" as a glass
+ * chip), stacked with a gap on a phone and two per row from 640px — the server's order kept, row by
+ * row. The empty state's "Criar trilha" is an outline link: the header's "Nova trilha" is the
+ * screen's one brand fill.
+ *
+ * 2026-10-23 (the wide desktop page, `data-shell-wide`): three cover cards per row from `xl`
+ * (two from 640px as before), the load-more placeholders one grid row; the empty and error cards
+ * keep a readable width (`WIDE_EMPTY`).
  */
 export function TracksList({
   filter,
@@ -154,7 +168,7 @@ export function TracksList({
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
     body = (
-      <div className="px-4 pt-2">
+      <div className={WIDE_EMPTY}>
         <EmptyState
           variant="card"
           icon={CircleAlert}
@@ -172,7 +186,7 @@ export function TracksList({
   } else if (items.length === 0) {
     const empty = EMPTY_KEYS[filter];
     body = (
-      <div className="px-4 pt-2">
+      <div className={WIDE_EMPTY}>
         <EmptyState
           variant="card"
           icon={Route}
@@ -181,7 +195,7 @@ export function TracksList({
           body={t(empty.body)}
           action={
             filter === 'active' ? (
-              <a href="/cursos/trilhas/nova" className={LINK_BRAND}>
+              <a href="/cursos/trilhas/nova" className={OUTLINE_LINK}>
                 {t('tracks.empty.cta')}
               </a>
             ) : undefined
@@ -195,7 +209,7 @@ export function TracksList({
         <ol
           aria-label={t('tracks.region', { tenant: tenantName })}
           data-testid="tracks-list"
-          className="flex flex-col divide-y divide-divider"
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
         >
           {items.map((item, index) => (
             <li key={item.id}>
@@ -236,7 +250,7 @@ export function TracksList({
           <div
             role="alert"
             data-tracks-page-error
-            className="mt-3 flex flex-col items-center gap-3 px-4 text-center"
+            className="mt-3 flex flex-col items-center gap-3 text-center"
           >
             <p className="text-sm font-normal text-danger">{t('errors.loadMoreTracks')}</p>
             <Button variant="outline" onClick={retryPage}>

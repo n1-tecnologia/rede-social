@@ -98,7 +98,7 @@ describe('CommunityCover — one component, two geometries, two branches (UI-D-3
     expect(box.querySelector('img')).toBeNull();
   });
 
-  it('3. the PAGE geometry is h-36 and its gradient fallback carries NO text at all', () => {
+  it('3. the PAGE geometry is 160px, 192px and rounded from md, and its gradient fallback carries NO text at all', () => {
     cover({
       geometry: 'page',
       coverAssetId: null,
@@ -108,7 +108,10 @@ describe('CommunityCover — one component, two geometries, two branches (UI-D-3
 
     const box = screen.getByTestId('community-cover-fallback');
     expect(box.getAttribute('data-geometry')).toBe('page');
-    expect(box.className).toContain('h-36');
+    expect(box.className).toContain('h-40');
+    expect(box.className).toContain('md:h-48');
+    expect(box.className).toContain('md:rounded-2xl');
+    expect(box.className).toContain('overflow-hidden');
     expect(box.className).not.toContain('aspect-[16/7]');
     // The page's name always renders BELOW the cover, so a fallback that carried it would double it.
     expect(screen.queryByText('fallback-node')).toBeNull();
@@ -117,7 +120,7 @@ describe('CommunityCover — one component, two geometries, two branches (UI-D-3
   it('4. the box keeps its height on every branch, and the free slot renders inside it', () => {
     const { unmount } = cover({ geometry: 'page', children: <span>slot-node</span> });
     const image = screen.getByTestId('community-cover-image');
-    expect(image.className).toContain('h-36');
+    expect(image.className).toContain('h-40');
     expect(screen.getByText('slot-node')).toBeInTheDocument();
     unmount();
 
@@ -130,7 +133,7 @@ describe('CommunityCover — one component, two geometries, two branches (UI-D-3
       children: <span>slot-node</span>,
     });
     const fallback = screen.getByTestId('community-cover-fallback');
-    expect(fallback.className).toContain('h-36');
+    expect(fallback.className).toContain('h-40');
     expect(screen.getByText('slot-node')).toBeInTheDocument();
   });
 });

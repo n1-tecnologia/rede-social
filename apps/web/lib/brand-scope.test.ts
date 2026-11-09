@@ -46,7 +46,7 @@ describe('brandScope', () => {
     expect(scope.style['--brand-title-font']).toBe(titleFontStack('Poppins'));
     expect(scope.style['--button-fill-light']).toBe('#e3af3f');
     expect(scope.titleFontHref).toBe(
-      'https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap',
+      'https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap',
     );
   });
 

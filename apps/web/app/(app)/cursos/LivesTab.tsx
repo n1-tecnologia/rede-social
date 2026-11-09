@@ -1,34 +1,27 @@
 import type { LivePage } from '@rede-social/module-courses/contracts';
-import { Chip, SectionTitle } from '@rede-social/ui';
-import { Plus } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import { COURSES_MODULE_DISABLED, getLives } from '@/lib/courses';
-import {
-  LIVE_FILTER_LABEL_KEY,
-  LIVE_FILTER_ORDER,
-  liveFilterFromParam,
-  liveFilterHref,
-  liveRowView,
-} from '@/lib/courses-view';
+import { liveFilterFromParam, liveRowView } from '@/lib/courses-view';
+import { ADMIN_SCREEN_TITLE_ID } from './admin-styles';
 import { LivesList } from './LivesList';
 
-/** The brand create control (UI-D-391): 44px tall, `shrink-0`, the `sm` type with `Plus` 16. */
-const CREATE_LINK =
-  'inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-button bg-(image:--button-image) px-4 text-xs font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-
 /**
- * The hub's Lives tab (08.3-11, D-416, UI-D-391, UI-D-392, UI-D-401), server-composed — the Trilhas
- * tab's shape with the live vocabulary:
+ * The body of the admin's Lives screen (08.3-11, D-416, UI-D-391, UI-D-392, UI-D-401),
+ * server-composed: the first page, handed to `LivesList` as FINISHED row views (`liveRowView`: the
+ * date line in the TENANT's timezone, the pill from the API's DERIVED status — no `Date.now()`
+ * anywhere in the body, UI-D-407; a cancelled live stays in its time bucket with the "Cancelada"
+ * pill), keyed by the filter so a chip switch starts from the server's page 1.
  *
- *  - the title row — "Lives" as a `SectionTitle` h2 16/700 and the brand "Nova live";
- *  - the time chips Próximas · Passadas (`Chip` LINKS bound to `?aba=lives&filtro=`, read HERE on
- *    the server; an unknown value reads as "Próximas", E04 partial) in ONE non-wrapping row — a
- *    cancelled live stays in its time bucket with the "Cancelada" pill;
- *  - the first page, handed to `LivesList` as FINISHED row views (`liveRowView`: the date line in the
- *    TENANT's timezone, the pill from the API's DERIVED status — no `Date.now()` anywhere in the
- *    tab, UI-D-407), keyed by the filter so a chip switch starts from the server's page 1.
+ * 2026-10-22 (the courses area redesign): Lives is a page of its own (`/cursos/lives`); its frame
+ * (`AdminListScreen`) draws the h1, the brand "Nova live" and the Próximas · Passadas chips
+ * (`?filtro=`) outside this body's `Suspense`, so the old h2 title row and chips left this file; the
+ * section is named by the screen's h1.
+ *
+ * 2026-10-23: the same row views now carry their card words (`liveRowView`'s `live`: the status in
+ * words, the agenda's date parts, the "Editar" name), and `LivesList` draws them as the member's live
+ * cards. Nothing changed in this file's reads.
  *
  * The first read's refusals split three ways (the Cursos tab's posture): `MODULE_DISABLED` → the
  * kernel not-found; a refusal the bootstrap knows → a navigation OUTSIDE the try/catch; anything
@@ -72,36 +65,11 @@ export async function LivesTab({
   const items = (page?.items ?? []).map((row) => liveRowView(row, { timezone: timeZone }, t));
 
   return (
-    <section aria-labelledby="lives-tab-title" data-testid="lives-tab" className="flex flex-col">
-      <div className="px-4">
-        <div className="flex items-center justify-between gap-3 pb-3">
-          <SectionTitle
-            id="lives-tab-title"
-            variant="group"
-            className="min-w-0 flex-1 truncate text-base font-bold text-text"
-          >
-            {t('courses.hub.tabs.lives')}
-          </SectionTitle>
-          <a href="/cursos/lives/nova" data-lives-create className={CREATE_LINK}>
-            <Plus aria-hidden size={16} />
-            {t('courses.hub.create.live')}
-          </a>
-        </div>
-
-        {/* Never wraps: `shrink-0` chips in one row that scrolls at 320px (E04 overflow). */}
-        <nav
-          aria-label={t('courses.lives.filter.label')}
-          data-testid="lives-filters"
-          className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-3 scrollbar-none"
-        >
-          {LIVE_FILTER_ORDER.map((key) => (
-            <Chip key={key} href={liveFilterHref(key)} active={filter === key} className="shrink-0">
-              {t(LIVE_FILTER_LABEL_KEY[key])}
-            </Chip>
-          ))}
-        </nav>
-      </div>
-
+    <section
+      aria-labelledby={ADMIN_SCREEN_TITLE_ID.lives}
+      data-testid="lives-tab"
+      className="flex flex-col px-4"
+    >
       <LivesList
         key={filter}
         filter={filter}

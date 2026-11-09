@@ -2,7 +2,7 @@
 
 import { StatusPill } from '@rede-social/ui';
 import { Camera, FileText, LoaderCircle, Lock, Video } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 /**
  * The lesson row of a module card (08.3-08, UI-D-395, D-407, D-409): an `<a>` to the lesson form
@@ -19,6 +19,10 @@ import { type ReactNode, useState } from 'react';
  * `<a>`, never `next/link`. The poster is a URL the host minted for this render (a signed thumbnail,
  * never persisted); when it fails to load the row shows the neutral `Video` glyph rather than a
  * broken image (the `MediaAssetRow` rule: a broken box is the one thing an `<img>` must never draw).
+ *
+ * 2026-10-22 (the courses area redesign): the rows sit in the outlined card under the module band
+ * (the prototype's editor rows): the card's `bg-card-hover`, the title 13/600 and the meta 11
+ * tertiary; the thumb, its four states, the caption and the arrows outside the link are unchanged.
  */
 export type LessonThumb =
   | { kind: 'poster'; src: string }
@@ -70,18 +74,27 @@ export function LessonRow({
   const [posterFailed, setPosterFailed] = useState(false);
   const poster = thumb.kind === 'poster' && !posterFailed ? thumb.src : null;
   const thumbState = thumb.kind === 'poster' && posterFailed ? 'poster-missing' : thumb.kind;
+  const posterRef = useRef<HTMLImageElement>(null);
+
+  // 2026-10-22: a poster that failed BEFORE hydration fired its `error` with no handler attached yet,
+  // so `onError` alone left a broken image on screen (seen with the local fake provider's posters).
+  // A browser marks such an image `complete` with no natural width: read that once it mounts.
+  useEffect(() => {
+    const image = posterRef.current;
+    if (image?.complete && image.naturalWidth === 0 && image.currentSrc) setPosterFailed(true);
+  }, []);
 
   return (
     <div
       data-testid="lesson-row"
       data-lesson-row={id}
-      className="flex min-h-14 items-center gap-1 pr-1 pl-3"
+      className="flex min-h-14 items-center gap-1 pr-1 pl-2"
     >
       <a
         href={href}
         aria-label={ariaLabel}
         data-testid="lesson-row-link"
-        className={`flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-lg py-2 transition-colors hover:bg-bg-hover active:bg-bg-active ${FOCUS}`}
+        className={`flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-2 transition-colors hover:bg-card-hover active:bg-bg-active ${FOCUS}`}
       >
         <span
           aria-hidden
@@ -91,6 +104,7 @@ export function LessonRow({
         >
           {poster ? (
             <img
+              ref={posterRef}
               src={poster}
               alt=""
               loading="lazy"
@@ -114,12 +128,12 @@ export function LessonRow({
         <span className="flex min-w-0 flex-1 flex-col">
           <span
             data-testid="lesson-row-title"
-            className="line-clamp-2 break-words text-sm font-bold leading-tight text-text"
+            className="line-clamp-2 break-words text-[13px] font-semibold leading-snug text-text"
           >
             {title}
           </span>
           {meta || requiresPreviousLabel ? (
-            <span className="mt-0.5 flex min-w-0 flex-wrap items-center text-xs font-normal text-text-secondary">
+            <span className="mt-0.5 flex min-w-0 flex-wrap items-center text-[11px] font-normal text-text-tertiary">
               {meta ? (
                 <span data-testid="lesson-row-meta" className="tabular-nums">
                   {meta}

@@ -42,23 +42,26 @@ describe('preview-modules (the tenant preview mirror of the module manifests)', 
     const nav = (enabled: string[]) =>
       buildNav(previewNavModules(previewEffectiveModules(enabled)), labels);
 
-    it('with courses enabled the tab keys are home, communities, courses, events, profile and Reels is the topbar item', () => {
+    // 2026-10-23: the full row keeps Reels as a tab; the kernel Perfil turns railOnly (the phone's
+    // bar drops it, the TopBar's avatar is its door).
+    it('with courses enabled the row is home, communities, courses, reels, events, profile (railOnly) and the topbar has no Reels', () => {
       const withCourses = nav([...ALL, 'courses']);
       expect(withCourses.tabs.map((t) => t.key)).toEqual([
         'home',
         'communities',
         'courses',
+        'reels',
         'events',
         'profile',
       ]);
-      expect(withCourses.topbar.map((t) => t.key)).toEqual(['reels']);
+      expect(withCourses.tabs.find((t) => t.key === 'profile')?.railOnly).toBe(true);
+      expect(withCourses.topbar.map((t) => t.key)).toEqual([]);
       expect(withCourses.tabs.find((t) => t.key === 'courses')?.icon).toBe('graduation-cap');
     });
 
-    it('the media chrome rides the topbar Reels item, and no tab carries it', () => {
+    it('the media chrome rides the Reels tab', () => {
       const withCourses = nav([...ALL, 'courses']);
-      expect(withCourses.tabs.some((t) => t.chrome === 'media')).toBe(false);
-      expect(withCourses.topbar.filter((t) => t.chrome === 'media').map((t) => t.key)).toEqual([
+      expect(withCourses.tabs.filter((t) => t.chrome === 'media').map((t) => t.key)).toEqual([
         'reels',
       ]);
     });

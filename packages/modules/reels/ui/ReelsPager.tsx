@@ -1,12 +1,13 @@
 'use client';
 
-import { DoubleTapHeart, IconButton, useMediaQuery } from '@rede-social/ui';
-import { ChevronDown, ChevronUp, Loader2, Pause, Play } from 'lucide-react';
+import { cn, DoubleTapHeart, IconButton, useMediaQuery } from '@rede-social/ui';
+import { ChevronDown, ChevronUp, Loader2, Maximize, Minimize, Pause, Play } from 'lucide-react';
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -18,6 +19,7 @@ import {
   REELS_WHEEL_LOCK_MS,
   REELS_WHEEL_THRESHOLD_PX,
 } from '../contracts/index';
+import { REELS_COLUMN, REELS_ROW } from './ReelsStage';
 import { ticksWindow } from './ticks';
 
 /**
@@ -73,10 +75,16 @@ import { ticksWindow } from './ticks';
  * and that release is no tap. The host owns what the hold pauses. A long press opens no callout or
  * context menu over the media (it would cancel the pointer mid-hold).
  *
- * **Desktop (UI-D-95, D-132).** From `md` the pages sit in a centred 9:16 column with ↑/↓ buttons
- * 24 px outside its right edge. The column takes the stage's FULL height with square corners
- * (2026-10-09: the 24 px black margins above and below it are gone), and its 9:16 width is capped
- * by the room the buttons leave; ↑/↓ keys, Space and M act on the window unless a sheet is open
+ * **Desktop (UI-D-95, D-132; the YouTube Shorts layout since 2026-10-23).** From `md` the pages sit
+ * in the player box (`REELS_COLUMN`): 9:16, centred 8 px under the top, every page with rounded
+ * corners and 16 px between pages (`--reels-gap`), so the top of the next video peeks under the
+ * current one. Over the video: play/pause at the top left (beside it the host's sound button) and
+ * "Tela cheia" at the top right, which takes the STAGE full screen. Beside it, two slots the host
+ * fills for the current page (`slots`): the rail to the right of the box, bottom-aligned, and the
+ * caption block at the stage's bottom left, offered only while the room left of the box holds it
+ * (measured, `INFO_*`). The ↑/↓ buttons sit at the stage's right edge, in the member's theme (the
+ * dark scope is the box alone). `shifted` (the comments panel open beside the player, from xl)
+ * moves the box left to make room. ↑/↓ keys, Space and M act on the window unless a sheet is open
  * (`gesturesDisabled`) or focus is in a field, and Space is left to a focused button or link. The
  * wheel is a NATIVE non-passive listener (React's root wheel listener is passive, so its
  * `preventDefault` would be ignored): it accumulates to `REELS_WHEEL_THRESHOLD_PX`, moves exactly
@@ -103,6 +111,20 @@ export interface ReelsPagerLabels {
   next: string;
   /** The RAW template "Vídeo {current}, de {author}", filled here for the live region. */
   position: string;
+  /** 2026-10-23: "Tela cheia", the desktop player's full-screen control; absent, no control. */
+  fullscreen?: string;
+  /** 2026-10-23: "Sair da tela cheia", the same control while full screen. */
+  exitFullscreen?: string;
+}
+
+/**
+ * 2026-10-23 — the desktop slots beside the player box, for the CURRENT page's pieces: the rail to
+ * the box's right and the caption block at the stage's bottom left (`null` while there is no room
+ * for it). Elements to render into (a portal), so the page's own like engine drives both.
+ */
+export interface ReelsPagerSlots {
+  rail: HTMLElement | null;
+  info: HTMLElement | null;
 }
 
 export interface ReelsPagerProps {
@@ -122,8 +144,14 @@ export interface ReelsPagerProps {
   onLaneStep?: (delta: 1 | -1) => void;
   /** The page's video; called only for pages within `REELS_MOUNT_RADIUS` of `index`. */
   renderMedia: (item: ReelsPagerItem, state: { current: boolean }) => ReactNode;
-  /** The page's rail and caption; rendered for mounted pages, in a layer that stops pointers. */
-  renderOverlay: (item: ReelsPagerItem, state: { current: boolean }) => ReactNode;
+  /**
+   * The page's rail and caption; rendered for mounted pages, in a layer that stops pointers. From md
+   * the current page may also render its desktop pieces into `slots` (2026-10-23).
+   */
+  renderOverlay: (
+    item: ReelsPagerItem,
+    state: { current: boolean; slots: ReelsPagerSlots },
+  ) => ReactNode;
   /** The lane row and the sound button, above the stack, in a layer that stops pointers. */
   top: ReactNode;
   /** The viewer's pause state: names the page's pause control. */
@@ -148,6 +176,8 @@ export interface ReelsPagerProps {
   panelId?: string;
   /** The active tab's id. */
   labelledBy?: string;
+  /** 2026-10-23: the comments panel is open beside the player (xl): the box moves left for it. */
+  shifted?: boolean;
   labels: ReelsPagerLabels;
 }
 
@@ -161,6 +191,23 @@ const WHEEL_LINE_PX = 16;
 const WHEEL_PAGE_PX = 800;
 /** The white focus ring every control over video carries (UI-D-97). */
 const RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white';
+/**
+ * 2026-10-23 — a round control over the desktop player (YouTube's): a white glyph on a translucent
+ * black disc, with the white focus ring every control over video carries.
+ */
+const PLAYER_CONTROL = `grid size-11 place-items-center rounded-full bg-black/40 text-white backdrop-blur-sm transition-colors hover:bg-black/55 active:bg-black/65 ${RING}`;
+/** 2026-10-23 — the ↑/↓ discs at the stage's right edge, in the member's theme (outside the box). */
+const NAV_DISC =
+  'size-14 bg-bg-tertiary text-text hover:bg-[color-mix(in_oklch,var(--theme-bg-tertiary),var(--theme-text)_8%)] active:bg-[color-mix(in_oklch,var(--theme-bg-tertiary),var(--theme-text)_14%)] disabled:opacity-40';
+/**
+ * 2026-10-23 — the desktop caption block left of the box: 24 px from the stage's edge and from the
+ * box, at least 240 px wide (narrower, it stays over the video) and at most 360 px.
+ */
+const INFO_MARGIN = 24;
+const INFO_MIN = 240;
+const INFO_MAX = 360;
+/** A page that is not the current one fills no slot. */
+const NO_SLOTS: ReelsPagerSlots = { rail: null, info: null };
 
 type Drag = { active: boolean; dx: number; dy: number };
 const IDLE: Drag = { active: false, dx: 0, dy: 0 };
@@ -237,11 +284,13 @@ export function ReelsPager({
   instantKey,
   panelId,
   labelledBy,
+  shifted = false,
   labels,
 }: ReelsPagerProps) {
   const [drag, setDrag] = useState<Drag>(IDLE);
   const origin = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   const wheel = useRef({ acc: 0, lockedUntil: 0 });
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
@@ -410,6 +459,69 @@ export function ReelsPager({
     }
   };
 
+  /* ── The desktop pieces beside the box (2026-10-23, the YouTube Shorts layout) ───────────────── */
+
+  // The play/pause and "Tela cheia" over the desktop player are drawn from md only: the phone keeps
+  // its tap surface and the page's own pause control, untouched.
+  const desktop = useMediaQuery('(min-width: 768px)');
+  const [railSlot, setRailSlot] = useState<HTMLDivElement | null>(null);
+  const [infoSlot, setInfoSlot] = useState<HTMLDivElement | null>(null);
+  /** Where the caption block goes left of the box, or null while the room there is too narrow. */
+  const [infoBox, setInfoBox] = useState<{ bottom: number; width: number } | null>(null);
+
+  // The room left of the box is measured, never assumed: it depends on the window, the box's 9:16
+  // and the comments panel. No room (the phone's full-bleed box, a narrow window, an open panel)
+  // offers no slot, and the caption stays over the video.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const column = columnRef.current;
+    if (!root || !column) return;
+    const measure = () => {
+      const room = column.offsetLeft - INFO_MARGIN * 2;
+      if (shifted || room < INFO_MIN) {
+        setInfoBox(null);
+        return;
+      }
+      const bottom = Math.max(0, root.clientHeight - (column.offsetTop + column.offsetHeight));
+      const width = Math.min(INFO_MAX, room);
+      setInfoBox((previous) =>
+        previous && previous.bottom === bottom && previous.width === width
+          ? previous
+          : { bottom, width },
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    observer.observe(column);
+    // The box slides back when the panel closes: measure again where it lands.
+    root.addEventListener('transitionend', measure);
+    return () => {
+      observer.disconnect();
+      root.removeEventListener('transitionend', measure);
+    };
+  }, [shifted]);
+
+  // "Tela cheia" takes the STAGE full screen, so the rail, the caption block, the ↑/↓ and the
+  // comments panel stay around the player; Escape (the browser's) or the same control leaves it.
+  const [canFullscreen, setCanFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    setCanFullscreen(document.fullscreenEnabled === true);
+    const sync = () => setFullscreen(document.fullscreenElement !== null);
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void Promise.resolve(document.exitFullscreen?.()).catch(() => {});
+      return;
+    }
+    const stage = rootRef.current?.closest<HTMLElement>('[data-reels-stage]');
+    void Promise.resolve(stage?.requestFullscreen?.()).catch(() => {});
+  };
+
   /* ── Render ──────────────────────────────────────────────────────────────────────────────────── */
 
   const followsFinger = drag.active && Math.abs(drag.dy) > Math.abs(drag.dx);
@@ -431,20 +543,32 @@ export function ReelsPager({
     panelId !== undefined || labelledBy !== undefined
       ? ({ role: 'tabpanel', id: panelId, 'aria-labelledby': labelledBy } as const)
       : {};
+  // The current page's desktop slots (2026-10-23); the caption block's only while there is room.
+  const slots: ReelsPagerSlots = { rail: railSlot, info: infoBox ? infoSlot : null };
 
   return (
     <div
       ref={rootRef}
       data-testid="reels-pager"
-      className="absolute inset-0 md:flex md:justify-center"
+      className={cn(
+        REELS_ROW,
+        // From md a 16 px gap between pages: the next video's top edge peeks under the box.
+        'md:[--reels-gap:16px] motion-safe:transition-[padding] motion-safe:duration-300',
+        // The comments panel (420 px) and the ↑/↓ column (88 px) to the right, 24 px apart.
+        shifted && 'xl:pr-[532px]',
+      )}
     >
-      {/* The column box: full-bleed on mobile, the centred 9:16 column from md (UI-D-95), the
-          full height of the stage with square corners (2026-10-09: no black margins). */}
-      <div
-        data-testid="reels-column"
-        className="relative h-full w-full md:aspect-[9/16] md:h-[var(--screen-h)] md:w-auto md:max-w-[calc(100%-160px)]"
-      >
-        <div data-testid="reels-clip" className="absolute inset-0 overflow-hidden bg-black">
+      {/* The player box: full-bleed on mobile; from md the centred 9:16 box of the YouTube Shorts
+          layout (2026-10-23), 8 px under the top, with the rail beside it. */}
+      <div ref={columnRef} data-testid="reels-column" className={REELS_COLUMN}>
+        {/* The DARK SCOPE is the box (UI-D-98): on the phone the whole stage, as before; on the
+            desktop the video alone, the member's theme around it. From md the pages carry their own
+            rounded corners and the next one shows under the box, so the clip lets them through. */}
+        <div
+          data-testid="reels-clip"
+          data-theme="dark"
+          className="absolute inset-0 overflow-hidden bg-black text-white md:overflow-visible md:bg-transparent"
+        >
           <div
             data-testid="reels-stack"
             {...panelProps}
@@ -460,7 +584,8 @@ export function ReelsPager({
               data-testid="reels-track"
               className="absolute inset-0"
               style={{
-                transform: `translateY(calc(${-index * 100}% + ${offset}px))`,
+                // One page plus the desktop gap per step (`--reels-gap`, 0 on the phone).
+                transform: `translateY(calc(${-index * 100}% + ${-index} * var(--reels-gap, 0px) + ${offset}px))`,
                 transition,
               }}
             >
@@ -473,19 +598,20 @@ export function ReelsPager({
                     data-reel-page={k}
                     inert={isCurrent ? undefined : true}
                     aria-hidden={isCurrent ? undefined : true}
-                    className="absolute inset-x-0 h-full overflow-hidden bg-black"
-                    style={{ top: `${k * 100}%` }}
+                    className="absolute inset-x-0 h-full overflow-hidden bg-black md:rounded-xl"
+                    style={{ top: `calc(${k * 100}% + ${k} * var(--reels-gap, 0px))` }}
                   >
                     {mounted ? (
                       <>
                         {/* WCAG 2.2.2: pause without a gesture. The first focusable in the page;
-                            visible as the centre badge only while it has focus. */}
+                            visible as the centre badge only while it has focus. From md the
+                            player's own play/pause (top left) is that control instead. */}
                         {isCurrent ? (
                           <button
                             type="button"
                             aria-label={paused ? labels.play : labels.pause}
                             onClick={onTogglePause}
-                            className={`sr-only focus:not-sr-only focus:absolute focus:top-1/2 focus:left-1/2 focus:z-[4] focus:grid focus:h-14 focus:w-14 focus:-translate-x-1/2 focus:-translate-y-1/2 focus:place-items-center focus:rounded-full focus:bg-black/60 focus:text-white ${RING}`}
+                            className={`sr-only focus:not-sr-only focus:absolute focus:top-1/2 focus:left-1/2 focus:z-[4] focus:grid focus:h-14 focus:w-14 focus:-translate-x-1/2 focus:-translate-y-1/2 focus:place-items-center focus:rounded-full focus:bg-black/60 focus:text-white md:hidden ${RING}`}
                           >
                             {paused ? (
                               <Play size={24} aria-hidden className="fill-current" />
@@ -519,7 +645,10 @@ export function ReelsPager({
                           className="pointer-events-none absolute inset-0 z-[3] *:pointer-events-auto"
                           {...STOP_POINTER}
                         >
-                          {renderOverlay(item, { current: isCurrent })}
+                          {renderOverlay(item, {
+                            current: isCurrent,
+                            slots: isCurrent ? slots : NO_SLOTS,
+                          })}
                         </div>
                       </>
                     ) : null}
@@ -536,6 +665,44 @@ export function ReelsPager({
           >
             {top}
           </div>
+
+          {/* 2026-10-23 — the desktop player's own controls (YouTube's): play/pause at the top left
+              (the host's sound button sits beside it) and "Tela cheia" at the top right. */}
+          {desktop ? (
+            <div
+              className="pointer-events-none absolute inset-x-3 top-3 z-[4] flex items-start justify-between *:pointer-events-auto"
+              {...STOP_POINTER}
+            >
+              <button
+                type="button"
+                data-testid="reels-player-toggle"
+                aria-label={paused ? labels.play : labels.pause}
+                onClick={onTogglePause}
+                className={PLAYER_CONTROL}
+              >
+                {paused ? (
+                  <Play size={20} aria-hidden className="fill-current" />
+                ) : (
+                  <Pause size={20} aria-hidden className="fill-current" />
+                )}
+              </button>
+              {canFullscreen && labels.fullscreen && labels.exitFullscreen ? (
+                <button
+                  type="button"
+                  data-testid="reels-fullscreen"
+                  aria-label={fullscreen ? labels.exitFullscreen : labels.fullscreen}
+                  onClick={toggleFullscreen}
+                  className={PLAYER_CONTROL}
+                >
+                  {fullscreen ? (
+                    <Minimize size={20} aria-hidden />
+                  ) : (
+                    <Maximize size={20} aria-hidden />
+                  )}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           {showSpinner ? (
             <div
@@ -565,10 +732,11 @@ export function ReelsPager({
           ) : null}
 
           {ticks.length > 0 ? (
+            // The phone's position cue; the desktop has its ↑/↓ instead (2026-10-23).
             <div
               data-testid="reels-ticks"
               aria-hidden
-              className="pointer-events-none absolute top-1/2 right-[3px] z-[3] flex -translate-y-1/2 flex-col gap-1"
+              className="pointer-events-none absolute top-1/2 right-[3px] z-[3] flex -translate-y-1/2 flex-col gap-1 md:hidden"
             >
               {ticks.map((tick) => (
                 <span
@@ -593,25 +761,44 @@ export function ReelsPager({
           </span>
         </div>
 
-        {/* Desktop ↑/↓, 24 px outside the column's right edge, vertically centred (UI-D-95). */}
-        <div className="absolute top-1/2 left-[calc(100%+24px)] hidden -translate-y-1/2 flex-col gap-4 md:flex">
-          <IconButton
-            icon={ChevronUp}
-            size={20}
-            label={labels.previous}
-            disabled={atStart}
-            onClick={() => go(index - 1)}
-            className="rounded-full bg-white/10 text-white hover:bg-white/20 active:bg-white/20 focus-visible:ring-white focus-visible:ring-offset-0 disabled:opacity-40"
-          />
-          <IconButton
-            icon={ChevronDown}
-            size={20}
-            label={labels.next}
-            disabled={atTrueEnd}
-            onClick={() => go(index + 1)}
-            className="rounded-full bg-white/10 text-white hover:bg-white/20 active:bg-white/20 focus-visible:ring-white focus-visible:ring-offset-0 disabled:opacity-40"
-          />
-        </div>
+        {/* 2026-10-23 — the rail's desktop slot: right of the box, level with its bottom. */}
+        <div
+          ref={setRailSlot}
+          data-reels-rail-slot=""
+          className="absolute bottom-0 left-[calc(100%+16px)] hidden md:block"
+        />
+      </div>
+
+      {/* 2026-10-23 — the caption block's desktop slot, at the stage's bottom left, level with the
+          box's bottom, while the room left of the box holds it. */}
+      {infoBox ? (
+        <div
+          ref={setInfoSlot}
+          data-reels-info-slot=""
+          className="absolute left-6 hidden md:block"
+          style={{ bottom: infoBox.bottom, width: infoBox.width }}
+        />
+      ) : null}
+
+      {/* Desktop ↑/↓ at the stage's right edge, vertically centred (UI-D-95; 2026-10-23, the
+          YouTube Shorts layout), in the member's theme. */}
+      <div className="absolute top-1/2 right-6 hidden -translate-y-1/2 flex-col gap-4 md:flex">
+        <IconButton
+          icon={ChevronUp}
+          size={24}
+          label={labels.previous}
+          disabled={atStart}
+          onClick={() => go(index - 1)}
+          className={NAV_DISC}
+        />
+        <IconButton
+          icon={ChevronDown}
+          size={24}
+          label={labels.next}
+          disabled={atTrueEnd}
+          onClick={() => go(index + 1)}
+          className={NAV_DISC}
+        />
       </div>
     </div>
   );

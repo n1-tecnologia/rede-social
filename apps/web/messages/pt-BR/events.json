@@ -235,7 +235,14 @@
         "add": "Adicionar capa",
         "change": "Trocar capa",
         "remove": "Remover capa",
-        "helper": "A capa é opcional. Sem ela, usamos as cores de {tenant}."
+        "helper": "A capa é opcional. Sem ela, usamos as cores de {tenant}.",
+        "as": {
+          "hero": "Horizontal · página do evento",
+          "poster": "Vertical · lista de eventos"
+        },
+        "posterAdd": "Adicionar capa vertical",
+        "posterChange": "Trocar capa vertical",
+        "posterRemove": "Remover capa vertical"
       },
       "name": {
         "label": "Nome do evento",

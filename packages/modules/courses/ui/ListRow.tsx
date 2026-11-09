@@ -3,12 +3,18 @@ import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 /**
- * The admin list row the course, track and live rows share (UI-D-392): one `<a>` with
- * `flex items-center gap-3 min-h-14 px-4 py-2`, a thumb on `bg-bg-tertiary` whose empty slot takes
- * the tenant gradient (D-69, `--brand-on-primary` ink rule: the box carries no text, so only the
- * paint applies), the name 14/700 clamped to two lines, a meta line 12/400 secondary, the pills
- * (`shrink-0`: two pills truncate the NAME, never themselves — E03 overflow) and `ChevronRight` 18
- * tertiary.
+ * The admin list row the course and live rows share (UI-D-392): one `<a>` with a thumb on
+ * `bg-bg-tertiary` whose empty slot takes the tenant gradient (D-69, `--brand-on-primary` ink rule:
+ * the box carries no text, so only the paint applies), the name clamped to two lines, a meta line
+ * and `ChevronRight` 18 tertiary.
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the row lives inside an
+ * outlined card with hairlines between rows (the host draws the card), so its hover is the card's
+ * own `bg-card-hover`; the name is 15/700, the meta 12 tertiary, and the PILLS moved under the meta
+ * in a wrapping line, so a long name keeps the whole width and two pills never squeeze it. The
+ * thumbs grew with the card: the 3:4 poster to 48px, the 16:10 live thumb to 80px. The track row
+ * left this shape for the cover card (`CoverCard`). Below 360px the chevron is not drawn, so the
+ * name keeps whole words beside the course row's 44px "ver como aluno" eye.
  *
  * Presentational and props-only (PWA-03, MOD-02): it fetches nothing, formats nothing, resolves no
  * route and ships NO words. The host builds the href, the accessible name ("{title}, {status}"),
@@ -32,19 +38,19 @@ export interface ListRowProps {
   pills?: readonly ListRowPill[];
   /** The host's `MediaImage` (object-cover, filling the box); absent takes the gradient branch. */
   thumb?: ReactNode;
-  /** `poster` is the 3:4 course thumb (`w-10`), `wide` the 16:10 track/live thumb (`w-16`). */
+  /** `poster` is the 3:4 course thumb (`w-12`), `wide` the 16:10 live thumb (`w-20`). */
   thumbShape: 'poster' | 'wide';
-  /** The host's `data-testid` family prefix (`course-row`, `track-row`, `live-row`). */
+  /** The host's `data-testid` family prefix (`course-row`, `live-row`). */
   testId: string;
 }
 
 const FOCUS =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand';
 
-/** The two thumb geometries of UI-D-392; both `rounded-lg` on `bg-bg-tertiary`, `shrink-0`. */
+/** The two thumb geometries; both `rounded-lg` on `bg-bg-tertiary`, `shrink-0`. */
 export const THUMB_SHAPE = {
-  poster: 'w-10 aspect-[3/4]',
-  wide: 'w-16 aspect-[16/10]',
+  poster: 'w-12 aspect-[3/4]',
+  wide: 'w-20 aspect-[16/10]',
 } as const;
 
 export function ListRow({
@@ -64,7 +70,7 @@ export function ListRow({
       aria-label={ariaLabel}
       data-testid={testId}
       className={cn(
-        'flex min-h-14 w-full items-center gap-3 px-4 py-2 transition-colors hover:bg-bg-hover active:bg-bg-active',
+        'flex min-h-14 w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-card-hover active:bg-bg-active',
         FOCUS,
       )}
     >
@@ -85,35 +91,41 @@ export function ListRow({
             own `-webkit-box` is block-level already. */}
         <span
           data-testid={`${testId}-title`}
-          className="line-clamp-2 text-sm font-bold leading-tight text-text"
+          className="line-clamp-2 text-[15px] font-bold leading-snug text-text [overflow-wrap:anywhere]"
         >
           {title}
         </span>
         {meta ? (
           <span
             data-testid={`${testId}-meta`}
-            className="mt-1 block text-xs font-normal text-text-secondary tabular-nums"
+            className="mt-0.5 block text-xs font-normal text-text-tertiary tabular-nums"
           >
             {meta}
           </span>
         ) : null}
+        {pills.length > 0 ? (
+          <span className="mt-1.5 flex flex-wrap items-center gap-1">
+            {pills.map((pill) => (
+              <StatusPill
+                key={pill.label}
+                tone={pill.tone}
+                data-testid={`${testId}-pill`}
+                data-tone={pill.tone}
+                className="shrink-0"
+              >
+                {pill.label}
+              </StatusPill>
+            ))}
+          </span>
+        ) : null}
       </span>
-      {pills.length > 0 ? (
-        <span className="flex shrink-0 items-center gap-1">
-          {pills.map((pill) => (
-            <StatusPill
-              key={pill.label}
-              tone={pill.tone}
-              data-testid={`${testId}-pill`}
-              data-tone={pill.tone}
-              className="shrink-0"
-            >
-              {pill.label}
-            </StatusPill>
-          ))}
-        </span>
-      ) : null}
-      <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
+      {/* Below 360px the chevron gives its 30px to the name: the whole row is the link anyway, and
+          with the host's 44px eye beside the row a 320px phone otherwise breaks a long word. */}
+      <ChevronRight
+        aria-hidden
+        size={18}
+        className="hidden shrink-0 text-text-tertiary min-[360px]:block"
+      />
     </a>
   );
 }

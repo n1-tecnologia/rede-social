@@ -11,6 +11,8 @@ import {
   isNavItemActive,
   type NavArea,
   type NavItem,
+  type PhoneLayout,
+  phoneChrome,
 } from './nav';
 import { useLiveCounters } from './realtime/LiveCountersProvider';
 import { slotAccessibleName, slotBadgeStyle, useSlotBadgeLabel } from './realtime/SlotBadgeLabels';
@@ -42,8 +44,15 @@ export interface TopBarProps {
   /**
    * 2026-10-06: the shell's areas (`nav.areas`). Inside one (with `tabs`), the bar names it beside
    * the logo ("· Eventos") and its right side collapses into the area's menu (`AreaMenu`).
+   * 2026-10-24: a slot's area too ("· Loja"), on the pages no tab claims (`activeArea` reads the
+   * tabs, then `slots`); its menu leaves that slot out of its shortcuts.
    */
   areas?: ReadonlyArray<NavArea>;
+  /**
+   * 2026-11-05: the administrator's arrangement of the phone (`ShellNav.phoneLayout`): the bar's
+   * right side draws the items `phoneChrome` puts at the top (a tab included), in its order.
+   */
+  layout?: PhoneLayout;
 }
 
 /** The separator between the brand and the area's name: a glyph, not copy (never translated). */
@@ -85,13 +94,18 @@ export function TopBar({
   profileHref = '/perfil',
   tabs,
   areas,
+  layout,
 }: TopBarProps) {
   const pathname = usePathname() ?? '';
   const onProfile = isNavItemActive(pathname, profileHref);
   const live = useLiveCounters();
   const labelFor = useSlotBadgeLabel();
   const shown = live ?? counters;
-  const area = tabs ? activeArea(tabs, areas, pathname) : null;
+  // 2026-10-24: the slots too, so a slot's area (the Loja's) holds on the pages no tab claims.
+  const area = tabs ? activeArea(tabs, areas, pathname, slots) : null;
+  // 2026-10-28: a `phoneTab` slot (the Loja) is the BottomNav's; the bar and its menus leave it out.
+  // 2026-11-05: the administrator may move items here, tabs included, or out (`phoneChrome`).
+  const barSlots = phoneChrome(tabs ?? [], slots, layout).top;
 
   // UI-D-423: the lookup reads the slots too, so a media entry that yielded its tab (Reels while
   // Cursos is a tab) still owns the screen when reached from its TopBar slot.
@@ -121,14 +135,14 @@ export function TopBar({
         {area ? (
           <AreaMenu
             area={area}
-            slots={slots}
+            slots={barSlots}
             counters={shown}
             profile={{ href: profileHref, label: profileLabel }}
             pathname={pathname}
           />
         ) : (
           <div data-shell-slots className="flex shrink-0 items-center gap-1 min-[360px]:gap-3">
-            {slots.map((slot) => {
+            {barSlots.map((slot) => {
               const Icon = iconFor(slot.icon);
               const active = isNavItemActive(pathname, slot.href);
               const count = slot.badge ? shown[slot.badge] : 0;

@@ -14,10 +14,10 @@ import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath, requireBootstrap } from '@/lib/bootstrap';
 import { getProducts, type PurchaseRefusal, purchaseProduct } from '@/lib/store';
-import { type ProductCardView, productCardView } from '@/lib/store-view';
+import { type ProductCardView, productCardView, productManageView } from '@/lib/store-view';
 
 /**
- * The `/loja` grid's paging and refresh (08.2-07, STORE-05), in the `comunidades/actions.ts`
+ * The store lists' paging and refresh (08.2-07, STORE-05), in the `comunidades/actions.ts`
  * conventions: the SAME Zod the API validates with runs BEFORE the request (a server action is a
  * public endpoint), a 401/403 refusal the bootstrap knows becomes a navigation OUTSIDE the try/catch
  * (Next 16: `redirect()` throws), and any other refusal is a code the client maps to catalog copy.
@@ -29,6 +29,13 @@ import { type ProductCardView, productCardView } from '@/lib/store-view';
  * tampered one). `archived` asked without `store.product.manage` is the API's 403: the page never
  * sends it, and a crafted call lands on the generic failure.
  *
+ * **2026-10-24 (the Loja area): two surfaces.** The BROWSE actions page Produtos (`all`) and Comprados
+ * (`owned`) as a member sees them, for a manager too: never the archived pill, never the manager-only
+ * "no payment link" pill (before, a manager's page 2 of the old one-screen grid carried it). The
+ * MANAGE actions page Gerenciar's rows (`all` as the active list, `archived`) for a caller holding
+ * `store.product.manage`, read from the server-side bootstrap; anyone else is refused BEFORE any read.
+ * Each surface answers only its own filters; another is the generic failure.
+ *
  * **This module must not re-export anything** (Turbopack drops re-exports from `'use server'`).
  */
 
@@ -36,7 +43,21 @@ export type ProductsPageResult =
   | { ok: true; items: ProductCardView[]; nextCursor: string | null }
   | { ok: false; code: 'generic' };
 
-async function readPage(filter: ProductFilter, cursor?: string): Promise<ProductsPageResult> {
+/** Which list asks: the member's screens (`browse`) or the manager's Gerenciar (`manage`). */
+type Surface = 'browse' | 'manage';
+
+/** The filters each surface may read. */
+const SURFACE_FILTERS: Record<Surface, ReadonlyArray<ProductFilter>> = {
+  browse: ['all', 'owned'],
+  manage: ['all', 'archived'],
+};
+
+async function readPage(
+  surface: Surface,
+  filter: ProductFilter,
+  cursor?: string,
+): Promise<ProductsPageResult> {
+  if (!SURFACE_FILTERS[surface].includes(filter)) return { ok: false, code: 'generic' };
   const query = productListQuerySchema.safeParse(
     cursor === undefined ? { filter } : { filter, cursor },
   );
@@ -48,6 +69,8 @@ async function readPage(filter: ProductFilter, cursor?: string): Promise<Product
   // runs OUTSIDE the try/catch below.
   const bootstrap = await requireBootstrap();
   const canManage = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
+  // Gerenciar's rows are a manager's: refused before the API is asked anything.
+  if (surface === 'manage' && !canManage) return { ok: false, code: 'generic' };
 
   let refusal: string | null = null;
   let result: ProductsPageResult = { ok: false, code: 'generic' };
@@ -60,11 +83,13 @@ async function readPage(filter: ProductFilter, cursor?: string): Promise<Product
       }),
       getTranslations(),
     ]);
-    const managerArchived = query.data.filter === 'archived';
+    const archived = query.data.filter === 'archived';
     result = {
       ok: true,
       items: page.items.map((product) =>
-        productCardView(product, t, { managerArchived, canManage }),
+        surface === 'manage'
+          ? productManageView(product, t, { archived, canManage })
+          : productCardView(product, t, { managerArchived: false }),
       ),
       nextCursor: page.nextCursor,
     };
@@ -84,17 +109,32 @@ async function readPage(filter: ProductFilter, cursor?: string): Promise<Product
   return result;
 }
 
-/** One more page of the grid, APPENDED by the client (never replaces, P21). */
+/** One more page of Produtos or Comprados, APPENDED by the client (never replaces, P21). */
 export async function loadMoreProductsAction(
   filter: ProductFilter,
   cursor: string,
 ): Promise<ProductsPageResult> {
-  return readPage(filter, cursor);
+  return readPage('browse', filter, cursor);
 }
 
 /** Page 1 again: what `PullToRefresh` and the first-load retry call. */
 export async function refreshProductsAction(filter: ProductFilter): Promise<ProductsPageResult> {
-  return readPage(filter);
+  return readPage('browse', filter);
+}
+
+/** 2026-10-24: one more page of Gerenciar's rows (a manager's only). */
+export async function loadMoreManagedProductsAction(
+  filter: ProductFilter,
+  cursor: string,
+): Promise<ProductsPageResult> {
+  return readPage('manage', filter, cursor);
+}
+
+/** 2026-10-24: Gerenciar's page 1 again (a manager's only). */
+export async function refreshManagedProductsAction(
+  filter: ProductFilter,
+): Promise<ProductsPageResult> {
+  return readPage('manage', filter);
 }
 
 export type PurchaseActionResult =

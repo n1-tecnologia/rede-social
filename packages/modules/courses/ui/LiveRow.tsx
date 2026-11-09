@@ -2,11 +2,13 @@ import type { ReactNode } from 'react';
 import { ListRow, type ListRowPill } from './ListRow';
 
 /**
- * The live row of the hub's Lives tab (UI-D-392, plan 11): the 16:10 thumb (`w-16`), the title, the
- * meta "{weekday} {day} {month}, {time} · {duration} min" (tenant timezone, formatted on the server)
- * and the derived status pill (Agendada / Ao vivo / Gravada / Cancelada, D-416). It links to the
- * live's edit form. Built props-only now so plan 11 composes it without touching the module's UI
- * surface again.
+ * The live row of the admin's Lives list (UI-D-392, plan 11): the 16:10 thumb, the title, the meta
+ * "{weekday} {day} {month}, {time} · {duration} min" (tenant timezone, formatted on the server) and
+ * the derived status pill (Agendada / Ao vivo / Gravada / Cancelada, D-416). It links to the live's
+ * edit form.
+ *
+ * 2026-10-22 (the courses area redesign): a row of the outlined list card, the thumb at 80px and the
+ * pill under the meta (`ListRow`).
  */
 export type LiveRowPill = ListRowPill;
 

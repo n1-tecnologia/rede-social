@@ -126,13 +126,37 @@ const REQUIRED_KEYS = [
   // be prerendered.
   '/(app)/cursos/page',
   // quick 261019-k7x: the member area, moved out of /cursos. It reads the session, the module flag and
-  // the composed `courses.manage` permission per request (a manager is sent to the hub, a school that
-  // is off answers the kernel not-found), so it may never be prerendered.
+  // the composed `courses.manage` permission per request (a manager sees it as a preview since
+  // 2026-10-23, a school that is off answers the kernel not-found), so it may never be prerendered.
   '/(app)/area-membros/page',
+  // 2026-10-22 (the courses redesign, one page per screen): the member's Cursos, Trilhas, Lives and
+  // Progresso, and the manager's Trilhas and Lives lists. Each reads the session, the module flag and
+  // the composed `courses.manage` permission per request (a member on a management list is sent to
+  // the member's twin; since 2026-10-23 a manager sees the member's screens as a preview), so none may
+  // ever be prerendered.
+  '/(app)/area-membros/cursos/page',
+  '/(app)/area-membros/trilhas/page',
+  '/(app)/area-membros/lives/page',
+  '/(app)/area-membros/progresso/page',
+  '/(app)/cursos/trilhas/page',
+  '/(app)/cursos/lives/page',
+  // 2026-10-23: "Gerenciar", the manager's hub. It reads the session, the module flag, the composed
+  // `courses.manage` permission and the manager's own lists (the cards' counts) per request, so it
+  // may never be prerendered.
+  '/(app)/cursos/gerenciar/page',
+  // 2026-10-24 (the Loja area): the store's screens. Produtos and Comprados read the session, the
+  // module flag and the viewer's own holdings per request; Gerenciar reads the composed
+  // `store.product.manage` permission (a member is sent to Produtos). None may ever be prerendered.
+  '/(app)/loja/page',
+  '/(app)/loja/comprados/page',
+  '/(app)/loja/gerenciar/page',
   // 08.3-08: the course page. It reads the session, the permission and the course per request and
   // mints a provider thumbnail credential per ready lesson (a bearer token, T-08.3-18), so a
   // prerendered copy would freeze one admin's tokens into every visitor's HTML. Never prerendered.
   '/(app)/cursos/[courseId]/page',
+  // 2026-10-26: a module's member page reads the session and the member's course (its progress) per
+  // request; a prerendered copy would freeze one member's progress into every visitor's HTML.
+  '/(app)/cursos/[courseId]/modulos/[moduleId]/page',
   // 08.3-09: the lesson form's two routes. Both read the session, `courses.manage`, the course (the
   // module subtitle, whether a product gates it) or the lesson detail per request; a prerendered copy
   // would freeze one admin's lesson — its materials and video state — into every visitor's HTML.

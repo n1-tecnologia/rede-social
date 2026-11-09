@@ -31,7 +31,10 @@ export const conversationsBadgeOf = (counters: LiveCounters): 'dot' | 'count' =>
 
 const LiveCountersContext = createContext<LiveCounters | null>(null);
 
-/** The live counters, or `null` outside a provider (TopBar/DesktopRail then keep their static prop). */
+/**
+ * The live counters, or `null` outside a provider (TopBar, DesktopRail and DesktopHeader then keep
+ * their static prop).
+ */
 export function useLiveCounters(): LiveCounters | null {
   return useContext(LiveCountersContext);
 }

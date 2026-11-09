@@ -36,7 +36,12 @@ import {
   liveDateParts,
   MATERIAL_KIND_LABEL_KEY,
 } from '@/lib/courses-view';
-import { MEMBER_AREA_PATH } from '@/lib/member-area';
+import {
+  memberScreenFromAba,
+  memberScreenHref,
+  PREVIEW_PARAM,
+  PREVIEW_VALUE,
+} from '@/lib/member-area';
 
 /**
  * The member side's view builders (08.5-06, D-420, D-421, D-430, UI-D-424..UI-D-426). Pure: no
@@ -45,12 +50,18 @@ import { MEMBER_AREA_PATH } from '@/lib/member-area';
  * pages share one formatter. `courses-view.ts` stays the manager's (planning decision 2); this file
  * reuses its duration and level vocabulary rather than copying it.
  *
+ * **2026-10-22 (the courses area redesign on the social-igoralves prototype).** Every link to a
+ * member SCREEN is `memberScreenHref` now that each screen is a page of its own (`/area-membros`,
+ * `/area-membros/cursos?categoria=`, `/area-membros/trilhas?trilha=`, `/area-membros/lives`,
+ * `/area-membros/progresso`); the course, lesson and live routes keep their `/cursos/…` paths. The
+ * course hero gains its overline and its facts strip (Aulas · Duração · Nível), the module band its
+ * pill by state, the live card the agenda's date parts and the chip's `live` / `replay` glyph.
+ *
  * Keys are FULL (`courses.member.…`): the same untyped translator every `lib/*-view` module takes.
  */
 
 /** The `?ver=aluno` preview suffix an `admin_tenant` keeps on every member link (UI-D-437). */
-export const PREVIEW_PARAM = 'ver';
-export const PREVIEW_VALUE = 'aluno';
+export { PREVIEW_PARAM, PREVIEW_VALUE };
 
 /** A member-area (`/area-membros…`) or detail (`/cursos/…`) href with its query, keeping `?ver=aluno` while the manager previews. */
 function memberHref(path: string, query: Record<string, string>, preview: boolean): string {
@@ -68,19 +79,19 @@ export interface MemberAreaRedirectQuery {
 }
 
 /**
- * Where `/cursos` sends everyone who is not on the manager's hub (quick 261019-k7x, T-k7x-02): the
- * constant `MEMBER_AREA_PATH`, plus `aba`, `categoria` and `trilha` only when each is ONE non-empty
- * string (a repeated or empty value is dropped, any other key never copied), always through
- * `URLSearchParams` encoding so a URL-shaped value stays an encoded query value (no open redirect).
- * `preview` appends `ver=aluno` last (the admin's "Ver como aluno").
+ * Where an OLD `/cursos?aba=…` or `/area-membros?aba=…` link sends a member (quick 261019-k7x,
+ * T-k7x-02; screens of their own since 2026-10-22): the screen `?aba=` names (`memberScreenFromAba`:
+ * only one known value counts, anything else is Início), keeping `categoria` on Cursos and `trilha` on
+ * Trilhas only when each is ONE non-empty string, always through `URLSearchParams` encoding so a
+ * URL-shaped value stays an encoded query value (no open redirect). `preview` appends `ver=aluno`
+ * last (the admin's "Ver como aluno").
  */
 export function memberAreaRedirectHref(query: MemberAreaRedirectQuery, preview = false): string {
-  const kept: Record<string, string> = {};
-  for (const key of ['aba', 'categoria', 'trilha'] as const) {
-    const value = query[key];
-    if (typeof value === 'string' && value !== '') kept[key] = value;
-  }
-  return memberHref(MEMBER_AREA_PATH, kept, preview);
+  return memberScreenHref(
+    memberScreenFromAba(query.aba),
+    { categoria: query.categoria, trilha: query.trilha },
+    preview,
+  );
 }
 
 /* ── Category chips (UI-D-425) ───────────────────────────────────────────────────────────────── */
@@ -99,19 +110,13 @@ export function categoryFromParam(
 }
 
 /**
- * A chip's href (08.6 UI-D-446): the catalogue lives at `?aba=cursos` now that the bare area is
- * Início, so "Todas" is `/area-membros?aba=cursos` and a category
- * `/area-membros?aba=cursos&categoria={id}`. The category empty state's "Ver todos os cursos" uses
- * "Todas" (= `MEMBER_CATALOGUE_HREF`, plus `ver=aluno` in preview). The course page's back link
- * targets the area; the course not-found stays bare `/cursos` and rides the redirect (the member area
- * moved from `/cursos` to `/area-membros`, 2026-10-19).
+ * A chip's href (08.6 UI-D-446; its own path since 2026-10-22): "Todas" is `/area-membros/cursos`
+ * and a category `/area-membros/cursos?categoria={id}`. The category empty state's "Ver todos os
+ * cursos" uses "Todas" (= `MEMBER_CATALOGUE_HREF`, plus `ver=aluno` in preview). The course
+ * not-found stays bare `/cursos` and rides the redirect.
  */
 export function catalogueCategoryHref(categoryId: string | null, preview = false): string {
-  return memberHref(
-    MEMBER_AREA_PATH,
-    categoryId ? { aba: 'cursos', categoria: categoryId } : { aba: 'cursos' },
-    preview,
-  );
+  return memberScreenHref('cursos', { categoria: categoryId }, preview);
 }
 
 /* ── Course card (UI-D-426, D-421, D-430) ────────────────────────────────────────────────────── */
@@ -131,8 +136,13 @@ export interface CourseCardView {
   coverAssetId: string | null;
   /** "{category} · {level}", either part alone, or null when both are empty. */
   categoryLine: string | null;
-  /** "{N} aulas" plus " · {duration}" when any video is ready. */
+  /**
+   * The lessons line, "{done}/{N} aulas" (2026-10-26, the academy reference's card; it was "{N}
+   * aulas · {duration}").
+   */
   meta: string;
+  /** The course's length ("1 h 43 min"), drawn beside the lessons line; null without ready video. */
+  duration: string | null;
   tags: CourseCardTags;
   /** Present exactly when the member completed at least one lesson (A-UI-5: locked cards too). */
   progress: { percent: number; label: string } | null;
@@ -181,9 +191,10 @@ export function courseCardView(
       : (category ?? level);
 
   const duration = formatCourseDuration(card.durationSeconds);
-  const meta = duration
-    ? t('courses.member.card.metaWithDuration', { N: card.lessonCount, duration })
-    : t('courses.member.card.meta', { N: card.lessonCount });
+  const meta = t('courses.member.card.lessonsDone', {
+    done: Math.min(card.completedCount, card.lessonCount),
+    N: card.lessonCount,
+  });
 
   const tags = courseCardTags(access);
   const progress =
@@ -211,6 +222,7 @@ export function courseCardView(
     coverAssetId: card.coverAssetId,
     categoryLine,
     meta,
+    duration: duration || null,
     tags,
     progress,
     ariaLabel,
@@ -234,16 +246,39 @@ export interface LiveCardView {
   coverAssetId: string | null;
   /** The status in words: "Ao vivo agora", "Agendada", "Gravada", "Cancelada". */
   statusLabel: string;
-  /** `radio` leads the pill only while the live is on air. */
-  statusIcon: 'radio' | null;
+  /** The chip's glyph (2026-10-22): `live` (the red chip, the breathing dot) on air, `replay` (▶) once recorded. */
+  statusIcon: LiveStatusIcon;
   /** "Exclusiva": the store says the live is locked for this caller. */
   exclusive: boolean;
-  /** A cancelled card keeps its colour; only its title takes the secondary ink. */
+  /** A cancelled card keeps its colour; only its title steps back. */
   cancelled: boolean;
   /** "{date}, {time} · {duration} min" in the TENANT's timezone. */
   meta: string;
+  /** The agenda row's date column (2026-10-22): the day ("24") and the short month ("out"). */
+  day: string;
+  month: string;
+  /** The agenda row's line (2026-10-22): "{time} · {duration} min". */
+  timeLine: string;
   /** "{live}, {status}, {date}" plus ", exclusiva". */
   ariaLabel: string;
+}
+
+/** A live chip's glyph: on air, a replay to watch, or none. */
+export type LiveStatusIcon = 'live' | 'replay' | null;
+
+/** The server's status → the chip's glyph (2026-10-22). */
+function liveStatusIcon(status: string): LiveStatusIcon {
+  if (status === 'live') return 'live';
+  return status === 'recorded' ? 'replay' : null;
+}
+
+/** "24" and "out" — a live's day and short month in the tenant timezone (the agenda's column). */
+function liveDayAndMonth(at: Date, timeZone: string): { day: string; month: string } {
+  const day = new Intl.DateTimeFormat('pt-BR', { timeZone, day: 'numeric' }).format(at);
+  const month = new Intl.DateTimeFormat('pt-BR', { timeZone, month: 'short' })
+    .format(at)
+    .replace(/\./g, '');
+  return { day, month };
 }
 
 /**
@@ -262,6 +297,7 @@ export function liveCardView(
   const statusLabel =
     card.status === 'live' ? t('courses.member.lives.liveNow') : t(`courses.status.${card.status}`);
   const { date, time } = liveDateParts(card.startsAt, timeZone);
+  const { day, month } = liveDayAndMonth(new Date(card.startsAt), timeZone);
   const exclusive = access?.locked === true;
   const ariaLabel = t('courses.member.lives.aria', {
     live: card.title,
@@ -275,10 +311,13 @@ export function liveCardView(
     title: card.title,
     coverAssetId: card.coverAssetId,
     statusLabel,
-    statusIcon: card.status === 'live' ? 'radio' : null,
+    statusIcon: liveStatusIcon(card.status),
     exclusive,
     cancelled: card.status === 'cancelled',
     meta: t('courses.lives.row.meta', { date, time, duration: card.durationMin }),
+    day,
+    month,
+    timeLine: t('courses.member.lives.timeLine', { time, duration: card.durationMin }),
     ariaLabel,
   };
 }
@@ -341,6 +380,15 @@ function lessonsMeta(
   return duration ? t(keys.withDuration, { N: count, duration }) : t(keys.plain, { N: count });
 }
 
+/** One cell of the course's facts strip (2026-10-22): the value over its label. */
+export interface CourseFactView {
+  key: 'lessons' | 'duration' | 'level';
+  /** "18", "4 h" / "3 h 41 min", "Iniciante". */
+  value: string;
+  /** "Aulas", "Duração", "Nível". */
+  label: string;
+}
+
 export interface CourseHeroView {
   title: string;
   /** Null when empty: the line is absent, never an empty paragraph. */
@@ -351,21 +399,52 @@ export interface CourseHeroView {
   outcomes: string[];
   coverAssetId: string | null;
   coverAlt: string;
-  /** The category as an over-media pill on the hero; null without one. */
+  /** The category as a glass chip on the hero; null without one. */
   categoryPill: string | null;
-  /** The `neutral` pills: the level, then "{N} h". */
-  pills: string[];
+  /** The line above the hero's title (2026-10-22): "Curso · {M} módulos · {level}". */
+  overline: string;
+  /**
+   * The facts strip (2026-10-22), in this order: Aulas (always), Duração (the certificate hours when
+   * set, else the ready videos' sum; absent with neither), Nível (absent without a level).
+   */
+  facts: CourseFactView[];
   instructorLine: string;
   instructorPhotoAssetId: string | null;
 }
 
-/** The hero and identity block (UI-D-427), every word built here. */
+/**
+ * The hero and identity block (UI-D-427), every word built here. 2026-10-22: the level and the hours
+ * left the pills for the hero's overline and the facts strip (the course page keeps one pill only,
+ * the store's "Produto arquivado"); the counts are the curriculum's own (the modules and lessons the
+ * member sees).
+ */
 export function courseHeroView(course: LearnCourse, t: CoursesTranslator): CourseHeroView {
-  const pills: string[] = [];
-  if (course.level) pills.push(t(COURSE_LEVEL_LABEL_KEY[course.level]));
-  if (course.certificateHours !== null && course.certificateHours > 0) {
-    pills.push(t('courses.course.hours', { N: String(Math.trunc(course.certificateHours)) }));
+  const modules = visibleModules(course);
+  const lessonCount = modules.reduce((sum, module) => sum + module.lessons.length, 0);
+  const level = course.level ? t(COURSE_LEVEL_LABEL_KEY[course.level]) : null;
+  const duration =
+    course.certificateHours !== null && course.certificateHours > 0
+      ? t('courses.course.hours', { N: String(Math.trunc(course.certificateHours)) })
+      : formatCourseDuration(courseSeconds(course));
+
+  const facts: CourseFactView[] = [
+    {
+      key: 'lessons',
+      value: String(lessonCount),
+      label: t('courses.member.course.facts.lessons'),
+    },
+  ];
+  if (duration) {
+    facts.push({
+      key: 'duration',
+      value: duration,
+      label: t('courses.member.course.facts.duration'),
+    });
   }
+  if (level) {
+    facts.push({ key: 'level', value: level, label: t('courses.member.course.facts.level') });
+  }
+
   return {
     title: course.title,
     tagline: course.tagline.trim() ? course.tagline : null,
@@ -374,7 +453,12 @@ export function courseHeroView(course: LearnCourse, t: CoursesTranslator): Cours
     coverAssetId: course.coverAssetId,
     coverAlt: t('courses.alt.course', { title: course.title }),
     categoryPill: course.category?.name?.trim() ? course.category.name : null,
-    pills,
+    overline: t('courses.member.course.overline', {
+      M: modules.length,
+      hasLevel: String(level !== null),
+      level: level ?? '',
+    }),
+    facts,
     instructorLine: t('courses.course.instructor', { instructor: course.instructorName }),
     instructorPhotoAssetId: course.instructorPhotoAssetId,
   };
@@ -566,7 +650,10 @@ export interface ModuleBandView {
   id: string;
   /** "01". */
   numeral: string;
-  /** "Módulo 01" or "Concluído". */
+  /**
+   * The band's pill by state (2026-10-22): "Concluído", "Exclusivo" (a purchase lock), "Bloqueado"
+   * (the module rule), "Em andamento" (part-way), else "Módulo 01".
+   */
   pill: string;
   title: string;
   /** "{N} aulas · {duration}", or the module-rule lock sentence. */
@@ -623,12 +710,16 @@ export function curriculumView(
         : state.kind === 'locked'
           ? t('courses.member.module.stateLocked')
           : t('courses.member.module.stateProgress', { percent: state.percent });
+    let pill: string;
+    if (state.kind === 'done') pill = t('courses.member.module.done');
+    else if (module.lockReason === 'purchase') pill = t('courses.member.tags.exclusiveCourse');
+    else if (state.kind === 'locked') pill = t('courses.member.module.locked');
+    else if (state.percent > 0) pill = t('courses.member.module.inProgress');
+    else pill = t('courses.member.module.pill', { nn: numeral });
     return {
       id: module.id,
       numeral,
-      pill: allDone
-        ? t('courses.member.module.done')
-        : t('courses.member.module.pill', { nn: numeral }),
+      pill,
       title: module.title,
       meta:
         lock && !allDone
@@ -1010,8 +1101,8 @@ export function lessonLockView(
 
 /* ── Live page (08.5-09, UI-D-435, UI-D-436, D-431..D-434, COURSE-24) ────────────────────────── */
 
-/** The member Lives tab, where the live page's back control and its not-found lead. */
-export const MEMBER_LIVES_HREF = `${MEMBER_AREA_PATH}?aba=lives`;
+/** The member Lives screen (`/area-membros/lives`), where the live page's back control and its not-found lead. */
+export const MEMBER_LIVES_HREF = memberScreenHref('lives');
 
 /**
  * The live page's ONE state zone, every word finished here from the API's `state` (UI-D-435).
@@ -1054,12 +1145,15 @@ export interface LiveRefreshInput {
 export interface LivePageView {
   id: string;
   title: string;
-  /** `/area-membros?aba=lives`. */
+  /** `/area-membros/lives`. */
   backHref: string;
   coverAssetId: string | null;
   coverAlt: string;
-  /** The status as an over-media pill; null in the `ended` state (no "Gravada" over "no recording"). */
-  statusPill: { label: string; icon: 'radio' | null } | null;
+  /**
+   * The status as an over-media chip; null in the `ended` state (no "Gravada" over "no recording").
+   * 2026-10-22: the icon is the chip's glyph (`live` → the red chip and its dot, `replay` → ▶).
+   */
+  statusPill: { label: string; icon: LiveStatusIcon } | null;
   /** The live is locked for this caller: "Exclusiva" follows the status pill. */
   exclusive: boolean;
   /** "{weekday}, {day} de {month}, {time} · {duration} min" in the tenant timezone. */
@@ -1204,9 +1298,7 @@ export function livePageView(
     coverAssetId: live.coverAssetId,
     coverAlt: t('courses.alt.live', { title: live.title }),
     statusPill:
-      zone.state === 'ended'
-        ? null
-        : { label: statusLabel, icon: live.status === 'live' ? 'radio' : null },
+      zone.state === 'ended' ? null : { label: statusLabel, icon: liveStatusIcon(live.status) },
     exclusive: live.locked,
     meta: t('courses.member.live.meta', {
       date: liveLongDate(startsAt, timeZone),
@@ -1230,10 +1322,10 @@ export function livePageView(
 /* ── Início (08.6-08, D-435, D-437, D-440, D-443, UI-D-446..UI-D-449, COURSE-28, 29, 37) ────── */
 
 /**
- * The member catalogue (the Cursos body) now lives at `?aba=cursos`: the bare area is Início, the
- * area's home (D-435, UI-D-446). Every link that means "the catalogue" carries this.
+ * The member catalogue, the Cursos screen (`/area-membros/cursos` since 2026-10-22): the bare area is
+ * Início, the area's home (D-435, UI-D-446). Every link that means "the catalogue" carries this.
  */
-export const MEMBER_CATALOGUE_HREF = `${MEMBER_AREA_PATH}?aba=cursos`;
+export const MEMBER_CATALOGUE_HREF = memberScreenHref('cursos');
 
 export interface StreakBadgeView {
   /** "{n} dia(s)" or "Sem sequência". */
@@ -1386,9 +1478,9 @@ export function homeHeroView(
 
 /* ── Início sections (08.6-09, D-436, D-438, UI-D-450, UI-D-451, COURSE-30, 31) ─────────────── */
 
-/** "Sua trilha"'s "Ver tudo": the Trilhas body (registered by plan 08.6-10), `ver=aluno` in preview. */
+/** "Sua trilha"'s "Ver tudo": the Trilhas screen (`/area-membros/trilhas`), `ver=aluno` in preview. */
 export function memberTracksHref(preview = false): string {
-  return memberHref(MEMBER_AREA_PATH, { aba: 'trilhas' }, preview);
+  return memberScreenHref('trilhas', {}, preview);
 }
 
 export interface ShelfRowView {
@@ -1483,7 +1575,7 @@ export type HomeTrackState = 'done' | 'suggested' | 'started';
 export interface HomeTrackView {
   /** `/cursos/{resumeCourseId}`, `ver=aluno` in preview. */
   href: string;
-  /** "Ver tudo" → `/area-membros?aba=trilhas`. */
+  /** "Ver tudo" → `/area-membros/trilhas`. */
   seeAllHref: string;
   title: string;
   coverAssetId: string | null;
@@ -1560,6 +1652,8 @@ export interface NewLessonView {
   title: string;
   /** The COURSE cover (never a per-lesson still, UI-D-444); null takes the gradient. */
   coverAssetId: string | null;
+  /** The card's overline (2026-10-22): the course the lesson belongs to. */
+  courseTitle: string;
   /** The shipped done thumb when the member already completed it. */
   done: boolean;
   /** The top-left over-media "Nova" pill. */
@@ -1589,6 +1683,7 @@ export function newLessonView(
     href: memberLessonHref(item.courseId, item.lessonId, preview),
     title: item.title,
     coverAssetId: item.coverAssetId,
+    courseTitle: item.courseTitle,
     done: item.done,
     badge: t('courses.member.home.newLessons.badge'),
     duration: seconds > 0 ? formatLessonDuration(seconds) : null,
@@ -1604,7 +1699,7 @@ export function newLessonView(
 
 export interface CategoryTileView {
   id: string;
-  /** `/area-membros?aba=cursos&categoria={id}`, plus `&ver=aluno` in preview. */
+  /** `/area-membros/cursos?categoria={id}`, plus `&ver=aluno` in preview. */
   href: string;
   name: string;
   coverAssetId: string | null;
@@ -1616,7 +1711,7 @@ export interface CategoryTileView {
 
 /**
  * One "Explore por categoria" tile (UI-D-455, COURSE-34): it lands on the 08.5 catalogue already
- * filtered, `/area-membros?aba=cursos&categoria={id}`. The href is built from the SERVER's category id
+ * filtered, `/area-membros/cursos?categoria={id}`. The href is built from the SERVER's category id
  * (`catalogueCategoryHref`, URL-encoded), never from the current URL's `categoria` (T-08.6-26).
  */
 export function categoryTileView(
@@ -1709,10 +1804,12 @@ export interface TrackHeroView {
 
 export interface OtherTrackView {
   id: string;
-  /** `/area-membros?aba=trilhas&trilha={id}`, plus `&ver=aluno` in preview. */
+  /** `/area-membros/trilhas?trilha={id}`, plus `&ver=aluno` in preview. */
   href: string;
   title: string;
   coverAssetId: string | null;
+  /** The cover's glass chip (2026-10-22): "Sua trilha" or "Sugerido", as on the hero; else null. */
+  pill: string | null;
   /** "{n} etapas · {N} aulas · {duration}". */
   meta: string;
   /** Started: the `h-1` bar and "{percent}% do caminho"; null → `notStarted`. */
@@ -1826,9 +1923,14 @@ export function otherTrackView(
   const started = trackStarted(track);
   return {
     id: track.id,
-    href: memberHref(MEMBER_AREA_PATH, { aba: 'trilhas', trilha: track.id }, preview),
+    href: memberScreenHref('trilhas', { trilha: track.id }, preview),
     title: track.title,
     coverAssetId: track.coverAssetId,
+    pill: track.mine
+      ? t('courses.member.tracks.mine')
+      : track.suggested
+        ? t('courses.member.tracks.suggested')
+        : null,
     meta: t('courses.member.tracks.others.meta', {
       n: track.total,
       N: track.lessonCount,
@@ -1903,6 +2005,176 @@ export function trackTabView(
     others: tracks
       .filter((item) => item.id !== track.id)
       .map((item) => otherTrackView(item, t, preview)),
+  };
+}
+
+/* ── 2026-10-26: Trilhas on the academy reference (a list of cards, a page per track) ─────── */
+
+/**
+ * The track a `?trilha=` names, ONLY when it is one value naming a track of the answer; anything
+ * else (absent, unknown, repeated) is null and the screen shows the list. The value is never used
+ * to build a link or a request (T-08.6-20).
+ */
+export function trackFromParam<T extends Pick<LearnTrack, 'id'>>(
+  tracks: readonly T[],
+  trilhaParam: string | string[] | undefined,
+): T | null {
+  if (typeof trilhaParam !== 'string') return null;
+  return tracks.find((track) => track.id === trilhaParam) ?? null;
+}
+
+/** One course of a track's page, as the catalogue's card draws it (numbered "01", "02"…). */
+export interface TrackCourseCardView {
+  id: string;
+  /** ALWAYS `/cursos/{id}`: a locked course lands on the 08.5 buy path (D-421, D-424). */
+  href: string;
+  title: string;
+  coverAssetId: string | null;
+  /** "01": the step's number, a chip on the cover. */
+  numeral: string;
+  /** "{done} de {N} aulas". */
+  line: string;
+  /** The course's length ("1 h 43 min"); null without ready video. */
+  duration: string | null;
+  /** The share chip and the band once a lesson is done. */
+  progress: { percent: number; label: string } | null;
+  /** `bloqueada`: the padlock disc. */
+  locked: boolean;
+  /** `concluida`: the success check. */
+  done: boolean;
+  /** The step to do now (outlined), while the track is not complete. */
+  current: boolean;
+  state: TrackCourseState;
+  /** "Etapa {nn}: {course}, {state}". */
+  ariaLabel: string;
+}
+
+export interface TrackDetailView {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  /** The Trilhas list (`/area-membros/trilhas`), `ver=aluno` in preview. */
+  backHref: string;
+  pill: { kind: TrackPillKind; label: string } | null;
+  /** "Etapa {n} de {total}". */
+  eyebrow: string;
+  chips: {
+    /** "3 cursos". */
+    courses: string;
+    /** "18 aulas no total". */
+    lessons: string;
+    /** "4 h 10 min"; null without ready video. */
+    duration: string | null;
+  };
+  progress: {
+    /** "{done} de {total} cursos concluídos". */
+    title: string;
+    percent: number;
+    barLabel: string;
+    helper: string;
+  };
+  cta: { kind: TrackCtaKind; label: string; href: string };
+  courses: TrackCourseCardView[];
+  /**
+   * 2026-10-27 — the manager's words when the member read carries them (`LearnTrack`'s optional
+   * fields): the subtitle under the title, the audience among the chips and the description ("a
+   * descrição deve aparecer quando o user abrir a trilha"). `null` when absent or blank.
+   */
+  subtitle: string | null;
+  audience: string | null;
+  description: string | null;
+}
+
+/** A manager's optional words, trimmed; `null` when there is nothing to show. */
+function optionalWords(value: string | undefined): string | null {
+  const text = value?.trim() ?? '';
+  return text ? text : null;
+}
+
+/**
+ * A track's own page (2026-10-26, the academy reference's track page): the hero (the cover, the
+ * pill, "Etapa n de N", the chips and the CTA, the same one the old hero card had), the progress
+ * panel ("{done} de {total} cursos concluídos", keyed on `coursesDone`, the lesson-weighted share
+ * on the bar) and the courses in path order as numbered cards, each with the SERVER's state (a
+ * padlock, a check, its share). Every number is the server's.
+ */
+export function trackDetailView(
+  track: LearnTrack,
+  t: CoursesTranslator,
+  preview = false,
+): TrackDetailView {
+  const complete = track.coursesDone >= track.total;
+  const ctaKind: TrackCtaKind = complete ? 'review' : trackStarted(track) ? 'continue' : 'start';
+  const duration = formatCourseDuration(track.durationSeconds);
+  const percent = Math.min(100, Math.max(0, track.percent));
+  return {
+    id: track.id,
+    title: track.title,
+    coverAssetId: track.coverAssetId,
+    subtitle: optionalWords(track.subtitle),
+    audience: optionalWords(track.audience),
+    description: optionalWords(track.description),
+    backHref: memberScreenHref('trilhas', {}, preview),
+    pill: track.mine
+      ? { kind: 'mine', label: t('courses.member.tracks.mine') }
+      : track.suggested
+        ? { kind: 'suggested', label: t('courses.member.tracks.suggested') }
+        : null,
+    eyebrow: t('courses.member.tracks.step', {
+      n: Math.min(track.currentIndex, track.total),
+      total: track.total,
+    }),
+    chips: {
+      courses: t('courses.member.tracks.detail.courses', { n: track.total }),
+      lessons: t('courses.member.tracks.detail.lessons', { N: track.lessonCount }),
+      duration: duration || null,
+    },
+    progress: {
+      title: t('courses.member.tracks.detail.progress', {
+        done: Math.min(track.coursesDone, track.total),
+        total: track.total,
+      }),
+      percent,
+      barLabel: t('courses.member.progress.aria', { percent }),
+      helper: t('courses.member.tracks.detail.helper'),
+    },
+    cta: {
+      kind: ctaKind,
+      label: t(TRACK_CTA_KEY[ctaKind]),
+      href: memberCourseHref(track.resumeCourseId, preview),
+    },
+    courses: track.courses.map((course, index) => {
+      const nn = padNumber(index + 1);
+      const courseDuration = formatCourseDuration(course.durationSeconds);
+      return {
+        id: course.id,
+        href: memberCourseHref(course.id, preview),
+        title: course.title,
+        coverAssetId: course.coverAssetId,
+        numeral: nn,
+        line: t('courses.member.tracks.detail.cardLine', {
+          done: Math.min(course.done, course.lessonCount),
+          N: course.lessonCount,
+        }),
+        duration: courseDuration || null,
+        progress:
+          course.done > 0
+            ? {
+                percent: course.percent,
+                label: t('courses.member.progress.aria', { percent: course.percent }),
+              }
+            : null,
+        locked: course.state === 'bloqueada',
+        done: course.state === 'concluida',
+        current: !complete && index === track.currentIndex - 1,
+        state: course.state,
+        ariaLabel: t('courses.member.tracks.path.stepAria', {
+          nn,
+          course: course.title,
+          state: course.state,
+        }),
+      };
+    }),
   };
 }
 
@@ -2016,7 +2288,7 @@ export function progressTabView(
             body: t('courses.member.myProgress.empty.body'),
             cta: {
               label: t('courses.member.myProgress.empty.cta'),
-              href: memberHref(MEMBER_AREA_PATH, {}, preview),
+              href: memberScreenHref('inicio', {}, preview),
             },
           }
         : null,
@@ -2173,5 +2445,306 @@ export function homeLiveView(
     }),
     meta: null,
     exclusiveLabel: live.locked ? t('courses.member.tags.exclusiveLive') : null,
+  };
+}
+
+/* ── 2026-10-26: the academy reference's course and module pages (the user's "swap completo") ─── */
+
+/** `/cursos/{courseId}/modulos/{moduleId}`, `ver=aluno` in preview: a module's own page. */
+export function memberModuleHref(courseId: string, moduleId: string, preview: boolean): string {
+  return memberHref(
+    `/cursos/${encodeURIComponent(courseId)}/modulos/${encodeURIComponent(moduleId)}`,
+    {},
+    preview,
+  );
+}
+
+export type ModuleCardState =
+  | { kind: 'progress'; percent: number; label: string }
+  | { kind: 'done'; label: string }
+  | { kind: 'locked' }
+  | { kind: 'idle' };
+
+/** One module as the course page's card draws it ("Módulos"). */
+export interface ModuleCardView {
+  id: string;
+  href: string;
+  title: string;
+  /** "01". */
+  numeral: string;
+  /** "Módulo 01". */
+  pill: string;
+  /** "{done}/{N} aulas". */
+  meta: string;
+  state: ModuleCardState;
+  /** "Módulo {nn}: {title}, {state}" (the curriculum band's own name). */
+  ariaLabel: string;
+  done: number;
+  total: number;
+  percent: number;
+}
+
+/**
+ * The course page's module cards, from the same curriculum the bands drew (`curriculumView`: only
+ * the modules with a live lesson, in course order, the server's locks). A module part-way shows its
+ * share; one complete, the success chip; one held by a lock, the padlock; one not begun, nothing.
+ */
+export function moduleCardViews(
+  course: Pick<LearnCourse, 'id' | 'modules'>,
+  preview: boolean,
+  t: CoursesTranslator,
+): ModuleCardView[] {
+  return curriculumView(course, preview, t).modules.map((band) => {
+    const lessons = course.modules.find((module) => module.id === band.id)?.lessons ?? [];
+    const total = lessons.length;
+    const done = lessons.filter((lesson) => lesson.completedAt !== null).length;
+    const percent = coursePercent(done, total);
+    const state: ModuleCardState =
+      band.state.kind === 'done'
+        ? { kind: 'done', label: t('courses.member.module.done') }
+        : band.state.kind === 'locked'
+          ? { kind: 'locked' }
+          : percent > 0
+            ? { kind: 'progress', percent, label: t('courses.member.progress.aria', { percent }) }
+            : { kind: 'idle' };
+    return {
+      id: band.id,
+      href: memberModuleHref(course.id, band.id, preview),
+      title: band.title,
+      numeral: band.numeral,
+      pill: t('courses.member.module.pill', { nn: band.numeral }),
+      meta: t('courses.member.moduleCard.lessons', { done, N: total }),
+      state,
+      ariaLabel: band.ariaLabel,
+      done,
+      total,
+      percent,
+    };
+  });
+}
+
+export type LessonCardState = 'open' | 'progress' | 'done' | 'locked';
+
+/** One lesson as a module page's card draws it ("Aulas"). */
+export interface LessonCardView {
+  id: string;
+  href: string;
+  title: string;
+  /** "Aula 01". */
+  pill: string;
+  state: LessonCardState;
+  /** The resume share of a lesson begun (0 otherwise). */
+  percent: number;
+  /** "{percent}% concluído". */
+  percentLabel: string;
+  /** The length chip ("12:34"); null without ready video. */
+  duration: string | null;
+  /** "12:34 · 26%", "12:34 · Concluída", the lock sentence, "Aula aberta"… */
+  meta: string;
+  ariaLabel: string;
+  current: boolean;
+}
+
+/** The separator between two words of a card's line: a glyph, not copy (never translated). */
+const LINE_SEPARATOR = ' · ';
+
+/**
+ * One lesson card, from the curriculum row's own reading (`memberLessonRowView`: the server's lock
+ * and its words, the completion, the resume share), re-laid for the card's line.
+ */
+export function lessonCardView(
+  lesson: LearnOutlineLesson,
+  t: CoursesTranslator,
+  context: {
+    courseId: string;
+    moduleNumber: number;
+    preview?: boolean;
+    currentLessonId?: string | null;
+  },
+): LessonCardView {
+  const row = memberLessonRowView(lesson, t, context);
+  const duration =
+    lesson.durationSeconds !== null && lesson.durationSeconds > 0
+      ? formatLessonDuration(lesson.durationSeconds)
+      : null;
+  const state: LessonCardState = row.thumbState;
+  let meta: string;
+  if (state === 'done') {
+    meta = [duration, t('courses.member.modulePage.cardMetaDone')]
+      .filter(Boolean)
+      .join(LINE_SEPARATOR);
+  } else if (state === 'progress') {
+    meta = [duration, `${row.resumePercent}%`].filter(Boolean).join(LINE_SEPARATOR);
+  } else {
+    meta = row.meta;
+  }
+  return {
+    id: lesson.id,
+    href: row.href,
+    title: lesson.title,
+    pill: t('courses.member.player.lesson', { nn: padNumber(lesson.number) }),
+    state,
+    percent: row.resumePercent,
+    percentLabel: t('courses.member.progress.aria', { percent: row.resumePercent }),
+    duration,
+    meta,
+    ariaLabel: row.ariaLabel,
+    current: row.current,
+  };
+}
+
+/** A module's page: its course, its own numbers and its lesson cards. */
+export interface ModulePageView {
+  courseId: string;
+  courseTitle: string;
+  courseHref: string;
+  coverAssetId: string | null;
+  moduleId: string;
+  numeral: string;
+  title: string;
+  /** "Módulo 01". */
+  pill: string;
+  locked: boolean;
+  done: number;
+  total: number;
+  percent: number;
+  lessons: LessonCardView[];
+  /** The first lesson of the module that opens and is not complete: "Começar aula" / "Retomar aula". */
+  next: { href: string; label: string } | null;
+}
+
+/**
+ * The module page (2026-10-26), from the member's course read: null for a module the curriculum
+ * does not show (unknown, emptied), which the route turns into its not-found.
+ */
+export function modulePageView(
+  course: LearnCourse,
+  moduleId: string,
+  preview: boolean,
+  t: CoursesTranslator,
+): ModulePageView | null {
+  const module = visibleModules(course).find((candidate) => candidate.id === moduleId);
+  if (!module) return null;
+  const numeral = padNumber(module.number);
+  const lessons = module.lessons.map((lesson) =>
+    lessonCardView(lesson, t, { courseId: course.id, moduleNumber: module.number, preview }),
+  );
+  const total = module.lessons.length;
+  const done = module.lessons.filter((lesson) => lesson.completedAt !== null).length;
+  const nextCard = lessons.find((card) => card.state === 'open' || card.state === 'progress');
+  return {
+    courseId: course.id,
+    courseTitle: course.title,
+    courseHref: memberCourseHref(course.id, preview),
+    coverAssetId: course.coverAssetId,
+    moduleId: module.id,
+    numeral,
+    title: module.title,
+    pill: t('courses.member.module.pill', { nn: numeral }),
+    locked: module.lockReason !== null,
+    done,
+    total,
+    percent: coursePercent(done, total),
+    lessons,
+    next: nextCard
+      ? {
+          href: nextCard.href,
+          label:
+            nextCard.state === 'progress'
+              ? t('courses.member.home.resume.cta')
+              : t('courses.member.home.resume.ctaStart'),
+        }
+      : null,
+  };
+}
+
+/** One lesson of the player's course outline (the reference's side list). */
+export interface OutlineLessonView {
+  id: string;
+  href: string;
+  title: string;
+  state: LessonCardState;
+  /** The resume share of a lesson begun (0 otherwise). */
+  percent: number;
+  current: boolean;
+  ariaLabel: string;
+}
+
+/** One module of the player's course outline: its number, title, "{done}/{N} aulas" and lessons. */
+export interface OutlineModuleView {
+  id: string;
+  /** "1" (the reference's bare number). */
+  number: string;
+  title: string;
+  meta: string;
+  lessons: OutlineLessonView[];
+}
+
+/** The player's course outline: every module, the course's share and the lesson's position. */
+export interface LessonOutlineView {
+  modules: OutlineModuleView[];
+  /** The module holding the open lesson: open on arrival. */
+  currentModuleId: string | null;
+  coursePercent: number;
+  coursePercentLabel: string;
+  /** "{n} de {total} aulas": the open lesson's place in the whole course. */
+  position: string | null;
+  /** The open lesson's module, for the breadcrumb. */
+  moduleHref: string | null;
+}
+
+/**
+ * The player's side list (2026-10-26, the academy reference's player): the whole course from the
+ * member's course read, the same rows the curriculum reads (`curriculumView`: the server's locks,
+ * completions and resume shares), the open lesson marked.
+ */
+export function lessonOutlineView(
+  course: Pick<LearnCourse, 'id' | 'modules' | 'progress'>,
+  lessonId: string,
+  preview: boolean,
+  t: CoursesTranslator,
+): LessonOutlineView {
+  const curriculum = curriculumView(course, preview, t, { currentLessonId: lessonId });
+  const found = { moduleId: null as string | null, position: null as number | null };
+  let index = 0;
+  const modules: OutlineModuleView[] = [];
+  for (const band of curriculum.modules) {
+    const lessons: OutlineLessonView[] = [];
+    for (const row of band.lessons) {
+      index += 1;
+      if (row.current) {
+        found.moduleId = band.id;
+        found.position = index;
+      }
+      lessons.push({
+        id: row.id,
+        href: row.href,
+        title: row.title,
+        state: row.thumbState,
+        percent: row.resumePercent,
+        current: row.current,
+        ariaLabel: row.ariaLabel,
+      });
+    }
+    const done = lessons.filter((lesson) => lesson.state === 'done').length;
+    modules.push({
+      id: band.id,
+      number: String(Number.parseInt(band.numeral, 10)),
+      title: band.title,
+      meta: t('courses.member.player.moduleLessons', { done, N: lessons.length }),
+      lessons,
+    });
+  }
+  const total = index;
+  const currentModuleId = found.moduleId;
+  const position = found.position;
+  return {
+    modules,
+    currentModuleId,
+    coursePercent: course.progress.percent,
+    coursePercentLabel: t('courses.member.progress.aria', { percent: course.progress.percent }),
+    position:
+      position === null ? null : t('courses.member.player.position', { n: position, total }),
+    moduleHref: currentModuleId ? memberModuleHref(course.id, currentModuleId, preview) : null,
   };
 }

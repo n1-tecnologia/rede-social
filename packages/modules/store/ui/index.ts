@@ -19,6 +19,7 @@ export {
   ProductChoiceSheet,
   type ProductChoiceSheetProps,
 } from './ProductChoiceSheet';
+export { ProductRow, type ProductRowProps, ProductRowSkeleton } from './ProductRow';
 export {
   PurchaseDialog,
   type PurchaseDialogCommunity,

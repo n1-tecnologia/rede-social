@@ -24,6 +24,10 @@ import { requireBootstrap } from '@/lib/bootstrap';
  * `requireBootstrap` is React-cached, so the page below reads the same bootstrap with no second
  * call — and every `/cursos/*` page reads it, which is what keeps the segment dynamic
  * (`scripts/check-static-routes.sh`).
+ *
+ * 2026-10-22 (one page per screen): the hub's Trilhas and Lives tabs are pages of this segment too
+ * (`trilhas/page.tsx`, `lives/page.tsx`); like `/cursos` they split the roles themselves, sending a
+ * member (and a manager's `?ver=aluno`) to the member area's twin.
  */
 export default async function CoursesLayout({ children }: { children: ReactNode }) {
   const bootstrap = await requireBootstrap();

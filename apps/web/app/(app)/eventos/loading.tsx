@@ -8,7 +8,7 @@ import { EventsSkeleton } from './EventsSections';
 export default async function EventsLoading() {
   const t = await getTranslations('events');
   return (
-    <div className="mx-auto flex w-full max-w-[680px] flex-col">
+    <div data-shell-full className="flex w-full flex-col">
       <h1 className="sr-only">{t('list.title')}</h1>
       <EventsSkeleton
         headers={[

@@ -80,10 +80,14 @@ afterEach(cleanup);
 
 describe('CategoryManager (UI-D-400)', () => {
   it('1. renders the header, the rows as buttons with the ICU count at 0 / 1 / many, and the chevron', () => {
-    render(<CategoryManager initialItems={ITEMS} />);
+    render(<CategoryManager tenantName="Escola Demo" initialItems={ITEMS} />);
 
     expect(screen.getByRole('heading', { name: 'Categorias' })).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Voltar' }).getAttribute('href')).toBe('/cursos');
+    // 2026-10-23: the management lists' header, the way back to Gerenciar above the h1.
+    const back = screen.getByRole('link', { name: 'Voltar para Gerenciar' });
+    expect(back.getAttribute('href')).toBe('/cursos/gerenciar');
+    expect(back.textContent).toBe('Gerenciar');
+    expect(screen.getByText('Os temas do catálogo de Escola Demo.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Nova categoria' })).toBeTruthy();
 
     const list = screen.getByRole('list', { name: 'Categorias' });
@@ -103,7 +107,7 @@ describe('CategoryManager (UI-D-400)', () => {
   });
 
   it('2. with no category the EmptyState offers Criar categoria, which opens the new sheet focused on the name', async () => {
-    render(<CategoryManager initialItems={[]} />);
+    render(<CategoryManager tenantName="Escola Demo" initialItems={[]} />);
     const empty = screen.getByTestId('categories-empty');
     expect(within(empty).getByRole('heading', { name: 'Nenhuma categoria' })).toBeTruthy();
     expect(empty.textContent).toContain('Categorias organizam o catálogo. Elas são opcionais.');
@@ -122,7 +126,7 @@ describe('CategoryManager (UI-D-400)', () => {
   });
 
   it('3. a row opens the edit sheet filled; the remove row is DISABLED with the in-use helper when courseCount is 2', () => {
-    render(<CategoryManager initialItems={ITEMS} />);
+    render(<CategoryManager tenantName="Escola Demo" initialItems={ITEMS} />);
     fireEvent.click(screen.getByRole('button', { name: /^Lábios/ }));
 
     const sheet = screen.getByRole('dialog', { name: 'Editar categoria' });
@@ -139,7 +143,7 @@ describe('CategoryManager (UI-D-400)', () => {
 
   it('4. an empty category: remove is enabled, the danger dialog confirms, the row leaves and the toast fires; a stale count toasts the in-use sentence', async () => {
     remove.mockResolvedValueOnce({ ok: false, code: 'category_in_use', courseCount: 3 });
-    render(<CategoryManager initialItems={ITEMS} />);
+    render(<CategoryManager tenantName="Escola Demo" initialItems={ITEMS} />);
     fireEvent.click(screen.getByRole('button', { name: /^Olhar/ }));
 
     const removeRow = screen.getByRole('button', { name: 'Remover categoria' });
@@ -176,7 +180,12 @@ describe('CategoryManager (UI-D-400)', () => {
 
   it('5. removing the LAST category shows the empty state and moves focus to Nova categoria', async () => {
     remove.mockResolvedValue({ ok: true, category: null });
-    render(<CategoryManager initialItems={[ITEMS[2] as (typeof ITEMS)[number]]} />);
+    render(
+      <CategoryManager
+        tenantName="Escola Demo"
+        initialItems={[ITEMS[2] as (typeof ITEMS)[number]]}
+      />,
+    );
     fireEvent.click(screen.getByRole('button', { name: /^Olhar/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Remover categoria' }));
     const dialog = screen.getByRole('dialog', { name: 'Remover categoria?' });
@@ -191,7 +200,12 @@ describe('CategoryManager (UI-D-400)', () => {
 
   it('6. removing a middle row moves focus to the next row', async () => {
     remove.mockResolvedValue({ ok: true, category: null });
-    render(<CategoryManager initialItems={ITEMS.map((item) => ({ ...item, courseCount: 0 }))} />);
+    render(
+      <CategoryManager
+        tenantName="Escola Demo"
+        initialItems={ITEMS.map((item) => ({ ...item, courseCount: 0 }))}
+      />,
+    );
     fireEvent.click(screen.getByRole('button', { name: /^Lábios/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Remover categoria' }));
     const dialog = screen.getByRole('dialog', { name: 'Remover categoria?' });
@@ -207,7 +221,7 @@ describe('CategoryManager (UI-D-400)', () => {
   });
 
   it('7. creating: an empty name shows the field error; category_exists shows the name error; a success inserts the row in name order and toasts', async () => {
-    render(<CategoryManager initialItems={ITEMS} />);
+    render(<CategoryManager tenantName="Escola Demo" initialItems={ITEMS} />);
     fireEvent.click(screen.getByRole('button', { name: 'Nova categoria' }));
     screen.getByRole('dialog', { name: 'Nova categoria' });
 
@@ -256,7 +270,7 @@ describe('CategoryManager (UI-D-400)', () => {
       ok: true,
       category: { id: C3, name: 'Olhos', coverAssetId: null, courseCount: 0 },
     });
-    render(<CategoryManager initialItems={ITEMS} />);
+    render(<CategoryManager tenantName="Escola Demo" initialItems={ITEMS} />);
     fireEvent.click(screen.getByRole('button', { name: /^Olhar/ }));
     fireEvent.change(nameInput(), { target: { value: 'Olhos' } });
     expect(sheetSubmit().disabled).toBe(false);
@@ -270,7 +284,7 @@ describe('CategoryManager (UI-D-400)', () => {
 
   it('9. a dirty close asks Descartar categoria?; a save failure toasts and keeps the sheet', async () => {
     create.mockResolvedValueOnce({ ok: false, code: 'generic' });
-    render(<CategoryManager initialItems={ITEMS} />);
+    render(<CategoryManager tenantName="Escola Demo" initialItems={ITEMS} />);
     fireEvent.click(screen.getByRole('button', { name: 'Nova categoria' }));
     fireEvent.change(nameInput(), { target: { value: 'Pele' } });
 

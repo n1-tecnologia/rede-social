@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ReelCaption } from '../ui/ReelCaption';
 import { ReelPlaybackError } from '../ui/ReelPlaybackError';
 import { ReelRail } from '../ui/ReelRail';
-import { ReelsStage } from '../ui/ReelsStage';
+import { ReelsFrame, ReelsStage } from '../ui/ReelsStage';
 
 /**
  * The two props-only pieces every Reels state renders with (UI-D-82, UI-D-93b, UI-D-97, UI-D-98).
@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe('ReelsStage (UI-D-82, UI-D-97, UI-D-98)', () => {
-  it('is a labelled region landmark, dark-scoped, fixed full-screen black under the BottomNav', () => {
+  it('is a labelled region landmark, fixed full-screen black under the BottomNav; from md the theme ground (2026-10-23)', () => {
     render(
       <ReelsStage label="stage-label">
         <p>child</p>
@@ -26,12 +26,45 @@ describe('ReelsStage (UI-D-82, UI-D-97, UI-D-98)', () => {
     );
     const region = screen.getByRole('region', { name: 'stage-label' });
     expect(region.tagName).toBe('SECTION');
-    expect(region).toHaveAttribute('data-theme', 'dark');
-    for (const cls of ['fixed', 'inset-0', 'z-40', 'overflow-hidden', 'bg-black', 'md:left-60']) {
+    // Right of the rail: its 72px glyphs (2026-10-26, Instagram's collapsed rail).
+    for (const cls of [
+      'fixed',
+      'inset-0',
+      'z-40',
+      'overflow-hidden',
+      'bg-black',
+      'md:left-[72px]',
+    ]) {
       expect(region.className).toContain(cls);
     }
+    // The YouTube Shorts layout: the member's theme around the player on the desktop. The dark
+    // scope is the player box now (`ReelsFrame`, the pager's clip), never the whole stage.
+    expect(region.className).toContain('md:bg-bg');
+    expect(region.className).toContain('md:text-text');
+    expect(region).not.toHaveAttribute('data-theme');
     expect(region.style.touchAction).toBe('none');
     expect(screen.getByText('child')).toBeInTheDocument();
+  });
+
+  it('2026-10-23: ReelsFrame is the dark player box: the whole stage on the phone, the rounded 9:16 box from md', () => {
+    render(
+      <ReelsStage label="stage-label">
+        <ReelsFrame>
+          <p>state</p>
+        </ReelsFrame>
+      </ReelsStage>,
+    );
+    const frame = document.querySelector('[data-reels-frame]') as HTMLElement;
+    expect(frame).toHaveAttribute('data-theme', 'dark');
+    const classes = frame.className.split(/\s+/);
+    for (const cls of ['relative', 'h-full', 'w-full', 'bg-black', 'text-white']) {
+      expect(classes).toContain(cls);
+    }
+    for (const cls of ['md:aspect-[9/16]', 'md:h-auto', 'md:rounded-xl', 'md:overflow-hidden']) {
+      expect(classes).toContain(cls);
+    }
+    expect(frame.parentElement?.className).toContain('md:pt-2');
+    expect(frame).toContainElement(screen.getByText('state'));
   });
 
   it('is the tab variant by default, and says so', () => {
@@ -42,7 +75,7 @@ describe('ReelsStage (UI-D-82, UI-D-97, UI-D-98)', () => {
     );
   });
 
-  it('the overlay variant covers the desktop rail too: md:left-0, never md:left-60', () => {
+  it("the overlay variant covers the desktop rail too: md:left-0, never the rail's offset", () => {
     render(
       <ReelsStage label="stage-label" variant="overlay">
         child
@@ -50,11 +83,11 @@ describe('ReelsStage (UI-D-82, UI-D-97, UI-D-98)', () => {
     );
     const region = screen.getByRole('region', { name: 'stage-label' });
     expect(region).toHaveAttribute('data-reels-stage', 'overlay');
-    expect(region).toHaveAttribute('data-theme', 'dark');
+    expect(region).not.toHaveAttribute('data-theme');
     for (const cls of ['fixed', 'inset-0', 'z-40', 'overflow-hidden', 'bg-black', 'md:left-0']) {
       expect(region.className).toContain(cls);
     }
-    expect(region.className).not.toContain('md:left-60');
+    expect(region.className).not.toContain('md:left-[72px]');
     expect(region.style.touchAction).toBe('none');
   });
 });

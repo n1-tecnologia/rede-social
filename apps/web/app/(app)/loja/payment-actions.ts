@@ -1,10 +1,10 @@
 'use server';
 
 import { storeMappingBodySchema } from '@rede-social/module-payments/contracts';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { deleteStoreMapping, putStoreMapping } from '@/lib/payments';
+import { revalidateStoreScreens } from '@/lib/store-revalidate';
 
 /**
  * The product form's SECOND write (09.1-17, PAY-20, D-502, A-P12, T-09.1-80): the gateway product that
@@ -65,8 +65,8 @@ export async function savePaymentMappingAction(
   }
 
   if (outcome.ok) {
-    revalidatePath('/loja');
-    revalidatePath(`/loja/${target.data}`);
+    // 2026-10-24: every store screen (Gerenciar's "Sem link de pagamento" follows the link).
+    revalidateStoreScreens(target.data);
     return { ok: true };
   }
   if (outcome.reason === 'redirect') redirect(outcome.path);

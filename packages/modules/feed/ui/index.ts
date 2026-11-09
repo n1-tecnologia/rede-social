@@ -17,6 +17,7 @@ export {
   type CommentView,
   removalOf,
 } from './CommentItem';
+export { CommentPanel, type CommentPanelProps } from './CommentPanel';
 export { CommentSheet, type CommentSheetProps } from './CommentSheet';
 export {
   type CommentAccessRefusal,

@@ -1,15 +1,20 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
+import { LiveStatusChip, MEDIA_CHIP_LG, MEMBER_CARD } from '@rede-social/module-courses/ui';
 import { ExclusiveBadge, type ProductChoiceItem } from '@rede-social/module-store/ui';
-import { buttonClasses, Card, chipBase, cn, StatusPill } from '@rede-social/ui';
-import { ChevronRight, Lock, Radio } from 'lucide-react';
+import { buttonClasses, Card, cn, SkinTileFx } from '@rede-social/ui';
+import { ChevronRight, Lock } from 'lucide-react';
 import type { HomeLiveView } from '@/lib/courses-member-view';
 import { HomeLiveChoice } from './HomeLiveChoice';
-import { CoverGradient, HomeSectionHeader } from './HomeShelf';
+import { CoverGradient, MemberSectionHeader } from './MemberSection';
 import { ReminderToggle } from './ReminderToggle';
 
 const FOCUS =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+/** The cover's width: half the wide row beside the track, or the whole row alone. */
+const HALF_SIZES = '(min-width: 1024px) 620px, (min-width: 768px) calc(100vw - 320px), 100vw';
+const WIDE_SIZES = '(min-width: 1280px) 1232px, (min-width: 768px) calc(100vw - 320px), 100vw';
 
 /** The `outline` `fullWidth` links of the locked body (A-UI-8): the hero keeps Início's one fill. */
 const OUTLINE_LINK = buttonClasses({ variant: 'outline', size: 'md', fullWidth: true });
@@ -34,126 +39,176 @@ export type HomeLiveBody =
  * Início's live (08.6-11, D-444, D-446, UI-D-452, COURSE-32): the live the SERVER chose, as one of
  * two slots the host places by `view.kind`.
  *
- * **(a) Live now** (slot 3, right under the hero): no section title — the pill says it. One link to
- * the live page in a `Card mx-4`: the neutral `StatusPill` with `Radio` 12 "Ao vivo agora", the title
- * (`line-clamp-1`) and "Começou às {time} · {duration} min" (or `Lock` 12 + "Live exclusiva ·
- * Começou às {time}"), and the trailing `ChevronRight` 18. No red, no pulse, **no join link** (only
- * the live page hands the room out inside its window, T-08.6-18) and **no reminder** (a started live
- * refuses it, COURSE-40).
+ * **2026-10-22 (the courses area redesign on the social-igoralves prototype).**
  *
- * **(b) Próxima live** (slot 6): `SectionTitle` "Próxima live", then a `Card mx-4 p-0`: the 16:10
- * cover as ONE link to the live page (gradient without a cover or when it fails; the
- * `from-black/85 via-black/30` veil), the relative-day pill (decided in the RSC from `serverNow`,
- * UI-D-288) followed by "Exclusiva" when locked — the stack wraps inside the cover —, then the
- * when-line 12/700 uppercase and the title 16/700 white `line-clamp-2`. The body is a SIBLING
- * `<div class="p-4">`, never inside the anchor.
+ * **(a) Live now** (right under the hero): no section title — the chip says it. One link to the live
+ * page in an outlined card: the prototype's red "Ao vivo" chip with the breathing dot
+ * (`LiveStatusChip`, CSS motion, still under "reduzir movimento") over the title and "Começou às
+ * {time} · {duration} min" (or `Lock` + "Live exclusiva · Começou às {time}"), so the title keeps the
+ * row's width at 320px, and the trailing chevron. **No
+ * join link** (only the live page hands the room out inside its window, T-08.6-18) and **no reminder**
+ * (a started live refuses it, COURSE-40).
+ *
+ * **(b) Próxima live**: the 17/800 "Próxima live", then the prototype's spotlight: the 16:10 cover as
+ * ONE link to the live page (`rounded-t-2xl`, the gradient without a cover or when it fails, the
+ * veil from the foot), the relative-day glass chip (decided in the RSC from `serverNow`, UI-D-288)
+ * followed by "Exclusiva" when locked, then the when-line 11px uppercase and the title 18/800 white.
+ * The body is a SIBLING `<div class="p-4">` in the same outlined card, never inside the anchor.
  *
  * Every word arrives finished (`homeLiveView`, the host's body) and renders as React text. Nothing
  * here reads a clock or names a room link.
+ *
+ * 2026-10-23 (the wide desktop): Início sets "Próxima live" beside "Sua trilha" from `lg`, half the
+ * row each; alone (`panoramic`) its cover flattens across the row (3:1 since 2026-10-26, the
+ * rethought Início's banner, where it is always alone).
+ *
+ * 2026-10-23 (the product owner's call: "ativar lembrete deve estar dentro do card"): the reminder
+ * body sits INSIDE the card, over the foot of the cover — the glass toggle and its helper in one row
+ * (`ReminderToggle` `appearance="onArt"`), the when-line and the title lifted above it. It is still
+ * the cover link's SIBLING (absolutely placed in the card), never inside the anchor. The other bodies
+ * (buy, not for sale, see the live) stay under the cover as before.
  */
 export function HomeLive({
   view,
   sectionTitle,
   body,
+  panoramic = false,
 }: {
   view: HomeLiveView;
   /** "Próxima live" — the `next` card's section title. */
   sectionTitle: string;
   /** The `next` card's body; ignored by the live-now row. */
   body: HomeLiveBody | null;
+  /** The next live alone across the wide row (no track beside it): a flatter cover from `lg`. */
+  panoramic?: boolean;
 }) {
   if (view.kind === 'now') {
     return (
-      <Card className="mx-4 p-0">
-        <a
-          href={view.href}
-          data-testid="courses-home-live-now"
-          className={`flex min-h-14 items-center gap-3 p-3 transition-opacity active:opacity-80 ${FOCUS} focus-visible:ring-inset focus-visible:ring-offset-0`}
-        >
-          <StatusPill tone="neutral" className="shrink-0">
-            <Radio aria-hidden size={12} className="shrink-0" />
-            {view.pill}
-          </StatusPill>
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span
-              data-testid="courses-home-live-now-title"
-              className="line-clamp-1 break-words text-sm font-bold text-text"
-            >
-              {view.title}
+      <div className="px-4">
+        <Card className={cn(MEMBER_CARD, 'border-danger/30 p-0')}>
+          <a
+            href={view.href}
+            data-testid="courses-home-live-now"
+            className={`ms-card ms-static group flex min-h-16 items-center gap-3 rounded-[inherit] p-3 transition-colors hover:bg-bg-hover ${FOCUS} focus-visible:ring-inset focus-visible:ring-offset-0`}
+          >
+            <span className="flex min-w-0 flex-1 flex-col items-start">
+              <LiveStatusChip label={view.pill} icon="live" />
+              <span
+                data-testid="courses-home-live-now-title"
+                className="mt-1.5 line-clamp-1 break-words text-sm font-bold text-text"
+              >
+                {view.title}
+              </span>
+              <span
+                data-testid="courses-home-live-now-meta"
+                className="mt-0.5 flex items-center gap-1 text-xs font-normal text-text-tertiary tabular-nums"
+              >
+                {view.locked ? <Lock aria-hidden size={12} className="shrink-0" /> : null}
+                <span className="min-w-0 truncate">{view.meta}</span>
+              </span>
             </span>
-            <span
-              data-testid="courses-home-live-now-meta"
-              className="mt-0.5 flex items-center gap-1 text-xs font-normal text-text-tertiary tabular-nums"
-            >
-              {view.locked ? <Lock aria-hidden size={12} className="shrink-0" /> : null}
-              <span className="min-w-0 truncate">{view.meta}</span>
-            </span>
-          </span>
-          <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
-        </a>
-      </Card>
+            <ChevronRight
+              aria-hidden
+              size={18}
+              className="shrink-0 text-text-tertiary transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none"
+            />
+          </a>
+        </Card>
+      </div>
     );
   }
 
+  // The reminder rides over the cover; every other body stays under it.
+  const onArt = body?.kind === 'reminder';
+
   return (
     <section data-testid="courses-home-next-live" data-live-id={view.id} className="flex flex-col">
-      <HomeSectionHeader id="courses-home-next-live-title" title={sectionTitle} />
-      <Card className="mx-4 p-0">
-        <a
-          href={view.href}
-          data-testid="courses-home-next-live-cover"
-          className={`relative block aspect-[16/10] w-full bg-bg-tertiary transition-opacity active:opacity-80 ${FOCUS} focus-visible:ring-inset focus-visible:ring-offset-0`}
-        >
-          {view.coverAssetId ? (
-            <MediaImage
-              assetId={view.coverAssetId}
-              widths={PURPOSE_WIDTHS.cover}
-              alt=""
-              sizes="(min-width: 680px) 648px, 100vw"
-              ratio=""
-              className="absolute inset-0 h-full w-full"
-              fallback={<CoverGradient />}
-            />
-          ) : (
-            <CoverGradient />
+      <MemberSectionHeader id="courses-home-next-live-title" title={sectionTitle} />
+      {/* Beside the track (2026-10-24) the card fills the row's height and its cover takes the
+          track's 16:9, so both are one size. */}
+      <div className={cn('px-4', !panoramic && 'lg:flex lg:flex-1 lg:flex-col')}>
+        <Card
+          className={cn(
+            MEMBER_CARD,
+            // The member skin's glass (2026-10-26): a static panel, since the buy sheet renders
+            // inside it; only the cover link lights up, and nothing here moves or isolates.
+            'ms-panel relative overflow-hidden rounded-2xl p-0',
+            !panoramic && 'lg:flex lg:flex-1 lg:flex-col',
           )}
-          <span
-            aria-hidden
-            className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent"
-          />
-          <span
-            data-testid="courses-home-next-live-pills"
-            className="absolute top-3 right-3 left-3 flex flex-wrap items-start gap-1"
+        >
+          <a
+            href={view.href}
+            data-testid="courses-home-next-live-cover"
+            className={cn(
+              'ms-card ms-static relative block aspect-[16/10] w-full bg-bg-tertiary transition-opacity active:opacity-90',
+              FOCUS,
+              'focus-visible:ring-inset focus-visible:ring-offset-0',
+              panoramic ? 'lg:aspect-[3/1] 2xl:aspect-[4/1]' : 'lg:aspect-video lg:flex-1',
+            )}
           >
+            {view.coverAssetId ? (
+              <MediaImage
+                assetId={view.coverAssetId}
+                widths={PURPOSE_WIDTHS.cover}
+                alt=""
+                sizes={panoramic ? WIDE_SIZES : HALF_SIZES}
+                ratio=""
+                className="ms-zoom absolute inset-0 h-full w-full"
+                fallback={<CoverGradient />}
+              />
+            ) : (
+              <CoverGradient />
+            )}
+            <SkinTileFx />
             <span
-              data-testid="courses-home-next-live-day"
-              className={cn(chipBase, 'bg-black/60 text-white tabular-nums backdrop-blur-sm')}
-            >
-              {view.pill}
-            </span>
-            {view.exclusiveLabel ? <ExclusiveBadge label={view.exclusiveLabel} /> : null}
-          </span>
-          <span className="absolute right-4 bottom-3 left-4 flex flex-col">
+              aria-hidden
+              className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent"
+            />
             <span
-              data-testid="courses-home-next-live-when"
-              className="text-xs font-bold uppercase tracking-wider text-white/80 tabular-nums [overflow-wrap:anywhere]"
+              data-testid="courses-home-next-live-pills"
+              className="absolute top-3 right-3 left-3 flex flex-wrap items-start gap-1.5"
             >
-              {view.whenLine}
+              <span
+                data-testid="courses-home-next-live-day"
+                className={cn(MEDIA_CHIP_LG, 'tabular-nums')}
+              >
+                {view.pill}
+              </span>
+              {view.exclusiveLabel ? (
+                <ExclusiveBadge label={view.exclusiveLabel} size="compact" />
+              ) : null}
             </span>
             <span
-              data-testid="courses-home-next-live-title"
-              className="mt-1 line-clamp-2 text-base font-bold leading-tight text-white [overflow-wrap:anywhere]"
+              className={cn(
+                'absolute right-4 left-4 flex flex-col',
+                onArt ? 'bottom-[4.25rem]' : 'bottom-3.5',
+              )}
             >
-              {view.title}
+              <span
+                data-testid="courses-home-next-live-when"
+                className="text-[11px] font-bold uppercase tracking-wider text-white/80 tabular-nums [overflow-wrap:anywhere]"
+              >
+                {view.whenLine}
+              </span>
+              <span
+                data-testid="courses-home-next-live-title"
+                className="mt-0.5 line-clamp-2 text-lg font-extrabold leading-snug text-white [overflow-wrap:anywhere]"
+              >
+                {view.title}
+              </span>
             </span>
-          </span>
-        </a>
-        {body ? (
-          <div data-testid="courses-home-next-live-body" data-body={body.kind} className="p-4">
-            <NextLiveBody liveId={view.id} liveTitle={view.title} body={body} />
-          </div>
-        ) : null}
-      </Card>
+          </a>
+          {body ? (
+            <div
+              data-testid="courses-home-next-live-body"
+              data-body={body.kind}
+              className={onArt ? 'absolute inset-x-0 bottom-0 px-4 pb-3.5' : 'p-4'}
+            >
+              <NextLiveBody liveId={view.id} liveTitle={view.title} body={body} onArt={onArt} />
+            </div>
+          ) : null}
+        </Card>
+      </div>
     </section>
   );
 }
@@ -162,10 +217,13 @@ function NextLiveBody({
   liveId,
   liveTitle,
   body,
+  onArt = false,
 }: {
   liveId: string;
   liveTitle: string;
   body: HomeLiveBody;
+  /** The reminder over the cover (`ReminderToggle` `onArt`). */
+  onArt?: boolean;
 }) {
   switch (body.kind) {
     case 'reminder':
@@ -177,6 +235,7 @@ function NextLiveBody({
           liveTitle={liveTitle}
           initialOn={body.initialOn}
           preview={body.preview}
+          appearance={onArt ? 'onArt' : 'default'}
         />
       );
     case 'buyOne':

@@ -10,7 +10,6 @@ import {
   STORE_ISSUE_SET,
   type StoreIssue,
 } from '@rede-social/module-store/contracts';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import type { ZodError } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
@@ -22,6 +21,7 @@ import {
   setProductStatus,
   updateProduct,
 } from '@/lib/store';
+import { revalidateStoreScreens } from '@/lib/store-revalidate';
 
 /**
  * The product writes: the product page's (and the product form's) archive or reactivate (`PUT …/status`, idempotent; it
@@ -75,8 +75,7 @@ export async function setProductStatusAction(
 
   if (refusal) redirect(refusal);
   if (result.ok) {
-    revalidatePath('/loja');
-    revalidatePath(`/loja/${productId}`);
+    revalidateStoreScreens(productId);
   }
   return result;
 }
@@ -154,8 +153,7 @@ export async function createProductAction(input: unknown): Promise<ProductWriteR
 
   if (refusal) redirect(refusal);
   if (result.ok) {
-    revalidatePath('/loja');
-    revalidatePath(`/loja/${result.productId}`);
+    revalidateStoreScreens(result.productId);
   }
   return result;
 }
@@ -184,8 +182,7 @@ export async function updateProductAction(
 
   if (refusal) redirect(refusal);
   if (result.ok) {
-    revalidatePath('/loja');
-    revalidatePath(`/loja/${productId}`);
+    revalidateStoreScreens(productId);
   }
   return result;
 }

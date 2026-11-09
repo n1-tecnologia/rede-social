@@ -1,78 +1,35 @@
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
-import { RowSkeleton } from '@rede-social/module-courses/ui';
-import { Skeleton } from '@rede-social/ui';
 import { notFound, redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
-import { Suspense } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { memberAreaRedirectHref } from '@/lib/courses-member-view';
-import { CoursesTab } from './CoursesTab';
-import { HubTabs } from './HubTabs';
-import { LivesTab } from './LivesTab';
-import { TracksTab } from './TracksTab';
-import { COURSE_HUB_TABS, hubTabFromParam, hubTabHref } from './tabs';
-
-const CHIPS = [56, 88, 92, 92];
-const ROWS = [0, 1, 2, 3, 4, 5];
-
-/**
- * The hub tab body's skeleton (UI-D-401), moved here from `loading.tsx` when the segment's loading
- * became role-neutral (08.5-06, UI-D-424): the title row with the create control's shape, the chips,
- * the "Categorias" row and 6 row skeletons, at the tab's final geometry. No words.
- */
-function HubBodySkeleton() {
-  return (
-    <div aria-busy className="flex flex-col">
-      <div className="flex items-center justify-between gap-3 px-4 pb-3">
-        <Skeleton className="h-5 w-20" />
-        <Skeleton variant="rect" className="h-11 w-28 shrink-0 rounded-xl" />
-      </div>
-      <div className="flex gap-2 overflow-x-auto px-4 pb-3 scrollbar-none">
-        {CHIPS.map((width, index) => (
-          <Skeleton
-            // biome-ignore lint/suspicious/noArrayIndexKey: a fixed, static placeholder row.
-            key={index}
-            variant="rect"
-            width={width}
-            className="h-[30px] shrink-0 rounded-full"
-          />
-        ))}
-      </div>
-      <div className="flex min-h-11 items-center gap-3 px-4 py-2">
-        <Skeleton variant="rect" className="h-5 w-5 shrink-0 rounded-md" />
-        <Skeleton variant="text" width="30%" />
-      </div>
-      <div className="flex flex-col divide-y divide-divider">
-        {ROWS.map((index) => (
-          <RowSkeleton key={index} />
-        ))}
-      </div>
-    </div>
-  );
-}
+import {
+  adminScreenFromAba,
+  adminScreenHref,
+  memberScreenFromAba,
+  memberScreenHref,
+  PREVIEW_VALUE,
+} from '@/lib/member-area';
+import { AdminListScreen } from './AdminListScreen';
 
 /**
- * `/cursos` (08.3-06, D-402, UI-D-390, COURSE-14): the school's hub, reached from the Configurações
- * "Cursos" row (UI-D-389). A `PageHeader`-less destination in the member shell (TopBar on, BottomNav
- * on): the h1 "Cursos" 24/700, the subtitle "Cursos, trilhas e lives de {tenant}." 14/400, the area
- * sub-nav as the shipped `Tabs` with `href` items from `tabs.ts` (`?aba=`, read HERE on the server
- * so a tab, a refresh, back and a shared link land on the same list; an unknown value reads as
- * `cursos`), then the active tab's body — each tab owns its create control, chips, list, empty,
- * loading and error states.
+ * `/cursos` (08.3-06, D-402, UI-D-390, COURSE-14): the school's authoring lists. Desktop: the 680px
+ * column (D-39, UI-D-411).
  *
- * The registry holds `cursos`, (08.3-10) `trilhas` and (08.3-11) `lives`; each tab's body is its own
- * component below and the frame never changed for them. Desktop: the 680px column (D-39,
- * UI-D-411); no rail entry (D-401).
+ * **2026-10-22 — one page per list (the courses redesign on the social-igoralves prototype).** The
+ * hub's three tabs (`?aba=`) became three pages: this one is Cursos; `cursos/trilhas/page.tsx` and
+ * `cursos/lives/page.tsx` are the others. Each renders `AdminListScreen` (the screen's header, its
+ * create control, chips, list, empty, loading and error states) with the list's `?filtro=`. The OLD
+ * `?aba=trilhas|lives` redirects to that list's page, keeping a single-valued `filtro`; anything
+ * else reads as Cursos (EP-01). Since 2026-10-23 the lists are reached from the cards of "Gerenciar"
+ * (`/cursos/gerenciar`, the "Membros" menu's last row and the Configurações "Cursos" row), and each
+ * leads back to it ("‹ Gerenciar").
  *
- * **08.5-06 — the role split (D-419, D-420, UI-D-424, T-08.5-27), re-homed 2026-10-19.** `layout.tsx`
- * keeps only the module check; the split happens HERE, on the server: a caller holding
- * `courses.manage` gets the hub above unless the URL says `?ver=aluno`; everyone else — `member`,
- * `support_tenant`, and the manager previewing — is redirected to the member area at
- * `/area-membros` (`app/(app)/area-membros/page.tsx`, the `MemberCatalogue`), keeping `aba`,
- * `categoria` and `trilha`; the preview keeps `ver=aluno`. A member's `?ver=` is ignored (it can
- * only ever choose the member view), and the API still authorises every admin read the hub makes.
- * Each hub tab body streams inside its own `Suspense` with the hub skeleton; the segment's
- * `loading.tsx` draws only the role-neutral frame.
+ * **The role split (D-419, D-420, UI-D-424, T-08.5-27), on the server.** `layout.tsx` keeps only the
+ * module check. A caller holding `courses.manage` gets the list unless the URL says `?ver=aluno`;
+ * everyone else (`member`, `support_tenant`, and the manager previewing) is redirected to the member
+ * area: the screen the OLD `?aba=` named (`/area-membros/cursos`, `/trilhas` …, else the Início),
+ * keeping `categoria` only for Cursos and `trilha` only for Trilhas; the preview keeps `ver=aluno`. A
+ * member's `?ver=` is ignored (it can only ever choose the member view), and the API still
+ * authorises every admin read the list makes.
  */
 export default async function CoursesHubPage({
   searchParams,
@@ -85,75 +42,32 @@ export default async function CoursesHubPage({
     ver?: string | string[];
   }>;
 }) {
-  const [bootstrap, t, params] = await Promise.all([
-    requireBootstrap(),
-    getTranslations(),
-    searchParams,
-  ]);
+  const [bootstrap, params] = await Promise.all([requireBootstrap(), searchParams]);
   // The module check is `layout.tsx`'s; it is repeated here because Next renders the layout and the
   // page CONCURRENTLY, so without it a request would still fire the body's API reads (each a
   // guaranteed 404) before the layout's `notFound()` lands. Same cached bootstrap, no second call.
   if (!bootstrap.modules.some((module) => module.key === 'courses')) notFound();
-  const tenantName = bootstrap.tenant.displayName;
   const manage = bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
 
-  const showHub = manage && params.ver !== 'aluno';
-
-  if (!showHub) {
-    // The member area lives at /area-membros (2026-10-19). A member or support_tenant, and a manager
-    // previewing, are sent there keeping a single-valued aba, categoria and trilha (the preview
-    // keeps ver=aluno). The module check above runs first, so a school that is off never redirects.
+  if (!manage || params.ver === PREVIEW_VALUE) {
     redirect(
-      memberAreaRedirectHref(
-        { aba: params.aba, categoria: params.categoria, trilha: params.trilha },
+      memberScreenHref(
+        memberScreenFromAba(params.aba),
+        { categoria: params.categoria, trilha: params.trilha },
         manage,
       ),
     );
   }
 
-  const tab = hubTabFromParam(params.aba);
-  const filterKey = typeof params.filtro === 'string' ? params.filtro : '';
+  const screen = adminScreenFromAba(params.aba);
+  if (screen !== 'cursos') redirect(adminScreenHref(screen, { filtro: params.filtro }));
 
   return (
-    <div data-testid="courses-hub" className="mx-auto flex w-full max-w-[680px] flex-col">
-      {/* The heading block is `min-w-0 flex-1`: a long tenant name wraps the subtitle (E02 long-text). */}
-      <div className="flex items-start px-4 pt-4 pb-1">
-        <div className="min-w-0 flex-1">
-          <h1
-            data-brand-title
-            className="text-2xl font-bold leading-tight tracking-[-0.02em] text-text"
-          >
-            {t('courses.hub.title')}
-          </h1>
-          <p className="mt-1 break-words text-sm font-normal text-text-secondary">
-            {t('courses.hub.subtitle', { tenant: tenantName })}
-          </p>
-        </div>
-      </div>
-
-      {/* Three tabs fit at 320px; the `Tabs` scroller handles the member phase's five (E02 overflow). */}
-      <HubTabs
-        label={t('courses.hub.tabs.label')}
-        value={tab}
-        items={COURSE_HUB_TABS.map((item) => ({
-          key: item.key,
-          label: t(item.labelKey),
-          href: hubTabHref(item.key),
-        }))}
-        className="mb-4 border-b border-divider"
-      />
-
-      <Suspense key={`${tab}:${filterKey}`} fallback={<HubBodySkeleton />}>
-        {tab === 'cursos' ? <CoursesTab filtro={params.filtro} tenantName={tenantName} /> : null}
-        {tab === 'trilhas' ? <TracksTab filtro={params.filtro} tenantName={tenantName} /> : null}
-        {tab === 'lives' ? (
-          <LivesTab
-            filtro={params.filtro}
-            tenantName={tenantName}
-            timeZone={bootstrap.tenant.timezone}
-          />
-        ) : null}
-      </Suspense>
-    </div>
+    <AdminListScreen
+      screen="cursos"
+      filtro={params.filtro}
+      tenantName={bootstrap.tenant.displayName}
+      timeZone={bootstrap.tenant.timezone}
+    />
   );
 }

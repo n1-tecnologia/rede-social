@@ -1,34 +1,40 @@
 'use client';
 
 import { MediaImage } from '@rede-social/core/ui';
-import { chipBase, cn } from '@rede-social/ui';
-import { Lock, Play } from 'lucide-react';
-import { useState } from 'react';
+import { cn, SkinTileFx } from '@rede-social/ui';
+import { Check, Lock, Play } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
+import { MEDIA_CHIP, SCRIM_RESUME } from './recipes';
 
 /**
- * A lesson's 16:9 thumb in the member curriculum (08.5-07, UI-D-430, UI-D-444), ported from the
- * prototype's `LessonThumb` as `MemberLessonThumb` (the package already exports a `LessonThumb`
- * TYPE for the admin row, planning decision 1).
+ * A lesson's 16:9 thumb (08.5-07, UI-D-430, UI-D-444), ported from the prototype's `LessonThumb` as
+ * `MemberLessonThumb` (the package already exports a `LessonThumb` TYPE for the admin row).
  *
- * **Art.** The COURSE cover at the thumb's own crop (`object-cover object-center`), never a
- * per-lesson Mux still: a locked lesson's thumbnail can never leave the server (D-423, R-A10,
- * WR-08 stays deferred). No cover, or a cover that fails to load, is the tenant gradient (D-69).
+ * **Art.** The COURSE cover at the thumb's own crop, never a per-lesson Mux still: a locked lesson's
+ * thumbnail can never leave the server (D-423, R-A10). No cover, or a cover that fails to load, is
+ * the tenant gradient (D-69).
  *
- * **The four states** (no duration chip: the row's meta carries it):
- *  - `open` → a 28px `bg-black/55` disc with a filled `Play` 14;
- *  - `done` → the art at `opacity-70`, no disc;
- *  - `locked` → `bg-black/65` over the art and a 28px `bg-black/60` bordered disc with `Lock` 14.
- *    **Never desaturated** (D-421, PR-3): the padlock informs, the colour stays;
- *  - `progress` → the open disc plus a 4px resume bar pinned to the bottom (`bg-brand` on
- *    `white/25`), at the server's `lastPositionSeconds / durationSeconds`.
+ * **The four states:**
+ *  - `open` → the play disc over a light veil;
+ *  - `done` → the art at `opacity-70` and the success check (no play disc);
+ *  - `locked` → the `bg-black/65` veil and the bordered padlock disc. **Never desaturated** (D-421,
+ *    PR-3): the padlock informs, the colour stays;
+ *  - `progress` → the play disc plus the 4px resume bar pinned to the bottom (`bg-brand` on
+ *    `white/25`, grown in by CSS), at the server's `lastPositionSeconds / durationSeconds`.
  *
- * **Two optional over-media pills** (08.6-08, UI-D-449, UI-D-458), absent by default so every 08.5
- * row renders exactly as shipped: `badge` (top-left, e.g. the hero's "Aula aberta") and `duration`
- * (bottom-right "mm:ss" chip, `bg-black/60 text-white` 12/700 `tabular-nums`), both in the
- * over-media pill family (`chipBase`). `sizes` lets a full-width host (the Início hero) ask for a
- * wider srcset candidate than the row's 80px.
+ * **2026-10-22 (the courses area redesign on the social-igoralves prototype).** The prototype's
+ * `LessonThumb` frame: 96px wide in a row (`w-24`, `rounded-xl`), the veil, the 28px play disc, the
+ * glass `badge` chip at the top-left and the dark `duration` chip at the bottom-right. And a `card`
+ * variant, the prototype's "continuar assistindo" (`ResumeCard`): the hairline frame, the
+ * `SCRIM_RESUME` veil, the 44px play disc (a success check once `done`), the duration chip at the
+ * top-right and the host's `children` (the course overline and the lesson title) at the foot.
  *
- * Decorative (`aria-hidden`): the row's name says the state in words. Props only, no words.
+ * Decorative (`aria-hidden`): the host's link names the lesson and says its state in words. Props
+ * only, no words.
+ *
+ * **2026-10-26 (the member skin).** Glass chips (`MEDIA_CHIP`), a lighter play disc with a light
+ * edge, the resume fill in the skin's glowing gradient (`ms-bar`) and, on the `card` frame, the
+ * image frame's vignette and brand glows (`ms-tile`, `SkinTileFx`). Inert outside the skin.
  */
 export type MemberLessonThumbState = 'open' | 'done' | 'locked' | 'progress';
 
@@ -39,12 +45,16 @@ export interface MemberLessonThumbProps {
   /** The course cover; null takes the gradient. */
   coverAssetId: string | null;
   coverWidths: readonly number[];
-  /** Top-left over-media pill, already translated by the host; absent → nothing. */
+  /** Top-left glass chip, already translated by the host; absent → nothing. */
   badge?: string;
-  /** Bottom-right duration chip ("12:34"), formatted by the host; absent → nothing. */
+  /** The duration chip ("12:34"), formatted by the host; absent → nothing. */
   duration?: string;
-  /** The image's `sizes` hint; the row's `80px` by default. */
+  /** The image's `sizes` hint; the row's `96px` by default. */
   sizes?: string;
+  /** `thumb` (rows) or `card` (the "continuar assistindo" frame, with `children` at the foot). */
+  variant?: 'thumb' | 'card';
+  /** `card` only: the words at the foot (the host's overline and title). */
+  children?: ReactNode;
   className?: string;
 }
 
@@ -55,20 +65,26 @@ export function MemberLessonThumb({
   coverWidths,
   badge,
   duration,
-  sizes = '80px',
+  sizes = '96px',
+  variant = 'thumb',
+  children,
   className,
 }: MemberLessonThumbProps) {
   const [failedId, setFailedId] = useState<string | null>(null);
   const showImage = coverAssetId !== null && failedId !== coverAssetId;
   const resume = Math.min(100, Math.max(0, Number.isFinite(resumePercent) ? resumePercent : 0));
+  const card = variant === 'card';
+  const playable = state === 'open' || state === 'progress';
 
   return (
     <span
       aria-hidden
       data-testid="member-lesson-thumb"
       data-state={state}
+      data-variant={variant}
       className={cn(
-        'relative block aspect-video w-20 shrink-0 overflow-hidden rounded-lg bg-bg-tertiary',
+        'relative block aspect-video shrink-0 overflow-hidden rounded-xl bg-bg-tertiary',
+        card ? 'ms-tile w-full border border-border' : 'w-24',
         className,
       )}
     >
@@ -79,34 +95,67 @@ export function MemberLessonThumb({
           alt=""
           sizes={sizes}
           ratio=""
-          className={cn('absolute inset-0 h-full w-full', state === 'done' && 'opacity-70')}
+          className={cn('ms-zoom absolute inset-0 h-full w-full', state === 'done' && 'opacity-70')}
           onFailed={() => setFailedId(coverAssetId)}
         />
       ) : (
         <span
           data-testid="member-lesson-thumb-fallback"
-          className={cn('absolute inset-0 block', state === 'done' && 'opacity-70')}
+          className={cn('ms-zoom absolute inset-0 block', state === 'done' && 'opacity-70')}
           style={{ backgroundImage: 'var(--brand-gradient)' }}
         />
       )}
 
-      {state === 'locked' ? (
-        <>
-          <span className="absolute inset-0 bg-black/65" />
-          <span className="absolute inset-0 flex items-center justify-center">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white">
-              <Lock size={14} />
-            </span>
-          </span>
-        </>
-      ) : null}
+      {card ? <SkinTileFx /> : null}
+      {card ? (
+        <span className={cn('absolute inset-0 block', SCRIM_RESUME)} />
+      ) : (
+        <span
+          className={cn(
+            'absolute inset-0 block',
+            state === 'locked' ? 'bg-black/65' : state === 'done' ? '' : 'bg-black/25',
+          )}
+        />
+      )}
 
-      {state === 'open' || state === 'progress' ? (
+      {state === 'locked' ? (
         <span className="absolute inset-0 flex items-center justify-center">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white">
-            <Play size={14} fill="currentColor" />
+          <span
+            className={cn(
+              'ms-chip flex items-center justify-center rounded-full border border-white/20 bg-black/60 text-white',
+              card ? 'h-11 w-11' : 'h-6 w-6',
+            )}
+          >
+            <Lock size={card ? 17 : 12} />
           </span>
         </span>
+      ) : null}
+
+      {playable ? (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <span
+            className={cn(
+              'flex items-center justify-center rounded-full bg-white/15 text-white ring-1 ring-white/25 backdrop-blur-sm',
+              card ? 'h-11 w-11' : 'h-7 w-7',
+            )}
+          >
+            <Play size={card ? 17 : 14} fill="currentColor" className="ml-0.5" />
+          </span>
+        </span>
+      ) : null}
+
+      {state === 'done' ? (
+        card ? (
+          <span className="absolute inset-0 flex items-center justify-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-success text-white">
+              <Check size={20} strokeWidth={3} />
+            </span>
+          </span>
+        ) : (
+          <span className="absolute top-1.5 right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-success text-white">
+            <Check size={11} strokeWidth={3} />
+          </span>
+        )
       ) : null}
 
       {state === 'progress' ? (
@@ -114,14 +163,17 @@ export function MemberLessonThumb({
           data-testid="member-lesson-thumb-resume"
           className="absolute inset-x-0 bottom-0 block h-1 bg-white/25"
         >
-          <span className="block h-full bg-brand" style={{ width: `${resume}%` }} />
+          <span
+            className="ms-bar block h-full animate-progress-fill bg-brand motion-reduce:animate-none"
+            style={{ width: `${resume}%` }}
+          />
         </span>
       ) : null}
 
       {badge ? (
         <span
           data-testid="member-lesson-thumb-badge"
-          className={cn(chipBase, 'absolute top-3 left-3 bg-black/60 text-white backdrop-blur-sm')}
+          className={cn(MEDIA_CHIP, 'absolute', card ? 'top-2 left-2' : 'top-1.5 left-1.5')}
         >
           {badge}
         </span>
@@ -131,12 +183,16 @@ export function MemberLessonThumb({
         <span
           data-testid="member-lesson-thumb-duration"
           className={cn(
-            chipBase,
-            'absolute right-2 bottom-2 bg-black/60 tabular-nums text-white backdrop-blur-sm',
+            'absolute rounded-md bg-black/75 px-1.5 py-0.5 text-[10px] font-bold text-white tabular-nums',
+            card ? 'top-2 right-2' : 'right-1.5 bottom-1.5',
           )}
         >
           {duration}
         </span>
+      ) : null}
+
+      {card && children ? (
+        <span className="absolute inset-x-0 bottom-0 block p-2.5 pb-3">{children}</span>
       ) : null}
     </span>
   );

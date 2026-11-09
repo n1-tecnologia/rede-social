@@ -279,7 +279,7 @@ describe('TrackForm — create (UI-D-402, E12 empty)', () => {
     expect(replaceCourses).toHaveBeenCalledWith(TRACK, [C2, C1]);
     expect(update).not.toHaveBeenCalled();
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Trilha criada.' });
-    expect(push).toHaveBeenCalledWith('/cursos?aba=trilhas');
+    expect(push).toHaveBeenCalledWith('/cursos/trilhas');
   });
 
   it('4. a track with no course creates with ONE write and no PUT (P40); an empty title shows the field error and sends nothing', async () => {
@@ -326,7 +326,7 @@ describe('TrackForm — create (UI-D-402, E12 empty)', () => {
     await waitFor(() => expect(replaceCourses).toHaveBeenCalledTimes(2));
     expect(create).toHaveBeenCalledTimes(1);
     expect(replaceCourses).toHaveBeenLastCalledWith(TRACK, [C1]);
-    expect(push).toHaveBeenCalledWith('/cursos?aba=trilhas');
+    expect(push).toHaveBeenCalledWith('/cursos/trilhas');
   });
 });
 
@@ -365,7 +365,7 @@ describe('TrackForm — edit (UI-D-402, E12 partial, UI-D-404)', () => {
     expect(replaceCourses).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Alterações salvas.' });
-    expect(push).toHaveBeenCalledWith('/cursos?aba=trilhas');
+    expect(push).toHaveBeenCalledWith('/cursos/trilhas');
   });
 
   it('8. a move sends the permutation of the PUBLISHED rows only — the unpublished course is excluded — with no PATCH when no field changed', async () => {
@@ -400,7 +400,7 @@ describe('TrackForm — edit (UI-D-402, E12 partial, UI-D-404)', () => {
   it('10. a dirty close opens "Descartar trilha?"; a clean close leaves for the Trilhas tab', () => {
     renderEdit();
     fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
-    expect(push).toHaveBeenCalledWith('/cursos?aba=trilhas');
+    expect(push).toHaveBeenCalledWith('/cursos/trilhas');
     push.mockClear();
     fireEvent.change(titleInput(), { target: { value: 'Outro' } });
     fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
@@ -419,7 +419,7 @@ describe('TrackForm — edit (UI-D-402, E12 partial, UI-D-404)', () => {
     });
     await waitFor(() => expect(setStatus).toHaveBeenCalledWith(TRACK, 'archived'));
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Trilha arquivada.' });
-    expect(push).toHaveBeenCalledWith('/cursos?aba=trilhas&filtro=arquivadas');
+    expect(push).toHaveBeenCalledWith('/cursos/trilhas?filtro=arquivadas');
   });
 
   it('12. an archived track shows the note instead of the archive row and still saves', async () => {

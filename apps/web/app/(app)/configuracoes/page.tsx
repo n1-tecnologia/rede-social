@@ -14,6 +14,8 @@ import { PushSettingRow } from '@/components/push/PushControls';
 import { LogoutForm } from '@/components/shell/LogoutForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { env } from '@/lib/env';
+import { MANAGE_PATH } from '@/lib/member-area';
+import { STORE_MANAGE_PATH } from '@/lib/store-area';
 import { requirePlatformTenants } from '@/lib/platform';
 import { getHostTenant } from '@/lib/tenant-host';
 import { logout, setTheme } from '../actions';
@@ -228,6 +230,19 @@ export default async function SettingsPage({
                 trailing={null}
               />
             ) : null}
+            {/* 2026-11-05 (the product owner: "personalizar hotbar do usuário", "somente no
+                mobile"): the phone's menu, Marca's gate; the row shows on the phone only, where
+                that menu exists. */}
+            {canManageBrand ? (
+              <div data-settings-row="menu" className="md:hidden">
+                <Row
+                  icon="smartphone"
+                  label={t('settings.rows.menu')}
+                  href="/configuracoes/menu"
+                  trailing={null}
+                />
+              </div>
+            ) : null}
             {canSeeMembers ? (
               <Row
                 icon="users"
@@ -263,12 +278,13 @@ export default async function SettingsPage({
                 trailing={null}
               />
             ) : null}
-            {/* 08.2-07 (UI-D-382): the same `/loja` the TopBar slot opens, one store screen. */}
+            {/* 08.2-07 (UI-D-382); 2026-10-24: the store's Gerenciar (the "· Loja" menu's last row), as
+                the Cursos row opens the courses' Gerenciar. */}
             {canManageStore ? (
               <Row
                 icon="shopping-bag"
                 label={t('settings.rows.store')}
-                href="/loja"
+                href={STORE_MANAGE_PATH}
                 trailing={null}
               />
             ) : null}
@@ -284,12 +300,13 @@ export default async function SettingsPage({
             ) : null}
             {/* 08.3-06 (UI-D-389, D-402): the admin's only door to the school in this phase — no
                 TopBar slot, rail row, BottomNav tab or area-menu entry exists (D-401). After Loja and
-                before Mídia: a second content catalogue sits beside the store. */}
+                before Mídia: a second content catalogue sits beside the store. 2026-10-23: it opens
+                "Gerenciar", the management hub the area menu's last row also leads to. */}
             {canManageCourses ? (
               <Row
                 icon="graduation-cap"
                 label={t('settings.rows.courses')}
-                href="/cursos"
+                href={MANAGE_PATH}
                 trailing={null}
               />
             ) : null}

@@ -18,7 +18,7 @@ import { Skeleton } from '@rede-social/ui';
 export default function PostLoading() {
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3" aria-busy>
-      <div className="sticky top-[-0.5rem] z-40 flex items-center gap-1 bg-bg/95 px-2 py-1 backdrop-blur-sm md:static md:px-0">
+      <div className="ui-page-header sticky top-[-0.5rem] z-40 flex items-center gap-1 px-2 py-1 md:static md:px-0">
         <Skeleton variant="circle" className="h-11 w-11" />
         <Skeleton variant="text" width={110} className="h-4" />
       </div>

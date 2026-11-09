@@ -146,6 +146,8 @@ export interface HighlightEditSheetProps {
   onDelete: () => Promise<boolean>;
   /** The host's `useSignedUpload` tile ("Enviar imagem" + progress) — first in the cover step. */
   uploadTile: ReactNode;
+  /** 2026-10-23: the host's ideal-size line for an uploaded cover, under the cover step's discs. */
+  coverHint?: ReactNode;
   /** The admin's story history as membership rows, newest first (UI-D-76). */
   pickerRows: readonly HighlightMembershipRow[];
   /** The ids of the stories already in this highlight; `null` while unknown (switches disabled). */
@@ -255,6 +257,7 @@ export function HighlightEditSheet({
   onCover,
   onDelete,
   uploadTile,
+  coverHint,
   pickerRows,
   pickerSelectedIds,
   onPickerToggle,
@@ -596,6 +599,7 @@ export function HighlightEditSheet({
           </button>
         ))}
       </div>
+      {coverHint}
       {imageItems.length === 0 ? (
         <p className="text-sm font-normal text-text-secondary">{labels.noImages}</p>
       ) : null}

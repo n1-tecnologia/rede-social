@@ -32,6 +32,7 @@ import { ArrowLeft, ArrowRight, Image as ImageIcon, Plus, X } from 'lucide-react
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useId, useRef, useState, useTransition } from 'react';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
@@ -364,6 +365,25 @@ export function EventForm({
     },
   });
 
+  /**
+   * 2026-10-24 — the STANDING cover (the list's 4:5 poster), its own field beside the lying one, at
+   * the product owner's request. FRONT ONLY so far: the API stores one cover per event, so this
+   * picture lives in the browser (a local object URL) and is not sent on save; the list keeps the
+   * lying cover until the API takes a second one. Nothing is uploaded for it.
+   */
+  const [posterUrl, setPosterUrl] = useState<string | null>(null);
+  const posterInputRef = useRef<HTMLInputElement>(null);
+  const [posterDragging, setPosterDragging] = useState(false);
+  const pickPoster = (file: File | undefined) => {
+    if (!file?.type.startsWith('image/')) return;
+    setPosterUrl(URL.createObjectURL(file));
+  };
+  // The previous picture's URL is released when it is replaced, removed or the form goes away.
+  useEffect(() => {
+    if (!posterUrl) return;
+    return () => URL.revokeObjectURL(posterUrl);
+  }, [posterUrl]);
+
   const uploading = upload.state === 'preparing' || upload.state === 'progress';
   const announced = QUARTILES.includes(upload.progress)
     ? tm('progress', { percent: upload.progress })
@@ -640,11 +660,22 @@ export function EventForm({
       ? t('form.submitEdit')
       : t('form.submitCreate');
 
-  /** The title over the preview: white over the photo's veil, the tenant ink over the gradient. */
-  const coverTitle = (ink: string) =>
+  /**
+   * The title over a preview: white over the photo's veil, the tenant ink over the gradient. `small`
+   * for the narrow poster preview beside the page's (2026-10-24).
+   */
+  const coverTitle = (ink: string, small = false) =>
     filled(title) ? (
-      <div className="absolute right-4 bottom-3 left-4">
-        <p className={cn('line-clamp-2 text-lg font-bold leading-tight', ink)}>{title}</p>
+      <div
+        className={
+          small ? 'absolute right-3 bottom-2.5 left-3' : 'absolute right-4 bottom-3 left-4'
+        }
+      >
+        <p
+          className={cn('line-clamp-2 font-bold leading-tight', small ? 'text-sm' : 'text-lg', ink)}
+        >
+          {title}
+        </p>
       </div>
     ) : null;
 
@@ -735,118 +766,223 @@ export function EventForm({
           {/* ── (1) Capa: the hero geometry, so the admin sees what a member will see. ── */}
           <div className="flex flex-col gap-2">
             <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
-            <div data-event-cover-preview className="overflow-hidden rounded-xl">
-              <EventCover
-                geometry="hero"
-                coverAssetId={coverAssetId}
-                coverVariantWidths={coverWidths}
-                coverAlt={t('cover.alt', { title: title || tenantName })}
-                previewUrl={coverPreview.previewUrl}
-                overlay={coverTitle('text-white')}
-                fallbackOverlay={coverTitle('')}
-              />
-            </div>
-            <div className="hidden md:block">
-              <FileDropZone
-                id="event-cover-dropzone"
-                icon={ImageIcon}
-                accept={ACCEPT}
-                // The hook owns the verdict: a phone-format or over-cap image is re-encoded first.
-                screen={false}
-                state={
-                  upload.state === 'progress' || upload.state === 'processing'
-                    ? upload.state
-                    : 'idle'
-                }
-                progress={upload.progress}
-                onFile={(file) => void upload.pick(file)}
-                labels={{
-                  caption: coverAssetId ? t('form.cover.change') : t('form.cover.add'),
-                  progress: (percent) => tm('progress', { percent }),
-                  processing: tm('photo.preparing'),
-                }}
-              />
-            </div>
-
-            <input
-              ref={inputRef}
-              type="file"
-              accept={ACCEPT}
-              className="sr-only"
-              data-event-cover-input
-              aria-label={coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = '';
-                if (file) void upload.pick(file);
-              }}
-            />
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={uploading}
-                onClick={() => inputRef.current?.click()}
-              >
-                <ImageIcon aria-hidden size={16} />
-                {coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-              </Button>
-              {coverAssetId ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={uploading}
-                  onClick={() => {
-                    setCoverAssetId(null);
-                    upload.reset();
-                  }}
-                >
-                  {t('form.cover.remove')}
-                </Button>
-              ) : null}
-            </div>
-
-            {upload.state === 'progress' ? (
-              <div className="flex flex-col gap-2">
-                <div
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={upload.progress}
-                  className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
-                >
-                  <div
-                    className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
-                    style={{ width: `${upload.progress}%` }}
+            {/* 2026-10-24: a cover FIELD per shape, side by side (the product owner's request): the
+                LYING one, the event's page (saved), and the STANDING one, the list's poster (front
+                only so far: see `posterUrl`). */}
+            <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_216px] sm:items-start">
+              <div className="flex min-w-0 flex-col gap-2">
+                <span className="text-xs font-semibold text-text">{t('form.cover.as.hero')}</span>
+                <div data-event-cover-preview className="overflow-hidden rounded-xl">
+                  <EventCover
+                    geometry="hero"
+                    coverAssetId={coverAssetId}
+                    coverVariantWidths={coverWidths}
+                    coverAlt={t('cover.alt', { title: title || tenantName })}
+                    previewUrl={coverPreview.previewUrl}
+                    overlay={coverTitle('text-white')}
+                    fallbackOverlay={coverTitle('')}
                   />
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs tabular-nums text-text-tertiary">
-                    {tm('progress', { percent: upload.progress })}
-                  </span>
-                  <Button type="button" variant="ghost" size="sm" onClick={upload.cancel}>
-                    {tm('cancel')}
+                {/* 2026-10-23: the ideal size of the image, under the preview. */}
+                <CoverSizeHint kind="eventHero" />
+                <div className="hidden md:block">
+                  <FileDropZone
+                    id="event-cover-dropzone"
+                    icon={ImageIcon}
+                    accept={ACCEPT}
+                    // The hook owns the verdict: a phone-format or over-cap image is re-encoded first.
+                    screen={false}
+                    state={
+                      upload.state === 'progress' || upload.state === 'processing'
+                        ? upload.state
+                        : 'idle'
+                    }
+                    progress={upload.progress}
+                    onFile={(file) => void upload.pick(file)}
+                    labels={{
+                      caption: coverAssetId ? t('form.cover.change') : t('form.cover.add'),
+                      progress: (percent) => tm('progress', { percent }),
+                      processing: tm('photo.preparing'),
+                    }}
+                  />
+                </div>
+
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept={ACCEPT}
+                  className="sr-only"
+                  data-event-cover-input
+                  aria-label={coverAssetId ? t('form.cover.change') : t('form.cover.add')}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (file) void upload.pick(file);
+                  }}
+                />
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={uploading}
+                    onClick={() => inputRef.current?.click()}
+                  >
+                    <ImageIcon aria-hidden size={16} />
+                    {coverAssetId ? t('form.cover.change') : t('form.cover.add')}
                   </Button>
+                  {coverAssetId ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={uploading}
+                      onClick={() => {
+                        setCoverAssetId(null);
+                        upload.reset();
+                      }}
+                    >
+                      {t('form.cover.remove')}
+                    </Button>
+                  ) : null}
+                </div>
+
+                {upload.state === 'progress' ? (
+                  <div className="flex flex-col gap-2">
+                    <div
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={upload.progress}
+                      className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
+                    >
+                      <div
+                        className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
+                        style={{ width: `${upload.progress}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs tabular-nums text-text-tertiary">
+                        {tm('progress', { percent: upload.progress })}
+                      </span>
+                      <Button type="button" variant="ghost" size="sm" onClick={upload.cancel}>
+                        {tm('cancel')}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <span aria-live="polite" className="sr-only">
+                  {announced}
+                </span>
+
+                {upload.error ? (
+                  <p role="alert" className="text-sm font-normal text-danger">
+                    {upload.error}
+                  </p>
+                ) : (
+                  <p className="text-xs font-normal text-text-tertiary">
+                    {t('form.cover.helper', { tenant: tenantName })}
+                  </p>
+                )}
+              </div>
+
+              {/* The STANDING cover, the list's poster: its own picture, picked by a tap or a drop
+                  on its frame or by its button (front only so far: kept in the browser). */}
+              <div
+                data-event-poster-field
+                className="flex max-w-[220px] flex-col gap-2 sm:max-w-none"
+              >
+                <span className="text-xs font-semibold text-text">{t('form.cover.as.poster')}</span>
+                <button
+                  type="button"
+                  data-event-poster-preview
+                  aria-label={posterUrl ? t('form.cover.posterChange') : t('form.cover.posterAdd')}
+                  onClick={() => posterInputRef.current?.click()}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setPosterDragging(true);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'copy';
+                  }}
+                  onDragLeave={() => setPosterDragging(false)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setPosterDragging(false);
+                    pickPoster(event.dataTransfer.files[0]);
+                  }}
+                  className={cn(
+                    'relative block aspect-[4/5] w-full overflow-hidden rounded-xl border border-border bg-bg-tertiary transition-opacity active:opacity-90',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+                    posterDragging && 'ring-2 ring-brand ring-offset-2 ring-offset-bg',
+                  )}
+                >
+                  {posterUrl ? (
+                    <>
+                      {/* biome-ignore lint/performance/noImgElement: a local object URL of the picked file; next/image cannot load it (the `CommunityCover` precedent) */}
+                      <img
+                        src={posterUrl}
+                        alt=""
+                        data-event-poster-local
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <span
+                        aria-hidden
+                        className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent"
+                      />
+                      {coverTitle('text-white', true)}
+                    </>
+                  ) : (
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 flex items-center justify-center"
+                      style={{ backgroundImage: 'var(--brand-gradient)' }}
+                    >
+                      <ImageIcon aria-hidden size={24} className="text-white/80" />
+                    </span>
+                  )}
+                </button>
+                <CoverSizeHint kind="eventPoster" />
+                <input
+                  ref={posterInputRef}
+                  type="file"
+                  accept={ACCEPT}
+                  className="sr-only"
+                  tabIndex={-1}
+                  data-event-poster-input
+                  aria-label={posterUrl ? t('form.cover.posterChange') : t('form.cover.posterAdd')}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    pickPoster(file);
+                  }}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => posterInputRef.current?.click()}
+                  >
+                    <ImageIcon aria-hidden size={16} />
+                    {posterUrl ? t('form.cover.posterChange') : t('form.cover.posterAdd')}
+                  </Button>
+                  {posterUrl ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPosterUrl(null)}
+                    >
+                      {t('form.cover.posterRemove')}
+                    </Button>
+                  ) : null}
                 </div>
               </div>
-            ) : null}
-
-            <span aria-live="polite" className="sr-only">
-              {announced}
-            </span>
-
-            {upload.error ? (
-              <p role="alert" className="text-sm font-normal text-danger">
-                {upload.error}
-              </p>
-            ) : (
-              <p className="text-xs font-normal text-text-tertiary">
-                {t('form.cover.helper', { tenant: tenantName })}
-              </p>
-            )}
+            </div>
           </div>
 
           {/* ── (2) Nome, with the counter the Input primitive does not carry. ── */}

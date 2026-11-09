@@ -22,12 +22,30 @@ import {
 } from './courses-admin';
 import { closeCoursesMember, completeLessonAs, longTitle } from './courses-member';
 import { isRemote, login, SEED_PASSWORD } from './fixtures';
+import { untilHydrated } from './hydration';
+import {
+  closeSchoolMenu,
+  currentSchoolScreen,
+  goToSchoolScreen,
+  hasDesktopRail,
+  schoolAreaLabel,
+  schoolScreenLabels,
+  schoolScreenLink,
+  schoolScreenList,
+} from './school-area';
 import { closeStoreAdmin, createProduct } from './store-admin';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
-const C = coursesMessages.courses;
 const M = memberMessages.courses.member;
 const H = M.home;
+/**
+ * 2026-10-22: the area menu's five screens ("· Membros"), in the menu's order — they replaced the
+ * tab row under the old "Cursos" title (`courses.hub.tabs.*`, still in the catalog, no longer drawn).
+ */
+const S = M.area.screens;
+const MENU_LABELS = [S.home, S.courses, S.tracks, S.lives, S.progress];
+/** 2026-10-23: a manager reads the same menu with a last row, "Gerenciar" (`/cursos/gerenciar`). */
+const MANAGE_LABEL = coursesMessages.courses.manage.title;
 /** The ICU plurals (streak, module-left line) go through next-intl, as the page does. */
 const tm = createTranslator({
   locale: 'pt-BR',
@@ -38,6 +56,28 @@ const tm = createTranslator({
 /** ICU `{name}` placeholders filled the way next-intl does for the plain arguments these use. */
 function fill(message: string, values: Record<string, string>): string {
   return message.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? `{${key}}`);
+}
+
+/** A literal text inside a regular expression. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 2026-10-26 — Início's ONE h1, the greeting by the part of the day at the overview's `serverNow`
+ * in the school's zone ("Bom dia|Boa tarde|Boa noite, {firstName}!"). The hour a case runs at is
+ * unknown, so the pattern takes the three periods, each read from the catalog's ICU sentence. With
+ * `name` (the first word of the member's profile name) it pins the name too; without it, any name.
+ */
+function greeting(name?: string): RegExp {
+  const NAME = '\u0000';
+  const sentences = (['morning', 'afternoon', 'evening'] as const).map((period) =>
+    escapeRegExp(tm('home.greet', { period, hasName: 'true', name: name ?? NAME })).replace(
+      NAME,
+      '.+',
+    ),
+  );
+  return new RegExp(`^(?:${sentences.join('|')})$`);
 }
 
 /** The one local write this spec needs beyond the shared fixtures: a module's own title. */
@@ -97,21 +137,68 @@ async function seedCourse(
   return { id, title: fields.title, moduleTitle: fields.moduleTitle, lessons };
 }
 
-const home = (page: Page): Locator =>
-  page.getByTestId('courses-member-catalogue').getByTestId('courses-member-home');
+const frame = (page: Page): Locator => page.getByTestId('courses-member-catalogue');
+const home = (page: Page): Locator => frame(page).getByTestId('courses-member-home');
 const streak = (page: Page): Locator => page.getByTestId('courses-member-streak');
 const hero = (page: Page): Locator => page.getByTestId('courses-home-hero');
-const areaTab = (page: Page, name: string): Locator =>
-  page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab', { name, exact: true });
 
-/** Início is the open body: the home testid inside the frame, the catalogue body absent. */
-async function expectInicio(page: Page): Promise<void> {
+/**
+ * Início is the open screen (2026-10-22: a page of its own, `/area-membros`): the frame says so
+ * (`data-screen`), the home body is drawn and no other body is, and the page's ONE h1 is the
+ * greeting (Início has no screen header). 2026-10-26: the greeting is "Boa tarde, {name}!" by the
+ * hour (`greeting`); "Bem-vindo de volta." is left to the overview's error state only.
+ */
+async function expectInicio(page: Page, name?: string): Promise<void> {
+  await expect(frame(page)).toHaveAttribute('data-screen', 'inicio');
   await expect(home(page)).toBeVisible();
   await expect(page.getByTestId('courses-member-courses')).toHaveCount(0);
   await expect(page.getByTestId('courses-member-lives')).toHaveCount(0);
   await expect(page.getByTestId('courses-member-tracks')).toHaveCount(0);
   await expect(page.getByTestId('courses-member-progress')).toHaveCount(0);
-  await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText([greeting(name)]);
+}
+
+/**
+ * 2026-10-26 — Início's streak (`courses-member-streak`, an image named by the SERVER's days, D-440;
+ * since 2026-10-26 a cell of the dashboard's numbers strip, so drawn only with a hero): its name and
+ * its state. Its look is the Início redesign's and is not pinned here.
+ */
+async function expectStreak(page: Page, days: number): Promise<void> {
+  const badge = page.getByTestId('courses-member-streak');
+  await expect(badge).toHaveAttribute('data-active', String(days > 0));
+  await expect(badge).toHaveAttribute(
+    'aria-label',
+    days > 0 ? tm('home.streak.aria', { n: days }) : H.streak.ariaNone,
+  );
+}
+
+/**
+ * The testids of Início's blocks (`data-home-section`), in document order (UI-D-447: a block with
+ * no data is absent). 2026-10-26: the blocks are no longer all children of the body (the resume
+ * card sits inside the dashboard panel), so the whole body is read; the live rows and the empty card
+ * are not blocks. The cases assert presence, not order: the Início redesign is still moving them.
+ */
+async function homeSections(page: Page): Promise<string[]> {
+  return home(page).evaluate((root) =>
+    Array.from(root.querySelectorAll('[data-home-section]')).map(
+      (node) => node.getAttribute('data-testid') ?? '',
+    ),
+  );
+}
+
+/** The screens with a header, and the h1 each one's `ScreenHeader` draws (2026-10-22). */
+const SCREEN_TITLE = {
+  cursos: M.catalogue.title,
+  trilhas: M.screens.tracks.title,
+  lives: M.screens.lives.title,
+  progresso: M.screens.progress.title,
+} as const;
+
+/** A screen other than Início is open: the frame says which, and its ONE h1 is the screen's title. */
+async function expectScreen(page: Page, screen: keyof typeof SCREEN_TITLE): Promise<void> {
+  await expect(frame(page)).toHaveAttribute('data-screen', screen);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText([SCREEN_TITLE[screen]]);
+  await expect(home(page)).toHaveCount(0);
 }
 
 type Box = { x: number; y: number; width: number; height: number };
@@ -122,18 +209,48 @@ async function boxOf(locator: Locator): Promise<Box> {
   return box;
 }
 
+/** Whether `first` comes before `second` in the document. */
+async function precedes(first: Locator, second: Locator): Promise<boolean> {
+  const other = await second.elementHandle();
+  return first.evaluate(
+    (node, target) =>
+      Boolean(target && node.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING),
+    other,
+  );
+}
+
 /**
  * 08.6-08 — Início, the member area's front door (D-435, D-437, D-440, D-443, UI-D-446..UI-D-449,
  * COURSE-28, COURSE-29, COURSE-34, COURSE-37), on the phone and on the desktop.
  *
  * A throwaway tenant per project (`e2e-ma-<project>`, the courses-admin shape): one member, one
  * admin and one course seeded as a draft, so the first case reads the empty school and the next
- * publishes the course. The cases run in order: the second one completes lesson 1 for the member.
- * The 320px long-text backstop runs on its own throwaway tenant (`e2e-mb-<project>`) so its course
- * never becomes the main tenant's hero.
+ * publishes the course. The cases run in order: the second one completes lesson 1 for the member
+ * (the cases after it read Início as a member with progress). The 320px long-text backstop runs on
+ * its own throwaway tenant (`e2e-mb-<project>`) so its course never becomes the main tenant's hero.
+ *
+ * 2026-10-22 (the user's rule, `lib/courses-home-plan.ts`): a member who never started a lesson does
+ * not land on Início — `/area-membros` sends them to the catalogue (`/area-membros/cursos`), the
+ * menu's "Início" too — and Início appears from their first started or completed lesson on. An empty
+ * school (no hero) still shows Início with the empty card, and the admin's preview never redirects,
+ * so the "Comece por aqui" hero a new member would have seen is read in the preview.
  *
  * `serviceWorkers: 'block'`: a worker answering navigations from its cache would have these
  * assertions read what a previous run left behind (the 03-05 lesson).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): each screen is a page of
+ * its own (`/area-membros`, `/area-membros/cursos|trilhas|lives|progresso`), reached from the
+ * shell's "· Membros" area menu (the TopBar's menu on a phone, the rail's sub-rows on a desktop,
+ * driven through `school-area.ts`) instead of the tab row under the old "Cursos" title; the old
+ * `?aba=` addresses redirect (on the client: the routes stream a `loading.tsx`, so the URL is what a
+ * case waits for). Início's one h1 is the greeting; the other screens' h1 is their `ScreenHeader`.
+ *
+ * 2026-10-26 (Início rethought on the academy reference): the greeting is "Boa tarde, {name}!" by
+ * the hour in the school's zone, with the question and the catalogue search under it; the streak
+ * left the greeting row for the dashboard (drawn only with a hero), beside the resume card (the
+ * old hero's hooks, `courses-home-hero*`). Every block is marked `data-home-section`. The Início is
+ * still being redesigned, so these cases pin only its structure (the greeting, the blocks present,
+ * the hero's CTA, the streak, the lives); its cards' details wait (`TODO(2026-10-26)`).
  */
 test.use({ serviceWorkers: 'block' });
 test.describe.configure({ timeout: 120_000 });
@@ -172,104 +289,110 @@ test.describe('member area: Início', () => {
     await closeCoursesAdmin();
   });
 
-  test('COURSE-34 / UI-D-447: with no published course, Início shows the greeting, "Sem sequência" and the empty card — no hero', async ({
+  test('COURSE-34 / UI-D-447 (2026-10-26): with no published course, Início shows the greeting by name, then the empty card — no hero, so no dashboard and no streak', async ({
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros`);
 
-    await expectInicio(page);
-    await expect(home(page).getByRole('heading', { level: 2, name: H.greeting })).toBeVisible();
-    await expect(streak(page)).toHaveText(H.streak.none);
-    await expect(streak(page)).toHaveAttribute('aria-label', H.streak.ariaNone);
-    await expect(streak(page)).toHaveAttribute('data-active', 'false');
+    // The fixture's member is "Membro Cursos" (`createCoursesTenant`): the greeting says the first
+    // word of the profile's name, after the part of the day.
+    await expectInicio(page, 'Membro');
 
     const empty = page.getByTestId('courses-member-home-empty');
     await expect(empty.getByRole('heading', { name: M.catalogue.empty.title })).toBeVisible();
     await expect(
       empty.getByText(fill(M.catalogue.empty.body, { tenant: tenant.displayName })),
     ).toBeVisible();
+    // UI-D-447: a block with no data is absent — no hero (and with it no dashboard: the streak
+    // lives there since 2026-10-26), no tracks, no courses.
+    const sections = await homeSections(page);
+    expect(sections).toContain('courses-home-greeting');
+    for (const absent of [
+      'courses-home-hero',
+      'courses-home-track',
+      'courses-home-shelf',
+      'courses-home-new-lessons',
+    ]) {
+      expect(sections).not.toContain(absent);
+    }
     await expect(hero(page)).toHaveCount(0);
+    await expect(streak(page)).toHaveCount(0);
 
     await setCourseStatus(course.id, 'published');
   });
 
-  test('D-435 / D-437 / D-440: the member lands on Início, starts the course from the hero, completes lesson 1 and comes back to "Continue de onde parou" with "1 dia"', async ({
+  test('2026-10-22 / D-435 / D-440: a member who never started a lesson lands on the catalogue, also through the menu’s Início; the course page starts the course, and after lesson 1 /area-membros is Início with "Continuar aula" at lesson 2 and a 1-day streak', async ({
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros`);
 
-    // The member registry (08.6-10): Início · Cursos · Trilhas · Lives · Progresso, Início first
-    // and selected at bare /area-membros.
-    await expectInicio(page);
-    const tabs = page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab');
-    await expect(tabs).toHaveText([
-      C.hub.tabs.home,
-      C.hub.tabs.courses,
-      C.hub.tabs.tracks,
-      C.hub.tabs.lives,
-      C.hub.tabs.progress,
-    ]);
-    await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('href', '/area-membros');
-    await expect(areaTab(page, C.hub.tabs.courses)).toHaveAttribute(
+    // The user's rule (2026-10-22): no lesson started or completed yet, so Início is not drawn —
+    // /area-membros lands on the catalogue's own page (a client redirect: the URL is the assertion).
+    await expect(page).toHaveURL(/\/area-membros\/cursos$/);
+    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
+    await expectScreen(page, 'cursos');
+
+    // The member's area menu ("· Membros"): Início · Cursos · Trilhas · Lives · Progresso, each a
+    // page of its own, Cursos current here. Início still links to /area-membros...
+    if (!hasDesktopRail(page)) await expect(schoolAreaLabel(page)).toContainText(M.area.label);
+    expect(await schoolScreenLabels(page)).toEqual(MENU_LABELS);
+    expect(await currentSchoolScreen(page)).toBe(S.courses);
+    await expect(await schoolScreenLink(page, S.home)).toHaveAttribute('href', '/area-membros');
+    await expect(await schoolScreenLink(page, S.courses)).toHaveAttribute(
       'href',
-      '/area-membros?aba=cursos',
+      '/area-membros/cursos',
     );
+    await closeSchoolMenu(page);
+    // ...and, for this member, leads to the same catalogue (from another screen, so the URL moves).
+    await goToSchoolScreen(page, S.lives, { url: /\/area-membros\/lives$/ });
+    await goToSchoolScreen(page, S.home, { url: /\/area-membros\/cursos$/ });
+    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
+    await expect(home(page)).toHaveCount(0);
 
-    await expect(streak(page)).toHaveText(H.streak.none);
-    await expect(page.getByTestId('courses-member-home-empty')).toHaveCount(0);
-
-    // "Comece por aqui": the first lesson, the 0% line, "Assistir à primeira aula".
-    await expect(hero(page).getByRole('heading', { name: H.hero.title.start })).toBeVisible();
-    await expect(page.getByTestId('courses-home-hero-eyebrow')).toHaveText(
-      fill(H.hero.eyebrow, { course: course.title, moduleNn: '01', lessonNn: '01' }),
-    );
-    await expect(page.getByTestId('courses-home-hero-title')).toHaveText(
-      `e2e-ma-${run} Anatomia do terço superior`,
-    );
-    // Scoped to the hero: the new-lessons rail (08.6-09) draws its own duration chips below it.
-    await expect(hero(page).getByTestId('member-lesson-thumb-duration')).toHaveText('9:12');
-    await expect(hero(page).getByRole('progressbar')).toHaveCount(0);
-    const start = page.getByTestId('courses-home-hero-cta');
-    await expect(start).toHaveText(H.hero.cta.start);
+    // The member starts the course from the catalogue: the card, then the course page's "Começar
+    // o curso" at lesson 1 (the start the old Início hero offered a new member).
+    await page.getByTestId('courses-member-grid').locator(`a[href="/cursos/${course.id}"]`).click();
+    await expect(page.getByTestId('member-course-page')).toBeVisible();
+    const start = page.getByTestId('course-action-cta');
+    await expect(start).toHaveText(M.course.start);
     await expect(start).toHaveAttribute('href', `/cursos/${course.id}/aulas/${course.lessons[0]}`);
-    // Only the CTA is a link inside the hero card.
-    await expect(hero(page).getByRole('link')).toHaveCount(1);
-
     await start.click();
     await expect(page.getByTestId('member-lesson-page')).toHaveAttribute(
       'data-lesson-id',
       course.lessons[0] ?? '',
     );
-    await page.getByRole('button', { name: M.player.complete, exact: true }).click();
+    // A click before hydration never reaches React (the lesson page streams in first).
+    const complete = page.getByRole('button', { name: M.player.complete, exact: true });
+    await untilHydrated(complete);
+    await complete.click();
     await expect(page.getByTestId('lesson-done')).toHaveText(M.player.done);
 
+    // From the first completed lesson on, /area-membros IS Início (no redirect any more).
     await page.goto(`${tenant.origin}/area-membros`);
+    await expect(page).toHaveURL(/\/area-membros$/);
     await expectInicio(page);
-    await expect(hero(page).getByRole('heading', { name: H.hero.title.resume })).toBeVisible();
-    await expect(page.getByTestId('courses-home-hero-sub')).toHaveText(
-      tm('home.hero.moduleLeft', { n: 2, module: course.moduleTitle }),
+    expect(await currentSchoolScreen(page)).toBe(S.home);
+    await expect(page.getByTestId('courses-member-home-empty')).toHaveCount(0);
+    expect(await homeSections(page)).toEqual(
+      expect.arrayContaining(['courses-home-greeting', 'courses-home-hero']),
     );
-    await expect(
-      hero(page).getByRole('progressbar', { name: fill(M.progress.aria, { percent: '33' }) }),
-    ).toBeVisible();
-    await expect(page.getByTestId('courses-home-hero-progress')).toHaveText(
-      fill(H.hero.progress, { percent: '33', done: '1', total: '3' }),
-    );
+    // D-437: the server's hero (`retomando`), its CTA at the lesson the member stopped at.
     const resume = page.getByTestId('courses-home-hero-cta');
     await expect(resume).toHaveText(H.hero.cta.resume);
     await expect(resume).toHaveAttribute('href', `/cursos/${course.id}/aulas/${course.lessons[1]}`);
+    // TODO(2026-10-26): Início redesign in progress — the resume card's details (its title, the
+    // module-left line, the bar and "{percent}% do curso"), "Cursos" and the numbers strip.
 
     // D-440: the server's streak, one local day.
-    await expect(streak(page)).toHaveText(tm('home.streak.days', { n: 1 }));
-    await expect(streak(page)).toHaveAttribute('aria-label', tm('home.streak.aria', { n: 1 }));
-    await expect(streak(page)).toHaveAttribute('data-active', 'true');
+    await expectStreak(page, 1);
   });
 
-  test('EP-01 / EP-02 (COURSE-28): an empty, unknown or repeated ?aba= renders Início; ?aba=cursos renders the catalogue and ?aba=trilhas the Trilhas body', async ({
+  test('EP-01 / EP-02 (COURSE-28): an empty, unknown or repeated ?aba= renders Início; the old ?aba=cursos|lives|trilhas addresses land on their own pages, keeping only the query each screen reads', async ({
     page,
   }) => {
+    // The member completed lesson 1 in the previous case, so Início is drawn (the user's rule).
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     for (const path of [
       '/area-membros?aba=',
@@ -281,19 +404,30 @@ test.describe('member area: Início', () => {
       await expectInicio(page);
     }
 
+    // 2026-10-22: the old tab addresses redirect to the screen's own page (client-side, after the
+    // route's loading.tsx streamed: the URL is the assertion, never the response status).
     await page.goto(`${tenant.origin}/area-membros?aba=cursos`);
+    await expect(page).toHaveURL(/\/area-membros\/cursos$/);
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
-    await expect(home(page)).toHaveCount(0);
-    await expect(areaTab(page, C.hub.tabs.courses)).toHaveAttribute('aria-selected', 'true');
+    await expectScreen(page, 'cursos');
+    expect(await currentSchoolScreen(page)).toBe(S.courses);
 
     await page.goto(`${tenant.origin}/area-membros?aba=lives`);
+    await expect(page).toHaveURL(/\/area-membros\/lives$/);
     await expect(page.getByTestId('courses-member-lives')).toBeVisible();
-    await expect(home(page)).toHaveCount(0);
+    await expectScreen(page, 'lives');
+
+    // `categoria` only follows Cursos and `trilha` only follows Trilhas.
+    await page.goto(`${tenant.origin}/area-membros?aba=cursos&categoria=abc&trilha=def`);
+    await expect(page).toHaveURL(/\/area-membros\/cursos\?categoria=abc$/);
+    await page.goto(`${tenant.origin}/area-membros?aba=trilhas&trilha=def&categoria=abc`);
+    await expect(page).toHaveURL(/\/area-membros\/trilhas\?trilha=def$/);
 
     // 08.6-10: Trilhas is registered; this school has no track, so its body is the empty card.
     await page.goto(`${tenant.origin}/area-membros?aba=trilhas`);
+    await expect(page).toHaveURL(/\/area-membros\/trilhas$/);
     await expect(page.getByTestId('courses-member-tracks')).toBeVisible();
-    await expect(home(page)).toHaveCount(0);
+    await expectScreen(page, 'trilhas');
     await expect(
       page
         .getByTestId('courses-member-tracks-empty')
@@ -302,10 +436,14 @@ test.describe('member area: Início', () => {
     await expect(
       page.getByText(fill(M.tracks.empty.body, { tenant: tenant.displayName })),
     ).toBeVisible();
-    await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute('aria-selected', 'true');
+    expect(await currentSchoolScreen(page)).toBe(S.tracks);
   });
 
-  test('D-422 / UI-D-437: the admin’s ?ver=aluno lands on Início with "Sem sequência"; ?aba=cursos&ver=aluno is the catalogue with preview links', async ({
+  // TODO(2026-10-26): Início redesign in progress — once it settles, a desktop case for the floating
+  // "Continuar assistindo" (`courses-home-continue`): shown while the resume card is out of view
+  // (`data-shown`), hidden with the card in view, "Fechar" dismissing it for the session.
+
+  test('D-422 / UI-D-437: the admin’s ?ver=aluno lands on Início (never the catalogue) with the streak at zero, the hero at the first lesson and the member’s menu in preview links, Gerenciar last; ?aba=cursos&ver=aluno is the catalogue page with preview links; 2026-10-23: without the flag the member pages stay the member view in preview too', async ({
     page,
   }) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
@@ -313,30 +451,65 @@ test.describe('member area: Início', () => {
     await expect(page.getByTestId('courses-hub')).toBeVisible();
 
     await page.goto(`${tenant.origin}/area-membros?ver=aluno`);
-    await expectInicio(page);
+    // The fixture's admin is "Admin Cursos".
+    await expectInicio(page, 'Admin');
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
-    await expect(streak(page)).toHaveText(H.streak.none);
-    await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('href', '/area-membros?ver=aluno');
-    await expect(areaTab(page, C.hub.tabs.courses)).toHaveAttribute(
+    // The preview reads zeros (the admin writes no progress): "Sem sequência de estudo".
+    await expectStreak(page, 0);
+    // 2026-10-22: under /area-membros the manager's menu is the member's "· Membros", every link
+    // keeping the preview flag (UI-D-437). 2026-10-23: then "Gerenciar", the way to authoring.
+    expect(await schoolScreenLabels(page)).toEqual([...MENU_LABELS, MANAGE_LABEL]);
+    await expect(await schoolScreenLink(page, MANAGE_LABEL)).toHaveAttribute(
       'href',
-      '/area-membros?aba=cursos&ver=aluno',
+      '/cursos/gerenciar',
     );
-    // The preview writes no progress (D-422): the admin starts at the first lesson, flag kept.
-    await expect(page.getByTestId('courses-home-hero-cta')).toHaveAttribute(
+    await expect(await schoolScreenLink(page, S.home)).toHaveAttribute(
+      'href',
+      '/area-membros?ver=aluno',
+    );
+    await expect(await schoolScreenLink(page, S.courses)).toHaveAttribute(
+      'href',
+      '/area-membros/cursos?ver=aluno',
+    );
+    await closeSchoolMenu(page);
+    // The preview NEVER sends the manager to the catalogue (2026-10-22: the admin writes no
+    // progress, so it is how a new member's start is drawn): the hero starts at the first lesson,
+    // "Assistir à primeira aula", the flag kept (D-422).
+    const start = page.getByTestId('courses-home-hero-cta');
+    await expect(start).toHaveText(H.hero.cta.start);
+    await expect(start).toHaveAttribute(
       'href',
       `/cursos/${course.id}/aulas/${course.lessons[0]}?ver=aluno`,
     );
+    // TODO(2026-10-26): Início redesign in progress — the "Comece por aqui" card's details (its
+    // title, "{course} · Módulo 01 · Aula 01", the lesson's 9:12, no bar at 0%) and the preview
+    // flag on the courses row's links.
 
     await page.goto(`${tenant.origin}/area-membros?aba=cursos&ver=aluno`);
+    await expect(page).toHaveURL(/\/area-membros\/cursos\?ver=aluno$/);
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
-    await expect(home(page)).toHaveCount(0);
+    await expectScreen(page, 'cursos');
     // The course card keeps the preview flag (UI-D-437).
     await expect(
       page.getByTestId('courses-member-grid').locator(`a[href="/cursos/${course.id}?ver=aluno"]`),
     ).toHaveCount(1);
+
+    // 2026-10-23: without ?ver=aluno a member page no longer sends the manager to the admin list:
+    // it stays the member's view, still a preview (the links keep the flag, nothing is written).
+    await page.goto(`${tenant.origin}/area-membros/cursos`);
+    await expect(page).toHaveURL(/\/area-membros\/cursos$/);
+    await expectScreen(page, 'cursos');
+    await expect(
+      page.getByTestId('courses-member-grid').locator(`a[href="/cursos/${course.id}?ver=aluno"]`),
+    ).toHaveCount(1);
+    await expect(page.getByTestId('courses-hub')).toHaveCount(0);
+    await page.goto(`${tenant.origin}/area-membros/trilhas`);
+    await expect(page).toHaveURL(/\/area-membros\/trilhas$/);
+    await expectScreen(page, 'trilhas');
+    await expect(page.getByTestId('courses-hub')).toHaveCount(0);
   });
 
-  test('E03 long-text backstop: at 320px a 120-character course and lesson title and a 60-character module name keep the hero CTA whole and on screen', async ({
+  test('E03 long-text backstop: at 320px a 120-character course and lesson title and a 60-character module name keep the resume card’s CTA whole and on screen', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
@@ -355,7 +528,7 @@ test.describe('member area: Início', () => {
         { title: `${prefix} Segunda aula`, seconds: 490 },
       ],
     });
-    // A started course: the hero says "Continue de onde parou" with the module-left line.
+    // A started course (lesson 1 at 30 s): the hero is `retomando`, at lesson 1.
     const first = long.lessons[0] ?? '';
     await sql()`
       insert into public.course_lesson_progress
@@ -364,41 +537,29 @@ test.describe('member area: Início', () => {
         from public.course_lessons l, public.users u
        where l.id = ${first}::uuid and u.email = ${longTenant.memberEmail}`;
 
+    // 2026-10-22: layout is measured at rest — under "reduzir movimento" the bar does not grow in.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, longTenant.memberEmail, longTenant.password, longTenant.origin);
     await page.goto(`${longTenant.origin}/area-membros`);
     await expectInicio(page);
-    await expect(hero(page).getByRole('heading', { name: H.hero.title.resume })).toBeVisible();
+    // TODO(2026-10-26): Início redesign in progress — the resume card's long-text details (the
+    // eyebrow and the title clamped, the module-left line with the 60-character module name).
 
-    // The eyebrow truncates on one line; the title clamps to two; the sub-line wraps.
-    const eyebrow = page.getByTestId('courses-home-hero-eyebrow');
-    expect(await eyebrow.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
-    const title = page.getByTestId('courses-home-hero-title');
-    await expect(title).toHaveText(lessonTitle);
-    expect(
-      await title.evaluate((node) => {
-        const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
-        return Math.round(node.getBoundingClientRect().height / lineHeight);
-      }),
-    ).toBe(2);
-    await expect(page.getByTestId('courses-home-hero-sub')).toHaveText(
-      tm('home.hero.moduleLeft', { n: 2, module: moduleTitle }),
-    );
+    // E02 overflow (2026-10-26: the greeting stands alone; the streak left its row): the greeting
+    // stays inside the screen.
+    const greetingBox = await boxOf(page.getByRole('heading', { level: 1 }));
+    expect(greetingBox.x).toBeGreaterThanOrEqual(0);
+    expect(greetingBox.x + greetingBox.width).toBeLessThanOrEqual(320);
 
-    // The badge stays beside the greeting (E02 overflow).
-    const greeting = home(page).getByRole('heading', { level: 2, name: H.greeting });
-    const greetingBox = await boxOf(greeting);
-    const badgeBox = await boxOf(streak(page));
-    expect(Math.abs(badgeBox.y - greetingBox.y)).toBeLessThan(greetingBox.height);
-
-    // The CTA: whole, inside the viewport, its label on one line.
+    // The CTA: the lesson in progress, whole and inside the viewport, never overflowing its box.
     const cta = page.getByTestId('courses-home-hero-cta');
     await cta.scrollIntoViewIfNeeded();
     await expect(cta).toHaveText(H.hero.cta.resume);
+    await expect(cta).toHaveAttribute('href', `/cursos/${long.id}/aulas/${first}`);
     const ctaBox = await boxOf(cta);
     expect(ctaBox.x).toBeGreaterThanOrEqual(0);
     expect(ctaBox.x + ctaBox.width).toBeLessThanOrEqual(320);
-    expect(ctaBox.height).toBeGreaterThanOrEqual(44);
     expect(await cta.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -416,15 +577,6 @@ async function lessonsOf(courseId: string): Promise<{ id: string; title: string 
      order by m.position asc, l.position asc`;
 }
 
-/** The section testids of Início in DOM order (UI-D-447: a section with no data is absent). */
-async function sectionOrder(page: Page): Promise<string[]> {
-  return home(page).evaluate((root) =>
-    Array.from(root.querySelectorAll(':scope > section[data-testid]')).map(
-      (node) => node.getAttribute('data-testid') ?? '',
-    ),
-  );
-}
-
 /**
  * 08.6-09 — the rest of Início (D-436, D-438, UI-D-450, UI-D-451, UI-D-454, UI-D-455, COURSE-30,
  * COURSE-31, COURSE-33, COURSE-34), on the phone and on the desktop.
@@ -433,16 +585,28 @@ async function sectionOrder(page: Page): Promise<string[]> {
  * `beforeAll`. Catalogue order is newest first, so the minutes back-date the four published courses:
  *
  *  - `paid` (1 min, no category) — linked to an active product the member lacks: LOCKED, no free
- *    lesson, so none of its lessons may ever reach "Novas aulas da semana" (T-08.6-13);
+ *    lesson, so none of its lessons may ever reach Início's new lessons (T-08.6-13);
  *  - `first` (2 min) and `second` (3 min), both in the short category, 2 lessons each, no video;
  *  - `third` (4 min), 1 lesson, in the 40-character category (the E09 long-text backstop);
- *  - one active track `first → second → paid`.
+ *  - one active track `first → second → paid`;
+ *  - `warmup` (10 min, 1 lesson, no category, outside the track), which the member COMPLETES in
+ *    `beforeAll`: since 2026-10-22 a member who never started a lesson lands on the catalogue, not
+ *    on Início (the user's rule), so the "fresh" Início below is read by a member whose only progress
+ *    is that unrelated, older course. Its lesson is older than the "Últimas aulas" four, and it is in
+ *    no category.
  *
- * A fresh member: the hero is `first` (comecando), so the shelf is `second`, `third` (não
- * iniciado, "2 aulas" / "1 aula": no ready video, no duration) and `paid` (Exclusivo); the track is
- * "Sugerido" with the dashed hook on `paid`; the rail holds the four newest open lessons (`first`'s
- * and `second`'s, never `third`'s fifth one nor a `paid` one). After lessons of `first` and then
- * `second` are completed, `second` is the hero and `first` opens the shelf "em andamento".
+ * 2026-10-26 (Início rethought on the academy reference; the same server rules, new shapes): the
+ * greeting (with the search and "Populares:", the categories with the most courses, in place of the
+ * category tiles), the tracks row (`courses-home-track`), "Cursos" (`courses-home-shelf`, quick
+ * access to the catalogue), the dashboard (the streak, the resume card `courses-home-hero`, the new
+ * lessons `courses-home-new-lessons`) and "Mais da escola" (`courses-home-areas`: Lives and the Loja
+ * here). The Início is still being redesigned: these cases pin the blocks present, the hero's CTA,
+ * the streak and the server's absences (no locked lesson, no grey, no "Premium"); the cards'
+ * details wait (`TODO(2026-10-26)`). The track's own states are the Trilhas cases'.
+ *
+ * A member with only `warmup` done: the hero is `first` (comecando — the platform's suggestion is
+ * the suggested track's next course, the same one) and no lesson of `paid` ever shows. After
+ * lessons of `first` and then `second` are completed, `second` is the hero ("Continuar aula").
  */
 test.describe('member area: Início sections', () => {
   test.skip(isRemote, 'the member-area fixtures write rows through the local database');
@@ -451,12 +615,13 @@ test.describe('member area: Início sections', () => {
   const run = Date.now().toString(36);
   const prefix = `e2e-mh-${run}`;
   let tenant: CoursesTenant;
-  const ids = { paid: '', first: '', second: '', third: '', short: '', long: '' };
+  const ids = { paid: '', first: '', second: '', third: '', warmup: '', short: '', long: '' };
   const titles = {
     paid: `${prefix} Lábios: técnica e segurança`,
     first: `${prefix} Olhar do zero`,
     second: `${prefix} Pele: protocolo`,
     third: `${prefix} Gestão de consultório`,
+    warmup: `${prefix} Boas-vindas à escola`,
     track: `${prefix} Do zero à prática`,
     short: `${prefix} Harmonização`,
     long: longTitle(`${prefix} Categoria`, 40),
@@ -467,6 +632,8 @@ test.describe('member area: Início sections', () => {
     second: [],
     third: [],
   };
+  /** The product that sells `paid` (the member skin's guards open its page). */
+  let productId = '';
 
   test.beforeAll(async ({ browser: _browser }, testInfo) => {
     tenant = await createCoursesTenant(`e2e-mh-${testInfo.project.name}`, SEED_PASSWORD, ['store']);
@@ -499,7 +666,7 @@ test.describe('member area: Início sections', () => {
     await course('second', 3, 2, ids.short);
     await course('third', 4, 1, ids.long);
 
-    const productId = await createProduct({
+    productId = await createProduct({
       tenantSlug: tenant.slug,
       name: `${prefix} Produto`,
       priceCents: 4900,
@@ -518,6 +685,20 @@ test.describe('member area: Início sections', () => {
         insert into public.course_track_courses (tenant_id, track_id, course_id, position)
         values (${tenant.tenantId}::uuid, ${track.id}::uuid, ${courseId}::uuid, ${position})`;
     }
+
+    // 2026-10-22 (the user's rule): Início is drawn from the member's first lesson on, so the
+    // member finishes `warmup`, an older course outside the track, leaving the four above untouched.
+    ids.warmup = await createCourse({
+      tenantSlug: tenant.slug,
+      title: titles.warmup,
+      status: 'published',
+      modules: 1,
+      lessonsPerModule: 1,
+      minutesAgo: 10,
+    });
+    for (const lesson of await lessonsOf(ids.warmup)) {
+      await completeLessonAs(tenant.memberEmail, lesson.id);
+    }
   });
 
   test.afterAll(async () => {
@@ -529,163 +710,102 @@ test.describe('member area: Início sections', () => {
     await closeCoursesAdmin();
   });
 
-  test('D-436 / D-438 / COURSE-33 / COURSE-34: a fresh member sees the shelf cascade with the padlocked shop window, the suggested track and its locked hook, four new lessons and the categories', async ({
+  test('D-436 / D-438 / COURSE-33 / COURSE-34 (2026-10-26): a member who touched none of these courses sees every block with data — the tracks, "Cursos", the dashboard with the start at `first` and the new lessons, "Mais da escola" — a 1-day streak, and never a locked lesson, a grey cover or "Premium"', async ({
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
-    await expect(hero(page).getByRole('heading', { name: H.hero.title.start })).toBeVisible();
-    await expect(page.getByTestId('courses-home-hero-cta')).toHaveAttribute(
+    // D-437: the hero starts the platform's suggestion, `first`, at its first lesson.
+    const start = page.getByTestId('courses-home-hero-cta');
+    await expect(start).toHaveText(H.hero.cta.start);
+    await expect(start).toHaveAttribute(
       'href',
       `/cursos/${ids.first}/aulas/${lessons.first[0]?.id}`,
     );
-    // UI-D-447: the order, top to bottom (no live in this school, plan 11's slots stay empty).
-    expect(await sectionOrder(page)).toEqual([
-      'courses-home-hero',
-      'courses-home-shelf',
-      'courses-home-track',
-      'courses-home-new-lessons',
-      'courses-home-categories',
-    ]);
+    // UI-D-447: every block with data is drawn; no live in this school, so neither live row.
+    expect(await homeSections(page)).toEqual(
+      expect.arrayContaining([
+        'courses-home-greeting',
+        'courses-home-track',
+        'courses-home-shelf',
+        'courses-home-hero',
+        'courses-home-new-lessons',
+        'courses-home-areas',
+      ]),
+    );
+    await expect(page.getByTestId('courses-home-next-live')).toHaveCount(0);
+    await expect(page.getByTestId('courses-home-live-now')).toHaveCount(0);
+    // D-440: `warmup`'s lesson, completed today.
+    await expectStreak(page, 1);
+    // TODO(2026-10-26): Início redesign in progress — the tracks row's cards ("Sugerido", the first
+    // step), "Cursos" (only the open courses, in progress first, "{done}/{N} aulas", "Ver todos"),
+    // the new lessons (the four newest open ones, in the server's order) and "Mais da escola".
 
-    // "Meus cursos": the server's cascade, never the hero's course, a legend in words per kind.
-    const shelf = page.getByTestId('courses-home-shelf');
-    await expect(shelf.getByRole('heading', { name: H.sections.shelf })).toBeVisible();
-    const rows = shelf.getByTestId('courses-home-shelf-row');
-    await expect(rows).toHaveCount(3);
-    await expect(rows.nth(0)).toHaveAttribute('href', `/cursos/${ids.second}`);
-    await expect(rows.nth(0)).toHaveAttribute('data-kind', 'nao_iniciado');
-    await expect(rows.nth(0).getByTestId('courses-home-shelf-legend')).toHaveText(
-      tm('home.shelf.notStarted', { N: 2, hasDuration: 'false', duration: '' }),
-    );
-    await expect(rows.nth(0)).toHaveAttribute(
-      'aria-label',
-      fill(H.shelf.aria, { course: titles.second, state: H.shelf.stateNotStarted }),
-    );
-    await expect(rows.nth(1)).toHaveAttribute('href', `/cursos/${ids.third}`);
-    await expect(rows.nth(1).getByTestId('courses-home-shelf-legend')).toHaveText(
-      tm('home.shelf.notStarted', { N: 1, hasDuration: 'false', duration: '' }),
-    );
-    // The shop window: the padlock and "Exclusivo", the cover in colour, the course page one tap away.
-    await expect(rows.nth(2)).toHaveAttribute('href', `/cursos/${ids.paid}`);
-    await expect(rows.nth(2)).toHaveAttribute('data-kind', 'bloqueado');
-    await expect(rows.nth(2).getByTestId('courses-home-shelf-legend')).toHaveText(
-      tm('home.shelf.locked', { N: 2 }),
-    );
-    await expect(rows.nth(2)).toHaveAttribute(
-      'aria-label',
-      fill(H.shelf.aria, { course: titles.paid, state: H.shelf.stateLocked }),
-    );
-    await expect(shelf.locator(`a[href="/cursos/${ids.first}"]`)).toHaveCount(0);
-    // PR-5 / D-421: no "Premium" anywhere, no desaturated cover.
-    await expect(page.getByText(/premium/i)).toHaveCount(0);
-    await expect(home(page).locator('[class*="grayscale"]')).toHaveCount(0);
-
-    // "Sua trilha": suggested, the first step, the dashed static hook on the locked last step.
-    const track = page.getByTestId('courses-home-track');
-    await expect(track.getByRole('heading', { name: H.sections.track })).toBeVisible();
-    await expect(track).toHaveAttribute('data-state', 'suggested');
-    await expect(page.getByTestId('courses-home-track-suggested')).toHaveText(H.track.suggested);
-    await expect(page.getByTestId('courses-home-track-card')).toHaveAttribute(
-      'href',
-      `/cursos/${ids.first}`,
-    );
-    await expect(page.getByTestId('courses-home-track-eyebrow')).toHaveText(
-      fill(H.track.step, { n: '1', total: '3' }),
-    );
-    await expect(page.getByTestId('courses-home-track-name')).toHaveText(titles.track);
-    await expect(track.getByRole('progressbar')).toHaveCount(0);
-    await expect(page.getByTestId('courses-home-track-line')).toHaveText(
-      tm('home.track.suggestedLine', { total: 3, course: titles.first }),
-    );
-    const hook = page.getByTestId('courses-home-track-locked');
-    await expect(hook).toHaveText(
-      fill(H.track.lastLocked.replace(/<\/?b>/g, ''), { course: titles.paid }),
-    );
-    await expect(hook.getByRole('link')).toHaveCount(0);
-    await expect(track.getByRole('link', { name: H.seeAllTracks, exact: true })).toHaveAttribute(
-      'href',
-      '/area-membros?aba=trilhas',
-    );
-
-    // "Novas aulas da semana": the four newest open lessons, never a locked lesson's title.
-    const rail = page.getByRole('list', { name: H.sections.newLessons });
-    const items = rail.getByTestId('courses-home-new-lesson');
-    await expect(items).toHaveCount(4);
-    // Newest new-date first (each course's lessons share its stamp), then lesson id asc (EP-14).
-    const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-    const expected = [...[...lessons.first].sort(byId), ...[...lessons.second].sort(byId)];
-    for (const [index, lesson] of expected.entries()) {
-      const item = items.nth(index);
-      await expect(item).toHaveAttribute(
-        'href',
-        `/cursos/${index < 2 ? ids.first : ids.second}/aulas/${lesson.id}`,
-      );
-      await expect(item.getByTestId('courses-home-new-lesson-title')).toHaveText(lesson.title);
-      await expect(item.getByTestId('member-lesson-thumb-badge')).toHaveText(H.newLessons.badge);
-      // No ready video: no chip, the meta is the course alone.
-      await expect(item.getByTestId('member-lesson-thumb-duration')).toHaveCount(0);
-      await expect(item.getByTestId('member-lesson-thumb')).toHaveAttribute('data-state', 'open');
-    }
+    // T-08.6-13 / D-421 / PR-5: no locked lesson's title anywhere on Início, no desaturated cover,
+    // no "Premium".
     for (const locked of lessons.paid) {
       await expect(home(page).getByText(locked.title)).toHaveCount(0);
     }
-    await expect(rail.getByText(lessons.third[0]?.title ?? '-')).toHaveCount(0);
-
-    // "Explore por categoria": the server's lower(name) order, counts pluralised, no icon.
-    const tiles = page
-      .getByRole('list', { name: H.sections.categories })
-      .getByTestId('courses-home-category');
-    await expect(tiles).toHaveCount(2);
-    await expect(tiles.nth(0)).toHaveAttribute(
-      'aria-label',
-      tm('home.categories.aria', { category: titles.long, n: 1 }),
-    );
-    await expect(tiles.nth(0).getByTestId('courses-home-category-count')).toHaveText(
-      tm('home.categories.count', { n: 1 }),
-    );
-    await expect(tiles.nth(1).getByTestId('courses-home-category-name')).toHaveText(titles.short);
-    await expect(tiles.nth(1).getByTestId('courses-home-category-count')).toHaveText(
-      tm('home.categories.count', { n: 2 }),
-    );
-    await expect(tiles.nth(1)).toHaveAttribute(
-      'href',
-      `/area-membros?aba=cursos&categoria=${ids.short}`,
-    );
-    await expect(tiles.locator('svg')).toHaveCount(0);
-
-    // "Ver tudo" on the shelf lands on the catalogue (?aba=cursos).
-    await shelf.getByRole('link', { name: H.seeAllCourses, exact: true }).click();
-    await expect(page).toHaveURL(/\/area-membros\?aba=cursos$/);
-    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
+    await expect(home(page).locator('[class*="grayscale"]')).toHaveCount(0);
+    await expect(page.getByText(/premium/i)).toHaveCount(0);
   });
 
-  test('UI-D-455: a category tile lands on the catalogue filtered by that category', async ({
+  test('UI-D-455 (2026-10-26): a "Populares:" chip lands on the catalogue filtered by its category, which the header’s "Filtros" names; the search under the greeting lands on Cursos with the courses it finds, accents and case aside', async ({
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     await page
-      .getByRole('list', { name: H.sections.categories })
-      .getByRole('link', { name: tm('home.categories.aria', { category: titles.short, n: 2 }) })
+      .getByTestId('courses-home-popular')
+      .getByRole('link', { name: titles.short, exact: true })
       .click();
-    await expect(page).toHaveURL(new RegExp(`/area-membros\\?aba=cursos&categoria=${ids.short}$`));
+    await expect(page).toHaveURL(new RegExp(`/area-membros/cursos\\?categoria=${ids.short}$`));
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
+    await expectScreen(page, 'cursos');
+    // The header's "Filtros" button says the category on screen; its menu marks it current.
+    const filter = page.getByTestId('courses-member-categories-button');
+    await expect(filter).toHaveAccessibleName(
+      fill(M.filters.buttonAria, { current: titles.short }),
+    );
+    await expect(filter).toContainText(M.filters.button);
+    await untilHydrated(filter);
+    await filter.click();
     await expect(
       page
         .getByTestId('courses-member-categories')
         .getByRole('link', { name: titles.short, exact: true }),
     ).toHaveAttribute('aria-current', 'page');
+    await page.keyboard.press('Escape');
     const grid = page.getByTestId('courses-member-grid');
     await expect(grid.locator(`a[href="/cursos/${ids.first}"]`)).toHaveCount(1);
     await expect(grid.locator(`a[href="/cursos/${ids.second}"]`)).toHaveCount(1);
     await expect(grid.locator(`a[href="/cursos/${ids.third}"]`)).toHaveCount(0);
     await expect(grid.locator(`a[href="/cursos/${ids.paid}"]`)).toHaveCount(0);
+
+    // The search (a plain GET to Cursos, `?busca=`): "GESTAO" finds "Gestão de consultório".
+    await page.goto(`${tenant.origin}/area-membros`);
+    await expectInicio(page);
+    const field = page
+      .getByTestId('courses-home-search')
+      .getByRole('searchbox', { name: M.search.label });
+    await field.fill('GESTAO');
+    await field.press('Enter');
+    await expect(page).toHaveURL(/\/area-membros\/cursos\?busca=GESTAO$/);
+    const results = page.getByTestId('courses-member-search-results');
+    await expect(results.getByTestId('courses-member-search-count')).toHaveText(
+      tm('search.results', { n: 1, q: 'GESTAO' }),
+    );
+    await expect(results.getByTestId('courses-member-grid').getByRole('link')).toHaveCount(1);
+    await expect(results.locator(`a[href="/cursos/${ids.third}"]`)).toHaveCount(1);
+    // The header's own field keeps the words searched.
+    await expect(
+      page.getByTestId('courses-member-search').getByRole('searchbox', { name: M.search.label }),
+    ).toHaveValue('GESTAO');
   });
 
-  test('D-436 / D-438: after lessons of two courses are completed, the shelf opens "em andamento" and the track loses "Sugerido"', async ({
+  test('D-436 / D-437: after lessons of two courses are completed, the most recently touched course is the hero, "Continuar aula" at its next lesson', async ({
     page,
   }) => {
     const firstLesson = lessons.first[0]?.id ?? '';
@@ -696,90 +816,96 @@ test.describe('member area: Início sections', () => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
-    // The most recently touched course is the hero; the other started one opens the shelf.
-    await expect(hero(page).getByRole('heading', { name: H.hero.title.resume })).toBeVisible();
-    await expect(page.getByTestId('courses-home-hero-cta')).toHaveAttribute(
+    const resume = page.getByTestId('courses-home-hero-cta');
+    await expect(resume).toHaveText(H.hero.cta.resume);
+    await expect(resume).toHaveAttribute(
       'href',
       `/cursos/${ids.second}/aulas/${lessons.second[1]?.id}`,
     );
-    const rows = page.getByTestId('courses-home-shelf-row');
-    await expect(rows.nth(0)).toHaveAttribute('href', `/cursos/${ids.first}`);
-    await expect(rows.nth(0)).toHaveAttribute('data-kind', 'em_andamento');
-    await expect(rows.nth(0).getByTestId('courses-home-shelf-legend')).toHaveText(
-      fill(H.shelf.progress, { percent: '50', done: '1', total: '2' }),
-    );
-    await expect(
-      rows.nth(0).getByRole('progressbar', { name: fill(M.progress.aria, { percent: '50' }) }),
-    ).toHaveCount(1);
-    await expect(rows.nth(0)).toHaveAttribute(
-      'aria-label',
-      fill(H.shelf.aria, {
-        course: titles.first,
-        state: fill(H.shelf.stateProgress, { percent: '50' }),
-      }),
-    );
-
-    const track = page.getByTestId('courses-home-track');
-    await expect(track).toHaveAttribute('data-state', 'started');
-    await expect(page.getByTestId('courses-home-track-suggested')).toHaveCount(0);
-    await expect(page.getByTestId('courses-home-track-line')).toHaveText(
-      fill(H.track.progress, { percent: '33', course: titles.first }),
-    );
-    await expect(
-      track.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '33' }) }),
-    ).toHaveCount(1);
-
-    // The completed lessons show the shipped done thumb and say so in their name.
-    const done = page
-      .getByRole('list', { name: H.sections.newLessons })
-      .locator(`a[href="/cursos/${ids.first}/aulas/${firstLesson}"]`);
-    await expect(done).toHaveAttribute('data-done', 'true');
-    await expect(done.getByTestId('member-lesson-thumb')).toHaveAttribute('data-state', 'done');
-    await expect(done).toHaveAttribute(
-      'aria-label',
-      fill(H.newLessons.ariaDone, { lesson: lessons.first[0]?.title ?? '', course: titles.first }),
-    );
+    await expectStreak(page, 1);
+    // TODO(2026-10-26): Início redesign in progress — "Cursos" opening with the two courses in
+    // progress (D-436), the track card turning "Sua trilha" at 33% (D-438; pinned on Trilhas), the
+    // numbers (3 of the school's 8 lessons) and the completed lesson's check in the new lessons.
   });
 
-  test('E09 long-text backstop: at 320px a 40-character category name clamps to two lines inside the 112px tile and keeps its count visible', async ({
+  test('E09 long-text backstop (2026-10-26, the "Populares:" chips): at 320px a 40-character category name truncates on one line inside its chip, and the chips scroll inside the search panel — the page never sideways', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    // 2026-10-22: measured at rest ("reduzir movimento": nothing grows or rises in).
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
 
-    const tile = page
-      .getByRole('list', { name: H.sections.categories })
-      .getByRole('link', { name: tm('home.categories.aria', { category: titles.long, n: 1 }) });
-    await tile.scrollIntoViewIfNeeded();
-    const tileBox = await boxOf(tile);
-    expect(Math.round(tileBox.width)).toBe(112);
-
-    const name = tile.getByTestId('courses-home-category-name');
+    const row = page.getByTestId('courses-home-popular');
+    const chip = row.getByRole('link', { name: titles.long, exact: true });
+    await expect(chip).toHaveAttribute('href', `/area-membros/cursos?categoria=${ids.long}`);
+    const name = chip.locator('span');
     await expect(name).toHaveText(titles.long);
-    expect(
-      await name.evaluate((node) => {
-        const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
-        return {
-          lines: Math.round(node.getBoundingClientRect().height / lineHeight),
-          clipped: node.scrollHeight > node.clientHeight + 1,
-        };
-      }),
-    ).toEqual({ lines: 2, clipped: true });
-
-    const count = tile.getByTestId('courses-home-category-count');
-    await expect(count).toBeVisible();
-    const countBox = await boxOf(count);
-    expect(countBox.y).toBeGreaterThanOrEqual(tileBox.y);
-    expect(countBox.y + countBox.height).toBeLessThanOrEqual(tileBox.y + tileBox.height + 0.5);
-    expect(countBox.x).toBeGreaterThanOrEqual(tileBox.x);
-    expect(countBox.x + countBox.width).toBeLessThanOrEqual(tileBox.x + tileBox.width + 0.5);
-    // The rail scrolls inside itself: the page never scrolls sideways.
+    expect(await linesOf(name)).toBe(1);
+    expect(await name.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+    // The row scrolls inside itself: the page never scrolls sideways.
+    expect(await row.evaluate((node) => getComputedStyle(node).overflowX)).toBe('auto');
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+  });
+
+  test('2026-10-26 (the member skin): the member screens, the course page and the shop window wear it once; a sheet host never sits under a transform, a filter or an isolation; "reduzir movimento" stops the glows', async ({
+    page,
+  }) => {
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    for (const path of [
+      '/area-membros',
+      '/area-membros/cursos',
+      '/area-membros/trilhas',
+      '/area-membros/lives',
+      '/area-membros/progresso',
+      `/cursos/${ids.paid}`,
+      '/loja',
+      `/loja/${productId}`,
+    ]) {
+      await page.goto(`${tenant.origin}${path}`);
+      await expect(page.locator('[data-member-skin]'), path).toHaveCount(1);
+      await expect(page.getByTestId('member-skin-backdrop'), path).toHaveCount(1);
+    }
+
+    // Sheets and dialogs render inside the page: the locked course's buy zone (the product sheet)
+    // and the product's buy box (the purchase dialogs) never sit under anything that would trap a
+    // fixed overlay below the TopBar.
+    await page.goto(`${tenant.origin}/cursos/${ids.paid}`);
+    const zone = page.getByTestId('course-locked-zone');
+    await expect(zone).toBeVisible();
+    expect(await zone.evaluate(trappingAncestors)).toEqual([]);
+    await page.goto(`${tenant.origin}/loja/${productId}`);
+    const buybox = page.getByTestId('store-product-buybox');
+    await expect(buybox).toBeVisible();
+    expect(await buybox.evaluate(trappingAncestors)).toEqual([]);
+
+    // "Reduzir movimento": nothing of the skin moves (the fill's own rest is the Trilhas case's).
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(`${tenant.origin}/area-membros/cursos`);
+    expect(
+      await page.evaluate(() => {
+        const blob = document.querySelector('.ms-blob-a');
+        const ambient = document.querySelector('.ms-ambient');
+        return [
+          blob ? getComputedStyle(blob).animationName : 'missing',
+          ambient ? getComputedStyle(ambient, '::before').animationName : 'missing',
+        ];
+      }),
+    ).toEqual(['none', 'none']);
+  });
+
+  test("2026-10-26 (the member skin): the manager's screens never wear it", async ({ page }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    for (const path of ['/cursos', '/cursos/gerenciar', '/loja/gerenciar']) {
+      await page.goto(`${tenant.origin}${path}`);
+      await expect(page.locator('main')).toBeVisible();
+      await expect(page.locator('[data-member-skin]'), path).toHaveCount(0);
+    }
   });
 });
 
@@ -806,6 +932,39 @@ async function insertTrack(
   return track.id;
 }
 
+/**
+ * The member skin (2026-10-26): what, on `element` or an ancestor, would make a `fixed` sheet or
+ * dialog rendered inside it lose the page (a transform, a filter, a backdrop filter, an isolation,
+ * a will-change or a containment) or take a z-index of its own. One line per offending element.
+ */
+function trappingAncestors(element: Element): string[] {
+  const found: string[] = [];
+  for (
+    let node: Element | null = element;
+    node && node !== document.documentElement;
+    node = node.parentElement
+  ) {
+    const style = getComputedStyle(node);
+    const traps = [
+      style.transform !== 'none' ? 'transform' : '',
+      style.translate !== 'none' ? 'translate' : '',
+      style.scale !== 'none' ? 'scale' : '',
+      style.filter !== 'none' ? 'filter' : '',
+      style.backdropFilter && style.backdropFilter !== 'none' ? 'backdrop-filter' : '',
+      style.isolation === 'isolate' ? 'isolation' : '',
+      style.willChange !== 'auto' ? 'will-change' : '',
+      style.contain !== 'none' ? 'contain' : '',
+      style.position !== 'static' && style.zIndex !== 'auto' ? 'z-index' : '',
+    ].filter(Boolean);
+    if (traps.length > 0) {
+      found.push(
+        `${node.tagName.toLowerCase()}[${node.getAttribute('data-testid') ?? ''}] ${traps.join(' ')}`,
+      );
+    }
+  }
+  return found;
+}
+
 /** How many lines a block's text takes, from its box and its computed line height. */
 async function linesOf(locator: Locator): Promise<number> {
   return locator.evaluate((node) => {
@@ -817,25 +976,40 @@ async function linesOf(locator: Locator): Promise<number> {
 const tracksBody = (page: Page): Locator => page.getByTestId('courses-member-tracks');
 const progressBody = (page: Page): Locator => page.getByTestId('courses-member-progress');
 const trackHero = (page: Page): Locator => page.getByTestId('courses-track-hero');
-const trackSteps = (page: Page): Locator => page.getByTestId('courses-track-step');
+/** The courses of a track's page, in path order (2026-10-26: numbered catalogue cards). */
+const trackCourses = (page: Page): Locator => page.getByTestId('courses-track-course');
+/**
+ * A track card's eyebrow, "{Sua trilha|Trilha sugerida|Trilha} · {n} cursos" (2026-10-26: the
+ * member's relation to the track rides in the eyebrow; the "Sua trilha" / "Sugerido" pill left).
+ */
+const trackEyebrow = (kind: 'mine' | 'suggested' | 'other', n: number): string =>
+  tm('home.trackEyebrow', { kind, n });
 
 /**
- * 08.6-10 — Trilhas and Meu progresso, and the area row complete with its five tabs (D-435, D-439,
+ * 08.6-10 — Trilhas and Meu progresso, and the area complete with its five screens (D-435, D-439,
  * D-440, D-442, D-443, UI-D-446, UI-D-456..UI-D-458, COURSE-28, COURSE-35..38), on the phone and
- * on the desktop.
+ * on the desktop. 2026-10-22: the five screens are the "· Membros" menu's pages (no tab row), and
+ * "reduzir movimento" stops every animation of the area.
+ *
+ * 2026-10-26 (Trilhas on the academy reference): two views of the same read. Without `?trilha=` (or
+ * with one naming no track) the LIST — the screen's header and "Todas as trilhas", every track a
+ * cover card (`member-track-card`), the member's own first; with `?trilha=` naming a track, the
+ * track's PAGE — the hero (its title the page's h1, its chips, the CTA to the course to do now), the
+ * progress panel and "Cursos da trilha", the path's courses as numbered catalogue cards with the
+ * server's state. The timeline ("O caminho") and "Outras trilhas" are gone.
  *
  * Its own throwaway tenant per project (`e2e-mt-<project>`, store on). Four published courses:
  *
  *  - `alpha`, 2 lessons with ready videos of 30 and 60 minutes (the hours line: 1,5 h);
  *  - `beta`, 1 lesson, no video ("1 aula", no duration);
- *  - `paid`, 2 lessons, linked to an active product the member lacks: LOCKED (the "Bloqueada" step
- *    still links to its buy path);
+ *  - `paid`, 2 lessons, linked to an active product the member lacks: LOCKED (its card still links
+ *    to its buy path);
  *  - `gamma`, 1 lesson, no video.
  *
  * Two active tracks: "Principal" `alpha → beta → paid` (the newest, so the suggested one) and
- * "Avançado" `gamma` (an hour older, "Outras trilhas"). The school holds 6 live lessons. The cases run
- * in order: the fresh member first, then lesson 1 of `alpha` completed in the Trilhas case and lesson
- * 2 in the Progresso case. The 320px backstops run last, on the phone only.
+ * "Avançado" `gamma` (an hour older). The school holds 6 live lessons. The cases run in order: the
+ * fresh member first, then lesson 1 of `alpha` completed in the Trilhas case and lesson 2 in the
+ * Progresso case. The 320px backstops run last, on the phone only.
  */
 test.describe('member area: Trilhas and Progresso', () => {
   test.skip(isRemote, 'the member-area fixtures write rows through the local database');
@@ -898,41 +1072,45 @@ test.describe('member area: Trilhas and Progresso', () => {
     await closeCoursesAdmin();
   });
 
-  test('EP-03 / D-435 (COURSE-28): the row lists Início, Cursos, Trilhas, Lives, Progresso in that order and each tab opens its own body', async ({
+  test('EP-03 / D-435 (COURSE-28): the "· Membros" menu lists Início, Cursos, Trilhas, Lives, Progresso in that order and each screen opens its own page and body — Início leads this member, who never started a lesson, to the catalogue', async ({
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros`);
-    await expectInicio(page);
-    const tabs = page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab');
-    await expect(tabs).toHaveText([
-      C.hub.tabs.home,
-      C.hub.tabs.courses,
-      C.hub.tabs.tracks,
-      C.hub.tabs.lives,
-      C.hub.tabs.progress,
-    ]);
-    await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute(
+    // 2026-10-22 (the user's rule): no lesson started yet → the catalogue, not Início. The cases
+    // below keep this member fresh until the Trilhas case completes a lesson.
+    await expect(page).toHaveURL(/\/area-membros\/cursos$/);
+    await expectScreen(page, 'cursos');
+    expect(await schoolScreenLabels(page)).toEqual(MENU_LABELS);
+    await expect(await schoolScreenLink(page, S.tracks)).toHaveAttribute(
       'href',
-      '/area-membros?aba=trilhas',
+      '/area-membros/trilhas',
     );
-    await expect(areaTab(page, C.hub.tabs.progress)).toHaveAttribute(
+    await expect(await schoolScreenLink(page, S.progress)).toHaveAttribute(
       'href',
-      '/area-membros?aba=progresso',
+      '/area-membros/progresso',
     );
+    await closeSchoolMenu(page);
 
-    const bodies: [string, string][] = [
-      [C.hub.tabs.courses, 'courses-member-courses'],
-      [C.hub.tabs.tracks, 'courses-member-tracks'],
-      [C.hub.tabs.lives, 'courses-member-lives'],
-      [C.hub.tabs.progress, 'courses-member-progress'],
-      [C.hub.tabs.home, 'courses-member-home'],
+    const bodies = [
+      'courses-member-courses',
+      'courses-member-tracks',
+      'courses-member-lives',
+      'courses-member-progress',
+      'courses-member-home',
     ];
-    for (const [name, testId] of bodies) {
-      await areaTab(page, name).click();
+    const screens: [label: string, url: RegExp, testId: string][] = [
+      [S.tracks, /\/area-membros\/trilhas$/, 'courses-member-tracks'],
+      [S.lives, /\/area-membros\/lives$/, 'courses-member-lives'],
+      [S.progress, /\/area-membros\/progresso$/, 'courses-member-progress'],
+      // Início, from Progresso: for this member it is the catalogue (the URL moves to /cursos).
+      [S.home, /\/area-membros\/cursos$/, 'courses-member-courses'],
+    ];
+    for (const [label, url, testId] of screens) {
+      await goToSchoolScreen(page, label, { url });
       await expect(page.getByTestId(testId)).toBeVisible();
-      await expect(areaTab(page, name)).toHaveAttribute('aria-selected', 'true');
-      for (const [, other] of bodies) {
+      expect(await currentSchoolScreen(page)).toBe(label === S.home ? S.courses : label);
+      for (const other of bodies) {
         if (other !== testId) await expect(page.getByTestId(other)).toHaveCount(0);
       }
     }
@@ -942,8 +1120,9 @@ test.describe('member area: Trilhas and Progresso', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/area-membros?aba=progresso`);
+    await page.goto(`${tenant.origin}/area-membros/progresso`);
     await expect(progressBody(page)).toBeVisible();
+    await expectScreen(page, 'progresso');
     await expect(page.getByTestId('progress-ring-label')).toHaveText(
       fill(M.myProgress.ring.label, { percent: '0' }),
     );
@@ -964,117 +1143,217 @@ test.describe('member area: Trilhas and Progresso', () => {
     await expect(progressBody(page).getByText(/certificad|conquista|em breve/i)).toHaveCount(0);
   });
 
-  test('D-439 / D-438 (COURSE-35): the suggested track, its path with every state in words, a locked step that still links to its buy path, "Outras trilhas" by ?trilha=, an unknown ?trilha=, then "Sua trilha" once started', async ({
+  test('D-439 / D-438 (COURSE-35; 2026-10-26, a list and a page per track): the list leads with the suggested track; its page says each course’s state on a numbered card, a locked one still linking to its buy path; an unknown ?trilha= is the list; once started the track is "Sua trilha" with its share', async ({
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/area-membros?aba=trilhas`);
+    await page.goto(`${tenant.origin}/area-membros/trilhas`);
     await expect(tracksBody(page)).toBeVisible();
-    await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute('aria-selected', 'true');
+    await expectScreen(page, 'trilhas');
+    expect(await currentSchoolScreen(page)).toBe(S.tracks);
 
-    // The hero: suggested, nothing started — "Sugerido", "Começar trilha", no bar.
-    const hero = trackHero(page);
+    // The list ("Todas as trilhas"): the member's own track first — "Trilha sugerida" while
+    // nothing is started, the first step named, no share — then the other one, not started.
+    await expect(tracksBody(page)).toHaveAttribute('data-view', 'list');
+    const list = page.getByTestId('courses-track-list');
+    await expect(
+      list.getByRole('heading', { level: 2, name: M.tracks.list.title, exact: true }),
+    ).toBeVisible();
+    const cards = list.getByTestId('member-track-card');
+    await expect(cards.getByTestId('member-track-card-title')).toHaveText([
+      titles.principal,
+      titles.advanced,
+    ]);
+    const principal = cards.nth(0);
+    await expect(principal).toHaveAttribute(
+      'href',
+      `/area-membros/trilhas?trilha=${ids.principal}`,
+    );
+    await expect(principal).toContainText(trackEyebrow('suggested', 3));
+    // Where the member stands: the card's line (drawn on hover from `lg`) and its accessible name.
+    const suggestedLine = tm('home.track.suggestedLine', { total: 3, course: titles.alpha });
+    await expect(principal.getByTestId('member-track-card-line')).toHaveText(suggestedLine);
+    await expect(principal).toHaveAttribute(
+      'aria-label',
+      fill(H.shelf.aria, { course: titles.principal, state: suggestedLine }),
+    );
+    await expect(principal.getByTestId('member-track-card-percent')).toHaveCount(0);
+    await expect(list.locator('li[data-featured]')).toHaveCount(1);
+    const advanced = cards.nth(1);
+    await expect(advanced).toHaveAttribute('href', `/area-membros/trilhas?trilha=${ids.advanced}`);
+    await expect(advanced).toContainText(trackEyebrow('other', 1));
+    await expect(advanced.getByTestId('member-track-card-line')).toHaveText(
+      M.tracks.others.notStarted,
+    );
+    await expect(page.getByText(/premium/i)).toHaveCount(0);
+
+    // A card opens the track's page: the hero (its title the page's one h1), the chips, the CTA to
+    // the course to do now; the way back to the list.
+    await principal.click();
+    await expect(page).toHaveURL(new RegExp(`/area-membros/trilhas\\?trilha=${ids.principal}$`));
+    await expect(tracksBody(page)).toHaveAttribute('data-view', 'track');
+    await expect(tracksBody(page)).toHaveAttribute('data-track', ids.principal);
+    await expect(frame(page)).toHaveAttribute('data-screen', 'trilhas');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText([titles.principal]);
     await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.principal);
     await expect(page.getByTestId('courses-track-hero-pill')).toHaveText(M.tracks.suggested);
-    await expect(page.getByTestId('courses-track-hero-eyebrow')).toHaveText(
-      fill(M.tracks.step, { n: '1', total: '3' }),
-    );
-    await expect(hero.getByRole('progressbar')).toHaveCount(0);
-    await expect(page.getByTestId('courses-track-hero-line')).toHaveText(
-      tm('tracks.progress', { coursesDone: 0, total: 3, percent: 0 }),
-    );
+    await expect(trackHero(page)).toContainText(fill(M.tracks.step, { n: '1', total: '3' }));
+    const chips = page.getByTestId('courses-track-hero-chips');
+    await expect(chips).toContainText(tm('tracks.detail.courses', { n: 3 }));
+    await expect(chips).toContainText(tm('tracks.detail.lessons', { N: 5 }));
+    await expect(chips).toContainText('1 h 30 min');
     const cta = page.getByTestId('courses-track-hero-cta');
+    await expect(cta).toHaveAttribute('data-cta', 'start');
     await expect(cta).toHaveText(M.tracks.cta.start);
     await expect(cta).toHaveAttribute('href', `/cursos/${alpha.id}`);
+    // The way back to the list, in the hero on every screen.
+    const back = page.getByTestId('courses-track-back');
+    await expect(back).toBeVisible();
+    await expect(back).toHaveAttribute('href', '/area-membros/trilhas');
+    await expect(back).toHaveText(M.tracks.detail.back);
 
-    // "O caminho": one step per published course, the state in the eyebrow, every card a link.
+    // The progress panel: no course complete, the bar at 0%, the helper.
+    const progress = page.getByTestId('courses-track-progress');
+    await expect(progress).toContainText(tm('tracks.detail.progress', { done: 0, total: 3 }));
     await expect(
-      page.getByRole('list', { name: fill(M.tracks.path.aria, { track: titles.principal }) }),
+      progress.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '0' }) }),
+    ).toHaveAttribute('aria-valuenow', '0');
+    await expect(progress).toContainText(M.tracks.detail.helper);
+
+    // "Cursos da trilha": one numbered card per published course, in path order, each the
+    // server's state (A-UI-11) and the step's only link; the course to do now is outlined.
+    const section = page.getByTestId('courses-track-courses');
+    await expect(
+      section.getByRole('heading', { level: 2, name: M.tracks.detail.coursesTitle, exact: true }),
     ).toBeVisible();
-    const steps = trackSteps(page);
+    const steps = trackCourses(page);
     await expect(steps).toHaveCount(3);
-    await expect(steps.getByTestId('courses-track-step-eyebrow')).toHaveText([
-      fill(M.tracks.path.eyebrow, { nn: '01', state: M.tracks.path.stateNext }),
-      fill(M.tracks.path.eyebrow, { nn: '02', state: M.tracks.path.stateNext }),
-      fill(M.tracks.path.eyebrow, { nn: '03', state: M.tracks.path.stateLocked }),
-    ]);
-    await expect(steps.nth(0).getByTestId('courses-track-step-meta')).toHaveText(
-      tm('tracks.path.meta', { N: 2, hasDuration: 'true', duration: '1 h 30 min' }),
+    expect(
+      await steps.evaluateAll((items) => items.map((item) => item.getAttribute('data-state'))),
+    ).toEqual(['a_seguir', 'a_seguir', 'bloqueada']);
+    await expect(steps.nth(0)).toHaveAttribute('data-current', 'true');
+    await expect(section.locator('[data-current]')).toHaveCount(1);
+    const card = (index: number) => steps.nth(index).getByTestId('courses-track-course-card');
+    for (let index = 0; index < 3; index += 1) {
+      await expect(steps.nth(index).getByRole('link')).toHaveCount(1);
+      await expect(card(index).getByTestId('course-card-tags')).toHaveText(`0${index + 1}`);
+    }
+    await expect(card(0)).toHaveAttribute('href', `/cursos/${alpha.id}`);
+    await expect(card(0)).toHaveAttribute(
+      'aria-label',
+      tm('tracks.path.stepAria', { nn: '01', course: titles.alpha, state: 'a_seguir' }),
     );
-    await expect(steps.nth(1).getByTestId('courses-track-step-meta')).toHaveText(
-      tm('tracks.path.meta', { N: 1, hasDuration: 'false', duration: '' }),
+    await expect(card(0).getByTestId('course-card-meta')).toHaveText(
+      tm('tracks.detail.cardLine', { done: 0, N: 2 }),
     );
-    await expect(steps.nth(2).getByTestId('courses-track-step-meta')).toHaveText(
-      tm('tracks.path.metaLocked', { N: 2 }),
+    await expect(card(0).getByTestId('course-card-duration')).toHaveText('1 h 30 min');
+    await expect(card(1).getByTestId('course-card-meta')).toHaveText(
+      tm('tracks.detail.cardLine', { done: 0, N: 1 }),
     );
-    await expect(steps.nth(2)).toHaveAttribute('data-state', 'bloqueada');
-    await expect(steps.nth(2)).toHaveAttribute(
+    await expect(card(1).getByTestId('course-card-duration')).toHaveCount(0);
+    // The locked course: the padlock disc over its colour, still a link to its buy path (D-421).
+    await expect(card(2)).toHaveAttribute('data-locked', 'true');
+    await expect(card(2).getByTestId('course-card-lock')).toBeVisible();
+    await expect(card(2)).toHaveAttribute('href', `/cursos/${ids.paid}`);
+    await expect(card(2)).toHaveAttribute(
       'aria-label',
       tm('tracks.path.stepAria', { nn: '03', course: titles.paid, state: 'bloqueada' }),
     );
-    await expect(steps.getByTestId('courses-track-step-link')).toHaveCount(3);
-    await expect(steps.nth(2).getByTestId('courses-track-step-link')).toHaveAttribute(
-      'href',
-      `/cursos/${ids.paid}`,
-    );
-    // The last step has no connector; no pulsing ring, no mini button (UI-D-463).
-    await expect(page.getByTestId('courses-track-step-connector')).toHaveCount(2);
-    await expect(tracksBody(page).locator('[class*="animate-"]')).toHaveCount(0);
     await expect(page.getByText(/premium/i)).toHaveCount(0);
 
-    // "Outras trilhas": the other track, not started, a link that swaps the hero.
-    const other = page.getByTestId('courses-track-other');
-    await expect(other).toHaveCount(1);
-    await expect(other).toContainText(titles.advanced);
-    await expect(other).toContainText(M.tracks.others.notStarted);
-    await expect(other).toHaveAttribute('href', `/area-membros?aba=trilhas&trilha=${ids.advanced}`);
-    await other.click();
-    await expect(page).toHaveURL(new RegExp(`/area-membros\\?aba=trilhas&trilha=${ids.advanced}$`));
+    // The other track's page: no pill, its own first course.
+    await page.goto(`${tenant.origin}/area-membros/trilhas?trilha=${ids.advanced}`);
     await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.advanced);
     await expect(page.getByTestId('courses-track-hero-pill')).toHaveCount(0);
     await expect(page.getByTestId('courses-track-hero-cta')).toHaveAttribute(
       'href',
       `/cursos/${ids.gamma}`,
     );
-    await expect(page.getByTestId('courses-track-other')).toContainText(titles.principal);
 
-    // An unknown ?trilha= reads as the default track (T-08.6-20).
-    await page.goto(`${tenant.origin}/area-membros?aba=trilhas&trilha=xyz`);
-    await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.principal);
+    // An unknown ?trilha= is the list (T-08.6-20: never used to build a link or a request).
+    await page.goto(`${tenant.origin}/area-membros/trilhas?trilha=xyz`);
+    await expect(tracksBody(page)).toHaveAttribute('data-view', 'list');
+    await expectScreen(page, 'trilhas');
 
-    // The locked step lands on the course page's buy section (D-421, D-424).
-    await trackSteps(page).nth(2).getByTestId('courses-track-step-link').click();
+    // The locked course's card lands on the course page's buy section (D-421, D-424).
+    await page.goto(`${tenant.origin}/area-membros/trilhas?trilha=${ids.principal}`);
+    await trackCourses(page).nth(2).getByTestId('courses-track-course-card').click();
     await expect(page).toHaveURL(new RegExp(`/cursos/${ids.paid}$`));
     await expect(page.getByRole('link', { name: M.locked.buy, exact: true })).toBeVisible();
 
     // Started: one lesson of the first course completed.
     await completeLessonAs(tenant.memberEmail, alpha.lessons[0] ?? '');
-    await page.goto(`${tenant.origin}/area-membros?aba=trilhas`);
-    await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.principal);
+    await page.goto(`${tenant.origin}/area-membros/trilhas`);
+    // The list: "Sua trilha", where the member stands and the lesson-weighted share (1 of 5: 20%).
+    const mine = page.getByTestId('member-track-card').first();
+    await expect(mine.getByTestId('member-track-card-title')).toHaveText(titles.principal);
+    await expect(mine).toContainText(trackEyebrow('mine', 3));
+    const progressLine = tm('home.track.progress', { percent: 20, course: titles.alpha });
+    await expect(mine.getByTestId('member-track-card-line')).toHaveText(progressLine);
+    await expect(mine).toHaveAttribute(
+      'aria-label',
+      fill(H.shelf.aria, { course: titles.principal, state: progressLine }),
+    );
+    await expect(mine.getByTestId('member-track-card-percent')).toHaveText('20%');
+
+    // Its page: "Continuar trilha" to the course in progress, the panel at 20% (no course complete
+    // yet), and the first course in progress at 50% on its card.
+    await page.goto(`${tenant.origin}/area-membros/trilhas?trilha=${ids.principal}`);
     await expect(page.getByTestId('courses-track-hero-pill')).toHaveText(M.tracks.mine);
-    await expect(page.getByTestId('courses-track-hero-cta')).toHaveText(M.tracks.cta.continue);
-    await expect(page.getByTestId('courses-track-hero-cta')).toHaveAttribute(
-      'href',
-      `/cursos/${alpha.id}`,
-    );
-    // Lesson-weighted over the path's 5 live lessons: 1 done → 20%.
+    const resume = page.getByTestId('courses-track-hero-cta');
+    await expect(resume).toHaveAttribute('data-cta', 'continue');
+    await expect(resume).toHaveText(M.tracks.cta.continue);
+    await expect(resume).toHaveAttribute('href', `/cursos/${alpha.id}`);
+    const panel = page.getByTestId('courses-track-progress');
     await expect(
-      trackHero(page).getByRole('progressbar', { name: fill(M.progress.aria, { percent: '20' }) }),
+      panel.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '20' }) }),
     ).toBeVisible();
-    await expect(page.getByTestId('courses-track-hero-line')).toHaveText(
-      tm('tracks.progress', { coursesDone: 0, total: 3, percent: 20 }),
-    );
-    const first = trackSteps(page).nth(0);
+    await expect(panel).toContainText(tm('tracks.detail.progress', { done: 0, total: 3 }));
+    const first = trackCourses(page).nth(0);
     await expect(first).toHaveAttribute('data-state', 'em_andamento');
-    await expect(first.getByTestId('courses-track-step-eyebrow')).toHaveText(
-      fill(M.tracks.path.eyebrow, { nn: '01', state: M.tracks.path.stateInProgress }),
-    );
+    await expect(first).toHaveAttribute('data-current', 'true');
+    const firstCard = first.getByTestId('courses-track-course-card');
+    await expect(firstCard.getByTestId('course-card-percent')).toHaveText('50%');
     await expect(
-      first.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '50' }) }),
-    ).toBeVisible();
-    await expect(first).toContainText(
-      fill(M.tracks.path.progress, { percent: '50', done: '1', total: '2' }),
+      firstCard.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '50' }) }),
+    ).toHaveCount(1);
+    await expect(firstCard.getByTestId('course-card-meta')).toHaveText(
+      tm('tracks.detail.cardLine', { done: 1, N: 2 }),
     );
+    await expect(firstCard).toHaveAttribute(
+      'aria-label',
+      tm('tracks.path.stepAria', { nn: '01', course: titles.alpha, state: 'em_andamento' }),
+    );
+  });
+
+  test('2026-10-26 (the motion): on a track’s page the bars fill in, the body swaps in and the course cards rise into place; under "reduzir movimento" nothing animates, every value at rest', async ({
+    page,
+  }) => {
+    // The state the previous case left: lesson 1 of `alpha` done (the path at 20%, alpha at 50%).
+    const animationOf = (locator: Locator) =>
+      locator.evaluate((node) => getComputedStyle(node).animationName);
+    const panelFill = (page: Page) =>
+      page.getByTestId('courses-track-progress').getByTestId('progress-bar-fill');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/area-membros/trilhas?trilha=${ids.principal}`);
+    await expect(trackCourses(page).nth(0)).toHaveAttribute('data-state', 'em_andamento');
+    expect(await animationOf(panelFill(page))).toBe('progress-fill');
+    expect(await animationOf(tracksBody(page))).toBe('swap-in');
+    // The member skin's rise: each card a beat after the one before (`ms-rise`).
+    expect(await animationOf(trackCourses(page).nth(1))).toBe('ms-rise');
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.reload();
+    await expect(trackCourses(page).nth(0)).toHaveAttribute('data-state', 'em_andamento');
+    expect(await animationOf(panelFill(page))).toBe('none');
+    expect(await animationOf(tracksBody(page))).toBe('none');
+    expect(await animationOf(trackCourses(page).nth(1))).toBe('none');
+    // At rest, the bar still says its value: 20% of the path's live lessons.
+    await expect(
+      page
+        .getByTestId('courses-track-progress')
+        .getByRole('progressbar', { name: fill(M.progress.aria, { percent: '20' }) }),
+    ).toBeVisible();
   });
 
   test('D-440 / D-442 / D-443 (COURSE-36..38): after two completions the ring, the four numbers and the course row are the server’s', async ({
@@ -1082,7 +1361,7 @@ test.describe('member area: Trilhas and Progresso', () => {
   }) => {
     await completeLessonAs(tenant.memberEmail, alpha.lessons[1] ?? '');
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/area-membros?aba=progresso`);
+    await page.goto(`${tenant.origin}/area-membros/progresso`);
     await expect(progressBody(page)).toBeVisible();
 
     await expect(page.getByTestId('progress-ring-label')).toHaveText(
@@ -1127,34 +1406,41 @@ test.describe('member area: Trilhas and Progresso', () => {
     await expect(progressBody(page).getByText(/certificad|conquista|em breve/i)).toHaveCount(0);
   });
 
-  test('E01 / E10 / E11 backstops at 320px: the five-item row fits at 390 and scrolls at 320 with Progresso whole; long track and step titles keep the disc and eyebrow aligned; every number stays on one line', async ({
+  test('E01 / E10 / E11 backstops at 320px: the "· Membros" menu lists the five screens whole inside the screen with Progresso current; a long track title wraps whole in its page’s hero and a long course title clamps in its numbered card; every number stays on one line', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstops are phone checks');
+    // 2026-10-22: measured at rest ("reduzir movimento": no bar grows in, no list rises in).
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    const row = page.getByRole('tablist', { name: C.hub.tabs.label });
 
-    // E01 overflow: at 390px the compact row fits on one line.
-    await page.setViewportSize({ width: 390, height: 800 });
-    await page.goto(`${tenant.origin}/area-membros`);
-    await expectInicio(page);
-    expect(await row.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
-
-    // At 320px it scrolls (hidden scrollbar) and the active Progresso is fully visible.
+    // E01 overflow (2026-10-22, the area menu replaced the tab row): at 320px the TopBar keeps the
+    // tenant, "· Membros" and the 44px menu button; the open panel sits inside the screen, every
+    // screen's label whole, Progresso marked current.
     await page.setViewportSize({ width: 320, height: 800 });
-    await page.goto(`${tenant.origin}/area-membros?aba=progresso`);
+    await page.goto(`${tenant.origin}/area-membros/progresso`);
     await expect(progressBody(page)).toBeVisible();
-    expect(await row.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
-    const active = areaTab(page, C.hub.tabs.progress);
-    await expect(active).toHaveAttribute('aria-selected', 'true');
-    await expect(async () => {
-      const rowBox = await boxOf(row);
-      const tabBox = await boxOf(active);
-      expect(tabBox.x).toBeGreaterThanOrEqual(rowBox.x - 0.5);
-      expect(tabBox.x + tabBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 0.5);
-    }).toPass({ timeout: 5_000 });
+    await expect(schoolAreaLabel(page)).toBeVisible();
+    const menuButton = page.getByRole('button', { name: M.area.menu, exact: true });
+    const buttonBox = await boxOf(menuButton);
+    expect(buttonBox.width).toBeGreaterThanOrEqual(44);
+    expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(320);
+    const list = await schoolScreenList(page);
+    const links = list.getByRole('link');
+    await expect(links).toHaveText(MENU_LABELS);
+    const panelBox = await boxOf(page.locator('[data-area-menu-panel]'));
+    expect(panelBox.x).toBeGreaterThanOrEqual(0);
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(320);
+    for (let index = 0; index < MENU_LABELS.length; index += 1) {
+      const link = links.nth(index);
+      expect(await link.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+      expect((await boxOf(link)).height).toBeGreaterThanOrEqual(44);
+    }
+    await expect(list.locator('a[aria-current="page"]')).toHaveText(S.progress);
+    await closeSchoolMenu(page);
 
-    // E11 overflow: each StatBlock value on one line inside its cell; labels truncate.
+    // E11 overflow: each StatBlock value on one line inside its cell; the labels (2026-10-26: a
+    // small uppercase overline) clamp to two lines at most.
     const blocks = page.getByTestId('stat-block');
     await expect(blocks).toHaveCount(4);
     for (let index = 0; index < 4; index += 1) {
@@ -1165,17 +1451,19 @@ test.describe('member area: Trilhas and Progresso', () => {
       const blockBox = await boxOf(block);
       const valueBox = await boxOf(value);
       expect(valueBox.x + valueBox.width).toBeLessThanOrEqual(blockBox.x + blockBox.width + 0.5);
+      const label = block.getByTestId('stat-block-label');
       expect(
-        await block
-          .getByTestId('stat-block-label')
-          .evaluate((node) => getComputedStyle(node).textOverflow),
-      ).toBe('ellipsis');
+        await label.evaluate((node) =>
+          getComputedStyle(node).getPropertyValue('-webkit-line-clamp'),
+        ),
+      ).toBe('2');
+      expect(await linesOf(label)).toBeLessThanOrEqual(2);
     }
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
 
-    // E10 long-text: a 120-character track title and a 120-character step course title.
+    // E10 long-text: a 120-character track title and a 120-character course title in its path.
     const trackTitle = longTitle(`${prefix} Trilha`, 120);
     const courseTitle = longTitle(`${prefix} Curso`, 120);
     expect([trackTitle.length, courseTitle.length]).toEqual([120, 120]);
@@ -1188,31 +1476,46 @@ test.describe('member area: Trilhas and Progresso', () => {
       minutesAgo: 5,
     });
     const longTrack = await insertTrack(tenant, trackTitle, [longCourse, ids.beta], 2);
-    await page.goto(`${tenant.origin}/area-membros?aba=trilhas&trilha=${longTrack}`);
+    await page.goto(`${tenant.origin}/area-membros/trilhas?trilha=${longTrack}`);
     // Visible first: the streamed body sits in a hidden boundary until React swaps it in.
     const heroTitle = page.getByTestId('courses-track-hero-title');
     await expect(heroTitle).toBeVisible();
     await expect(heroTitle).toHaveText(trackTitle);
-    expect(await linesOf(heroTitle)).toBe(2);
+    // 2026-10-26: the track's page title is the hero's h1: it wraps whole (never cut) and the hero
+    // grows to hold it, inside the screen.
+    expect(await linesOf(heroTitle)).toBeGreaterThanOrEqual(2);
+    expect(await heroTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(
+      true,
+    );
     const heroBox = await boxOf(trackHero(page));
-    const eyebrowBox = await boxOf(page.getByTestId('courses-track-hero-eyebrow'));
-    expect(eyebrowBox.y).toBeGreaterThanOrEqual(heroBox.y);
-    expect(eyebrowBox.x + eyebrowBox.width).toBeLessThanOrEqual(heroBox.x + heroBox.width + 0.5);
+    const titleBox = await boxOf(heroTitle);
+    expect(titleBox.y).toBeGreaterThanOrEqual(heroBox.y - 0.5);
+    expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(heroBox.y + heroBox.height + 0.5);
+    expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(320 + 0.5);
 
-    const step = trackSteps(page).nth(0);
-    await expect(step.getByTestId('courses-track-step-title')).toHaveText(courseTitle);
-    expect(await linesOf(step.getByTestId('courses-track-step-title'))).toBe(2);
-    const disc = await boxOf(step.getByTestId('courses-track-step-disc'));
-    expect(Math.round(disc.width)).toBe(28);
-    const stepEyebrow = await boxOf(step.getByTestId('courses-track-step-eyebrow'));
-    // The disc and the eyebrow share a row band.
-    expect(stepEyebrow.y).toBeLessThan(disc.y + disc.height);
-    expect(stepEyebrow.y + stepEyebrow.height).toBeGreaterThan(disc.y);
-    // The meta sits under the title, inside the card, on screen.
-    const link = await boxOf(step.getByTestId('courses-track-step-link'));
-    const meta = await boxOf(step.getByTestId('courses-track-step-meta'));
-    expect(meta.y + meta.height).toBeLessThanOrEqual(link.y + link.height + 0.5);
-    expect(link.x + link.width).toBeLessThanOrEqual(320);
+    // The long course's numbered card: the title clamps to two lines; the "01" chip and the meta
+    // stay inside the card, the card inside the screen.
+    const card = trackCourses(page).nth(0).getByTestId('courses-track-course-card');
+    await card.scrollIntoViewIfNeeded();
+    const cardTitle = card.getByTestId('course-card-title');
+    await expect(cardTitle).toHaveText(courseTitle);
+    expect(await linesOf(cardTitle)).toBe(2);
+    expect(await cardTitle.evaluate((node) => node.scrollHeight > node.clientHeight + 1)).toBe(
+      true,
+    );
+    const cardBox = await boxOf(card);
+    expect(cardBox.x).toBeGreaterThanOrEqual(0);
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(320);
+    for (const part of [
+      card.getByTestId('course-card-tags'),
+      card.getByTestId('course-card-meta'),
+    ]) {
+      const box = await boxOf(part);
+      expect(box.x).toBeGreaterThanOrEqual(cardBox.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 0.5);
+      expect(box.y + box.height).toBeLessThanOrEqual(cardBox.y + cardBox.height + 0.5);
+    }
+    await expect(card.getByTestId('course-card-tags')).toHaveText('01');
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -1225,11 +1528,13 @@ test.describe('member area: Trilhas and Progresso', () => {
  *
  * Its own throwaway tenant per project (`e2e-ml-<project>`, store on): one published course (the
  * hero) and one open live two days ahead. The cases run in order and add what they need: the
- * member's toggle on Início and on the live page, the admin's preview (the banner between the row
- * and the body, the disabled toggle, no write), a product-linked live one day ahead (the nearest:
- * the buy path), a live happening now (the neutral row), the two 320px backstops, and last the
- * member turned `support_tenant` (no banner, a working toggle) once the locked and live-now lives
- * are gone. `afterAll` drops the reminder jobs the opt-ins armed, then the tenant.
+ * member's toggle on Início and on the live page, the admin's preview (the banner first in the
+ * frame, before the body, the disabled toggle, no write), a product-linked live one day ahead (the
+ * nearest: the buy path), a live happening now (the outlined row with the red "Ao vivo" chip), the
+ * two 320px backstops, and last the member turned `support_tenant` (no banner, a working toggle) once
+ * the locked and live-now lives are gone. `afterAll` drops the reminder jobs the opt-ins armed, then
+ * the tenant. 2026-10-22: the member has finished the course's only lesson in `beforeAll` (Início is
+ * drawn from the first lesson on; a member who never started one lands on the catalogue).
  */
 test.describe('member area: the live and its reminder', () => {
   test.skip(isRemote, 'the member-area fixtures write rows through the local database');
@@ -1273,12 +1578,16 @@ test.describe('member area: the live and its reminder', () => {
   test.beforeAll(async ({ browser: _browser }, testInfo) => {
     tenant = await createCoursesTenant(`e2e-ml-${testInfo.project.name}`, SEED_PASSWORD, ['store']);
     timeZone = await tenantTimezone(tenant.slug);
-    await seedCourse(tenant, {
+    const seeded = await seedCourse(tenant, {
       title: `${prefix} Olhar do zero`,
       moduleTitle: 'Técnica',
       status: 'published',
       lessons: [{ title: `${prefix} Anatomia`, seconds: 552 }],
     });
+    // 2026-10-22 (the user's rule): a member who never started a lesson lands on the catalogue, not
+    // on Início, so the member finishes the course's only lesson — the hero reads "Você está em dia"
+    // and the live slots these cases read stay exactly the overview's.
+    await completeLessonAs(tenant.memberEmail, seeded.lessons[0] ?? '');
     ids.open = await createLive({
       tenantSlug: tenant.slug,
       title: titles.open,
@@ -1364,35 +1673,30 @@ test.describe('member area: the live and its reminder', () => {
     await expect(toggle(page)).toHaveText(R.off);
   });
 
-  test("D-422 / UI-D-459 (COURSE-50, EP-68, EP-69): the admin's ?ver=aluno shows the banner after the row and before the body, the toggle disabled with its hint, and a tap sends no write — on Início and on the live page", async ({
+  test("D-422 / UI-D-459 (COURSE-50, EP-68, EP-69): the admin's preview (2026-10-23: with or without ?ver=aluno) has NO banner, the body first in the frame, the toggle disabled with its hint, and a tap sends no write — on Início and on the live page", async ({
     page,
   }) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    // 2026-10-23: the manager browses the member area as a member sees it, in preview, whether the
+    // URL says ?ver=aluno or not (the tab "Membros" opens it bare): the same disabled toggle.
+    await page.goto(`${tenant.origin}/area-membros`);
+    await expectInicio(page);
+    await expect(toggle(page)).toBeDisabled();
+    await expect(page.getByTestId('reminder-helper')).toHaveText(R.previewHint);
+
     await page.goto(`${tenant.origin}/area-membros?ver=aluno`);
     await expectInicio(page);
 
-    const banner = page.getByTestId('preview-banner');
-    await expect(banner).toContainText(M.preview.title);
-    await expect(banner).toContainText(M.preview.body);
-    await expect(page.getByTestId('preview-banner-back')).toHaveAttribute('href', '/cursos');
-
-    // EP-69: the area row, then the banner, then the body — in DOM order.
-    const row = page
-      .getByTestId('courses-member-catalogue')
-      .getByRole('tablist', { name: C.hub.tabs.label });
-    const order = await page.evaluate(
-      ([first, second, third]) => {
-        const follows = (a: Node | null, b: Node | null) =>
-          Boolean(a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-        return [follows(first, second), follows(second, third)];
-      },
-      [
-        await row.elementHandle(),
-        await banner.elementHandle(),
-        await home(page).elementHandle(),
-      ] as const,
-    );
-    expect(order).toEqual([true, true]);
+    // EP-69 (2026-10-23: the banner is gone, the way back is the menu's Gerenciar): the frame's
+    // FIRST child holds the body.
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    await expect(home(page)).toBeVisible();
+    expect(
+      await frame(page).evaluate(
+        (root) =>
+          root.firstElementChild?.querySelector('[data-testid="courses-member-home"]') != null,
+      ),
+    ).toBe(true);
 
     // EP-68: disabled, off, the hint in place of the helper; a tap sends nothing.
     await expect(toggle(page)).toBeDisabled();
@@ -1467,7 +1771,7 @@ test.describe('member area: the live and its reminder', () => {
     await expect(page.getByTestId('reminder-helper')).toHaveCount(0);
   });
 
-  test('UI-D-452 (COURSE-32): a live happening now is the neutral "Ao vivo agora" row right under the hero — no join link, no toggle, no "Próxima live"', async ({
+  test('UI-D-452 (COURSE-32): a live happening now is the "Ao vivo agora" row near the top of Início (2026-10-26: right under the greeting) — the red chip with its breathing dot, no join link, no toggle, no "Próxima live"', async ({
     page,
   }) => {
     ids.now = await createLive({
@@ -1489,6 +1793,8 @@ test.describe('member area: the live and its reminder', () => {
     await expect(row).toBeVisible();
     await expect(row).toHaveAttribute('href', `/cursos/lives/${ids.now}`);
     await expect(row).toContainText(M.lives.liveNow);
+    // 2026-10-22: the prototype's red "Ao vivo" chip, its white dot breathing (CSS motion).
+    await expect(row.getByTestId('live-status-dot')).toHaveClass(/animate-live-dot/);
     await expect(page.getByTestId('courses-home-live-now-title')).toHaveText(titles.now);
     await expect(page.getByTestId('courses-home-live-now-meta')).toHaveText(
       fill(HL.startedAt, { time, duration: '60' }),
@@ -1498,17 +1804,9 @@ test.describe('member area: the live and its reminder', () => {
     await expect(home(page).locator('a[href^="http"]')).toHaveCount(0);
     await expect(page.getByTestId('live-join')).toHaveCount(0);
 
-    // Slot 3: right after the hero.
-    const heroFollowed = await page.evaluate(
-      ([heroNode, rowNode]) =>
-        Boolean(
-          heroNode &&
-            rowNode &&
-            heroNode.compareDocumentPosition(rowNode) & Node.DOCUMENT_POSITION_FOLLOWING,
-        ),
-      [await hero(page).elementHandle(), await row.elementHandle()] as const,
-    );
-    expect(heroFollowed).toBe(true);
+    // 2026-10-26 (the rethought Início): the row comes after the greeting.
+    // TODO(2026-10-26): Início redesign in progress — pin its exact slot once the blocks settle.
+    expect(await precedes(page.getByTestId('courses-home-greeting'), row)).toBe(true);
   });
 
   test('E06 long-text backstop: at 320px a 120-character live title over the 16:10 cover and the long when-line keep the pills readable and the title inside two lines', async ({
@@ -1523,6 +1821,8 @@ test.describe('member area: the live and its reminder', () => {
        where tenant_id = ${tenant.tenantId}::uuid and id <> ${ids.open}::uuid`;
     await sql()`update public.course_lives set title = ${long} where id = ${ids.open}::uuid`;
 
+    // 2026-10-22: measured at rest ("reduzir movimento").
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros`);
@@ -1555,20 +1855,27 @@ test.describe('member area: the live and its reminder', () => {
     ).toBe(true);
   });
 
-  test('E14 long-text backstop: with ?ver=aluno at 320px the banner, the five-item row and the hero keep the hero CTA within the first two screen heights', async ({
+  test('E14 long-text backstop: with ?ver=aluno at 320px nothing overflows the width and the resume CTA is reachable', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    // 2026-10-22: measured at rest ("reduzir movimento"); the tab row is gone (the area menu is in
+    // the TopBar). 2026-10-23: no preview banner either, the greeting sits right under the bar.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 320, height: 640 });
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/area-membros?ver=aluno`);
     await expectInicio(page);
-    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    // 2026-10-26 (the academy reference's Início, the product owner's "mais fiel"): "Continue de onde
+    // parou" lives in the dashboard panel, under the tracks and the courses, so the old "within two
+    // screen heights" rule no longer holds; the CTA must still be there, whole, once scrolled to.
     const cta = page.getByTestId('courses-home-hero-cta');
+    await cta.scrollIntoViewIfNeeded();
     await expect(cta).toBeVisible();
-    const top = await cta.evaluate((node) => node.getBoundingClientRect().top + window.scrollY);
-    const viewport = await page.evaluate(() => window.innerHeight);
-    expect(top).toBeLessThanOrEqual(2 * viewport);
+    const box = await cta.boundingBox();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -1605,6 +1912,92 @@ test.describe('member area: the live and its reminder', () => {
     await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     await expect(toggle(page)).toBeEnabled();
     await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+/**
+ * 2026-10-22 — the platform's suggestion on Início (the user's rule, `lib/courses-home-plan.ts`):
+ * with nothing in progress but something finished, the hero is no longer the newest course nobody
+ * started (the API's `comecando`) but the next course at the member's level, published FIRST in that
+ * level. Its own throwaway tenant per project (`e2e-mv-<project>`): four published open courses with
+ * one lesson each, the level written straight to the row, back-dated so the catalogue's newest-first
+ * order is known:
+ *
+ *  - `newest` (iniciante, 1 min) — the newest course nobody started: the API's own pick;
+ *  - `inter` (intermediário, 2 min);
+ *  - `done` (iniciante, 3 min) — the member completes its lesson, so their level is iniciante;
+ *  - `first` (iniciante, 4 min) — the iniciante course published first: the suggestion.
+ *
+ * 2026-10-26: "Meus cursos" (the overview's shelf, where the displaced `newest` came back) left
+ * Início; its "Cursos" row reads the catalogue, and the Início is still being redesigned, so only
+ * the hero's start is pinned here (`TODO(2026-10-26)`).
+ */
+test.describe('member area: the suggestion by level', () => {
+  test.skip(isRemote, 'the member-area fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  const prefix = `e2e-mv-${run}`;
+  let tenant: CoursesTenant;
+  const ids = { newest: '', inter: '', done: '', first: '' };
+  const titles = {
+    newest: `${prefix} Toxina: primeiros pontos`,
+    inter: `${prefix} Preenchimento labial`,
+    done: `${prefix} Anatomia essencial`,
+    first: `${prefix} Olhar do zero`,
+  };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    tenant = await createCoursesTenant(`e2e-mv-${testInfo.project.name}`, SEED_PASSWORD);
+    const course = async (
+      key: keyof typeof ids,
+      minutesAgo: number,
+      level: 'iniciante' | 'intermediario',
+    ) => {
+      ids[key] = await createCourse({
+        tenantSlug: tenant.slug,
+        title: titles[key],
+        status: 'published',
+        modules: 1,
+        lessonsPerModule: 1,
+        minutesAgo,
+      });
+      await sql()`update public.courses set level = ${level} where id = ${ids[key]}::uuid`;
+    };
+    await course('newest', 1, 'iniciante');
+    await course('inter', 2, 'intermediario');
+    await course('done', 3, 'iniciante');
+    await course('first', 4, 'iniciante');
+    for (const lesson of await lessonsOf(ids.done)) {
+      await completeLessonAs(tenant.memberEmail, lesson.id);
+    }
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await client?.end();
+    client = null;
+    await closeCoursesMember();
+    await closeCoursesAdmin();
+  });
+
+  test('2026-10-22 (the platform’s suggestion): after finishing an iniciante course, Início suggests the OTHER iniciante course published first — not the newest one', async ({
+    page,
+  }) => {
+    const [lesson] = await lessonsOf(ids.first);
+    if (!lesson) throw new Error('no lesson on the suggested course');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/area-membros`);
+    // One lesson completed: Início is drawn (no redirect to the catalogue).
+    await expect(page).toHaveURL(/\/area-membros$/);
+    await expectInicio(page);
+
+    // The hero starts `first` at its first lesson — never `newest`.
+    const cta = page.getByTestId('courses-home-hero-cta');
+    await expect(cta).toHaveText(H.hero.cta.start);
+    await expect(cta).toHaveAttribute('href', `/cursos/${ids.first}/aulas/${lesson.id}`);
+    // TODO(2026-10-26): Início redesign in progress — the start card's details ("{course} · Módulo
+    // 01 · Aula 01", the lesson's title) and where the displaced `newest` shows in "Cursos".
   });
 });
 

@@ -204,6 +204,8 @@ const LABELS: ReelsHostLabels = {
   previous: r('previous'),
   next: r('next'),
   position: r('position'),
+  fullscreen: r('fullscreen.enter'),
+  exitFullscreen: r('fullscreen.exit'),
   railAuthor: r('rail.author'),
   captionMore: f('caption.more'),
   captionLess: r('caption.less'),
@@ -319,6 +321,7 @@ function renderHost(overrides: Partial<ReelsHostProps> = {}) {
     onUnlike: noLike,
     comments: {
       title: f('comments.title'),
+      closeLabel: f('comments.close'),
       locale: 'pt-BR',
       viewer: { displayName: 'Eu', profileHref: null, avatarUrl: null },
       labels: commentLabels(),
@@ -368,8 +371,30 @@ async function setVisibility(next: DocumentVisibilityState) {
   });
 }
 
+/**
+ * 2026-10-23 — the window every `min-width` query reads: the PHONE unless a case says otherwise
+ * (happy-dom's own window is 1024 px wide, which would draw the desktop rail beside the player). The
+ * desktop cases (the YouTube Shorts layout) set it before rendering.
+ */
+let viewportWidth = 390;
+function matchMediaFor(query: string) {
+  const min = /min-width:\s*(\d+)px/.exec(query);
+  return {
+    matches: min ? viewportWidth >= Number(min[1]) : false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  viewportWidth = 390;
+  vi.stubGlobal('matchMedia', vi.fn(matchMediaFor));
   controllers.clear();
   videoProps.clear();
   pagerProps.length = 0;
@@ -387,6 +412,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /* ── Credentials and the gesture (REELS-05, WebKit) ───────────────────────────────────────────── */
@@ -1585,8 +1611,10 @@ describe('ReelsHost — the overlay a feed video opens (2026-10-09)', () => {
     const sound = screen.getByRole('button', { name: r('sound.mute') });
     expect(sound.classList.contains('right-16')).toBe(true);
     expect(sound.classList.contains('right-4')).toBe(false);
-    // From md the arrow is the screen's corner and the sound button keeps the column's.
-    expect(sound.classList.contains('md:right-4')).toBe(true);
+    // From md the arrow is the screen's corner, and the sound button sits at the player's top left,
+    // beside its play/pause (2026-10-23, the YouTube Shorts layout).
+    expect(sound.classList.contains('md:right-auto')).toBe(true);
+    expect(sound.classList.contains('md:left-16')).toBe(true);
     // The stage covers the desktop rail.
     expect(screen.getByRole('region', { name: r('region') }).dataset.reelsStage).toBe('overlay');
   });
@@ -1723,5 +1751,105 @@ describe('ReelsHost — the overlay a feed video opens (2026-10-09)', () => {
     await flush();
     expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: f('errors.generic') });
     expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+/* ── 2026-10-23 — the desktop: the YouTube Shorts layout ──────────────────────────────────────── */
+
+describe('ReelsHost — the desktop player (2026-10-23, the YouTube Shorts layout)', () => {
+  /** The rail beside the player, in the pager's slot right of the box. */
+  function sideRail(): HTMLElement {
+    const rail = document.querySelector<HTMLElement>(
+      '[data-reels-rail-slot] [data-reel-rail="side"]',
+    );
+    if (!rail) throw new Error('no rail beside the player');
+    return rail;
+  }
+
+  it('from md the rail sits beside the player, outside the dark box, and the page draws none over the video', async () => {
+    viewportWidth = 1024;
+    renderHost();
+    await flush();
+    const rail = sideRail();
+    expect(within(rail).getByRole('button', { name: f('actions.like') })).toBeTruthy();
+    expect(within(rail).getByRole('button', { name: f('actions.comment') })).toBeTruthy();
+    // One like control on screen: the page's own rail over the video is not drawn.
+    expect(screen.getAllByRole('button', { name: f('actions.like') })).toHaveLength(1);
+    expect(rail.closest('[data-theme="dark"]')).toBeNull();
+  });
+
+  it('it is the page’s own like engine: a double tap fills its heart and its count', async () => {
+    viewportWidth = 1024;
+    const like = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    renderHost({ onLike: like });
+    await flush();
+    await act(async () => {
+      pagerProps.at(-1)?.onDoubleTap();
+    });
+    await flush();
+    expect(like).toHaveBeenCalledTimes(1);
+    const rail = sideRail();
+    expect(
+      within(rail)
+        .getByRole('button', { name: f('actions.unlike') })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(rail.querySelector('[data-reel-count="like"]')?.textContent).toBe('1');
+  });
+
+  it('from xl the comments open in the panel beside the player: no dialog, the video plays on, the panel follows the video', async () => {
+    viewportWidth = 1440;
+    renderHost();
+    await flush();
+    fireEvent.click(within(sideRail()).getByRole('button', { name: f('actions.comment') }));
+    await flush();
+    const panel = screen.getByRole('complementary', { name: f('comments.title') });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(loadComments.mock.calls[0]?.[0]).toBe(postId(1));
+    expect(controllerOf(1).pause).not.toHaveBeenCalled();
+    expect(pagerProps.at(-1)?.gesturesDisabled).toBe(false);
+    expect(pagerProps.at(-1)?.shifted).toBe(true);
+    expect(panel.closest('[data-theme="dark"]')).toBeNull();
+
+    // Moving to the next video shows that video's comments.
+    await press('ArrowDown');
+    expect(position()).toBe('Vídeo 2, de Autora 2');
+    expect(loadComments.mock.calls.at(-1)?.[0]).toBe(postId(2));
+    expect(screen.getByRole('complementary', { name: f('comments.title') })).toBeTruthy();
+
+    // Closing it resumes nothing: it paused nothing.
+    fireEvent.click(screen.getByRole('button', { name: f('comments.close') }));
+    await flush();
+    expect(screen.queryByRole('complementary', { name: f('comments.title') })).toBeNull();
+    expect(controllerOf(2).resume).not.toHaveBeenCalled();
+    expect(pagerProps.at(-1)?.shifted).toBe(false);
+  });
+
+  it('under xl the comments keep the sheet: a dialog that pauses the video', async () => {
+    viewportWidth = 1024;
+    renderHost();
+    await flush();
+    fireEvent.click(within(sideRail()).getByRole('button', { name: f('actions.comment') }));
+    await flush();
+    expect(screen.getByRole('dialog', { name: f('comments.title') })).toBeTruthy();
+    expect(controllerOf(1).pause).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('complementary', { name: f('comments.title') })).toBeNull();
+  });
+
+  it('the stage’s other states draw in the dark player box (the stage error here)', async () => {
+    viewportWidth = 1440;
+    renderHost({ initial: null });
+    await flush();
+    const frame = document.querySelector('[data-reels-frame]');
+    expect(frame?.getAttribute('data-theme')).toBe('dark');
+    expect(frame?.contains(screen.getByRole('button', { name: r('errors.retry') }))).toBe(true);
+  });
+
+  it('the player gets the full-screen words', async () => {
+    viewportWidth = 1440;
+    renderHost();
+    await flush();
+    expect(pagerProps.at(-1)?.labels.fullscreen).toBe(r('fullscreen.enter'));
+    expect(pagerProps.at(-1)?.labels.exitFullscreen).toBe(r('fullscreen.exit'));
   });
 });

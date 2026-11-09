@@ -83,6 +83,8 @@ function writeResult(outcome: CategoryWriteOutcome): {
 function revalidateCategories() {
   revalidatePath('/cursos/categorias');
   revalidatePath('/cursos');
+  // 2026-10-23: the counts on Gerenciar's cards.
+  revalidatePath('/cursos/gerenciar');
 }
 
 /** `POST /v1/courses/categories`: a name (60) and an optional cover; `409 category_exists`. */

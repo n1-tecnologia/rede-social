@@ -1,4 +1,5 @@
-import { buttonClasses, Card } from '@rede-social/ui';
+import { MEMBER_CARD } from '@rede-social/module-courses/ui';
+import { buttonClasses, Card, cn } from '@rede-social/ui';
 import { CalendarClock, CircleX, ExternalLink } from 'lucide-react';
 import { MemberMaterials } from '@/app/(app)/cursos/[courseId]/aulas/[lessonId]/MemberMaterials';
 import {
@@ -33,6 +34,10 @@ import { LiveReplayButton } from './LiveReplay';
  *  - `ended` → a `Card p-4` with "Esta live já aconteceu. A gravação não está disponível.".
  *
  * Every word arrives finished (`livePageView`); all of it is React text.
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the notices are the
+ * area's outlined cards (`MEMBER_CARD`), the "before" card leads with its glyph on the brand tint, and
+ * the locked live's buy section is the prototype's centred card (through `CourseActionZone`).
  */
 export interface LiveStateZoneProps {
   zone: LiveZoneView;
@@ -51,6 +56,9 @@ export interface LiveStateZoneProps {
  */
 const BRAND_LINK = buttonClasses({ variant: 'brand', size: 'md', fullWidth: true });
 
+/** The notices' card in the member skin (2026-10-26): a static glass panel. */
+const NOTICE = 'ms-panel rounded-2xl';
+
 export function LiveStateZone({ zone, locked, reminder = null }: LiveStateZoneProps) {
   if (zone.state === 'locked') {
     return (
@@ -67,7 +75,7 @@ export function LiveStateZone({ zone, locked, reminder = null }: LiveStateZonePr
           {zone.video ? (
             <LiveReplayButton label={zone.label} />
           ) : (
-            <Card className="p-4">
+            <Card className={cn(MEMBER_CARD, NOTICE, 'p-4')}>
               <p className="text-sm font-normal text-text-secondary">{zone.noVideoText}</p>
             </Card>
           )}
@@ -89,14 +97,19 @@ export function LiveStateZone({ zone, locked, reminder = null }: LiveStateZonePr
   return (
     <div data-testid="live-state-zone" data-state={zone.state} className="px-4 pt-4">
       {zone.state === 'cancelled' ? (
-        <Card className="flex items-center gap-3 p-4">
+        <Card className={cn(MEMBER_CARD, NOTICE, 'flex items-center gap-3 p-4')}>
           <CircleX aria-hidden size={20} className="shrink-0 text-text-tertiary" />
           <p className="text-sm font-normal text-text-secondary">{zone.text}</p>
         </Card>
       ) : zone.state === 'before' ? (
         <>
-          <Card className="flex gap-3 p-4">
-            <CalendarClock aria-hidden size={20} className="mt-0.5 shrink-0 text-text-secondary" />
+          <Card className={cn(MEMBER_CARD, NOTICE, 'flex items-start gap-3 p-4')}>
+            <span
+              aria-hidden
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand/15 text-brand ring-4 ring-brand/10"
+            >
+              <CalendarClock size={18} />
+            </span>
             <div className="flex min-w-0 flex-col gap-1">
               <p data-testid="live-starts" className="text-sm font-bold text-text">
                 {zone.line}
@@ -132,7 +145,7 @@ export function LiveStateZone({ zone, locked, reminder = null }: LiveStateZonePr
           </p>
         </div>
       ) : (
-        <Card className="p-4">
+        <Card className={cn(MEMBER_CARD, NOTICE, 'p-4')}>
           <p className="text-sm font-normal text-text-secondary">{zone.text}</p>
         </Card>
       )}

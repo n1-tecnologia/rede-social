@@ -14,7 +14,7 @@ import { CoursePickerSheet, ReorderList } from '@rede-social/module-courses/ui';
 import {
   Button,
   ConfirmDialog,
-  FileDropZone,
+  cn,
   IconButton,
   Input,
   PageHeader,
@@ -23,10 +23,11 @@ import {
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { Archive, Image as ImageIcon, Plus, X } from 'lucide-react';
+import { Archive, Plus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useId, useRef, useState, useTransition } from 'react';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
@@ -34,7 +35,11 @@ import {
   TRACK_PICKER_MAX,
   type TrackFormCourse,
   type TrackFormDefaults,
+  trackFilterHref,
 } from '@/lib/courses-view';
+import { DANGER_OVERRIDES, DASHED_OVERRIDES } from '../admin-styles';
+import { CoverField } from '../CoverField';
+import { PagePreview, TrackCardPreview } from '../CoverPreviews';
 import {
   createTrackAction,
   replaceTrackCoursesAction,
@@ -74,6 +79,15 @@ import {
  * **ZERO UPLOAD CODE LIVES HERE.** The cover runs the Phase 3 machine (`useSignedUpload`, purpose
  * `cover`), straight to Storage; this file holds an asset id, never bytes (MEDIA-01). Every field
  * renders as React text (T-08.3-25); every string comes from the `courses` catalog (PWA-03).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the cover is the shared
+ * `CoverField` (the 16:10 frame IS the control); "Cursos da trilha" draws as the member's path — a
+ * numbered disc per course on a rail (muted on a course that is no longer published), the course in
+ * an outlined block beside it (thumb and title on top, the two arrows and the `X` on a row of their
+ * own under the title, as on the prototype, so the 44px targets never squeeze the title on a phone),
+ * and the picker's dashed "+" as the path's last node; "Arquivar trilha"
+ * is the danger zone's outlined button. A save and an archive land on the Trilhas list's own page
+ * (`/cursos/trilhas`, the archive on its Arquivadas chip). Rules, writes and hooks are unchanged.
  */
 export type TrackFormMode = 'create' | 'edit';
 
@@ -95,9 +109,9 @@ const ACCEPT = mediaAcceptFor('image', 'cover');
 /** Announced at these percentages only, not on every tick (the `CommunityForm` rule). */
 const QUARTILES = [25, 50, 75, 100];
 
-/** The Trilhas tab; an archive lands on its Arquivadas chip. */
-const TRACKS_TAB = '/cursos?aba=trilhas';
-const ARCHIVED_TAB = '/cursos?aba=trilhas&filtro=arquivadas';
+/** The Trilhas list's own page; an archive lands on its Arquivadas chip (2026-10-22). */
+const TRACKS_TAB = trackFilterHref('active');
+const ARCHIVED_TAB = trackFilterHref('archived');
 
 const EMPTY: TrackFormDefaults = {
   title: '',
@@ -192,7 +206,6 @@ export function TrackForm({
   /** A create whose course list was refused: the track exists, the next submit patches it. */
   const createdId = useRef<string | null>(null);
 
-  const coverInputRef = useRef<HTMLInputElement>(null);
   const coursesTitleId = useId();
   const coursesHelperId = useId();
 
@@ -447,143 +460,71 @@ export function TrackForm({
       />
 
       <div className="flex flex-col gap-6 px-4 py-4 md:gap-8 md:px-6">
-        {/* ── (1) Capa: the 16:10 crop the track row and the member catalogue show (UI-D-402). ── */}
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
-          <div
-            data-track-cover-preview
-            className="relative aspect-[16/10] w-full max-w-[320px] overflow-hidden rounded-xl bg-bg-tertiary"
-          >
-            {coverPreview.previewUrl ? (
-              // biome-ignore lint/performance/noImgElement: a local object URL of the file being uploaded; next/image cannot load it (the `CommunityCover` precedent)
-              <img
-                src={coverPreview.previewUrl}
-                alt={t('form.cover.preview')}
-                data-track-cover-local
-                className="h-full w-full object-cover object-center"
-              />
-            ) : coverAssetId !== null ? (
-              <MediaImage
-                assetId={coverAssetId}
-                widths={coverWidths}
-                alt={t('form.cover.preview')}
-                sizes="320px"
-                ratio=""
-                className="h-full w-full"
-                fallback={GRADIENT}
-              />
-            ) : (
-              <span
-                data-track-cover-fallback
-                aria-hidden
-                className="block h-full w-full"
-                style={{ backgroundImage: 'var(--brand-gradient)' }}
-              />
-            )}
-          </div>
-
-          <div className="hidden md:block">
-            <FileDropZone
-              id="track-cover-dropzone"
-              icon={ImageIcon}
-              accept={ACCEPT}
-              // The hook owns the verdict (a phone photo is re-encoded in the browser).
-              screen={false}
-              state={
-                coverUpload.state === 'progress' || coverUpload.state === 'processing'
-                  ? coverUpload.state
-                  : 'idle'
-              }
-              progress={coverUpload.progress}
-              onFile={(file) => void coverUpload.pick(file)}
-              labels={{
-                caption: coverAssetId ? t('form.cover.change') : t('form.cover.add'),
-                progress: (percent) => tm('progress', { percent }),
-                processing: tm('photo.preparing'),
-              }}
+        {/* ── (1) Capa: the 16:10 crop the track card and the member catalogue show (UI-D-402). ── */}
+        {/* 2026-10-27 ("adicione os tipos de imagem que podem aparecer na trilha"): the two places a
+            track's cover shows, each as the member sees it with the title being typed: the card of
+            Início and Trilhas and the wide top of the track's page, each in its own block with its
+            size and its own "Escolher arquivo" (one image under both: the track has one cover). */}
+        <CoverField
+          hook="track"
+          ratio="card"
+          dropzoneId="track-cover-dropzone"
+          accept={ACCEPT}
+          assetId={coverAssetId}
+          widths={coverWidths}
+          previewUrl={coverPreview.previewUrl}
+          sizes="320px"
+          upload={coverUpload}
+          error={coverError}
+          helper={t('track.form.coverHelper', { tenant: tenantName })}
+          announced={coverAnnounced}
+          layout="blocks"
+          frameLabel={t('coverField.as.trackCard')}
+          frameDecor={
+            <TrackCardPreview
+              eyebrow={t('member.home.trackEyebrow', { kind: 'other', n: selected.length })}
+              title={title.trim()}
+              cta={t('member.home.access')}
             />
-          </div>
-
-          <input
-            ref={coverInputRef}
-            type="file"
-            accept={ACCEPT}
-            className="sr-only"
-            aria-label={coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file) void coverUpload.pick(file);
-            }}
-          />
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={coverUploading}
-              onClick={() => coverInputRef.current?.click()}
-            >
-              <ImageIcon aria-hidden size={18} className="shrink-0" />
-              {coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-            </Button>
-            {coverAssetId ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={coverUploading}
-                onClick={() => {
-                  setCoverAssetId(null);
-                  setCoverError(null);
-                  coverUpload.reset();
-                }}
-              >
-                <X aria-hidden size={18} className="shrink-0" />
-                {t('form.cover.remove')}
-              </Button>
-            ) : null}
-          </div>
-
-          {coverUpload.state === 'progress' ? (
-            <div className="flex flex-col gap-2">
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={coverUpload.progress}
-                className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
-              >
-                <div
-                  className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
-                  style={{ width: `${coverUpload.progress}%` }}
+          }
+          alsoAs={[
+            {
+              key: 'page',
+              ratio: 'banner',
+              label: t('coverField.as.trackPage'),
+              sizeHint: <CoverSizeHint kind="trackBanner" />,
+              decor: (
+                <PagePreview
+                  eyebrow={t('member.tracks.step', { n: 1, total: Math.max(1, selected.length) })}
+                  title={title.trim()}
                 />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs tabular-nums text-text-tertiary">
-                  {tm('progress', { percent: coverUpload.progress })}
-                </span>
-                <Button type="button" variant="ghost" size="sm" onClick={coverUpload.cancel}>
-                  {tm('cancel')}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          <span aria-live="polite" className="sr-only">
-            {coverAnnounced}
-          </span>
-
-          {coverUpload.error || coverError ? (
-            <p role="alert" data-track-cover-error className="text-sm font-normal text-danger">
-              {coverUpload.error ?? coverError}
-            </p>
-          ) : null}
-          <p className="text-xs font-normal text-text-tertiary">
-            {t('track.form.coverHelper', { tenant: tenantName })}
-          </p>
-        </div>
+              ),
+            },
+          ]}
+          sizeHint={<CoverSizeHint kind="trackCard" />}
+          labels={{
+            pickFile: t('coverField.pickFile'),
+            camera: t('coverField.camera'),
+            ways: t('coverField.ways'),
+            waysTouch: t('coverField.waysTouch'),
+            dropHere: t('coverField.dropHere'),
+            field: t('form.cover.label'),
+            add: t('form.cover.add'),
+            change: t('form.cover.change'),
+            remove: t('form.cover.remove'),
+            preview: t('form.cover.preview'),
+            progress: (percent) => tm('progress', { percent }),
+            processing: tm('photo.preparing'),
+            cancel: tm('cancel'),
+          }}
+          onPick={(file) => void coverUpload.pick(file)}
+          onRemove={() => {
+            setCoverAssetId(null);
+            setCoverError(null);
+            coverUpload.reset();
+          }}
+          onCancel={coverUpload.cancel}
+        />
 
         {/* ── (2) Título ── */}
         <Input
@@ -639,7 +580,7 @@ export function TrackForm({
           onChange={(event) => setDescription(event.target.value)}
         />
 
-        {/* ── (6) Cursos da trilha: the ordered list, the picker and the helper (D-414, D-415). ── */}
+        {/* ── (6) Cursos da trilha: the ordered path, the picker and the helper (D-414, D-415). ── */}
         <div data-track-courses className="flex flex-col gap-3">
           <SectionTitle id={coursesTitleId} as="h2" variant="group">
             {t('track.form.coursesTitle')}
@@ -657,68 +598,108 @@ export function TrackForm({
               labelledBy={coursesTitleId}
               describedBy={coursesHelperId}
               labels={reorderLabels}
-              className="flex flex-col gap-2"
+              className="flex flex-col"
               testId="track-courses"
-              renderItem={(row, arrows) => {
+              renderItem={(row, arrows, index) => {
                 const unpublished = row.status !== 'published';
                 return (
-                  <div
-                    data-track-course-row={row.id}
-                    data-track-course-status={row.status}
-                    className="flex min-h-14 items-center gap-2 rounded-xl bg-bg-secondary py-1.5 pr-1 pl-2"
-                  >
-                    <CourseThumb course={row} size="row" />
-                    {/* The only flexible child: the title gives way (two lines, then clipped). */}
-                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  // The path: a numbered disc on the rail (its line runs into the next node, the
+                  // picker's "+" included), then the course's block.
+                  <div className="flex gap-3 pb-2">
+                    <span aria-hidden className="flex w-8 shrink-0 flex-col items-center">
                       <span
-                        className={
+                        className={cn('h-3 w-0.5', index === 0 ? 'bg-transparent' : 'bg-border')}
+                      />
+                      <span
+                        data-track-course-step
+                        className={cn(
+                          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 bg-card text-xs font-extrabold tabular-nums',
                           unpublished
-                            ? 'line-clamp-2 break-words text-sm font-bold text-text-tertiary'
-                            : 'line-clamp-2 break-words text-sm font-bold text-text'
-                        }
+                            ? 'border-border text-text-tertiary'
+                            : 'border-brand/40 text-brand',
+                        )}
                       >
-                        {row.title}
+                        {index + 1}
                       </span>
-                      {unpublished ? (
-                        <span className="self-start">
-                          <StatusPill tone="neutral">{t('status.notPublished')}</StatusPill>
-                        </span>
-                      ) : null}
+                      <span className="-mb-2 w-0.5 flex-1 bg-border" />
                     </span>
-                    {arrows}
-                    <IconButton
-                      icon={X}
-                      size={20}
-                      label={t('track.form.remove', { course: row.title })}
-                      disabled={busy}
-                      onClick={() => removeCourse(row.id)}
-                      className="shrink-0"
-                    />
+                    <div
+                      data-track-course-row={row.id}
+                      data-track-course-status={row.status}
+                      className="flex min-w-0 flex-1 flex-col gap-1 rounded-xl border border-border bg-card px-2 pt-2 pb-1"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <CourseThumb course={row} size="row" />
+                        {/* The only flexible child: the title gives way (two lines, then clipped). */}
+                        <span className="flex min-w-0 flex-1 flex-col gap-1">
+                          <span
+                            className={
+                              unpublished
+                                ? 'line-clamp-2 break-words text-sm font-bold text-text-tertiary'
+                                : 'line-clamp-2 break-words text-sm font-bold text-text'
+                            }
+                          >
+                            {row.title}
+                          </span>
+                          {unpublished ? (
+                            <span className="self-start">
+                              <StatusPill tone="neutral">{t('status.notPublished')}</StatusPill>
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+                      {/* The controls sit UNDER the title, right-aligned (the prototype's own call):
+                          in a side column the three 44px targets eat the title on a 390px phone. */}
+                      <div className="flex items-center justify-end gap-1">
+                        {arrows}
+                        <IconButton
+                          icon={X}
+                          size={20}
+                          label={t('track.form.remove', { course: row.title })}
+                          disabled={busy}
+                          onClick={() => removeCourse(row.id)}
+                          className="shrink-0"
+                        />
+                      </div>
+                    </div>
                   </div>
                 );
               }}
             />
           )}
 
-          <Button
-            type="button"
-            variant="outline"
-            size="md"
-            className="self-start"
-            data-track-courses-pick
-            disabled={busy}
-            onClick={() => setPickerOpen(true)}
-          >
-            <Plus aria-hidden size={18} className="shrink-0" />
-            {selected.length === 0 ? t('track.form.choose') : t('track.form.change')}
-          </Button>
+          {/* The path's last node: the picker, a dashed "+" (Escolher cursos / Alterar cursos). */}
+          <div className="flex gap-3">
+            {selected.length > 0 ? (
+              <span aria-hidden className="flex w-8 shrink-0 flex-col items-center">
+                {/* The rail runs on from the last course, over the list's gap, into this node. */}
+                <span className="-mt-3 h-[18px] w-0.5 bg-border" />
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-border bg-card text-text-tertiary">
+                  <Plus size={14} />
+                </span>
+              </span>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              className={cn(DASHED_OVERRIDES, 'min-w-0 flex-1')}
+              data-track-courses-pick
+              disabled={busy}
+              onClick={() => setPickerOpen(true)}
+            >
+              <Plus aria-hidden size={18} className="shrink-0" />
+              {selected.length === 0 ? t('track.form.choose') : t('track.form.change')}
+            </Button>
+          </div>
 
           <p id={coursesHelperId} className="text-xs font-normal text-text-secondary">
             {t('track.form.coursesHelper')}
           </p>
         </div>
 
-        {/* ── (7) Edit only: the hairline and "Arquivar trilha", or the archived note (UI-D-402). ── */}
+        {/* ── (7) Edit only: the hairline and the danger zone's "Arquivar trilha", or the archived
+            note (UI-D-402). ── */}
         {mode === 'edit' && trackId ? (
           <>
             <div aria-hidden className="h-px bg-border" />
@@ -729,13 +710,13 @@ export function TrackForm({
             ) : (
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="md"
                 data-track-archive
-                className="justify-start self-start px-0 text-danger"
+                className={DANGER_OVERRIDES}
                 onClick={() => setArchiving(true)}
               >
-                <Archive aria-hidden size={20} />
+                <Archive aria-hidden size={18} />
                 {t('track.form.archive')}
               </Button>
             )}

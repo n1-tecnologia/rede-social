@@ -1,9 +1,9 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import type { LearnLive } from '@rede-social/module-courses/contracts';
+import { LiveStatusChip } from '@rede-social/module-courses/ui';
 import { ExclusiveBadge } from '@rede-social/module-store/ui';
-import { chipBase, cn, PageHeader } from '@rede-social/ui';
-import { Radio } from 'lucide-react';
+import { MemberSkin, PageHeader, SkinTileFx } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { LockedCourseZone } from '@/app/(app)/cursos/[courseId]/CourseActionZone';
@@ -11,6 +11,7 @@ import { ReadMoreText } from '@/app/(app)/cursos/ReadMoreText';
 import { getLiveReminder } from '@/lib/courses-learn';
 import { livePageView } from '@/lib/courses-member-view';
 import type { CoursesTranslator } from '@/lib/courses-view';
+import { memberScreenHref } from '@/lib/member-area';
 import { getLiveAccess } from '@/lib/store';
 import { lockedLiveView } from '@/lib/store-view';
 import { LiveReplayMedia, LiveReplayProvider } from './LiveReplay';
@@ -46,6 +47,18 @@ import { WindowRefresh } from './useWindowRefresh';
  * card from that answer (a failed read draws it off; the idempotent write corrects it). In the
  * admin's preview (`?ver=aluno`, UI-D-459) nothing is read: the toggle is disabled with its hint and
  * there is no `PreviewBanner` on this page (sketch 011 finding 1, approved as drawn).
+ *
+ * **2026-10-22 (the courses area redesign on the social-igoralves prototype).** The cover carries the
+ * prototype's chips: the status (`LiveStatusChip`: the red chip with the breathing dot while on air,
+ * ▶ on a recording, glass otherwise) and the compact "Exclusiva", under a veil from the top; the title
+ * 22/800 sits under the cover, then the date line and the description (three lines and "Ler mais");
+ * the state zone draws its outlined cards (`LiveStateZone`), and the replay player fades in where
+ * the cover was (`LiveReplay`). "Voltar" falls back to the Lives screen, keeping the preview.
+ *
+ * **2026-10-23 — a WIDE page on the desktop** (`data-shell-full`), framed like the lesson player: the
+ * media (cover or replay) edge to edge on the phone and, from `md`, inset by the 16px gutter, rounded
+ * and lifted, 16:9 from `lg`; under it, from `lg`, two columns: the title, the date line and the
+ * description on the left, the state zone (380px) on the right. The DOM keeps the phone's order.
  */
 export interface MemberLivePageProps {
   live: LearnLive;
@@ -56,7 +69,7 @@ export interface MemberLivePageProps {
   preview?: boolean;
 }
 
-const COVER_SIZES = '(min-width: 680px) 680px, 100vw';
+const COVER_SIZES = '(min-width: 1280px) 1232px, (min-width: 768px) calc(100vw - 320px), 100vw';
 
 export async function MemberLivePage({
   live,
@@ -123,7 +136,10 @@ export async function MemberLivePage({
   }
 
   const cover = (
-    <div data-testid="member-live-cover" className="relative aspect-[16/10] w-full bg-bg-tertiary">
+    <div
+      data-testid="member-live-cover"
+      className="relative aspect-[16/10] w-full bg-bg-tertiary lg:aspect-video"
+    >
       {view.coverAssetId ? (
         <MediaImage
           assetId={view.coverAssetId}
@@ -149,27 +165,26 @@ export async function MemberLivePage({
           style={{ backgroundImage: 'var(--brand-gradient)' }}
         />
       )}
+      <SkinTileFx />
+      <span
+        aria-hidden
+        className="absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-transparent"
+      />
       {view.statusPill || view.exclusive ? (
         <div
           data-testid="member-live-pills"
-          className="absolute top-3 right-3 left-3 flex flex-wrap items-start gap-1"
+          className="absolute top-3 right-3 left-3 flex flex-wrap items-start gap-1.5"
         >
           {view.statusPill ? (
-            <span
-              data-testid="member-live-status"
-              className={cn(
-                chipBase,
-                'max-w-full truncate bg-black/60 text-white backdrop-blur-sm',
-              )}
-            >
-              {view.statusPill.icon === 'radio' ? (
-                <Radio size={12} aria-hidden className="shrink-0" />
-              ) : null}
-              {view.statusPill.label}
-            </span>
+            <LiveStatusChip
+              testId="member-live-status"
+              label={view.statusPill.label}
+              icon={view.statusPill.icon}
+              size="lg"
+            />
           ) : null}
           {view.exclusive ? (
-            <ExclusiveBadge label={t('courses.member.tags.exclusiveLive')} />
+            <ExclusiveBadge label={t('courses.member.tags.exclusiveLive')} size="compact" />
           ) : null}
         </div>
       ) : null}
@@ -178,54 +193,64 @@ export async function MemberLivePage({
 
   const zone = view.zone;
   const body = (
-    <div
-      data-testid="member-live-page"
-      data-live-id={live.id}
-      data-state={zone.state}
-      className="mx-auto flex w-full max-w-[680px] flex-col pb-6"
-    >
-      <PageHeader
-        title={view.title}
-        backHref={view.backHref}
-        backLabel={t('courses.member.live.back')}
-        stickyTop="0px"
-        className="md:static md:px-0"
-      />
+    <MemberSkin>
+      <div
+        data-testid="member-live-page"
+        data-live-id={live.id}
+        data-state={zone.state}
+        data-shell-full
+        className="mx-auto flex w-full flex-col pb-6"
+      >
+        <PageHeader
+          title={view.title}
+          backHref={preview ? memberScreenHref('lives', {}, true) : view.backHref}
+          backLabel={t('courses.member.live.back')}
+          className="md:px-0"
+        />
 
-      {zone.state === 'replay' && zone.video ? (
-        <LiveReplayMedia cover={cover} lessonId={zone.lessonId} video={zone.video} />
-      ) : (
-        cover
-      )}
+        <div className="md:px-4 md:pt-1">
+          <div className="ms-hero overflow-hidden bg-black md:rounded-3xl md:shadow-lg">
+            {zone.state === 'replay' && zone.video ? (
+              <LiveReplayMedia cover={cover} lessonId={zone.lessonId} video={zone.video} />
+            ) : (
+              cover
+            )}
+          </div>
+        </div>
 
-      <div className="flex flex-col gap-2 px-4 pt-4">
-        <p
-          data-testid="member-live-title"
-          data-brand-title
-          className="text-2xl font-bold leading-tight tracking-[-0.02em] text-text [overflow-wrap:anywhere]"
-        >
-          {view.title}
-        </p>
-        <p
-          data-testid="member-live-meta"
-          className="text-sm font-normal text-text-secondary tabular-nums [overflow-wrap:anywhere]"
-        >
-          {view.meta}
-        </p>
-        {view.description ? (
-          <ReadMoreText
-            id="live-about-text"
-            data-testid="member-live-description"
-            text={view.description}
-            moreLabel={t('courses.member.readMore')}
-            lessLabel={t('courses.member.readLess')}
-          />
-        ) : null}
+        <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+          <div className="flex min-w-0 flex-col gap-2 px-4 pt-4 md:pt-6">
+            <p
+              data-testid="member-live-title"
+              data-brand-title
+              className="ms-title-compact text-[22px] font-extrabold leading-tight tracking-tight text-text md:text-2xl [overflow-wrap:anywhere]"
+            >
+              {view.title}
+            </p>
+            <p
+              data-testid="member-live-meta"
+              className="text-sm font-normal text-text-secondary tabular-nums [overflow-wrap:anywhere]"
+            >
+              {view.meta}
+            </p>
+            {view.description ? (
+              <ReadMoreText
+                id="live-about-text"
+                data-testid="member-live-description"
+                text={view.description}
+                moreLabel={t('courses.member.readMore')}
+                lessLabel={t('courses.member.readLess')}
+              />
+            ) : null}
+          </div>
+
+          <div className="lg:pt-2">
+            <LiveStateZone zone={zone} locked={lockedZone} reminder={reminder} />
+          </div>
+        </div>
+        <WindowRefresh input={view.refresh} />
       </div>
-
-      <LiveStateZone zone={zone} locked={lockedZone} reminder={reminder} />
-      <WindowRefresh input={view.refresh} />
-    </div>
+    </MemberSkin>
   );
 
   return zone.state === 'replay' ? (

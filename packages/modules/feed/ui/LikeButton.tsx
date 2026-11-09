@@ -138,14 +138,14 @@ export type LikeButtonProps = {
   /**
    * `'default'` (the feed card and the story viewer) renders exactly as before. `'overMedia'` is
    * for a surface that draws the button straight on video (the Reels rail, D-124): see the tone
-   * note on `LikeButton`.
+   * note on `LikeButton`. `'disc'` (2026-10-23) is the Reels rail beside the desktop player.
    */
   tone?: LikeButtonTone;
   /** The heart's size in px (default 20; the Reels rail passes 28, UI-D-87). */
   glyphSize?: number;
 };
 
-export type LikeButtonTone = 'default' | 'overMedia';
+export type LikeButtonTone = 'default' | 'overMedia' | 'disc';
 
 /** How long the pop lasts. Short enough to be over before a second tap can land. */
 const PULSE_MS = 220;
@@ -172,6 +172,14 @@ const TONE: Record<LikeButtonTone, { idle: string; liked: string; extra?: string
     liked: 'text-like [&_svg]:fill-like',
     extra:
       '[&_svg]:drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)] hover:bg-white/10 active:bg-white/20 focus-visible:ring-white focus-visible:ring-offset-0',
+  },
+  // 2026-10-23 — the Reels rail BESIDE the desktop player (the YouTube Shorts layout): a 48 px disc
+  // in the member's theme, the same disc the Reels module draws for comment and share.
+  disc: {
+    idle: 'text-text',
+    liked: 'text-like [&_svg]:fill-like',
+    extra:
+      'size-12 bg-bg-tertiary hover:bg-[color-mix(in_oklch,var(--theme-bg-tertiary),var(--theme-text)_8%)] active:bg-[color-mix(in_oklch,var(--theme-bg-tertiary),var(--theme-text)_14%)]',
   },
 };
 

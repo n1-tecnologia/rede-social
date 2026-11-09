@@ -85,6 +85,8 @@ function writeResult(outcome: LessonWriteOutcome): {
 
 function revalidateLesson(courseId: string, lessonId: string | null) {
   revalidatePath('/cursos');
+  // 2026-10-23: the counts on Gerenciar's cards.
+  revalidatePath('/cursos/gerenciar');
   revalidatePath(`/cursos/${courseId}`);
   if (lessonId) revalidatePath(`/cursos/${courseId}/aulas/${lessonId}`);
 }

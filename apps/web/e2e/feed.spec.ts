@@ -229,14 +229,24 @@ test.describe('D-55 — the feed is a home slot on /inicio, and no navigation ta
 
     await expect(feedRegion(page)).toBeVisible();
 
-    const names = await visibleNav(page, mobile)
+    const links = await visibleNav(page, mobile)
       .locator('a')
-      .evaluateAll((links) =>
-        links.map((a) => a.getAttribute('aria-label') ?? a.textContent?.trim() ?? ''),
+      .evaluateAll((anchors) =>
+        anchors.map((a) => ({
+          name: a.getAttribute('aria-label') ?? a.textContent?.trim() ?? '',
+          href: a.getAttribute('href') ?? '',
+        })),
       );
     // D-55 amends D-40: the feed contributes a home slot, so the BottomNav / rail budget Phases 5
     // and 6 are planning against is untouched. A "Feed" tab here is a regression, not a feature.
-    expect(names.some((name) => /feed|publica/i.test(name))).toBe(false);
+    // 2026-10-23: the desktop rail names the HOME tab (/inicio) "Feed"; that one is the home, not a
+    // tab of the feed's, so it is the only "Feed" allowed, and only on the desktop.
+    expect(links.some(({ name, href }) => /feed|publica/i.test(name) && href !== '/inicio')).toBe(
+      false,
+    );
+    expect(links.filter(({ name }) => /feed/i.test(name)).map(({ href }) => href)).toEqual(
+      mobile ? [] : ['/inicio'],
+    );
   });
 
   test('a rede-lab member never sees the rede-demo feed, even though the captions match', async ({

@@ -77,8 +77,12 @@ function writeResult(outcome: LiveWriteOutcome): {
   }
 }
 
+/** The lists a live write changes: since 2026-10-22 the Lives list is a page of its own. */
 function revalidateLive(liveId: string) {
   revalidatePath('/cursos');
+  // 2026-10-23: the counts on Gerenciar's cards.
+  revalidatePath('/cursos/gerenciar');
+  revalidatePath('/cursos/lives');
   revalidatePath(`/cursos/lives/${liveId}`);
 }
 

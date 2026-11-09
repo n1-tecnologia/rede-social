@@ -46,6 +46,7 @@ export { TrackRow, type TrackRowPill, type TrackRowProps } from './TrackRow';
 
 export { CourseCard, type CourseCardProgress, type CourseCardProps } from './member/CourseCard';
 export { LiveCard, type LiveCardProps } from './member/LiveCard';
+export { LiveStatusChip, type LiveStatusChipProps } from './member/LiveStatusChip';
 export {
   MemberLessonRow,
   type MemberLessonRowProps,
@@ -57,6 +58,48 @@ export {
   type MemberLessonThumbState,
 } from './member/MemberLessonThumb';
 export { ModuleCover, type ModuleCoverProps, type ModuleCoverState } from './member/ModuleCover';
+// 2026-10-26 — the academy reference's cards: a module, a lesson and a track.
+export {
+  MemberLessonCard,
+  type MemberLessonCardProps,
+  type MemberLessonCardState,
+} from './member/MemberLessonCard';
+export {
+  MemberModuleCard,
+  type MemberModuleCardProps,
+  type MemberModuleCardState,
+} from './member/MemberModuleCard';
+export { MemberQuickCard, type MemberQuickCardProps } from './member/MemberQuickCard';
+export { MemberTrackCard, type MemberTrackCardProps } from './member/MemberTrackCard';
 export { ProgressBar, type ProgressBarProps } from './member/ProgressBar';
 export { ProgressRing, type ProgressRingProps } from './member/ProgressRing';
 export { StatBlock, type StatBlockProps } from './member/StatBlock';
+
+/* ── 2026-10-22: the courses area redesign on the social-igoralves prototype (class recipes) ───── */
+
+export {
+  GLASS_CHIP,
+  GLASS_CHIP_LG,
+  MEDIA_CHIP,
+  MEDIA_CHIP_LG,
+  MEMBER_CARD,
+  MEMBER_SECTION_TITLE,
+  OVERLINE,
+  OVERLINE_MEDIA,
+  POSTER_FRAME,
+  RAIL,
+  SCRIM_CARD,
+  SCRIM_EVENT,
+  SCRIM_HERO,
+  SCRIM_MODULE,
+  SCRIM_POSTER,
+  SCRIM_RESUME,
+  SCRIM_TRACK,
+  SCRIM_TRACK_CARD,
+  SCRIM_TRACK_TILE,
+  TRACK_LINE_SHADOW,
+} from './member/recipes';
+
+/* ── 2026-10-22: the admin's module band control (the curriculum editor's arrows over the art) ── */
+
+export { MODULE_BAND_CONTROL } from './ModuleCard';

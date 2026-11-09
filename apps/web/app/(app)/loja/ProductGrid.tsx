@@ -3,20 +3,24 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import type { ProductFilter } from '@rede-social/module-store/contracts';
-import { ProductCard, ProductCardSkeleton } from '@rede-social/module-store/ui';
-import { Button, EmptyState, InfiniteScroll, PullToRefresh } from '@rede-social/ui';
-import { Archive, CircleAlert, ShoppingBag } from 'lucide-react';
+import { ProductCard } from '@rede-social/module-store/ui';
+import { Button, InfiniteScroll, PullToRefresh } from '@rede-social/ui';
+import { CircleAlert, ShoppingBag } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, useCallback, useState } from 'react';
+import type { ReactNode } from 'react';
+import { STORE_PATH } from '@/lib/store-area';
 import type { ProductCardView } from '@/lib/store-view';
+import { OUTLINE_LINK } from '../cursos/admin-styles';
+import { MEMBER_EMPTY_WIDE, MemberEmptyCard } from '../cursos/MemberEmptyCard';
 import { loadMoreProductsAction, refreshProductsAction } from './actions';
+import { ProductGridSkeleton } from './StoreSkeletons';
+import { CARD_SIZES, PRODUCT_GRID, PRODUCT_GRID_FRAME } from './store-styles';
+import { type ProductPagesActions, useProductPages } from './useProductPages';
 
 export interface ProductGridProps {
-  /** Which list this is; the PAGE decides it on the server and remounts the grid per filter. */
-  filter: ProductFilter;
-  /** The composed `store.product.manage` permission (the manager empty state's CTA). */
-  canManage: boolean;
-  /** The tenant's display name (the grid region and the member empty state). */
+  /** Which list this is: Produtos (`all`) or Comprados (`owned`); the SCREEN remounts the grid per filter. */
+  filter: Extract<ProductFilter, 'all' | 'owned'>;
+  /** The tenant's display name (the grid region and the empty state). */
   tenantName: string;
   /** The first page the SERVER rendered, as finished views. */
   initialItems: ProductCardView[];
@@ -25,122 +29,54 @@ export interface ProductGridProps {
   initialError?: boolean;
 }
 
-/** The poster's `sizes`: two columns at every width, 322px each in the 680px column (D-351). */
-const CARD_SIZES = '(min-width: 768px) 322px, 50vw';
+/** The browse screens' paging: the member's view, for a manager too (`actions.ts`). */
+const BROWSE_ACTIONS: ProductPagesActions = {
+  refresh: refreshProductsAction,
+  loadMore: loadMoreProductsAction,
+};
 
-/** The first row of posters loads eagerly; the rest are lazy. */
-const EAGER_CARDS = 2;
-
-const LINK_BRAND =
-  'inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-
-const LINK_OUTLINE =
-  'inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-
-/** One grid row of skeletons: what the load-more sentinel shows (UI-D-384). */
-function NextRowSkeleton() {
-  return (
-    <div aria-busy className="grid grid-cols-2 gap-3 px-4">
-      <ProductCardSkeleton />
-      <ProductCardSkeleton />
-    </div>
-  );
-}
+/** The first row of cards (up to five in the wide frame) loads eagerly; the rest are lazy. */
+const EAGER_CARDS = 5;
 
 /**
- * The `/loja` grid body (08.2-07, UI-D-367, UI-D-384), `CommunitiesList`'s state machine:
- * append-never-replace paging through the shipped `InfiniteScroll` sentinel, `PullToRefresh` on
- * mobile, and four states only: an unreadable first page (the error card with a retry), an empty
- * first page (the filter's own empty state, P19: never rendered from a failed page), the grid, and a
- * LOAD-MORE failure (an inline danger line plus a retry AT the sentinel; the loaded cards stay).
+ * The poster grid of Produtos and Comprados (08.2-07, UI-D-367, UI-D-384), on the shared paging
+ * machine (`useProductPages`): append-never-replace paging through the `InfiniteScroll` sentinel,
+ * `PullToRefresh` on mobile, and four states only: an unreadable first page (the error card with a
+ * retry), an empty first page (the screen's own empty card, P19: never rendered from a failed page),
+ * the grid, and a LOAD-MORE failure (an inline danger line plus a retry AT the sentinel; the loaded
+ * cards stay).
  *
  * Every card arrives as a finished view (price through `formatBrl`, the pill, the accessible name),
- * so nothing here formats or sorts (P21, P22): pages are appended in the API's order. The poster's
- * image is the host's `MediaImage` on the `cover` ladder; a failed image falls back to the plain
- * `bg-bg-tertiary` box under the same veil and text (E03 media).
+ * so nothing here formats or sorts (P21, P22): pages are appended in the API's order.
+ *
+ * **2026-10-24 (the Loja redesign on the "área de membros", then the e-commerce card).** Two cards a
+ * row on a phone and three, four and five as the room grows (`PRODUCT_GRID` reads its own width, a
+ * container, so the rail never squeezes a card), entering with the area's swap; each card prints the
+ * product tile (the image with its glass panel: the name and the price). The empty and error
+ * states are the area's
+ * `MemberEmptyCard`. Browse only: Gerenciar's rows are `ProductsManageList`, so this grid never draws
+ * a manager's pill (no create call to action either, the screen is the member's for everyone).
  */
 export function ProductGrid({
   filter,
-  canManage,
   tenantName,
   initialItems,
   initialCursor,
   initialError,
 }: ProductGridProps) {
   const t = useTranslations('store');
-
-  const [items, setItems] = useState(initialItems);
-  const [cursor, setCursor] = useState(initialCursor);
-  const [firstLoadFailed, setFirstLoadFailed] = useState(Boolean(initialError));
-  const [pageFailed, setPageFailed] = useState(false);
-
-  // The SERVER sent a different first page (a navigation, not a refresh): re-seed rather than merge.
-  const [seed, setSeed] = useState(initialItems);
-  if (seed !== initialItems) {
-    setSeed(initialItems);
-    setItems(initialItems);
-    setCursor(initialCursor);
-    setFirstLoadFailed(Boolean(initialError));
-    setPageFailed(false);
-  }
-
-  /** Page 1 again; the cards never become skeletons, so a pull shows only the brand loader. */
-  const refresh = useCallback(async () => {
-    try {
-      const page = await refreshProductsAction(filter);
-      if (!page.ok) {
-        setFirstLoadFailed(items.length === 0);
-        return;
-      }
-      setItems(page.items);
-      setCursor(page.nextCursor);
-      setFirstLoadFailed(false);
-      setPageFailed(false);
-    } catch (error) {
-      console.error('store.refresh_failed', { error: String(error) });
-      setFirstLoadFailed(items.length === 0);
-    }
-  }, [filter, items.length]);
-
-  /** APPEND: every card already on screen keeps its order and its DOM position. */
-  const loadMore = useCallback(async () => {
-    if (!cursor) return;
-    try {
-      const page = await loadMoreProductsAction(filter, cursor);
-      if (!page.ok) {
-        setPageFailed(true);
-        return;
-      }
-      setPageFailed(false);
-      setItems((previous) => {
-        // A product can never show twice, even if a page boundary moved under a concurrent write.
-        const seen = new Set(previous.map((item) => item.id));
-        return [...previous, ...page.items.filter((item) => !seen.has(item.id))];
-      });
-      setCursor(page.nextCursor);
-    } catch (error) {
-      // The sentinel hook swallows a rejection; without this catch a dead network would spin forever.
-      console.error('store.load_more_failed', { error: String(error) });
-      setPageFailed(true);
-    }
-  }, [cursor, filter]);
-
-  /** Re-arms the sentinel (which is on screen under the retry) rather than fetching twice. */
-  const retryPage = useCallback(() => setPageFailed(false), []);
-
-  const retryFirst = useCallback(() => {
-    setFirstLoadFailed(false);
-    void refresh();
-  }, [refresh]);
+  const { items, cursor, firstLoadFailed, pageFailed, refresh, loadMore, retryPage, retryFirst } =
+    useProductPages({ filter, initialItems, initialCursor, initialError, actions: BROWSE_ACTIONS });
 
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
     body = (
-      <div className="px-4">
-        <EmptyState
-          variant="card"
+      <div className="px-4 pt-2">
+        <MemberEmptyCard
           icon={CircleAlert}
+          tone="error"
           data-testid="store-error"
+          className={MEMBER_EMPTY_WIDE}
           title={t('errors.title')}
           body={t('errors.list')}
           action={
@@ -151,29 +87,17 @@ export function ProductGrid({
         />
       </div>
     );
-  } else if (items.length === 0 && filter === 'archived') {
-    body = (
-      <div className="px-4">
-        <EmptyState
-          variant="card"
-          icon={Archive}
-          data-testid="store-empty-archived"
-          title={t('list.archivedEmpty.title')}
-          body={t('list.archivedEmpty.body')}
-        />
-      </div>
-    );
   } else if (items.length === 0 && filter === 'owned') {
     body = (
-      <div className="px-4">
-        <EmptyState
-          variant="card"
+      <div className="px-4 pt-2">
+        <MemberEmptyCard
           icon={ShoppingBag}
           data-testid="store-empty-owned"
+          className={MEMBER_EMPTY_WIDE}
           title={t('list.ownedEmpty.title')}
           body={t('list.ownedEmpty.body')}
           action={
-            <a href="/loja" className={LINK_OUTLINE}>
+            <a href={STORE_PATH} className={OUTLINE_LINK}>
               {t('list.ownedEmpty.cta')}
             </a>
           }
@@ -182,65 +106,58 @@ export function ProductGrid({
     );
   } else if (items.length === 0) {
     body = (
-      <div className="px-4">
-        <EmptyState
-          variant="card"
+      <div className="px-4 pt-2">
+        <MemberEmptyCard
           icon={ShoppingBag}
           data-testid="store-empty"
+          className={MEMBER_EMPTY_WIDE}
           title={t('list.empty.title')}
-          body={
-            canManage ? t('list.empty.bodyManager') : t('list.empty.body', { tenant: tenantName })
-          }
-          action={
-            canManage ? (
-              <a href="/loja/novo" className={LINK_BRAND}>
-                {t('form.create')}
-              </a>
-            ) : undefined
-          }
+          body={t('list.empty.body', { tenant: tenantName })}
         />
       </div>
     );
   } else {
     body = (
       <>
-        <ul
-          aria-label={t('list.region', { tenant: tenantName })}
-          data-testid="store-grid"
-          className="grid grid-cols-2 gap-3 px-4"
-        >
-          {items.map((item, index) => (
-            <li key={item.id}>
-              <ProductCard
-                href={item.href}
-                ariaLabel={item.ariaLabel}
-                name={item.name}
-                priceLabel={item.priceLabel}
-                pill={item.pill}
-                imageSlot={
-                  item.imageAssetId ? (
-                    <MediaImage
-                      assetId={item.imageAssetId}
-                      widths={PURPOSE_WIDTHS.cover}
-                      alt={item.imageAlt}
-                      sizes={CARD_SIZES}
-                      eager={index < EAGER_CARDS}
-                      ratio=""
-                      className="h-full w-full"
-                    />
-                  ) : undefined
-                }
-              />
-            </li>
-          ))}
-        </ul>
+        <div className={`${PRODUCT_GRID_FRAME} pt-1`}>
+          <ul
+            aria-label={t('list.region', { tenant: tenantName })}
+            data-testid="store-grid"
+            className={`${PRODUCT_GRID} animate-swap-in motion-reduce:animate-none`}
+          >
+            {items.map((item, index) => (
+              <li key={item.id} className="min-w-0">
+                <ProductCard
+                  href={item.href}
+                  ariaLabel={item.ariaLabel}
+                  name={item.name}
+                  priceLabel={item.priceLabel}
+                  pill={item.pill}
+                  imageSlot={
+                    item.imageAssetId ? (
+                      <MediaImage
+                        assetId={item.imageAssetId}
+                        widths={PURPOSE_WIDTHS.cover}
+                        alt={item.imageAlt}
+                        sizes={CARD_SIZES}
+                        eager={index < EAGER_CARDS}
+                        ratio=""
+                        className="h-full w-full"
+                      />
+                    ) : undefined
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
 
         {/* The sentinel stands down while a page is refused, so a failed page cannot spin. */}
         <InfiniteScroll
           hasMore={cursor !== null}
           enabled={!pageFailed}
           onLoadMore={loadMore}
-          skeleton={<NextRowSkeleton />}
+          skeleton={<ProductGridSkeleton rows={1} />}
           className="mt-3"
         />
 

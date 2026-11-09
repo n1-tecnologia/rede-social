@@ -2,10 +2,13 @@ import type { ReactNode } from 'react';
 import { ListRow, type ListRowPill } from './ListRow';
 
 /**
- * The course row of the hub's Cursos tab (UI-D-392): the 3:4 poster thumb (`w-10`, the prototype's
- * catalogue crop at 40px), the title, the meta "{N} módulos · {N} aulas · {duration}" and the pills
- * — the status (Rascunho / Publicado / Arquivado) and, on a draft whose videos are not all ready,
- * the second `warning` "Processando". It links to the course page. Every word is a prop (PWA-03).
+ * The course row of the admin's Cursos list (UI-D-392): the 3:4 poster thumb (the catalogue crop),
+ * the title, the meta "{N} módulos · {N} aulas · {duration}" and the pills — the status (Rascunho /
+ * Publicado / Arquivado) and, on a draft whose videos are not all ready, the second `warning`
+ * "Processando". It links to the course page. Every word is a prop (PWA-03).
+ *
+ * 2026-10-22 (the courses area redesign): a row of the outlined list card, the thumb at 48px and the
+ * pills under the meta (`ListRow`).
  */
 export type CourseRowPill = ListRowPill;
 

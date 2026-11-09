@@ -46,6 +46,11 @@ export interface VideoBlockProps {
  * the caption is never typed and never guessed (PR-6). **No URL field, no embed, no typed duration or
  * thumbnail exists here** (D-409): the only video source is the direct upload through the kernel
  * field, browser → provider, and this block holds an asset id and what the asset said about itself.
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): "Remover vídeo" moved to
+ * the label line (the player keeps the whole width, the duration under it), the failure is a
+ * danger-tinted block holding its sentence and "Tentar novamente", and the processing card is
+ * outlined. The five states and their rules are unchanged.
  */
 export function VideoBlock({ video, onChange }: VideoBlockProps) {
   const t = useTranslations('courses');
@@ -99,9 +104,25 @@ export function VideoBlock({ video, onChange }: VideoBlockProps) {
       data-video-state={video?.status ?? 'empty'}
       className="flex flex-col gap-2"
     >
-      <span id="lesson-video-label" className="text-sm font-normal text-text-secondary">
-        {t('lesson.video.title')}
-      </span>
+      <div className="flex min-h-6 items-center justify-between gap-3">
+        <span id="lesson-video-label" className="text-sm font-normal text-text-secondary">
+          {t('lesson.video.title')}
+        </span>
+        {video !== null && video.status === 'ready' ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            hitArea
+            data-lesson-video-remove
+            className="h-7 shrink-0 px-2 text-xs font-semibold text-text-secondary hover:text-danger"
+            onClick={() => setRemoving(true)}
+          >
+            <Trash2 aria-hidden size={14} />
+            {t('lesson.video.remove')}
+          </Button>
+        ) : null}
+      </div>
 
       {video === null ? (
         <>
@@ -118,7 +139,10 @@ export function VideoBlock({ video, onChange }: VideoBlockProps) {
           <p className="text-xs font-normal text-text-tertiary">{t('lesson.video.helper')}</p>
         </>
       ) : video.status === 'failed' ? (
-        <div data-lesson-video-failed className="flex flex-col items-start gap-2">
+        <div
+          data-lesson-video-failed
+          className="flex flex-col items-start gap-2 rounded-xl border border-danger/30 bg-danger/5 px-3.5 py-3"
+        >
           <p role="alert" className="text-sm font-normal text-danger">
             {failedCopy}
           </p>
@@ -126,6 +150,8 @@ export function VideoBlock({ video, onChange }: VideoBlockProps) {
             type="button"
             variant="ghost"
             size="sm"
+            hitArea
+            className="-ml-2 px-2"
             onClick={() => {
               setFailure(null);
               settledFor.current = null;
@@ -138,37 +164,22 @@ export function VideoBlock({ video, onChange }: VideoBlockProps) {
       ) : video.status === 'ready' ? (
         <div data-lesson-video-ready className="flex flex-col gap-2 md:max-w-[480px]">
           <VideoPlayer assetId={video.assetId} status="ready" />
-          <div className="flex items-center justify-between gap-3">
-            {video.durationSeconds !== null && video.durationSeconds > 0 ? (
-              // UI-D-410: the asset's seconds as "mm:ss"; the sr-only twin carries "Duração {mm:ss}".
-              <span data-lesson-video-duration className="text-xs tabular-nums text-text-tertiary">
-                <span aria-hidden>{formatLessonDuration(video.durationSeconds)}</span>
-                <span className="sr-only">
-                  {t('lesson.video.duration', {
-                    duration: formatLessonDuration(video.durationSeconds),
-                  })}
-                </span>
+          {video.durationSeconds !== null && video.durationSeconds > 0 ? (
+            // UI-D-410: the asset's seconds as "mm:ss"; the sr-only twin carries "Duração {mm:ss}".
+            <span data-lesson-video-duration className="text-xs tabular-nums text-text-tertiary">
+              <span aria-hidden>{formatLessonDuration(video.durationSeconds)}</span>
+              <span className="sr-only">
+                {t('lesson.video.duration', {
+                  duration: formatLessonDuration(video.durationSeconds),
+                })}
               </span>
-            ) : (
-              <span />
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              data-lesson-video-remove
-              className="text-danger"
-              onClick={() => setRemoving(true)}
-            >
-              <Trash2 aria-hidden size={18} />
-              {t('lesson.video.remove')}
-            </Button>
-          </div>
+            </span>
+          ) : null}
         </div>
       ) : (
         <Card
           data-lesson-video-processing
-          className="flex aspect-video w-full flex-col items-center justify-center gap-3 bg-bg-tertiary p-4 md:max-w-[480px]"
+          className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-bg-secondary p-4 shadow-none md:max-w-[480px]"
         >
           <LoaderCircle
             aria-hidden

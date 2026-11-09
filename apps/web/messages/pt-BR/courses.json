@@ -17,6 +17,9 @@
         "course": "Novo curso",
         "track": "Nova trilha",
         "live": "Nova live"
+      },
+      "filter": {
+        "button": "{label}: {current}"
       }
     },
     "list": {
@@ -89,7 +92,9 @@
       "pastEmpty": {
         "title": "Nenhuma live passada",
         "body": "Lives que já aconteceram aparecem aqui."
-      }
+      },
+      "edit": "Editar",
+      "editAria": "Editar a live: {title}"
     },
     "row": {
       "meta": "{modules, plural, =0 {# módulos} one {# módulo} other {# módulos}} · {lessons, plural, =0 {# aulas} one {# aula} other {# aulas}}",
@@ -153,6 +158,12 @@
         "bodyGated": "Os membros com {products} passam a ver o curso; os demais veem só as aulas abertas.",
         "confirm": "Publicar",
         "cancel": "Cancelar"
+      },
+      "editSection": {
+        "label": "Editar",
+        "hero": "Editar a capa e as informações do curso",
+        "about": "Editar a descrição do curso",
+        "outcomes": "Editar o que o aluno vai dominar"
       }
     },
     "curriculum": {
@@ -170,7 +181,8 @@
         "requiresPrevious": "Exige o anterior",
         "meta": "{N, plural, =0 {# aulas} one {# aula} other {# aulas}}",
         "metaWithDuration": "{N, plural, =0 {# aulas} one {# aula} other {# aulas}} · {duration}",
-        "edit": "Editar módulo: {module}"
+        "edit": "Editar módulo: {module}",
+        "pill": "Módulo {nn}"
       },
       "lesson": {
         "practice": "Prática",
@@ -206,7 +218,7 @@
         "add": "Adicionar capa",
         "change": "Trocar capa",
         "remove": "Remover capa",
-        "helper": "Opcional. Use uma imagem vertical (3:4): é assim que ela aparece no catálogo. Sem imagem, usamos as cores de {tenant}.",
+        "helper": "Opcional. Sem imagem, usamos as cores de {tenant}.",
         "preview": "Prévia da capa"
       },
       "title": {
@@ -274,6 +286,8 @@
       "form": {
         "create": "Criar módulo",
         "createTitle": "Novo módulo",
+        "cover": "Capa do módulo",
+        "coverHelper": "Opcional. Sem capa, o módulo usa a do curso.",
         "editTitle": "Editar módulo",
         "title": "Título",
         "titlePlaceholder": "Ex.: Fundamentos",
@@ -369,7 +383,8 @@
         "title": "Nenhuma categoria",
         "body": "Categorias organizam o catálogo. Elas são opcionais.",
         "cta": "Criar categoria"
-      }
+      },
+      "subtitle": "Os temas do catálogo de {tenant}."
     },
     "category": {
       "count": "{N, plural, =0 {Nenhum curso} one {# curso} other {# cursos}}",
@@ -402,7 +417,7 @@
         "create": "Criar trilha",
         "createTitle": "Nova trilha",
         "editTitle": "Editar trilha",
-        "coverHelper": "Opcional. Use uma imagem horizontal (16:10). Sem imagem, usamos as cores de {tenant}.",
+        "coverHelper": "Opcional. Sem imagem, usamos as cores de {tenant}.",
         "title": "Título",
         "subtitle": "Subtítulo",
         "audience": "Para quem é",
@@ -557,6 +572,74 @@
       "lessonCta": "Voltar para o curso",
       "liveBody": "Esta live não está mais aqui.",
       "liveCta": "Ver as lives"
+    },
+    "area": {
+      "label": "Cursos",
+      "menu": "Menu de Cursos",
+      "screens": {
+        "courses": "Cursos",
+        "tracks": "Trilhas",
+        "lives": "Lives"
+      }
+    },
+    "screens": {
+      "tracks": {
+        "title": "Trilhas",
+        "subtitle": "Sequências de cursos de {tenant}."
+      },
+      "lives": {
+        "title": "Lives",
+        "subtitle": "Lives e replays de {tenant}."
+      },
+      "courses": {
+        "subtitle": "Cursos e aulas de {tenant}."
+      }
+    },
+    "manage": {
+      "title": "Gerenciar",
+      "subtitle": "O conteúdo da área de membros, por tipo.",
+      "back": "Gerenciar",
+      "backAria": "Voltar para Gerenciar",
+      "cards": {
+        "courses": {
+          "title": "Cursos",
+          "meta": "{courses, plural, =1 {# curso} other {# cursos}} · {modules, plural, =1 {# módulo} other {# módulos}} · {lessons, plural, =1 {# aula} other {# aulas}}",
+          "body": "A página do curso inteira: capa, textos, módulos, aulas, vídeos e materiais."
+        },
+        "tracks": {
+          "title": "Trilhas",
+          "meta": "{n, plural, =1 {# trilha} other {# trilhas}}",
+          "body": "Capa, título, público e a ordem dos cursos."
+        },
+        "lives": {
+          "title": "Lives",
+          "meta": "{upcoming, plural, =1 {# próxima} other {# próximas}} · {past, plural, =1 {# passada} other {# passadas}}",
+          "body": "Data, hora, duração, capa, acesso e o replay de cada uma."
+        },
+        "categories": {
+          "title": "Categorias",
+          "meta": "{n, plural, =1 {# categoria} other {# categorias}}",
+          "body": "Nome e capa das categorias do catálogo."
+        }
+      }
+    },
+    "coverField": {
+      "pickFile": "Escolher arquivo",
+      "camera": "Tirar foto",
+      "ways": "Arraste uma imagem até o quadro, cole com Ctrl+V ou escolha um arquivo.",
+      "waysTouch": "Escolha da galeria ou tire uma foto.",
+      "dropHere": "Solte para usar como capa",
+      "as": {
+        "horizontal": "Horizontal · página do curso e Início",
+        "panoramic": "Panorâmica · destaque no computador",
+        "tile": "Bloco · Explore por categoria",
+        "trackCard": "Cartão · Início e Trilhas",
+        "courseCard": "Cartão · Cursos e Início",
+        "coursePage": "Topo · página do curso",
+        "moduleCard": "Cartão · página do curso",
+        "modulePage": "Topo · página do módulo",
+        "trackPage": "Topo · página da trilha"
+      }
     }
   }
 }

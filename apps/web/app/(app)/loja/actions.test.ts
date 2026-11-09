@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * manager from the SERVER-side bootstrap, never from an argument: a forged call cannot reveal the
  * manager-only "Sem link de pagamento" pill to a member. The API read and the bootstrap are stubbed;
  * the card view and the pt-BR catalog are real.
+ *
+ * 2026-10-24 (the Loja area): two surfaces. The BROWSE actions (Produtos, Comprados) draw the member's
+ * view for everyone, so even a manager never gets the manager-only pill there; the MANAGE actions
+ * (Gerenciar) give a manager the catalogue's state and refuse anyone else before any API read.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -39,7 +43,12 @@ vi.mock('@/lib/store', () => ({
   purchaseProduct: vi.fn(),
 }));
 
-const { loadMoreProductsAction, refreshProductsAction } = await import('./actions');
+const {
+  loadMoreManagedProductsAction,
+  loadMoreProductsAction,
+  refreshManagedProductsAction,
+  refreshProductsAction,
+} = await import('./actions');
 
 const P = '11111111-1111-4111-8111-111111111111';
 const card = (overrides: Record<string, unknown> = {}) => ({
@@ -61,12 +70,12 @@ beforeEach(() => {
   mocks.getProducts.mockResolvedValue({ items: [card()], nextCursor: null });
 });
 
-describe('the grid actions read canManage from the bootstrap', () => {
-  it('a manager gets the noLink pill from the refresh and from the load more', async () => {
+describe('the store actions read canManage from the bootstrap', () => {
+  it('Gerenciar: a manager gets the noLink pill from the refresh and from the load more', async () => {
     mocks.permissions = ['store.product.manage'];
     for (const result of [
-      await refreshProductsAction('all'),
-      await loadMoreProductsAction('all', 'cursor-1'),
+      await refreshManagedProductsAction('all'),
+      await loadMoreManagedProductsAction('all', 'cursor-1'),
     ]) {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -74,6 +83,52 @@ describe('the grid actions read canManage from the bootstrap', () => {
       expect(result.items[0]?.ariaLabel).toContain(', sem link de pagamento');
     }
     expect(mocks.requireBootstrap).toHaveBeenCalledTimes(2);
+  });
+
+  it('the browse screens never draw the manager pill, even for a manager', async () => {
+    mocks.permissions = ['store.product.manage'];
+    mocks.getProducts.mockResolvedValue({ items: [card({ owned: true })], nextCursor: null });
+    for (const result of [
+      await refreshProductsAction('all'),
+      await loadMoreProductsAction('owned', 'cursor-1'),
+    ]) {
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.items[0]?.pill).toEqual({ kind: 'owned', label: 'Comprado' });
+    }
+    mocks.getProducts.mockResolvedValue({ items: [card()], nextCursor: null });
+    const plain = await refreshProductsAction('all');
+    expect(plain.ok && plain.items[0]?.pill).toBeUndefined();
+  });
+
+  it("Gerenciar shows the catalogue's state: the archived list reads Arquivado, the manager's own holding never shows", async () => {
+    mocks.permissions = ['store.product.manage'];
+    mocks.getProducts.mockResolvedValue({
+      items: [card({ owned: true, status: 'archived' })],
+      nextCursor: null,
+    });
+    const archived = await refreshManagedProductsAction('archived');
+    expect(archived.ok).toBe(true);
+    if (!archived.ok) return;
+    expect(archived.items[0]?.pill).toEqual({ kind: 'archived', label: 'Arquivado' });
+    expect(archived.items[0]?.ariaLabel).toBe('Kit, arquivado');
+  });
+
+  it('Gerenciar refuses a member before any API read', async () => {
+    mocks.permissions = ['feed.post'];
+    expect(await refreshManagedProductsAction('all')).toEqual({ ok: false, code: 'generic' });
+    expect(await loadMoreManagedProductsAction('archived', 'cursor-1')).toEqual({
+      ok: false,
+      code: 'generic',
+    });
+    expect(mocks.getProducts).not.toHaveBeenCalled();
+  });
+
+  it('each surface answers only its own lists', async () => {
+    mocks.permissions = ['store.product.manage'];
+    expect(await refreshProductsAction('archived')).toEqual({ ok: false, code: 'generic' });
+    expect(await refreshManagedProductsAction('owned')).toEqual({ ok: false, code: 'generic' });
+    expect(mocks.getProducts).not.toHaveBeenCalled();
   });
 
   it('a member never gets the pill, whatever the product says', async () => {

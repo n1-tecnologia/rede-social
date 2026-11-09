@@ -4,20 +4,33 @@ import { Badge, cn, useKeyboardInset } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
-import { activeTabChrome, activeTabKey, iconFor, type NavItem } from './nav';
+import {
+  activeTabChrome,
+  activeTabKey,
+  iconFor,
+  type NavItem,
+  type PhoneLayout,
+  phoneChrome,
+} from './nav';
 import { reselectTab, scrollAppToTop } from './tab-reselect';
 
 export interface BottomNavProps {
-  /** Registry tabs: kernel Início first, enabled module tabs, kernel Perfil last (D-40). */
+  /**
+   * Registry tabs: kernel Início first, enabled module tabs, kernel Perfil last (D-40). A `railOnly`
+   * tab is left out here (2026-10-23: Perfil when the row is full; the TopBar's avatar is its door).
+   */
   tabs: ReadonlyArray<NavItem>;
   /** `aria-label` of the `<nav>` (catalog string). */
   label: string;
   /**
-   * UI-D-423: the shell's TopBar slots (`nav.topbar`), read only for the media chrome lookup, so a
-   * media entry that yielded its tab (Reels while Cursos is a tab) still darkens the bar on its
-   * pages. Never rendered here, and never `aria-current`: on such a page no tab is current.
+   * UI-D-423: the shell's TopBar slots (`nav.topbar`), read for the media chrome lookup, so a media
+   * entry drawn as a slot still darkens the bar on its pages (since 2026-10-23 Reels keeps its tab,
+   * so today none is). Since 2026-10-28 a slot marked `phoneTab` (the Loja) is drawn here too, as
+   * the last tab, and is `aria-current` on its pages like any tab; the others are never rendered.
    */
   slots?: ReadonlyArray<NavItem>;
+  /** 2026-11-05: the administrator's arrangement of the phone (`ShellNav.phoneLayout`, `phoneChrome`). */
+  layout?: PhoneLayout;
 }
 
 /** The prototype's easing (noz-app curve). */
@@ -78,7 +91,12 @@ const COLLAPSED_SHADOW = '0 1px 1px rgba(15, 23, 42, 0.16), 0 8px 24px rgba(15, 
  * Re-tap (2026-10-06, Instagram's gesture): tapping the tab whose page is already open (Início on
  * the feed) takes the page back to the top instead of navigating (`reselectTab`).
  */
-export function BottomNav({ tabs, label, slots }: BottomNavProps) {
+export function BottomNav({ tabs: row, label, slots, layout }: BottomNavProps) {
+  // 2026-10-23: a `railOnly` tab (the kernel Perfil when the row is full) is the rail's alone; the
+  // TopBar's avatar is its door on a phone. Nothing below ever sees it. 2026-10-28: a `phoneTab`
+  // slot (the Loja) closes the row, after the module tabs. 2026-11-05: the administrator may choose
+  // what the bar holds and in which order (`phoneChrome`).
+  const tabs = phoneChrome(row, slots ?? [], layout).bar;
   const pathname = usePathname() ?? '';
   const [shrunk, setShrunk] = useState(false);
   const keyboardOpen = useKeyboardInset(true).keyboardHeight > KEYBOARD_MIN_HEIGHT;
@@ -185,7 +203,7 @@ export function BottomNav({ tabs, label, slots }: BottomNavProps) {
             aria-current={isActive ? 'page' : undefined}
             onClick={(event) => reselectTab(event, pathname, tab.href, scrollerRef.current)}
             inert={collapsed}
-            className="grid min-w-0 place-items-center overflow-hidden py-1.5 focus-visible:outline-none motion-reduce:transition-none!"
+            className="grid min-w-0 grid-cols-1 place-items-center overflow-hidden py-1.5 focus-visible:outline-none motion-reduce:transition-none!"
             style={{
               flex: collapsed ? '0 0 0px' : '1 1 0%',
               padding: collapsed ? 0 : undefined,
@@ -195,7 +213,9 @@ export function BottomNav({ tabs, label, slots }: BottomNavProps) {
           >
             <span
               className={cn(
-                'relative grid h-11 w-[50px] place-items-center rounded-full transition-colors',
+                // `max-w-full` over the link's `grid-cols-1` (a column that may shrink below the
+                // chip): six tabs at 320px leave each ~46px, and the chip narrows with it.
+                'relative grid h-11 w-[50px] max-w-full place-items-center rounded-full transition-colors',
                 isActive ? 'bg-[var(--theme-chip)] text-brand' : 'text-text-tertiary',
               )}
             >

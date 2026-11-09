@@ -90,6 +90,26 @@ async function navLabels(page: Page): Promise<string[]> {
     );
 }
 
+/**
+ * 2026-10-23 (the grouped desktop rail): the phone's tab names as the visible nav reads them — on
+ * the desktop the home tab is "Feed" while the feed module is on, Perfil lives in the rail's account
+ * card, not among its tabs, and with the store on the Loja closes the rail's navigation (the phone
+ * keeps it a TopBar slot). The phone's BottomNav is unchanged.
+ */
+function navFor(
+  page: Page,
+  labels: string[],
+  { feed = true, store = false }: { feed?: boolean; store?: boolean } = {},
+): string[] {
+  if ((page.viewportSize()?.width ?? 0) < 768) return labels;
+  return [
+    ...labels
+      .filter((label) => label !== 'Perfil')
+      .map((label) => (feed && label === 'Início' ? 'Feed' : label)),
+    ...(store ? ['Loja'] : []),
+  ];
+}
+
 /** `{ status, code }` of one API call, so a 403 can never be read as a 404 by accident. */
 async function answer(api: ApiFetch, path: string, host: string) {
   const res = await api(path, {}, host);
@@ -134,16 +154,13 @@ test.describe('Phase 5 smoke — communities and stories, each in both direction
 
     // `stories` contributes a HOME SLOT at order 5 and NO nav entry (UI-D-25/D-80); `communities`
     // contributes a TAB and no home slot (D-55's budget). Asserting both in one place is what keeps
-    // the distinction visible. 08.5-11 (D-419): rede-demo has the school on, so Cursos holds the
-    // middle tab and Reels is a TopBar slot.
+    // the distinction visible. 08.5-11 (D-419): rede-demo has the school on, so Cursos (Membros for
+    // a member) holds a tab; 2026-10-23: Reels keeps its tab beside it and the full row leaves the
+    // kernel Perfil to the desktop rail (the phone's door is the TopBar avatar).
     await expect(strip(page)).toBeVisible();
-    expect(await navLabels(page)).toEqual([
-      'Início',
-      'Comunidades',
-      'Membros',
-      'Eventos',
-      'Perfil',
-    ]);
+    expect(await navLabels(page)).toEqual(
+      navFor(page, ['Início', 'Comunidades', 'Membros', 'Reels', 'Eventos'], { store: true }),
+    );
     await expect(visibleNav(page).getByRole('link', { name: 'Stories', exact: true })).toHaveCount(
       0,
     );
@@ -239,13 +256,10 @@ test.describe('Phase 5 smoke — communities and stories, each in both direction
     // touch is the control that shows the flips were scoped to their own tenant.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await expect(strip(page)).toBeVisible();
-    // 08.5-11 (D-419): Cursos holds the middle tab on rede-demo; Reels is a TopBar slot.
-    expect(await navLabels(page)).toEqual([
-      'Início',
-      'Comunidades',
-      'Membros',
-      'Eventos',
-      'Perfil',
-    ]);
+    // 08.5-11 (D-419): Cursos holds a tab on rede-demo; 2026-10-23: Reels keeps its tab beside it
+    // and Perfil is the desktop rail's alone.
+    expect(await navLabels(page)).toEqual(
+      navFor(page, ['Início', 'Comunidades', 'Membros', 'Reels', 'Eventos'], { store: true }),
+    );
   });
 });

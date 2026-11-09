@@ -11,6 +11,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * inputs. Since 08.4 the form never writes a product link: the Acesso block is a read-only line.
  *
  * The web workspace has no jest-dom: plain DOM assertions only.
+ *
+ * 2026-10-23: the anchors the course page's "Editar" doors land on (`#capa`, `#descricao`,
+ * `#resultados`) are pinned here too.
  */
 
 const { toast, push, refresh, create, update, setStatus } = vi.hoisted(() => ({
@@ -150,9 +153,12 @@ describe('CourseForm — create (UI-D-393)', () => {
     expect(submitButton().textContent).toContain('Criar curso');
     expect(document.querySelector('form')?.getAttribute('data-shell-hide')).toBe('nav');
     expect(document.querySelector('[data-course-cover-fallback]')).not.toBeNull();
+    // 2026-10-27: the frame is the 16:9 course card of Cursos and Início (no longer the 3:4 poster),
+    // and the wide top of the course's page is a block of its own.
     expect(document.querySelector('[data-course-cover-preview]')?.className).toContain(
-      'aspect-[3/4]',
+      'aspect-video',
     );
+    expect(document.querySelector('[data-cover-block="page"]')).not.toBeNull();
     expect(screen.getByText(/usamos as cores de Rede Demo\./)).toBeTruthy();
     expect(document.querySelector('[data-course-category-value]')?.textContent).toBe(
       'Sem categoria',
@@ -413,6 +419,19 @@ describe('CourseForm — edit (UI-D-393, UI-D-417)', () => {
       'Arquivar curso',
     );
     expect(document.querySelector('[data-course-archived-note]')).toBeNull();
+  });
+
+  it('12b. 2026-10-23: the course page\'s "Editar" doors land on #capa, #descricao and #resultados, each clear of the fixed bars', () => {
+    renderEdit();
+    const cover = document.getElementById('capa');
+    const description = document.getElementById('descricao');
+    const outcomes = document.getElementById('resultados');
+    for (const anchor of [cover, description, outcomes]) {
+      expect(anchor?.className).toContain('scroll-mt-32');
+    }
+    expect(cover?.querySelector('input[type="file"]')).not.toBeNull();
+    expect(description?.contains(document.getElementById('course-description'))).toBe(true);
+    expect(outcomes?.contains(outcomeInputs()[0] ?? null)).toBe(true);
   });
 
   it('13. changing only the tagline sends { tagline } and nothing else', async () => {

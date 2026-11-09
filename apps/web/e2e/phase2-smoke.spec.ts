@@ -45,9 +45,10 @@ import { ensureWorker } from './worker';
  * (D-55), `communities` ships a tab (D-40, 05-01), `reels` a tab that REQUIRES the feed
  * (D-121/D-123, 05.3-01) and `events` the Eventos tab (D-55, 06-01). With the feed off the Reels
  * tab therefore leaves too while its own flag stays on, and it returns with the feed — an
- * assertion, not an absence. 08.5-11 (D-401): a provisioned tenant has `courses` OFF, so Reels is
- * still a TAB here (it yields to a Cursos tab only while the school is on, as on rede-demo); these
- * bars are the courses-off control and did not change.
+ * assertion, not an absence. 08.5-11 (D-401): a provisioned tenant has `courses` OFF, so the row is
+ * never full here: Reels is a TAB and Perfil stays in the phone's BottomNav (2026-10-23: only while
+ * the school is on, as on rede-demo, does Perfil turn rail-only; Reels keeps its tab there too);
+ * these bars are the courses-off control and did not change.
  *
  * Hosts are `<slug>.localhost`: the BROWSER resolves them to loopback (RFC 6761) and GoTrue honours
  * their `redirectTo` locally; NODE does not resolve them, so every Node-side call (API, Mailpit,
@@ -276,6 +277,26 @@ async function navLabels(page: Page): Promise<string[]> {
     .evaluateAll((links) =>
       links.map((a) => a.getAttribute('aria-label') ?? a.textContent?.trim() ?? ''),
     );
+}
+
+/**
+ * 2026-10-23 (the grouped desktop rail): the phone's tab names as the visible nav reads them — on
+ * the desktop the home tab is "Feed" while the feed module is on, Perfil lives in the rail's account
+ * card, not among its tabs, and with the store on the Loja closes the rail's navigation (the phone
+ * keeps it a TopBar slot). The phone's BottomNav is unchanged.
+ */
+function navFor(
+  page: Page,
+  labels: string[],
+  { feed = true, store = false }: { feed?: boolean; store?: boolean } = {},
+): string[] {
+  if ((page.viewportSize()?.width ?? 0) < 768) return labels;
+  return [
+    ...labels
+      .filter((label) => label !== 'Perfil')
+      .map((label) => (feed && label === 'Início' ? 'Feed' : label)),
+    ...(store ? ['Loja'] : []),
+  ];
 }
 
 /** The RENDERED text colour of the `aria-current="page"` item of the visible nav. */
@@ -630,7 +651,9 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     // D-19 (reference module off) + D-40: the two kernel tabs plus the `communities` and `reels`
     // manifests' own entries, which every newly provisioned tenant gets with the default module set
     // (05-01, 05.3-01).
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']);
+    expect(await navLabels(page)).toEqual(
+      navFor(page, ['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']),
+    );
     // RENDERED brand colour on the active item (02-14 alias scoping inside [data-brand-root]).
     await expect.poll(() => activeNavColor(page)).toBe(hexToRgb(PRIMARY_2));
 
@@ -784,13 +807,9 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect(feedRegion(memberPage)).toBeVisible();
       expect(await modulesOf()).toContain('feed');
       expect((await feedApi()).status).toBe(200);
-      expect(await navLabels(memberPage)).toEqual([
-        'Início',
-        'Comunidades',
-        'Reels',
-        'Eventos',
-        'Perfil',
-      ]);
+      expect(await navLabels(memberPage)).toEqual(
+        navFor(memberPage, ['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']),
+      );
 
       // (b) Panel path: Feed off → the stored flag, the member's bootstrap, the API and the home
       // slot all follow, within the flags TTL and with no redeploy. The FEED itself ships a home
@@ -814,7 +833,10 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       expect((await feedApi()).code).toBe('MODULE_DISABLED');
       await memberPage.goto(`${origin}/inicio`);
       // D-121: the feed-requiring Reels tab left with the feed; its own flag was never touched.
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Eventos', 'Perfil']);
+      // With the feed off the desktop's home tab keeps the name "Início" (no feed behind it).
+      expect(await navLabels(memberPage)).toEqual(
+        navFor(memberPage, ['Início', 'Comunidades', 'Eventos', 'Perfil'], { feed: false }),
+      );
       expect(await getTenantModuleFlag(slug, 'reels')).toBe(true);
       await expect(visibleNav(memberPage).getByRole('link', { name: 'Feed' })).toHaveCount(0);
       await expect(feedRegion(memberPage)).toHaveCount(0); // the slot is gone, no redeploy
@@ -830,13 +852,9 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect.poll(async () => (await feedApi()).status, { timeout: 35_000 }).toBe(200);
       await memberPage.goto(`${origin}/inicio`);
       await expect(feedRegion(memberPage)).toBeVisible();
-      expect(await navLabels(memberPage)).toEqual([
-        'Início',
-        'Comunidades',
-        'Reels',
-        'Eventos',
-        'Perfil',
-      ]);
+      expect(await navLabels(memberPage)).toEqual(
+        navFor(memberPage, ['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']),
+      );
     } finally {
       await setTenantModuleFlag(slug, 'feed', true);
       await memberContext.close();

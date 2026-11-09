@@ -1055,3 +1055,83 @@ export async function getLessonsForPicker(): Promise<LessonPickerItem[]> {
     return [];
   }
 }
+
+/* ── 2026-10-23: the "Gerenciar" hub's numbers (the social-igoralves reference's cards) ──────────── */
+
+/** One card's numbers; `null` when that card's read failed (the card then shows no numbers line). */
+export interface ManagementTotals {
+  courses: { courses: number; modules: number; lessons: number } | null;
+  tracks: number | null;
+  lives: { upcoming: number; past: number } | null;
+  categories: number | null;
+}
+
+/**
+ * Every row of one keyset list, walked `COURSE_MAX_PAGE_SIZE` (50) rows a page for at most
+ * `TRACK_PICKER_MAX_PAGES` pages (the product pickers' walk). `null` on any refusal, logged by
+ * shape only: a title is tenant content.
+ */
+async function walkList<T>(
+  read: (cursor: string | undefined) => Promise<{ items: T[]; nextCursor: string | null }>,
+  op: string,
+): Promise<T[] | null> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  try {
+    for (let page = 0; page < TRACK_PICKER_MAX_PAGES; page += 1) {
+      const result = await read(cursor);
+      items.push(...result.items);
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+  } catch (error) {
+    console.error(op, {
+      ...(error instanceof ApiClientError
+        ? { status: error.status, code: error.code }
+        : { error: String(error) }),
+    });
+    return null;
+  }
+  return items;
+}
+
+/**
+ * The "Gerenciar" cards' numbers, counted from the manager's own lists (the same reads the lists
+ * make; the web adds rows, it never estimates): the live catalogue (`all`: drafts and published)
+ * with its live modules and lessons summed, the ACTIVE tracks, the upcoming and the past lives, and
+ * the categories. Never throws: each failed read leaves its card without numbers.
+ */
+export async function getManagementTotals(): Promise<ManagementTotals> {
+  const page = { limit: COURSE_MAX_PAGE_SIZE };
+  const [courses, tracks, upcoming, past, categories] = await Promise.all([
+    walkList(
+      (cursor) => getCourses({ ...page, filter: 'all', cursor }),
+      'courses.manage_courses_failed',
+    ),
+    walkList(
+      (cursor) => getTracks({ ...page, filter: 'active', cursor }),
+      'courses.manage_tracks_failed',
+    ),
+    walkList(
+      (cursor) => getLives({ ...page, filter: 'upcoming', cursor }),
+      'courses.manage_lives_failed',
+    ),
+    walkList(
+      (cursor) => getLives({ ...page, filter: 'past', cursor }),
+      'courses.manage_lives_failed',
+    ),
+    getCategories(),
+  ]);
+  return {
+    courses: courses
+      ? {
+          courses: courses.length,
+          modules: courses.reduce((sum, row) => sum + row.moduleCount, 0),
+          lessons: courses.reduce((sum, row) => sum + row.lessonCount, 0),
+        }
+      : null,
+    tracks: tracks ? tracks.length : null,
+    lives: upcoming && past ? { upcoming: upcoming.length, past: past.length } : null,
+    categories: categories.status === 'ok' ? categories.categories.length : null,
+  };
+}

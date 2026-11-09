@@ -1664,6 +1664,15 @@ export const learnTrackSchema = z
     mine: z.boolean(),
     suggested: z.boolean(),
     courses: z.array(learnTrackCourseSchema).min(1),
+    /**
+     * 2026-10-27 — the words the manager writes on the track form (`trackDetailSchema`): its subtitle,
+     * its audience ("Para quem é") and its description. OPTIONAL: the member read does not carry them
+     * yet, and the member screens show each one only when it arrives (the product owner chose the
+     * front alone for now; the API joins later without a web change). A string, possibly empty.
+     */
+    subtitle: z.string().optional(),
+    audience: z.string().optional(),
+    description: z.string().optional(),
   })
   .strict();
 export type LearnTrack = z.infer<typeof learnTrackSchema>;

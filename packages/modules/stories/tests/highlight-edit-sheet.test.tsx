@@ -265,6 +265,19 @@ describe('HighlightEditSheet — the edit sheet (UI-D-74)', () => {
     expect(screen.queryAllByRole('button', { name: /^cover:/ })).toHaveLength(0);
   });
 
+  it('E4b. 2026-10-23: the host’s ideal-size line sits in the cover step, under the discs', async () => {
+    render(<HighlightEditSheet {...props({ coverHint: <p>cover-size-hint</p> })} />);
+    // Not on the main step.
+    expect(screen.queryByText('cover-size-hint')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit-change-cover' }));
+    const hint = await screen.findByText('cover-size-hint');
+    const lastDisc = screen.getAllByRole('button', { name: /^cover:/ }).at(-1) as Node;
+    expect(lastDisc.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it('E5. "Adicionar stories" swaps to the picker: the shared toggle machine with the host load-more node', async () => {
     const onPickerToggle = vi.fn(async (_id: string, _next: boolean) => true);
     const onStepChange = vi.fn();

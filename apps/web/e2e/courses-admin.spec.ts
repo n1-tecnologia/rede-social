@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { createTranslator } from 'next-intl';
 import appCoursesMessages from '../messages/pt-BR/app.courses.json' with { type: 'json' };
 import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
+import coursesMemberMessages from '../messages/pt-BR/courses.member.json' with { type: 'json' };
 import mediaMessages from '../messages/pt-BR/media.json' with { type: 'json' };
 import {
   type CoursesTenant,
@@ -39,8 +41,18 @@ import {
   trackByTitle,
   trackCourseIds,
 } from './courses-admin';
+import { closeCoursesMember, completeLessonAs } from './courses-member';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+import { untilHydrated } from './hydration';
 import { landscapePng } from './media-fixtures';
+import {
+  closeSchoolMenu,
+  currentSchoolScreen,
+  hasDesktopRail,
+  schoolAreaLabel,
+  schoolScreenLabels,
+  schoolScreenLink,
+} from './school-area';
 import {
   closeStoreAdmin,
   createProduct,
@@ -51,7 +63,75 @@ import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const C = coursesMessages.courses;
+/** The member side's catalog: the Início greeting a member lands on (2026-10-22, its one h1). */
+const CM = coursesMemberMessages.courses.member;
+/** The member side's ICU sentences (the greeting's `select`s) go through next-intl, as the page does. */
+const tMember = createTranslator({
+  locale: 'pt-BR',
+  messages: coursesMemberMessages,
+  namespace: 'courses.member',
+});
+
+/**
+ * 2026-10-26 — Início's one h1: "Bom dia|Boa tarde|Boa noite, {firstName}!" by the hour in the
+ * school's zone. The hour a case runs at is unknown, so any of the three periods, any name.
+ */
+function memberGreeting(): RegExp {
+  const NAME = '\u0000';
+  const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sentences = (['morning', 'afternoon', 'evening'] as const).map((period) =>
+    literal(tMember('home.greet', { period, hasName: 'true', name: NAME })).replace(NAME, '.+'),
+  );
+  return new RegExp(`^(?:${sentences.join('|')})$`);
+}
 const SETTINGS_ROW = appCoursesMessages.app.settings.rows.courses;
+/**
+ * 2026-10-23: the manager's ONE area menu ("· Membros"): the member's five screens, then "Gerenciar"
+ * (`/cursos/gerenciar`), the row that stays current on the management lists.
+ */
+const MANAGER_MENU_LABELS = [
+  CM.area.screens.home,
+  CM.area.screens.courses,
+  CM.area.screens.tracks,
+  CM.area.screens.lives,
+  CM.area.screens.progress,
+  C.manage.title,
+];
+/** The "Gerenciar" hub's cards, in its order, and the list each opens. */
+const MANAGE_CARDS = [
+  ['courses', '/cursos'],
+  ['tracks', '/cursos/trilhas'],
+  ['lives', '/cursos/lives'],
+  ['categories', '/cursos/categorias'],
+] as const;
+/** The cards' ICU counts go through next-intl, as the page does. */
+const tCards = createTranslator({
+  locale: 'pt-BR',
+  messages: coursesMessages,
+  namespace: 'courses.manage.cards',
+});
+
+/** The counts line of each "Gerenciar" card, in the hub's order. */
+function manageMetas(totals: {
+  courses: number;
+  modules: number;
+  lessons: number;
+  tracks: number;
+  upcoming: number;
+  past: number;
+  categories: number;
+}): string[] {
+  return [
+    tCards('courses.meta', {
+      courses: totals.courses,
+      modules: totals.modules,
+      lessons: totals.lessons,
+    }),
+    tCards('tracks.meta', { n: totals.tracks }),
+    tCards('lives.meta', { upcoming: totals.upcoming, past: totals.past }),
+    tCards('categories.meta', { n: totals.categories }),
+  ];
+}
 
 /** ICU `{name}` placeholders filled the way next-intl does for the plain arguments these use. */
 function fill(message: string, values: Record<string, string>): string {
@@ -72,11 +152,33 @@ function fill(message: string, values: Record<string, string>): string {
  *
  * `serviceWorkers: 'block'`: a worker answering navigations from its cache would have these
  * assertions read what a previous run left behind (the 03-05 lesson).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the hub's area TABS are
+ * gone. Each admin list is a page of its own with its h1 and supporting line — `/cursos` (Cursos),
+ * `/cursos/trilhas` and `/cursos/lives`, each with `?filtro=` — reached from the shell's area menu
+ * ("· Cursos" and the "Menu de Cursos" button on a phone, the rail's sub-rows on a desktop;
+ * `school-area.ts` takes the right road per project), with the "Novo …" link in the header and the
+ * chips under it. The old `/cursos?aba=trilhas|lives` links are redirected there, on the CLIENT (the
+ * pages stream first: `toHaveURL`, never the response status). The course page draws the shared
+ * full-bleed hero (title and instructor over the cover), the modules are 16:6 bands with the
+ * "Módulo 01" pill, and the covers are `CoverField` frames.
+ *
+ * 2026-10-23 ("Gerenciar", the reference's model): the admin's "· Cursos" menu is gone. A manager
+ * reads the member's "· Membros" menu (the tab "Membros" → `/area-membros`) with a last row
+ * "Gerenciar" → `/cursos/gerenciar`, the hub whose four cards (with their counts) open the lists;
+ * each list carries "‹ Gerenciar" above its h1, and the Configurações "Cursos" row opens the hub.
+ * The "Categorias" row left the Cursos list for the hub's card. Each list's filter is ONE icon
+ * button beside "Novo …" that opens a dropdown of the `?filtro=` links (the row of chips is gone);
+ * the button's name carries the choice on screen ("Filtrar cursos: Todos").
  */
 test.use({ serviceWorkers: 'block' });
 test.describe.configure({ timeout: 120_000 });
 
-/** The hrefs of the Administração rows the plan orders: Loja, Cursos, Mídia (UI-D-389, P54). */
+/**
+ * The hrefs of the Administração rows the plan orders: Loja, Cursos, Mídia (UI-D-389, P54). Since
+ * 2026-10-23 the Cursos row opens "Gerenciar", and since 2026-10-24 the Loja row opens the store's
+ * own "Gerenciar" (`/loja/gerenciar`).
+ */
 async function adminRowOrder(page: Page): Promise<string[]> {
   return page
     .locator('main a[href]')
@@ -84,9 +186,50 @@ async function adminRowOrder(page: Page): Promise<string[]> {
       links
         .map((link) => link.getAttribute('href'))
         .filter(
-          (href) => href === '/loja' || href === '/cursos' || href === '/configuracoes/midia',
+          (href) =>
+            href === '/loja/gerenciar' ||
+            href === '/cursos/gerenciar' ||
+            href === '/configuracoes/midia',
         ),
     );
+}
+
+/**
+ * 2026-10-23: opens a management list the way a manager does, from the list on screen: its
+ * "‹ Gerenciar", then the hub's card (`data-manage`), waiting for each address.
+ */
+async function openFromManage(
+  page: Page,
+  key: (typeof MANAGE_CARDS)[number][0],
+  url: RegExp,
+): Promise<void> {
+  await page.getByTestId('manage-back').click();
+  await expect(page).toHaveURL(/\/cursos\/gerenciar$/);
+  await page.locator(`[data-testid="manage-card"][data-manage="${key}"]`).click();
+  await expect(page).toHaveURL(url);
+}
+
+/**
+ * 2026-10-23: a list's filter is ONE icon button beside "Novo …" (`{list}-filters-button`) that
+ * opens a dropdown; there is one per list page.
+ */
+function filterButton(page: Page): Locator {
+  return page.locator('[data-testid$="-filters-button"]');
+}
+
+/** The filter button's name for a choice: "Filtrar cursos: Todos". */
+function filterName(label: string, current: string): string {
+  return fill(C.hub.filter.button, { label, current });
+}
+
+/** Opens the filter dropdown (once hydrated) and returns its panel, named after the filter. */
+async function openFilter(page: Page, label: string): Promise<Locator> {
+  const button = filterButton(page);
+  await untilHydrated(button);
+  if ((await button.getAttribute('aria-expanded')) !== 'true') await button.click();
+  const panel = page.getByRole('navigation', { name: label, exact: true });
+  await expect(panel).toBeVisible();
+  return panel;
 }
 
 /** The kernel's generic not-found: no hub, no "Cursos" h1, Next's 404 heading. */
@@ -118,27 +261,43 @@ test.describe('browse', () => {
   test.afterAll(async () => {
     if (tenant) await deleteCoursesTenant(tenant.slug);
     await closeCoursesAdmin();
+    await closeCoursesMember();
   });
 
-  test('on the seed: the admin has the Cursos row after Loja and before Mídia and reaches the hub through it and the Cursos tab; the member has no row (UI-D-389, UI-D-412, D-419)', async ({
+  test('on the seed: the admin has the Cursos row after Loja and before Mídia and reaches Gerenciar through it (2026-10-23), under the Membros tab with Gerenciar marked in the area; the member has no row (UI-D-389, UI-D-412, D-419)', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/configuracoes`);
-    expect(await adminRowOrder(page)).toEqual(['/loja', '/cursos', '/configuracoes/midia']);
+    expect(await adminRowOrder(page)).toEqual([
+      '/loja/gerenciar',
+      '/cursos/gerenciar',
+      '/configuracoes/midia',
+    ]);
     await page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }).click();
-    await expect(page).toHaveURL(/\/cursos$/);
-    await expect(page.getByRole('heading', { level: 1, name: C.hub.title })).toBeVisible();
-    await expect(page.getByText(fill(C.hub.subtitle, { tenant: 'Rede Demo' }))).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\/gerenciar$/);
+    const manage = page.getByTestId('manage-hub');
+    await expect(manage.getByRole('heading', { level: 1, name: C.manage.title })).toBeVisible();
+    await expect(manage.getByText(C.manage.subtitle)).toBeVisible();
     // 08.5-11 (D-419, UI-D-423; was D-401's "no chrome for the school" in 08.3): the school is ONE
     // tab, in the BottomNav and the rail (both trees are in the DOM), never a TopBar slot; it is the
-    // current tab on the hub too. The shell's chrome only: the hub's own links are not counted.
-    await expect(page.locator('[data-shell-nav] a[href="/cursos"]')).toHaveCount(2);
-    await expect(page.locator('header a[href="/cursos"]')).toHaveCount(0);
-    await expect(page.locator('[data-shell-nav="bottom"] a[href="/cursos"]')).toHaveAttribute(
+    // current tab under /cursos too. The shell's chrome only: the hub's own links are not counted.
+    // 2026-10-23: the manager's tab is the member's ("Membros" → /area-membros); inside it the rail
+    // lists the area's rows and marks "Gerenciar" (this page), and with the menu closed the TopBar
+    // carries no school link at all.
+    await expect(page.locator('[data-shell-nav="bottom"] a[href="/area-membros"]')).toHaveCount(1);
+    await expect(page.locator('[data-shell-nav="rail"] a[data-slot="courses"]')).toHaveAttribute(
+      'href',
+      '/area-membros',
+    );
+    await expect(page.locator('header a[href^="/cursos"]')).toHaveCount(0);
+    await expect(page.locator('[data-shell-nav="bottom"] a[href="/area-membros"]')).toHaveAttribute(
       'aria-current',
       'page',
     );
+    await expect(
+      page.locator('[data-rail-area="courses"] a[href="/cursos/gerenciar"]'),
+    ).toHaveAttribute('aria-current', 'page');
 
     await page.context().clearCookies();
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -149,67 +308,142 @@ test.describe('browse', () => {
       page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
     ).toHaveCount(0);
     // 08.5 (D-419): the member's /cursos is the member frame, never the hub; 08.6 (D-435): bare
-    // /cursos opens Início inside it, and the catalogue body is at ?aba=cursos.
+    // /cursos opens Início inside it. 2026-10-22: each member screen has its own address, so the
+    // old ?aba=cursos lands on /area-membros/cursos (redirected on the client). And the Início waits
+    // for the member's first lesson: one who never started a lesson in a school that has one is sent
+    // on (on the client) to the catalogue, while an empty school keeps the Início and its empty card.
+    // The seed member's progress and rede-demo's courses are shared state, so either screen of the
+    // member frame is the right answer here; the hub never is.
     await page.goto(`${hosts.demo}/cursos`);
-    await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
-    await expect(page.getByTestId('courses-member-home')).toBeVisible();
+    await expect(page).toHaveURL(/\/area-membros(\/cursos)?$/);
+    const catalogue = page.getByTestId('courses-member-catalogue');
+    await expect(catalogue).toBeVisible();
+    await expect(catalogue).toHaveAttribute('data-screen', /^(inicio|cursos)$/);
+    // The landing settles on a BODY: the Início's own (the member has a lesson) or the catalogue's
+    // (sent on from Início's frame, on the client). Waiting on the frame alone let the next goto race
+    // that client redirect and abort (net::ERR_ABORTED).
+    await expect(
+      page.getByTestId('courses-member-home').or(page.getByTestId('courses-member-courses')),
+    ).toBeVisible();
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
     await page.goto(`${hosts.demo}/cursos?aba=cursos`);
+    await expect(page).toHaveURL(/\/area-membros\/cursos$/);
     await expect(
       page.getByTestId('courses-member-catalogue').getByTestId('courses-member-courses'),
     ).toBeVisible();
   });
 
-  test('UI-D-390 / UI-D-391 / P55: the hub frame, the tabs, the four chips, the Categorias row at 0 and the Todos empty state with Criar curso', async ({
+  test('UI-D-390 / UI-D-391 / P55 (2026-10-23): Gerenciar with its four cards at 0, the Membros menu with Gerenciar last, the Cursos list frame with "‹ Gerenciar", the four filters in the filter dropdown, no Categorias row and the Todos empty state with Criar curso', async ({
     page,
   }, testInfo) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/configuracoes`);
     // P54: with both store and courses on, both rows render, Cursos between Loja and Mídia.
-    expect(await adminRowOrder(page)).toEqual(['/loja', '/cursos', '/configuracoes/midia']);
+    expect(await adminRowOrder(page)).toEqual([
+      '/loja/gerenciar',
+      '/cursos/gerenciar',
+      '/configuracoes/midia',
+    ]);
     await page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }).click();
+    await expect(page).toHaveURL(/\/cursos\/gerenciar$/);
+    await untilHydrated(page.getByTestId('manage-hub'));
+
+    // 2026-10-23: "Gerenciar", one card per kind of content, each to its list, with the counts of
+    // this empty school (the categories count moved here from the old Categorias row, P55).
+    const cards = page.getByTestId('manage-card');
+    await expect(cards).toHaveCount(MANAGE_CARDS.length);
+    for (const [index, [key, href]] of MANAGE_CARDS.entries()) {
+      await expect(cards.nth(index)).toHaveAttribute('data-manage', key);
+      await expect(cards.nth(index)).toHaveAttribute('href', href);
+    }
+    await expect(cards.getByTestId('manage-card-meta')).toHaveText(
+      manageMetas({
+        courses: 0,
+        modules: 0,
+        lessons: 0,
+        tracks: 0,
+        upcoming: 0,
+        past: 0,
+        categories: 0,
+      }),
+    );
+
+    // The area menu (was the admin's "· Cursos"): the member's five rows, then Gerenciar, current
+    // here; the member rows keep ver=aluno. On a phone the TopBar reads "· Membros".
+    if (!hasDesktopRail(page)) await expect(schoolAreaLabel(page)).toContainText(CM.area.label);
+    expect(await schoolScreenLabels(page)).toEqual(MANAGER_MENU_LABELS);
+    expect(await currentSchoolScreen(page)).toBe(C.manage.title);
+    await expect(await schoolScreenLink(page, C.manage.title)).toHaveAttribute(
+      'href',
+      '/cursos/gerenciar',
+    );
+    await expect(await schoolScreenLink(page, CM.area.screens.courses)).toHaveAttribute(
+      'href',
+      '/area-membros/cursos?ver=aluno',
+    );
+    await closeSchoolMenu(page);
+
+    // The Cursos card opens the list; the list leads back ("‹ Gerenciar") and keeps Gerenciar
+    // current in the menu.
+    await cards.first().click();
     await expect(page).toHaveURL(/\/cursos$/);
-
     const hub = page.getByTestId('courses-hub');
+    await untilHydrated(hub);
+    await expect(hub).toHaveAttribute('data-screen', 'cursos');
     await expect(hub.getByRole('heading', { level: 1, name: C.hub.title })).toBeVisible();
-    await expect(hub.getByText(fill(C.hub.subtitle, { tenant: tenant.displayName }))).toBeVisible();
+    await expect(
+      hub.getByText(fill(C.screens.courses.subtitle, { tenant: tenant.displayName })),
+    ).toBeVisible();
+    await expect(hub.getByRole('link', { name: C.manage.backAria, exact: true })).toHaveAttribute(
+      'href',
+      '/cursos/gerenciar',
+    );
+    await expect(hub.getByRole('tablist')).toHaveCount(0);
+    expect(await currentSchoolScreen(page)).toBe(C.manage.title);
 
-    // UI-D-390: the area tabs are a named tablist of LINKS; Cursos is selected, Trilhas (08.3-10)
-    // beside it in the P57 order.
-    const tabs = hub.getByRole('tablist', { name: C.hub.tabs.label });
-    await expect(tabs).toBeVisible();
-    const coursesTab = tabs.getByRole('tab', { name: C.hub.tabs.courses });
-    await expect(coursesTab).toHaveAttribute('aria-selected', 'true');
-    await expect(coursesTab).toHaveAttribute('href', '/cursos?aba=cursos');
-    const tracksTab = tabs.getByRole('tab', { name: C.hub.tabs.tracks });
-    await expect(tracksTab).toHaveAttribute('aria-selected', 'false');
-    await expect(tracksTab).toHaveAttribute('href', '/cursos?aba=trilhas');
-
-    // UI-D-391: the title row with the brand create control, then the chips in the P57 order.
-    await expect(hub.getByRole('heading', { level: 2, name: C.hub.tabs.courses })).toBeVisible();
+    // UI-D-391: the header's brand create control (the screen's one brand fill), then the filters in
+    // the P57 order. 2026-10-22: no h2 title row — the list section is named by the h1.
+    await expect(
+      hub.getByRole('heading', { level: 2, name: C.hub.tabs.courses, exact: true }),
+    ).toHaveCount(0);
     await expect(hub.getByRole('link', { name: C.hub.create.course })).toHaveAttribute(
       'href',
       '/cursos/novo',
     );
-    const chips = hub.getByRole('navigation', { name: C.list.filter.label });
-    await expect(chips.getByRole('link')).toHaveText([
+    await expect(page.getByTestId('courses-tab')).toHaveAttribute(
+      'aria-labelledby',
+      'courses-screen-title',
+    );
+    await expect(hub.getByRole('heading', { level: 1, name: C.hub.title })).toHaveAttribute(
+      'id',
+      'courses-screen-title',
+    );
+    // 2026-10-23: the filter is one icon button beside "Novo curso" whose name carries the choice;
+    // it opens the dropdown of the four filters in the P57 order, Todos current. Escape closes it.
+    await expect(filterButton(page)).toHaveAccessibleName(
+      filterName(C.list.filter.label, C.list.filter.all),
+    );
+    await expect(hub.getByRole('navigation', { name: C.list.filter.label })).toHaveCount(0);
+    const filters = await openFilter(page, C.list.filter.label);
+    await expect(filters.getByRole('link')).toHaveText([
       C.list.filter.all,
       C.list.filter.drafts,
       C.list.filter.published,
       C.list.filter.archived,
     ]);
-    await expect(chips.getByRole('link', { name: C.list.filter.all })).toHaveAttribute(
+    await expect(filters.getByRole('link', { name: C.list.filter.all })).toHaveAttribute(
       'aria-current',
       'page',
     );
+    await page.keyboard.press('Escape');
+    await expect(filters).toHaveCount(0);
+    await expect(filterButton(page)).toBeFocused();
 
-    // P55: the Categorias row reads 0 on a tenant with no category; it opens the manager.
-    const categories = hub.getByTestId('courses-categories-row');
-    await expect(categories).toHaveAccessibleName(fill(C.list.categories.aria, { N: '0' }));
-    await expect(categories).toHaveAttribute('href', '/cursos/categorias');
-    await expect(hub.getByTestId('courses-categories-count')).toHaveText('0');
+    // P55 (2026-10-23): the Categorias row left the list; its door (and its count) is the hub's card.
+    await expect(hub.getByTestId('courses-categories-row')).toHaveCount(0);
 
-    // E03 empty: the manager copy with the brand "Criar curso".
+    // E03 empty: the manager copy with "Criar curso" (2026-10-22: an outline link, the header's
+    // "Novo curso" being the screen's one brand fill).
     const empty = hub.getByTestId('courses-empty');
     await expect(empty.getByRole('heading', { name: C.list.empty.title })).toBeVisible();
     await expect(empty).toContainText(C.list.empty.body);
@@ -218,20 +452,24 @@ test.describe('browse', () => {
       '/cursos/novo',
     );
 
-    // E03 overflow (the mobile project): at 320px the four chips do not fit and the row scrolls
-    // with the scrollbar hidden; the chips never wrap.
+    // E03 overflow (the mobile project, 2026-10-23): at 320px the header keeps the filter button and
+    // "Novo curso" whole and on screen beside the h1, and the open dropdown stays inside the screen.
     if (testInfo.project.name === 'mobile-chromium') {
       await page.setViewportSize({ width: 320, height: 800 });
-      const metrics = await chips.evaluate((el) => ({
-        scrollWidth: el.scrollWidth,
-        clientWidth: el.clientWidth,
-        overflowX: getComputedStyle(el).overflowX,
-        flexWrap: getComputedStyle(el).flexWrap,
-      }));
-      expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
-      expect(metrics.overflowX).toBe('auto');
-      expect(metrics.flexWrap).toBe('nowrap');
-      await expect(chips.getByRole('link', { name: C.list.filter.all })).toBeVisible();
+      const create = hub.getByRole('link', { name: C.hub.create.course });
+      for (const control of [filterButton(page), create]) {
+        const box = await control.boundingBox();
+        expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+        expect(Math.round(box?.height ?? 0)).toBeGreaterThanOrEqual(44);
+      }
+      const panel = await openFilter(page, C.list.filter.label);
+      const panelBox = await panel.boundingBox();
+      expect(panelBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((panelBox?.x ?? 0) + (panelBox?.width ?? 0)).toBeLessThanOrEqual(320);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
     }
   });
 
@@ -245,10 +483,11 @@ test.describe('browse', () => {
     await expect(drafts.getByRole('heading', { name: C.list.draftsEmpty.title })).toBeVisible();
     await expect(drafts).toContainText(C.list.draftsEmpty.body);
     await expect(drafts.getByRole('link')).toHaveCount(0);
-    await expect(page.getByRole('link', { name: C.list.filter.drafts })).toHaveAttribute(
-      'aria-current',
-      'page',
+    // 2026-10-23: the filter button names the choice and wears the dot of a non-default filter.
+    await expect(filterButton(page)).toHaveAccessibleName(
+      filterName(C.list.filter.label, C.list.filter.drafts),
     );
+    await expect(filterButton(page)).toHaveAttribute('data-filtered', '');
 
     await page.goto(`${tenant.origin}/cursos?filtro=publicados`);
     const published = page.getByTestId('courses-empty-published');
@@ -264,19 +503,91 @@ test.describe('browse', () => {
     await expect(archived).toContainText(C.list.archivedEmpty.body);
     await expect(archived.getByRole('link')).toHaveCount(0);
 
-    // An unknown filter reads as Todos (the manager copy with its action); an unknown tab as Cursos.
+    // An unknown filter reads as Todos (the manager copy with its action); an unknown ?aba= (the
+    // old tab param, 2026-10-22) is no screen of the area, so the page stays the Cursos list — no
+    // redirect, the h1 says Cursos and the menu's current row is Gerenciar (2026-10-23).
     await page.goto(`${tenant.origin}/cursos?filtro=qualquer&aba=desconhecida`);
-    await expect(page.getByRole('link', { name: C.list.filter.all })).toHaveAttribute(
-      'aria-current',
-      'page',
+    await expect(filterButton(page)).toHaveAccessibleName(
+      filterName(C.list.filter.label, C.list.filter.all),
     );
-    await expect(page.getByRole('tab', { name: C.hub.tabs.courses })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    await expect(filterButton(page)).not.toHaveAttribute('data-filtered', /.*/);
+    await expect(page.getByTestId('courses-hub')).toHaveAttribute('data-screen', 'cursos');
+    await expect(page.getByRole('heading', { level: 1, name: C.hub.title })).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\?filtro=qualquer&aba=desconhecida$/);
+    await untilHydrated(page.getByTestId('courses-hub'));
+    expect(await currentSchoolScreen(page)).toBe(C.manage.title);
     await expect(
       page.getByTestId('courses-empty').getByRole('link', { name: C.list.empty.cta }),
     ).toBeVisible();
+  });
+
+  test('2026-10-22 (the courses area redesign): Trilhas and Lives are pages of their own with their h1, reached (2026-10-23) from the cards of Gerenciar and leading back to it; the old /cursos?aba= links land on them keeping filtro', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expect(page.getByTestId('courses-hub')).toHaveAttribute('data-screen', 'cursos');
+
+    // Trilhas through Gerenciar ("‹ Gerenciar", then the card): its own address, h1, supporting
+    // line and "Nova trilha".
+    await openFromManage(page, 'tracks', /\/cursos\/trilhas$/);
+    let hub = page.getByTestId('courses-hub');
+    await expect(hub).toHaveAttribute('data-screen', 'trilhas');
+    await expect(
+      hub.getByRole('heading', { level: 1, name: C.screens.tracks.title }),
+    ).toHaveAttribute('id', 'tracks-screen-title');
+    await expect(
+      hub.getByText(fill(C.screens.tracks.subtitle, { tenant: tenant.displayName })),
+    ).toBeVisible();
+    await expect(hub.getByRole('link', { name: C.hub.create.track })).toHaveAttribute(
+      'href',
+      '/cursos/trilhas/nova',
+    );
+    const trackFilters = await openFilter(page, C.tracks.filter.label);
+    await expect(trackFilters.getByRole('link')).toHaveText([
+      C.tracks.filter.active,
+      C.tracks.filter.archived,
+    ]);
+    await page.keyboard.press('Escape');
+    await untilHydrated(hub);
+    expect(await currentSchoolScreen(page)).toBe(C.manage.title);
+
+    // Lives through Gerenciar.
+    await openFromManage(page, 'lives', /\/cursos\/lives$/);
+    hub = page.getByTestId('courses-hub');
+    await expect(hub).toHaveAttribute('data-screen', 'lives');
+    await expect(
+      hub.getByRole('heading', { level: 1, name: C.screens.lives.title }),
+    ).toHaveAttribute('id', 'lives-screen-title');
+    await expect(
+      hub.getByText(fill(C.screens.lives.subtitle, { tenant: tenant.displayName })),
+    ).toBeVisible();
+    await expect(hub.getByRole('link', { name: C.hub.create.live })).toHaveAttribute(
+      'href',
+      '/cursos/lives/nova',
+    );
+    await untilHydrated(hub);
+    expect(await currentSchoolScreen(page)).toBe(C.manage.title);
+
+    // And back to Cursos, through Gerenciar.
+    await openFromManage(page, 'courses', /\/cursos$/);
+    await expect(page.getByTestId('courses-hub')).toHaveAttribute('data-screen', 'cursos');
+
+    // The old tab links (bookmarks, shared URLs) are redirected to the new pages, keeping filtro.
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas&filtro=arquivadas`);
+    await expect(page).toHaveURL(/\/cursos\/trilhas\?filtro=arquivadas$/);
+    await expect(page.getByTestId('courses-hub')).toHaveAttribute('data-screen', 'trilhas');
+    await expect(filterButton(page)).toHaveAccessibleName(
+      filterName(C.tracks.filter.label, C.tracks.filter.archived),
+    );
+    await expect(
+      (await openFilter(page, C.tracks.filter.label)).getByRole('link', {
+        name: C.tracks.filter.archived,
+      }),
+    ).toHaveAttribute('aria-current', 'page');
+    await page.goto(`${tenant.origin}/cursos?aba=lives`);
+    await expect(page).toHaveURL(/\/cursos\/lives$/);
+    await expect(page.getByTestId('courses-hub')).toHaveAttribute('data-screen', 'lives');
   });
 
   test('UI-D-392 / E03 populated: two courses, newest first, with the right pills; the draft with an unready video carries Processando; ?filtro=publicados lists one', async ({
@@ -342,8 +653,10 @@ test.describe('browse', () => {
     // No cover: the gradient thumb (D-69).
     await expect(draft.getByTestId('course-row-fallback')).toBeVisible();
 
-    // The chips filter: Publicados lists one, Rascunhos the other, Arquivados none.
-    await page.getByRole('link', { name: C.list.filter.published }).click();
+    // The filter (2026-10-23: the dropdown): Publicados lists one, Rascunhos the other, Arquivados none.
+    await (await openFilter(page, C.list.filter.label))
+      .getByRole('link', { name: C.list.filter.published })
+      .click();
     await expect(page).toHaveURL(/\/cursos\?filtro=publicados$/);
     await expect(
       page.getByRole('link', { name: `${titles.published}, ${C.status.published}`, exact: true }),
@@ -360,7 +673,7 @@ test.describe('browse', () => {
     await expect(page.getByTestId('courses-empty-archived')).toBeVisible();
   });
 
-  test('08.5-10 D-422 / UI-D-437 / EP-36 / COURSE-25: a published row has the eye "Ver como aluno: {course}" after its link and a draft row none; the course page puts "Ver como aluno" above "Despublicar"; the eye lands on the preview', async ({
+  test('08.5-10 D-422 / UI-D-437 / EP-36 / COURSE-25: a published row has the eye "Ver como aluno: {course}" after its link and a draft row none; the course page puts "Ver como aluno" in its header (2026-10-23), before "Despublicar"; the eye lands on the preview', async ({
     page,
   }) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
@@ -407,13 +720,18 @@ test.describe('browse', () => {
     expect(Math.round(box?.width ?? 0)).toBeGreaterThanOrEqual(44);
     expect(Math.round(box?.height ?? 0)).toBeGreaterThanOrEqual(44);
 
-    // The admin course page of the published course: "Ver como aluno" ABOVE "Despublicar" (EP-36).
+    // The admin course page of the published course: "Ver como aluno" BEFORE "Despublicar" (EP-36).
+    // 2026-10-23 (the reference's course page): it is the header's outlined pill
+    // (`course-view-as-member`), so it sits above the publish card, which keeps Despublicar alone.
     await page.goto(`${tenant.origin}/cursos/${ids.published}`);
-    const actions = page.getByTestId('course-actions');
-    const view = actions.getByRole('link', { name: C.course.viewAsMember, exact: true });
-    const unpublish = actions.getByTestId('course-unpublish');
+    const view = page.getByTestId('course-view-as-member');
+    const unpublish = page.getByTestId('course-actions').getByTestId('course-unpublish');
+    await expect(view).toHaveAccessibleName(C.course.viewAsMember);
     await expect(view).toHaveAttribute('href', `/cursos/${ids.published}?ver=aluno`);
     await expect(unpublish).toBeVisible();
+    await expect(
+      page.getByTestId('course-actions').getByRole('link', { name: C.course.viewAsMember }),
+    ).toHaveCount(0);
     const precedes = await view.evaluate(
       (node, other) =>
         Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
@@ -423,6 +741,8 @@ test.describe('browse', () => {
     const viewBox = await view.boundingBox();
     const unpublishBox = await unpublish.boundingBox();
     expect((viewBox?.y ?? 0) + (viewBox?.height ?? 0)).toBeLessThanOrEqual(unpublishBox?.y ?? 0);
+    // The 44px target of the header's door.
+    expect(Math.round(viewBox?.height ?? 0)).toBeGreaterThanOrEqual(44);
 
     // UI E11/error: a course that is not published has no "Ver como aluno".
     await page.goto(`${tenant.origin}/cursos/${ids.draft}`);
@@ -431,7 +751,8 @@ test.describe('browse', () => {
       0,
     );
 
-    // The eye lands on the member page with the preview banner (D-422).
+    // The eye lands on the member page (D-422). 2026-10-23: as the member sees it, with no preview
+    // banner (the way back to authoring is the menu's Gerenciar).
     await page.goto(`${tenant.origin}/cursos`);
     await list
       .getByRole('link', {
@@ -441,7 +762,7 @@ test.describe('browse', () => {
       .click();
     await expect(page).toHaveURL(new RegExp(`/cursos/${ids.published}\\?ver=aluno$`));
     await expect(page.getByTestId('member-course-page')).toBeVisible();
-    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
   });
 
   test('08.5 / D-419 / UI-D-424 (was UI-D-412): a member gets the member catalogue and no Configurações row; with the module off both roles get the kernel not-found', async ({
@@ -454,24 +775,64 @@ test.describe('browse', () => {
     await expect(
       page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
     ).toHaveCount(0);
-    // D-419: /cursos opens for the member — the frame's h1 "Cursos", never the hub's controls.
-    // 08.6 (D-435): bare /cursos and the admin-only ?filtro= open Início; since 08.6-10 the
-    // member's ?aba=trilhas opens the member Trilhas body (never the admin's tracks list).
+    // D-419: /cursos opens for the member — the member area, never the hub's controls. 08.6
+    // (D-435): bare /cursos and the admin-only ?filtro= open Início; since 08.6-10 the member's
+    // ?aba=trilhas opens the member Trilhas (never the admin's tracks list). 2026-10-22: each member
+    // screen has its own address (/area-membros, /area-membros/trilhas …) and Início has no screen
+    // header: its one h1 is the greeting.
+    //
+    // 2026-10-22 (the Início waits for the first lesson): this member never started a lesson and the
+    // school has a published course with lessons, so /cursos lands on /area-membros and the client
+    // sends it on to the catalogue — the hub's controls still nowhere.
     for (const path of ['/cursos', '/cursos?filtro=publicados']) {
       await page.goto(`${tenant.origin}${path}`);
+      await expect(page).toHaveURL(/\/area-membros\/cursos$/);
+      const catalogue = page.getByTestId('courses-member-catalogue');
+      await expect(catalogue).toHaveAttribute('data-screen', 'cursos');
+      await expect(catalogue.getByTestId('courses-member-courses')).toBeVisible();
+      await expect(catalogue.getByTestId('courses-member-home')).toHaveCount(0);
+      await expect(page.getByTestId('courses-hub')).toHaveCount(0);
+      await expect(page.getByRole('link', { name: C.hub.create.course })).toHaveCount(0);
+    }
+    // One lesson done and the Início is the member's door again (D-435): bare /cursos and the
+    // admin-only ?filtro= open it, its one h1 the greeting (2026-10-26: by the hour and the name).
+    const firstLesson = await lessonByTitle(`${titles.published} aula 1.1`);
+    if (!firstLesson) throw new Error('the published fixture course has no first lesson');
+    await completeLessonAs(tenant.memberEmail, firstLesson.id);
+    for (const path of ['/cursos', '/cursos?filtro=publicados']) {
+      await page.goto(`${tenant.origin}${path}`);
+      await expect(page).toHaveURL(/\/area-membros$/);
       const catalogue = page.getByTestId('courses-member-catalogue');
       await expect(catalogue).toBeVisible();
-      await expect(catalogue.getByRole('heading', { level: 1, name: C.hub.title })).toBeVisible();
+      await expect(catalogue).toHaveAttribute('data-screen', 'inicio');
+      await expect(
+        catalogue.getByRole('heading', { level: 1, name: memberGreeting() }),
+      ).toBeVisible();
       await expect(catalogue.getByTestId('courses-member-home')).toBeVisible();
       await expect(page.getByTestId('courses-hub')).toHaveCount(0);
       await expect(page.getByRole('link', { name: C.hub.create.course })).toHaveCount(0);
     }
     await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await expect(page).toHaveURL(/\/area-membros\/trilhas$/);
     await expect(page.getByTestId('courses-member-tracks')).toBeVisible();
     await expect(page.getByTestId('courses-member-home')).toHaveCount(0);
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
     await page.goto(`${tenant.origin}/cursos?aba=cursos`);
+    await expect(page).toHaveURL(/\/area-membros\/cursos$/);
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
+    // The admin's own list pages send a member to the twin member screen (2026-10-22).
+    await page.goto(`${tenant.origin}/cursos/trilhas`);
+    await expect(page).toHaveURL(/\/area-membros\/trilhas$/);
+    await expect(page.getByTestId('courses-hub')).toHaveCount(0);
+    await page.goto(`${tenant.origin}/cursos/lives`);
+    await expect(page).toHaveURL(/\/area-membros\/lives$/);
+    await expect(page.getByTestId('courses-hub')).toHaveCount(0);
+    // 2026-10-23: so does "Gerenciar", to the area's Início; the member's menu has no such row.
+    await page.goto(`${tenant.origin}/cursos/gerenciar`);
+    await expect(page).toHaveURL(/\/area-membros$/);
+    await expect(page.getByTestId('manage-hub')).toHaveCount(0);
+    await untilHydrated(page.getByTestId('courses-member-catalogue'));
+    expect(await schoolScreenLabels(page)).not.toContain(C.manage.title);
 
     await page.context().clearCookies();
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
@@ -489,10 +850,16 @@ test.describe('browse', () => {
       await expect(
         page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
       ).toHaveCount(0);
-      // 08.5-11 (UI E01/error, D-401): with the school off the shell has no Cursos tab either.
-      await expect(page.locator('[data-shell-nav] a[href="/cursos"]')).toHaveCount(0);
-      // The store row stays: only the school left the group (P54).
-      await expect(page.locator('main a[href="/loja"]')).toHaveCount(1);
+      // 08.5-11 (UI E01/error, D-401): with the school off the shell has no school tab either
+      // (2026-10-23: the tab is "Membros" → /area-membros for every role).
+      await expect(
+        page.locator(
+          '[data-shell-nav] a[href="/area-membros"], [data-shell-nav] a[href="/cursos"]',
+        ),
+      ).toHaveCount(0);
+      // The store row stays: only the school left the group (P54). Since 2026-10-24 it opens the
+      // store's Gerenciar.
+      await expect(page.locator('main a[href="/loja/gerenciar"]')).toHaveCount(1);
 
       // With the school off the member gets the kernel's not-found as well, not the catalogue.
       await page.context().clearCookies();
@@ -805,15 +1172,19 @@ test.describe('categories', () => {
     page,
   }) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
-    await expect(page.getByTestId('courses-categories-count')).toHaveText('0');
-    await page.getByTestId('courses-categories-row').click();
+    // 2026-10-23: the category manager's door is the "Categorias" card of Gerenciar, with the count.
+    await page.goto(`${tenant.origin}/cursos/gerenciar`);
+    const categoriesCard = page.locator('[data-testid="manage-card"][data-manage="categories"]');
+    await expect(categoriesCard.getByTestId('manage-card-meta')).toHaveText(
+      tCards('categories.meta', { n: 0 }),
+    );
+    await categoriesCard.click();
     await expect(page).toHaveURL(/\/cursos\/categorias$/);
 
     await expect(page.getByRole('heading', { name: C.categories.title })).toBeVisible();
-    await expect(page.getByRole('link', { name: C.categories.back, exact: true })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: C.manage.backAria, exact: true })).toHaveAttribute(
       'href',
-      '/cursos',
+      '/cursos/gerenciar',
     );
     const empty = page.getByTestId('categories-empty');
     await expect(empty.getByRole('heading', { name: C.categories.empty.title })).toBeVisible();
@@ -853,8 +1224,12 @@ test.describe('categories', () => {
     await expect(again).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Lábios/ })).toHaveCount(1);
 
-    await page.goto(`${tenant.origin}/cursos`);
-    await expect(page.getByTestId('courses-categories-count')).toHaveText('1');
+    await page.goto(`${tenant.origin}/cursos/gerenciar`);
+    await expect(
+      page
+        .locator('[data-testid="manage-card"][data-manage="categories"]')
+        .getByTestId('manage-card-meta'),
+    ).toHaveText(tCards('categories.meta', { n: 1 }));
   });
 
   test('D-405 / D-411: with the store off the form has no Acesso block; the category picked in the sheet saves, counts 1 curso and disables the remove with the helper', async ({
@@ -976,10 +1351,14 @@ test.describe('curriculum', () => {
     page.getByRole('button', { name: fill(R.moveDown, { name }), exact: true });
   const cardTitles = (page: Page) =>
     page.getByTestId('module-card-title').evaluateAll((nodes) => nodes.map((n) => n.textContent));
+  /** The bands' visible pills (`aria-hidden`; the sr-only twin still says "Módulo 1"). */
   const numerals = (page: Page) =>
     page
       .getByTestId('module-card-numeral')
       .evaluateAll((nodes) => nodes.map((n) => n.querySelector('[aria-hidden]')?.textContent));
+  /** 2026-10-22: the band's glass pill reads "Módulo 01" (was the bare numeral "1"). */
+  const pill = (position: number) =>
+    fill(C.curriculum.module.pill, { nn: String(position).padStart(2, '0') });
   const publish = (page: Page) => page.getByTestId('course-publish');
   const sheet = (page: Page, title: string) => page.getByRole('dialog', { name: title });
 
@@ -1012,27 +1391,34 @@ test.describe('curriculum', () => {
     await page.goto(`${tenant.origin}/cursos/${courseId}`);
 
     // The header, the hero fallback, the status pill, the instructor line and the enabled button
-    // (no module, so no video blocks publishing).
+    // (no module, so no video blocks publishing). 2026-10-22: the hero is the shared full-bleed
+    // one — the fallback paints inside it and the title and the instructor sit over the cover (a
+    // `p`: the page's h1 stays the header's).
     await expect(page.getByRole('heading', { name: names.course })).toBeVisible();
     await expect(page.getByRole('link', { name: C.course.back, exact: true })).toHaveAttribute(
       'href',
       '/cursos',
     );
-    await expect(page.getByRole('link', { name: C.course.edit })).toHaveAttribute(
-      'href',
-      `/cursos/${courseId}/editar`,
-    );
-    await expect(page.getByTestId('course-hero-fallback')).toBeVisible();
+    // 2026-10-23: the edit door is the hero's glass "Editar", named for what it edits.
+    await expect(
+      page.getByRole('link', { name: C.course.editSection.hero, exact: true }),
+    ).toHaveAttribute('href', `/cursos/${courseId}/editar`);
+    const hero = page.getByTestId('course-hero');
+    await expect(hero.getByTestId('course-hero-fallback')).toBeVisible();
+    await expect(hero.getByTestId('course-title')).toHaveText(names.course);
+    await expect(page.locator('main').getByRole('heading', { level: 1 })).toHaveCount(1);
     await expect(page.getByTestId('course-status-pill')).toHaveText(C.status.draft);
-    await expect(page.getByTestId('course-instructor')).toHaveText(
+    await expect(hero.getByTestId('course-instructor')).toHaveText(
       fill(C.course.instructor, { instructor: 'Instrutora Fixture' }),
     );
     await expect(publish(page)).toBeEnabled();
     await expect(page.getByTestId('publish-blocked')).toHaveCount(0);
 
-    // E06 empty: the Módulos EmptyState with the outline "Criar módulo" opens the sheet.
+    // E06 empty: the Módulos EmptyState with the outline "Criar módulo" opens the sheet; the list's
+    // dashed "Novo módulo" (2026-10-22: it closes the list) is absent while there is no module.
     const empty = page.getByTestId('curriculum-empty');
     await expect(empty.getByRole('heading', { name: C.curriculum.empty.title })).toBeVisible();
+    await expect(page.locator('[data-curriculum-create]')).toHaveCount(0);
     await empty.getByRole('button', { name: C.curriculum.empty.cta }).click();
     let dialog = sheet(page, C.module.form.createTitle);
     await expect(dialog).toBeVisible();
@@ -1050,9 +1436,21 @@ test.describe('curriculum', () => {
     await expect(toast(page, C.toasts.moduleCreated)).toBeVisible();
     await expect(dialog).toHaveCount(0);
 
-    // One module: numeral 1, both arrows disabled, the ghost row above "Nova aula".
+    // One module: the "Módulo 01" pill on its band, both arrows disabled, the ghost row above
+    // "Nova aula"; the dashed "Novo módulo" now closes the list, after the band.
     await expect.poll(() => cardTitles(page)).toEqual([names.first]);
-    await expect.poll(() => numerals(page)).toEqual(['1']);
+    await expect.poll(() => numerals(page)).toEqual([pill(1)]);
+    const newModule = page.locator('[data-curriculum-create]');
+    await expect(newModule).toHaveText(C.curriculum.newModule);
+    expect(
+      await newModule.evaluate((node) => {
+        const bands = document.querySelectorAll('[data-testid="module-card"]');
+        const last = bands[bands.length - 1];
+        return Boolean(
+          last && last.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      }),
+    ).toBe(true);
     await expect(moveUp(page, names.first)).toBeDisabled();
     await expect(moveDown(page, names.first)).toBeDisabled();
     await expect(page.getByTestId('curriculum-no-lessons')).toHaveText(C.curriculum.noLessons);
@@ -1077,7 +1475,7 @@ test.describe('curriculum', () => {
     await dialog.locator('button[type="submit"]').click();
     await expect(toast(page, C.toasts.moduleCreated)).toBeVisible();
     await expect.poll(() => cardTitles(page)).toEqual([names.first, names.second]);
-    await expect.poll(() => numerals(page)).toEqual(['1', '2']);
+    await expect.poll(() => numerals(page)).toEqual([pill(1), pill(2)]);
     await expect(page.getByTestId('module-card-lock')).toHaveCount(0);
 
     // Edit the second with the switch on → "Alterações salvas." → the lock caption.
@@ -1114,7 +1512,7 @@ test.describe('curriculum', () => {
     await moveUp(page, names.second).click();
     // Optimistic: the order and the numerals swap at once; the live region announces it.
     await expect.poll(() => cardTitles(page)).toEqual([names.second, names.first]);
-    await expect.poll(() => numerals(page)).toEqual(['1', '2']);
+    await expect.poll(() => numerals(page)).toEqual([pill(1), pill(2)]);
     await expect(
       page.getByText(fill(R.moved, { name: names.second, position: '1', total: '2' })),
     ).toBeAttached();
@@ -1139,7 +1537,7 @@ test.describe('curriculum', () => {
       ]);
     await page.reload();
     await expect.poll(() => cardTitles(page)).toEqual([names.second, names.first]);
-    await expect.poll(() => numerals(page)).toEqual(['1', '2']);
+    await expect.poll(() => numerals(page)).toEqual([pill(1), pill(2)]);
   });
 
   test('UI-D-394 / D-413 / COURSE-03: the publish-blocked notice names the processing lesson over the disabled button; once the asset is ready the course publishes and unpublishes', async ({
@@ -1283,7 +1681,7 @@ test.describe('curriculum', () => {
     await expect(toast(page, C.toasts.moduleRemoved)).toBeVisible();
     await expect(edit).toHaveCount(0);
     await expect.poll(() => cardTitles(page)).toEqual([names.first]);
-    await expect.poll(() => numerals(page)).toEqual(['1']);
+    await expect.poll(() => numerals(page)).toEqual([pill(1)]);
     // Focus moved to the next module's edit control (the opener is gone).
     await expect(
       page.getByRole('button', { name: fill(C.curriculum.module.edit, { module: names.first }) }),
@@ -1299,10 +1697,10 @@ test.describe('curriculum', () => {
     await expect(page.getByTestId('course-publish')).toHaveCount(0);
     await expect(page.getByTestId('course-unpublish')).toHaveCount(0);
     await expect(page.getByTestId('course-status-pill')).toHaveText(C.status.archived);
-    await expect(page.getByRole('link', { name: C.course.edit })).toHaveAttribute(
-      'href',
-      `/cursos/${archivedId}/editar`,
-    );
+    // 2026-10-23: the edit door is the hero's glass "Editar", named for what it edits.
+    await expect(
+      page.getByRole('link', { name: C.course.editSection.hero, exact: true }),
+    ).toHaveAttribute('href', `/cursos/${archivedId}/editar`);
 
     // An unknown id is the school's "Curso indisponível" card (UI E05 error).
     await page.goto(`${tenant.origin}/cursos/00000000-0000-4000-8000-000000000000`);
@@ -1584,7 +1982,11 @@ test.describe('lesson form', () => {
     // UI-D-438: the module sheet's helper is the reworded sentence now that the rule is live — read
     // on a would-be second module ("Novo módulo"), closed without saving.
     await page.goto(`${tenant.origin}/cursos/${courseId}`);
-    await page.getByRole('button', { name: C.curriculum.newModule }).click();
+    // 2026-10-22: React on the control first; a click before hydration was lost and the sheet
+    // never opened (this case failed that way on master, once per project).
+    const newModule = page.getByRole('button', { name: C.curriculum.newModule });
+    await untilHydrated(newModule);
+    await newModule.click();
     const sheet = page.getByRole('dialog', { name: C.module.form.createTitle });
     await expect(sheet.getByRole('switch', { name: C.module.form.requiresPrevious })).toBeEnabled();
     await expect(sheet.locator('[data-module-requires-helper]')).toHaveText(
@@ -1780,6 +2182,12 @@ test.describe('lesson form', () => {
  * unpublishes one course the form shows "Não publicado" on it and the row reads "1 curso"; a subtitle
  * save leaves the link row (drop at read time, D-415) and removing the stale row unlinks it. Then the
  * track is archived through the danger dialog and listed under Arquivadas with "Arquivada".
+ *
+ * 2026-10-22: the Trilhas tab is the page `/cursos/trilhas` (its h1, "Nova trilha" in the header, the
+ * chips under it; Arquivadas at `?filtro=arquivadas`), where a save and an archive now land; a track
+ * row is a 16:10 cover card with the same test ids; in the form, "Cursos da trilha" is a numbered
+ * path whose block (`data-track-course-row`) holds the thumb and the title, with the arrows and the
+ * remove control on a line of their own under the title.
  */
 test.describe('tracks', () => {
   test.skip(isRemote, 'the courses fixtures write rows through the local database');
@@ -1802,9 +2210,13 @@ test.describe('tracks', () => {
   const trackRow = (page: Page, status: string) =>
     page.getByRole('link', { name: `${names.track}, ${status}`, exact: true });
   /** Proves React's handlers are attached after a `page.goto` (the 08.3-09 hydration gate): the
-   *  picker opens only through state. */
+   *  picker opens only through state. 2026-10-22: it waits for React on the control first
+   *  (`untilHydrated`), since a click in the window before hydration is lost and the sheet never
+   *  opens (seen once on desktop in the redesign's run, the 08.3-09 race, not the form). */
   const hydrate = async (page: Page) => {
-    await page.getByRole('button', { name: T.form.change }).click();
+    const change = page.getByRole('button', { name: T.form.change });
+    await untilHydrated(change);
+    await change.click();
     const sheet = page.getByRole('dialog', { name: T.picker.title });
     await expect(sheet).toBeVisible();
     await sheet.getByRole('button', { name: T.picker.done }).click();
@@ -1839,24 +2251,28 @@ test.describe('tracks', () => {
     await closeCoursesAdmin();
   });
 
-  test('UI-D-391 / UI-D-402 / D-414 / COURSE-10: from the empty Trilhas tab the admin creates a track, picks the two published courses (the draft is absent), moves the second up, saves and sees "2 cursos"; reopening keeps the order', async ({
+  test('UI-D-391 / UI-D-402 / D-414 / COURSE-10: from the empty Trilhas page the admin creates a track, picks the two published courses (the draft is absent), moves the second up, saves and sees "2 cursos"; reopening keeps the order', async ({
     page,
   }) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await page.goto(`${tenant.origin}/cursos/trilhas`);
 
-    // E04 empty: the tab's title row, the two chips and the empty copy with "Criar trilha".
+    // E04 empty: the page's h1 (2026-10-22: no tab, no h2 title row), the two filters (2026-10-23:
+    // in the filter dropdown) and the empty copy with "Criar trilha".
     const hub = page.getByTestId('courses-hub');
-    await expect(hub.getByRole('tab', { name: C.hub.tabs.tracks })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    await expect(hub.getByRole('heading', { level: 2, name: C.hub.tabs.tracks })).toBeVisible();
-    const chips = hub.getByRole('navigation', { name: C.tracks.filter.label });
-    await expect(chips.getByRole('link')).toHaveText([
+    await expect(hub).toHaveAttribute('data-screen', 'trilhas');
+    await expect(
+      hub.getByRole('heading', { level: 1, name: C.screens.tracks.title }),
+    ).toBeVisible();
+    await expect(
+      hub.getByRole('heading', { level: 2, name: C.hub.tabs.tracks, exact: true }),
+    ).toHaveCount(0);
+    const filters = await openFilter(page, C.tracks.filter.label);
+    await expect(filters.getByRole('link')).toHaveText([
       C.tracks.filter.active,
       C.tracks.filter.archived,
     ]);
+    await page.keyboard.press('Escape');
     const empty = page.getByTestId('tracks-empty');
     await expect(empty).toBeVisible();
     await expect(empty).toContainText(C.tracks.empty.title);
@@ -1908,7 +2324,7 @@ test.describe('tracks', () => {
 
     await trackSubmit(page).click();
     await expect(toast(page, C.toasts.trackCreated)).toBeVisible();
-    await expect(page).toHaveURL(/\/cursos\?aba=trilhas$/);
+    await expect(page).toHaveURL(/\/cursos\/trilhas$/);
 
     // UI-D-392: the row with the 16:10 fallback thumb, "2 cursos" and no pill while active.
     const row = trackRow(page, C.tracks.filter.active);
@@ -1938,7 +2354,7 @@ test.describe('tracks', () => {
     test.skip(!trackId, 'needs the track the first case created');
     await setCourseStatus(ids.first, 'draft');
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await page.goto(`${tenant.origin}/cursos/trilhas`);
     // E04 partial: the count follows the published courses only; the link row stays.
     await expect(trackRow(page, C.tracks.filter.active).getByTestId('track-row-meta')).toHaveText(
       '1 curso',
@@ -1960,7 +2376,7 @@ test.describe('tracks', () => {
     await page.getByLabel(T.form.subtitle, { exact: true }).fill('Quatro cursos em sequência');
     await trackSubmit(page).click();
     await expect(toast(page, C.toasts.saved)).toBeVisible();
-    await expect(page).toHaveURL(/\/cursos\?aba=trilhas$/);
+    await expect(page).toHaveURL(/\/cursos\/trilhas$/);
     await expect
       .poll(async () => (await trackByTitle(names.track))?.subtitle)
       .toBe('Quatro cursos em sequência');
@@ -1975,7 +2391,7 @@ test.describe('tracks', () => {
     await expect.poll(() => rowIds(page)).toEqual([ids.second]);
     await trackSubmit(page).click();
     await expect(toast(page, C.toasts.saved)).toBeVisible();
-    await expect(page).toHaveURL(/\/cursos\?aba=trilhas$/);
+    await expect(page).toHaveURL(/\/cursos\/trilhas$/);
     await expect.poll(() => trackCourseIds(trackId)).toEqual([ids.second]);
     await expect(trackRow(page, C.tracks.filter.active).getByTestId('track-row-meta')).toHaveText(
       '1 curso',
@@ -1996,7 +2412,7 @@ test.describe('tracks', () => {
     await expect(dialog).toContainText(T.archiveDialog.body);
     await dialog.getByRole('button', { name: T.archiveDialog.confirm, exact: true }).click();
     await expect(toast(page, C.toasts.trackArchived)).toBeVisible();
-    await expect(page).toHaveURL(/\/cursos\?aba=trilhas&filtro=arquivadas$/);
+    await expect(page).toHaveURL(/\/cursos\/trilhas\?filtro=arquivadas$/);
 
     const archived = trackRow(page, C.status.trackArchived);
     await expect(archived).toBeVisible();
@@ -2006,8 +2422,8 @@ test.describe('tracks', () => {
     // Archive never deletes: the link row survives (D-415).
     expect(await trackCourseIds(trackId)).toEqual([ids.second]);
 
-    // Ativas no longer lists it — the tab is back to its empty state.
-    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    // Ativas no longer lists it — the page is back to its empty state.
+    await page.goto(`${tenant.origin}/cursos/trilhas`);
     await expect(page.getByRole('link', { name: new RegExp(names.track) })).toHaveCount(0);
     await expect(page.getByTestId('tracks-empty')).toBeVisible();
 
@@ -2067,6 +2483,12 @@ function zoneDate(ms: number, zone: string): string {
  * what the API derived. 08.4 (D-418, UI-D-418): the live form never offers a product picker; once
  * the store links a live, its form shows "Liberada pelos produtos: X" read-only, scheduled and
  * cancelled alike, and a live no product opens shows no Acesso block.
+ *
+ * 2026-10-22: the Lives tab is the page `/cursos/lives` (Passadas at `?filtro=passadas`), where a
+ * save, a replay and a cancel now land. 2026-10-23: the lives are the member's showcase cards (the
+ * first upcoming in the spotlight, the rest as agenda rows, the past ones as tiles), each card still
+ * the link named "{title}, {status}" with its status chip (`live-card-status`) and an "Editar"
+ * door beside it.
  */
 test.describe('lives', () => {
   test.skip(isRemote, 'the courses fixtures write rows through the local database');
@@ -2143,29 +2565,32 @@ test.describe('lives', () => {
     await closeCoursesAdmin();
   });
 
-  test('UI-D-391 / UI-D-403 / D-416 / COURSE-11: the Lives tab lists the fixtures by derived state; from "Nova live" the admin schedules a live for tomorrow 19:00 — an http:// link is refused under the field — and sees it under Próximas as "Agendada" with the pt-BR date line', async ({
+  test('UI-D-391 / UI-D-403 / D-416 / COURSE-11: the Lives page lists the fixtures by derived state; from "Nova live" the admin schedules a live for tomorrow 19:00 — an http:// link is refused under the field — and sees it under Próximas as "Agendada" with the pt-BR date line', async ({
     page,
   }, testInfo) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?aba=lives`);
+    await page.goto(`${tenant.origin}/cursos/lives`);
 
-    // E04: the tab's title row, the two chips; the on-air fixture reads "Ao vivo" here, the ended one
-    // is NOT in this bucket (it sits under Passadas).
+    // E04: the page's h1 (2026-10-22: `/cursos/lives`, no tab, no h2 title row), the two filters
+    // (2026-10-23: in the filter dropdown); the on-air fixture reads "Ao vivo" here, the ended one is
+    // NOT in this bucket (it sits under Passadas).
     const hub = page.getByTestId('courses-hub');
-    await expect(hub.getByRole('tab', { name: C.hub.tabs.lives })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    await expect(hub.getByRole('heading', { level: 2, name: C.hub.tabs.lives })).toBeVisible();
-    const chips = hub.getByRole('navigation', { name: C.lives.filter.label });
-    await expect(chips.getByRole('link')).toHaveText([
+    await expect(hub).toHaveAttribute('data-screen', 'lives');
+    await expect(hub.getByRole('heading', { level: 1, name: C.screens.lives.title })).toBeVisible();
+    await expect(
+      hub.getByRole('heading', { level: 2, name: C.hub.tabs.lives, exact: true }),
+    ).toHaveCount(0);
+    const filters = await openFilter(page, C.lives.filter.label);
+    await expect(filters.getByRole('link')).toHaveText([
       C.lives.filter.upcoming,
       C.lives.filter.past,
     ]);
+    await page.keyboard.press('Escape');
     const onAir = liveRow(page, names.onAir, C.status.live);
     await expect(onAir).toBeVisible();
-    await expect(onAir.getByTestId('live-row-pill')).toHaveText([C.status.live]);
-    await expect(onAir.getByTestId('live-row-fallback')).toBeVisible();
+    // 2026-10-23: the first upcoming is the spotlight card, the tenant gradient without a cover.
+    await expect(onAir.getByTestId('live-card-status')).toHaveText([C.status.live]);
+    await expect(onAir.getByTestId('live-card-fallback')).toBeVisible();
     await expect(page.getByRole('link', { name: new RegExp(names.ended) })).toHaveCount(0);
 
     await hub.getByRole('link', { name: C.hub.create.live }).click();
@@ -2185,6 +2610,8 @@ test.describe('lives', () => {
     await expect(page.locator('[data-live-access]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
 
+    // A value typed before hydration never reaches React's state (the submit would stay disabled).
+    await untilHydrated(page.getByLabel(C.form.title.label, { exact: true }));
     await page.getByLabel(C.form.title.label, { exact: true }).fill(names.scheduled);
     await page.locator('#live-start-date').fill(when.date);
     await page.locator('#live-start-time').fill(when.time);
@@ -2222,7 +2649,7 @@ test.describe('lives', () => {
     await expect(page.getByText(L.form.errors.urlInvalid)).toHaveCount(0);
     await liveSubmit(page).click();
     await expect(toast(page, C.toasts.liveScheduled)).toBeVisible();
-    await expect(page).toHaveURL(/\/cursos\?aba=lives$/);
+    await expect(page).toHaveURL(/\/cursos\/lives$/);
 
     // UI-D-392: the row under Próximas with "Agendada" and the tenant-zone date line.
     const saved = await liveByTitle(names.scheduled);
@@ -2237,9 +2664,11 @@ test.describe('lives', () => {
     expect(zoneDate(Date.parse(saved?.startsAt ?? ''), zone)).toBe(when.date);
     const row = liveRow(page, names.scheduled, C.status.scheduled);
     await expect(row).toBeVisible();
-    await expect(row.getByTestId('live-row-pill')).toHaveText([C.status.scheduled]);
-    await expect(row.getByTestId('live-row-meta')).toHaveText(
-      fill(C.lives.row.meta, { date: line.date, time: line.time, duration: '60' }),
+    // 2026-10-23: after the live on air it is an agenda row: the date in its column, the line
+    // "{time} · {duration} min".
+    await expect(row.getByTestId('live-card-status')).toHaveText([C.status.scheduled]);
+    await expect(row.getByTestId('live-card-meta')).toHaveText(
+      fill(CM.lives.timeLine, { time: line.time, duration: '60' }),
     );
 
     // Reopened: the edit form with the pill, the stored wall clock, the cancel row, NO replay row.
@@ -2258,16 +2687,14 @@ test.describe('lives', () => {
     page,
   }) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?aba=lives&filtro=passadas`);
-    const hub = page.getByTestId('courses-hub');
-    await expect(
-      hub.getByRole('navigation', { name: C.lives.filter.label }).getByRole('link', {
-        name: C.lives.filter.past,
-      }),
-    ).toHaveAttribute('aria-current', 'page');
+    await page.goto(`${tenant.origin}/cursos/lives?filtro=passadas`);
+    // 2026-10-23: the filter button names the choice (Passadas).
+    await expect(filterButton(page)).toHaveAccessibleName(
+      filterName(C.lives.filter.label, C.lives.filter.past),
+    );
     const ended = liveRow(page, names.ended, C.status.recorded);
     await expect(ended).toBeVisible();
-    await expect(ended.getByTestId('live-row-pill')).toHaveText([C.status.recorded]);
+    await expect(ended.getByTestId('live-card-status')).toHaveText([C.status.recorded]);
     await expect(page.getByRole('link', { name: new RegExp(names.onAir) })).toHaveCount(0);
 
     await ended.click();
@@ -2300,7 +2727,7 @@ test.describe('lives', () => {
     await expect(liveSubmit(page)).toBeEnabled();
     await liveSubmit(page).click();
     await expect(toast(page, C.toasts.replaySet)).toBeVisible();
-    await expect(page).toHaveURL(/\/cursos\?aba=lives$/);
+    await expect(page).toHaveURL(/\/cursos\/lives$/);
     await expect
       .poll(async () => (await liveByTitle(names.ended))?.replayLessonId)
       .toBe(ids.lesson);
@@ -2378,10 +2805,10 @@ test.describe('lives', () => {
     await expect(page.locator('#live-url')).toBeDisabled();
 
     // E04 partial: the cancelled live keeps its time bucket (Próximas) with "Cancelada".
-    await page.goto(`${tenant.origin}/cursos?aba=lives`);
+    await page.goto(`${tenant.origin}/cursos/lives`);
     const row = liveRow(page, names.scheduled, C.status.cancelled);
     await expect(row).toBeVisible();
-    await expect(row.getByTestId('live-row-pill')).toHaveText([C.status.cancelled]);
+    await expect(row.getByTestId('live-card-status')).toHaveText([C.status.cancelled]);
     await expect(liveRow(page, names.onAir, C.status.live)).toBeVisible();
   });
 
@@ -2757,7 +3184,7 @@ test.describe('backstops', () => {
     await closeCoursesAdmin();
   });
 
-  test('E03/long-text: at 320px a 120-character draft title with "Rascunho" and "Processando" clamps to two lines and both pills stay whole beside the chevron', async ({
+  test('E03/long-text (2026-10-22): at 320px a 120-character draft title with "Rascunho" and "Processando" clamps to two lines, both pills stay whole under the meta, and the chevron gives its room to the title below 360px', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
@@ -2775,25 +3202,34 @@ test.describe('backstops', () => {
     expect(await clampedTall(title)).toBe(true);
     await expect(title).toHaveText(e03.title);
 
-    // Both pills, in order, fully inside the screen and never squeezed; then the chevron.
+    // Both pills, in order, fully inside the screen and never squeezed. 2026-10-22: they moved
+    // UNDER the meta, in a wrapping line, so the name keeps the row's width.
     const pills = row.getByTestId('course-row-pill');
     await expect(pills).toHaveText([C.status.draft, C.status.processing]);
+    const metaBox = await boxOf(row.getByTestId('course-row-meta'));
     for (const index of [0, 1]) {
       await expect(pills.nth(index)).toBeVisible();
-      expectInside(await boxOf(pills.nth(index)), 320);
+      const pillBox = await boxOf(pills.nth(index));
+      expectInside(pillBox, 320);
+      expect(pillBox.y).toBeGreaterThanOrEqual(metaBox.y + metaBox.height - 0.5);
       expect(await whole(pills.nth(index))).toBe(true);
     }
-    const chevron = row.locator('svg').last();
-    const chevronBox = await boxOf(chevron);
-    expect(chevronBox.width).toBeGreaterThan(0);
-    expectInside(chevronBox, 320);
-    const pillBox = await boxOf(pills.nth(1));
-    expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(chevronBox.x + 0.5);
+    // The chevron (the row's only glyph) is not drawn below 360px: its 30px go to the name.
+    const chevron = row.locator('svg');
+    await expect(chevron).toHaveCount(1);
+    await expect(chevron).toBeHidden();
     expect(await whole(row)).toBe(true);
     expect(await pageFits(page)).toBe(true);
+    // From 360px it is back, inside the screen, after the pills.
+    await page.setViewportSize({ width: 390, height: 800 });
+    await expect(chevron).toBeVisible();
+    const chevronBox = await boxOf(chevron);
+    expectInside(chevronBox, 390);
+    const lastPill = await boxOf(pills.nth(1));
+    expect(lastPill.x + lastPill.width).toBeLessThanOrEqual(chevronBox.x + 0.5);
   });
 
-  test('E05/long-text: at 320px a 120-character title and a 160-character tagline wrap under the hero without pushing the pills off-screen; the header title truncates', async ({
+  test('E05/long-text (2026-10-22): at 320px a 120-character title wraps whole inside the hero, which grows past its 16:10 instead of cutting it; the 160-character tagline wraps under the hero without pushing the pills off-screen; the header title truncates', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
@@ -2807,14 +3243,24 @@ test.describe('backstops', () => {
     await expect(header).toHaveText(e05.title);
     expect(await truncatedWide(header)).toBe(true);
     expect(await linesOf(header)).toBe(1);
-    const title = page.getByTestId('course-title');
+    // 2026-10-22: the title is drawn OVER the cover, in the shared full-bleed hero. Its 16:10 is a
+    // minimum, not a crop: the long title wraps whole and the hero grows to hold it.
+    const hero = page.getByTestId('course-hero');
+    const title = hero.getByTestId('course-title');
     await expect(title).toHaveText(e05.title);
     expect(await linesOf(title)).toBeGreaterThanOrEqual(2);
     expect(await unclipped(title)).toBe(true);
+    const heroBox = await boxOf(hero);
+    const titleBox = await boxOf(title);
+    expectInside(heroBox, 320);
+    expect(heroBox.height).toBeGreaterThanOrEqual(heroBox.width / 1.6 - 0.5);
+    expect(titleBox.y).toBeGreaterThanOrEqual(heroBox.y - 0.5);
+    expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(heroBox.y + heroBox.height + 0.5);
     const tagline = page.getByTestId('course-tagline');
     await expect(tagline).toHaveText(e05.tagline);
     expect(await linesOf(tagline)).toBeGreaterThanOrEqual(2);
     expect(await unclipped(tagline)).toBe(true);
+    expect((await boxOf(tagline)).y).toBeGreaterThanOrEqual(heroBox.y + heroBox.height - 0.5);
 
     // The pills row sits under the tagline, every pill inside the screen, no horizontal scroll.
     const pills = page.getByTestId('course-pills');
@@ -3150,9 +3596,10 @@ test.describe('backstops', () => {
     const preview = page.locator('[data-course-cover-preview]');
     const local = page.locator('[data-course-cover-local]');
     await expect(local).toBeVisible({ timeout: 60_000 });
-    // The form preview: a 3:4 box, the landscape picture centre-cropped inside it.
+    // The form preview: since 2026-10-27 the 16:9 course card's box (no longer the 3:4 poster), the
+    // landscape picture centre-cropped inside it.
     const previewBox = await boxOf(preview);
-    expect(previewBox.width / previewBox.height).toBeCloseTo(0.75, 2);
+    expect(previewBox.width / previewBox.height).toBeCloseTo(16 / 9, 1);
     await expect
       .poll(() => local.evaluate((node) => (node as HTMLImageElement).naturalWidth), {
         timeout: 30_000,
@@ -3188,13 +3635,15 @@ test.describe('backstops', () => {
       })
       .toBeGreaterThan(0);
 
-    // The course page hero: the SAME asset at 16:10.
+    // The course page hero: the SAME asset at 16:10 (2026-10-23: panoramic 21:9 from 1024px, the
+    // wide desktop page).
     await row.click();
     await expect(page).toHaveURL(new RegExp(`/cursos/${saved.id}$`));
     const hero = page.getByTestId('course-hero');
     await expect(hero).toBeVisible();
     const heroBox = await boxOf(hero);
-    expect(heroBox.width / heroBox.height).toBeCloseTo(1.6, 1);
+    const heroRatio = (page.viewportSize()?.width ?? 0) >= 1024 ? 21 / 9 : 1.6;
+    expect(heroBox.width / heroBox.height).toBeCloseTo(heroRatio, 1);
     const heroImg = hero.locator('img').first();
     expect(await heroImg.getAttribute('src')).toContain(coverId);
     await expect

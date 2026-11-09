@@ -4,7 +4,9 @@ import {
   Building2,
   CalendarDays,
   Camera,
+  ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   ClipboardList,
   CreditCard,
   Film,
@@ -18,15 +20,22 @@ import {
   Menu,
   MessageCircle,
   Moon,
+  PackageCheck,
   Palette,
   QrCode,
+  Radio,
+  Route,
   ScrollText,
   Settings,
   ShieldCheck,
   ShoppingBag,
+  SlidersHorizontal,
+  Smartphone,
   Sparkles,
   Sun,
+  Tag,
   Ticket,
+  TrendingUp,
   User,
   UserCircle,
   Users,
@@ -70,18 +79,51 @@ export interface NavItem {
    * (`withTabOverrides`).
    */
   matches?: ReadonlyArray<string>;
+  /**
+   * 2026-10-23: drawn in the desktop rail only; the phone's BottomNav leaves it out. `buildNav` sets
+   * it on the kernel Perfil when the row is full (a tab that declares `yieldsTabTo` meets its
+   * target): on a phone the TopBar's avatar (or the area menu's "Meu perfil") is already Perfil's
+   * door, so the bar keeps every module tab instead. The desktop has no TopBar and keeps the row.
+   */
+  railOnly?: true;
+  /**
+   * 2026-10-23: a slot (`ShellNav.topbar`) the desktop rail lists under Principal, after the tabs,
+   * instead of among the shortcuts (the Loja, at the product owner's request): the Atalhos at the
+   * rail's foot until 2026-10-26, the desktop header's icon links since. The phone's TopBar is
+   * unchanged. Never from the bootstrap: the host decides it (`withRailMainSlots`).
+   */
+  railMain?: true;
+  /**
+   * 2026-10-28: a slot (`ShellNav.topbar`) the phone's BottomNav draws as one more tab, after the
+   * module tabs (the Loja, at the product owner's request: "no mobile o ícone de loja deve estar na
+   * menubar inferior"). The phone's TopBar, and the shortcuts of its area menus, leave it out so it
+   * is drawn once; its own area ("· Loja") still names the bar on its pages. The desktop is unchanged.
+   * Never from the bootstrap: the host decides it (`withPhoneTabSlots`).
+   */
+  phoneTab?: true;
 }
 
-/** What the shell renders: the tab row (BottomNav / rail nav) and the slot row (TopBar / rail bottom group). */
+/** What the shell renders: the tab row (BottomNav / rail nav) and the slot row (TopBar / desktop header). */
 /**
  * A tab whose pages form an AREA with screens of their own (2026-10-06, the REINE prototype's
  * Eventos: Eventos, Fotos, Check-in, Meus). While the member is inside it, the phone's TopBar names
  * the area beside the logo ("· Eventos") and its right side collapses into one menu: the area's
  * screens first, then the bar's own shortcuts. The rail lists the screens under the tab. Never from
  * the bootstrap: the host declares it (`withAreas`) and words it.
+ *
+ * 2026-10-22 (the courses area): a tab may declare SEVERAL areas under its key, told apart by
+ * `within`. A manager's courses tab is "Cursos" (the authoring screens) everywhere, and "Membros"
+ * (the member's screens, every link in preview) under the member area's path, so "Ver como aluno"
+ * shows the member's own menu. `activeArea` picks the variant.
+ *
+ * 2026-10-24 (the Loja area): a TopBar SLOT may own an area too, the store's "· Loja" (Produtos,
+ * Comprados, the manager's Gerenciar). A tab always wins: a slot's area applies only on the pages
+ * no tab claims (`activeArea`), so every page a tab claims behaves as before. The rail lists its
+ * screens under the slot's row when the slot sits under Principal (`NavItem.railMain`); the area of
+ * a slot left among the shortcuts (the desktop header's since 2026-10-26) shows on the phone only.
  */
 export interface NavArea {
-  /** The tab whose pages ARE the area (`NavItem.key`). */
+  /** The tab, or since 2026-10-24 the TopBar slot, whose pages ARE the area (`NavItem.key`). */
   key: string;
   /** "Eventos": the TopBar's label and the menu's section title. */
   label: string;
@@ -89,13 +131,41 @@ export interface NavArea {
   menuLabel: string;
   /** The area's screens, in order. */
   screens: NavItem[];
+  /**
+   * 2026-10-22: the paths (and their sub-paths) under which THIS variant applies. Absent on an area
+   * that is the tab's only one (Eventos) or its everywhere-else variant.
+   */
+  within?: ReadonlyArray<string>;
 }
 
 export interface ShellNav {
   tabs: NavItem[];
   topbar: NavItem[];
-  /** 2026-10-06: the tabs that form an area (`withAreas`); absent, no area anywhere. */
+  /**
+   * 2026-10-06: the areas, each keyed by the tab, or since 2026-10-24 the TopBar slot, whose pages
+   * are the area (`withAreas`); absent, no area anywhere.
+   */
   areas?: NavArea[];
+  /**
+   * 2026-11-05: where each item sits on the PHONE (the product owner: "personalizar hotbar do
+   * usuário selecionando quais itens ele quer que entre ali, a ordem dos itens clicando segurando e
+   * arrastando, escolhendo se vai ter algum desses itens no header", "somente no mobile"). Absent,
+   * the shell's own placement. The desktop never reads it. Never from the bootstrap: the host
+   * decides it (`withPhoneLayout`, `phoneChrome`).
+   */
+  phoneLayout?: PhoneLayout;
+}
+
+/**
+ * The phone's chrome as the tenant's administrator arranged it (2026-11-05): the bottom bar's keys
+ * in order, the TopBar's own keys in order (beside the fixed ones, `isFixedTopSlot`) and the keys
+ * drawn nowhere on the phone. An item none of the three names keeps the shell's own place, so a
+ * module turned on later still shows.
+ */
+export interface PhoneLayout {
+  bar: ReadonlyArray<string>;
+  top: ReadonlyArray<string>;
+  hidden: ReadonlyArray<string>;
 }
 
 /** Catalog strings for the kernel entries plus a resolver for module labels (`<key>.nav` → fallback). */
@@ -144,35 +214,38 @@ function toItem(m: NavEntry, labels: NavLabels): NavItem {
  *   key, kernel Perfil last. The two kernel entries have no `tenant_modules` flag (D-16) and are
  *   unconditional; every module entry exists only because the tenant's flags put it in
  *   `bootstrap.modules`, so a disabled module's tab never renders.
- * - topbar: module entries with `placement: 'topbar'`, carrying their `badge` key, plus every
- *   yielded tab (below), sorted by `topbarOrder ?? order`, then key.
+ * - topbar: module entries with `placement: 'topbar'`, carrying their `badge` key, sorted by
+ *   `topbarOrder ?? order`, then key.
  *
- * Yield (D-401 / D-419, data-driven): a tab entry whose `yieldsTabTo` names a key that is itself a
- * tab here, and does not yield in turn, renders as a TopBar slot instead (Reels while the school's
- * Cursos tab exists). The rule is one hop over the bootstrap's own data, so two entries naming each
- * other both stay tabs, and an entry naming a disabled or slot-only module stays a tab. The kernel
- * never names a module: which entry yields to which is the manifests' declaration (MOD-02). A
- * yielded entry keeps its `chrome`, which `activeTabChrome` reads over the slots as well.
+ * A full row (D-401 / D-419 read anew on 2026-10-23, data-driven): a tab entry whose `yieldsTabTo`
+ * names a key that is itself a tab here, and does not yield in turn, says the row is full (Reels
+ * while the school's Cursos tab exists). Until 2026-10-23 that entry left the row for a TopBar slot;
+ * now, at the product owner's request, it KEEPS its tab and the kernel Perfil turns `railOnly`: the
+ * phone's BottomNav drops it (the TopBar's avatar, or the area menu's "Meu perfil", is its door
+ * there) and the desktop rail, which has no TopBar, keeps it. The rule is one hop over the
+ * bootstrap's own data, so two entries naming each other, or an entry naming a disabled or
+ * slot-only module, leave the row as it is. The kernel never names a module: which entry fills the
+ * row is the manifests' declaration (MOD-02).
  *
  * Labels: the module's own catalog namespace (`<key>.nav`) wins over the manifest label (PWA-03).
  */
 export function buildNav(modules: ReadonlyArray<NavModule>, labels: NavLabels): ShellNav {
   const entries = modules.filter(hasNav).sort(byOrderThenKey);
-  const candidates = entries.filter((m) => (m.nav.placement ?? 'tab') === 'tab');
-  const steadyTabKeys = new Set<string>(
-    candidates.filter((m) => !declaresYield(m)).map((m) => m.key),
-  );
-  const yields = (m: NavEntry) => m.nav.yieldsTabTo?.some((key) => steadyTabKeys.has(key)) ?? false;
-  const tabs = candidates.filter((m) => !yields(m));
-  const topbar = [
-    ...entries.filter((m) => m.nav.placement === 'topbar'),
-    ...candidates.filter(yields),
-  ].sort(bySlotOrderThenKey);
+  const tabs = entries.filter((m) => (m.nav.placement ?? 'tab') === 'tab');
+  const steadyTabKeys = new Set<string>(tabs.filter((m) => !declaresYield(m)).map((m) => m.key));
+  const full = tabs.some((m) => m.nav.yieldsTabTo?.some((key) => steadyTabKeys.has(key)) ?? false);
+  const topbar = entries.filter((m) => m.nav.placement === 'topbar').sort(bySlotOrderThenKey);
   return {
     tabs: [
       { key: 'home', href: '/inicio', icon: 'home', label: labels.home },
       ...tabs.map((m) => toItem(m, labels)),
-      { key: 'profile', href: '/perfil', icon: 'user', label: labels.profile },
+      {
+        key: 'profile',
+        href: '/perfil',
+        icon: 'user',
+        label: labels.profile,
+        ...(full ? { railOnly: true as const } : {}),
+      },
     ],
     topbar: topbar.map((m) => toItem(m, labels)),
   };
@@ -209,6 +282,104 @@ export function withCollapsingTabs(
       return label ? { ...tab, collapse: { label } } : tab;
     }),
   };
+}
+
+/**
+ * The nav with the named SLOTS moved up into the desktop rail's main group (`NavItem.railMain`). A
+ * key with no slot in the row (a tab key included) is ignored, and the tabs never change.
+ */
+export function withRailMainSlots(nav: ShellNav, keys: ReadonlyArray<string>): ShellNav {
+  const named = new Set(keys);
+  return {
+    ...nav,
+    topbar: nav.topbar.map((slot) =>
+      named.has(slot.key) ? { ...slot, railMain: true as const } : slot,
+    ),
+  };
+}
+
+/**
+ * The nav with the named SLOTS moved down into the phone's BottomNav (`NavItem.phoneTab`). A key
+ * with no slot in the row (a tab key included) is ignored, and the tabs never change.
+ */
+export function withPhoneTabSlots(nav: ShellNav, keys: ReadonlyArray<string>): ShellNav {
+  const named = new Set(keys);
+  return {
+    ...nav,
+    topbar: nav.topbar.map((slot) =>
+      named.has(slot.key) ? { ...slot, phoneTab: true as const } : slot,
+    ),
+  };
+}
+
+/** The nav with the phone arranged as the administrator chose (`ShellNav.phoneLayout`); `null` keeps it. */
+export function withPhoneLayout(nav: ShellNav, layout: PhoneLayout | null): ShellNav {
+  return layout ? { ...nav, phoneLayout: layout } : nav;
+}
+
+/**
+ * A TopBar slot that always stays at the top of the phone (2026-11-05): one that carries a counter
+ * (Notificações, the support chat), whose badge only the TopBar draws.
+ */
+export function isFixedTopSlot(slot: NavItem): boolean {
+  return slot.badge !== undefined;
+}
+
+/**
+ * What the phone's BottomNav draws by default, in order (2026-10-28): the tabs it keeps (a
+ * `railOnly` tab is the rail's alone), then the `phoneTab` slots.
+ */
+export function phoneBarItems(
+  tabs: ReadonlyArray<NavItem>,
+  slots: ReadonlyArray<NavItem> = [],
+): NavItem[] {
+  return [...tabs.filter((tab) => !tab.railOnly), ...slots.filter((slot) => slot.phoneTab)];
+}
+
+/**
+ * The phone's chrome (2026-11-05): what the BottomNav draws (`bar`) and what the TopBar draws on
+ * its right side, before the avatar (`top`), both in order.
+ *
+ * Without a layout it is the shell's own: the bar of `phoneBarItems`, and every slot that is not a
+ * `phoneTab` at the top, in the row's order. With one, any tab or slot may sit in the bar, at the top
+ * or nowhere, in the layout's order; the counter slots (`isFixedTopSlot`) always stay at the top,
+ * after the chosen ones; an item the layout does not name keeps its own place after the named ones.
+ * A key with no item is ignored, and a layout that would leave the bar empty is not applied.
+ */
+export function phoneChrome(
+  tabs: ReadonlyArray<NavItem>,
+  slots: ReadonlyArray<NavItem>,
+  layout?: PhoneLayout | null,
+): { bar: NavItem[]; top: NavItem[] } {
+  const defaultBar = phoneBarItems(tabs, slots);
+  const defaultTop = slots.filter((slot) => !slot.phoneTab);
+  if (!layout) return { bar: defaultBar, top: defaultTop };
+
+  const items = new Map<string, NavItem>();
+  for (const item of [...tabs, ...slots.filter((slot) => !isFixedTopSlot(slot))]) {
+    if (!items.has(item.key)) items.set(item.key, item);
+  }
+  const placed = new Set([...layout.bar, ...layout.top, ...layout.hidden]);
+  const taken = new Set<string>();
+  const pick = (keys: ReadonlyArray<string>) =>
+    keys.flatMap((key) => {
+      const item = items.get(key);
+      if (!item || taken.has(key)) return [];
+      taken.add(key);
+      return [item];
+    });
+  const bar = [
+    ...pick(layout.bar),
+    ...defaultBar.filter((item) => !placed.has(item.key) && !taken.has(item.key)),
+  ];
+  if (bar.length === 0) return { bar: defaultBar, top: defaultTop };
+  const top = [
+    ...pick(layout.top),
+    ...defaultTop.filter(
+      (slot) => isFixedTopSlot(slot) || (!placed.has(slot.key) && !taken.has(slot.key)),
+    ),
+  ];
+  return { bar, top };
 }
 
 /** What the host may rewrite on one tab (`withTabOverrides`); every field is optional. */
@@ -280,22 +451,65 @@ export function activeTabKey(tabs: ReadonlyArray<NavItem>, pathname: string): st
   return best?.key ?? null;
 }
 
-/** The areas the host declares (2026-10-06), kept only for tabs the shell actually has. */
+/**
+ * True when `pathname` IS the area screen's page (2026-10-22). The path alone: a screen's href may
+ * carry a query (a manager's preview links end in `?ver=aluno`), which a pathname never does. A
+ * sub-path is not the screen: an event page under `/eventos` keeps the TAB current, not the
+ * "Eventos" screen.
+ */
+export function isAreaScreenHere(pathname: string, href: string): boolean {
+  return pathname === pathOf(href);
+}
+
+/**
+ * 2026-10-23: the area screen the menu marks current. Its own page (`isAreaScreenHere`), or one of
+ * its `matches` read as EXACT paths, never prefixes (on a tab, `matches` are prefixes): a screen that
+ * gathers several pages, such as the courses area's "Gerenciar" over the management lists, is
+ * current on each of them and on none of their detail pages.
+ */
+export function isAreaScreenCurrent(
+  pathname: string,
+  screen: Pick<NavItem, 'href' | 'matches'>,
+): boolean {
+  return isAreaScreenHere(pathname, screen.href) || (screen.matches?.includes(pathname) ?? false);
+}
+
+/**
+ * The areas the host declares (2026-10-06), kept only for the tabs, and since 2026-10-24 the TopBar
+ * slots (the Loja), the shell actually has; an area with no screens is dropped. Several areas may
+ * share a key (2026-10-22, `NavArea.within`); each is kept on its own terms.
+ */
 export function withAreas(nav: ShellNav, areas: ReadonlyArray<NavArea>): ShellNav {
-  const keys = new Set(nav.tabs.map((tab) => tab.key));
+  const keys = new Set([...nav.tabs, ...nav.topbar].map((item) => item.key));
   const kept = areas.filter((area) => keys.has(area.key) && area.screens.length > 0);
   return kept.length > 0 ? { ...nav, areas: kept } : nav;
 }
 
-/** The area the member is inside: the one of the ACTIVE tab, or null. */
+/**
+ * The area the member is inside: the one of the ACTIVE tab, or null. When the tab has several
+ * (2026-10-22), the variant whose `within` holds the path wins, else the one without `within`; a tab
+ * whose only areas are scoped elsewhere has no area here.
+ *
+ * 2026-10-24 (the Loja area): given the shell's `slots` (`nav.topbar`), the area of the active SLOT
+ * on the pages no tab claims, picked the same way. A tab always wins: once a tab is current its key
+ * decides, even when that tab has no area, so a slot's area never takes over a tab's page. Without
+ * `slots` the answer is the tabs' alone, as before.
+ */
 export function activeArea(
   tabs: ReadonlyArray<NavItem>,
   areas: ReadonlyArray<NavArea> | undefined,
   pathname: string,
+  slots: ReadonlyArray<NavItem> = [],
 ): NavArea | null {
   if (!areas || areas.length === 0) return null;
-  const key = activeTabKey(tabs, pathname);
-  return areas.find((area) => area.key === key) ?? null;
+  const key = activeTabKey(tabs, pathname) ?? activeTabKey(slots, pathname);
+  if (key === null) return null;
+  const variants = areas.filter((area) => area.key === key);
+  return (
+    variants.find((area) => area.within?.some((path) => isNavItemActive(pathname, path))) ??
+    variants.find((area) => !area.within || area.within.length === 0) ??
+    null
+  );
 }
 
 /**
@@ -321,6 +535,9 @@ export function activeTabChrome(items: ReadonlyArray<NavItem>, pathname: string)
 const ICONS: Record<string, LucideIcon> = {
   home: Home,
   user: User,
+  'chevrons-up-down': ChevronsUpDown,
+  // 2026-10-26: the desktop header's account button (its menu drops down).
+  'chevron-down': ChevronDown,
   users: Users,
   'calendar-days': CalendarDays,
   bell: Bell,
@@ -336,6 +553,8 @@ const ICONS: Record<string, LucideIcon> = {
   'user-circle': UserCircle,
   info: Info,
   'layout-grid': LayoutGrid,
+  // 2026-11-05: the Configurações "Menu do app" row (the phone's bar and top, on the phone only).
+  smartphone: Smartphone,
   // 08-01 (UI-D-269): the Configurações "Moderação" row.
   'shield-check': ShieldCheck,
   // 08-06 (UI-D-269): the Configurações "Marca" row.
@@ -357,6 +576,18 @@ const ICONS: Record<string, LucideIcon> = {
   'credit-card': CreditCard,
   // 12-11 (UI-D-594): the platform Módulos row of the profile form module (danger `confirmDisable`).
   'clipboard-list': ClipboardList,
+  // 2026-10-22: the courses area's screens (Trilhas, Lives, Progresso), the social-igoralves
+  // prototype's glyphs.
+  route: Route,
+  radio: Radio,
+  'trending-up': TrendingUp,
+  // 2026-10-23: the courses area's "Gerenciar" (the manager's door to the management lists) and its
+  // Categorias card.
+  'sliders-horizontal': SlidersHorizontal,
+  tag: Tag,
+  // 2026-10-24: the store area's "Comprados" (its Produtos wears the shopping bag, its Gerenciar the
+  // sliders).
+  'package-check': PackageCheck,
 };
 
 export function iconFor(name: string): LucideIcon {

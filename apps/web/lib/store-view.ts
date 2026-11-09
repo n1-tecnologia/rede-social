@@ -13,7 +13,6 @@ import type {
   ProductCard,
   ProductCommunity,
   ProductDetail,
-  ProductFilter,
   ProductUnlockCourse,
   ProductUnlockLive,
 } from '@rede-social/module-store/contracts';
@@ -39,42 +38,6 @@ type Translator = Awaited<ReturnType<typeof getTranslations>>;
 /** Exported for client hosts that pass their root `useTranslations()` (the product form). */
 export type StoreTranslator = Translator;
 
-/** The pt-BR `?filtro=` values the chips write, mapped to the API's closed filter enum. */
-export const STORE_FILTER_PARAMS = {
-  todos: 'all',
-  comprados: 'owned',
-  arquivados: 'archived',
-} as const satisfies Record<string, ProductFilter>;
-
-/** The chip query value for each filter (`all` has none: it is `/loja`). */
-export const STORE_FILTER_QUERY: Record<ProductFilter, string | null> = {
-  all: null,
-  owned: 'comprados',
-  archived: 'arquivados',
-};
-
-/**
- * `?filtro=` → the filter the page reads (D-352, T-08.2-32). Anything but the single exact string
- * `comprados` or `arquivados` reads as `all` (a repeated value, an unknown one, or none), and
- * `arquivados` without `store.product.manage` reads as `all` too: the API answers 403 anyway, this is
- * the UX half.
- */
-export function storeFilterFromParam(
-  value: string | string[] | undefined,
-  canManage: boolean,
-): ProductFilter {
-  if (typeof value !== 'string') return 'all';
-  if (value === 'comprados') return 'owned';
-  if (value === 'arquivados' && canManage) return 'archived';
-  return 'all';
-}
-
-/** The `/loja` href of a filter chip. */
-export function storeFilterHref(filter: ProductFilter): string {
-  const query = STORE_FILTER_QUERY[filter];
-  return query === null ? '/loja' : `/loja?filtro=${query}`;
-}
-
 /** UI-D-383: `formatBrl(cents)`, or the catalog word for zero. Never "R$ 0,00". */
 export function priceLabel(cents: number, t: Translator): string {
   return cents === 0 ? t('store.price.free') : formatBrl(cents);
@@ -90,6 +53,25 @@ export interface ProductCardView {
   imageAssetId: string | null;
   imageAlt: string;
   pill?: { kind: 'owned' | 'archived' | 'noLink'; label: string };
+}
+
+/** A formatted price split for print: "R$" + U+00A0 + "1.497" + ",00" (`formatBrl`'s own characters). */
+export interface PriceParts {
+  lead: string;
+  main: string;
+  tail: string;
+}
+
+/**
+ * 2026-10-24 — `formatBrl(cents)` in its printed parts: the currency (with its U+00A0), the amount and
+ * the cents. Joined they ARE `formatBrl(cents)`, character for character. `null` for zero ("Grátis")
+ * or an unexpected shape, which the card prints whole.
+ */
+export function priceParts(cents: number): PriceParts | null {
+  if (cents === 0) return null;
+  const match = /^(\D*?)([\d.]+)(,\d+)$/.exec(formatBrl(cents));
+  if (!match) return null;
+  return { lead: match[1] ?? '', main: match[2] ?? '', tail: match[3] ?? '' };
 }
 
 /**
@@ -142,6 +124,20 @@ export function productCardView(
   };
 }
 
+/**
+ * 2026-10-24 — one row of the store's Gerenciar (`/loja/gerenciar`): the catalogue's state, never the
+ * manager's own holding. The same card view with `owned` cleared, so an archived product (the archived
+ * list) reads "Arquivado" and an active gateway product with no usable link always reads "Sem link de
+ * pagamento", whether or not the manager holds it. `canManage` comes from the server-side bootstrap.
+ */
+export function productManageView(
+  product: Parameters<typeof productCardView>[0],
+  t: Translator,
+  { archived, canManage }: { archived: boolean; canManage: boolean },
+): ProductCardView {
+  return productCardView({ ...product, owned: false }, t, { managerArchived: archived, canManage });
+}
+
 /** What a "Libera o acesso a" row (and a "Compra concluída" list row) opens (UI-D-439). */
 export type UnlockKind = 'community' | 'course' | 'live';
 
@@ -174,6 +170,11 @@ export interface ProductPageView {
   title: string;
   back: { href: string; label: string };
   priceLabel: string;
+  /** 2026-10-24: the price in its printed parts for the buy box (`null` for "Grátis"). */
+  priceParts: PriceParts | null;
+  /** The price is zero: "Grátis" in the success tone. */
+  free: boolean;
+  /** The state pill; 2026-10-24: drawn beside the info column's "Produto" overline, no longer in the header. */
   headerPill: { tone: 'success' | 'neutral' | 'warning'; label: string } | null;
   /**
    * What sits under the price: "Comprar"/"Obter" for an active product the viewer does not hold,
@@ -200,6 +201,8 @@ export interface ProductPageView {
   description: string | null;
   /** Empty renders no section and says nothing about communities (D-353). */
   unlocks: ProductUnlockRow[];
+  /** 2026-10-24: the section header's count, "3 conteúdos" (`MemberSectionHeader`). */
+  unlocksCount: string;
   /** The manager card's Compradores sub-line, or `null` for everyone else. */
   manage: { buyersSub: string } | null;
 }
@@ -288,6 +291,8 @@ export function productPageView(
     title: product.name,
     back,
     priceLabel: priceLabel(product.priceCents, t),
+    priceParts: priceParts(product.priceCents),
+    free: product.priceCents === 0,
     headerPill,
     action,
     buyMode,
@@ -295,6 +300,7 @@ export function productPageView(
     gatewayZone,
     description: product.description.trim() === '' ? null : product.description,
     unlocks,
+    unlocksCount: t('store.product.unlocks.count', { count: unlocks.length }),
     manage: canManage
       ? { buyersSub: t('store.product.manage.buyersSub', { count: product.holderCount ?? 0 }) }
       : null,

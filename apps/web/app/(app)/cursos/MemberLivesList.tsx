@@ -8,9 +8,11 @@ import { useTranslations } from 'next-intl';
 import { useCallback, useState } from 'react';
 import type { LiveCardView } from '@/lib/courses-member-view';
 import { loadMoreLivesAction } from './learn-actions';
+import { riseStyle } from './rise';
 
-/** The lives grid of both groups (UI-D-434). */
-export const LIVES_GRID = 'grid grid-cols-2 gap-3 px-4 sm:grid-cols-3';
+/** The "Gravadas" grid (UI-D-434): two columns, three from 640px, four from `lg` (2026-10-23). */
+export const LIVES_GRID =
+  'grid grid-cols-1 gap-4 px-4 min-[480px]:grid-cols-2 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4';
 
 /** Two card skeletons on load more of "Gravadas" (E04 loading). */
 const LOAD_MORE_SKELETONS = 2;
@@ -18,17 +20,24 @@ const LOAD_MORE_SKELETONS = 2;
 /** The first cards of a screen load eagerly; the rest are lazy. */
 const EAGER_CARDS = 4;
 
-/** The live card skeletons (E04 loading): the 16:10 rect plus two bars, at the grid's geometry. */
+/**
+ * The live card skeletons (E04 loading), at the 2026-10-22 tile's geometry: the 16:10 rect IS the
+ * card (the words sit on the cover), outlined like the tiles. No words. Used for the "Gravadas" load
+ * more; the screen's first load is `LivesSkeleton` (2026-10-23).
+ */
 export function LiveCardSkeletons({ count }: { count: number }) {
   return (
     <div aria-busy data-testid="lives-member-skeleton" className={LIVES_GRID}>
       {Array.from({ length: count }, (_, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: a fixed, static placeholder row.
-        <div key={index} className="flex flex-col overflow-hidden rounded-xl bg-bg-secondary">
-          <Skeleton variant="rect" className="aspect-[16/10] rounded-none" />
-          <div className="flex flex-col gap-2 p-3">
-            <Skeleton variant="text" width="80%" />
-            <Skeleton variant="text" width="55%" />
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: a fixed, static placeholder row.
+          key={index}
+          className="ms-panel ms-solid flex flex-col overflow-hidden rounded-2xl border border-border bg-card"
+        >
+          <Skeleton variant="rect" className="aspect-video w-full rounded-none" />
+          <div className="flex flex-col gap-2.5 p-4">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
           </div>
         </div>
       ))}
@@ -39,12 +48,26 @@ export function LiveCardSkeletons({ count }: { count: number }) {
 /**
  * One live card with the store's tag composed in the app tier (MOD-02): the courses module never
  * imports the store. Used by both groups, so "Próximas" (server-rendered) and "Gravadas" (paged
- * here) can never draw a card differently.
+ * here) can never draw a card differently. 2026-10-22: the host picks the card's `variant` (the
+ * spotlight, an agenda row or a tile) and the tag is the compact glass "Exclusiva".
  */
-export function MemberLiveCard({ view, eager = false }: { view: LiveCardView; eager?: boolean }) {
+export function MemberLiveCard({
+  view,
+  eager = false,
+  variant = 'card',
+  wide = false,
+}: {
+  view: LiveCardView;
+  eager?: boolean;
+  variant?: 'card' | 'spotlight' | 'agenda';
+  /** The spotlight alone across the row (3:1 from `lg`). */
+  wide?: boolean;
+}) {
   const t = useTranslations('courses');
   return (
     <LiveCard
+      variant={variant}
+      wide={wide}
       href={view.href}
       ariaLabel={view.ariaLabel}
       title={view.title}
@@ -54,8 +77,15 @@ export function MemberLiveCard({ view, eager = false }: { view: LiveCardView; ea
       coverAssetId={view.coverAssetId}
       coverWidths={PURPOSE_WIDTHS.cover}
       cancelled={view.cancelled}
+      day={view.day}
+      month={view.month}
+      timeLine={view.timeLine}
       eager={eager}
-      tags={view.exclusive ? <ExclusiveBadge label={t('member.tags.exclusiveLive')} /> : undefined}
+      tags={
+        view.exclusive ? (
+          <ExclusiveBadge label={t('member.tags.exclusiveLive')} size="compact" />
+        ) : undefined
+      }
     />
   );
 }
@@ -75,7 +105,8 @@ export interface MemberLivesListProps {
  * replace keyset paging through the shipped `InfiniteScroll` (2 card skeletons while a page is in
  * flight), and a LOAD-MORE failure as an inline line plus a retry with the loaded cards kept. Every
  * card arrives finished (status words, tenant-time meta, tag, name): nothing here reads the clock
- * (UI-D-288), formats or sorts (P09).
+ * (UI-D-288), formats or sorts (P09). 2026-10-22: the prototype's tiles (the words on the cover, the
+ * ▶ chip of a replay).
  */
 export function MemberLivesList({
   labelledBy,
@@ -128,7 +159,12 @@ export function MemberLivesList({
     <>
       <ul aria-labelledby={labelledBy} data-testid="lives-member-recorded" className={LIVES_GRID}>
         {items.map((item, index) => (
-          <li key={item.id} data-live-card={item.id} className="min-w-0">
+          <li
+            key={item.id}
+            data-live-card={item.id}
+            className="ms-rise min-w-0"
+            style={riseStyle(index)}
+          >
             <MemberLiveCard view={item} eager={index < EAGER_CARDS} />
           </li>
         ))}

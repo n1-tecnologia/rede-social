@@ -26,7 +26,7 @@ describe('StoriesBand', () => {
     const node = band(container);
     expect(node.className).toContain('border-b');
     expect(node.className).toContain('bg-card');
-    expect(node.className).not.toContain('md:rounded-xl');
+    expect(node.className).not.toContain('md:rounded-2xl');
     expect(node.hasAttribute('data-desktop-card')).toBe(false);
     expect(node.querySelector('[data-testid="row"]')).not.toBeNull();
   });
@@ -45,7 +45,7 @@ describe('StoriesBand', () => {
     expect(classes).toContain('bg-card');
     // …and the desktop card, every part of it behind `md:`.
     for (const name of [
-      'md:rounded-xl',
+      'md:rounded-2xl',
       'md:border-b-0',
       'md:shadow-[0_1px_3px_rgba(22,35,59,.06)]',
       'md:dark:border',
@@ -53,6 +53,6 @@ describe('StoriesBand', () => {
     ]) {
       expect(classes).toContain(name);
     }
-    expect(classes).not.toContain('rounded-xl');
+    expect(classes).not.toContain('rounded-2xl');
   });
 });

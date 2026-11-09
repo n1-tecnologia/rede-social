@@ -18,17 +18,18 @@ import {
   Button,
   Chip,
   ConfirmDialog,
-  FileDropZone,
+  cn,
   IconButton,
   Input,
   PageHeader,
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { Archive, ChevronDown, Image as ImageIcon, Plus, Tag, User, X } from 'lucide-react';
+import { Archive, Check, ChevronDown, Plus, Tag, User, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
@@ -38,6 +39,9 @@ import {
   type CourseFormDefaults,
 } from '@/lib/courses-view';
 import { type AccessProductView, communityAccessSegments } from '@/lib/store-view';
+import { DANGER_OVERRIDES, DASHED_OVERRIDES, FIELD_TRIGGER, INFO_TILE } from './admin-styles';
+import { CoverField } from './CoverField';
+import { PagePreview } from './CoverPreviews';
 import {
   type CourseWriteResult,
   createCourseAction,
@@ -73,6 +77,19 @@ import {
  *
  * Every field renders as React text (UI-D-407, T-08.3-25); every string comes from the `courses`
  * catalog (PWA-03).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): the cover is the shared
+ * `CoverField` (the 3:4 frame IS the control, "Remover capa" on the label line), the category opens
+ * from a field-like trigger (the forms' one pattern), each "O que você vai dominar" item wears the
+ * brand check the member sees, "Adicionar item" is a dashed block, the read-only "Acesso" is an
+ * information block and "Arquivar curso" is the danger zone's outlined button. Fields, order, rules
+ * and hooks are unchanged.
+ *
+ * 2026-10-23 (the admin's course page as the reference draws it): the page's "Editar" doors land on
+ * this form's sections by their anchors: `#capa` (the cover), `#descricao` (the description) and
+ * `#resultados` (O que você vai dominar), each held clear of the fixed bars by `SECTION_ANCHOR`.
+ * The shell's scroll root returns to the top when a route mounts, which undoes the browser's own
+ * jump, so the form scrolls the named section into view itself, one frame after mounting.
  */
 export type CourseFormMode = 'create' | 'edit';
 
@@ -97,6 +114,13 @@ export interface CourseFormProps {
 }
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
+/**
+ * A section the course page's "Editar" links land on (2026-10-23): the jump stops below the TopBar
+ * and this form's sticky header (≈ 3.5rem + 3.25rem), not under them.
+ */
+const SECTION_ANCHOR = 'scroll-mt-32';
+/** The section anchors a door may name (2026-10-23); any other fragment is left alone. */
+const SECTION_ANCHOR_IDS: readonly string[] = ['capa', 'descricao', 'resultados'];
 /** Announced at these percentages only, not on every tick (the `CommunityForm` rule). */
 const QUARTILES = [25, 50, 75, 100];
 
@@ -199,8 +223,19 @@ export function CourseForm({
   const [archiving, setArchiving] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const coverInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // 2026-10-23: a door from the course page (`/editar#descricao`) lands on its section. The shell's
+  // scroll root resets to the top as the route mounts (its effect runs after this one, parent after
+  // child), so the jump waits a frame; the section's `scroll-mt-32` keeps it below the fixed bars.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!SECTION_ANCHOR_IDS.includes(id)) return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   /* ── The cover: the Phase 3 machine, purpose `cover`, a 3:4 preview (UI-D-409) ─────────────── */
   const coverPreview = useCoverPreview(coverAssetId);
@@ -491,143 +526,60 @@ export function CourseForm({
       />
 
       <div className="flex flex-col gap-6 px-4 py-4 md:gap-8 md:px-6">
-        {/* ── (1) Capa: the 3:4 centre crop the catalogue thumb shows (UI-D-409). ── */}
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
-
-          <div
-            data-course-cover-preview
-            className="relative aspect-[3/4] w-full max-w-[240px] overflow-hidden rounded-xl bg-bg-tertiary"
-          >
-            {coverPreview.previewUrl ? (
-              // biome-ignore lint/performance/noImgElement: a local object URL of the file being uploaded; next/image cannot load it (the `CommunityCover` precedent)
-              <img
-                src={coverPreview.previewUrl}
-                alt={t('form.cover.preview')}
-                data-course-cover-local
-                className="h-full w-full object-cover object-center"
-              />
-            ) : coverAssetId !== null ? (
-              <MediaImage
-                assetId={coverAssetId}
-                widths={coverWidths}
-                alt={t('form.cover.preview')}
-                sizes="240px"
-                ratio=""
-                className="h-full w-full"
-                fallback={GRADIENT}
-              />
-            ) : (
-              <span
-                data-course-cover-fallback
-                aria-hidden
-                className="block h-full w-full"
-                style={{ backgroundImage: 'var(--brand-gradient)' }}
-              />
-            )}
-          </div>
-
-          <div className="hidden md:block">
-            <FileDropZone
-              id="course-cover-dropzone"
-              icon={ImageIcon}
-              accept={ACCEPT}
-              // The hook owns the verdict (a phone photo is re-encoded in the browser).
-              screen={false}
-              state={
-                coverUpload.state === 'progress' || coverUpload.state === 'processing'
-                  ? coverUpload.state
-                  : 'idle'
-              }
-              progress={coverUpload.progress}
-              onFile={(file) => void coverUpload.pick(file)}
-              labels={{
-                caption: coverAssetId ? t('form.cover.change') : t('form.cover.add'),
-                progress: (percent) => tm('progress', { percent }),
-                processing: tm('photo.preparing'),
-              }}
-            />
-          </div>
-
-          <input
-            ref={coverInputRef}
-            type="file"
+        {/* ── (1) Capa. The wrapper is the course page's "Editar" anchor (`#capa`, 2026-10-23).
+            2026-10-27 ("faça o mesmo para cursos, a área tem duas capas mas o tamanho mudou"): one
+            block per place the member sees the cover, each with its size and its own "Escolher
+            arquivo": the 16:9 card of Cursos and Início, and the wide top of the course's page with
+            the title and the tagline being typed (one image under both: a course has one cover). ── */}
+        <div id="capa" className={SECTION_ANCHOR}>
+          <CoverField
+            hook="course"
+            ratio="video"
+            layout="blocks"
+            frameLabel={t('coverField.as.courseCard')}
+            dropzoneId="course-cover-dropzone"
             accept={ACCEPT}
-            className="sr-only"
-            aria-label={coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file) void coverUpload.pick(file);
+            assetId={coverAssetId}
+            widths={coverWidths}
+            previewUrl={coverPreview.previewUrl}
+            sizes="360px"
+            upload={coverUpload}
+            error={coverError}
+            helper={t('form.cover.helper', { tenant: tenantName })}
+            announced={coverAnnounced}
+            alsoAs={[
+              {
+                key: 'page',
+                ratio: 'banner',
+                label: t('coverField.as.coursePage'),
+                sizeHint: <CoverSizeHint kind="courseBanner" />,
+                decor: <PagePreview title={title.trim()} line={tagline.trim()} />,
+              },
+            ]}
+            sizeHint={<CoverSizeHint kind="courseCard" />}
+            labels={{
+              pickFile: t('coverField.pickFile'),
+              camera: t('coverField.camera'),
+              ways: t('coverField.ways'),
+              waysTouch: t('coverField.waysTouch'),
+              dropHere: t('coverField.dropHere'),
+              field: t('form.cover.label'),
+              add: t('form.cover.add'),
+              change: t('form.cover.change'),
+              remove: t('form.cover.remove'),
+              preview: t('form.cover.preview'),
+              progress: (percent) => tm('progress', { percent }),
+              processing: tm('photo.preparing'),
+              cancel: tm('cancel'),
             }}
+            onPick={(file) => void coverUpload.pick(file)}
+            onRemove={() => {
+              setCoverAssetId(null);
+              setCoverError(null);
+              coverUpload.reset();
+            }}
+            onCancel={coverUpload.cancel}
           />
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={coverUploading}
-              onClick={() => coverInputRef.current?.click()}
-            >
-              <ImageIcon aria-hidden size={18} className="shrink-0" />
-              {coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-            </Button>
-            {coverAssetId ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={coverUploading}
-                onClick={() => {
-                  setCoverAssetId(null);
-                  setCoverError(null);
-                  coverUpload.reset();
-                }}
-              >
-                <X aria-hidden size={18} className="shrink-0" />
-                {t('form.cover.remove')}
-              </Button>
-            ) : null}
-          </div>
-
-          {coverUpload.state === 'progress' ? (
-            <div className="flex flex-col gap-2">
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={coverUpload.progress}
-                className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
-              >
-                <div
-                  className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
-                  style={{ width: `${coverUpload.progress}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs tabular-nums text-text-tertiary">
-                  {tm('progress', { percent: coverUpload.progress })}
-                </span>
-                <Button type="button" variant="ghost" size="sm" onClick={coverUpload.cancel}>
-                  {tm('cancel')}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          <span aria-live="polite" className="sr-only">
-            {coverAnnounced}
-          </span>
-
-          {coverUpload.error || coverError ? (
-            <p role="alert" data-course-cover-error className="text-sm font-normal text-danger">
-              {coverUpload.error ?? coverError}
-            </p>
-          ) : null}
-          <p className="text-xs font-normal text-text-tertiary">
-            {t('form.cover.helper', { tenant: tenantName })}
-          </p>
         </div>
 
         {/* ── (2) Título ── */}
@@ -661,23 +613,26 @@ export function CourseForm({
           <p className="text-xs font-normal text-text-tertiary">{t('form.tagline.helper')}</p>
         </div>
 
-        {/* ── (4) Descrição: grows to its content; the page scrolls (E08/long-text). ── */}
-        <Textarea
-          id="course-description"
-          name="description"
-          label={t('form.description.label')}
-          placeholder={t('form.description.placeholder')}
-          value={description}
-          rows={4}
-          maxLength={COURSE_MAX_DESCRIPTION}
-          counter={{ value: description.length, max: COURSE_MAX_DESCRIPTION }}
-          onInput={(event) => {
-            const el = event.currentTarget;
-            el.style.height = 'auto';
-            el.style.height = `${el.scrollHeight}px`;
-          }}
-          onChange={(event) => setDescription(event.target.value)}
-        />
+        {/* ── (4) Descrição: grows to its content; the page scrolls (E08/long-text). The wrapper is
+            the course page's "Editar" anchor (`#descricao`, 2026-10-23). ── */}
+        <div id="descricao" className={SECTION_ANCHOR}>
+          <Textarea
+            id="course-description"
+            name="description"
+            label={t('form.description.label')}
+            placeholder={t('form.description.placeholder')}
+            value={description}
+            rows={4}
+            maxLength={COURSE_MAX_DESCRIPTION}
+            counter={{ value: description.length, max: COURSE_MAX_DESCRIPTION }}
+            onInput={(event) => {
+              const el = event.currentTarget;
+              el.style.height = 'auto';
+              el.style.height = `${el.scrollHeight}px`;
+            }}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </div>
 
         {/* ── (5) Categoria: the 44px picker row → the module's single-select sheet (D-411). ── */}
         <div className="flex flex-col gap-2">
@@ -691,9 +646,9 @@ export function CourseForm({
             aria-expanded={categoryOpen}
             aria-labelledby="course-category-label course-category-value"
             onClick={() => setCategoryOpen(true)}
-            className="flex min-h-11 w-full items-center gap-3 rounded-xl text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            className={FIELD_TRIGGER}
           >
-            <Tag aria-hidden size={20} className="shrink-0 text-text-secondary" />
+            <Tag aria-hidden size={18} className="shrink-0 text-text-secondary" />
             <span
               id="course-category-value"
               data-course-category-value
@@ -852,8 +807,9 @@ export function CourseForm({
           <p className="text-xs font-normal text-text-tertiary">{t('form.instructor.helper')}</p>
         </div>
 
-        {/* ── (8) O que você vai dominar: up to 10 items; "Adicionar item" hides at the cap. ── */}
-        <div className="flex flex-col gap-2">
+        {/* ── (8) O que você vai dominar: up to 10 items; "Adicionar item" hides at the cap. The
+            block is the course page's "Editar" anchor (`#resultados`, 2026-10-23). ── */}
+        <div id="resultados" className={cn('flex flex-col gap-2', SECTION_ANCHOR)}>
           <span id="course-outcomes-label" className="text-sm font-normal text-text-secondary">
             {t('form.outcomes.label')}
           </span>
@@ -867,8 +823,10 @@ export function CourseForm({
                 // biome-ignore lint/suspicious/noArrayIndexKey: the items are positional inputs; a removal re-renders the list from its position
                 key={index}
                 data-course-outcome={index + 1}
-                className="flex items-center gap-1"
+                className="flex items-center gap-2"
               >
+                {/* The member's check (the course page draws each item with it), in the brand ink. */}
+                <Check aria-hidden size={16} strokeWidth={2.5} className="shrink-0 text-brand" />
                 <Input
                   id={`course-outcome-${index + 1}`}
                   containerClassName="min-w-0 flex-1"
@@ -891,8 +849,8 @@ export function CourseForm({
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              className="self-start"
+              size="md"
+              className={DASHED_OVERRIDES}
               data-course-outcomes-add
               onClick={addOutcome}
             >
@@ -945,34 +903,37 @@ export function CourseForm({
             <span className="text-sm font-normal text-text-secondary">
               {t('form.access.label')}
             </span>
-            <p
-              data-course-access-value
-              className="text-sm font-normal text-text [overflow-wrap:anywhere]"
-            >
-              {communityAccessSegments(accessProducts, tRoot, 'courses.form.access.value').map(
-                (segment, index) =>
-                  segment.kind === 'text' ? (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: a fixed sentence, never reordered
-                    <span key={`text-${index}`}>{segment.text}</span>
-                  ) : (
-                    <span key={segment.product.id}>
-                      <a
-                        href={segment.product.href}
-                        data-course-access-product={segment.product.id}
-                        className="font-bold text-text underline-offset-2 hover:underline [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-                      >
-                        {segment.product.name}
-                      </a>
-                      {segment.product.archived ? t('form.access.archivedSuffix') : null}
-                    </span>
-                  ),
-              )}
-            </p>
-            <p className="text-xs font-normal text-text-tertiary">{t('form.access.helper')}</p>
+            <div className={INFO_TILE}>
+              <p
+                data-course-access-value
+                className="text-sm font-normal text-text [overflow-wrap:anywhere]"
+              >
+                {communityAccessSegments(accessProducts, tRoot, 'courses.form.access.value').map(
+                  (segment, index) =>
+                    segment.kind === 'text' ? (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: a fixed sentence, never reordered
+                      <span key={`text-${index}`}>{segment.text}</span>
+                    ) : (
+                      <span key={segment.product.id}>
+                        <a
+                          href={segment.product.href}
+                          data-course-access-product={segment.product.id}
+                          className="font-bold text-text underline-offset-2 hover:underline [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+                        >
+                          {segment.product.name}
+                        </a>
+                        {segment.product.archived ? t('form.access.archivedSuffix') : null}
+                      </span>
+                    ),
+                )}
+              </p>
+              <p className="text-xs font-normal text-text-tertiary">{t('form.access.helper')}</p>
+            </div>
           </div>
         ) : null}
 
-        {/* ── (11) Edit only: the hairline and "Arquivar curso", or the archived note (UI-D-394). ── */}
+        {/* ── (11) Edit only: the hairline and the danger zone's "Arquivar curso", or the archived
+            note (UI-D-394). ── */}
         {mode === 'edit' && courseId ? (
           <>
             <div aria-hidden className="h-px bg-border" />
@@ -983,13 +944,13 @@ export function CourseForm({
             ) : (
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="md"
                 data-course-archive
-                className="justify-start self-start px-0 text-danger"
+                className={DANGER_OVERRIDES}
                 onClick={() => setArchiving(true)}
               >
-                <Archive aria-hidden size={20} />
+                <Archive aria-hidden size={18} />
                 {t('form.archive')}
               </Button>
             )}

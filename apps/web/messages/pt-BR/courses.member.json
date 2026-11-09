@@ -22,7 +22,8 @@
         "categoryLevel": "{category} · {level}",
         "meta": "{N, plural, one {# aula} other {# aulas}}",
         "metaWithDuration": "{N, plural, one {# aula} other {# aulas}} · {duration}",
-        "aria": "{course}, {N, plural, one {# aula} other {# aulas}}{exclusive, select, true {, exclusivo} other {}}{progress, select, true {, {percent}% concluído} other {}}"
+        "aria": "{course}, {N, plural, one {# aula} other {# aulas}}{exclusive, select, true {, exclusivo} other {}}{progress, select, true {, {percent}% concluído} other {}}",
+        "lessonsDone": "{done}/{N, plural, =0 {# aulas} one {# aula} other {# aulas}}"
       },
       "tags": {
         "exclusiveCourse": "Exclusivo",
@@ -37,7 +38,8 @@
           "title": "Nenhuma live por aqui ainda",
           "body": "Quando {tenant} agendar uma live, ela aparece aqui."
         },
-        "aria": "{live}, {status}, {date}{exclusive, select, true {, exclusiva} other {}}"
+        "aria": "{live}, {status}, {date}{exclusive, select, true {, exclusiva} other {}}",
+        "timeLine": "{time} · {duration} min"
       },
       "progress": {
         "aria": "{percent}% concluído"
@@ -56,7 +58,15 @@
         "noLessons": {
           "title": "Nenhuma aula ainda",
           "body": "As aulas deste curso aparecem aqui assim que estiverem prontas."
-        }
+        },
+        "overline": "Curso{M, plural, =0 {} one { · # módulo} other { · # módulos}}{hasLevel, select, true { · {level}} other {}}",
+        "facts": {
+          "lessons": "Aulas",
+          "duration": "Duração",
+          "level": "Nível"
+        },
+        "progressTitle": "Seu progresso no curso",
+        "modulesTitle": "Módulos"
       },
       "module": {
         "pill": "Módulo {nn}",
@@ -67,7 +77,9 @@
         "aria": "Módulo {nn}: {title}, {state}",
         "stateDone": "concluído",
         "stateLocked": "bloqueado",
-        "stateProgress": "{percent}% concluído"
+        "stateProgress": "{percent}% concluído",
+        "inProgress": "Em andamento",
+        "locked": "Bloqueado"
       },
       "lesson": {
         "practice": "Prática",
@@ -123,7 +135,14 @@
           "lockedNow": "Esta aula agora é exclusiva. Compre o acesso para continuar.",
           "sequenceNow": "Esta aula ficou bloqueada. Conclua a anterior para continuar.",
           "gone": "Esta aula não está mais disponível."
-        }
+        },
+        "position": "{n} de {total} aulas",
+        "tabs": {
+          "description": "Descrição",
+          "materials": "Materiais",
+          "label": "Conteúdo da aula"
+        },
+        "moduleLessons": "{done}/{N, plural, =0 {# aulas} one {# aula} other {# aulas}}"
       },
       "lock": {
         "pillExclusive": "Exclusiva",
@@ -220,6 +239,96 @@
           "inDays": "Em {n, plural, one {# dia} other {# dias}}",
           "when": "{date}, {time}",
           "seeLive": "Ver a live"
+        },
+        "greet": "{period, select, morning {Bom dia} afternoon {Boa tarde} other {Boa noite}}{hasName, select, true {, {name}} other {}}!",
+        "ask": "O que você quer aprender agora?",
+        "popular": "Populares:",
+        "trackEyebrow": "{kind, select, mine {Sua trilha} suggested {Trilha sugerida} other {Trilha}} · {n, plural, =0 {# cursos} one {# curso} other {# cursos}}",
+        "access": "Acesse",
+        "courses": {
+          "title": "Cursos",
+          "sub": "Acesso rápido aos seus cursos · {n, plural, one {# disponível} other {# disponíveis}}",
+          "all": "Ver todos"
+        },
+        "stats": {
+          "progress": "Progresso geral",
+          "progressLine": "{done} de {total, plural, =0 {# aulas} one {# aula} other {# aulas}}",
+          "lessons": "Aulas",
+          "lessonsLine": "{n, plural, =0 {Nenhuma concluída ainda} one {Concluída} other {Concluídas}}",
+          "streak": "Sequência",
+          "streakLine": "{n, plural, =0 {Sem sequência no momento} other {Dias seguidos estudando}}",
+          "courses": "Cursos concluídos",
+          "coursesLine": "Ver meu progresso",
+          "label": "Seus números"
+        },
+        "resume": {
+          "sub": "Retome seus estudos",
+          "cta": "Retomar aula",
+          "ctaStart": "Começar aula",
+          "stoppedAt": "Você parou em {at} de {total}",
+          "next": "Próxima aula · {total}",
+          "watched": "{percent}% da aula assistida"
+        },
+        "latest": {
+          "title": "Últimas aulas",
+          "sub": "Publicadas nesta semana",
+          "all": "Ver todos os cursos"
+        },
+        "areas": {
+          "label": "Mais de {tenant}",
+          "lives": {
+            "eyebrow": "Ao vivo",
+            "body": "Aulas ao vivo e gravações para assistir quando quiser."
+          },
+          "communities": {
+            "eyebrow": "Comunidade",
+            "body": "Converse e tire dúvidas com quem estuda com você."
+          },
+          "events": {
+            "eyebrow": "Agenda",
+            "body": "Encontros e eventos da escola."
+          },
+          "reels": {
+            "eyebrow": "Vídeos curtos",
+            "body": "Conteúdo direto, em poucos segundos."
+          },
+          "store": {
+            "eyebrow": "Exclusivo",
+            "body": "Produtos e acessos para ir além."
+          },
+          "cta": "Acessar"
+        },
+        "float": {
+          "eyebrow": "Continuar assistindo",
+          "close": "Fechar",
+          "meta": "{course} · {percent}%"
+        },
+        "searchPlaceholder": "Busque um curso ou categoria",
+        "tracks": {
+          "all": "Ver todas"
+        },
+        "promo": {
+          "product": {
+            "eyebrow": "Destaque da loja",
+            "body": "Disponível agora na loja de {tenant}.",
+            "cta": "Conhecer agora"
+          },
+          "catalogue": {
+            "eyebrow": "Catálogo de {tenant}",
+            "title": "Explore todos os cursos",
+            "body": "Aprenda no seu ritmo, do básico ao avançado.",
+            "courses": "{n, plural, =0 {# cursos} one {# curso} other {# cursos}}",
+            "tracks": "{n, plural, =0 {# trilhas} one {# trilha} other {# trilhas}}",
+            "cta": "Ver os cursos"
+          },
+          "edit": {
+            "open": "Escolher o destaque da loja",
+            "title": "Destaque da loja",
+            "helper": "Escolha o produto que aparece neste espaço do Início.",
+            "latest": "Mais recente da loja",
+            "latestLine": "Padrão · {product}",
+            "device": "Por enquanto, a escolha vale só neste aparelho."
+          }
         }
       },
       "tracks": {
@@ -254,6 +363,20 @@
           "meta": "{n, plural, one {# etapa} other {# etapas}} · {N, plural, one {# aula} other {# aulas}}{hasDuration, select, true { · {duration}} other {}}",
           "progress": "{percent}% do caminho",
           "notStarted": "Você ainda não começou"
+        },
+        "list": {
+          "title": "Todas as trilhas"
+        },
+        "detail": {
+          "back": "Trilhas",
+          "courses": "{n, plural, =0 {# cursos} one {# curso} other {# cursos}}",
+          "lessons": "{N, plural, =0 {# aulas} one {# aula} other {# aulas}} no total",
+          "progress": "{done} de {total, plural, one {# curso concluído} other {# cursos concluídos}}",
+          "helper": "Conclua todos os cursos para completar a trilha. Seu progresso nas aulas é o mesmo aqui e nos cursos.",
+          "coursesTitle": "Cursos da trilha",
+          "coursesSub": "Escolha um curso para explorar os módulos e as aulas.",
+          "about": "Sobre a trilha",
+          "cardLine": "{done} de {N, plural, =0 {# aulas} one {# aula} other {# aulas}}"
         }
       },
       "myProgress": {
@@ -275,7 +398,7 @@
           "streak": "Sequência atual",
           "minutes": "{m} min",
           "hoursValue": "{h} h",
-          "days": "{n, plural, one {# dia} other {# dias}}"
+          "days": "{n, plural, =0 {# dias} one {# dia} other {# dias}}"
         },
         "courses": {
           "title": "Curso a curso",
@@ -301,6 +424,71 @@
           "closed": "Esta live já começou ou foi cancelada.",
           "gone": "Esta live não está mais disponível."
         }
+      },
+      "area": {
+        "label": "Membros",
+        "menu": "Menu de Membros",
+        "screens": {
+          "home": "Início",
+          "courses": "Cursos",
+          "tracks": "Trilhas",
+          "lives": "Lives",
+          "progress": "Progresso"
+        }
+      },
+      "screens": {
+        "courses": {
+          "meta": "Todos os cursos de {tenant}.",
+          "eyebrow": "Sua biblioteca de aprendizado"
+        },
+        "tracks": {
+          "title": "Trilhas",
+          "meta": "Caminhos prontos: a ordem certa para aprender sem pular etapa.",
+          "eyebrow": "Caminhos de aprendizado"
+        },
+        "lives": {
+          "title": "Lives",
+          "meta": "Aulas ao vivo e gravações de {tenant}.",
+          "eyebrow": "Ao vivo e gravadas"
+        },
+        "progress": {
+          "title": "Meu progresso",
+          "meta": "Sua evolução nos cursos de {tenant}.",
+          "eyebrow": "Sua evolução"
+        }
+      },
+      "search": {
+        "label": "Buscar cursos",
+        "placeholder": "Buscar cursos",
+        "submit": "Buscar",
+        "results": "{n, plural, =0 {Nenhum curso para “{q}”} one {# curso para “{q}”} other {# cursos para “{q}”}}",
+        "clear": "Limpar busca",
+        "empty": {
+          "title": "Nenhum curso encontrado",
+          "body": "Tente outra palavra ou veja todos os cursos."
+        }
+      },
+      "filters": {
+        "button": "Filtros",
+        "buttonAria": "Filtrar por categoria: {current}"
+      },
+      "chips": {
+        "lessons": "{N, plural, =0 {# aulas} one {# aula} other {# aulas}}",
+        "done": "{n, plural, =0 {# concluídas} one {# concluída} other {# concluídas}}",
+        "percent": "{percent}% completo"
+      },
+      "modulePage": {
+        "sub": "Aprofunde seus conhecimentos com as aulas deste módulo.",
+        "progressTitle": "Seu progresso no módulo",
+        "lessonsTitle": "Aulas",
+        "cardMetaDone": "Concluída",
+        "cardMetaLocked": "Bloqueada",
+        "cardAria": "Aula {n}: {lesson}, {state}",
+        "cardAriaOpen": "Aula {n}: {lesson}"
+      },
+      "moduleCard": {
+        "aria": "Módulo {n}: {title}, {state}",
+        "lessons": "{done}/{N, plural, =0 {# aulas} one {# aula} other {# aulas}}"
       }
     }
   }

@@ -35,6 +35,18 @@ describe('ExclusiveBadge (UI-D-372)', () => {
     expect(glyph?.getAttribute('aria-hidden')).toBe('true');
     // The text is the pill's only accessible content.
     expect(pill.textContent).toBe('badge-label');
+    expect(pill).not.toHaveAttribute('data-size');
+  });
+
+  it('1b. (2026-10-22) size="compact" is the school 9px glass chip with an aria-hidden Lock', () => {
+    render(<ExclusiveBadge label="badge-label" size="compact" />);
+    const pill = screen.getByTestId('exclusive-badge');
+    expect(pill).toHaveAttribute('data-size', 'compact');
+    for (const token of ['bg-black/55', 'text-white', 'text-[9px]', 'uppercase', 'rounded-full']) {
+      expect(pill.className).toContain(token);
+    }
+    expect(pill.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(pill.textContent).toBe('badge-label');
   });
 });
 
@@ -64,6 +76,28 @@ describe('LockedSection (UI-D-373 top section)', () => {
     const body = screen.getByText('body-y');
     // DOCUMENT_POSITION_FOLLOWING: the body comes after the extra line.
     expect(extra.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('3b. (2026-10-22) variant="centered": the hairline card, the 48px disc, the words centred over the action', () => {
+    render(
+      <LockedSection
+        variant="centered"
+        title="title-c"
+        body="body-c"
+        action={<a href="/loja/p1">action-c</a>}
+      />,
+    );
+    const section = screen.getByTestId('locked-section');
+    expect(section).toHaveAttribute('data-variant', 'centered');
+    for (const token of ['items-center', 'text-center', 'border', 'shadow-none']) {
+      expect(section.className).toContain(token);
+    }
+    const disc = section.querySelector('span[aria-hidden="true"]');
+    expect(disc?.className).toContain('h-12');
+    expect(within(section).getByRole('heading', { name: 'title-c' })).toBeInTheDocument();
+    const body = within(section).getByText('body-c');
+    const action = within(section).getByRole('link', { name: 'action-c' });
+    expect(body.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

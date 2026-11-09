@@ -169,7 +169,16 @@ export function PurchaseControl({
 
   return (
     <>
-      <Button variant="brand" size="md" fullWidth data-store-buy onClick={openDialog}>
+      {/* 2026-10-24: `lg`, the height of the gateway's buy link beside the redesigned price.
+          2026-10-28: a pill, like the storefront's own call to action. */}
+      <Button
+        variant="brand"
+        size="lg"
+        fullWidth
+        data-store-buy
+        onClick={openDialog}
+        className="rounded-full"
+      >
         <ShoppingBag aria-hidden size={18} className="shrink-0" />
         {confirm.buyLabel}
       </Button>

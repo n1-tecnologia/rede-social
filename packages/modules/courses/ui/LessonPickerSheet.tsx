@@ -25,6 +25,10 @@ import { RowSkeleton } from './RowSkeleton';
  *
  * Rows are `<button role="radio" aria-checked>`: one tap selects, so the whole 44px row is the
  * control and the glyph at its end never has to be aimed at.
+ *
+ * 2026-10-22 (the courses area redesign): the rows are outlined blocks with a gap (the
+ * social-igoralves choice sheets), and the chosen one is tinted `border-brand/40 bg-brand/10` beside
+ * its check.
  */
 export interface LessonPickerLesson {
   id: string;
@@ -67,7 +71,11 @@ export interface LessonPickerSheetProps {
 }
 
 const ROW =
-  'flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+  'flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+/** A row at rest, and the chosen one (2026-10-22). */
+const ROW_IDLE = 'border-border bg-card hover:bg-card-hover';
+const ROW_SELECTED = 'border-brand/40 bg-brand/10';
 
 /** The 16:9 thumb slot of every row: 56px wide, `rounded-lg`, on `bg-bg-tertiary`. */
 const THUMB = 'relative block w-14 shrink-0 overflow-hidden rounded-lg bg-bg-tertiary aspect-video';
@@ -107,7 +115,7 @@ export function LessonPickerSheet({
   let body: ReactNode;
   if (loading) {
     body = (
-      <div aria-busy data-testid="lesson-picker-loading">
+      <div aria-busy data-testid="lesson-picker-loading" className="flex flex-col gap-2">
         {LOADING_ROWS.map((index) => (
           <RowSkeleton key={index} variant="wide" />
         ))}
@@ -131,10 +139,10 @@ export function LessonPickerSheet({
           key={group.courseId}
           data-testid="lesson-picker-group"
           data-course-id={group.courseId}
-          className="flex flex-col pt-2"
+          className="flex flex-col gap-2 pt-2"
         >
           {/* The course's title names the group; the rows below carry it in their own name too. */}
-          <SectionTitle as="h3" variant="group" className="px-2 pb-1">
+          <SectionTitle as="h3" variant="group" className="px-1">
             {group.courseTitle}
           </SectionTitle>
           {group.lessons.map((lesson) => {
@@ -151,7 +159,7 @@ export function LessonPickerSheet({
                 data-testid="lesson-picker-row"
                 data-lesson-id={lesson.id}
                 onClick={() => onSelect(lesson.id)}
-                className={ROW}
+                className={cn(ROW, selected ? ROW_SELECTED : ROW_IDLE)}
               >
                 <span
                   className={cn(THUMB, hasThumb ? undefined : 'flex items-center justify-center')}
@@ -178,7 +186,7 @@ export function LessonPickerSheet({
   return (
     <BottomSheet open={open} onClose={onClose} title={title}>
       {helper ? <p className="pb-2 text-xs font-normal text-text-tertiary">{helper}</p> : null}
-      <div role="radiogroup" aria-label={title} className="flex flex-col">
+      <div role="radiogroup" aria-label={title} className="flex flex-col gap-2">
         {/* The none row comes FIRST (UI-D-403): a live without a replay is the common case. */}
         {/* biome-ignore lint/a11y/useSemanticElements: UI-D-403 / UI-D-206 fix a 44px row BUTTON that selects on one tap and closes the sheet; a native radio input needs a form, a legend and a separate submit */}
         <button
@@ -187,7 +195,7 @@ export function LessonPickerSheet({
           aria-checked={selectedId === null}
           data-testid="lesson-picker-none"
           onClick={() => onSelect(null)}
-          className={ROW}
+          className={cn(ROW, selectedId === null ? ROW_SELECTED : ROW_IDLE)}
         >
           <span className={cn(THUMB, 'flex items-center justify-center')}>
             <Video aria-hidden size={18} className="text-text-tertiary" />

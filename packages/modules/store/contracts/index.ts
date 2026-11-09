@@ -213,6 +213,24 @@ export const PRODUCT_STATUSES = ['active', 'archived'] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 
 /**
+ * 2026-10-27 — the store's kinds of item (the product owner: "será vendido curso, livro, roupa,
+ * perfumes, equipamentos e afins"), the storefront's categories and shelves, in the storefront's
+ * order. OPTIONAL on the card and the page: the API has no column for it yet, so the web reads it
+ * when it arrives and, until then, tells the category from the name (`apps/web/lib/store-categories`).
+ */
+export const STORE_PRODUCT_CATEGORIES = [
+  'cursos',
+  'livros',
+  'materiais',
+  'roupas',
+  'perfumes',
+  'equipamentos',
+  'servicos',
+  'outros',
+] as const;
+export type StoreProductCategory = (typeof STORE_PRODUCT_CATEGORIES)[number];
+
+/**
  * `PUT /v1/store/products/{productId}/status` (08.2-05, decision 3): idempotent, one verb for both
  * directions. Archiving stops NEW purchases only; it touches no link and no entitlement.
  */
@@ -297,6 +315,8 @@ export const productDetailSchema = z
     currency: z.literal('BRL'),
     imageAssetId: z.uuid().nullable(),
     status: z.enum(PRODUCT_STATUSES),
+    /** 2026-10-27 — OPTIONAL: the API has no category yet (`STORE_PRODUCT_CATEGORIES`). */
+    category: z.enum(STORE_PRODUCT_CATEGORIES).optional(),
     owned: z.boolean(),
     communities: z.array(productCommunitySchema),
     holderCount: z.number().int().min(0).optional(),
@@ -349,6 +369,8 @@ export const productCardSchema = z
     currency: z.literal('BRL'),
     imageAssetId: z.uuid().nullable(),
     status: z.enum(PRODUCT_STATUSES),
+    /** 2026-10-27 — OPTIONAL: the API has no category yet (`STORE_PRODUCT_CATEGORIES`). */
+    category: z.enum(STORE_PRODUCT_CATEGORIES).optional(),
     owned: z.boolean(),
     purchase: purchaseInfoSchema.optional(),
   })

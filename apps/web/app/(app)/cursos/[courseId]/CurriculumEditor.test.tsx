@@ -12,6 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * `ConfirmDialog` and inputs.
  *
  * The web workspace has no jest-dom: plain DOM assertions only.
+ *
+ * 2026-10-23: the course page's doors (the hero's "Editar", the sections' "Editar" to the form's
+ * anchors, the header's "Ver como aluno") and its facts strip are pinned here too.
  */
 
 const { toast, push, refresh, reorderModules, reorderLessons, create, update, remove, setStatus } =
@@ -165,6 +168,7 @@ function course(overrides: Partial<CourseDetail> = {}): CourseDetail {
 const moveUp = (name: string) => screen.getByRole('button', { name: `Mover para cima: ${name}` });
 const moveDown = (name: string) =>
   screen.getByRole('button', { name: `Mover para baixo: ${name}` });
+// 2026-10-22: the band's pill shows "Módulo 01" (the screen reader hears "Módulo 1").
 const numerals = () =>
   Array.from(document.querySelectorAll('[data-testid="module-card-numeral"]')).map(
     (node) => node.querySelector('[aria-hidden]')?.textContent,
@@ -174,6 +178,15 @@ const titles = () =>
     (node) => node.textContent,
   );
 const publishButton = () => screen.getByTestId('course-publish') as HTMLButtonElement;
+/** 2026-10-23: the facts strip's cells as [key, label, value]. */
+const facts = () =>
+  screen
+    .getAllByTestId('course-fact')
+    .map((cell) => [
+      cell.getAttribute('data-fact'),
+      cell.querySelector('dt')?.textContent,
+      cell.querySelector('dd')?.textContent,
+    ]);
 
 function renderEditor(modules: ModuleView[] = MODULES) {
   return render(
@@ -186,21 +199,32 @@ function renderEditor(modules: ModuleView[] = MODULES) {
   );
 }
 
+// 2026-10-22: happy-dom loads no image, so a poster reads `complete` with no natural width — what
+// `LessonRow` now takes for a poster that failed before hydration. The posters here "loaded".
+let posterWidth: { mockRestore: () => void } | null = null;
 beforeEach(() => {
   vi.clearAllMocks();
+  posterWidth = vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(640);
 });
-afterEach(cleanup);
+afterEach(() => {
+  posterWidth?.mockRestore();
+  cleanup();
+});
 
 describe('CurriculumEditor (UI-D-395, UI-D-397)', () => {
   it('1. renders the module cards in order with numerals, the lock caption only on a later module, the meta, the lesson rows and Nova aula', () => {
     renderEditor();
     expect(screen.getByRole('heading', { name: 'Módulos' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Novo módulo' })).toBeTruthy();
+    // 2026-10-22: the draft's count beside the heading; "Novo módulo" closes the list, dashed.
+    expect(screen.getByTestId('curriculum-count').textContent).toBe('2 módulos · 3 aulas');
+    const create = screen.getByRole('button', { name: 'Novo módulo' });
+    expect(create.className).toContain('border-dashed');
     const list = screen.getByRole('list', {
       name: 'Módulos de Harmonização facial do zero',
     });
     expect(list.tagName).toBe('OL');
-    expect(numerals()).toEqual(['1', '2']);
+    expect(list.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(numerals()).toEqual(['Módulo 01', 'Módulo 02']);
     expect(titles()).toEqual(['Fundamentos', 'Técnica']);
     const locks = document.querySelectorAll('[data-testid="module-card-lock"]');
     expect(locks).toHaveLength(1);
@@ -254,7 +278,7 @@ describe('CurriculumEditor (UI-D-395, UI-D-397)', () => {
     fireEvent.click(moveUp('Técnica'));
     // Optimistic: the numerals and the order swapped at once; the list is busy.
     expect(titles()).toEqual(['Técnica', 'Fundamentos']);
-    expect(numerals()).toEqual(['1', '2']);
+    expect(numerals()).toEqual(['Módulo 01', 'Módulo 02']);
     expect(reorderModules).toHaveBeenCalledWith(COURSE, [M2, M1]);
     for (const name of ['Técnica', 'Fundamentos']) {
       expect((moveUp(name) as HTMLButtonElement).disabled).toBe(true);
@@ -405,7 +429,7 @@ describe('CurriculumEditor (UI-D-395, UI-D-397)', () => {
     );
     await waitFor(() => expect(titles()).toEqual(['Fundamentos', 'Técnica', 'Finalização']));
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Módulo criado.' });
-    expect(numerals()).toEqual(['1', '2', '3']);
+    expect(numerals()).toEqual(['Módulo 01', 'Módulo 02', 'Módulo 03']);
     // A module with no lesson: the ghost row above Nova aula.
     expect(screen.getByTestId('curriculum-no-lessons').textContent).toBe(
       'Nenhuma aula neste módulo.',
@@ -430,6 +454,8 @@ describe('CurriculumEditor (UI-D-395, UI-D-397)', () => {
     const empty = screen.getByTestId('curriculum-empty');
     expect(within(empty).getByRole('heading', { name: 'Nenhum módulo ainda' })).toBeTruthy();
     expect(empty.textContent).toContain('Crie o primeiro módulo e adicione aulas a ele.');
+    // 2026-10-22: the dashed "Novo módulo" closes a list; with no list, the empty state's is the one.
+    expect(screen.queryByRole('button', { name: 'Novo módulo' })).toBeNull();
     fireEvent.click(within(empty).getByRole('button', { name: 'Criar módulo' }));
     const sheet = screen.getByRole('dialog', { name: 'Novo módulo' });
     // The first module ever: the switch is present but disabled.
@@ -453,17 +479,43 @@ describe('CoursePage / PublishZone (UI-D-394, D-413)', () => {
     renderPage();
     expect(screen.getByRole('heading', { name: 'Harmonização facial do zero' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Voltar' }).getAttribute('href')).toBe('/cursos');
-    expect(screen.getByRole('link', { name: 'Editar curso' }).getAttribute('href')).toBe(
-      `/cursos/${COURSE}/editar`,
-    );
-    expect(screen.getByTestId('course-hero-fallback').className).toContain('aspect-[16/10]');
+    // 2026-10-23: the edit door is the hero's glass "Editar" (a sibling of the hero, over its corner),
+    // named for what it edits; a draft has no "Ver como aluno" (the member view of a draft is a 404).
+    const edit = screen.getByRole('link', { name: 'Editar a capa e as informações do curso' });
+    expect(edit.getAttribute('href')).toBe(`/cursos/${COURSE}/editar`);
+    expect(edit.getAttribute('data-testid')).toBe('course-edit');
+    expect(edit.textContent).toBe('Editar');
+    expect(screen.queryByTestId('course-view-as-member')).toBeNull();
+    // 2026-10-22: the shared full-bleed hero — the fallback paints inside the 16:10 box, and over
+    // its foot the list row's line, the title (a `p`: the h1 is the header's) and the instructor.
+    const hero = screen.getByTestId('course-hero');
+    expect(hero.contains(edit)).toBe(false);
+    expect(hero.parentElement?.contains(edit)).toBe(true);
+    expect(hero.className).toContain('aspect-[16/10]');
+    expect(hero.contains(screen.getByTestId('course-hero-fallback'))).toBe(true);
+    expect(screen.getByTestId('course-overline').textContent).toBe('2 módulos · 3 aulas · 15 min');
+    expect(screen.getByTestId('course-title').tagName).toBe('P');
+    expect(hero.contains(screen.getByTestId('course-instructor'))).toBe(true);
     expect(screen.getByTestId('course-tagline').textContent).toBe(
       'Do primeiro ponto ao resultado natural.',
     );
     expect(screen.getByTestId('course-status-pill').textContent).toBe('Rascunho');
-    expect(screen.getByTestId('course-level-pill').textContent).toBe('Iniciante');
-    expect(screen.getByTestId('course-hours-pill').textContent).toBe('12 h');
     expect(screen.getByTestId('course-instructor').textContent).toBe('Com Dra. Ana Souza');
+    // 2026-10-23: the member's facts strip, the duration from the certificate hours; the level and
+    // hours pills left (the strip says both, once): the status is the row's one pill.
+    expect(screen.getByTestId('course-pills').children).toHaveLength(1);
+    expect(screen.queryByTestId('course-level-pill')).toBeNull();
+    expect(screen.queryByTestId('course-hours-pill')).toBeNull();
+    expect(facts()).toEqual([
+      ['lessons', 'Aulas', '3'],
+      ['duration', 'Duração', '12 h'],
+      ['level', 'Nível', 'Iniciante'],
+    ]);
+    // No description and no outcome: neither section, nor its door.
+    expect(screen.queryByTestId('course-description')).toBeNull();
+    expect(screen.queryByTestId('course-edit-about')).toBeNull();
+    expect(screen.queryByTestId('course-outcomes')).toBeNull();
+    expect(screen.queryByTestId('course-edit-outcomes')).toBeNull();
 
     const notice = screen.getByTestId('publish-blocked');
     expect(notice.getAttribute('role')).toBe('status');
@@ -478,7 +530,7 @@ describe('CoursePage / PublishZone (UI-D-394, D-413)', () => {
     expect(screen.queryByTestId('course-unpublish')).toBeNull();
   });
 
-  it('10. every video ready: no notice, the button enabled; no level or hours → no pill; published → Despublicar with the caption; archived → the note and no button', () => {
+  it('10. every video ready: no notice, the button enabled; no level or hours → no pill and no level cell; published → Despublicar with the caption; archived → the note and no button', () => {
     renderPage({
       hasUnreadyVideo: false,
       unreadyLessonIds: [],
@@ -489,6 +541,11 @@ describe('CoursePage / PublishZone (UI-D-394, D-413)', () => {
     expect(publishButton().disabled).toBe(false);
     expect(screen.queryByTestId('course-level-pill')).toBeNull();
     expect(screen.queryByTestId('course-hours-pill')).toBeNull();
+    // 2026-10-23: no hours → the ready videos' sum; no level → no cell.
+    expect(facts()).toEqual([
+      ['lessons', 'Aulas', '3'],
+      ['duration', 'Duração', '15 min'],
+    ]);
     cleanup();
 
     renderPage({
@@ -505,6 +562,11 @@ describe('CoursePage / PublishZone (UI-D-394, D-413)', () => {
       'Publicado em 9 de outubro de 2026.',
     );
     expect(screen.getByTestId('course-status-pill').textContent).toBe('Publicado');
+    // 2026-10-23: "Ver como aluno" is the header's pill now, no longer in the publish card.
+    const view = screen.getByRole('link', { name: 'Ver como aluno' });
+    expect(view.getAttribute('href')).toBe(`/cursos/${COURSE}?ver=aluno`);
+    expect(view.getAttribute('data-testid')).toBe('course-view-as-member');
+    expect(screen.getByTestId('course-actions').contains(view)).toBe(false);
     cleanup();
 
     renderPage({ status: 'archived', archivedAt: '2026-10-10T12:00:00.000Z' });
@@ -513,8 +575,37 @@ describe('CoursePage / PublishZone (UI-D-394, D-413)', () => {
     );
     expect(screen.queryByTestId('course-publish')).toBeNull();
     expect(screen.queryByTestId('course-unpublish')).toBeNull();
-    // The header's edit control still works on an archived course (A-UI-3).
-    expect(screen.getByRole('link', { name: 'Editar curso' })).toBeTruthy();
+    expect(screen.queryByTestId('course-view-as-member')).toBeNull();
+    // The hero's edit door still works on an archived course (A-UI-3).
+    expect(
+      screen.getByRole('link', { name: 'Editar a capa e as informações do curso' }),
+    ).toBeTruthy();
+  });
+
+  it('10b. 2026-10-23: "Sobre o curso" and "O que você vai dominar" render with content, each with its "Editar" door to the form section; blank outcomes drop', () => {
+    renderPage({
+      description: 'Um curso prático, do diagnóstico ao acabamento.',
+      outcomes: ['Planejar a sessão', '   ', 'Marcar com segurança'],
+    });
+    const about = screen.getByRole('region', { name: 'Sobre o curso' });
+    expect(within(about).getByTestId('course-description').textContent).toBe(
+      'Um curso prático, do diagnóstico ao acabamento.',
+    );
+    const aboutDoor = within(about).getByRole('link', { name: 'Editar a descrição do curso' });
+    expect(aboutDoor.getAttribute('href')).toBe(`/cursos/${COURSE}/editar#descricao`);
+    expect(aboutDoor.textContent).toBe('Editar');
+
+    const outcomes = screen.getByRole('region', { name: 'O que você vai dominar' });
+    expect(
+      within(outcomes)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Planejar a sessão', 'Marcar com segurança']);
+    expect(
+      within(outcomes)
+        .getByRole('link', { name: 'Editar o que o aluno vai dominar' })
+        .getAttribute('href'),
+    ).toBe(`/cursos/${COURSE}/editar#resultados`);
   });
 
   it('11. Publicar curso? confirms (the gated body only with products) → published → toast and refresh', async () => {

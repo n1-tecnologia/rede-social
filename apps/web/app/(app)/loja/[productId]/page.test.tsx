@@ -52,6 +52,15 @@ vi.mock('@/lib/bootstrap', () => ({
 }));
 vi.mock('@/lib/store', () => ({
   getProduct: async () => ({ status: 'ok', product: mocks.product }),
+  // The storefront's catalogue for "Você também pode gostar" (2026-10-27): empty here.
+  getProducts: async () => ({ items: [], nextCursor: null }),
+}));
+// 2026-10-28: the store's setup (Gerenciar) is a per-device cookie; here the built-in store.
+vi.mock('@/lib/store-setup-cookie', () => ({
+  readStoreSetup: async () => ({
+    setup: { categories: null, featured: [] },
+    assignments: new Map(),
+  }),
 }));
 vi.mock('@rede-social/core/ui', () => ({ MediaImage: () => null }));
 vi.mock('./PurchaseControl', () => ({
@@ -181,5 +190,49 @@ describe('P58: the gateway branch reaches no purchase action', () => {
     expect(source).not.toMatch(/purchaseProductAction/);
     expect(source).not.toMatch(/PurchaseControl/);
     expect(source).not.toMatch(/from '\.\.\/actions'/);
+  });
+});
+
+/* ── 2026-10-24: the "Imagem ao lado" product page (the Loja redesign) ─────────────────────────── */
+
+describe('the "Imagem ao lado" layout (2026-10-24)', () => {
+  const C = '22222222-2222-4222-8222-222222222222';
+
+  it('is a wide page whose ONE h1 is the product name; the header keeps it as a plain line', async () => {
+    const { container } = await renderPage(product());
+    expect(screen.getByTestId('store-product-page').hasAttribute('data-shell-full')).toBe(true);
+    const headings = container.querySelectorAll('h1');
+    expect(headings).toHaveLength(1);
+    expect(headings[0]?.textContent).toBe('Mentoria em grupo');
+    expect(headings[0]?.getAttribute('data-testid')).toBe('store-product-name');
+  });
+
+  it('draws the state pill beside the category chip ("Mentoria" reads as a service), with its glyph', async () => {
+    await renderPage(product({ owned: true }));
+    const pill = screen.getByTestId('store-product-pill');
+    expect(pill.textContent).toBe('Comprado');
+    expect(pill.querySelector('svg')).not.toBeNull();
+    const chip = pill.parentElement?.firstElementChild;
+    expect(chip?.textContent).toBe('Serviço');
+    expect(chip?.getAttribute('href')).toBe('/loja?categoria=servicos');
+  });
+
+  it('orders the sections: about, the unlocks with their count, then the manager card', async () => {
+    mocks.permissions = ['store.product.manage'];
+    const { container } = await renderPage(
+      product({ holderCount: 0, communities: [{ id: C, name: 'VIP', coverAssetId: null }] }),
+    );
+    expect([...container.querySelectorAll('section h2')].map((heading) => heading.id)).toEqual([
+      'store-about-title',
+      'store-unlocks-title',
+      'store-manage-title',
+    ]);
+    expect(screen.getByTestId('store-unlocks-count').textContent).toBe('1 conteúdo');
+    const buyers = container.querySelector('[data-store-manage-buyers]');
+    expect(buyers?.getAttribute('href')).toBe(`/loja/${P}/compradores`);
+    expect(buyers?.textContent).toContain('Ninguém com acesso ainda');
+    expect(container.querySelector('[data-store-manage-edit]')?.getAttribute('href')).toBe(
+      `/loja/${P}/editar`,
+    );
   });
 });

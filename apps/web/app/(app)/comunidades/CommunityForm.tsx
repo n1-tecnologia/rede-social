@@ -27,6 +27,7 @@ import {
   reactivateCommunityAction,
   updateCommunityAction,
 } from '@/app/(app)/comunidades/actions';
+import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
@@ -352,6 +353,8 @@ export function CommunityForm({
               takes no children, so it sits directly above it instead — same two things on screen,
               same order, and the primitive stays the one every other upload surface uses. */}
           <div className="overflow-hidden rounded-xl">{preview}</div>
+          {/* 2026-10-23: the ideal size of the image, under the preview. */}
+          <CoverSizeHint kind="community" />
           <div className="hidden md:block">
             <FileDropZone
               id="community-cover-dropzone"

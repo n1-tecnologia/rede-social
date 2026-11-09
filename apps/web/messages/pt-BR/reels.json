@@ -21,6 +21,10 @@
     "position": "Vídeo {current}, de {author}",
     "previous": "Vídeo anterior",
     "next": "Próximo vídeo",
+    "fullscreen": {
+      "enter": "Tela cheia",
+      "exit": "Sair da tela cheia"
+    },
     "backToPost": "Voltar para a publicação",
     "empty": {
       "title": "Nenhum vídeo ainda",

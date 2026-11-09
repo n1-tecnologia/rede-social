@@ -13,6 +13,7 @@ import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import feedStoreMessages from '../messages/pt-BR/feed.store.json' with { type: 'json' };
 import storeCoursesMessages from '../messages/pt-BR/store.courses.json' with { type: 'json' };
 import storeMessages from '../messages/pt-BR/store.json' with { type: 'json' };
+import storePaymentsMessages from '../messages/pt-BR/store.payments.json' with { type: 'json' };
 import {
   closeAdmin,
   createCommunityAs,
@@ -35,6 +36,7 @@ import {
   tenantTimezone,
 } from './courses-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+import { untilHydrated } from './hydration';
 import { landscapePng } from './media-fixtures';
 import {
   closeStoreAdmin,
@@ -61,11 +63,20 @@ import {
   setProductStatus,
   waitForReadyCoverIn,
 } from './store-admin';
+import {
+  currentStoreScreen,
+  goToStoreScreen,
+  storeAreaLabel,
+  storeMenuLabels,
+  storeScreenLabels,
+} from './store-area';
 import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const S = storeMessages.store;
 const SETTINGS_ROW = appStoreMessages.app.settings.rows.store;
+/** The manager-only pill of a gateway product with no usable checkout link (09.1-17). */
+const NO_PAYMENT_LINK = storePaymentsMessages.store.product.noPaymentLink;
 
 /** ICU `{name}` placeholders filled the way next-intl does for the plain arguments these use. */
 function fill(message: string, values: Record<string, string>): string {
@@ -74,9 +85,19 @@ function fill(message: string, values: Record<string, string>): string {
 
 /**
  * 08.2-07 — the Loja browse surfaces, on the phone (`mobile-chromium`) and on the desktop:
- * the TopBar slot (UI-D-366), the grid with its chips (UI-D-367, D-352), the poster (UI-D-368), the
- * product page (UI-D-369, D-353), the manager's additions (D-362) and the Configurações row
- * (UI-D-382), plus the store being off on rede-lab (UI-D-387).
+ * the TopBar slot (UI-D-366), the grid (UI-D-367, D-352), the poster (UI-D-368), the product page
+ * (UI-D-369, D-353), the manager's additions (D-362) and the Configurações row (UI-D-382), plus the
+ * store being off on rede-lab (UI-D-387).
+ *
+ * 2026-10-24 (the Loja redesign on the "área de membros"): the store is an AREA, "· Loja", owned by
+ * its TopBar slot. The old one-screen page's chips are screens of their own, reached from the area's
+ * menu (the phone's sandwich, the rail's sub-rows under the Loja row; `store-area.ts` takes the right
+ * road per viewport): Produtos (`/loja`) and Comprados (`/loja/comprados`), the SAME screens for every
+ * role (no create control, no archived list, no manager pill, no chips), and a manager's Gerenciar
+ * (`/loja/gerenciar`: "Novo produto", the Ativos / Arquivados filter dropdown and the products as
+ * rows). The old `?filtro=` links redirect to their screens; the Configurações "Loja" row opens
+ * Gerenciar. The product page is wide with the image beside the info ("Imagem ao lado"), its one h1
+ * the product's name (`store-product-name`; the header's title is a plain line now).
  *
  * The seed turns `store` ON for rede-demo with no product (Pitfall 13), so every product here is a
  * fixture written through `store-admin.ts`, prefixed per run and project, and removed in `afterAll`.
@@ -170,10 +191,11 @@ test.describe('browse', () => {
     await closeAdmin();
   });
 
-  test('UI-D-366: the member sees the Loja slot first in the slot row and opens the grid', async ({
+  test('UI-D-366: the member sees the Loja slot first in the slot row and opens Produtos, the first screen of the "· Loja" area', async ({
     page,
-  }) => {
+  }, testInfo) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    // Outside the store nothing changed: the slot row reads Loja, Notificações, Suporte.
     const order = await chrome(page).evaluateAll((links) =>
       links
         .map((link) => link.getAttribute('href'))
@@ -187,16 +209,33 @@ test.describe('browse', () => {
     await expect(slot).not.toContainText(/\d/);
     await slot.click();
     await expect(page).toHaveURL(/\/loja$/);
-    await expect(page.getByRole('heading', { level: 1, name: S.list.title })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: S.list.title, exact: true }),
+    ).toBeVisible();
     await expect(page.getByText(fill(S.list.subtitle, { tenant: 'Rede Demo' }))).toBeVisible();
 
-    // D-351: two columns at every width, "Grátis" at zero and the formatBrl price.
+    // 2026-10-24: inside the store the phone's TopBar names the area and its right side IS the
+    // area's menu (no slot row); the member's menu is Produtos and Comprados, Produtos current here.
+    if (isMobile(testInfo)) {
+      await expect(storeAreaLabel(page)).toHaveText(`· ${S.area.label}`);
+      await expect(page.locator('header[data-shell-topbar] [data-shell-slots]')).toHaveCount(0);
+    }
+    expect(await storeScreenLabels(page)).toEqual(storeMenuLabels());
+    expect(await currentStoreScreen(page)).toBe(S.area.screens.products);
+
+    // D-351 (2026-10-24, the e-commerce grid): two columns on the phone; at 1280px the grid has
+    // 960px of room beside the rail (its columns follow its own width, a container: 3 from 600px,
+    // 4 from 880px, 5 from 1200px), so four; "Grátis" at zero and the formatBrl price.
     const grid = page.getByRole('list', { name: fill(S.list.region, { tenant: 'Rede Demo' }) });
     await expect(grid).toBeVisible();
     const columns = await grid.evaluate(
       (el) => getComputedStyle(el).gridTemplateColumns.split(' ').length,
     );
-    expect(columns).toBe(2);
+    expect(columns).toBe(isMobile(testInfo) ? 2 : 4);
+    if (!isMobile(testInfo)) {
+      // The screen is wide (`data-shell-wide`): the shell lifts its 680px column.
+      expect((await boxOf(page.getByTestId('store-screen'))).width).toBeGreaterThan(680);
+    }
     await expect(
       grid.getByRole('link', { name: `${names.free}, ${S.price.free}`, exact: true }),
     ).toBeVisible();
@@ -207,10 +246,10 @@ test.describe('browse', () => {
     await expect(
       grid.getByRole('link', { name: `${names.owned}, ${formatBrl(4990)}, comprado`, exact: true }),
     ).toContainText(S.card.owned);
-    // Archived products are not in "Todos"; the manager-only chip is absent for a member.
+    // Archived products are not in Produtos; no create control and no road to Gerenciar for a member.
     await expect(grid.getByRole('link', { name: new RegExp(names.archived) })).toHaveCount(0);
-    await expect(page.getByRole('link', { name: S.list.filter.archived })).toHaveCount(0);
-    await expect(page.getByRole('link', { name: S.list.create })).toHaveCount(0);
+    await expect(page.locator('a[data-store-create], a[href="/loja/novo"]')).toHaveCount(0);
+    await expect(page.locator('a[href^="/loja/gerenciar"]')).toHaveCount(0);
 
     // P21: the server's order, newest first, never re-sorted by the web.
     const mine = await grid
@@ -228,26 +267,30 @@ test.describe('browse', () => {
     ]);
   });
 
-  test('D-352: "Comprados" lists what the member holds, archived included; ?filtro=arquivados reads as Todos', async ({
+  test('D-352: "Comprados" (/loja/comprados, from the area menu) lists what the member holds, archived included; the old ?filtro= links land on their screens and a member never reaches Gerenciar', async ({
     page,
-  }) => {
+  }, testInfo) => {
+    const grid = page.getByRole('list', { name: fill(S.list.region, { tenant: 'Rede Demo' }) });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/loja`);
-    await page.getByRole('link', { name: S.list.filter.owned }).click();
-    await expect(page).toHaveURL(/\/loja\?filtro=comprados$/);
-    await expect(page.getByRole('link', { name: S.list.filter.owned })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    await goToStoreScreen(page, S.area.screens.owned, /\/loja\/comprados$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: S.screens.owned.title, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(fill(S.screens.owned.subtitle, { tenant: 'Rede Demo' })),
+    ).toBeVisible();
+    expect(await currentStoreScreen(page)).toBe(S.area.screens.owned);
+    if (isMobile(testInfo)) await expect(storeAreaLabel(page)).toHaveText(`· ${S.area.label}`);
     const ownedName = `${names.owned}, ${formatBrl(4990)}, comprado`;
-    await expect(page.getByRole('link', { name: ownedName, exact: true })).toBeVisible();
+    await expect(grid.getByRole('link', { name: ownedName, exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: new RegExp(names.paid) })).toHaveCount(0);
 
     // Archived after the grant: still under "Comprados", with "Comprado" and no archive wording.
     await setProductStatus(ids.owned, 'archived');
     try {
       await page.reload();
-      const card = page.getByRole('link', { name: ownedName, exact: true });
+      const card = grid.getByRole('link', { name: ownedName, exact: true });
       await expect(card).toBeVisible();
       await expect(card).toContainText(S.card.owned);
       await expect(card).not.toContainText(S.card.archived);
@@ -255,47 +298,98 @@ test.describe('browse', () => {
       await setProductStatus(ids.owned, 'active');
     }
 
-    // T-08.2-32: a member asking for the manager filter gets "Todos".
+    // The old chip link of "Comprados" lands on its screen (`legacyStoreFilterRedirect`).
+    await page.goto(`${hosts.demo}/loja?filtro=comprados`);
+    await expect(page).toHaveURL(/\/loja\/comprados$/);
+    await expect(grid.getByRole('link', { name: ownedName, exact: true })).toBeVisible();
+
+    // T-08.2-32: a member asking for the manager's archived list gets Produtos.
     await page.goto(`${hosts.demo}/loja?filtro=arquivados`);
-    await expect(page.getByRole('link', { name: S.list.filter.all })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    await expect(page).toHaveURL(/\/loja$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: S.list.title, exact: true }),
+    ).toBeVisible();
+    expect(await currentStoreScreen(page)).toBe(S.area.screens.products);
     await expect(page.getByRole('link', { name: new RegExp(names.archived) })).toHaveCount(0);
     await expect(
-      page.getByRole('link', { name: `${names.paid}, ${formatBrl(1990)}`, exact: true }),
+      grid.getByRole('link', { name: `${names.paid}, ${formatBrl(1990)}`, exact: true }),
     ).toBeVisible();
+
+    // Gerenciar is a manager's screen: a member opening it is sent to Produtos.
+    await page.goto(`${hosts.demo}/loja/gerenciar`);
+    await expect(page).toHaveURL(/\/loja$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: S.list.title, exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId('store-manage-list')).toHaveCount(0);
+    await expect(page.locator('a[data-store-create]')).toHaveCount(0);
   });
 
-  test('P19: "Comprados" with nothing held shows its empty copy and "Ver todos"', async ({
+  test('P19: "Comprados" with nothing held shows its empty copy and "Ver todos" (back to Produtos)', async ({
     page,
   }) => {
     // The seeded admin holds no product of this run (and the seed grants none).
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/loja?filtro=comprados`);
-    await expect(page.getByText(S.list.ownedEmpty.title)).toBeVisible();
-    await expect(page.getByText(S.list.ownedEmpty.body)).toBeVisible();
-    await page.getByRole('link', { name: S.list.ownedEmpty.cta }).click();
+    await page.goto(`${hosts.demo}/loja/comprados`);
+    const empty = page.getByTestId('store-empty-owned');
+    await expect(empty).toBeVisible();
+    await expect(empty.getByText(S.list.ownedEmpty.title)).toBeVisible();
+    await expect(empty.getByText(S.list.ownedEmpty.body)).toBeVisible();
+    // Comprados is this page's row of the area menu (a manager's ends with Gerenciar).
+    expect(await currentStoreScreen(page)).toBe(S.area.screens.owned);
+    const cta = empty.getByRole('link', { name: S.list.ownedEmpty.cta, exact: true });
+    await expect(cta).toHaveAttribute('href', '/loja');
+    await cta.click();
     await expect(page).toHaveURL(/\/loja$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: S.list.title, exact: true }),
+    ).toBeVisible();
   });
 
-  test('D-353 / UI-D-369: the product page with and without communities, and the held state', async ({
+  test('D-353 / UI-D-369: the product page with and without communities, and the held state; the image beside the name on the desktop, above it on the phone', async ({
     page,
-  }) => {
+  }, testInfo) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
-    // No linked community: nothing is said about communities.
+    // No linked community: nothing is said about communities. 2026-10-24: the page's ONE h1 is the
+    // product's name in the info column (`store-product-name`); the header repeats it as a line.
     await page.goto(`${hosts.demo}/loja/${ids.free}`);
-    await expect(page.getByRole('heading', { name: names.free })).toBeVisible();
+    const title = page.getByTestId('store-product-name');
+    await expect(title).toHaveText(names.free);
+    await expect(
+      page.getByRole('heading', { level: 1, name: names.free, exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('main.app-scroll h1')).toHaveCount(1);
     await expect(page.getByTestId('store-product-price')).toHaveText(S.price.free);
+    await expect(page.getByTestId('store-product-unlocks')).toHaveCount(0);
     await expect(page.getByText(S.product.unlocks.title)).toHaveCount(0);
     await expect(page.getByTestId('store-product-description')).toHaveCount(0);
+    await expect(page.locator('#store-about-title')).toHaveCount(0);
     await expect(page.getByRole('link', { name: S.product.back })).toHaveAttribute('href', '/loja');
+    // A held product's pill is the only one a member meets; this one has none.
+    await expect(page.getByTestId('store-product-pill')).toHaveCount(0);
+
+    // "Imagem ao lado": the 4:5 box (the gradient here, no image) is the left column on the desktop
+    // (`lg`), level with the name, and the top of the page on the phone; the page is wide.
+    const image = page.getByTestId('store-product-fallback');
+    await expect(image).toBeVisible();
+    const [imageBox, titleBox] = [await boxOf(image), await boxOf(title)];
+    if (isMobile(testInfo)) {
+      expect(imageBox.y + imageBox.height).toBeLessThanOrEqual(titleBox.y + 0.5);
+    } else {
+      expect(imageBox.x + imageBox.width).toBeLessThanOrEqual(titleBox.x + 0.5);
+      expect(titleBox.y).toBeLessThan(imageBox.y + imageBox.height);
+      expect((await boxOf(page.getByTestId('store-product-page'))).width).toBeGreaterThan(680);
+    }
 
     // One active community: the section, a static row with a padlock, the price and the text.
     await page.goto(`${hosts.demo}/loja/${ids.paid}`);
     await expect(page.getByTestId('store-product-price')).toHaveText(formatBrl(1990));
-    await expect(page.getByText(S.product.unlocks.title)).toBeVisible();
+    await expect(page.locator('#store-unlocks-title')).toHaveText(S.product.unlocks.title);
+    await expect(page.getByTestId('store-unlocks-count')).toHaveText(
+      tStore('product.unlocks.count', { count: 1 }),
+    );
+    await expect(page.locator('#store-about-title')).toHaveText(S.product.about);
     const locked = page.getByRole('listitem', {
       name: fill(S.product.unlocks.rowLocked, { community: names.community }),
     });
@@ -325,28 +419,103 @@ test.describe('browse', () => {
     await expect(page.getByRole('link', { name: S.notFound.cta })).toHaveAttribute('href', '/loja');
   });
 
-  test('D-362: the manager gets the create control, "Arquivados", the manage card and reactivates', async ({
+  test('D-362: the manager browses Produtos as a member does and manages in "Gerenciar" (the create control, the Ativos / Arquivados filter), then the manage card and reactivates', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/loja`);
-    await expect(page.getByRole('link', { name: S.list.create })).toHaveAttribute(
-      'href',
-      '/loja/novo',
+
+    // 2026-10-24: Produtos is the member's screen for every role: no create control, no archived
+    // card and no manager-only pill ("Arquivado", "Sem link de pagamento").
+    const grid = page.getByRole('list', { name: fill(S.list.region, { tenant: 'Rede Demo' }) });
+    await expect(
+      grid.getByRole('link', { name: `${names.paid}, ${formatBrl(1990)}`, exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('a[data-store-create], a[href="/loja/novo"]')).toHaveCount(0);
+    await expect(grid.getByRole('link', { name: new RegExp(names.archived) })).toHaveCount(0);
+    await expect(
+      grid.locator('[data-testid="product-card-pill"]:not([data-kind="owned"])'),
+    ).toHaveCount(0);
+    await expect(page.getByText(NO_PAYMENT_LINK)).toHaveCount(0);
+
+    // The manager's area menu: the member's two screens, then Gerenciar, which holds the rest.
+    expect(await storeScreenLabels(page)).toEqual(storeMenuLabels({ manager: true }));
+    expect(await currentStoreScreen(page)).toBe(S.area.screens.products);
+    await goToStoreScreen(page, S.area.screens.manage, /\/loja\/gerenciar$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: S.screens.manage.title, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(fill(S.screens.manage.subtitle, { tenant: 'Rede Demo' })),
+    ).toBeVisible();
+    expect(await currentStoreScreen(page)).toBe(S.area.screens.manage);
+    const create = page.locator('main a[data-store-create]');
+    await expect(create).toHaveAccessibleName(S.list.create);
+    await expect(create).toHaveAttribute('href', '/loja/novo');
+
+    // The active rows: the catalogue's products as rows, the archived one not among them.
+    const rows = page.getByTestId('store-manage-list');
+    await expect(rows).toHaveAccessibleName(fill(S.list.region, { tenant: 'Rede Demo' }));
+    await expect(
+      rows.getByRole('link', { name: `${names.paid}, ${formatBrl(1990)}`, exact: true }),
+    ).toBeVisible();
+    await expect(rows.getByRole('link', { name: new RegExp(names.archived) })).toHaveCount(0);
+
+    // The filter: ONE button beside "Novo produto" whose name carries the list on screen, opening
+    // the dropdown of Ativos (current) and Arquivados.
+    const filterLabel = S.list.filter.label;
+    const filterButton = page.getByTestId('store-manage-filters-button');
+    await expect(filterButton).toHaveAccessibleName(
+      fill(S.screens.manage.filter.button, {
+        label: filterLabel,
+        current: S.screens.manage.filter.active,
+      }),
     );
-    await page.getByRole('link', { name: S.list.filter.archived }).click();
-    await expect(page).toHaveURL(/\/loja\?filtro=arquivados$/);
-    const card = page.getByRole('link', {
-      name: fill(S.card.ariaArchived, { product: names.archived }),
-      exact: true,
-    });
-    await expect(card).toContainText(S.card.archived);
-    await card.click();
+    await untilHydrated(filterButton);
+    await filterButton.click();
+    const filters = page.getByTestId('store-manage-filters');
+    await expect(filters).toHaveAccessibleName(filterLabel);
+    await expect(filters.getByRole('link')).toHaveText([
+      S.screens.manage.filter.active,
+      S.list.filter.archived,
+    ]);
+    const active = filters.getByRole('link', { name: S.screens.manage.filter.active, exact: true });
+    await expect(active).toHaveAttribute('aria-current', 'page');
+    await expect(active).toHaveAttribute('href', '/loja/gerenciar');
+    const archivedLink = filters.getByRole('link', { name: S.list.filter.archived, exact: true });
+    await expect(archivedLink).toHaveAttribute('href', '/loja/gerenciar?filtro=arquivados');
+    await archivedLink.click();
+    await expect(page).toHaveURL(/\/loja\/gerenciar\?filtro=arquivados$/);
+    await expect(page.getByTestId('store-manage-filters-button')).toHaveAccessibleName(
+      fill(S.screens.manage.filter.button, {
+        label: filterLabel,
+        current: S.list.filter.archived,
+      }),
+    );
+    // The query is not a screen of its own: Gerenciar stays the current row.
+    expect(await currentStoreScreen(page)).toBe(S.area.screens.manage);
+    const archivedRow = () =>
+      page.getByTestId('store-manage-list').getByRole('link', {
+        name: fill(S.card.ariaArchived, { product: names.archived }),
+        exact: true,
+      });
+    await expect(archivedRow()).toContainText(S.card.archived);
+    await expect(archivedRow().getByTestId('product-row-pill')).toHaveAttribute(
+      'data-kind',
+      'archived',
+    );
+
+    // The old chip link of the archived list lands here for a manager.
+    await page.goto(`${hosts.demo}/loja?filtro=arquivados`);
+    await expect(page).toHaveURL(/\/loja\/gerenciar\?filtro=arquivados$/);
+    await expect(archivedRow()).toContainText(S.card.archived);
+    await archivedRow().click();
 
     await expect(page).toHaveURL(new RegExp(`/loja/${ids.archived}$`));
+    // The state pill sits beside the info column's "Produto" overline (2026-10-24), not in the header.
     await expect(page.getByTestId('store-product-pill')).toHaveText(S.card.archived);
     await expect(page.getByText(S.product.archived.note)).toBeVisible();
-    await expect(page.getByText(S.product.manage.title)).toBeVisible();
+    await expect(page.locator('#store-manage-title')).toHaveText(S.product.manage.title);
     await expect(
       page.getByRole('link', { name: new RegExp(S.product.manage.buyers) }),
     ).toContainText('Ninguém com acesso ainda');
@@ -355,7 +524,9 @@ test.describe('browse', () => {
       `/loja/${ids.archived}/editar`,
     );
 
-    await page.getByRole('button', { name: S.product.archived.reactivate }).click();
+    const reactivate = page.getByRole('button', { name: S.product.archived.reactivate });
+    await untilHydrated(reactivate);
+    await reactivate.click();
     const dialog = page.getByRole('dialog', { name: S.form.reactivateDialog.title });
     await expect(dialog).toBeVisible();
     await dialog
@@ -367,13 +538,18 @@ test.describe('browse', () => {
     await setProductStatus(ids.archived, 'archived');
   });
 
-  test('UI-D-382: Configurações shows "Loja" to the admin and not to the member', async ({
+  test('UI-D-382: Configurações shows "Loja" to the admin, opening Gerenciar (2026-10-24), and not to the member', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/configuracoes`);
     const row = page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true });
-    await expect(row).toHaveAttribute('href', '/loja');
+    await expect(row).toHaveAttribute('href', '/loja/gerenciar');
+    await row.click();
+    await expect(page).toHaveURL(/\/loja\/gerenciar$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: S.screens.manage.title, exact: true }),
+    ).toBeVisible();
 
     await page.context().clearCookies();
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -422,17 +598,20 @@ test.describe('browse', () => {
     expect(nameClamped).toBe(true);
   });
 
-  test('UI-D-387: with the store off (rede-lab) there is no slot and /loja is the generic not-found', async ({
+  test('UI-D-387: with the store off (rede-lab) there is no slot and every store screen is the generic not-found', async ({
     page,
   }) => {
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
     await expect(chrome(page).and(page.locator('a[href="/loja"]'))).toHaveCount(0);
-    await page.goto(`${hosts.lab}/loja`);
-    await expect(page.getByText(/could not be found/i)).toBeVisible();
-    await expect(page.getByText(S.notFound.title)).toHaveCount(0);
-    await page.goto(`${hosts.lab}/loja/${ids.paid}`);
-    await expect(page.getByText(/could not be found/i)).toBeVisible();
-    await expect(page.getByText(S.notFound.title)).toHaveCount(0);
+    // 2026-10-24: Comprados and Gerenciar sit under the same layout gate as Produtos.
+    for (const path of ['/loja', '/loja/comprados', '/loja/gerenciar', `/loja/${ids.paid}`]) {
+      await page.goto(`${hosts.lab}${path}`);
+      await expect(page.getByText(/could not be found/i)).toBeVisible();
+      await expect(page.getByText(S.notFound.title)).toHaveCount(0);
+      await expect(page.locator('[data-shell-area="store"], [data-rail-area="store"]')).toHaveCount(
+        0,
+      );
+    }
   });
 });
 
@@ -1407,7 +1586,8 @@ function liveDateParts(iso: string, zone: string): { date: string; time: string 
  *
  *  - SC 1: "/loja/novo" shows "Comunidades liberadas", "Cursos liberados" and "Lives liberadas" in
  *    that order; a draft course and a scheduled live are picked in their sheets (rows are
- *    `aria-pressed` buttons named "{title}, não incluído/a" → "incluído/a"), saved ("Produto
+ *    `aria-pressed` buttons named "{title}, não incluído/a" → "incluído/a"; since 2026-10-22
+ *    outlined blocks, an included one tinted `border-brand/40 bg-brand/10`), saved ("Produto
  *    criado." on `/loja/{id}`), and the edit form lists both, with "Rascunho" and the live's
  *    "{date}, {time} · Agendada".
  *  - SC 2: the course and live forms show the product read-only ("Liberado/Liberada pelos produtos:
@@ -1476,9 +1656,14 @@ test.describe('course and live links (08.4)', () => {
     await expect(sheet).toBeVisible();
     const off = sheet.getByRole('button', { name: rowOff, exact: true });
     await expect(off).toHaveAttribute('aria-pressed', 'false');
+    // 2026-10-22 (the courses area redesign): the rows are outlined blocks and an included one is
+    // tinted with the brand beside its check (the courses module's sheet, both blocks use it).
+    await expect(off).not.toHaveClass(/bg-brand\/10/);
     await off.click();
     const on = sheet.getByRole('button', { name: rowOn, exact: true });
     await expect(on).toHaveAttribute('aria-pressed', 'true');
+    await expect(on).toHaveClass(/border-brand\/40/);
+    await expect(on).toHaveClass(/bg-brand\/10/);
     await sheet.getByRole('button', { name: done, exact: true }).click();
     await expect(sheet).toHaveCount(0);
   }
@@ -1895,7 +2080,15 @@ test.describe('buyers', () => {
     await page.locator('[data-store-manage-buyers]').click();
     await expect(page).toHaveURL(new RegExp(`/loja/${productId}/compradores$`));
 
-    await expect(page.getByRole('heading', { name: S.buyers.title })).toBeVisible();
+    // 2026-10-24: the screen's h1 "Compradores" under a "Voltar" back row (the product page is its
+    // fallback), then the toolbar and the rows in one outlined list card.
+    await expect(
+      page.getByRole('heading', { level: 1, name: S.buyers.title, exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('link', { name: S.buyers.back, exact: true })).toHaveAttribute(
+      'href',
+      `/loja/${productId}`,
+    );
     await expect(page.locator('[data-buyers-product]')).toHaveText(productName);
     await expect(count(page)).toHaveText(tStore('buyers.count', { count: 3 }));
     await expect(grantButton(page)).toBeVisible();
@@ -2277,7 +2470,7 @@ test.describe('backstops', () => {
     await closeAdmin();
   });
 
-  test('E01 overflow: at 320px the tenant logo, the four slots and the avatar sit on one line without overlap', async ({
+  test('E01 overflow: at 320px the tenant logo, the three slots and the avatar sit on one line without overlap (2026-10-23: no Reels slot)', async ({
     page,
   }, testInfo) => {
     test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
@@ -2296,18 +2489,20 @@ test.describe('backstops', () => {
     });
     expect(natural).toBeGreaterThanOrEqual(120);
 
-    // 08.5-11 (UI-D-423): with `courses` on, Reels yields its tab and leads the slot row.
+    // 08.5-11 (UI-D-423) had Reels lead the slot row while `courses` is on; since 2026-10-23 Reels
+    // keeps its tab and the full row sends Perfil to the rail instead, so the avatar (Perfil's door
+    // on the phone) follows Loja, Notificações and Suporte.
     const slots = bar.locator('a[data-slot]');
-    await expect(slots).toHaveCount(4);
+    await expect(slots).toHaveCount(3);
     expect(
       await slots.evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
-    ).toEqual(['/reels', '/loja', '/notificacoes', '/suporte']);
+    ).toEqual(['/loja', '/notificacoes', '/suporte']);
     const avatar = bar.locator('a[href="/perfil"]');
     const brand = await boxOf(bar.locator('[data-shell-brand]'));
     const image = await boxOf(logo);
     const row = [
       brand,
-      ...(await Promise.all([0, 1, 2, 3].map((index) => boxOf(slots.nth(index))))),
+      ...(await Promise.all([0, 1, 2].map((index) => boxOf(slots.nth(index))))),
       await boxOf(avatar),
     ];
 
@@ -2322,7 +2517,7 @@ test.describe('backstops', () => {
     // The logo is drawn inside its link (never under the slots), and every slot keeps 44px.
     expect(image.x).toBeGreaterThanOrEqual(brand.x - 0.5);
     expect(image.x + image.width).toBeLessThanOrEqual(brand.x + brand.width + 0.5);
-    for (const index of [1, 2, 3, 4]) expect(row[index]?.width ?? 0).toBeGreaterThanOrEqual(44);
+    for (const index of [1, 2, 3]) expect(row[index]?.width ?? 0).toBeGreaterThanOrEqual(44);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -2657,6 +2852,10 @@ const MEMBER = coursesMemberMessages.courses.member;
  *  - "Produto único": one course, bought from the store (the one-course success);
  *  - phone only: a 120-character course, alone ("Longo único", E14) and beside the scheduled live
  *    ("Longo", E13).
+ *
+ * 2026-10-22 (the courses area redesign): the locked course page is the full-bleed hero with the
+ * store's compact "Exclusivo" chip, never greyed, over the centred `LockedSection`; the cases read
+ * those hooks (`data-variant="centered"`, `data-size="compact"`) beside the buy path they always had.
  */
 test.describe('08.5 product unlocks and purchase return', () => {
   test.skip(isRemote, 'the store and courses fixtures write rows through the local database');
@@ -2898,6 +3097,23 @@ test.describe('08.5 product unlocks and purchase return', () => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/cursos/${id.backCourse}`);
     await expect(page.getByTestId('locked-section')).toBeVisible();
+    // 2026-10-22 (the courses area redesign): the buy section is the prototype's centred card, and
+    // the course's full-bleed hero carries the store's compact "Exclusivo" glass chip (2026-10-26:
+    // among the hero's chips, `member-course-chips`). Nothing on the hero is greyed (D-421 keeps the
+    // colour; the lock says it all).
+    await expect(page.getByTestId('locked-section')).toHaveAttribute('data-variant', 'centered');
+    const badge = page.getByTestId('member-course-chips').getByTestId('exclusive-badge');
+    await expect(badge).toHaveAttribute('data-size', 'compact');
+    await expect(badge).toHaveText(MEMBER.tags.exclusiveCourse);
+    expect(
+      await page
+        .getByTestId('member-course-hero')
+        .evaluate((hero) =>
+          [hero, ...hero.querySelectorAll('*')].some((node) =>
+            getComputedStyle(node).filter.includes('grayscale'),
+          ),
+        ),
+    ).toBe(false);
     const buy = page.getByRole('link', { name: MEMBER.locked.buy, exact: true });
     await expect(buy).toHaveAttribute('href', `/loja/${id.courseProduct}?curso=${id.backCourse}`);
     await buy.click();
@@ -2916,6 +3132,9 @@ test.describe('08.5 product unlocks and purchase return', () => {
     await expect(page.getByText(S.purchase.success.title, { exact: true })).toHaveCount(0);
     await expect(page.getByTestId('locked-section')).toHaveCount(0);
     await expect(page.getByRole('link', { name: MEMBER.locked.buy })).toHaveCount(0);
+    await expect(page.getByTestId('member-course-hero').getByTestId('exclusive-badge')).toHaveCount(
+      0,
+    );
   });
 
   test('STORE-07 / UI-D-440: from a locked live\'s "Comprar para liberar" the purchase returns to the live, unlocked, with the toast', async ({

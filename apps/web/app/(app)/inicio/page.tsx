@@ -6,6 +6,7 @@ import { Suspense } from 'react';
 import { NoticeToast } from '@/components/feedback/NoticeToast';
 import { ProfileNudgeOnArrival } from '@/components/profile/ProfileNudgeOnArrival';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { loadFeedSuggestions } from '@/lib/feed-suggestions';
 import { requirePlatformTenants } from '@/lib/platform';
 import { loadOwnProfile } from '@/lib/profile';
 import { homeSlotsFor } from '@/lib/registry';
@@ -13,6 +14,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
 import { ExplorarBody } from './ExplorarBody';
 import { ExplorarSkeleton } from './ExplorarSkeleton';
+import { FeedSuggestions } from './FeedSuggestions';
 import { InicioTabs } from './InicioTabs';
 import { inicioTabFromParam, showsInicioTabs } from './tabs';
 
@@ -116,20 +118,27 @@ export default async function InicioPage({
     );
   }
 
-  const [slots, profile, tn] = await Promise.all([
+  const [slots, profile, tn, suggestions] = await Promise.all([
     homeSlotsFor(bootstrap),
     loadOwnProfile(),
     getTranslations('notifications'),
+    loadFeedSuggestions(bootstrap, tRoot),
   ]);
   const storyExpired = query.aviso === STORY_EXPIRED_NOTICE;
 
-  return (
+  const feed = (
     // The REINE timeline (2026-10-02): no side gutter and no top padding on a phone, so the stories
     // band and the posts run edge to edge right under the top bar's 7px of page ground; the cards
     // between them (the empty and error states) keep the `px-4` gutter on their own. The next
     // event is no card here since 2026-10-03: it is the red dot on the Eventos tab. From md up
     // everything sits in the centred column, as before.
-    <div className="flex flex-col gap-3">
+    <div
+      className={
+        suggestions
+          ? 'flex min-w-0 flex-col gap-3 md:mx-auto md:w-full md:max-w-[680px] xl:mx-0'
+          : 'flex flex-col gap-3'
+      }
+    >
       {/* No visible welcome block (product decision, 2026-10-01): the tenant's logo, or its name
           without one, already heads the shell (TopBar / rail). The page keeps its h1 for assistive
           tech only. */}
@@ -161,6 +170,22 @@ export default async function InicioPage({
           only while it holds, so a member who dismissed the old card never sees the popup. WHEN is
           the host's: 500 ms after the page settles, once per visit (`lib/profile-nudge.ts`). */}
       {profile?.needsNudge ? <ProfileNudgeOnArrival membershipId={profile.membershipId} /> : null}
+    </div>
+  );
+
+  if (!suggestions) return feed;
+
+  // 2026-10-26 — the suggestions column (`FeedSuggestions`): from `xl` it sits beside the feed and
+  // the pair is centred, Instagram's layout. The page turns wide (`data-shell-wide`) to make room,
+  // and the feed keeps its own 680px cap, so below `xl`, where the column is hidden, the feed is
+  // exactly the centred column it always was.
+  return (
+    <div
+      data-shell-wide
+      className="flex flex-col xl:flex-row xl:items-start xl:justify-center xl:gap-8"
+    >
+      {feed}
+      <FeedSuggestions view={suggestions} />
     </div>
   );
 }

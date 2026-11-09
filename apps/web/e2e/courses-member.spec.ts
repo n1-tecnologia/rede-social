@@ -24,6 +24,14 @@ import {
   playerFixture,
 } from './courses-member';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+import { untilHydrated } from './hydration';
+import {
+  closeSchoolMenu,
+  currentSchoolScreen,
+  hasDesktopRail,
+  schoolScreenLabels,
+  schoolScreenLink,
+} from './school-area';
 import { closeStoreAdmin } from './store-admin';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
@@ -69,6 +77,19 @@ const courseCard = (page: Page, title: string): Locator =>
 const liveCard = (scope: Locator, title: string): Locator =>
   scope.getByRole('link', { name: startsWith(title) });
 
+/**
+ * 2026-10-26 — the catalogue's categories are the header's "Filtros" menu (`FilterMenu`), no longer
+ * a row of chips: opens it (once hydrated) and returns its panel, named "Filtrar por categoria".
+ */
+async function openCategories(page: Page): Promise<Locator> {
+  const button = page.getByTestId('courses-member-categories-button');
+  await untilHydrated(button);
+  if ((await button.getAttribute('aria-expanded')) !== 'true') await button.click();
+  const panel = page.getByRole('navigation', { name: M.catalogue.categories.label, exact: true });
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
 /** The kernel's generic not-found: no school surface at all, Next's 404 heading. */
 async function expectKernelNotFound(page: Page): Promise<void> {
   await expect(page.getByTestId('courses-member-catalogue')).toHaveCount(0);
@@ -94,6 +115,28 @@ async function linesOf(locator: Locator): Promise<number> {
 }
 
 /**
+ * Whether the element and every element inside it show all of their content (nothing clipped behind
+ * an ellipsis): 2026-10-22, the compact glass chips truncate in an INNER span, so the outer box alone
+ * would read "fits" while the words inside it were cut.
+ */
+async function showsAll(locator: Locator): Promise<boolean> {
+  return locator.evaluate((node) =>
+    [node, ...Array.from(node.querySelectorAll('*'))].every(
+      (element) => element.scrollWidth <= element.clientWidth + 1,
+    ),
+  );
+}
+
+/** The member's five screens, in the area menu's order (2026-10-22). */
+const MEMBER_SCREEN_LABELS = [
+  M.area.screens.home,
+  M.area.screens.courses,
+  M.area.screens.tracks,
+  M.area.screens.lives,
+  M.area.screens.progress,
+];
+
+/**
  * 08.5-06 — the member's door into the school (D-419, D-420, D-421, D-430, D-431, UI-D-424..426,
  * UI-D-434, COURSE-16, COURSE-17, COURSE-23), on the phone and on the desktop.
  *
@@ -104,6 +147,20 @@ async function linesOf(locator: Locator): Promise<number> {
  *
  * `serviceWorkers: 'block'`: a worker answering navigations from its cache would have these
  * assertions read what a previous run left behind (the 03-05 lesson).
+ *
+ * 2026-10-22 (the courses area redesign on the social-igoralves prototype): each screen of the member
+ * area is a page of its own — `/area-membros` (Início), `/area-membros/cursos`, `/area-membros/
+ * trilhas`, `/area-membros/lives`, `/area-membros/progresso` — reached from the shell's area menu
+ * ("· Membros", `school-area.ts`) instead of the tabs under the title; the old `?aba=` addresses
+ * redirect to them. The poster is the prototype's (the padlock disc in the centre on a locked
+ * course, the colour kept), the Lives screen puts its first upcoming live in the spotlight and the
+ * rest in the agenda, and a cancelled card says so with `data-cancelled`.
+ *
+ * 2026-10-26 (the academy reference): the course card is a panel — the 16:9 cover on top with the
+ * tags, the share and the padlock, the title and "{done}/{N} aulas" UNDER it, the 2px band (the
+ * member skin's) at the cover's foot; the Cursos screen draws its own header with the search
+ * (`?busca=`, front only) and the "Filtros" menu of categories; "Gravadas" are cards of the same
+ * language (`LiveCard` `card`).
  */
 test.use({ serviceWorkers: 'block' });
 test.describe.configure({ timeout: 120_000 });
@@ -128,15 +185,16 @@ test.describe('catalogue', () => {
     await closeStoreAdmin();
   });
 
-  test('D-419 / D-420 / UI-D-424 / D-421: the member opens the catalogue (?aba=cursos, 08.6 D-435) — the frame, the tabs, no admin control; the locked course with "Exclusivo" and the open one, never the draft', async ({
+  test('D-419 / D-420 / UI-D-424 / D-421: the member opens the Cursos screen (/area-membros/cursos, 2026-10-22) — the frame, the area menu, no admin control; the locked course with "Exclusivo" and the padlock, the open one, never the draft', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    // 08.6 (D-435): the bare area is Início; the catalogue body lives at ?aba=cursos (the member area moved to /area-membros, 2026-10-19).
-    await page.goto(`${hosts.demo}/area-membros?aba=cursos`);
+    // 2026-10-22: the Cursos screen is a page of its own (the bare area is Início; ?aba=cursos redirects here).
+    await page.goto(`${hosts.demo}/area-membros/cursos`);
 
     const catalogue = page.getByTestId('courses-member-catalogue');
     await expect(catalogue).toBeVisible();
+    await expect(catalogue).toHaveAttribute('data-screen', 'cursos');
     await expect(catalogue.getByTestId('courses-member-courses')).toBeVisible();
     await expect(catalogue.getByTestId('courses-member-home')).toHaveCount(0);
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
@@ -144,24 +202,38 @@ test.describe('catalogue', () => {
       catalogue.getByRole('heading', { level: 1, name: M.catalogue.title }),
     ).toBeVisible();
     await expect(
-      catalogue.getByText(fill(M.catalogue.subtitle, { tenant: 'Rede Demo' })),
+      catalogue.getByText(fill(M.screens.courses.meta, { tenant: 'Rede Demo' })),
     ).toBeVisible();
+    // 2026-10-26: the screen's own header — the eyebrow over the h1, the search (a plain GET to this
+    // screen, `?busca=`) and the "Filtros" menu of categories.
+    await expect(page.getByTestId('courses-member-header-eyebrow')).toHaveText(
+      M.screens.courses.eyebrow,
+    );
+    const search = page.getByTestId('courses-member-search');
+    await expect(search).toHaveAttribute('action', '/area-membros/cursos');
+    await expect(search.getByRole('searchbox', { name: M.search.label })).toBeVisible();
+    await expect(page.getByTestId('courses-member-categories-button')).toHaveAccessibleName(
+      fill(M.filters.buttonAria, { current: M.catalogue.categories.all }),
+    );
 
-    // UI-D-446 (08.6-08, 08.6-10): the member registry — Início · Cursos (selected) · Trilhas ·
-    // Lives · Progresso.
-    const tabs = catalogue.getByRole('tablist', { name: C.hub.tabs.label });
-    const coursesTab = tabs.getByRole('tab', { name: C.hub.tabs.courses });
-    await expect(coursesTab).toHaveAttribute('aria-selected', 'true');
-    await expect(coursesTab).toHaveAttribute('href', '/area-membros?aba=cursos');
-    await expect(tabs.getByRole('tab', { name: C.hub.tabs.home })).toHaveAttribute(
+    // 2026-10-22: no tabs under the title any more — the shell's area menu ("· Membros") lists the
+    // member's five screens, Início · Cursos (current) · Trilhas · Lives · Progresso, each its own page.
+    await expect(catalogue.getByRole('tablist')).toHaveCount(0);
+    expect(await schoolScreenLabels(page)).toEqual(MEMBER_SCREEN_LABELS);
+    expect(await currentSchoolScreen(page)).toBe(M.area.screens.courses);
+    await expect(await schoolScreenLink(page, M.area.screens.courses)).toHaveAttribute(
+      'href',
+      '/area-membros/cursos',
+    );
+    await expect(await schoolScreenLink(page, M.area.screens.home)).toHaveAttribute(
       'href',
       '/area-membros',
     );
-    await expect(tabs.getByRole('tab', { name: C.hub.tabs.lives })).toHaveAttribute(
+    await expect(await schoolScreenLink(page, M.area.screens.lives)).toHaveAttribute(
       'href',
-      '/area-membros?aba=lives',
+      '/area-membros/lives',
     );
-    await expect(tabs.getByRole('tab')).toHaveCount(5);
+    await closeSchoolMenu(page);
 
     // No create control, no status chips and no "Categorias" row for a member.
     await expect(page.locator('a[href="/cursos/novo"]')).toHaveCount(0);
@@ -179,9 +251,28 @@ test.describe('catalogue', () => {
     await expect(open.getByTestId('course-card-category')).toHaveText(
       fill(M.card.categoryLevel, { category: fx.category.name, level: C.level.beginner }),
     );
-    await expect(open.getByTestId('course-card-meta')).toHaveText('2 aulas');
+    // 2026-10-26: the lessons line under the cover is "{done}/{N} aulas".
+    await expect(open.getByTestId('course-card-meta')).toHaveText(
+      tm('card.lessonsDone', { done: 0, N: 2 }),
+    );
+    // The words sit UNDER the 16:9 cover, never over the art.
+    const poster = await boxOf(open.getByTestId('course-card-poster'));
+    expect(Math.abs(poster.width / poster.height - 16 / 9)).toBeLessThan(0.05);
+    expect((await boxOf(open.getByTestId('course-card-body'))).y).toBeGreaterThanOrEqual(
+      poster.y + poster.height - 0.5,
+    );
+    // 2026-10-22: the locked poster says so with the padlock disc in the centre; the open one has none.
+    await expect(locked).toHaveAttribute('data-locked', 'true');
+    await expect(locked.getByTestId('course-card-lock')).toBeVisible();
+    await expect(open).not.toHaveAttribute('data-locked', 'true');
+    await expect(open.getByTestId('course-card-lock')).toHaveCount(0);
     // The cover is always in colour: nothing on a locked card is desaturated or dimmed (PR-3).
     expect(await locked.evaluate((node) => node.innerHTML)).not.toMatch(/grayscale|opacity-50/);
+    expect(
+      await locked
+        .getByTestId('course-card-poster')
+        .evaluate((node) => getComputedStyle(node).filter),
+    ).toBe('none');
 
     // D-426: a draft is absent for every member.
     await expect(courseCard(page, fx.draft.title)).toHaveCount(0);
@@ -201,39 +292,114 @@ test.describe('catalogue', () => {
     ]);
   });
 
-  test('UI-D-425: the category chips — "Todas" first and active; a chip narrows the grid; an unknown ?categoria= reads as "Todas"', async ({
+  test('UI-D-425 (2026-10-26: the header’s "Filtros" menu in place of the chips): "Todas" first and current; a category narrows the grid and the button names it; an unknown ?categoria= reads as "Todas"', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/area-membros?aba=cursos`);
+    await page.goto(`${hosts.demo}/area-membros/cursos`);
 
-    const chips = page.getByRole('navigation', { name: M.catalogue.categories.label });
-    await expect(chips).toBeVisible();
-    const all = chips.getByRole('link', { name: M.catalogue.categories.all, exact: true });
-    // 08.6 (UI-D-446): every catalogue link carries aba=cursos — the bare area is Início.
-    await expect(all).toHaveAttribute('href', '/area-membros?aba=cursos');
-    await expect(chips.getByRole('link').first()).toHaveText(M.catalogue.categories.all);
-
-    await chips.getByRole('link', { name: fx.category.name, exact: true }).click();
-    await expect(page).toHaveURL(
-      new RegExp(`/area-membros\\?aba=cursos&categoria=${fx.category.id}$`),
+    const button = page.getByTestId('courses-member-categories-button');
+    await expect(button).toContainText(M.filters.button);
+    await expect(button).toHaveAccessibleName(
+      fill(M.filters.buttonAria, { current: M.catalogue.categories.all }),
     );
+    const menu = await openCategories(page);
+    const all = menu.getByRole('link', { name: M.catalogue.categories.all, exact: true });
+    // 2026-10-22: every catalogue link is the Cursos screen's own path (no ?aba= any more).
+    await expect(all).toHaveAttribute('href', '/area-membros/cursos');
+    await expect(all).toHaveAttribute('aria-current', 'page');
+    await expect(menu.getByRole('link').first()).toHaveText(M.catalogue.categories.all);
+
+    await menu.getByRole('link', { name: fx.category.name, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/area-membros/cursos\\?categoria=${fx.category.id}$`));
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(courseCard(page, fx.open.title)).toBeVisible();
     await expect(courseCard(page, fx.locked.title)).toHaveCount(0);
+    // The closed button still says which category is on screen.
+    await expect(page.getByTestId('courses-member-categories-button')).toHaveAccessibleName(
+      fill(M.filters.buttonAria, { current: fx.category.name }),
+    );
+    await expect(
+      (await openCategories(page)).getByRole('link', { name: fx.category.name, exact: true }),
+    ).toHaveAttribute('aria-current', 'page');
 
     await page.goto(
-      `${hosts.demo}/area-membros?aba=cursos&categoria=00000000-0000-4000-8000-000000000000`,
+      `${hosts.demo}/area-membros/cursos?categoria=00000000-0000-4000-8000-000000000000`,
     );
     await expect(courseCard(page, fx.locked.title)).toBeVisible();
     await expect(courseCard(page, fx.open.title)).toBeVisible();
+    await expect(page.getByTestId('courses-member-categories-button')).toHaveAccessibleName(
+      fill(M.filters.buttonAria, { current: M.catalogue.categories.all }),
+    );
   });
 
-  test('D-430 / A-UI-5: after the member completes the locked course’s free lesson, its card shows the h-1 bar and says so in its name', async ({
+  test('2026-10-26 (the catalogue search, front only): the header’s search finds the fixture’s courses by a word of their title or category, accents and case aside, counts them, says when nothing matches and clears back to the grid', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/area-membros?aba=cursos`);
+    await page.goto(`${hosts.demo}/area-membros/cursos`);
+    const field = page
+      .getByTestId('courses-member-search')
+      .getByRole('searchbox', { name: M.search.label });
+
+    // The run's prefix in capitals: its three published courses (never the draft).
+    const everything = prefix.toUpperCase();
+    await field.fill(everything);
+    await field.press('Enter');
+    await expect(page).toHaveURL(/\/area-membros\/cursos\?busca=/);
+    const results = page.getByTestId('courses-member-search-results');
+    await expect(results.getByTestId('courses-member-search-count')).toHaveText(
+      tm('search.results', { n: 3, q: everything }),
+    );
+    const found = results.getByTestId('courses-member-grid').getByRole('link');
+    await expect(found).toHaveCount(3);
+    for (const course of [fx.long, fx.locked, fx.open]) {
+      await expect(courseCard(page, course.title)).toHaveCount(1);
+    }
+    await expect(courseCard(page, fx.draft.title)).toHaveCount(0);
+
+    // "LABIOS": the category "Lábios" — accents and case aside — holds the open course only.
+    const category = `${prefix} LABIOS`;
+    await page
+      .getByTestId('courses-member-search')
+      .getByRole('searchbox', { name: M.search.label })
+      .fill(category);
+    await page
+      .getByTestId('courses-member-search')
+      .getByRole('searchbox', { name: M.search.label })
+      .press('Enter');
+    await expect(results.getByTestId('courses-member-search-count')).toHaveText(
+      tm('search.results', { n: 1, q: category }),
+    );
+    await expect(results.getByTestId('courses-member-grid').getByRole('link')).toHaveCount(1);
+    await expect(courseCard(page, fx.open.title)).toHaveCount(1);
+
+    // Nothing found: the empty card and its way back to every course.
+    await page.goto(
+      `${hosts.demo}/area-membros/cursos?busca=${encodeURIComponent(`${prefix} inexistente`)}`,
+    );
+    const empty = page.getByTestId('courses-member-search-empty');
+    await expect(empty.getByRole('heading', { name: M.search.empty.title })).toBeVisible();
+    await expect(
+      empty.getByRole('link', { name: M.catalogue.categoryEmpty.cta, exact: true }),
+    ).toHaveAttribute('href', '/area-membros/cursos');
+
+    // "Limpar busca" leads back to the grid.
+    await page.goto(`${hosts.demo}/area-membros/cursos?busca=${encodeURIComponent(everything)}`);
+    await page
+      .getByTestId('courses-member-search-results')
+      .getByRole('link', { name: M.search.clear, exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/area-membros\/cursos$/);
+    await expect(page.getByTestId('courses-member-search-results')).toHaveCount(0);
+    await expect(courseCard(page, fx.open.title)).toBeVisible();
+  });
+
+  test('D-430 / A-UI-5: after the member completes the locked course’s free lesson, its card shows the band at the cover’s foot, the share chip and "1/2 aulas", and says so in its name', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/area-membros/cursos`);
     const locked = courseCard(page, fx.locked.title);
     await expect(locked).toBeVisible();
     await expect(locked.getByRole('progressbar')).toHaveCount(0);
@@ -244,6 +410,15 @@ test.describe('catalogue', () => {
     const bar = locked.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '50' }) });
     await expect(bar).toBeVisible();
     await expect(bar).toHaveAttribute('aria-valuenow', '50');
+    // 2026-10-26: the band pinned to the cover's foot is the member skin's plain 2px line.
+    expect(Math.round((await boxOf(bar)).height)).toBe(2);
+    const poster = await boxOf(locked.getByTestId('course-card-poster'));
+    const barBox = await boxOf(bar);
+    expect(Math.abs(barBox.y + barBox.height - (poster.y + poster.height))).toBeLessThanOrEqual(1);
+    await expect(locked.getByTestId('course-card-percent')).toHaveText('50%');
+    await expect(locked.getByTestId('course-card-meta')).toHaveText(
+      tm('card.lessonsDone', { done: 1, N: 2 }),
+    );
     await expect(locked).toHaveAttribute(
       'aria-label',
       tm('card.aria', {
@@ -259,17 +434,17 @@ test.describe('catalogue', () => {
     await expect(courseCard(page, fx.open.title).getByRole('progressbar')).toHaveCount(0);
   });
 
-  test('D-431 / UI-D-434 / COURSE-23: ?aba=lives shows "Próximas" (on air, scheduled, cancelled, the locked one with "Exclusiva") then "Gravadas"; an ended live without a replay is absent', async ({
+  test('D-431 / UI-D-434 / COURSE-23: the Lives screen (/area-membros/lives) shows "Próximas" (on air, scheduled, cancelled, the locked one with "Exclusiva": the first in the spotlight, the rest in the agenda) then "Gravadas" (2026-10-26: cards, the words under the 16:9 cover); an ended live without a replay is absent', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/area-membros?aba=lives`);
+    await page.goto(`${hosts.demo}/area-membros/lives`);
 
-    const tabs = page.getByRole('tablist', { name: C.hub.tabs.label });
-    await expect(tabs.getByRole('tab', { name: C.hub.tabs.lives })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    // 2026-10-22: the area menu marks Lives as the current screen (no tab row any more).
+    expect(await currentSchoolScreen(page)).toBe(M.area.screens.lives);
+    await expect(
+      page.getByRole('heading', { level: 1, name: M.screens.lives.title, exact: true }),
+    ).toBeVisible();
 
     const upcomingTitle = page.getByRole('heading', { name: M.lives.upcoming, exact: true });
     const recordedTitle = page.getByRole('heading', { name: M.lives.recorded, exact: true });
@@ -278,14 +453,29 @@ test.describe('catalogue', () => {
     expect((await boxOf(upcomingTitle)).y).toBeLessThan((await boxOf(recordedTitle)).y);
 
     const upcoming = page.getByTestId('lives-member-upcoming');
+    // 2026-10-22: the nearest upcoming live is the spotlight, every other one an agenda row.
+    const variants = await upcoming
+      .getByRole('link')
+      .evaluateAll((links) => links.map((link) => link.getAttribute('data-variant')));
+    expect(variants[0]).toBe('spotlight');
+    expect(variants.slice(1).every((variant) => variant === 'agenda')).toBe(true);
     const onAir = liveCard(upcoming, fx.lives.onAir.title);
     await expect(onAir.getByTestId('live-card-status')).toHaveText(M.lives.liveNow);
+    // On air: the red chip with the white dot that breathes.
+    await expect(onAir.getByTestId('live-card-status')).toHaveClass(/\bbg-danger\b/);
+    await expect(onAir.getByTestId('live-status-dot')).toBeVisible();
     await expect(
       liveCard(upcoming, fx.lives.scheduled.title).getByTestId('live-card-status'),
     ).toHaveText(C.status.scheduled);
     const cancelled = liveCard(upcoming, fx.lives.cancelled.title);
     await expect(cancelled.getByTestId('live-card-status')).toHaveText(C.status.cancelled);
-    await expect(cancelled.getByTestId('live-card-title')).toHaveClass(/text-text-secondary/);
+    // 2026-10-22: a cancelled card says so with data-cancelled, its title stepping back (the
+    // secondary ink in the agenda, the dimmed white over a cover).
+    await expect(cancelled).toHaveAttribute('data-cancelled', 'true');
+    await expect(onAir).not.toHaveAttribute('data-cancelled', 'true');
+    await expect(cancelled.getByTestId('live-card-title')).toHaveClass(
+      /text-text-secondary|text-white\/70/,
+    );
     const lockedLive = liveCard(upcoming, fx.lives.locked.title);
     await expect(lockedLive.getByTestId('exclusive-badge')).toHaveText(M.tags.exclusiveLive);
     await expect(lockedLive).toHaveAttribute('aria-label', endsWith(liveExclusiveSuffix()));
@@ -307,16 +497,29 @@ test.describe('catalogue', () => {
     ]);
 
     const recorded = page.getByTestId('lives-member-recorded');
-    await expect(
-      liveCard(recorded, fx.lives.recorded.title).getByTestId('live-card-status'),
-    ).toHaveText(C.status.recorded);
+    const replay = liveCard(recorded, fx.lives.recorded.title);
+    await expect(replay.getByTestId('live-card-status')).toHaveText(C.status.recorded);
     await expect(liveCard(recorded, fx.lives.onAir.title)).toHaveCount(0);
+    // 2026-10-26 (the academy reference's card language): every "Gravadas" card is the catalogue's
+    // card for a live — the 16:9 cover on top with the status chip, the title and the date UNDER it.
+    await expect(replay).toHaveAttribute('data-variant', 'card');
+    const recordedVariants = await recorded
+      .getByRole('link')
+      .evaluateAll((links) => links.map((link) => link.getAttribute('data-variant')));
+    expect(recordedVariants.every((variant) => variant === 'card')).toBe(true);
+    const cover = await boxOf(replay.getByTestId('live-card-cover'));
+    expect(Math.abs(cover.width / cover.height - 16 / 9)).toBeLessThan(0.05);
+    for (const part of ['live-card-title', 'live-card-meta']) {
+      expect((await boxOf(replay.getByTestId(part))).y).toBeGreaterThanOrEqual(
+        cover.y + cover.height - 0.5,
+      );
+    }
 
     // D-431: an ended live without a replay is in neither group.
     await expect(liveCard(page.locator('main'), fx.lives.ended.title)).toHaveCount(0);
   });
 
-  test('UI-D-424 / UI-D-437: the admin gets the hub at /cursos and the member catalogue at /area-membros?aba=cursos&ver=aluno, its links keeping the flag', async ({
+  test('UI-D-424 / UI-D-437: the admin gets the hub at /cursos and the member Cursos screen at /area-membros/cursos?ver=aluno, its links — the area menu too — keeping the flag', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
@@ -324,55 +527,100 @@ test.describe('catalogue', () => {
     await expect(page.getByTestId('courses-hub')).toBeVisible();
     await expect(page.getByTestId('courses-member-catalogue')).toHaveCount(0);
 
-    // 08.6 (D-435): ?ver=aluno alone lands on Início; the catalogue keeps the flag at ?aba=cursos.
-    await page.goto(`${hosts.demo}/area-membros?aba=cursos&ver=aluno`);
+    // 2026-10-22: the preview of the Cursos screen is its own path with the flag.
+    await page.goto(`${hosts.demo}/area-membros/cursos?ver=aluno`);
     await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
+    // 2026-10-23: no preview banner; the manager sees the screen as a member does.
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     await expect(page.locator('a[href="/cursos/novo"]')).toHaveCount(0);
+    // 2026-10-26: the "Filtros" menu's links and the search keep the flag too.
     await expect(
-      page
-        .getByRole('navigation', { name: M.catalogue.categories.label })
-        .getByRole('link', { name: M.catalogue.categories.all, exact: true }),
-    ).toHaveAttribute('href', '/area-membros?aba=cursos&ver=aluno');
+      (await openCategories(page)).getByRole('link', {
+        name: M.catalogue.categories.all,
+        exact: true,
+      }),
+    ).toHaveAttribute('href', '/area-membros/cursos?ver=aluno');
+    await page.keyboard.press('Escape');
+    await expect(
+      page.getByTestId('courses-member-search').locator('input[name="ver"]'),
+    ).toHaveValue('aluno');
     // Staff are never locked (UI-D-442): no "Exclusivo" on the manager's preview.
     const locked = courseCard(page, fx.locked.title);
     await expect(locked).toHaveAttribute('href', `/cursos/${fx.locked.id}?ver=aluno`);
     await expect(locked.getByTestId('exclusive-badge')).toHaveCount(0);
-    await expect(
-      page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab', {
-        name: C.hub.tabs.lives,
-      }),
-    ).toHaveAttribute('href', '/area-membros?aba=lives&ver=aluno');
+    await expect(locked.getByTestId('course-card-lock')).toHaveCount(0);
+    // 2026-10-22: under /area-membros the manager's area menu is the member's ("· Membros"), every
+    // screen link keeping ?ver=aluno, so the preview never drops out of the member view.
+    // 2026-10-23: the same menu everywhere, with "Gerenciar" last.
+    expect(await schoolScreenLabels(page)).toEqual([...MEMBER_SCREEN_LABELS, C.manage.title]);
+    await expect(await schoolScreenLink(page, M.area.screens.lives)).toHaveAttribute(
+      'href',
+      '/area-membros/lives?ver=aluno',
+    );
+    await closeSchoolMenu(page);
 
     // A member's ?ver= is ignored: it can only ever choose the member view.
     await page.context().clearCookies();
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/area-membros?aba=cursos&ver=admin`);
+    await page.goto(`${hosts.demo}/area-membros/cursos?ver=admin`);
     await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     await expect(courseCard(page, fx.locked.title)).toHaveAttribute(
       'href',
       `/cursos/${fx.locked.id}`,
     );
   });
 
-  test('quick 261019-k7x (QD-02, T-k7x-01, T-k7x-04): /cursos redirects everyone but the manager to /area-membros keeping aba, categoria and trilha; the admin keeps the hub, its preview lands on the area with the flag, and the area sends a manager without the flag back to the hub', async ({
+  test('quick 261019-k7x (QD-02, T-k7x-01, T-k7x-04) + 2026-10-22: every old address lands on its screen — /cursos and ?aba= send a member to the screen page keeping only its own filter; the admin keeps the hub, its preview lands on the screen with the flag, and (2026-10-23) a screen stays the member view for a manager without the flag', async ({
     page,
   }) => {
+    // 2026-10-22 (the user's rule): a member who never started a lesson is sent from Início to the
+    // Cursos screen; Início exists from the first lesson on. This member has one (the locked course's
+    // free lesson, completed by an earlier case and again here, idempotent: the progress read counts
+    // locked courses too), so the bare area below stays Início.
+    await completeLessonAs(users.demoMember, fx.locked.freeLessonId);
     // redirect() inside a streaming page is a meta tag, not a status: URL assertions only, they retry.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/cursos?aba=lives`);
-    await expect(page).toHaveURL(/\/area-membros\?aba=lives$/);
-    await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
+    await expect(page).toHaveURL(/\/area-membros\/lives$/);
+    await expect(page.getByTestId('courses-member-catalogue')).toHaveAttribute(
+      'data-screen',
+      'lives',
+    );
 
     await page.goto(`${hosts.demo}/cursos`);
     await expect(page).toHaveURL(/\/area-membros$/);
-    await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
+    await expect(page.getByTestId('courses-member-catalogue')).toHaveAttribute(
+      'data-screen',
+      'inicio',
+    );
+    await expect(page.getByTestId('courses-member-home')).toBeVisible();
+    await expect(page).toHaveURL(/\/area-membros$/);
+
+    // The member area's own ?aba= links (08.6) land on the screen's page: categoria only on Cursos.
+    await page.goto(
+      `${hosts.demo}/area-membros?aba=cursos&categoria=${fx.category.id}&trilha=qualquer`,
+    );
+    await expect(page).toHaveURL(new RegExp(`/area-membros/cursos\\?categoria=${fx.category.id}$`));
+    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
+    // An unknown or repeated ?aba= stays on Início (this member has started, see above).
+    await page.goto(`${hosts.demo}/area-membros?aba=desconhecida`);
+    await expect(page.getByTestId('courses-member-catalogue')).toHaveAttribute(
+      'data-screen',
+      'inicio',
+    );
+    await expect(page.getByTestId('courses-member-home')).toBeVisible();
+    await expect(page).toHaveURL(/\/area-membros\?aba=desconhecida$/);
 
     // A member's ?ver= is dropped by the redirect: the preview flag is the manager's alone.
     await page.goto(`${hosts.demo}/cursos?aba=trilhas&ver=aluno`);
-    await expect(page).toHaveURL(/\/area-membros\?aba=trilhas$/);
+    await expect(page).toHaveURL(/\/area-membros\/trilhas$/);
     await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    // The admin's own list pages send a member to the twin screen.
+    await page.goto(`${hosts.demo}/cursos/lives`);
+    await expect(page).toHaveURL(/\/area-membros\/lives$/);
 
     await page.context().clearCookies();
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
@@ -381,24 +629,41 @@ test.describe('catalogue', () => {
     await expect(page).toHaveURL(/\/cursos$/);
 
     await page.goto(`${hosts.demo}/cursos?aba=lives&ver=aluno`);
-    await expect(page).toHaveURL(/\/area-membros\?aba=lives&ver=aluno$/);
-    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page).toHaveURL(/\/area-membros\/lives\?ver=aluno$/);
+    await expect(page.getByTestId('courses-member-catalogue')).toHaveAttribute(
+      'data-screen',
+      'lives',
+    );
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
 
-    // The manager without the flag is sent back to the hub tab the URL names, never into a loop.
+    // 2026-10-23: without the flag a member screen no longer sends the manager to the admin twin;
+    // it stays the member's view, in preview. The old ?aba= lands on the screen with the flag added.
     await page.goto(`${hosts.demo}/area-membros?aba=lives`);
-    await expect(page).toHaveURL(/\/cursos\?aba=lives$/);
-    await expect(page.getByTestId('courses-hub')).toBeVisible();
+    await expect(page).toHaveURL(/\/area-membros\/lives\?ver=aluno$/);
+    await expect(page.getByTestId('courses-member-catalogue')).toHaveAttribute(
+      'data-screen',
+      'lives',
+    );
+    await page.goto(`${hosts.demo}/area-membros/trilhas`);
+    await expect(page).toHaveURL(/\/area-membros\/trilhas$/);
+    await expect(page.getByTestId('courses-member-catalogue')).toHaveAttribute(
+      'data-screen',
+      'trilhas',
+    );
+    await page.goto(`${hosts.demo}/area-membros/progresso`);
+    await expect(page).toHaveURL(/\/area-membros\/progresso$/);
+    await expect(page.getByTestId('courses-hub')).toHaveCount(0);
   });
 
-  test('E03/long-text backstop: at 320px a 120-character locked title with "Exclusivo" and "Produto arquivado" keeps both tags readable, the title at two lines and the meta above the bar', async ({
+  test('E03/long-text backstop: at 320px a 120-character locked title with "Exclusivo" and "Produto arquivado" keeps both tags readable, the title at two lines and (2026-10-26) the band at the cover’s foot above the words', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
     await completeLessonAs(users.demoMember, fx.long.freeLessonId);
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/area-membros?aba=cursos`);
+    await page.goto(`${hosts.demo}/area-membros/cursos`);
 
     const card = courseCard(page, fx.long.title);
     await card.scrollIntoViewIfNeeded();
@@ -413,8 +678,9 @@ test.describe('catalogue', () => {
       const box = await boxOf(tag);
       expect(box.x).toBeGreaterThanOrEqual(cardBox.x);
       expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 0.5);
-      // Readable: the pill shows all of its own words, never an ellipsis.
-      expect(await tag.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+      // Readable: the pill shows all of its own words, never an ellipsis (2026-10-22: the compact
+      // glass chip truncates in an inner span, so every box inside it is checked).
+      expect(await showsAll(tag)).toBe(true);
     }
 
     const title = card.getByTestId('course-card-title');
@@ -422,23 +688,26 @@ test.describe('catalogue', () => {
     expect(await title.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
     await expect(title).toHaveText(fx.long.title);
 
-    // The tags sit above the title, and the meta sits above the pinned bar.
+    // 2026-10-26 (the card's cover on top): the tags sit on the cover, above the band pinned to its
+    // foot; the title and the meta sit under the cover, never over the art.
     const archivedBox = await boxOf(archived);
     const titleBox = await boxOf(title);
-    expect(archivedBox.y + archivedBox.height).toBeLessThanOrEqual(titleBox.y);
     const meta = card.getByTestId('course-card-meta');
     await expect(meta).toBeVisible();
+    await expect(meta).toHaveText(tm('card.lessonsDone', { done: 1, N: 2 }));
     const bar = card.getByRole('progressbar');
     await expect(bar).toBeVisible();
     const metaBox = await boxOf(meta);
     const barBox = await boxOf(bar);
-    expect(metaBox.y + metaBox.height).toBeLessThanOrEqual(barBox.y);
+    expect(archivedBox.y + archivedBox.height).toBeLessThanOrEqual(barBox.y);
+    expect(barBox.y + barBox.height).toBeLessThanOrEqual(titleBox.y + 0.5);
+    expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(metaBox.y + 0.5);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
   });
 
-  test('UI-D-441: with the school off (rede-lab) /cursos and /area-membros are the kernel not-found for the member and the admin', async ({
+  test('UI-D-441: with the school off (rede-lab) /cursos, /area-membros and every screen page are the kernel not-found for the member and the admin', async ({
     page,
   }) => {
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
@@ -449,12 +718,19 @@ test.describe('catalogue', () => {
     // The member area answers the same way: the module check runs before any redirect.
     await page.goto(`${hosts.lab}/area-membros`);
     await expectKernelNotFound(page);
+    // 2026-10-22: so do the screens' own pages.
+    await page.goto(`${hosts.lab}/area-membros/cursos`);
+    await expectKernelNotFound(page);
+    await page.goto(`${hosts.lab}/area-membros/lives`);
+    await expectKernelNotFound(page);
 
     await page.context().clearCookies();
     await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
     await page.goto(`${hosts.lab}/cursos`);
     await expectKernelNotFound(page);
     await page.goto(`${hosts.lab}/area-membros`);
+    await expectKernelNotFound(page);
+    await page.goto(`${hosts.lab}/cursos/trilhas`);
     await expectKernelNotFound(page);
   });
 });
@@ -469,6 +745,18 @@ test.describe('catalogue', () => {
  * The fixture lives on rede-demo under a per-project run prefix (`e2e-cp-…`), every assertion is
  * scoped to its own ids, and progress is written per lesson, so the two projects never share a row.
  * Sketch 010 is approved (D-417), so the gated surfaces (buy section, preview banner) run here.
+ *
+ * 2026-10-26 (the academy reference's course and module pages, the user's "swap completo"): the hero
+ * is a panel whose ground is the cover — the overline ("Curso · N módulos"), the title (the page's
+ * one h1), the tagline, the instructor and the chips ("N aulas", "N concluídas", the length, "{n}%
+ * completo", or "Exclusivo" on a locked course) — with the main action (`course-action-cta`:
+ * "Começar o curso" / "Continuar o curso" / "Rever o curso", never on a locked course). Under it the
+ * buy section (a locked course) or "Seu progresso no curso" (the bar, the share, the line), then
+ * "Módulos": one card per module (`member-module-card`, its state as a chip, the padlock while
+ * held), each opening the module's own page (`/cursos/{id}/modulos/{moduleId}`), where the lessons
+ * are cards (`member-lesson-card`) that say their state in words. The way back to Cursos is the
+ * phone header's "Voltar" and, from `md`, the hero's "‹ Cursos". The accordion curriculum (module
+ * bands and lesson rows) left the course page.
  */
 test.describe('course page', () => {
   test.skip(isRemote, 'the course-page fixtures write rows through the local database');
@@ -478,15 +766,17 @@ test.describe('course page', () => {
   let prefix = '';
   let fx: CoursePageFixture;
 
-  const band = (page: Page, moduleId: string): Locator =>
-    page.locator(`[data-testid="module-cover"][data-module-id="${moduleId}"]`);
-  const row = (page: Page, lessonId: string): Locator =>
-    page.locator(`[data-testid="member-lesson-row"][data-lesson-id="${lessonId}"]`);
+  const moduleCard = (page: Page, moduleId: string): Locator =>
+    page.locator(`[data-testid="member-module-card"][data-module-id="${moduleId}"]`);
+  const lessonCard = (page: Page, lessonId: string): Locator =>
+    page.locator(`[data-testid="member-lesson-card"][data-lesson-id="${lessonId}"]`);
   const lessonHref = (courseId: string, lessonId: string, preview = false) =>
     `/cursos/${courseId}/aulas/${lessonId}${preview ? '?ver=aluno' : ''}`;
-
-  /** "Libera ao concluir o Módulo 01", from the catalog, pinned to its words once. */
-  const lockModule01 = fill(M.module.lockedBy, { nn: '01' });
+  const moduleHref = (courseId: string, moduleId: string) =>
+    `/cursos/${courseId}/modulos/${moduleId}`;
+  /** The way back to Cursos on screen: the phone header's "Voltar", the hero's "‹ Cursos" from md. */
+  const backToCatalogue = (page: Page, href: string): Locator =>
+    page.getByTestId('member-course-page').locator(`a[href="${href}"]:visible`);
 
   test.beforeAll(async ({ browser: _browser }, testInfo) => {
     prefix = `e2e-cp-${testInfo.project.name}-${run}`;
@@ -500,105 +790,182 @@ test.describe('course page', () => {
     await closeStoreAdmin();
   });
 
-  test('D-430 / UI-D-427 / UI-D-429 / UI-D-430: 0% "Começar", then the h-2 bar and "Continuar", the module rule in words until module 1 is complete, then "Curso concluído" and the outline "Rever"', async ({
+  test('D-430 / UI-D-427 / UI-D-429 / UI-D-430 (2026-10-26, the reference’s course page): the hero’s chips and "Começar o curso", the progress panel at 0%, the module cards with module 2 held, the lessons in words on each module’s page; then "Continuar o curso" at 33%, module 1 complete, and at 100% the outline "Rever o curso"', async ({
     page,
   }) => {
-    expect(lockModule01).toBe('Libera ao concluir o Módulo 01');
     const { open } = fx;
     const [m1, m2] = open.moduleIds;
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/cursos/${open.id}`);
 
-    // D-423: the member page, never the admin one; the header names the course.
+    // D-423: the member page, never the admin one; its one h1 is the course's title.
     await expect(page.getByTestId('member-course-page')).toBeVisible();
     await expect(page.getByTestId('course-page')).toHaveCount(0);
-    await expect(page.getByRole('heading', { level: 1, name: open.title })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText([open.title]);
     await expect(page.getByTestId('preview-banner')).toHaveCount(0);
-
-    // 0% (EP-11): the "{N} aulas · {duration}" line and the brand link to the first open lesson.
-    const zone = page.getByTestId('member-course-actions');
-    await expect(zone.getByTestId('course-action')).toHaveAttribute('data-variant', 'start');
-    await expect(zone.getByTestId('course-action-line')).toContainText('21 min');
-    await expect(zone.getByRole('progressbar')).toHaveCount(0);
-    const start = zone.getByRole('link', { name: M.course.start, exact: true });
-    await expect(start).toHaveAttribute('href', lessonHref(open.id, open.videoLessonId));
-
-    // UI-D-429: module 1 opens at 0%; module 2's band says its rule in words and opens on tap.
-    await expect(band(page, m1)).toHaveAttribute('aria-expanded', 'true');
-    await expect(band(page, m1)).toBeEnabled();
-    await expect(band(page, m2)).toHaveAttribute('aria-expanded', 'false');
-    await expect(band(page, m2)).toBeEnabled();
-    await expect(band(page, m2).getByTestId('module-cover-meta')).toHaveText(lockModule01);
-    await expect(band(page, m2)).toHaveAttribute('data-state', 'locked');
-
-    // UI-D-430: rows say their state in words — "12:34", "Prática".
-    await expect(row(page, open.videoLessonId).getByTestId('member-lesson-meta')).toHaveText(
-      '12:34',
-    );
-    await expect(row(page, open.practiceLessonId).getByTestId('member-lesson-meta')).toHaveText(
-      M.lesson.practice,
-    );
-    await expect(row(page, open.videoLessonId)).toHaveAttribute(
-      'href',
-      lessonHref(open.id, open.videoLessonId),
+    // The way back leads to the Cursos screen, the course's place in the area.
+    const back = backToCatalogue(page, '/area-membros/cursos');
+    await expect(back).toHaveCount(1);
+    await expect(back).toHaveAccessibleName(
+      hasDesktopRail(page) ? M.catalogue.title : C.course.back,
     );
 
-    await band(page, m2).click();
-    await expect(band(page, m2)).toHaveAttribute('aria-expanded', 'true');
-    await expect(band(page, m2)).toBeFocused();
-    const held = row(page, open.secondModuleLessonId);
-    await expect(held.getByTestId('member-lesson-meta')).toHaveText(
+    // The hero: the overline (no level on this course), the instructor and the chips.
+    const hero = page.getByTestId('member-course-hero');
+    await expect(hero.getByTestId('member-course-title')).toHaveText(open.title);
+    await expect(hero).toContainText(tm('course.overline', { M: 2, hasLevel: 'false', level: '' }));
+    await expect(hero.getByTestId('member-course-instructor')).toBeVisible();
+    const chips = page.getByTestId('member-course-chips');
+    await expect(chips.getByTestId('member-course-chip-lessons')).toHaveText(
+      tm('chips.lessons', { N: 3 }),
+    );
+    await expect(chips.getByTestId('member-course-chip-duration')).toHaveText('21 min');
+    await expect(chips.getByTestId('member-course-chip-done')).toHaveCount(0);
+    await expect(chips.getByTestId('member-course-chip-progress')).toHaveCount(0);
+    await expect(page.getByTestId('member-course-pills')).toHaveCount(0);
+
+    // 0% (EP-11): the brand "Começar o curso" to the first open lesson; the panel's bar at 0%.
+    const cta = page.getByTestId('member-course-actions').getByTestId('course-action-cta');
+    await expect(cta).toHaveAttribute('data-variant', 'start');
+    await expect(cta).toHaveText(M.course.start);
+    await expect(cta).toHaveAttribute('href', lessonHref(open.id, open.videoLessonId));
+    const panel = page.getByTestId('member-course-progress');
+    await expect(panel).toContainText(M.course.progressTitle);
+    await expect(
+      panel.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '0' }) }),
+    ).toHaveAttribute('aria-valuenow', '0');
+
+    // "Módulos" (UI-D-429): one card per module, its page a tap away; module 2 is held by the
+    // module rule — the padlock, "bloqueado" in its name — and still a link (A-UI-3).
+    const modules = page.getByTestId('member-course-modules');
+    await expect(
+      modules.getByRole('heading', { level: 2, name: M.course.modulesTitle, exact: true }),
+    ).toBeVisible();
+    await expect(modules).toContainText(tm('course.contentCount', { M: 2, N: 3 }));
+    await expect(modules.getByTestId('member-module-card')).toHaveCount(2);
+    await expect(moduleCard(page, m1)).toHaveAttribute('href', moduleHref(open.id, m1));
+    await expect(moduleCard(page, m1)).toHaveAttribute('data-state', 'idle');
+    await expect(moduleCard(page, m1).getByTestId('member-module-card-pill')).toHaveText(
+      fill(M.module.pill, { nn: '01' }),
+    );
+    await expect(moduleCard(page, m1).getByTestId('member-module-card-meta')).toHaveText(
+      tm('moduleCard.lessons', { done: 0, N: 2 }),
+    );
+    await expect(moduleCard(page, m1)).toHaveAttribute(
+      'aria-label',
+      fill(M.module.aria, {
+        nn: '01',
+        title: `${prefix} Fundamentos`,
+        state: fill(M.module.stateProgress, { percent: '0' }),
+      }),
+    );
+    const held = moduleCard(page, m2);
+    await expect(held).toHaveAttribute('data-state', 'locked');
+    await expect(held).toHaveAttribute('data-locked', 'true');
+    await expect(held.getByTestId('member-module-card-lock')).toBeVisible();
+    await expect(held).toHaveAttribute(
+      'aria-label',
+      fill(M.module.aria, { nn: '02', title: `${prefix} Técnica`, state: M.module.stateLocked }),
+    );
+    await expect(held).toHaveAttribute('href', moduleHref(open.id, m2));
+
+    // UI-D-430 (2026-10-26: the lessons are cards on the module's own page): each says its state in
+    // words — "12:34", "Prática" — and links to its lesson.
+    await moduleCard(page, m1).click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${open.id}/modulos/${m1}$`));
+    await expect(page.getByTestId('member-module-page')).toHaveAttribute('data-module-id', m1);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText([`${prefix} Fundamentos`]);
+    await expect(page.getByTestId('member-module-hero')).toContainText(
+      fill(M.module.pill, { nn: '01' }),
+    );
+    await expect(page.getByTestId('member-module-chip-lessons')).toHaveText(
+      tm('chips.lessons', { N: 2 }),
+    );
+    const video = lessonCard(page, open.videoLessonId);
+    await expect(video).toHaveAttribute('data-state', 'open');
+    await expect(video.getByTestId('member-lesson-card-pill')).toHaveText(
+      fill(M.player.lesson, { nn: '01' }),
+    );
+    await expect(video.getByTestId('member-lesson-card-meta')).toHaveText('12:34');
+    await expect(video.getByTestId('member-lesson-card-duration')).toHaveText('12:34');
+    await expect(video).toHaveAttribute('href', lessonHref(open.id, open.videoLessonId));
+    await expect(
+      lessonCard(page, open.practiceLessonId).getByTestId('member-lesson-card-meta'),
+    ).toHaveText(M.lesson.practice);
+    // Module 2's page: its lesson is held by the module rule, in words, and still a link (A-UI-3).
+    await page.goto(`${hosts.demo}${moduleHref(open.id, m2)}`);
+    const heldLesson = lessonCard(page, open.secondModuleLessonId);
+    await expect(heldLesson).toHaveAttribute('data-state', 'locked');
+    await expect(heldLesson.getByTestId('member-lesson-card-meta')).toHaveText(
       fill(M.lesson.lockedByModule, { nn: '01' }),
     );
-    await expect(held).toHaveAttribute('data-trailing', 'locked');
-    // A-UI-3: a locked row is still a link to its lesson.
-    await expect(held).toHaveAttribute('href', lessonHref(open.id, open.secondModuleLessonId));
+    await expect(heldLesson.getByTestId('member-lesson-card-lock')).toBeVisible();
+    await expect(heldLesson).toHaveAttribute(
+      'href',
+      lessonHref(open.id, open.secondModuleLessonId),
+    );
 
-    // 1 of 3 (EP-11 continue): the h-2 bar, the line and "Continuar o curso" to the next open lesson.
+    // 1 of 3 (EP-11 continue): "Continuar o curso" to the next open lesson, the h-2 bar at 33% and
+    // its line, the chips' "1 concluída" and "33% completo"; module 1 under way.
     await completeLessonAs(users.demoMember, open.videoLessonId);
-    await page.reload();
-    await expect(zone.getByTestId('course-action')).toHaveAttribute('data-variant', 'continue');
-    const bar = zone.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '33' }) });
+    await page.goto(`${hosts.demo}/cursos/${open.id}`);
+    await expect(cta).toHaveAttribute('data-variant', 'continue');
+    await expect(cta).toHaveText(M.course.continue);
+    await expect(cta).toHaveAttribute('href', lessonHref(open.id, open.practiceLessonId));
+    const bar = panel.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '33' }) });
     await expect(bar).toHaveAttribute('aria-valuenow', '33');
     await expect(bar).toHaveClass(/\bh-2\b/);
-    await expect(zone.getByTestId('course-action-line')).toHaveText(
+    await expect(panel).toContainText(
       fill(M.course.progressLine, { percent: '33', done: '1', total: '3' }),
     );
-    await expect(zone.getByRole('link', { name: M.course.continue, exact: true })).toHaveAttribute(
-      'href',
-      lessonHref(open.id, open.practiceLessonId),
+    await expect(chips.getByTestId('member-course-chip-done')).toHaveText(
+      tm('chips.done', { n: 1 }),
     );
-    await expect(row(page, open.videoLessonId)).toHaveAttribute('data-trailing', 'done');
-    await expect(band(page, m2).getByTestId('module-cover-meta')).toHaveText(lockModule01);
+    await expect(chips.getByTestId('member-course-chip-progress')).toHaveText(
+      fill(M.chips.percent, { percent: '33' }),
+    );
+    await expect(moduleCard(page, m1)).toHaveAttribute('data-state', 'progress');
+    await expect(moduleCard(page, m1).getByTestId('member-module-card-percent')).toHaveText('50%');
+    await expect(moduleCard(page, m1).getByTestId('member-module-card-meta')).toHaveText(
+      tm('moduleCard.lessons', { done: 1, N: 2 }),
+    );
+    await expect(moduleCard(page, m2)).toHaveAttribute('data-state', 'locked');
 
-    // Module 1 complete (EP-12): its band reads "Concluído", module 2 opens alone and loses its lock.
+    // Module 1 complete (EP-12): its card reads "Concluído"; module 2 loses its padlock and its
+    // lesson opens.
     await completeLessonAs(users.demoMember, open.practiceLessonId);
     await page.reload();
-    await expect(band(page, m1).getByTestId('module-cover-pill')).toHaveText(M.module.done);
-    await expect(band(page, m1)).toHaveAttribute('data-state', 'done');
-    await expect(band(page, m1)).toHaveAttribute('aria-expanded', 'false');
-    await expect(band(page, m2)).toHaveAttribute('aria-expanded', 'true');
-    await expect(band(page, m2).getByTestId('module-cover-meta')).not.toHaveText(lockModule01);
-    await expect(row(page, open.secondModuleLessonId)).toHaveAttribute('data-trailing', 'chevron');
-
-    // 100%: the done line with its check, the OUTLINE "Rever o curso" to the first lesson, no bar.
-    await completeLessonAs(users.demoMember, open.secondModuleLessonId);
-    await page.reload();
-    await expect(zone.getByTestId('course-action')).toHaveAttribute('data-variant', 'done');
-    await expect(zone.getByTestId('course-action-line')).toHaveText(
-      fill(M.course.doneLine, { total: '3' }),
+    await expect(moduleCard(page, m1)).toHaveAttribute('data-state', 'done');
+    await expect(moduleCard(page, m1).getByTestId('member-module-card-done')).toHaveText(
+      M.module.done,
     );
-    const review = zone.getByRole('link', { name: M.course.review, exact: true });
-    await expect(review).toHaveAttribute('href', lessonHref(open.id, open.videoLessonId));
-    await expect(review).toHaveClass(/border-border-secondary/);
-    await expect(review).not.toHaveClass(/bg-button/);
-    await expect(zone.getByRole('progressbar')).toHaveCount(0);
+    await expect(moduleCard(page, m2)).toHaveAttribute('data-state', 'idle');
+    await expect(moduleCard(page, m2).getByTestId('member-module-card-lock')).toHaveCount(0);
+    await page.goto(`${hosts.demo}${moduleHref(open.id, m2)}`);
+    await expect(lessonCard(page, open.secondModuleLessonId)).toHaveAttribute('data-state', 'open');
+    await expect(
+      lessonCard(page, open.secondModuleLessonId).getByTestId('member-lesson-card-meta'),
+    ).toHaveText('8:10');
+
+    // 100%: the OUTLINE "Rever o curso" to the first lesson, the done line, the bar full, every
+    // module done.
+    await completeLessonAs(users.demoMember, open.secondModuleLessonId);
+    await page.goto(`${hosts.demo}/cursos/${open.id}`);
+    await expect(cta).toHaveAttribute('data-variant', 'done');
+    await expect(cta).toHaveText(M.course.review);
+    await expect(cta).toHaveAttribute('href', lessonHref(open.id, open.videoLessonId));
+    await expect(cta).toHaveClass(/border-border-secondary/);
+    await expect(cta).not.toHaveClass(/bg-button/);
+    await expect(panel).toContainText(fill(M.course.doneLine, { total: '3' }));
+    await expect(
+      panel.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '100' }) }),
+    ).toHaveAttribute('aria-valuenow', '100');
     for (const id of open.moduleIds) {
-      await expect(band(page, id)).toHaveAttribute('aria-expanded', 'false');
+      await expect(moduleCard(page, id)).toHaveAttribute('data-state', 'done');
     }
   });
 
-  test('D-424 / UI-D-428 (b) / STORE-23: two products → "Curso exclusivo", the button opens "Opções de acesso" with both rows; "Aula aberta" and "Aula exclusiva" rows; the page HTML never carries a locked lesson’s description', async ({
+  test('D-424 / UI-D-428 (b) / STORE-23: two products → "Curso exclusivo", the button opens "Opções de acesso" with both rows; on the module’s page (2026-10-26) the "Aula aberta" and "Aula exclusiva" cards; neither page’s HTML ever carries a lesson’s description', async ({
     page,
   }) => {
     const { lockedMany: course } = fx;
@@ -606,13 +973,19 @@ test.describe('course page', () => {
     const url = `${hosts.demo}/cursos/${course.id}`;
     await page.goto(url);
 
-    await expect(page.getByTestId('member-course-hero').getByTestId('exclusive-badge')).toHaveText(
-      M.tags.exclusiveCourse,
-    );
+    // The compact glass "Exclusivo" among the hero's chips, the cover keeping its colour (D-421).
+    const hero = page.getByTestId('member-course-hero');
+    await expect(hero.getByTestId('exclusive-badge')).toHaveText(M.tags.exclusiveCourse);
+    await expect(hero.getByTestId('exclusive-badge')).toHaveAttribute('data-size', 'compact');
+    expect(await hero.evaluate((node) => node.innerHTML)).not.toMatch(/grayscale/);
     const section = page.getByTestId('locked-section');
+    // 2026-10-22: the buy section is the prototype's centred card.
+    await expect(section).toHaveAttribute('data-variant', 'centered');
     await expect(section).toContainText(S.course.title);
     await expect(section).toContainText(fill(S.course.bodyMany, { course: course.title }));
-    await expect(page.getByTestId('member-course-actions').getByRole('progressbar')).toHaveCount(0);
+    // A locked course has no main action and no progress panel: the buy section speaks instead.
+    await expect(page.getByTestId('member-course-actions')).toHaveCount(0);
+    await expect(page.getByTestId('member-course-progress')).toHaveCount(0);
 
     const buy = page.getByRole('button', { name: M.locked.buy, exact: true });
     await expect(buy).toHaveAttribute('aria-haspopup', 'dialog');
@@ -634,34 +1007,47 @@ test.describe('course page', () => {
     // PR-4: nothing was bought by the tap.
     await expect(page).toHaveURL(new RegExp(`/cursos/${course.id}$`));
 
-    // UI-D-430 partial: the free lesson is "Aula aberta"; the paid one "Aula exclusiva", a lock, a link.
-    await expect(row(page, course.freeLessonId).getByTestId('member-lesson-meta')).toHaveText(
-      tm('lesson.free', { hasLength: 'true', length: '4:10' }),
-    );
-    const paid = row(page, course.paidLessonId);
-    await expect(paid.getByTestId('member-lesson-meta')).toHaveText(
+    // T-08.5-13 / PR-1: the course page's HTML and its inline RSC payload never hold a lesson's
+    // description.
+    expect(await page.content()).not.toContain(course.paidMarker);
+    const raw = await (await page.request.get(url)).text();
+    expect(raw).toContain(course.title);
+    expect(raw).not.toContain(course.paidMarker);
+    expect(raw).not.toContain(course.freeMarker);
+
+    // UI-D-430 partial (2026-10-26: on the module's page): the free lesson is "Aula aberta"; the
+    // paid one "Aula exclusiva", the padlock, still a link; nothing desaturated.
+    const moduleLink = page.getByTestId('member-module-card');
+    await expect(moduleLink).toHaveCount(1);
+    const moduleUrl = (await moduleLink.getAttribute('href')) ?? '';
+    await moduleLink.click();
+    await expect(page.getByTestId('member-module-page')).toBeVisible();
+    await expect(
+      lessonCard(page, course.freeLessonId).getByTestId('member-lesson-card-meta'),
+    ).toHaveText(tm('lesson.free', { hasLength: 'true', length: '4:10' }));
+    const paid = lessonCard(page, course.paidLessonId);
+    await expect(paid).toHaveAttribute('data-state', 'locked');
+    await expect(paid.getByTestId('member-lesson-card-meta')).toHaveText(
       fill(M.lesson.exclusive, { duration: '12:34' }),
     );
-    await expect(paid).toHaveAttribute('data-trailing', 'locked');
     await expect(paid).toHaveAttribute(
       'aria-label',
       fill(M.lesson.aria, { lesson: course.paidLessonTitle, state: M.lesson.stateExclusive }),
     );
     await expect(paid).toHaveAttribute('href', lessonHref(course.id, course.paidLessonId));
     expect(await paid.evaluate((node) => node.innerHTML)).not.toMatch(/grayscale/);
-
-    // T-08.5-13 / PR-1: the titles ship, the descriptions never — neither in the DOM nor in the
-    // server's HTML with its inline RSC payload.
+    // The titles ship, the descriptions never — neither in the DOM nor in the server's HTML.
     const html = await page.content();
     expect(html).toContain(course.paidLessonTitle);
     expect(html).not.toContain(course.paidMarker);
     expect(html).not.toContain(course.freeMarker);
-    const raw = await (await page.request.get(url)).text();
-    expect(raw).toContain(course.title);
-    expect(raw).not.toContain(course.paidMarker);
-    expect(raw).not.toContain(course.freeMarker);
+    const moduleRaw = await (await page.request.get(`${hosts.demo}${moduleUrl}`)).text();
+    expect(moduleRaw).toContain(course.paidLessonTitle);
+    expect(moduleRaw).not.toContain(course.paidMarker);
+    expect(moduleRaw).not.toContain(course.freeMarker);
 
     // The free-lesson door leads to the first free lesson.
+    await page.goto(url);
     const door = page.getByRole('link', { name: M.locked.freeLesson, exact: true });
     await expect(door).toHaveAttribute('href', lessonHref(course.id, course.freeLessonId));
     await door.click();
@@ -701,7 +1087,7 @@ test.describe('course page', () => {
     ).toBeVisible();
   });
 
-  test('D-422 / UI-D-437 / COURSE-25: the admin at ?ver=aluno sees the banner and every lesson open, links keep the flag; without it the admin page; a member’s ?ver=aluno draws no banner', async ({
+  test('D-422 / UI-D-437 / COURSE-25: the admin at ?ver=aluno sees the member page with every lesson open (2026-10-23: no banner), links keep the flag — the module card too; without it the admin page; a member’s ?ver=aluno draws no banner', async ({
     page,
   }) => {
     const { lockedMany: course } = fx;
@@ -712,25 +1098,31 @@ test.describe('course page', () => {
     await expect(page.getByTestId('member-course-page')).toHaveCount(0);
 
     await page.goto(`${hosts.demo}/cursos/${course.id}?ver=aluno`);
-    const banner = page.getByTestId('preview-banner');
-    await expect(banner).toBeVisible();
-    await expect(banner).toContainText(M.preview.title);
-    await expect(banner).toContainText(M.preview.body);
-    await expect(banner.getByRole('link', { name: M.preview.back })).toHaveAttribute(
-      'href',
-      `/cursos/${course.id}`,
-    );
-    // Staff are never locked: no tag, no buy section, the paid lesson open and linked in preview.
+    await expect(page.getByTestId('member-course-page')).toBeVisible();
+    // 2026-10-23: the page as a member sees it, no preview banner (the way back to authoring is
+    // the menu's Gerenciar, or the browser's back).
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    // 2026-10-22: in preview the way back stays in the member view, on the Cursos screen.
+    await expect(backToCatalogue(page, '/area-membros/cursos?ver=aluno')).toHaveCount(1);
+    // Staff are never locked: no tag, no buy section, the start at the first lesson in preview.
     await expect(page.getByTestId('exclusive-badge')).toHaveCount(0);
     await expect(page.getByTestId('course-locked-zone')).toHaveCount(0);
-    const paid = row(page, course.paidLessonId);
-    await expect(paid).toHaveAttribute('data-trailing', 'chevron');
-    await expect(paid.getByTestId('member-lesson-meta')).toHaveText('12:34');
-    await expect(paid).toHaveAttribute('href', lessonHref(course.id, course.paidLessonId, true));
     await expect(page.getByRole('link', { name: M.course.start, exact: true })).toHaveAttribute(
       'href',
       lessonHref(course.id, course.freeLessonId, true),
     );
+    // The module card keeps the flag; on its page the paid lesson is open and linked in preview.
+    const moduleLink = page.getByTestId('member-module-card');
+    await expect(moduleLink).toHaveAttribute(
+      'href',
+      new RegExp(`^/cursos/${course.id}/modulos/[^?]+\\?ver=aluno$`),
+    );
+    await moduleLink.click();
+    await expect(page.getByTestId('member-module-page')).toBeVisible();
+    const paid = lessonCard(page, course.paidLessonId);
+    await expect(paid).toHaveAttribute('data-state', 'open');
+    await expect(paid.getByTestId('member-lesson-card-meta')).toHaveText('12:34');
+    await expect(paid).toHaveAttribute('href', lessonHref(course.id, course.paidLessonId, true));
 
     await page.context().clearCookies();
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -756,7 +1148,7 @@ test.describe('course page', () => {
     await expect(page.getByTestId('member-course-page')).toHaveCount(0);
   });
 
-  test('E05/long-text backstop: at 320px a 120-character title and a 160-character tagline wrap under the hero and the header title truncates', async ({
+  test('E05/long-text backstop (2026-10-26, the reference’s hero): at 320px a 120-character title wraps whole inside the hero, which grows to hold it; the 160-character tagline clamps to three lines under it, inside the hero; the header’s title truncates', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
@@ -765,18 +1157,28 @@ test.describe('course page', () => {
     await page.goto(`${hosts.demo}/cursos/${fx.long.id}`);
 
     const hero = page.getByTestId('member-course-hero');
-    const title = page.getByTestId('member-course-title');
-    const tagline = page.getByTestId('member-course-tagline');
+    const title = hero.getByTestId('member-course-title');
+    const tagline = hero.getByTestId('member-course-tagline');
     await expect(title).toHaveText(fx.long.title);
     await expect(tagline).toHaveText(fx.long.tagline);
+    await expect(hero).toContainText(tm('course.overline', { M: 3, hasLevel: 'false', level: '' }));
     const heroBox = await boxOf(hero);
-    for (const text of [title, tagline]) {
-      const box = await boxOf(text);
-      expect(box.y).toBeGreaterThanOrEqual(heroBox.y + heroBox.height);
-      expect(box.x + box.width).toBeLessThanOrEqual(320 + 0.5);
-      expect(await linesOf(text)).toBeGreaterThanOrEqual(2);
-    }
-    const header = page.getByRole('heading', { level: 1, name: fx.long.title });
+    const titleBox = await boxOf(title);
+    // The hero's height is a minimum, not a crop: the long title wraps whole inside it.
+    expect(titleBox.y).toBeGreaterThanOrEqual(heroBox.y - 0.5);
+    expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(heroBox.y + heroBox.height + 0.5);
+    expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(320 + 0.5);
+    expect(await linesOf(title)).toBeGreaterThanOrEqual(2);
+    expect(await title.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+    // The tagline sits under the title, inside the hero, clamped to three lines.
+    const taglineBox = await boxOf(tagline);
+    expect(taglineBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height - 0.5);
+    expect(taglineBox.y + taglineBox.height).toBeLessThanOrEqual(heroBox.y + heroBox.height + 0.5);
+    expect(taglineBox.x + taglineBox.width).toBeLessThanOrEqual(320 + 0.5);
+    expect(await linesOf(tagline)).toBe(3);
+    // The phone header's title is a paragraph (the page's one h1 is the hero's): one truncated line.
+    const header = page.getByTestId('member-course-page').locator('header p');
+    await expect(header).toHaveText(fx.long.title);
     expect(await header.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
     expect(await header.evaluate((node) => getComputedStyle(node).textOverflow)).toBe('ellipsis');
     expect(
@@ -784,38 +1186,76 @@ test.describe('course page', () => {
     ).toBe(true);
   });
 
-  test('E07/overflow backstop: at 320px a two-line lesson title with "Libera ao concluir o Módulo 02" keeps the 80px thumb and the trailing lock inside the row', async ({
+  test('E07/overflow backstop (2026-10-26: the lessons are cards on the module’s page): at 320px a two-line lesson title held by "Libera ao concluir o Módulo 02" keeps its padlock, its chip and its line inside the card, and the card inside the screen', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos/${fx.long.id}`);
+    await page.goto(`${hosts.demo}${moduleHref(fx.long.id, fx.long.module3Id)}`);
 
-    const module3 = band(page, fx.long.module3Id);
-    await module3.scrollIntoViewIfNeeded();
-    await module3.click();
-    await expect(module3).toHaveAttribute('aria-expanded', 'true');
-    const lessonRow = row(page, fx.long.longLessonId);
-    await lessonRow.scrollIntoViewIfNeeded();
-    await expect(lessonRow.getByTestId('member-lesson-meta')).toHaveText(
+    const card = lessonCard(page, fx.long.longLessonId);
+    await card.scrollIntoViewIfNeeded();
+    await expect(card).toHaveAttribute('data-state', 'locked');
+    await expect(card.getByTestId('member-lesson-card-meta')).toHaveText(
       fill(M.lesson.lockedByModule, { nn: '02' }),
     );
-    const rowBox = await boxOf(lessonRow);
-    const thumb = await boxOf(lessonRow.getByTestId('member-lesson-thumb'));
-    const trailing = await boxOf(lessonRow.getByTestId('member-lesson-trailing'));
-    expect(thumb.width).toBeCloseTo(80, 0);
-    for (const box of [thumb, trailing]) {
-      expect(box.x).toBeGreaterThanOrEqual(rowBox.x);
-      expect(box.x + box.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 0.5);
-      expect(box.y).toBeGreaterThanOrEqual(rowBox.y);
-      expect(box.y + box.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 0.5);
+    const cardBox = await boxOf(card);
+    expect(cardBox.x).toBeGreaterThanOrEqual(0);
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(320);
+    for (const part of [
+      'member-lesson-card-lock',
+      'member-lesson-card-pill',
+      'member-lesson-card-title',
+      'member-lesson-card-meta',
+    ]) {
+      const box = await boxOf(card.getByTestId(part));
+      expect(box.x).toBeGreaterThanOrEqual(cardBox.x - 0.5);
+      expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 0.5);
+      expect(box.y).toBeGreaterThanOrEqual(cardBox.y - 0.5);
+      expect(box.y + box.height).toBeLessThanOrEqual(cardBox.y + cardBox.height + 0.5);
     }
-    expect(await linesOf(lessonRow.getByTestId('member-lesson-title'))).toBe(2);
-    await expect(lessonRow).toHaveAttribute('data-trailing', 'locked');
+    expect(await linesOf(card.getByTestId('member-lesson-card-title'))).toBe(2);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+  });
+
+  test('2026-10-26 (the hero’s chips, in place of the facts strip): at 390px and at 320px the instructor line and every chip wrap inside the hero, each one whole', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320/390px checks are phone checks');
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(`${hosts.demo}/cursos/${fx.open.id}`);
+
+      // The first case completed the whole course: the lessons, the done ones, the length, 100%.
+      const chips = page.getByTestId('member-course-chips');
+      await chips.scrollIntoViewIfNeeded();
+      await expect(chips.getByTestId('member-course-chip-lessons')).toHaveText(
+        tm('chips.lessons', { N: 3 }),
+      );
+      await expect(chips.getByTestId('member-course-chip-done')).toHaveText(
+        tm('chips.done', { n: 3 }),
+      );
+      await expect(chips.getByTestId('member-course-chip-duration')).toHaveText('21 min');
+      await expect(chips.getByTestId('member-course-chip-progress')).toHaveText(
+        fill(M.chips.percent, { percent: '100' }),
+      );
+      const heroBox = await boxOf(page.getByTestId('member-course-hero'));
+      const right = Math.min(width, heroBox.x + heroBox.width);
+      for (const item of await chips.locator(':scope > *').all()) {
+        const box = await boxOf(item);
+        expect(box.x).toBeGreaterThanOrEqual(heroBox.x - 0.5);
+        expect(box.x + box.width).toBeLessThanOrEqual(right + 0.5);
+        // Each one shows its whole words: nothing clipped.
+        expect(await showsAll(item)).toBe(true);
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
   });
 });
 
@@ -850,6 +1290,24 @@ const GATED_REASON = 'sketch 010 is not approved yet (D-417): the lock pages are
  * What a browser cannot do here is PLAY a video (the fake provider mints a playback id no CDN
  * serves), so the 15-second ticks are pinned by `progress-reporter.test.ts` and the page-hide write
  * is exercised by posting the beacon's own body from the page (same origin, the session cookie).
+ *
+ * 2026-10-22 (the social-igoralves lesson page): the header has two lines — the course as the
+ * overline over the lesson's title, both `p` — so the page's ONE h1 is the lesson title under the
+ * player (the lock pages too); the pills are uppercase by CSS (their words are the catalog's); the
+ * completion button swaps to "Aula concluída" with a short fade (the done block arrives once the
+ * button has left, and takes the focus); "Sobre esta aula" clamps to three lines.
+ *
+ * 2026-10-23: the "Módulo NN / Aula NN / Aula aberta / Prática" pills left the lesson page and the
+ * lock page. The length stands alone over the title (`member-lesson-duration` /
+ * `lesson-lock-duration`), only when the lesson has a ready video; the cases read it there and pin
+ * the pills' absence.
+ *
+ * 2026-10-26 (the academy reference's player): the side list (`lesson-module-list`) is the WHOLE
+ * course — every module a disclosure (the open lesson's module open), the rows keeping their hooks
+ * (`member-lesson-row`, `aria-current`, `data-trailing`); the previous and next sit in one row with
+ * the lesson's place in the course between them (`lesson-position`, "1 de 2 aulas"); the
+ * description and the materials are the tabs "Descrição | Materiais" (`lesson-tabs`: one tab alone
+ * draws no list), so a case opens "Materiais" before it reads the files.
  */
 test.describe('player', () => {
   test.skip(isRemote, 'the player fixtures write rows through the local database');
@@ -864,6 +1322,26 @@ test.describe('player', () => {
     `/cursos/${courseId}/aulas/${lessonId}${preview ? '?ver=aluno' : ''}`;
   const toast = (page: Page, message: string) =>
     page.getByRole('status').filter({ hasText: message });
+  /** A row of the side list (2026-10-26: the whole course's outline). */
+  const outlineRow = (page: Page, lessonId: string): Locator =>
+    page
+      .getByTestId('lesson-module-list')
+      .locator(`[data-testid="member-lesson-row"][data-lesson-id="${lessonId}"]`);
+
+  /**
+   * 2026-10-22: the lesson page's two-line header — the course as the overline over the lesson's
+   * title, both paragraphs — and the page's one h1, the lesson title under the media.
+   */
+  // 2026-10-23 (the video first): the header names the COURSE only; the lesson's title is the
+  // page's one h1, under the stage.
+  async function expectLessonHeadings(page: Page, course: string, lesson: string): Promise<void> {
+    const header = page.locator('header').filter({ hasText: course });
+    await expect(header.locator('p')).toHaveText([course]);
+    await expect(header).not.toContainText(lesson);
+    await expect(header.locator('h1')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+    await expect(page.getByRole('heading', { level: 1, name: lesson })).toBeVisible();
+  }
 
   test.beforeAll(async ({ browser: _browser }, testInfo) => {
     prefix = `e2e-pl-${testInfo.project.name}-${run}`;
@@ -889,9 +1367,11 @@ test.describe('player', () => {
     const lock = page.getByTestId('lesson-lock-page');
     await expect(lock).toHaveAttribute('data-reason', 'sequence');
     await expect(page.getByRole('heading', { level: 1, name: open.lesson2.title })).toBeVisible();
+    await expectLessonHeadings(page, open.title, open.lesson2.title);
     await expect(lock.getByTestId('lesson-lock-media')).toContainText(M.lock.pillLocked);
-    await expect(lock.getByTestId('lesson-lock-pills')).toContainText(fill(P.module, { nn: '01' }));
-    await expect(lock.getByTestId('lesson-lock-pills')).toContainText(fill(P.lesson, { nn: '02' }));
+    // 2026-10-23: no "Módulo 01 / Aula 02" pills; lesson 2's ready video (8:10) is the length line.
+    await expect(lock.getByTestId('lesson-lock-pills')).toHaveCount(0);
+    await expect(lock.getByTestId('lesson-lock-duration')).toHaveText('8:10');
     const notice = lock.getByTestId('lesson-lock-sequence');
     await expect(notice.getByRole('heading', { name: M.lock.title })).toBeVisible();
     await expect(notice.getByText(M.lock.bodyPrevious, { exact: true })).toBeVisible();
@@ -920,28 +1400,62 @@ test.describe('player', () => {
     const lessonPage = page.getByTestId('member-lesson-page');
     await expect(lessonPage).toHaveAttribute('data-lesson-id', open.lesson1.id);
     await expect(page.getByRole('heading', { level: 1, name: open.lesson1.title })).toBeVisible();
+    await expectLessonHeadings(page, open.title, open.lesson1.title);
     await expect(page.getByTestId('lesson-player')).toHaveAttribute('data-writes', 'on');
     await expect(page.getByTestId('video-ready')).toBeVisible();
-    const pills = page.getByTestId('member-lesson-pills');
-    await expect(pills).toContainText(fill(P.module, { nn: '01' }));
-    await expect(pills).toContainText(fill(P.lesson, { nn: '01' }));
-    await expect(pills).toContainText('12:34');
+    // 2026-10-23: the "Módulo 01 / Aula 01" pills left; the length stands alone over the title.
+    await expect(page.getByTestId('member-lesson-pills')).toHaveCount(0);
+    await expect(page.getByTestId('member-lesson-duration')).toHaveText('12:34');
     await expect(page.getByTestId('preview-banner')).toHaveCount(0);
 
-    // The module list marks the current row; the next lesson is held by the lesson rule.
+    // 2026-10-26: the side list is the whole course — its one module open (the open lesson's), the
+    // current row marked, lesson 2 held by the lesson rule; the course's share on top.
+    const outline = page.getByTestId('lesson-module-list');
+    await expect(outline).toHaveAttribute('aria-label', M.course.content);
+    await expect(outline.getByTestId('lesson-outline-module')).toHaveCount(1);
+    await expect(outline.getByRole('button', { expanded: true })).toHaveCount(1);
+    await expect(outlineRow(page, open.lesson1.id)).toHaveAttribute('aria-current', 'page');
+    await expect(outlineRow(page, open.lesson1.id)).toHaveAttribute('data-current', 'true');
+    await expect(outlineRow(page, open.lesson1.id).getByTestId('member-lesson-title')).toHaveText(
+      open.lesson1.title,
+    );
+    await expect(outlineRow(page, open.lesson2.id)).toHaveAttribute('data-trailing', 'locked');
     await expect(
-      page.locator(`[data-testid="member-lesson-row"][data-lesson-id="${open.lesson1.id}"]`),
-    ).toHaveAttribute('aria-current', 'page');
+      outline.getByRole('progressbar', {
+        name: fill(M.progress.aria, { percent: '0' }),
+        exact: true,
+      }),
+    ).toHaveCount(1);
+    // One row between hairlines: the previous (none: the disabled span), the place in the course,
+    // the next (held by the lesson rule: the lock and the reason in words).
     const next = page.getByTestId('lesson-next');
     await expect(next).toHaveAttribute('data-variant', 'locked');
     await expect(next).toHaveText(P.nextLockedPrevious);
-    await expect(page.getByTestId('lesson-previous')).toHaveAttribute('aria-disabled', 'true');
+    const previous = page.getByTestId('lesson-previous');
+    await expect(previous).toHaveAttribute('aria-disabled', 'true');
+    await expect(previous).toHaveAttribute('data-state', 'disabled');
+    await expect(page.getByTestId('lesson-position')).toHaveText(
+      fill(P.position, { n: '1', total: '2' }),
+    );
     await expect(page.getByTestId('lesson-module-progress')).toHaveText(
       fill(P.moduleProgress, { nn: '01', done: '0', total: '2' }),
     );
+    // "Descrição | Materiais": the description first and selected, the materials a tab away.
+    const tabs = page.getByTestId('lesson-tabs');
+    await expect(tabs.getByRole('tablist', { name: P.tabs.label })).toBeVisible();
+    await expect(tabs.getByRole('tab')).toHaveText([P.tabs.description, P.tabs.materials]);
+    await expect(tabs.getByRole('tab', { name: P.tabs.description })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(page.getByTestId('member-lesson-description')).toBeVisible();
+    await expect(page.getByTestId('lesson-materials')).toBeHidden();
 
     await page.getByRole('button', { name: P.complete, exact: true }).click();
+    // 2026-10-22: the button fades out, then the done block fades in and takes the focus the
+    // button had (the web-first assertions wait out the ~150 ms swap).
     await expect(page.getByTestId('lesson-done')).toHaveText(P.done);
+    await expect(page.getByTestId('lesson-done')).toBeFocused();
     await expect(toast(page, P.doneToast)).toBeVisible();
     await expect(page.getByRole('button', { name: P.complete, exact: true })).toHaveCount(0);
     await expect
@@ -955,6 +1469,15 @@ test.describe('player', () => {
     await expect(page.getByTestId('lesson-module-progress')).toHaveText(
       fill(P.moduleProgress, { nn: '01', done: '1', total: '2' }),
     );
+    // ...and the side list follows: lesson 1 done, lesson 2 open, the course at 50%.
+    await expect(outlineRow(page, open.lesson1.id)).toHaveAttribute('data-trailing', 'done');
+    await expect(outlineRow(page, open.lesson2.id)).toHaveAttribute('data-trailing', 'chevron');
+    await expect(
+      outline.getByRole('progressbar', {
+        name: fill(M.progress.aria, { percent: '50' }),
+        exact: true,
+      }),
+    ).toHaveCount(1);
 
     await next.click();
     await expect(lessonPage).toHaveAttribute('data-lesson-id', open.lesson2.id);
@@ -963,6 +1486,10 @@ test.describe('player', () => {
       'href',
       lessonHref(open.id, open.lesson1.id),
     );
+    await expect(page.getByTestId('lesson-position')).toHaveText(
+      fill(P.position, { n: '2', total: '2' }),
+    );
+    await expect(outlineRow(page, open.lesson2.id)).toHaveAttribute('aria-current', 'page');
     // The last lesson of the course: the right slot is "Voltar para o curso".
     await expect(page.getByTestId('lesson-next')).toHaveAttribute('data-variant', 'end');
     await expect(page.getByTestId('lesson-next')).toHaveText(P.toCourse);
@@ -983,6 +1510,11 @@ test.describe('player', () => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson1.id)}`);
 
+    // 2026-10-26: the materials are the second tab ("Materiais"), a tap away.
+    const materialsTab = page.getByRole('tab', { name: P.tabs.materials, exact: true });
+    await untilHydrated(materialsTab);
+    await materialsTab.click();
+    await expect(materialsTab).toHaveAttribute('aria-selected', 'true');
     const materials = page.getByTestId('lesson-materials');
     await expect(materials.getByRole('heading', { name: P.materials })).toBeVisible();
     await expect(materials.getByTestId('lesson-material-row')).toHaveCount(2);
@@ -1037,6 +1569,7 @@ test.describe('player', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: locked.paidLessonTitle }),
     ).toBeVisible();
+    await expectLessonHeadings(page, locked.title, locked.paidLessonTitle);
     await expect(lock.getByTestId('lesson-lock-media')).toContainText(M.lock.pillExclusive);
     const purchase = lock.getByTestId('lesson-lock-purchase');
     await expect(purchase.getByRole('heading', { name: S.course.lessonTitle })).toBeVisible();
@@ -1054,7 +1587,7 @@ test.describe('player', () => {
     await expect(page.getByTestId('lesson-completion')).toHaveCount(0);
   });
 
-  test('D-429 / E09 partial: the free lesson of the locked course plays for the non-buyer, "Aula aberta", completes, and its "Próxima aula" reads "Aula exclusiva"', async ({
+  test('D-429 / E09 partial: the free lesson of the locked course plays for the non-buyer, completes, and its "Próxima aula" reads "Aula exclusiva" (2026-10-23: no "Aula aberta" pill on the lesson page)', async ({
     page,
   }) => {
     const { locked } = fx;
@@ -1065,7 +1598,9 @@ test.describe('player', () => {
       'data-lesson-id',
       locked.freeLessonId,
     );
-    await expect(page.getByTestId('member-lesson-pills')).toContainText(P.free);
+    // 2026-10-23: the "Aula aberta" pill left the lesson page (the course page's curriculum still
+    // says it, D-424 above).
+    await expect(page.getByTestId('member-lesson-pills')).toHaveCount(0);
     await expect(page.getByTestId('video-ready')).toBeVisible();
     const next = page.getByTestId('lesson-next');
     await expect(next).toHaveAttribute('data-variant', 'locked');
@@ -1081,7 +1616,7 @@ test.describe('player', () => {
     await expect(next).toHaveText(P.nextExclusive);
   });
 
-  test('D-422 / UI-D-437 / T-08.5-17: the admin at ?ver=aluno sees the banner and the player, no completion zone, and leaves no progress row behind', async ({
+  test('D-422 / UI-D-437 / T-08.5-17: the admin at ?ver=aluno sees the player (2026-10-23: no banner), no completion zone, and leaves no progress row behind', async ({
     page,
   }) => {
     const { open } = fx;
@@ -1089,11 +1624,15 @@ test.describe('player', () => {
     await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson1.id, true)}`);
 
     await expect(page.getByTestId('member-lesson-page')).toBeVisible();
-    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     await expect(page.getByTestId('lesson-player')).toHaveAttribute('data-writes', 'off');
     await expect(page.getByTestId('video-ready')).toBeVisible();
     await expect(page.getByTestId('lesson-completion')).toHaveCount(0);
     await expect(page.getByRole('button', { name: P.complete })).toHaveCount(0);
+    // 2026-10-26: the materials are the "Materiais" tab, in preview too.
+    const materialsTab = page.getByRole('tab', { name: P.tabs.materials, exact: true });
+    await untilHydrated(materialsTab);
+    await materialsTab.click();
     await expect(page.getByTestId('lesson-materials')).toBeVisible();
     await expect(page.getByTestId('lesson-see-course')).toHaveAttribute(
       'href',
@@ -1129,7 +1668,7 @@ test.describe('player', () => {
     }
   });
 
-  test('E09/long-text backstop: at 320px a 2,000-character description clamps to four lines with "Ler mais" and, expanded, wraps without horizontal overflow', async ({
+  test('E09/long-text backstop: at 320px a 2,000-character description clamps to three lines (2026-10-22, the prototype\'s clamp) with "Ler mais" and, expanded, wraps without horizontal overflow', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
@@ -1139,7 +1678,7 @@ test.describe('player', () => {
 
     const description = page.getByTestId('member-lesson-description');
     await description.scrollIntoViewIfNeeded();
-    expect(await linesOf(description)).toBe(4);
+    expect(await linesOf(description)).toBe(3);
     const toggle = page.getByTestId('read-more-toggle');
     await expect(toggle).toHaveText(M.readMore);
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -1147,7 +1686,7 @@ test.describe('player', () => {
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await expect(toggle).toHaveText(M.readLess);
-    expect(await linesOf(description)).toBeGreaterThan(4);
+    expect(await linesOf(description)).toBeGreaterThan(3);
     expect(await description.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -1165,6 +1704,11 @@ test.describe('player', () => {
  * cancelled after its planned end, and a live in 10 min locked by a product the member lacks. Every
  * live stores a unique `external_url`, so the PR-1 / T-08.5-07 check reads the whole HTML of a page
  * that must not carry the room link and looks for any part of it.
+ *
+ * 2026-10-22 (the social-igoralves live page): the status over the cover is the `LiveStatusChip`
+ * (the red chip with the breathing dot while on air, ▶ on a replay), the title 22/800 sits under the
+ * cover, the replay fades in over it, and "Voltar" / "Ver as lives" lead to the Lives screen
+ * (`/area-membros/lives`).
  */
 test.describe('live page', () => {
   test.skip(isRemote, 'the live page fixtures write rows through the local database');
@@ -1206,7 +1750,7 @@ test.describe('live page', () => {
     await openAsMember(page, fx.before.id);
     await expect(page.getByRole('link', { name: L.back, exact: true })).toHaveAttribute(
       'href',
-      '/area-membros?aba=lives',
+      '/area-membros/lives',
     );
     await expect(page.getByRole('heading', { level: 1, name: fx.before.title })).toBeVisible();
     await expect(page.getByTestId('member-live-status')).toHaveText(C.status.scheduled);
@@ -1246,6 +1790,11 @@ test.describe('live page', () => {
   }) => {
     await openAsMember(page, fx.onAir.id);
     await expect(page.getByTestId('member-live-status')).toHaveText(M.lives.liveNow);
+    // 2026-10-22: on air is the red chip led by the white dot that breathes.
+    await expect(page.getByTestId('member-live-status')).toHaveClass(/\bbg-danger\b/);
+    await expect(
+      page.getByTestId('member-live-status').getByTestId('live-status-dot'),
+    ).toBeVisible();
     await expect(page.getByRole('link', { name: L.join, exact: true })).toHaveAttribute(
       'href',
       fx.onAir.url,
@@ -1322,6 +1871,7 @@ test.describe('live page', () => {
   }) => {
     await openAsMember(page, fx.cancelled.id);
     await expect(page.getByTestId('member-live-status')).toHaveText(C.status.cancelled);
+    await expect(page.getByTestId('member-live-page')).toHaveAttribute('data-state', 'cancelled');
     await expect(zone(page)).toHaveAttribute('data-state', 'cancelled');
     await expect(zone(page)).toHaveText(L.cancelled);
     await expect(page.getByRole('link', { name: L.join })).toHaveCount(0);
@@ -1341,7 +1891,7 @@ test.describe('live page', () => {
       await expect(card.getByText(C.notFound.liveBody, { exact: true })).toBeVisible();
       await expect(card.getByRole('link', { name: C.notFound.liveCta })).toHaveAttribute(
         'href',
-        '/area-membros?aba=lives',
+        '/area-membros/lives',
       );
       await expect(page.getByTestId('member-live-page')).toHaveCount(0);
     }
@@ -1443,27 +1993,37 @@ test.describe('preview', () => {
 
     await expect(page).toHaveURL(new RegExp(`/cursos/${open.id}\\?ver=aluno$`));
     await expect(page.getByTestId('member-course-page')).toBeVisible();
-    const banner = page.getByTestId('preview-banner');
-    await expect(banner).toContainText(M.preview.title);
-    await expect(banner).toContainText(M.preview.body);
+    // 2026-10-23: as a member sees it, no preview banner.
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
 
-    // Every lesson is open to staff, and the row keeps the flag.
-    const lesson1Row = page.locator(
-      `[data-testid="member-lesson-row"][data-lesson-id="${open.lesson1.id}"]`,
+    // Every lesson is open to staff, and the links keep the flag (2026-10-26: the module's card,
+    // then the lesson's card on the module's page).
+    const moduleCard = page.getByTestId('member-module-card');
+    await expect(moduleCard).toHaveAttribute(
+      'href',
+      new RegExp(`^/cursos/${open.id}/modulos/[^?]+\\?ver=aluno$`),
     );
-    await expect(lesson1Row).toHaveAttribute('href', lessonHref(open.id, open.lesson1.id, true));
-    await lesson1Row.click();
+    await moduleCard.click();
+    await expect(page.getByTestId('member-module-page')).toBeVisible();
+    const lesson1Card = page.locator(
+      `[data-testid="member-lesson-card"][data-lesson-id="${open.lesson1.id}"]`,
+    );
+    await expect(lesson1Card).toHaveAttribute('href', lessonHref(open.id, open.lesson1.id, true));
+    await lesson1Card.click();
     await expect(page).toHaveURL(
       new RegExp(`/cursos/${open.id}/aulas/${open.lesson1.id}\\?ver=aluno$`),
     );
     await expect(page.getByTestId('member-lesson-page')).toBeVisible();
-    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     await expect(page.getByTestId('video-ready')).toBeVisible();
     await expect(page.getByTestId('lesson-player')).toHaveAttribute('data-writes', 'off');
     await expect(page.getByTestId('lesson-completion')).toHaveCount(0);
     await expect(page.getByRole('button', { name: P.complete })).toHaveCount(0);
 
-    // The material opens through a fresh token= URL, in preview too.
+    // The material opens through a fresh token= URL, in preview too (its tab first).
+    const materialsTab = page.getByRole('tab', { name: P.tabs.materials, exact: true });
+    await untilHydrated(materialsTab);
+    await materialsTab.click();
     const materials = page.getByTestId('lesson-materials');
     const file = `${prefix} Protocolo.pdf`;
     await materials.getByRole('button', { name: fill(P.download, { file }), exact: true }).click();
@@ -1516,7 +2076,8 @@ test.describe('preview', () => {
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/cursos/${emptyId}?ver=aluno`);
-    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page.getByTestId('member-course-page')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     const adminEmpty = page.getByTestId('member-course-no-lessons');
     await expect(adminEmpty).toContainText(M.course.noLessons.title);
     await expect(adminEmpty).toContainText(M.course.noLessons.body);

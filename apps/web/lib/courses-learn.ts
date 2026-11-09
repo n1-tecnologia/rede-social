@@ -1,7 +1,9 @@
 import {
+  COURSE_MAX_PAGE_SIZE,
   COURSE_PAGE_SIZE,
   type LearnCataloguePage,
   type LearnCourse,
+  type LearnCourseCard,
   type LearnLesson,
   type LearnLive,
   type LearnLivesPage,
@@ -114,6 +116,28 @@ export async function getLearnCatalogue(
     (body) => learnCataloguePageSchema.parse(body),
     'courses.learn_catalogue_failed',
   );
+}
+
+/**
+ * 2026-10-22 — the WHOLE member catalogue (every page at the largest page size, at most `maxPages`
+ * pages), in the API's order (newest published first). The Início reads it only when the overview's
+ * hero is not a course in progress: to suggest where a member with nothing in progress starts, and
+ * to tell a member with no open course at all, who lands on the catalogue (`courses-home-plan.ts`).
+ * The first refusal ends the read with that refusal; the cursor is forwarded as returned.
+ */
+export async function getLearnCatalogueAll(
+  maxPages = 10,
+): Promise<LearnReadResult<LearnCourseCard[]>> {
+  const items: LearnCourseCard[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await getLearnCatalogue({ cursor, limit: COURSE_MAX_PAGE_SIZE });
+    if (result.status !== 'ok') return result;
+    items.push(...result.page.items);
+    if (!result.page.nextCursor) break;
+    cursor = result.page.nextCursor;
+  }
+  return { status: 'ok', page: items };
 }
 
 /**

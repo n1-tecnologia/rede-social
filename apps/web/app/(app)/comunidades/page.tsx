@@ -52,6 +52,10 @@ import { CommunitiesList } from './CommunitiesList';
  * `CommunitiesList` is keyed by the status, so switching chips starts from the server's page 1 with
  * no client state carried across lists.
  *
+ * **2026-10-26 — the whole width on a desktop** (the product owner: "essa tela de comunidade deve ter
+ * o aproveitamento igual da área de membros"): the page carries `data-shell-full`, so the shell lifts
+ * the 680px column, and the list lays its cards out in a grid (`CommunitiesList`).
+ *
  * **08.2-09 — the store's card tags (UI-D-372, P81).** Only when `store` is among the bootstrap's
  * modules, `GET /v1/store/community-access` runs BESIDE the first page (`Promise.all`); with the
  * store off no store request is made at all. The answer becomes a map of finished tag views by
@@ -108,7 +112,7 @@ export default async function CommunitiesPage({
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-[680px] flex-col">
+    <div data-shell-full className="flex w-full flex-col">
       {canManage ? (
         <>
           {/* The heading block is `min-w-0 flex-1` and the control `shrink-0`: at any width the
