@@ -251,7 +251,13 @@ describe('courses contracts (08.3-01)', () => {
 
   it('module input: title 1..120, summary ≤ 500 defaulting to empty, requiresPrevious defaults false', () => {
     const parsed = moduleInputSchema.parse({ title: 'Módulo 1' });
-    expect(parsed).toEqual({ title: 'Módulo 1', summary: '', requiresPrevious: false });
+    expect(parsed).toEqual({
+      title: 'Módulo 1',
+      summary: '',
+      requiresPrevious: false,
+      coverAssetId: null,
+      topCoverAssetId: null,
+    });
     expect(issueOf({ title: '' }, moduleInputSchema)).toBe('title_required');
     expect(issueOf({ title: 'x'.repeat(121) }, moduleInputSchema)).toBe('title_too_long');
     expect(moduleInputSchema.safeParse({ title: 'x', summary: 's'.repeat(500) }).success).toBe(
@@ -1401,6 +1407,77 @@ describe('the Topo of a track and of a course (NOVF-02, D-696, D-699)', () => {
       expect(schema.safeParse({ ...body, topCoverAssetId: id(9) }).success).toBe(true);
       expect(schema.safeParse({ ...body, topCoverAssetId: 'nope' }).success).toBe(false);
       expect(schema.safeParse({ ...body, topCoverUrl: 'x' }).success).toBe(false);
+    }
+  });
+});
+
+describe('the module covers (NOVF-03, OQ-1, D-696, D-699)', () => {
+  const module = {
+    id: id(60),
+    title: 'Módulo',
+    summary: '',
+    position: 1,
+    requiresPrevious: false,
+    lessonCount: 0,
+    durationSeconds: 0,
+    lessons: [],
+  };
+  const outlineModule = {
+    id: id(61),
+    title: 'Módulo',
+    position: 1,
+    number: 1,
+    requiresPrevious: false,
+    lockReason: null,
+    lessons: [],
+  };
+
+  it('the create body: absent is null for both images, null and a uuid pass, each non-uuid names its own code, an unknown key still fails', () => {
+    expect(moduleInputSchema.parse({ title: 'x' })).toMatchObject({
+      coverAssetId: null,
+      topCoverAssetId: null,
+    });
+    expect(moduleInputSchema.safeParse({ title: 'x', coverAssetId: null }).success).toBe(true);
+    expect(moduleInputSchema.safeParse({ title: 'x', topCoverAssetId: id(1) }).success).toBe(true);
+    expect(issueOf({ title: 'x', coverAssetId: 'nope' }, moduleInputSchema)).toBe('cover_invalid');
+    expect(issueOf({ title: 'x', topCoverAssetId: 'nope' }, moduleInputSchema)).toBe(
+      'top_cover_invalid',
+    );
+    expect(moduleInputSchema.safeParse({ title: 'x', topCover: id(1) }).success).toBe(false);
+    // The same asset as card cover and Topo is valid input (adjacency).
+    expect(
+      moduleInputSchema.parse({ title: 'x', coverAssetId: id(1), topCoverAssetId: id(1) }),
+    ).toMatchObject({ coverAssetId: id(1), topCoverAssetId: id(1) });
+  });
+
+  it('the patch body: either image alone satisfies the one-key rule, null clears, absent stays absent, {} still fails patch_empty, an unknown key still fails', () => {
+    expect(modulePatchSchema.parse({ topCoverAssetId: null })).toEqual({ topCoverAssetId: null });
+    expect(modulePatchSchema.parse({ coverAssetId: id(1) })).toEqual({ coverAssetId: id(1) });
+    expect(modulePatchSchema.parse({ coverAssetId: null, topCoverAssetId: id(2) })).toEqual({
+      coverAssetId: null,
+      topCoverAssetId: id(2),
+    });
+    expect(issueOf({}, modulePatchSchema)).toBe('patch_empty');
+    expect(issueOf({ coverAssetId: 'nope' }, modulePatchSchema)).toBe('cover_invalid');
+    expect(issueOf({ topCoverAssetId: 'nope' }, modulePatchSchema)).toBe('top_cover_invalid');
+    expect(modulePatchSchema.safeParse({ topCover: null }).success).toBe(false);
+    expect(modulePatchSchema.safeParse({ title: 'x', position: 3 }).success).toBe(false);
+  });
+
+  it('the answers: both images are optional and nullable on the module view and the member outline module, a non-uuid fails, and the schemas stay strict', () => {
+    for (const [schema, shape] of [
+      [moduleViewSchema, module],
+      [learnOutlineModuleSchema, outlineModule],
+    ] as const) {
+      expect(schema.safeParse(shape).success).toBe(true);
+      expect(
+        schema.safeParse({ ...shape, coverAssetId: null, topCoverAssetId: null }).success,
+      ).toBe(true);
+      expect(
+        schema.safeParse({ ...shape, coverAssetId: id(1), topCoverAssetId: id(2) }).success,
+      ).toBe(true);
+      expect(schema.safeParse({ ...shape, topCoverAssetId: 'nope' }).success).toBe(false);
+      expect(schema.safeParse({ ...shape, extra: 1 }).success).toBe(false);
     }
   });
 });

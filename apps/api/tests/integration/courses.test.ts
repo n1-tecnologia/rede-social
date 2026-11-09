@@ -2120,6 +2120,85 @@ describe('modules', () => {
     expect(cleared).toMatchObject({ coverAssetId: card, topCoverAssetId: null });
   });
 
+  it('module cover edges (NOVF-03): adjacency, empty, ordering, idempotency and concurrency of the two module images', async () => {
+    const cols = (moduleId: string) =>
+      adminSql<{ top: string | null; card: string | null }[]>`
+        select top_cover_asset_id::text as top, cover_asset_id::text as card
+          from public.course_modules where id = ${moduleId}::uuid`;
+    const same = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const other = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+
+    // Adjacency: the same asset as card cover and Topo is stored twice; clearing one leaves the
+    // other; a module cover equal to the course's own cover is allowed and read back as the
+    // module's own value.
+    const course = await createCourse({ coverAssetId: same });
+    const twin = await createModule(course.id, { coverAssetId: same, topCoverAssetId: same });
+    expect(await cols(twin.id)).toEqual([{ top: same, card: same }]);
+    expect(twin).toMatchObject({ coverAssetId: same, topCoverAssetId: same });
+    expect((await getCourse(course.id)).coverAssetId).toBe(same);
+    const topCleared = await json<ModuleView>(
+      await patchModule(twin.id, { topCoverAssetId: null }),
+      200,
+    );
+    expect(topCleared).toMatchObject({ coverAssetId: same, topCoverAssetId: null });
+    const cardCleared = await json<ModuleView>(
+      await patchModule(twin.id, { topCoverAssetId: same, coverAssetId: null }),
+      200,
+    );
+    expect(cardCleared).toMatchObject({ coverAssetId: null, topCoverAssetId: same });
+
+    // Empty: absent on create is null; an absent key on edit changes nothing; one image alone is a
+    // patch; the module of another course is not touched.
+    const bare = await createModule(course.id);
+    expect(await cols(bare.id)).toEqual([{ top: null, card: null }]);
+    const set = await json<ModuleView>(await patchModule(bare.id, { topCoverAssetId: other }), 200);
+    expect(set.topCoverAssetId).toBe(other);
+    const untouched = await json<ModuleView>(await patchModule(bare.id, { summary: 'novo' }), 200);
+    expect(untouched).toEqual({ ...set, summary: 'novo' });
+    expect(await cols(bare.id)).toEqual([{ top: other, card: null }]);
+
+    // Ordering: an image write moves no module and no lesson of the course, in the admin view.
+    const { course: ordered, modules } = await courseWithModules(3);
+    const [m1, m2, m3] = modules as [ModuleView, ModuleView, ModuleView];
+    for (const m of modules) {
+      await json<LessonView>(await createLesson(m.id, { title: `${PREFIX} a` }), 201);
+      await json<LessonView>(await createLesson(m.id, { title: `${PREFIX} b` }), 201);
+    }
+    const shape = async () =>
+      (await getCourse(ordered.id)).modules.map((m) => [
+        m.id,
+        m.position,
+        m.lessons.map((l) => l.id),
+      ]);
+    const before = await shape();
+    expect(before.map((row) => row[0])).toEqual([m1.id, m2.id, m3.id]);
+    await json<ModuleView>(await patchModule(m2.id, { topCoverAssetId: other }), 200);
+    await json<ModuleView>(await patchModule(m3.id, { coverAssetId: same }), 200);
+    expect(await shape()).toEqual(before);
+
+    // Idempotency: the same edit twice stores the same columns and answers the same body.
+    const first = await json<ModuleView>(
+      await patchModule(bare.id, { topCoverAssetId: same }),
+      200,
+    );
+    const stored = await cols(bare.id);
+    const second = await json<ModuleView>(
+      await patchModule(bare.id, { topCoverAssetId: same }),
+      200,
+    );
+    expect(second).toEqual(first);
+    expect(await cols(bare.id)).toEqual(stored);
+
+    // Concurrency: a card-only edit and a Topo-only edit in parallel leave BOTH columns set.
+    const racer = await createModule(course.id);
+    const [a, b] = await Promise.all([
+      patchModule(racer.id, { coverAssetId: same }),
+      patchModule(racer.id, { topCoverAssetId: other }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(await cols(racer.id)).toEqual([{ top: other, card: same }]);
+  });
+
   it('remove (COURSE-05, D-408, P17, PR-5): a soft delete drops the module from the detail, keeps its lesson rows and every progress row, answers the bare 404 the second time, leaves a gap in position until the next reorder renumbers 1..N', async () => {
     const { course, modules } = await courseWithModules(3);
     const [m1, m2, m3] = modules as [ModuleView, ModuleView, ModuleView];

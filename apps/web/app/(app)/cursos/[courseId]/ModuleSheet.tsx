@@ -163,7 +163,14 @@ export function ModuleSheet({
         if (requiresPrevious !== startRequires) patch.requiresPrevious = requiresPrevious;
         result = await updateModuleAction(courseId, module.id, patch);
       } else {
-        const body: ModuleInput = { title, summary, requiresPrevious };
+        // The module's images are written by the sheet of plan 12.3-08; until then none is sent.
+        const body: ModuleInput = {
+          title,
+          summary,
+          requiresPrevious,
+          coverAssetId: null,
+          topCoverAssetId: null,
+        };
         result = await createModuleAction(courseId, body);
       }
     } catch (error) {

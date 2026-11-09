@@ -1559,4 +1559,51 @@ describe('NOVF-03 module covers on the member read', () => {
     expect(mine.raw).not.toContain(siblingCover);
     expect(mine.course.modules.map((m) => m.id)).not.toContain(siblingModule);
   });
+
+  it('the edges: the module covers keep their module through a removal and a reorder, one soft-deleted module has no entry and nothing throws, and a course of modules with no image answers null for both', async () => {
+    const card = await readyCover('rede-demo', 'edge-card');
+    const top = await readyCover('rede-demo', 'edge-top');
+    const built = await publishedCourse('capas de modulo bordas', [
+      [{ title: 'a1' }],
+      [{ title: 'b1' }],
+      [{ title: 'c1' }],
+    ]);
+    const [first, second, third] = built.moduleIds as [string, string, string];
+    expect((await patchModule(first, { coverAssetId: card })).status).toBe(200);
+    expect((await patchModule(second, { topCoverAssetId: top })).status).toBe(200);
+
+    // Ordering: a reorder moves each module WITH its own images, never an image onto its neighbour.
+    const reorder = await admin('PUT', `/v1/courses/${built.courseId}/modules/order`, {
+      ids: [third, first, second],
+    });
+    expect(reorder.status).toBe(200);
+    const reordered = (await readCourse(built.courseId)).course;
+    expect(reordered.modules.map((m) => [m.id, m.coverAssetId, m.topCoverAssetId])).toEqual([
+      [third, null, null],
+      [first, card, null],
+      [second, null, top],
+    ]);
+    expect(reordered.modules.map((m) => m.number)).toEqual([1, 2, 3]);
+
+    // Soft-deleted: the removed module has no entry in the merge, the others keep theirs.
+    expect((await admin('DELETE', `/v1/courses/modules/${first}`)).status).toBe(204);
+    const afterRemoval = await readCourse(built.courseId);
+    expect(afterRemoval.course.modules.map((m) => m.id)).toEqual([third, second]);
+    expect(afterRemoval.raw).not.toContain(card);
+    expect(afterRemoval.course.modules[1]).toMatchObject({
+      coverAssetId: null,
+      topCoverAssetId: top,
+    });
+
+    // Empty: a course whose modules have no image answers null for both keys on every module.
+    const plain = await publishedCourse('sem capas de modulo', [
+      [{ title: 'p1' }],
+      [{ title: 'p2' }],
+    ]);
+    const read = (await readCourse(plain.courseId)).course;
+    expect(read.modules.map((m) => [m.coverAssetId, m.topCoverAssetId])).toEqual([
+      [null, null],
+      [null, null],
+    ]);
+  });
 });
