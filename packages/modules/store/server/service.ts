@@ -38,7 +38,9 @@ import type {
   PurchaseInfo,
   PurchaseResult,
   RevokeResult,
+  StoreFront,
 } from '../contracts/index';
+import { guessStoreCategory } from '../contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-store');
@@ -129,6 +131,70 @@ async function resolveImageAsset(
   if (!(asset.purpose === 'cover' && asset.kind === 'image' && asset.status === 'ready')) {
     throw new ApiError(400, 'VALIDATION_FAILED', { store: 'image_invalid' });
   }
+}
+
+/** The slug of a product's category as a correlated subquery over `p` (12.3, D-694): null when it has none. */
+const CATEGORY_COLUMN = sql`(
+           select c.slug from store_categories c
+            where c.tenant_id = p.tenant_id and c.id = p.category_id) as category_slug`;
+
+/** The answer's `category` key: present only when the product has a category (D-693). */
+const categoryKey = (slug: string | null | undefined): { category?: string } =>
+  slug ? { category: slug } : {};
+
+/**
+ * The lazy, once-only seed of the store's eight built-in categories (D-691, T-12.3-06). A store enabled
+ * after the migration has no category rows and no one acts, so the first store read or product write
+ * seeds them: after a cheap read of the marker, `app.store_seed_categories()` (tenant-pinned, takes no
+ * argument) claims the seed through the marker row. Two parallel first calls leave exactly eight rows
+ * (the second waits on the first's claim, finds it taken and writes nothing), and a store whose admin
+ * deleted categories is never seeded again. Only called from inside the store routes, which already
+ * require the module.
+ */
+async function ensureSeeded(tx: Tx, ctx: RequestContext): Promise<void> {
+  const marker = await tx.execute<{ seeded: boolean }>(sql`
+    select exists (
+             select 1 from store_front
+              where tenant_id = ${ctx.tenantId}::uuid and categories_seeded_at is not null) as seeded`);
+  if (marker[0]?.seeded) return;
+  await tx.execute(sql`select app.store_seed_categories()`);
+}
+
+type CategoryRef = { id: string; slug: string };
+
+/**
+ * A category of THIS tenant by slug, or null (T-12.3-03). Read under the caller's RLS in the writing
+ * transaction, and key-share locked so a delete of the category cannot slip in between this read and
+ * the product write (a delete waits; one that committed first makes this read answer null). The
+ * category's NAME never takes part: only the slug, by exact equality.
+ */
+async function findCategory(
+  tx: Tx,
+  ctx: RequestContext,
+  slug: string,
+): Promise<CategoryRef | null> {
+  const rows = await tx.execute<CategoryRef>(sql`
+    select id, slug
+      from store_categories
+     where tenant_id = ${ctx.tenantId}::uuid
+       and slug = ${slug}
+       for key share`);
+  return rows[0] ?? null;
+}
+
+/**
+ * The category a body names (OQ-3): `null` is "Sem categoria" and does no lookup, a slug that is not a
+ * category of this tenant is `400 { store: 'category_invalid' }` (a body value, never a 404).
+ */
+async function resolveCategory(
+  tx: Tx,
+  ctx: RequestContext,
+  slug: string | null,
+): Promise<CategoryRef | null> {
+  if (slug === null) return null;
+  const found = await findCategory(tx, ctx, slug);
+  if (!found) throw new ApiError(400, 'VALIDATION_FAILED', { store: 'category_invalid' });
+  return found;
 }
 
 /**
@@ -365,16 +431,24 @@ export async function createProduct(
 ): Promise<ProductDetail> {
   const coursesOn = await coursesEnabled(ctx);
   const detail = await withTenantTx(ctx, async (tx) => {
+    await ensureSeeded(tx, ctx);
     await resolveImageAsset(tx, ctx, input.imageAssetId);
     await resolveCommunities(tx, ctx, input.communityIds);
     await resolveCourses(tx, ctx, input.courseIds, null);
     await resolveLives(tx, ctx, input.liveIds, null);
+    // OQ-3: an ABSENT key applies the name guess (the tenant's category with that slug, else none), an
+    // explicit null is "Sem categoria", a slug must be one of this tenant's.
+    const category =
+      input.category === undefined
+        ? await findCategory(tx, ctx, guessStoreCategory(input.name))
+        : await resolveCategory(tx, ctx, input.category);
 
     const inserted = await tx.execute<ProductRow>(sql`
       insert into store_products
-             (tenant_id, created_by_user_id, name, description, image_asset_id, price_cents)
+             (tenant_id, created_by_user_id, name, description, image_asset_id, price_cents,
+              category_id)
       values (${ctx.tenantId}::uuid, ${ctx.userId}::uuid, ${input.name}, ${input.description},
-              ${input.imageAssetId}::uuid, ${input.priceCents}::int)
+              ${input.imageAssetId}::uuid, ${input.priceCents}::int, ${category?.id ?? null}::uuid)
       returning id, name, description, price_cents, currency, image_asset_id, status`);
     const product = inserted[0];
     if (!product) throw new ApiError(500, 'INTERNAL');
@@ -412,6 +486,7 @@ export async function createProduct(
       currency: 'BRL' as const,
       imageAssetId: product.image_asset_id,
       status: product.status as ProductStatus,
+      ...categoryKey(category?.slug),
       // A product the caller just created: nobody holds it yet.
       owned: false,
       communities,
@@ -568,6 +643,7 @@ type CardRow = PurchaseColumns & {
   price_cents: number;
   image_asset_id: string | null;
   status: string;
+  category_slug: string | null;
   owned: boolean;
   cursor_at: string;
   cursor_id: string;
@@ -580,6 +656,7 @@ const toCard = (row: CardRow): ProductCard => ({
   currency: 'BRL',
   imageAssetId: row.image_asset_id,
   status: row.status as ProductStatus,
+  ...categoryKey(row.category_slug),
   owned: row.owned,
   purchase: toPurchaseInfo(row),
 });
@@ -613,7 +690,7 @@ export async function listProducts(
     if (query.filter === 'owned') {
       return tx.execute<CardRow>(sql`
         select p.id, p.name, p.price_cents, p.image_asset_id, p.status, true as owned,
-               ${PURCHASE_COLUMNS},
+               ${CATEGORY_COLUMN}, ${PURCHASE_COLUMNS},
                to_char(e.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at,
                e.id as cursor_id
           from store_entitlements e
@@ -631,7 +708,7 @@ export async function listProducts(
     if (query.filter === 'archived') {
       return tx.execute<CardRow>(sql`
         select p.id, p.name, p.price_cents, p.image_asset_id, p.status, ${ownedExists} as owned,
-               ${PURCHASE_COLUMNS},
+               ${CATEGORY_COLUMN}, ${PURCHASE_COLUMNS},
                to_char(p.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at,
                p.id as cursor_id
           from store_products p
@@ -646,7 +723,7 @@ export async function listProducts(
     }
     return tx.execute<CardRow>(sql`
         select p.id, p.name, p.price_cents, p.image_asset_id, p.status, ${ownedExists} as owned,
-               ${PURCHASE_COLUMNS},
+               ${CATEGORY_COLUMN}, ${PURCHASE_COLUMNS},
                to_char(p.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at,
                p.id as cursor_id
           from store_products p
@@ -681,7 +758,7 @@ export async function listProducts(
   return { items: page.map(toCard), nextCursor };
 }
 
-type DetailRow = ProductRow & PurchaseColumns & { owned: boolean };
+type DetailRow = ProductRow & PurchaseColumns & { owned: boolean; category_slug: string | null };
 
 /**
  * One product as the product page reads it, inside the caller's transaction, or null when the
@@ -703,6 +780,7 @@ async function readDetail(
              select 1 from store_entitlements e
               where e.tenant_id = p.tenant_id and e.product_id = p.id
                 and e.user_id = ${ctx.userId}::uuid and e.status = 'active') as owned,
+           ${CATEGORY_COLUMN},
            ${PURCHASE_COLUMNS}
       from store_products p
      where p.id = ${productId}::uuid
@@ -719,6 +797,7 @@ async function readDetail(
     currency: 'BRL',
     imageAssetId: product.image_asset_id,
     status: product.status as ProductStatus,
+    ...categoryKey(product.category_slug),
     owned: product.owned,
     communities: await linkedCommunities(tx, ctx, product.id),
     unlockedCourses: await unlockedCourses(tx, ctx, product.id, coursesOn),
@@ -755,6 +834,60 @@ export async function getProduct(
   );
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
   return detail;
+}
+
+type FrontRow = { promo_product_id: string | null; featured_product_ids: string[] | null };
+
+/**
+ * `GET /v1/store/front` (D-694, D-696): the store's categories in the storefront's order, the promo
+ * product and the featured products. ONE tenant transaction that starts with the lazy seed (D-691),
+ * so a store enabled later answers its eight built-ins on the first read. The promo is answered only
+ * while that product is ACTIVE; the featured ids are the ACTIVE ones, in the admin's stored order (the
+ * array's ordinality), at most five (the table's check). Reads only what the tenant owns: every read
+ * is filtered by the tenant and runs under RLS. The server never guesses anything for a product here
+ * (D-693): a product with no category simply sits in no shelf.
+ */
+export async function getFront(ctx: RequestContext): Promise<StoreFront> {
+  const front = await withTenantTx(ctx, async (tx) => {
+    await ensureSeeded(tx, ctx);
+    const categories = await tx.execute<{ id: string; name: string; icon: string }>(sql`
+      select slug as id, name, icon
+        from store_categories
+       where tenant_id = ${ctx.tenantId}::uuid
+       order by position, slug`);
+    const rows = await tx.execute<FrontRow>(sql`
+      select (select p.id
+                from store_products p
+               where p.tenant_id = f.tenant_id
+                 and p.id = f.promo_product_id
+                 and p.status = 'active') as promo_product_id,
+             (select array_agg(p.id order by u.ord)
+                from unnest(f.featured_product_ids) with ordinality as u(id, ord)
+                join store_products p on p.id = u.id and p.tenant_id = f.tenant_id
+               where p.status = 'active') as featured_product_ids
+        from store_front f
+       where f.tenant_id = ${ctx.tenantId}::uuid`);
+    const row = rows[0];
+    return {
+      categories: categories as StoreFront['categories'],
+      promoProductId: row?.promo_product_id ?? null,
+      featuredProductIds: row?.featured_product_ids ?? [],
+    };
+  });
+
+  log.info(
+    {
+      event: 'store.front_read',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      categoryCount: front.categories.length,
+      featuredCount: front.featuredProductIds.length,
+      hasPromo: front.promoProductId !== null,
+    },
+    'store front read',
+  );
+  return front;
 }
 
 type AccessRow = { community_id: string; locked: boolean; archived_tag: boolean };
@@ -1242,12 +1375,16 @@ export async function updateProduct(
   const coursesOn = await coursesEnabled(ctx);
   const detail = await withTenantTx(ctx, async (tx) => {
     if (!(await lockProduct(tx, ctx, productId))) return null;
+    await ensureSeeded(tx, ctx);
     if (patch.imageAssetId !== undefined) await resolveImageAsset(tx, ctx, patch.imageAssetId);
     if (patch.communityIds !== undefined) await resolveCommunities(tx, ctx, patch.communityIds);
     if (patch.courseIds !== undefined) {
       await resolveCourses(tx, ctx, patch.courseIds, productId);
     }
     if (patch.liveIds !== undefined) await resolveLives(tx, ctx, patch.liveIds, productId);
+    // OQ-3: an absent key leaves the category alone, null clears it, a slug sets it.
+    const category =
+      patch.category === undefined ? undefined : await resolveCategory(tx, ctx, patch.category);
 
     const sets = [sql`updated_at = now()`];
     if (patch.name !== undefined) sets.push(sql`name = ${patch.name}`);
@@ -1256,6 +1393,7 @@ export async function updateProduct(
     if (patch.imageAssetId !== undefined) {
       sets.push(sql`image_asset_id = ${patch.imageAssetId}::uuid`);
     }
+    if (category !== undefined) sets.push(sql`category_id = ${category?.id ?? null}::uuid`);
     await tx.execute(sql`
       update store_products
          set ${sql.join(sets, sql`, `)}

@@ -30,11 +30,13 @@ import {
   purchaseResultSchema,
   revokeResultSchema,
   STORE_ISSUE_SET,
+  storeFrontSchema,
 } from '../contracts/index';
 import {
   createProduct,
   getCommunityAccess,
   getCourseAccess,
+  getFront,
   getLiveAccess,
   getProduct,
   grantAccess,
@@ -133,6 +135,19 @@ const getProductRoute = createRoute({
       description:
         '`MODULE_DISABLED` when the store is off; otherwise the product is unknown, another tenant’s, or archived and neither held nor managed by the caller. One bare code, no details (D-23).',
     },
+  },
+});
+
+const getFrontRoute = createRoute({
+  method: 'get',
+  path: '/front',
+  responses: {
+    200: {
+      description:
+        'The store front for every member: `categories` (`id` is the slug, `name`, `icon`) in the storefront’s order, `promoProductId` (the promo product, only while it is ACTIVE, else null) and `featuredProductIds` (the ACTIVE featured products in the admin’s order, at most 5). A store that never had categories answers its eight built-ins on the first read: the one-time seed runs inside this call.',
+      content: { 'application/json': { schema: storeFrontSchema } },
+    },
+    404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
   },
 });
 
@@ -461,6 +476,7 @@ export const storeRoutes = store
     const canManage = await canManageStore(ctx);
     return c.json(await getProduct(ctx, c.req.valid('param').productId, canManage), 200);
   })
+  .openapi(getFrontRoute, async (c) => c.json(await getFront(c.get('ctx')), 200))
   .openapi(listCommunityAccessRoute, async (c) =>
     c.json(await listCommunityAccess(c.get('ctx')), 200),
   )

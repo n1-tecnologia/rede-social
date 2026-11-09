@@ -35,7 +35,10 @@ export const STORE_MAX_LINKS = 50;
  *    tenant, or not a uuid), `too_many_communities`, `course_invalid` (not a draft or published course
  *    of this tenant nor one already linked to this product, or not a uuid), `too_many_courses`,
  *    `live_invalid` (not a non-cancelled live of this tenant nor one already linked to this product,
- *    or not a uuid), `too_many_lives` (08.4, D-418);
+ *    or not a uuid), `too_many_lives` (08.4, D-418), and (12.3, D-690, D-694) `category_invalid` (a
+ *    category slug that is malformed or is not a category of this tenant), `category_name_required`,
+ *    `category_name_too_long`, `category_name_taken`, `category_icon_invalid`, `too_many_categories`,
+ *    `promo_invalid`, `featured_invalid` and `too_many_featured` (the writes of the store front);
  *  - `409 CONFLICT`: `unavailable` (the product is archived), `price_changed` (the price moved) and
  *    `community_deleted` (09.3 WR-03: reactivating a product that links a deleted community).
  */
@@ -54,6 +57,15 @@ export const STORE_ISSUES = [
   'unavailable',
   'price_changed',
   'community_deleted',
+  'category_invalid',
+  'category_name_required',
+  'category_name_too_long',
+  'category_name_taken',
+  'category_icon_invalid',
+  'too_many_categories',
+  'promo_invalid',
+  'featured_invalid',
+  'too_many_featured',
 ] as const;
 export type StoreIssue = (typeof STORE_ISSUES)[number];
 
@@ -64,6 +76,253 @@ export const STORE_ISSUE_SET: ReadonlySet<string> = new Set(STORE_ISSUES);
 export const STORE_PERMISSIONS = {
   manage: 'store.product.manage',
 } as const;
+
+/**
+ * 2026-10-27 — the store's kinds of item (the product owner: "será vendido curso, livro, roupa,
+ * perfumes, equipamentos e afins"), the storefront's built-in categories in the storefront's order.
+ * Since 12.3 (D-691) they are the SEED of every store's own category rows, no longer a closed enum:
+ * a store's admin renames, adds and deletes categories, so a product's `category` is a slug string
+ * (`STORE_CATEGORY_SLUG_RE`), and these eight slugs stay valid values of it.
+ */
+export const STORE_PRODUCT_CATEGORIES = [
+  'cursos',
+  'livros',
+  'materiais',
+  'roupas',
+  'perfumes',
+  'equipamentos',
+  'servicos',
+  'outros',
+] as const;
+export type StoreProductCategory = (typeof STORE_PRODUCT_CATEGORIES)[number];
+
+/**
+ * 12.3 (D-690): the store front's limits, owned by the SERVER and exported here so the web never
+ * retypes them. At most 20 categories per store, a name of at most 30 characters (code points, the
+ * Zod `.max()` rule and the table's `char_length`), and at most 5 featured products.
+ */
+export const STORE_CATEGORY_MAX = 20;
+export const STORE_CATEGORY_NAME_MAX = 30;
+export const STORE_FEATURED_MAX = 5;
+
+/** The glyphs a category may take (lucide names, drawn by the web's `StoreCategoryGlyph`). */
+export const STORE_CATEGORY_ICONS = [
+  'graduation-cap',
+  'book-open',
+  'file-text',
+  'shirt',
+  'spray-can',
+  'wrench',
+  'calendar-check',
+  'package',
+  'tag',
+  'sparkles',
+  'gift',
+  'heart',
+  'star',
+  'gem',
+  'coffee',
+  'dumbbell',
+  'palette',
+  'camera',
+  'laptop',
+  'music',
+] as const;
+export type StoreCategoryIcon = (typeof STORE_CATEGORY_ICONS)[number];
+
+/**
+ * A category's id in the contract is its SLUG (OQ-2, 12.3): lowercase letters, digits and inner
+ * hyphens, 1 to 24 characters. The same rule as the table's `store_categories_slug_chk`, and the
+ * `?categoria=` of the category's page.
+ */
+export const STORE_CATEGORY_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$/;
+
+/** The eight built-in categories with their glyphs, in the storefront's order (D-691). */
+export const STORE_BUILT_IN_CATEGORIES: ReadonlyArray<{
+  slug: StoreProductCategory;
+  name: string;
+  icon: StoreCategoryIcon;
+}> = [
+  { slug: 'cursos', name: 'Cursos', icon: 'graduation-cap' },
+  { slug: 'livros', name: 'Livros', icon: 'book-open' },
+  { slug: 'materiais', name: 'Materiais', icon: 'file-text' },
+  { slug: 'roupas', name: 'Roupas', icon: 'shirt' },
+  { slug: 'perfumes', name: 'Perfumes', icon: 'spray-can' },
+  { slug: 'equipamentos', name: 'Equipamentos', icon: 'wrench' },
+  { slug: 'servicos', name: 'Serviços', icon: 'calendar-check' },
+  { slug: 'outros', name: 'Outros', icon: 'package' },
+];
+
+/**
+ * The category a product's NAME tells: the first kind whose words appear in it, in THIS order (a book
+ * before a consultation, an equipment or a course before a service), else "outros". Accents and case
+ * do not count, and only whole words match ("led", never "ledger"). Moved here from the web
+ * (`apps/web/lib/store-categories.ts`, 12.3-11) so there is ONE rule: the server applies it on a
+ * create that sends no category, and `app.store_guess_category` (plan 09) is its SQL twin, both pinned
+ * to `tests/guess-corpus.ts`. The server never applies it to an existing product on a read (D-693).
+ */
+const CATEGORY_WORDS: ReadonlyArray<readonly [StoreProductCategory, readonly string[]]> = [
+  ['livros', ['livro', 'livros', 'e-book', 'ebook', 'e-books', 'apostila', 'guia', 'manual']],
+  [
+    'materiais',
+    [
+      'protocolo',
+      'protocolos',
+      'planilha',
+      'planilhas',
+      'template',
+      'templates',
+      'checklist',
+      'material',
+      'materiais',
+      'roteiro',
+      'roteiros',
+    ],
+  ],
+  [
+    'roupas',
+    [
+      'camiseta',
+      'camisetas',
+      'camisa',
+      'moletom',
+      'jaqueta',
+      'jaleco',
+      'bone',
+      'calca',
+      'vestido',
+      'blusa',
+      'uniforme',
+      'avental',
+      'regata',
+      'roupa',
+      'roupas',
+      'touca',
+      'scrub',
+      'casaco',
+    ],
+  ],
+  [
+    'perfumes',
+    ['perfume', 'perfumes', 'fragrancia', 'colonia', 'body splash', 'eau de parfum', 'essencia'],
+  ],
+  [
+    'equipamentos',
+    [
+      'equipamento',
+      'equipamentos',
+      'aparelho',
+      'dermapen',
+      'caneta',
+      'maquina',
+      'maca',
+      'led',
+      'laser',
+      'ultrassom',
+      'ring light',
+      'luminaria',
+      'tripe',
+      'ponteira',
+      'ponteiras',
+    ],
+  ],
+  [
+    'cursos',
+    [
+      'curso',
+      'cursos',
+      'formacao',
+      'masterclass',
+      'aula',
+      'aulas',
+      'treinamento',
+      'workshop',
+      'imersao',
+      'webinar',
+    ],
+  ],
+  [
+    'servicos',
+    ['mentoria', 'consultoria', 'sessao', 'sessoes', 'consulta', 'atendimento', 'pacote'],
+  ],
+];
+
+/** Lower case, no accents: "Fragrância" → "fragrancia" (the guess and the search). */
+export function plainText(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+// The words are plain letters, spaces and hyphens: nothing to escape in the pattern.
+const CATEGORY_MATCHERS = CATEGORY_WORDS.map(([category, words]) => ({
+  category,
+  pattern: new RegExp(`(^|[^a-z0-9])(${words.join('|')})(?=$|[^a-z0-9])`),
+}));
+
+/** The category a product's name tells (D-692: the one rule, the initial load's and the create's). */
+export function guessStoreCategory(name: string): StoreProductCategory {
+  const text = plainText(name);
+  return CATEGORY_MATCHERS.find(({ pattern }) => pattern.test(text))?.category ?? 'outros';
+}
+
+/** A category name as kept: trimmed, inner runs of space folded, at most `STORE_CATEGORY_NAME_MAX` code points. */
+export function cleanCategoryName(name: string): string {
+  return Array.from(name.trim().replace(/\s+/g, ' '))
+    .slice(0, STORE_CATEGORY_NAME_MAX)
+    .join('')
+    .trim();
+}
+
+/** "Skin care & Cia" → "skin-care-cia", unique among `taken` ("-2", "-3"…), at most 24 characters. */
+export function newCategoryId(name: string, taken: ReadonlySet<string>): string {
+  const base =
+    name
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 20)
+      .replace(/-+$/, '') || 'categoria';
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const id = `${base}-${n}`;
+    if (!taken.has(id)) return id;
+  }
+}
+
+/**
+ * A product's category in a body or an answer: the category's SLUG (OQ-2), validated by shape here and
+ * by existence in the writing transaction. An uppercase, accented, spaced or over-long slug, and the
+ * empty string, are refused by the schema before any lookup (`category_invalid`).
+ */
+const categorySlugField = z.string().regex(STORE_CATEGORY_SLUG_RE, 'category_invalid');
+
+/** One category of the store front (`id` is the slug), in the storefront's order. */
+export const storeCategorySchema = z
+  .object({
+    id: z.string().regex(STORE_CATEGORY_SLUG_RE),
+    name: z.string(),
+    icon: z.enum(STORE_CATEGORY_ICONS),
+  })
+  .strict();
+export type StoreFrontCategory = z.infer<typeof storeCategorySchema>;
+
+/**
+ * `GET /v1/store/front` (D-694, D-696): the store's categories by `position, id`, the promo product
+ * (only while that product is ACTIVE) and the featured product ids (active only, in the admin's
+ * order, at most `STORE_FEATURED_MAX`).
+ */
+export const storeFrontSchema = z
+  .object({
+    categories: z.array(storeCategorySchema),
+    promoProductId: z.uuid().nullable(),
+    featuredProductIds: z.array(z.uuid()).max(STORE_FEATURED_MAX),
+  })
+  .strict();
+export type StoreFront = z.infer<typeof storeFrontSchema>;
 
 /**
  * The product's field rules, ONE definition shared by the create body and the patch body (08.2-05),
@@ -105,6 +364,11 @@ export const productInputSchema = z
     communityIds: productCommunityIdsField.default([]).transform(dedupe),
     courseIds: productCourseIdsField.default([]).transform(dedupe),
     liveIds: productLiveIdsField.default([]).transform(dedupe),
+    /**
+     * 12.3 (OQ-3): ABSENT means "apply the name guess" (a client that never heard of categories keeps
+     * getting its product shelved), an explicit `null` means "Sem categoria", a slug picks that category.
+     */
+    category: categorySlugField.nullable().optional(),
   })
   .strict();
 export type ProductInput = z.infer<typeof productInputSchema>;
@@ -132,6 +396,8 @@ export const productPatchSchema = z
     communityIds: productCommunityIdsField.transform(dedupe).optional(),
     courseIds: productCourseIdsField.transform(dedupe).optional(),
     liveIds: productLiveIdsField.transform(dedupe).optional(),
+    /** 12.3 (OQ-3): absent leaves the category alone, `null` clears it, a slug sets it. */
+    category: categorySlugField.nullable().optional(),
   })
   .strict()
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
@@ -211,24 +477,6 @@ export type ProductUnlockLive = z.infer<typeof productUnlockLiveSchema>;
 
 export const PRODUCT_STATUSES = ['active', 'archived'] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
-
-/**
- * 2026-10-27 — the store's kinds of item (the product owner: "será vendido curso, livro, roupa,
- * perfumes, equipamentos e afins"), the storefront's categories and shelves, in the storefront's
- * order. OPTIONAL on the card and the page: the API has no column for it yet, so the web reads it
- * when it arrives and, until then, tells the category from the name (`apps/web/lib/store-categories`).
- */
-export const STORE_PRODUCT_CATEGORIES = [
-  'cursos',
-  'livros',
-  'materiais',
-  'roupas',
-  'perfumes',
-  'equipamentos',
-  'servicos',
-  'outros',
-] as const;
-export type StoreProductCategory = (typeof STORE_PRODUCT_CATEGORIES)[number];
 
 /**
  * `PUT /v1/store/products/{productId}/status` (08.2-05, decision 3): idempotent, one verb for both
@@ -315,8 +563,8 @@ export const productDetailSchema = z
     currency: z.literal('BRL'),
     imageAssetId: z.uuid().nullable(),
     status: z.enum(PRODUCT_STATUSES),
-    /** 2026-10-27 — OPTIONAL: the API has no category yet (`STORE_PRODUCT_CATEGORIES`). */
-    category: z.enum(STORE_PRODUCT_CATEGORIES).optional(),
+    /** 12.3 (D-693, D-694): the category's slug, ABSENT when the product has none. */
+    category: z.string().regex(STORE_CATEGORY_SLUG_RE).optional(),
     owned: z.boolean(),
     communities: z.array(productCommunitySchema),
     holderCount: z.number().int().min(0).optional(),
@@ -369,8 +617,8 @@ export const productCardSchema = z
     currency: z.literal('BRL'),
     imageAssetId: z.uuid().nullable(),
     status: z.enum(PRODUCT_STATUSES),
-    /** 2026-10-27 — OPTIONAL: the API has no category yet (`STORE_PRODUCT_CATEGORIES`). */
-    category: z.enum(STORE_PRODUCT_CATEGORIES).optional(),
+    /** 12.3 (D-693, D-694): the category's slug, ABSENT when the product has none. */
+    category: z.string().regex(STORE_CATEGORY_SLUG_RE).optional(),
     owned: z.boolean(),
     purchase: purchaseInfoSchema.optional(),
   })
