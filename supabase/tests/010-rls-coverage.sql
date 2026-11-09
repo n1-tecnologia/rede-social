@@ -157,6 +157,10 @@ select is_empty(
         -- course or a live, and their foreign keys to `courses` / `course_lives` are hand-written
         -- SQL (MOD-02), so nothing in the TS schema would notice them disappear either.
         ('store_product_courses'), ('store_product_lives'),
+        -- Phase 12.3 (12.3-09, 12.3-10, D-690, D-700). The category list and the front row of a store both carry
+        -- `tenant_id`, so assertions 1-2 already cover them; they are listed for the same reason as their siblings.
+        -- Both are tenant-read, admin-write, and both had TRUNCATE revoked from `authenticated` (truncate skips RLS).
+        ('store_categories'), ('store_front'),
         -- Phase 08.3 (08.3-01). The courses module's nine tables all carry `tenant_id`, so
         -- assertions 1-2 already cover them; they are listed for the same reason as their siblings.
         -- Three of them matter more than most: `course_lessons` carries the RESTRICTIVE

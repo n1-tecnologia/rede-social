@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(280);
+select plan(296);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -290,6 +290,15 @@ insert into public.store_products (id, tenant_id, created_by_user_id, name, pric
 insert into public.store_product_communities (tenant_id, product_id, community_id) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-0000000001a1', '0a000000-0000-4000-8000-0000000000c1'),
   ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-0000000000c1');
+-- 12.3-10 (D-700): the category list and the front row, IDENTICAL on both sides — one category slugged 'cursos' named 'x', and one
+-- front row whose promo product is the tenant's own product 'x'. Both tables are written by the tenant admin in production; here
+-- the fixture is written as the migration role like its neighbours.
+insert into public.store_categories (id, tenant_id, slug, name, icon, position) values
+  ('0a000000-0000-4000-8000-0000000001a4', '0a000000-0000-4000-8000-000000000001', 'cursos', 'x', 'package', 1),
+  ('0b000000-0000-4000-8000-0000000001a4', '0b000000-0000-4000-8000-000000000001', 'cursos', 'x', 'package', 1);
+insert into public.store_front (tenant_id, promo_product_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-0000000001a1'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1');
 select tests.as_service();
 insert into public.store_orders (id, tenant_id, user_id, product_id, status, amount_cents, currency, paid_at) values
   ('0a000000-0000-4000-8000-0000000001a2', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-0000000001a1', 'paid', 1990, 'BRL', now()),
@@ -1319,6 +1328,66 @@ select results_eq(
        delete from public.store_product_communities where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
      ) select count(*)::int from u $$,
   ARRAY[0], 'USING: a delete aimed at B''s links touches nothing');
+
+-- ── store_categories: the same six cases (12.3-10, D-700), plus the member write and the truncate privilege. Tenant-read,
+--    admin-write: the lane here is a MEMBER of A, so a write to its OWN tenant is refused as well. ──────────────────────
+select results_eq(
+  $$ select count(*)::int from public.store_categories where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own store_categories row');
+select results_eq(
+  $$ select count(*)::int from public.store_categories where slug = 'cursos' $$,
+  ARRAY[1], 'adjacency: both tenants hold a category slugged cursos named x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.store_categories where slug = 'cursos' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the category it returns belongs to A');
+select is_empty(
+  $$ select id from public.store_categories where id = '0b000000-0000-4000-8000-0000000001a4' $$,
+  'detail by id: B''s category is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.store_categories (tenant_id, slug, name, icon, position)
+     values ('0b000000-0000-4000-8000-000000000001', 'y', 'y', 'package', 2) $$,
+  '42501', null, 'WITH CHECK: A cannot write a category stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (
+       update public.store_categories set name = 'hack' where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s categories touches nothing');
+select throws_ok(
+  $$ insert into public.store_categories (tenant_id, slug, name, icon, position)
+     values ('0a000000-0000-4000-8000-000000000001', 'y', 'y', 'package', 2) $$,
+  '42501', null, 'a member of A cannot write a category into A either (only the admin_tenant claim writes)');
+select results_eq(
+  $$ select has_table_privilege('authenticated', 'public.store_categories', 'TRUNCATE') $$,
+  ARRAY[false], 'truncate privilege: authenticated cannot TRUNCATE store_categories (truncate skips row-level security)');
+
+-- ── store_front: the same six cases (12.3-10, D-700), plus the member write and the truncate privilege. One row per tenant, keyed
+--    by tenant_id, so "by id" is the tenant id. ───────────────────────────────────────────────────────────────────────
+select results_eq(
+  $$ select count(*)::int from public.store_front where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own store_front row');
+select results_eq(
+  $$ select count(*)::int from public.store_front where promo_product_id is not null $$,
+  ARRAY[1], 'adjacency: both tenants hold a front row with a promo product, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.store_front $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the front row it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.store_front where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'detail by key: B''s front row is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.store_front (tenant_id) values ('0b000000-0000-4000-8000-000000000001') $$,
+  '42501', null, 'WITH CHECK: A cannot write a front row stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (
+       update public.store_front set promo_product_id = null where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s front row touches nothing');
+select throws_ok(
+  $$ insert into public.store_front (tenant_id) values ('0a000000-0000-4000-8000-000000000001') $$,
+  '42501', null, 'a member of A cannot write a front row into A either (only the admin_tenant claim writes)');
+select results_eq(
+  $$ select has_table_privilege('authenticated', 'public.store_front', 'TRUNCATE') $$,
+  ARRAY[false], 'truncate privilege: authenticated cannot TRUNCATE store_front (truncate skips row-level security)');
 
 -- ── store_orders: the isolation cases on a no-write-policy ledger (08.2-01). The member selects
 --    its OWN order and none of B's; it can write nothing at all (no write policy and no write
