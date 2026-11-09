@@ -72,6 +72,23 @@ async function readyLessonVideo(tenantId: string, label: string, prefix = PREFIX
   return row.id;
 }
 
+/** A ready `cover` image of `tenantId`, the kind a track's Topo may point at (NOVF-02). */
+async function readyCoverImage(tenantId: string, label: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+       variant_widths, filename, ready_at)
+    select ${tenantId}::uuid, m.user_id, 'image', 'cover', 'ready', 'supabase', 'image/webp',
+           262144, 1600, 700, '{320,640,960,1280}'::int[], ${`${PREFIX}-${label}.webp`}, now()
+      from public.memberships m
+     where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant'
+     order by m.joined_at
+     fetch first 1 rows only
+    returning id::text as id`;
+  if (!row) throw new Error(`could not seed the ${label} cover image`);
+  return row.id;
+}
+
 async function created(res: Response, what: string): Promise<string> {
   expect(res.status, `${what} -> ${res.status}`).toBe(201);
   return ((await res.json()) as { id: string }).id;
@@ -925,6 +942,8 @@ describe('08.6 tracks', () => {
       id: fx.tracks.ta,
       title: `${TRK} trilha TA`,
       coverAssetId: null,
+      // NOVF-02: the Topo is the stored value or null, never a computed fallback.
+      topCoverAssetId: null,
       // NOVF-01: the three texts always travel; a track saved without any answers three ''.
       subtitle: '',
       audience: '',
@@ -1287,6 +1306,40 @@ describe('NOVF-01 track texts on the member read', () => {
     const tied = [t1, t2].sort().reverse();
     const { tracks } = await readTracksText(tokens.member);
     expect(tracks.map((track) => track.id)).toEqual([newest, ...tied, oldest]);
+  });
+
+  it('NOVF-02 tracks Topo: a member reads the Topo the admin saved beside the card cover, null when none was saved, and never another tenant’s asset', async () => {
+    await sweepTracks();
+    const tenantId = await demoTenantId();
+    const card = await readyCoverImage(tenantId, 'card');
+    const top = await readyCoverImage(tenantId, 'top');
+    const withTop = await adminTrack({
+      title: `${NVF} trilha com topo`,
+      coverAssetId: card,
+      topCoverAssetId: top,
+    });
+    const without = await adminTrack({ title: `${NVF} trilha sem topo`, coverAssetId: card });
+    const { tracks } = await readTracksText(tokens.member);
+    // Positive control: the Topo and the card cover travel together; the track with none is null.
+    expect(tracks.find((track) => track.id === withTop)).toMatchObject({
+      coverAssetId: card,
+      topCoverAssetId: top,
+    });
+    const bare = tracks.find((track) => track.id === without);
+    expect(bare).toMatchObject({ coverAssetId: card, topCoverAssetId: null });
+
+    // Negative: the lab admin cannot write another tenant's asset into a demo track, and a demo
+    // track never carries a foreign asset id; the member read after the refusal is unchanged.
+    const labTenant = await adminSql<{ id: string }[]>`
+      select id::text as id from public.tenants where slug = 'rede-lab'`;
+    const labTop = await readyCoverImage(labTenant[0]?.id ?? '', 'lab-top');
+    const refused = await admin('PATCH', `/v1/courses/tracks/${withTop}`, {
+      topCoverAssetId: labTop,
+    });
+    expect(refused.status).toBe(400);
+    const after = await readTracksText(tokens.member);
+    expect(after.raw).not.toContain(labTop);
+    expect(after.tracks.find((track) => track.id === withTop)?.topCoverAssetId).toBe(top);
   });
 
   it('NOVF-01 empty school: a tenant with no active track still answers { tracks: [] }', async () => {

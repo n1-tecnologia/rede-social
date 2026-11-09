@@ -2841,6 +2841,7 @@ describe('tracks', () => {
         'audience',
         'description',
         'coverAssetId',
+        'topCoverAssetId',
         'status',
         'archivedAt',
         'createdAt',
@@ -2919,6 +2920,56 @@ describe('tracks', () => {
     await expectBare404(await putTrackStatus(track.id, 'archived', tokens.labAdmin, HOSTS.lab));
     await expectBare404(await putOrder(track.id, { ids: [] }, tokens.labAdmin, HOSTS.lab));
     expect(await json<TrackDetail>(await getTrack(track.id), 200)).toEqual(detached);
+  });
+
+  it('top cover (NOVF-02, D-699): a ready cover attaches as the track Topo beside the card cover and both reads carry it; a pending, wrong-purpose, rede-lab or unknown asset is 400 top_cover_invalid by name; a track with none reads topCoverAssetId null', async () => {
+    // Control: a track with no Topo reads null on create and on read, the card cover untouched.
+    const card = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const none = await createTrack({ coverAssetId: card });
+    expect(none.topCoverAssetId).toBeNull();
+    expect(none.coverAssetId).toBe(card);
+    expect((await json<TrackDetail>(await getTrack(none.id), 200)).topCoverAssetId).toBeNull();
+
+    // Positive control: a ready demo cover attaches on create and reads back from the admin detail.
+    const top = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const withTop = await createTrack({ coverAssetId: card, topCoverAssetId: top });
+    expect(withTop).toMatchObject({ coverAssetId: card, topCoverAssetId: top });
+    expect(await json<TrackDetail>(await getTrack(withTop.id), 200)).toEqual(withTop);
+    expect(
+      await adminSql`
+        select top_cover_asset_id::text as top, cover_asset_id::text as card
+          from public.course_tracks where id = ${withTop.id}::uuid`,
+    ).toEqual([{ top, card }]);
+
+    // The negatives beside it, on create AND on edit: ONE answer by name, no foreign / unknown tell.
+    const pending = await seedAsset(demoTenantId, 'image', 'cover', 'pending');
+    const labCover = await seedAsset(labTenantId, 'image', 'cover', 'ready');
+    const postCover = await seedAsset(demoTenantId, 'image', 'post', 'ready');
+    const video = await seedAsset(demoTenantId, 'video', 'cover', 'ready');
+    for (const topCoverAssetId of [pending, labCover, postCover, video, randomUUID()]) {
+      const created = await postTrack({ title: `${PREFIX} t`, topCoverAssetId });
+      expect(created.status).toBe(400);
+      expect(((await created.json()) as Envelope).error.details).toEqual({
+        courses: 'top_cover_invalid',
+      });
+      const edited = await patchTrack(withTop.id, { topCoverAssetId });
+      expect(edited.status).toBe(400);
+      expect(((await edited.json()) as Envelope).error.details).toEqual({
+        courses: 'top_cover_invalid',
+      });
+    }
+    // A malformed id is refused by name too, and the refused edits wrote nothing.
+    const malformed = await patchTrack(withTop.id, { topCoverAssetId: 'not-a-uuid' });
+    expect(malformed.status).toBe(400);
+    expect(((await malformed.json()) as Envelope).error.details).toEqual({
+      courses: 'top_cover_invalid',
+    });
+    expect(await json<TrackDetail>(await getTrack(withTop.id), 200)).toEqual(withTop);
+    // The lab admin cannot touch the demo track at all: the bare 404, the Topo intact.
+    await expectBare404(
+      await patchTrack(withTop.id, { topCoverAssetId: null }, tokens.labAdmin, HOSTS.lab),
+    );
+    expect((await json<TrackDetail>(await getTrack(withTop.id), 200)).topCoverAssetId).toBe(top);
   });
 
   it('order (COURSE-10, D-414, D-415, P39, P40, P41, P42): two published courses take positions 1, 2 with courseCount 2; a draft, an archived, a rede-lab, an unknown and a non-uuid id are 400 course_invalid with nothing written; a duplicate is 400; the same list twice keeps the rows; the reversed list swaps positions and keeps created_at; [] clears; the same course sits in two tracks', async () => {
