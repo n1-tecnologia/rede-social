@@ -372,8 +372,8 @@
       "cta": "Ir para a Loja"
     },
     "setup": {
-      "device": "Por enquanto, vale só neste aparelho.",
       "save": "Salvar",
+      "saving": "Salvando…",
       "cancel": "Cancelar",
       "featured": {
         "title": "Em destaque",
@@ -387,7 +387,13 @@
         "position": "Posição {n}",
         "useNewest": "Usar os mais recentes",
         "empty": "Nenhum produto à venda ainda.",
-        "saved": "Destaque salvo."
+        "saved": "Destaque salvo.",
+        "scope": "Todos os membros veem esta ordem na vitrine.",
+        "errors": {
+          "featured_invalid": "Um dos produtos não está mais à venda. Atualizamos a lista; escolha de novo.",
+          "too_many_featured": "O destaque aceita até {max} produtos.",
+          "generic": "Não foi possível salvar o destaque. Tente de novo."
+        }
       },
       "categories": {
         "title": "Categorias",
@@ -409,10 +415,15 @@
         "add": "Adicionar",
         "reset": "Restaurar as categorias padrão",
         "saved": "Categorias salvas.",
+        "scope": "Todos os membros veem estas categorias na vitrine.",
         "errors": {
           "empty": "Dê um nome a cada categoria.",
           "taken": "Já existe uma categoria com esse nome.",
-          "max": "A loja pode ter até {max} categorias."
+          "max": "A loja pode ter até {max} categorias.",
+          "category_name_too_long": "Use até {max} caracteres no nome.",
+          "category_icon_invalid": "Escolha um dos ícones da lista.",
+          "category_invalid": "As categorias mudaram enquanto você editava. Atualizamos a lista; confira e tente de novo.",
+          "generic": "Não foi possível salvar as categorias. Tente de novo."
         }
       },
       "icons": {

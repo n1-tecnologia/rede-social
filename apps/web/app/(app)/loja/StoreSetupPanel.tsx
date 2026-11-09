@@ -1,21 +1,27 @@
 'use client';
 
-import { BottomSheet, Button, cn, IconButton, useMediaQuery, useToast } from '@rede-social/ui';
-import { ArrowDown, ArrowUp, Check, LayoutGrid, Plus, Star, Trash2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
-import { type ReactNode, useEffect, useId, useState } from 'react';
 import {
-  cleanCategoryName,
-  newCategoryId,
   STORE_CATEGORY_ICONS,
   STORE_CATEGORY_MAX,
   STORE_CATEGORY_NAME_MAX,
   STORE_FEATURED_MAX,
+} from '@rede-social/module-store/contracts';
+import { BottomSheet, Button, cn, IconButton, useMediaQuery, useToast } from '@rede-social/ui';
+import { ArrowDown, ArrowUp, Check, LayoutGrid, Plus, Star, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import {
+  builtInCategories,
+  cleanCategoryName,
   type StoreCategoryDef,
   type StoreCategoryIcon,
-} from '@/lib/store-setup';
-import { forgetCategory, saveStoreSetup } from '@/lib/store-setup-client';
+} from '@/lib/store-categories';
+import {
+  type StoreSetupSaveResult,
+  saveStoreCategoriesAction,
+  setStoreFeaturedAction,
+} from './actions';
 import { STORE_CATEGORY_GLYPH } from './category-glyphs';
 
 /** A product the featured picker lists: its name, its price and the server's 40×50 thumb. */
@@ -29,15 +35,11 @@ export interface StoreSetupProduct {
 export interface StoreSetupPanelProps {
   /** The store's active products, newest first. */
   products: readonly StoreSetupProduct[];
-  /** The categories as the store shows them now (its own, or the built-in eight named). */
+  /** The store's own categories, in its order (`GET /v1/store/front`). */
   categories: readonly StoreCategoryDef[];
-  /** The built-in eight, named: what "Restaurar as categorias padrão" returns to. */
-  builtIn: readonly StoreCategoryDef[];
-  /** True when this device keeps its own categories (else the built-in eight are in use). */
-  custom: boolean;
   /** How many active products each category holds. */
   counts: Readonly<Record<string, number>>;
-  /** The featured products this device keeps, still on sale, first to last. */
+  /** The store's featured products, still on sale, first to last. */
   featured: readonly string[];
 }
 
@@ -50,21 +52,35 @@ const FIELD =
   'h-11 min-w-0 flex-1 rounded-xl border border-border bg-bg-input px-3 text-sm font-semibold text-text placeholder:font-normal placeholder:text-text-tertiary focus:border-brand focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30';
 const THUMB = 'relative h-[50px] w-10 shrink-0 overflow-hidden rounded-lg bg-bg-tertiary';
 
-/** Two lists of categories hold the same names, glyphs and order. */
-function sameCategories(a: readonly StoreCategoryDef[], b: readonly StoreCategoryDef[]): boolean {
+/** A sheet closed by nothing: what a save in flight leaves the backdrop, Escape and the drag. */
+const NO_CLOSE = () => {};
+
+/**
+ * The one error line of a sheet (UI-D-686): 14/400 `text-danger`, `role="alert"`, directly above the
+ * Save button. A refusal of the API takes focus when it appears (`focusIt`), so it is read where the
+ * admin is looking; the draft's own validation line never does, it would pull focus out of the field
+ * being typed in.
+ */
+function SaveError({ message, focusIt }: { message: string | null; focusIt: boolean }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (message && focusIt) ref.current?.focus();
+  }, [message, focusIt]);
+  if (!message) return null;
   return (
-    a.length === b.length &&
-    a.every(
-      (category, index) =>
-        category.id === b[index]?.id &&
-        category.name === b[index]?.name &&
-        category.icon === b[index]?.icon,
-    )
+    <p
+      ref={ref}
+      role="alert"
+      tabIndex={-1}
+      className="text-sm font-normal text-danger focus:outline-none"
+    >
+      {message}
+    </p>
   );
 }
 
 /**
- * 2026-10-28 — Gerenciar's store setup (the product owner: "na tela de gerenciar da parte de loja
+ * Gerenciar's store setup (the product owner, 2026-10-28: "na tela de gerenciar da parte de loja
  * quero que tenha como gerenciar as categorias e o destaque"): two cards over the products, each
  * opening its sheet.
  *
@@ -73,17 +89,13 @@ function sameCategories(a: readonly StoreCategoryDef[], b: readonly StoreCategor
  *  - "Categorias": the store's categories, created, renamed, given a glyph, ordered (the shelves'
  *    order) and removed; the product form's "Categoria" menu lists them.
  *
- * ⚠ Front only: both are kept on THIS device (`lib/store-setup.ts`) until the API keeps them, and
- * each card says so. A save refreshes the route, so the storefront and the counts follow at once.
+ * Since 12.3-13 (D-690, D-691, D-699) both are kept by the API for every member (`PUT
+ * /v1/store/front/featured` and `PUT /v1/store/categories`), and each card says who sees it. Each
+ * sheet keeps a DRAFT until Save (UI-D-686): Save is pending and the sheet cannot be closed while the
+ * call is in flight; success closes it, toasts and refreshes the route; a refusal keeps it open with
+ * the draft and one alert line; a stale answer refreshes and re-seeds the draft.
  */
-export function StoreSetupPanel({
-  products,
-  categories,
-  builtIn,
-  custom,
-  counts,
-  featured,
-}: StoreSetupPanelProps) {
+export function StoreSetupPanel({ products, categories, counts, featured }: StoreSetupPanelProps) {
   const t = useTranslations('store.setup');
   const tCount = useTranslations('store.categories');
   const router = useRouter();
@@ -94,24 +106,9 @@ export function StoreSetupPanel({
   const byId = new Map(products.map((product) => [product.id, product]));
   const shown = featured.flatMap((id) => byId.get(id) ?? []);
 
-  const keepFeatured = (next: readonly string[]) => {
-    saveStoreSetup({ categories: custom ? [...categories] : null, featured: [...next] });
+  const saved = (message: string) => {
     setSheet(null);
-    toast.show({ tone: 'success', message: t('featured.saved') });
-    router.refresh();
-  };
-
-  const keepCategories = (next: readonly StoreCategoryDef[]) => {
-    const removed = categories.filter(
-      (category) => !next.some((entry) => entry.id === category.id),
-    );
-    for (const category of removed) forgetCategory(category.id);
-    saveStoreSetup({
-      categories: sameCategories(next, builtIn) ? null : [...next],
-      featured: [...featured],
-    });
-    setSheet(null);
-    toast.show({ tone: 'success', message: t('categories.saved') });
+    toast.show({ tone: 'success', message });
     router.refresh();
   };
 
@@ -163,7 +160,7 @@ export function StoreSetupPanel({
         ) : (
           <p className="text-sm font-normal text-text-secondary">{t('featured.auto')}</p>
         )}
-        <p className="text-[11px] font-normal text-text-tertiary">{t('device')}</p>
+        <p className="text-xs font-normal text-text-tertiary">{t('featured.scope')}</p>
       </div>
 
       {/* ── "Categorias" ── */}
@@ -200,35 +197,35 @@ export function StoreSetupPanel({
               >
                 <Icon aria-hidden size={14} className="shrink-0 text-brand" />
                 <span className="truncate">{category.name}</span>
-                <span className="font-normal text-text-tertiary">
+                <span className="shrink-0 font-normal text-text-tertiary">
                   {tCount('count', { n: counts[category.id] ?? 0 })}
                 </span>
               </li>
             );
           })}
         </ul>
-        <p className="text-[11px] font-normal text-text-tertiary">{t('device')}</p>
+        <p className="text-xs font-normal text-text-tertiary">{t('categories.scope')}</p>
       </div>
 
       {/* Inside the page, never portaled: the sheets take the tenant's brand from the shell. */}
       <FeaturedSheet
+        // A fresh draft on every opening: Cancelar never leaves edits behind.
+        key={sheet === 'featured' ? 'open' : 'closed'}
         open={sheet === 'featured'}
         desktop={desktop}
         products={products}
         featured={featured}
         onClose={() => setSheet(null)}
-        onSave={keepFeatured}
+        onSaved={() => saved(t('featured.saved'))}
       />
       <CategoriesSheet
-        // A fresh draft on every opening: Cancelar never leaves edits behind.
         key={sheet === 'categories' ? 'open' : 'closed'}
         open={sheet === 'categories'}
         desktop={desktop}
         categories={categories}
-        builtIn={builtIn}
         counts={counts}
         onClose={() => setSheet(null)}
-        onSave={keepCategories}
+        onSaved={() => saved(t('categories.saved'))}
       />
     </section>
   );
@@ -241,23 +238,31 @@ function FeaturedSheet({
   products,
   featured,
   onClose,
-  onSave,
+  onSaved,
 }: {
   open: boolean;
   desktop: boolean;
   products: readonly StoreSetupProduct[];
   featured: readonly string[];
   onClose: () => void;
-  onSave: (next: readonly string[]) => void;
+  onSaved: () => void;
 }) {
   const t = useTranslations('store.setup');
-  const [picked, setPicked] = useState<string[]>([...featured]);
-  // Every opening starts from what is saved.
+  const router = useRouter();
+  const [picked, setPicked] = useState<string[]>(() => [...featured]);
+  const [pending, setPending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  // A stale answer asked for a refresh: the draft re-seeds when the refreshed list arrives.
+  const awaitingRefresh = useRef(false);
   useEffect(() => {
-    if (open) setPicked([...featured]);
-  }, [open, featured]);
+    if (awaitingRefresh.current) {
+      awaitingRefresh.current = false;
+      setPicked([...featured]);
+    }
+  }, [featured]);
 
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    setFailure(null);
     setPicked((current) =>
       current.includes(id)
         ? current.filter((value) => value !== id)
@@ -265,11 +270,37 @@ function FeaturedSheet({
           ? [...current, id]
           : current,
     );
+  };
+
+  const save = async () => {
+    setPending(true);
+    setFailure(null);
+    let result: StoreSetupSaveResult;
+    try {
+      result = await setStoreFeaturedAction(picked);
+    } catch {
+      result = { ok: false, code: 'generic' };
+    }
+    setPending(false);
+    if (result.ok) {
+      onSaved();
+      return;
+    }
+    if (result.code === 'featured_invalid' || result.code === 'too_many_featured') {
+      setFailure(t(`featured.errors.${result.code}`, { max: STORE_FEATURED_MAX }));
+    } else {
+      setFailure(t('featured.errors.generic'));
+    }
+    if (result.code === 'featured_invalid') {
+      awaitingRefresh.current = true;
+      router.refresh();
+    }
+  };
 
   return (
     <BottomSheet
       open={open}
-      onClose={onClose}
+      onClose={pending ? NO_CLOSE : onClose}
       title={t('featured.sheetTitle')}
       desktopCard={desktop}
       initialFocus="title"
@@ -292,7 +323,7 @@ function FeaturedSheet({
                   <button
                     type="button"
                     aria-pressed={on}
-                    disabled={full}
+                    disabled={full || pending}
                     data-featured-option={product.id}
                     onClick={() => toggle(product.id)}
                     className={cn(
@@ -338,63 +369,112 @@ function FeaturedSheet({
           </ul>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mr-auto px-2"
-          disabled={picked.length === 0}
-          onClick={() => setPicked([])}
-        >
-          {t('featured.useNewest')}
-        </Button>
-        <Button variant="outline" size="sm" onClick={onClose}>
-          {t('cancel')}
-        </Button>
-        <Button
-          variant="brand"
-          size="sm"
-          data-testid="store-setup-featured-save"
-          onClick={() => onSave(picked)}
-        >
-          {t('save')}
-        </Button>
+      <div className="flex flex-col gap-2 border-t border-border px-4 py-3">
+        <SaveError message={failure} focusIt />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mr-auto px-2"
+            disabled={picked.length === 0 || pending}
+            onClick={() => {
+              setFailure(null);
+              setPicked([]);
+            }}
+          >
+            {t('featured.useNewest')}
+          </Button>
+          <Button variant="outline" size="sm" disabled={pending} onClick={onClose}>
+            {t('cancel')}
+          </Button>
+          <Button
+            variant="brand"
+            size="sm"
+            loading={pending}
+            data-testid="store-setup-featured-save"
+            onClick={save}
+          >
+            {pending ? t('saving') : t('save')}
+          </Button>
+        </div>
       </div>
     </BottomSheet>
   );
 }
+
+/**
+ * A row of the categories' draft. A row the store already holds keeps its slug (`id`, the row's
+ * identity: a rename never changes it); a row added in the draft has none and the server mints it.
+ * `key` is the React key: the slug, or a local one for a new row.
+ */
+interface DraftRow {
+  key: string;
+  id: string | null;
+  name: string;
+  icon: StoreCategoryIcon;
+}
+
+function seedRows(categories: readonly StoreCategoryDef[]): DraftRow[] {
+  return categories.map(({ id, name, icon }) => ({ key: id, id, name, icon }));
+}
+
+/** The refusal codes of the categories' save that have a sentence of their own. */
+const CATEGORY_SENTENCE: Record<string, string> = {
+  category_name_required: 'empty',
+  category_name_taken: 'taken',
+  too_many_categories: 'max',
+  category_name_too_long: 'category_name_too_long',
+  category_icon_invalid: 'category_icon_invalid',
+  category_invalid: 'category_invalid',
+};
 
 /** The categories' editor: rename, glyph, order, remove and add; saved as a whole. */
 function CategoriesSheet({
   open,
   desktop,
   categories,
-  builtIn,
   counts,
   onClose,
-  onSave,
+  onSaved,
 }: {
   open: boolean;
   desktop: boolean;
   categories: readonly StoreCategoryDef[];
-  builtIn: readonly StoreCategoryDef[];
   counts: Readonly<Record<string, number>>;
   onClose: () => void;
-  onSave: (next: readonly StoreCategoryDef[]) => void;
+  onSaved: () => void;
 }) {
   const t = useTranslations('store.setup');
   const tCount = useTranslations('store.categories');
-  const [draft, setDraft] = useState<StoreCategoryDef[]>(() => [...categories]);
+  const router = useRouter();
+  const [draft, setDraft] = useState<DraftRow[]>(() => seedRows(categories));
   const [iconFor, setIconFor] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
+  const [pending, setPending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const newId = useId();
+  const added = useRef(0);
+  // A stale answer asked for a refresh: the draft re-seeds when the refreshed list arrives.
+  const awaitingRefresh = useRef(false);
+  useEffect(() => {
+    if (awaitingRefresh.current) {
+      awaitingRefresh.current = false;
+      setDraft(seedRows(categories));
+      setIconFor(null);
+      setRemoving(null);
+    }
+  }, [categories]);
 
-  const names = draft.map((category) =>
-    cleanCategoryName(category.name).toLocaleLowerCase('pt-BR'),
-  );
+  /** Every edit of the draft clears the last refusal: it described the draft as it was. */
+  const edit = (change: (rows: DraftRow[]) => DraftRow[]) => {
+    setFailure(null);
+    setDraft(change);
+  };
+
+  const names = draft.map((row) => cleanCategoryName(row.name).toLocaleLowerCase('pt-BR'));
   const emptyName = names.some((name) => name === '');
   const duplicate = names.some((name, index) => name !== '' && names.indexOf(name) !== index);
   const error = emptyName
@@ -403,20 +483,18 @@ function CategoriesSheet({
       ? t('categories.errors.taken')
       : null;
 
-  const update = (id: string, patch: Partial<StoreCategoryDef>) =>
-    setDraft((current) =>
-      current.map((category) => (category.id === id ? { ...category, ...patch } : category)),
-    );
+  const update = (key: string, patch: Partial<DraftRow>) =>
+    edit((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
 
-  const move = (id: string, delta: -1 | 1) => {
-    const from = draft.findIndex((category) => category.id === id);
+  const move = (key: string, delta: -1 | 1) => {
+    const from = draft.findIndex((row) => row.key === key);
     const to = from + delta;
     if (from < 0 || to < 0 || to >= draft.length) return;
     const next = [...draft];
     const [row] = next.splice(from, 1);
     if (!row) return;
     next.splice(to, 0, row);
-    setDraft(next);
+    edit(() => next);
     setAnnouncement(
       t('categories.moved', { name: row.name, position: to + 1, total: next.length }),
     );
@@ -436,21 +514,69 @@ function CategoriesSheet({
       setAddError(t('categories.errors.taken'));
       return;
     }
-    const id = newCategoryId(name, new Set(draft.map((category) => category.id)));
-    setDraft((current) => [...current, { id, name, icon: 'tag' }]);
+    added.current += 1;
+    edit((rows) => [...rows, { key: `new-${added.current}`, id: null, name, icon: 'tag' }]);
     setNewName('');
     setAddError(null);
   };
 
-  const save = () => {
+  /**
+   * "Restaurar as categorias padrão": the eight built-ins replace the DRAFT only; Save commits them.
+   * A built-in slug the store still holds keeps it as its id; one the store no longer holds goes as a
+   * new row (the server refuses an unknown id), and mints the same slug from the same name.
+   */
+  const reset = () => {
+    const held = new Set(categories.map((category) => category.id));
+    added.current += 1;
+    const round = added.current;
+    edit(() =>
+      builtInCategories().map(({ id, name, icon }) => ({
+        key: held.has(id) ? id : `new-${round}-${id}`,
+        id: held.has(id) ? id : null,
+        name,
+        icon,
+      })),
+    );
+    setIconFor(null);
+    setRemoving(null);
+  };
+
+  const save = async () => {
     if (error) return;
-    onSave(draft.map((category) => ({ ...category, name: cleanCategoryName(category.name) })));
+    setPending(true);
+    setFailure(null);
+    let result: StoreSetupSaveResult;
+    try {
+      result = await saveStoreCategoriesAction(
+        draft.map((row) => ({
+          ...(row.id === null ? {} : { id: row.id }),
+          name: cleanCategoryName(row.name),
+          icon: row.icon,
+        })),
+      );
+    } catch {
+      result = { ok: false, code: 'generic' };
+    }
+    setPending(false);
+    if (result.ok) {
+      onSaved();
+      return;
+    }
+    setFailure(
+      t(`categories.errors.${CATEGORY_SENTENCE[result.code] ?? 'generic'}`, {
+        max: result.code === 'too_many_categories' ? STORE_CATEGORY_MAX : STORE_CATEGORY_NAME_MAX,
+      }),
+    );
+    if (result.code === 'category_invalid') {
+      awaitingRefresh.current = true;
+      router.refresh();
+    }
   };
 
   return (
     <BottomSheet
       open={open}
-      onClose={onClose}
+      onClose={pending ? NO_CLOSE : onClose}
       title={t('categories.sheetTitle')}
       desktopCard={desktop}
       initialFocus="title"
@@ -462,57 +588,60 @@ function CategoriesSheet({
         <p className="text-sm font-normal text-text-secondary">{t('categories.helper')}</p>
 
         <ol data-testid="store-setup-categories-list" className="mt-3 flex flex-col gap-2">
-          {draft.map((category, index) => {
-            const Icon = STORE_CATEGORY_GLYPH[category.icon];
-            const count = counts[category.id] ?? 0;
+          {draft.map((row, index) => {
+            const Icon = STORE_CATEGORY_GLYPH[row.icon];
+            const count = row.id === null ? 0 : (counts[row.id] ?? 0);
             return (
               <li
-                key={category.id}
-                data-category-row={category.id}
+                key={row.key}
+                data-category-row={row.id ?? row.key}
                 className="flex flex-col gap-2 rounded-2xl border border-border bg-bg-secondary/50 p-2"
               >
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    aria-label={t('categories.icon', { name: category.name })}
-                    aria-expanded={iconFor === category.id}
-                    onClick={() => setIconFor(iconFor === category.id ? null : category.id)}
+                    aria-label={t('categories.icon', { name: row.name })}
+                    aria-expanded={iconFor === row.key}
+                    disabled={pending}
+                    onClick={() => setIconFor(iconFor === row.key ? null : row.key)}
                     className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand transition-colors hover:bg-brand/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                   >
                     <Icon aria-hidden size={18} />
                   </button>
                   <input
-                    value={category.name}
+                    value={row.name}
                     maxLength={STORE_CATEGORY_NAME_MAX}
+                    disabled={pending}
                     aria-label={t('categories.nameLabel', { n: index + 1 })}
-                    aria-describedby={`${category.id}-count`}
-                    onChange={(event) => update(category.id, { name: event.target.value })}
+                    aria-describedby={`${row.key}-count`}
+                    onChange={(event) => update(row.key, { name: event.target.value })}
                     className={FIELD}
                   />
-                  <span id={`${category.id}-count`} className="sr-only">
+                  <span id={`${row.key}-count`} className="sr-only">
                     {tCount('count', { n: count })}
                   </span>
                   <IconButton
                     icon={ArrowUp}
-                    label={t('categories.moveUp', { name: category.name })}
+                    label={t('categories.moveUp', { name: row.name })}
                     size={18}
-                    disabled={index === 0}
-                    onClick={() => move(category.id, -1)}
+                    disabled={index === 0 || pending}
+                    onClick={() => move(row.key, -1)}
                     className="shrink-0"
                   />
                   <IconButton
                     icon={ArrowDown}
-                    label={t('categories.moveDown', { name: category.name })}
+                    label={t('categories.moveDown', { name: row.name })}
                     size={18}
-                    disabled={index === draft.length - 1}
-                    onClick={() => move(category.id, 1)}
+                    disabled={index === draft.length - 1 || pending}
+                    onClick={() => move(row.key, 1)}
                     className="shrink-0"
                   />
                   <IconButton
                     icon={Trash2}
-                    label={t('categories.remove', { name: category.name })}
+                    label={t('categories.remove', { name: row.name })}
                     size={18}
-                    onClick={() => setRemoving(category.id)}
+                    disabled={pending}
+                    onClick={() => setRemoving(row.key)}
                     className="shrink-0 text-danger"
                   />
                 </div>
@@ -520,15 +649,15 @@ function CategoriesSheet({
                   {tCount('count', { n: count })}
                 </p>
 
-                {iconFor === category.id ? (
+                {iconFor === row.key ? (
                   <div
                     role="radiogroup"
                     aria-label={t('categories.iconPick')}
                     className="grid grid-cols-5 gap-1.5 px-1 min-[400px]:grid-cols-10"
                   >
-                    {STORE_CATEGORY_ICONS.map((icon: StoreCategoryIcon) => {
+                    {STORE_CATEGORY_ICONS.map((icon) => {
                       const Glyph = STORE_CATEGORY_GLYPH[icon];
-                      const checked = icon === category.icon;
+                      const checked = icon === row.icon;
                       return (
                         // biome-ignore lint/a11y/useSemanticElements: a glyph grid; a native radio cannot draw the icon as its whole face
                         <button
@@ -538,7 +667,7 @@ function CategoriesSheet({
                           aria-checked={checked}
                           aria-label={t(`icons.${icon}`)}
                           onClick={() => {
-                            update(category.id, { icon });
+                            update(row.key, { icon });
                             setIconFor(null);
                           }}
                           className={cn(
@@ -555,10 +684,10 @@ function CategoriesSheet({
                   </div>
                 ) : null}
 
-                {removing === category.id ? (
+                {removing === row.key ? (
                   <div className="flex flex-wrap items-center gap-2 rounded-xl bg-danger/10 px-3 py-2">
                     <p className="min-w-0 flex-1 text-xs font-normal text-text">
-                      {t('categories.removeConfirm', { name: category.name })}
+                      {t('categories.removeConfirm', { name: row.name })}
                     </p>
                     <Button variant="outline" size="sm" onClick={() => setRemoving(null)}>
                       {t('cancel')}
@@ -567,7 +696,7 @@ function CategoriesSheet({
                       variant="danger"
                       size="sm"
                       onClick={() => {
-                        setDraft((current) => current.filter((entry) => entry.id !== category.id));
+                        edit((rows) => rows.filter((entry) => entry.key !== row.key));
                         setRemoving(null);
                       }}
                     >
@@ -589,6 +718,7 @@ function CategoriesSheet({
               id={newId}
               value={newName}
               maxLength={STORE_CATEGORY_NAME_MAX}
+              disabled={pending}
               placeholder={t('categories.newPlaceholder')}
               onChange={(event) => {
                 setNewName(event.target.value);
@@ -605,6 +735,7 @@ function CategoriesSheet({
             <Button
               variant="outline"
               size="md"
+              disabled={pending}
               data-testid="store-setup-category-add"
               onClick={add}
               className="shrink-0 rounded-xl"
@@ -622,7 +753,8 @@ function CategoriesSheet({
 
         <button
           type="button"
-          onClick={() => setDraft([...builtIn])}
+          disabled={pending}
+          onClick={reset}
           className="mt-4 text-xs font-semibold text-brand underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           {t('categories.reset')}
@@ -631,24 +763,23 @@ function CategoriesSheet({
           {announcement}
         </p>
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
-        {error ? (
-          <p role="alert" className="mr-auto text-xs font-normal text-danger">
-            {error}
-          </p>
-        ) : null}
-        <Button variant="outline" size="sm" onClick={onClose}>
-          {t('cancel')}
-        </Button>
-        <Button
-          variant="brand"
-          size="sm"
-          disabled={error !== null}
-          data-testid="store-setup-categories-save"
-          onClick={save}
-        >
-          {t('save')}
-        </Button>
+      <div className="flex flex-col gap-2 border-t border-border px-4 py-3">
+        <SaveError message={failure ?? error} focusIt={failure !== null} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" size="sm" disabled={pending} onClick={onClose}>
+            {t('cancel')}
+          </Button>
+          <Button
+            variant="brand"
+            size="sm"
+            loading={pending}
+            disabled={error !== null}
+            data-testid="store-setup-categories-save"
+            onClick={save}
+          >
+            {pending ? t('saving') : t('save')}
+          </Button>
+        </div>
       </div>
     </BottomSheet>
   );

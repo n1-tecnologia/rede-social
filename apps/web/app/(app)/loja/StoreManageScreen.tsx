@@ -7,15 +7,15 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { type ReactNode, Suspense } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { getStoreFront } from '@/lib/store';
 import {
   STORE_MANAGE_LISTS,
   storeManageFilter,
   storeManageHref,
   storeManageListFromParam,
 } from '@/lib/store-area';
+import { storeCategoryList } from '@/lib/store-categories';
 import { storeItems } from '@/lib/store-front-view';
-import { builtInCategories, storeCategoryList } from '@/lib/store-setup';
-import { readStoreSetup } from '@/lib/store-setup-cookie';
 import { productManageView } from '@/lib/store-view';
 import { CREATE_LINK } from '../cursos/admin-styles';
 import { FilterMenu, type FilterOption } from '../cursos/FilterMenu';
@@ -49,7 +49,8 @@ const LIST_LABEL_KEY = {
  * 2026-10-28 (the product owner: "na tela de gerenciar da parte de loja quero que tenha como
  * gerenciar as categorias e o destaque"): over the products, the store's setup (`StoreSetupPanel`):
  * "Em destaque" and "Categorias", each with its sheet, in a `Suspense` of their own (they read the
- * whole active catalogue).
+ * whole active catalogue). Since 12.3-13 both are the store's own, read from `GET /v1/store/front`
+ * and saved to the API for every member.
  *
  * The page gates the permission; this re-checks it (a server component must not trust its caller).
  */
@@ -141,17 +142,17 @@ function productThumb(imageAssetId: string | null): ReactNode {
 
 /**
  * The store's setup over the products (`StoreSetupPanel`): the active catalogue, each category's
- * count and the featured products still on sale. An unreadable catalogue draws no panel.
+ * count and the featured products still on sale. An unreadable catalogue or front draws no panel: the
+ * categories save as a whole list, so an editor opened on an unknown list could delete the real one.
  */
 async function StoreSetupBody() {
-  const [products, t, store] = await Promise.all([
+  const [products, t, front] = await Promise.all([
     readStoreCatalog(),
     getTranslations(),
-    readStoreSetup(),
+    getStoreFront(),
   ]);
-  if (products === null) return null;
-  const builtIn = builtInCategories(t);
-  const categories = storeCategoryList(store.setup, t);
+  if (products === null || front === null) return null;
+  const categories = storeCategoryList(front.categories, t);
   const items = storeItems(products, t, { categories });
   const counts: Record<string, number> = {};
   for (const item of items) {
@@ -168,10 +169,8 @@ async function StoreSetupBody() {
         thumb: productThumb(item.imageAssetId),
       }))}
       categories={categories.map(({ id, name, icon }) => ({ id, name, icon }))}
-      builtIn={builtIn}
-      custom={store.setup.categories !== null}
       counts={counts}
-      featured={store.setup.featured.filter((id) => onSale.has(id))}
+      featured={front.featuredProductIds.filter((id) => onSale.has(id))}
     />
   );
 }

@@ -1,4 +1,5 @@
 import {
+  type CategoryEntry,
   type CommunityAccess,
   type CommunityAccessList,
   type CourseAccess,
@@ -123,6 +124,70 @@ export async function getStoreFront(): Promise<StoreFront | null> {
     console.error('store.front_failed', { error: String(error) });
     return null;
   }
+}
+
+/**
+ * A store-front write's answer (12.3-12, D-690, D-691, D-699): the fresh front (`null` when the saved
+ * answer could not be read: the write still stands), a closed
+ * `details.store` refusal (the sheet draws its sentence), the store being off, a navigation the
+ * bootstrap knows (401, blocked, suspended…), or anything else. Never throws.
+ */
+export type FrontWriteOutcome =
+  | { status: 'ok'; front: StoreFront | null }
+  | { status: 'issue'; issue: StoreIssue }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/** The shared `PUT` of the two setup saves; shape-only logging (a category name is tenant content). */
+async function putFront(path: string, body: unknown, op: string): Promise<FrontWriteOutcome> {
+  try {
+    const res = await apiFetch(path, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const parsed = tolerantFrontSchema.safeParse(await res.json());
+      if (parsed.success) return { status: 'ok', front: parsed.data };
+      // Saved, but the answer is unreadable: the save stands, the sheet closes and the page re-reads.
+      console.error(`store.${op}_unreadable`);
+      return { status: 'ok', front: null };
+    }
+    const error = await apiError(res);
+    const issue = error.details?.store;
+    if (typeof issue === 'string' && STORE_ISSUE_SET.has(issue)) {
+      return { status: 'issue', issue: issue as StoreIssue };
+    }
+    if (res.status === 404 && error.code === STORE_MODULE_DISABLED) return { status: 'disabled' };
+    const redirectPath = bootstrapRedirectPath(error);
+    if (redirectPath) return { status: 'redirect', path: redirectPath };
+    console.error(`store.${op}_failed`, { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error(`store.${op}_failed`, { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * `PUT /v1/store/front/featured { productIds }` (12.3-12, NOVF-06): the "Em destaque" products in the
+ * admin's order, `[]` for "Usar os mais recentes". The API refuses a repeated, archived, unknown or
+ * foreign id (`featured_invalid`) and more than five (`too_many_featured`).
+ */
+export async function setStoreFeatured(productIds: readonly string[]): Promise<FrontWriteOutcome> {
+  return putFront('/v1/store/front/featured', { productIds }, 'featured');
+}
+
+/**
+ * `PUT /v1/store/categories { categories }` (12.3-12, NOVF-07): the WHOLE ordered list replaces the
+ * store's. A kept row carries its `id` (the slug); a new row carries none and the server mints it (an
+ * unknown id answers `category_invalid`); a row left out is deleted and its products fall to none.
+ */
+export async function saveStoreCategories(
+  categories: readonly CategoryEntry[],
+): Promise<FrontWriteOutcome> {
+  return putFront('/v1/store/categories', { categories }, 'categories');
 }
 
 /**

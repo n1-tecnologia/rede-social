@@ -2,18 +2,30 @@
 
 import { priceCentsSchema } from '@rede-social/contracts/money';
 import {
+  categoriesBodySchema,
+  frontFeaturedBodySchema,
   type ProductCommunity,
   type ProductFilter,
   type ProductUnlockCourse,
   type ProductUnlockLive,
   productListQuerySchema,
+  STORE_ISSUE_SET,
   STORE_PERMISSIONS,
+  type StoreIssue,
 } from '@rede-social/module-store/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath, requireBootstrap } from '@/lib/bootstrap';
-import { getProducts, type PurchaseRefusal, purchaseProduct } from '@/lib/store';
+import {
+  type FrontWriteOutcome,
+  getProducts,
+  type PurchaseRefusal,
+  purchaseProduct,
+  saveStoreCategories,
+  setStoreFeatured,
+} from '@/lib/store';
+import { revalidateStoreScreens } from '@/lib/store-revalidate';
 import { type ProductCardView, productCardView, productManageView } from '@/lib/store-view';
 
 /**
@@ -180,4 +192,54 @@ export async function purchaseProductAction(
   // show. The store pages are dynamic (no router cache for them), and the control refreshes the
   // page itself when the success step closes.
   return outcome;
+}
+
+/* ── 12.3-13: Gerenciar's store setup, kept by the API (D-690, D-691, D-699) ───────────────────── */
+
+/**
+ * What a store-setup save answers. Every refusal is a CODE the sheet maps to copy (nothing
+ * server-controlled reaches the DOM): the API's closed `StoreIssue` vocabulary or `generic`.
+ */
+export type StoreSetupSaveResult = { ok: true } | { ok: false; code: StoreIssue | 'generic' };
+
+/** The first closed store issue a local parse refused with (the contract's own messages), else generic. */
+function localRefusal(messages: readonly string[]): StoreSetupSaveResult {
+  const issue = messages.find((message) => STORE_ISSUE_SET.has(message));
+  return { ok: false, code: (issue as StoreIssue | undefined) ?? 'generic' };
+}
+
+/** The shared tail of the two saves: a navigation the bootstrap knows redirects OUTSIDE any try/catch. */
+function saveResult(outcome: FrontWriteOutcome): StoreSetupSaveResult {
+  if (outcome.status === 'redirect') redirect(outcome.path);
+  if (outcome.status === 'ok') {
+    revalidateStoreScreens();
+    return { ok: true };
+  }
+  return outcome.status === 'issue'
+    ? { ok: false, code: outcome.issue }
+    : { ok: false, code: 'generic' };
+}
+
+/**
+ * `PUT /v1/store/front/featured` (NOVF-06): the "Em destaque" products in order, `[]` for "Usar os mais
+ * recentes". The SAME Zod the route validates with runs BEFORE the request (a server action is a
+ * public endpoint); the API owns the rules (`featured_invalid`, `too_many_featured`).
+ */
+export async function setStoreFeaturedAction(productIds: unknown): Promise<StoreSetupSaveResult> {
+  const body = frontFeaturedBodySchema.safeParse({ productIds });
+  if (!body.success) return localRefusal(body.error.issues.map((issue) => issue.message));
+  return saveResult(await setStoreFeatured(body.data.productIds));
+}
+
+/**
+ * `PUT /v1/store/categories` (NOVF-07): the whole ordered list. A kept row carries its slug `id`, a new
+ * row none (the server mints it); the body is parsed with the contract's strict schema first, so a forged
+ * key (a position, a tenant id) never leaves the server.
+ */
+export async function saveStoreCategoriesAction(
+  categories: unknown,
+): Promise<StoreSetupSaveResult> {
+  const body = categoriesBodySchema.safeParse({ categories });
+  if (!body.success) return localRefusal(body.error.issues.map((issue) => issue.message));
+  return saveResult(await saveStoreCategories(body.data.categories));
 }
