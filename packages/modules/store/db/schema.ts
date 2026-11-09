@@ -190,10 +190,7 @@ export const storeFront = pgTable(
     promoProductId: uuid('promo_product_id').references(() => storeProducts.id, {
       onDelete: 'set null',
     }),
-    featuredProductIds: uuid('featured_product_ids')
-      .array()
-      .notNull()
-      .default(sql`'{}'::uuid[]`),
+    featuredProductIds: uuid('featured_product_ids').array().notNull().default(sql`'{}'::uuid[]`),
     /** NULL until the once-only seed claimed this store; never reset, in any project. */
     categoriesSeededAt: timestamp('categories_seeded_at', { withTimezone: true }),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
