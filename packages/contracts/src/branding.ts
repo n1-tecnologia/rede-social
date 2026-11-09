@@ -228,6 +228,40 @@ export const phoneMenuSchema = z
 export type PhoneMenu = z.infer<typeof phoneMenuSchema>;
 
 /**
+ * The closed vocabulary of `details.phoneMenu` on a refused `PUT /v1/admin/branding/phone-menu` (400),
+ * one code per rule `validatePhoneMenu` applies.
+ */
+export const PHONE_MENU_ISSUES = [
+  'bar_too_small',
+  'bar_too_large',
+  'top_too_large',
+  'key_repeated',
+  'home_not_in_bar',
+  'profile_at_top',
+] as const;
+export type PhoneMenuIssue = (typeof PHONE_MENU_ISSUES)[number];
+
+/**
+ * The rules the web applies to a phone menu (OQ-5, D-697), pure: the bar holds `PHONE_BAR_MIN` to
+ * `PHONE_BAR_MAX` keys, the top at most `PHONE_TOP_MAX`, a key sits once in one list, `home` is in the
+ * bar and `profile` never at the top. Answers the first broken rule's code (checked in the order of
+ * `PHONE_MENU_ISSUES` after the repeat), or `null` for a valid menu. It reads the menu only: nothing is
+ * sorted, deduplicated or rewritten, and a key it does not know is not an error.
+ */
+export function validatePhoneMenu(menu: PhoneMenu): PhoneMenuIssue | null {
+  const all = [...menu.bar, ...menu.top, ...menu.hidden];
+  if (new Set(all).size !== all.length) return 'key_repeated';
+  if (menu.bar.length < PHONE_BAR_MIN) return 'bar_too_small';
+  if (menu.bar.length > PHONE_BAR_MAX) return 'bar_too_large';
+  if (menu.top.length > PHONE_TOP_MAX) return 'top_too_large';
+  if (!PHONE_MENU_BAR_ONLY.every((key) => menu.bar.includes(key))) return 'home_not_in_bar';
+  if (menu.top.some((key) => (PHONE_MENU_NEVER_TOP as readonly string[]).includes(key))) {
+    return 'profile_at_top';
+  }
+  return null;
+}
+
+/**
  * The public brand facts carried by `GET /v1/public/tenants/by-host` (T-02-04): logo, favicon, the
  * icon set, the five colors and, since 2026-10-03, the look (so the logged-out pages show the
  * tenant's grounds, buttons and title font before any session exists). Strict at the top level —

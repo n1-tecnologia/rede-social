@@ -13,6 +13,7 @@ import { KERNEL_PERMISSIONS } from '@rede-social/contracts/moderation';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import {
+  clearPhoneMenu,
   completeBrandingUpload,
   removeIconOverride,
   setBrandingColors,
@@ -177,6 +178,18 @@ const putPhoneMenuRoute = createRoute({
   },
 });
 
+const clearPhoneMenuRoute = createRoute({
+  method: 'delete',
+  path: '/phone-menu',
+  middleware: [manage] as const,
+  responses: {
+    200: brandResponse(
+      "The saved phone menu removed (the shell's own menu again); unchanged and nothing written when none was saved",
+    ),
+    403: envelope('FORBIDDEN — the caller does not hold `tenant.manage` in this tenant'),
+  },
+});
+
 export const adminBrandingRoutes = branding
   .openapi(readRoute, async (c) => {
     const body = await brandOf(c.get('ctx').tenantId);
@@ -271,6 +284,13 @@ export const adminBrandingRoutes = branding
       userId: ctx.userId,
       logger: c.get('logger'),
     });
+    const body = await brandOf(ctx.tenantId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(body, 200);
+  })
+  .openapi(clearPhoneMenuRoute, async (c) => {
+    const ctx = c.get('ctx');
+    await clearPhoneMenu(ctx.tenantId, { userId: ctx.userId, logger: c.get('logger') });
     const body = await brandOf(ctx.tenantId);
     c.header('Cache-Control', 'no-store');
     return c.json(body, 200);

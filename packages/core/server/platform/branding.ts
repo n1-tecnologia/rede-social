@@ -16,6 +16,7 @@ import {
   type ResolvedBranding,
   resolveBranding,
   type TenantBranding,
+  validatePhoneMenu,
   withDarkPrimary,
 } from '@rede-social/contracts';
 import { eq, sql } from 'drizzle-orm';
@@ -666,6 +667,8 @@ export async function setPhoneMenu(
   menu: PhoneMenu,
   actor: PlatformActor,
 ): Promise<void> {
+  const issue = validatePhoneMenu(menu);
+  if (issue) throw new ApiError(400, 'VALIDATION_FAILED', { phoneMenu: issue });
   if (!(await tenantExists(tenantId))) throw new ApiError(404, 'NOT_FOUND');
   await withAdminTx({ tenantId }, async (tx) => {
     const [row] = await tx
@@ -695,6 +698,43 @@ export async function setPhoneMenu(
     },
     'phone menu saved',
   );
+}
+
+/**
+ * `DELETE /v1/admin/branding/phone-menu` (12.3-15, D-697): "Restaurar o padrão". Removes the one
+ * `phoneMenu` key (`branding - 'phoneMenu'`) under the row lock. Idempotent: with no key stored nothing
+ * is written, nothing is pushed and the host cache is left alone. Answers whether a menu was removed.
+ */
+export async function clearPhoneMenu(
+  tenantId: string,
+  actor: PlatformActor,
+): Promise<{ removed: boolean }> {
+  if (!(await tenantExists(tenantId))) throw new ApiError(404, 'NOT_FOUND');
+  const removed = await withAdminTx({ tenantId }, async (tx) => {
+    const [row] = await tx
+      .select({ id: tenants.id, branding: tenants.branding })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1)
+      .for('update');
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    const stored = row.branding as Record<string, unknown> | null;
+    if (!stored || !Object.hasOwn(stored, 'phoneMenu')) return false;
+    await tx.execute(sql`
+      update public.tenants
+         set branding = branding - 'phoneMenu', updated_at = now()
+       where id = ${tenantId}::uuid`);
+    return true;
+  });
+
+  if (!removed) return { removed: false };
+  await pushToCentral(tenantId, ['branding']);
+  await invalidateAllTenantHosts(tenantId);
+  logFor(actor, 'platform.branding').info(
+    { event: 'platform.branding.phone_menu_cleared', userId: actor.userId, tenantId },
+    'phone menu cleared',
+  );
+  return { removed: true };
 }
 
 /**
