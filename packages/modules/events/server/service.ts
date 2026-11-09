@@ -916,7 +916,12 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
 }
 
 /** The locked current row an update starts from. */
-type LockedEventRow = { cover_asset_id: string | null; starts_at: string; ends_at: string };
+type LockedEventRow = {
+  cover_asset_id: string | null;
+  poster_asset_id: string | null;
+  starts_at: string;
+  ends_at: string;
+};
 
 /**
  * `PUT /v1/events/{eventId}` (06-04, D-214): a WHOLE-EVENT REPLACEMENT with the create's own
@@ -932,6 +937,9 @@ type LockedEventRow = { cover_asset_id: string | null; starts_at: string; ends_a
  *  2. **The cover** (Pitfall 5 + CR-01): an id that DIFFERS from the stored one is a new assertion
  *     and is resolved strictly (foreign -> bare 404, unusable -> `cover_invalid`, T-06-21). The SAME
  *     id re-sent, now unusable (its admin retired it), is self-healed to null.
+ *  2b. **The poster** (2026-11-09, 12.3-06) is handled exactly like the cover, on the same locked row,
+ *     with `poster_invalid`; both `is distinct from` tuples carry it, so a poster-only edit is a real
+ *     change. The whole-event replacement means an ABSENT `posterAssetId` clears the stored poster.
  *  3. **`events`**, with the wall clock converted inside the statement exactly as the create does,
  *     `where (…) is distinct from (…)`: an identical body matches no row, so `updated_at` stays put.
  *  4. **`event_secrets`** `set event_format, meeting_url` under the same `is distinct from` rule.
@@ -960,15 +968,23 @@ export async function updateEvent(
   const address = inPerson ? orNull(input.address) : null;
   const meetingUrl = inPerson ? null : orNull(input.meetingUrl);
   const requestedCover = input.coverAssetId ?? null;
+  const requestedPoster = input.posterAssetId ?? null;
   const category = orNull(input.category);
   const capacity = input.capacity ?? null;
   const schedule = normaliseEventSchedule(input.schedule ?? []);
 
-  let outcome: { row: EventRow; changed: boolean; timesChanged: boolean; healed: boolean };
+  let outcome: {
+    row: EventRow;
+    changed: boolean;
+    timesChanged: boolean;
+    healed: boolean;
+    posterHealed: boolean;
+  };
   try {
     outcome = await withTenantTx(ctx, async (tx) => {
       const locked = await tx.execute<LockedEventRow>(sql`
         select cover_asset_id,
+               poster_asset_id,
                to_char(starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                to_char(ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at
           from events
@@ -988,11 +1004,24 @@ export async function updateEvent(
         healed = true;
       }
 
+      // (2026-11-09, 12.3-06) The poster rides the SAME locked row and the SAME rule as the cover: a
+      // different id is a new assertion (strict, `poster_invalid`), the stored id re-sent and since
+      // retired is self-healed to null instead of bricking the edit.
+      let posterAssetId = requestedPoster;
+      let posterHealed = false;
+      if (posterAssetId !== before.poster_asset_id) {
+        await resolveCoverAsset(tx, ctx, posterAssetId, 'poster_invalid');
+      } else if (posterAssetId !== null && !(await coverIsUsable(tx, ctx, posterAssetId))) {
+        posterAssetId = null;
+        posterHealed = true;
+      }
+
       const updated = await tx.execute<{ starts_at: string; ends_at: string }>(sql`
         with next as (
           select ${input.title}::text as title,
                  ${input.description}::text as description,
                  ${coverAssetId}::uuid as cover_asset_id,
+                 ${posterAssetId}::uuid as poster_asset_id,
                  ${category}::text as category,
                  ${capacity}::int as capacity,
                  ${JSON.stringify(schedule)}::jsonb as schedule,
@@ -1008,6 +1037,7 @@ export async function updateEvent(
            set title = n.title,
                description = n.description,
                cover_asset_id = n.cover_asset_id,
+               poster_asset_id = n.poster_asset_id,
                category = n.category,
                capacity = n.capacity,
                schedule = n.schedule,
@@ -1021,11 +1051,11 @@ export async function updateEvent(
          where e.tenant_id = ${ctx.tenantId}::uuid
            and e.id = ${eventId}::uuid
            and e.deleted_at is null
-           and (e.title, e.description, e.cover_asset_id, e.category, e.capacity, e.schedule,
-                e.format, e.venue_name, e.address, e.starts_at, e.ends_at)
+           and (e.title, e.description, e.cover_asset_id, e.poster_asset_id, e.category,
+                e.capacity, e.schedule, e.format, e.venue_name, e.address, e.starts_at, e.ends_at)
                is distinct from
-               (n.title, n.description, n.cover_asset_id, n.category, n.capacity, n.schedule,
-                n.format, n.venue_name, n.address, n.starts_at, n.ends_at)
+               (n.title, n.description, n.cover_asset_id, n.poster_asset_id, n.category,
+                n.capacity, n.schedule, n.format, n.venue_name, n.address, n.starts_at, n.ends_at)
         returning to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                   to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at`);
 
@@ -1066,6 +1096,7 @@ export async function updateEvent(
         changed: moved !== undefined || secrets.length > 0,
         timesChanged,
         healed,
+        posterHealed,
       };
     });
   } catch (error) {
@@ -1075,7 +1106,7 @@ export async function updateEvent(
     throw error;
   }
 
-  const { row, changed, timesChanged, healed } = outcome;
+  const { row, changed, timesChanged, healed, posterHealed } = outcome;
   if (changed) {
     emit(ctx, 'event.updated', {
       tenantId: ctx.tenantId,
@@ -1099,9 +1130,11 @@ export async function updateEvent(
       changed,
       timesChanged,
       coverHealed: healed,
+      posterHealed,
       format: row.format,
       titleLength: input.title.length,
       hasCover: row.cover_asset_id !== null,
+      hasPoster: row.poster_asset_id != null,
       hasCategory: category !== null,
       capacity,
       // A count, never the words (Pitfall 12).
