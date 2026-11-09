@@ -3304,4 +3304,208 @@ describe('store front and product category (12.3-11)', () => {
     expect(empty.categories).toEqual([]);
     expect(await seedState(demoTenantId)).toEqual({ categories: 0, markers: 1 });
   });
+
+  /** A store with its eight built-ins and nothing else: the clean start of an edge case. */
+  async function freshStore(): Promise<void> {
+    await sweepCategories();
+    await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(await seedState(demoTenantId)).toEqual({ categories: 8, markers: 1 });
+  }
+
+  it('front edge adjacency: "livros" and "livros-2" are different categories, a product holds exactly one slug and the card compares by exact equality (NOVF-09)', async () => {
+    await freshStore();
+    await adminSql`
+      insert into public.store_categories (tenant_id, slug, name, icon, position)
+      values (${demoTenantId}::uuid, 'livros-2', 'Livros 2', 'book-open', 9)`;
+    const one = await createRaw({ name: `${PREFIX} Adj um`, priceCents: 100, category: 'livros' });
+    const two = await createRaw({
+      name: `${PREFIX} Adj dois`,
+      priceCents: 100,
+      category: 'livros-2',
+    });
+    expect(one.status).toBe(201);
+    expect(two.status).toBe(201);
+    const first = (await one.json()) as ProductDetail;
+    const second = (await two.json()) as ProductDetail;
+    expect(first.category).toBe('livros');
+    expect(second.category).toBe('livros-2');
+    expect(first.category === second.category).toBe(false);
+    expect(await storedSlug(first.id)).toBe('livros');
+    expect(await storedSlug(second.id)).toBe('livros-2');
+
+    // Moving one product never moves the other: each holds exactly one slug.
+    const moved = await patchRaw(first.id, { category: 'livros-2' });
+    expect(((await moved.json()) as ProductDetail).category).toBe('livros-2');
+    expect(await storedSlug(second.id)).toBe('livros-2');
+    const list = await getJson<{ items: Card[] }>('/v1/store/products?limit=50', tokens.demoMember);
+    expect(list.items.find((item) => item.id === first.id)?.category).toBe('livros-2');
+
+    // The front lists both, in position order, as two rows.
+    const front = await getJson<FrontAnswer>('/v1/store/front', tokens.demoMember);
+    expect(front.categories.map((category) => category.id).slice(-1)).toEqual(['livros-2']);
+    expect(front.categories.filter((category) => category.id.startsWith('livros'))).toHaveLength(2);
+  });
+
+  it('front edge empty: an absent key applies the guess (outros when nothing matches, none when the store has no outros row), null stores none, "" is refused, an absent key on edit changes nothing (NOVF-09)', async () => {
+    await freshStore();
+    const nothing = await createRaw({ name: `${PREFIX} Vale-presente`, priceCents: 100 });
+    expect(((await nothing.json()) as ProductDetail).category).toBe('outros');
+
+    // The admin deleted "Outros": the same guess finds no row and stores none, without an error.
+    await adminSql`
+      delete from public.store_categories where tenant_id = ${demoTenantId}::uuid and slug = 'outros'`;
+    const lost = await createRaw({ name: `${PREFIX} Vale-brinde`, priceCents: 100 });
+    expect(lost.status).toBe(201);
+    const lostBody = (await lost.json()) as ProductDetail;
+    expect('category' in lostBody).toBe(false);
+    expect(await storedSlug(lostBody.id)).toBeNull();
+    // A guess for a category the store still has is unaffected.
+    const book = await createRaw({ name: `${PREFIX} Livro de Receitas`, priceCents: 100 });
+    const bookBody = (await book.json()) as ProductDetail;
+    expect(bookBody.category).toBe('livros');
+
+    const explicitNone = await createRaw({
+      name: `${PREFIX} Livro sem estante`,
+      priceCents: 1,
+      category: null,
+    });
+    const noneBody = (await explicitNone.json()) as ProductDetail;
+    expect('category' in noneBody).toBe(false);
+    expect(await storedSlug(noneBody.id)).toBeNull();
+
+    const empty = await createRaw({ name: `${PREFIX} Livro vazio`, priceCents: 1, category: '' });
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as Envelope).error.details).toEqual({ store: 'category_invalid' });
+
+    // An absent key on edit changes nothing, whatever the name now says.
+    const rename = await patchRaw(bookBody.id, { name: `${PREFIX} Perfume de Receitas` });
+    expect(rename.status).toBe(200);
+    expect(((await rename.json()) as ProductDetail).category).toBe('livros');
+  });
+
+  it('front edge encoding: a slug is lowercase letters, digits and inner hyphens up to 24; the category NAME never takes part in the check (NOVF-09)', async () => {
+    await freshStore();
+    // "roupas" is renamed, and a NEW category takes the name "roupas": the slug still decides.
+    await adminSql`
+      update public.store_categories set name = 'Vestuário'
+       where tenant_id = ${demoTenantId}::uuid and slug = 'roupas'`;
+    await adminSql`
+      insert into public.store_categories (tenant_id, slug, name, icon, position)
+      values (${demoTenantId}::uuid, 'enc-teste', 'roupas', 'tag', 9)`;
+    const ok = await createRaw({ name: `${PREFIX} Enc ok`, priceCents: 1, category: 'roupas' });
+    const okBody = (await ok.json()) as ProductDetail;
+    expect(okBody.category).toBe('roupas');
+    expect(await storedSlug(okBody.id)).toBe('roupas');
+
+    for (const bad of [
+      'Vestuário',
+      'Roupas',
+      'roupas ',
+      ' roupas',
+      'enc teste',
+      'ENC-TESTE',
+      'a'.repeat(25),
+    ]) {
+      const res = await createRaw({
+        name: `${PREFIX} Enc ${bad.length}`,
+        priceCents: 1,
+        category: bad,
+      });
+      expect(res.status, JSON.stringify(bad)).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ store: 'category_invalid' });
+    }
+    const [written] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.store_products where name like ${`${PREFIX} Enc %`}`;
+    expect(written?.n).toBe(1);
+  });
+
+  it('front edge ordering: the list order and its cursor pages do not change when a category changes (NOVF-09)', async () => {
+    await freshStore();
+    const ids: string[] = [];
+    for (const [n, at] of [
+      ['um', '2026-03-01T10:00:00Z'],
+      ['dois', '2026-03-02T10:00:00Z'],
+      ['tres', '2026-03-03T10:00:00Z'],
+      ['quatro', '2026-03-04T10:00:00Z'],
+    ] as const) {
+      ids.push(await insertProduct(demoTenantId, `${PREFIX} Ord ${n}`, at));
+    }
+    const sequence = async (limit: number) =>
+      (await allPages('/v1/store/products', tokens.demoMember, limit)).flatMap((page) =>
+        page.items.map((item) => item.id),
+      );
+    const before = { whole: await sequence(50), paged: await sequence(2) };
+    expect(before.paged).toEqual(before.whole);
+    expect(before.whole.filter((id) => ids.includes(id))).toEqual([...ids].reverse());
+
+    for (const [index, slug] of ['perfumes', 'cursos', null, 'livros'].entries()) {
+      const res = await patchRaw(ids[index] ?? '', { category: slug });
+      expect(res.status).toBe(200);
+    }
+    const after = { whole: await sequence(50), paged: await sequence(2) };
+    expect(after.whole).toEqual(before.whole);
+    expect(after.paged).toEqual(before.whole);
+  });
+
+  it('front edge idempotency: two products created with the same name and no category key receive the same guessed category (NOVF-09)', async () => {
+    await freshStore();
+    const name = `${PREFIX} Livro Gêmeo`;
+    const [a, b] = await Promise.all([
+      createRaw({ name, priceCents: 100 }),
+      createRaw({ name, priceCents: 100 }),
+    ]);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    const first = (await a.json()) as ProductDetail;
+    const second = (await b.json()) as ProductDetail;
+    expect(first.id).not.toBe(second.id);
+    expect(first.category).toBe('livros');
+    expect(second.category).toBe('livros');
+    expect(await storedSlug(first.id)).toBe(await storedSlug(second.id));
+  });
+
+  it('front edge empty store (NOVF-11): a store with the module on and no product answers the eight built-ins, no promo and no featured; with the module off it is the bare MODULE_DISABLED and nothing is seeded', async () => {
+    const restoreLab = await withStoreEnabled('lab');
+    const labFront = (token = tokens.labMember) => request('/v1/store/front', token, {}, HOSTS.lab);
+    try {
+      await adminSql`
+        delete from public.store_front where tenant_id = ${labTenantId}::uuid`;
+      await adminSql`
+        delete from public.store_categories where tenant_id = ${labTenantId}::uuid`;
+      const [products] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_products where tenant_id = ${labTenantId}::uuid`;
+      expect(products?.n).toBe(0);
+
+      // Module off first: the bare 404, and the lazy seed did not run for this tenant.
+      await adminSql`
+        update public.tenant_modules set enabled = false
+         where tenant_id = ${labTenantId}::uuid and module_key = 'store'`;
+      moduleFlags.invalidate(labTenantId);
+      const off = await labFront();
+      expect(off.status).toBe(404);
+      const offBody = (await off.json()) as Envelope;
+      expect(offBody.error.code).toBe('MODULE_DISABLED');
+      expect(offBody.error).not.toHaveProperty('details');
+      expect(await seedState(labTenantId)).toEqual({ categories: 0, markers: 0 });
+
+      // Module on, no product: the eight, in order, and nothing else.
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'store'`;
+      moduleFlags.invalidate(labTenantId);
+      const on = await labFront();
+      expect(on.status).toBe(200);
+      const front = (await on.json()) as FrontAnswer;
+      expect(front.categories.map((c) => [c.id, c.name, c.icon])).toEqual(BUILT_IN);
+      expect(front.promoProductId).toBeNull();
+      expect(front.featuredProductIds).toEqual([]);
+      expect(JSON.stringify(front)).not.toContain(demoTenantId);
+      expect(await seedState(labTenantId)).toEqual({ categories: 8, markers: 1 });
+      expect(await seedState(demoTenantId)).toMatchObject({ markers: expect.any(Number) });
+    } finally {
+      await adminSql`delete from public.store_front where tenant_id = ${labTenantId}::uuid`;
+      await adminSql`delete from public.store_categories where tenant_id = ${labTenantId}::uuid`;
+      await restoreLab();
+    }
+  });
 });

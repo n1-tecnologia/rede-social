@@ -5,6 +5,7 @@ import {
   buyerSchema,
   buyersPageSchema,
   buyersQuerySchema,
+  cleanCategoryName,
   communityAccessListSchema,
   communityAccessSchema,
   courseAccessItemSchema,
@@ -14,15 +15,18 @@ import {
   GRANT_OUTCOMES,
   grantBodySchema,
   grantResultSchema,
+  guessStoreCategory,
   liveAccessItemSchema,
   liveAccessListSchema,
   liveAccessSchema,
   lockPreviewBodySchema,
   lockPreviewSchema,
+  newCategoryId,
   PRODUCT_COURSE_STATUSES,
   PRODUCT_FILTERS,
   PRODUCT_LIVE_STATUSES,
   PURCHASE_MODES,
+  plainText,
   productCardSchema,
   productCourseSchema,
   productDetailSchema,
@@ -38,6 +42,12 @@ import {
   purchaseInfoSchema,
   purchaseResultSchema,
   revokeResultSchema,
+  STORE_BUILT_IN_CATEGORIES,
+  STORE_CATEGORY_ICONS,
+  STORE_CATEGORY_MAX,
+  STORE_CATEGORY_NAME_MAX,
+  STORE_CATEGORY_SLUG_RE,
+  STORE_FEATURED_MAX,
   STORE_ISSUE_SET,
   STORE_ISSUES,
   STORE_MAX_CURSOR_LENGTH,
@@ -47,7 +57,11 @@ import {
   STORE_MAX_PAGE_SIZE,
   STORE_PAGE_SIZE,
   STORE_PERMISSIONS,
+  STORE_PRODUCT_CATEGORIES,
+  storeCategorySchema,
+  storeFrontSchema,
 } from '../contracts/index';
+import { GUESS_CORPUS } from './guess-corpus';
 
 const id = (n: number) => `18000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const base = { name: 'Curso', priceCents: 1990 };
@@ -597,6 +611,168 @@ describe('store gateway purchase info (09.1-06, D-506, D-508)', () => {
       productDetailSchema.safeParse({
         ...detail,
         purchase: { mode: 'gateway', checkoutUrl: 'http://pay.example/x' },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+/**
+ * 12.3-11 (NOVF-05..09, D-690, D-693, D-694, D-700, OQ-2, OQ-3): the store front's limits, the moved
+ * guess rule pinned to the shared corpus, the slug as the category id and the optional `category` keys.
+ */
+describe('store categories contract (12.3-11)', () => {
+  const card = {
+    id: id(1),
+    name: 'Curso',
+    priceCents: 1990,
+    currency: 'BRL',
+    imageAssetId: null,
+    status: 'active',
+    owned: false,
+  };
+
+  it('pins the limits, the glyphs and the eight built-ins (D-690, D-691)', () => {
+    expect(STORE_CATEGORY_MAX).toBe(20);
+    expect(STORE_CATEGORY_NAME_MAX).toBe(30);
+    expect(STORE_FEATURED_MAX).toBe(5);
+    expect(STORE_CATEGORY_ICONS).toHaveLength(20);
+    expect(new Set(STORE_CATEGORY_ICONS).size).toBe(20);
+    expect(STORE_BUILT_IN_CATEGORIES.map((category) => category.slug)).toEqual([
+      ...STORE_PRODUCT_CATEGORIES,
+    ]);
+    for (const category of STORE_BUILT_IN_CATEGORIES) {
+      expect(STORE_CATEGORY_ICONS).toContain(category.icon);
+      expect(STORE_CATEGORY_SLUG_RE.test(category.slug)).toBe(true);
+    }
+    for (const code of [
+      'category_invalid',
+      'category_name_required',
+      'category_name_too_long',
+      'category_name_taken',
+      'category_icon_invalid',
+      'too_many_categories',
+      'promo_invalid',
+      'featured_invalid',
+      'too_many_featured',
+    ]) {
+      expect(STORE_ISSUES).toContain(code);
+    }
+  });
+
+  // One row per case, so a failing row names itself (the corpus is shared with plan 10's pgTAP).
+  it.each(GUESS_CORPUS.map(([name, expected]) => ({ name, expected })))(
+    'guessStoreCategory parity: $name -> $expected',
+    ({ name, expected }) => {
+      expect(guessStoreCategory(name)).toBe(expected);
+    },
+  );
+
+  it('the corpus is the one the SQL twin is pinned to: 68 rows, every slug a built-in', () => {
+    expect(GUESS_CORPUS).toHaveLength(68);
+    for (const [, expected] of GUESS_CORPUS) {
+      expect(STORE_PRODUCT_CATEGORIES as readonly string[]).toContain(expected);
+    }
+  });
+
+  it('plainText folds accents and case', () => {
+    expect(plainText('Fragrância CÍTRICA')).toBe('fragrancia citrica');
+  });
+
+  it('the slug pattern accepts livros and a 24-character slug and refuses uppercase, accents, spaces and 25 characters (NOVF-09 encoding)', () => {
+    for (const ok of ['livros', 'a', '1', 'livros-2', 'a-b-c', 'a'.repeat(24)]) {
+      expect(STORE_CATEGORY_SLUG_RE.test(ok), ok).toBe(true);
+    }
+    for (const bad of [
+      '',
+      'Livros',
+      'serviços',
+      'a b',
+      'a'.repeat(25),
+      '-a',
+      'a-',
+      'a_b',
+      'a.b',
+      'livros\n',
+    ]) {
+      expect(STORE_CATEGORY_SLUG_RE.test(bad), JSON.stringify(bad)).toBe(false);
+    }
+    // Adjacency: two different slugs are two different categories, compared by exact equality.
+    const [shelf, other]: string[] = ['livros', 'livros-2'];
+    expect(
+      STORE_CATEGORY_SLUG_RE.test(shelf ?? '') && STORE_CATEGORY_SLUG_RE.test(other ?? ''),
+    ).toBe(true);
+    expect(shelf === other).toBe(false);
+  });
+
+  it('cleanCategoryName trims, folds inner spaces and counts code points', () => {
+    expect(cleanCategoryName('   Skin   care \t Cia  ')).toBe('Skin care Cia');
+    expect(cleanCategoryName('a'.repeat(31))).toBe('a'.repeat(30));
+    // 31 emoji are 62 UTF-16 code units: counted as 31 code points, cut at 30 whole characters.
+    expect(Array.from(cleanCategoryName('\u{1F600}'.repeat(31)))).toHaveLength(30);
+    expect(cleanCategoryName('   ')).toBe('');
+  });
+
+  it('newCategoryId makes a slug unique among the taken set and falls back to "categoria"', () => {
+    expect(newCategoryId('Skin care & Cia', new Set())).toBe('skin-care-cia');
+    expect(newCategoryId('Livros', new Set(['livros']))).toBe('livros-2');
+    expect(newCategoryId('Livros', new Set(['livros', 'livros-2']))).toBe('livros-3');
+    expect(newCategoryId('!!!', new Set())).toBe('categoria');
+    expect(newCategoryId('!!!', new Set(['categoria']))).toBe('categoria-2');
+    expect(newCategoryId('Serviços', new Set())).toBe('servicos');
+    const long = newCategoryId('x'.repeat(60), new Set(['x'.repeat(20)]));
+    expect(STORE_CATEGORY_SLUG_RE.test(long)).toBe(true);
+  });
+
+  it('the create body: an old web body with no category key parses with the key absent; null and a slug parse; the rest is category_invalid', () => {
+    const old = productInputSchema.parse(base);
+    expect('category' in old).toBe(false);
+    expect(productInputSchema.parse({ ...base, category: null }).category).toBeNull();
+    expect(productInputSchema.parse({ ...base, category: 'livros' }).category).toBe('livros');
+    for (const bad of ['', 'Livros', 'a b', 'serviços', 'a'.repeat(25), 7]) {
+      const result = productInputSchema.safeParse({ ...base, category: bad });
+      expect(result.success, JSON.stringify(bad)).toBe(false);
+    }
+    expect(issueOf({ ...base, category: 'Livros' })).toBe('category_invalid');
+    expect(issueOf({ ...base, category: '' })).toBe('category_invalid');
+  });
+
+  it('the patch body: category alone is a valid patch, null clears, and the strict and non-empty rules stay', () => {
+    expect(productPatchSchema.safeParse({ category: null }).success).toBe(true);
+    expect(productPatchSchema.safeParse({ category: 'perfumes' }).success).toBe(true);
+    expect(productPatchSchema.safeParse({}).success).toBe(false);
+    expect(productPatchSchema.safeParse({ category: undefined }).success).toBe(false);
+    expect(issueOf({ category: 'Perfumes' }, productPatchSchema)).toBe('category_invalid');
+    expect(productPatchSchema.safeParse({ category: 'perfumes', slug: 'x' }).success).toBe(false);
+    expect(productInputSchema.safeParse({ ...base, categoryId: id(1) }).success).toBe(false);
+  });
+
+  it('the card and the detail carry the slug as an optional string (OQ-2, D-694); the eight old values stay valid', () => {
+    expect('category' in productCardSchema.parse(card)).toBe(false);
+    for (const slug of [...STORE_PRODUCT_CATEGORIES, 'skin-care', 'livros-2']) {
+      expect(productCardSchema.parse({ ...card, category: slug }).category).toBe(slug);
+    }
+    expect(productCardSchema.safeParse({ ...card, category: 'Livros' }).success).toBe(false);
+    expect(productCardSchema.safeParse({ ...card, category: '' }).success).toBe(false);
+    expect(productCardSchema.safeParse({ ...card, category: null }).success).toBe(false);
+  });
+
+  it('storeFrontSchema and storeCategorySchema are strict; the empty store front parses', () => {
+    const category = { id: 'livros', name: 'Livros', icon: 'book-open' };
+    expect(storeCategorySchema.safeParse(category).success).toBe(true);
+    expect(storeCategorySchema.safeParse({ ...category, icon: 'rocket' }).success).toBe(false);
+    expect(storeCategorySchema.safeParse({ ...category, id: 'Livros' }).success).toBe(false);
+    expect(storeCategorySchema.safeParse({ ...category, position: 1 }).success).toBe(false);
+    const front = { categories: [category], promoProductId: id(2), featuredProductIds: [id(3)] };
+    expect(storeFrontSchema.safeParse(front).success).toBe(true);
+    expect(
+      storeFrontSchema.safeParse({ categories: [], promoProductId: null, featuredProductIds: [] })
+        .success,
+    ).toBe(true);
+    expect(storeFrontSchema.safeParse({ ...front, extra: 1 }).success).toBe(false);
+    expect(
+      storeFrontSchema.safeParse({
+        ...front,
+        featuredProductIds: [id(1), id(2), id(3), id(4), id(5), id(6)],
       }).success,
     ).toBe(false);
   });
