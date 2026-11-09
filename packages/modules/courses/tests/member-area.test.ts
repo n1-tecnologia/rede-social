@@ -856,6 +856,45 @@ describe('trackStates (D-439, COURSE-35)', () => {
     expect(view).toMatchObject(texts);
   });
 
+  it('NOVF-01 empty: a track holding the empty-string default answers three empty strings, never null or omitted', () => {
+    const empty = { subtitle: '', audience: '', description: '' };
+    const [view] = trackStates([track(1, [C1], empty)], [course(C1)], lessons(C1, 1, 0));
+    expect(view).toHaveProperty('subtitle', '');
+    expect(view).toHaveProperty('audience', '');
+    expect(view).toHaveProperty('description', '');
+  });
+
+  it('NOVF-01 adjacency: identical texts, and a text that is a prefix of another, stay separate tracks with their own strings', () => {
+    const same = { subtitle: 'igual', audience: 'igual', description: 'igual' };
+    const shorter = { subtitle: 'Iniciante', audience: 'Para', description: 'Trilha' };
+    const longer = {
+      subtitle: 'Iniciante avançado',
+      audience: 'Para quem',
+      description: 'Trilha completa',
+    };
+    const views = trackStates(
+      [track(1, [C1], same), track(2, [C2], same), track(3, [C3], shorter), track(4, [C1], longer)],
+      [course(C1), course(C2), course(C3)],
+      [...lessons(C1, 1, 0), ...lessons(C2, 1, 10), ...lessons(C3, 1, 20)],
+    );
+    expect(views.map((view) => view.id)).toEqual([TR(1), TR(2), TR(3), TR(4)]);
+    expect(views.map((view) => [view.subtitle, view.audience, view.description])).toEqual([
+      ['igual', 'igual', 'igual'],
+      ['igual', 'igual', 'igual'],
+      ['Iniciante', 'Para', 'Trilha'],
+      ['Iniciante avançado', 'Para quem', 'Trilha completa'],
+    ]);
+  });
+
+  it('NOVF-01 ordering: the texts change no order, the admin order the service read is kept as given', () => {
+    const views = trackStates(
+      [track(3, [C1]), track(1, [C2]), track(2, [C3])],
+      [course(C1), course(C2), course(C3)],
+      [...lessons(C1, 1, 0), ...lessons(C2, 1, 10), ...lessons(C3, 1, 20)],
+    );
+    expect(views.map((view) => view.id)).toEqual([TR(3), TR(1), TR(2)]);
+  });
+
   it('a locked untouched course → bloqueada; a locked completed course → concluida (complete wins); a locked started course → bloqueada', () => {
     const courses = [
       course(C1, { locked: true }),

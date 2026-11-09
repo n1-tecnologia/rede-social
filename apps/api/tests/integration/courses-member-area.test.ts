@@ -1112,6 +1112,29 @@ describe('NOVF-01 track texts on the member read', () => {
     return id;
   }
 
+  /** A demo track written by SQL with its `created_at` pinned to `createdAt` (ties are made here). */
+  async function insertTextTrack(
+    title: string,
+    texts: { subtitle: string; audience: string; description: string },
+    createdAt: Date,
+  ): Promise<string> {
+    const tenantId = await demoTenantId();
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.course_tracks
+        (tenant_id, title, subtitle, audience, description, status, created_at)
+      values (${tenantId}::uuid, ${`${NVF} ${title}`}, ${texts.subtitle}, ${texts.audience},
+              ${texts.description}, 'active', ${createdAt.toISOString()}::timestamptz)
+      returning id::text as id`;
+    if (!row) throw new Error(`could not insert the ${title} track`);
+    await adminSql`
+      insert into public.course_track_courses (tenant_id, track_id, course_id, position)
+      values (${tenantId}::uuid, ${row.id}::uuid, ${fx.X.id}::uuid, 0)`;
+    return row.id;
+  }
+
+  const sweepTracks = () =>
+    adminSql`delete from public.course_tracks where title like ${`${NVF}%`}`;
+
   beforeAll(async () => {
     await sweepFile();
     restores.push(await withModuleEnabled('demo', 'store'));
@@ -1198,6 +1221,80 @@ describe('NOVF-01 track texts on the member read', () => {
     );
     expect(lab.raw).toContain('texto-lab-sub');
     expect(lab.raw).not.toContain('texto-vivo');
+  });
+
+  it('NOVF-01 empty: a track saved with no texts answers three empty strings (never null, never omitted)', async () => {
+    await sweepTracks();
+    const id = await adminTrack({ title: `${NVF} trilha sem textos` });
+    const { raw } = await readTracksText(tokens.member);
+    const [track] = (JSON.parse(raw) as { tracks: Record<string, unknown>[] }).tracks;
+    expect(track?.id).toBe(id);
+    expect(track).toHaveProperty('subtitle', '');
+    expect(track).toHaveProperty('audience', '');
+    expect(track).toHaveProperty('description', '');
+  });
+
+  it('NOVF-01 adjacency: identical texts, and a text that is the prefix of another, stay separate tracks that each keep their own strings', async () => {
+    await sweepTracks();
+    const base = Date.now();
+    const same = { subtitle: 'igual', audience: 'igual', description: 'igual' };
+    const a = await insertTextTrack('gêmea A', same, new Date(base - 4 * 3_600_000));
+    const b = await insertTextTrack('gêmea B', same, new Date(base - 3 * 3_600_000));
+    const shorter = await insertTextTrack(
+      'curta',
+      { subtitle: 'Iniciante', audience: 'Para', description: 'Trilha' },
+      new Date(base - 2 * 3_600_000),
+    );
+    const longer = await insertTextTrack(
+      'longa',
+      { subtitle: 'Iniciante avançado', audience: 'Para quem', description: 'Trilha completa' },
+      new Date(base - 1 * 3_600_000),
+    );
+    const { tracks } = await readTracksText(tokens.member);
+    expect(tracks.map((track) => track.id)).toEqual([longer, shorter, b, a]);
+    expect(tracks.map((track) => [track.subtitle, track.audience, track.description])).toEqual([
+      ['Iniciante avançado', 'Para quem', 'Trilha completa'],
+      ['Iniciante', 'Para', 'Trilha'],
+      ['igual', 'igual', 'igual'],
+      ['igual', 'igual', 'igual'],
+    ]);
+  });
+
+  it('NOVF-01 ordering: the admin order holds (created_at desc, id desc); two tracks of one instant order by id desc', async () => {
+    await sweepTracks();
+    const base = Date.now();
+    const oldest = await insertTextTrack(
+      'antiga',
+      { subtitle: '', audience: '', description: '' },
+      new Date(base - 5 * 3_600_000),
+    );
+    const instant = new Date(base - 2 * 3_600_000);
+    const t1 = await insertTextTrack(
+      'empate 1',
+      { subtitle: '1', audience: '', description: '' },
+      instant,
+    );
+    const t2 = await insertTextTrack(
+      'empate 2',
+      { subtitle: '2', audience: '', description: '' },
+      instant,
+    );
+    const newest = await insertTextTrack(
+      'recente',
+      { subtitle: '', audience: '', description: 'r' },
+      new Date(base - 1 * 3_600_000),
+    );
+    const tied = [t1, t2].sort().reverse();
+    const { tracks } = await readTracksText(tokens.member);
+    expect(tracks.map((track) => track.id)).toEqual([newest, ...tied, oldest]);
+  });
+
+  it('NOVF-01 empty school: a tenant with no active track still answers { tracks: [] }', async () => {
+    await sweepTracks();
+    await sweepFile();
+    const res = await learnRequest('GET', '/v1/courses/learn/tracks', tokens.member, HOSTS.demo);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ tracks: [] });
   });
 });
 
