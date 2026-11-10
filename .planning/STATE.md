@@ -5,10 +5,10 @@ current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: 21
 status: verifying
 stopped_at: "Phase 12.3 CLOSED 2026-11-09 by developer closure (UAT 6/6 on Igor's word, he tests in production directly; security 56/56 closed, threats_open 0; verification passed): nothing pushed or deployed, M1..M16 ledger and the release are his, NOVF-02 wording (bare 404 vs the 400 by name) still to amend, pnpm lint red from the front merge (8 findings, none this phase's); STATE back on 12.2 (executed 21/21, verification human_needed, next /gsd-verify-work 12.2 after his proofs); Phase 13 stays paused at plan 14"
-last_updated: "2026-11-10T00:15:24.392Z"
+last_updated: "2026-11-10T12:42:52.916Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 12.3 closed by developer closure, STATE back on 12.2
-state_head: 6639229204fb2287fde2ae1b7f675cd35f396c80
+state_head: e3ee30b7c229e12629b1595fdb58b3fd7f22c81c
 progress:
   total_phases: 31
   completed_phases: 1
@@ -1199,6 +1199,7 @@ None yet.
 | 261106-ei5 | Phase 12.1: a new or reactivated conditional question is stored right after its opener (same step), after the opener's last active dependent; other step and unconditional keep the end of the step; server only, not pushed | 2026-11-06 | 69620c4e | complete | [261106-ei5-phase-12-1-a-new-conditional-question-is](./quick/261106-ei5-phase-12-1-a-new-conditional-question-is/) |
 | 48 | 12.2 CI fix: save-step tracer expected an empty branch to change the member formEtag (stale after WR-02) | 2026-11-07 | 96546259 | — | — |
 | 261109-tdt | Fix the 8 Biome lint errors from the front merge c80665e5 so pnpm lint and the CI checks gate (production deploy) go green; no behavior change (nothing pushed) | 2026-11-09 | 66392292 | complete | [261109-tdt-fix-the-8-biome-lint-errors-from-the-fro](./quick/261109-tdt-fix-the-8-biome-lint-errors-from-the-fro/) |
+| 50 | Fix the two stale test pins that turned the master CI red: events-rsvp detail key set (12.3 poster keys) and the PWA cache check vs the branding bucket (e3ee30b7) | 2026-11-10 | e3ee30b7 | — | — |
 
 ### Roadmap Evolution
 
