@@ -124,7 +124,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the type picker (D-590, UI-D-570)', () => {
-  it('shows a radiogroup "Tipo de resposta" of the 13 tiles in the order of the contract', () => {
+  it('shows a radiogroup "Tipo de resposta" of the 14 tiles in the order of the contract', () => {
     mount();
     const group = screen.getByRole('group', { name: 'Tipo de resposta' });
     const names = within(group)
@@ -147,6 +147,7 @@ describe('the type picker (D-590, UI-D-570)', () => {
       'Telefone',
       'E-mail',
       'Link',
+      'Registro profissional / CNPJ',
     ]);
   });
 
@@ -2879,5 +2880,110 @@ describe('12.2-18 Task 2: WR-06 in the question sheet (PFORM-53, D-646, UI-D-675
       fireEvent.click(saveButton());
     });
     expect(normalize((privacyAlert() as HTMLElement).innerHTML)).toBe(fromClient);
+  });
+});
+
+describe('quick 261110-ij7: the professional_id format list', () => {
+  const FORMAT_NAMES = [
+    'CRO (Odontologia)',
+    'CRM (Medicina)',
+    'CRBM (Biomedicina)',
+    'CRF (Farmácia)',
+    'COREN (Enfermagem)',
+    'CREFITO (Fisioterapia e Terapia Ocupacional)',
+    'CRBio (Biologia)',
+    'CNPJ (tradicional ou alfanumérico)',
+  ];
+  const formatSelect = () => screen.getByLabelText('Formato do registro') as HTMLSelectElement;
+
+  it('choosing the tile shows the "Formato do registro" select with the 8 formats in order', () => {
+    mount();
+    pick('Registro profissional / CNPJ');
+    const select = formatSelect();
+    expect(select.value).toBe('');
+    const options = within(select)
+      .getAllByRole('option')
+      .map((option) => option.textContent);
+    expect(options).toEqual(['Escolha o formato', ...FORMAT_NAMES]);
+    expect(
+      screen.getByText('O membro vê a máscara enquanto digita e só salva um registro válido.'),
+    ).toBeTruthy();
+  });
+
+  it('shows the example of the chosen format', () => {
+    mount();
+    pick('Registro profissional / CNPJ');
+    fireEvent.change(formatSelect(), { target: { value: 'crefito' } });
+    expect(screen.getByText('Exemplo: CREFITO-3/123456-F')).toBeTruthy();
+    fireEvent.change(formatSelect(), { target: { value: 'cnpj' } });
+    expect(screen.getByText('Exemplo: 12.345.678/0001-95')).toBeTruthy();
+  });
+
+  it('saving without a choice shows the format error and sends nothing', async () => {
+    mount();
+    pick('Registro profissional / CNPJ');
+    typeTitle('CRO');
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe('Escolha o formato do registro.');
+    expect(document.activeElement).toBe(formatSelect());
+  });
+
+  it('saving with a choice sends limits {format} and no min or max', async () => {
+    mount();
+    pick('Registro profissional / CNPJ');
+    typeTitle('Registro no CRO');
+    fireEvent.change(formatSelect(), { target: { value: 'cro' } });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(mocks.create.mock.calls[0]?.[0]).toEqual({
+      type: 'professional_id',
+      title: 'Registro no CRO',
+      helpText: null,
+      required: false,
+      showOnProfile: false,
+      allowOther: false,
+      options: [],
+      limits: { format: 'cro' },
+    });
+  });
+
+  it('with answers the select is disabled and the locked note shows', () => {
+    mount({
+      mode: 'edit',
+      question: adminQuestion('professional_id', {
+        title: 'Registro',
+        options: [],
+        answerCount: 5,
+        revision: 1,
+        limits: { format: 'crm' },
+      }),
+    });
+    expect(formatSelect().disabled).toBe(true);
+    expect(formatSelect().value).toBe('crm');
+    expect(
+      screen.getByText(
+        'O formato não muda depois que há respostas. Para mudar, crie uma nova pergunta e arquive esta.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('without answers the select is free', () => {
+    mount({
+      mode: 'edit',
+      question: adminQuestion('professional_id', {
+        title: 'Registro',
+        options: [],
+        answerCount: 0,
+        revision: 1,
+        limits: { format: 'crm' },
+      }),
+    });
+    expect(formatSelect().disabled).toBe(false);
+    expect(screen.queryByText(/O formato não muda depois/)).toBeNull();
   });
 });

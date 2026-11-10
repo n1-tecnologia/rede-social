@@ -338,7 +338,8 @@ export function QuestionEditorSheet({
       const row = draft.options.find((option) => found.options?.rows[option.key] !== undefined);
       const target = row ?? draft.options[0];
       id = target ? `pf-option-${target.key}` : null;
-    } else if (found.min || found.limits) id = 'pf-min';
+    } else if (found.format) id = 'pf-format';
+    else if (found.min || found.limits) id = 'pf-min';
     else if (found.max) id = 'pf-max';
     if (id) document.getElementById(id)?.focus();
   }
@@ -446,6 +447,10 @@ export function QuestionEditorSheet({
         const limits = result.fields.limits;
         const limitsError = limits === undefined ? null : serverLimitsError(draft.type, limits);
         if (limitsError) found.limits = limitsError;
+        // A registry question refused on its limits is the missing or unknown format (quick 261110-ij7).
+        if (draft.type === 'professional_id' && limits !== undefined) {
+          found.format = { key: 'errors.formatRequired' };
+        }
         // A branch the server does not know (or that is gone) is the stale-copy alert: nothing was saved.
         if (result.fields.branch !== undefined || result.fields.form === 'unknown_branch') {
           setConflict(true);
@@ -790,6 +795,13 @@ export function QuestionEditorSheet({
                     maxError={errors.max}
                     pairError={errors.limits}
                     widenOnly={locks.limitsWidenOnly}
+                    format={draft.format}
+                    formatError={errors.format}
+                    formatLocked={locks.formatLocked}
+                    onFormatChange={(format) => {
+                      patch({ format });
+                      clear('format');
+                    }}
                     onMinChange={(min) => {
                       patch({ min });
                       clear('min');

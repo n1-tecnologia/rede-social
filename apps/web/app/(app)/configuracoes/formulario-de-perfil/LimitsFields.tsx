@@ -1,9 +1,16 @@
 'use client';
 
-import { PROFILE_FORM_LIMITS, type ProfileFormType } from '@rede-social/contracts/profile-form';
+import {
+  PROFESSIONAL_ID_EXAMPLES,
+  PROFESSIONAL_ID_FORMATS,
+  PROFILE_FORM_LIMITS,
+  type ProfessionalIdFormat,
+  type ProfileFormType,
+} from '@rede-social/contracts/profile-form';
 import { Input } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import type { FieldError } from './editor-state';
+import { SheetSelect } from './SheetSelect';
 
 export interface LimitsFieldsProps {
   type: ProfileFormType;
@@ -18,6 +25,12 @@ export interface LimitsFieldsProps {
   pairError?: FieldError;
   /** The question has answers: the pair may only widen (D-587), and a note says so. */
   widenOnly?: boolean;
+  /** The mask of a professional_id question (quick 261110-ij7); empty until chosen. */
+  format?: ProfessionalIdFormat | '';
+  onFormatChange?: (value: ProfessionalIdFormat | '') => void;
+  formatError?: FieldError;
+  /** The question has answers: the format is read-only (D-587), and a note says so. */
+  formatLocked?: boolean;
 }
 
 /** The one-line note of each type that has no field of its own (UI-D-572). Text types carry their fixed cap. */
@@ -48,8 +61,45 @@ export function LimitsFields({
   maxError,
   pairError,
   widenOnly = false,
+  format = '',
+  onFormatChange,
+  formatError,
+  formatLocked = false,
 }: LimitsFieldsProps) {
   const t = useTranslations('profileForm.admin.editor');
+
+  if (type === 'professional_id') {
+    return (
+      <div className="flex flex-col gap-2">
+        <SheetSelect
+          id="pf-format"
+          label={t('format.label')}
+          value={format}
+          disabled={formatLocked}
+          error={formatError ? t(formatError.key, formatError.values) : undefined}
+          helper={
+            format === ''
+              ? undefined
+              : t('format.example', { example: PROFESSIONAL_ID_EXAMPLES[format] })
+          }
+          onChange={(value) => onFormatChange?.(value as ProfessionalIdFormat | '')}
+        >
+          <option value="" disabled={formatLocked}>
+            {t('format.placeholder')}
+          </option>
+          {PROFESSIONAL_ID_FORMATS.map((key) => (
+            <option key={key} value={key}>
+              {t(`format.options.${key}`)}
+            </option>
+          ))}
+        </SheetSelect>
+        <p className="text-xs font-normal text-text-secondary">{t('format.note')}</p>
+        {formatLocked ? (
+          <p className="text-xs font-normal text-text-secondary">{t('locked.format')}</p>
+        ) : null}
+      </div>
+    );
+  }
 
   if (type === 'number' || type === 'date') {
     const date = type === 'date';

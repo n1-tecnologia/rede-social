@@ -1,4 +1,4 @@
-import type { AdminQuestion } from '@rede-social/contracts/profile-form';
+import type { AdminQuestion, ProfessionalIdFormat } from '@rede-social/contracts/profile-form';
 import { describe, expect, it } from 'vitest';
 import { buildBranchTree } from '@/lib/profile-form/branch-tree';
 import {
@@ -1706,5 +1706,120 @@ describe('12.2-18: archivedLayout, the Arquivadas list over branches (D-653, UI-
     expect(items.some((item) => item.kind === 'group' && item.group.branch.id === lonely.id)).toBe(
       true,
     );
+  });
+});
+
+describe('quick 261110-ij7: the professional_id draft carries its format', () => {
+  const pid = (format: ProfessionalIdFormat | '' = 'cro') => ({
+    ...blankDraft(),
+    type: 'professional_id' as const,
+    title: 'Registro',
+    format,
+  });
+  const storedPid = (over: Partial<AdminQuestion> = {}) =>
+    adminQuestion('professional_id', {
+      title: 'Registro',
+      options: [],
+      revision: 2,
+      limits: { format: 'cro' },
+      ...over,
+    });
+
+  it('a blank draft has no format', () => {
+    expect(blankDraft().format).toBe('');
+  });
+
+  it('a draft with no format fails validateDraft with the format error and cannot be saved', () => {
+    const errors = validateDraft(pid(''));
+    expect(errors.format).toEqual({ key: 'errors.formatRequired' });
+    expect(hasErrors(errors)).toBe(true);
+    expect(validateDraft(pid('cro')).format).toBeUndefined();
+    expect(canSave(pid(''))).toBe(true);
+  });
+
+  it('toCreateBody carries limits {format} and no min or max', () => {
+    const body = toCreateBody(pid('cnpj'));
+    expect(body.limits).toEqual({ format: 'cnpj' });
+    expect(body.options).toEqual([]);
+    expect(body.allowOther).toBe(false);
+    expect(toCreateBody({ ...blankDraft(), type: 'short_text', title: 'x' }).limits).toEqual({});
+  });
+
+  it('draftFromQuestion reads the format back, replaceDraftFrom starts without one', () => {
+    expect(draftFromQuestion(storedPid()).format).toBe('cro');
+    expect(draftFromQuestion(adminQuestion('short_text')).format).toBe('');
+    expect(replaceDraftFrom(storedPid()).format).toBe('');
+  });
+
+  it('changeType keeps the format only between two professional_id selections', () => {
+    expect(changeType(pid('cro'), 'professional_id').format).toBe('cro');
+    expect(changeType(pid('cro'), 'short_text').format).toBe('');
+    expect(changeType({ ...blankDraft(), type: 'short_text' }, 'professional_id').format).toBe('');
+  });
+
+  it('parseLimits names the format for professional_id and nothing for the other non-range types', () => {
+    expect(parseLimits(pid('crm')).limits).toEqual({ format: 'crm' });
+    expect(parseLimits(pid('')).limits).toEqual({});
+    expect(parseLimits({ ...pid('crm'), type: 'short_text' }).limits).toEqual({});
+  });
+
+  it('toUpdateBody sends limits when the format or the type changes and nothing when unchanged', () => {
+    const question = storedPid();
+    expect(hasChanges(toUpdateBody(question, draftFromQuestion(question)))).toBe(false);
+    expect(toUpdateBody(question, { ...draftFromQuestion(question), format: 'cnpj' })).toEqual({
+      revision: 2,
+      limits: { format: 'cnpj' },
+    });
+    const text = adminQuestion('short_text', { revision: 3, options: [] });
+    expect(
+      toUpdateBody(text, { ...draftFromQuestion(text), type: 'professional_id', format: 'crf' }),
+    ).toEqual({ revision: 3, type: 'professional_id', limits: { format: 'crf' } });
+  });
+
+  it('isDirty: a format edit is a change', () => {
+    const initial = draftFromQuestion(storedPid());
+    expect(isDirty(initial, { ...initial })).toBe(false);
+    expect(isDirty(initial, { ...initial, format: 'cnpj' })).toBe(true);
+  });
+
+  it('checkDraftLocks answers limits_locked for a format change with answers (the vectors of the core lock test)', () => {
+    const def = (format?: 'cro' | 'cnpj'): LockDefinition => ({
+      type: 'professional_id',
+      showOnProfile: false,
+      allowOther: false,
+      options: [],
+      limits: format ? { format } : {},
+    });
+    const run = (current: LockDefinition, next: LockDefinition, answerCount = 1) =>
+      checkDraftLocks({
+        current,
+        next,
+        answerCount,
+        answeredOptionIds: new Set<string>(),
+        otherAnswered: false,
+      });
+    expect(run(def('cro'), def('cnpj'))).toBe('limits_locked');
+    expect(run(def('cro'), def())).toBe('limits_locked');
+    expect(run(def('cro'), def('cro'))).toBeNull();
+    expect(run(def('cro'), def('cnpj'), 0)).toBeNull();
+    expect(run(def('cro'), { ...def('cro'), type: 'short_text', limits: {} })).toBe('type_locked');
+  });
+
+  it('draftLock and validateDraft refuse a format change on an answered question before any request', () => {
+    const question = storedPid({ answerCount: 4 });
+    const draft = { ...draftFromQuestion(question), format: 'cnpj' as const };
+    expect(draftLock(question, draft)).toBe('limits_locked');
+    expect(validateDraft(draft, question).format).toEqual({ key: 'locked.format' });
+    expect(validateDraft(draftFromQuestion(question), question).format).toBeUndefined();
+  });
+
+  it('lockFlags marks the format locked for an answered professional_id and for nothing else', () => {
+    expect(lockFlags(storedPid({ answerCount: 3 })).formatLocked).toBe(true);
+    expect(lockFlags(storedPid({ answerCount: 0 })).formatLocked).toBe(false);
+    expect(lockFlags(null).formatLocked).toBe(false);
+    expect(
+      lockFlags(adminQuestion('short_text', { answerCount: 3, options: [] })).formatLocked,
+    ).toBe(false);
+    expect(lockFlags(storedPid({ answerCount: 3 })).limitsWidenOnly).toBe(false);
   });
 });

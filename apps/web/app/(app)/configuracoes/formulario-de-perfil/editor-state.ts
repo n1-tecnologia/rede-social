@@ -9,6 +9,7 @@ import {
   normalizeOptionLabel,
   PROFILE_FORM_CONDITION_OPENER_TYPES,
   PROFILE_FORM_LIMITS,
+  type ProfessionalIdFormat,
   type ProfileFormIssue,
   type ProfileFormLimits,
   type ProfileFormType,
@@ -61,6 +62,8 @@ export interface QuestionDraft {
   /** The raw minimum and maximum: pt-BR number text for a number question, an ISO day for a date question. */
   min: string;
   max: string;
+  /** The mask of a professional_id question (quick 261110-ij7); empty until the admin picks one. */
+  format: ProfessionalIdFormat | '';
   /** The step the question sits in (12.1-17, D-627); `null` while the form has no step the sheet knows. */
   stepId: string | null;
   /**
@@ -104,6 +107,7 @@ export function blankDraft(
     options: blankOptions(),
     min: '',
     max: '',
+    format: '',
     stepId,
     branchId,
   };
@@ -118,6 +122,7 @@ export function changeType(draft: QuestionDraft, next: ProfileFormType): Questio
   const wasChoice = isChoiceType(draft.type);
   const choice = isChoiceType(next);
   const keepLimits = isRangeType(next) && draft.type === next;
+  const keepFormat = next === 'professional_id' && draft.type === next;
   return {
     ...draft,
     type: next,
@@ -125,6 +130,7 @@ export function changeType(draft: QuestionDraft, next: ProfileFormType): Questio
     allowOther: choice && wasChoice ? draft.allowOther : false,
     min: keepLimits ? draft.min : '',
     max: keepLimits ? draft.max : '',
+    format: keepFormat ? draft.format : '',
   };
 }
 
@@ -144,6 +150,7 @@ export function draftFromQuestion(question: AdminQuestion): QuestionDraft {
     })),
     min: limitText(question.limits.min),
     max: limitText(question.limits.max),
+    format: question.limits.format ?? '',
     stepId: question.stepId,
     branchId: question.branchId ?? null,
   };
@@ -171,12 +178,19 @@ export function limitText(value: number | string | undefined): string {
 }
 
 /** The minimum and maximum a draft names, and which of the two texts is not a value of the type. */
-export function parseLimits(draft: Pick<QuestionDraft, 'type' | 'min' | 'max'>): {
+export function parseLimits(
+  draft: Pick<QuestionDraft, 'type' | 'min' | 'max'> & Partial<Pick<QuestionDraft, 'format'>>,
+): {
   limits: ProfileFormLimits;
   invalid: { min: boolean; max: boolean };
 } {
   const limits: ProfileFormLimits = {};
   const invalid = { min: false, max: false };
+  // A registry question carries its mask and no range (quick 261110-ij7).
+  if (draft.type === 'professional_id') {
+    if (draft.format !== undefined && draft.format !== '') limits.format = draft.format;
+    return { limits, invalid };
+  }
   if (!isRangeType(draft.type)) return { limits, invalid };
   for (const key of ['min', 'max'] as const) {
     const raw = draft[key].trim();
@@ -249,7 +263,7 @@ export interface UpdateBody {
 }
 
 const sameLimits = (a: ProfileFormLimits, b: ProfileFormLimits) =>
-  a.min === b.min && a.max === b.max;
+  a.min === b.min && a.max === b.max && a.format === b.format;
 
 /**
  * The edit as the API wants it: `revision` always, then ONLY what differs from the stored question. An
@@ -289,7 +303,7 @@ export function toUpdateBody(question: AdminQuestion, draft: QuestionDraft): Upd
     if (typeChanged || !same) body.options = next;
   }
 
-  if (isRangeType(draft.type)) {
+  if (isRangeType(draft.type) || draft.type === 'professional_id') {
     const { limits } = parseLimits(draft);
     if (typeChanged || !sameLimits(limits, question.limits)) body.limits = limits;
   }
@@ -316,6 +330,7 @@ function snapshot(draft: QuestionDraft): string {
     options: draft.options.map((option) => [option.id ?? null, option.label]),
     min: draft.min,
     max: draft.max,
+    format: draft.format,
     stepId: draft.stepId,
     branchId: draft.branchId,
   });
@@ -350,6 +365,8 @@ export interface DraftErrors {
   limits?: FieldError;
   min?: FieldError;
   max?: FieldError;
+  /** A professional_id question needs a format (quick 261110-ij7). */
+  format?: FieldError;
 }
 
 /** Whether `validateDraft` found anything wrong. */
@@ -428,6 +445,14 @@ export function validateDraft(draft: QuestionDraft, question?: AdminQuestion | n
       draftLock(question, draft) === 'limits_locked'
     ) {
       errors.limits = { key: 'locked.limitsRefused' };
+    }
+  }
+
+  if (draft.type === 'professional_id') {
+    if (draft.format === '') errors.format = { key: 'errors.formatRequired' };
+    else if (question && draftLock(question, draft) === 'limits_locked') {
+      // An answered question keeps its mask (D-587): refused before any request.
+      errors.format = { key: 'locked.format' };
     }
   }
   return errors;
@@ -570,7 +595,7 @@ export interface LockDefinition {
   showOnProfile: boolean;
   allowOther: boolean;
   options: readonly { id: string; label: string }[];
-  limits: { min?: number | string; max?: number | string };
+  limits: { min?: number | string; max?: number | string; format?: ProfessionalIdFormat };
 }
 
 export interface LockInput {
@@ -631,6 +656,10 @@ export function checkDraftLocks(input: LockInput): ProfileFormIssue | null {
   if (current.allowOther && !next.allowOther && otherAnswered) return 'other_locked';
   if (!current.showOnProfile && next.showOnProfile) return 'visibility_locked';
   if (narrowsLimits(current.type, current.limits, next.limits)) return 'limits_locked';
+  // Quick 261110-ij7: the mask of an answered registry question is part of what its answers mean.
+  if (current.type === 'professional_id' && current.limits.format !== next.limits.format) {
+    return 'limits_locked';
+  }
   return null;
 }
 
@@ -645,6 +674,8 @@ export interface LockFlags {
   otherLocked: boolean;
   /** A number or date pair may only widen. */
   limitsWidenOnly: boolean;
+  /** The format of a professional_id question is read-only (quick 261110-ij7). */
+  formatLocked: boolean;
   /** A private question cannot become public: the switch is disabled and off. */
   visibilityFrozen: boolean;
   /** A public question may be turned off but not on again: the warning line. */
@@ -657,6 +688,7 @@ const NO_LOCKS: LockFlags = {
   lockedOptions: new Map(),
   otherLocked: false,
   limitsWidenOnly: false,
+  formatLocked: false,
   visibilityFrozen: false,
   visibilityRatchet: false,
 };
@@ -677,6 +709,7 @@ export function lockFlags(question: AdminQuestion | null): LockFlags {
     ),
     otherLocked: question.allowOther,
     limitsWidenOnly: isRangeType(question.type),
+    formatLocked: question.type === 'professional_id',
     visibilityFrozen: !question.showOnProfile,
     visibilityRatchet: question.showOnProfile,
   };
