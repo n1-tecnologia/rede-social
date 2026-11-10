@@ -1,7 +1,9 @@
 'use client';
 
 import {
+  layoutProfessionalId,
   type MemberQuestion,
+  PROFESSIONAL_ID_EXAMPLES,
   PROFILE_FORM_LIMITS,
   type ProfileFormIssue,
   type ProfileFormType,
@@ -37,7 +39,7 @@ import {
 } from '@/lib/profile-form/phone';
 
 /**
- * The thirteen controls of the member's completion screen (12-12, D-590, UI-D-583, UI-D-584, UI-D-596).
+ * The fourteen controls of the member's completion screen (12-12, D-590, UI-D-583, UI-D-584, UI-D-596).
  *
  * Every title, help text, option label and answer is React text: nothing here parses HTML or markdown
  * (UI-D-598). Every control is at least 44px tall with 16px text, every label is tied with `for`/`id` or
@@ -491,6 +493,70 @@ export const PhoneField: FieldComponent = (props) => {
       value={masked}
       onChange={onChange}
       onPaste={onPaste}
+      onBlur={f.blur}
+    />
+  );
+};
+
+/**
+ * A professional registry or CNPJ (quick 261110-ij7). The draft holds the MASKED text and every change goes
+ * through `layoutProfessionalId`, the same engine the contract's judge runs, so what the member sees is what is
+ * stored. A character that does not fit its slot is not kept (the text comes back unchanged), and the caret stays
+ * next to the character being edited: it goes after the last placed character left of the old caret, and a "/"
+ * the member just typed in a CREFITO keeps the caret after it.
+ */
+export const ProfessionalIdField: FieldComponent = (props) => {
+  const f = useFormatField(props);
+  const { format } = props.question.limits;
+  const ref = useRef<HTMLInputElement>(null);
+  const caret = useRef<number | null>(null);
+  const [, redraw] = useState(0);
+
+  useLayoutEffect(() => {
+    const at = caret.current;
+    caret.current = null;
+    const element = ref.current;
+    if (at === null || element === null || document.activeElement !== element) return;
+    element.setSelectionRange(at, at);
+  });
+
+  // A question with no format cannot be answered (the judge fails closed); the member still sees a plain line.
+  if (format === undefined) {
+    return <TextLine props={f.props} type="text" autoComplete="off" onBlur={f.blur} />;
+  }
+
+  function onChange(event: ChangeEvent<HTMLInputElement>) {
+    if (format === undefined) return;
+    const raw = event.target.value;
+    const start = event.target.selectionStart ?? raw.length;
+    const next = layoutProfessionalId(format, raw);
+    const leftRaw = raw.slice(0, start);
+    const left = layoutProfessionalId(format, leftRaw);
+    const placed = Math.min(left.consumed, next.consumed);
+    let at = 0;
+    if (placed > 0) {
+      at = next.ends[placed - 1] ?? next.text.length;
+      if (leftRaw.endsWith('/') && next.text.charAt(at) === '/') at += 1;
+    } else if (next.ends[0] !== undefined) {
+      at = next.ends[0] - 1;
+    }
+    caret.current = at;
+    if (next.text === f.text) redraw((n) => n + 1);
+    f.props.onChange(next.text);
+  }
+
+  return (
+    <TextLine
+      props={f.props}
+      ref={ref}
+      type="text"
+      autoCapitalize="characters"
+      autoComplete="off"
+      spellCheck={false}
+      enterKeyHint="next"
+      placeholder={PROFESSIONAL_ID_EXAMPLES[format]}
+      value={f.text}
+      onChange={onChange}
       onBlur={f.blur}
     />
   );

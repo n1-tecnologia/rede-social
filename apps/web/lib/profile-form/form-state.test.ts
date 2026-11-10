@@ -655,3 +655,65 @@ describe('the visible set drives the form state (12.1-13 task 1: D-631, Pitfall 
     });
   });
 });
+
+describe('professional_id: the draft, the wire, the blur judge and the messages (quick 261110-ij7)', () => {
+  const cro = () => question('professional_id', { limits: { format: 'cro' } });
+  const cnpj = () => question('professional_id', { limits: { format: 'cnpj' } });
+
+  it('draftFromStored returns the stored text, empty for a missing answer', () => {
+    expect(draftFromStored(question('professional_id', { answer: 'CRO-SP 123456' }))).toBe(
+      'CRO-SP 123456',
+    );
+    expect(draftFromStored(question('professional_id'))).toBe('');
+    expect(emptyDraft('professional_id')).toBe('');
+  });
+
+  it('toWire passes the draft text, blank is null', () => {
+    expect(toWire(cro(), 'CRO-SP 123456')).toBe('CRO-SP 123456');
+    expect(toWire(cro(), '   ')).toBeNull();
+    expect(toWire(cro(), '')).toBeNull();
+  });
+
+  it('issueFor is null for a valid value of the format, invalid for a wrong one, required when empty and required', () => {
+    expect(issueFor(cro(), 'CRO-SP 123456')).toBeNull();
+    expect(issueFor(cro(), 'sp123456')).toBeNull();
+    expect(issueFor(cro(), 'CRO-XX 12')).toBe('invalid');
+    expect(issueFor(cnpj(), '12.345.678/0001-90')).toBe('invalid');
+    expect(issueFor(cnpj(), '12.345.678/0001-95')).toBeNull();
+    expect(issueFor(cro(), '')).toBeNull();
+    const required = question('professional_id', { required: true, limits: { format: 'cro' } });
+    expect(issueFor(required, '')).toBe('required');
+  });
+
+  it('is a format type: judged on blur, never while typing, an empty text is no issue', () => {
+    expect(isFormatType('professional_id')).toBe(true);
+    expect(validateOnBlur(cro(), 'CRO-S')).toBe('invalid');
+    expect(validateOnBlur(cro(), 'CRO-SP 123456')).toBeNull();
+    expect(validateOnBlur(cro(), '')).toBeNull();
+    expect(settleOnBlur(cro(), 'CRO-SP 12')).toBe('CRO-SP 12');
+  });
+
+  it('errorSpec names the format example for invalid and too_long, the CNPJ sentence for a cnpj', () => {
+    expect(errorSpec(cro(), 'invalid')).toEqual({
+      key: 'errors.professionalId',
+      values: { example: 'CRO-SP 123456' },
+    });
+    expect(errorSpec(cro(), 'too_long')).toEqual({
+      key: 'errors.professionalId',
+      values: { example: 'CRO-SP 123456' },
+    });
+    expect(errorSpec(cnpj(), 'invalid')).toEqual({
+      key: 'errors.cnpj',
+      values: { example: '12.345.678/0001-95' },
+    });
+    expect(errorSpec(cnpj(), 'too_long').key).toBe('errors.cnpj');
+  });
+
+  it('limitHint gives the example line', () => {
+    expect(limitHint(cro())).toEqual({
+      key: 'controls.professionalIdExample',
+      values: { example: 'CRO-SP 123456' },
+    });
+    expect(limitHint(question('professional_id'))).toBeNull();
+  });
+});

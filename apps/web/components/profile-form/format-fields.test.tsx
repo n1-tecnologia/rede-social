@@ -384,3 +384,140 @@ describe('no validation while the member types', () => {
     }
   });
 });
+
+describe('the professional_id control: the mask appears while typing (quick 261110-ij7)', () => {
+  const cro = (extra: Partial<MemberQuestion> = {}) =>
+    question('professional_id', { title: 'Registro', limits: { format: 'cro' }, ...extra });
+  const cnpj = (extra: Partial<MemberQuestion> = {}) =>
+    question('professional_id', { title: 'CNPJ', limits: { format: 'cnpj' }, ...extra });
+  const crefito = (extra: Partial<MemberQuestion> = {}) =>
+    question('professional_id', { title: 'CREFITO', limits: { format: 'crefito' }, ...extra });
+  const CRO_ERROR = 'Informe um registro válido, como CRO-SP 123456.';
+
+  it('keeps the text keyboard attributes, 16px text and a 44px target, with the example as placeholder', () => {
+    const { input } = show(cro());
+    expect(input.type).toBe('text');
+    expect(input.getAttribute('autocapitalize')).toBe('characters');
+    expect(input.getAttribute('autocomplete')).toBe('off');
+    expect(input.getAttribute('spellcheck')).toBe('false');
+    expect(input.getAttribute('enterkeyhint')).toBe('next');
+    expect(input.getAttribute('placeholder')).toBe('CRO-SP 123456');
+    expect(input.className).toContain('text-base');
+    expect(input.className).toContain('min-h-11');
+  });
+
+  it('shows the example as a helper line', () => {
+    show(cro());
+    expect(screen.getByText('Exemplo: CRO-SP 123456')).toBeTruthy();
+  });
+
+  it('typing sp123456 into a cro question shows CRO-SP 123456 and stores that text', () => {
+    const { input } = show(cro());
+    type(input, 's');
+    expect(input.value).toBe('CRO-S');
+    type(input, 'sp123456');
+    expect(input.value).toBe('CRO-SP 123456');
+    expect(draftNow()).toBe('CRO-SP 123456');
+  });
+
+  it('a tenth digit that does not fit leaves the value unchanged', () => {
+    const { input } = show(cro({ answer: 'CRO-SP 123456789' }));
+    expect(input.value).toBe('CRO-SP 123456789');
+    type(input, 'CRO-SP 1234567890');
+    expect(input.value).toBe('CRO-SP 123456789');
+    expect(draftNow()).toBe('CRO-SP 123456789');
+  });
+
+  it('typing 12ABC into a cnpj question shows 12.ABC', () => {
+    const { input } = show(cnpj());
+    type(input, '12abc');
+    expect(input.value).toBe('12.ABC');
+    expect(draftNow()).toBe('12.ABC');
+  });
+
+  it('a pasted 12345678000195 shows 12.345.678/0001-95', () => {
+    const { input } = show(cnpj());
+    type(input, '12345678000195');
+    expect(input.value).toBe('12.345.678/0001-95');
+    expect(draftNow()).toBe('12.345.678/0001-95');
+  });
+
+  it('a crefito question typed digit by digit ends in CREFITO-3/123456-F', () => {
+    const { input } = show(crefito());
+    let shown = '';
+    for (const digit of '3123456') {
+      type(input, shown + digit);
+      shown = input.value;
+    }
+    expect(input.value).toBe('CREFITO-3/123456-F');
+    expect(draftNow()).toBe('CREFITO-3/123456-F');
+  });
+
+  it('shows a stored value as stored', () => {
+    expect(show(cnpj({ answer: '12.345.678/0001-95' })).input.value).toBe('12.345.678/0001-95');
+  });
+
+  it('judges on blur only, with the catalog sentence, and clears the error on the next edit', () => {
+    const { input } = show(cro());
+    type(input, 'sp12x');
+    expect(screen.queryByRole('alert')).toBeNull();
+    type(input, 'xx12');
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.blur(input);
+    expect(screen.getByRole('alert').textContent).toBe(CRO_ERROR);
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    type(input, 'CRO-XX 123');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a valid value shows no error, and neither does an empty optional field', () => {
+    const { input } = show(cro());
+    type(input, 'sp123456');
+    fireEvent.blur(input);
+    expect(screen.queryByRole('alert')).toBeNull();
+    cleanup();
+    const empty = show(cro());
+    fireEvent.blur(empty.input);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a wrong CNPJ says so with both examples', () => {
+    const { input } = show(cnpj());
+    type(input, '12.345.678/0001-90');
+    fireEvent.blur(input);
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Informe um CNPJ válido, como 12.345.678/0001-95 ou 12.ABC.345/01DE-35.',
+    );
+  });
+
+  it('keeps the caret next to the edited character when typing in the middle', () => {
+    const { input } = show(cro({ answer: 'CRO-SP 1234' }));
+    input.focus();
+    // The caret is after the "2" (index 9) and the member types an "8": the new text is CRO-SP 12834.
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setValue?.call(input, 'CRO-SP 12834');
+    input.setSelectionRange(10, 10);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(input.value).toBe('CRO-SP 12834');
+    expect(input.selectionStart).toBe(10);
+    expect(input.selectionEnd).toBe(10);
+  });
+
+  it('keeps the caret after a character typed in the middle of a cnpj, across a separator', () => {
+    const { input } = show(cnpj({ answer: '12.345' }));
+    input.focus();
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    // The caret is after the "1" and the member types a "7": 172.345 re-masks to 17.234.5, caret after the "7".
+    setValue?.call(input, '172.345');
+    input.setSelectionRange(2, 2);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(input.value).toBe('17.234.5');
+    expect(input.selectionStart).toBe(2);
+  });
+
+  it('a question with no format falls back to a plain text line', () => {
+    const { input } = show(question('professional_id', { title: 'Sem formato' }));
+    type(input, 'abc');
+    expect(input.value).toBe('abc');
+  });
+});

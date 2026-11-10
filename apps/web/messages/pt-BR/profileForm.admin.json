@@ -322,6 +322,22 @@
           "errNumber": "O mínimo não pode ser maior que o máximo.",
           "errDate": "A data mínima não pode ser depois da máxima."
         },
+        "format": {
+          "label": "Formato do registro",
+          "placeholder": "Escolha o formato",
+          "example": "Exemplo: {example}",
+          "note": "O membro vê a máscara enquanto digita e só salva um registro válido.",
+          "options": {
+            "cro": "CRO (Odontologia)",
+            "crm": "CRM (Medicina)",
+            "crbm": "CRBM (Biomedicina)",
+            "crf": "CRF (Farmácia)",
+            "coren": "COREN (Enfermagem)",
+            "crefito": "CREFITO (Fisioterapia e Terapia Ocupacional)",
+            "crbio": "CRBio (Biologia)",
+            "cnpj": "CNPJ (tradicional ou alfanumérico)"
+          }
+        },
         "notes": {
           "shortText": "O membro escreve uma linha, com até {max} caracteres.",
           "longText": "O membro escreve um texto, com até {max} caracteres.",
@@ -353,7 +369,8 @@
           "optionAnswers": "{n, plural, one {# resposta} other {# respostas}}",
           "other": "Já existem respostas “Outro”. Não dá para desligar.",
           "limits": "Como já há respostas, só dá para ampliar o intervalo.",
-          "limitsRefused": "Esse intervalo deixaria respostas fora do limite. Só é possível ampliar."
+          "limitsRefused": "Esse intervalo deixaria respostas fora do limite. Só é possível ampliar.",
+          "format": "O formato não muda depois que há respostas. Para mudar, crie uma nova pergunta e arquive esta."
         },
         "where": {
           "title": "Onde e quando aparece"
@@ -390,6 +407,7 @@
           "titleRequired": "Escreva a pergunta.",
           "tooLong": "Use até {max} caracteres.",
           "numberInvalid": "Informe um número.",
+          "formatRequired": "Escolha o formato do registro.",
           "saveFailed": "Não foi possível salvar a pergunta agora. Suas alterações continuam aqui. Tente de novo.",
           "conflict": "Esta pergunta foi alterada enquanto você editava. Feche e abra de novo para ver a versão atual."
         },
@@ -442,7 +460,11 @@
       "date": { "name": "Data", "hint": "Dia, mês e ano" },
       "phone": { "name": "Telefone", "hint": "Com DDD" },
       "email": { "name": "E-mail", "hint": "Endereço de e-mail" },
-      "link": { "name": "Link", "hint": "Endereço de site ou rede" }
+      "link": { "name": "Link", "hint": "Endereço de site ou rede" },
+      "professionalId": {
+        "name": "Registro profissional / CNPJ",
+        "hint": "Conselho de classe ou CNPJ, com máscara"
+      }
     }
   }
 }

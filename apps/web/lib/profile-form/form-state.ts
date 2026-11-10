@@ -3,6 +3,7 @@ import {
   type MemberForm,
   type MemberQuestion,
   missingIssue,
+  PROFESSIONAL_ID_EXAMPLES,
   PROFILE_FORM_LIMITS,
   type ProfileFormIssue,
   type ProfileFormQuestionDef,
@@ -76,6 +77,7 @@ export function draftFromStored(question: MemberQuestion): Draft {
     case 'phone':
     case 'email':
     case 'link':
+    case 'professional_id':
       return typeof stored === 'string' ? stored : '';
     case 'number':
       return typeof stored === 'number' ? formatNumberPtBr(stored) : '';
@@ -132,6 +134,7 @@ export function toWire(question: Pick<MemberQuestion, 'type'>, draft: Draft | un
     case 'long_text':
     case 'date':
     case 'email':
+    case 'professional_id':
       return typeof value === 'string' && value.trim() !== '' ? value : null;
     case 'link':
       return typeof value === 'string' && value.trim() !== '' ? normalizeLink(value) : null;
@@ -194,13 +197,14 @@ export function issueFor(
   return null;
 }
 
-/** The five types whose text is judged on blur (UI-D-586): the rest are judged on "Salvar" only. */
+/** The six types whose text is judged on blur (UI-D-586): the rest are judged on "Salvar" only. */
 const FORMAT_TYPES: ReadonlySet<ProfileFormType> = new Set([
   'number',
   'date',
   'phone',
   'email',
   'link',
+  'professional_id',
 ]);
 
 export function isFormatType(type: ProfileFormType): boolean {
@@ -371,6 +375,15 @@ function formatLimit(question: MemberQuestion, value: number | string | undefine
 
 /** "Entre {min} e {max}.", "A partir de {min}.", "Até {max}." for a number or date question (UI-D-584). */
 export function limitHint(question: MemberQuestion): MessageSpec | null {
+  if (question.type === 'professional_id') {
+    const { format } = question.limits;
+    return format === undefined
+      ? null
+      : {
+          key: 'controls.professionalIdExample',
+          values: { example: PROFESSIONAL_ID_EXAMPLES[format] },
+        };
+  }
   if (question.type !== 'number' && question.type !== 'date') return null;
   const min = formatLimit(question, question.limits.min);
   const max = formatLimit(question, question.limits.max);
@@ -390,6 +403,14 @@ function rangeSpec(question: MemberQuestion, kind: 'number' | 'date'): MessageSp
   if (min !== undefined) return { key: `errors.${kind}Min`, values: { min } };
   if (max !== undefined) return { key: `errors.${kind}Max`, values: { max } };
   return { key: `errors.${kind}Invalid` };
+}
+
+/** The refusal of a registry or CNPJ: the sentence names the example of the question's own format. */
+function professionalIdSpec(question: MemberQuestion): MessageSpec {
+  const { format } = question.limits;
+  if (format === undefined) return { key: 'errors.generic' };
+  const example = PROFESSIONAL_ID_EXAMPLES[format];
+  return { key: format === 'cnpj' ? 'errors.cnpj' : 'errors.professionalId', values: { example } };
 }
 
 /** The pt-BR sentence (catalog key and values) that explains an issue on a question (UI-D-586). */
@@ -418,6 +439,7 @@ export function errorSpec(question: MemberQuestion, issue: ProfileFormIssue): Me
       }
       if (type === 'email') return { key: 'errors.email' };
       if (type === 'link') return { key: 'errors.link' };
+      if (type === 'professional_id') return professionalIdSpec(question);
       return { key: 'errors.generic' };
     case 'out_of_range':
       if (type === 'number') return rangeSpec(question, 'number');
@@ -429,6 +451,7 @@ export function errorSpec(question: MemberQuestion, issue: ProfileFormIssue): Me
       if (type === 'phone') return { key: 'errors.phone' };
       if (type === 'email') return { key: 'errors.email' };
       if (type === 'link') return { key: 'errors.link' };
+      if (type === 'professional_id') return professionalIdSpec(question);
       return { key: 'errors.generic' };
     default:
       return { key: 'errors.generic' };

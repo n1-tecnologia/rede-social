@@ -21,6 +21,7 @@ import {
   MultipleChoice,
   NumberField,
   PhoneField,
+  ProfessionalIdField,
   Rating,
   ShortText,
   SingleChoice,
@@ -45,6 +46,7 @@ export const FIELD_BY_TYPE: Record<ProfileFormType, FieldComponent> = {
   yes_no: YesNo,
   acceptance: Acceptance,
   rating: Rating,
+  professional_id: ProfessionalIdField,
 };
 
 /** The DOM id of the wrapper of a question (the in-page links and the focus jumps point at it). */

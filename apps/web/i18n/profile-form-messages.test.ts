@@ -1,5 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  canonicalizeProfessionalId,
+  PROFESSIONAL_ID_FORMATS,
+} from '@rede-social/contracts/profile-form';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from './messages';
@@ -225,7 +229,7 @@ describe('profileForm.profile.json (12-14)', () => {
 /**
  * 12-15 — the builder's catalog (UI-D-564..UI-D-568, UI-D-576, UI-D-578): `profileForm.admin.json`
  * declares the `profileForm` root with the `admin` and `types` branches and pins the approved
- * Copywriting Contract lines of "Admin: page, summary, list, reorder", "Admin: the 13 types" and
+ * Copywriting Contract lines of "Admin: page, summary, list, reorder", "Admin: the 14 types" and
  * "Admin: confirmations, archived", through the real merged catalog and the real formatter.
  */
 const a = createTranslator({
@@ -380,7 +384,7 @@ describe('profileForm.admin.json (12-15)', () => {
     );
   });
 
-  it('names the 13 types as the Copywriting Contract does', () => {
+  it('names the 14 types as the Copywriting Contract does', () => {
     const names: [string, string][] = [
       ['shortText', 'Texto curto'],
       ['longText', 'Texto longo'],
@@ -395,10 +399,12 @@ describe('profileForm.admin.json (12-15)', () => {
       ['phone', 'Telefone'],
       ['email', 'E-mail'],
       ['link', 'Link'],
+      ['professionalId', 'Registro profissional / CNPJ'],
     ];
-    expect(names).toHaveLength(13);
+    expect(names).toHaveLength(14);
     for (const [key, name] of names) expect(ty(`${key}.name`), key).toBe(name);
     expect(ty('rating.hint')).toBe('De 1 a 5 estrelas');
+    expect(ty('professionalId.hint')).toBe('Conselho de classe ou CNPJ, com máscara');
   });
 
   it('keeps the vocabulary rules: no "survey", "questionário", "deletar" or "template"', () => {
@@ -724,5 +730,67 @@ describe('the builder dialog strings of UI-D-576..UI-D-579, pinned together (12-
     ];
     expect(pinned.length).toBeGreaterThanOrEqual(20);
     for (const [read, text] of pinned) expect(read()).toBe(text);
+  });
+});
+
+/**
+ * Quick 261110-ij7 (D-591): the professional_id question type. The admin builder strings (the format list, its
+ * note, the required-format error, the locked note) and the member strings (the example hint and the two error
+ * sentences) are pinned verbatim; the CNPJ examples named in the member sentence must pass the contract's judge.
+ */
+describe('professional_id catalog strings (quick 261110-ij7)', () => {
+  const admin = a;
+
+  it('pins the admin strings', () => {
+    expect(ty('professionalId.name')).toBe('Registro profissional / CNPJ');
+    expect(ty('professionalId.hint')).toBe('Conselho de classe ou CNPJ, com máscara');
+    expect(admin('editor.format.label')).toBe('Formato do registro');
+    expect(admin('editor.format.placeholder')).toBe('Escolha o formato');
+    expect(admin('editor.format.example', { example: 'CRO-SP 123456' })).toBe(
+      'Exemplo: CRO-SP 123456',
+    );
+    expect(admin('editor.format.note')).toBe(
+      'O membro vê a máscara enquanto digita e só salva um registro válido.',
+    );
+    expect(admin('editor.errors.formatRequired')).toBe('Escolha o formato do registro.');
+    expect(admin('editor.locked.format')).toBe(
+      'O formato não muda depois que há respostas. Para mudar, crie uma nova pergunta e arquive esta.',
+    );
+  });
+
+  it('pins the eight format names in the order of PROFESSIONAL_ID_FORMATS', () => {
+    const names: [string, string][] = [
+      ['cro', 'CRO (Odontologia)'],
+      ['crm', 'CRM (Medicina)'],
+      ['crbm', 'CRBM (Biomedicina)'],
+      ['crf', 'CRF (Farmácia)'],
+      ['coren', 'COREN (Enfermagem)'],
+      ['crefito', 'CREFITO (Fisioterapia e Terapia Ocupacional)'],
+      ['crbio', 'CRBio (Biologia)'],
+      ['cnpj', 'CNPJ (tradicional ou alfanumérico)'],
+    ];
+    expect(names.map(([key]) => key)).toEqual([...PROFESSIONAL_ID_FORMATS]);
+    for (const [key, name] of names) expect(admin(`editor.format.options.${key}`), key).toBe(name);
+  });
+
+  it('pins the member strings', () => {
+    expect(t('controls.professionalIdExample', { example: 'CRO-SP 123456' })).toBe(
+      'Exemplo: CRO-SP 123456',
+    );
+    expect(t('errors.professionalId', { example: 'CRO-SP 123456' })).toBe(
+      'Informe um registro válido, como CRO-SP 123456.',
+    );
+    expect(t('errors.cnpj')).toBe(
+      'Informe um CNPJ válido, como 12.345.678/0001-95 ou 12.ABC.345/01DE-35.',
+    );
+  });
+
+  it('the two CNPJ examples of the member sentence both pass the contract judge', () => {
+    const sentence = t('errors.cnpj');
+    const examples = sentence.match(/[0-9A-Z]{2}\.[0-9A-Z]{3}\.[0-9A-Z]{3}\/[0-9A-Z]{4}-[0-9]{2}/g);
+    expect(examples).toEqual(['12.345.678/0001-95', '12.ABC.345/01DE-35']);
+    for (const example of examples ?? []) {
+      expect(canonicalizeProfessionalId('cnpj', example)).toBe(example);
+    }
   });
 });

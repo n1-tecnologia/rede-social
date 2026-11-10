@@ -8,6 +8,7 @@ import {
   ChevronsUpDown,
   CircleDot,
   Hash,
+  IdCard,
   Link2,
   ListChecks,
   type LucideIcon,
@@ -21,7 +22,7 @@ import {
 import { PROFILE_FORM_TYPE_KEYS, typeNameKey } from './type-key';
 
 /**
- * The single table of the thirteen question types for the builder (12-16, D-590, D-591, UI-D-570): the
+ * The single table of the fourteen question types for the builder (12-16, D-590, D-591, UI-D-570): the
  * position of each in the picker and its 20px glyph. It is a `Record` keyed by `ProfileFormType`, so a
  * type added to `PROFILE_FORM_TYPES` is a compile error here until it has a row (and therefore a tile),
  * and a test pins that its keys equal the contract's list. The names and the one-line hints are NOT here:
@@ -49,6 +50,7 @@ export const QUESTION_TYPE_META: Record<ProfileFormType, QuestionTypeMeta> = {
   phone: { order: 11, glyph: Phone },
   email: { order: 12, glyph: Mail },
   link: { order: 13, glyph: Link2 },
+  professional_id: { order: 14, glyph: IdCard },
 };
 
 /** The types in the order the picker shows them. */

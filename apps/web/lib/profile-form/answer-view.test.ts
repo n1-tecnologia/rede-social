@@ -9,7 +9,7 @@ import {
 import { options } from './test-fixtures';
 
 /**
- * 12-14 Task 1 (UI-D-591, T-12-32): the one answer mapper, all thirteen types. The words are the catalog's
+ * 12-14 Task 1 (UI-D-591, T-12-32): the one answer mapper, all fourteen types. The words are the catalog's
  * (Sim, Não, Aceito, "{n} de 5", "Outro: {text}"); the mapper holds no copy of its own.
  */
 
@@ -24,6 +24,22 @@ const words: AnswerWords = {
 const def = (type: AnswerDef['type'], labels: string[] = []): AnswerDef => ({
   type,
   options: options(...labels),
+});
+
+describe('answerView: professional_id (quick 261110-ij7)', () => {
+  it('shows the stored canonical text as text, and a non-string as nothing', () => {
+    expect(answerView(def('professional_id'), 'CRO-SP 123456', words)).toEqual({
+      kind: 'text',
+      text: 'CRO-SP 123456',
+    });
+    expect(answerView(def('professional_id'), '12.345.678/0001-95', words)).toEqual({
+      kind: 'text',
+      text: '12.345.678/0001-95',
+    });
+    expect(answerView(def('professional_id'), 123, words)).toBeNull();
+    expect(answerView(def('professional_id'), '   ', words)).toBeNull();
+    expect(answerView(def('professional_id'), null, words)).toBeNull();
+  });
 });
 
 describe('answerView: text, number, date, phone, e-mail', () => {

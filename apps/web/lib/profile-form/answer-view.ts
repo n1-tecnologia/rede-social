@@ -112,6 +112,7 @@ export function answerView(
   switch (def.type) {
     case 'short_text':
     case 'long_text':
+    case 'professional_id':
       return typeof value === 'string' && value.trim() !== '' ? text(value) : null;
     case 'dropdown':
     case 'single_choice':

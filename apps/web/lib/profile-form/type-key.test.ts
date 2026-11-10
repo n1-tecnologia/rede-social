@@ -13,8 +13,14 @@ const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'profileForm'
 ) => string;
 
 describe('typeNameKey', () => {
-  it('covers exactly the 13 contract types', () => {
+  it('covers exactly the 14 contract types', () => {
     expect(Object.keys(PROFILE_FORM_TYPE_KEYS).sort()).toEqual([...PROFILE_FORM_TYPES].sort());
+  });
+
+  it('maps professional_id to the catalog key professionalId', () => {
+    expect(PROFILE_FORM_TYPE_KEYS.professional_id).toBe('professionalId');
+    expect(typeNameKey('professional_id')).toBe('types.professionalId.name');
+    expect(PROFILE_FORM_TYPES).toHaveLength(14);
   });
 
   it('resolves every type to a real, non-empty catalog name', () => {

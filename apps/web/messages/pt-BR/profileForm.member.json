@@ -35,7 +35,8 @@
         "linkPlaceholder": "https://",
         "between": "Entre {min} e {max}.",
         "from": "A partir de {min}.",
-        "until": "Até {max}."
+        "until": "Até {max}.",
+        "professionalIdExample": "Exemplo: {example}"
       },
       "errors": {
         "required": "Responda esta pergunta.",
@@ -55,6 +56,8 @@
         "phone": "Informe um telefone com DDD, como (11) 91234-5678.",
         "email": "Informe um e-mail válido, como nome@exemplo.com.br.",
         "link": "Informe um link válido, como https://exemplo.com.br.",
+        "professionalId": "Informe um registro válido, como {example}.",
+        "cnpj": "Informe um CNPJ válido, como 12.345.678/0001-95 ou 12.ABC.345/01DE-35.",
         "generic": "Esta resposta não pôde ser aceita. Confira e tente de novo."
       },
       "summary": {

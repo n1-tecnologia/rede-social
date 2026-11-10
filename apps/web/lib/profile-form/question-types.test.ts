@@ -11,19 +11,19 @@ import {
 } from './question-types';
 
 /**
- * 12-16 Task 1 (D-590, D-591, UI-D-570): the one table of the thirteen types. A new type in the contract
+ * 12-16 Task 1 (D-590, D-591, UI-D-570): the one table of the fourteen types. A new type in the contract
  * must be a row here (and so a tile), which the record type enforces at compile time and these tests at run
  * time.
  */
 describe('QUESTION_TYPE_META', () => {
   it('has exactly the keys of PROFILE_FORM_TYPES', () => {
     expect(Object.keys(QUESTION_TYPE_META).sort()).toEqual([...PROFILE_FORM_TYPES].sort());
-    expect(Object.keys(QUESTION_TYPE_META)).toHaveLength(13);
+    expect(Object.keys(QUESTION_TYPE_META)).toHaveLength(14);
   });
 
-  it('numbers the tiles 1 to 13 with no repeat', () => {
+  it('numbers the tiles 1 to 14 with no repeat', () => {
     const orders = Object.values(QUESTION_TYPE_META).map((meta) => meta.order);
-    expect([...orders].sort((a, b) => a - b)).toEqual(Array.from({ length: 13 }, (_, i) => i + 1));
+    expect([...orders].sort((a, b) => a - b)).toEqual(Array.from({ length: 14 }, (_, i) => i + 1));
   });
 
   it('gives every type a glyph', () => {
@@ -49,7 +49,9 @@ describe('orderedTypes', () => {
       'phone',
       'email',
       'link',
+      'professional_id',
     ]);
+    expect(QUESTION_TYPE_META.professional_id.order).toBe(14);
   });
 });
 
