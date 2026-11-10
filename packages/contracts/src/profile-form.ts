@@ -1,7 +1,24 @@
 import { z } from 'zod';
+import {
+  canonicalizeProfessionalId,
+  isProfessionalIdText,
+  PROFESSIONAL_ID_FORMATS,
+  PROFESSIONAL_ID_MAX_INPUT,
+  type ProfessionalIdFormat,
+} from './professional-id';
+
+export {
+  BRAZILIAN_UF_CODES,
+  canonicalizeProfessionalId,
+  formatProfessionalId,
+  layoutProfessionalId,
+  PROFESSIONAL_ID_EXAMPLES,
+  PROFESSIONAL_ID_FORMATS,
+  type ProfessionalIdFormat,
+} from './professional-id';
 
 /**
- * The profile form contract (Phase 12, D-590, D-591, D-592): the thirteen question types, one constant
+ * The profile form contract (Phase 12, D-590, D-591, D-592): the fourteen question types, one constant
  * per limit, the closed list of refusal codes and `parseAnswer`, the single place that decides whether a
  * raw value is a valid answer to a question.
  *
@@ -10,7 +27,7 @@ import { z } from 'zod';
  */
 
 /**
- * The thirteen question types, in this exact order. The `type` CHECK of `profile_form_questions` is
+ * The fourteen question types, in this exact order. The `type` CHECK of `profile_form_questions` is
  * generated from this list, so a new type is appended LAST (the generated CHECK keeps the list's order)
  * and is one new variant of `answerValueSchema` plus, at most, a widening of that CHECK (D-591).
  */
@@ -28,6 +45,8 @@ export const PROFILE_FORM_TYPES = [
   'yes_no',
   'acceptance',
   'rating',
+  // Quick 261110-ij7 (D-591): the 14th type, appended LAST; its mask is `limits.format`.
+  'professional_id',
 ] as const;
 export type ProfileFormType = (typeof PROFILE_FORM_TYPES)[number];
 
@@ -149,7 +168,7 @@ export type ProfileFormQuestionDef = {
   allowOther: boolean;
   options: { id: string; label: string }[];
   /** `min` and `max` are numbers for a number question and ISO days for a date question. */
-  limits: { min?: number | string; max?: number | string };
+  limits: { min?: number | string; max?: number | string; format?: ProfessionalIdFormat };
 };
 
 export type ParseAnswerResult =
@@ -317,6 +336,19 @@ function parseLink(raw: unknown): ParseAnswerResult {
 }
 
 /**
+ * A registry or CNPJ (quick 261110-ij7). The format is the STORED question's `limits.format`; a question
+ * with none fails closed. The stored value is the canonical masked text.
+ */
+function parseProfessionalId(question: ProfileFormQuestionDef, raw: unknown): ParseAnswerResult {
+  if (typeof raw !== 'string') return fail('invalid');
+  if (raw.length > PROFESSIONAL_ID_MAX_INPUT) return fail('too_long');
+  const { format } = question.limits;
+  if (format === undefined) return fail('invalid');
+  const canonical = canonicalizeProfessionalId(format, raw);
+  return canonical === null ? fail('invalid') : ok(canonical);
+}
+
+/**
  * Decides whether `raw` is a valid answer to `question`. Pure and total: it never throws and parsing the
  * same input twice returns deeply equal values. `{ ok: true, value: null }` means "no answer" (the row
  * is absent); the caller then applies `missingIssue` when the question is required.
@@ -352,6 +384,8 @@ export function parseAnswer(question: ProfileFormQuestionDef, raw: unknown): Par
     case 'rating':
       if (typeof raw !== 'number' || !Number.isInteger(raw)) return fail('invalid');
       return raw >= 1 && raw <= 5 ? ok(raw) : fail('out_of_range');
+    case 'professional_id':
+      return parseProfessionalId(question, raw);
   }
 }
 
@@ -383,6 +417,10 @@ export const answerValueSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('yes_no'), value: z.boolean() }),
   z.object({ type: z.literal('acceptance'), value: z.literal(true) }),
   z.object({ type: z.literal('rating'), value: z.number().int().min(1).max(5) }),
+  z.object({
+    type: z.literal('professional_id'),
+    value: z.string().refine(isProfessionalIdText, 'invalid'),
+  }),
 ]);
 export type AnswerValue = z.infer<typeof answerValueSchema>;
 
@@ -553,7 +591,14 @@ const helpTextField = z
 
 /** `min` and `max` of a number question (numbers) or a date question (ISO days). */
 const limitValue = z.union([z.number(), z.string()], { error: 'invalid' });
-const limitsSchema = z.object({ min: limitValue.optional(), max: limitValue.optional() }).strict();
+const limitsSchema = z
+  .object({
+    min: limitValue.optional(),
+    max: limitValue.optional(),
+    /** The mask of a professional_id question (quick 261110-ij7); no other type carries one. */
+    format: z.enum(PROFESSIONAL_ID_FORMATS, { error: 'invalid' }).optional(),
+  })
+  .strict();
 export type ProfileFormLimits = z.infer<typeof limitsSchema>;
 
 type DefinitionIssueCtx = z.core.$RefinementCtx;
@@ -627,6 +672,20 @@ function checkDefinition(body: QuestionDefinitionBody, ctx: DefinitionIssueCtx):
   }
   if (body.allowOther && !choice) {
     ctx.addIssue({ code: 'custom', message: 'other_not_allowed', path: ['allowOther'] });
+  }
+  if (body.type === 'professional_id') {
+    if (body.limits.format === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'required', path: ['limits', 'format'] });
+    }
+    for (const key of ['min', 'max'] as const) {
+      if (body.limits[key] !== undefined) {
+        ctx.addIssue({ code: 'custom', message: 'invalid', path: ['limits', key] });
+      }
+    }
+    return;
+  }
+  if (body.limits.format !== undefined) {
+    ctx.addIssue({ code: 'custom', message: 'invalid', path: ['limits', 'format'] });
   }
   const limitKeys = Object.values(body.limits).filter((value) => value !== undefined);
   if (body.type === 'number' || body.type === 'date') {

@@ -55,7 +55,7 @@ import {
 } from '../src/profile-form';
 
 /**
- * 12-03 (D-590, D-591, D-592; PFORM-04, 05, 06): the thirteen answer validators, the limits and the
+ * 12-03 (D-590, D-591, D-592; PFORM-04, 05, 06): the fourteen answer validators, the limits and the
  * closed refusal list. `parseAnswer` is built from the STORED question only (T-12-05).
  */
 
@@ -101,8 +101,8 @@ const issueOf = (def: ProfileFormQuestionDef, raw: unknown) => {
 };
 
 describe('12-03 - the constants (D-590, D-591)', () => {
-  it('lists the thirteen types in the documented order, the last one being the append point', () => {
-    expect(PROFILE_FORM_TYPES).toHaveLength(13);
+  it('lists the fourteen types in the documented order, the last one being the append point', () => {
+    expect(PROFILE_FORM_TYPES).toHaveLength(14);
     expect(PROFILE_FORM_TYPES).toEqual([
       'short_text',
       'long_text',
@@ -117,8 +117,10 @@ describe('12-03 - the constants (D-590, D-591)', () => {
       'yes_no',
       'acceptance',
       'rating',
+      'professional_id',
     ]);
-    expect(new Set(PROFILE_FORM_TYPES).size).toBe(13);
+    expect(PROFILE_FORM_TYPES.at(-1)).toBe('professional_id');
+    expect(new Set(PROFILE_FORM_TYPES).size).toBe(14);
   });
 
   it('the choice types are a subset of the types, and the modes are the four of the member read', () => {
@@ -267,6 +269,7 @@ describe('12-03 - one valid answer per type (PFORM-04)', () => {
       [q('yes_no'), false],
       [q('acceptance'), true],
       [q('rating'), 3],
+      [q('professional_id', { limits: { format: 'cro' } }), 'sp123456'],
     ];
     for (const [def, raw] of samples) {
       const result = answerValueSchema.safeParse({ type: def.type, value: parsedValue(def, raw) });
@@ -822,6 +825,7 @@ describe('12-03 - createQuestionBodySchema (PFORM-02, PFORM-06)', () => {
           required: true,
           showOnProfile: true,
           options,
+          limits: type === 'professional_id' ? { format: 'cro' } : {},
         }).success,
         type,
       ).toBe(true);
@@ -1819,5 +1823,106 @@ describe('12.2-01 - branch bodies, reads and the optional keys (D-640, D-642, D-
       answerEtag(list, [{ id: C, revision: 1 }], branches),
     );
     expect(answerEtag(list, undefined, branches)).toBe(`${A}:1|${B}:4;steps=;branches=${BRANCH}:3`);
+  });
+});
+
+describe('quick 261110-ij7 - professional_id (D-591, T-12-05)', () => {
+  const cro = q('professional_id', { limits: { format: 'cro' } });
+  const cnpj = q('professional_id', { limits: { format: 'cnpj' } });
+
+  it('parseAnswer stores the canonical text for lower-case and unmasked input', () => {
+    expect(parsedValue(cro, 'cro-sp 123456')).toBe('CRO-SP 123456');
+    expect(parsedValue(cro, ' sp123456 ')).toBe('CRO-SP 123456');
+    expect(parsedValue(cnpj, '12ABC34501DE35')).toBe('12.ABC.345/01DE-35');
+    expect(parsedValue(cnpj, '12345678000195')).toBe('12.345.678/0001-95');
+  });
+
+  it('refuses a non-UF, a wrong CNPJ digit and a non-string as invalid', () => {
+    expect(issueOf(cro, 'CRO-XX 12')).toBe('invalid');
+    expect(issueOf(cnpj, '12.345.678/0001-90')).toBe('invalid');
+    expect(issueOf(cro, 123456)).toBe('invalid');
+    expect(issueOf(cro, true)).toBe('invalid');
+  });
+
+  it('a raw over 64 units is too_long', () => {
+    expect(issueOf(cro, 'x'.repeat(70))).toBe('too_long');
+    expect(issueOf(cro, `CRO-SP 123${' '.repeat(80)}`)).toBe('too_long');
+  });
+
+  it('fails closed: no format, or the format of another council, is invalid', () => {
+    expect(issueOf(q('professional_id'), 'CRO-SP 123456')).toBe('invalid');
+    expect(issueOf(q('professional_id', { limits: { format: 'crm' } }), 'CRO-SP 123456')).toBe(
+      'invalid',
+    );
+  });
+
+  it('empty, null and whitespace are no answer; the caller decides on required', () => {
+    for (const raw of ['', '   ', null, undefined]) {
+      expect(parsedValue(cro, raw)).toBeNull();
+    }
+    expect(missingIssue(cro)).toBe('required');
+  });
+
+  it('answerValueSchema accepts a canonical text and refuses a non-canonical one', () => {
+    expect(
+      answerValueSchema.safeParse({ type: 'professional_id', value: 'CRO-SP 123456' }).success,
+    ).toBe(true);
+    expect(
+      answerValueSchema.safeParse({ type: 'professional_id', value: 'cro-sp 123456' }).success,
+    ).toBe(false);
+    expect(answerValueSchema.safeParse({ type: 'professional_id', value: 12 }).success).toBe(false);
+  });
+
+  const body = (limits: unknown) => ({ type: 'professional_id', title: 'Registro', limits });
+
+  it('createQuestionBodySchema accepts a body with a format', () => {
+    const parsed = createQuestionBodySchema.safeParse(body({ format: 'crefito' }));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.limits).toEqual({ format: 'crefito' });
+  });
+
+  it('refuses a missing format as required at limits.format', () => {
+    for (const limits of [{}, undefined]) {
+      const result = createQuestionBodySchema.safeParse(body(limits));
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const hit = result.error.issues.find(
+          (i) => i.path.join('.') === 'limits.format' && i.message === 'required',
+        );
+        expect(hit).toBeDefined();
+      }
+    }
+  });
+
+  it('refuses an unknown format, a min or max, and a format on another type as invalid', () => {
+    expect(issuesOf(createQuestionBodySchema, body({ format: 'crx' }))).toContain('invalid');
+    expect(issuesOf(createQuestionBodySchema, body({ format: 'cro', min: 1 }))).toContain(
+      'invalid',
+    );
+    expect(issuesOf(createQuestionBodySchema, body({ format: 'cro', max: 5 }))).toContain(
+      'invalid',
+    );
+    for (const type of ['short_text', 'number'] as const) {
+      expect(
+        issuesOf(createQuestionBodySchema, { type, title: 'x', limits: { format: 'cro' } }),
+      ).toContain('invalid');
+    }
+  });
+
+  it('updateQuestionBodySchema accepts limits.format', () => {
+    expect(
+      updateQuestionBodySchema.safeParse({ revision: 2, limits: { format: 'cnpj' } }).success,
+    ).toBe(true);
+    expect(
+      updateQuestionBodySchema.safeParse({ revision: 2, limits: { format: 'nope' } }).success,
+    ).toBe(false);
+  });
+
+  it('replaceQuestionBodySchema runs the same definition rules', () => {
+    const replaces = '55555555-5555-4555-8555-555555555555';
+    expect(
+      replaceQuestionBodySchema.safeParse({ ...body({ format: 'cro' }), replaces }).success,
+    ).toBe(true);
+    expect(replaceQuestionBodySchema.safeParse({ ...body({}), replaces }).success).toBe(false);
   });
 });
