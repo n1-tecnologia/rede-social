@@ -33,7 +33,7 @@ Current Plan: 21
 Total Plans in Phase: 21
 Plan: 21 of 21
 Status: Phase executed, awaiting the owner's proofs (12.2-UAT.md); Phase 12.3 closed 2026-11-09
-Last activity: 2026-11-09 — Completed quick task 261109-tdt (lint fix, 66392292); Phase 12.3 closed by developer closure, STATE on 12.2
+Last activity: 2026-11-10 — Completed quick task 261110-ij7 (professional_id mask question type, e35bf3a; nothing pushed); Phase 12.3 closed by developer closure, STATE on 12.2
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 3%)
 
@@ -1200,6 +1200,7 @@ None yet.
 | 48 | 12.2 CI fix: save-step tracer expected an empty branch to change the member formEtag (stale after WR-02) | 2026-11-07 | 96546259 | — | — |
 | 261109-tdt | Fix the 8 Biome lint errors from the front merge c80665e5 so pnpm lint and the CI checks gate (production deploy) go green; no behavior change (nothing pushed) | 2026-11-09 | 66392292 | complete | [261109-tdt-fix-the-8-biome-lint-errors-from-the-fro](./quick/261109-tdt-fix-the-8-biome-lint-errors-from-the-fro/) |
 | 50 | Fix the two stale test pins that turned the master CI red: events-rsvp detail key set (12.3 poster keys) and the PWA cache check vs the branding bucket (e3ee30b7) | 2026-11-10 | e3ee30b7 | — | — |
+| 261110-ij7 | Profile form: new `professional_id` question type with 8 admin-chosen masks (CRO, CRM, CRBM, CRF, COREN, CREFITO, CRBio, CNPJ traditional + alphanumeric with check digits); format in `limits.format`, locked once answered; 2 migrations applied to the local DB only (nothing pushed or deployed) | 2026-11-10 | e35bf3a | complete | [261110-ij7-tipo-de-pergunta-professional-id-com-m-s](./quick/261110-ij7-tipo-de-pergunta-professional-id-com-m-s/) |
 
 ### Roadmap Evolution
 
