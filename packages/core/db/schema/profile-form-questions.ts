@@ -2,6 +2,7 @@ import {
   PROFILE_FORM_CHOICE_TYPES,
   PROFILE_FORM_LIMITS,
   PROFILE_FORM_TYPES,
+  type ProfessionalIdFormat,
 } from '@rede-social/contracts/profile-form';
 import { sql } from 'drizzle-orm';
 import {
@@ -54,7 +55,8 @@ const TENANT_ADMIN = sql`tenant_id = app.tenant_id() and app.tenant_role() = 'ad
  * `type` is a CHECK built from `PROFILE_FORM_TYPES`, in that order: a new type is one new Zod variant
  * plus a small CHECK-widening migration, appended last (the `tenant_modules_key_chk` mould).
  * `options` is a `jsonb` array of `{ id, label }` with stable ids (answers reference ids, so a rename
- * never changes meaning); `limits` is `{ min?, max? }` for number and date.
+ * never changes meaning); `limits` is `{ min?, max? }` for number and date and
+ * `{ format }` (the mask, a key of `PROFESSIONAL_ID_FORMATS`) for professional_id; the database checks only that it is an object.
  *
  * A QUESTION BELONGS TO ONE STEP AND MAY CARRY ONE CONDITION (Phase 12.1; D-621, D-622, D-627, D-633).
  * `step_id` is declared NOT NULL here, but the generated migration adds it NULLABLE (production already
@@ -95,7 +97,10 @@ export const profileFormQuestions = pgTable(
     /** `[{ "id": "<uuid>", "label": "..." }]` in display order; empty for a non-choice type. */
     options: jsonb().$type<{ id: string; label: string }[]>().notNull().default([]),
     /** `{ "min"?, "max"? }` for number (numbers) and date (ISO days). */
-    limits: jsonb().$type<{ min?: number | string; max?: number | string }>().notNull().default({}),
+    limits: jsonb()
+      .$type<{ min?: number | string; max?: number | string; format?: ProfessionalIdFormat }>()
+      .notNull()
+      .default({}),
     position: integer().notNull(),
     /** D-627: the one step this question belongs to (NOT NULL once plan 06's backfill has run; see the header). */
     stepId: uuid('step_id').notNull(),

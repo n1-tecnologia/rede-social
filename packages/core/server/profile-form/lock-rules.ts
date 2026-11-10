@@ -1,4 +1,4 @@
-import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
+import type { ProfessionalIdFormat, ProfileFormIssue } from '@rede-social/contracts/profile-form';
 
 /**
  * The D-587 lock rules, PURE (Phase 12-08, PFORM-17, T-12-20): what an admin may not change on a question that
@@ -14,7 +14,9 @@ import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
  * widening a limit, turning "show on profile" off. Locked (the check order is this order): the TYPE
  * (`type_locked`), every option that has answers, removed or relabelled (`option_locked`), switching "Outro"
  * off while an "Outro" answer exists (`other_locked`), private to public (`visibility_locked`, the one-way
- * ratchet of PU-1) and narrowing a number or date limit (`limits_locked`).
+ * ratchet of PU-1), narrowing a number or date limit and, for a professional_id question, changing its
+ * mask `limits.format` (both `limits_locked`; the format has its own additive trigger, also PF005, from quick
+ * 261110-ij7).
  *
  * 12.1 (D-625, D-632): the trigger states two more rules, PF006 and PF007 (a branch membership cannot be
  * gained, lost or changed on an answered question; an opener with an active branch cannot be archived,
@@ -27,7 +29,11 @@ import type { ProfileFormIssue } from '@rede-social/contracts/profile-form';
  * below sends all ten back to the same codes, so the race path and the rule path answer the same coded 409.
  */
 
-export type LockLimits = { min?: number | string; max?: number | string };
+export type LockLimits = {
+  min?: number | string;
+  max?: number | string;
+  format?: ProfessionalIdFormat;
+};
 
 /** The part of a question the lock rules look at. */
 export type LockDefinition = {
@@ -93,6 +99,11 @@ export function checkLocks(input: LockInput): ProfileFormIssue | null {
   if (!current.showOnProfile && next.showOnProfile) return 'visibility_locked';
 
   if (narrows(current.type, current.limits, next.limits)) return 'limits_locked';
+
+  // Quick 261110-ij7: the mask of an answered registry question is part of what its answers mean.
+  if (current.type === 'professional_id' && current.limits.format !== next.limits.format) {
+    return 'limits_locked';
+  }
 
   return null;
 }

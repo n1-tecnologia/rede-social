@@ -119,6 +119,7 @@ export function answerText(question: ExportQuestion, value: unknown): AnswerCell
     case 'long_text':
     case 'email':
     case 'link':
+    case 'professional_id':
       return typeof value === 'string' ? text(value) : EMPTY;
     case 'dropdown':
     case 'single_choice': {

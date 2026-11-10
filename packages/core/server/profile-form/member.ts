@@ -8,6 +8,7 @@ import {
   memberBranchSchema,
   missingIssue,
   PROFILE_FORM_LIMITS,
+  type ProfessionalIdFormat,
   type ProfileFormBootstrap,
   type ProfileFormIssue,
   type ProfileFormMode,
@@ -143,7 +144,7 @@ type QuestionRow = {
   show_on_profile: boolean;
   allow_other: boolean;
   options: { id: string; label: string }[];
-  limits: { min?: number | string; max?: number | string };
+  limits: { min?: number | string; max?: number | string; format?: ProfessionalIdFormat };
   position: number;
   revision: number;
   /** 12.1 (D-627): the step the question sits in; every question has exactly one. */

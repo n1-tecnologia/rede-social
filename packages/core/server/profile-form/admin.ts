@@ -109,7 +109,7 @@ export type StoredQuestion = {
   show_on_profile: boolean;
   allow_other: boolean;
   options: { id: string; label: string }[];
-  limits: { min?: number | string; max?: number | string };
+  limits: LockDefinition['limits'];
   position: number;
   revision: number;
   archived_at: string | Date | null;
@@ -612,6 +612,7 @@ function nextDefinition(current: StoredQuestion, body: UpdateQuestionBody): Defi
       ? {
           ...(body.limits.min !== undefined ? { min: body.limits.min } : {}),
           ...(body.limits.max !== undefined ? { max: body.limits.max } : {}),
+          ...(body.limits.format !== undefined ? { format: body.limits.format } : {}),
         }
       : typeChanged
         ? {}
@@ -662,7 +663,7 @@ const sameOptions = (
   a.every((option, i) => option.id === b[i]?.id && option.label === b[i]?.label);
 
 const sameLimits = (a: LockDefinition['limits'], b: LockDefinition['limits']) =>
-  a.min === b.min && a.max === b.max;
+  a.min === b.min && a.max === b.max && a.format === b.format;
 
 const unchanged = (a: Definition, b: Definition) =>
   a.type === b.type &&

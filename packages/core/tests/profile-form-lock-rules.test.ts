@@ -157,6 +157,45 @@ describe('12-08 checkLocks, behavior 2: with answers each rule has its code', ()
   });
 });
 
+describe('quick 261110-ij7 checkLocks: the format of an answered professional_id (D-587)', () => {
+  const pid = (format?: 'cro' | 'cnpj') => ({
+    type: 'professional_id',
+    options: [],
+    limits: format ? { format } : {},
+  });
+
+  it('a changed format on an answered question is limits_locked', () => {
+    expect(check(pid('cnpj'), { current: pid('cro') })).toBe('limits_locked');
+    expect(check(pid(), { current: pid('cro') })).toBe('limits_locked');
+  });
+
+  it('the same format is free, so is a title-only edit', () => {
+    expect(check(pid('cro'), { current: pid('cro') })).toBeNull();
+  });
+
+  it('a never-answered question may change its format', () => {
+    expect(check(pid('cnpj'), { current: pid('cro'), answerCount: 0 })).toBeNull();
+  });
+
+  it('the type is answered first: a type change is type_locked', () => {
+    expect(check({ type: 'short_text', options: [], limits: {} }, { current: pid('cro') })).toBe(
+      'type_locked',
+    );
+  });
+
+  it('narrowing a number limit is still limits_locked, and a format on another type is no lock', () => {
+    expect(
+      check(
+        { limits: { min: 5, max: 10 } },
+        { current: { type: 'number', options: [], limits: { min: 1, max: 10 } } },
+      ),
+    ).toBe('limits_locked');
+    expect(
+      check({ limits: { format: 'cnpj' } }, { current: { type: 'short_text', options: [] } }),
+    ).toBeNull();
+  });
+});
+
 describe('12-08 checkLocks, behavior 3: the first violated rule wins and the function is pure', () => {
   it('returns type, then option, then other, then visibility, then limits', () => {
     const current = {

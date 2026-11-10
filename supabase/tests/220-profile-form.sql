@@ -152,7 +152,7 @@ select is(
     where conrelid = 'public.profile_form_answers'::regclass and conname = 'profile_form_answers_value_chk'),
   1, 'profile_form_answers carries its value size CHECK');
 
--- PFORM-05 adjacency: the TypeScript list and the CHECK list are compared as ORDERED arrays (13 names, no tolerance).
+-- PFORM-05 adjacency: the TypeScript list and the CHECK list are compared as ORDERED arrays (14 names, no tolerance).
 select is(
   (select array_agg(k order by ord) from (
      select m[1] as k, ord
@@ -160,8 +160,8 @@ select is(
             regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g') with ordinality as t(m, ord)
       where c.conname = 'profile_form_questions_type_chk' and c.conrelid = 'public.profile_form_questions'::regclass
    ) q),
-  array['short_text','long_text','dropdown','multiple_choice','single_choice','number','date','phone','email','link','yes_no','acceptance','rating']::text[],
-  'PFORM-05/D-591: the type CHECK lists the thirteen PROFILE_FORM_TYPES in the contract''s order');
+  array['short_text','long_text','dropdown','multiple_choice','single_choice','number','date','phone','email','link','yes_no','acceptance','rating','professional_id']::text[],
+  'PFORM-05/D-591: the type CHECK lists the fourteen PROFILE_FORM_TYPES in the contract''s order');
 select is(
   (select array_length(array_agg(k), 1) from (
      select m[1] as k
@@ -169,7 +169,7 @@ select is(
             regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g') as t(m)
       where c.conname = 'profile_form_questions_type_chk' and c.conrelid = 'public.profile_form_questions'::regclass
    ) q),
-  13, 'PFORM-05: the type CHECK holds exactly thirteen names (a type in one list and not the other fails)');
+  14, 'PFORM-05: the type CHECK holds exactly fourteen names (a type in one list and not the other fails)');
 
 -- CHECKs refuse (23514). The inserts run as the migration role, so only the CHECK can say no.
 select throws_ok(

@@ -140,7 +140,7 @@ describe('csvRow and the file frame', () => {
   });
 });
 
-describe('answerText: the thirteen types', () => {
+describe('answerText: the fourteen types', () => {
   const options = [
     { id: 'o1', label: 'Azul' },
     { id: 'o2', label: 'Verde' },
@@ -148,8 +148,8 @@ describe('answerText: the thirteen types', () => {
   ];
   const q = (type: ExportQuestion['type']): ExportQuestion => ({ type, options });
 
-  it('covers every one of the thirteen types', () => {
-    expect(PROFILE_FORM_TYPES).toHaveLength(13);
+  it('covers every one of the fourteen types', () => {
+    expect(PROFILE_FORM_TYPES).toHaveLength(14);
     for (const type of PROFILE_FORM_TYPES) {
       expect(() => answerText(q(type), null)).not.toThrow();
       expect(answerText(q(type), null).text).toBe('');
@@ -163,6 +163,16 @@ describe('answerText: the thirteen types', () => {
     expect(answerText(q('link'), 'https://exemplo.com/a?b=1').text).toBe(
       'https://exemplo.com/a?b=1',
     );
+  });
+
+  it('renders a professional_id as the stored canonical text, a non-string as an empty cell', () => {
+    expect(answerText(q('professional_id'), 'CRO-SP 123456')).toEqual({
+      text: 'CRO-SP 123456',
+      numeric: false,
+    });
+    expect(answerText(q('professional_id'), '12.345.678/0001-95').text).toBe('12.345.678/0001-95');
+    expect(answerText(q('professional_id'), 123456).text).toBe('');
+    expect(answerText(q('professional_id'), { optionId: 'o1' }).text).toBe('');
   });
 
   it('renders a single choice and a dropdown as the label, or Outro: text', () => {
