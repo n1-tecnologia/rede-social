@@ -88,7 +88,10 @@ export function MemberQuickCard({
             ratio=""
             className="ms-zoom absolute inset-0 h-full w-full"
             // A failed cover leaves the tint and the glyph under it.
-            fallback={<></>}
+            // The value is false, not null or undefined: MediaImage replaces a nullish
+            // fallback with its own tinted span, which would cover the glyph. False draws
+            // nothing, as the empty fragment did.
+            fallback={false}
           />
         ) : null}
       </div>

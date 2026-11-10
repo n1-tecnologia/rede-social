@@ -16,8 +16,8 @@ import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';
 import { type CourseCardView, catalogueCategoryHref } from '@/lib/courses-member-view';
 import { loadMoreCatalogueAction, refreshCatalogueAction } from './learn-actions';
-import { riseStyle } from './rise';
 import { MEMBER_EMPTY_WIDE, MemberEmptyCard } from './MemberEmptyCard';
+import { riseStyle } from './rise';
 
 export interface MemberCoursesGridProps {
   /** The category the TAB decided on the server (`null` = "Todas"); the grid remounts per value. */

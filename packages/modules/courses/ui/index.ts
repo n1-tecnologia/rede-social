@@ -47,6 +47,12 @@ export { TrackRow, type TrackRowPill, type TrackRowProps } from './TrackRow';
 export { CourseCard, type CourseCardProgress, type CourseCardProps } from './member/CourseCard';
 export { LiveCard, type LiveCardProps } from './member/LiveCard';
 export { LiveStatusChip, type LiveStatusChipProps } from './member/LiveStatusChip';
+// 2026-10-26 — the academy reference's cards: a module, a lesson and a track.
+export {
+  MemberLessonCard,
+  type MemberLessonCardProps,
+  type MemberLessonCardState,
+} from './member/MemberLessonCard';
 export {
   MemberLessonRow,
   type MemberLessonRowProps,
@@ -57,13 +63,6 @@ export {
   type MemberLessonThumbProps,
   type MemberLessonThumbState,
 } from './member/MemberLessonThumb';
-export { ModuleCover, type ModuleCoverProps, type ModuleCoverState } from './member/ModuleCover';
-// 2026-10-26 — the academy reference's cards: a module, a lesson and a track.
-export {
-  MemberLessonCard,
-  type MemberLessonCardProps,
-  type MemberLessonCardState,
-} from './member/MemberLessonCard';
 export {
   MemberModuleCard,
   type MemberModuleCardProps,
@@ -71,6 +70,7 @@ export {
 } from './member/MemberModuleCard';
 export { MemberQuickCard, type MemberQuickCardProps } from './member/MemberQuickCard';
 export { MemberTrackCard, type MemberTrackCardProps } from './member/MemberTrackCard';
+export { ModuleCover, type ModuleCoverProps, type ModuleCoverState } from './member/ModuleCover';
 export { ProgressBar, type ProgressBarProps } from './member/ProgressBar';
 export { ProgressRing, type ProgressRingProps } from './member/ProgressRing';
 export { StatBlock, type StatBlockProps } from './member/StatBlock';

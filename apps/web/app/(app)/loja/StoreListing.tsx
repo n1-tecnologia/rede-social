@@ -102,7 +102,12 @@ export function StoreListing({
 
       {view.items.length > 0 ? (
         <div className="@container px-4">
-          <ul className={cn('grid grid-cols-2 gap-3 @min-[576px]:grid-cols-3 @min-[576px]:gap-4', STORE_COLUMNS)}>
+          <ul
+            className={cn(
+              'grid grid-cols-2 gap-3 @min-[576px]:grid-cols-3 @min-[576px]:gap-4',
+              STORE_COLUMNS,
+            )}
+          >
             {view.items.map((item, index) => (
               <li key={item.id} className="ms-rise min-w-0" style={riseStyle(index)}>
                 <StoreProductCard item={item} eager={index < 4} showTag={showTags} />

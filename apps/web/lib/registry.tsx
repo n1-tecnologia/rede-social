@@ -44,8 +44,8 @@ import { loadFeed } from '@/lib/feed';
 import { composerEntryFor, postAdminLabel, postCardView } from '@/lib/feed-view';
 import { coursesAreas } from '@/lib/member-area';
 import type { InstagramByMember } from '@/lib/profile-instagram';
-import { loadHighlights, loadStories } from '@/lib/stories';
 import { storeAreas } from '@/lib/store-area';
+import { loadHighlights, loadStories } from '@/lib/stories';
 import {
   highlightGroupView,
   inicioGroups,
