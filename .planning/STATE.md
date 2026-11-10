@@ -5,10 +5,10 @@ current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: 21
 status: verifying
 stopped_at: "Phase 12.3 CLOSED 2026-11-09 by developer closure (UAT 6/6 on Igor's word, he tests in production directly; security 56/56 closed, threats_open 0; verification passed): nothing pushed or deployed, M1..M16 ledger and the release are his, NOVF-02 wording (bare 404 vs the 400 by name) still to amend, pnpm lint red from the front merge (8 findings, none this phase's); STATE back on 12.2 (executed 21/21, verification human_needed, next /gsd-verify-work 12.2 after his proofs); Phase 13 stays paused at plan 14"
-last_updated: "2026-11-09T23:55:00.000Z"
+last_updated: "2026-11-10T00:15:24.392Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 12.3 closed by developer closure, STATE back on 12.2
-state_head: 57dc2c28c93d88a4f7fc2430d10eff8820710e33
+state_head: 6639229204fb2287fde2ae1b7f675cd35f396c80
 progress:
   total_phases: 31
   completed_phases: 1
@@ -33,7 +33,7 @@ Current Plan: 21
 Total Plans in Phase: 21
 Plan: 21 of 21
 Status: Phase executed, awaiting the owner's proofs (12.2-UAT.md); Phase 12.3 closed 2026-11-09
-Last activity: 2026-11-09 — Phase 12.3 closed by developer closure, STATE back on 12.2
+Last activity: 2026-11-09 — Completed quick task 261109-tdt (lint fix, 66392292); Phase 12.3 closed by developer closure, STATE on 12.2
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 3%)
 
@@ -1198,6 +1198,7 @@ None yet.
 | 261030-hh2 | Centre the 44px hit area of sm buttons so a 1px border no longer shaves it to 42px (shared Button primitive) | 2026-10-30 | 18d9f0f8 | complete | [261030-hh2-fix-the-44px-touch-target-of-bordered-ou](./quick/261030-hh2-fix-the-44px-touch-target-of-bordered-ou/) |
 | 261106-ei5 | Phase 12.1: a new or reactivated conditional question is stored right after its opener (same step), after the opener's last active dependent; other step and unconditional keep the end of the step; server only, not pushed | 2026-11-06 | 69620c4e | complete | [261106-ei5-phase-12-1-a-new-conditional-question-is](./quick/261106-ei5-phase-12-1-a-new-conditional-question-is/) |
 | 48 | 12.2 CI fix: save-step tracer expected an empty branch to change the member formEtag (stale after WR-02) | 2026-11-07 | 96546259 | — | — |
+| 261109-tdt | Fix the 8 Biome lint errors from the front merge c80665e5 so pnpm lint and the CI checks gate (production deploy) go green; no behavior change (nothing pushed) | 2026-11-09 | 66392292 | complete | [261109-tdt-fix-the-8-biome-lint-errors-from-the-fro](./quick/261109-tdt-fix-the-8-biome-lint-errors-from-the-fro/) |
 
 ### Roadmap Evolution
 
