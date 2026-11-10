@@ -52,7 +52,9 @@ const SEEDED_UPCOMING = {
 
 /**
  * The one member-facing detail key set (D-206, D-207): no URL, no code, no other member. 2026-10-03
- * adds `category` and `capacity` (and moves `address` into the list item too).
+ * adds `category` and `capacity` (and moves `address` into the list item too). 2026-11-09 (Phase 12.3,
+ * plan 06) adds `posterAssetId` and `posterVariantWidths`: the tenant's optional vertical poster, never
+ * member data.
  */
 const DETAIL_KEYS = [
   'address',
@@ -65,6 +67,8 @@ const DETAIL_KEYS = [
   'endsAt',
   'format',
   'id',
+  'posterAssetId',
+  'posterVariantWidths',
   'presentCount',
   'schedule',
   'startsAt',

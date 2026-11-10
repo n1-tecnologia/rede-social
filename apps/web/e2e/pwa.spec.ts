@@ -16,6 +16,9 @@ test.skip(
 
 const DEMO_MANIFEST = '/m/rede-demo/manifest.webmanifest';
 const ICON_SRC = /^(\/icons\/rede-social-|.*\/storage\/v1\/object\/public\/branding\/)/;
+// The public branding bucket is cached on purpose (sw.ts rule (c): the tenant's derived icons stay
+// offline) and its path carries `/v1/` (Supabase Storage), which is not an API answer.
+const BRANDING_BUCKET_PREFIX = '/storage/v1/object/public/branding/';
 
 async function waitForController(page: Page): Promise<void> {
   await page.evaluate(() => navigator.serviceWorker.ready);
@@ -209,7 +212,8 @@ test.describe('PWA-01 — offline fallback and caching contract', () => {
       expect(['/inicio', '/configuracoes', '/perfil', '/entrar'], full).not.toContain(url.pathname);
       expect(full, full).not.toContain('_rsc=');
       expect(url.pathname, full).not.toMatch(/^\/(v1|auth|m)\//);
-      expect(url.pathname, full).not.toContain('/v1/');
+      if (!url.pathname.startsWith(BRANDING_BUCKET_PREFIX))
+        expect(url.pathname, full).not.toContain('/v1/');
       // The only document-like entry (no file extension) is the offline fallback.
       if (!/\.[a-z0-9]+$/i.test(url.pathname)) expect(url.pathname, full).toBe('/~offline');
     }
