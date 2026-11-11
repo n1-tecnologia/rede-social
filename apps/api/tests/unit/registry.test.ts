@@ -688,3 +688,76 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     );
   });
 });
+
+describe('10-05 D-707/A2: the member community permissions are composed in the app tier', () => {
+  const MEMBER_KEYS = [
+    'communities.community.create',
+    'communities.community.manage_own',
+    'stories.story.publish',
+  ] as const;
+
+  it('23. a member gets create, manage_own and story.publish only while social and the owning module are effective', () => {
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    const composed = permissionsFor('member', everything);
+    for (const key of MEMBER_KEYS) expect(composed, key).toContain(key);
+    // `communities` off: neither community key; the story key stays (its own module is on).
+    const noCommunities = permissionsFor(
+      'member',
+      new Set<ModuleKey>(TOGGLEABLE_MODULES.filter((key) => key !== 'communities')),
+    );
+    expect(noCommunities).not.toContain('communities.community.create');
+    expect(noCommunities).not.toContain('communities.community.manage_own');
+    expect(noCommunities).toContain('stories.story.publish');
+    // `stories` off: no story key; both community keys stay.
+    const noStories = permissionsFor(
+      'member',
+      new Set<ModuleKey>(TOGGLEABLE_MODULES.filter((key) => key !== 'stories')),
+    );
+    expect(noStories).not.toContain('stories.story.publish');
+    expect(noStories).toContain('communities.community.create');
+    // `social` off: none of the three (and `feed` off takes `social` with it, D-121).
+    for (const off of ['social', 'feed'] as const) {
+      const without = permissionsFor(
+        'member',
+        new Set<ModuleKey>(TOGGLEABLE_MODULES.filter((key) => key !== off)),
+      );
+      for (const key of MEMBER_KEYS) expect(without, `${off} off: ${key}`).not.toContain(key);
+    }
+  });
+
+  it('24. EP-40: the two community keys are member-only by construction; staff never receives them, whatever is enabled or set', () => {
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    const generous = settingsFor([
+      ['social', { participants: ['support_tenant', 'admin_tenant'] }],
+    ]);
+    for (const role of TENANT_ROLES) {
+      for (const settings of [new Map<ModuleKey, Record<string, unknown>>(), generous]) {
+        const composed = permissionsFor(role, everything, settings);
+        expect(composed.includes('communities.community.create'), `${role}: create`).toBe(
+          role === 'member',
+        );
+        expect(composed.includes('communities.community.manage_own'), `${role}: manage_own`).toBe(
+          role === 'member',
+        );
+      }
+    }
+    // The admin keeps `manage`; a member never holds it.
+    expect(permissionsFor('admin_tenant', everything)).toContain('communities.community.manage');
+    expect(permissionsFor('member', everything)).not.toContain('communities.community.manage');
+    // No static role grant holds the member keys: the manifest names `manage` for the admin and nothing else.
+    expect(MODULE_REGISTRY.communities?.defaultRolePermissions).toEqual({
+      admin_tenant: ['communities.community.manage'],
+    });
+  });
+
+  it('25. EP-40: composing twice yields the same set with no duplicate, in sorted order', () => {
+    const forward = new Set<ModuleKey>(['feed', 'social', 'communities', 'stories']);
+    const reverse = new Set<ModuleKey>(['stories', 'communities', 'social', 'feed']);
+    const first = permissionsFor('member', forward);
+    expect(permissionsFor('member', forward)).toEqual(first);
+    expect(permissionsFor('member', reverse)).toEqual(first);
+    expect(new Set(first).size).toBe(first.length);
+    expect(first).toEqual([...first].sort());
+    for (const key of MEMBER_KEYS) expect(first.filter((p) => p === key)).toHaveLength(1);
+  });
+});

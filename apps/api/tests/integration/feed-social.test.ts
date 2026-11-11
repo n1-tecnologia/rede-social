@@ -14,6 +14,7 @@ import {
   removeIdentitiesByPrefix,
   SEED_PASSWORD,
   signInAs,
+  withCommunitiesEnabled,
   withSocialEnabled,
 } from './setup';
 
@@ -1397,5 +1398,145 @@ describe('09-06 member authoring rules leave a text post alone', () => {
     expect(post.communityId).toBeNull();
     expect(post.mediaKind).toBe('none');
     expect(post.media).toEqual([]);
+  });
+});
+
+/**
+ * 10-05 (D-709, MPUB-03; EP-42, EP-44): the member post inside the member's OWN community carries the
+ * same media rules as the member post anywhere (the `social` limits), and never a PDF. The community is
+ * made through the real route, so the owner seam, the derived audience and the RLS gates all run.
+ */
+describe('10 community post', () => {
+  const ASSET_MARK = 'community-post-10-05.jpg';
+  const COMMUNITY_NAME = `${PREFIX}10-05 comunidade de mídia`;
+  let communityId = '';
+  let savedSettings: Record<string, unknown> = {};
+  let restoreCommunities: () => Promise<void> = async () => {};
+
+  const seedAsset = async (kind: 'image' | 'video' | 'file'): Promise<string> => {
+    const video = kind === 'video';
+    const file = kind === 'file';
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+         mime, bytes, width, height, duration_seconds, aspect_ratio, filename, ready_at)
+      values (${labTenantId}::uuid, ${userIds.helena}::uuid, ${kind},
+              ${file ? 'attachment' : 'post'}, 'ready', ${video ? 'fake' : 'supabase'},
+              ${video ? `fake-${crypto.randomUUID()}` : null},
+              ${video ? `pb-${crypto.randomUUID()}` : null},
+              ${video ? 'video/mp4' : file ? 'application/pdf' : 'image/jpeg'}, 2048,
+              ${file ? null : 1080}, ${file ? null : 1080}, ${video ? 15 : null},
+              ${video ? '9:16' : null}, ${ASSET_MARK}, now())
+      returning id`;
+    return row?.id ?? '';
+  };
+
+  const post = (body: Record<string, unknown>) =>
+    request('/v1/feed/posts', tokens.helena, { method: 'POST', body: JSON.stringify(body) });
+
+  const setMediaSettings = async (media: Record<string, unknown>) => {
+    await adminSql`
+      update public.tenant_modules
+         set settings = ${adminSql.json({ ...savedSettings, media } as never)}
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+  };
+
+  beforeAll(async () => {
+    // The seed leaves `communities` OFF on rede-lab; this describe needs it on (and puts it back).
+    restoreCommunities = await withCommunitiesEnabled('lab');
+    const [row] = await adminSql<{ settings: Record<string, unknown> }[]>`
+      select settings from public.tenant_modules
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    savedSettings = row?.settings ?? {};
+    const res = await request('/v1/communities', tokens.helena, {
+      method: 'POST',
+      body: JSON.stringify({ name: COMMUNITY_NAME }),
+    });
+    expect(res.status).toBe(201);
+    communityId = ((await res.json()) as { id: string }).id;
+  });
+
+  afterAll(async () => {
+    await adminSql`
+      update public.tenant_modules set settings = ${adminSql.json(savedSettings as never)}
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+    await adminSql`delete from public.feed_posts where community_id = ${communityId}::uuid`;
+    await adminSql`delete from public.communities where id = ${communityId}::uuid`;
+    await adminSql`delete from public.media_assets where filename = ${ASSET_MARK}`;
+    await restoreCommunities();
+  });
+
+  it('EP-42 adjacency: photos exactly at the social limit are accepted and limit plus one is refused too_many_images', async () => {
+    await setMediaSettings({ photosPerPost: 3 });
+    const assets = [
+      await seedAsset('image'),
+      await seedAsset('image'),
+      await seedAsset('image'),
+      await seedAsset('image'),
+    ];
+    const atLimit = await post({
+      caption: `${PREFIX}três fotos`,
+      communityId,
+      imageAssetIds: assets.slice(0, 3),
+    });
+    expect(atLimit.status).toBe(201);
+    expect(((await atLimit.json()) as FeedPost).audience).toBe('community');
+    const over = await post({
+      caption: `${PREFIX}quatro fotos`,
+      communityId,
+      imageAssetIds: assets,
+    });
+    expect(over.status).toBe(400);
+    expect(((await over.json()) as Envelope).error.details?.media).toBe('too_many_images');
+  });
+
+  it('EP-42 adjacency: one video is accepted where the platform allowed it; a second video (here sent among the images) is refused', async () => {
+    await setMediaSettings({ photosPerPost: 4, video: { enabled: true } });
+    const one = await seedAsset('video');
+    const ok = await post({ caption: `${PREFIX}um vídeo`, communityId, videoAssetId: one });
+    expect(ok.status).toBe(201);
+    expect(((await ok.json()) as FeedPost).mediaKind).toBe('video');
+    const refused = await post({
+      caption: `${PREFIX}dois vídeos`,
+      communityId,
+      videoAssetId: await seedAsset('video'),
+      imageAssetIds: [await seedAsset('video')],
+    });
+    expect(refused.status).toBe(400);
+  });
+
+  it('EP-42 adjacency: a PDF attachment from a member is refused member_no_attachments, in a community as anywhere', async () => {
+    const pdf = await seedAsset('file');
+    const res = await post({ caption: `${PREFIX}com pdf`, communityId, attachmentAssetIds: [pdf] });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Envelope).error.details?.member).toBe('member_no_attachments');
+  });
+
+  it('EP-43 empty: a creator’s post with no text and no media answers 400', async () => {
+    const res = await post({ caption: '', communityId });
+    expect(res.status).toBe(400);
+  });
+
+  it('EP-44 ordering: the media order the member sent is the order stored and returned', async () => {
+    await setMediaSettings({ photosPerPost: 4 });
+    const [a, b, c] = [
+      await seedAsset('image'),
+      await seedAsset('image'),
+      await seedAsset('image'),
+    ];
+    const sent = [c, a, b];
+    const res = await post({ caption: `${PREFIX}ordem`, communityId, imageAssetIds: sent });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as FeedPost;
+    expect(created.media.map((item) => item.assetId)).toEqual(sent);
+    const stored = await adminSql<{ media_asset_id: string }[]>`
+      select media_asset_id from public.feed_post_media
+       where post_id = ${created.id}::uuid order by position`;
+    expect(stored.map((row) => row.media_asset_id)).toEqual(sent);
+    const onPage = await request(`/v1/feed?communityId=${communityId}&limit=25`, tokens.marcos);
+    const found = ((await onPage.json()) as FeedPage).items.find((item) => item.id === created.id);
+    expect(found?.media.map((item) => item.assetId)).toEqual(sent);
   });
 });

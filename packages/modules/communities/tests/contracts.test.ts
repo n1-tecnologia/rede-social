@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   COMMUNITY_ISSUE_SET,
   COMMUNITY_ISSUES,
+  COMMUNITY_MAX_DESCRIPTION,
+  COMMUNITY_MAX_NAME,
   COMMUNITY_MAX_ORDER,
+  COMMUNITY_PERMISSIONS,
   COMMUNITY_UNLOCK_NAMES_MAX,
   communityUnlockRefusalSchema,
+  createCommunitySchema,
   reorderCommunitiesSchema,
+  updateCommunitySchema,
 } from '../contracts/index';
 
 /**
@@ -135,5 +140,73 @@ describe('communityUnlockRefusalSchema - the delete refusal the web parses (D-55
     expect(
       communityUnlockRefusalSchema.safeParse({ ...base, community: 'not_archived' }).success,
     ).toBe(false);
+  });
+});
+
+/**
+ * 10-05 (D-706, D-707, EP-01..03, EP-22): the member creator's published contract, without a server.
+ * The body of a create or an edit never carries `kind`, `createdByUserId`, `position` or `productIds`:
+ * both schemas are `.strict()`, so a forged key is a 400 and the service stamps from the session.
+ */
+describe('10-05: the member create and edit contract', () => {
+  it('the permission strings: manage (unchanged), create and manage_own (member-only, composed in the app tier)', () => {
+    expect(COMMUNITY_PERMISSIONS).toEqual({
+      manage: 'communities.community.manage',
+      create: 'communities.community.create',
+      manageOwn: 'communities.community.manage_own',
+    });
+  });
+
+  it('the create schema refuses kind, createdByUserId, position and productIds (mass assignment, T-10-15)', () => {
+    expect(createCommunitySchema.safeParse({ name: 'x' }).success).toBe(true);
+    for (const extra of [
+      { kind: 'organization' },
+      { kind: 'member' },
+      { createdByUserId: '11111111-1111-4111-8111-111111111111' },
+      { position: 0 },
+      { productIds: [] },
+    ]) {
+      expect(
+        createCommunitySchema.safeParse({ name: 'x', ...extra }).success,
+        JSON.stringify(extra),
+      ).toBe(false);
+    }
+  });
+
+  it('the edit schema refuses the same keys, and an empty object is still the valid no-op shape the route 400s on empty names only', () => {
+    for (const extra of [
+      { kind: 'member' },
+      { createdByUserId: 'x' },
+      { position: 1 },
+      { productIds: [] },
+    ]) {
+      expect(updateCommunitySchema.safeParse(extra).success, JSON.stringify(extra)).toBe(false);
+    }
+  });
+
+  it('EP-01 boundary: 80 name characters and 280 description characters parse, 81 and 281 do not', () => {
+    const name = 'á'.repeat(COMMUNITY_MAX_NAME);
+    const description = 'ç'.repeat(COMMUNITY_MAX_DESCRIPTION);
+    expect(createCommunitySchema.safeParse({ name, description }).success).toBe(true);
+    expect(createCommunitySchema.safeParse({ name: `${name}a` }).success).toBe(false);
+    expect(
+      createCommunitySchema.safeParse({ name: 'x', description: `${description}a` }).success,
+    ).toBe(false);
+  });
+
+  it('EP-02 empty: an empty or whitespace-only name is name_required; no description and no cover parse', () => {
+    for (const name of ['', '   ']) {
+      const result = createCommunitySchema.safeParse({ name });
+      expect(result.success).toBe(false);
+      expect(!result.success && result.error.issues.map((i) => i.message)).toContain(
+        'name_required',
+      );
+    }
+    expect(createCommunitySchema.parse({ name: 'x' })).toMatchObject({ description: '' });
+  });
+
+  it('EP-03 encoding: accents, an emoji and a combining sequence survive the parse byte for byte', () => {
+    const name = 'Café ☕ e\u0301 🎉';
+    expect(createCommunitySchema.parse({ name }).name).toBe(name);
   });
 });

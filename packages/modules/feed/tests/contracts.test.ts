@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FEED_AUDIENCES,
   FEED_COMMUNITY_ISSUES,
   FEED_MEDIA_ISSUES,
   FEED_MEMBER_ISSUES,
@@ -77,6 +78,13 @@ describe('feedPostSchema.audience (D-471, D-473)', () => {
     const parsed = feedPostSchema.safeParse(POST);
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.audience).toBeUndefined();
+  });
+
+  it('7b. 10-05 (D-709): parses audience "community" (a post stamped for a member community) and keeps it', () => {
+    expect([...FEED_AUDIENCES]).toEqual(['tenant', 'followers', 'community']);
+    const parsed = feedPostSchema.safeParse({ ...POST, audience: 'community' });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.audience).toBe('community');
   });
 
   it('7. refuses an audience outside the closed vocabulary', () => {

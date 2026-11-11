@@ -595,8 +595,12 @@ export async function runDashboardJobs(
 /** The seed slug behind each of `HOSTS` (scripts/seed.ts). */
 const SEED_SLUGS: Record<keyof typeof HOSTS, string> = { demo: 'rede-demo', lab: 'rede-lab' };
 
-/** The modules a suite may toggle on a seed tenant: the ones that are OFF by default. */
-export type ToggleableInTests = 'store' | 'courses' | 'social';
+/**
+ * The modules a suite may toggle on a seed tenant: the ones that are OFF by default. 10-05 adds
+ * `communities` and `stories`, which the seed leaves OFF on rede-lab (the member creator's suites run
+ * there, beside `social`).
+ */
+export type ToggleableInTests = 'store' | 'courses' | 'social' | 'communities' | 'stories';
 
 /**
  * 08.2 / 08.3: turns a module that is OFF by default (`store`, STORE-01; `courses`, COURSE-01) ON
@@ -641,6 +645,11 @@ export async function withModuleEnabled(
 
 /** 08.2's name for the store toggle, kept for every store suite. */
 export const withStoreEnabled = (host: keyof typeof HOSTS) => withModuleEnabled(host, 'store');
+
+/** 10-05: turns `communities` (and `stories`) ON for a seed tenant, restored by the returned function. */
+export const withCommunitiesEnabled = (host: keyof typeof HOSTS) =>
+  withModuleEnabled(host, 'communities');
+export const withStoriesEnabled = (host: keyof typeof HOSTS) => withModuleEnabled(host, 'stories');
 
 /** 09-01's name for the `social` toggle (SOCIAL-01): its members become authors while it is on. */
 export const withSocialEnabled = (host: keyof typeof HOSTS) => withModuleEnabled(host, 'social');
