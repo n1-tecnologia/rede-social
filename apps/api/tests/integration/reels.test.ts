@@ -8,7 +8,15 @@ import {
   type VideoCommunities,
 } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from './setup';
+import {
+  adminSql,
+  api,
+  HOSTS,
+  SEED_PASSWORD,
+  signInAs,
+  withSocialEnabled,
+  withStoreEnabled,
+} from './setup';
 
 /**
  * 05.3-01 — the phase's API tracer (REELS-01, REELS-03, D-121), against the live local stack.
@@ -636,6 +644,128 @@ describe('08.2 — a locked community leaves Reels (STORE-16, truth 1)', () => {
         await adminSql`delete from public.store_products where id = ${productId}::uuid`;
       }
       await restoreStore();
+    }
+  });
+});
+
+/**
+ * 10-06 (MCOMM-09, D-702, EP-32..34): the Reels lanes of a MEMBER community. Helena (a lab member who
+ * is followed by Alvaro in the seed) creates communities through the real route; her videos are written with
+ * `adminSql` (the `fake` provider posture of the rest of this file) because a member's video upload is the
+ * social module's subject, not this one's. Every row carries `CAPTION_PREFIX`, so the crash sweep finds it.
+ */
+describe('10 — Reels lanes of member communities (MCOMM-09, EP-32, EP-33, EP-34)', () => {
+  const HELENA = 'helena.kuster@rede-lab.local';
+  const ALVARO = 'alvaro.pinheiro@rede-lab.local';
+
+  /** A member community by Helena through the real route; registered for the sweep. */
+  async function memberCommunity(token: string, label: string): Promise<string> {
+    const res = await api.request('/v1/communities', {
+      method: 'POST',
+      headers: authed(token, 'lab'),
+      body: JSON.stringify({ name: `${CAPTION_PREFIX}${label}` }),
+    });
+    expect(res.status, `POST /v1/communities as a member -> ${res.status}`).toBe(201);
+    const body = (await res.json()) as { id: string };
+    createdCommunityIds.push(body.id);
+    return body.id;
+  }
+
+  /** A community post of Helena's carrying one video in the given state (visibility `community`). */
+  async function memberVideo(
+    communityId: string,
+    status: 'processing' | 'ready' | 'failed',
+  ): Promise<string> {
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+         mime, bytes, width, height, duration_seconds, aspect_ratio, filename, ready_at)
+      select ${tenantIds.lab}::uuid, u.id, 'video', 'post', ${status}, 'fake',
+             ${`fake-${crypto.randomUUID()}`},
+             ${status === 'ready' ? `pb-${crypto.randomUUID()}` : null},
+             'video/mp4', 1048576, 1080, 1920, 15, '9:16', 'reel.mp4',
+             ${status === 'ready' ? new Date().toISOString() : null}::timestamptz
+        from public.users u where u.email = ${HELENA}
+      returning id`;
+    if (!asset) throw new Error('could not seed a member video asset');
+    createdAssetIds.push(asset.id);
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts
+        (tenant_id, author_user_id, community_id, caption, visibility, media_kind)
+      select ${tenantIds.lab}::uuid, u.id, ${communityId}::uuid,
+             ${`${CAPTION_PREFIX}vídeo de membro ${status}`}, 'community', 'video'
+        from public.users u where u.email = ${HELENA}
+      returning id`;
+    if (!post) throw new Error('could not seed a member community post');
+    createdPostIds.push(post.id);
+    await adminSql`
+      insert into public.feed_post_media
+        (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+      values (${tenantIds.lab}::uuid, ${post.id}::uuid, 'video', ${asset.id}::uuid, 'video', 0)`;
+    return post.id;
+  }
+
+  const kindsOf = async (ids: string[]): Promise<Map<string, string>> => {
+    const rows = await adminSql<{ id: string; kind: string }[]>`
+      select id, kind from public.communities where id = any(${ids}::uuid[])`;
+    return new Map(rows.map((row) => [row.id, row.kind]));
+  };
+
+  it('EP-32 / EP-33 / EP-34: one ready video is one lane with one item, a pending or failed one has no lane, and organization lanes come before member lanes', async () => {
+    const restoreSocial = await withSocialEnabled('lab');
+    try {
+      await setCommunities('lab', true);
+      const helena = await signInAs(HELENA, SEED_PASSWORD);
+      const alvaro = await signInAs(ALVARO, SEED_PASSWORD);
+
+      const ready = await memberCommunity(helena, 'lane membro pronta');
+      const pending = await memberCommunity(helena, 'lane membro processando');
+      const failed = await memberCommunity(helena, 'lane membro falhou');
+      const readyPost = await memberVideo(ready, 'ready');
+      await memberVideo(pending, 'processing');
+      await memberVideo(failed, 'failed');
+      const org = await community('lane organizacao', 'lab');
+      const orgPost = await created(
+        {
+          caption: `${CAPTION_PREFIX}video da organizacao`,
+          videoAssetId: await videoAsset('ready', 'lab'),
+          communityId: org.id,
+        },
+        'lab',
+      );
+
+      const body = await lanes(alvaro, 'lab');
+      const ids = body.items.map((lane) => lane.id);
+      // EP-32: the member community with exactly one ready video is ONE lane, and it opens on that video.
+      expect(ids.filter((id) => id === ready)).toHaveLength(1);
+      const opened = await walk(
+        `/v1/feed?media=video&communityId=${ready}&limit=25`,
+        alvaro,
+        'lab',
+      );
+      expect(opened.map((item) => item.id)).toEqual([readyPost]);
+      // EP-33: pending-only and failed-only member communities name no lane (Pitfall 7).
+      expect(ids).not.toContain(pending);
+      expect(ids).not.toContain(failed);
+      // EP-34: every organization lane precedes every member lane (the position decides, never the activity).
+      expect(ids).toContain(org.id);
+      const kinds = await kindsOf(ids);
+      const firstMember = ids.findIndex((id) => kinds.get(id) === 'member');
+      const lastOrganization = ids.map((id) => kinds.get(id)).lastIndexOf('organization');
+      expect(firstMember, ids.join(',')).toBeGreaterThanOrEqual(0);
+      expect(lastOrganization, ids.join(',')).toBeLessThan(firstMember);
+      expect(ids.indexOf(org.id)).toBeLessThan(ids.indexOf(ready));
+
+      // MCOMM-09: 'Todos' keeps D-480's meaning. Alvaro FOLLOWS Helena, and still lists neither her
+      // member-community video nor (positive control) misses the organization one.
+      const todos = (await walk('/v1/feed?media=video&limit=25', alvaro, 'lab')).map(
+        (item) => item.id,
+      );
+      expect(todos).not.toContain(readyPost);
+      expect(todos).toContain(orgPost.id);
+    } finally {
+      await restoreLabCommunities();
+      await restoreSocial();
     }
   });
 });

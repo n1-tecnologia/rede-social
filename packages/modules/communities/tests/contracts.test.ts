@@ -7,6 +7,8 @@ import {
   COMMUNITY_MAX_ORDER,
   COMMUNITY_PERMISSIONS,
   COMMUNITY_UNLOCK_NAMES_MAX,
+  communityPageSchema,
+  communitySummarySchema,
   communityUnlockRefusalSchema,
   createCommunitySchema,
   reorderCommunitiesSchema,
@@ -211,5 +213,110 @@ describe('10-05: the member create and edit contract', () => {
   it('EP-03 encoding: accents, an emoji and a combining sequence survive the parse byte for byte', () => {
     const name = 'Café ☕ e\u0301 🎉';
     expect(createCommunitySchema.parse({ name }).name).toBe(name);
+  });
+});
+
+/**
+ * 10-06 (D-701, D-703, MCOMM-04) and the Escopo seam: the read contract of a community. A member
+ * community carries its creator as EXACTLY three keys; an organization one carries `null`; `viewer` holds the
+ * four flags plus the `actions` object of five booleans, every level `.strict()`.
+ */
+describe('10-06: the community read contract (kind, createdBy, viewer.actions, memberQuota)', () => {
+  const actions = { like: true, comment: true, share: true, post: false, story: false };
+  const viewer = { isOwner: false, canPublish: false, canEdit: false, canCurate: false, actions };
+  const base = {
+    id: A,
+    name: 'Corrida',
+    slug: 'corrida',
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    postCount: 0,
+    status: 'active',
+    lastActivityAt: '2026-11-11T10:00:00.000000Z',
+    kind: 'organization',
+    createdBy: null,
+    viewer,
+  };
+  const creator = { membershipId: B, displayName: 'Helena Küster 🏃', avatarAssetId: null };
+
+  it('an organization entry parses with createdBy null; a member entry parses with the three safe keys, accents and emoji intact', () => {
+    expect(communitySummarySchema.safeParse(base).success).toBe(true);
+    const member = communitySummarySchema.parse({ ...base, kind: 'member', createdBy: creator });
+    expect(member.createdBy?.displayName).toBe('Helena Küster 🏃');
+  });
+
+  it('D-703: createdBy is exactly { membershipId, displayName, avatarAssetId }: a userId, an e-mail or a missing key is refused', () => {
+    for (const bad of [
+      { ...creator, userId: C },
+      { ...creator, email: 'h@x.com' },
+      { membershipId: B, displayName: 'x' },
+      { displayName: 'x', avatarAssetId: null },
+    ]) {
+      expect(
+        communitySummarySchema.safeParse({ ...base, kind: 'member', createdBy: bad }).success,
+        JSON.stringify(bad),
+      ).toBe(false);
+    }
+  });
+
+  it('kind is the closed pair organization | member', () => {
+    expect(communitySummarySchema.safeParse({ ...base, kind: 'group' }).success).toBe(false);
+  });
+
+  it('Escopo seam: viewer parses only with actions holding exactly the five booleans like, comment, share, post, story', () => {
+    expect(communitySummarySchema.safeParse(base).success).toBe(true);
+    const { actions: _drop, ...withoutActions } = viewer;
+    expect(communitySummarySchema.safeParse({ ...base, viewer: withoutActions }).success).toBe(
+      false,
+    );
+    expect(
+      communitySummarySchema.safeParse({
+        ...base,
+        viewer: { ...viewer, actions: { ...actions, react: true } },
+      }).success,
+    ).toBe(false);
+    for (const key of Object.keys(actions)) {
+      const { [key]: _gone, ...rest } = actions as Record<string, boolean>;
+      expect(
+        communitySummarySchema.safeParse({ ...base, viewer: { ...viewer, actions: rest } }).success,
+        `missing ${key}`,
+      ).toBe(false);
+      expect(
+        communitySummarySchema.safeParse({
+          ...base,
+          viewer: { ...viewer, actions: { ...actions, [key]: 'yes' } },
+        }).success,
+        `non-boolean ${key}`,
+      ).toBe(false);
+    }
+    // The four existing flags stay and stay required; a sixth flag beside them is refused.
+    expect(
+      communitySummarySchema.safeParse({ ...base, viewer: { ...viewer, extra: 1 } }).success,
+    ).toBe(false);
+    const { isOwner: _o, ...noOwner } = viewer;
+    expect(communitySummarySchema.safeParse({ ...base, viewer: noOwner }).success).toBe(false);
+  });
+
+  it('the page carries memberQuota { ownedActive, limit } | null and nothing else', () => {
+    const items = [base];
+    expect(
+      communityPageSchema.safeParse({ items, nextCursor: null, memberQuota: null }).success,
+    ).toBe(true);
+    expect(
+      communityPageSchema.safeParse({
+        items,
+        nextCursor: null,
+        memberQuota: { ownedActive: 1, limit: 3 },
+      }).success,
+    ).toBe(true);
+    expect(
+      communityPageSchema.safeParse({
+        items,
+        nextCursor: null,
+        memberQuota: { ownedActive: 1, limit: 3, userId: C },
+      }).success,
+    ).toBe(false);
+    expect(communityPageSchema.safeParse({ items, nextCursor: null }).success).toBe(false);
   });
 });

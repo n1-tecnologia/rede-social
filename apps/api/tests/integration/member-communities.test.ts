@@ -38,7 +38,7 @@ import {
 type Envelope = { error: { code: string; message?: string; details?: Record<string, unknown> } };
 
 const PREFIX = 'Teste 10-05 ';
-const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '', labMember: '' };
+const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '', labMember: '', support: '' };
 const userIds = { helena: '', marcos: '', alvaro: '', labAdmin: '', labMember: '' };
 let labTenantId = '';
 let restoreSocial: () => Promise<void> = async () => {};
@@ -160,6 +160,7 @@ beforeAll(async () => {
   tokens.alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
   tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
   tokens.labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
+  tokens.support = await signInAs('support@rede-lab.local', SEED_PASSWORD);
   userIds.helena = await userOf('helena.kuster@rede-lab.local');
   userIds.marcos = await userOf('marcos.vinicius@rede-lab.local');
   userIds.alvaro = await userOf('alvaro.pinheiro@rede-lab.local');
@@ -819,5 +820,476 @@ describe('10 lifecycle', () => {
       select count(*)::int as n from public.notifications
        where tenant_id = ${labTenantId}::uuid and subject_id = ${id}::uuid`;
     expect(row?.n).toBe(0);
+  });
+});
+
+/**
+ * 10-06 (D-701, D-702, D-703, D-712; MCOMM-02, MCOMM-03, MCOMM-04, MCOMM-08 and the Escopo seam
+ * `viewer.actions`): the READ side of the creator rule. Helena is the creator; Marcos, Alvaro (who follows
+ * Helena in the seed) and the lab member are other members; the lab admin is the organization's voice and
+ * the moderator; `support@rede-lab.local` is a real `support_tenant` session.
+ */
+describe('10 reads', () => {
+  type Item = CommunitySummary & {
+    kind: 'organization' | 'member';
+    createdBy: { membershipId: string; displayName: string; avatarAssetId: string | null } | null;
+    viewer: {
+      isOwner: boolean;
+      canPublish: boolean;
+      canEdit: boolean;
+      canCurate: boolean;
+      actions: Record<string, boolean>;
+    };
+  };
+  type Page = {
+    items: Item[];
+    nextCursor: string | null;
+    memberQuota: { ownedActive: number; limit: number } | null;
+  };
+
+  const listOf = async (token: string, query = '?limit=25'): Promise<Page> => {
+    const res = await request(`/v1/communities${query}`, token);
+    expect(res.status, `GET /v1/communities${query}`).toBe(200);
+    return (await res.json()) as Page;
+  };
+
+  const detailOf = async (token: string, id: string): Promise<Item> => {
+    const res = await request(`/v1/communities/${id}`, token);
+    expect(res.status, `GET /v1/communities/${id}`).toBe(200);
+    return (await res.json()) as Item;
+  };
+
+  /** Every page of a feed read, to its end (bounded). */
+  const walkFeed = async (token: string, query: string): Promise<FeedPost[]> => {
+    const seen: FeedPost[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 200; guard += 1) {
+      const suffix: string = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const res = await request(`/v1/feed?limit=25${query}${suffix}`, token);
+      expect(res.status, `GET /v1/feed?limit=25${query}`).toBe(200);
+      const page = (await res.json()) as FeedPage;
+      seen.push(...page.items);
+      cursor = page.nextCursor;
+      if (cursor === null) return seen;
+    }
+    throw new Error('feed walk did not end');
+  };
+
+  /** Every page of the community list, `limit` at a time, to its end (bounded). */
+  const walkCommunities = async (token: string, limit: number): Promise<Item[]> => {
+    const seen: Item[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 200; guard += 1) {
+      const suffix: string = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const page = await listOf(token, `?limit=${limit}${suffix}`);
+      seen.push(...page.items);
+      cursor = page.nextCursor;
+      if (cursor === null) return seen;
+    }
+    throw new Error('community walk did not end');
+  };
+
+  const idOf = async (res: Response): Promise<string> =>
+    ((await res.json()) as CommunitySummary).id;
+
+  /** A ready community video post of Helena's, audience `community` (the `fake` provider posture of the tracer). */
+  async function seedCommunityVideo(communityId: string): Promise<string> {
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+         mime, bytes, width, height, duration_seconds, aspect_ratio, filename, ready_at)
+      values (${labTenantId}::uuid, ${userIds.helena}::uuid, 'video', 'post', 'ready', 'fake',
+              ${`fake-${crypto.randomUUID()}`}, ${`pb-${crypto.randomUUID()}`},
+              'video/mp4', 1048576, 1080, 1920, 15, '9:16', 'reel-10-05.mp4', now())
+      returning id`;
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts
+        (tenant_id, author_user_id, community_id, caption, visibility, media_kind)
+      values (${labTenantId}::uuid, ${userIds.helena}::uuid, ${communityId}::uuid,
+              ${`${PREFIX}vídeo de leitura`}, 'community', 'video')
+      returning id`;
+    await adminSql`
+      insert into public.feed_post_media
+        (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+      values (${labTenantId}::uuid, ${post?.id ?? ''}::uuid, 'video', ${asset?.id ?? ''}::uuid, 'video', 0)`;
+    return post?.id ?? '';
+  }
+
+  const expectedLimit = (): number => {
+    const communities = savedSocialSettings.communities as { maxPerMember?: number } | undefined;
+    return communities?.maxPerMember ?? 3;
+  };
+
+  const ACTION_KEYS = ['comment', 'like', 'post', 'share', 'story'];
+
+  /** The Escopo assertion for ONE item: five keys exactly, post and story = canPublish, the rest true. */
+  const expectActions = (item: Item, label: string): void => {
+    expect(Object.keys(item.viewer.actions).sort(), label).toEqual(ACTION_KEYS);
+    expect(item.viewer.actions.post, `${label} post`).toBe(item.viewer.canPublish);
+    expect(item.viewer.actions.story, `${label} story`).toBe(item.viewer.canPublish);
+    for (const key of ['like', 'comment', 'share']) {
+      expect(item.viewer.actions[key], `${label} ${key}`).toBe(true);
+    }
+  };
+
+  beforeEach(async () => {
+    await sweep();
+    await writeSocialSettings(savedSocialSettings);
+  });
+
+  it('1. tracer D-701 / D-702 / D-703: organization communities first in the admin order, then Helena’s with her safe label; no user id anywhere; every live member opens it; its post lives on its page only', async () => {
+    const helenaCommunity = await idOf(
+      await createCommunity(tokens.helena, { name: `${PREFIX}Leitura 1` }),
+    );
+    const post = (await (
+      await publish(tokens.helena, { caption: `${PREFIX}na página`, communityId: helenaCommunity })
+    ).json()) as FeedPost;
+    const videoPostId = await seedCommunityVideo(helenaCommunity);
+
+    const body = await request('/v1/communities?limit=25', tokens.marcos);
+    expect(body.status).toBe(200);
+    const text = await body.text();
+    const page = JSON.parse(text) as Page;
+
+    // The order: organization items first (in the position order the statement gives), then the member one.
+    const kinds = page.items.map((item) => item.kind);
+    const firstMember = kinds.indexOf('member');
+    expect(firstMember).toBeGreaterThan(0);
+    expect(kinds.slice(0, firstMember).every((kind) => kind === 'organization')).toBe(true);
+    expect(kinds.slice(firstMember).every((kind) => kind === 'member')).toBe(true);
+    const organizationIds = page.items.slice(0, firstMember).map((item) => item.id);
+    const expectedOrg = await adminSql<{ id: string }[]>`
+      select id from public.communities
+       where tenant_id = ${labTenantId}::uuid and kind = 'organization' and status = 'active'
+         and deleted_at is null
+       order by position asc, last_activity_at desc, id desc`;
+    expect(organizationIds).toEqual(expectedOrg.map((row) => row.id));
+    expect(page.items.at(-1)?.id).toBe(helenaCommunity);
+
+    // The projection: an organization entry has no creator at all, the member entry exactly three keys.
+    for (const item of page.items.slice(0, firstMember)) {
+      expect(item.createdBy, item.id).toBeNull();
+    }
+    const entry = page.items.find((item) => item.id === helenaCommunity);
+    const [helenaMembership] = await adminSql<{ id: string; display_name: string }[]>`
+      select m.id, p.display_name from public.memberships m
+        join public.member_profiles p on p.membership_id = m.id
+       where m.tenant_id = ${labTenantId}::uuid and m.user_id = ${userIds.helena}::uuid`;
+    expect(entry?.createdBy && Object.keys(entry.createdBy).sort()).toEqual([
+      'avatarAssetId',
+      'displayName',
+      'membershipId',
+    ]);
+    expect(entry?.createdBy?.membershipId).toBe(helenaMembership?.id);
+    expect(entry?.createdBy?.displayName).toBe(helenaMembership?.display_name);
+    // D-703: not one user id of any member appears anywhere in the response.
+    for (const [who, id] of Object.entries(userIds)) {
+      expect(text.includes(id), `${who}'s user id in the list`).toBe(false);
+    }
+
+    // The page keys: only `memberQuota` is new (EP-06).
+    expect(Object.keys(page).sort()).toEqual(['items', 'memberQuota', 'nextCursor']);
+
+    // The detail opens for EVERY live member exactly like an organization one (no lock screen).
+    for (const token of [
+      tokens.marcos,
+      tokens.alvaro,
+      tokens.labMember,
+      tokens.helena,
+      tokens.support,
+      tokens.labAdmin,
+    ]) {
+      const res = await request(`/v1/communities/${helenaCommunity}`, token);
+      expect(res.status).toBe(200);
+      const raw = await res.text();
+      for (const id of Object.values(userIds)) expect(raw.includes(id)).toBe(false);
+      const detail = JSON.parse(raw) as Item;
+      expect(detail.kind).toBe('member');
+      expect(detail.createdBy?.membershipId).toBe(helenaMembership?.id);
+    }
+
+    // D-702: her posts are on her page (positive control, for the follower too) and in NONE of the
+    // three merged reads, for a follower of the creator, the creator and the moderator.
+    for (const token of [tokens.alvaro, tokens.marcos]) {
+      const onPage = await walkFeed(token, `&communityId=${helenaCommunity}`);
+      expect(onPage.map((item) => item.id)).toContain(post.id);
+    }
+    for (const [who, token] of [
+      ['alvaro (follows the creator)', tokens.alvaro],
+      ['helena (the creator)', tokens.helena],
+      ['admin (the moderator)', tokens.labAdmin],
+    ] as const) {
+      for (const query of ['', '&scope=explorar', '&media=video']) {
+        const ids = (await walkFeed(token, query)).map((item) => item.id);
+        expect(ids, `${who} ${query}`).not.toContain(post.id);
+        expect(ids, `${who} ${query}`).not.toContain(videoPostId);
+      }
+    }
+  });
+
+  it('2. the quota: memberQuota is { ownedActive, limit } for a caller who can create and null for the admin and a support session; the creator’s count moves with the create', async () => {
+    const before = await listOf(tokens.helena);
+    expect(before.memberQuota).toEqual({ ownedActive: 0, limit: expectedLimit() });
+    await createCommunity(tokens.helena, { name: `${PREFIX}Cota 1` });
+    await createCommunity(tokens.helena, { name: `${PREFIX}Cota 2` });
+    expect((await listOf(tokens.helena)).memberQuota).toEqual({
+      ownedActive: 2,
+      limit: expectedLimit(),
+    });
+    // Another member's count is their own.
+    expect((await listOf(tokens.marcos)).memberQuota).toEqual({
+      ownedActive: 0,
+      limit: expectedLimit(),
+    });
+    expect((await listOf(tokens.labAdmin)).memberQuota).toBeNull();
+    expect((await listOf(tokens.support)).memberQuota).toBeNull();
+    // The archived list of the manager carries the same key.
+    expect((await listOf(tokens.labAdmin, '?status=archived&limit=25')).memberQuota).toBeNull();
+  });
+
+  it('3. Escopo seam: viewer.actions is five booleans on the list item and on the detail, post and story equal canPublish, like, comment and share are true, for every kind of viewer', async () => {
+    const mine = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Escopo` }));
+    const expected: Record<
+      string,
+      { member: [boolean, boolean, boolean, boolean]; org: [boolean, boolean, boolean, boolean] }
+    > = {
+      // [isOwner, canPublish, canEdit, canCurate]
+      helena: { member: [true, true, true, true], org: [false, false, false, false] },
+      marcos: { member: [false, false, false, false], org: [false, false, false, false] },
+      labAdmin: { member: [false, false, true, false], org: [false, true, true, true] },
+      support: { member: [false, false, false, false], org: [false, false, false, false] },
+    };
+    for (const [who, want] of Object.entries(expected)) {
+      const token = tokens[who as keyof typeof tokens];
+      const list = await listOf(token);
+      for (const [label, id, flags] of [
+        ['member', mine, want.member],
+        ['org', orgCommunityId, want.org],
+      ] as const) {
+        const item = list.items.find((candidate) => candidate.id === id);
+        const detail = await detailOf(token, id);
+        for (const [source, view] of [
+          ['list', item],
+          ['detail', detail],
+        ] as const) {
+          expect(view, `${who} ${label} ${source} present`).toBeDefined();
+          if (!view) continue;
+          expect(
+            [
+              view.viewer.isOwner,
+              view.viewer.canPublish,
+              view.viewer.canEdit,
+              view.viewer.canCurate,
+            ],
+            `${who} ${label} ${source} flags`,
+          ).toEqual(flags);
+          expectActions(view, `${who} ${label} ${source}`);
+        }
+      }
+    }
+  });
+
+  it('EP-05 adjacency: a member community and an organization community with exactly equal last_activity_at list organization first', async () => {
+    const orgRes = await createCommunity(tokens.labAdmin, { name: `${PREFIX}Org empate` });
+    expect(orgRes.status).toBe(201);
+    const org = await idOf(orgRes);
+    const member = await idOf(
+      await createCommunity(tokens.helena, { name: `${PREFIX}Membro empate` }),
+    );
+    await adminSql`
+      update public.communities set last_activity_at = '2026-11-11T12:00:00.123456Z'
+       where id = any (${[org, member]}::uuid[])`;
+    const ids = (await listOf(tokens.marcos)).items.map((item) => item.id);
+    expect(ids.indexOf(org), ids.join(',')).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf(org)).toBeLessThan(ids.indexOf(member));
+  });
+
+  it('EP-06 empty: a tenant with no member community lists exactly the organization order of today, every creator null', async () => {
+    const page = await listOf(tokens.marcos);
+    const stored = await adminSql<{ id: string }[]>`
+      select id from public.communities
+       where tenant_id = ${labTenantId}::uuid and status = 'active' and deleted_at is null
+       order by position asc, last_activity_at desc, id desc`;
+    expect(page.items.map((item) => item.id)).toEqual(stored.map((row) => row.id));
+    expect(
+      page.items.every((item) => item.kind === 'organization' && item.createdBy === null),
+    ).toBe(true);
+    expect(Object.keys(page).sort()).toEqual(['items', 'memberQuota', 'nextCursor']);
+  });
+
+  it('EP-07 encoding: a creator display name with accents and an emoji is projected verbatim', async () => {
+    const [original] = await adminSql<{ display_name: string }[]>`
+      select p.display_name from public.member_profiles p
+        join public.memberships m on m.id = p.membership_id
+       where m.tenant_id = ${labTenantId}::uuid and m.user_id = ${userIds.helena}::uuid`;
+    const fancy = 'Hélèna Küster 🏃‍♀️ São João';
+    try {
+      await adminSql`
+        update public.member_profiles set display_name = ${fancy}
+         where membership_id = (select id from public.memberships
+                                 where tenant_id = ${labTenantId}::uuid and user_id = ${userIds.helena}::uuid)`;
+      const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Acentos` }));
+      expect((await detailOf(tokens.marcos, id)).createdBy?.displayName).toBe(fancy);
+      const listed = (await listOf(tokens.marcos)).items.find((item) => item.id === id);
+      expect(listed?.createdBy?.displayName).toBe(fancy);
+    } finally {
+      await adminSql`
+        update public.member_profiles set display_name = ${original?.display_name ?? ''}
+         where membership_id = (select id from public.memberships
+                                 where tenant_id = ${labTenantId}::uuid and user_id = ${userIds.helena}::uuid)`;
+    }
+  });
+
+  it('EP-08 ordering: equal-activity member communities order by id desc and a limit=1 walk visits each exactly once', async () => {
+    const ids = [
+      await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Empate A` })),
+      await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Empate B` })),
+      await idOf(await createCommunity(tokens.marcos, { name: `${PREFIX}Empate C` })),
+    ];
+    await adminSql`
+      update public.communities set last_activity_at = '2026-11-11T12:00:00.654321Z'
+       where id = any (${ids}::uuid[])`;
+    const walked = await walkCommunities(tokens.alvaro, 1);
+    const seen = walked.map((item) => item.id);
+    expect(new Set(seen).size, 'no repeat').toBe(seen.length);
+    const members = walked.filter((item) => item.kind === 'member').map((item) => item.id);
+    expect(members).toEqual([...ids].sort().reverse());
+    // The whole walk equals one wide read.
+    expect(seen).toEqual((await listOf(tokens.alvaro, '?limit=25')).items.map((item) => item.id));
+  });
+
+  it('EP-09 idempotency: reading the list and a community twice changes no stored value', async () => {
+    const id = await idOf(
+      await createCommunity(tokens.helena, { name: `${PREFIX}Leitura idempotente` }),
+    );
+    await publish(tokens.helena, { caption: `${PREFIX}um`, communityId: id });
+    const snapshot = async () =>
+      adminSql<{ id: string; post_count: number; last_activity_at: string; updated_at: string }[]>`
+        select id, post_count, last_activity_at::text, updated_at::text
+          from public.communities where tenant_id = ${labTenantId}::uuid order by id`;
+    const before = await snapshot();
+    for (let round = 0; round < 2; round += 1) {
+      await listOf(tokens.marcos);
+      await detailOf(tokens.marcos, id);
+    }
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('EP-12 empty: a tenant with zero organization communities and one member community lists that one item and its quota', async () => {
+    const lab = await adminSql<{ id: string; updated_at: string }[]>`
+      select id, updated_at::text from public.communities
+       where tenant_id = ${labTenantId}::uuid and kind = 'organization' and status = 'active'
+         and deleted_at is null`;
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Sozinha` }));
+    try {
+      await adminSql`
+        update public.communities set status = 'archived'
+         where id = any (${lab.map((row) => row.id)}::uuid[])`;
+      const page = await listOf(tokens.helena);
+      expect(page.items.map((item) => item.id)).toEqual([id]);
+      expect(page.memberQuota).toEqual({ ownedActive: 1, limit: expectedLimit() });
+      expect(page.nextCursor).toBeNull();
+    } finally {
+      for (const row of lab) {
+        await adminSql`
+          update public.communities set status = 'active', updated_at = ${row.updated_at}::timestamptz
+           where id = ${row.id}::uuid`;
+      }
+    }
+  });
+
+  it('EP-13 ordering: member communities list newest activity first after a creator posts; organization ones keep the admin’s order', async () => {
+    const first = await idOf(
+      await createCommunity(tokens.helena, { name: `${PREFIX}Atividade 1` }),
+    );
+    const second = await idOf(
+      await createCommunity(tokens.marcos, { name: `${PREFIX}Atividade 2` }),
+    );
+    const orgOrder = async () =>
+      (await listOf(tokens.alvaro)).items
+        .filter((item) => item.kind === 'organization')
+        .map((i) => i.id);
+    const memberOrder = async () =>
+      (await listOf(tokens.alvaro)).items.filter((item) => item.kind === 'member').map((i) => i.id);
+    const orgBefore = await orgOrder();
+    await publish(tokens.helena, { caption: `${PREFIX}movimenta 1`, communityId: first });
+    expect((await memberOrder()).slice(0, 2)).toEqual([first, second]);
+    await publish(tokens.marcos, { caption: `${PREFIX}movimenta 2`, communityId: second });
+    expect((await memberOrder()).slice(0, 2)).toEqual([second, first]);
+    expect(await orgOrder()).toEqual(orgBefore);
+  });
+
+  it('EP-29 adjacency: a member-community post created between two Início pages appears on neither', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Entre páginas` }));
+    const firstRes = await request('/v1/feed?limit=2', tokens.alvaro);
+    const firstPage = (await firstRes.json()) as FeedPage;
+    expect(firstPage.nextCursor).not.toBeNull();
+    const created = (await (
+      await publish(tokens.helena, { caption: `${PREFIX}entre duas páginas`, communityId: id })
+    ).json()) as FeedPost;
+    const secondRes = await request(
+      `/v1/feed?limit=25&cursor=${encodeURIComponent(firstPage.nextCursor ?? '')}`,
+      tokens.alvaro,
+    );
+    const secondPage = (await secondRes.json()) as FeedPage;
+    expect([...firstPage.items, ...secondPage.items].map((item) => item.id)).not.toContain(
+      created.id,
+    );
+    // Positive control: it exists, and it is on its own page.
+    expect((await walkFeed(tokens.alvaro, `&communityId=${id}`)).map((item) => item.id)).toContain(
+      created.id,
+    );
+  });
+
+  it('EP-30 empty: a community holding only community posts leaves Início and Explorar empty of them', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Só dela` }));
+    const ids: string[] = [];
+    for (const n of [1, 2]) {
+      const res = await publish(tokens.helena, { caption: `${PREFIX}só ${n}`, communityId: id });
+      ids.push(((await res.json()) as FeedPost).id);
+    }
+    expect((await walkFeed(tokens.marcos, `&communityId=${id}`)).map((p) => p.id).sort()).toEqual(
+      [...ids].sort(),
+    );
+    for (const token of [tokens.marcos, tokens.alvaro, tokens.helena, tokens.labAdmin]) {
+      for (const query of ['', '&scope=explorar']) {
+        const walked = await walkFeed(token, query);
+        expect(walked.filter((item) => item.communityId === id)).toEqual([]);
+        expect(walked.some((item) => item.audience === 'community')).toBe(false);
+      }
+    }
+  });
+
+  it('EP-31 ordering: the community page orders newest first with id desc as the tiebreak across tenant and community posts, each exactly once at limit=1', async () => {
+    const id = await idOf(
+      await createCommunity(tokens.helena, { name: `${PREFIX}Ordem da página` }),
+    );
+    const at = '2026-11-11T12:30:00.111111Z';
+    const rows = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts
+        (tenant_id, author_user_id, community_id, caption, visibility, created_at)
+      values
+        (${labTenantId}::uuid, ${userIds.helena}::uuid, ${id}::uuid, ${`${PREFIX}ordem a`}, 'community', ${at}::timestamptz),
+        (${labTenantId}::uuid, ${userIds.helena}::uuid, ${id}::uuid, ${`${PREFIX}ordem b`}, 'community', ${at}::timestamptz),
+        (${labTenantId}::uuid, ${userIds.labAdmin}::uuid, ${id}::uuid, ${`${PREFIX}ordem c`}, 'tenant', ${at}::timestamptz),
+        (${labTenantId}::uuid, ${userIds.helena}::uuid, ${id}::uuid, ${`${PREFIX}ordem d`}, 'community', '2026-11-11T12:31:00Z'::timestamptz)
+      returning id`;
+    const stored = rows.map((row) => row.id);
+    const newest = stored[3] ?? '';
+    const tied = stored.slice(0, 3).sort().reverse();
+    const expected = [newest, ...tied];
+    const wide = (await walkFeed(tokens.marcos, `&communityId=${id}`)).map((p) => p.id);
+    expect(wide).toEqual(expected);
+    const narrow: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 10; guard += 1) {
+      const suffix: string = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const res = await request(`/v1/feed?limit=1&communityId=${id}${suffix}`, tokens.marcos);
+      const page = (await res.json()) as FeedPage;
+      narrow.push(...page.items.map((p) => p.id));
+      cursor = page.nextCursor;
+      if (cursor === null) break;
+    }
+    expect(narrow).toEqual(expected);
   });
 });

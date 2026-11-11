@@ -735,3 +735,99 @@ describe('feedPostCommentedPushCopy (09-07, planner deviation from UI-D-506: hou
     ).toBeLessThanOrEqual(100);
   });
 });
+
+/* ── 10-06 (A4): a 'community' post, and a comment or a like on one, notifies NOBODY ───────────────── */
+
+describe("10-06 A4: a post of the audience 'community' produces no notification of any kind", () => {
+  it('post.published: a community post yields [] after ONE read, a video one too', async () => {
+    const plain = recordingTx([{ ...baseRow, visibility: 'community', community_id: C }]);
+    expect(await source.resolve(plain.tx, payload, { sinkAt: 'x' })).toEqual([]);
+    expect(plain.calls()).toBe(1);
+    const video = recordingTx([
+      { ...baseRow, visibility: 'community', community_id: C, media_kind: 'video' },
+    ]);
+    expect(await source.resolve(video.tx, payload, { sinkAt: 'x' })).toEqual([]);
+    expect(video.calls()).toBe(1);
+  });
+
+  it('comment.created: a ROOT comment on a community post yields [] after ONE read', async () => {
+    const created = sourceFor('comment.created');
+    const { tx, calls } = recordingTx([
+      {
+        comment_id: CM,
+        post_id: P,
+        body: 'Comentário na comunidade',
+        visibility: 'community',
+        post_author_user_id: A,
+        author_live: true,
+        social_on: true,
+        actor_name: 'Bia',
+      },
+    ]);
+    const root = {
+      tenantId: T,
+      postId: P,
+      commentId: CM,
+      parentCommentId: null,
+      postAuthorUserId: A,
+      parentAuthorUserId: null,
+      actorUserId: LIKER,
+    };
+    expect(await created.resolve(tx, root, { sinkAt: 'x' })).toEqual([]);
+    expect(calls()).toBe(1);
+  });
+
+  it('comment.created: a REPLY under a community post yields [] after ONE read, never asking whether the root author may read it', async () => {
+    const created = sourceFor('comment.created');
+    const { tx, calls } = recordingTx([
+      {
+        comment_id: CM,
+        post_id: P,
+        community_id: C,
+        body: 'Concordo',
+        root_comment_id: ROOT,
+        root_author_user_id: COMMENT_AUTHOR,
+        visibility: 'community',
+        post_author_user_id: A,
+        author_live: true,
+        social_on: true,
+        // Were the follower check asked, this answer would let the notice through.
+        readable: true,
+        actor_name: 'Bia',
+      },
+    ]);
+    const reply = {
+      tenantId: T,
+      postId: P,
+      commentId: CM,
+      parentCommentId: ROOT,
+      postAuthorUserId: A,
+      parentAuthorUserId: COMMENT_AUTHOR,
+      actorUserId: LIKER,
+    };
+    expect(await created.resolve(tx, reply, { sinkAt: 'x' })).toEqual([]);
+    expect(calls()).toBe(1);
+  });
+
+  it('comment.liked: a like on a comment of a community post yields [] after ONE read; a tenant post still notifies (positive control)', async () => {
+    const liked = sourceFor('comment.liked');
+    const likedPayload = {
+      tenantId: T,
+      commentId: CM,
+      commentAuthorUserId: COMMENT_AUTHOR,
+      actorUserId: LIKER,
+    };
+    const row = {
+      comment_id: CM,
+      post_id: P,
+      community_id: C,
+      body: 'Meu comentário',
+      author_user_id: COMMENT_AUTHOR,
+    };
+    const community = recordingTx([{ ...row, visibility: 'community' }]);
+    expect(await liked.resolve(community.tx, likedPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(community.calls()).toBe(1);
+    const tenant = queuedTx([[{ ...row, visibility: 'tenant' }], [{ locked: false }]]);
+    expect(await liked.resolve(tenant.tx, likedPayload, { sinkAt: 'x' })).toHaveLength(1);
+  });
+});
