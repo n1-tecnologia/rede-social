@@ -1329,4 +1329,244 @@ describe('10 highlights', () => {
     });
     expect(ok.status).toBe(201);
   });
+
+  const itemRows = async (highlightId: string, storyId: string) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_highlight_items
+       where highlight_id = ${highlightId}::uuid and story_id = ${storyId}::uuid`;
+    return row?.n ?? 0;
+  };
+  const addItem = (token: string, highlightId: string, storyId: string) =>
+    hlBody(token, `/${highlightId}/stories/${storyId}`, 'PUT');
+
+  it('5. Pitfall 9 / T-10-35 (IDOR): Helena adding Marcos’s story or the admin’s story to her highlight is the bare 404 and writes no item; her own story is the positive control', async () => {
+    const marcosStory = await insertStory({
+      author: userIds.marcos,
+      visibility: 'followers',
+      caption: `${PREFIX}do marcos`,
+    });
+    const orgStory = await insertStory({
+      author: userIds.labAdmin,
+      visibility: 'tenant',
+      caption: `${PREFIX}da organizacao`,
+    });
+    for (const [label, id] of [
+      ['marcos story', marcosStory],
+      ['admin story', orgStory],
+    ] as const) {
+      const res = await addItem(tokens.helena, made.highlight ?? '', id);
+      expect(res.status, label).toBe(404);
+      expect((await errorOf(res)).details, label).toBeUndefined();
+      expect(await itemRows(made.highlight ?? '', id), label).toBe(0);
+    }
+    const own = await insertStory({
+      author: userIds.helena,
+      visibility: 'followers',
+      caption: `${PREFIX}segunda da helena`,
+    });
+    const ok = await addItem(tokens.helena, made.highlight ?? '', own);
+    expect(ok.status).toBe(200);
+    expect(await itemRows(made.highlight ?? '', own)).toBe(1);
+    // The admin never saves a MEMBER story anywhere: an organization highlight answers the bare 404 too.
+    const [orgHighlight] = await adminSql<{ id: string }[]>`
+      select id from public.story_highlights
+       where community_id = ${made.orgCommunity}::uuid and title = ${`${PREFIX}Org`}`;
+    const org = orgHighlight?.id ?? '';
+    const refused = await addItem(tokens.labAdmin, org, own);
+    expect(refused.status).toBe(404);
+    expect((await errorOf(refused)).details).toBeUndefined();
+    expect(await itemRows(org, own)).toBe(0);
+    // Positive control: the admin's own organization story goes into the organization highlight as today.
+    expect((await addItem(tokens.labAdmin, org, orgStory)).status).toBe(200);
+    expect(await itemRows(org, orgStory)).toBe(1);
+    // The cover chooser carries the same predicate: a foreign story that sits IN Helena's highlight (written
+    // by hand, the way no route can) cannot be her cover; her own image story can.
+    await adminSql`insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+                   values (${labTenantId}::uuid, ${made.highlight}::uuid, ${marcosStory}::uuid, ${userIds.helena}::uuid)`;
+    const coverForeign = await hlBody(tokens.helena, `/${made.highlight}`, 'PATCH', {
+      cover: { storyId: marcosStory },
+    });
+    expect(coverForeign.status).toBe(404);
+    const coverOwn = await hlBody(tokens.helena, `/${made.highlight}`, 'PATCH', {
+      cover: { storyId: own },
+    });
+    expect(coverOwn.status).toBe(200);
+    await adminSql`delete from public.story_highlight_items
+                    where highlight_id = ${made.highlight}::uuid and story_id = ${marcosStory}::uuid`;
+  });
+
+  it('6. D-713 / T-10-34: Marcos curating Helena’s community is 403 on every write and an unknown community is 404; a member curating Início or an organization community is 403; the admin keeps the organization places', async () => {
+    const own = await adminSql<{ id: string }[]>`
+      select id from public.stories where author_user_id = ${userIds.helena}::uuid
+         and caption = ${`${PREFIX}segunda da helena`}`;
+    const ownStory = own[0]?.id ?? '';
+    const target = made.highlight ?? '';
+    const refusals: Array<[string, Response]> = [
+      [
+        'create in her community',
+        await hlBody(tokens.marcos, '', 'POST', {
+          communityId: made.community,
+          title: `${PREFIX}M`,
+        }),
+      ],
+      ['add item', await addItem(tokens.marcos, target, ownStory)],
+      ['rename', await hlBody(tokens.marcos, `/${target}`, 'PATCH', { title: `${PREFIX}R` })],
+      ['remove item', await hlBody(tokens.marcos, `/${target}/stories/${ownStory}`, 'DELETE')],
+      ['delete', await hlBody(tokens.marcos, `/${target}`, 'DELETE')],
+      [
+        'reorder',
+        await hlBody(tokens.marcos, '/order', 'PUT', {
+          communityId: made.community,
+          highlightIds: [target],
+        }),
+      ],
+      ['create in Início', await hlBody(tokens.marcos, '', 'POST', { title: `${PREFIX}I` })],
+      [
+        'create in the organization community',
+        await hlBody(tokens.marcos, '', 'POST', {
+          communityId: made.orgCommunity,
+          title: `${PREFIX}O`,
+        }),
+      ],
+      ['reorder Início', await hlBody(tokens.marcos, '/order', 'PUT', { highlightIds: [] })],
+      [
+        'helena in the organization community',
+        await hlBody(tokens.helena, '', 'POST', {
+          communityId: made.orgCommunity,
+          title: `${PREFIX}H`,
+        }),
+      ],
+      ['helena in Início', await hlBody(tokens.helena, '', 'POST', { title: `${PREFIX}HI` })],
+    ];
+    for (const [label, res] of refusals) {
+      expect(res.status, label).toBe(403);
+      expect((await errorOf(res)).code, label).toBe('FORBIDDEN');
+    }
+    const unknown = await hlBody(tokens.helena, '', 'POST', {
+      communityId: randomUUID(),
+      title: `${PREFIX}U`,
+    });
+    expect(unknown.status).toBe(404);
+    expect((await errorOf(unknown)).details).toBeUndefined();
+    // Nothing moved in Helena's community.
+    expect((await readRow(tokens.helena, made.community ?? '')).map((item) => item.id)).toEqual([
+      target,
+    ]);
+    // The admin on a member community: every write 403 (no moderator takedown inside a highlight).
+    for (const [label, res] of [
+      [
+        'admin rename',
+        await hlBody(tokens.labAdmin, `/${target}`, 'PATCH', { title: `${PREFIX}A` }),
+      ],
+      ['admin delete', await hlBody(tokens.labAdmin, `/${target}`, 'DELETE')],
+      [
+        'admin remove item',
+        await hlBody(tokens.labAdmin, `/${target}/stories/${ownStory}`, 'DELETE'),
+      ],
+      ['admin add item', await addItem(tokens.labAdmin, target, ownStory)],
+    ] as const) {
+      expect(res.status, label).toBe(403);
+    }
+    // Positive controls: the admin's organization highlight and Início still take every write.
+    const org = await hlBody(tokens.labAdmin, '', 'POST', {
+      communityId: made.orgCommunity,
+      title: `${PREFIX}Org2`,
+    });
+    expect(org.status).toBe(201);
+    const home = await hlBody(tokens.labAdmin, '', 'POST', { title: `${PREFIX}Inicio` });
+    expect(home.status).toBe(201);
+  });
+
+  it('7. MCOMM-06 / D-713: the creator creates, renames, reorders, edits and deletes highlights of her own community with the same API as the admin', async () => {
+    const second = await hlBody(tokens.helena, '', 'POST', {
+      communityId: made.community,
+      title: `${PREFIX}Segundo`,
+    });
+    expect(second.status).toBe(201);
+    const secondId = ((await second.json()) as HighlightItem).id;
+    const renamed = await hlBody(tokens.helena, `/${secondId}`, 'PATCH', {
+      title: `${PREFIX}Renomeado`,
+    });
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as HighlightItem).title).toBe(`${PREFIX}Renomeado`);
+    const order = await hlBody(tokens.helena, '/order', 'PUT', {
+      communityId: made.community,
+      highlightIds: [secondId, made.highlight],
+    });
+    expect(order.status).toBe(200);
+    expect(((await order.json()) as HighlightRead).items.map((item) => item.id)).toEqual([
+      secondId,
+      made.highlight,
+    ]);
+    const storyRows = await adminSql<{ id: string }[]>`
+      select id from public.stories where author_user_id = ${userIds.helena}::uuid
+         and caption = ${`${PREFIX}segunda da helena`}`;
+    const storyId = storyRows[0]?.id ?? '';
+    expect((await addItem(tokens.helena, secondId, storyId)).status).toBe(200);
+    // The catalog and the story's memberships see the creator's own places only.
+    const memberships = await request(`/v1/stories/${storyId}/highlights`, tokens.helena);
+    expect(memberships.status).toBe(200);
+    expect(((await memberships.json()) as { highlightIds: string[] }).highlightIds.sort()).toEqual(
+      [secondId, made.highlight ?? ''].sort(),
+    );
+    const removed = await hlBody(tokens.helena, `/${secondId}/stories/${storyId}`, 'DELETE');
+    expect(removed.status).toBe(200);
+    expect((await hlBody(tokens.helena, `/${secondId}`, 'DELETE')).status).toBe(204);
+    expect((await readRow(tokens.helena, made.community ?? '')).map((item) => item.id)).toEqual([
+      made.highlight,
+    ]);
+    // Someone else's story's memberships are the bare 404 for a member (the author predicate), and the
+    // admin never lists a member story's memberships either.
+    const foreign = await request(`/v1/stories/${made.story}/highlights`, tokens.marcos);
+    expect(foreign.status).toBe(404);
+  });
+
+  it('8. D-713 curator is place-dependent: true for the creator on her community and for the admin on an organization place, false for the admin on a member community and for Marcos', async () => {
+    const empty = await hlBody(tokens.helena, '', 'POST', {
+      communityId: made.community,
+      title: `${PREFIX}Vazio`,
+    });
+    expect(empty.status).toBe(201);
+    const emptyId = ((await empty.json()) as HighlightItem).id;
+    // The creator sees her EMPTY highlight (the curator read), in the row with scope=all and by id.
+    const row = await hl(tokens.helena, `?communityId=${made.community}&scope=all`);
+    expect(row.status).toBe(200);
+    expect(
+      ((await row.json()) as HighlightRead).items.map((item) => [item.id, item.itemCount]),
+    ).toEqual([
+      [made.highlight, 2],
+      [emptyId, 0],
+    ]);
+    expect((await hl(tokens.helena, `/${emptyId}`)).status).toBe(200);
+    // Marcos and the admin are not curators of it: no scope=all, and the empty highlight is the bare 404.
+    for (const [who, token] of [
+      ['marcos', tokens.marcos],
+      ['admin', tokens.labAdmin],
+    ] as const) {
+      const all = await hl(token, `?communityId=${made.community}&scope=all`);
+      expect(all.status, `${who} scope=all`).toBe(403);
+      const detail = await hl(token, `/${emptyId}`);
+      expect(detail.status, `${who} empty detail`).toBe(404);
+      expect((await errorOf(detail)).details, `${who} empty detail`).toBeUndefined();
+      const plain = await readRow(token, made.community ?? '');
+      expect(
+        plain.map((item) => item.id),
+        `${who} plain row`,
+      ).toEqual([made.highlight]);
+    }
+    // The admin's organization place keeps curator: scope=all lists its empty highlights; a member's does not.
+    const [orgEmpty] = await adminSql<{ id: string }[]>`
+      select id from public.story_highlights
+       where community_id = ${made.orgCommunity}::uuid and title = ${`${PREFIX}Org2`}`;
+    const adminRow = await hl(tokens.labAdmin, `?communityId=${made.orgCommunity}&scope=all`);
+    expect(adminRow.status).toBe(200);
+    expect(((await adminRow.json()) as HighlightRead).items.map((item) => item.id)).toContain(
+      orgEmpty?.id,
+    );
+    expect((await hl(tokens.labAdmin, `/${orgEmpty?.id}`)).status).toBe(200);
+    expect((await hl(tokens.marcos, `?communityId=${made.orgCommunity}&scope=all`)).status).toBe(
+      403,
+    );
+    expect((await hl(tokens.marcos, `/${orgEmpty?.id}`)).status).toBe(404);
+  });
 });
