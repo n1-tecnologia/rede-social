@@ -1,6 +1,14 @@
 import { sqlClient } from '@rede-social/core/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withSocialEnabled } from './setup';
+import {
+  adminSql,
+  api,
+  HOSTS,
+  SEED_PASSWORD,
+  signInAs,
+  withSocialEnabled,
+  withStoriesEnabled,
+} from './setup';
 
 /**
  * Criterion 4's query budget: **one `GET /v1/feed` page costs at most ONE statement against the feed
@@ -674,6 +682,122 @@ describe('GET /v1/feed?scope=explorar — the CI query budget (09-04)', () => {
     const calls = await feedCalls();
     expect(calls).toBeGreaterThan(0);
     expect(calls).toBe(FEED_LIST_STATEMENT_BUDGET);
+  });
+});
+
+/**
+ * 10-08 (D-714, D-717, A10, T-10-32) — the Explorar story row is ONE statement per page against the story
+ * tables, and one author's group is ONE statement, whatever the number of circles and stories: the seen flag
+ * (`story_views`), the author's name and photo and the media ladder ride the statement the circles come from
+ * (the feed-table budget of 1 style). Fixture: rede-lab (`social` on, `stories` turned on here): Helena and
+ * Marcos write the member stories, Alvaro follows Helena in the seed, Helena follows Marcos, the lab admin is the
+ * moderator. Each case asserts a non-empty page first (a budget of 1 cannot pass vacuously on an empty one).
+ */
+describe('GET /v1/stories/authors — the Explorar story row query budget (10-08)', () => {
+  const CAPTION = 'Orcamento autores ';
+  let labTenantId = '';
+  let alvaro = '';
+  let labAdmin = '';
+  let helenaMembership = '';
+  const assets: string[] = [];
+  let restoreSocial: () => Promise<void> = async () => {};
+  let restoreStories: () => Promise<void> = async () => {};
+
+  const sweep = async () => {
+    await adminSql`delete from public.stories where caption like ${`${CAPTION}%`}`;
+    if (assets.length > 0) {
+      await adminSql`delete from public.media_assets where id = any (${assets}::uuid[])`;
+      assets.length = 0;
+    }
+  };
+
+  beforeAll(async () => {
+    restoreSocial = await withSocialEnabled('lab');
+    restoreStories = await withStoriesEnabled('lab');
+    alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
+    labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
+    const [tenant] = await adminSql<{ id: string }[]>`
+      select id from public.tenants where slug = 'rede-lab'`;
+    labTenantId = tenant?.id ?? '';
+    await sweep();
+    for (const [email, count] of [
+      ['helena.kuster@rede-lab.local', 3],
+      ['marcos.vinicius@rede-lab.local', 2],
+    ] as const) {
+      const [author] = await adminSql<{ id: string }[]>`
+        select u.id from public.users u where u.email = ${email}`;
+      for (let i = 0; i < count; i++) {
+        const [asset] = await adminSql<{ id: string }[]>`
+          insert into public.media_assets (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+          values (${labTenantId}::uuid, ${author?.id ?? null}::uuid, 'image', 'story', 'ready', 'supabase', 'image/webp', 1024, '{640,1080}'::int[])
+          returning id`;
+        assets.push(asset?.id ?? '');
+        await adminSql`
+          insert into public.stories (tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility, published_at, expires_at)
+          values (${labTenantId}::uuid, ${author?.id ?? null}::uuid, ${asset?.id ?? null}::uuid, 'image',
+                  ${`${CAPTION}${email}-${i}`}, 'followers', now() - ${i * 60 + 60} * interval '1 second', now() + interval '23 hours')`;
+      }
+    }
+    const [helena] = await adminSql<{ id: string }[]>`
+      select m.id from public.memberships m join public.users u on u.id = m.user_id
+       where m.tenant_id = ${labTenantId}::uuid and u.email = 'helena.kuster@rede-lab.local'`;
+    helenaMembership = helena?.id ?? '';
+  });
+
+  afterAll(async () => {
+    await sweep();
+    await restoreStories();
+    await restoreSocial();
+  });
+
+  const get = (path: string, token: string) =>
+    api.request(path, {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.lab },
+    });
+
+  it(`a member's authors page costs exactly ${STORY_LIST_STATEMENT_BUDGET} statement against the story tables, however many circles`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+    const res = await get('/v1/stories/authors', alvaro);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { storyCount: number }[] };
+    // Not vacuous: Helena's circle, with her three stories, is on the page.
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.some((item) => item.storyCount === 3)).toBe(true);
+    const calls = await storyCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(STORY_LIST_STATEMENT_BUDGET);
+  });
+
+  it(`a moderator's authors page costs exactly ${STORY_LIST_STATEMENT_BUDGET} statement against the story tables`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+    const res = await get('/v1/stories/authors?limit=1', labAdmin);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[]; nextCursor: string | null };
+    expect(body.items).toHaveLength(1);
+    expect(body.nextCursor).not.toBeNull();
+    const calls = await storyCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(STORY_LIST_STATEMENT_BUDGET);
+  });
+
+  it(`one author's group read costs exactly ${STORY_LIST_STATEMENT_BUDGET} statement against the story tables`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+    const res = await get(`/v1/stories/authors/${helenaMembership}`, alvaro);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { viewerSeen: boolean; mediaVariantWidths: number[] }[];
+    };
+    expect(body.items).toHaveLength(3);
+    expect(body.items.every((item) => item.mediaVariantWidths.length > 0)).toBe(true);
+    const calls = await storyCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(STORY_LIST_STATEMENT_BUDGET);
+    // `story_views` is never read on its own: it rides the statement the stories come from.
+    const [separateViewReads] = await adminSql<{ calls: number }[]>`
+      select coalesce(sum(calls), 0)::int as calls
+        from pg_stat_statements
+       where query ~ 'story_views' and query !~ 'stories'`;
+    expect(separateViewReads?.calls ?? 0).toBe(0);
   });
 });
 

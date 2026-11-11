@@ -12195,3 +12195,98 @@ describe('shared identity (08.1)', () => {
     }
   });
 });
+
+/**
+ * 10-08 (T-10-30, MSTORY-03/04, D-714, D-717): the Explorar story row's two reads, asked the isolation question
+ * with a session of each tenant. Written BEFORE the two inventory entries of `isolation-inventory.ts`.
+ */
+describe('phase 10 sweep (10-08)', () => {
+  it('phase 10 sweep: GET /v1/stories/authors and /authors/:membershipId answer each host its own member circles only, every negative beside its lab positive control (10-08)', async () => {
+    const restores = [
+      await withSocialEnabled('lab'),
+      await withModuleEnabled('lab', 'stories'),
+      await withSocialEnabled('demo'),
+    ];
+    const caption = `Varredura 10-08 ${RUN}`;
+    try {
+      const insertFollowersStory = async (tenantId: string, email: string): Promise<string> => {
+        const assetId = await seedStoryImage(tenantId, email);
+        const [row] = await adminSql<{ id: string }[]>`
+          insert into public.stories
+            (tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility, published_at, expires_at)
+          select ${tenantId}::uuid, u.id, ${assetId}::uuid, 'image', ${caption}, 'followers',
+                 now() - interval '5 minutes', now() + interval '23 hours'
+            from public.users u where u.email = ${email}
+          returning id::text as id`;
+        if (!row) throw new Error(`could not seed a member story for ${email}`);
+        return row.id;
+      };
+      const labStory = await insertFollowersStory(tenantIds.lab, 'helena.kuster@rede-lab.local');
+      const demoStory = await insertFollowersStory(tenantIds.demo, 'member@rede-demo.local');
+      const labHelena = await membershipIdOf(tenantIds.lab, 'helena.kuster@rede-lab.local');
+      const demoMember = await membershipIdOf(tenantIds.demo, 'member@rede-demo.local');
+
+      // Positive controls: each tenant's moderator reads its OWN member circle and opens its group.
+      const labRow = await send('GET', '/v1/stories/authors', tokens.labAdmin, HOSTS.lab);
+      expect(labRow.status).toBe(200);
+      const labItems = ((await labRow.json()) as { items: { membershipId: string }[] }).items;
+      expect(labItems.map((item) => item.membershipId)).toContain(labHelena);
+      const labGroup = await send(
+        'GET',
+        `/v1/stories/authors/${labHelena}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(labGroup.status).toBe(200);
+      expect(
+        ((await labGroup.json()) as { items: { id: string }[] }).items.map((item) => item.id),
+      ).toEqual([labStory]);
+      const demoRow = await send('GET', '/v1/stories/authors', tokens.demoAdmin, HOSTS.demo);
+      expect(demoRow.status).toBe(200);
+      const demoItems = ((await demoRow.json()) as { items: { membershipId: string }[] }).items;
+      expect(demoItems.map((item) => item.membershipId)).toContain(demoMember);
+
+      // Negatives: tenant B's row never names tenant A's circle, and A's membership id is the bare 404 on B's host.
+      expect(demoItems.map((item) => item.membershipId)).not.toContain(labHelena);
+      expect(labItems.map((item) => item.membershipId)).not.toContain(demoMember);
+      await expectBareNotFound(
+        await send('GET', `/v1/stories/authors/${labHelena}`, tokens.demoAdmin, HOSTS.demo),
+        'demo moderator, lab membership id',
+      );
+      await expectBareNotFound(
+        await send('GET', `/v1/stories/authors/${labHelena}`, tokens.demoMember, HOSTS.demo),
+        'demo member, lab membership id',
+      );
+      await expectBareNotFound(
+        await send('GET', `/v1/stories/authors/${demoMember}`, tokens.labAdmin, HOSTS.lab),
+        'lab moderator, demo membership id',
+      );
+      // A member who follows nobody reads an empty row, never the other tenant's circles.
+      const demoPlain = await send('GET', '/v1/stories/authors', tokens.demoMember, HOSTS.demo);
+      expect(demoPlain.status).toBe(200);
+      expect(JSON.stringify(await demoPlain.json())).not.toContain(labHelena);
+
+      // The wrong host: a session of one tenant on the other tenant's host is refused before any read.
+      await expectHostRefused(
+        await send('GET', '/v1/stories/authors', tokens.labAdmin, HOSTS.demo),
+        'lab session on the demo host (row)',
+      );
+      await expectHostRefused(
+        await send('GET', `/v1/stories/authors/${labHelena}`, tokens.labAdmin, HOSTS.demo),
+        'lab session on the demo host (group)',
+      );
+      await expectHostRefused(
+        await send('GET', '/v1/stories/authors', tokens.demoAdmin, HOSTS.lab),
+        'demo session on the lab host (row)',
+      );
+      await expectHostRefused(
+        await send('GET', `/v1/stories/authors/${demoMember}`, tokens.demoAdmin, HOSTS.lab),
+        'demo session on the lab host (group)',
+      );
+      void demoStory;
+    } finally {
+      await adminSql`delete from public.stories where caption = ${caption}`;
+      for (const restore of restores.reverse()) await restore();
+    }
+  });
+});

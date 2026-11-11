@@ -235,6 +235,8 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   },
   'POST /v1/stories/views': { case: 'b8' },
   'GET /v1/stories': { case: 'b3' },
+  'GET /v1/stories/authors': { case: 'phase 10 sweep' },
+  'GET /v1/stories/authors/:membershipId': { case: 'phase 10 sweep' },
   'GET /v1/stories/:storyId': { case: 'b3' },
   'POST /v1/stories': { case: 'b6' },
   'DELETE /v1/stories/:storyId': { case: 'inventory sweep: stories and communities' },

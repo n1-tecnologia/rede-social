@@ -12,8 +12,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   adminSql,
   api,
+  createSharedIdentity,
   HOSTS,
   notificationJobsOf,
+  removeIdentitiesByPrefix,
   runNotificationJobs,
   SEED_PASSWORD,
   signInAs,
@@ -42,7 +44,7 @@ type Envelope = { error: { code: string; message?: string; details?: Record<stri
 
 const PREFIX = 'Teste 10-07 ';
 const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '', support: '', plain: '' };
-const userIds = { helena: '', marcos: '', alvaro: '', labAdmin: '' };
+const userIds = { helena: '', marcos: '', alvaro: '', labAdmin: '', plain: '' };
 let labTenantId = '';
 let restoreSocial: () => Promise<void> = async () => {};
 let restoreCommunities: () => Promise<void> = async () => {};
@@ -186,7 +188,13 @@ async function sweep(): Promise<void> {
   const storyIds = ids.map((row) => row.id);
   if (storyIds.length > 0) {
     await adminSql`delete from public.notifications where subject_id = any (${storyIds}::uuid[])`;
-    await adminSql`delete from public.moderation_log where subject_id = any (${storyIds}::uuid[])`;
+    // `moderation_log` is append-only (a trigger refuses delete for every role). A moderator's delete in this
+    // file writes a `story_removed` row, so the fixture cleanup (and only it, scoped to this file's story ids)
+    // runs with triggers off for the transaction, the `move-copy.test.ts` precedent.
+    await adminSql.begin(async (tx) => {
+      await tx.unsafe('set local session_replication_role = replica');
+      await tx`delete from public.moderation_log where subject_id = any (${storyIds}::uuid[])`;
+    });
     await adminSql`delete from public.stories where id = any (${storyIds}::uuid[])`;
   }
   if (createdAssets.length > 0) {
@@ -218,6 +226,7 @@ beforeAll(async () => {
   userIds.marcos = await userOf('marcos.vinicius@rede-lab.local');
   userIds.alvaro = await userOf('alvaro.pinheiro@rede-lab.local');
   userIds.labAdmin = await userOf('admin@rede-lab.local');
+  userIds.plain = await userOf('member@rede-lab.local');
   const [lab] = await adminSql<
     { id: string }[]
   >`select id from public.tenants where slug = 'rede-lab'`;
@@ -827,5 +836,291 @@ describe('10 authors', () => {
       expect(res.status, id).toBe(404);
       expect((await errorOf(res)).details, id).toBeUndefined();
     }
+  });
+});
+
+/**
+ * 10-08 (D-717, D-708, D-616, EP-60, EP-62; MSTORY-03, MSTORY-08): the moderator's every-member row with its
+ * cursor, the member ordering, the expiry boundary and the block filters. Every follow, block and membership
+ * change is written with `adminSql` and put back (`beforeEach` and `afterAll` repair them).
+ */
+describe('10 authors moderator', () => {
+  const memberships = { helena: '', marcos: '', alvaro: '', plain: '', extra: '' };
+  const EXTRA_PREFIX = 'ms08';
+  let extraUser = '';
+
+  const publishedAt = (secondsAgo: number) =>
+    new Date(Date.now() - secondsAgo * 1000).toISOString();
+  const story = (author: string, caption: string, secondsAgo = 60, visibility = 'followers') =>
+    insertStory({
+      author,
+      visibility: visibility as 'tenant' | 'followers',
+      caption: `${PREFIX}${caption}`,
+      publishedAt: publishedAt(secondsAgo),
+    });
+  const setMembership = (userId: string, set: 'blocked' | 'deleted' | 'live') =>
+    set === 'blocked'
+      ? adminSql`update public.memberships set status = 'blocked', blocked_at = now()
+                  where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`
+      : set === 'deleted'
+        ? adminSql`update public.memberships set deleted_at = now()
+                    where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`
+        : adminSql`update public.memberships set status = 'active', blocked_at = null, deleted_at = null
+                    where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`;
+  const follow = (follower: string, followee: string) =>
+    adminSql`insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+             values (${labTenantId}::uuid, ${follower}::uuid, ${followee}::uuid)
+             on conflict do nothing`;
+  const unfollow = (follower: string, followee: string) =>
+    adminSql`delete from public.social_follows
+              where tenant_id = ${labTenantId}::uuid and follower_user_id = ${follower}::uuid
+                and followee_user_id = ${followee}::uuid`;
+  const repair = async () => {
+    await sweep();
+    for (const userId of [userIds.helena, userIds.marcos, userIds.alvaro, userIds.plain]) {
+      await setMembership(userId, 'live');
+    }
+    await adminSql`delete from public.member_blocks where tenant_id = ${labTenantId}::uuid
+                    and blocker_user_id = any (${[userIds.alvaro, userIds.helena, userIds.marcos]}::uuid[])`;
+    await unfollow(userIds.alvaro, userIds.marcos);
+    await unfollow(userIds.alvaro, userIds.plain);
+  };
+  const ids = (page: AuthorsPage) => page.items.map((item) => item.membershipId);
+
+  beforeAll(async () => {
+    await removeIdentitiesByPrefix(EXTRA_PREFIX);
+    await repair();
+    const extra = await createSharedIdentity({
+      prefix: EXTRA_PREFIX,
+      memberships: [{ host: 'lab', displayName: 'Extra Dez Zero Oito' }],
+    });
+    extraUser = extra.userId;
+    memberships.helena = await membershipOf(userIds.helena);
+    memberships.marcos = await membershipOf(userIds.marcos);
+    memberships.alvaro = await membershipOf(userIds.alvaro);
+    memberships.plain = await membershipOf(userIds.plain);
+    memberships.extra = await membershipOf(extraUser);
+  });
+
+  beforeEach(repair);
+
+  afterAll(async () => {
+    await repair();
+    await removeIdentitiesByPrefix(EXTRA_PREFIX);
+  });
+
+  it('1. EP-60: a story whose expires_at is in the future is in the read, one expiring exactly at its insert instant or earlier is not, and the circle leaves when the window closes', async () => {
+    const edge = await insertStory({
+      author: userIds.helena,
+      visibility: 'followers',
+      caption: `${PREFIX}borda viva`,
+      publishedAt: publishedAt(3600),
+      expiresAt: new Date(Date.now() + 4_000).toISOString(),
+    });
+    // `expires_at = now()` of the insert transaction: by the time the API reads, now() has moved past it.
+    const [atNow] = await adminSql<{ id: string }[]>`
+      insert into public.stories (tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility,
+                                  published_at, expires_at)
+      values (${labTenantId}::uuid, ${userIds.helena}::uuid, ${await makeAsset(userIds.helena)}::uuid, 'image',
+              ${`${PREFIX}borda agora`}, 'followers', now() - interval '1 hour', now())
+      returning id`;
+    const gone = await insertStory({
+      author: userIds.helena,
+      visibility: 'followers',
+      caption: `${PREFIX}borda passada`,
+      publishedAt: publishedAt(7200),
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+    const group = (await (await groupRead(tokens.alvaro, memberships.helena)).json()) as {
+      items: StorySummary[];
+    };
+    expect(group.items.map((item) => item.id)).toEqual([edge]);
+    expect(group.items.map((item) => item.id)).not.toContain(atNow?.id);
+    expect(group.items.map((item) => item.id)).not.toContain(gone);
+    const page = await authorsOf(tokens.alvaro);
+    expect(page.items.find((item) => item.membershipId === memberships.helena)?.storyCount).toBe(1);
+    // The window closes: no live story left, the circle and the group are gone (the bare 404).
+    await new Promise((resolve) => setTimeout(resolve, 4_600));
+    expect(ids(await authorsOf(tokens.alvaro))).not.toContain(memberships.helena);
+    expect((await groupRead(tokens.alvaro, memberships.helena)).status).toBe(404);
+  });
+
+  it('2. EP-62: own circle first, then unseen before seen, then newest, then membership_id (two authors with the same latest time order by membership id)', async () => {
+    await follow(userIds.alvaro, userIds.marcos);
+    await follow(userIds.alvaro, userIds.plain);
+    const same = publishedAt(1800);
+    await insertStory({
+      author: userIds.alvaro,
+      visibility: 'followers',
+      caption: `${PREFIX}propria`,
+      publishedAt: publishedAt(7200),
+    });
+    await insertStory({
+      author: userIds.helena,
+      visibility: 'followers',
+      caption: `${PREFIX}h`,
+      publishedAt: same,
+    });
+    await insertStory({
+      author: userIds.plain,
+      visibility: 'followers',
+      caption: `${PREFIX}p`,
+      publishedAt: same,
+    });
+    const marcosStory = await insertStory({
+      author: userIds.marcos,
+      visibility: 'followers',
+      caption: `${PREFIX}m`,
+      publishedAt: publishedAt(60),
+    });
+    // Marcos is the newest but SEEN by Alvaro: he goes after the unseen circles.
+    expect(
+      (await post('/v1/stories/views', tokens.alvaro, { storyIds: [marcosStory] })).status,
+    ).toBe(204);
+    const page = await authorsOf(tokens.alvaro);
+    const tied = [memberships.helena, memberships.plain].sort();
+    expect(ids(page)).toEqual([memberships.alvaro, ...tied, memberships.marcos]);
+    expect(page.items[0]?.isSelf).toBe(true);
+    expect(page.items.slice(1).every((item) => item.isSelf === false)).toBe(true);
+    expect(page.items.find((item) => item.membershipId === memberships.marcos)?.hasUnseen).toBe(
+      false,
+    );
+    expect(page.items.find((item) => item.membershipId === memberships.helena)?.hasUnseen).toBe(
+      true,
+    );
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('3. D-717: the moderator reads every live member circle, cursor-paged (limit 2 over five authors: 2, 2, 1, each exactly once, a story published between pages included), with isSelf false and no own item', async () => {
+    const authors = [
+      [userIds.helena, memberships.helena],
+      [userIds.marcos, memberships.marcos],
+      [userIds.alvaro, memberships.alvaro],
+      [userIds.plain, memberships.plain],
+      [extraUser, memberships.extra],
+    ] as const;
+    for (const [index, [userId]] of authors.entries()) {
+      await story(userId, `moderador ${index}`, 600 + index * 600);
+    }
+    const first = await authorsOf(tokens.labAdmin, '?limit=2');
+    expect(first.items).toHaveLength(2);
+    expect(first.nextCursor).not.toBeNull();
+    expect(first.items.every((item) => item.isSelf === false)).toBe(true);
+    // Newest first: the author at index 0 published 600 s ago, index 1 1200 s ago.
+    expect(ids(first)).toEqual([authors[0][1], authors[1][1]]);
+    // A story published between the pages by an author already visited: nobody repeats, nobody is skipped.
+    await story(authors[0][0], 'entre paginas', 5);
+    const second = await authorsOf(
+      tokens.labAdmin,
+      `?limit=2&cursor=${encodeURIComponent(first.nextCursor ?? '')}`,
+    );
+    expect(second.items).toHaveLength(2);
+    expect(second.nextCursor).not.toBeNull();
+    const third = await authorsOf(
+      tokens.labAdmin,
+      `?limit=2&cursor=${encodeURIComponent(second.nextCursor ?? '')}`,
+    );
+    expect(third.items).toHaveLength(1);
+    expect(third.nextCursor).toBeNull();
+    const visited = [...ids(first), ...ids(second), ...ids(third)];
+    expect(visited).toHaveLength(5);
+    expect(new Set(visited)).toEqual(new Set(authors.map(([, membershipId]) => membershipId)));
+    // A tampered cursor degrades to page 1 (the total decoder), never an error.
+    const tampered = await authorsOf(tokens.labAdmin, '?limit=2&cursor=not-a-cursor');
+    expect(ids(tampered)).toHaveLength(2);
+    expect(tampered.nextCursor).not.toBeNull();
+    // The moderator's row holds no organization circle and no follow state: the admin's organization story is not in it.
+    await story(userIds.labAdmin, 'org no moderador', 30, 'tenant');
+    const all = await authorsOf(tokens.labAdmin, '?limit=50');
+    expect(ids(all)).not.toContain(await membershipOf(userIds.labAdmin));
+    expect(all.items.every((item) => item.isSelf === false)).toBe(true);
+    expect(all.items).toHaveLength(5);
+  });
+
+  it('4. EP-61: a moderator in a tenant with no member story gets 200 { items: [], nextCursor: null }; a real support session is 403', async () => {
+    expect(await authorsOf(tokens.labAdmin)).toEqual({ items: [], nextCursor: null });
+    expect((await authorsRead(tokens.support)).status).toBe(403);
+    // Positive control: with a live story the same moderator read is not empty.
+    await story(userIds.helena, 'controle', 30);
+    expect(ids(await authorsOf(tokens.labAdmin))).toEqual([memberships.helena]);
+  });
+
+  it('5. D-708 / MSTORY-08: blocking the AUTHOR removes the circle and 404s the group for the follower AND the moderator; unblocking restores both; a removed membership behaves the same', async () => {
+    const helenaStory = await story(userIds.helena, 'bloqueada', 300);
+    const probe = async (label: string, visible: boolean) => {
+      const asFollower = await authorsOf(tokens.alvaro);
+      const asModerator = await authorsOf(tokens.labAdmin);
+      expect(ids(asFollower).includes(memberships.helena), `${label}: follower row`).toBe(visible);
+      expect(ids(asModerator).includes(memberships.helena), `${label}: moderator row`).toBe(
+        visible,
+      );
+      for (const [who, token] of [
+        ['follower', tokens.alvaro],
+        ['moderator', tokens.labAdmin],
+      ] as const) {
+        const res = await groupRead(token, memberships.helena);
+        expect(res.status, `${label}: ${who} group`).toBe(visible ? 200 : 404);
+        if (!visible)
+          expect((await errorOf(res)).details, `${label}: ${who} group`).toBeUndefined();
+      }
+      // The by-id read follows the same gate for the follower (the live-followee seam); the story is never deleted.
+      expect(
+        (await request(`/v1/stories/${helenaStory}`, tokens.alvaro)).status,
+        `${label}: by id`,
+      ).toBe(visible ? 200 : 404);
+      expect((await storyRow(helenaStory))?.deleted_at).toBeNull();
+    };
+    await probe('live', true);
+    await setMembership(userIds.helena, 'blocked');
+    await probe('blocked', false);
+    await setMembership(userIds.helena, 'live');
+    await probe('unblocked', true);
+    await setMembership(userIds.helena, 'deleted');
+    await probe('removed', false);
+    await setMembership(userIds.helena, 'live');
+    await probe('restored', true);
+  });
+
+  it('6. D-616: an author the VIEWER blocked is absent from the viewer’s row and 404s on the group read, and the blocked author sees nothing different', async () => {
+    await story(userIds.helena, 'bloqueio do espectador', 300);
+    await story(userIds.marcos, 'marcos de helena', 120);
+    const helenaBefore = ids(await authorsOf(tokens.helena));
+    expect(helenaBefore).toContain(memberships.marcos);
+    await adminSql`insert into public.member_blocks (tenant_id, blocker_user_id, blocked_user_id)
+                   values (${labTenantId}::uuid, ${userIds.alvaro}::uuid, ${userIds.helena}::uuid)`;
+    expect(ids(await authorsOf(tokens.alvaro))).not.toContain(memberships.helena);
+    const res = await groupRead(tokens.alvaro, memberships.helena);
+    expect(res.status).toBe(404);
+    expect((await errorOf(res)).details).toBeUndefined();
+    // The blocked author's own row is unchanged, and the moderator still reads her circle.
+    expect(ids(await authorsOf(tokens.helena))).toEqual(helenaBefore);
+    expect(ids(await authorsOf(tokens.labAdmin))).toContain(memberships.helena);
+    // Lifting the block (the repair) brings the circle back.
+    await adminSql`delete from public.member_blocks where tenant_id = ${labTenantId}::uuid and blocker_user_id = ${userIds.alvaro}::uuid`;
+    expect(ids(await authorsOf(tokens.alvaro))).toContain(memberships.helena);
+  });
+
+  it('7. a story the moderator deletes leaves the read (the circle shrinks, the last one removes it)', async () => {
+    const first = await story(userIds.helena, 'apaga um', 300);
+    const second = await story(userIds.helena, 'apaga dois', 200);
+    expect(
+      (await authorsOf(tokens.alvaro)).items.find(
+        (item) => item.membershipId === memberships.helena,
+      )?.storyCount,
+    ).toBe(2);
+    expect(
+      (await request(`/v1/stories/${first}`, tokens.labAdmin, { method: 'DELETE' })).status,
+    ).toBe(204);
+    expect(
+      (await authorsOf(tokens.alvaro)).items.find(
+        (item) => item.membershipId === memberships.helena,
+      )?.storyCount,
+    ).toBe(1);
+    expect(
+      (await request(`/v1/stories/${second}`, tokens.labAdmin, { method: 'DELETE' })).status,
+    ).toBe(204);
+    expect(ids(await authorsOf(tokens.alvaro))).not.toContain(memberships.helena);
+    expect(ids(await authorsOf(tokens.labAdmin))).not.toContain(memberships.helena);
+    expect((await groupRead(tokens.labAdmin, memberships.helena)).status).toBe(404);
   });
 });
