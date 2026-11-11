@@ -1523,22 +1523,54 @@ Plans:
 **Amended 2026-11-10 (Phase 10 discuss and planning, `10-CONTEXT.md` D-701..D-718):** the owner rule of criterion 3 is stated per community kind (D-706); the admin keeps moderation over member content and the log row ships in THIS phase: soft-deleting any member story and archiving or removing any member-created community with a `moderation_log` row is MSTORY-09, MCOMM-10 (plus MCOMM-11, the single-post removal), so MODER-04 is split again and Phase 11 keeps the reports queue and "block author" (Phase 11's criterion 4 and Executar list are re-read at its own planning).
 
 Plans:
+**Wave 1**
 
 - [ ] 10-01-PLAN.md — Sketch gate 020: the 55 prototype-less frames drawn from the UI-SPEC (UI-04, wave 1)
-- [ ] 10-02-PLAN.md — Sketch 020 README, manifest row and Igor's approval, `autonomous: false` (UI-04, wave 2)
 - [ ] 10-03-PLAN.md — Schema A: `communities.kind`, the sentinel position, the member gates, the hidden-creator definer, the third post audience and the allow-list update guard; pgTAP 230 and 232 (MCOMM-01, 07, 08, MPUB-04, 07, tracer, BLOCKING schema push, wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 10-02-PLAN.md — Sketch 020 README, manifest row and Igor's approval, `autonomous: false` (UI-04, wave 2)
 - [ ] 10-04-PLAN.md — Schema B: `stories.visibility` and the audience gate with the highlight branch (A10 measurement), the story media gate (A5), the moderation vocabulary and kernel entries; pgTAP 231 and 154 (MSTORY-04, 08, MPUB-04, MCOMM-10, MSTORY-09, tracer, BLOCKING schema push, wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 10-05-PLAN.md — The creator rule in the API: permission composition, the kind stamp, the post owner seam, the per-member limit with its kernel seam, the owner predicates and the moderator's community log rows (MCOMM-01, 05, 06, 10, MPUB-01, 02, 03, 05, tracer, wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 10-06-PLAN.md — The read side: the creator projection, the viewer flags, the quota, the organization-only reorder, the explicit liveness and viewer-block predicates, the Reels lanes, and the separable moderator removal of one community post (MCOMM-02, 03, 04, 07, 08, 09, 11, tracer, wave 4)
-- [ ] 10-07-PLAN.md — Member stories write: the stamp, the organization-only Início reads, the zero-notification guard, the story and cover media seam, the delete transaction with its log row and the author projection (MSTORY-01, 02, 05, 07, 09, tracer, wave 5)
-- [ ] 10-08-PLAN.md — The Explorar authors read and the lazy group read, the moderator's cursor, the block filters, the A10 measurement and index, and the isolation inventory (MSTORY-03, 04, 08, MPUB-05, 07, tracer, BLOCKING schema push, wave 6)
-- [ ] 10-09-PLAN.md — The highlight owner seam: the creator's own story in their own community's highlight, the IDOR guards, the place-dependent curator flag and the organization-only catalog (MSTORY-06, MPUB-01, 06, MCOMM-06, tracer, wave 7)
-- [ ] 10-10-PLAN.md — The backend proof: the seed, the two-tenant sweep, the `social` off and on matrix, the migration proofs and the DEPLOY release order with the web-first A7 exception (MPUB-05, 07, tracer, wave 8)
 - [ ] 10-11-PLAN.md — Web foundations: the platform community limit, the three moderation log kinds, the third audience in the feed badge and the web half of A7 (MCOMM-05, 08, 10, MSTORY-04, 09, UI-04, tracer, wave 4)
-- [ ] 10-12-PLAN.md — Web stories: the Explorar row with the own circle, the viewer menus and delete dialogs, the member publish screen, the destination and visibility notice, the highlight checklist and "Seus stories" (MSTORY-01, 03, 06, 09, MPUB-02, UI-04, tracer, wave 8)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 10-07-PLAN.md — Member stories write: the stamp, the organization-only Início reads, the zero-notification guard, the story and cover media seam, the delete transaction with its log row and the author projection (MSTORY-01, 02, 05, 07, 09, tracer, wave 5)
 - [ ] 10-13-PLAN.md — Web communities: the create entry and member form, the limit notice and screen, the chips, the card byline and the organization-only reorder (MCOMM-01 to 06, MPUB-05, UI-04, tracer, wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 10-08-PLAN.md — The Explorar authors read and the lazy group read, the moderator's cursor, the block filters, the A10 measurement and index, and the isolation inventory (MSTORY-03, 04, 08, MPUB-05, 07, tracer, BLOCKING schema push, wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 10-09-PLAN.md — The highlight owner seam: the creator's own story in their own community's highlight, the IDOR guards, the place-dependent curator flag and the organization-only catalog (MSTORY-06, MPUB-01, 06, MCOMM-06, tracer, wave 7)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 10-10-PLAN.md — The backend proof: the seed, the two-tenant sweep, the `social` off and on matrix, the migration proofs and the DEPLOY release order with the web-first A7 exception (MPUB-05, 07, tracer, wave 8)
+- [ ] 10-12-PLAN.md — Web stories: the Explorar row with the own circle, the viewer menus and delete dialogs, the member publish screen, the destination and visibility notice, the highlight checklist and "Seus stories" (MSTORY-01, 03, 06, 09, MPUB-02, UI-04, tracer, wave 8)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
 - [ ] 10-14-PLAN.md — Web community page: the creator's controls from the viewer flags, the member composer inside a community, the byline, the lifecycle and moderator confirmations, curation and the off and blocked states (MCOMM-06, 07, 10, MPUB-01, 03, 05, 06, UI-04, tracer, wave 9)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
 - [ ] 10-15-PLAN.md — Browser journeys, the exit gate `pnpm verify` and the owner's manual-proofs ledger (MCOMM-01, 08, MSTORY-01, 03, MPUB-01, 05, 07, UI-04, tracer, wave 10)
+
+**Cross-cutting constraints:**
+
+- Precondition for every task (D-33, D-365, UI-04): `grep -q '^approved: true' .planning/sketches/020-phase-10-designed-screens/README.md` succeeds; if it does not, the executor stops and reports that the sketch gate of plan 02 is pending; it is also the FIRST clause of every verify command of this plan
 
 ### Phase 11: Rede Social - Direct Messages, Member Blocking and Reports
 
