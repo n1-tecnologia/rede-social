@@ -41,8 +41,8 @@ import {
 type Envelope = { error: { code: string; message?: string; details?: Record<string, unknown> } };
 
 const PREFIX = 'Teste 10-07 ';
-const tokens = { helena: '', marcos: '', labAdmin: '' };
-const userIds = { helena: '', marcos: '', labAdmin: '' };
+const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '' };
+const userIds = { helena: '', marcos: '', alvaro: '', labAdmin: '' };
 let labTenantId = '';
 let restoreSocial: () => Promise<void> = async () => {};
 let restoreCommunities: () => Promise<void> = async () => {};
@@ -210,9 +210,11 @@ beforeAll(async () => {
   restoreStories = await withStoriesEnabled('lab');
   tokens.helena = await signInAs('helena.kuster@rede-lab.local', SEED_PASSWORD);
   tokens.marcos = await signInAs('marcos.vinicius@rede-lab.local', SEED_PASSWORD);
+  tokens.alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
   tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
   userIds.helena = await userOf('helena.kuster@rede-lab.local');
   userIds.marcos = await userOf('marcos.vinicius@rede-lab.local');
+  userIds.alvaro = await userOf('alvaro.pinheiro@rede-lab.local');
   userIds.labAdmin = await userOf('admin@rede-lab.local');
   const [lab] = await adminSql<
     { id: string }[]
@@ -525,5 +527,114 @@ describe('10 tracer', () => {
     } finally {
       await adminSql`delete from public.story_highlights where id = ${highlightId}::uuid`;
     }
+  });
+});
+
+describe('10 delete', () => {
+  const removeStory = (token: string, id: string) =>
+    request(`/v1/stories/${id}`, token, { method: 'DELETE' });
+
+  const publishAs = async (
+    token: string,
+    ownerId: string,
+    caption: string,
+  ): Promise<StorySummary> => {
+    const asset = await makeAsset(ownerId);
+    const res = await publish(token, { mediaAssetId: asset, mediaKind: 'image', caption });
+    expect(res.status, `publish ${caption}`).toBe(201);
+    return (await res.json()) as StorySummary;
+  };
+
+  const logCount = async (storyId: string): Promise<number> => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.moderation_log where subject_id = ${storyId}::uuid`;
+    return row?.n ?? 0;
+  };
+
+  it('1. D-711: the author deletes their own story (204, no log row), it leaves GET /mine, and a second delete is the bare 404', async () => {
+    const story = await publishAs(tokens.helena, userIds.helena, `${PREFIX}apagar`);
+    expect((await mine(tokens.helena)).map((item) => item.id)).toContain(story.id);
+    const res = await removeStory(tokens.helena, story.id);
+    expect(res.status).toBe(204);
+    expect((await storyRow(story.id))?.deleted_at).not.toBeNull();
+    expect(await logCount(story.id)).toBe(0);
+    expect((await mine(tokens.helena)).map((item) => item.id)).not.toContain(story.id);
+    const second = await removeStory(tokens.helena, story.id);
+    expect(second.status).toBe(404);
+    expect((await errorOf(second)).details).toBeUndefined();
+  });
+
+  it('2. T-10-25: another member touching Helena’s story is 403 when the row is visible to them (a follower) and the bare 404 when it is not; nothing is deleted', async () => {
+    const story = await publishAs(tokens.helena, userIds.helena, `${PREFIX}alheia`);
+    // Alvaro follows Helena (seed): the audience gate shows him the row, so the refusal is a 403.
+    const follower = await removeStory(tokens.alvaro, story.id);
+    expect(follower.status).toBe(403);
+    expect((await errorOf(follower)).code).toBe('FORBIDDEN');
+    // Marcos does not: the lane cannot read the story, so it is the bare 404 (no existence oracle).
+    const stranger = await removeStory(tokens.marcos, story.id);
+    expect(stranger.status).toBe(404);
+    expect((await errorOf(stranger)).details).toBeUndefined();
+    expect((await storyRow(story.id))?.deleted_at).toBeNull();
+    expect(await logCount(story.id)).toBe(0);
+  });
+
+  it('3. a member touching an ORGANIZATION story is 403, and the admin deleting it writes no row (unchanged)', async () => {
+    const org = await publishAs(tokens.labAdmin, userIds.labAdmin, `${PREFIX}org apagar`);
+    const refused = await removeStory(tokens.helena, org.id);
+    expect(refused.status).toBe(403);
+    expect((await storyRow(org.id))?.deleted_at).toBeNull();
+    expect((await removeStory(tokens.labAdmin, org.id)).status).toBe(204);
+    expect(await logCount(org.id)).toBe(0);
+  });
+
+  it('4. a story id of another tenant is the bare 404', async () => {
+    const [foreign] = await adminSql<{ id: string }[]>`
+      select id from public.stories where tenant_id <> ${labTenantId}::uuid limit 1`;
+    expect(foreign?.id).toBeTruthy();
+    const res = await removeStory(tokens.labAdmin, foreign?.id ?? '');
+    expect(res.status).toBe(404);
+    expect((await errorOf(res)).details).toBeUndefined();
+    const [still] = await adminSql<{ deleted_at: string | null }[]>`
+      select deleted_at::text from public.stories where id = ${foreign?.id ?? ''}::uuid`;
+    expect(still?.deleted_at).toBeNull();
+  });
+
+  it('5. T-10-29 / A7: a follower reading Helena’s story finds no user id of hers (uuid scan) and the three safe author fields; Helena reads her own authorUserId', async () => {
+    const story = await publishAs(tokens.helena, userIds.helena, `${PREFIX}autoria`);
+    const asFollower = await request(`/v1/stories/${story.id}`, tokens.alvaro);
+    expect(asFollower.status).toBe(200);
+    const text = await asFollower.text();
+    expect(text).not.toContain(userIds.helena);
+    const wire = JSON.parse(text) as StorySummary;
+    expect(wire.authorUserId).toBeNull();
+    expect(Object.keys(wire.author ?? {}).sort()).toEqual([
+      'avatarUrl',
+      'displayName',
+      'membershipId',
+    ]);
+    const [membership] = await adminSql<{ id: string }[]>`
+      select id from public.memberships
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userIds.helena}::uuid`;
+    expect(wire.author?.membershipId).toBe(membership?.id);
+    expect(wire.author?.displayName.length).toBeGreaterThan(0);
+
+    const own = (await (
+      await request(`/v1/stories/${story.id}`, tokens.helena)
+    ).json()) as StorySummary;
+    expect(own.authorUserId).toBe(userIds.helena);
+
+    // The moderator and every list read send no foreign user id either; an organization story names no person.
+    const org = await publishAs(tokens.labAdmin, userIds.labAdmin, `${PREFIX}autoria org`);
+    const stripText = await (
+      await request(`/v1/stories?limit=${STORY_MAX_PAGE_SIZE}`, tokens.alvaro)
+    ).text();
+    expect(stripText).toContain(org.id);
+    expect(stripText).not.toContain(userIds.labAdmin);
+    expect(stripText).not.toContain(userIds.helena);
+    const orgWire = JSON.parse(
+      await (await request(`/v1/stories/${org.id}`, tokens.alvaro)).text(),
+    ) as StorySummary;
+    expect(orgWire.authorUserId).toBeNull();
+    expect(orgWire.author).toBeNull();
   });
 });

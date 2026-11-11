@@ -1,8 +1,13 @@
+import { MODERATION_EXCERPT_MAX } from '@rede-social/contracts/moderation';
 import { sqlClient } from '@rede-social/core/db';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
-import { communityCreateLimiter } from '@rede-social/core/server/safety/limits';
+import {
+  communityCreateLimiter,
+  storyPublishLimiter,
+} from '@rede-social/core/server/safety/limits';
 import type { CommunitySummary } from '@rede-social/module-communities/contracts';
 import type { FeedPost } from '@rede-social/module-feed/contracts';
+import { STORY_MAX_CAPTION, type StorySummary } from '@rede-social/module-stories/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -521,5 +526,191 @@ describe('10 community post removal', () => {
     } finally {
       await adminSql`delete from public.content_reports where id = ${reportId}::uuid`;
     }
+  });
+});
+
+/**
+ * 10-07 (D-711, D-717, D-718; MSTORY-09, EP-69): a holder of `moderation.manage` removes any MEMBER story,
+ * and the removal leaves ONE `story_removed` row in the SAME transaction (a failing log insert rolls the
+ * delete back). The author's own delete, an organization story's delete by a manager, a repeat and a
+ * missing id write no row, and nobody is notified. Every assertion is scoped by the story id it created
+ * (the log is append-only), and the stories this suite writes carry `STORY_PREFIX`.
+ */
+describe('10 story removal', () => {
+  const STORY_PREFIX = 'Teste 10-07 mod ';
+  const createdAssets: string[] = [];
+
+  const sweepStories = async (): Promise<void> => {
+    await adminSql`delete from public.notifications where payload::text like ${`%${STORY_PREFIX}%`}`;
+    await adminSql`delete from public.stories where caption like ${`${STORY_PREFIX}%`}`;
+    for (const id of createdAssets.splice(0)) {
+      await adminSql`delete from public.stories where media_asset_id = ${id}::uuid`;
+      await adminSql`delete from public.media_assets where id = ${id}::uuid`;
+    }
+  };
+
+  /** A member (or admin) story published through the real route, on an asset the caller owns. */
+  const publishStory = async (
+    token: string,
+    ownerId: string,
+    caption: string,
+  ): Promise<StorySummary> => {
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+      values (${labTenantId}::uuid, ${ownerId}::uuid, 'image', 'story', 'ready', 'supabase',
+              'image/webp', 1024, '{640,1080}'::int[])
+      returning id`;
+    const assetId = asset?.id ?? '';
+    createdAssets.push(assetId);
+    const res = await request('/v1/stories', token, {
+      method: 'POST',
+      body: JSON.stringify({ mediaAssetId: assetId, mediaKind: 'image', caption }),
+    });
+    expect(res.status, `POST /v1/stories ${caption}`).toBe(201);
+    return (await res.json()) as StorySummary;
+  };
+
+  const removeStory = (token: string, id: string) =>
+    request(`/v1/stories/${id}`, token, { method: 'DELETE' });
+
+  const storyState = async (id: string) => {
+    const [row] = await adminSql<{ deleted_at: string | null }[]>`
+      select deleted_at::text from public.stories where id = ${id}::uuid`;
+    return row;
+  };
+
+  beforeEach(async () => {
+    storyPublishLimiter.reset();
+    await sweepStories();
+  });
+
+  afterAll(async () => {
+    await sweepStories();
+  });
+
+  it('a moderator’s delete of a member story writes ONE story_removed row naming the author, the story and the capped caption; the story leaves every read', async () => {
+    // A caption over the excerpt budget: the log keeps a capped, word-cut snapshot, never the whole text.
+    const caption = `${STORY_PREFIX}${'palavra '.repeat(40)}`.slice(0, STORY_MAX_CAPTION);
+    const story = await publishStory(tokens.helena, userIds.helena, caption);
+    expect(caption.length).toBeGreaterThan(MODERATION_EXCERPT_MAX - 1);
+    const res = await removeStory(tokens.labAdmin, story.id);
+    expect(res.status).toBe(204);
+    expect((await storyState(story.id))?.deleted_at).not.toBeNull();
+    const rows = await logRowsFor(story.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.action).toBe('story_removed');
+    expect(rows[0]?.subject_type).toBe('story');
+    expect(rows[0]?.actor_user_id).toBe(userIds.labAdmin);
+    expect(rows[0]?.target_user_id).toBe(userIds.helena);
+    expect(rows[0]?.reason).toBeNull();
+    expect(rows[0]?.excerpt?.length ?? 0).toBeLessThanOrEqual(MODERATION_EXCERPT_MAX);
+    expect(rows[0]?.excerpt?.startsWith(STORY_PREFIX.trim())).toBe(true);
+    const mine = await request('/v1/stories/mine?limit=50', tokens.helena);
+    expect(((await mine.json()) as { items: StorySummary[] }).items.map((s) => s.id)).not.toContain(
+      story.id,
+    );
+  });
+
+  it('a second delete is the bare 404 and writes no second row', async () => {
+    const story = await publishStory(tokens.helena, userIds.helena, `${STORY_PREFIX}repetida`);
+    expect((await removeStory(tokens.labAdmin, story.id)).status).toBe(204);
+    const second = await removeStory(tokens.labAdmin, story.id);
+    expect(second.status).toBe(404);
+    expect((await errorOf(second)).details).toBeUndefined();
+    expect(await logRowsFor(story.id)).toHaveLength(1);
+  });
+
+  it('the author’s own delete writes no row; an organization story deleted by an admin writes none either', async () => {
+    const own = await publishStory(tokens.helena, userIds.helena, `${STORY_PREFIX}própria`);
+    expect((await removeStory(tokens.helena, own.id)).status).toBe(204);
+    expect(await logRowsFor(own.id)).toHaveLength(0);
+
+    const org = await publishStory(
+      tokens.labAdmin,
+      userIds.labAdmin,
+      `${STORY_PREFIX}da organização`,
+    );
+    expect((await removeStory(tokens.labAdmin, org.id)).status).toBe(204);
+    expect(await logRowsFor(org.id)).toHaveLength(0);
+  });
+
+  it('T-10-28: the log insert is in the delete’s transaction - a forced log failure leaves the story live; with the log working again the delete commits with its row', async () => {
+    const story = await publishStory(tokens.helena, userIds.helena, `${STORY_PREFIX}atomicidade`);
+    await adminSql.unsafe(`
+      create or replace function public.test_moderation_log_fail() returns trigger
+        language plpgsql as $$ begin raise exception 'forced log failure'; end $$;
+      create trigger test_moderation_log_fail before insert on public.moderation_log
+        for each row execute function public.test_moderation_log_fail();`);
+    try {
+      const res = await removeStory(tokens.labAdmin, story.id);
+      expect(res.status).toBe(500);
+      expect((await storyState(story.id))?.deleted_at).toBeNull();
+      expect(await logRowsFor(story.id)).toHaveLength(0);
+    } finally {
+      await adminSql.unsafe(`
+        drop trigger if exists test_moderation_log_fail on public.moderation_log;
+        drop function if exists public.test_moderation_log_fail();`);
+    }
+    expect((await removeStory(tokens.labAdmin, story.id)).status).toBe(204);
+    expect((await logRowsFor(story.id)).map((row) => row.action)).toEqual(['story_removed']);
+  });
+
+  it('D-718: with social off the moderator’s delete still works (and logs) while Helena’s publish is 403', async () => {
+    const story = await publishStory(
+      tokens.helena,
+      userIds.helena,
+      `${STORY_PREFIX}social desligado`,
+    );
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+    try {
+      const [asset] = await adminSql<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+        values (${labTenantId}::uuid, ${userIds.helena}::uuid, 'image', 'story', 'ready', 'supabase',
+                'image/webp', 1024, '{640,1080}'::int[])
+        returning id`;
+      createdAssets.push(asset?.id ?? '');
+      const publish = await request('/v1/stories', tokens.helena, {
+        method: 'POST',
+        body: JSON.stringify({
+          mediaAssetId: asset?.id,
+          mediaKind: 'image',
+          caption: `${STORY_PREFIX}negada`,
+        }),
+      });
+      expect(publish.status).toBe(403);
+      expect((await removeStory(tokens.labAdmin, story.id)).status).toBe(204);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labTenantId);
+    }
+    expect((await logRowsFor(story.id)).map((row) => row.action)).toEqual(['story_removed']);
+  });
+
+  it('the author is told nothing, and GET /v1/admin/moderation-log lists the row', async () => {
+    const name = `${STORY_PREFIX}notificacao ${Date.now()}`;
+    const story = await publishStory(tokens.helena, userIds.helena, name);
+    expect((await removeStory(tokens.labAdmin, story.id)).status).toBe(204);
+    await runNotificationJobs(labTenantId);
+    const [told] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userIds.helena}::uuid
+         and subject_id = ${story.id}::uuid`;
+    expect(told?.n).toBe(0);
+    const res = await request('/v1/admin/moderation-log?limit=50', tokens.labAdmin);
+    expect(res.status).toBe(200);
+    const items = (
+      (await res.json()) as {
+        items: { action: string; subjectType: string | null; excerpt: string | null }[];
+      }
+    ).items.filter((item) => item.excerpt === name);
+    expect(items.map((item) => item.action)).toEqual(['story_removed']);
+    expect(items[0]?.subjectType).toBe('story');
   });
 });
