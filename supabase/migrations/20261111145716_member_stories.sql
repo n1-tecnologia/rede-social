@@ -18,7 +18,7 @@
 --      story gate (RESEARCH Pitfall); rows without `story_id` pass untouched.
 --
 -- Sorts AFTER `*_feed_member_update_allowlist.sql` (10-03). EXPAND-ONLY (MPUB-07): one column with a
--- default, one CHECK, six policies; no table or column dropped, renamed or retyped; no row touched.
+-- default, one CHECK, six policies; no table or column removed or retyped; no row touched.
 -- The applied 10-03 migrations are not edited.
 
 ALTER TABLE "stories" ADD COLUMN "visibility" text DEFAULT 'tenant' NOT NULL;--> statement-breakpoint
