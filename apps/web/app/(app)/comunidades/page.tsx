@@ -43,12 +43,18 @@ import { CommunityLimitNotice } from './CommunityLimitNotice';
  *   - Two `Chip` links, `Ativas` and `Arquivadas`, carry the filter in the URL and are read HERE on
  *     the server, so a chip switch, a refresh, back and a shared link all land on the same list.
  *
- * **The status is decided on the server and only for a manager (D-89, web half).** `Arquivadas` is
- * selected only when the viewer holds `communities.community.manage` AND the `status` query value is
- * exactly the single string `arquivadas`. A repeated value (an array), any other value, or a member
- * lands on the active list with no chips and no error. The API's 403 is the real control; this is
- * UX. A member's title markup and request are today's: the flex row, the control and the chips
- * exist only in the manager branch, and `status` is never sent for the active list.
+ * **The status is decided on the server and only for who may read it (D-89, web half; 10-13).**
+ * `Arquivadas` is selected only when the viewer may read an archived list AND the `status` query
+ * value is exactly the single string `arquivadas`. A manager (`communities.community.manage`) may
+ * always; a member creator (`manage_own`, composed only while `social` is on) may only while they own
+ * at least one archived community, which one read of THEIR OWN archived rows answers (the API scopes
+ * it, D-713). A repeated value (an array), any other value, a member with none or `social` off lands
+ * on the active list with no chips and no error. The API's 403 is the real control; this is UX.
+ *
+ * **10-13 — the member's entry (UI-D-706).** The title-row control is `communityEntryState`: an admin
+ * always, a member under their limit, and at the limit `CommunityLimitNotice` stands where the control
+ * was (limit 0 and `social` off show neither). The decision reads the composed permissions and the
+ * `memberQuota` the list read carries, never a role. The cards carry their "Criada por" byline (UI-D-708).
  *
  * `CommunitiesList` is keyed by the status, so switching chips starts from the server's page 1 with
  * no client state carried across lists.

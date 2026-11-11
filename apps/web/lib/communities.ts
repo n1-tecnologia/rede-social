@@ -166,8 +166,14 @@ export async function listAllCommunities(): Promise<CommunitySummary[]> {
 const ORDER_MAX_PAGES = Math.ceil(COMMUNITY_MAX_ORDER / COMMUNITY_MAX_PAGE_SIZE) + 1;
 
 /**
- * EVERY active community of the tenant, in the list's order, for the `Comunidades` reorder mode
- * (2026-10-03) — or `null` when the tenant holds more than `COMMUNITY_MAX_ORDER`.
+ * EVERY active ORGANIZATION community of the tenant, in the list's order, for the `Comunidades` reorder
+ * mode (2026-10-03) — or `null` when the tenant holds more than `COMMUNITY_MAX_ORDER`.
+ *
+ * **10-13 (UI-D-708, D-712): organization communities only.** The list now carries member-created
+ * communities after the organization's, but the admin's order is one permutation of the ORGANIZATION
+ * set (the API answers `order_stale` for a member id). Member rows come after every organization row,
+ * so the walk stops at the first one, keeps only the organization rows and never counts a member row
+ * against the bound.
  *
  * The same keyset walk `listAllCommunities` does, with the opposite failure posture, on purpose:
  * that one degrades to "whatever loaded" because a picker with fewer rows still publishes, but a
@@ -181,8 +187,11 @@ export async function getOrderableCommunities(): Promise<CommunitySummary[] | nu
   let cursor: string | undefined;
   for (let page = 0; page < ORDER_MAX_PAGES; page += 1) {
     const result = await getCommunities({ cursor, limit: COMMUNITY_MAX_PAGE_SIZE });
-    items.push(...result.items);
+    const organization = result.items.filter((item) => item.kind !== 'member');
+    items.push(...organization);
     if (items.length > COMMUNITY_MAX_ORDER) return null;
+    // A member row ends the organization rows (D-712): nothing after it can be one.
+    if (organization.length < result.items.length) return items;
     if (result.nextCursor === null) return items;
     cursor = result.nextCursor;
   }

@@ -89,6 +89,13 @@ type ReorderDraft = { original: CommunitySummary[]; draft: CommunitySummary[] };
 /** Where focus goes once the next render has committed (the mode swaps the controls out). */
 type FocusTarget = 'heading' | 'toggle' | 'save';
 
+/**
+ * An ORGANIZATION community: the admin's, orderable and carrying store tags. `kind` is the API's own
+ * flag (D-701), never a comparison against a user id or a role. A member-created community is the
+ * other case: it sits after the organization's, is not in the reorder draft and carries no store tag.
+ */
+const isOrganization = (community: CommunitySummary) => community.kind !== 'member';
+
 const sameOrder = (a: readonly CommunitySummary[], b: readonly CommunitySummary[]) =>
   a.length === b.length && a.every((community, index) => community.id === b[index]?.id);
 
@@ -142,6 +149,12 @@ export function CommunitiesSkeleton() {
  *     failure keeps the draft and the mode, so "Salvar ordem" can simply be tried again.
  * Closing the mode returns focus to "Reordenar". While it is open the list neither pulls to refresh
  * nor pages: there is nothing to append to a permutation.
+ *
+ * **10-13 (UI-D-708) — the order is the organization's.** Member-created communities come after the
+ * organization's in the server's answer and are not orderable: the control counts organization
+ * communities only, the draft and the save carry organization ids only, and member cards stay on
+ * screen after the draft, unchanged. A member never gets the mode (`canManage` is the composed
+ * `communities.community.manage`; the member's `manage_own` never flips it).
  *
  * **05.1 — the `Arquivadas` list (D-88) is the same machine over a different keyset.** `status`
  * travels with every refresh and load-more, so a pull or a scroll on `Arquivadas` never swaps the
@@ -266,7 +279,10 @@ export function CommunitiesList({
   });
 
   // Members never get it, `Arquivadas` never gets it, and one community has no order to choose.
-  const canReorder = canManage && status === 'active' && items.length > 1;
+  // UI-D-708: member communities are not orderable, so only organization ones count toward "two or more".
+  const organizationCount = items.filter(isOrganization).length;
+  const memberCards = items.filter((community) => !isOrganization(community));
+  const canReorder = canManage && status === 'active' && organizationCount > 1;
 
   const startReorder = async () => {
     if (entering) return;
@@ -291,7 +307,9 @@ export function CommunitiesList({
       return;
     }
     focusAfter.current = 'heading';
-    setReorder({ original: result.items, draft: result.items });
+    // The draft holds ORGANIZATION communities only (UI-D-708): the API orders that set and nothing else.
+    const organization = result.items.filter(isOrganization);
+    setReorder({ original: organization, draft: organization });
   };
 
   /** The list's `onChange`: the new permutation, mapped back onto the draft's own rows. */
@@ -362,6 +380,44 @@ export function CommunitiesList({
       </a>
     ) : null;
 
+  const renderCard = (community: CommunitySummary) => {
+    // P80: an archived community keeps today's rule; the store adds no tag to it.
+    const tags =
+      community.status === 'archived' || !isOrganization(community)
+        ? undefined
+        : storeTags?.[community.id];
+    return (
+      <CommunityCard
+        key={community.id}
+        href={`/comunidades/${community.id}`}
+        name={community.name}
+        description={community.description}
+        coverAssetId={community.coverAssetId}
+        coverVariantWidths={community.coverVariantWidths}
+        postCountLabel={t('card.posts', { count: community.postCount })}
+        // UI-D-708: a member-created community says whose it is; an organization one never
+        // does. The host builds the string, and the name is plain text inside the one link.
+        byline={
+          community.createdBy
+            ? t('card.byline', { name: community.createdBy.displayName })
+            : undefined
+        }
+        coverAlt={t('card.cover', { community: community.name })}
+        // UI-D-50: decided per ROW from the row's own status, never from the list's.
+        // UI-D-372: "Produto arquivado" takes the same slot (never both: P80 above).
+        statusPill={
+          community.status === 'archived' ? (
+            <StatusPill tone="neutral">{t('archived.pill')}</StatusPill>
+          ) : tags?.archived ? (
+            <StatusPill tone="neutral">{t('tags.productArchived')}</StatusPill>
+          ) : undefined
+        }
+        // UI-D-372: "Exclusiva" on the cover, in colour, inside the card's one link.
+        coverBadge={tags?.coverBadge ? <ExclusiveBadge label={t('tags.exclusive')} /> : undefined}
+      />
+    );
+  };
+
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
     body = (
@@ -412,44 +468,7 @@ export function CommunitiesList({
     body = (
       <>
         <div className={GRID_WRAP}>
-          <div className={GRID}>
-            {items.map((community) => {
-              // P80: an archived community keeps today's rule; the store adds no tag to it.
-              const tags = community.status === 'archived' ? undefined : storeTags?.[community.id];
-              return (
-                <CommunityCard
-                  key={community.id}
-                  href={`/comunidades/${community.id}`}
-                  name={community.name}
-                  description={community.description}
-                  coverAssetId={community.coverAssetId}
-                  coverVariantWidths={community.coverVariantWidths}
-                  postCountLabel={t('card.posts', { count: community.postCount })}
-                  // UI-D-708: a member-created community says whose it is; an organization one never
-                  // does. The host builds the string, and the name is plain text inside the one link.
-                  byline={
-                    community.createdBy
-                      ? t('card.byline', { name: community.createdBy.displayName })
-                      : undefined
-                  }
-                  coverAlt={t('card.cover', { community: community.name })}
-                  // UI-D-50: decided per ROW from the row's own status, never from the list's.
-                  // UI-D-372: "Produto arquivado" takes the same slot (never both: P80 above).
-                  statusPill={
-                    community.status === 'archived' ? (
-                      <StatusPill tone="neutral">{t('archived.pill')}</StatusPill>
-                    ) : tags?.archived ? (
-                      <StatusPill tone="neutral">{t('tags.productArchived')}</StatusPill>
-                    ) : undefined
-                  }
-                  // UI-D-372: "Exclusiva" on the cover, in colour, inside the card's one link.
-                  coverBadge={
-                    tags?.coverBadge ? <ExclusiveBadge label={t('tags.exclusive')} /> : undefined
-                  }
-                />
-              );
-            })}
-          </div>
+          <div className={GRID}>{items.map(renderCard)}</div>
         </div>
 
         {/* The sentinel stands down while a page is refused, so a failed page cannot spin: the
@@ -551,6 +570,13 @@ export function CommunitiesList({
             }}
           />
         </div>
+        {/* UI-D-708: member communities are not orderable, so they are not in the draft; they stay on
+            screen exactly as the list drew them, after the organization rows, outside the list. */}
+        {memberCards.length > 0 ? (
+          <div className={`${GRID_WRAP} mt-4`}>
+            <div className={GRID}>{memberCards.map(renderCard)}</div>
+          </div>
+        ) : null}
       </section>
     );
   }
