@@ -49,8 +49,7 @@ const labels = {
     videoMb: 'Tamanho máximo do vídeo, em MB',
     communities: 'Comunidades por membro',
   },
-  communitiesHelper:
-    'Comunidades arquivadas não contam. Use 0 para não deixar os membros criarem.',
+  communitiesHelper: 'Comunidades arquivadas não contam. Use 0 para não deixar os membros criarem.',
   hint: 'De {min} a {max}. Padrão: {default}.',
   helper: 'Vale só para novos envios e novas comunidades. O que já existe não muda.',
   save: 'Salvar limites',

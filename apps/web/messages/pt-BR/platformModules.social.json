@@ -9,16 +9,18 @@
       },
       "limits": {
         "open": "Configurar limites",
-        "title": "Limites de mídia dos membros",
+        "title": "Limites dos membros",
         "fields": {
           "photos": "Fotos por publicação",
           "photoMb": "Tamanho máximo da foto, em MB",
           "allowVideo": "Permitir vídeo",
           "videoSeconds": "Duração máxima do vídeo, em segundos",
-          "videoMb": "Tamanho máximo do vídeo, em MB"
+          "videoMb": "Tamanho máximo do vídeo, em MB",
+          "communities": "Comunidades por membro"
         },
+        "communitiesHelper": "Comunidades arquivadas não contam. Use 0 para não deixar os membros criarem.",
         "hint": "De {min} a {max}. Padrão: {default}.",
-        "helper": "Vale só para novos envios. O que já foi publicado não muda.",
+        "helper": "Vale só para novos envios e novas comunidades. O que já existe não muda.",
         "save": "Salvar limites",
         "saving": "Salvando…",
         "saved": "Limites salvos.",

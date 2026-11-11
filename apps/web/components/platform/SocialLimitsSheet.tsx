@@ -19,7 +19,7 @@ import {
 export interface SocialLimitsLabels {
   /** The row button, "Configurar limites". */
   open: string;
-  /** The sheet title, "Limites de mídia dos membros". */
+  /** The sheet title, "Limites dos membros". */
   title: string;
   fields: {
     photos: string;
@@ -27,10 +27,14 @@ export interface SocialLimitsLabels {
     allowVideo: string;
     videoSeconds: string;
     videoMb: string;
+    /** 10-11 (UI-D-715): "Comunidades por membro", the last field. */
+    communities: string;
   };
+  /** The extra 12px helper under the community field: archived ones do not count, 0 blocks creating. */
+  communitiesHelper: string;
   /** ICU template with `{min}`, `{max}` and `{default}` - the 12px helper under each number field. */
   hint: string;
-  /** The footer line: the limits apply to new uploads only. */
+  /** The footer line: the limits apply to new uploads and new communities only. */
   helper: string;
   save: string;
   saving: string;
@@ -63,6 +67,7 @@ type Draft = {
   videoEnabled: boolean;
   videoSeconds: string;
   videoMb: string;
+  maxPerMember: string;
 };
 
 const draftOf = (settings: SocialSettings): Draft => {
@@ -73,6 +78,7 @@ const draftOf = (settings: SocialSettings): Draft => {
     videoEnabled: form.videoEnabled,
     videoSeconds: String(form.videoSeconds),
     videoMb: String(form.videoMb),
+    maxPerMember: String(form.maxPerMember),
   };
 };
 
@@ -85,6 +91,7 @@ const formOf = (draft: Draft): SocialLimitsForm => ({
   videoEnabled: draft.videoEnabled,
   videoSeconds: parse(draft.videoSeconds),
   videoMb: parse(draft.videoMb),
+  maxPerMember: parse(draft.maxPerMember),
 });
 
 /** The defaults, for the "Padrão" helper of each field (the stored value is not the default). */
@@ -93,6 +100,7 @@ const DEFAULTS = socialLimitsFromSettings({
     ...SOCIAL_SETTINGS_DEFAULTS.media,
     video: { ...SOCIAL_SETTINGS_DEFAULTS.media.video },
   },
+  communities: { ...SOCIAL_SETTINGS_DEFAULTS.communities },
 });
 
 const DEFAULT_OF: Record<SocialLimitField, number> = {
@@ -100,14 +108,16 @@ const DEFAULT_OF: Record<SocialLimitField, number> = {
   photoMb: DEFAULTS.photoMb,
   videoSeconds: DEFAULTS.videoSeconds ?? SOCIAL_LIMIT_RANGES.videoSeconds.min,
   videoMb: DEFAULTS.videoMb ?? SOCIAL_LIMIT_RANGES.videoMb.min,
+  maxPerMember: DEFAULTS.maxPerMember,
 };
 
 /**
  * The limits sheet of the `social` row (09-12, UI-D-505 c, D-474): the `super_admin` edits one
- * tenant's member media allowance - photos per post, the photo cap in MB, and (only while video is
- * allowed) the video duration and size. A single column of fields, each a 14/700 label with its
+ * tenant's member allowances - photos per post, the photo cap in MB, (only while video is allowed)
+ * the video duration and size and, last and always shown behind a divider, how many communities one
+ * member may own (10-11, UI-D-715, D-710). A single column of fields, each a 14/700 label with its
  * unit, a 16px numeric `Input` and a 12/400 helper; the footer says the limits apply to new uploads
- * only (what is already published does not change).
+ * and new communities only (what already exists does not change).
  *
  * It opens with the SAVED values (the server page read them; the contract defaults when the blob is
  * empty), so there is no skeleton. With "Permitir vídeo" off the two video fields are absent from
@@ -158,8 +168,9 @@ export function SocialLimitsSheet({ tenantId, saved, labels, action }: SocialLim
 
   const numberField = (
     field: SocialLimitField,
-    key: 'photos' | 'photoMb' | 'videoSeconds' | 'videoMb',
+    key: 'photos' | 'photoMb' | 'videoSeconds' | 'videoMb' | 'maxPerMember',
     label: string,
+    extraHelper?: string,
   ) => {
     const range = SOCIAL_LIMIT_RANGES[field];
     const bounds = errors[field];
@@ -186,6 +197,9 @@ export function SocialLimitsSheet({ tenantId, saved, labels, action }: SocialLim
             })}
           </p>
         )}
+        {extraHelper ? (
+          <p className="break-words text-xs text-text-tertiary">{extraHelper}</p>
+        ) : null}
       </div>
     );
   };
@@ -223,6 +237,14 @@ export function SocialLimitsSheet({ tenantId, saved, labels, action }: SocialLim
               {numberField('videoMb', 'videoMb', labels.fields.videoMb)}
             </>
           ) : null}
+          <div className="border-t border-divider pt-4">
+            {numberField(
+              'maxPerMember',
+              'maxPerMember',
+              labels.fields.communities,
+              labels.communitiesHelper,
+            )}
+          </div>
           <div className="flex flex-col gap-3">
             <p className="break-words text-xs text-text-tertiary">{labels.helper}</p>
             <Button type="submit" variant="brand" fullWidth loading={saving}>

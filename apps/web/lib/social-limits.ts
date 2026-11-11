@@ -1,8 +1,10 @@
 import {
+  SOCIAL_MAX_COMMUNITIES_PER_MEMBER,
   SOCIAL_MAX_PHOTO_BYTES,
   SOCIAL_MAX_PHOTOS_PER_POST,
   SOCIAL_MAX_VIDEO_BYTES,
   SOCIAL_MAX_VIDEO_SECONDS,
+  SOCIAL_SETTINGS_DEFAULTS,
   type SocialSettings,
   type SocialSettingsPatch,
 } from '@rede-social/module-social/contracts';
@@ -26,7 +28,12 @@ export const SOCIAL_LIMIT_RANGES = {
   photoMb: { min: 1, max: Math.floor(SOCIAL_MAX_PHOTO_BYTES / MIB) },
   videoSeconds: { min: 1, max: SOCIAL_MAX_VIDEO_SECONDS },
   videoMb: { min: 1, max: Math.floor(SOCIAL_MAX_VIDEO_BYTES / MIB) },
+  // 10-11 (UI-D-715, D-710): 0 is valid and means "members cannot create"; the API caps at 20.
+  maxPerMember: { min: 0, max: SOCIAL_MAX_COMMUNITIES_PER_MEMBER },
 } as const;
+
+/** The community limit a tenant gets until the `super_admin` edits it, read from the contract. */
+export const SOCIAL_DEFAULT_MAX_PER_MEMBER = SOCIAL_SETTINGS_DEFAULTS.communities.maxPerMember;
 
 export type SocialLimitField = keyof typeof SOCIAL_LIMIT_RANGES;
 export type SocialLimitBounds = { min: number; max: number };
@@ -41,6 +48,8 @@ export type SocialLimitsForm = {
   videoEnabled: boolean;
   videoSeconds?: number;
   videoMb?: number;
+  /** 10-11: the most active communities one member may own (0 to 20), validated whatever video says. */
+  maxPerMember: number;
 };
 
 function inRange(value: number | undefined, bounds: SocialLimitBounds): boolean {
@@ -65,6 +74,7 @@ export function validateSocialLimits(
   if (form.videoEnabled) {
     fields.push(['videoSeconds', form.videoSeconds], ['videoMb', form.videoMb]);
   }
+  fields.push(['maxPerMember', form.maxPerMember]);
   for (const [field, value] of fields) {
     if (!inRange(value, SOCIAL_LIMIT_RANGES[field])) errors[field] = SOCIAL_LIMIT_RANGES[field];
   }
@@ -72,7 +82,7 @@ export function validateSocialLimits(
 }
 
 /**
- * The form as the API's partial patch: bytes for the sizes, and for the video only `enabled` while
+ * The form as the API's partial patch: bytes for the sizes, the community limit as is, and for the video only `enabled` while
  * it is off (the stored duration and size are left alone, so switching video back on later restores
  * them). Call it only on a form `validateSocialLimits` accepted.
  */
@@ -86,6 +96,7 @@ export function socialLimitsToPatch(form: SocialLimitsForm): SocialSettingsPatch
   }
   return {
     media: { photosPerPost: form.photos, photoMaxBytes: form.photoMb * MIB, video },
+    communities: { maxPerMember: form.maxPerMember },
   };
 }
 
@@ -93,16 +104,16 @@ export function socialLimitsToPatch(form: SocialLimitsForm): SocialSettingsPatch
 const toMb = (bytes: number) => Math.max(1, Math.round(bytes / MIB));
 
 /** The inverse of `socialLimitsToPatch`: the effective settings in the units of the labels. */
-// 10-05: only the media half is read here; `communities.maxPerMember` has its own form later.
 export function socialLimitsFromSettings(
-  settings: Pick<SocialSettings, 'media'>,
+  settings: Pick<SocialSettings, 'media' | 'communities'>,
 ): SocialLimitsForm {
-  const { media } = settings;
+  const { media, communities } = settings;
   return {
     photos: media.photosPerPost,
     photoMb: toMb(media.photoMaxBytes),
     videoEnabled: media.video.enabled,
     videoSeconds: media.video.maxDurationSeconds,
     videoMb: toMb(media.video.maxBytes),
+    maxPerMember: communities.maxPerMember,
   };
 }
