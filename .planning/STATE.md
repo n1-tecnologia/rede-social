@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "12.2"
-current_phase_name: Ramos condicionais no formulário de perfil
-current_plan: 21
-status: verifying
-stopped_at: Phase 10 UI-SPEC approved by the checker 2026-11-10 (UI-D-697..720, 4 FLAGs); sketch 020 and owner answers to OQ-1..OQ-7 still open; STATE pointer stays on 12.2, Phase 13 paused at plan 14; next /gsd-plan-phase 10 after the sketch gate
-last_updated: "2026-11-11T00:36:22.591Z"
-last_activity: 2026-11-10
-last_activity_desc: Phase 12.3 closed by developer closure, STATE back on 12.2
-state_head: 89bbf2041e09007eaa573d12deb4785c75f8f853
+current_phase: "10"
+current_phase_name: Rede Social - Member Stories and Communities
+current_plan: 1
+status: planned
+stopped_at: Phase 12.2 CLOSED 2026-11-11 by developer closure (UAT 7 pass on Igor's word and 1 skipped, M8 cleanup owed; verification passed; MANUAL-PROOFS ledger still pending; no 12.2 security audit run); STATE hand-moved to Phase 10 (15 plans planned 2026-11-10, none executed); Igor accepted the UI-SPEC defaults for OQ-1..OQ-7 on 2026-11-11 and left the Escopo hooks to Claude; sketch 020 still undrawn and unapproved (plans 10-01 and 10-02); Phase 13 stays paused at plan 14; nothing pushed
+last_updated: "2026-11-11T14:15:00.000Z"
+last_activity: 2026-11-11
+last_activity_desc: Phase 12.2 closed by developer closure, STATE moved to Phase 10
+state_head: ea5d2ea8c30441fcc8e42349b76d2f6389b7e176
 progress:
   total_phases: 31
-  completed_phases: 0
+  completed_phases: 2
   total_plans: 401
   completed_plans: 373
-  percent: 0
+  percent: 6
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 12.2 — Ramos condicionais no formulário de perfil (awaiting the owner's proofs, 12.2-UAT.md)
+**Current focus:** Phase 10 — Rede Social: Member Stories and Communities (planned, 15 plans in 10 waves; sketch gate 020 pending)
 
 ## Current Position
 
-Phase: 12.2 (Ramos condicionais no formulário de perfil) — EXECUTED, VERIFICATION human_needed
-Current Plan: 21
-Total Plans in Phase: 21
-Plan: 21 of 21
-Status: Phase executed, awaiting the owner's proofs (12.2-UAT.md); Phase 12.3 closed 2026-11-09
-Last activity: 2026-11-10 — Completed quick task 261110-ij7 (professional_id mask question type, e35bf3a; nothing pushed); Phase 12.3 closed by developer closure, STATE on 12.2
+Phase: 10 (Rede Social - Member Stories and Communities) — PLANNED, not executed
+Current Plan: 1
+Total Plans in Phase: 15
+Plan: 1 of 15 (wave 1: 10-01 sketch drawing and 10-03 schema A)
+Status: Ready to execute; plans 10-03 to 10-10 (backend) never wait for the sketch gate, plans 10-11 to 10-15 (web) do
+Last activity: 2026-11-11 — Phase 12.2 closed by developer closure (UAT 7 pass on his word, 1 skipped; ledger and security audit owed), STATE moved to Phase 10
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
