@@ -455,6 +455,7 @@ describe('05.2-07 — storyHistoryView carries the highlight indicator (UI-D-77,
       highlightCount: 0,
       viewerSeen: false,
       authorAvatarUrl: null,
+      author: null,
       ...overrides,
     };
   }
@@ -506,6 +507,7 @@ describe('05.2-09 — highlightManageRowView and highlightEditStoryView', () => 
       highlightCount: 1,
       viewerSeen: false,
       authorAvatarUrl: null,
+      author: null,
       ...overrides,
     };
   }
@@ -593,6 +595,7 @@ describe('the tenant circle’s seen state (05.2-10)', () => {
       highlightCount: 0,
       viewerSeen: true,
       authorAvatarUrl: null,
+      author: null,
     };
     const now = Date.parse('2026-09-20T13:00:00.000Z');
     expect(storyViewerItem(summary, now).seen).toBe(true);
@@ -766,6 +769,7 @@ describe('#2b — the tenant circle wears the face of the newest story’s autho
       id: '0000000c-1111-4111-8111-111111111111',
       authorUserId: '0000000d-1111-4111-8111-111111111111',
       authorAvatarUrl: FACE,
+      author: null,
       mediaAssetId: '0000000e-1111-4111-8111-111111111111',
       mediaKind: 'image',
       mediaVariantWidths: [640, 1080],

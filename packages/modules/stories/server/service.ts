@@ -64,6 +64,11 @@ const log = moduleLogger('module-stories');
 type StoryRow = {
   id: string;
   author_user_id: string;
+  /** The stamped audience (10-04): `'tenant'` is the organization's, `'followers'` a member's. */
+  visibility: 'tenant' | 'followers';
+  /** 10-07 (A7): the live author's membership and profile name, from the projection's LEFT JOINs. */
+  author_membership_id: string | null;
+  author_display_name: string | null;
   /**
    * 2026-10-03 (#2b): the author's profile photo, from the `left join`s of the projection. NULL when
    * the author has no photo or no ACTIVE membership in the story's tenant (blocked, invited, removed).
@@ -159,6 +164,9 @@ function storyProjection(ctx: RequestContext) {
   return sql`
     select s.id,
            s.author_user_id,
+           s.visibility,
+           am.id as author_membership_id,
+           ap.display_name as author_display_name,
            ap.avatar_asset_id as author_avatar_asset_id,
            s.media_asset_id,
            s.media_kind,
@@ -197,10 +205,29 @@ function storyProjection(ctx: RequestContext) {
       left join member_profiles ap on ap.membership_id = am.id`;
 }
 
-/** Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`. */
-const toStory = (row: StoryRow): StorySummary => ({
+/**
+ * Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`.
+ *
+ * 10-07 (A7, T-10-29): `authorUserId` is the author's id ONLY when the viewer is that author, else null,
+ * for every story: no reader needs another user's id. A MEMBER story (`visibility = 'followers'`) names
+ * its live author as `{ membershipId, displayName, avatarUrl }`; an organization story names no person
+ * (D-104: the tenant speaks), and a member story whose author has no live membership or profile name
+ * carries no author object either (a blocked or departed author's story is hidden by the audience gate
+ * before it gets here).
+ */
+const toStory = (row: StoryRow, viewerUserId: string): StorySummary => ({
   id: row.id,
-  authorUserId: row.author_user_id,
+  authorUserId: row.author_user_id === viewerUserId ? row.author_user_id : null,
+  author:
+    row.visibility === 'followers' &&
+    row.author_membership_id !== null &&
+    row.author_display_name !== null
+      ? {
+          membershipId: row.author_membership_id,
+          displayName: row.author_display_name,
+          avatarUrl: avatarUrlFor(row.author_avatar_asset_id ?? null),
+        }
+      : null,
   // The profile's own projection, verbatim (`avatarUrlFor`): the stable `/v1/media/{id}/w128` path.
   // `?? null`: a row that does not carry the column at all must read "no photo", never the path of
   // an `undefined` asset.
@@ -225,12 +252,12 @@ const toStory = (row: StoryRow): StorySummary => ({
 });
 
 /** The over-fetch page split, shared by both list reads so the two cannot disagree about `nextCursor`. */
-function toPage(rows: StoryRow[], limit: number): StoryPage {
+function toPage(rows: StoryRow[], limit: number, viewerUserId: string): StoryPage {
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   const nextCursor =
     rows.length > limit && last ? encodeCursor({ n: last.expires_at, id: last.id }) : null;
-  return { items: page.map(toStory), nextCursor };
+  return { items: page.map((row) => toStory(row, viewerUserId)), nextCursor };
 }
 
 /**
@@ -279,7 +306,7 @@ export async function listActiveStories(
        limit ${limit + 1}`),
   );
 
-  const page = toPage(rows, limit);
+  const page = toPage(rows, limit, ctx.userId);
 
   // The SHAPE of the read — counts, ids and flags. A story CAPTION is member-facing content and
   // never reaches a log line, an error `details` payload or an OpenAPI example (T-05-29).
@@ -346,7 +373,7 @@ export async function listOwnStories(
        limit ${limit + 1}`),
   );
 
-  const page = toPage(rows, limit);
+  const page = toPage(rows, limit, ctx.userId);
 
   log.info(
     {
@@ -385,7 +412,7 @@ export async function getStory(ctx: RequestContext, storyId: string): Promise<St
   });
 
   if (!row) throw new ApiError(404, 'NOT_FOUND');
-  return toStory(row);
+  return toStory(row, ctx.userId);
 }
 
 /**
@@ -628,22 +655,67 @@ export async function publishStory(
     'story published',
   );
 
-  return toStory(created);
+  return toStory(created, ctx.userId);
 }
 
 /**
- * `DELETE /v1/stories/{storyId}` (D-84) — a SOFT delete behind `stories.story.manage`.
+ * `DELETE /v1/stories/{storyId}` (D-84, 10-07 D-711 / D-717) — a SOFT delete, in ONE transaction.
  *
  * Soft, not hard, for the same reason expiry is a predicate: the likes and comments members left on
  * a story are theirs, and a cascade would erase them. Phase 8's moderation reads the row through the
  * same tenant lane afterwards (Pitfall 9).
  *
- * A second delete of the same story is a no-op that still answers 204 and emits nothing: the
- * statement's `deleted_at is null` predicate matches zero rows, and an event counting transitions
+ * **Who may delete what** (the route computed `canManage` and `canModerate` from the composed
+ * permission set; this function never compares a role):
+ *  - the AUTHOR deletes their own story, member or organization (no log row);
+ *  - a holder of `moderation.manage` (`canModerate`) deletes any MEMBER story (`visibility =
+ *    'followers'`), and the kernel `recordModerationAction` appends the `story_removed` row in this
+ *    SAME transaction when the actor is not the author, so a removal without its row is impossible and
+ *    a failing log insert rolls the delete back (T-10-28);
+ *  - a holder of `stories.story.manage` (`canManage`) deletes an ORGANIZATION story exactly as before,
+ *    with NO log row.
+ * The moderator path reads no member permission, so it works with `social` off (D-718). The author of a
+ * removed story is not told (no notification, D-335's stance).
+ *
+ * **404 versus 403.** The row is read `for update` under the audience gate: a story the lane cannot
+ * read, an unknown id, another tenant's and an already removed one are ONE bare 404 (D-23); a story the
+ * caller CAN read but may not delete is a 403 (it is information they already hold). The lock
+ * serialises two concurrent removals: the second misses on `deleted_at`, so one transition, one row.
+ *
+ * A second delete of the same story is the bare 404 and emits nothing: an event counting transitions
  * must not announce one that did not happen.
  */
-export async function deleteStory(ctx: RequestContext, storyId: string): Promise<void> {
+export async function deleteStory(
+  ctx: RequestContext,
+  storyId: string,
+  opts: { canManage: boolean; canModerate: boolean },
+): Promise<void> {
   const removed = await withTenantTx(ctx, async (tx) => {
+    const locked = await tx.execute<{
+      id: string;
+      author_user_id: string;
+      visibility: 'tenant' | 'followers';
+      caption: string;
+    }>(sql`
+      select s.id, s.author_user_id, s.visibility, s.caption
+        from stories s
+       where s.tenant_id = ${ctx.tenantId}::uuid
+         and s.id = ${storyId}::uuid
+         and s.deleted_at is null
+         for update`);
+    const target = locked[0];
+    // Unknown, another tenant's, one the audience gate hides from this lane, or ALREADY deleted — one
+    // bare 404, no details (D-23). "Already deleted" answering 404 is deliberate: the alternative tells a
+    // caller that an id they cannot see exists, which is the existence oracle the whole posture removes.
+    if (!target) throw new ApiError(404, 'NOT_FOUND');
+
+    const isAuthor = target.author_user_id === ctx.userId;
+    const permitted =
+      isAuthor ||
+      (opts.canModerate && target.visibility === 'followers') ||
+      (opts.canManage && target.visibility === 'tenant');
+    if (!permitted) throw new ApiError(403, 'FORBIDDEN');
+
     const rows = await tx.execute<{ id: string; author_user_id: string }>(sql`
       update stories
          set deleted_at = now()
@@ -651,13 +723,24 @@ export async function deleteStory(ctx: RequestContext, storyId: string): Promise
          and id = ${storyId}::uuid
          and deleted_at is null
       returning id, author_user_id`);
-    return rows[0];
-  });
+    const row = rows[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
 
-  // Unknown, another tenant's, or ALREADY deleted — one bare 404, no details (D-23). "Already
-  // deleted" answering 404 is deliberate: the alternative tells a caller that an id they cannot see
-  // exists, which is the existence oracle the whole posture removes.
-  if (!removed) throw new ApiError(404, 'NOT_FOUND');
+    // 10-07 (D-711): a moderator removing a MEMBER story leaves its trace in the SAME transaction. The
+    // excerpt source is the caption read under the lock (the kernel caps it). The author's own delete
+    // and an organization story's delete write nothing.
+    if (!isAuthor && target.visibility === 'followers') {
+      await recordModerationAction(tx, ctx, {
+        action: 'story_removed',
+        targetUserId: target.author_user_id,
+        subjectType: 'story',
+        subjectId: target.id,
+        excerptSource: target.caption,
+        reason: null,
+      });
+    }
+    return row;
+  });
 
   emit(ctx, 'story.deleted', {
     tenantId: ctx.tenantId,
@@ -1828,7 +1911,10 @@ export async function getHighlight(
     'story highlight read',
   );
 
-  return { highlight: toHighlight(detail.highlight), items: detail.items.map(toStory) };
+  return {
+    highlight: toHighlight(detail.highlight),
+    items: detail.items.map((row) => toStory(row, ctx.userId)),
+  };
 }
 
 /* ── Curation writes (05.2-03: HIGHLIGHT-01/02, D-101, R-D-E, R-D-F, R-D-L) ───────────────────── */

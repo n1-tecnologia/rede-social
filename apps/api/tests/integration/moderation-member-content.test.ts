@@ -656,7 +656,7 @@ describe('10 story removal', () => {
     expect((await logRowsFor(story.id)).map((row) => row.action)).toEqual(['story_removed']);
   });
 
-  it('D-718: with social off the moderator’s delete still works (and logs) while Helena’s publish is 403', async () => {
+  it('D-718: with social off Helena’s publish is 403 and the moderator’s permission is untouched, but the audience gate hides every member story from every lane (10-04: off hides everything), so the delete is the bare 404 and nothing changes; with social back on the moderator’s delete commits with its row', async () => {
     const story = await publishStory(
       tokens.helena,
       userIds.helena,
@@ -683,13 +683,21 @@ describe('10 story removal', () => {
         }),
       });
       expect(publish.status).toBe(403);
-      expect((await removeStory(tokens.labAdmin, story.id)).status).toBe(204);
+      // The moderator's own permission does not depend on `social`: the guard lets the request in, and the
+      // audience gate (plan 04's locked pgTAP 231 section 3: the admin reads zero member stories while
+      // `social` is off) is what makes the story unreachable, so the lane answers the bare 404.
+      const hidden = await removeStory(tokens.labAdmin, story.id);
+      expect(hidden.status).toBe(404);
+      expect((await errorOf(hidden)).details).toBeUndefined();
+      expect((await storyState(story.id))?.deleted_at).toBeNull();
+      expect(await logRowsFor(story.id)).toHaveLength(0);
     } finally {
       await adminSql`
         update public.tenant_modules set enabled = true
          where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
       moduleFlags.invalidate(labTenantId);
     }
+    expect((await removeStory(tokens.labAdmin, story.id)).status).toBe(204);
     expect((await logRowsFor(story.id)).map((row) => row.action)).toEqual(['story_removed']);
   });
 

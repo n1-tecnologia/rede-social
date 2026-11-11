@@ -463,18 +463,22 @@ const publishStoryRoute = createRoute({
 const deleteStoryRoute = createRoute({
   method: 'delete',
   path: '/{storyId}',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-07 (D-711): any-of, literals. The guard only says "may act on stories at all"; WHICH story the
+  // caller may delete is decided in the service under the row lock from the two flags computed below.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: { params: storyIdParam },
   responses: {
     204: {
       description:
-        'The story is SOFT-deleted: the row stays, so the likes and comments members left on it survive and Phase 8 moderation can still read it.',
+        'The story is SOFT-deleted: the row stays, so the likes and comments members left on it survive and Phase 8 moderation can still read it. The AUTHOR may delete their own story; a holder of `moderation.manage` may delete any MEMBER story (one `moderation_log` row, subject `story`, commits in the same transaction and the author is not told); a holder of `stories.story.manage` deletes an ORGANIZATION story (no row).',
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither permission, or the story is one they can read but may not delete (another member’s, or an organization story for a member).',
+    },
     404: {
       description:
-        'No story with that id is visible to this tenant — unknown, another tenant’s, or already removed. One bare code, no details (D-23).',
+        'No story with that id is visible to this lane — unknown, another tenant’s, not readable by the caller, or already removed. One bare code, no details (D-23).',
     },
   },
 });
@@ -702,8 +706,14 @@ export const storiesRoutes = stories
     return c.json(await publishStory(ctx, body), 201);
   })
   .openapi(deleteStoryRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { storyId } = c.req.valid('param');
-    await deleteStory(c.get('ctx'), storyId);
+    // Read BEFORE the service opens its transaction (the pool is `max: 5`; see `readPlaceGate`).
+    const granted = await permissionsForRequest(ctx);
+    await deleteStory(ctx, storyId, {
+      canManage: granted.includes('stories.story.manage'),
+      canModerate: granted.includes('moderation.manage'),
+    });
     return c.body(null, 204);
   })
   .openapi(likeStoryRoute, async (c) => {

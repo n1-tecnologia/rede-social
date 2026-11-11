@@ -8,8 +8,8 @@ import {
 import { encodeJpeg } from '@rede-social/core/server/media/variants';
 import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import { fakeVideoInternals } from '@rede-social/core/server/media/video/fake';
-import { normaliseProviderEvent } from '@rede-social/core/server/media/video/wire';
 import type { VideoProviderEvent } from '@rede-social/core/server/media/video/types';
+import { normaliseProviderEvent } from '@rede-social/core/server/media/video/wire';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { FEED_MAX_CAPTION, type FeedPage, type FeedPost } from '@rede-social/module-feed/contracts';
 import { createClient } from '@supabase/supabase-js';

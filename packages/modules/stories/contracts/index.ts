@@ -139,11 +139,34 @@ const AUTHOR_AVATAR_PATH_PREFIX = '/v1/media/';
  * tenant circle would vanish until both deploys landed). With the default, shipping the web before
  * the API is safe; the reverse order still is not, because the previous web's `.strict()` refuses
  * the new key — deploy the web first.
+ *
+ * **The author wire (10-07, A7 — the ONE release-order exception of Phase 10: WEB FIRST).** Another
+ * member's user id never reaches a member (D-703's stance extended): `authorUserId` is NULL unless the
+ * caller IS the author, for every story, and a MEMBER story names its author as `author`
+ * `{ membershipId, displayName, avatarUrl }` for every reader (an ORGANIZATION story names no person:
+ * the strip and the viewer name the tenant, D-104, so `author` is null there). `author` defaults to null
+ * like `authorAvatarUrl`, so the new web still parses a page from an API that predates it. The previous
+ * web's `.strict()` refuses the new `author` key and its required `authorUserId` refuses null, so the
+ * WEB MUST DEPLOY BEFORE THE API starts sending either (the grep of `apps/web` found no read of
+ * `authorUserId`; plan 11 removes the last parse; plan 15's rollout task states the order).
  */
+export const storyAuthorSchema = z
+  .object({
+    membershipId: z.uuid(),
+    displayName: z.string(),
+    /** The profile photo's stable path (`/v1/media/{assetId}/w128`), or null — the same rule as `authorAvatarUrl`. */
+    avatarUrl: z.string().startsWith(AUTHOR_AVATAR_PATH_PREFIX).nullable(),
+  })
+  .strict();
+export type StoryAuthor = z.infer<typeof storyAuthorSchema>;
+
 export const storySummarySchema = z
   .object({
     id: z.uuid(),
-    authorUserId: z.uuid(),
+    /** Null unless the CALLER is the author (A7): another member's user id is never sent. */
+    authorUserId: z.uuid().nullable(),
+    /** The member author of a MEMBER story, or null (an organization story names no person). */
+    author: storyAuthorSchema.nullable().default(null),
     /** The author's profile photo (`/v1/media/{assetId}/w128`), or null — see the note above. */
     authorAvatarUrl: z.string().startsWith(AUTHOR_AVATAR_PATH_PREFIX).nullable().default(null),
     mediaAssetId: z.uuid(),

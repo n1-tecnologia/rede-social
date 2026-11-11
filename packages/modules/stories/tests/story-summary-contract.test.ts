@@ -12,8 +12,10 @@ import { storyPageSchema, storySummarySchema } from '../contracts/index';
  *     `null` (no photo, or an author who is no longer an active member) both parse;
  *  2. nothing else does: an absolute URL (a signed Storage link that would outlive its signature, or
  *     anything an `<img>` could be pointed at) is refused, so it can never reach the DOM;
- *  3. the photo is the ONLY thing of the author's profile that rides a story: `.strict()` still
- *     refuses a display name or a membership id (D-104 — the strip and the viewer name the tenant);
+ *  3. the photo is the ONLY thing of the author's profile that rides the FLAT story keys: `.strict()`
+ *     still refuses a flat display name or membership id, and an incomplete `author` object (D-104 — the
+ *     strip and the viewer name the tenant). Since 10-07 (A7) a MEMBER story names its author in the one
+ *     `author { membershipId, displayName, avatarUrl }` object, pinned in `contracts.test.ts`;
  *  4. a page from an API that predates the field still parses, with `null` — the one defaulted key,
  *     so the web can ship before the API (the deploy-order note on the schema).
  */
