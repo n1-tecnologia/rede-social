@@ -681,6 +681,26 @@ export const feedComments = pgTable(
       to: authenticatedRole,
       using: sql`app.tenant_role() <> 'member' or author_user_id = app.user_id()`,
     }),
+    // 10-04 (D-705, MSTORY-04; T-10-09): the STORY gate on comments. Before this phase a story's comments
+    // carried no story gate in RLS (every story was the organization's, so the tenant isolation was the
+    // whole rule); a member story is visible to its audience only, so its comments must follow. RESTRICTIVE
+    // twice: `for select` hides a member story's comments from a lane that cannot read the story, and `for
+    // insert` refuses a comment written on one (42501). The inner `exists (select 1 from public.stories s)`
+    // runs under the CALLER's RLS, so it answers by `stories_audience_gate` (`stories` module): the two
+    // agree by construction. A post comment (`story_id` null) passes untouched (the post gates above are
+    // unchanged).
+    pgPolicy('feed_comments_story_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`story_id is null or exists (select 1 from public.stories s where s.id = feed_comments.story_id)`,
+    }),
+    pgPolicy('feed_comments_story_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`story_id is null or exists (select 1 from public.stories s where s.id = feed_comments.story_id)`,
+    }),
   ],
 ).enableRLS();
 
@@ -785,6 +805,21 @@ export const feedLikes = pgTable(
              and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS}))))
         and (comment_id is null or exists (
           select 1 from public.feed_comments c where c.id = feed_likes.comment_id))`,
+    }),
+    // 10-04 (D-705, MSTORY-04; T-10-09): the STORY gate on likes, the twin of `feed_comments_story_gate`
+    // above (same reason, same inner `exists` under the caller's RLS, so a member story's audience is the
+    // only lane that reads or writes its likes). A like on a post or a comment (`story_id` null) passes.
+    pgPolicy('feed_likes_story_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`story_id is null or exists (select 1 from public.stories s where s.id = feed_likes.story_id)`,
+    }),
+    pgPolicy('feed_likes_story_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`story_id is null or exists (select 1 from public.stories s where s.id = feed_likes.story_id)`,
     }),
   ],
 ).enableRLS();

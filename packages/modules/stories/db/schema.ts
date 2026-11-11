@@ -1,16 +1,23 @@
 import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
+import {
+  SOCIAL_ENABLED,
+  SOCIAL_STAFF_EXEMPT,
+  SOCIAL_VISIBLE_AUTHOR_IDS,
+} from '@rede-social/core/db/social-gate';
 import { sql } from 'drizzle-orm';
 import {
   check,
   index,
   integer,
+  pgPolicy,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { authenticatedRole } from 'drizzle-orm/supabase';
 
 /**
  * The stories module's two tables (STORY-01, STORY-03, STORY-04) — the tenant's 24 h broadcast and
@@ -107,6 +114,16 @@ export const stories = pgTable(
     mediaKind: text('media_kind').notNull(),
     /** `''` rather than NULL: "no caption" is ONE value, so no renderer branches on two (D-54 text). */
     caption: text().notNull().default(''),
+    /**
+     * 10-04 (D-705, D-718; MSTORY-04): WHO READS THIS STORY. `'tenant'` is the organization's story, shown
+     * to every lane of the tenant (every story that existed before Phase 10 is one: the default backfills
+     * them); `'followers'` is a MEMBER story, shown only to its author's followers (Explorar), to the
+     * moderator and to everyone who reads a community whose highlight holds it (D-716). STAMPED AT PUBLISH
+     * from the author's role by the service (plan 07), never from the request body, and re-checked by
+     * `stories_social_insert_gate` below. Same vocabulary as `feed_posts.visibility`, minus `'community'`:
+     * a member story has no community of its own, a highlight is how a community shows it.
+     */
+    visibility: text().notNull().default('tenant'),
     publishedAt: timestamp('published_at', { withTimezone: true }).notNull().defaultNow(),
     /**
      * STORY-03's window, as a DATABASE fact. See point 1 above for why this is a default and not a
@@ -143,7 +160,57 @@ export const stories = pgTable(
     // The invariant the generated column would have given for free — a hand-written row (a seed, a
     // migration, a psql session) cannot invert the window or publish a story already expired.
     check('stories_expiry_window_chk', sql`${t.expiresAt} > ${t.publishedAt}`),
+    check('stories_visibility_chk', sql`${t.visibility} in ('tenant','followers')`),
     tenantIsolationPolicy('stories_tenant_isolation'),
+    // 10-04 (D-705, MSTORY-04, D-716, D-718; T-10-09): the story AUDIENCE gate. RESTRICTIVE, so it ANDs with
+    // `stories_tenant_isolation` and can only NARROW. An organization story passes for everyone. A member
+    // story passes through ONE of two doors:
+    //   2. `social` is on (a SQL read, never the 30-second flags cache: off hides every member story at
+    //      once, the rows untouched) AND the caller is the moderator or a system lane (`SOCIAL_STAFF_EXEMPT`:
+    //      admin_tenant and the zero user, NEVER a real support_tenant session, D-475) or the story's
+    //      author is in `app.social_visible_author_ids()` (the caller plus the LIVE followees, so a blocked
+    //      or removed author drops out of every follower's lane, D-708);
+    //   3. a HIGHLIGHT OF A COMMUNITY THE CALLER CAN READ holds the story (D-716). The branch carries NO
+    //      `social` term (a community and its highlights stay readable with `social` off, D-718) and NO
+    //      author term: whoever reads the community reads the story, after the 24 hours too. The inner
+    //      `communities` read runs under the CALLER's RLS, so `communities_member_hidden_gate` answers a
+    //      blocked or removed creator's community as "no row" and the branch closes (D-708), and
+    //      `c.deleted_at is null` closes it for a deleted community (the rows are never touched). Branch 3
+    //      is the one a reviewer forgets: without it a member's story saved in a community highlight would
+    //      be readable only by that member's followers.
+    // Likes and comments of a story inherit the gate through `feed_comments_story_gate` and
+    // `feed_likes_story_gate` (feed module), which test the story through an inner `exists` that runs
+    // under THIS policy. The service form of the same rule is the story predicate of plan 08; the two are
+    // written side by side so a reviewer can see them agree. Branch 3 below is the per-row `exists` form
+    // (`EXISTS_JOIN`); `10-04-SPIKE.md` records the measurement that chose it.
+    pgPolicy('stories_audience_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`visibility = 'tenant'
+        or (${SOCIAL_ENABLED} and (${SOCIAL_STAFF_EXEMPT} or author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))
+        or exists (
+          select 1
+            from public.story_highlight_items i
+            join public.story_highlights h on h.id = i.highlight_id and h.tenant_id = i.tenant_id
+           where i.story_id = stories.id
+             and h.community_id is not null
+             and exists (
+               select 1 from public.communities c
+                where c.id = h.community_id
+                  and c.tenant_id = app.tenant_id()
+                  and c.deleted_at is null))`,
+    }),
+    // 10-04 (D-705, T-10-10): the write half. A `member` claim may insert ONLY a followers story while
+    // `social` is on; every other claim may insert ONLY an organization story. A forged `'tenant'` from a
+    // member lane and a `'followers'` from a staff lane are refused with 42501, whatever the service
+    // believed. Role-first, so a null role claim makes every branch false-or-null and fails closed.
+    pgPolicy('stories_social_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant')`,
+    }),
   ],
 ).enableRLS();
 

@@ -1226,6 +1226,13 @@
       "when": 1794408125853,
       "tag": "20261111144205_feed_member_update_allowlist",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 1794409036916,
+      "tag": "20261111145716_member_stories",
+      "breakpoints": true
     }
   ]
 }
