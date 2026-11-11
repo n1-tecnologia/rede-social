@@ -41,7 +41,7 @@ import {
 type Envelope = { error: { code: string; message?: string; details?: Record<string, unknown> } };
 
 const PREFIX = 'Teste 10-07 ';
-const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '', support: '' };
+const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '', support: '', plain: '' };
 const userIds = { helena: '', marcos: '', alvaro: '', labAdmin: '' };
 let labTenantId = '';
 let restoreSocial: () => Promise<void> = async () => {};
@@ -213,6 +213,7 @@ beforeAll(async () => {
   tokens.alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
   tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
   tokens.support = await signInAs('support@rede-lab.local', SEED_PASSWORD);
+  tokens.plain = await signInAs('member@rede-lab.local', SEED_PASSWORD);
   userIds.helena = await userOf('helena.kuster@rede-lab.local');
   userIds.marcos = await userOf('marcos.vinicius@rede-lab.local');
   userIds.alvaro = await userOf('alvaro.pinheiro@rede-lab.local');
@@ -749,10 +750,7 @@ describe('10 authors', () => {
         'like',
         await request(`/v1/stories/${made.helenaNew}/likes`, tokens.marcos, { method: 'POST' }),
       ],
-      [
-        'comments list',
-        await request(`/v1/stories/${made.helenaNew}/comments`, tokens.marcos),
-      ],
+      ['comments list', await request(`/v1/stories/${made.helenaNew}/comments`, tokens.marcos)],
       [
         'comment',
         await post(`/v1/stories/${made.helenaNew}/comments`, tokens.marcos, { body: 'oi' }),
@@ -771,9 +769,9 @@ describe('10 authors', () => {
       body: `${PREFIX}comentario`,
     });
     expect(commented.status).toBe(201);
-    expect(
-      (await request(`/v1/stories/${made.helenaNew}/comments`, tokens.alvaro)).status,
-    ).toBe(200);
+    expect((await request(`/v1/stories/${made.helenaNew}/comments`, tokens.alvaro)).status).toBe(
+      200,
+    );
   });
 
   it('4. the moderator without a follow reads Helena’s group (the moderator branch); a real support session gets 403 on both routes', async () => {
@@ -789,9 +787,14 @@ describe('10 authors', () => {
     }
   });
 
-  it('5. EP-61: a member with no followee and no story gets 200 { items: [], nextCursor: null }', async () => {
-    const page = await authorsOf(tokens.marcos);
-    expect(page).toEqual({ items: [], nextCursor: null });
+  it('5. EP-61: a member with no followee and no story gets 200 { items: [], nextCursor: null } (and an own item only with a live story)', async () => {
+    // `member@` follows nobody and has no story of their own.
+    expect(await authorsOf(tokens.plain)).toEqual({ items: [], nextCursor: null });
+    // Positive control: Marcos follows nobody either, but his own live story gives him his own circle only.
+    const own = await authorsOf(tokens.marcos);
+    expect(own.items.map((item) => [item.membershipId, item.isSelf])).toEqual([
+      [memberships.marcos, true],
+    ]);
   });
 
   it('6. D-718: with social off both routes answer 404 MODULE_DISABLED (before any read), and they come back with social on', async () => {

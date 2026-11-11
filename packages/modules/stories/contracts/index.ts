@@ -209,6 +209,68 @@ export const storySummarySchema = z
 export type StorySummary = z.infer<typeof storySummarySchema>;
 
 /**
+ * 10-08 (D-714, D-717, MSTORY-03): the Explorar story row. `GET /v1/stories/authors` returns ONE CIRCLE PER
+ * AUTHOR, and `GET /v1/stories/authors/{membershipId}` opens that author's live stories lazily.
+ *
+ * **`storyAuthorCircleSchema` is NOT `storyAuthorSchema`** (the three-field `author` a member story carries,
+ * 10-07): the circle is the row's item, exactly seven keys, `.strict()`. It names the author by MEMBERSHIP id
+ * only (never a user id, A7), carries the count and the newest `publishedAt` of the author's live stories,
+ * the CALLER's own seen flag over them (`hasUnseen`: "some live story the caller has not viewed", their own
+ * `story_views` rows and nobody else's) and `isSelf` (the caller's own circle, always first for a member and
+ * always false in the moderator's read, where no follow state exists, D-717).
+ *
+ * The page is `{ items, nextCursor }`. For a member the read is ONE unpaged page bounded by the follow graph
+ * (`nextCursor` always null); for a holder of `moderation.manage` it is a keyset page of
+ * `STORY_AUTHORS_PAGE_SIZE` (20, `limit` 1..50) in the kernel `encodeCursor` envelope. `limit` CLAMPS and a
+ * malformed one degrades to the default, the `storyQuerySchema` rule.
+ */
+export const STORY_AUTHORS_PAGE_SIZE = 20;
+export const STORY_AUTHORS_MAX_PAGE_SIZE = 50;
+
+export const storyAuthorCircleSchema = z
+  .object({
+    membershipId: z.uuid(),
+    displayName: z.string(),
+    /** The profile photo's stable path (`/v1/media/{assetId}/w128`), or null — the `authorAvatarUrl` rule. */
+    avatarUrl: z.string().startsWith(AUTHOR_AVATAR_PATH_PREFIX).nullable(),
+    /** How many LIVE member stories of this author the caller may read (always at least 1). */
+    storyCount: z.number().int(),
+    /** The newest `published_at` of those stories, ISO with microseconds (the moderator's cursor `n`). */
+    latestPublishedAt: z.string(),
+    /** Whether the CALLER has not yet seen at least one of them — their own flag only. */
+    hasUnseen: z.boolean(),
+    /** The caller's own circle (member read only). */
+    isSelf: z.boolean(),
+  })
+  .strict();
+export type StoryAuthorCircle = z.infer<typeof storyAuthorCircleSchema>;
+
+export const storyAuthorsPageSchema = z
+  .object({
+    items: z.array(storyAuthorCircleSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type StoryAuthorsPage = z.infer<typeof storyAuthorsPageSchema>;
+
+export const storyAuthorsQuerySchema = z
+  .object({
+    cursor: z.string().max(STORY_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(STORY_AUTHORS_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), STORY_AUTHORS_MAX_PAGE_SIZE))
+      .default(STORY_AUTHORS_PAGE_SIZE),
+  })
+  .strict();
+export type StoryAuthorsQuery = z.infer<typeof storyAuthorsQuerySchema>;
+
+/** `GET /v1/stories/authors/{membershipId}`: one author's live stories, oldest first (the viewer's order). */
+export const authorStoriesSchema = z.object({ items: z.array(storySummarySchema) }).strict();
+export type AuthorStories = z.infer<typeof authorStoriesSchema>;
+
+/**
  * `POST /v1/stories/views` (HIGHLIGHT-06, D-105) — the stories the caller has just SEEN, batched.
  *
  * The web flushes its buffer at 10 ids (and on close, on a group change and when the page hides),

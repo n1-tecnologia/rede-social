@@ -1,5 +1,6 @@
 import { avatarUrlFor } from '@rede-social/contracts/profiles';
 import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
+import { SOCIAL_ENABLED, SOCIAL_VISIBLE_AUTHOR_IDS } from '@rede-social/core/db/social-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
@@ -11,6 +12,7 @@ import { decodeCursor, encodeCursor, keysetComparison } from '@rede-social/core/
 import { safetyLimiterKey, storyPublishLimiter } from '@rede-social/core/server/safety/limits';
 import { type SQL, sql } from 'drizzle-orm';
 import {
+  type AuthorStories,
   type CreateStoryComment,
   type CreateStoryHighlight,
   type HighlightCover,
@@ -23,6 +25,9 @@ import {
   STORY_HIGHLIGHT_MAX_ITEMS,
   STORY_HIGHLIGHT_MAX_PER_PLACE,
   STORY_HIGHLIGHT_MAX_TITLE,
+  type StoryAuthorCircle,
+  type StoryAuthorsPage,
+  type StoryAuthorsQuery,
   type StoryComment,
   type StoryCommentPage,
   type StoryCommentsQuery,
@@ -261,6 +266,45 @@ function toPage(rows: StoryRow[], limit: number, viewerUserId: string): StoryPag
 }
 
 /**
+ * 10-08 (D-705, MSTORY-04, T-10-30): "the caller may read this story" — the SERVICE form of the restrictive
+ * policy `stories_audience_gate` (`packages/modules/stories/db/schema.ts`), written side by side with it so a
+ * reviewer sees the two agree. RLS is the backstop; this fragment is the precise rule, so an unreadable story
+ * is the bare 404 in the statement as well as in the policy (D-23: no distinguishing code, no `details`).
+ *
+ *   1. an organization story (`s.visibility = 'tenant'`) passes for everyone;
+ *   2. a member story passes while `social` is on (a SQL read, never the flags cache) for a moderator
+ *      (`canModerate`, computed by the ROUTE from `moderation.manage` before the transaction opens) or when
+ *      its author is in `SOCIAL_VISIBLE_AUTHOR_IDS` (the caller plus the LIVE followees: a blocked or removed
+ *      author is not in it, D-708);
+ *   3. a member story saved in a HIGHLIGHT of a community the caller can read passes with `social` on or off
+ *      (D-716, D-718): the form plan 04 measured (`10-04-SPIKE.md`, `CHOSEN_FORM: EXISTS_JOIN`); the inner
+ *      `communities` read runs under the caller's RLS, so a hidden creator's community closes it.
+ *
+ * `canModerate` is rendered as a LITERAL (`true` / `false`), never a bound parameter, so the statement keeps
+ * one shape per caller kind. Reads the alias `s`.
+ */
+function memberStoryVisible(canModerate: boolean): SQL {
+  const staff = canModerate ? sql`true` : sql`false`;
+  return sql`(s.visibility = 'tenant'
+        or (${SOCIAL_ENABLED} and (${staff} or s.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))
+        or exists (
+          select 1
+            from story_highlight_items i
+            join story_highlights h on h.id = i.highlight_id and h.tenant_id = i.tenant_id
+           where i.story_id = s.id
+             and h.community_id is not null
+             and exists (
+               select 1 from communities c
+                where c.id = h.community_id
+                  and c.tenant_id = app.tenant_id()
+                  and c.deleted_at is null)))`;
+}
+
+/** What every story read by id needs besides the context: the moderator flag the route computed. */
+type StoryAudience = { canModerate: boolean };
+const NOT_MODERATOR: StoryAudience = { canModerate: false };
+
+/**
  * `GET /v1/stories?limit=&cursor=` (STORY-01, STORY-03, D-78) — one keyset page of the tenant's
  * ACTIVE stories, newest first.
  *
@@ -400,19 +444,189 @@ export async function listOwnStories(
  * viewer opens a single-item sequence from the history, and a highlight keeps an expired story a
  * legitimate thing to fetch. The STRIP is what filters; the row read never does.
  */
-export async function getStory(ctx: RequestContext, storyId: string): Promise<StorySummary> {
+export async function getStory(
+  ctx: RequestContext,
+  storyId: string,
+  audience: StoryAudience = NOT_MODERATOR,
+): Promise<StorySummary> {
   const row = await withTenantTx(ctx, async (tx) => {
     const rows = await tx.execute<StoryRow>(sql`
       ${storyProjection(ctx)}
        where s.tenant_id = ${ctx.tenantId}::uuid
          and s.id = ${storyId}::uuid
          and s.deleted_at is null
+         and ${memberStoryVisible(audience.canModerate)}
        limit 1`);
     return rows[0];
   });
 
   if (!row) throw new ApiError(404, 'NOT_FOUND');
   return toStory(row, ctx.userId);
+}
+
+/* ── Explorar's story row (10-08, D-714, D-717; MSTORY-03, MSTORY-04, MSTORY-08) ────────────────── */
+
+/** One circle of the authors read, as the statement returns it (snake_case: `tx.execute` rows). */
+type AuthorCircleRow = {
+  membership_id: string;
+  display_name: string | null;
+  avatar_asset_id: string | null;
+  story_count: number;
+  latest_published_at: string;
+  has_unseen: boolean;
+  is_self: boolean;
+};
+
+const toAuthorCircle = (row: AuthorCircleRow): StoryAuthorCircle => ({
+  membershipId: row.membership_id,
+  displayName: row.display_name ?? '',
+  avatarUrl: avatarUrlFor(row.avatar_asset_id ?? null),
+  storyCount: row.story_count,
+  latestPublishedAt: row.latest_published_at,
+  hasUnseen: row.has_unseen,
+  isSelf: row.is_self,
+});
+
+/**
+ * The hard bound on a MEMBER's authors read (the follow graph is the real bound; this is the safety belt,
+ * the statement is still ONE unpaged page). Beyond it the oldest circles drop, never an error.
+ */
+const MEMBER_AUTHORS_HARD_LIMIT = 200;
+
+/**
+ * The most stories one group read returns. An author publishing under the per-member limiter (30 per hour)
+ * stays far below it inside the 24 hour window; the cap only keeps the statement bounded.
+ */
+const AUTHOR_STORIES_HARD_LIMIT = 200;
+
+/**
+ * `GET /v1/stories/authors` (10-08, D-714) — Explorar's story row: ONE CIRCLE PER AUTHOR.
+ *
+ * **Member scope** (the caller holds `social.participate`, the route's `isMember`): the circles of the
+ * caller's own live stories and of every LIVE author they follow, in ONE unpaged page bounded by the follow
+ * graph, ordered `is_self desc, has_unseen desc, latest desc, membership_id` (own circle first, then unseen
+ * before seen, then recency, with a deterministic tiebreak; MSTORY-03, Claude's discretion recorded in the
+ * plan). The follow predicate is `SOCIAL_VISIBLE_AUTHOR_IDS` (the caller plus the LIVE followees: a blocked
+ * or removed author is not in it, D-708), `not app.is_blocked_by_viewer(...)` drops an author the VIEWER
+ * blocked (D-616, the `NOT_BLOCKED_AUTHOR` predicate), and the statement names the audience literal
+ * (`s.visibility = 'followers'`) so branch 3 of `stories_audience_gate` stays off the rows it walks
+ * (`10-04-SPIKE.md`). The row is a follow-bound list: no ranking by engagement, no boost, no suggestion of
+ * a stranger's story (PR-5, D-705).
+ *
+ * `hasUnseen` reads the caller's OWN `story_views` rows through the constant `v.tenant_id` form (the
+ * `storyProjection` rule: the planner walks `story_views_uq` as an index-only scan).
+ *
+ * The expiry window is `expires_at > now()` (STORY-03: a predicate, never a job). A story whose media is not
+ * `ready` occupies no circle (R-P8, the strip's rule).
+ */
+export async function listStoryAuthors(
+  ctx: RequestContext,
+  _query: StoryAuthorsQuery,
+  _scope: { canModerate: boolean; isMember: boolean },
+): Promise<StoryAuthorsPage> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<AuthorCircleRow>(sql`
+      select am.id as membership_id,
+             ap.display_name,
+             ap.avatar_asset_id,
+             count(*)::int as story_count,
+             to_char(max(s.published_at) at time zone 'utc', ${ISO_MICROSECONDS}) as latest_published_at,
+             bool_or(not exists (
+               select 1 from story_views v
+                where v.tenant_id = ${ctx.tenantId}::uuid
+                  and v.user_id = ${ctx.userId}::uuid
+                  and v.story_id = s.id
+             )) as has_unseen,
+             (s.author_user_id = ${ctx.userId}::uuid) as is_self
+        from stories s
+        join media_assets a on a.id = s.media_asset_id and a.status = 'ready'
+        join memberships am
+          on am.tenant_id = s.tenant_id
+         and am.user_id = s.author_user_id
+         and am.status = 'active'
+         and am.blocked_at is null
+         and am.deleted_at is null
+        left join member_profiles ap on ap.membership_id = am.id
+       where s.tenant_id = ${ctx.tenantId}::uuid
+         and s.visibility = 'followers'
+         and s.deleted_at is null
+         and s.expires_at > now()
+         and ${SOCIAL_ENABLED}
+         and s.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})
+         and not app.is_blocked_by_viewer(s.author_user_id)
+       group by am.id, ap.display_name, ap.avatar_asset_id, s.author_user_id
+       order by is_self desc, has_unseen desc, max(s.published_at) desc, am.id
+       limit ${MEMBER_AUTHORS_HARD_LIMIT}`),
+  );
+
+  log.info(
+    {
+      event: 'stories.authors',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      returned: rows.length,
+    },
+    'story authors listed',
+  );
+
+  return { items: rows.map(toAuthorCircle), nextCursor: null };
+}
+
+/**
+ * `GET /v1/stories/authors/{membershipId}` (10-08, D-714) — one author's live stories, OLDEST first (the
+ * viewer's order), through the story projection (`viewer_seen` included). The group a circle opens lazily.
+ *
+ * **Zero readable rows is the bare 404** (no `details`): a stranger, a story that just expired, a blocked or
+ * removed author, a viewer-blocked author and an unknown or another tenant's membership id are ONE answer, so
+ * the read is no follow-state oracle (D-23, T-10-30). The author is addressed by MEMBERSHIP id and resolved by
+ * the projection's own join (`am.id`, live: active, not blocked, not removed), never by a user id.
+ *
+ * Reachable stories are the author's `'followers'` rows that pass `memberStoryVisible` AND, for a member,
+ * sit in the follow graph (`SOCIAL_VISIBLE_AUTHOR_IDS`): a member story that is readable only because a
+ * community highlight holds it (branch 3) is NOT readable from Explorar, which stays follow-bound (D-705).
+ * A moderator (`canModerate`) reads any live member's circle (D-717).
+ */
+export async function listAuthorStories(
+  ctx: RequestContext,
+  membershipId: string,
+  scope: { canModerate: boolean },
+): Promise<AuthorStories> {
+  const followBound = scope.canModerate
+    ? sql`${SOCIAL_ENABLED}`
+    : sql`${SOCIAL_ENABLED} and s.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})`;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<StoryRow>(sql`
+      ${storyProjection(ctx)}
+       where s.tenant_id = ${ctx.tenantId}::uuid
+         and am.id = ${membershipId}::uuid
+         and am.blocked_at is null
+         and s.visibility = 'followers'
+         and s.deleted_at is null
+         and s.expires_at > now()
+         and a.status = 'ready'
+         and ${followBound}
+         and ${memberStoryVisible(scope.canModerate)}
+         and not app.is_blocked_by_viewer(s.author_user_id)
+       order by s.published_at, s.id
+       limit ${AUTHOR_STORIES_HARD_LIMIT}`),
+  );
+
+  if (rows.length === 0) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'stories.author_group',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      returned: rows.length,
+    },
+    'author stories listed',
+  );
+
+  return { items: rows.map((row) => toStory(row, ctx.userId)) };
 }
 
 /**
@@ -786,19 +1000,25 @@ type StoryCounterRow = { like_count: number; author_user_id: string };
  *    the STRIP's read and nothing else, so there is no affordance that answers 400 and no second
  *    copy of the window to keep in step.
  */
-export async function likeStory(ctx: RequestContext, storyId: string): Promise<StoryLikeResult> {
+export async function likeStory(
+  ctx: RequestContext,
+  storyId: string,
+  audience: StoryAudience = NOT_MODERATOR,
+): Promise<StoryLikeResult> {
   const { likeCount, authorUserId } = await withTenantTx(ctx, async (tx) => {
     await tx.execute(sql`
       insert into feed_likes (tenant_id, user_id, story_id)
       select ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, s.id
         from stories s
        where s.id = ${storyId}::uuid and s.deleted_at is null
+         and ${memberStoryVisible(audience.canModerate)}
       on conflict (user_id, story_id) where story_id is not null do nothing`);
 
     const rows = await tx.execute<StoryCounterRow>(sql`
       select s.like_count, s.author_user_id
         from stories s
-       where s.id = ${storyId}::uuid and s.deleted_at is null`);
+       where s.id = ${storyId}::uuid and s.deleted_at is null
+         and ${memberStoryVisible(audience.canModerate)}`);
     const row = rows[0];
     // Unknown, another tenant's, or removed — one bare 404, no details (D-23, T-05-35).
     if (!row) throw new ApiError(404, 'NOT_FOUND');
@@ -822,7 +1042,11 @@ export async function likeStory(ctx: RequestContext, storyId: string): Promise<S
  * event**, because nothing happened. Only a delete that really removed a row is worth telling
  * Phase 7 about.
  */
-export async function unlikeStory(ctx: RequestContext, storyId: string): Promise<StoryLikeResult> {
+export async function unlikeStory(
+  ctx: RequestContext,
+  storyId: string,
+  audience: StoryAudience = NOT_MODERATOR,
+): Promise<StoryLikeResult> {
   const { likeCount, authorUserId, removed } = await withTenantTx(ctx, async (tx) => {
     const deleted = await tx.execute<{ id: string }>(sql`
       delete from feed_likes
@@ -832,7 +1056,8 @@ export async function unlikeStory(ctx: RequestContext, storyId: string): Promise
     const rows = await tx.execute<StoryCounterRow>(sql`
       select s.like_count, s.author_user_id
         from stories s
-       where s.id = ${storyId}::uuid and s.deleted_at is null`);
+       where s.id = ${storyId}::uuid and s.deleted_at is null
+         and ${memberStoryVisible(audience.canModerate)}`);
     const row = rows[0];
     if (!row) throw new ApiError(404, 'NOT_FOUND');
     return {
@@ -876,7 +1101,11 @@ export async function unlikeStory(ctx: RequestContext, storyId: string): Promise
  * on. The log line carries the requested and inserted COUNTS only — never a story id, because a log
  * of "user U saw story S" is exactly the member-watching record V8 forbids in this phase.
  */
-export async function markStoriesSeen(ctx: RequestContext, storyIds: string[]): Promise<void> {
+export async function markStoriesSeen(
+  ctx: RequestContext,
+  storyIds: string[],
+  audience: StoryAudience = NOT_MODERATOR,
+): Promise<void> {
   // `in (…)` over individually-cast ids, the feed's `validateAssets` shape: drizzle's `sql` expands a
   // JS array into a comma-separated parameter list, so `any(${ids}::uuid[])` is not one array. The
   // ids are Zod-validated uuids (1..50) before this runs.
@@ -892,6 +1121,7 @@ export async function markStoriesSeen(ctx: RequestContext, storyIds: string[]): 
        where s.id in (${idList})
          and s.tenant_id = ${ctx.tenantId}::uuid
          and s.deleted_at is null
+         and ${memberStoryVisible(audience.canModerate)}
       on conflict (tenant_id, user_id, story_id) do nothing
       returning id`),
   );
@@ -1089,7 +1319,8 @@ export async function listStoryComments(
     const stories = await tx.execute<{ id: string }>(sql`
       select s.id from stories s
        where s.id = ${storyId}::uuid and s.tenant_id = ${ctx.tenantId}::uuid
-         and s.deleted_at is null`);
+         and s.deleted_at is null
+         and ${memberStoryVisible(opts.canModerate)}`);
     if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
 
     return tx.execute<StoryCommentRow>(sql`
@@ -1152,6 +1383,7 @@ export async function createStoryComment(
   ctx: RequestContext,
   storyId: string,
   input: CreateStoryComment,
+  audience: StoryAudience = NOT_MODERATOR,
 ): Promise<StoryComment> {
   const parentId = input.parentId ?? null;
 
@@ -1166,6 +1398,7 @@ export async function createStoryComment(
                 from stories s
                where s.id = ${storyId}::uuid and s.tenant_id = ${ctx.tenantId}::uuid
                  and s.deleted_at is null
+                 and ${memberStoryVisible(audience.canModerate)}
               returning id`)
           : // The literals, not `c.depth` / `c.target_kind`. The parent is necessarily a STORY
             // comment (the join says so), so this statement is written to be REFUSED — by the
@@ -1177,6 +1410,7 @@ export async function createStoryComment(
                 join feed_comments c on c.story_id = s.id and c.deleted_at is null
                where s.id = ${storyId}::uuid and s.tenant_id = ${ctx.tenantId}::uuid
                  and s.deleted_at is null
+                 and ${memberStoryVisible(audience.canModerate)}
                  and c.id = ${parentId}::uuid
               returning id`);
     } catch (error) {

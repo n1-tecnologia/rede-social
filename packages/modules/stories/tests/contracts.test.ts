@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  STORY_AUTHORS_PAGE_SIZE,
   publishStorySchema,
+  STORY_AUTHORS_PAGE_SIZE,
+  storyAuthorCircleSchema,
   storyAuthorSchema,
   storyAuthorsPageSchema,
   storyAuthorsQuerySchema,
@@ -116,11 +117,12 @@ describe('10-07 storySummarySchema: the author wire (A7)', () => {
 });
 
 /**
- * 10-08 (D-714, D-717, T-10-30): the Explorar circle of one author. EXACTLY seven keys, `.strict()`: it names
+ * 10-08 (D-714, D-717, T-10-30): the Explorar circle of one author (`storyAuthorCircleSchema`; `storyAuthorSchema`
+ * stays the three-field `author` of a MEMBER story, 10-07). EXACTLY seven keys, `.strict()`: it names
  * the author by membership id (never a user id), carries the counts the ring needs and the caller's own seen
  * flag, and nothing else.
  */
-describe('10-08 storyAuthorSchema: the Explorar circle', () => {
+describe('10-08 storyAuthorCircleSchema: the Explorar circle', () => {
   const item = {
     membershipId: OTHER,
     displayName: 'Helena Kuster',
@@ -132,8 +134,8 @@ describe('10-08 storyAuthorSchema: the Explorar circle', () => {
   };
 
   it('parses an item of exactly the listed keys (avatarUrl may be null)', () => {
-    expect(storyAuthorSchema.parse(item)).toEqual(item);
-    expect(storyAuthorSchema.parse({ ...item, avatarUrl: null }).avatarUrl).toBeNull();
+    expect(storyAuthorCircleSchema.parse(item)).toEqual(item);
+    expect(storyAuthorCircleSchema.parse({ ...item, avatarUrl: null }).avatarUrl).toBeNull();
   });
 
   it('refuses an extra userId key, a missing key and a non-uuid membership id', () => {
@@ -144,15 +146,26 @@ describe('10-08 storyAuthorSchema: the Explorar circle', () => {
       { ...item, membershipId: 'not-a-uuid' },
       { ...item, storyCount: 1.5 },
     ]) {
-      expect(storyAuthorSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+      expect(storyAuthorCircleSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
+  });
+
+  it('the story’s own three-field author is a different schema and refuses the circle’s extra keys', () => {
+    expect(storyAuthorSchema.safeParse({ ...item }).success).toBe(false);
+    expect(
+      storyAuthorSchema.safeParse({
+        membershipId: item.membershipId,
+        displayName: item.displayName,
+        avatarUrl: item.avatarUrl,
+      }).success,
+    ).toBe(true);
   });
 
   it('wraps the items in a strict page with a nullable cursor, and the page size is 20', () => {
     expect(storyAuthorsPageSchema.parse({ items: [item], nextCursor: null }).items).toHaveLength(1);
-    expect(storyAuthorsPageSchema.safeParse({ items: [item], nextCursor: null, x: 1 }).success).toBe(
-      false,
-    );
+    expect(
+      storyAuthorsPageSchema.safeParse({ items: [item], nextCursor: null, x: 1 }).success,
+    ).toBe(false);
     expect(STORY_AUTHORS_PAGE_SIZE).toBe(20);
   });
 

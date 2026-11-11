@@ -2,12 +2,14 @@ import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { requireModule } from '@rede-social/core/server/modules/require-module';
 import {
   permissionsForRequest,
   requirePermission,
 } from '@rede-social/core/server/rbac/permissions';
 import {
+  authorStoriesSchema,
   createStoryCommentSchema,
   createStoryHighlightSchema,
   highlightDetailSchema,
@@ -20,6 +22,8 @@ import {
   reorderHighlightsSchema,
   STORY_HIGHLIGHT_ISSUE_SET,
   STORY_ISSUE_SET,
+  storyAuthorsPageSchema,
+  storyAuthorsQuerySchema,
   storyCommentPageSchema,
   storyCommentSchema,
   storyCommentsQuerySchema,
@@ -41,9 +45,11 @@ import {
   getStory,
   likeStory,
   listActiveStories,
+  listAuthorStories,
   listHighlightCatalog,
   listHighlights,
   listOwnStories,
+  listStoryAuthors,
   listStoryComments,
   listStoryHighlightIds,
   markStoriesSeen,
@@ -144,6 +150,71 @@ const listOwnRoute = createRoute({
     403: {
       description:
         'The caller holds neither `stories.story.manage` nor `stories.story.publish` in this tenant',
+    },
+  },
+});
+
+/* ── Explorar's story row (10-08, D-714, D-717, D-718) ─────────────────────────────────────────── */
+
+/**
+ * `GET /v1/stories/authors` and `GET /v1/stories/authors/{membershipId}`: declared BEFORE `/{storyId}` so the
+ * literal `authors` segment is never captured as an id (the `/mine` rule).
+ *
+ * **Who may call.** A holder of `social.participate` (a member of a `social` tenant) reads the follow-bound
+ * row; a holder of `moderation.manage` reads the moderator's all-members row (D-717). A caller holding
+ * neither (a real `support_tenant`) is `403 FORBIDDEN`. The `social` switch and both permission flags are
+ * read BEFORE the service opens its transaction (the pool is `max: 5`; see `readPlaceGate`), and `social`
+ * off is `404 MODULE_DISABLED` for everyone: the row leaves Explorar while a story saved in a community
+ * highlight stays readable through the highlight reads (D-718).
+ */
+const authorsAudience = async (ctx: AppEnv['Variables']['ctx']) => {
+  // "Not here" before "not allowed" (the ROLE-06 order): with `social` off a member does not even hold
+  // `social.participate`, so the permission check first would answer 403 where D-718 says 404.
+  if (!(await moduleFlags.isEnabled(ctx, 'social'))) throw new ApiError(404, 'MODULE_DISABLED');
+  const granted = await permissionsForRequest(ctx);
+  const canModerate = granted.includes('moderation.manage');
+  const isMember = granted.includes('social.participate');
+  if (!canModerate && !isMember) throw new ApiError(403, 'FORBIDDEN');
+  return { canModerate, isMember };
+};
+
+const listAuthorsRoute = createRoute({
+  method: 'get',
+  path: '/authors',
+  request: { query: storyAuthorsQuerySchema },
+  responses: {
+    200: {
+      description:
+        "Explorar's story row, one circle per author. A member reads ONE unpaged page: their own circle first (when they have a live story), then the live authors they follow, unseen before seen, newest first, `membership_id` as the tiebreak. A holder of `moderation.manage` reads a keyset page (20 by default, `limit` 1..50) of every live member's circle, newest first, with `isSelf` false and no follow state. A story is in a circle only while `expires_at > now()`; a blocked, removed or viewer-blocked author has no circle. Nothing to show answers `{ items: [], nextCursor: null }`, never an error.",
+      content: { 'application/json': { schema: storyAuthorsPageSchema } },
+    },
+    403: {
+      description:
+        'The caller holds neither `social.participate` nor `moderation.manage` (a real `support_tenant` session).',
+    },
+    404: {
+      description: '`MODULE_DISABLED`: `social` is off for this tenant (D-718).',
+    },
+  },
+});
+
+const authorStoriesRoute = createRoute({
+  method: 'get',
+  path: '/authors/{membershipId}',
+  request: { params: z.object({ membershipId: z.uuid() }) },
+  responses: {
+    200: {
+      description:
+        "One author's live stories, oldest first, in the story projection (`viewerSeen` included). The group a circle opens lazily.",
+      content: { 'application/json': { schema: authorStoriesSchema } },
+    },
+    403: {
+      description:
+        'The caller holds neither `social.participate` nor `moderation.manage` (a real `support_tenant` session).',
+    },
+    404: {
+      description:
+        '`MODULE_DISABLED` when `social` is off; otherwise the bare `NOT_FOUND` with no `details` when the caller can read no live story of that membership: a stranger, an expired story, a blocked, removed or viewer-blocked author, an unknown or another tenant’s id (D-23, T-10-30).',
     },
   },
 });
@@ -636,6 +707,17 @@ export const storiesRoutes = stories
     const canManage = (await permissionsForRequest(ctx)).includes('stories.story.manage');
     return c.json(await listOwnStories(ctx, c.req.valid('query'), { canManage }), 200);
   })
+  .openapi(listAuthorsRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const scope = await authorsAudience(ctx);
+    return c.json(await listStoryAuthors(ctx, c.req.valid('query'), scope), 200);
+  })
+  .openapi(authorStoriesRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { membershipId } = c.req.valid('param');
+    const { canModerate } = await authorsAudience(ctx);
+    return c.json(await listAuthorStories(ctx, membershipId, { canModerate }), 200);
+  })
   .openapi(listHighlightsRoute, async (c) => {
     const ctx = c.get('ctx');
     const { communityId, scope } = c.req.valid('query');
@@ -682,15 +764,21 @@ export const storiesRoutes = stories
     return c.json(await removeStoryFromHighlight(c.get('ctx'), highlightId, storyId), 200);
   })
   .openapi(markSeenRoute, async (c) => {
-    await markStoriesSeen(c.get('ctx'), c.req.valid('json').storyIds);
+    const ctx = c.get('ctx');
+    const audience = { canModerate: await canModerateComments(ctx) };
+    await markStoriesSeen(ctx, c.req.valid('json').storyIds, audience);
     return c.body(null, 204);
   })
   .openapi(listRoute, async (c) =>
     c.json(await listActiveStories(c.get('ctx'), c.req.valid('query')), 200),
   )
   .openapi(getStoryRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { storyId } = c.req.valid('param');
-    return c.json(await getStory(c.get('ctx'), storyId), 200);
+    return c.json(
+      await getStory(ctx, storyId, { canModerate: await canModerateComments(ctx) }),
+      200,
+    );
   })
   .openapi(publishStoryRoute, async (c) => {
     const ctx = c.get('ctx');
@@ -717,12 +805,20 @@ export const storiesRoutes = stories
     return c.body(null, 204);
   })
   .openapi(likeStoryRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { storyId } = c.req.valid('param');
-    return c.json(await likeStory(c.get('ctx'), storyId), 200);
+    return c.json(
+      await likeStory(ctx, storyId, { canModerate: await canModerateComments(ctx) }),
+      200,
+    );
   })
   .openapi(unlikeStoryRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { storyId } = c.req.valid('param');
-    return c.json(await unlikeStory(c.get('ctx'), storyId), 200);
+    return c.json(
+      await unlikeStory(ctx, storyId, { canModerate: await canModerateComments(ctx) }),
+      200,
+    );
   })
   .openapi(listCommentsRoute, async (c) => {
     const ctx = c.get('ctx');
@@ -731,8 +827,10 @@ export const storiesRoutes = stories
     return c.json(await listStoryComments(ctx, storyId, c.req.valid('query'), opts), 200);
   })
   .openapi(createCommentRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { storyId } = c.req.valid('param');
-    return c.json(await createStoryComment(c.get('ctx'), storyId, c.req.valid('json')), 201);
+    const audience = { canModerate: await canModerateComments(ctx) };
+    return c.json(await createStoryComment(ctx, storyId, c.req.valid('json'), audience), 201);
   })
   .openapi(deleteCommentRoute, async (c) => {
     const ctx = c.get('ctx');
