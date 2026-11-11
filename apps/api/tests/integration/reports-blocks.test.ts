@@ -522,6 +522,39 @@ describe("member blocks and the blocker's reads (NATIVE-33)", () => {
     expect(restored.replies).toContain(comments.replyByAuthor);
   });
 
+  it('10-06 (A12): a viewer block hides the creator’s MEMBER community too: absent from the blocker’s list, the bare 404 by id, still listed for another member, back after the unblock', async () => {
+    const made = await post('/v1/communities', tokens.author, {
+      name: `${CAPTION_PREFIX} comunidade do bloqueado`,
+    });
+    expect(made.status).toBe(201);
+    const communityId = ((await made.json()) as { id: string }).id;
+    const listIds = async (token: string): Promise<string[]> => {
+      const res = await request('/v1/communities?limit=25', token);
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { items: { id: string }[] }).items.map((item) => item.id);
+    };
+    try {
+      // Positive control: the blocker sees it before the block.
+      expect(await listIds(tokens.third)).toContain(communityId);
+      expect((await request(`/v1/communities/${communityId}`, tokens.third)).status).toBe(200);
+
+      expect((await post('/v1/blocks', tokens.third, { userId: ids.author })).status).toBe(200);
+      expect(await listIds(tokens.third)).not.toContain(communityId);
+      const byId = await request(`/v1/communities/${communityId}`, tokens.third);
+      expect(byId.status).toBe(404);
+      expect((await errorOf(byId)).details).toBeUndefined();
+      // Another viewer and the blocked creator are unaffected (the filter is a viewer predicate).
+      expect(await listIds(tokens.reporter)).toContain(communityId);
+      expect(await listIds(tokens.author)).toContain(communityId);
+
+      expect((await del(`/v1/blocks/${ids.author}`, tokens.third)).status).toBe(200);
+      expect(await listIds(tokens.third)).toContain(communityId);
+    } finally {
+      await adminSql`delete from public.member_blocks where tenant_id = ${ids.tenant}::uuid and blocker_user_id = ${ids.third}::uuid`;
+      await adminSql`delete from public.communities where id = ${communityId}::uuid`;
+    }
+  });
+
   it('posts and comments carry canReport and canBlock by the rule, and an answer without them still parses', async () => {
     const feed = await request('/v1/feed?limit=25', tokens.third);
     const items = ((await feed.json()) as { items: FeedItem[] }).items;

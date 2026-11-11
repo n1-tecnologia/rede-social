@@ -1293,3 +1293,233 @@ describe('10 reads', () => {
     expect(narrow).toEqual(expected);
   });
 });
+
+/**
+ * 10-06 (D-708, D-712, A12; MCOMM-03, MCOMM-07): the order and visibility edges of the read side. The reorder
+ * never touches a member community; a blocked or departed creator's community answers the bare 404 on the
+ * list, the detail, its feed and a like on one of its posts, for the moderator too (RLS is the backstop, the
+ * statements say it too); a community whose creator the VIEWER blocked is absent for that viewer only.
+ */
+describe('10 visibility', () => {
+  type Item = { id: string; kind: string; status: string };
+  type Page = { items: Item[]; nextCursor: string | null };
+
+  const listOf = async (token: string, query = '?limit=25'): Promise<Page> => {
+    const res = await request(`/v1/communities${query}`, token);
+    expect(res.status, `GET /v1/communities${query}`).toBe(200);
+    return (await res.json()) as Page;
+  };
+
+  const idOf = async (res: Response): Promise<string> =>
+    ((await res.json()) as CommunitySummary).id;
+
+  const reorder = (token: string, ids: string[]) =>
+    request('/v1/communities/order', token, {
+      method: 'PUT',
+      body: JSON.stringify({ ids }),
+    });
+
+  /** The BARE not-found of D-23: 404, code NOT_FOUND, no `details` at all. */
+  const expectBare404 = async (res: Response, label: string): Promise<void> => {
+    expect(res.status, label).toBe(404);
+    const error = await errorOf(res);
+    expect(error.code, label).toBe('NOT_FOUND');
+    expect(error.details, label).toBeUndefined();
+  };
+
+  const setMembership = (userId: string, set: 'blocked' | 'deleted' | 'live') =>
+    set === 'blocked'
+      ? adminSql`update public.memberships set blocked_at = now()
+                  where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`
+      : set === 'deleted'
+        ? adminSql`update public.memberships set deleted_at = now()
+                    where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`
+        : adminSql`update public.memberships set blocked_at = null, deleted_at = null
+                    where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`;
+
+  beforeEach(async () => {
+    await sweep();
+    await writeSocialSettings(savedSocialSettings);
+    await setMembership(userIds.helena, 'live');
+    await setMembership(userIds.marcos, 'live');
+    await adminSql`delete from public.member_blocks where tenant_id = ${labTenantId}::uuid and blocker_user_id = any (${memberUsers()}::uuid[])`;
+  });
+
+  afterAll(async () => {
+    await setMembership(userIds.helena, 'live');
+    await setMembership(userIds.marcos, 'live');
+    await adminSql`delete from public.member_blocks where tenant_id = ${labTenantId}::uuid and blocker_user_id = any (${memberUsers()}::uuid[])`;
+  });
+
+  it('D-712 / MCOMM-03: an admin reorder with only organization ids succeeds and leaves the member community at position 1000000; a body holding the member id is order_stale', async () => {
+    const member = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Ordem 1` }));
+    const original = await adminSql<{ id: string; position: number; updated_at: string }[]>`
+      select id, position, updated_at::text from public.communities
+       where tenant_id = ${labTenantId}::uuid and kind = 'organization' and status = 'active'
+         and deleted_at is null`;
+    try {
+      const organization = (await listOf(tokens.labAdmin)).items
+        .filter((item) => item.kind === 'organization')
+        .map((item) => item.id);
+      expect(organization.length).toBeGreaterThan(1);
+
+      // The member id in the permutation: the stale answer, nothing written (positive control below).
+      const stale = await reorder(tokens.labAdmin, [...organization, member]);
+      expect(stale.status).toBe(409);
+      const staleError = await errorOf(stale);
+      expect(staleError.code).toBe('CONFLICT');
+      expect(staleError.details).toEqual({ community: 'order_stale' });
+      expect((await communityRow(member))?.position).toBe(1000000);
+
+      // Only organization ids: the reorder lands, in the order asked, and the member stays last.
+      const reversed = [...organization].reverse();
+      const ok = await reorder(tokens.labAdmin, reversed);
+      expect(ok.status).toBe(200);
+      const page = (await ok.json()) as Page;
+      expect(page.items.map((item) => item.id)).toEqual([...reversed, member]);
+      expect((await communityRow(member))?.position).toBe(1000000);
+      const [positions] = await adminSql<{ n: number; max: number }[]>`
+        select count(*)::int as n, max(position)::int as max from public.communities
+         where tenant_id = ${labTenantId}::uuid and kind = 'organization' and status = 'active'
+           and deleted_at is null and position between 1 and 200`;
+      expect(positions?.n).toBe(organization.length);
+      expect(positions?.max).toBeLessThanOrEqual(200);
+    } finally {
+      for (const row of original) {
+        await adminSql`
+          update public.communities set position = ${row.position},
+                 updated_at = ${row.updated_at}::timestamptz
+           where id = ${row.id}::uuid`;
+      }
+    }
+  });
+
+  it('EP-11 adjacency: when the last organization community is archived the member communities still list, and a reorder naming a member community is order_stale (an empty body stays 400)', async () => {
+    const member = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Sobra` }));
+    const original = await adminSql<{ id: string; updated_at: string }[]>`
+      select id, updated_at::text from public.communities
+       where tenant_id = ${labTenantId}::uuid and kind = 'organization' and status = 'active'
+         and deleted_at is null`;
+    try {
+      await adminSql`
+        update public.communities set status = 'archived'
+         where id = any (${original.map((row) => row.id)}::uuid[])`;
+      expect((await listOf(tokens.marcos)).items.map((item) => item.id)).toEqual([member]);
+      const named = await reorder(tokens.labAdmin, [member]);
+      expect(named.status).toBe(409);
+      expect((await errorOf(named)).details).toEqual({ community: 'order_stale' });
+      expect((await reorder(tokens.labAdmin, [])).status).toBe(400);
+      expect((await communityRow(member))?.position).toBe(1000000);
+    } finally {
+      for (const row of original) {
+        await adminSql`
+          update public.communities set status = 'active', updated_at = ${row.updated_at}::timestamptz
+           where id = ${row.id}::uuid`;
+      }
+    }
+  });
+
+  it('D-708 / EP-28: a blocked or departed creator hides the community on the list, the detail, its feed and a like, for a member AND the moderator; the rest keeps its order, the cursor still pages, and unblocking restores every byte', async () => {
+    const hiddenOne = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Some 1` }));
+    const keptOne = await idOf(await createCommunity(tokens.marcos, { name: `${PREFIX}Fica 1` }));
+    const keptTwo = await idOf(await createCommunity(tokens.marcos, { name: `${PREFIX}Fica 2` }));
+    const post = (await (
+      await publish(tokens.helena, { caption: `${PREFIX}curtir`, communityId: hiddenOne })
+    ).json()) as FeedPost;
+
+    const readBack = async () => ({
+      marcos: await (await request('/v1/communities?limit=25', tokens.marcos)).text(),
+      admin: await (await request('/v1/communities?limit=25', tokens.labAdmin)).text(),
+    });
+    const before = await readBack();
+    const orderBefore = (JSON.parse(before.marcos) as Page).items.map((item) => item.id);
+    expect(orderBefore).toContain(hiddenOne);
+    // Positive controls: all four doors are open while the creator is live.
+    expect((await request(`/v1/communities/${hiddenOne}`, tokens.marcos)).status).toBe(200);
+    expect((await request(`/v1/feed?communityId=${hiddenOne}`, tokens.marcos)).status).toBe(200);
+    expect((await request(`/v1/feed/posts/${post.id}`, tokens.marcos)).status).toBe(200);
+
+    for (const state of ['blocked', 'deleted'] as const) {
+      try {
+        await setMembership(userIds.helena, state);
+        for (const [who, token] of [
+          ['marcos', tokens.marcos],
+          ['admin (the moderator)', tokens.labAdmin],
+        ] as const) {
+          const label = `${state} ${who}`;
+          const listed = await listOf(token);
+          expect(
+            listed.items.map((item) => item.id),
+            label,
+          ).not.toContain(hiddenOne);
+          await expectBare404(
+            await request(`/v1/communities/${hiddenOne}`, token),
+            `${label} detail`,
+          );
+          await expectBare404(
+            await request(`/v1/feed?communityId=${hiddenOne}`, token),
+            `${label} feed`,
+          );
+          await expectBare404(
+            await request(`/v1/feed/posts/${post.id}/like`, token, { method: 'POST' }),
+            `${label} like`,
+          );
+        }
+        // EP-28: the remaining items keep their relative order and the cursor pages without skipping.
+        const remaining = orderBefore.filter((id) => id !== hiddenOne);
+        const wide = (await listOf(tokens.marcos)).items.map((item) => item.id);
+        expect(wide).toEqual(remaining);
+        const narrow: string[] = [];
+        let cursor: string | null = null;
+        for (let guard = 0; guard < 100; guard += 1) {
+          const suffix: string = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+          const page = await listOf(tokens.marcos, `?limit=1${suffix}`);
+          narrow.push(...page.items.map((item) => item.id));
+          cursor = page.nextCursor;
+          if (cursor === null) break;
+        }
+        expect(narrow, `${state} limit=1 walk`).toEqual(remaining);
+        expect(narrow).toEqual(expect.arrayContaining([keptOne, keptTwo]));
+      } finally {
+        await setMembership(userIds.helena, 'live');
+      }
+      // Unblocked (or restored): everything is back, byte for byte, nothing was deleted.
+      const after = await readBack();
+      expect(after.marcos, `${state} restored (member list)`).toBe(before.marcos);
+      expect(after.admin, `${state} restored (admin list)`).toBe(before.admin);
+      expect((await request(`/v1/communities/${hiddenOne}`, tokens.marcos)).status).toBe(200);
+      expect((await request(`/v1/feed?communityId=${hiddenOne}`, tokens.marcos)).status).toBe(200);
+    }
+  });
+
+  it('A12: a community whose creator the VIEWER blocked is absent from the viewer’s list and answers the bare 404 by id and on its feed; it stays for Alvaro, and the blocked creator sees nothing different', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}Bloqueada` }));
+    const before = {
+      alvaro: await (await request('/v1/communities?limit=25', tokens.alvaro)).text(),
+      helena: await (await request('/v1/communities?limit=25', tokens.helena)).text(),
+    };
+    expect((await listOf(tokens.marcos)).items.map((item) => item.id)).toContain(id);
+
+    const block = await request('/v1/blocks', tokens.marcos, json({ userId: userIds.helena }));
+    expect(block.status).toBe(200);
+
+    expect((await listOf(tokens.marcos)).items.map((item) => item.id)).not.toContain(id);
+    await expectBare404(await request(`/v1/communities/${id}`, tokens.marcos), 'marcos detail');
+    await expectBare404(await request(`/v1/feed?communityId=${id}`, tokens.marcos), 'marcos feed');
+    // Another viewer and the blocked creator read exactly what they read before.
+    expect(await (await request('/v1/communities?limit=25', tokens.alvaro)).text()).toBe(
+      before.alvaro,
+    );
+    expect(await (await request('/v1/communities?limit=25', tokens.helena)).text()).toBe(
+      before.helena,
+    );
+    expect((await request(`/v1/communities/${id}`, tokens.helena)).status).toBe(200);
+
+    const unblock = await request(`/v1/blocks/${userIds.helena}`, tokens.marcos, {
+      method: 'DELETE',
+    });
+    expect(unblock.status).toBe(200);
+    expect((await listOf(tokens.marcos)).items.map((item) => item.id)).toContain(id);
+    expect((await request(`/v1/communities/${id}`, tokens.marcos)).status).toBe(200);
+  });
+});
