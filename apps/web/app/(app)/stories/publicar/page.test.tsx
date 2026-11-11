@@ -247,4 +247,15 @@ describe('/stories/publicar — the member screen (10-12, UI-D-702..UI-D-704)', 
     expect(props?.member).toBeUndefined();
     expect(labelsOf(props)).toEqual(['Início']);
   });
+  it('P9. 10-14 (UI-D-718): the administrator is offered ORGANIZATION communities only, never a member group', async () => {
+    mocks.permissions = [PUBLISH, MANAGE, 'content.publish'];
+    mocks.communities = [
+      { ...community(X, 'Org', { story: true, isOwner: false }), kind: 'organization' },
+      { ...community(Y, 'Delas', { story: false, isOwner: false }), kind: 'member' },
+    ];
+    const props = await render({ comunidade: Y });
+    expect(labelsOf(props)).toEqual(['Início', 'Org']);
+    // A member community the administrator typed is not a destination either.
+    expect(props?.originCommunityId ?? null).toBeNull();
+  });
 });

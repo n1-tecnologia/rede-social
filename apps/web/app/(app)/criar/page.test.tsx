@@ -186,3 +186,33 @@ describe('/criar?comunidade= — a member in a community (UI-D-711, the Escopo s
     expect(mocks.loadCommunity).toHaveBeenCalledWith(ID);
   });
 });
+
+/**
+ * 10-14 Task 2 (UI-D-718, D-706): the ADMINISTRATOR's destination picker. The list read carries member
+ * communities too (the admin sees them for moderation), and an admin cannot publish in one, so none may
+ * be offered: the picker keeps the communities where the API says the caller may post (the Escopo seam,
+ * `viewer.actions.post`, today the organization's own).
+ */
+describe('/criar — the administrator picker offers organization communities only (UI-D-718)', () => {
+  const ORG = '6e1d2d3f-8b52-4d63-8e4b-1f7a2c3d4e51';
+
+  beforeEach(() => {
+    mocks.permissions = ['feed.post.create', 'content.publish'];
+    mocks.listAllCommunities.mockResolvedValue([
+      community({ id: ORG, name: 'Novidades', kind: 'organization', isOwner: false }),
+      community({ id: ID, name: 'Clube de Leitura', kind: 'member', isOwner: false, post: false }),
+    ]);
+  });
+
+  it('P6. the destinations hold the organization community and no member community', async () => {
+    const p = await props();
+
+    expect((p.destinations as { id: string }[]).map((item) => item.id)).toEqual([ORG]);
+    expect(p.memberLimits).toBeUndefined();
+  });
+
+  it('P7. a typed member community id does not pre-select anything; an organization id does', async () => {
+    expect((await props({ comunidade: ID })).initialCommunityId).toBeNull();
+    expect((await props({ comunidade: ORG })).initialCommunityId).toBe(ORG);
+  });
+});

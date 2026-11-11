@@ -384,3 +384,158 @@ describe('/comunidades/[communityId] — the Escopo seam (viewer.actions)', () =
     expect(manageCircle()).toBeUndefined();
   });
 });
+
+/**
+ * 10-14 Task 2 (UI-D-710 matrix, UI-D-716, UI-D-717): one rendering test per viewer kind. Every fixture
+ * carries `viewer.actions` exactly as the API computes it (`post` and `story` equal `canPublish`, the
+ * other three true), so the matrix shows the action flags reproduce the owner rule for every kind.
+ */
+const HIGHLIGHT = {
+  id: 'b7a1c0de-0000-4000-8000-000000000001',
+  communityId: ID,
+  title: 'Mudas',
+  position: 0,
+  coverAssetId: null,
+  coverVariantWidths: [],
+  coverStoryId: null,
+  coverChosen: false,
+  itemCount: 2,
+};
+
+const ADMIN_PERMISSIONS = [
+  'communities.community.manage',
+  'feed.post.create',
+  'content.publish',
+  'stories.story.manage',
+  'stories.story.publish',
+];
+
+describe('/comunidades/[communityId] — the control matrix per viewer kind (UI-D-710)', () => {
+  it('12. another member: no publish control, no pencil, no manage circle; the posts and highlights stay', async () => {
+    mocks.highlights = { items: [HIGHLIGHT] };
+    mocks.result = { status: 'ok', community: community('member', OTHER_MEMBER_VIEW) };
+
+    const html = await render();
+
+    expect(mocks.postsProps?.canPost).toBe(false);
+    expect(ownCircle()).toBeUndefined();
+    expect(manageCircle()).toBeUndefined();
+    expect(html).not.toContain('data-community-edit');
+    // The highlight circle is still drawn: reading is intact.
+    expect(circles().length).toBe(1);
+    expect(labels().emptyBodyAuthor).toBe('As publicações desta comunidade vão aparecer aqui.');
+    expect(mocks.postsProps?.onLike).toBeDefined();
+  });
+
+  it('13. an admin on a member community: the pencil only, no publish control, no "+", no manage circle', async () => {
+    mocks.permissions = ADMIN_PERMISSIONS;
+    mocks.role = 'admin_tenant';
+    mocks.result = {
+      status: 'ok',
+      community: community('member', {
+        isOwner: false,
+        canPublish: false,
+        canEdit: true,
+        canCurate: false,
+      }),
+    };
+
+    const html = await render();
+
+    expect(html).toContain('data-community-edit');
+    expect(mocks.postsProps?.canPost).toBe(false);
+    expect(ownCircle()).toBeUndefined();
+    expect(manageCircle()).toBeUndefined();
+  });
+
+  it('14. an admin on an organization community: every control, as today', async () => {
+    mocks.permissions = ADMIN_PERMISSIONS;
+    mocks.role = 'admin_tenant';
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', {
+        isOwner: false,
+        canPublish: true,
+        canEdit: true,
+        canCurate: true,
+      }),
+    };
+
+    const html = await render();
+
+    expect(html).toContain('data-community-edit');
+    expect(mocks.postsProps?.canPost).toBe(true);
+    expect(mocks.postsProps?.createHref).toBe(`/criar?comunidade=${ID}`);
+    expect(ownCircle()?.href).toBe(`/stories/publicar?comunidade=${ID}`);
+    expect(manageCircle()?.href).toBe(`/comunidades/${ID}/destaques`);
+    // The organization admin keeps today's empty-list sentence, not the owner's.
+    expect(labels().emptyBodyAuthor).toBe('As publicações desta comunidade vão aparecer aqui.');
+    expect(mocks.loadHighlights).toHaveBeenCalledWith({ communityId: ID, scope: 'all' });
+  });
+
+  it('15. support_tenant: nothing to write on either kind of community', async () => {
+    mocks.permissions = [];
+    mocks.role = 'support_tenant';
+    for (const kind of ['organization', 'member'] as const) {
+      mocks.result = { status: 'ok', community: community(kind, OTHER_MEMBER_VIEW) };
+      const html = await render();
+      expect(html).not.toContain('data-community-edit');
+      expect(mocks.postsProps?.canPost).toBe(false);
+      expect(ownCircle()).toBeUndefined();
+      expect(manageCircle()).toBeUndefined();
+    }
+  });
+});
+
+describe('/comunidades/[communityId] — social off (UI-D-716) and a blocked creator (UI-D-717)', () => {
+  it('16. the creator with social off keeps every read and loses every write control, with no notice', async () => {
+    // The API drops the member keys while `social` is off: canEdit, canCurate and both actions go false,
+    // while isOwner (a fact about the row) and like, comment and share stay.
+    mocks.permissions = [];
+    mocks.highlights = { items: [HIGHLIGHT] };
+    mocks.result = {
+      status: 'ok',
+      community: community('member', {
+        isOwner: true,
+        canPublish: false,
+        canEdit: false,
+        canCurate: false,
+      }),
+    };
+
+    const html = await render();
+
+    expect(html).not.toContain('data-community-edit');
+    expect(mocks.postsProps?.canPost).toBe(false);
+    expect(ownCircle()).toBeUndefined();
+    expect(manageCircle()).toBeUndefined();
+    expect(circles().length).toBe(1);
+    // "Criada por" stays as plain text, and nothing explains the missing controls.
+    expect(html).toContain('Criada por você');
+    expect(html).not.toContain('/membros/');
+    expect(html).not.toContain('desativada');
+  });
+
+  it('17. an ARCHIVED community the creator may edit offers Reativar and Excluir, never for a viewer who may not edit', async () => {
+    mocks.result = {
+      status: 'ok',
+      community: community('member', CREATOR_VIEW, { status: 'archived' }),
+    };
+    await render();
+    expect(mocks.lifecycle.map((entry) => entry.name).sort()).toEqual(['delete', 'reactivate']);
+
+    mocks.result = {
+      status: 'ok',
+      community: community('member', OTHER_MEMBER_VIEW, { status: 'archived' }),
+    };
+    await render();
+    expect(mocks.lifecycle).toEqual([]);
+  });
+
+  it('18. a blocked or departed creator answers the shipped not-found screen, with no special copy', async () => {
+    mocks.result = { status: 'not-found' };
+
+    await expect(render()).rejects.toThrow('NOT_FOUND');
+    expect(mocks.notFound).toHaveBeenCalled();
+  });
+});
