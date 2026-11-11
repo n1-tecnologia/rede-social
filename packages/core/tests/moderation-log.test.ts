@@ -141,3 +141,130 @@ describe('recordModerationAction: profile_form_exported (D-595)', () => {
     expect(inserts[0]?.params[7]).toBeNull();
   });
 });
+
+describe('recordModerationAction: story_removed, community_archived, community_removed (10-04, D-711)', () => {
+  const STORY = '88888888-8888-4888-8888-888888888888';
+  const COMMUNITY = '99999999-9999-4999-8999-999999999999';
+
+  it('story_removed writes subject_type story, the story id, the excerpt of the caption and no reason or details', async () => {
+    const { tx, inserts } = fakeTx();
+    await recordModerationAction(tx, ctx, {
+      action: 'story_removed',
+      targetUserId: TARGET,
+      subjectType: 'story',
+      subjectId: STORY,
+      excerptSource: '  Legenda do story.  ',
+      reason: null,
+    });
+    expect(inserts).toHaveLength(1);
+    const params = inserts[0]?.params ?? [];
+    expect(params[1]).toBe('story_removed');
+    expect(params[6]).toBe('story');
+    expect(params[7]).toBe(STORY);
+    expect(params[8]).toBeNull();
+    expect(params[9]).toBe('Legenda do story.');
+    expect(params[10]).toBeNull();
+  });
+
+  it('writes the empty string for a story with no caption, never null', async () => {
+    const { tx, inserts } = fakeTx();
+    await recordModerationAction(tx, ctx, {
+      action: 'story_removed',
+      targetUserId: TARGET,
+      subjectType: 'story',
+      subjectId: STORY,
+      excerptSource: '',
+      reason: null,
+    });
+    expect(inserts[0]?.params[9]).toBe('');
+  });
+
+  it.each(['community_archived', 'community_removed'] as const)(
+    '%s writes subject_type community, the community id and the name as the excerpt',
+    async (action) => {
+      const { tx, inserts } = fakeTx();
+      await recordModerationAction(tx, ctx, {
+        action,
+        targetUserId: TARGET,
+        subjectType: 'community',
+        subjectId: COMMUNITY,
+        excerptSource: 'Comunidade de teste',
+        reason: null,
+      });
+      const params = inserts[0]?.params ?? [];
+      expect(params[1]).toBe(action);
+      expect(params[6]).toBe('community');
+      expect(params[7]).toBe(COMMUNITY);
+      expect(params[9]).toBe('Comunidade de teste');
+    },
+  );
+
+  it('cuts a long community name inside the 280-unit rule', async () => {
+    const { tx, inserts } = fakeTx();
+    await recordModerationAction(tx, ctx, {
+      action: 'community_removed',
+      targetUserId: TARGET,
+      subjectType: 'community',
+      subjectId: COMMUNITY,
+      excerptSource: Array.from({ length: 80 }, () => 'palavra').join(' '),
+      reason: null,
+    });
+    const excerpt = String(inserts[0]?.params[9]);
+    expect(excerpt.length).toBeLessThanOrEqual(280);
+    expect(excerpt.endsWith('…')).toBe(true);
+  });
+
+  it('refuses a subject type that does not belong to the action, writing nothing', async () => {
+    const { tx, inserts } = fakeTx();
+    await expect(
+      recordModerationAction(tx, ctx, {
+        action: 'story_removed',
+        targetUserId: TARGET,
+        // @ts-expect-error a story removal names a story, never a community
+        subjectType: 'community',
+        subjectId: STORY,
+        excerptSource: 'x',
+        reason: null,
+      }),
+    ).rejects.toThrow(/subject/);
+    await expect(
+      recordModerationAction(tx, ctx, {
+        action: 'community_archived',
+        targetUserId: TARGET,
+        // @ts-expect-error a community action names a community, never a story
+        subjectType: 'story',
+        subjectId: COMMUNITY,
+        excerptSource: 'x',
+        reason: null,
+      }),
+    ).rejects.toThrow(/subject/);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('throws, rolling the caller back, when the target has no membership of the tenant', async () => {
+    const inserts: unknown[] = [];
+    const dialect = new PgDialect();
+    const tx = {
+      execute: async (query: Parameters<PgDialect['sqlToQuery']>[0]) => {
+        const rendered = dialect.sqlToQuery(query);
+        if (/insert into moderation_log/.test(rendered.sql)) {
+          inserts.push(rendered);
+          return [{ id: '55555555-5555-4555-8555-555555555555' }];
+        }
+        // the actor resolves, the target does not
+        return rendered.params.includes(TARGET) ? [] : [{ id: '66666666-6666-4666-8666-666666666666' }];
+      },
+    } as unknown as Tx;
+    await expect(
+      recordModerationAction(tx, ctx, {
+        action: 'story_removed',
+        targetUserId: TARGET,
+        subjectType: 'story',
+        subjectId: STORY,
+        excerptSource: 'x',
+        reason: null,
+      }),
+    ).rejects.toThrow(/no membership/);
+    expect(inserts).toHaveLength(0);
+  });
+});

@@ -30,9 +30,14 @@ begin;
 --    by the CHECKs (23514), and the immutability facts hold on its row in the tenant lane, the admin
 --    lane and for the owner.
 --
+-- 10-04 (D-711, MCOMM-10, MSTORY-09): the member-content vocabulary. `story_removed` binds to subject
+--    `story`, `community_archived` and `community_removed` to subject `community`; every mismatched
+--    pair, a missing subject and a subject on a non-removal action is refused (23514); the current
+--    list (incl. `profile_form_exported`) is kept; the append-only facts hold on the new rows.
+--
 -- Fixture ids use the `15400000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(48);
+select plan(65);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ml-a', 'Moderacao A', '15400000-0000-4000-8000-000000000001');
@@ -479,6 +484,167 @@ select throws_ok(
   '23514',
   null,
   'fact 7: details on a profile_form_exported row are refused (moderation_log_details_chk)'
+);
+
+-- ── 8. 10-04 (D-711, MCOMM-10, MSTORY-09): the member-content vocabulary ───────────────────────────
+-- `story_removed` (subject `story`), `community_archived` and `community_removed` (subject `community`):
+-- each accepted with ITS subject by the migration role, `story_removed` also by the tenant lane under the
+-- SAME insert policy; every mismatched pair, a missing subject and a subject on a non-removal action
+-- raises 23514; the append-only facts hold on the new rows.
+select lives_ok(
+  $$ insert into public.moderation_log
+       (id, tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-0000000002a9', '15400000-0000-4000-8000-000000000001', 'story_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'story', '15400000-0000-4000-8000-0000000003c1', 'texto igual') $$,
+  'fact 8: a story_removed row with a story subject is accepted'
+);
+select lives_ok(
+  $$ insert into public.moderation_log
+       (id, tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-0000000002aa', '15400000-0000-4000-8000-000000000001', 'community_archived',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'community', '15400000-0000-4000-8000-0000000003c2', 'texto igual') $$,
+  'fact 8: a community_archived row with a community subject is accepted'
+);
+select lives_ok(
+  $$ insert into public.moderation_log
+       (id, tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-0000000002ab', '15400000-0000-4000-8000-000000000001', 'community_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'community', '15400000-0000-4000-8000-0000000003c3', 'texto igual') $$,
+  'fact 8: a community_removed row with a community subject is accepted'
+);
+select tests.as_tenant('15400000-0000-4000-8000-000000000001', '15400000-0000-4000-8000-0000000000a1', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'story_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'story', '15400000-0000-4000-8000-0000000003c4', 'texto da lane') $$,
+  'fact 8: the tenant lane appends a story_removed row under the same insert policy'
+);
+reset role;
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id, subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'story_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2', 'feed_post', '15400000-0000-4000-8000-0000000003c5', 'texto') $$,
+  '23514',
+  null,
+  'fact 8: a feed_post subject on a story removal is refused (moderation_log_subject_chk)'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id, subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'story_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2', 'community', '15400000-0000-4000-8000-0000000003c6', 'texto') $$,
+  '23514',
+  null,
+  'fact 8: a community subject on a story removal is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id)
+     values ('15400000-0000-4000-8000-000000000001', 'story_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2') $$,
+  '23514',
+  null,
+  'fact 8: a story removal without a subject is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id, subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'community_archived',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2', 'story', '15400000-0000-4000-8000-0000000003c7', 'texto') $$,
+  '23514',
+  null,
+  'fact 8: a story subject on a community archival is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id, subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'community_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2', 'feed_post', '15400000-0000-4000-8000-0000000003c8', 'texto') $$,
+  '23514',
+  null,
+  'fact 8: a feed_post subject on a community removal is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id)
+     values ('15400000-0000-4000-8000-000000000001', 'community_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2') $$,
+  '23514',
+  null,
+  'fact 8: a community removal without a subject is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id, subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'comment_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2', 'story', '15400000-0000-4000-8000-0000000003c9', 'texto') $$,
+  '23514',
+  null,
+  'fact 8: a story subject on a comment removal is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id, subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'post_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2', 'story', '15400000-0000-4000-8000-0000000003ca', 'texto') $$,
+  '23514',
+  null,
+  'fact 8: a story subject on a post removal is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id, subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'member_blocked',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2', 'community', '15400000-0000-4000-8000-0000000003cb', 'texto') $$,
+  '23514',
+  null,
+  'fact 8: a community subject on a block is refused (only a removal names a subject)'
+);
+select matches(
+  (select pg_get_constraintdef(oid) from pg_constraint where conname = 'moderation_log_action_chk'),
+  'community_removed',
+  'fact 8: moderation_log_action_chk lists the new actions'
+);
+select matches(
+  (select pg_get_constraintdef(oid) from pg_constraint where conname = 'moderation_log_action_chk'),
+  'profile_form_exported',
+  'fact 8: …and still lists the Phase 12 export (the CURRENT list was extended, nothing narrowed)'
+);
+select throws_ok(
+  $$ update public.moderation_log set excerpt = 'reescrito'
+      where id = '15400000-0000-4000-8000-0000000002a9' $$,
+  '42501',
+  'moderation_log is append-only',
+  'fact 8: the table owner cannot UPDATE a story_removed row (the row trigger)'
+);
+select throws_ok(
+  $$ delete from public.moderation_log where id = '15400000-0000-4000-8000-0000000002aa' $$,
+  '42501',
+  'moderation_log is append-only',
+  'fact 8: the table owner cannot DELETE a community_archived row (the row trigger)'
 );
 
 -- ── 5. invariant: both parties are memberships of the row's own tenant ─────────────────────────

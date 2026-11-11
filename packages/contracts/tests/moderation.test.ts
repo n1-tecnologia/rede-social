@@ -32,7 +32,7 @@ import { MEMBERS_MAX_QUERY_LENGTH } from '../src/profiles';
  * costly). These assertions pin the exact lists so a widening has to touch the migration AND this file.
  */
 describe('moderation vocabulary', () => {
-  it('fixes the six actions and the three subject types the table CHECKs carry', () => {
+  it('fixes the nine actions and the five subject types the table CHECKs carry', () => {
     // 09-07 (D-475): `post_removed` and `feed_post` are appended, never inserted, so the order of the
     // four earlier values (the filter chips read it) is unchanged.
     expect(MODERATION_ACTIONS).toEqual([
@@ -42,10 +42,21 @@ describe('moderation vocabulary', () => {
       'role_changed',
       'post_removed',
       'profile_form_exported',
+      'story_removed',
+      'community_archived',
+      'community_removed',
     ]);
-    // Phase 12 (D-595): the export action is appended LAST, so the filter chips keep their order.
-    expect(MODERATION_ACTIONS.at(-1)).toBe('profile_form_exported');
-    expect(MODERATION_SUBJECT_TYPES).toEqual(['post_comment', 'story_comment', 'feed_post']);
+    // Phase 12 (D-595) appended the export action; Phase 10 (D-711) appends the three member-content
+    // actions after it, so every earlier value keeps its position (the filter chips read the order).
+    expect(MODERATION_ACTIONS.indexOf('profile_form_exported')).toBe(5);
+    expect(MODERATION_ACTIONS.at(-1)).toBe('community_removed');
+    expect(MODERATION_SUBJECT_TYPES).toEqual([
+      'post_comment',
+      'story_comment',
+      'feed_post',
+      'story',
+      'community',
+    ]);
     expect(MODERATION_EXCERPT_MAX).toBe(280);
     expect(MODERATION_REASON_MAX).toBe(500);
   });
