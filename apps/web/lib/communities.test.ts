@@ -6,7 +6,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { getOrderableCommunities, reorderCommunities } from './communities';
+import { getOrderableCommunities, loadCommunities, reorderCommunities } from './communities';
 
 /**
  * 2026-10-03 — the two BFF calls behind the Comunidades reorder mode, against a stubbed transport.
@@ -165,5 +165,58 @@ describe('reorderCommunities — one PUT, a strict answer, refusals as ApiClient
     );
 
     await expect(reorderCommunities({ ids: [uuid(1)] })).rejects.toThrow();
+  });
+});
+
+/* ── 10-13 (D-701, D-703, D-710): what the list read carries into the web ─────────────────────── */
+
+describe('loadCommunities — kind, createdBy, viewer and memberQuota reach the page WHOLE (10-13)', () => {
+  const HELENA = {
+    membershipId: '99999999-9999-4999-8999-999999999999',
+    displayName: 'Helena',
+    avatarAssetId: null,
+  };
+
+  it('1. an organization entry and a member entry keep their viewer.actions object unchanged', async () => {
+    const org = community(1);
+    const member: CommunitySummary = {
+      ...community(2),
+      kind: 'member',
+      createdBy: HELENA,
+      viewer: {
+        isOwner: true,
+        canPublish: true,
+        canEdit: true,
+        canCurate: true,
+        // Deliberately NOT the defaults the web could invent: the web only forwards what the API said.
+        actions: { like: true, comment: false, share: true, post: true, story: false },
+      },
+    };
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(200, { items: [org, member], nextCursor: null, memberQuota: null }),
+    );
+
+    const page = await loadCommunities();
+
+    expect(page?.items[0]?.viewer.actions).toEqual(org.viewer.actions);
+    expect(page?.items[0]?.kind).toBe('organization');
+    expect(page?.items[0]?.createdBy).toBeNull();
+    expect(page?.items[1]?.viewer).toEqual(member.viewer);
+    expect(page?.items[1]?.viewer.actions).toEqual({
+      like: true,
+      comment: false,
+      share: true,
+      post: true,
+      story: false,
+    });
+    expect(page?.items[1]?.kind).toBe('member');
+    expect(page?.items[1]?.createdBy).toEqual(HELENA);
+  });
+
+  it('2. the memberQuota the API sent is carried as sent', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(200, { items: [], nextCursor: null, memberQuota: { ownedActive: 2, limit: 3 } }),
+    );
+    expect((await loadCommunities())?.memberQuota).toEqual({ ownedActive: 2, limit: 3 });
   });
 });

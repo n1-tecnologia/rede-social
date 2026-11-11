@@ -131,6 +131,7 @@ function list(props: {
   status: 'active' | 'archived';
   items?: CommunitySummary[];
   canManage?: boolean;
+  canCreate?: boolean;
   cursor?: string | null;
 }) {
   return render(
@@ -139,6 +140,7 @@ function list(props: {
       initialCursor={props.cursor ?? null}
       tenantName={TENANT}
       canManage={props.canManage ?? true}
+      canCreate={props.canCreate}
       status={props.status}
     />,
   );
@@ -408,5 +410,81 @@ describe('CommunitiesList — the manager’s reorder mode on Ativas (2026-10-03
     );
     expect(reorderList()).toBeNull();
     expect(cardNames()).toEqual(['Avisos', 'Eventos']);
+  });
+});
+
+/* ── 10-13: the member's entry and the byline (UI-D-706, UI-D-708) ────────────────────────────── */
+
+const HELENA = {
+  membershipId: '99999999-9999-4999-8999-999999999999',
+  displayName: 'Helena',
+  avatarAssetId: null,
+};
+const MEMBER_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const memberCommunity = (overrides: Partial<CommunitySummary> = {}) =>
+  community({
+    id: MEMBER_ID,
+    name: 'Horta em casa',
+    kind: 'member',
+    createdBy: HELENA,
+    ...overrides,
+  });
+
+describe('CommunitiesList — a member finds and creates communities (10-13)', () => {
+  it('11. a member with the control available gets the outline create action in the empty list', () => {
+    list({ status: 'active', canManage: false, canCreate: true });
+
+    const empty = screen.getByTestId('communities-empty');
+    expect(within(empty).getByText(C.empty.title)).toBeTruthy();
+    // The member body is unchanged; the action is the admin's own link.
+    expect(within(empty).getByText(`As comunidades de ${TENANT} vão aparecer aqui.`)).toBeTruthy();
+    const cta = within(empty).getByRole('link', { name: C.actions.create });
+    expect(cta.getAttribute('href')).toBe('/comunidades/nova');
+  });
+
+  it('12. a member without the control keeps the empty list with no action', () => {
+    const { container } = list({ status: 'active', canManage: false, canCreate: false });
+
+    expect(screen.getByText(C.empty.title)).toBeTruthy();
+    expect(container.querySelector('a[href="/comunidades/nova"]')).toBeNull();
+  });
+
+  it('13. member cards follow the organization ones with the byline, no divider and no heading', () => {
+    const { container } = list({
+      status: 'active',
+      canManage: false,
+      canCreate: true,
+      items: [AVISOS, EVENTOS, memberCommunity()],
+    });
+
+    // The server's order is shown as served (organization first, then member).
+    expect(cardNames()).toEqual(['Avisos', 'Eventos', '?']);
+    const cards = screen.getAllByTestId('community-card');
+    expect(cards[2]?.textContent).toContain('Horta em casa');
+    // The byline is a finished string from the host catalog, on the member card only.
+    expect(within(cards[2] as HTMLElement).getByText('Criada por Helena')).toBeTruthy();
+    expect(screen.getAllByText(/Criada por/)).toHaveLength(1);
+    expect(cards[0]?.textContent).not.toContain('Criada por');
+    // D-712: the UI never segregates them.
+    expect(screen.queryByText(/De membros/i)).toBeNull();
+    expect(container.querySelector('hr, [role="separator"]')).toBeNull();
+    expect(container.querySelectorAll('h2, h3')).toHaveLength(0);
+  });
+
+  it('14. a member never sees "Reordenar", even with several organization communities', () => {
+    list({
+      status: 'active',
+      canManage: false,
+      canCreate: true,
+      items: [AVISOS, EVENTOS, memberCommunity()],
+    });
+    expect(toggle()).toBeNull();
+  });
+
+  it('15. the byline name is plain text: the card stays one link', () => {
+    list({ status: 'active', canManage: false, items: [memberCommunity()] });
+    const card = screen.getByTestId('community-card');
+    expect(card.querySelectorAll('a')).toHaveLength(0);
+    expect(screen.getAllByRole('link')).toHaveLength(1);
   });
 });

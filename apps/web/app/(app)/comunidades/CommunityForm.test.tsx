@@ -183,3 +183,50 @@ describe('CommunityForm — "Excluir comunidade", live and archived-only (09.3, 
     expect(document.querySelector('[data-delete-control]')).toBeNull();
   });
 });
+
+describe('CommunityForm — the member variant (10-13, UI-D-707)', () => {
+  const AUDIENCE = 'Todos os membros de Rede Demo veem esta comunidade. Só você publica nela.';
+
+  it('7. member mode adds the audience line under "Descrição", with the tenant name', () => {
+    render(<CommunityForm mode="create" tenantName="Rede Demo" memberMode />);
+    const line = document.querySelector('[data-community-audience]') as HTMLElement;
+    expect(line).not.toBeNull();
+    expect(line.textContent).toBe(AUDIENCE);
+    // `Users` 14 beside a 12/400 tertiary line, after the description field.
+    expect(line.className).toContain('text-text-tertiary');
+    const description = document.getElementById('community-description') as HTMLElement;
+    expect(
+      description.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('8. the organization form carries no audience line and no member-only copy', () => {
+    render(<CommunityForm mode="create" tenantName="Rede Demo" />);
+    expect(document.querySelector('[data-community-audience]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Só você publica nela');
+  });
+
+  it('9. member mode never renders the store "Acesso" block, whatever the host passes', () => {
+    render(
+      <CommunityForm
+        mode="edit"
+        communityId={COMMUNITY}
+        initial={INITIAL}
+        tenantName="Rede Demo"
+        memberMode
+        accessProducts={[{ id: P1, name: 'Mentoria', href: `/loja/${P1}`, archived: false }]}
+      />,
+    );
+    expect(document.querySelector('[data-community-access]')).toBeNull();
+    expect(document.querySelector('[data-community-audience]')).not.toBeNull();
+  });
+
+  it('10. the member form keeps the shipped chrome: close, cover picker, name, description, submit', () => {
+    render(<CommunityForm mode="create" tenantName="Rede Demo" memberMode />);
+    expect(screen.getByRole('button', { name: 'Fechar' })).toBeTruthy();
+    expect(document.getElementById('community-name')).not.toBeNull();
+    expect(document.getElementById('community-description')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Criar comunidade' })).toBeTruthy();
+    expect(document.querySelector('[data-cover-preview-fallback]')).not.toBeNull();
+  });
+});
