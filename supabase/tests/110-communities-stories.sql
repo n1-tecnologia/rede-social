@@ -81,7 +81,7 @@ begin;
 -- because with five rows the planner always chooses a sequential scan and the assertion would prove
 -- nothing. Like its siblings, this file ROLLS BACK, so it re-runs identically against a seeded or an
 -- empty database, twice in a row, in any order.
-select plan(48);
+select plan(58);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-comm', 'Comunidade Phase 5', '0f000000-0000-4000-8000-000000000001');
@@ -807,6 +807,70 @@ select ok(
 -- (Assertions 48-58, 05-08's "the pin outlives the expiry", retired with the pin model in 05.2-11,
 -- HIGHLIGHT-05 / D-116. Their twin is `120-story-highlights.sql`'s expiry override under a
 -- controlled clock: a highlight ITEM is the one representation of a curated story now.)
+
+-- ── 49-58. EP-10 (10-03): the counters hold when the WRITER IS A MEMBER LANE ────────────────────
+-- `app.community_post_stats()` is NOT a definer: when a creator publishes in their own member community it
+-- updates `communities` as the INVOKER (the member lane). The member update gate must therefore never block
+-- it, with `social` on or OFF (assumption A11: no `social_enabled()` term in that policy), or `post_count`
+-- drifts silently. The member's own soft delete goes through the allow-list guard
+-- (`feed_posts_member_update_guard`, which allows exactly the live -> deleted-by-caller transition).
+select tests.tenant('pgtap-comm-m', 'Comunidade de membro', '0f100000-0000-4000-8000-000000000001');
+select tests.auth_user('mc@c.local', '0f100000-0000-4000-8000-000000000002');
+select tests.member('0f100000-0000-4000-8000-000000000001', '0f100000-0000-4000-8000-000000000002');
+insert into public.tenant_modules (tenant_id, module_key, enabled) values
+  ('0f100000-0000-4000-8000-000000000001', 'social', true);
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position) values
+  ('0f100000-0000-4000-8000-0000000000a1', '0f100000-0000-4000-8000-000000000001',
+   '0f100000-0000-4000-8000-000000000002', 'Do membro', 'do-membro', 'member', 1000000);
+
+select tests.as_tenant('0f100000-0000-4000-8000-000000000001', '0f100000-0000-4000-8000-000000000002');
+select lives_ok(
+  $$ insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, community_id)
+     values ('0f100000-0000-4000-8000-0000000000b1', '0f100000-0000-4000-8000-000000000001',
+             '0f100000-0000-4000-8000-000000000002', 'm1', 'community', '0f100000-0000-4000-8000-0000000000a1') $$,
+  'member lane: the creator publishes a first community post');
+select lives_ok(
+  $$ insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, community_id)
+     values ('0f100000-0000-4000-8000-0000000000b2', '0f100000-0000-4000-8000-000000000001',
+             '0f100000-0000-4000-8000-000000000002', 'm2', 'community', '0f100000-0000-4000-8000-0000000000a1') $$,
+  'member lane: …and a second one');
+select results_eq(
+  $$ select post_count from public.communities where id = '0f100000-0000-4000-8000-0000000000a1' $$,
+  ARRAY[2], 'member lane: the trigger run as the member moved post_count to 2 (the update gate did not block it)');
+select lives_ok(
+  $$ update public.feed_posts set deleted_at = now(), deleted_by_user_id = '0f100000-0000-4000-8000-000000000002'
+      where id = '0f100000-0000-4000-8000-0000000000b1' $$,
+  'member lane: the author soft-deletes their own post through the allow-list guard');
+select results_eq(
+  $$ select post_count from public.communities where id = '0f100000-0000-4000-8000-0000000000a1' $$,
+  ARRAY[1], 'member lane: …and post_count followed the soft delete (2 -> 1)');
+select is_empty(
+  $$ select c.id from public.communities c
+      where c.id = '0f100000-0000-4000-8000-0000000000a1'
+        and c.post_count <> (select count(*) from public.feed_posts p where p.community_id = c.id and p.deleted_at is null) $$,
+  'member lane: reconciliation, post_count equals the live posts of the member community');
+reset role;
+
+-- `social` OFF: new publication stops at the database, the counter must still move (A11).
+update public.tenant_modules set enabled = false
+ where tenant_id = '0f100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('0f100000-0000-4000-8000-000000000001', '0f100000-0000-4000-8000-000000000002');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('0f100000-0000-4000-8000-000000000001', '0f100000-0000-4000-8000-000000000002', 'm3', 'community', '0f100000-0000-4000-8000-0000000000a1') $$,
+  '42501', null, 'social off: a new community post is refused in SQL (not the 30 s flags cache)');
+select lives_ok(
+  $$ update public.feed_posts set deleted_at = now(), deleted_by_user_id = '0f100000-0000-4000-8000-000000000002'
+      where id = '0f100000-0000-4000-8000-0000000000b2' $$,
+  'social off: the author can still soft-delete their post');
+select results_eq(
+  $$ select post_count from public.communities where id = '0f100000-0000-4000-8000-0000000000a1' $$,
+  ARRAY[0], 'social off: post_count still moved (1 -> 0): the member update gate has no social term (A11)');
+reset role;
+select is_empty(
+  $$ select c.id from public.communities c
+      where c.post_count <> (select count(*) from public.feed_posts p where p.community_id = c.id and p.deleted_at is null) $$,
+  'reconciliation over EVERY community, member communities included, after the member-lane writes');
 
 select * from finish();
 rollback;

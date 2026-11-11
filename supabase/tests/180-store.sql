@@ -749,8 +749,18 @@ analyze public.feed_posts;
 -- an estimate, not usability: the pin is about the index being walkable in order, so both bitmap and
 -- sequential plans are taken off the table and the name pin below stays falsifiable (a gate that made
 -- the ordered walk impossible would leave only an unordered scan + Sort, which this pin would not match).
+--
+-- `enable_sort = off` joins them (10-03, the same owner decision a second time). The member communities add
+-- ONE more restrictive select clause of that form (`feed_posts_member_hidden_community_gate`), the row
+-- estimate shrinks again, and the planner now prefers an Index Scan on `feed_posts_tenant_author_idx` plus a
+-- `Sort` over the ordered walk of `created_all_idx`. The pin is still about the ordered walk being POSSIBLE,
+-- so the in-memory Sort is taken off the table too: a gate that made the ordered walk impossible would leave
+-- only an unordered scan + Sort, which the name pin below would not match, so it stays falsifiable. This
+-- statement is the 08.2-era merged shape (no `visibility` predicate); what Início actually runs since Phase 9
+-- is pinned BY NAME with every gate in place by 201 and, for the third audience, by 232 section 7.
 set local enable_seqscan = off;
 set local enable_bitmapscan = off;
+set local enable_sort = off;
 select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004');
 do $$
 declare
@@ -787,6 +797,7 @@ $$;
 reset role;
 reset enable_seqscan;
 reset enable_bitmapscan;
+reset enable_sort;
 select matches(current_setting('tests.plan_merged'), 'InitPlan',
   'P41: the member-lane merged feed evaluates the gate as an InitPlan (once per statement, never per row)');
 select matches(current_setting('tests.plan_merged'), 'feed_posts_tenant_created_all_idx',
