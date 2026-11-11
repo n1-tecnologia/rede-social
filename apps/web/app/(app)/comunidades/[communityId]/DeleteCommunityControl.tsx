@@ -5,11 +5,20 @@ import { Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
+import type { CommunityRelation } from '@/lib/communities';
 import { deleteCommunityAction } from '../actions';
 
 export interface DeleteCommunityControlProps {
   communityId: string;
   className?: string;
+  /**
+   * 10-14 (UI-D-712, UI-D-714): which confirmation copy this viewer reads, computed by the host from the
+   * API's flags (`communityRelation`). `organization` (the default) and `owner` read the shipped
+   * confirmation; `moderator` reads the one that states the consequence and that the creator is not told.
+   * A MEMBER community (`owner` or `moderator`) never has the store refusal block: a member cannot link
+   * products to a community (D-713), so an `unlock_active` answer cannot be real there.
+   */
+  relation?: CommunityRelation;
 }
 
 /** What the refusal dialog draws: the products the API named and the TOTAL (D-554). */
@@ -44,7 +53,11 @@ interface Blocked {
  * page whose community is no longer archived (error toast, `refresh` so the trigger disappears) and a
  * failure (error toast, the page stays and the trigger remains available).
  */
-export function DeleteCommunityControl({ communityId, className }: DeleteCommunityControlProps) {
+export function DeleteCommunityControl({
+  communityId,
+  className,
+  relation = 'organization',
+}: DeleteCommunityControlProps) {
   const t = useTranslations('communities');
   const router = useRouter();
   const toast = useToast();
@@ -52,6 +65,8 @@ export function DeleteCommunityControl({ communityId, className }: DeleteCommuni
   // The refusal is kept after it closes, so the dialog does not empty itself while it fades out.
   const [blocked, setBlocked] = useState<Blocked | null>(null);
   const [blockedOpen, setBlockedOpen] = useState(false);
+  const copy = relation === 'moderator' ? 'confirm.deleteMod' : 'confirm.delete';
+  const memberCommunity = relation !== 'organization';
 
   const remove = async () => {
     const result = await deleteCommunityAction(communityId);
@@ -70,6 +85,11 @@ export function DeleteCommunityControl({ communityId, className }: DeleteCommuni
         router.refresh();
         return;
       case 'unlock_active':
+        // A member community has no Loja link to name (D-713): read as the generic failure.
+        if (memberCommunity) {
+          toast.show({ tone: 'error', message: t('errors.delete') });
+          return;
+        }
         setBlocked({ products: result.products, count: result.count });
         setBlockedOpen(true);
         return;
@@ -96,10 +116,10 @@ export function DeleteCommunityControl({ communityId, className }: DeleteCommuni
         open={open}
         tone="danger"
         icon={Trash2}
-        title={t('confirm.delete.title')}
-        body={t('confirm.delete.body')}
-        confirmLabel={t('confirm.delete.confirm')}
-        cancelLabel={t('confirm.delete.cancel')}
+        title={t(`${copy}.title`)}
+        body={t(`${copy}.body`)}
+        confirmLabel={t(`${copy}.confirm`)}
+        cancelLabel={t(`${copy}.cancel`)}
         onConfirm={remove}
         onClose={() => setOpen(false)}
         onError={(error) => {
@@ -108,34 +128,36 @@ export function DeleteCommunityControl({ communityId, className }: DeleteCommuni
           toast.show({ tone: 'error', message: t('errors.delete') });
         }}
       />
-      <ConfirmDialog
-        open={blockedOpen && blocked !== null}
-        tone="brand"
-        scrollBody
-        title={t('blocked.title')}
-        body={blocked ? t('blocked.body', { count: blocked.count }) : undefined}
-        confirmLabel={t('blocked.confirm')}
-        cancelLabel={t('blocked.cancel')}
-        onConfirm={() => router.push('/loja')}
-        onClose={() => setBlockedOpen(false)}
-      >
-        {blocked ? (
-          <>
-            <ul className="list-disc pl-4 text-sm text-text">
-              {blocked.products.map((product) => (
-                <li key={product.id} className="break-words">
-                  {product.name}
-                </li>
-              ))}
-            </ul>
-            {blocked.count > blocked.products.length ? (
-              <p className="mt-1 text-sm text-text-secondary">
-                {t('blocked.more', { count: blocked.count - blocked.products.length })}
-              </p>
-            ) : null}
-          </>
-        ) : null}
-      </ConfirmDialog>
+      {memberCommunity ? null : (
+        <ConfirmDialog
+          open={blockedOpen && blocked !== null}
+          tone="brand"
+          scrollBody
+          title={t('blocked.title')}
+          body={blocked ? t('blocked.body', { count: blocked.count }) : undefined}
+          confirmLabel={t('blocked.confirm')}
+          cancelLabel={t('blocked.cancel')}
+          onConfirm={() => router.push('/loja')}
+          onClose={() => setBlockedOpen(false)}
+        >
+          {blocked ? (
+            <>
+              <ul className="list-disc pl-4 text-sm text-text">
+                {blocked.products.map((product) => (
+                  <li key={product.id} className="break-words">
+                    {product.name}
+                  </li>
+                ))}
+              </ul>
+              {blocked.count > blocked.products.length ? (
+                <p className="mt-1 text-sm text-text-secondary">
+                  {t('blocked.more', { count: blocked.count - blocked.products.length })}
+                </p>
+              ) : null}
+            </>
+          ) : null}
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

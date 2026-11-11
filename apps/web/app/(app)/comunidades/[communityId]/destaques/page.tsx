@@ -85,6 +85,7 @@ export default async function CommunityHighlightsPage({
         archived={archived}
         editTarget={editTarget}
         publishHref={`/stories/publicar?comunidade=${community.id}`}
+        member={community.kind === 'member'}
       />
     </div>
   );

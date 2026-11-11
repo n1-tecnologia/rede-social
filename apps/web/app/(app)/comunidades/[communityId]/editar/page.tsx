@@ -2,7 +2,7 @@ import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { CommunityForm } from '@/app/(app)/comunidades/CommunityForm';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { loadCommunity } from '@/lib/communities';
+import { communityRelation, loadCommunity } from '@/lib/communities';
 import { getCommunityAccess } from '@/lib/store';
 import { communityAccessProductsView } from '@/lib/store-view';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -51,9 +51,16 @@ export default async function EditCommunityPage({
   // right to see the community has already met `notFound` above.
   if (!result.community.viewer.canEdit) redirect(`/comunidades/${result.community.id}`);
 
+  // UI-D-712, UI-D-714: which lifecycle copy this viewer reads, from the API's flags. A member
+  // community's form never renders the store "Acesso" block (D-713: a member cannot link products), so
+  // its access is not even read.
+  const relation = communityRelation(result.community);
+  const memberMode = relation !== 'organization';
+
   const storeOn = bootstrap.modules.some((module) => module.key === 'store');
   const canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
-  const access = storeOn && canManageStore ? await getCommunityAccess(result.community.id) : null;
+  const access =
+    storeOn && canManageStore && !memberMode ? await getCommunityAccess(result.community.id) : null;
   const accessProducts = access?.products
     ? communityAccessProductsView(access.products)
     : undefined;
@@ -71,6 +78,8 @@ export default async function EditCommunityPage({
       }}
       tenantName={bootstrap.tenant.displayName}
       accessProducts={accessProducts}
+      memberMode={memberMode}
+      relation={relation}
     />
   );
 }

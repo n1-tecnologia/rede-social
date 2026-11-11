@@ -22,7 +22,19 @@ vi.mock('@/lib/bootstrap', () => ({
     modules: mocks.modules,
   }),
 }));
-vi.mock('@/lib/communities', () => ({ loadCommunity: async () => mocks.result }));
+vi.mock('@/lib/communities', async (orig) => ({
+  ...(await orig<typeof import('@/lib/communities')>()),
+  loadCommunity: async () => mocks.result,
+}));
+vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
+vi.mock('@/lib/env', () => ({
+  env: {
+    API_URL: 'http://api.test',
+    PLATFORM_HOST: 'rede-social.test',
+    NEXT_PUBLIC_SUPABASE_URL: 'http://supabase.test',
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test-key',
+  },
+}));
 vi.mock('@/lib/store', () => ({ getCommunityAccess: async () => null }));
 vi.mock('@/lib/store-view', () => ({ communityAccessProductsView: () => [] }));
 vi.mock('@/lib/tenant-host', () => ({ getHostTenant: async () => ({ mode: mocks.hostMode }) }));

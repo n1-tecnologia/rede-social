@@ -113,6 +113,18 @@
         "confirm": "Arquivar",
         "cancel": "Cancelar"
       },
+      "archiveOwn": {
+        "title": "Arquivar comunidade?",
+        "body": "Ela sai da lista e ninguém mais publica nela. Você pode reativar quando quiser.",
+        "confirm": "Arquivar",
+        "cancel": "Manter comunidade"
+      },
+      "archiveMod": {
+        "title": "Arquivar comunidade?",
+        "body": "Ela sai da lista e ninguém mais publica nela. A pessoa que criou não é avisada.",
+        "confirm": "Arquivar",
+        "cancel": "Manter comunidade"
+      },
       "reactivate": {
         "title": "Reativar comunidade?",
         "body": "Ela volta para a lista de comunidades e pode receber publicações de novo.",
@@ -124,6 +136,12 @@
         "body": "A comunidade e as publicações dela, com curtidas e comentários, deixam de aparecer para todos. Não há como desfazer por aqui.",
         "confirm": "Excluir",
         "cancel": "Cancelar"
+      },
+      "deleteMod": {
+        "title": "Excluir comunidade?",
+        "body": "A comunidade e as publicações dela, com curtidas e comentários, deixam de aparecer para todos. A pessoa que criou não é avisada. Não há como desfazer por aqui.",
+        "confirm": "Excluir",
+        "cancel": "Manter comunidade"
       }
     },
     "blocked": {

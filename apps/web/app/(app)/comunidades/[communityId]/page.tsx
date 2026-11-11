@@ -23,7 +23,7 @@ import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { loadAuthorInstagrams, withAuthorInstagrams } from '@/lib/author-instagram';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { loadCommunity } from '@/lib/communities';
+import { communityRelation, loadCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
 import { postAdminLabel, postCardView } from '@/lib/feed-view';
 import { canBrowseMemberDirectory } from '@/lib/member-directory';
@@ -300,6 +300,15 @@ export default async function CommunityPage({
   ]);
   const now = Date.now();
   const { media, ...card } = postCardLabels(tf);
+  // 10-14 (carry-forward of 10-11): a post inside a MEMBER community leaves that community, not "Explorar"
+  // (D-702: it was never in Início or Explorar), so the author's delete body and the moderator's removal
+  // body name the community. The organization's community keeps the shipped wording.
+  const postMenuLabelsFor = (kind: 'organization' | 'member') => ({
+    ...postMenuLabels(tf),
+    ...(kind === 'member'
+      ? { deleteBodyMember: tf('deleteCommunity.body'), removeBody: tf('removeCommunity.body') }
+      : {}),
+  });
 
   /**
    * HIGHLIGHT-04 / UI-D-64: under "Destaques", the community's NAMED HIGHLIGHTS — the same row
@@ -489,7 +498,11 @@ export default async function CommunityPage({
               <>
                 {tc('archived.note')}
                 <ReactivateCommunity communityId={community.id} />
-                <DeleteCommunityControl communityId={community.id} className="mt-2" />
+                <DeleteCommunityControl
+                  communityId={community.id}
+                  className="mt-2"
+                  relation={communityRelation(community)}
+                />
               </>
             ) : (
               tc('archived.note')
@@ -551,7 +564,7 @@ export default async function CommunityPage({
             error: tf('errors.generic'),
           }}
           menu={{
-            labels: postMenuLabels(tf),
+            labels: postMenuLabelsFor(community.kind),
             deletedLabel: tf('toasts.deleted'),
             removedLabel: tf('toasts.removed'),
             onDelete: deletePostAction,

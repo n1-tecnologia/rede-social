@@ -125,6 +125,27 @@ export function communityEntryState(input: {
 }
 
 /**
+ * Which of the three lifecycle copy variants a viewer reads on a community (10-14, UI-D-712, UI-D-714):
+ *
+ *  - `organization`: the organization's community; the shipped confirmations, unchanged;
+ *  - `owner`: the creator of a MEMBER community; the archive body drops the feed sentence (a member
+ *    community's posts are in no feed) and says it can be reactivated;
+ *  - `moderator`: any other viewer the API lets edit a MEMBER community; the copy states the consequence
+ *    and that the creator is not told.
+ *
+ * Read off the API's own flags (`kind`, `viewer.isOwner`) and never a role or an id comparison, so a
+ * later change of who may moderate needs no web edit. Only meaningful for a viewer who may edit.
+ */
+export type CommunityRelation = 'organization' | 'owner' | 'moderator';
+
+export function communityRelation(
+  community: Pick<CommunitySummary, 'kind' | 'viewer'>,
+): CommunityRelation {
+  if (community.kind !== 'member') return 'organization';
+  return community.viewer.isOwner ? 'owner' : 'moderator';
+}
+
+/**
  * Whether the member owns at least one ACTIVE community (10-12, UI-D-701, UI-D-705): "Destacar" in the
  * story viewer's menu and in "Seus stories" exists only then. The list read already says it, in the
  * caller's own `memberQuota.ownedActive`, so one row of it is enough. It is a UX hint (the API refuses

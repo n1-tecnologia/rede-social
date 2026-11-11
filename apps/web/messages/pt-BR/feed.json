@@ -141,6 +141,12 @@
     "deleteMember": {
       "body": "Ela sai de Explorar para todos que seguem você. Os comentários também deixam de aparecer."
     },
+    "deleteCommunity": {
+      "body": "Ela sai da comunidade para todos os membros. Os comentários também deixam de aparecer."
+    },
+    "removeCommunity": {
+      "body": "Ela sai da comunidade e do link compartilhado para todos. A pessoa não é avisada."
+    },
     "remove": {
       "title": "Remover publicação?",
       "body": "Ela sai de Explorar e do link compartilhado para todos. A pessoa não é avisada.",

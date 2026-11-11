@@ -19,6 +19,7 @@ import {
 import {
   BottomSheet,
   Button,
+  ConfirmDialog,
   EmptyState,
   InfiniteScroll,
   Skeleton,
@@ -89,6 +90,14 @@ export interface HighlightManagerProps {
   editTarget: string | null;
   /** The empty-history CTA of the picker ("Publicar story"). */
   publishHref: string;
+  /**
+   * 10-14 (UI-D-713, UI-D-705): the creator of a MEMBER community curates here. "Adicionar stories"
+   * lists their OWN stories (the same pager) under a helper that says every member will read the story
+   * in the community, and the first switch-on of each opening of the picker asks first (the confirm of
+   * plan 12, `stories.highlights.memberConfirm`); switching off is always immediate. Absent: the
+   * organization's manager, exactly as shipped.
+   */
+  member?: boolean;
 }
 
 type EditState = {
@@ -145,6 +154,7 @@ export function HighlightManager({
   archived,
   editTarget,
   publishHref,
+  member = false,
 }: HighlightManagerProps) {
   const t = useTranslations('stories');
   const tm = useTranslations('media');
@@ -498,6 +508,8 @@ export function HighlightManager({
   );
 
   const onStepChange = (step: HighlightEditStep) => {
+    // Each OPENING of the picker asks again (UI-D-705); leaving and returning forgets the confirm.
+    if (step === 'picker') memberConfirmed.current = false;
     if (step === 'picker' && picker === null) {
       setPicker({ rows: [], cursor: null, loaded: false });
       void loadPickerPage(undefined);
@@ -531,8 +543,28 @@ export function HighlightManager({
     [editViews],
   );
 
+  /** UI-D-705, member mode: the once-per-opening confirm, answered by the dialog below. */
+  const memberConfirmed = useRef(false);
+  const memberAnswer = useRef<((ok: boolean) => void) | null>(null);
+  const [asking, setAsking] = useState(false);
+  const askMember = () =>
+    new Promise<boolean>((resolve) => {
+      memberAnswer.current = resolve;
+      setAsking(true);
+    });
+  const answerMember = (ok: boolean) => {
+    const resolve = memberAnswer.current;
+    memberAnswer.current = null;
+    resolve?.(ok);
+  };
+
   const togglePicker = async (storyId: string, next: boolean): Promise<boolean> => {
     if (!current) return false;
+    if (member && next && !memberConfirmed.current) {
+      // Declined: nothing is written and the switch reverts to off.
+      if (!(await askMember())) return false;
+      memberConfirmed.current = true;
+    }
     const target = { communityId: place.communityId, revalidate: true };
     const result = next
       ? await addStoryToHighlightAction(storyId, current.id, target)
@@ -731,7 +763,9 @@ export function HighlightManager({
             autoHelper: t('highlights.cover.autoHelper'),
             noImages: t('highlights.cover.noImages'),
             pickerTitle: t('highlights.picker.title'),
-            pickerHelper: t('highlights.picker.helper'),
+            pickerHelper: member
+              ? t('highlights.picker.memberHelper')
+              : t('highlights.picker.helper'),
             pickerRow: (row) => t('highlights.picker.row', { date: row.title }),
             confirmDelete: {
               title: t('highlights.confirmDelete.title'),
@@ -739,6 +773,22 @@ export function HighlightManager({
               confirm: t('highlights.confirmDelete.confirm'),
               cancel: t('highlights.confirmDelete.cancel'),
             },
+          }}
+        />
+      ) : null}
+      {member ? (
+        <ConfirmDialog
+          open={asking}
+          tone="brand"
+          title={t('highlights.memberConfirm.title')}
+          body={t('highlights.memberConfirm.body')}
+          confirmLabel={t('highlights.memberConfirm.confirm')}
+          cancelLabel={t('highlights.memberConfirm.cancel')}
+          onConfirm={() => answerMember(true)}
+          onClose={() => {
+            setAsking(false);
+            // Closing without a confirm (the cancel, the backdrop, Escape) is "Não mostrar".
+            answerMember(false);
           }}
         />
       ) : null}

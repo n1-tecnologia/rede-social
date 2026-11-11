@@ -32,6 +32,7 @@ import {
 import { CoverSizeHint } from '@/components/media/CoverSizeHint';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import type { CommunityRelation } from '@/lib/communities';
 import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import {
   type CommunityAccessProductView,
@@ -107,6 +108,13 @@ export type CommunityFormProps = {
    */
   memberMode?: boolean;
   /**
+   * 10-14 (UI-D-712, UI-D-714), edit mode: which lifecycle copy variant this viewer reads on the archive
+   * and delete confirmations. The host computes it from the API's flags (`communityRelation`), never from
+   * a role. Absent means `owner` in `memberMode` and `organization` otherwise. The `moderator` also gets
+   * no audience line: "Só você publica nela" would be false for them.
+   */
+  relation?: CommunityRelation;
+  /**
    * 10-13 (UI-D-707): `/comunidades/nova` was opened at the member's limit. The form is NOT rendered:
    * the limit screen is, naming `limit`. Decided by the host from the quota the list read carries.
    */
@@ -178,6 +186,7 @@ function CommunityFormBody({
   tenantName,
   accessProducts,
   memberMode = false,
+  relation: relationProp,
 }: CommunityFormProps) {
   const t = useTranslations('communities');
   /** Full keys (`communities.form.access.…`), shared with `lib/store-view`'s sentence builder. */
@@ -187,7 +196,18 @@ function CommunityFormBody({
   const router = useRouter();
 
   /** UI-D-707: the line under "Descrição" of a member's form; the organization's form carries none. */
-  const audienceNote = memberMode ? t('form.audienceMember', { tenant: tenantName }) : undefined;
+  const relation: CommunityRelation = relationProp ?? (memberMode ? 'owner' : 'organization');
+  const audienceNote =
+    memberMode && relation !== 'moderator'
+      ? t('form.audienceMember', { tenant: tenantName })
+      : undefined;
+  /** UI-D-712, UI-D-714: the archive confirmation's copy key, by the viewer's relation. */
+  const archiveCopy =
+    relation === 'owner'
+      ? 'confirm.archiveOwn'
+      : relation === 'moderator'
+        ? 'confirm.archiveMod'
+        : 'confirm.archive';
 
   const start = initial ?? EMPTY;
   const [name, setName] = useState(start.name);
@@ -638,7 +658,7 @@ function CommunityFormBody({
                 </Button>
                 {/* 09.3 (D-553): deleting an ARCHIVED community is live, behind its own confirmation.
                     Edit mode always has the id, and only this archived branch offers it. */}
-                <DeleteCommunityControl communityId={communityId} />
+                <DeleteCommunityControl communityId={communityId} relation={relation} />
               </>
             ) : (
               <Button
@@ -671,10 +691,10 @@ function CommunityFormBody({
       <ConfirmDialog
         open={archiving}
         tone="danger"
-        title={t('confirm.archive.title')}
-        body={t('confirm.archive.body')}
-        confirmLabel={t('confirm.archive.confirm')}
-        cancelLabel={t('confirm.archive.cancel')}
+        title={t(`${archiveCopy}.title`)}
+        body={t(`${archiveCopy}.body`)}
+        confirmLabel={t(`${archiveCopy}.confirm`)}
+        cancelLabel={t(`${archiveCopy}.cancel`)}
         onConfirm={archive}
         onClose={() => setArchiving(false)}
         onError={(error) => {
