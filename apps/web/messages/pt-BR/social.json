@@ -60,6 +60,10 @@
       "emptyTitle": "Você não segue ninguém",
       "emptyBody": "Encontre pessoas para ver o que elas publicam em Explorar.",
       "cta": "Encontrar pessoas"
+    },
+    "stories": {
+      "region": "Stories de quem você segue",
+      "regionStaff": "Stories dos membros"
     }
   }
 }

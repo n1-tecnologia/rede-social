@@ -4,6 +4,7 @@ import type { CommentView } from '@rede-social/module-feed/ui';
 import {
   createStoryCommentSchema,
   publishStorySchema,
+  storyAuthorsQuerySchema,
   storyCommentsQuerySchema,
   storyQuerySchema,
 } from '@rede-social/module-stories/contracts';
@@ -20,6 +21,8 @@ import {
   createStoryComment,
   deleteStory,
   deleteStoryComment,
+  getAuthorStories,
+  getStoryAuthors,
   getStoryComments,
   likeStory,
   loadOwnStories,
@@ -28,7 +31,14 @@ import {
   storyCommentIssue,
   unlikeStory,
 } from '@/lib/stories';
-import { type StoryHistoryItemView, storyCommentView, storyHistoryView } from '@/lib/story-view';
+import {
+  type AuthorRowItem,
+  type StoryHistoryItemView,
+  type StoryViewerItemView,
+  storyCommentView,
+  storyHistoryView,
+  storyViewerItem,
+} from '@/lib/story-view';
 
 /**
  * The publish screen's own server action (STORY-01), in the three conventions every server action in
@@ -428,4 +438,85 @@ export async function markStoriesSeenAction(storyIds: string[]): Promise<boolean
     });
     return false;
   }
+}
+
+/* ── The Explorar row (10-12: MSTORY-03, D-714, D-717) ────────────────────────────────────────── */
+
+/**
+ * One author's group, read when the member taps their circle (and again on the viewer's retry). The
+ * same three conventions as every action here: the id is untrusted and refused before any request if
+ * it is not a uuid; every miss is ONE answer with no detail (the bare 404 and an empty group alike,
+ * a group with nothing to play is a miss), which the surface shows as the group error with its retry;
+ * a lost session is a navigation taken OUTSIDE the try/catch. The items are mapped with the strip's
+ * own `storyViewerItem` from the server's single clock read, so a story looks identical whichever
+ * circle opened it (UI-D-14). It never revalidates: it is a read.
+ */
+export type AuthorStoriesResult = { ok: true; items: StoryViewerItemView[] } | { ok: false };
+
+export async function loadAuthorStoriesAction(membershipId: string): Promise<AuthorStoriesResult> {
+  const id = z.uuid().safeParse(membershipId);
+  if (!id.success) return { ok: false };
+
+  let refusal: string | null = null;
+  let result: AuthorStoriesResult = { ok: false };
+  try {
+    const group = await getAuthorStories(id.data);
+    const now = Date.now();
+    if (group.items.length > 0) {
+      result = { ok: true, items: group.items.map((story) => storyViewerItem(story, now)) };
+    }
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    // Shape only: a caption and a display name are member content and never reach a log line.
+    if (!refusal && !(error instanceof ApiClientError && error.status === 404)) {
+      console.error('stories.author_group_failed', {
+        status: error instanceof ApiClientError ? error.status : null,
+      });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * The moderator's next page of circles (UI-D-699): plain author data plus the next cursor, which the
+ * client turns into circles and groups with the SAME builders the server used for the first page. The
+ * cursor is OPAQUE (forwarded as the previous page returned it) and untrusted: an empty or oversized
+ * one sends no request. A failure is `{ ok: false }`, which leaves the trailing "Recarregar" circle
+ * with the loaded ones intact; a lost session is a navigation.
+ */
+export type StoryAuthorsPageResult =
+  | { ok: true; authors: AuthorRowItem[]; nextCursor: string | null }
+  | { ok: false };
+
+export async function loadStoryAuthorsPageAction(cursor: string): Promise<StoryAuthorsPageResult> {
+  const query = storyAuthorsQuerySchema.safeParse({ cursor });
+  if (!query.success || typeof cursor !== 'string' || cursor.length === 0) return { ok: false };
+
+  let refusal: string | null = null;
+  let result: StoryAuthorsPageResult = { ok: false };
+  try {
+    const page = await getStoryAuthors({ cursor: query.data.cursor });
+    result = {
+      ok: true,
+      authors: page.items.map(({ membershipId, displayName, avatarUrl, hasUnseen }) => ({
+        membershipId,
+        displayName,
+        avatarUrl,
+        hasUnseen,
+      })),
+      nextCursor: page.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) {
+      console.error('stories.authors_page_failed', {
+        status: error instanceof ApiClientError ? error.status : null,
+      });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
 }

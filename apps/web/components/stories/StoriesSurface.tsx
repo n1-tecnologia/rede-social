@@ -5,17 +5,19 @@ import {
   type StoriesStripProps,
   type StoryStripCircle,
 } from '@rede-social/module-stories/ui';
-import { Pencil } from 'lucide-react';
+import { Pencil, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadHighlightItemsAction } from '@/app/(app)/stories/highlight-actions';
 import {
   type likeStoryAction,
+  loadAuthorStoriesAction,
   markStoriesSeenAction,
   type unlikeStoryAction,
 } from '@/app/(app)/stories/story-actions';
 import { sendSeenBeacon } from '@/lib/seen-batch';
 import {
+  fillName,
   type RowCircleView,
   type StoryGroupView,
   type StoryViewerItemView,
@@ -121,6 +123,12 @@ export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
      */
     seenRing?: { seenLabel: string; unseenLabel: string };
     /**
+     * 10-12 (UI-D-699): the author circles' two accessible-name TEMPLATES (`{name}` slot), so the
+     * surface can re-derive an author's ring and name on close from the session's seen set. Present
+     * only where the row has author circles (Explorar).
+     */
+    authorRing?: { seen: string; unseen: string };
+    /**
      * 2026-10-20: the viewer's share control — the tenant's VERIFIED primary origin and its display
      * name, both resolved on the server. Absent: no share control.
      */
@@ -133,10 +141,19 @@ type Opened = { group: number; index: number };
 /** R-P5: the buffer is flushed when it reaches this many ids (the contract caps a batch at 50). */
 const SEEN_FLUSH_AT = 10;
 
-/** The manage circle's glyph (UI-D-63 a): `Pencil` 20, on the module's tertiary disc. */
+/**
+ * The two plain-data glyph discs, drawn HERE because a React node cannot cross the server/client
+ * boundary: the manage circle's `Pencil` 20 (UI-D-63 a) and a member's neutral `User` (10-12,
+ * UI-D-698), both on the module's tertiary disc.
+ */
 function toStripCircle(circle: RowCircleView): StoryStripCircle {
-  if (circle.disc.kind !== 'manage') return circle as StoryStripCircle;
-  return { ...circle, disc: { kind: 'glyph', icon: <Pencil aria-hidden size={20} /> } };
+  if (circle.disc.kind === 'manage') {
+    return { ...circle, disc: { kind: 'glyph', icon: <Pencil aria-hidden size={20} /> } };
+  }
+  if (circle.disc.kind === 'person') {
+    return { ...circle, disc: { kind: 'glyph', icon: <User aria-hidden size={28} /> } };
+  }
+  return circle as StoryStripCircle;
 }
 
 export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: StoriesSurfaceProps) {
@@ -155,25 +172,42 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
   /** CR-01: the likes and comment counts of this page's life, handed to every host it mounts. */
   const [interactions] = useState(createStoryInteractions);
 
+  const authorRing = viewer?.authorRing;
+  const [opened, setOpened] = useState<Opened | null>(null);
+  /** Highlight and author items read so far, by group key — kept for the page's life. */
+  const [loaded, setLoaded] = useState<Record<string, StoryViewerItemView[]>>({});
+
   const circles = useMemo(
     () =>
       rowCircles.map((circle) => {
         const stripCircle = toStripCircle(circle);
-        if (!seenRing || stripCircle.kind !== 'open') return stripCircle;
+        if (stripCircle.kind !== 'open') return stripCircle;
+        const group = viewer?.groups[stripCircle.group];
         // UI-D-61: ONLY the circle that opens the tenant's own stories wears the seen ring; a
         // highlight circle is an archive and keeps the neutral ring the server gave it.
-        const group = viewer?.groups[stripCircle.group];
-        if (group?.kind !== 'tenant' || group.items === null) return stripCircle;
-        return {
-          ...stripCircle,
-          ...tenantSeenDecoration(tenantSeenState(group.items, seenAtClose), seenRing),
-        };
+        if (seenRing && group?.kind === 'tenant' && group.items !== null) {
+          return {
+            ...stripCircle,
+            ...tenantSeenDecoration(tenantSeenState(group.items, seenAtClose), seenRing),
+          };
+        }
+        // 10-12 (UI-D-699): an AUTHOR's circle keeps the server's ring (`hasUnseen`) until the group
+        // has been read; from then on the ring and the name follow what the session has shown, so
+        // closing the viewer greys it with no refresh. The member's own circle never turns brand.
+        if (authorRing && group?.kind === 'member' && group.member?.isSelf === false) {
+          const items = group.items ?? loaded[group.key] ?? null;
+          if (items === null) return stripCircle;
+          const unseen = tenantSeenState(items, seenAtClose).anyUnseen;
+          return {
+            ...stripCircle,
+            ring: unseen ? ('brand' as const) : ('neutral' as const),
+            actionLabel: fillName(unseen ? authorRing.unseen : authorRing.seen, group.name),
+          };
+        }
+        return stripCircle;
       }),
-    [rowCircles, seenRing, viewer?.groups, seenAtClose],
+    [rowCircles, seenRing, authorRing, viewer?.groups, seenAtClose, loaded],
   );
-  const [opened, setOpened] = useState<Opened | null>(null);
-  /** Highlight items read so far, by group key — kept for the page's life. */
-  const [loaded, setLoaded] = useState<Record<string, StoryViewerItemView[]>>({});
   /** Group keys whose last read failed; cleared by the retry. */
   const [failed, setFailed] = useState<Record<string, boolean>>({});
   /** Reads in flight, by group key: the in-flight dedupe (T-05.2-24). */
@@ -250,33 +284,45 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
   );
 
   /**
-   * The lazy read (R-P6). Only a HIGHLIGHT group that has no items yet is ever requested, at most
-   * once at a time; a failure marks the group for the viewer's error frame and is retried only on
-   * the member's own tap.
+   * The lazy read (R-P6). Only a HIGHLIGHT group or an AUTHOR group (10-12) that has no items yet is
+   * ever requested, at most once at a time; a failure marks the group for the viewer's error frame
+   * and is retried only on the member's own tap. It answers the items it read (or already held), or
+   * `null` when the read failed or one is already in flight.
    */
   const requestGroup = useCallback(
-    async (g: number) => {
+    async (g: number): Promise<StoryViewerItemView[] | null> => {
       const group = viewer?.groups[g];
-      if (!group || group.items !== null || group.highlightId === null) return;
+      if (!group || group.items !== null) return null;
+      const { highlightId, member } = group;
+      const read =
+        highlightId !== null
+          ? () => loadHighlightItemsAction(highlightId)
+          : member
+            ? () => loadAuthorStoriesAction(member.membershipId)
+            : null;
+      if (read === null) return null;
       const key = group.key;
-      if (loadedRef.current[key] || inFlight.current.has(key)) return;
+      const held = loadedRef.current[key];
+      if (held) return held;
+      if (inFlight.current.has(key)) return null;
       inFlight.current.add(key);
       let items: StoryViewerItemView[] | null = null;
       try {
-        const result = await loadHighlightItemsAction(group.highlightId);
+        const result = await read();
         if (result.ok) items = result.items;
       } catch (error) {
         // A transport failure is the same group error as a refusal; shape only in the log.
-        console.error('stories.highlight_group_failed', { error: String(error) });
+        console.error('stories.group_failed', { error: String(error) });
       } finally {
         inFlight.current.delete(key);
       }
       if (items) {
-        const read = items;
-        setLoaded((state) => ({ ...state, [key]: read }));
+        const got = items;
+        setLoaded((state) => ({ ...state, [key]: got }));
       } else {
         setFailed((state) => ({ ...state, [key]: true }));
       }
+      return items;
     },
     [viewer?.groups],
   );
@@ -379,27 +425,44 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
     onViewerClosed();
   }, [onViewerClosed]);
 
+  /** A tap on an author's circle while its group is still being read: the second tap does nothing. */
+  const opening = useRef(false);
   const open = useCallback(
-    (group: number, index: number) => {
+    async (group: number, index: number) => {
       const target = groups[group];
-      if (!target) return;
+      if (!target || opening.current) return;
       originRef.current = document.activeElement as HTMLElement | null;
+      let items = target.items;
+      if (items === null && target.kind === 'member') {
+        // An author's circle resumes at its first unseen story, which is only known once the group
+        // has been read: read it BEFORE the viewer opens. A failed read opens the viewer on the
+        // group's error frame and its retry, never a dead circle (UI-D-700).
+        opening.current = true;
+        try {
+          items = await requestGroup(group);
+        } finally {
+          opening.current = false;
+        }
+      }
       // D-105: the tenant circle resumes at its first unseen story — server flags plus what this
-      // session already showed — recomputed at every open, so a re-open after watching is right.
+      // session already showed — recomputed at every open, so a re-open after watching is right. So
+      // does another member's circle (10-12); the member's own group starts at its first story.
       const start =
-        seenRing && target.kind === 'tenant' && target.items
-          ? tenantSeenState(target.items, sessionSeen.current).resumeIndex
-          : index;
-      const story = target.items?.[start];
-      // A group of the tenant's stories names the story it opens on; a highlight keeps the URL
-      // (planning decision 3) — either way back pops exactly this entry.
+        seenRing && target.kind === 'tenant' && items
+          ? tenantSeenState(items, sessionSeen.current).resumeIndex
+          : target.kind === 'member' && target.member?.isSelf === false && items
+            ? tenantSeenState(items, sessionSeen.current).resumeIndex
+            : index;
+      const story = items?.[start];
+      // A group of the tenant's or an author's stories names the story it opens on; a highlight keeps
+      // the URL (planning decision 3) — either way back pops exactly this entry.
       const url =
         target.kind !== 'highlight' && story ? `/stories/${story.id}` : window.location.href;
       window.history.pushState(null, '', url);
       pushedRef.current = true;
       setOpened({ group, index: start });
     },
-    [groups, seenRing],
+    [groups, seenRing, requestGroup],
   );
 
   useEffect(() => {

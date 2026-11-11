@@ -823,7 +823,10 @@ describe('10-12 — the Explorar row (UI-D-697..UI-D-700, D-714, D-717)', () => 
   const rowLabels = () => authorRowLabels(tr);
   const PHOTO = '/v1/media/0b000000-0000-4000-8000-0000000000a1/w128';
 
-  function author(n: number, extra: Partial<import('@rede-social/module-stories/contracts').StoryAuthorCircle> = {}) {
+  function author(
+    n: number,
+    extra: Partial<import('@rede-social/module-stories/contracts').StoryAuthorCircle> = {},
+  ) {
     return {
       membershipId: `0e000000-0000-4000-8000-00000000000${n}`,
       displayName: `Pessoa ${n}`,
@@ -904,7 +907,6 @@ describe('10-12 — the Explorar row (UI-D-697..UI-D-700, D-714, D-717)', () => 
   });
 
   it('R6. an author group is lazy (items null), headed by the author, never by the tenant, and not a link', () => {
-    const labels = rowLabels();
     expect(authorGroupView(author(1, { avatarUrl: PHOTO }), false)).toEqual({
       key: 'author:0e000000-0000-4000-8000-000000000001',
       kind: 'member',
@@ -955,22 +957,27 @@ describe('10-12 — the Explorar row (UI-D-697..UI-D-700, D-714, D-717)', () => 
       const row = memberStoriesRow({ ownAvatarUrl: PHOTO, page }, labels);
       expect(row.groups).toEqual([]);
       expect(row.circles).toEqual([
-        expect.objectContaining({ kind: 'link', key: 'own', href: '/stories/publicar', badge: true }),
+        expect.objectContaining({
+          kind: 'link',
+          key: 'own',
+          href: '/stories/publicar',
+          badge: true,
+        }),
       ]);
     }
   });
 
-
-
   it('R12. who gets the row: a member and a moderator with social and stories on; support and either module off get none', () => {
-    const labels = rowLabels();
     const modules = (...keys: string[]) => keys.map((key) => ({ key }));
-    expect(explorarStoriesRowKind(['social.participate'], modules('social', 'stories'))).toBe('member');
-    expect(explorarStoriesRowKind(['moderation.manage'], modules('social', 'stories'))).toBe('moderator');
+    expect(explorarStoriesRowKind(['social.participate'], modules('social', 'stories'))).toBe(
+      'member',
+    );
+    expect(explorarStoriesRowKind(['moderation.manage'], modules('social', 'stories'))).toBe(
+      'moderator',
+    );
     expect(explorarStoriesRowKind([], modules('social', 'stories'))).toBeNull();
     expect(explorarStoriesRowKind(['social.participate'], modules('social'))).toBeNull();
     expect(explorarStoriesRowKind(['social.participate'], modules('stories'))).toBeNull();
     expect(explorarStoriesRowKind(['moderation.manage'], modules('social'))).toBeNull();
   });
-
 });

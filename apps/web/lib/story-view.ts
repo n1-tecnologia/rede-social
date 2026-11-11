@@ -3,6 +3,8 @@ import type { CommentView } from '@rede-social/module-feed/ui';
 import {
   type HighlightSummary,
   STORY_MAX_PAGE_SIZE,
+  type StoryAuthorCircle,
+  type StoryAuthorsPage,
   type StoryComment,
   type StorySummary,
 } from '@rede-social/module-stories/contracts';
@@ -479,7 +481,9 @@ export function highlightCircleView(
  */
 export type RowCircleDisc =
   | Exclude<StoryStripCircle['disc'], { kind: 'glyph' }>
-  | { kind: 'manage' };
+  | { kind: 'manage' }
+  /** 10-12 (UI-D-698, UI-D-699): the neutral `User` glyph disc of a member with no photo, drawn client-side. */
+  | { kind: 'person' };
 type WithRowDisc<C> = C extends unknown ? Omit<C, 'disc'> & { disc: RowCircleDisc } : never;
 export type RowCircleView = WithRowDisc<StoryStripCircle>;
 
@@ -653,8 +657,14 @@ export function inicioRow(
  */
 export type StoryGroupView = {
   key: string;
-  kind: 'tenant' | 'highlight' | 'story';
+  /**
+   * `member` (10-12, UI-D-701) is ONE author's live stories in Explorar's row: headed by the author
+   * (name and photo), never the tenant, and read lazily through `loadAuthorStoriesAction`.
+   */
+  kind: 'tenant' | 'highlight' | 'story' | 'member';
   highlightId: string | null;
+  /** Set on a `member` group only: whose stories these are, and whether they are the caller's own. */
+  member?: { membershipId: string; isSelf: boolean };
   name: string;
   avatar:
     | { kind: 'logo'; src: string }
@@ -902,4 +912,198 @@ export function highlightEditStoryView(
       story.mediaKind === 'image' && coverAssetId !== null && story.mediaAssetId === coverAssetId,
     removeLabel: t('highlights.edit.remove', { date: dateLabel }),
   };
+}
+
+/* ── The Explorar row (10-12: UI-D-697..UI-D-700, D-714, D-717) ───────────────────────────────── */
+
+/**
+ * Who gets Explorar's story row (UI-D-697): a member (`social.participate`) or a holder of
+ * `moderation.manage`, with BOTH the `social` and the `stories` module on. The composed permissions
+ * are the same set the API's guards evaluate, never a role; `support_tenant` holds neither and gets
+ * no node, and with either module off `?aba=explorar` keeps UI-D-491's fallback. A holder of both
+ * permissions reads as the member (the `exploreEmpty` order).
+ */
+export function explorarStoriesRowKind(
+  permissions: readonly string[],
+  modules: ReadonlyArray<{ key: string }>,
+): 'member' | 'moderator' | null {
+  const on = (key: string) => modules.some((module) => module.key === key);
+  if (!on('social') || !on('stories')) return null;
+  if (permissions.includes('social.participate')) return 'member';
+  if (permissions.includes('moderation.manage')) return 'moderator';
+  return null;
+}
+
+/**
+ * Where a story publish door lives (Pitfall 12, SOCIAL-02). Giving members `stories.story.publish`
+ * must not draw the admin's "+ Seu story" in Início: Início is the ORGANIZATION's voice and needs
+ * `content.publish` as well; Explorar is the member's and needs `social.participate`. Both rules read
+ * the composed permissions, never a role.
+ */
+export function storyPublishDoorFor(
+  surface: 'inicio' | 'explorar',
+  permissions: readonly string[],
+): boolean {
+  if (!permissions.includes('stories.story.publish')) return false;
+  return permissions.includes(surface === 'explorar' ? 'social.participate' : 'content.publish');
+}
+
+/**
+ * The words of the row, read ONCE on the server. The two author names are TEMPLATES with a `{name}`
+ * slot (read with `.raw`: `next-intl` would raise on an unfilled placeholder) so the moderator's
+ * next page can name its circles on the client; the display name is inserted AFTER the split, never
+ * re-expanded.
+ */
+export type AuthorRowLabels = {
+  ownLabel: string;
+  ownAction: string;
+  ownOpen: string;
+  author: string;
+  authorUnseen: string;
+};
+
+export function authorRowLabels(t: StoryLabelReader): AuthorRowLabels {
+  return {
+    ownLabel: t('own.label'),
+    ownAction: t('own.action'),
+    ownOpen: t('circle.own'),
+    author: String(t.raw('circle.author')),
+    authorUnseen: String(t.raw('circle.authorUnseen')),
+  };
+}
+
+/** `{name}` filled with a function replacement, so `$&` and friends in a display name stay text. */
+export function fillName(template: string, name: string): string {
+  return template.replace(/\{name\}/g, () => name);
+}
+
+/** What the row needs of one author: the circle's identity and its unseen flag (the moderator's next page). */
+export type AuthorRowItem = Pick<
+  StoryAuthorCircle,
+  'membershipId' | 'displayName' | 'avatarUrl' | 'hasUnseen'
+>;
+
+export function authorGroupKey(membershipId: string): string {
+  return `author:${membershipId}`;
+}
+
+/** An author's disc: the photo with the neutral glyph behind it, or the glyph alone. Never initials. */
+function personDisc(avatarUrl: string | null): RowCircleDisc {
+  return avatarUrl !== null
+    ? { kind: 'photo', src: avatarUrl, fallback: { kind: 'glyph' } }
+    : { kind: 'person' };
+}
+
+/**
+ * One author's group for the viewer (UI-D-701): headed by the author's display name and photo, items
+ * `null` (read lazily when the member taps the circle). The name is not a link: the viewer is not a
+ * navigation surface.
+ */
+export function authorGroupView(
+  author: Pick<StoryAuthorCircle, 'membershipId' | 'displayName' | 'avatarUrl'>,
+  isSelf: boolean,
+): StoryGroupView {
+  return {
+    key: authorGroupKey(author.membershipId),
+    kind: 'member',
+    highlightId: null,
+    name: author.displayName,
+    avatar: { kind: 'avatar', src: author.avatarUrl },
+    items: null,
+    member: { membershipId: author.membershipId, isSelf },
+  };
+}
+
+/**
+ * An author's circle (UI-D-699): the brand ring while the caller has an unseen story of theirs and
+ * the neutral ring once all are seen, never colour alone: the accessible name carries it too. It
+ * opens its group at the first story; the surface resumes at the first unseen one once it has read
+ * the group.
+ */
+export function authorCircleView(
+  author: AuthorRowItem,
+  group: number,
+  labels: AuthorRowLabels,
+): Extract<RowCircleView, { kind: 'open' }> {
+  return {
+    kind: 'open',
+    key: authorGroupKey(author.membershipId),
+    label: author.displayName,
+    actionLabel: fillName(
+      author.hasUnseen ? labels.authorUnseen : labels.author,
+      author.displayName,
+    ),
+    ring: author.hasUnseen ? 'brand' : 'neutral',
+    disc: personDisc(author.avatarUrl),
+    group,
+    index: 0,
+  };
+}
+
+/**
+ * The member's OWN circle (UI-D-698, D-714), always first. With no live story it is the publish door:
+ * a link to `/stories/publicar` carrying the "+" badge. With one it is the button that opens the own
+ * group, with no badge: a second story is published from the viewer's menu, never from a second
+ * control on the circle. The ring is neutral either way (the author has no unseen state for their own
+ * stories).
+ */
+export function ownCircleView(
+  own: { avatarUrl: string | null; group: number | null },
+  labels: AuthorRowLabels,
+): RowCircleView {
+  const disc = personDisc(own.avatarUrl);
+  if (own.group === null) {
+    return {
+      kind: 'link',
+      key: 'own',
+      href: '/stories/publicar',
+      label: labels.ownLabel,
+      actionLabel: labels.ownAction,
+      ring: 'neutral',
+      disc,
+      badge: true,
+    };
+  }
+  return {
+    kind: 'open',
+    key: 'own',
+    label: labels.ownLabel,
+    actionLabel: labels.ownOpen,
+    ring: 'neutral',
+    disc,
+    group: own.group,
+    index: 0,
+  };
+}
+
+/** The row as the server composes it: the circles and the viewer groups they open, in the same order. */
+export type StoriesRowView = { circles: RowCircleView[]; groups: StoryGroupView[] };
+
+/**
+ * A member's row (UI-D-697, UI-D-700): their own circle first, then one circle per followed author in
+ * the API's order (unseen before seen, newest first). A failed read, or nothing to show, is the own
+ * circle ALONE as the publish door: losing the door is worse than losing the row.
+ */
+export function memberStoriesRow(
+  input: { ownAvatarUrl: string | null; page: StoryAuthorsPage | null },
+  labels: AuthorRowLabels,
+): StoriesRowView {
+  const items = input.page?.items ?? [];
+  const own = items.find((item) => item.isSelf);
+  const circles: RowCircleView[] = [];
+  const groups: StoryGroupView[] = [];
+  const ownAvatarUrl = input.ownAvatarUrl ?? own?.avatarUrl ?? null;
+
+  if (own) {
+    groups.push(authorGroupView(own, true));
+    circles.push(ownCircleView({ avatarUrl: ownAvatarUrl, group: 0 }, labels));
+  } else {
+    circles.push(ownCircleView({ avatarUrl: ownAvatarUrl, group: null }, labels));
+  }
+  for (const item of items) {
+    if (item.isSelf) continue;
+    groups.push(authorGroupView(item, false));
+    circles.push(authorCircleView(item, groups.length - 1, labels));
+  }
+  return { circles, groups };
 }

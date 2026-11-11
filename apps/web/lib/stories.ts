@@ -1,4 +1,6 @@
 import {
+  type AuthorStories,
+  authorStoriesSchema,
   type CreateStoryHighlight,
   type HighlightDetail,
   type HighlightList,
@@ -15,6 +17,7 @@ import {
   STORY_HIGHLIGHT_ISSUE_SET,
   STORY_ISSUE_SET,
   STORY_PAGE_SIZE,
+  type StoryAuthorsPage,
   type StoryComment,
   type StoryCommentIssue,
   type StoryCommentPage,
@@ -24,6 +27,7 @@ import {
   type StoryLikeResult,
   type StoryPage,
   type StorySummary,
+  storyAuthorsPageSchema,
   storyCommentPageSchema,
   storyCommentSchema,
   storyHighlightIdsSchema,
@@ -185,6 +189,79 @@ export async function attemptStoryPublish(
     // Shape only: a story CAPTION is member-facing content and never reaches a log line (T-05-29).
     if (!refusal) console.error('stories.publish_failed', { error: String(error) });
     return { result: { ok: false, code: 'generic' }, refusal };
+  }
+}
+
+/* ── The Explorar row (10-12: D-714, D-717, MSTORY-03) ───────────────────────────────────────── */
+
+/**
+ * `GET /v1/stories/authors` — Explorar's story row, one circle per author (10-08). For a member it is
+ * ONE unpaged page already ordered (their own circle first, then the authors they follow, unseen
+ * before seen); for a holder of `moderation.manage` a keyset page of 20 whose `cursor` is OPAQUE and
+ * forwarded verbatim. Only what the caller names rides the query, so the API's own defaults hold.
+ * Throws `ApiClientError` like its siblings (the server action reads the refusal).
+ */
+export async function getStoryAuthors(
+  query: { cursor?: string; limit?: number } = {},
+): Promise<StoryAuthorsPage> {
+  const search = new URLSearchParams();
+  if (query.cursor) search.set('cursor', query.cursor);
+  if (query.limit !== undefined) search.set('limit', String(query.limit));
+  const qs = search.toString();
+
+  const res = await apiFetch(`/v1/stories/authors${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw await apiError(res);
+  return storyAuthorsPageSchema.parse(await res.json());
+}
+
+/** The log line of a row read: the SHAPE of the failure, never a name, a caption or a membership id. */
+function rowFailure(error: unknown): { status: number | null; code: string } {
+  return error instanceof ApiClientError
+    ? { status: error.status, code: error.code }
+    : { status: null, code: error instanceof Error ? error.name : 'unknown' };
+}
+
+/**
+ * The first page of the row, or `null` when the API could not answer.
+ *
+ * **It NEVER redirects and never rethrows** (the `loadStories` rule, UI-D-700): the row sits above the
+ * feed and is never the reason Explorar errors. A 404 (the module off, a tenant with nothing to show)
+ * is the EMPTY page, not a failure; anything else, a page outside the strict contract included, is
+ * `null`, logged by shape.
+ */
+export async function loadStoryAuthors(
+  query: { cursor?: string; limit?: number } = {},
+): Promise<StoryAuthorsPage | null> {
+  try {
+    return await getStoryAuthors(query);
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 404) {
+      return { items: [], nextCursor: null };
+    }
+    console.error('stories.authors_failed', rowFailure(error));
+    return null;
+  }
+}
+
+/**
+ * `GET /v1/stories/authors/{membershipId}` — one author's live stories, oldest first (the viewer's
+ * order), opened lazily when the member taps the circle. Throws `ApiClientError`; a group that yields
+ * no readable story is the API's bare 404.
+ */
+export async function getAuthorStories(membershipId: string): Promise<AuthorStories> {
+  const res = await apiFetch(`/v1/stories/authors/${encodeURIComponent(membershipId)}`);
+  if (!res.ok) throw await apiError(res);
+  return authorStoriesSchema.parse(await res.json());
+}
+
+/** One author's stories, `[]` for the bare 404, or `null` when the API could not answer. Never navigates. */
+export async function loadAuthorStories(membershipId: string): Promise<StorySummary[] | null> {
+  try {
+    return (await getAuthorStories(membershipId)).items;
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 404) return [];
+    console.error('stories.author_group_failed', rowFailure(error));
+    return null;
   }
 }
 

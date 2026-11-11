@@ -1,12 +1,24 @@
 import type { Bootstrap } from '@rede-social/contracts';
+import type { StoryAuthorsPage } from '@rede-social/module-stories/contracts';
+import { StoriesStrip } from '@rede-social/module-stories/ui';
 import { buttonClasses, EmptyState } from '@rede-social/ui';
 import { UserPlus, Users } from 'lucide-react';
 import Link from 'next/link';
-import { getTranslations } from 'next-intl/server';
-import type { ReactNode } from 'react';
+import { getLocale, getTranslations } from 'next-intl/server';
+import { type ReactNode, Suspense } from 'react';
+import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { loadFeed } from '@/lib/feed';
-import { buildFeedSurface } from '@/lib/registry';
+import { buildFeedSurface, storyCommentsProps } from '@/lib/registry';
+import { loadStoryAuthors } from '@/lib/stories';
+import {
+  authorRowLabels,
+  explorarStoriesRowKind,
+  memberStoriesRow,
+  storyViewerLabels,
+} from '@/lib/story-view';
+import { primaryHostOrigin } from '@/lib/tenant-host';
+import { ExplorarStoriesRow } from './ExplorarStoriesRow';
 
 /** The action of the two member empty states: the directory (D-466), an OUTLINE button on purpose. */
 const FIND_LINK = buttonClasses({ variant: 'outline', size: 'md' });
@@ -65,8 +77,67 @@ function exploreEmpty(
 }
 
 /**
- * The Explorar body (D-479, UI-D-493): `/inicio?aba=explorar` is the chip row and the feed, and
- * nothing else - no welcome block, no `HomeSlots` widgets, no stories strip, no profile nudge. The
+ * The story row's own section (10-12, UI-D-697..UI-D-700). It composes on the server from ONE read of
+ * the authors route that `ExplorarBody` started before it awaited the feed, so the row never delays
+ * the posts and the posts never delay the row: the chips and the feed render at once and the row
+ * swaps its three skeleton circles for the real ones.
+ *
+ * **The row is never the reason Explorar errors** (UI-D-700): a failed read (`page` is `null`) leaves
+ * a member the own circle alone as the publish door (the "+" badge, an anchor, no viewer) and a
+ * moderator nothing; the failure was logged by `loadStoryAuthors`. A moderator with nothing to show
+ * gets no node and no reserved height.
+ */
+async function StoriesRowSection({
+  bootstrap,
+  kind,
+  pending,
+}: {
+  bootstrap: Bootstrap;
+  kind: 'member' | 'moderator';
+  pending: Promise<StoryAuthorsPage | null>;
+}) {
+  const [page, tf, tfeed, tmod, t, locale, shareOrigin] = await Promise.all([
+    pending,
+    getTranslations('stories'),
+    // D-82: the sheet's own copy is the FEED's, read from the feed namespace.
+    getTranslations('feed'),
+    getTranslations('moderation'),
+    getTranslations(),
+    getLocale(),
+    primaryHostOrigin(),
+  ]);
+  const labels = authorRowLabels(tf);
+  // The moderator's row arrives with its own task (10-12, Task 2); until then it renders nothing.
+  if (kind !== 'member') return null;
+  const row = memberStoriesRow(
+    { ownAvatarUrl: bootstrap.membership.profile.avatarUrl, page },
+    labels,
+  );
+  if (row.circles.length === 0) return null;
+  return (
+    <ExplorarStoriesRow
+      circles={row.circles}
+      groups={row.groups}
+      regionLabel={t('social.stories.region')}
+      scrollLabels={{ previous: tf('scroll.previous'), next: tf('scroll.next') }}
+      viewer={{
+        labels: storyViewerLabels(tf),
+        onLike: likeStoryAction,
+        onUnlike: unlikeStoryAction,
+        comments: storyCommentsProps(locale, tfeed, tf, bootstrap, tmod),
+        authorRing: { seen: labels.author, unseen: labels.authorUnseen },
+        ...(shareOrigin === null
+          ? {}
+          : { share: { origin: shareOrigin, title: bootstrap.tenant.displayName } }),
+      }}
+    />
+  );
+}
+
+/**
+ * The Explorar body (D-479, UI-D-493): `/inicio?aba=explorar` is the chip row, the story row (10-12,
+ * UI-D-697, only for a member or a moderator with `social` and `stories` on) and the feed, and
+ * nothing else - no welcome block, no `HomeSlots` widgets, no profile nudge. The
  * feed is the SAME surface Início renders (`buildFeedSurface`, so the cards, the comment sheet, the
  * share and menu props and the Reels overlay are one implementation) fed by `scope: 'explorar'`
  * through `loadFeed`, the one fetch function the load-more and refresh actions also call.
@@ -75,6 +146,9 @@ function exploreEmpty(
  * "Tentar novamente"; a refusal the bootstrap knows becomes a navigation inside `loadFeed`.
  */
 export async function ExplorarBody({ bootstrap }: { bootstrap: Bootstrap }) {
+  // The row's read starts NOW, beside the feed's, and is awaited by its own `Suspense` below.
+  const rowKind = explorarStoriesRowKind(bootstrap.permissions, bootstrap.modules);
+  const pendingRow = rowKind === null ? null : loadStoryAuthors();
   const [loaded, t] = await Promise.all([
     loadFeed({ scope: 'explorar' }).then(withAuthorInstagrams),
     getTranslations(),
@@ -85,9 +159,18 @@ export async function ExplorarBody({ bootstrap }: { bootstrap: Bootstrap }) {
     bootstrap.permissions,
     loaded.page?.followsAnyone,
   );
-  return buildFeedSurface(bootstrap, {
+  const feed = await buildFeedSurface(bootstrap, {
     scope: 'explorar',
     loaded: Promise.resolve(loaded),
     ...(empty === null ? {} : { empty }),
   });
+  if (rowKind === null || pendingRow === null) return feed;
+  return (
+    <>
+      <Suspense fallback={<StoriesStrip circles={[]} regionLabel="" loading />}>
+        <StoriesRowSection bootstrap={bootstrap} kind={rowKind} pending={pendingRow} />
+      </Suspense>
+      {feed}
+    </>
+  );
 }

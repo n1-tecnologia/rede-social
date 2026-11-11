@@ -715,7 +715,7 @@ describe('StoryCircle — the badge and the glyph fallback (10-12, UI-D-698, UI-
         onOpen={() => {}}
       />,
     );
-    fireEvent.error(screen.getByRole('button', { name: 'a' }).querySelector('img') as Element);
+    // happy-dom reports an unloaded image as complete with no width: the failure path of test 20.
     const glyph = screen.getByTestId('story-disc-person');
     expect(glyph.className).toContain('bg-bg-tertiary');
     expect(glyph.className).toContain('h-16');

@@ -1,8 +1,16 @@
 'use client';
 
 import { Skeleton, useMediaQuery } from '@rede-social/ui';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import { StoryCircle, type StoryCircleDisc, type StoryCircleRing } from './StoryCircle';
 
 /**
@@ -51,6 +59,8 @@ interface StoryStripCircleBase {
   actionLabel: string;
   ring: StoryCircleRing;
   disc: StoryCircleDisc;
+  /** 10-12: the member's own "publish a story" badge (UI-D-698). Absent is none. */
+  badge?: boolean;
 }
 
 /**
@@ -76,6 +86,19 @@ export interface StoriesStripProps {
    * screen, and the row renders exactly as before.
    */
   scrollLabels?: { previous: string; next: string };
+  /**
+   * 10-12 (UI-D-699): the moderator's PAGED row. Fires once each time the row is scrolled within one
+   * circle of its end (and again only after the end moved, i.e. the host appended circles). Absent:
+   * the member's row, which is never paged.
+   */
+  onReachEnd?: () => void;
+  /** While the host reads the next page: three trailing 64px skeleton circles. */
+  loadingMore?: boolean;
+  /**
+   * After a FAILED next page: one trailing `RotateCw` circle, labelled and named by the host, that
+   * calls `onRetry`. The circles already loaded stay.
+   */
+  retry?: { label: string; actionLabel: string; onRetry: () => void };
 }
 
 /** The row's own classes, shared by the content and loading shapes so the swap cannot shift layout. */
@@ -89,6 +112,36 @@ const EAGER_CIRCLES = 3;
 const PAGE_OVERLAP_PX = 80;
 /** Sub-pixel scroll positions (a zoomed page) still count as the start or the end. */
 const EDGE_SLOP_PX = 1;
+/** One circle (68px) and its gap (16px): "within one circle of the end" (UI-D-699). */
+const REACH_END_PX = 84;
+
+/**
+ * Calls `onReachEnd` when the list is scrolled within one circle of its end. It fires once per
+ * scroll width: appending circles moves the end and re-arms it, and a row that does not overflow
+ * never asks (there is nothing to scroll toward). A ref holds the latest callback, so a new identity
+ * never re-binds the listener.
+ */
+function useReachEnd(listRef: RefObject<HTMLUListElement | null>, onReachEnd?: () => void) {
+  const latest = useRef(onReachEnd);
+  latest.current = onReachEnd;
+  const firedFor = useRef<number | null>(null);
+  const enabled = onReachEnd !== undefined;
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || !enabled) return;
+    const check = () => {
+      const max = list.scrollWidth - list.clientWidth;
+      if (max <= EDGE_SLOP_PX) return;
+      if (list.scrollLeft < max - REACH_END_PX) return;
+      if (firedFor.current === list.scrollWidth) return;
+      firedFor.current = list.scrollWidth;
+      latest.current?.();
+    };
+    list.addEventListener('scroll', check, { passive: true });
+    return () => list.removeEventListener('scroll', check);
+  }, [listRef, enabled]);
+}
 
 export function StoriesStrip({
   circles,
@@ -96,6 +149,9 @@ export function StoriesStrip({
   loading = false,
   onOpen,
   scrollLabels,
+  onReachEnd,
+  loadingMore = false,
+  retry,
 }: StoriesStripProps) {
   if (loading) {
     // Three 64px circles with 12px label bars at the REAL geometry (68px = 64 + the 2px ring and
@@ -127,6 +183,7 @@ export function StoriesStrip({
         label={circle.label}
         actionLabel={circle.actionLabel}
         eager={position < EAGER_CIRCLES}
+        badge={circle.badge}
         href={circle.kind === 'link' ? circle.href : undefined}
         onOpen={
           circle.kind === 'open' && onOpen ? () => onOpen(circle.group, circle.index) : undefined
@@ -135,22 +192,79 @@ export function StoriesStrip({
     </li>
   ));
 
+  // 10-12 (UI-D-699): the moderator's paged row ends in the loading skeletons or the retry circle.
+  const trailing = (
+    <>
+      {loadingMore
+        ? [0, 1, 2].map((index) => (
+            <li
+              key={`more-${index}`}
+              aria-hidden
+              data-testid="story-circle-skeleton"
+              className="flex shrink-0 flex-col items-center gap-1.5"
+            >
+              <Skeleton variant="circle" className="h-[68px] w-[68px]" />
+              <Skeleton variant="text" className="h-3 w-10 rounded-full" />
+            </li>
+          ))
+        : null}
+      {retry ? (
+        <li key="retry">
+          <StoryCircle
+            ring="neutral"
+            disc={{ kind: 'glyph', icon: <RotateCw aria-hidden size={20} /> }}
+            label={retry.label}
+            actionLabel={retry.actionLabel}
+            onOpen={retry.onRetry}
+          />
+        </li>
+      ) : null}
+    </>
+  );
+
   if (scrollLabels) {
     return (
-      <ScrollableRow regionLabel={regionLabel} labels={scrollLabels}>
+      <ScrollableRow regionLabel={regionLabel} labels={scrollLabels} onReachEnd={onReachEnd}>
         {items}
+        {trailing}
       </ScrollableRow>
     );
   }
 
   return (
+    <PlainRow regionLabel={regionLabel} onReachEnd={onReachEnd}>
+      {items}
+      {trailing}
+    </PlainRow>
+  );
+}
+
+/** The phone's scroller: the list itself, with the reach-the-end hook when the host pages the row. */
+function PlainRow({
+  regionLabel,
+  onReachEnd,
+  children,
+}: {
+  regionLabel: string;
+  onReachEnd?: () => void;
+  children: ReactNode;
+}) {
+  const listRef = useRef<HTMLUListElement>(null);
+  useReachEnd(listRef, onReachEnd);
+  return (
     // Tailwind's preflight sets `list-style: none` on every `ul`, and WebKit then DROPS the list
     // semantics entirely — the row stops being announced as a list of N items, which is the only
     // thing telling a screen-reader user how many circles there are. The explicit role restores it,
     // and the UI-SPEC's §Stories strip contract asks for `role="list"` by name.
-    // biome-ignore lint/a11y/noRedundantRoles: see the note above — it is not redundant under preflight
-    <ul className={ROW} role="list" aria-label={regionLabel} data-testid="stories-strip">
-      {items}
+    <ul
+      ref={listRef}
+      className={ROW}
+      // biome-ignore lint/a11y/noRedundantRoles: see the note above — it is not redundant under preflight
+      role="list"
+      aria-label={regionLabel}
+      data-testid="stories-strip"
+    >
+      {children}
     </ul>
   );
 }
@@ -167,14 +281,17 @@ type Edges = { overflow: boolean; atStart: boolean; atEnd: boolean };
 function ScrollableRow({
   regionLabel,
   labels,
+  onReachEnd,
   children,
 }: {
   regionLabel: string;
   labels: { previous: string; next: string };
+  onReachEnd?: () => void;
   children: ReactNode;
 }) {
   const listId = useId();
   const listRef = useRef<HTMLUListElement>(null);
+  useReachEnd(listRef, onReachEnd);
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const [edges, setEdges] = useState<Edges>({ overflow: false, atStart: true, atEnd: true });
 

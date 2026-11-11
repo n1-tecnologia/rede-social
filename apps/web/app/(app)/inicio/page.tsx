@@ -10,6 +10,7 @@ import { loadFeedSuggestions } from '@/lib/feed-suggestions';
 import { requirePlatformTenants } from '@/lib/platform';
 import { loadOwnProfile } from '@/lib/profile';
 import { homeSlotsFor } from '@/lib/registry';
+import { explorarStoriesRowKind } from '@/lib/story-view';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
 import { ExplorarBody } from './ExplorarBody';
@@ -33,8 +34,8 @@ import { inicioTabFromParam, showsInicioTabs } from './tabs';
  *
  * **Explorar (09-08, D-479, UI-D-491)**: with `social` effective, a viewer whose composed permissions
  * hold `social.participate` or `moderation.manage` gets the Início · Explorar chip row as the first
- * child of the column, and `?aba=explorar` swaps the body for the Explorar feed alone (no widgets, no
- * stories strip, no profile nudge, no notice). Everyone else - `social` off, `support_tenant` - gets
+ * child of the column, and `?aba=explorar` swaps the body for the Explorar feed (no widgets, no profile
+ * nudge, no notice) under the story row of 10-12 (UI-D-697) for a member or a moderator. Everyone else - `social` off, `support_tenant` - gets
  * exactly the page below with no row, and `?aba=` (unknown, repeated or `explorar`) reads as Início
  * in silence. Explorar is a query parameter on a page that exists, so it is never a 404.
  *
@@ -111,7 +112,14 @@ export default async function InicioPage({
       <div className="flex flex-col gap-3">
         <h1 className="sr-only">{t('nav.home')}</h1>
         {chips}
-        <Suspense key={tab} fallback={<ExplorarSkeleton />}>
+        <Suspense
+          key={tab}
+          fallback={
+            <ExplorarSkeleton
+              storiesRow={explorarStoriesRowKind(bootstrap.permissions, bootstrap.modules) !== null}
+            />
+          }
+        >
           <ExplorarBody bootstrap={bootstrap} />
         </Suspense>
       </div>

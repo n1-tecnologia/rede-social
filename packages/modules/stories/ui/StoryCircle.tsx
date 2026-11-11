@@ -2,7 +2,7 @@
 
 import { MediaImage } from '@rede-social/core/ui';
 import { cn } from '@rede-social/ui';
-import { Plus } from 'lucide-react';
+import { Plus, User } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 /**
@@ -63,7 +63,15 @@ export type StoryCircleRing = 'brand' | 'neutral' | 'dashed';
  * What a `photo` disc shows when its photo cannot be fetched: the tenant identity the circle wore
  * before the photo (UI-D-60) — plain data, so a server component can still build the whole disc.
  */
-export type StoryPhotoFallback = { kind: 'logo'; src: string } | { kind: 'monogram'; text: string };
+export type StoryPhotoFallback =
+  | { kind: 'logo'; src: string }
+  | { kind: 'monogram'; text: string }
+  /**
+   * 10-12 (UI-D-698, UI-D-699): a PERSON's neutral glyph on `bg-bg-tertiary` — a member's photo that
+   * cannot be fetched shows the `User` glyph, never initials (the `Avatar` rule). Plain data, so a
+   * server component can build it.
+   */
+  | { kind: 'glyph' };
 
 /** What the 64px disc shows. Every kind renders at the identical geometry. */
 export type StoryCircleDisc =
@@ -97,6 +105,14 @@ export interface StoryCircleProps {
   onOpen?: () => void;
   /** `true` for the first three circles only: they are above the fold on `/inicio`. */
   eager?: boolean;
+  /**
+   * 10-12 (UI-D-698, the original UI-D-28 geometry): the member's "publish a story" door. A 24px
+   * `rounded-full bg-brand text-on-brand` disc with `Plus` 16 at the disc's bottom-right, behind a
+   * `border-2 border-bg` ring. A plain boolean the host sets (the `Plus` is drawn HERE, like the
+   * `own` disc's, so the descriptor stays plain data); decorative, the accessible name is the host's.
+   * It never changes the ring: the member's own ring is neutral.
+   */
+  badge?: boolean;
 }
 
 /**
@@ -222,6 +238,24 @@ export function StoryPhoto({ src, fallback, size = 64, eager = false }: StoryPho
   );
 }
 
+/**
+ * What a photo that cannot be fetched is replaced by. `logo` and `monogram` are whole discs of their
+ * own kind; `glyph` is the neutral person disc (10-12). Every branch is `h-16 w-16`.
+ */
+function FallbackDisc({ fallback, eager }: { fallback: StoryPhotoFallback; eager: boolean }) {
+  if (fallback.kind === 'glyph') {
+    return (
+      <span
+        data-testid="story-disc-person"
+        className="grid h-16 w-16 place-items-center rounded-full bg-bg-tertiary text-text-secondary"
+      >
+        <User aria-hidden size={28} />
+      </span>
+    );
+  }
+  return <Disc disc={fallback} eager={eager} />;
+}
+
 /** The 64x64 disc for each kind. Every branch is `h-16 w-16`, so no kind can change the geometry. */
 function Disc({ disc, eager }: { disc: StoryCircleDisc; eager: boolean }) {
   switch (disc.kind) {
@@ -232,7 +266,7 @@ function Disc({ disc, eager }: { disc: StoryCircleDisc; eager: boolean }) {
           src={disc.src}
           size={64}
           eager={eager}
-          fallback={<Disc disc={disc.fallback} eager={eager} />}
+          fallback={<FallbackDisc fallback={disc.fallback} eager={eager} />}
         />
       );
     case 'own':
@@ -304,14 +338,30 @@ export function StoryCircle({
   href,
   onOpen,
   eager = false,
+  badge = false,
 }: StoryCircleProps) {
-  const ringed = (
+  const plainRing = (
     <span
       data-testid="story-circle-ring"
       className={cn('block rounded-full border-2 p-0.5', RING[ring])}
     >
       <Disc disc={disc} eager={eager} />
     </span>
+  );
+  // The badge sits INSIDE the control (the anchor or the button), so one tap target carries both.
+  const ringed = badge ? (
+    <span className="relative block">
+      {plainRing}
+      <span
+        data-testid="story-circle-badge"
+        aria-hidden
+        className="absolute right-0 bottom-0 grid h-6 w-6 place-items-center rounded-full border-2 border-bg bg-brand text-on-brand"
+      >
+        <Plus size={16} />
+      </span>
+    </span>
+  ) : (
+    plainRing
   );
 
   const focus =

@@ -162,7 +162,9 @@ describe('loadStoryAuthors / loadAuthorStories — the row reads (10-12, UI-D-70
       json(200, { items: [circle({ isSelf: true }), circle()], nextCursor: 'c2' }),
     );
     const page = await loadStoryAuthors({ cursor: 'c1', limit: 20 });
-    expect(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]).toBe('/v1/stories/authors?cursor=c1&limit=20');
+    expect(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]).toBe(
+      '/v1/stories/authors?cursor=c1&limit=20',
+    );
     expect(page?.items.map((item) => item.isSelf)).toEqual([true, false]);
     expect(page?.nextCursor).toBe('c2');
   });
@@ -195,7 +197,7 @@ describe('loadStoryAuthors / loadAuthorStories — the row reads (10-12, UI-D-70
     log.mockRestore();
   });
 
-  it('A5. one author\'s group: the stories arrive in the API order, through the strict story contract', async () => {
+  it("A5. one author's group: the stories arrive in the API order, through the strict story contract", async () => {
     const story = (n: number) => ({
       id: `0d000000-0000-4000-8000-00000000000${n}`,
       authorUserId: null,
