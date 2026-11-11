@@ -38,7 +38,22 @@ const { catalog, toast, actions } = await vi.hoisted(async () => {
   const read = (name: string) =>
     JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
   return {
-    catalog: read('communities').communities as Record<string, unknown>,
+    // `communities.json` plus the store's additions to the same namespace (`tags.exclusive` …),
+    // merged key by key exactly as `loadMessages` does.
+    catalog: (() => {
+      const merge = (a: Record<string, unknown>, b: Record<string, unknown>) => {
+        const out: Record<string, unknown> = { ...a };
+        for (const [key, value] of Object.entries(b)) {
+          const mine = out[key];
+          out[key] =
+            mine && typeof mine === 'object' && value && typeof value === 'object'
+              ? merge(mine as Record<string, unknown>, value as Record<string, unknown>)
+              : value;
+        }
+        return out;
+      };
+      return merge(read('communities').communities, read('communities.store').communities);
+    })(),
     toast: { show: vi.fn(), dismiss: vi.fn() },
     actions: {
       loadMoreCommunitiesAction: vi.fn(),
@@ -133,6 +148,7 @@ function list(props: {
   canManage?: boolean;
   canCreate?: boolean;
   cursor?: string | null;
+  storeTags?: Record<string, { coverBadge: boolean; archived: boolean }>;
 }) {
   return render(
     <CommunitiesList
@@ -141,6 +157,7 @@ function list(props: {
       tenantName={TENANT}
       canManage={props.canManage ?? true}
       canCreate={props.canCreate}
+      storeTags={props.storeTags}
       status={props.status}
     />,
   );
@@ -486,5 +503,100 @@ describe('CommunitiesList — a member finds and creates communities (10-13)', (
     const card = screen.getByTestId('community-card');
     expect(card.querySelectorAll('a')).toHaveLength(0);
     expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+});
+
+/* ── 10-13 Task 3: the organization-only reorder list and the card edge cases (UI-D-708) ─────── */
+
+describe('CommunitiesList — reorder lists ORGANIZATION communities only (UI-D-708)', () => {
+  it('16. "Reordenar" counts organization communities only: one is nothing to order', () => {
+    list({
+      status: 'active',
+      items: [AVISOS, memberCommunity(), memberCommunity({ id: MUTIRAO.id })],
+    });
+    expect(toggle()).toBeNull();
+  });
+
+  it('17. two organization communities offer it, whatever follows them', () => {
+    list({ status: 'active', items: [AVISOS, EVENTOS, memberCommunity()] });
+    expect(toggle()).not.toBeNull();
+  });
+
+  it('18. a member community is never in the draft, and the save sends organization ids only', async () => {
+    const member = memberCommunity();
+    list({ status: 'active', items: [AVISOS, EVENTOS, member] });
+
+    // Even if the read handed a member row back, the draft does not hold it.
+    await openReorder([AVISOS, EVENTOS, member]);
+    expect(rowNames()).toEqual(['Avisos', 'Eventos']);
+
+    actions.reorderCommunitiesAction.mockResolvedValue({
+      ok: true,
+      items: [EVENTOS, AVISOS, member],
+      nextCursor: null,
+    });
+    fireEvent.click(screen.getByRole('button', { name: moveDown('Avisos') }));
+    await save();
+
+    expect(actions.reorderCommunitiesAction).toHaveBeenCalledWith([EVENTOS.id, AVISOS.id]);
+    await waitFor(() => expect(cardNames()).toEqual(['Eventos', 'Avisos', '?']));
+  });
+
+  it('19. member cards stay on screen, unchanged and outside the draggable list, while ordering', async () => {
+    list({ status: 'active', items: [AVISOS, EVENTOS, memberCommunity()] });
+    await openReorder([AVISOS, EVENTOS]);
+
+    const cards = screen.getAllByTestId('community-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.textContent).toContain('Horta em casa');
+    expect(within(cards[0] as HTMLElement).getByText('Criada por Helena')).toBeTruthy();
+    expect(within(reorderList() as HTMLElement).queryByText('Horta em casa')).toBeNull();
+  });
+});
+
+describe('CommunitiesList — the card edge cases (UI-D-708, E08)', () => {
+  it('20. the archived list carries the byline beside the Arquivada pill', () => {
+    list({
+      status: 'archived',
+      canManage: false,
+      items: [memberCommunity({ status: 'archived' })],
+    });
+    const card = screen.getByTestId('community-card');
+    expect(within(card).getByText('Criada por Helena')).toBeTruthy();
+    expect(within(card).getByText(C.archived.pill)).toBeTruthy();
+  });
+
+  it('21. a store tag never lands on a member card, even if the map names it', () => {
+    list({
+      status: 'active',
+      canManage: false,
+      items: [memberCommunity()],
+      storeTags: { [MEMBER_ID]: { coverBadge: true, archived: true } },
+    });
+    expect(screen.queryByText('Exclusiva')).toBeNull();
+    expect(screen.queryByText('Produto arquivado')).toBeNull();
+  });
+
+  it('22. an organization card with a store tag keeps it (the rule is not widened)', () => {
+    list({
+      status: 'active',
+      items: [AVISOS],
+      storeTags: { [AVISOS.id]: { coverBadge: true, archived: false } },
+    });
+    expect(screen.getByText('Exclusiva')).toBeTruthy();
+  });
+
+  it('23. a long display name truncates in the byline while the count stays whole', () => {
+    const name = 'Maria da Conceição Aparecida de Albuquerque e Vasconcelos Figueiredo Neto';
+    list({
+      status: 'active',
+      canManage: false,
+      items: [memberCommunity({ createdBy: { ...HELENA, displayName: name } })],
+    });
+    const byline = screen.getByText(`Criada por ${name}`);
+    expect(byline.className).toContain('truncate');
+    const count = byline.parentElement?.firstElementChild as HTMLElement;
+    expect(count.className).toContain('shrink-0');
+    expect(count.className).not.toContain('truncate');
   });
 });

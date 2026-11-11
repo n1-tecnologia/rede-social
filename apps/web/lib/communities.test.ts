@@ -220,3 +220,52 @@ describe('loadCommunities — kind, createdBy, viewer and memberQuota reach the 
     expect((await loadCommunities())?.memberQuota).toEqual({ ownedActive: 2, limit: 3 });
   });
 });
+
+describe('getOrderableCommunities — ORGANIZATION communities only (10-13, UI-D-708)', () => {
+  const member = (index: number): CommunitySummary => ({
+    ...community(index),
+    kind: 'member',
+    createdBy: {
+      membershipId: '99999999-9999-4999-8999-999999999999',
+      displayName: 'Helena',
+      avatarAssetId: null,
+    },
+  });
+
+  it('3. returns the organization rows and drops the member rows that follow them', async () => {
+    const org = [community(1), community(2)];
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(200, { items: [...org, member(3), member(4)], nextCursor: null, memberQuota: null }),
+    );
+
+    const items = await getOrderableCommunities();
+
+    expect(items?.map((item) => item.id)).toEqual(org.map((item) => item.id));
+  });
+
+  it('4. stops walking at the first member row: they come after every organization row', async () => {
+    const org = Array.from({ length: COMMUNITY_MAX_PAGE_SIZE - 1 }, (_, i) => community(i + 1));
+    vi.mocked(apiFetch).mockImplementation(async () =>
+      json(200, { items: [...org, member(900)], nextCursor: 'c1', memberQuota: null }),
+    );
+
+    const items = await getOrderableCommunities();
+
+    expect(items).toHaveLength(org.length);
+    // The member rows are ordered after the organization's (D-712): nothing later can be organization.
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it('5. member rows do not count against the reorder bound', async () => {
+    const org = [community(1)];
+    const members = Array.from({ length: COMMUNITY_MAX_ORDER }, (_, i) => member(i + 100));
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(200, { items: [...org, ...members], nextCursor: null, memberQuota: null }),
+    );
+
+    const items = await getOrderableCommunities();
+
+    expect(items).not.toBeNull();
+    expect(items).toHaveLength(1);
+  });
+});
