@@ -345,6 +345,26 @@ const quotaColumn = (ctx: RequestContext) => sql`,
                and q.deleted_at is null) as quota_owned_active`;
 
 /**
+ * 10-06 (D-708, A12): "this community may be shown to THIS viewer", the SERVICE form of two rules the database
+ * also states. An ORGANIZATION community always passes. A MEMBER community passes only while
+ *
+ *  1. its creator is a LIVE member (`am` is the projection's join to the creator's membership, written with
+ *     `status = 'active'`, not blocked, not deleted, so liveness costs nothing and a blocked or departed creator
+ *     hides the whole community for everybody, the moderator included; unblocking restores it, nothing is
+ *     deleted). RLS (`communities_member_hidden_gate`) says the same and is the backstop; the explicit term keeps
+ *     the statement correct on its own, whatever lane runs it, and
+ *  2. the VIEWER has not blocked that creator (`app.is_blocked_by_viewer`, the invoker predicate `getPost` and
+ *     `NOT_BLOCKED_AUTHOR` use): the community leaves the blocker's list and answers the bare 404 by id, and
+ *     nobody else (the creator included) sees a difference (the predicate reads the viewer's own rows only).
+ *
+ * Both terms are guarded by `c.kind = 'organization' or ...`, so an organization community never evaluates
+ * either. A miss is the bare 404 (D-23): there is no distinguishing code.
+ */
+const MEMBER_COMMUNITY_VISIBLE = sql`
+         and (c.kind = 'organization' or am.id is not null)
+         and (c.kind = 'organization' or not app.is_blocked_by_viewer(c.created_by_user_id))`;
+
+/**
  * THE active-list statement — one page of the tenant's ACTIVE communities in the list's order —
  * written once and shared by `listCommunities` and by `reorderCommunities`' answer, so the page a
  * reorder hands back can never be ordered differently from the page the next GET returns.
@@ -393,6 +413,7 @@ async function activePage(
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'active'
+         ${MEMBER_COMMUNITY_VISIBLE}
          and (
            ${afterPosition}::int is null
            or (
@@ -437,6 +458,7 @@ async function archivedPage(
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'archived'
+         ${MEMBER_COMMUNITY_VISIBLE}
          ${
            ownOnly
              ? sql`and c.kind = 'member' and c.created_by_user_id = ${ctx.userId}::uuid`
@@ -602,6 +624,7 @@ export async function getCommunity(
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.id = ${communityId}::uuid
          and c.deleted_at is null
+         ${MEMBER_COMMUNITY_VISIBLE}
        limit 1`);
     return rows[0];
   });
@@ -1257,6 +1280,12 @@ export async function updateCommunity(
  * for free (the `community.reactivated` precedent in the contracts). The log line below carries the
  * shape of the write; adding `community.reordered` later is one line in the contracts.
  *
+ * **ORGANIZATION communities only (10-06, D-712, Pitfall 3).** The lock, the comparison and the renumber each
+ * carry `c.kind = 'organization'`: a member community is ranked by the sentinel position 1000000 and by
+ * activity, never by an admin, so it is outside the permutation, its position is never rewritten, and a body
+ * naming one is `order_stale` like any id that is not in the set. `1..n` stays below `COMMUNITY_MAX_ORDER`
+ * (200), so a renumbered position can never collide with the sentinel.
+ *
  * Duplicates are refused by the contract before this runs (400: a list naming one community twice is
  * malformed, not stale), and re-stated here for any caller that does not pass through the route.
  * Ids are compared lower-cased, because two spellings of one uuid are one community.
@@ -1278,6 +1307,7 @@ export async function reorderCommunities(
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'active'
+         and c.kind = 'organization'
        order by c.id
        for update`);
     const current = new Set(locked.map((row) => row.id));
@@ -1297,6 +1327,7 @@ export async function reorderCommunities(
          and c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'active'
+         and c.kind = 'organization'
          and c.position <> o.ord
       returning c.id`);
 

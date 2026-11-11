@@ -347,6 +347,31 @@ function mediaPredicate(query: FeedQuery): ReturnType<typeof sql> {
 }
 
 /**
+ * 10-06 (D-708, A12): "this community may be shown to THIS viewer", the feed's form of the rule the communities
+ * module states for its own list and detail (a module may not import another, MOD-02, so the two are written
+ * side by side). An ORGANIZATION community always passes. A MEMBER community passes only while its creator is a
+ * LIVE member (a blocked or departed creator hides the whole community for everybody, the moderator included;
+ * `communities_member_hidden_gate` is the backstop) and while the VIEWER has not blocked that creator
+ * (`app.is_blocked_by_viewer`, the predicate `NOT_BLOCKED_AUTHOR` and `getPost` use). A miss is the bare 404 on
+ * the community's feed (D-23), and a community that fails it names no Reels lane. Reads the alias `c`.
+ */
+const MEMBER_COMMUNITY_VISIBLE = sql`
+         and (
+           c.kind = 'organization'
+           or (
+             exists (
+               select 1
+                 from public.memberships lm
+                where lm.tenant_id = c.tenant_id
+                  and lm.user_id = c.created_by_user_id
+                  and lm.status = 'active'
+                  and lm.blocked_at is null
+                  and lm.deleted_at is null)
+             and not app.is_blocked_by_viewer(c.created_by_user_id)
+           )
+         )`;
+
+/**
  * 08.2 (STORE-16, decision 11, RESEARCH Pitfall 3) — "this post is NOT in a community locked for the
  * caller". RLS (`feed_posts_community_gate`) deliberately ADMITS a locked community's newest post (the
  * sample shown on its own page), so a feed read that relies on RLS alone would put that sample in
@@ -659,6 +684,7 @@ export async function listCommunityFeed(
        where c.id = ${communityId}::uuid
          and c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
+         ${MEMBER_COMMUNITY_VISIBLE}
        limit 1`);
     return rows[0];
   });
@@ -747,6 +773,7 @@ export async function listVideoCommunities(ctx: RequestContext): Promise<VideoCo
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'active'
+         ${MEMBER_COMMUNITY_VISIBLE}
          -- 08.2 (STORE-16): a community locked for the caller names no lane. RLS still admits its
          -- sample, so without this a lane would open on a teaser (Pitfall 3). One InitPlan.
          and c.id <> all (${LOCKED_COMMUNITY_IDS})
