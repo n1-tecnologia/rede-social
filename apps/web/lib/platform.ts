@@ -176,8 +176,8 @@ export const getSocialSettings = cache(async (tenantId: string): Promise<SocialS
 
 /** A fresh, mutable copy of the contract defaults (the constant is `as const`, readonly). */
 function defaultSocialSettings(): SocialSettings {
-  const { media } = SOCIAL_SETTINGS_DEFAULTS;
-  return { media: { ...media, video: { ...media.video } } };
+  const { media, communities } = SOCIAL_SETTINGS_DEFAULTS;
+  return { media: { ...media, video: { ...media.video } }, communities: { ...communities } };
 }
 
 /**

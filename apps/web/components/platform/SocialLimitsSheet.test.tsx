@@ -131,6 +131,7 @@ describe('09-12 - SocialLimitsSheet: the fields', () => {
         photosPerPost: 9,
         video: { enabled: true, maxDurationSeconds: 300, maxBytes: 500 * MIB },
       },
+      communities: { maxPerMember: 3 },
     });
     open();
 

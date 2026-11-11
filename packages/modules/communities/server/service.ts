@@ -1,9 +1,11 @@
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { memberCommunityPolicyFor } from '@rede-social/core/server/communities/member-policy';
 import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
+import { communityCreateLimiter, safetyLimiterKey } from '@rede-social/core/server/safety/limits';
 import { type SQL, sql } from 'drizzle-orm';
 import {
   COMMUNITY_PAGE_SIZE,
@@ -60,6 +62,13 @@ type CommunityRow = {
    * reaches the wire — the array order already IS the answer.
    */
   cursor_position?: number;
+  /**
+   * 10-05: the owner seam's two inputs, selected through the projection's `extra` column by the WRITE
+   * paths only (`updateCommunity`). Like the cursor keys, `toCommunity` never reads them, so neither the
+   * kind nor the creator's user id can reach the wire (`communitySummarySchema` is `.strict()`).
+   */
+  kind?: 'organization' | 'member';
+  created_by_user_id?: string | null;
 };
 
 /**
@@ -562,6 +571,45 @@ async function coverIsUsable(tx: Tx, ctx: RequestContext, coverAssetId: string):
 }
 
 /**
+ * 10-05 (D-710, MCOMM-05; EP-15..21): "this member may own one more ACTIVE community", decided INSIDE the
+ * writing transaction and race-proof.
+ *
+ * The transaction first takes `pg_advisory_xact_lock(hashtextextended('communities:own:' || tenant || ':'
+ * || user, 0))`: one lock per member of one tenant, released at commit or rollback, so two creates (or a
+ * create and a reactivation) by the SAME member queue, and two different members never block each other
+ * (EP-21). Only then does it count the member's `kind = 'member'`, `status = 'active'`, `deleted_at is
+ * null` rows (archived and removed communities do not count, other members' and the admin's never do) and
+ * refuses `400 VALIDATION_FAILED { community: 'limit_reached' }` when the count already reaches the
+ * limit. READ COMMITTED gives each statement a fresh snapshot, so under the lock the count sees every
+ * earlier committer: after `Promise.all` of N+1 creates exactly N rows exist whatever the commit order.
+ *
+ * Lowering the limit below what a member already owns removes nothing: only the NEXT create (or
+ * reactivation) is refused. A limit of 0 refuses the first. The limit and the lock key are the CREATOR's
+ * (`ownerUserId`), so a moderator reactivating somebody's community is held to that member's allowance.
+ */
+async function assertWithinMemberLimit(
+  tx: Tx,
+  ctx: RequestContext,
+  ownerUserId: string,
+  maxActive: number,
+): Promise<void> {
+  await tx.execute(sql`
+    select pg_advisory_xact_lock(
+      hashtextextended('communities:own:' || ${ctx.tenantId}::text || ':' || ${ownerUserId}::text, 0))`);
+  const owned = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n
+      from communities
+     where tenant_id = ${ctx.tenantId}::uuid
+       and kind = 'member'
+       and created_by_user_id = ${ownerUserId}::uuid
+       and status = 'active'
+       and deleted_at is null`);
+  if ((owned[0]?.n ?? 0) >= maxActive) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { community: 'limit_reached' });
+  }
+}
+
+/**
  * `POST /v1/communities` (COMM-01).
  *
  * - `tenantId` and `createdByUserId` come from `ctx`, never from the body (T-04-02, T-07-01). The
@@ -595,13 +643,28 @@ export async function createCommunity(
   // `'organization'` ones. Ownership everywhere else is tested in the statement, never by role.
   const member = ctx.role === 'member';
 
+  // 10-05 (A6, D-710): a member's creation is rate limited (every ATTEMPT counts, a refused one
+  // included, T-10-16) and judged against the tenant's member policy BEFORE the transaction opens (the
+  // policy read may use the flags cache, which opens a lane of its own on a miss). A null policy means
+  // the `social` module is not effective for the tenant (the flags-cache window after it was switched
+  // off): 403, the same answer the permission guard gives once the cache expires.
+  let maxActive: number | null = null;
+  if (member) {
+    if (!communityCreateLimiter.consume(safetyLimiterKey(ctx))) {
+      throw new ApiError(429, 'RATE_LIMITED');
+    }
+    const policy = await memberCommunityPolicyFor(ctx);
+    if (!policy) throw new ApiError(403, 'FORBIDDEN');
+    maxActive = policy.maxActive;
+  }
+
   const base = slugify(input.name);
   let created: CommunityRow | undefined;
 
   for (let attempt = 0; attempt < SLUG_ATTEMPTS; attempt += 1) {
     const slug = slugCandidate(base, attempt);
     try {
-      created = await withTenantTx(ctx, (tx) => insertCommunity(tx, ctx, input, slug, member));
+      created = await withTenantTx(ctx, (tx) => insertCommunity(tx, ctx, input, slug, maxActive));
       break;
     } catch (error) {
       if (isSlugCollision(error)) continue;
@@ -655,12 +718,17 @@ async function insertCommunity(
   ctx: RequestContext,
   input: CreateCommunity,
   slug: string,
-  member: boolean,
+  /** The member's allowance, or null for an organization create (no limit, no lock). */
+  maxActive: number | null,
 ): Promise<CommunityRow> {
+  const member = maxActive !== null;
   // FIRST statement of the transaction: a refused cover writes nothing at all. `isSlugCollision`
   // matches a 23505 on the slug index alone, so this `ApiError` is re-thrown by the retry loop
   // untouched rather than swallowed as a collision.
   await resolveCoverAsset(tx, ctx, input.coverAssetId ?? null);
+
+  // 10-05 (D-710): the member's own allowance, under their advisory lock, before the insert.
+  if (maxActive !== null) await assertWithinMemberLimit(tx, ctx, ctx.userId, maxActive);
 
   // 10-05 (D-706): a MEMBER's community is stamped `kind = 'member'` at the sentinel position, so it
   // sorts after every organization community whatever order the admin chose and the list statement, its
@@ -740,16 +808,25 @@ export async function updateCommunity(
     throw new ApiError(400, 'VALIDATION_FAILED', { community: 'name_required' });
   }
 
+  // 10-05 (D-710): a write that REACTIVATES (`status: 'active'`) is judged against the member allowance
+  // too, so archive-and-reactivate can never be a way past the limit. The policy is read BEFORE the
+  // transaction (the flags cache may open a lane of its own on a miss).
+  const policy = input.status === 'active' ? await memberCommunityPolicyFor(ctx) : null;
+
   const { row, contentChanged, archivedNow } = await withTenantTx(ctx, async (tx) => {
     // The row is read FIRST, inside the same transaction, because three of this function's answers
     // depend on what it was: the 404, whether anything actually changed, and whether this write is
-    // the transition into `archived` rather than a repeat of it.
+    // the transition into `archived` rather than a repeat of it. 10-05: it is read `for update of c`
+    // (the joined cover asset is not locked), so two writers of one community (the creator and a
+    // moderator archiving at the same time, EP-25) queue and the second one reads the first one's
+    // status: exactly one transition happens.
     const current = await tx.execute<CommunityRow>(sql`
-      ${communityProjection()}
+      ${communityProjection(sql`, c.kind as kind, c.created_by_user_id as created_by_user_id`)}
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.id = ${communityId}::uuid
          and c.deleted_at is null
-       limit 1`);
+       limit 1
+         for update of c`);
     const before = current[0];
     if (!before) throw new ApiError(404, 'NOT_FOUND');
 
@@ -793,6 +870,19 @@ export async function updateCommunity(
     // must be observably inert, not merely idempotent in its response body.
     if (!changedContent && !changedStatus) {
       return { row: before, contentChanged: false, archivedNow: false };
+    }
+
+    // 10-05 (D-710): archived -> active on a MEMBER community counts against its CREATOR's allowance
+    // (the row itself is archived, so it is not counted yet). With `social` off there is no policy and no
+    // allowance to enforce; a member cannot reach this path then (the permission leaves the composed set).
+    if (
+      changedStatus &&
+      status === 'active' &&
+      before.kind === 'member' &&
+      before.created_by_user_id &&
+      policy
+    ) {
+      await assertWithinMemberLimit(tx, ctx, before.created_by_user_id, policy.maxActive);
     }
 
     await tx.execute(sql`

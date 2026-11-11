@@ -349,6 +349,11 @@ describe('10 tracer', () => {
 describe('10 create rules', () => {
   const made: string[] = [];
 
+  // The default allowance is 3 active communities per member: each case starts from none.
+  beforeEach(async () => {
+    await sweep();
+  });
+
   it('EP-01 boundary: a name of exactly 80 and a description of exactly 280 are accepted; 81 and 281 answer 400', async () => {
     const name = 'á'.repeat(COMMUNITY_MAX_NAME);
     const description = 'ç'.repeat(COMMUNITY_MAX_DESCRIPTION);
@@ -443,6 +448,10 @@ describe('10 create rules', () => {
 });
 
 describe('10 social switched off while the flags cache is warm (EP-41, T-10-18)', () => {
+  beforeEach(async () => {
+    await sweep();
+  });
+
   it('a member’s community insert and post insert are refused by RLS and answer 403, never 500; an admin’s organization write is unaffected', async () => {
     const own = await createCommunity(tokens.helena, { name: `${PREFIX}antes de desligar` });
     expect(own.status).toBe(201);

@@ -60,6 +60,11 @@ export const COMMUNITY_MAX_DESCRIPTION = 280;
  *    tenant's — so it is not an existence oracle either: a foreign id and a random uuid answer the
  *    same bytes. The client's move is always the same one: reload the list and start again.
  *
+ * 10-05 (D-710, MCOMM-05) appends `limit_reached`: the member already owns as many ACTIVE communities as the
+ * tenant's `social` setting `communities.maxPerMember` allows (default 3), so a create, or a write that
+ * REACTIVATES an archived one, is refused `400 VALIDATION_FAILED`. It is an input-class refusal the creator
+ * can fix (archive or delete one), decided under the member's advisory lock so it cannot be raced.
+ *
  * 2026-10-26 (09.3) adds the two STATE refusals of the delete (`409 CONFLICT`, D-553 and D-554):
  *  - `not_archived`: only an ARCHIVED community can be deleted. It is decided AFTER the
  *    tenant-scoped locking read, so a foreign community is the bare 404 and never this code.
@@ -74,6 +79,7 @@ export const COMMUNITY_ISSUES = [
   'order_stale',
   'not_archived',
   'unlock_active',
+  'limit_reached',
 ] as const;
 export type CommunityIssue = (typeof COMMUNITY_ISSUES)[number];
 

@@ -21,6 +21,25 @@ export const blockLimiter: AttemptLimiter = createAttemptLimiter({
   windowMs: HOUR_MS,
 });
 
+/**
+ * 10-05 (A6, assumption, adopted; T-10-16): the abuse ceilings of the member creator, 10 community
+ * creations and 30 story publications per member per hour, the same in-process limiter and the same
+ * `user:{tenant}:{user}` key as the report limiter. The numbers are the planner's, not Igor's. Every
+ * ATTEMPT counts, a refused one included. `storyPublishLimiter` is declared here and used by plan 07.
+ */
+export const COMMUNITY_CREATES_PER_HOUR = 10;
+export const STORY_PUBLISHES_PER_HOUR = 30;
+
+export const communityCreateLimiter: AttemptLimiter = createAttemptLimiter({
+  max: COMMUNITY_CREATES_PER_HOUR,
+  windowMs: HOUR_MS,
+});
+
+export const storyPublishLimiter: AttemptLimiter = createAttemptLimiter({
+  max: STORY_PUBLISHES_PER_HOUR,
+  windowMs: HOUR_MS,
+});
+
 /** The limiter key of one member in their tenant. */
 export const safetyLimiterKey = (input: { tenantId: string; userId: string }): string[] => [
   `user:${input.tenantId}:${input.userId}`,

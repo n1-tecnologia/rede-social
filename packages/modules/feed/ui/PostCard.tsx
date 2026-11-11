@@ -94,9 +94,9 @@ export type PostCardView = {
   /**
    * 09-09 (D-473): the stamped audience as the API sent it (`'followers'` for a member post; an organization
    * post carries no key on the wire). The menu reads it to word the author's delete for Explorar, and the host reads
-   * it for the Administrador mark.
+   * it for the Administrador mark. 10-05 (D-709): `'community'` is a member's post inside a member community.
    */
-  audience?: 'tenant' | 'followers';
+  audience?: 'tenant' | 'followers' | 'community';
   likeCount: number;
   commentCount: number;
   viewerLiked: boolean;

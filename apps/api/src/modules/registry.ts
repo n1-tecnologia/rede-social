@@ -6,6 +6,7 @@ import {
 } from '@rede-social/contracts';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { setMemberCommunityPolicy } from '@rede-social/core/server/communities/member-policy';
 import { subscribe } from '@rede-social/core/server/events/bus';
 import { registerJobQueues } from '@rede-social/core/server/jobs/boss';
 import { registerSweepFunctions } from '@rede-social/core/server/jobs/sweep-functions';
@@ -326,4 +327,23 @@ setMemberMediaPolicy(async (ctx) => {
   if (!effectiveKeys(flags.keys).has('social')) return null;
   const parsed = socialSettingsSchema.safeParse(flags.settings.get('social') ?? {});
   return (parsed.success ? parsed.data : SOCIAL_SETTINGS_DEFAULTS).media;
+});
+
+/**
+ * 10-05 (D-710, MCOMM-05): the kernel's member community seam (the `setMemberMediaPolicy` inversion once
+ * more). The communities module may not import the social settings schema (MOD-02), so the app tier tells
+ * it how many ACTIVE communities one member of THIS tenant may own: null while `social` is not effective
+ * (the module then refuses a member's write), else the tolerant parse of the module's settings, falling
+ * back to the defaults for a stored blob without the key or a malformed one. A limit of 0 is a policy.
+ *
+ * The flags are read BEFORE any transaction (the 07 review rule: a cache miss opens its own tenant-lane
+ * transaction); the module calls this seam before `withTenantTx`.
+ */
+setMemberCommunityPolicy(async (ctx) => {
+  const flags = await moduleFlags.flags(ctx);
+  if (!effectiveKeys(flags.keys).has('social')) return null;
+  const parsed = socialSettingsSchema.safeParse(flags.settings.get('social') ?? {});
+  return {
+    maxActive: (parsed.success ? parsed.data : SOCIAL_SETTINGS_DEFAULTS).communities.maxPerMember,
+  };
 });

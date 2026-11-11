@@ -172,6 +172,16 @@ const videoEnabledField = z.boolean();
 const videoSecondsField = z.number().int().min(1).max(SOCIAL_MAX_VIDEO_SECONDS);
 const videoBytesField = z.number().int().min(1).max(SOCIAL_MAX_VIDEO_BYTES);
 
+/**
+ * 10-05 (D-710, MCOMM-05): the most ACTIVE communities one member may own, an integer from 0 (nobody may
+ * create) to 20. It lives in the `social` settings, beside the media limits, because it is a member
+ * allowance of the same module and the same `super_admin` form; the communities module never imports
+ * this package: it asks the kernel seam `memberCommunityPolicyFor`, which the app registry fills from
+ * this schema (MOD-02).
+ */
+export const SOCIAL_MAX_COMMUNITIES_PER_MEMBER = 20;
+const maxPerMemberField = z.number().int().min(0).max(SOCIAL_MAX_COMMUNITIES_PER_MEMBER);
+
 /** The values a tenant gets until the `super_admin` edits them: 5 MB x 4 photos, video off (60 s, 100 MB). */
 export const SOCIAL_SETTINGS_DEFAULTS = {
   media: {
@@ -179,6 +189,8 @@ export const SOCIAL_SETTINGS_DEFAULTS = {
     photosPerPost: 4,
     video: { enabled: false, maxDurationSeconds: 60, maxBytes: 100 * MIB },
   },
+  // 10-05 (D-710): three active communities per member until the `super_admin` says otherwise.
+  communities: { maxPerMember: 3 },
 } as const;
 
 /**
@@ -202,6 +214,13 @@ export const socialSettingsSchema = z.object({
           maxBytes: videoBytesField.default(SOCIAL_SETTINGS_DEFAULTS.media.video.maxBytes),
         })
         .prefault({}),
+    })
+    .prefault({}),
+  // 10-05 (D-710): inside the same `.prefault({})` chain, so a blob stored before this key existed parses
+  // to the default (EP-17) and no migration or backfill is needed.
+  communities: z
+    .object({
+      maxPerMember: maxPerMemberField.default(SOCIAL_SETTINGS_DEFAULTS.communities.maxPerMember),
     })
     .prefault({}),
 });
@@ -229,6 +248,7 @@ export const socialSettingsPatchSchema = z
       })
       .strict()
       .optional(),
+    communities: z.object({ maxPerMember: maxPerMemberField.optional() }).strict().optional(),
   })
   .strict();
 export type SocialSettingsPatch = z.infer<typeof socialSettingsPatchSchema>;
@@ -249,5 +269,6 @@ export const socialSettingsAnswerSchema = z
           .strict(),
       })
       .strict(),
+    communities: z.object({ maxPerMember: maxPerMemberField }).strict(),
   })
   .strict();

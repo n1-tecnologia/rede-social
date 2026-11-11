@@ -93,7 +93,10 @@ export function socialLimitsToPatch(form: SocialLimitsForm): SocialSettingsPatch
 const toMb = (bytes: number) => Math.max(1, Math.round(bytes / MIB));
 
 /** The inverse of `socialLimitsToPatch`: the effective settings in the units of the labels. */
-export function socialLimitsFromSettings(settings: SocialSettings): SocialLimitsForm {
+// 10-05: only the media half is read here; `communities.maxPerMember` has its own form later.
+export function socialLimitsFromSettings(
+  settings: Pick<SocialSettings, 'media'>,
+): SocialLimitsForm {
   const { media } = settings;
   return {
     photos: media.photosPerPost,

@@ -263,7 +263,11 @@ export function postCardView(
  * Evaluate it PER POST, at every site that builds a card.
  */
 export function postAdminLabel(post: Pick<FeedPost, 'audience'>, tf: Translator): string | null {
-  return post.audience === 'followers' ? null : tf('post.adminBadge');
+  // 10-05 (D-709): a post stamped `'community'` is a MEMBER's (the creator's), never the organization's
+  // voice, so it never carries the Administrador mark either.
+  return post.audience === 'followers' || post.audience === 'community'
+    ? null
+    : tf('post.adminBadge');
 }
 
 /** The surfaces that may offer an authoring entry (composer FAB, header button, empty-state CTA). */

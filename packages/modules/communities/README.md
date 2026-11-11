@@ -52,6 +52,9 @@ Deleting a community emits nothing: it is a silent soft delete of an archived co
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`
+- `@rede-social/core/server/communities/member-policy` (10-05: `memberCommunityPolicyFor`, the kernel seam that
+  tells the module how many active communities one member may own; the app registry fills it from the social
+  settings, so this module never imports the social package)
 - `@rede-social/core/server/events/bus`
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/logging`
@@ -59,6 +62,7 @@ Deleting a community emits nothing: it is a silent soft delete of an archived co
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
+- `@rede-social/core/server/safety/limits` (10-05: `communityCreateLimiter`, the per-member creation ceiling)
 - `@rede-social/core/ui`
 
 ## Navigation
