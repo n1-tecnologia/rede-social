@@ -481,3 +481,152 @@ describe('HighlightTitleStep — the shared "Novo destaque" form (UI-D-72, UI E0
     expect(field.value).toBe('Aulas');
   });
 });
+
+/* ── 10-12 (UI-D-704, UI-D-705): the member's notice and the once-per-opening confirm ──────────────
+ *
+ * A member saves THEIR story into a highlight of THEIR community, where every member who sees the
+ * community will read it, also after the 24 hours. The sheet therefore carries the host's `notice`
+ * above its groups in both modes, and, in checklist mode, a `confirmOn` whose dialog gates the FIRST
+ * switch-on of each opening: the switch stays off until confirmed, the confirm appears once per
+ * opening, later switch-ons of that opening write at once and switching off is always immediate.
+ * The words are fixture strings: the module ships none.
+ */
+const CONFIRM = {
+  title: 'confirm-title',
+  body: 'confirm-body',
+  confirmLabel: 'confirm-yes',
+  cancelLabel: 'confirm-no',
+};
+
+function memberChecklist(overrides: Partial<HighlightSheetChecklistProps> = {}) {
+  return checklistProps({
+    places: [C1, { ...HOME, key: 'c9', label: 'place-c9', communityId: 'c9' }],
+    selectedIds: [],
+    notice: <p>notice-node</p>,
+    confirmOn: CONFIRM,
+    ...overrides,
+  });
+}
+
+describe('HighlightSheet — the member notice (UI-D-704)', () => {
+  it('N1. the notice sits above the groups in checklist mode and in single-select mode', () => {
+    render(<HighlightSheet {...memberChecklist()} />);
+    const notice = screen.getByText('notice-node');
+    const firstGroup = screen.getAllByText(/^place-/)[0] as HTMLElement;
+    expect(
+      notice.compareDocumentPosition(firstGroup) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    cleanup();
+
+    render(<HighlightSheet {...singleProps({ notice: <p>notice-node</p> })} />);
+    const noneRow = document.querySelector('[data-highlight-sheet-item="none"]') as HTMLElement;
+    expect(
+      screen.getByText('notice-node').compareDocumentPosition(noneRow) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('N2. without notice nothing is added: the shipped sheets are byte for byte what they were', () => {
+    render(<HighlightSheet {...checklistProps()} />);
+    expect(screen.queryByText('notice-node')).toBeNull();
+  });
+});
+
+describe('HighlightSheet — switch-on asks ONCE per opening (UI-D-705, OQ-6)', () => {
+  const dialogs = () => screen.queryAllByRole('dialog', { name: 'confirm-title' });
+
+  it('K1. the first switch-on opens the brand confirm with the focus on cancel; the switch stays off and nothing is written', async () => {
+    const onToggle = vi.fn(async () => true);
+    render(<HighlightSheet {...memberChecklist({ onToggle })} />);
+    fireEvent.click(screen.getByRole('switch', { name: 'row:title-h3@place-c1' }));
+
+    await waitFor(() => expect(dialogs()).toHaveLength(1));
+    expect(screen.getByText('confirm-body')).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText('confirm-no')));
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(screen.getByRole('switch', { name: 'row:title-h3@place-c1' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+  });
+
+  it('K2. cancelling keeps the switch off and the next switch-on asks again (nothing was confirmed)', async () => {
+    const onToggle = vi.fn(async () => true);
+    render(<HighlightSheet {...memberChecklist({ onToggle })} />);
+    const row = () => screen.getByRole('switch', { name: 'row:title-h3@place-c1' });
+    fireEvent.click(row());
+    await waitFor(() => expect(dialogs()).toHaveLength(1));
+    fireEvent.click(screen.getByText('confirm-no'));
+    await waitFor(() => expect(dialogs()).toHaveLength(0));
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(row()).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(row());
+    await waitFor(() => expect(dialogs()).toHaveLength(1));
+  });
+
+  it('K3. confirming writes THAT switch-on at once; later switch-ons and every switch-off of the opening write with no dialog', async () => {
+    const onToggle = vi.fn(async () => true);
+    render(<HighlightSheet {...memberChecklist({ onToggle })} />);
+    fireEvent.click(screen.getByRole('switch', { name: 'row:title-h3@place-c1' }));
+    await waitFor(() => expect(dialogs()).toHaveLength(1));
+    fireEvent.click(screen.getByText('confirm-yes'));
+
+    await waitFor(() =>
+      expect(onToggle).toHaveBeenCalledWith('h3', true, expect.objectContaining({ key: 'c1' })),
+    );
+    await waitFor(() => expect(dialogs()).toHaveLength(0));
+    expect(screen.getByRole('switch', { name: 'row:title-h3@place-c1' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+
+    // A second switch-on in the SAME opening: no dialog, one write.
+    fireEvent.click(screen.getByRole('switch', { name: 'row:title-h1@place-c9' }));
+    await waitFor(() => expect(onToggle).toHaveBeenCalledWith('h1', true, expect.anything()));
+    expect(dialogs()).toHaveLength(0);
+
+    // Switching off is immediate.
+    fireEvent.click(screen.getByRole('switch', { name: 'row:title-h3@place-c1' }));
+    await waitFor(() => expect(onToggle).toHaveBeenCalledWith('h3', false, expect.anything()));
+    expect(dialogs()).toHaveLength(0);
+  });
+
+  it('K4. a failed write after the confirm reverts in place (the machine’s rule is unchanged)', async () => {
+    const onToggle = vi.fn(async () => false);
+    render(<HighlightSheet {...memberChecklist({ onToggle })} />);
+    fireEvent.click(screen.getByRole('switch', { name: 'row:title-h3@place-c1' }));
+    await waitFor(() => expect(dialogs()).toHaveLength(1));
+    fireEvent.click(screen.getByText('confirm-yes'));
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: 'row:title-h3@place-c1' })).toHaveAttribute(
+        'aria-checked',
+        'false',
+      ),
+    );
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('K5. closing and reopening the sheet makes the next switch-on ask again', async () => {
+    const onToggle = vi.fn(async () => true);
+    const { rerender } = render(<HighlightSheet {...memberChecklist({ onToggle })} />);
+    fireEvent.click(screen.getByRole('switch', { name: 'row:title-h3@place-c1' }));
+    await waitFor(() => expect(dialogs()).toHaveLength(1));
+    fireEvent.click(screen.getByText('confirm-yes'));
+    await waitFor(() => expect(onToggle).toHaveBeenCalledTimes(1));
+
+    rerender(<HighlightSheet {...memberChecklist({ onToggle, open: false })} />);
+    rerender(<HighlightSheet {...memberChecklist({ onToggle, open: true })} />);
+    fireEvent.click(screen.getByRole('switch', { name: 'row:title-h1@place-c9' }));
+    await waitFor(() => expect(dialogs()).toHaveLength(1));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('K6. without confirmOn (the organization’s sheets) a switch-on writes at once, exactly as before', async () => {
+    const onToggle = vi.fn(async () => true);
+    render(<HighlightSheet {...checklistProps({ onToggle })} />);
+    fireEvent.click(screen.getByRole('switch', { name: 'row:title-h1@place-home' }));
+    await waitFor(() => expect(onToggle).toHaveBeenCalledWith('h1', true, HOME));
+    expect(dialogs()).toHaveLength(0);
+  });
+});

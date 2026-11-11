@@ -186,7 +186,13 @@ function summary(id: string, communityId: string | null, title: string, position
   };
 }
 
-function community(id: string, name: string) {
+/**
+ * A community as the list read projects it. Since 10-06 the wire carries `kind`, `createdBy` and the
+ * viewer's flags (`isOwner`, `canPublish`, `canEdit`, `canCurate`, `actions`) as REQUIRED keys, so a
+ * fixture without them no longer parses (this was the one red case of `apps/web` after plan 10-07).
+ * `owner` makes it the caller's own member community.
+ */
+function community(id: string, name: string, owner = false, lastActivityAt = new Date(0)) {
   return {
     id,
     name,
@@ -196,7 +202,16 @@ function community(id: string, name: string) {
     coverVariantWidths: [],
     postCount: 0,
     status: 'active',
-    lastActivityAt: new Date(0).toISOString(),
+    lastActivityAt: lastActivityAt.toISOString(),
+    kind: owner ? 'member' : 'organization',
+    createdBy: null,
+    viewer: {
+      isOwner: owner,
+      canPublish: owner,
+      canEdit: owner,
+      canCurate: owner,
+      actions: { like: true, comment: true, share: true, post: owner, story: owner },
+    },
   };
 }
 
@@ -225,6 +240,7 @@ function sheetRoutes(path: string): Response {
   if (path.startsWith('/v1/communities?')) {
     return json(200, {
       items: [community(COMMUNITY_A, 'Avisos'), community(COMMUNITY_B, 'Coral')],
+      memberQuota: null,
       nextCursor: null,
     });
   }
@@ -278,6 +294,41 @@ describe('loadHighlightSheetAction — ONE read opens the sheet (05.2-06, UI E09
         },
       ],
     });
+  });
+
+  it('7b. 10-12: a member’s sheet carries the owned communities only, and "Criar destaque" goes to the manage route of the most recently active one they own', async () => {
+    const OLD = '0c000000-0000-4000-8000-0000000000c1';
+    const NEW = '0c000000-0000-4000-8000-0000000000c2';
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      const target = String(path);
+      if (target === '/v1/stories/highlights/catalog') return json(200, { items: [] });
+      if (target === `/v1/stories/${STORY}/highlights`) return json(200, { highlightIds: [] });
+      if (target.startsWith('/v1/communities?')) {
+        return json(200, {
+          items: [
+            community(COMMUNITY_A, 'Avisos'),
+            community(OLD, 'Antiga', true, new Date('2026-01-01T00:00:00Z')),
+            community(NEW, 'Recente', true, new Date('2026-11-01T00:00:00Z')),
+          ],
+          memberQuota: { ownedActive: 2, limit: 3 },
+          nextCursor: null,
+        });
+      }
+      return json(404, { error: { code: 'NOT_FOUND' } });
+    });
+    const result = await loadHighlightSheetAction(STORY);
+    expect(result).toEqual({
+      ok: true,
+      places: [],
+      selectedIds: [],
+      createHref: `/comunidades/${NEW}/destaques`,
+    });
+  });
+
+  it('7c. 10-12: the organization’s sheet carries no createHref (nobody owns an organization community)', async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => sheetRoutes(String(path)));
+    const result = await loadHighlightSheetAction(STORY);
+    expect(result.ok && 'createHref' in result).toBe(false);
   });
 
   it('7. a member’s 403 on the manage-only catalogue is { ok: false } — no sheet, no navigation (T-05.2-26)', async () => {

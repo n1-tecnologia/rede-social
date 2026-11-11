@@ -104,6 +104,11 @@ vi.mock('@/app/(app)/stories/story-actions', () => ({ publishStoryAction: publis
 // actions, which import `lib/api` -> `lib/env`, which fails fast on the browser env vars a unit
 // test has no business supplying. The composer uses nothing else from this module.
 vi.mock('@/components/media/useSignedUpload', () => ({
+  // The shared size formatter (10-12): the member helper names the tenant's caps with it.
+  formatMediaLimit: (bytes: number) => {
+    const mb = bytes / (1024 * 1024);
+    return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
+  },
   useSignedUpload: (options: { kind: string; [key: string]: unknown }) => {
     upload.handlers[options.kind] = options as never;
     const shell = options.kind === 'video' ? upload.video : upload.image;
@@ -872,5 +877,265 @@ describe('StoryComposer — the video preview (2026-10-20)', () => {
     await completeUpload('image', IMAGE);
     expect(screen.queryByTestId('story-preview-sound')).toBeNull();
     expect(document.querySelector('[data-video-sound]')).toBeNull();
+  });
+});
+
+/* ── 10-12: the member's publish screen (UI-D-702..UI-D-704, D-714..D-716) ─────────────────────────
+ *
+ * The SAME route with the member mode on: the page passes the tenant's `social.media` limits (the
+ * helper, the upload caps, whether the video row exists at all) and the destination groups it built
+ * from the communities the caller may publish a story into. The words are the real catalog's.
+ */
+
+const MB = 1024 * 1024;
+const LIMITS = {
+  photoMaxBytes: 5 * MB,
+  photosPerPost: 4,
+  video: { enabled: true, maxDurationSeconds: 60, maxBytes: 100 * MB },
+};
+const LIMITS_NO_VIDEO = { ...LIMITS, video: { ...LIMITS.video, enabled: false } };
+
+/** A member's groups: communities only, NO "Início" group (UI-D-704). */
+const memberPlaces = (): Place[] => placesFor().filter((place) => place.communityId !== null);
+
+const AUDIENCE = 'Quem segue você vê este story em Explorar por 24 horas.';
+const NOTICE = 'Todos os membros verão este story na comunidade.';
+
+const asMember = (
+  props: {
+    limits?: typeof LIMITS;
+    places?: Place[];
+    originCommunityId?: string | null;
+    initialSelection?: Selection;
+  } = {},
+) =>
+  render(
+    <StoryComposer
+      historyHref="/stories/meus"
+      member={{ limits: props.limits ?? LIMITS }}
+      places={props.places ?? []}
+      originCommunityId={props.originCommunityId ?? null}
+      initialSelection={props.initialSelection ?? { kind: 'none' }}
+    />,
+  );
+
+describe('StoryComposer — the member before a pick (UI-D-702, D-715)', () => {
+  it('M1. both pick rows, and the helper names the tenant’s photo and video caps', () => {
+    asMember();
+    expect(screen.getAllByText('Escolher foto')).toHaveLength(2);
+    expect(screen.getAllByText('Escolher vídeo')).toHaveLength(2);
+    expect(screen.getByTestId('story-duration-helper').textContent).toBe(
+      'Foto de até 5 MB. Vídeo de até 60 s e 100 MB.',
+    );
+  });
+
+  it('M2. with member video off the video row and its drop zone are ABSENT from the DOM, and the helper speaks of the photo only', () => {
+    asMember({ limits: LIMITS_NO_VIDEO });
+    expect(screen.getAllByText('Escolher foto')).toHaveLength(2);
+    expect(screen.queryAllByText('Escolher vídeo')).toHaveLength(0);
+    expect(document.getElementById('story-video-input')).toBeNull();
+    expect(screen.getByTestId('story-duration-helper').textContent).toBe('Foto de até 5 MB.');
+  });
+
+  it('M3. the uploads carry the tenant’s caps, and a photo over the cap reads "A foto pode ter até {size}."', () => {
+    asMember();
+    const image = upload.handlers.image as {
+      maxBytes?: number;
+      tooLargeMessage?: (s: string) => string;
+    };
+    const video = upload.handlers.video as { maxBytes?: number };
+    expect(image.maxBytes).toBe(5 * MB);
+    expect(image.tooLargeMessage?.('5 MB')).toBe('A foto pode ter até 5 MB.');
+    expect(video.maxBytes).toBe(100 * MB);
+  });
+
+  it('M4. the administrator’s screen is unchanged: its helper, no caps and no member copy', () => {
+    composer();
+    expect(upload.handlers.image).not.toHaveProperty('maxBytes');
+    expect(upload.handlers.video).not.toHaveProperty('maxBytes');
+    expect(screen.getByTestId('story-duration-helper').textContent).toContain('Vídeo de até');
+    expect(screen.queryByText(/Foto de até/)).toBeNull();
+  });
+});
+
+describe('StoryComposer — the member after a pick (UI-D-703)', () => {
+  it('M5. the audience line shows above the caption, and the administrator’s screen never shows it', async () => {
+    asMember();
+    await completeUpload('image', IMAGE);
+    expect(screen.getByText(AUDIENCE)).toBeTruthy();
+    expect(screen.getByText(AUDIENCE).className).toContain('text-white/70');
+    cleanup();
+    composer();
+    await completeUpload('image', IMAGE);
+    expect(screen.queryByText(AUDIENCE)).toBeNull();
+  });
+
+  it('M6. a member video waits for ready: Publicar disabled and the waiting line, not the administrator’s "Você já pode publicar"', async () => {
+    readiness.value = { phase: 'waiting' };
+    asMember();
+    await completeUpload('video', IMAGE);
+    const submit = screen.getByRole('button', { name: 'Publicar' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(
+      screen.getByText('Você poderá publicar quando o vídeo terminar de processar.'),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Você já pode publicar/)).toBeNull();
+
+    readiness.value = { phase: 'ready' };
+    cleanup();
+    asMember();
+    await completeUpload('video', IMAGE);
+    expect((screen.getByRole('button', { name: 'Publicar' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    expect(
+      screen.queryByText('Você poderá publicar quando o vídeo terminar de processar.'),
+    ).toBeNull();
+  });
+
+  it('M7. a video rejected for duration says so in the tenant’s own number and offers "Remover vídeo", which returns to the pickers', async () => {
+    readiness.value = { phase: 'failed', issue: 'duration_too_long' };
+    asMember();
+    await completeUpload('video', IMAGE);
+    expect(screen.getByRole('alert').textContent).toBe(
+      'O vídeo passou de 60 s e não pôde ser usado. Escolha um vídeo mais curto.',
+    );
+    expect((screen.getByRole('button', { name: 'Publicar' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await tap(screen.getByRole('button', { name: 'Remover vídeo' }));
+    expect(screen.getAllByText('Escolher foto')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Publicar' })).toBeNull();
+  });
+
+  it('M8. an image publish by a member sends the plain body and lands on Explorar with "Story publicado."', async () => {
+    asMember();
+    await completeUpload('image', IMAGE);
+    await publishNow();
+    expect(publish).toHaveBeenCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: '' },
+      { communityId: null },
+    );
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Story publicado.' });
+    expect(push).toHaveBeenCalledWith('/inicio?aba=explorar');
+  });
+});
+
+describe('StoryComposer — the member’s destination (UI-D-704, D-716)', () => {
+  it('M9. with no community to publish into there is no row and no gap: the audience line and the caption only', async () => {
+    asMember({ places: [] });
+    await completeUpload('image', IMAGE);
+    expect(destinationRow()).toBeNull();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    expect(screen.getByText(AUDIENCE)).toBeTruthy();
+  });
+
+  it('M10. the row reads "Nenhum"; its sheet has the member helper, the notice above the groups, the owned communities and NO "Início" group', async () => {
+    asMember({ places: memberPlaces() });
+    await completeUpload('image', IMAGE);
+    expect(destinationValue()).toBe('Nenhum');
+    const dialog = await openSheet();
+    expect(
+      within(dialog).getByText(
+        'O story aparece em Explorar por 24 h e continua no destaque escolhido.',
+      ),
+    ).toBeTruthy();
+    const notice = within(dialog).getByText(NOTICE);
+    expect(notice.className).toContain('text-text');
+    expect(notice.className).toContain('font-bold');
+    expect(within(dialog).queryByText(HOME)).toBeNull();
+    expect(within(dialog).getByText(NAME_A)).toBeTruthy();
+    expect(within(dialog).getByText(NAME_B)).toBeTruthy();
+    // The groups come AFTER the notice.
+    expect(
+      notice.compareDocumentPosition(within(dialog).getByText(NAME_A)) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('M11. choosing a highlight replaces the audience line by the stronger notice (white, bold), and publishing lands on the community with its toast', async () => {
+    asMember({ places: memberPlaces() });
+    await completeUpload('image', IMAGE);
+    const dialog = await openSheet();
+    await tap(sheetItem(dialog, `row:${H_A1}`) as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    expect(destinationValue()).toBe(value(NAME_A, 'Destaques'));
+    expect(screen.queryByText(AUDIENCE)).toBeNull();
+    const notice = screen.getByText(NOTICE);
+    expect(notice.className).toContain('text-white');
+    expect(notice.className).toContain('font-bold');
+
+    await publishNow();
+    expect(publish).toHaveBeenCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: '', highlightId: H_A1 },
+      { communityId: A },
+    );
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: `Story publicado no destaque Destaques de ${NAME_A}.`,
+    });
+    expect(push).toHaveBeenCalledWith(`/comunidades/${A}`);
+  });
+
+  it('M12. a 403 with a destination: "Você não pode publicar nesta comunidade.", the selection resets to "Nenhum", the group leaves the sheet for the session, the media and caption stay', async () => {
+    publish.mockResolvedValue({ ok: false, code: 'forbidden' });
+    asMember({ places: memberPlaces() });
+    await completeUpload('image', IMAGE);
+    fireEvent.change(screen.getByLabelText('Legenda'), { target: { value: 'minha legenda' } });
+    const dialog = await openSheet();
+    await tap(sheetItem(dialog, `row:${H_A1}`) as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await publishNow();
+
+    expect(screen.getByRole('alert').textContent).toBe('Você não pode publicar nesta comunidade.');
+    expect(destinationValue()).toBe('Nenhum');
+    expect((screen.getByLabelText('Legenda') as HTMLTextAreaElement).value).toBe('minha legenda');
+    expect(screen.getByTestId('story-preview')).toBeTruthy();
+    expect(push).not.toHaveBeenCalled();
+    const again = await openSheet();
+    expect(within(again).queryByText(NAME_A)).toBeNull();
+    expect(within(again).getByText(NAME_B)).toBeTruthy();
+  });
+
+  it('M13. a 403 with NO destination means the Rede social was turned off: its sentence, and Publicar stays disabled', async () => {
+    publish.mockResolvedValue({ ok: false, code: 'forbidden' });
+    asMember();
+    await completeUpload('image', IMAGE);
+    await publishNow();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'A Rede social foi desativada. Não é possível publicar agora.',
+    );
+    expect((screen.getByRole('button', { name: 'Publicar' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it('M14. an archived refusal keeps the shipped copy and reset (UI-D-71 carried)', async () => {
+    publish.mockResolvedValue({ ok: false, code: 'archived' });
+    asMember({
+      places: memberPlaces(),
+      originCommunityId: A,
+      initialSelection: { kind: 'highlight', highlightId: H_A1 },
+    });
+    await completeUpload('image', IMAGE);
+    await publishNow();
+    expect(screen.getByRole('alert').textContent).toBe(
+      lookup(catalog, 'publish.errors.archived', { community: NAME_A }),
+    );
+    expect(destinationValue()).toBe('Nenhum');
+  });
+
+  it('M15. opened from a community with no highlight the row reads "Escolher destaque", and Publicar opens the sheet instead of publishing', async () => {
+    asMember({
+      places: memberPlaces(),
+      originCommunityId: B,
+      initialSelection: { kind: 'choose' },
+    });
+    await completeUpload('image', IMAGE);
+    expect(destinationValue()).toBe('Escolher destaque');
+    await publishNow();
+    expect(publish).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
   });
 });
