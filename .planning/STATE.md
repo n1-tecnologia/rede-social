@@ -4,11 +4,11 @@ current_phase: "12.2"
 current_phase_name: Ramos condicionais no formulário de perfil
 current_plan: 21
 status: verifying
-stopped_at: Phase 10 context gathered 2026-11-10 (D-701..D-718; discussion only, no plans); STATE pointer stays on 12.2 awaiting Igor's proofs, Phase 13 paused at plan 14; next /gsd-ui-phase 10 then /gsd-plan-phase 10
-last_updated: "2026-11-10T20:42:31.535Z"
+stopped_at: Phase 10 UI-SPEC approved by the checker 2026-11-10 (UI-D-697..720, 4 FLAGs); sketch 020 and owner answers to OQ-1..OQ-7 still open; STATE pointer stays on 12.2, Phase 13 paused at plan 14; next /gsd-plan-phase 10 after the sketch gate
+last_updated: "2026-11-11T00:36:22.591Z"
 last_activity: 2026-11-10
 last_activity_desc: Phase 12.3 closed by developer closure, STATE back on 12.2
-state_head: 7bf4b245f66cb5560d67f5af03f01321a6587d6e
+state_head: 89bbf2041e09007eaa573d12deb4785c75f8f853
 progress:
   total_phases: 31
   completed_phases: 0
@@ -1250,6 +1250,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-10T20:42:30.675Z
-Stopped at: Phase 10 context gathered 2026-11-10 (D-701..D-718; discussion only, no plans); STATE pointer stays on 12.2 awaiting Igor's proofs, Phase 13 paused at plan 14; next /gsd-ui-phase 10 then /gsd-plan-phase 10
-Resume file: .planning/phases/10-rede-social-member-stories-and-communities/10-CONTEXT.md
+Last session: 2026-11-11T00:36:21.803Z
+Stopped at: Phase 10 UI-SPEC approved by the checker 2026-11-10 (UI-D-697..720, 4 FLAGs); sketch 020 and owner answers to OQ-1..OQ-7 still open; STATE pointer stays on 12.2, Phase 13 paused at plan 14; next /gsd-plan-phase 10 after the sketch gate
+Resume file: .planning/phases/10-rede-social-member-stories-and-communities/10-UI-SPEC.md
