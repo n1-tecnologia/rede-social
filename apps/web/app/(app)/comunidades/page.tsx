@@ -7,7 +7,7 @@ import { Chip } from '@rede-social/ui';
 import { Plus } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { loadCommunities } from '@/lib/communities';
+import { communityEntryState, loadCommunities } from '@/lib/communities';
 import { getCommunityAccessList } from '@/lib/store';
 import { type CommunityTagsView, communityTagsView } from '@/lib/store-view';
 import { CommunitiesList } from './CommunitiesList';
@@ -84,6 +84,12 @@ export default async function CommunitiesPage({
     loadCommunities({ status }),
     storeOn ? getCommunityAccessList() : Promise.resolve(null),
   ]);
+  // 10-13 (UI-D-706): the create entry is the composed permission plus the quota the read carries.
+  const entry = communityEntryState({
+    canManage,
+    canCreate: bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.create),
+    memberQuota: page?.memberQuota,
+  });
   const viewer = {
     canManage: bootstrap.permissions.includes(STORE_PERMISSIONS.manage),
     // UI-D-372: support reads every community in full and holds no store role, so it never sees a
@@ -111,37 +117,41 @@ export default async function CommunitiesPage({
     </>
   );
 
+  const createControl = (
+    <a
+      href="/comunidades/nova"
+      data-communities-create
+      className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-button bg-(image:--button-image) text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:px-4"
+    >
+      <Plus aria-hidden size={20} className="sm:hidden" />
+      <Plus aria-hidden size={16} className="hidden sm:block" />
+      <span className="sr-only sm:not-sr-only">{t('actions.create')}</span>
+    </a>
+  );
+
   return (
     <div data-shell-full className="flex w-full flex-col">
-      {canManage ? (
-        <>
-          {/* The heading block is `min-w-0 flex-1` and the control `shrink-0`: at any width the
-              control keeps its 44px and the heading wraps rather than overlapping it (UI-D-48). */}
-          <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-3">
-            <div className="min-w-0 flex-1">{heading}</div>
-            <a
-              href="/comunidades/nova"
-              data-communities-create
-              className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-button bg-(image:--button-image) text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:px-4"
-            >
-              <Plus aria-hidden size={20} className="sm:hidden" />
-              <Plus aria-hidden size={16} className="hidden sm:block" />
-              <span className="sr-only sm:not-sr-only">{t('actions.create')}</span>
-            </a>
-          </div>
-
-          <nav aria-label={t('list.filter.label')} className="flex gap-2 px-4 pb-3">
-            <Chip href="/comunidades" active={status === 'active'}>
-              {t('list.filter.active')}
-            </Chip>
-            <Chip href="/comunidades?status=arquivadas" active={status === 'archived'}>
-              {t('list.filter.archived')}
-            </Chip>
-          </nav>
-        </>
+      {entry === 'control' ? (
+        // The heading block is `min-w-0 flex-1` and the control `shrink-0`: at any width the
+        // control keeps its 44px and the heading wraps rather than overlapping it (UI-D-48).
+        <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-3">
+          <div className="min-w-0 flex-1">{heading}</div>
+          {createControl}
+        </div>
       ) : (
         <div className="px-4 pt-4 pb-3">{heading}</div>
       )}
+
+      {canManage ? (
+        <nav aria-label={t('list.filter.label')} className="flex gap-2 px-4 pb-3">
+          <Chip href="/comunidades" active={status === 'active'}>
+            {t('list.filter.active')}
+          </Chip>
+          <Chip href="/comunidades?status=arquivadas" active={status === 'archived'}>
+            {t('list.filter.archived')}
+          </Chip>
+        </nav>
+      ) : null}
 
       <CommunitiesList
         key={status}
@@ -150,6 +160,7 @@ export default async function CommunitiesPage({
         initialError={page === null}
         tenantName={bootstrap.tenant.displayName}
         canManage={canManage}
+        canCreate={entry === 'control'}
         status={status}
         storeTags={storeTags}
       />

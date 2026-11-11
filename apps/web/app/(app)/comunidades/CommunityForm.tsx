@@ -17,7 +17,7 @@ import {
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { Archive, ArchiveRestore, Image as ImageIcon, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Image as ImageIcon, Users, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useRef, useState, useTransition } from 'react';
@@ -97,6 +97,13 @@ export type CommunityFormProps = {
    * links are edited in the product form only.
    */
   accessProducts?: readonly CommunityAccessProductView[];
+  /**
+   * 10-13 (UI-D-707, D-713): the form of a MEMBER's own community. The same form as the admin's, with
+   * the store "Acesso" block never rendered (a member cannot link products) and, under "Descrição", the
+   * audience line that states the owner rule where the community is born. The host decides it from
+   * the composed permissions (`create` or `manage_own` without `manage`), never from a role.
+   */
+  memberMode?: boolean;
 };
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -117,6 +124,7 @@ export function CommunityForm({
   initial,
   tenantName,
   accessProducts,
+  memberMode = false,
 }: CommunityFormProps) {
   const t = useTranslations('communities');
   /** Full keys (`communities.form.access.…`), shared with `lib/store-view`'s sentence builder. */
@@ -124,6 +132,9 @@ export function CommunityForm({
   const tm = useTranslations('media');
   const toast = useToast();
   const router = useRouter();
+
+  /** UI-D-707: the line under "Descrição" of a member's form; the organization's form carries none. */
+  const audienceNote = memberMode ? t('form.audienceMember', { tenant: tenantName }) : undefined;
 
   const start = initial ?? EMPTY;
   const [name, setName] = useState(start.name);
@@ -490,9 +501,20 @@ export function CommunityForm({
           onChange={(event) => setDescription(event.target.value)}
         />
 
+        {/* UI-D-707: who sees the community and who publishes in it, stated where it is born. */}
+        {audienceNote ? (
+          <p
+            data-community-audience
+            className="-mt-4 flex items-center gap-1.5 text-xs font-normal text-text-tertiary"
+          >
+            <Users aria-hidden size={14} className="shrink-0" />
+            <span className="min-w-0">{audienceNote}</span>
+          </p>
+        ) : null}
+
         {/* ── 08.2-10 / UI-D-379: the read-only "Acesso" block. Which products make this community
             exclusive, each a link to its product; no control writes from here (D-363). ── */}
-        {mode === 'edit' && accessProducts !== undefined ? (
+        {mode === 'edit' && !memberMode && accessProducts !== undefined ? (
           <div data-community-access className="flex flex-col gap-2">
             <span className="text-sm font-normal text-text-secondary">
               {tRoot('communities.form.access.label')}

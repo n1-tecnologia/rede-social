@@ -14,6 +14,11 @@ import { getHostTenant } from '@/lib/tenant-host';
  * and then be refused on; the API refuses the write independently regardless, which is what makes
  * this a UX decision rather than the security boundary.
  *
+ * **10-13 (UI-D-707): a member may create too.** A caller holding `communities.community.create`
+ * (composed for a member only while `social` and `communities` are effective) without `manage` gets the
+ * SAME form in member mode: no store "Acesso" block, and under "Descrição" the audience line. Neither
+ * permission, which is also what `social` off looks like to a member, goes back to `/comunidades`.
+ *
  * **There is no public render path.** The route lives inside the `(app)` group, so `proxy.ts`
  * bounces a session-less visitor to `/entrar` before this file runs, and it reads the session and
  * the host headers at request time — which is what keeps it OUT of the static route list.
@@ -24,7 +29,15 @@ export default async function NewCommunityPage() {
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const bootstrap = await requireBootstrap();
-  if (!bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.manage)) redirect('/comunidades');
+  const canManage = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.manage);
+  const canCreate = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.create);
+  if (!canManage && !canCreate) redirect('/comunidades');
 
-  return <CommunityForm mode="create" tenantName={bootstrap.tenant.displayName} />;
+  return (
+    <CommunityForm
+      mode="create"
+      tenantName={bootstrap.tenant.displayName}
+      memberMode={!canManage}
+    />
+  );
 }

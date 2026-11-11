@@ -20,10 +20,10 @@ import { CommunityCover } from './CommunityCover';
  * size, the rail beside it) and NO description, then the same counts row inside the same single
  * link, with the same `data-testid`.
  *
- * **There is no owner byline, and there must never be one** (D-67). The organisation owns the
- * container and every post inside it already shows a face; a second byline here would compete with
- * the real one and invent an authorship claim the product does not make. `created_by_user_id` is
- * stored on the row and never projected, so there is nothing to render even if a caller asked.
+ * **An organization community has no byline, and must never get one** (D-67): the organisation
+ * owns the container and every post inside it already shows a face. A MEMBER-created community is
+ * somebody's (10-06, D-703), so the host may pass the optional `byline` below for it; the module
+ * still ships no words and never sees a user id (`created_by_user_id` is never projected).
  *
  * **Three things the prototype has that this card deliberately does not** (D-75, UI-D-42): the
  * activity badge, the member count and the "last activity" timestamp. `last_activity_at` exists for
@@ -57,6 +57,16 @@ export interface CommunityCardProps {
    */
   statusPill?: ReactNode;
   /**
+   * 10-13 (UI-D-708): the creator's byline of a MEMBER-created community, a FINISHED string the host
+   * builds from its own catalog ("Criada por Helena"; the module ships no words). It shares the
+   * counts row with the post count: the count is `shrink-0 tabular-nums` so it never truncates, an
+   * `aria-hidden` middot separates them, and the byline is `min-w-0 truncate`, so a long name
+   * truncates while the row keeps the height of an organization card's. The name is PLAIN TEXT: the
+   * card is one `<a>`, and a link inside it would be invalid nested anchors (OQ-2); the profile link
+   * lives in the community header. Absent on an organization community.
+   */
+  byline?: string;
+  /**
    * UI-D-372 (08.2): an over-media badge on the cover, top-left, on both cover branches — the
    * store's "Exclusiva" pill, composed by the host from the store access read (the communities
    * module stays ignorant of products). It lives inside the card's one anchor, so its text is read
@@ -86,6 +96,7 @@ export function CommunityCard({
   postCountLabel,
   coverAlt,
   statusPill,
+  byline,
   coverBadge,
   variant = 'list',
 }: CommunityCardProps) {
@@ -143,9 +154,17 @@ export function CommunityCard({
             timestamp (D-75). `tabular-nums` keeps the digits from shifting as the count grows. */}
         <div className="flex items-center gap-2 px-4 py-3">
           <MessageCircle size={16} aria-hidden className="shrink-0 text-text-tertiary" />
-          <span className="min-w-0 flex-1 truncate text-xs font-normal text-text-tertiary tabular-nums">
-            {postCountLabel}
-          </span>
+          {byline ? (
+            <span className="flex min-w-0 flex-1 items-center gap-1 text-xs font-normal text-text-tertiary">
+              <span className="shrink-0 tabular-nums">{postCountLabel}</span>
+              <span aria-hidden>·</span>
+              <span className="min-w-0 truncate">{byline}</span>
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-xs font-normal text-text-tertiary tabular-nums">
+              {postCountLabel}
+            </span>
+          )}
           {/* `shrink-0` beside the label's `min-w-0 flex-1 truncate`: a long count truncates, the
               pill and the chevron keep their width, and the row never wraps (UI-D-50). */}
           {statusPill ? <span className="shrink-0">{statusPill}</span> : null}

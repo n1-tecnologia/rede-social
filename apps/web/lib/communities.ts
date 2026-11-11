@@ -95,6 +95,36 @@ export async function loadCommunities(
 }
 
 /**
+ * What the "Criar comunidade" entry looks like for a viewer (10-13, UI-D-706, D-710).
+ *
+ *  - `control`: the brand control shows (an admin always; a member under the limit);
+ *  - `notice`: the member is AT the limit with a limit above 0, so the control is absent and the
+ *    notice replaces it;
+ *  - `none`: nothing (not a creator, or limit 0: creation is not offered in this tenant).
+ *
+ * The inputs are the COMPOSED permissions the bootstrap carries (`communities.community.manage` for
+ * the organization, `communities.community.create` for a member, which the API composes only while
+ * `social` and `communities` are effective) and the quota the list read carries for the caller: never
+ * a role comparison, so granting a permission to another role changes the entry with no web edit.
+ * A creator whose quota did not arrive (the read failed) still gets the control: the API's
+ * `limit_reached` and `403` are the real controls, this is UX.
+ */
+export type CommunityEntry = 'control' | 'notice' | 'none';
+
+export function communityEntryState(input: {
+  canManage: boolean;
+  canCreate: boolean;
+  memberQuota: CommunityPage['memberQuota'] | undefined;
+}): CommunityEntry {
+  if (input.canManage) return 'control';
+  if (!input.canCreate) return 'none';
+  const quota = input.memberQuota;
+  if (!quota) return 'control';
+  if (quota.limit <= 0) return 'none';
+  return quota.ownedActive >= quota.limit ? 'notice' : 'control';
+}
+
+/**
  * Every ACTIVE community of the tenant, for a surface that has to offer ALL of them at once —
  * UI-D-45's "Publicar em" picker today, UI-D-41's pin sheet in 05-08.
  *

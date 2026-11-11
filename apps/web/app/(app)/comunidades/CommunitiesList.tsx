@@ -40,6 +40,13 @@ export interface CommunitiesListProps {
   /** The composed `communities.community.manage` permission — never a role comparison here. */
   canManage: boolean;
   /**
+   * 10-13 (UI-D-706): the "Criar comunidade" entry is available to this viewer: an admin, or a member
+   * under their limit. Decided by the PAGE from the composed permission and the quota numbers the read
+   * carries (`communityEntryState`); it only adds the empty list's action here. `canManage` still
+   * owns the reorder, the archived read and the store tags (the member's `manage_own` never flips them).
+   */
+  canCreate?: boolean;
+  /**
    * Which list this is (05.1, D-88). The PAGE decides it on the server — `archived` only for a
    * manager asking `?status=arquivadas` — and remounts this component per status, so no state is
    * ever carried from one list into the other. Refresh and load-more pass it on (Pitfall 9).
@@ -150,6 +157,7 @@ export function CommunitiesList({
   initialError,
   tenantName,
   canManage,
+  canCreate = false,
   status = 'active',
   storeTags,
 }: CommunitiesListProps) {
@@ -344,14 +352,15 @@ export function CommunitiesList({
 
   // A LINK, not a `Button`: the shipped button is a `<button>` and the form is a route. The brand
   // styling is the button's, read through the tenant tokens exactly as `Button` reads them.
-  const createCta = canManage ? (
-    <a
-      href="/comunidades/nova"
-      className="inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-    >
-      {t('actions.create')}
-    </a>
-  ) : null;
+  const createCta =
+    canManage || canCreate ? (
+      <a
+        href="/comunidades/nova"
+        className="inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+      >
+        {t('actions.create')}
+      </a>
+    ) : null;
 
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
@@ -416,6 +425,13 @@ export function CommunitiesList({
                   coverAssetId={community.coverAssetId}
                   coverVariantWidths={community.coverVariantWidths}
                   postCountLabel={t('card.posts', { count: community.postCount })}
+                  // UI-D-708: a member-created community says whose it is; an organization one never
+                  // does. The host builds the string, and the name is plain text inside the one link.
+                  byline={
+                    community.createdBy
+                      ? t('card.byline', { name: community.createdBy.displayName })
+                      : undefined
+                  }
                   coverAlt={t('card.cover', { community: community.name })}
                   // UI-D-50: decided per ROW from the row's own status, never from the list's.
                   // UI-D-372: "Produto arquivado" takes the same slot (never both: P80 above).
