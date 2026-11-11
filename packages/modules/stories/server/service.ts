@@ -8,6 +8,7 @@ import { moduleLogger } from '@rede-social/core/server/logging';
 import { recordModerationAction } from '@rede-social/core/server/moderation/log';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { decodeCursor, encodeCursor, keysetComparison } from '@rede-social/core/server/paging';
+import { safetyLimiterKey, storyPublishLimiter } from '@rede-social/core/server/safety/limits';
 import { type SQL, sql } from 'drizzle-orm';
 import {
   type CreateStoryComment,
@@ -266,6 +267,7 @@ export async function listActiveStories(
     tx.execute<StoryRow>(sql`
       ${storyProjection(ctx)}
        where s.tenant_id = ${ctx.tenantId}::uuid
+         and s.visibility = 'tenant'
          and s.deleted_at is null
          and s.expires_at > now()
          and a.status = 'ready'
@@ -298,28 +300,43 @@ export async function listActiveStories(
 }
 
 /**
- * `GET /v1/stories/mine` (D-84) — the SAME query as the strip with the range predicate and the
- * readiness filter DROPPED, which is the whole reason `stories_tenant_expires_idx` serves both.
+ * `GET /v1/stories/mine` (D-84, 10-07 D-714) — the SAME query as the strip with the range predicate and
+ * the readiness filter DROPPED, which is the whole reason `stories_tenant_expires_idx` serves both.
  *
- * "Own" is the MANAGING view of the tenant's stories, not an author filter: the guard is
- * `stories.story.manage`, and V1's single publisher makes the two sets identical anyway. An author
- * predicate would be a second shape the one index would then have to serve badly, and it would hide
- * a co-admin's story from the person responsible for moderating it.
+ * **Two sets, chosen by the flag the ROUTE computed** (this file never compares a role or a permission):
+ *  - `canManage` (a holder of `stories.story.manage`): the tenant's ORGANIZATION stories
+ *    (`visibility = 'tenant'`), never a member's. It is the managing view, not an author filter, so a
+ *    co-admin's story still shows to the person responsible for moderating it. A member's story reaches
+ *    a moderator through Explorar (plan 08), never through this door.
+ *  - anyone else holding `stories.story.publish` (a member): THEIR OWN stories
+ *    (`author_user_id = ctx.userId`), the member's "Seus stories", expired ones included.
+ * Until Phase 10 the two sets were identical because V1 had a single publisher; that stopped being true
+ * the day a member could publish.
  *
  * This is where a `processing` story and a `rejected` one are visible — with `mediaStatus` and
  * `mediaFailureReason` on the payload so the history screen can render the Phase 3 `Processando` /
  * `Recusado` pill and the media catalog's own reason string (Pitfall 5).
  */
-export async function listOwnStories(ctx: RequestContext, query: StoryQuery): Promise<StoryPage> {
+export async function listOwnStories(
+  ctx: RequestContext,
+  query: StoryQuery,
+  options: { canManage: boolean },
+): Promise<StoryPage> {
   const limit = query.limit;
   const after = decodeCursor(query.cursor);
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
+  // Both branches are literals (the audience is never a client value): the manager's set keeps the
+  // organization stories only, the member's set is their own rows.
+  const scope = options.canManage
+    ? sql`s.visibility = 'tenant'`
+    : sql`s.author_user_id = ${ctx.userId}::uuid`;
 
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<StoryRow>(sql`
       ${storyProjection(ctx)}
        where s.tenant_id = ${ctx.tenantId}::uuid
+         and ${scope}
          and s.deleted_at is null
          and (
            ${afterAt}::timestamptz is null
@@ -334,6 +351,7 @@ export async function listOwnStories(ctx: RequestContext, query: StoryQuery): Pr
   log.info(
     {
       event: 'stories.list_own',
+      canManage: options.canManage,
       tenantId: ctx.tenantId,
       userId: ctx.userId,
       requestId: ctx.requestId,
@@ -368,6 +386,22 @@ export async function getStory(ctx: RequestContext, storyId: string): Promise<St
 
   if (!row) throw new ApiError(404, 'NOT_FOUND');
   return toStory(row);
+}
+
+/**
+ * A `42501` (insufficient privilege, the row-level-security refusal) anywhere in the cause chain. The
+ * communities and feed modules keep their own copies because modules never import each other (MOD-02).
+ */
+function isInsufficientPrivilege(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current !== null && current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (candidate.code === '42501') return true;
+    current = candidate.cause;
+  }
+  return false;
 }
 
 /** What the asset lookup inside `publishStory`'s transaction needs to decide. */
@@ -414,6 +448,11 @@ type AssetRow = { kind: string; purpose: string };
  *   bare 404. A story born in a highlight and a story added later are therefore the SAME item row.
  *   The module flag is read BEFORE the transaction opens (the `PlaceGate` rule: one request never
  *   holds two pooled connections).
+ * - **A MEMBER publishes too (10-07, D-714).** The audience is stamped from the role (`'followers'` for a
+ *   member, `'tenant'` otherwise), a member's attempt is rate limited, a member's 42501 from the insert
+ *   gate (`social` switched off inside the flags-cache window) is a 403, and a MEMBER story raises no
+ *   `story.published` event at all (nobody is told, PR-4). A member naming a destination meets the
+ *   manage gate below and is refused 403: plan 09 gives that path its owner branch.
  * - **The ROUTE owns the permission.** A body naming any destination additionally needs
  *   `stories.story.manage` (curation is the manage half); that check runs in the handler before this
  *   function is called, so this file never compares roles or permissions.
@@ -436,80 +475,111 @@ export async function publishStory(
 
   const highlightId = input.highlightId;
   const newHighlight = input.newHighlight;
+
+  // 10-07 (D-714): the audience is STAMPED here from the caller's role, never read from `input` (the
+  // body is `.strict()` and names no audience). It is the ONE role read of this function, a stamp and
+  // not a permission decision, and it is backed by `stories_social_insert_gate` in SQL: a member lane
+  // may only insert `'followers'` (with `social` on), a staff lane only `'tenant'`.
+  const member = ctx.role === 'member';
+  const visibility = member ? 'followers' : 'tenant';
+
+  // 10-07 (A6, T-10-27): a member's publication is rate limited BEFORE anything is read or written;
+  // every ATTEMPT counts, a refused one included.
+  if (member && !storyPublishLimiter.consume(safetyLimiterKey(ctx))) {
+    throw new ApiError(429, 'RATE_LIMITED');
+  }
+
   // Read BEFORE the transaction, and only when a highlight is named: the plain publish stays three
   // statements with no flag read.
   const gate =
     highlightId !== undefined || newHighlight !== undefined ? await readPlaceGate(ctx) : null;
 
-  const {
-    row: created,
-    createdHighlightId,
-    itemHighlightId,
-  } = await withTenantTx(ctx, async (tx) => {
-    // BEFORE the asset: a refused destination is the first thing the caller is told (see above).
-    if (highlightId !== undefined && gate !== null) {
-      await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
-      await assertHighlightHasRoom(tx, ctx, highlightId, null);
-    }
-    if (newHighlight !== undefined && gate !== null) {
-      await resolveHighlightPlace(tx, ctx, newHighlight.communityId, 'curate', gate);
-      await lockHighlightPlace(tx, ctx, newHighlight.communityId);
-    }
+  const writeStory = () =>
+    withTenantTx(ctx, async (tx) => {
+      // BEFORE the asset: a refused destination is the first thing the caller is told (see above).
+      if (highlightId !== undefined && gate !== null) {
+        await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
+        await assertHighlightHasRoom(tx, ctx, highlightId, null);
+      }
+      if (newHighlight !== undefined && gate !== null) {
+        await resolveHighlightPlace(tx, ctx, newHighlight.communityId, 'curate', gate);
+        await lockHighlightPlace(tx, ctx, newHighlight.communityId);
+      }
 
-    const assets = await tx.execute<AssetRow>(sql`
+      const assets = await tx.execute<AssetRow>(sql`
       select kind, purpose
         from media_assets
        where id = ${mediaAssetId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid
          and deleted_at is null
        limit 1`);
-    const asset = assets[0];
-    // Unknown, another tenant's, or soft-deleted — one indistinguishable answer, no details.
-    if (!asset) throw new ApiError(404, 'NOT_FOUND');
-    if (asset.purpose !== 'story' || asset.kind !== input.mediaKind) {
-      throw new ApiError(400, 'VALIDATION_FAILED', { story: 'media_invalid' });
-    }
+      const asset = assets[0];
+      // Unknown, another tenant's, or soft-deleted — one indistinguishable answer, no details.
+      if (!asset) throw new ApiError(404, 'NOT_FOUND');
+      if (asset.purpose !== 'story' || asset.kind !== input.mediaKind) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { story: 'media_invalid' });
+      }
 
-    const inserted = await tx.execute<{ id: string }>(sql`
-      insert into stories (tenant_id, author_user_id, media_asset_id, media_kind, caption)
+      const inserted = await tx.execute<{ id: string }>(sql`
+      insert into stories (tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility)
       values (${ctx.tenantId}::uuid,
               ${ctx.userId}::uuid,
               ${mediaAssetId}::uuid,
               ${input.mediaKind},
-              ${input.caption})
+              ${input.caption},
+              ${visibility})
       returning id`);
-    const id = inserted[0]?.id;
-    if (!id) throw new ApiError(500, 'INTERNAL');
+      const id = inserted[0]?.id;
+      if (!id) throw new ApiError(500, 'INTERNAL');
 
-    // The inline highlight is written AFTER the story, through the one highlight insert.
-    const newId =
-      newHighlight !== undefined
-        ? await insertHighlight(tx, ctx, newHighlight.communityId, newHighlight.title)
-        : null;
-    const target = highlightId ?? newId;
-    // The one item statement `addStoryToHighlight` also uses: born in ≡ added later.
-    const itemWritten = target !== null ? await insertHighlightItem(tx, ctx, target, id) : false;
+      // The inline highlight is written AFTER the story, through the one highlight insert.
+      const newId =
+        newHighlight !== undefined
+          ? await insertHighlight(tx, ctx, newHighlight.communityId, newHighlight.title)
+          : null;
+      const target = highlightId ?? newId;
+      // The one item statement `addStoryToHighlight` also uses: born in ≡ added later.
+      const itemWritten = target !== null ? await insertHighlightItem(tx, ctx, target, id) : false;
 
-    const rows = await tx.execute<StoryRow>(sql`
+      const rows = await tx.execute<StoryRow>(sql`
       ${storyProjection(ctx)}
        where s.id = ${id}::uuid
        limit 1`);
-    const row = rows[0];
-    if (!row) throw new ApiError(500, 'INTERNAL');
-    return {
-      row,
-      createdHighlightId: newId,
-      itemHighlightId: itemWritten ? target : null,
-    };
-  });
+      const row = rows[0];
+      if (!row) throw new ApiError(500, 'INTERNAL');
+      return {
+        row,
+        createdHighlightId: newId,
+        itemHighlightId: itemWritten ? target : null,
+      };
+    });
 
-  emit(ctx, 'story.published', {
-    tenantId: ctx.tenantId,
-    storyId: created.id,
-    authorUserId: created.author_user_id,
-    mediaKind: created.media_kind,
-    expiresAt: created.expires_at,
-  });
+  let written: Awaited<ReturnType<typeof writeStory>>;
+  try {
+    written = await writeStory();
+  } catch (error) {
+    // T-10-26 / D-718: `social` was switched off while this instance's flags cache still held the old
+    // answer, so the permission guard let a member through and the insert gate (`app.social_enabled()`
+    // in SQL) refused the row. That is a permission refusal, not an internal error. MEMBERS ONLY: any
+    // other 42501 stays a 500 so a real policy bug is never masked as a user-facing refusal.
+    if (member && isInsufficientPrivilege(error)) throw new ApiError(403, 'FORBIDDEN');
+    throw error;
+  }
+  const { row: created, createdHighlightId, itemHighlightId } = written;
+
+  // 10-07 (MSTORY-05, PR-4): nobody is told that a member published a story. The event is the only way
+  // a story reaches the notification fan-out (and any other subscriber), so it is raised for an
+  // ORGANIZATION story alone: a member story enqueues no job at all. The `story.published` source
+  // guards on `visibility` as well (a second wall). Whether followers are told is Phase 11's decision.
+  if (visibility === 'tenant') {
+    emit(ctx, 'story.published', {
+      tenantId: ctx.tenantId,
+      storyId: created.id,
+      authorUserId: created.author_user_id,
+      mediaKind: created.media_kind,
+      expiresAt: created.expires_at,
+    });
+  }
 
   if (createdHighlightId !== null && newHighlight !== undefined) {
     emit(ctx, 'highlight.created', {
@@ -1283,6 +1353,17 @@ async function resolveHighlight(
  */
 const MEMBER_VISIBLE = sql`s.deleted_at is null and a.status = 'ready'`;
 
+/**
+ * 10-07 (D-704, MSTORY-02): the audience of a highlight's PLACE. Início (`community_id is null`) is the
+ * organization's place, so only an ORGANIZATION story (`s.visibility = 'tenant'`, a literal) may count
+ * toward it, appear on its cover or in its items; a member story never reaches Início through a
+ * highlight. A COMMUNITY highlight keeps every story the audience gate lets the caller read (plan 09's
+ * owner seam puts a member's story in a community highlight). Expects the aliases `h` (story_highlights)
+ * and `s` (stories); the `getHighlight` items read, which has no `h`, writes the same rule from the
+ * highlight row it already holds.
+ */
+const PLACE_AUDIENCE = sql`(h.community_id is not null or s.visibility = 'tenant')`;
+
 /** One hydrated row of `highlightProjection`, snake_case straight off `tx.execute`. */
 type HighlightSummaryRow = {
   id: string;
@@ -1335,6 +1416,7 @@ function highlightProjection(where: SQL) {
                  join media_assets a on a.id = s.media_asset_id
                 where i.highlight_id = h.id
                   and ${MEMBER_VISIBLE}
+                  and ${PLACE_AUDIENCE}
              ) as item_count
         from story_highlights h
         left join lateral (
@@ -1356,6 +1438,7 @@ function highlightProjection(where: SQL) {
                  and i.story_id = h.cover_story_id
                  and s.media_kind = 'image'
                  and ${MEMBER_VISIBLE}
+                  and ${PLACE_AUDIENCE}
               union all
               (
                 select a.id, a.variant_widths, false, 3
@@ -1365,6 +1448,7 @@ function highlightProjection(where: SQL) {
                  where i.highlight_id = h.id
                    and s.media_kind = 'image'
                    and ${MEMBER_VISIBLE}
+                  and ${PLACE_AUDIENCE}
                  order by i.added_at desc, i.id desc
                  limit 1
               )
@@ -1702,7 +1786,10 @@ export async function getHighlight(
     await resolveHighlightPlace(tx, ctx, highlight.community_id, 'read', gate);
     if (!curator && highlight.item_count === 0) throw new ApiError(404, 'NOT_FOUND');
 
-    const visible = curator ? sql`s.deleted_at is null` : MEMBER_VISIBLE;
+    const base = curator ? sql`s.deleted_at is null` : MEMBER_VISIBLE;
+    // 10-07 (D-704): Início's highlight holds organization stories only (see `PLACE_AUDIENCE`).
+    const visible =
+      highlight.community_id === null ? sql`${base} and s.visibility = 'tenant'` : base;
     const items = await tx.execute<StoryRow>(sql`
       ${storyProjection(ctx)}
       join story_highlight_items i

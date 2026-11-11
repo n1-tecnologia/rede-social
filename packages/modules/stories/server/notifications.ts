@@ -38,6 +38,8 @@ type StoryFactsRow = {
   author_user_id: string;
   media_kind: 'image' | 'video';
   media_asset_id: string;
+  /** The stamped audience (10-04): only an ORGANIZATION story (`'tenant'`) is ever announced. */
+  visibility: 'tenant' | 'followers';
   expires_at: string;
   /** Whole seconds until `expires_at`, computed by the database clock (never negative). */
   seconds_left: number;
@@ -61,6 +63,7 @@ async function resolveStoryPublished(
            s.author_user_id,
            s.media_kind,
            s.media_asset_id,
+           s.visibility,
            to_char(s.expires_at at time zone 'utc', ${ISO_MICROSECONDS}) as expires_at,
            greatest(0, floor(extract(epoch from (s.expires_at - now()))))::int as seconds_left
       from stories s
@@ -72,6 +75,13 @@ async function resolveStoryPublished(
        for share of s`);
   const row = rows[0];
   if (!row) return [];
+  // 10-07 (MSTORY-05, PR-4, T-10-26): nobody is told that a member published a story. A story that is
+  // not stamped `'tenant'` (a member's, audience `'followers'`) yields no intent, no push and no bell
+  // row, and a row that does not name its audience is treated the same way (fail closed). Whether the
+  // author's followers are told is Phase 11's decision, never an incidental side effect of publishing
+  // (D-476 for posts, extended). The service also declines to emit the event for a member story, so
+  // this is the second wall, not the only one.
+  if (row.visibility !== 'tenant') return [];
 
   return [
     {

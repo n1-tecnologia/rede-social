@@ -86,6 +86,7 @@ routes only.
 - `@rede-social/core/server/notifications/source`
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
+- `@rede-social/core/server/safety/limits` (10-07: `storyPublishLimiter`, the member publish ceiling)
 - `@rede-social/core/ui`
 
 ## Navigation

@@ -116,8 +116,7 @@ async function makeAsset(
   return id;
 }
 
-const publish = (token: string, body: Record<string, unknown>) =>
-  post('/v1/stories', token, body);
+const publish = (token: string, body: Record<string, unknown>) => post('/v1/stories', token, body);
 
 async function storyRow(id: string) {
   const [row] = await adminSql<
@@ -485,6 +484,46 @@ describe('10 tracer', () => {
       await adminSql`
         update public.stories set deleted_at = null
          where tenant_id = ${labTenantId}::uuid and visibility = 'tenant' and deleted_at is not null`;
+    }
+  });
+
+  it('13. D-704: an Início highlight holding an organization story and a member story shows only the organization one (count, items), for members and for the curator', async () => {
+    const org = await insertStory({
+      author: userIds.labAdmin,
+      visibility: 'tenant',
+      caption: `${PREFIX}destaque org`,
+    });
+    const member = await insertStory({
+      author: userIds.helena,
+      visibility: 'followers',
+      caption: `${PREFIX}destaque membro`,
+    });
+    const [highlight] = await adminSql<{ id: string }[]>`
+      insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+      values (${labTenantId}::uuid, null, ${`${PREFIX}destaque`}, 9000, ${userIds.labAdmin}::uuid)
+      returning id`;
+    const highlightId = highlight?.id ?? '';
+    try {
+      for (const story of [org, member]) {
+        await adminSql`
+          insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+          values (${labTenantId}::uuid, ${highlightId}::uuid, ${story}::uuid, ${userIds.labAdmin}::uuid)`;
+      }
+      for (const token of [tokens.marcos, tokens.labAdmin]) {
+        const detail = await request(`/v1/stories/highlights/${highlightId}`, token);
+        expect(detail.status).toBe(200);
+        const body = (await detail.json()) as {
+          highlight: { itemCount: number };
+          items: StorySummary[];
+        };
+        expect(body.items.map((item) => item.id)).toEqual([org]);
+        expect(body.highlight.itemCount).toBe(1);
+      }
+      const row = await request('/v1/stories/highlights?scope=all', tokens.labAdmin);
+      const list = (await row.json()) as { items: { id: string; itemCount: number }[] };
+      expect(list.items.find((item) => item.id === highlightId)?.itemCount).toBe(1);
+    } finally {
+      await adminSql`delete from public.story_highlights where id = ${highlightId}::uuid`;
     }
   });
 });

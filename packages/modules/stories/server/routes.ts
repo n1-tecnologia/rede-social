@@ -131,16 +131,20 @@ const listRoute = createRoute({
 const listOwnRoute = createRoute({
   method: 'get',
   path: '/mine',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-07 (D-714): any-of, literals. A holder of `stories.story.manage` keeps the ORGANIZATION history;
+  // a member holding `stories.story.publish` (composed with `social`) gets THEIR OWN history.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: { query: storyQuerySchema },
   responses: {
     200: {
       description:
-        'Every story of the tenant, expired ones included, newest window first. `isActive` says which are still in the strip; `mediaStatus` / `mediaFailureReason` carry the Phase 3 processing and refusal state.',
+        "For a holder of `stories.story.manage`: every ORGANIZATION story of the tenant (never a member's), expired ones included, newest window first. For any other holder of `stories.story.publish` (a member): that member's OWN stories, expired ones included, newest window first. `isActive` says which are still in the strip; `mediaStatus` / `mediaFailureReason` carry the Phase 3 processing and refusal state.",
       content: { 'application/json': { schema: storyPageSchema } },
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish` in this tenant',
+    },
   },
 });
 
@@ -622,9 +626,12 @@ const storyHighlightIdsRoute = createRoute({
 });
 
 export const storiesRoutes = stories
-  .openapi(listOwnRoute, async (c) =>
-    c.json(await listOwnStories(c.get('ctx'), c.req.valid('query')), 200),
-  )
+  .openapi(listOwnRoute, async (c) => {
+    const ctx = c.get('ctx');
+    // The route reads the permission set; the service honours the flag (it never compares a role).
+    const canManage = (await permissionsForRequest(ctx)).includes('stories.story.manage');
+    return c.json(await listOwnStories(ctx, c.req.valid('query'), { canManage }), 200);
+  })
   .openapi(listHighlightsRoute, async (c) => {
     const ctx = c.get('ctx');
     const { communityId, scope } = c.req.valid('query');
