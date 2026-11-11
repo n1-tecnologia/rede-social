@@ -156,6 +156,21 @@ export const stories = pgTable(
     index('stories_tenant_expires_idx')
       .on(t.tenantId, t.expiresAt.desc().nullsFirst(), t.id.desc().nullsFirst())
       .where(sql`deleted_at is null`),
+    // 10-08 (A10, MSTORY-03): the authors read's index, chosen by MEASUREMENT (`10-08-SPIKE.md`, `CHOSEN_FORM:
+    // LATERAL`). The read takes the live member stories of ONE author at a time (a LATERAL over the followed set
+    // for a member, over the live members for the moderator): `author_user_id` equality, then the window range on
+    // `expires_at`. The partial predicate is exactly the literals the statement names (`visibility = 'followers'`,
+    // `deleted_at is null`), so the index holds only live-or-expired MEMBER stories, never the organization's.
+    // `.nullsFirst()` for the `stories_tenant_expires_idx` reason above (both key columns are NOT NULL). It does
+    // NOT serve the Inicio strip (`visibility = 'tenant'`), whose plan and pin are unchanged (R5, pgTAP 120).
+    index('stories_tenant_author_expires_idx')
+      .on(
+        t.tenantId,
+        t.authorUserId,
+        t.expiresAt.desc().nullsFirst(),
+        t.id.desc().nullsFirst(),
+      )
+      .where(sql`deleted_at is null and visibility = 'followers'`),
     check('stories_media_kind_chk', sql`${t.mediaKind} in ('image','video')`),
     // The invariant the generated column would have given for free — a hand-written row (a seed, a
     // migration, a psql session) cannot invert the window or publish a story already expired.

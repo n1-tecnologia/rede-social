@@ -36,10 +36,15 @@ begin;
 --    member lane with every gate in place and as the migration role (120's pin, no policies). Bitmap scans are
 --    off for the EXPLAIN, because the planner flips between a correlated probe and a hashed subplan with the
 --    statistics of whatever ran before.
+-- 11. THE AUTHORS READ PLAN (10-08, A10, T-10-32): the index chosen by measurement (`10-08-SPIKE.md`, `CHOSEN_FORM:
+--    LATERAL`, `stories_tenant_author_expires_idx`) exists by name with its partial predicate, and on a controlled
+--    volume (6000 live member stories over 50 authors, 400 organization ones) the member read (3 followees) and the
+--    moderator's page 1 walk it BY NAME, never seq-scan `stories`, and the member read's seen-flag probe stays an
+--    Index Only Scan on `story_views_uq`. Section 10's strip pins are untouched.
 --
 -- Fixture ids use the `23100000-…` prefix and the tenants `pgtap-mstory-a` / `pgtap-mstory-b`, used by no
 -- other file. Like its siblings, this file ROLLS BACK.
-select plan(99);
+select plan(106);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-mstory-a', 'Stories de membros A', '23100000-0000-4000-8000-000000000001');
@@ -494,6 +499,108 @@ end
 $$;
 reset enable_bitmapscan;
 select matches(current_setting('tests.strip_plan_owner'), 'Index Only Scan using story_views_uq', '10: as the migration role (120''s pin, no policies) the same statement is an Index Only Scan on story_views_uq with the constant tenant predicate');
+
+-- ── 11. the authors read plan: stories_tenant_author_expires_idx by name (10-08, A10) ──────────────────
+-- (`pg_indexes` prints `DESC NULLS FIRST` as plain `DESC`: for a descending key that is Postgres' default.)
+reset role;
+select ok(exists (select 1 from pg_indexes where schemaname = 'public' and tablename = 'stories' and indexname = 'stories_tenant_author_expires_idx'), '11: the authors-read index stories_tenant_author_expires_idx exists by name');
+select ok((select indexdef from pg_indexes where schemaname = 'public' and indexname = 'stories_tenant_author_expires_idx') like '%(tenant_id, author_user_id, expires_at DESC, id DESC)%'
+          and (select indexdef from pg_indexes where schemaname = 'public' and indexname = 'stories_tenant_author_expires_idx') like '%visibility = ''followers''%'
+          and (select indexdef from pg_indexes where schemaname = 'public' and indexname = 'stories_tenant_author_expires_idx') like '%deleted_at IS NULL%', '11: …with the columns and the partial predicate the SPIKE file records');
+-- A controlled volume: the 50 `views-` users become members, write 6000 live member stories between them, and
+-- user 1 follows users 2..4 (a member with 3 followees in a tenant full of member stories).
+select tests.member('23100000-0000-4000-8000-000000000001', ('23100000-0000-4000-8200-' || lpad(to_hex(g), 12, '0'))::uuid)
+  from generate_series(1, 50) g;
+insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility, published_at, expires_at)
+select ('23100000-0000-4000-8400-' || lpad(to_hex(g), 12, '0'))::uuid, '23100000-0000-4000-8000-000000000001',
+       ('23100000-0000-4000-8200-' || lpad(to_hex(1 + (g % 50)), 12, '0'))::uuid,
+       '23100000-0000-4000-8000-0000000000a1', 'image', 'membro ' || g, 'followers',
+       now() - (g * 14 || ' seconds')::interval, now() - (g * 14 || ' seconds')::interval + interval '24 hours'
+  from generate_series(1, 6000) g;
+insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+select '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8200-000000000001', ('23100000-0000-4000-8200-' || lpad(to_hex(g), 12, '0'))::uuid
+  from generate_series(2, 4) g;
+analyze public.stories;
+analyze public.story_views;
+analyze public.memberships;
+analyze public.member_profiles;
+analyze public.social_follows;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8200-000000000001');
+set local enable_bitmapscan = off;
+do $$
+declare
+  r record;
+  v_plan text := '';
+begin
+  for r in execute
+    'explain select am.id as membership_id, ap.display_name, ap.avatar_asset_id, agg.story_count, agg.latest, agg.has_unseen,
+            (am.user_id = ''23100000-0000-4000-8200-000000000001''::uuid) as is_self
+       from unnest(coalesce((select app.social_visible_author_ids()), ''{}''::uuid[])) as f(uid)
+       join public.memberships am on am.tenant_id = ''23100000-0000-4000-8000-000000000001''::uuid and am.user_id = f.uid
+            and am.status = ''active'' and am.blocked_at is null and am.deleted_at is null
+       left join public.member_profiles ap on ap.membership_id = am.id
+      cross join lateral (
+        select count(*)::int as story_count, max(s.published_at) as latest,
+               bool_or(not exists (select 1 from public.story_views v
+                                    where v.tenant_id = ''23100000-0000-4000-8000-000000000001''::uuid
+                                      and v.user_id = ''23100000-0000-4000-8200-000000000001''::uuid
+                                      and v.story_id = s.id)) as has_unseen
+          from public.stories s
+          join public.media_assets a on a.id = s.media_asset_id and a.status = ''ready''
+         where s.tenant_id = ''23100000-0000-4000-8000-000000000001''::uuid and s.author_user_id = f.uid
+           and s.visibility = ''followers'' and s.deleted_at is null and s.expires_at > now()
+      ) agg
+      where (select app.social_enabled()) and agg.story_count > 0 and not app.is_blocked_by_viewer(f.uid)
+      order by is_self desc, agg.has_unseen desc, agg.latest desc, am.id
+      limit 200'
+  loop
+    v_plan := v_plan || r."QUERY PLAN" || E'\n';
+  end loop;
+  perform set_config('tests.authors_member_plan', v_plan, true);
+end
+$$;
+reset enable_bitmapscan;
+select matches(current_setting('tests.authors_member_plan'), 'stories_tenant_author_expires_idx', '11: the member authors read walks stories_tenant_author_expires_idx BY NAME (3 followees, 6000 member stories)');
+select ok(current_setting('tests.authors_member_plan') not like '%Seq Scan on stories%', '11: …and never a Seq Scan on stories');
+select matches(current_setting('tests.authors_member_plan'), 'Index Only Scan using story_views_uq', '11: …and the seen-flag probe is an Index Only Scan on story_views_uq (the strip pin, 120, unchanged)');
+reset role;
+-- The moderator's page 1 (the admin lane): every live member with a live member story, newest first, keyset.
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000002');
+set local enable_bitmapscan = off;
+do $$
+declare
+  r record;
+  v_plan text := '';
+begin
+  for r in execute
+    'explain select am.id as membership_id, ap.display_name, ap.avatar_asset_id, agg.story_count, agg.latest, agg.has_unseen
+       from public.memberships am
+       left join public.member_profiles ap on ap.membership_id = am.id
+      cross join lateral (
+        select count(*)::int as story_count, max(s.published_at) as latest,
+               bool_or(not exists (select 1 from public.story_views v
+                                    where v.tenant_id = ''23100000-0000-4000-8000-000000000001''::uuid
+                                      and v.user_id = ''23100000-0000-4000-8000-000000000002''::uuid
+                                      and v.story_id = s.id)) as has_unseen
+          from public.stories s
+          join public.media_assets a on a.id = s.media_asset_id and a.status = ''ready''
+         where s.tenant_id = ''23100000-0000-4000-8000-000000000001''::uuid and s.author_user_id = am.user_id
+           and s.visibility = ''followers'' and s.deleted_at is null and s.expires_at > now()
+      ) agg
+      where am.tenant_id = ''23100000-0000-4000-8000-000000000001''::uuid and am.status = ''active'' and am.blocked_at is null and am.deleted_at is null
+        and (select app.social_enabled()) and agg.story_count > 0
+      order by agg.latest desc, am.id
+      limit 21'
+  loop
+    v_plan := v_plan || r."QUERY PLAN" || E'\n';
+  end loop;
+  perform set_config('tests.authors_mod_plan', v_plan, true);
+end
+$$;
+reset enable_bitmapscan;
+select matches(current_setting('tests.authors_mod_plan'), 'stories_tenant_author_expires_idx', '11: the moderator''s authors read (page 1) walks stories_tenant_author_expires_idx BY NAME');
+select ok(current_setting('tests.authors_mod_plan') not like '%Seq Scan on stories%', '11: …and never a Seq Scan on stories');
+reset role;
 
 select * from finish();
 rollback;

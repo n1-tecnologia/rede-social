@@ -524,38 +524,48 @@ export async function listStoryAuthors(
   _query: StoryAuthorsQuery,
   _scope: { canModerate: boolean; isMember: boolean },
 ): Promise<StoryAuthorsPage> {
+  // FORM L (`10-08-SPIKE.md`, `CHOSEN_FORM: LATERAL`): `unnest` of the followed set (the caller plus the LIVE
+  // followees), the author's live membership and profile, then ONE lateral aggregate over that author's live
+  // member stories on `stories_tenant_author_expires_idx`. The grouped form measured 4 to 11 times slower on the
+  // moderator's reads and never used the index.
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<AuthorCircleRow>(sql`
       select am.id as membership_id,
              ap.display_name,
              ap.avatar_asset_id,
-             count(*)::int as story_count,
-             to_char(max(s.published_at) at time zone 'utc', ${ISO_MICROSECONDS}) as latest_published_at,
-             bool_or(not exists (
-               select 1 from story_views v
-                where v.tenant_id = ${ctx.tenantId}::uuid
-                  and v.user_id = ${ctx.userId}::uuid
-                  and v.story_id = s.id
-             )) as has_unseen,
-             (s.author_user_id = ${ctx.userId}::uuid) as is_self
-        from stories s
-        join media_assets a on a.id = s.media_asset_id and a.status = 'ready'
+             agg.story_count,
+             to_char(agg.latest at time zone 'utc', ${ISO_MICROSECONDS}) as latest_published_at,
+             agg.has_unseen,
+             (am.user_id = ${ctx.userId}::uuid) as is_self
+        from unnest(${SOCIAL_VISIBLE_AUTHOR_IDS}) as f(uid)
         join memberships am
-          on am.tenant_id = s.tenant_id
-         and am.user_id = s.author_user_id
+          on am.tenant_id = ${ctx.tenantId}::uuid
+         and am.user_id = f.uid
          and am.status = 'active'
          and am.blocked_at is null
          and am.deleted_at is null
         left join member_profiles ap on ap.membership_id = am.id
-       where s.tenant_id = ${ctx.tenantId}::uuid
-         and s.visibility = 'followers'
-         and s.deleted_at is null
-         and s.expires_at > now()
-         and ${SOCIAL_ENABLED}
-         and s.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})
-         and not app.is_blocked_by_viewer(s.author_user_id)
-       group by am.id, ap.display_name, ap.avatar_asset_id, s.author_user_id
-       order by is_self desc, has_unseen desc, max(s.published_at) desc, am.id
+        cross join lateral (
+          select count(*)::int as story_count,
+                 max(s.published_at) as latest,
+                 bool_or(not exists (
+                   select 1 from story_views v
+                    where v.tenant_id = ${ctx.tenantId}::uuid
+                      and v.user_id = ${ctx.userId}::uuid
+                      and v.story_id = s.id
+                 )) as has_unseen
+            from stories s
+            join media_assets a on a.id = s.media_asset_id and a.status = 'ready'
+           where s.tenant_id = ${ctx.tenantId}::uuid
+             and s.author_user_id = f.uid
+             and s.visibility = 'followers'
+             and s.deleted_at is null
+             and s.expires_at > now()
+        ) agg
+       where ${SOCIAL_ENABLED}
+         and agg.story_count > 0
+         and not app.is_blocked_by_viewer(f.uid)
+       order by is_self desc, agg.has_unseen desc, agg.latest desc, am.id
        limit ${MEMBER_AUTHORS_HARD_LIMIT}`),
   );
 
