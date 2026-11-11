@@ -252,7 +252,9 @@ describe('recordModerationAction: story_removed, community_archived, community_r
           return [{ id: '55555555-5555-4555-8555-555555555555' }];
         }
         // the actor resolves, the target does not
-        return rendered.params.includes(TARGET) ? [] : [{ id: '66666666-6666-4666-8666-666666666666' }];
+        return rendered.params.includes(TARGET)
+          ? []
+          : [{ id: '66666666-6666-4666-8666-666666666666' }];
       },
     } as unknown as Tx;
     await expect(

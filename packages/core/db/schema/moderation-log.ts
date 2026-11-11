@@ -50,7 +50,8 @@ export const moderationLog = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /**
      * 'comment_removed' | 'member_blocked' | 'member_unblocked' | 'role_changed' | 'post_removed' |
-     * 'profile_form_exported' — see the CHECK.
+     * 'profile_form_exported' | 'story_removed' | 'community_archived' | 'community_removed' — see the
+     * CHECK.
      */
     action: text().notNull(),
     /** No FK (see above). Pinned to `app.user_id()` by the insert policy in the tenant lane. */
@@ -60,7 +61,8 @@ export const moderationLog = pgTable(
     targetMembershipId: uuid('target_membership_id').notNull(),
     /**
      * 'post_comment' | 'story_comment' on a `comment_removed` row, 'feed_post' on a `post_removed`
-     * row; null on every other action.
+     * row, 'story' on a `story_removed` row, 'community' on a `community_archived` or
+     * `community_removed` row; null on every other action.
      */
     subjectType: text('subject_type'),
     subjectId: uuid('subject_id'),
@@ -85,17 +87,20 @@ export const moderationLog = pgTable(
     ),
     check(
       'moderation_log_action_chk',
-      sql`${t.action} in ('comment_removed','member_blocked','member_unblocked','role_changed','post_removed','profile_form_exported')`,
+      sql`${t.action} in ('comment_removed','member_blocked','member_unblocked','role_changed','post_removed','profile_form_exported','story_removed','community_archived','community_removed')`,
     ),
     // A removal names what it removed; nothing else names a subject (a comment removal a comment, a
-    // post removal a post — 09-07, D-475). Each comparison is guarded so the CHECK can never be
+    // post removal a post — 09-07, D-475; and, from 10-04, D-711, a story removal a story and a community
+    // archival or removal a community). Each comparison is guarded so the CHECK can never be
     // satisfied by a NULL (the `feed_comments_parent_shape_chk` lesson): `coalesce(.., false)` turns
     // an unknown into a false before it is compared with the action.
     check(
       'moderation_log_subject_chk',
-      sql`((${t.action} in ('comment_removed','post_removed')) = (${t.subjectType} is not null and ${t.subjectId} is not null))
-        and (${t.subjectType} is null or ${t.subjectType} in ('post_comment','story_comment','feed_post'))
-        and (coalesce(${t.subjectType} = 'feed_post', false) = (${t.action} = 'post_removed'))`,
+      sql`((${t.action} in ('comment_removed','post_removed','story_removed','community_archived','community_removed')) = (${t.subjectType} is not null and ${t.subjectId} is not null))
+        and (${t.subjectType} is null or ${t.subjectType} in ('post_comment','story_comment','feed_post','story','community'))
+        and (coalesce(${t.subjectType} = 'feed_post', false) = (${t.action} = 'post_removed'))
+        and (coalesce(${t.subjectType} = 'story', false) = (${t.action} = 'story_removed'))
+        and (coalesce(${t.subjectType} = 'community', false) = (${t.action} in ('community_archived','community_removed')))`,
     ),
     check(
       'moderation_log_reason_len_chk',

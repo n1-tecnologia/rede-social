@@ -37,6 +37,14 @@ import { TENANT_ROLES } from './modules';
  * blocker's content filter) only in part; the rest stays in Phase 11.
  */
 
+/**
+ * Phase 10 (D-711, MCOMM-10, MSTORY-09) appends the member-content actions: `story_removed` (subject
+ * `story`), `community_archived` and `community_removed` (subject `community`), and the two subject types
+ * they name. APPENDED after `profile_form_exported`, never inserted, so every earlier value keeps its
+ * position. The two CHECKs widen in `supabase/migrations/*_moderation_member_content.sql`; the web's
+ * exhaustive maps follow in the screens' own plan.
+ */
+
 /** Every `moderation_log.action` value — the `moderation_log_action_chk` list, verbatim. */
 export const MODERATION_ACTIONS = [
   'comment_removed',
@@ -45,14 +53,25 @@ export const MODERATION_ACTIONS = [
   'role_changed',
   'post_removed',
   'profile_form_exported',
+  'story_removed',
+  'community_archived',
+  'community_removed',
 ] as const;
 export type ModerationAction = (typeof MODERATION_ACTIONS)[number];
 
 /**
  * Every `moderation_log.subject_type` value — a removal row names one of these: `comment_removed`
- * names a comment (`post_comment`, `story_comment`), `post_removed` names a post (`feed_post`).
+ * names a comment (`post_comment`, `story_comment`), `post_removed` names a post (`feed_post`),
+ * `story_removed` a story (`story`), `community_archived` and `community_removed` a community
+ * (`community`).
  */
-export const MODERATION_SUBJECT_TYPES = ['post_comment', 'story_comment', 'feed_post'] as const;
+export const MODERATION_SUBJECT_TYPES = [
+  'post_comment',
+  'story_comment',
+  'feed_post',
+  'story',
+  'community',
+] as const;
 export type ModerationSubjectType = (typeof MODERATION_SUBJECT_TYPES)[number];
 
 /**

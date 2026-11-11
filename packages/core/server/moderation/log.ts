@@ -1,6 +1,7 @@
 import type { TenantRole } from '@rede-social/contracts';
 import {
   MODERATION_EXCERPT_MAX,
+  type ModerationAction,
   type ModerationSubjectType,
 } from '@rede-social/contracts/moderation';
 import { sql } from 'drizzle-orm';
@@ -59,6 +60,33 @@ export type ModerationEntry =
       reason: null;
     }
   | {
+      /**
+       * 10-04 (D-711, MSTORY-09): a moderator removed a MEMBER's story. A removal-class entry like the post
+       * removal: it names the story (subject type `story`, fixed) and carries `excerptSource`, the story's
+       * CAPTION read under the row lock (the empty string for a story with no caption). The author deleting
+       * their own story writes no row (plan 07).
+       */
+      action: 'story_removed';
+      targetUserId: string;
+      subjectType: 'story';
+      subjectId: string;
+      excerptSource: string;
+      reason: null;
+    }
+  | {
+      /**
+       * 10-04 (D-711, MCOMM-10): a moderator archived or removed a MEMBER's community. Removal-class: it names
+       * the community (subject type `community`, fixed) and `excerptSource` is the community's NAME at the
+       * time of the action. The target is the community's creator.
+       */
+      action: 'community_archived' | 'community_removed';
+      targetUserId: string;
+      subjectType: 'community';
+      subjectId: string;
+      excerptSource: string;
+      reason: null;
+    }
+  | {
       action: 'member_blocked' | 'member_unblocked';
       targetUserId: string;
       targetMembershipId: string;
@@ -82,6 +110,20 @@ export type ModerationEntry =
       action: 'profile_form_exported';
       actorMembershipId: string;
     };
+
+/**
+ * The removal-class actions (D-337, D-475, D-711): each carries a subject and an excerpt, and each is
+ * bound to the subject types the database CHECK `moderation_log_subject_chk` allows for it. The writer
+ * refuses a pair the CHECK would refuse BEFORE the insert, so the caller's transaction rolls back with a
+ * message that names the mistake instead of a bare 23514.
+ */
+const REMOVAL_SUBJECTS: Partial<Record<ModerationAction, readonly ModerationSubjectType[]>> = {
+  comment_removed: ['post_comment', 'story_comment'],
+  post_removed: ['feed_post'],
+  story_removed: ['story'],
+  community_archived: ['community'],
+  community_removed: ['community'],
+};
 
 const ELLIPSIS = '…';
 const segmenter = new Intl.Segmenter('pt-BR', { granularity: 'grapheme' });
@@ -153,8 +195,17 @@ export async function recordModerationAction(
       ? entry.targetMembershipId
       : await membershipIdOf(tx, ctx.tenantId, entry.targetUserId);
 
-  // Both removal actions carry a subject and an excerpt; no other action does.
-  const removal = entry.action === 'comment_removed' || entry.action === 'post_removed';
+  // Every removal-class action carries a subject and an excerpt (a comment's body, a post's or a story's
+  // caption, a community's name); no other action does.
+  const removal =
+    entry.action === 'comment_removed' ||
+    entry.action === 'post_removed' ||
+    entry.action === 'story_removed' ||
+    entry.action === 'community_archived' ||
+    entry.action === 'community_removed';
+  if (removal && !REMOVAL_SUBJECTS[entry.action]?.includes(entry.subjectType)) {
+    throw new Error('moderation log: the subject type does not belong to this action');
+  }
   const subjectType = removal ? entry.subjectType : null;
   const subjectId = removal ? entry.subjectId : null;
   const excerpt = removal ? moderationExcerpt(entry.excerptSource) : null;
