@@ -3,7 +3,7 @@ begin;
 -- MPUB-07; D-701, D-702, D-708, D-718; EP-45, EP-46). `feed_posts.visibility` gains `'community'`: a post in a
 -- MEMBER-created community, readable by whoever reads that community, never the organization's voice.
 --
--- 1. THE CHECK MATRIX (as the migration role): the three allowed shapes pass; a `'followers'` post with a community,
+-- 1. THE CHECK MATRIX (as the migration role; `feed_posts_visibility_chk` and `feed_posts_visibility_shape_chk`): the three allowed shapes pass; a `'followers'` post with a community,
 --    a `'community'` post without one and an unknown value raise 23514.
 -- 2. THE INSERT GATE (as the member lane): the owner of an active member community inserts a `'community'` post;
 --    another member, an admin lane, a null community and a post into an ORGANIZATION community raise 42501 (the
@@ -18,7 +18,7 @@ begin;
 -- 5. THE INSERT GATE, the rest of the table: `social` off, an archived community, a deleted community, another
 --    tenant's community, a null role, a null user, a forged `'tenant'` and a followers post with a community each
 --    raise 42501 (RLS runs before the CHECKs); the admin's organization post passes.
--- 6. THE ALLOW-LIST GUARD (EP-45): each forbidden column one at a time raises 42501; the allow-listed columns, the
+-- 6. THE ALLOW-LIST GUARD (EP-45, `app.feed_posts_member_update_guard`, trigger `feed_posts_member_update_guard`): each forbidden column one at a time raises 42501; the allow-listed columns, the
 --    counters, the author's soft delete and a non-author counter bump succeed.
 -- 7. THE INDEXES: the three partial feed indexes still exist by name, and on a volume fixture Início's two reads
 --    are still served by them BY NAME with the new gates in place.
