@@ -2,6 +2,10 @@ import { PLATFORM_TERMS_VERSION, TENANT_HOST_HEADER } from '@rede-social/contrac
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import {
+  communityCreateLimiter,
+  storyPublishLimiter,
+} from '@rede-social/core/server/safety/limits';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -35,9 +39,11 @@ import {
   setPaymentsRow,
   signInAs,
   uploadAvatar,
+  withCommunitiesEnabled,
   withModuleEnabled,
   withSocialEnabled,
   withStoreEnabled,
+  withStoriesEnabled,
 } from './setup';
 
 /**
@@ -12287,6 +12293,485 @@ describe('phase 10 sweep (10-08)', () => {
     } finally {
       await adminSql`delete from public.stories where caption = ${caption}`;
       for (const restore of restores.reverse()) await restore();
+    }
+  });
+});
+
+/**
+ * 10-10 (MPUB-07, T-10-37, D-701, D-706, D-713, D-716): the MEMBER-owned half of Phase 10, asked the isolation
+ * question with a session of each tenant. Tenant A is rede-lab (`social` on in the seed, owner of the seeded member
+ * community and member story written by `scripts/seed.ts`), tenant B is rede-demo (`social` switched on here).
+ * Written BEFORE the inventory entries point at these titles, and every negative sits beside tenant A's positive
+ * control and a wrong-host 403. Each crossing is also compared with the same call on an id that does not exist
+ * anywhere: the two answers must be byte-identical apart from `requestId` (no existence oracle).
+ */
+const SEED_LAB_MEMBER_COMMUNITY = '0e000000-0000-4000-8000-0000000000f1';
+const SEED_LAB_MEMBER_STORY = '0e000000-0000-4000-8000-0000000000f3';
+const LAB_OWNER_EMAIL = 'member@rede-lab.local';
+
+describe('phase 10 sweep (10-10)', () => {
+  /** The three modules a member needs on BOTH tenants, put back by the returned function. */
+  const withSocialModules = async () => {
+    const restores = [
+      await withSocialEnabled('lab'),
+      await withCommunitiesEnabled('lab'),
+      await withStoriesEnabled('lab'),
+      await withSocialEnabled('demo'),
+      await withCommunitiesEnabled('demo'),
+      await withStoriesEnabled('demo'),
+    ];
+    return async () => {
+      for (const restore of restores.reverse()) await restore();
+    };
+  };
+
+  it('phase 10 sweep: member communities and their posts — a demo session cannot list, open, edit, delete or post into the lab member community, beside the lab positive controls and the wrong host (10-10)', async () => {
+    const since = await dbNow();
+    const restore = await withSocialModules();
+    const tag = `Varredura 10-10 ${RUN}`;
+    const communityIds: string[] = [];
+    try {
+      communityCreateLimiter.reset();
+      const labOwner = await signInAs(LAB_OWNER_EMAIL, SEED_PASSWORD);
+      const asLab = (method: string, path: string, body?: unknown, token = labOwner) =>
+        send(method, path, token, HOSTS.lab, body);
+      const asDemoMember = (method: string, path: string, body?: unknown) =>
+        send(method, path, tokens.demoMember, HOSTS.demo, body);
+      const asDemoAdmin = (method: string, path: string, body?: unknown) =>
+        send(method, path, tokens.demoAdmin, HOSTS.demo, body);
+
+      // The seed's member community: member kind, created by the lab member, in the lab.
+      const [seeded] = await adminSql<{ tenant_id: string; kind: string; created_by: string }[]>`
+        select tenant_id::text, kind, created_by_user_id::text as created_by
+          from public.communities where id = ${SEED_LAB_MEMBER_COMMUNITY}::uuid and deleted_at is null`;
+      expect(seeded, 'the seed carries the lab member community (pnpm db:seed)').toBeDefined();
+      expect(seeded?.tenant_id).toBe(tenantIds.lab);
+      expect(seeded?.kind).toBe('member');
+      expect(seeded?.created_by).toBe(await userIdOf(LAB_OWNER_EMAIL));
+
+      // Tenant A positive controls: the owner and the lab admin open the seeded community and list it.
+      for (const [label, token] of [
+        ['owner', labOwner],
+        ['lab admin', tokens.labAdmin],
+      ] as const) {
+        const detail = await asLab(
+          'GET',
+          `/v1/communities/${SEED_LAB_MEMBER_COMMUNITY}`,
+          undefined,
+          token,
+        );
+        expect(detail.status, `${label} detail`).toBe(200);
+        expect(((await detail.json()) as { kind: string }).kind).toBe('member');
+      }
+      const walk = async (token: string, host: string): Promise<string[]> => {
+        const ids: string[] = [];
+        let cursor: string | null = null;
+        for (let guard = 0; guard < 50; guard++) {
+          const query: string = cursor
+            ? `?limit=25&cursor=${encodeURIComponent(cursor)}`
+            : '?limit=25';
+          const res = await send('GET', `/v1/communities${query}`, token, host);
+          expect(res.status).toBe(200);
+          const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+          ids.push(...page.items.map((item) => item.id));
+          cursor = page.nextCursor;
+          if (cursor === null) break;
+        }
+        return ids;
+      };
+      expect(await walk(labOwner, HOSTS.lab)).toContain(SEED_LAB_MEMBER_COMMUNITY);
+
+      // The lab owner makes a throwaway member community through the API (POST positive control) and a post in it.
+      const created = await asLab('POST', '/v1/communities', { name: `${tag} A` });
+      expect(created.status).toBe(201);
+      const labCommunity = ((await created.json()) as { id: string }).id;
+      communityIds.push(labCommunity);
+      const labPost = await asLab('POST', '/v1/feed/posts', {
+        caption: `${tag} post A`,
+        communityId: labCommunity,
+      });
+      expect(labPost.status).toBe(201);
+      const labPostId = ((await labPost.json()) as { id: string }).id;
+
+      // Tenant B's own member community (POST from a demo member: 201 on its own host) and its list.
+      const demoCreated = await asDemoMember('POST', '/v1/communities', { name: `${tag} B` });
+      expect(demoCreated.status).toBe(201);
+      const demoCommunity = ((await demoCreated.json()) as { id: string }).id;
+      communityIds.push(demoCommunity);
+      const demoList = await walk(tokens.demoMember, HOSTS.demo);
+      expect(demoList).toContain(demoCommunity);
+      for (const id of [SEED_LAB_MEMBER_COMMUNITY, labCommunity]) {
+        expect(demoList, 'a lab id in the demo list').not.toContain(id);
+      }
+      expect(await walk(labOwner, HOSTS.lab), 'the demo community in the lab list').not.toContain(
+        demoCommunity,
+      );
+      expect(await walk(tokens.demoAdmin, HOSTS.demo)).not.toContain(SEED_LAB_MEMBER_COMMUNITY);
+
+      // The crossings: every route, tenant B's two sessions, tenant A's ids, one bare 404 each, and the same
+      // call on an id that exists nowhere answers the same bytes.
+      const unknown = crypto.randomUUID();
+      const crossings = (community: string) =>
+        [
+          ['detail', 'GET', `/v1/communities/${community}`, undefined],
+          ['edit', 'PATCH', `/v1/communities/${community}`, { description: 'Invadida.' }],
+          ['delete', 'DELETE', `/v1/communities/${community}`, undefined],
+          [
+            'post in it',
+            'POST',
+            '/v1/feed/posts',
+            { caption: `${tag} intruso`, communityId: community },
+          ],
+        ] as const;
+      for (const [who, as] of [
+        ['demo member', asDemoMember],
+        ['demo admin', asDemoAdmin],
+      ] as const) {
+        for (const community of [SEED_LAB_MEMBER_COMMUNITY, labCommunity]) {
+          const calls = crossings(community);
+          const unknownCalls = crossings(unknown);
+          for (const [index, [label, method, path, body]] of calls.entries()) {
+            const text = await expectBareNotFound(await as(method, path, body), `${who}: ${label}`);
+            const other = unknownCalls[index];
+            if (!other) throw new Error('crossing table out of step');
+            const otherText = await expectBareNotFound(
+              await as(other[1], other[2], other[3]),
+              `${who}: ${label} (unknown id)`,
+            );
+            expect(sansRequestId(text), `${who}: ${label}`).toEqual(sansRequestId(otherText));
+            for (const needle of [tenantIds.lab, community]) {
+              expect(text, `${who}: ${label}`).not.toContain(needle);
+            }
+          }
+        }
+      }
+      // Nothing moved or was written by any of them.
+      const [after] = await adminSql<
+        { description: string | null; status: string; posts: number }[]
+      >`
+        select c.description, c.status,
+               (select count(*)::int from public.feed_posts p
+                 where p.community_id = any(${[SEED_LAB_MEMBER_COMMUNITY, labCommunity]}::uuid[])
+                   and p.deleted_at is null) as posts
+          from public.communities c where c.id = ${labCommunity}::uuid`;
+      expect(after?.description ?? '').not.toBe('Invadida.');
+      expect(after?.status).toBe('active');
+      expect(after?.posts).toBe(1);
+      const [seedAfter] = await adminSql<{ description: string | null; status: string }[]>`
+        select description, status from public.communities where id = ${SEED_LAB_MEMBER_COMMUNITY}::uuid`;
+      expect(seedAfter?.description ?? '').not.toBe('Invadida.');
+      expect(seedAfter?.status).toBe('active');
+
+      // Positive controls for the same routes on tenant A's own rows (the 404s above are isolation).
+      expect(
+        (await asLab('PATCH', `/v1/communities/${labCommunity}`, { description: 'Minha.' })).status,
+      ).toBe(200);
+      expect((await asLab('GET', `/v1/feed/posts/${labPostId}`)).status).toBe(200);
+
+      // The wrong host: a session of one tenant on the other tenant's registered host is refused before any read.
+      for (const [method, path, body] of [
+        ['GET', '/v1/communities?limit=25', undefined],
+        ['GET', `/v1/communities/${SEED_LAB_MEMBER_COMMUNITY}`, undefined],
+        ['POST', '/v1/communities', { name: `${tag} host` }],
+        ['PATCH', `/v1/communities/${labCommunity}`, { description: 'Invadida.' }],
+        ['DELETE', `/v1/communities/${labCommunity}`, undefined],
+        ['POST', '/v1/feed/posts', { caption: `${tag} host`, communityId: labCommunity }],
+      ] as const) {
+        await expectHostRefused(
+          await send(method, path, tokens.demoMember, HOSTS.lab, body),
+          `demo member on the lab host: ${method} ${path}`,
+        );
+        await expectHostRefused(
+          await send(method, path, labOwner, HOSTS.demo, body),
+          `lab owner on the demo host: ${method} ${path}`,
+        );
+      }
+      const [written] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.communities where name like ${`${tag}%`}`;
+      expect(written?.n, 'only the two controls exist').toBe(2);
+    } finally {
+      await adminSql`delete from public.feed_posts where caption like ${`${tag}%`}`;
+      if (communityIds.length > 0) {
+        await adminSql`delete from public.feed_posts where community_id = any(${communityIds}::uuid[])`;
+        await adminSql`delete from public.communities where id = any(${communityIds}::uuid[])`;
+      }
+      await adminSql`delete from public.communities where name like ${`${tag}%`}`;
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+      await restore();
+    }
+  });
+
+  it('phase 10 sweep: member stories and highlights — a demo session cannot read, delete, highlight or list the lab member story and its community highlights, beside the lab positive controls and the wrong host (10-10)', async () => {
+    const since = await dbNow();
+    const restore = await withSocialModules();
+    const tag = `Varredura 10-10 ${RUN} stories`;
+    const communityIds: string[] = [];
+    const storyIds: string[] = [];
+    try {
+      communityCreateLimiter.reset();
+      storyPublishLimiter.reset();
+      const labOwner = await signInAs(LAB_OWNER_EMAIL, SEED_PASSWORD);
+      const asLab = (method: string, path: string, body?: unknown, token = labOwner) =>
+        send(method, path, token, HOSTS.lab, body);
+      const asDemoMember = (method: string, path: string, body?: unknown) =>
+        send(method, path, tokens.demoMember, HOSTS.demo, body);
+      const asDemoAdmin = (method: string, path: string, body?: unknown) =>
+        send(method, path, tokens.demoAdmin, HOSTS.demo, body);
+
+      const [seededStory] = await adminSql<{ tenant_id: string; visibility: string }[]>`
+        select tenant_id::text, visibility from public.stories where id = ${SEED_LAB_MEMBER_STORY}::uuid`;
+      expect(seededStory, 'the seed carries the lab member story (pnpm db:seed)').toBeDefined();
+      expect(seededStory?.tenant_id).toBe(tenantIds.lab);
+      expect(seededStory?.visibility).toBe('followers');
+
+      // The lab owner: a throwaway community, then a member story naming a NEW highlight in it (the publish
+      // destination of 10-09), through the real routes.
+      const community = await asLab('POST', '/v1/communities', { name: `${tag} A` });
+      expect(community.status).toBe(201);
+      const labCommunity = ((await community.json()) as { id: string }).id;
+      communityIds.push(labCommunity);
+      const labAsset = await seedStoryImage(tenantIds.lab, LAB_OWNER_EMAIL);
+      const published = await asLab('POST', '/v1/stories', {
+        mediaAssetId: labAsset,
+        mediaKind: 'image',
+        caption: tag,
+        newHighlight: { communityId: labCommunity, title: `${tag} destaque` },
+      });
+      expect(published.status).toBe(201);
+      const labStory = ((await published.json()) as { id: string }).id;
+      storyIds.push(labStory);
+      const [highlightRow] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.story_highlights where community_id = ${labCommunity}::uuid`;
+      const labHighlight = highlightRow?.id ?? '';
+      expect(labHighlight).not.toBe('');
+
+      // Tenant A's positive controls on every read and write of the crossing table below.
+      expect((await asLab('GET', `/v1/stories/${labStory}`)).status).toBe(200);
+      expect((await asLab('GET', `/v1/stories/${labStory}/highlights`)).status).toBe(200);
+      expect(
+        (await asLab('GET', `/v1/stories/highlights?communityId=${labCommunity}`)).status,
+      ).toBe(200);
+      expect((await asLab('GET', `/v1/stories/highlights/${labHighlight}`)).status).toBe(200);
+      expect(
+        (await asLab('PATCH', `/v1/stories/highlights/${labHighlight}`, { title: `${tag} novo` }))
+          .status,
+      ).toBe(200);
+      const ownerMembership = await membershipIdOf(tenantIds.lab, LAB_OWNER_EMAIL);
+      const adminGroup = await asLab(
+        'GET',
+        `/v1/stories/authors/${ownerMembership}`,
+        undefined,
+        tokens.labAdmin,
+      );
+      expect(adminGroup.status).toBe(200);
+      expect(
+        ((await adminGroup.json()) as { items: { id: string }[] }).items.map((item) => item.id),
+      ).toEqual(expect.arrayContaining([SEED_LAB_MEMBER_STORY, labStory]));
+
+      // GET /v1/stories/mine: the owner's history holds both lab member stories; a demo walk never lists one.
+      const mineOf = async (as: typeof asLab): Promise<string[]> => {
+        const ids: string[] = [];
+        let cursor: string | null = null;
+        for (let guard = 0; guard < 50; guard++) {
+          const query: string = cursor
+            ? `?limit=50&cursor=${encodeURIComponent(cursor)}`
+            : '?limit=50';
+          const res = await as('GET', `/v1/stories/mine${query}`);
+          expect(res.status).toBe(200);
+          const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+          ids.push(...page.items.map((item) => item.id));
+          cursor = page.nextCursor;
+          if (cursor === null) break;
+        }
+        return ids;
+      };
+      expect(await mineOf(asLab)).toEqual(
+        expect.arrayContaining([SEED_LAB_MEMBER_STORY, labStory]),
+      );
+      for (const [who, as] of [
+        ['demo member', asDemoMember],
+        ['demo admin', asDemoAdmin],
+      ] as const) {
+        const mine = await mineOf(as);
+        for (const id of [SEED_LAB_MEMBER_STORY, labStory]) {
+          expect(mine, `${who}: a lab id in the history`).not.toContain(id);
+        }
+      }
+      // The authors read: the demo moderator and member never see the lab owner's circle.
+      const demoCircle = await asDemoAdmin('GET', '/v1/stories/authors');
+      expect(demoCircle.status).toBe(200);
+      expect(JSON.stringify(await demoCircle.json())).not.toContain(ownerMembership);
+
+      // A demo-side asset to attempt the publish crossing with.
+      const demoAsset = await seedStoryImage(tenantIds.demo, 'member@rede-demo.local');
+      const before = await adminSql<{ n: number }[]>`
+        select (select count(*)::int from public.stories where tenant_id = ${tenantIds.lab}::uuid)
+             + (select count(*)::int from public.story_highlights where tenant_id = ${tenantIds.lab}::uuid)
+             + (select count(*)::int from public.story_highlight_items where tenant_id = ${tenantIds.lab}::uuid)
+               as n`;
+
+      const unknown = crypto.randomUUID();
+      const crossings = (story: string, highlight: string, place: string) =>
+        [
+          ['story by id', 'GET', `/v1/stories/${story}`, undefined],
+          ['delete story', 'DELETE', `/v1/stories/${story}`, undefined],
+          ['story memberships', 'GET', `/v1/stories/${story}/highlights`, undefined],
+          [
+            'highlight row of a community',
+            'GET',
+            `/v1/stories/highlights?communityId=${place}`,
+            undefined,
+          ],
+          ['highlight detail', 'GET', `/v1/stories/highlights/${highlight}`, undefined],
+          [
+            'create a highlight in it',
+            'POST',
+            '/v1/stories/highlights',
+            { communityId: place, title: 'Invadido' },
+          ],
+          [
+            'rename highlight',
+            'PATCH',
+            `/v1/stories/highlights/${highlight}`,
+            { title: 'Invadido' },
+          ],
+          [
+            'save a story in it',
+            'PUT',
+            `/v1/stories/highlights/${highlight}/stories/${story}`,
+            undefined,
+          ],
+          [
+            'take a story out',
+            'DELETE',
+            `/v1/stories/highlights/${highlight}/stories/${story}`,
+            undefined,
+          ],
+          ['delete highlight', 'DELETE', `/v1/stories/highlights/${highlight}`, undefined],
+          [
+            'publish into it',
+            'POST',
+            '/v1/stories',
+            {
+              mediaAssetId: demoAsset,
+              mediaKind: 'image',
+              caption: `${tag} intruso`,
+              highlightId: highlight,
+            },
+          ],
+          [
+            'publish with a new highlight in it',
+            'POST',
+            '/v1/stories',
+            {
+              mediaAssetId: demoAsset,
+              mediaKind: 'image',
+              caption: `${tag} intruso`,
+              newHighlight: { communityId: place, title: 'Invadido' },
+            },
+          ],
+        ] as const;
+      for (const [who, as] of [
+        ['demo member', asDemoMember],
+        ['demo admin', asDemoAdmin],
+      ] as const) {
+        for (const story of [SEED_LAB_MEMBER_STORY, labStory]) {
+          const place = story === labStory ? labCommunity : SEED_LAB_MEMBER_COMMUNITY;
+          const highlight = story === labStory ? labHighlight : crypto.randomUUID();
+          const calls = crossings(story, highlight, place);
+          const unknownCalls = crossings(unknown, unknown, unknown);
+          for (const [index, [label, method, path, body]] of calls.entries()) {
+            const text = await expectBareNotFound(await as(method, path, body), `${who}: ${label}`);
+            const other = unknownCalls[index];
+            if (!other) throw new Error('crossing table out of step');
+            const otherText = await expectBareNotFound(
+              await as(other[1], other[2], other[3]),
+              `${who}: ${label} (unknown id)`,
+            );
+            expect(sansRequestId(text), `${who}: ${label}`).toEqual(sansRequestId(otherText));
+            for (const needle of [tenantIds.lab, story, place]) {
+              expect(text, `${who}: ${label}`).not.toContain(needle);
+            }
+          }
+        }
+        // The member circle of the lab owner is the bare 404 on a demo host too.
+        await expectBareNotFound(
+          await as('GET', `/v1/stories/authors/${ownerMembership}`),
+          `${who}: authors group`,
+        );
+      }
+      // Nothing moved: the lab's stories, highlights and items are exactly what they were, no story was written.
+      const afterRows = await adminSql<{ n: number }[]>`
+        select (select count(*)::int from public.stories where tenant_id = ${tenantIds.lab}::uuid)
+             + (select count(*)::int from public.story_highlights where tenant_id = ${tenantIds.lab}::uuid)
+             + (select count(*)::int from public.story_highlight_items where tenant_id = ${tenantIds.lab}::uuid)
+               as n`;
+      expect(afterRows[0]?.n).toBe(before[0]?.n);
+      const [intruder] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.stories where caption = ${`${tag} intruso`}`;
+      expect(intruder?.n, 'a refused publish writes nothing').toBe(0);
+      const [renamed] = await adminSql<{ title: string }[]>`
+        select title from public.story_highlights where id = ${labHighlight}::uuid`;
+      expect(renamed?.title).toBe(`${tag} novo`);
+
+      // Positive controls of the writes: the lab owner takes the story out of the highlight and deletes it.
+      expect(
+        (await asLab('DELETE', `/v1/stories/highlights/${labHighlight}/stories/${labStory}`))
+          .status,
+      ).toBe(200);
+      expect((await asLab('DELETE', `/v1/stories/${labStory}`)).status).toBe(204);
+
+      // The wrong host, both directions, on the family's routes.
+      for (const [method, path, body] of [
+        ['GET', '/v1/stories/mine', undefined],
+        ['GET', `/v1/stories/${SEED_LAB_MEMBER_STORY}`, undefined],
+        ['DELETE', `/v1/stories/${SEED_LAB_MEMBER_STORY}`, undefined],
+        ['GET', `/v1/stories/${SEED_LAB_MEMBER_STORY}/highlights`, undefined],
+        ['GET', `/v1/stories/highlights?communityId=${SEED_LAB_MEMBER_COMMUNITY}`, undefined],
+        [
+          'POST',
+          '/v1/stories/highlights',
+          { communityId: SEED_LAB_MEMBER_COMMUNITY, title: 'Invadido' },
+        ],
+        ['PATCH', `/v1/stories/highlights/${labHighlight}`, { title: 'Invadido' }],
+        ['DELETE', `/v1/stories/highlights/${labHighlight}`, undefined],
+        ['GET', `/v1/stories/authors/${ownerMembership}`, undefined],
+        [
+          'POST',
+          '/v1/stories',
+          {
+            mediaAssetId: labAsset,
+            mediaKind: 'image',
+            caption: `${tag} host`,
+            highlightId: labHighlight,
+          },
+        ],
+      ] as const) {
+        await expectHostRefused(
+          await send(method, path, tokens.demoMember, HOSTS.lab, body),
+          `demo member on the lab host: ${method} ${path}`,
+        );
+        await expectHostRefused(
+          await send(method, path, labOwner, HOSTS.demo, body),
+          `lab owner on the demo host: ${method} ${path}`,
+        );
+      }
+      // The seeded rows never moved.
+      const [seedStillThere] = await adminSql<{ n: number }[]>`
+        select (select count(*)::int from public.stories where id = ${SEED_LAB_MEMBER_STORY}::uuid)
+             + (select count(*)::int from public.communities where id = ${SEED_LAB_MEMBER_COMMUNITY}::uuid) as n`;
+      expect(seedStillThere?.n).toBe(2);
+    } finally {
+      await adminSql`delete from public.stories where caption like ${`${tag}%`}`;
+      if (storyIds.length > 0) {
+        await adminSql`delete from public.stories where id = any(${storyIds}::uuid[])`;
+      }
+      if (communityIds.length > 0) {
+        await adminSql`delete from public.story_highlights where community_id = any(${communityIds}::uuid[])`;
+        await adminSql`delete from public.communities where id = any(${communityIds}::uuid[])`;
+      }
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+      await restore();
     }
   });
 });
