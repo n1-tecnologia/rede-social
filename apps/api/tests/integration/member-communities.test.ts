@@ -252,14 +252,14 @@ describe('10 tracer', () => {
     const [post] = await adminSql<{ id: string }[]>`
       insert into public.feed_posts
         (tenant_id, author_user_id, community_id, caption, visibility, media_kind)
-      values (${labTenantId}::uuid, ${userIds.helena}::uuid, ${made.community?.id}::uuid,
+      values (${labTenantId}::uuid, ${userIds.helena}::uuid, ${made.community?.id ?? ''}::uuid,
               ${`${PREFIX}vídeo da comunidade`}, 'community', 'video')
       returning id`;
     made.videoPostId = post?.id;
     await adminSql`
       insert into public.feed_post_media
         (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
-      values (${labTenantId}::uuid, ${made.videoPostId}::uuid, 'video', ${asset?.id}::uuid, 'video', 0)`;
+      values (${labTenantId}::uuid, ${made.videoPostId ?? ''}::uuid, 'video', ${asset?.id ?? ''}::uuid, 'video', 0)`;
 
     for (const query of ['&media=video', '', '&scope=explorar']) {
       const items = await feedOf(tokens.alvaro, query);

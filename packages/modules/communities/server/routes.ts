@@ -110,10 +110,14 @@ const getCommunityRoute = createRoute({
 const createCommunityRoute = createRoute({
   method: 'post',
   path: '/',
-  // The literal, not `COMMUNITY_PERMISSIONS.manage`: this string is the one thing a reviewer greps
+  // The literals, not `COMMUNITY_PERMISSIONS.*`: these strings are the one thing a reviewer greps
   // for when asking "what guards creating a community?", and an indirection here is the kind that
-  // hides a change.
-  middleware: [requirePermission('communities.community.manage')] as const,
+  // hides a change. ANY of the two passes (`requirePermission` is any-of): the admin's `manage`, or the
+  // member creator's `create` (10-05, D-707, composed for the role `member` only while `social` is on).
+  // The service stamps the kind from the session; the guard never says who OWNS the result.
+  middleware: [
+    requirePermission('communities.community.manage', 'communities.community.create'),
+  ] as const,
   request: {
     body: { content: { 'application/json': { schema: createCommunitySchema } }, required: true },
   },
@@ -128,7 +132,8 @@ const createCommunityRoute = createRoute({
         '`VALIDATION_FAILED` with `details.community` carrying exactly one machine code: `name_required` (a community with no name has nothing for a card to render).',
     },
     403: {
-      description: 'The caller does not hold `communities.community.manage` in this tenant',
+      description:
+        'The caller holds neither `communities.community.manage` nor `communities.community.create` in this tenant (a member of a tenant with `social` off, or a staff role that is not an admin)',
     },
   },
 });

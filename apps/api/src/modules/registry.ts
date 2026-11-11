@@ -28,6 +28,7 @@ import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions
 import { KERNEL_ROLE_PERMISSIONS } from '@rede-social/core/server/rbac/require-role';
 import { registerDailyTenantJobs } from '@rede-social/core/server/tenancy/daily-dispatch';
 import { chatModule } from '@rede-social/module-chat/module';
+import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
 import { communitiesModule } from '@rede-social/module-communities/module';
 import { coursesModule } from '@rede-social/module-courses/module';
 import { DASHBOARD_QUEUES } from '@rede-social/module-dashboard/contracts';
@@ -45,6 +46,7 @@ import {
 } from '@rede-social/module-social/contracts';
 import { socialModule } from '@rede-social/module-social/module';
 import { storeModule } from '@rede-social/module-store/module';
+import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { storiesModule } from '@rede-social/module-stories/module';
 
 /**
@@ -227,9 +229,23 @@ export function permissionsFor(
   // `manage` is author-only for a member because `updatePost` / `softDeletePost` keep
   // `author_user_id = ctx.userId` in their statement (T-04-54). The module manifest cannot name these
   // two strings: that would be a module-to-module edge (MOD-02), so the app tier composes them.
+  //
+  // 10-05 (D-707, assumption A2): the same block composes the member CREATOR's keys, each only while the
+  // module that owns it is effective too: `communities.community.create` and
+  // `communities.community.manage_own` (requires `communities`) and `stories.story.publish` (requires
+  // `stories`). They are member-only by construction: no staff role is composed them and no manifest
+  // grants them statically (cases 23 to 25 of `registry.test.ts`), so `admin_tenant` keeps
+  // `communities.community.manage` and a member never holds it. They say "may try"; every statement
+  // tests OWNERSHIP itself (`created_by_user_id = ctx.userId`), never the role. A `Set` and a pure
+  // function: composing twice yields the same set (EP-40).
   if (effective.has('social') && role === 'member') {
     permissions.add(FEED_PERMISSIONS.create);
     permissions.add(FEED_PERMISSIONS.manage);
+    if (effective.has('communities')) {
+      permissions.add(COMMUNITY_PERMISSIONS.create);
+      permissions.add(COMMUNITY_PERMISSIONS.manageOwn);
+    }
+    if (effective.has('stories')) permissions.add(STORY_PERMISSIONS.publish);
   }
 
   return [...permissions].sort();

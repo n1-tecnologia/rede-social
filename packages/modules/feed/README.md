@@ -85,6 +85,8 @@ who does not follow the author (`follow_required`, with `postLockedAuthorSchema`
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`
+- `@rede-social/core/server/communities/action-gate` (10-05: `communityActionAllowed`, the reserved Escopo
+  branch of the post owner decision; false while the SQL stub answers false)
 - `@rede-social/core/server/events/bus`
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/jobs/boss`

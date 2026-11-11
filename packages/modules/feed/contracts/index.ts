@@ -51,9 +51,12 @@ export type FeedScope = (typeof FEED_SCOPES)[number];
 
 /**
  * The stamped audience of a post (09-03, D-473): `tenant` is the organization's voice, `followers` a
- * member post. On the wire only `followers` is ever emitted (`feedPostSchema.audience`).
+ * member post. 10-05 (D-709) appends `community`: a post written inside a MEMBER community, readable on
+ * that community's page only (never in Início, Explorar or Reels 'Todos'), stamped from the TARGET
+ * community and the branch that permitted the write, never from the body. On the wire only `followers`
+ * and `community` are ever emitted (`feedPostSchema.audience`); absent means the organization's voice.
  */
-export const FEED_AUDIENCES = ['tenant', 'followers'] as const;
+export const FEED_AUDIENCES = ['tenant', 'followers', 'community'] as const;
 export type FeedAudience = (typeof FEED_AUDIENCES)[number];
 
 /**
@@ -154,8 +157,10 @@ export const FEED_COMMUNITY_ISSUE_SET: ReadonlySet<string> = new Set(FEED_COMMUN
  *
  *  - `member_no_attachments` - a member post carries caption, photos, at most one video and a link,
  *    and no file attachment;
- *  - `member_no_community`   - a member post has no community (it is the member's own voice, shown to
- *    followers in Explorar);
+ *  - `member_no_community`   - HISTORICAL since 10-05 (D-706): the API no longer raises it. A member who
+ *    names a community goes through the post OWNER seam (404 miss, 403 unless the creator, 400 archived).
+ *    The word stays so a deployed web that switches on it keeps compiling; a followers post (the member's
+ *    own voice, shown to followers in Explorar) still has no community;
  *  - `member_video_off`      - the tenant has not enabled member video (an edit that re-sends the
  *    post's EXISTING video is not a new upload and passes).
  */
@@ -595,8 +600,9 @@ export const feedPostSchema = z
      * admin staff); `'followers'` is a member post, shown only to the author's followers.
      *
      * OPTIONAL ON PURPOSE (the 08.2 Pitfall 10 rule, restated): the schema is `.strict()` and the web
-     * parses with it. The API emits the key ONLY as `'followers'`, and `social` is off for every
-     * tenant at release, so an older web never meets a new key during the deploy window.
+     * parses with it. The API emits the key ONLY as `'followers'` (10-05: or `'community'`, a post of a
+     * member community), and `social` is off for every tenant at release, so an older web never meets
+     * a new key during the deploy window.
      */
     audience: z.enum(FEED_AUDIENCES).optional(),
     /**

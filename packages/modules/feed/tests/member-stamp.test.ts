@@ -144,13 +144,16 @@ describe('createPost member authoring rules (D-473)', () => {
     expect(lane.inserted).toHaveLength(0);
   });
 
-  it('refuses a non-null communityId with member_no_community before any community lookup', async () => {
+  it('10-05 (D-706): a non-null communityId no longer answers member_no_community; it goes to the owner seam (the lane is opened)', async () => {
+    // The mocked lane answers the projection row for every statement, so the owner read finds no
+    // `kind`, no creator and no usable status: the point is that the OLD pre-transaction refusal is
+    // gone and the community lookup now happens (the integration suite proves 404/403/201 through the
+    // real route and database).
     const error = await refusal(
       createPost(ctxFor('member'), { caption: 'oi', communityId: COMMUNITY }),
     );
-    expect(error.status).toBe(400);
-    expect(error.details).toEqual({ member: 'member_no_community' });
-    expect(lane.opened).toBe(0);
+    expect(error.details).not.toEqual({ member: 'member_no_community' });
+    expect(lane.opened).toBe(1);
   });
 
   it('refuses a video while the policy has video off, with member_video_off', async () => {

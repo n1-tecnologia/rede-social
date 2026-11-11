@@ -1096,13 +1096,19 @@ describe('09 rules', () => {
     expect(await postCount()).toBe(before);
   });
 
-  it('2. D-473: a member post with a community is member_no_community before any community lookup', async () => {
+  it('2. 10-05 (D-706, replaces D-473 `member_no_community`): a member naming a community goes through the owner seam: unknown is 404, an organization community is 403, and nothing is written', async () => {
     const before = await postCount();
-    for (const communityId of [randomUUID(), ACTIVE_COMMUNITY]) {
-      const res = await postAs(tokens.helena, { caption: `${PREFIX}comunidade`, communityId });
-      expect(res.status, communityId).toBe(400);
-      expect((await detailsOf(res))?.member).toBe('member_no_community');
-    }
+    const unknown = await postAs(tokens.helena, {
+      caption: `${PREFIX}comunidade`,
+      communityId: randomUUID(),
+    });
+    expect(unknown.status).toBe(404);
+    const organization = await postAs(tokens.helena, {
+      caption: `${PREFIX}comunidade`,
+      communityId: ACTIVE_COMMUNITY,
+    });
+    expect(organization.status).toBe(403);
+    expect((await errorOf(organization)).code).toBe('FORBIDDEN');
     expect(await postCount()).toBe(before);
   });
 

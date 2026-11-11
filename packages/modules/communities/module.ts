@@ -23,6 +23,14 @@ const log = moduleLogger('module-communities');
  * still sees the tab and lands on the empty state — which for an admin is also the creation entry
  * point. Hiding a tab because a list is empty would make the product's own emptiness unreachable.
  *
+ * **10-05 (D-707): the member CREATOR's two keys are named here and granted NOWHERE in this file.**
+ * `communities.community.create` and `communities.community.manage_own` (`COMMUNITY_PERMISSIONS`) are
+ * composed for the role `member` only, while `social` is effective, by the app-tier registry
+ * (`apps/api/src/modules/registry.ts`), exactly as `feed.post.create` is: a static grant here would be a
+ * role-to-permission edge this manifest cannot make conditional on `social` (MOD-02), and a module that
+ * names the social module's switch would be a module-to-module import. `defaultRolePermissions` below
+ * therefore stays the admin's `manage` alone, and ownership is tested in each statement.
+ *
  * No `home` key and no `jobs` key: this module contributes no `/inicio` widget and enqueues nothing.
  * Both are OMITTED rather than set to an empty array, so "declares none" and "declares an empty one"
  * stay two different statements in the manifest.

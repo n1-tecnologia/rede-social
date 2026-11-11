@@ -4,6 +4,7 @@ import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { SOCIAL_ENABLED, SOCIAL_VISIBLE_AUTHOR_IDS } from '@rede-social/core/db/social-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { communityActionAllowed } from '@rede-social/core/server/communities/action-gate';
 import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { enqueueInTx } from '@rede-social/core/server/jobs/boss';
@@ -80,8 +81,11 @@ type FeedRow = {
   comment_count: number;
   viewer_liked: boolean;
   author_user_id: string;
-  /** 09-03 (D-473): the stamped audience; only `'followers'` is emitted on the wire (`audience`). */
-  visibility: 'tenant' | 'followers';
+  /**
+   * 09-03 (D-473): the stamped audience; `'followers'` is emitted on the wire (`audience`), and since
+   * 10-05 (D-709) so is `'community'` (a post written inside a member community).
+   */
+  visibility: 'tenant' | 'followers' | 'community';
   membership_id: string;
   display_name: string;
   avatar_asset_id: string | null;
@@ -302,7 +306,10 @@ const toPost = (row: FeedRow, viewerUserId: string, canModerate = false): FeedPo
   linkPreview: toLinkPreview(row),
   // 09-03 (D-471): emitted ONLY for a member post, so an older web never meets a new key while
   // `social` is off for every tenant. Absent means the organization's voice.
-  ...(row.visibility === 'followers' ? { audience: 'followers' as const } : {}),
+  // 10-05 (D-709): the third value, `'community'`, rides the same optional key.
+  ...(row.visibility === 'followers' || row.visibility === 'community'
+    ? { audience: row.visibility }
+    : {}),
   // 09-07 (D-475): emitted ONLY as 'moderation' (never null), only to a holder of `moderation.manage`
   // looking at a member post somebody else wrote. `canManage` stays author-only. The viewer's
   // `canModerate` is read by the ROUTE before the transaction; the statement of `softDeletePost`
@@ -381,7 +388,7 @@ const NOT_LOCKED = sql`and (p.community_id is null or p.community_id <> all (${L
  * Membership-status vocabulary: the same folding as the rest of the kernel (`status = 'blocked'` or
  * `blocked_at is not null` is blocked; removed is `deleted_at`).
  */
-function memberPostVisible(canModerate: boolean): ReturnType<typeof sql> {
+function memberPostVisible(canModerate: boolean, includeCommunity = false): ReturnType<typeof sql> {
   // 09-04 (T-09-11, measured): the liveness test on `ms` is written ONLY on the moderator branch. For
   // everyone else it is already inside `SOCIAL_VISIBLE_AUTHOR_IDS` (the seam holds the caller and the
   // LIVE followees only: blocked and removed authors are not in it), so repeating it here changed no
@@ -389,13 +396,23 @@ function memberPostVisible(canModerate: boolean): ReturnType<typeof sql> {
   // below the join to `memberships`; it becomes a join filter the planner estimates at a fraction of
   // the video rows, and on a mixed-audience volume fixture that flipped Reels' 'Todos' from the
   // partial video index to a sequential scan (`130-reels.sql`). Over `p` alone it is a plain filter.
+  //
+  // 10-05 (D-709, RESEARCH Pitfall 1): the member clause names the `'followers'` audience on its own. A
+  // `'community'` post (written inside a member community) has an author the viewer may follow, and
+  // without that literal Reels 'Todos' (`memberPostVisible(false)`) would list a followed creator's
+  // community video outside its community page. Only the single-post reads (`getPost`,
+  // `assertPostInteractive`, `includeCommunity = true`) add `p.visibility = 'community'` back: a community
+  // post is readable and interactive for the whole tenant (D-701), with `social` on or off (D-718), and
+  // RLS (`feed_posts_social_gate`, plan 10-03) states the same rule.
+  const community = includeCommunity ? sql` or p.visibility = 'community'` : sql``;
   if (canModerate) {
-    return sql`(p.visibility = 'tenant'
+    return sql`(p.visibility = 'tenant'${community}
         or (${SOCIAL_ENABLED}
             and ms.status = 'active' and ms.blocked_at is null and ms.deleted_at is null))`;
   }
-  return sql`(p.visibility = 'tenant'
-        or (${SOCIAL_ENABLED} and p.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))`;
+  return sql`(p.visibility = 'tenant'${community}
+        or (p.visibility = 'followers' and ${SOCIAL_ENABLED}
+            and p.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))`;
 }
 
 /** The `details.access` values of a 403 on locked content (`@rede-social/contracts/access`). */
@@ -626,9 +643,12 @@ export async function listCommunityFeed(
 ): Promise<FeedPage> {
   if (!(await moduleFlags.isEnabled(ctx, 'communities'))) throw new ApiError(404, 'NOT_FOUND');
 
-  // 09-04 (D-480): a community lane never lists a member post. A member post has no community
-  // (`feed_posts_visibility_shape_chk`), so the equality below can never match one; it is left
-  // untouched on purpose rather than given the member fragment.
+  // 09-04 (D-480): a community lane never lists a `'followers'` member post: that audience has no
+  // community (`feed_posts_visibility_shape_chk`), so the equality below can never match one. 10-05
+  // (D-709): a post written inside a member community carries the audience `'community'` WITH the
+  // community's id, so it IS matched here, and the shape check guarantees the only audiences a community
+  // id can carry are `'tenant'` and `'community'`: the equality needs no visibility term, which also
+  // keeps the plan `feed_posts_tenant_community_created_idx` serves unchanged.
   const visible = await withTenantTx(ctx, async (tx) => {
     // 08.2 (STORE-11): `locked` asks the kernel gate seam whether this community is locked for the
     // caller (a store product links it and the caller holds none). '{}' for staff and while the store
@@ -798,7 +818,7 @@ export async function getPost(
          and p.deleted_at is null
          and c.deleted_at is null
          ${NOT_BLOCKED_AUTHOR}
-         and ${memberPostVisible(opts.canModerate)}
+         and ${memberPostVisible(opts.canModerate, true)}
        limit 1`);
     if (rows[0]) return { row: rows[0], lockedCommunityId: null, lockedAuthor: null };
 
@@ -911,9 +931,11 @@ function assertMediaShape(images: string[], attachments: string[], hasVideo: boo
  * are validation codes (`details.member`, the closed `FEED_MEMBER_ISSUES` set) because a hidden control
  * is not a rule: the composer hides the picker, this is what stops a crafted request.
  *
- *  - a non-empty `attachmentAssetIds` is `member_no_attachments`, a non-null `communityId` is
- *    `member_no_community`; both come first, so a refused caller learns nothing about assets or
- *    communities (an unknown id is NOT a 404 here);
+ *  - a non-empty `attachmentAssetIds` is `member_no_attachments` (a member never attaches a PDF, in a
+ *    community as anywhere); it comes first, so a refused caller learns nothing about assets (an unknown
+ *    id is NOT a 404 here). 10-05 (D-706) removed the old "member has no community" refusal: a member
+ *    who names a community now goes through the OWNER seam (`resolveCommunityTarget`), which answers 404
+ *    for a miss and 403 unless the member created it. The old code stays in `FEED_MEMBER_ISSUES`;
  *  - a null policy means the `social` module is not effective for the tenant (the flags-cache window
  *    after it was switched off): 403, the same answer the permission guard gives once the cache expires;
  *  - a video needs `video.enabled`, except that an EDIT re-sending the post's own existing video is not
@@ -928,14 +950,12 @@ function memberRules(
     images: string[];
     video: string | null;
     attachments: string[];
-    communityId: string | null;
     existingVideoId: string | null;
   },
 ): void {
   const refuse = (issue: FeedMemberIssue) =>
     new ApiError(400, 'VALIDATION_FAILED', { member: issue });
   if (input.attachments.length > 0) throw refuse('member_no_attachments');
-  if (input.communityId !== null) throw refuse('member_no_community');
   if (!policy) throw new ApiError(403, 'FORBIDDEN');
   if (input.video !== null && !policy.video.enabled && input.video !== input.existingVideoId) {
     throw refuse('member_video_off');
@@ -1138,17 +1158,36 @@ async function upsertLinkPreview(
 }
 
 /**
- * COMM-04's destination check — VALIDATION, never a permission, and it runs inside the post's OWN
- * transaction so a community cannot be archived between the check and the insert.
+ * COMM-04's destination check, and since 10-05 (D-706) the POST OWNER seam: "may THIS caller publish in
+ * THIS community?" — decided here, in the post's OWN transaction, from the community's stamped `kind` and
+ * `created_by_user_id`, so a community cannot be archived or re-owned between the check and the insert.
+ * The permission (`feed.post.create`) only says "may try"; this function says "may do".
  *
- * Three answers, and the asymmetry between them is the security decision (D-23, T-05-12, T-05-13):
- *  - not visible in this lane (unknown id, ANOTHER TENANT'S id, soft-deleted) → a BARE 404 with no
- *    `details`. A per-cause code over an enumerable uuid space would let the composer enumerate
- *    another organisation's containers one 400 at a time;
- *  - visible but `archived` → `400 VALIDATION_FAILED { community: 'archived' }`. This one IS
- *    distinguishable, and safely: the member can already read that community's page and see the
- *    "Arquivada" pill, so the code discloses nothing new;
- *  - active → the insert proceeds.
+ * Four answers, in this FIXED order, and the asymmetry between them is the security decision (D-23,
+ * T-05-12, T-05-13, T-10-14):
+ *  1. not visible in this lane (unknown id, ANOTHER TENANT'S id, soft-deleted) → a BARE 404 with no
+ *     `details`. A per-cause code over an enumerable uuid space would let the composer enumerate
+ *     another organisation's containers one 400 at a time;
+ *  2. the OWNER decision, ORDERED branches, first one that holds permits the write:
+ *       (1) `kind = 'member'` and `created_by_user_id = ctx.userId` and the caller is a member: the creator;
+ *       (2) `kind = 'organization'` and the caller speaks for the organization (any staff role that got
+ *           this far: the route already required `feed.post.create`, which no support user holds);
+ *       (3) RESERVED, the Escopo seam, evaluated only when 1 and 2 fail: `kind = 'organization'`, a
+ *           caller whose posting identity is a member (the same role read the audience stamp already
+ *           makes, not a new role gate) and `communityActionAllowed(tx, id, 'post')`. The SQL stub it
+ *           asks answers `false` for every input, so this branch is NEVER taken in Phase 10;
+ *     when none holds → `403 FORBIDDEN`. An admin can therefore never publish in a member community
+ *     (RLS `feed_posts_social_insert_gate` says the same), and a non-owner learns nothing the tenant
+ *     cannot already read: every community is visible to the whole tenant (D-701);
+ *  3. visible, permitted, but `archived` → `400 VALIDATION_FAILED { community: 'archived' }`, AFTER the
+ *     403 test (a stranger never learns the state of somebody else's community from a 400). The creator
+ *     can already see the "Arquivada" pill, so the code discloses nothing new;
+ *  4. active → the insert proceeds.
+ *
+ * It RETURNS the audience to stamp, derived from the branch that permitted the write, never from the
+ * body or from the role alone: `'community'` for branches 1 and 3 (`visibility = 'community'` with the
+ * community's id) and `'tenant'` for branch 2. A post a buyer's product granted is therefore NEVER
+ * stamped `'tenant'`, so the 'Administrador' mark (09 UI-D-509, OQ-4 of 10-UI-SPEC) can never render on it.
  *
  * The read runs in the TENANT LANE, so `communities_tenant_isolation` is what scopes it. The
  * explicit `tenant_id` predicate beside it is layer 2 of the three, exactly as `listCommunityFeed`
@@ -1159,18 +1198,39 @@ async function resolveCommunityTarget(
   ctx: RequestContext,
   tx: Tx,
   communityId: string,
-): Promise<void> {
-  const rows = await tx.execute<{ status: string }>(sql`
-    select c.status from public.communities c
+): Promise<'tenant' | 'community'> {
+  const rows = await tx.execute<{
+    id: string;
+    status: string;
+    kind: 'organization' | 'member';
+    created_by_user_id: string | null;
+  }>(sql`
+    select c.id, c.status, c.kind, c.created_by_user_id from public.communities c
      where c.id = ${communityId}::uuid
        and c.tenant_id = ${ctx.tenantId}::uuid
        and c.deleted_at is null
      limit 1`);
   const community = rows[0];
   if (!community) throw new ApiError(404, 'NOT_FOUND');
+
+  const isMember = ctx.role === 'member';
+  let audience: 'tenant' | 'community' | null = null;
+  if (community.kind === 'member') {
+    // Branch 1: the creator, and only as the member they are (an admin is never an owner here).
+    if (isMember && community.created_by_user_id === ctx.userId) audience = 'community';
+  } else if (!isMember) {
+    // Branch 2: the organization's voice, in an organization community.
+    audience = 'tenant';
+  } else if (await communityActionAllowed(tx, community.id, 'post')) {
+    // Branch 3, RESERVED (Escopo): never taken while the SQL stub answers false.
+    audience = 'community';
+  }
+  if (audience === null) throw new ApiError(403, 'FORBIDDEN');
+
   if (community.status === 'archived') {
     throw new ApiError(400, 'VALIDATION_FAILED', { community: 'archived' });
   }
+  return audience;
 }
 
 /**
@@ -1188,6 +1248,11 @@ async function resolveCommunityTarget(
  *   this tenant's own rows. Do not collapse the two: a role check on the community would hard-code
  *   V1's posting policy, and a permission-shaped refusal would answer 403 where the product means
  *   "that container is archived".
+ * - **10-05 (D-706, D-709): the destination check is also the OWNER seam.** It answers 404 for a miss,
+ *   403 unless the caller owns the target (the creator of a member community, or the organization's
+ *   voice in an organization community), then 400 for an archived one, and it returns the audience the
+ *   branch that permitted the write stamps (`'community'` or `'tenant'`). With no community the audience
+ *   is the role's, as since 09-03.
  */
 export async function createPost(ctx: RequestContext, input: CreatePost): Promise<FeedPost> {
   const images = input.imageAssetIds ?? [];
@@ -1222,7 +1287,6 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
       images,
       video,
       attachments,
-      communityId,
       existingVideoId: null,
     });
   }
@@ -1230,7 +1294,8 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
   const created = await withTenantTx(ctx, async (tx) => {
     // BEFORE the assets and before the preview: a refused destination must cost neither an asset
     // validation nor an outbound-fetch cache row, and it must be the first thing the caller is told.
-    if (communityId !== null) await resolveCommunityTarget(ctx, tx, communityId);
+    const targetAudience =
+      communityId !== null ? await resolveCommunityTarget(ctx, tx, communityId) : null;
     await validateAssets(tx, wanted, isMember ? ctx.userId : undefined);
     const previewId = await upsertLinkPreview(tx, ctx, linkCandidate);
 
@@ -1243,11 +1308,15 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
         caption: input.caption,
         mediaKind,
         linkPreviewId: previewId,
-        // 09-03 (D-473, T-09-08): the audience is DERIVED FROM THE ROLE, never from `input` (the
-        // body schema is `.strict()` and has no such key). A member's post is a followers post; any
-        // other author speaks for the organization. `feed_posts_social_insert_gate` refuses a
-        // mismatch at the database, so a forged claim cannot widen it.
-        visibility: ctx.role === 'member' ? ('followers' as const) : ('tenant' as const),
+        // 09-03 (D-473, T-09-08): the audience is DERIVED, never read from `input` (the body schema is
+        // `.strict()` and has no such key). 10-05 (D-709): with a community it comes from the BRANCH
+        // that permitted the write (`'community'` for a member community, `'tenant'` for the
+        // organization's voice in an organization community); with none, a member's post is a
+        // followers post and any other author speaks for the organization.
+        // `feed_posts_social_insert_gate` refuses a mismatch at the database, so a forged claim cannot
+        // widen it.
+        visibility:
+          targetAudience ?? (ctx.role === 'member' ? ('followers' as const) : ('tenant' as const)),
       })
       .returning();
     if (!inserted) throw new ApiError(500, 'INTERNAL');
@@ -1466,7 +1535,6 @@ export async function updatePost(
           images,
           video,
           attachments,
-          communityId: null,
           existingVideoId: row.video_asset_id,
         });
       }
@@ -1907,7 +1975,7 @@ async function assertPostInteractive(
           : sql``
       }
      where p.id = ${postId}::uuid and p.deleted_at is null
-       and ${memberPostVisible(opts.canModerate)}`);
+       and ${memberPostVisible(opts.canModerate, true)}`);
   const row = rows[0];
   if (row?.locked) throw new ApiError(403, 'FORBIDDEN', { access: COMMUNITY_LOCKED });
   if (row) return;

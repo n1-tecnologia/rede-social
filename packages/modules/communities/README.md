@@ -47,6 +47,8 @@ Deleting a community emits nothing: it is a silent soft delete of an archived co
 
 - `@rede-social/core/db/rls`
 - `@rede-social/core/db/schema`
+- `@rede-social/core/db/social-gate` (10-03: `SOCIAL_ENABLED`, the SQL `app.social_enabled()` term of the member insert
+  gates in the schema's policies)
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`

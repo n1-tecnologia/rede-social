@@ -300,9 +300,22 @@ export const reorderCommunitiesSchema = z
   .strict();
 export type ReorderCommunities = z.infer<typeof reorderCommunitiesSchema>;
 
-/** The permission STRINGS, exported so the manifest and the web tier never retype them. */
+/**
+ * The permission STRINGS, exported so the manifest and the web tier never retype them.
+ *
+ * **`create` and `manageOwn` are MEMBER-ONLY BY CONSTRUCTION (10-05, D-707, assumption A2).** The app-tier
+ * registry composes them for the role `member` only, and only while `social` and `communities` are
+ * effective; no static role grant (the manifest's `defaultRolePermissions`) holds them and no staff role
+ * ever does. The route guards authorise a write by ANY of `manage` or the member key, and then the
+ * statement tests OWNERSHIP (`created_by_user_id = ctx.userId`) itself, never the role: the key says "may
+ * try", the locked row says "may do". `manage` stays the organization's (admin) permission and keeps
+ * reorder, the archived list of every creator and the store form to the admin.
+ * `apps/api/tests/unit/registry.test.ts` (cases 23 to 25) pins the composition.
+ */
 export const COMMUNITY_PERMISSIONS = {
   manage: 'communities.community.manage',
+  create: 'communities.community.create',
+  manageOwn: 'communities.community.manage_own',
 } as const;
 
 /**

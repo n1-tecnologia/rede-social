@@ -16,6 +16,7 @@ import {
   type ReorderCommunities,
   type UpdateCommunity,
 } from '../contracts/index';
+import { COMMUNITY_MEMBER_POSITION } from '../db/schema';
 
 const log = moduleLogger('module-communities');
 
@@ -449,6 +450,23 @@ function isSlugCollision(error: unknown): boolean {
   return false;
 }
 
+/**
+ * A `42501` (insufficient privilege, the row-level-security refusal) anywhere in the cause chain: the
+ * same walk `isSlugCollision` does, with its own `seen` set. The feed module keeps its own copy because
+ * modules never import each other (MOD-02).
+ */
+function isInsufficientPrivilege(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current !== null && current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (candidate.code === '42501') return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
 /** How many suffixes to try before giving up. Ten same-named communities is already absurd. */
 const SLUG_ATTEMPTS = 10;
 
@@ -570,16 +588,28 @@ export async function createCommunity(
     throw new ApiError(400, 'VALIDATION_FAILED', { community: 'name_required' });
   }
 
+  // 10-05 (D-706, D-707): the KIND is stamped from the session, never from the body (the schema is
+  // `.strict()` and has no such key). It is the ONE role read of this module, a stamp rather than a
+  // permission decision, and it is backed by `communities_kind_insert_gate` in SQL: a member lane may
+  // only insert `kind = 'member'` rows of its own at the sentinel position, a staff lane only
+  // `'organization'` ones. Ownership everywhere else is tested in the statement, never by role.
+  const member = ctx.role === 'member';
+
   const base = slugify(input.name);
   let created: CommunityRow | undefined;
 
   for (let attempt = 0; attempt < SLUG_ATTEMPTS; attempt += 1) {
     const slug = slugCandidate(base, attempt);
     try {
-      created = await withTenantTx(ctx, (tx) => insertCommunity(tx, ctx, input, slug));
+      created = await withTenantTx(ctx, (tx) => insertCommunity(tx, ctx, input, slug, member));
       break;
     } catch (error) {
       if (isSlugCollision(error)) continue;
+      // T-10-18 / EP-41: `social` was switched off while this instance's flags cache still held the old
+      // answer, so the permission guard let a member through and the insert gate (`app.social_enabled()`
+      // in SQL) refused the row. That is a permission refusal, not an internal error. MEMBERS ONLY: any
+      // other 42501 stays a 500 so a real policy bug is never masked as a user-facing refusal.
+      if (member && isInsufficientPrivilege(error)) throw new ApiError(403, 'FORBIDDEN');
       throw error;
     }
   }
@@ -625,13 +655,31 @@ async function insertCommunity(
   ctx: RequestContext,
   input: CreateCommunity,
   slug: string,
+  member: boolean,
 ): Promise<CommunityRow> {
   // FIRST statement of the transaction: a refused cover writes nothing at all. `isSlugCollision`
   // matches a 23505 on the slug index alone, so this `ApiError` is re-thrown by the retry loop
   // untouched rather than swallowed as a collision.
   await resolveCoverAsset(tx, ctx, input.coverAssetId ?? null);
 
-  const inserted = await tx.execute<{ id: string }>(sql`
+  // 10-05 (D-706): a MEMBER's community is stamped `kind = 'member'` at the sentinel position, so it
+  // sorts after every organization community whatever order the admin chose and the list statement, its
+  // index and its cursor stay untouched. The organization path keeps its original statement byte for
+  // byte (kind takes its column default, position 0: the newest lands first, as before).
+  const inserted = member
+    ? await tx.execute<{ id: string }>(sql`
+    insert into communities
+      (tenant_id, created_by_user_id, name, slug, description, cover_asset_id, kind, position)
+    values (${ctx.tenantId}::uuid,
+            ${ctx.userId}::uuid,
+            ${input.name},
+            ${slug},
+            ${input.description},
+            ${input.coverAssetId ?? null}::uuid,
+            'member',
+            ${COMMUNITY_MEMBER_POSITION})
+    returning id`)
+    : await tx.execute<{ id: string }>(sql`
     insert into communities (tenant_id, created_by_user_id, name, slug, description, cover_asset_id)
     values (${ctx.tenantId}::uuid,
             ${ctx.userId}::uuid,

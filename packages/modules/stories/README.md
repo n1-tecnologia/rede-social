@@ -71,6 +71,8 @@ routes only.
 - `@rede-social/core/db/community-gate`
 - `@rede-social/core/db/rls`
 - `@rede-social/core/db/schema`
+- `@rede-social/core/db/social-gate` (10-04: `SOCIAL_ENABLED`, the SQL `app.social_enabled()` term of the story
+  insert gate in the schema's policies)
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`
