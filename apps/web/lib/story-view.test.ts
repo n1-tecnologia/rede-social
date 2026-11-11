@@ -4,6 +4,7 @@ import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import {
+  appendAuthors,
   authorCircleView,
   authorGroupView,
   authorRowLabels,
@@ -16,10 +17,12 @@ import {
   inicioGroups,
   inicioRow,
   memberStoriesRow,
+  moderatorStoriesRow,
   monogramOf,
   ownCircleView,
   type StoryViewerItemView,
   storyHistoryView,
+  storyPublishDoorFor,
   storyShareUrl,
   storyViewerItem,
   storyViewerLabels,
@@ -979,5 +982,67 @@ describe('10-12 — the Explorar row (UI-D-697..UI-D-700, D-714, D-717)', () => 
     expect(explorarStoriesRowKind(['social.participate'], modules('social'))).toBeNull();
     expect(explorarStoriesRowKind(['social.participate'], modules('stories'))).toBeNull();
     expect(explorarStoriesRowKind(['moderation.manage'], modules('social'))).toBeNull();
+  });
+
+  it('R10. the moderator row: every circle an author circle, no own circle, no follow state, the next cursor kept; a failed or empty read is nothing', () => {
+    const labels = rowLabels();
+    const row = moderatorStoriesRow(
+      { items: [author(1), author(2, { hasUnseen: true })], nextCursor: 'c2' },
+      labels,
+    );
+    expect(row.circles.map((c) => c.key)).not.toContain('own');
+    expect(row.circles).toHaveLength(2);
+    expect(row.groups.every((g) => g.member?.isSelf === false)).toBe(true);
+    expect(row.nextCursor).toBe('c2');
+    for (const page of [null, { items: [], nextCursor: null }]) {
+      expect(moderatorStoriesRow(page, labels)).toEqual({
+        circles: [],
+        groups: [],
+        nextCursor: null,
+      });
+    }
+  });
+
+  it('R11. appendAuthors adds the next page after the loaded ones, numbering groups on, and drops a membership already in the row', () => {
+    const labels = rowLabels();
+    const first = moderatorStoriesRow({ items: [author(1), author(2)], nextCursor: 'c2' }, labels);
+    const next = appendAuthors(first, [author(2), author(3)], labels);
+    expect(next.circles.map((c) => c.key.slice(-1))).toEqual(['1', '2', '3']);
+    expect(next.circles.map((c) => ('group' in c ? c.group : null))).toEqual([0, 1, 2]);
+    expect(next.groups).toHaveLength(3);
+    // The input is never mutated.
+    expect(first.circles).toHaveLength(2);
+  });
+
+  it('R13. Pitfall 12: a member holding the composed permission set gets NO publish circle in Início, and the own circle in Explorar', () => {
+    const labels = rowLabels();
+    // The permission set the API composes for a member of a `social` tenant (SOCIAL-02, D-707).
+    const member = ['social.participate', 'feed.post.create', 'stories.story.publish'];
+    const admin = [
+      'content.publish',
+      'stories.story.publish',
+      'stories.story.manage',
+      'moderation.manage',
+    ];
+    expect(storyPublishDoorFor('inicio', member)).toBe(false);
+    expect(storyPublishDoorFor('explorar', member)).toBe(true);
+    expect(storyPublishDoorFor('inicio', admin)).toBe(true);
+    expect(storyPublishDoorFor('explorar', admin)).toBe(false);
+    expect(storyPublishDoorFor('inicio', [])).toBe(false);
+    // Início's row stays byte for byte for the admin and absent for the member.
+    const input = {
+      tenant: { displayName: 'Demo', logoUrl: null },
+      sequenceLength: 0,
+      highlights: [],
+    };
+    expect(inicioRow({ ...input, canPublish: storyPublishDoorFor('inicio', member) }, t)).toEqual(
+      [],
+    );
+    expect(
+      inicioRow({ ...input, canPublish: storyPublishDoorFor('inicio', admin) }, t).map(
+        (c) => c.key,
+      ),
+    ).toEqual(['own']);
+    expect(memberStoriesRow({ ownAvatarUrl: null, page: null }, labels).circles).toHaveLength(1);
   });
 });

@@ -174,6 +174,15 @@ describe('deleteStoryAction — the viewer opts out of the revalidation (2026-10
     expect(apiFetch).not.toHaveBeenCalled();
   });
 
+  it('D5. 10-12: a member’s refused delete (a 403 of someone else’s story) is generic, silent and revalidates nothing', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(403, { error: { code: 'FORBIDDEN' } }));
+    await expect(deleteStoryAction(A, { revalidate: false })).resolves.toEqual({
+      ok: false,
+      code: 'generic',
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
   it('D4. a miss is the generic answer and revalidates nothing', async () => {
     vi.mocked(apiFetch).mockResolvedValue(status(404, { error: { code: 'NOT_FOUND' } }));
     await expect(deleteStoryAction(A)).resolves.toEqual({ ok: false, code: 'generic' });

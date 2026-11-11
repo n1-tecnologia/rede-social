@@ -2122,3 +2122,210 @@ describe('StoryViewerHost — a curator deletes a story from the viewer (2026-10
     }
   });
 });
+
+/* ── 10-12 (UI-D-701): the viewer over member groups ──────────────────────────────────────────────── */
+
+describe('StoryViewerHost — member groups: the author’s and the moderator’s menus (10-12, UI-D-701)', () => {
+  const STORY_ID = '0d000000-0000-4000-8000-0000000000d1';
+  const OWN_DELETE_BODY = 'Ele sai de Explorar e de todos os destaques onde está.';
+  const MOD_DELETE_BODY =
+    'Ele sai de Explorar e de todos os destaques onde está, para todos. A pessoa não é avisada.';
+
+  /** One MEMBER group (an author's live stories), as `StoriesSurface` hands it once it has read it. */
+  function memberHost(overrides: Record<string, unknown> = {}) {
+    const {
+      items = [item()],
+      isSelf = false,
+      ...rest
+    } = overrides as {
+      items?: ReturnType<typeof item>[];
+      isSelf?: boolean;
+    };
+    return render(
+      <StoryViewerHost
+        groups={[
+          {
+            key: 'author:0e000000-0000-4000-8000-0000000000e1',
+            kind: 'member',
+            highlightId: null,
+            name: 'Helena',
+            avatar: { kind: 'avatar', src: null },
+            items,
+            member: { membershipId: '0e000000-0000-4000-8000-0000000000e1', isSelf },
+          },
+        ]}
+        labels={LABELS}
+        onLike={like as never}
+        onUnlike={unlike as never}
+        onClose={() => {}}
+        {...rest}
+      />,
+    );
+  }
+
+  async function openMenu() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mais opções' }));
+    });
+    return screen.getByRole('dialog', { name: 'Opções do story' });
+  }
+
+  const rowNames = (sheet: HTMLElement) =>
+    within(sheet)
+      .getAllByRole('button')
+      .concat(within(sheet).queryAllByRole('link'))
+      .map((node) => node.textContent);
+
+  it('M1. the author gets "Mais opções" in their own group: "Publicar novo story" (an anchor), "Destacar", "Excluir story" (danger)', async () => {
+    memberHost({ isSelf: true, memberMenu: { canModerate: false, canHighlight: true } });
+    const more = screen.getByRole('button', { name: 'Mais opções' });
+    expect(more.getAttribute('data-story-action')).toBe('more');
+    const sheet = await openMenu();
+    const link = within(sheet).getByRole('link', { name: 'Publicar novo story' });
+    expect(link.getAttribute('href')).toBe('/stories/publicar');
+    const rows = within(sheet)
+      .getAllByRole('button')
+      .map((node) => node.textContent);
+    expect(rows).toEqual(['Destacar', 'Excluir story']);
+    expect(within(sheet).getByRole('button', { name: 'Excluir story' }).className).toContain(
+      'text-danger',
+    );
+    // The labelled "Destacar" pill of UI-D-66 is not drawn on a member group: it lives in the menu.
+    expect(document.querySelector('[data-story-action="highlight"]')).toBeNull();
+  });
+
+  it('M2. "Destacar" is offered ONLY when the author owns an active community', async () => {
+    memberHost({ isSelf: true, memberMenu: { canModerate: false, canHighlight: false } });
+    const sheet = await openMenu();
+    expect(within(sheet).queryByRole('button', { name: 'Destacar' })).toBeNull();
+    expect(within(sheet).getByRole('link', { name: 'Publicar novo story' })).toBeTruthy();
+    expect(within(sheet).getByRole('button', { name: 'Excluir story' })).toBeTruthy();
+  });
+
+  it('M3. a moderator gets "Mais opções" in ANY member group with "Excluir story" only', async () => {
+    memberHost({ isSelf: false, memberMenu: { canModerate: true, canHighlight: false } });
+    const sheet = await openMenu();
+    expect(rowNames(sheet)).toEqual(['Excluir story']);
+    expect(within(sheet).queryByRole('link', { name: 'Publicar novo story' })).toBeNull();
+  });
+
+  it('M4. for anyone else the menu slot is ABSENT from the DOM, not disabled — even for a curator of the organization', () => {
+    memberHost({ isSelf: false, memberMenu: { canModerate: false, canHighlight: true } });
+    expect(document.querySelector('[data-story-action="more"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Mais opções' })).toBeNull();
+    cleanup();
+    // `canCurate` is the organization's permission: it neither draws the pill nor the menu here.
+    memberHost({ isSelf: false, canCurate: true });
+    expect(screen.queryByRole('button', { name: 'Mais opções' })).toBeNull();
+    expect(document.querySelector('[data-story-action="highlight"]')).toBeNull();
+  });
+
+  it('M5. the author’s delete: the author’s two-sentence body, confirm "Excluir story", cancel "Manter story", deleted WITHOUT revalidation, the toast, the viewer closes', async () => {
+    const onClose = vi.fn();
+    const onStoryDeleted = vi.fn();
+    memberHost({
+      isSelf: true,
+      memberMenu: { canModerate: false, canHighlight: false },
+      onClose,
+      onStoryDeleted,
+    });
+    const sheet = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Excluir story' }));
+    });
+    const confirm = screen.getByRole('dialog', { name: 'Excluir story?' });
+    expect(confirm.textContent).toContain(OWN_DELETE_BODY);
+    expect(confirm.textContent).not.toContain('A pessoa não é avisada.');
+    expect(within(confirm).getByRole('button', { name: 'Manter story' })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Excluir story' }));
+    });
+    expect(deleteStory).toHaveBeenCalledWith(STORY_ID, { revalidate: false });
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Story excluído.' });
+    expect(onStoryDeleted).toHaveBeenCalledWith(STORY_ID);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('M6. the moderator’s delete says so: "para todos. A pessoa não é avisada." — fixed copy, no name in it', async () => {
+    memberHost({ isSelf: false, memberMenu: { canModerate: true, canHighlight: false } });
+    const sheet = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Excluir story' }));
+    });
+    const confirm = screen.getByRole('dialog', { name: 'Excluir story?' });
+    expect(confirm.textContent).toContain(MOD_DELETE_BODY);
+    expect(confirm.textContent).not.toContain('Helena');
+  });
+
+  it('M7. while the delete is pending BOTH buttons are disabled and the confirm is aria-busy; nothing is removed until it settles', async () => {
+    let settle: (value: { ok: true }) => void = () => {};
+    deleteStory.mockReturnValueOnce(
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
+    const onStoryDeleted = vi.fn();
+    memberHost({
+      isSelf: true,
+      memberMenu: { canModerate: false, canHighlight: false },
+      onStoryDeleted,
+    });
+    const sheet = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Excluir story' }));
+    });
+    const confirm = screen.getByRole('dialog', { name: 'Excluir story?' });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Excluir story' }));
+    });
+    const pendingConfirm = within(confirm).getByRole('button', { name: 'Excluir story' });
+    expect(pendingConfirm.getAttribute('aria-busy')).toBe('true');
+    expect((pendingConfirm as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (within(confirm).getByRole('button', { name: 'Manter story' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(onStoryDeleted).not.toHaveBeenCalled();
+    await act(async () => {
+      settle({ ok: true });
+    });
+    expect(onStoryDeleted).toHaveBeenCalledWith(STORY_ID);
+  });
+
+  it('M8. a refused delete keeps the story, with the generic toast (a stale tab, a 403 or a 404)', async () => {
+    deleteStory.mockResolvedValue({ ok: false, code: 'generic' });
+    const onClose = vi.fn();
+    const onStoryDeleted = vi.fn();
+    memberHost({
+      isSelf: false,
+      memberMenu: { canModerate: true, canHighlight: false },
+      onClose,
+      onStoryDeleted,
+    });
+    const sheet = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Excluir story' }));
+    });
+    const confirm = screen.getByRole('dialog', { name: 'Excluir story?' });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Excluir story' }));
+    });
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Algo deu errado. Tente novamente.',
+    });
+    expect(onStoryDeleted).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Story' })).toBeTruthy();
+  });
+
+  it('M9. the author’s "Destacar" opens the highlight sheet for THAT story', async () => {
+    loadSheet.mockResolvedValue({ ok: true, places: [], selectedIds: [] });
+    memberHost({ isSelf: true, memberMenu: { canModerate: false, canHighlight: true } });
+    const sheet = await openMenu();
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Destacar' }));
+    });
+    expect(loadSheet).toHaveBeenCalledWith(STORY_ID);
+    expect(screen.getByRole('dialog', { name: 'Destacar story' })).toBeTruthy();
+  });
+});
