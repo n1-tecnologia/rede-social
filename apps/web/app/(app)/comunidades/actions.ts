@@ -299,9 +299,11 @@ export async function refreshCommunityPostsAction(
 
 /**
  * What a community write can answer. Every refusal is a catalog KEY — the client translates — and
- * the vocabulary is the API's own closed `CommunityIssue` set plus the two transport-shaped
- * outcomes a form has to be able to draw: the container vanished under the admin (`not_found`), and
- * everything else (`generic`).
+ * the vocabulary is the API's own closed `CommunityIssue` set (10-13: its `limit_reached` member is
+ * what a member's create answers with a `409` once they own as many active communities as allowed, and
+ * the form draws it as the top alert, keeping every value) plus the transport-shaped outcomes a form
+ * has to be able to draw: the container vanished under the admin (`not_found`), a `403` (`forbidden`),
+ * and everything else (`generic`).
  */
 export type CommunityWriteResult =
   | { ok: true; communityId: string }
