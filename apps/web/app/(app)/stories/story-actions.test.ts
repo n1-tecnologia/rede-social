@@ -3,7 +3,12 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
-import { deleteStoryAction, markStoriesSeenAction } from './story-actions';
+import {
+  deleteStoryAction,
+  loadAuthorStoriesAction,
+  loadStoryAuthorsPageAction,
+  markStoriesSeenAction,
+} from './story-actions';
 
 /**
  * 05.2-10 — the seen-state write behind the tenant circle's ring (HIGHLIGHT-06, D-105, R-P5).
@@ -173,6 +178,110 @@ describe('deleteStoryAction — the viewer opts out of the revalidation (2026-10
     vi.mocked(apiFetch).mockResolvedValue(status(404, { error: { code: 'NOT_FOUND' } }));
     await expect(deleteStoryAction(A)).resolves.toEqual({ ok: false, code: 'generic' });
     expect(revalidatePath).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 10-12 (MSTORY-03, D-714, D-717): the Explorar row's two server actions. Both are public endpoints
+ * with untrusted arguments, so a membership id that is not a uuid and a cursor outside the contract
+ * send NO request; both answer `{ ok: false }` for every miss with no detail (the bare 404 included),
+ * which the row renders as the group error with its retry or the trailing "Recarregar" circle; a
+ * lost session is a navigation taken outside the try/catch.
+ */
+describe('loadAuthorStoriesAction / loadStoryAuthorsPageAction — the row (10-12)', () => {
+  const MEMBER = '0e000000-0000-4000-8000-0000000000e1';
+  const PHOTO = '/v1/media/0b000000-0000-4000-8000-0000000000a1/w128';
+
+  function story(n: number) {
+    return {
+      id: uuid(n),
+      authorUserId: null,
+      author: { membershipId: MEMBER, displayName: 'Helena', avatarUrl: PHOTO },
+      mediaAssetId: '0b000000-0000-4000-8000-000000000001',
+      mediaKind: 'image',
+      mediaVariantWidths: [640],
+      mediaStatus: 'ready',
+      mediaFailureReason: null,
+      caption: 'oi',
+      publishedAt: new Date(Date.now() - 3_600_000).toISOString(),
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      isActive: true,
+      durationSeconds: null,
+      likeCount: 1,
+      commentCount: 0,
+      viewerLiked: false,
+      highlightCount: 0,
+      viewerSeen: true,
+    };
+  }
+
+  function circle(n: number, extra: Record<string, unknown> = {}) {
+    return {
+      membershipId: uuid(n),
+      displayName: `Pessoa ${n}`,
+      avatarUrl: null,
+      storyCount: 1,
+      latestPublishedAt: '2026-11-11T12:00:00.000000Z',
+      hasUnseen: n % 2 === 0,
+      isSelf: false,
+      ...extra,
+    };
+  }
+
+  it('G1. a membership id that is not a uuid is refused WITHOUT a request', async () => {
+    await expect(loadAuthorStoriesAction('nao-e-um-uuid')).resolves.toEqual({ ok: false });
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('G2. a hit maps every story with the viewer view builder, in the API order, seen flags kept', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(200, { items: [story(1), story(2)] }));
+    const result = await loadAuthorStoriesAction(MEMBER);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.items.map((item) => item.id)).toEqual([uuid(1), uuid(2)]);
+    expect(result.items[0]).toMatchObject({ caption: 'oi', likeCount: 1, seen: true });
+    expect(typeof result.items[0]?.timeLabel).toBe('string');
+    expect(apiFetch).toHaveBeenCalledWith(`/v1/stories/authors/${MEMBER}`);
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('G3. the bare 404, an EMPTY group and a failure are all { ok: false } with no detail', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(status(404, { error: { code: 'NOT_FOUND' } }));
+    await expect(loadAuthorStoriesAction(MEMBER)).resolves.toEqual({ ok: false });
+    vi.mocked(apiFetch).mockResolvedValueOnce(status(200, { items: [] }));
+    await expect(loadAuthorStoriesAction(MEMBER)).resolves.toEqual({ ok: false });
+    vi.mocked(apiFetch).mockResolvedValueOnce(status(500, { error: { code: 'INTERNAL' } }));
+    await expect(loadAuthorStoriesAction(MEMBER)).resolves.toEqual({ ok: false });
+  });
+
+  it('G4. a lost session is a navigation to /entrar, taken outside the try/catch', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(401, { error: { code: 'UNAUTHENTICATED' } }));
+    await expect(loadAuthorStoriesAction(MEMBER)).rejects.toThrow('redirect:/entrar');
+  });
+
+  it('G5. the moderator page: plain author data and the next cursor, one GET with the cursor verbatim', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      status(200, { items: [circle(1), circle(2, { avatarUrl: PHOTO })], nextCursor: 'next-1' }),
+    );
+    const result = await loadStoryAuthorsPageAction('cur-1');
+    expect(result).toEqual({
+      ok: true,
+      authors: [
+        { membershipId: uuid(1), displayName: 'Pessoa 1', avatarUrl: null, hasUnseen: false },
+        { membershipId: uuid(2), displayName: 'Pessoa 2', avatarUrl: PHOTO, hasUnseen: true },
+      ],
+      nextCursor: 'next-1',
+    });
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe('/v1/stories/authors?cursor=cur-1');
+  });
+
+  it('G6. a cursor outside the contract sends no request; a failed page is { ok: false }', async () => {
+    await expect(loadStoryAuthorsPageAction('x'.repeat(5000))).resolves.toEqual({ ok: false });
+    await expect(loadStoryAuthorsPageAction('')).resolves.toEqual({ ok: false });
+    expect(apiFetch).not.toHaveBeenCalled();
+    vi.mocked(apiFetch).mockResolvedValue(status(500, { error: { code: 'INTERNAL' } }));
+    await expect(loadStoryAuthorsPageAction('cur-1')).resolves.toEqual({ ok: false });
     expect(redirect).not.toHaveBeenCalled();
   });
 });

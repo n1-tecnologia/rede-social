@@ -641,3 +641,176 @@ describe('StoriesStrip — the desktop arrows (UI-D-47 amended, 2026-10-20)', ()
     }
   });
 });
+
+/* ── 10-12 (UI-D-697..UI-D-699): the member row's three additions ───────────────────────────────────
+ *
+ * `badge` (the 24px brand "+" of the original UI-D-28 geometry), the `glyph` photo fallback (the
+ * neutral person disc, never initials) and the moderator row's paging hooks (`onReachEnd`, the
+ * trailing `loadingMore` skeleton and the trailing `retry` circle). Words are fixture strings: the
+ * module ships none.
+ */
+describe('StoryCircle — the badge and the glyph fallback (10-12, UI-D-698, UI-D-699)', () => {
+  it('B1. badge draws the 24px brand "+" at the disc corner behind a border-2 border-bg ring, decorative', () => {
+    render(
+      <StoryCircle
+        ring="neutral"
+        disc={{ kind: 'glyph', icon: <span data-testid="person" /> }}
+        label="own-label"
+        actionLabel="own-action"
+        href="/stories/publicar"
+        badge
+      />,
+    );
+    const link = screen.getByRole('link', { name: 'own-action' });
+    const badge = within(link).getByTestId('story-circle-badge');
+    expect(badge).toHaveAttribute('aria-hidden', 'true');
+    for (const cls of [
+      'h-6',
+      'w-6',
+      'rounded-full',
+      'bg-brand',
+      'text-on-brand',
+      'border-2',
+      'border-bg',
+      'bottom-0',
+      'right-0',
+    ]) {
+      expect(badge.className).toContain(cls);
+    }
+    // The badge never changes the ring: a neutral ring stays neutral.
+    expect(screen.getByTestId('story-circle-ring').className).toContain('border-border');
+  });
+
+  it('B2. without badge there is none, and the openable circle with a badge stays one button', () => {
+    const { rerender } = render(
+      <StoryCircle
+        ring="neutral"
+        disc={{ kind: 'monogram', text: 'x' }}
+        label="l"
+        actionLabel="a"
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId('story-circle-badge')).toBeNull();
+    rerender(
+      <StoryCircle
+        ring="neutral"
+        disc={{ kind: 'monogram', text: 'x' }}
+        label="l"
+        actionLabel="a"
+        onOpen={() => {}}
+        badge
+      />,
+    );
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('B3. a photo that cannot load falls back to the neutral person glyph disc, never initials', () => {
+    render(
+      <StoryCircle
+        ring="brand"
+        disc={{ kind: 'photo', src: '/v1/media/x/w128', fallback: { kind: 'glyph' } }}
+        label="l"
+        actionLabel="a"
+        onOpen={() => {}}
+      />,
+    );
+    fireEvent.error(screen.getByRole('button', { name: 'a' }).querySelector('img') as Element);
+    const glyph = screen.getByTestId('story-disc-person');
+    expect(glyph.className).toContain('bg-bg-tertiary');
+    expect(glyph.className).toContain('h-16');
+    expect(glyph.textContent).toBe('');
+    expect(screen.queryByTestId('story-monogram')).toBeNull();
+  });
+});
+
+describe('StoriesStrip — the moderator row pages (10-12, UI-D-699)', () => {
+  const ten = () => Array.from({ length: 10 }, (_, k) => asset(k + 1));
+
+  function rowWidths(scrollWidth: number, clientWidth: number): () => void {
+    Object.defineProperty(HTMLUListElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get: () => scrollWidth,
+    });
+    Object.defineProperty(HTMLUListElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => clientWidth,
+    });
+    return () => {
+      delete (HTMLUListElement.prototype as unknown as Record<string, unknown>).scrollWidth;
+      delete (HTMLUListElement.prototype as unknown as Record<string, unknown>).clientWidth;
+    };
+  }
+
+  function scrollTo(list: HTMLElement, left: number) {
+    Object.defineProperty(list, 'scrollLeft', { configurable: true, get: () => left });
+    list.dispatchEvent(new Event('scroll'));
+  }
+
+  it('P1. onReachEnd fires once when the row scrolls within one circle of its end, and again only after the end moved', () => {
+    const restore = rowWidths(1000, 400);
+    try {
+      const onReachEnd = vi.fn();
+      const { rerender } = strip({ circles: ten(), onReachEnd });
+      const list = screen.getByRole('list', { name: 'strip-region' });
+      scrollTo(list, 100);
+      expect(onReachEnd).not.toHaveBeenCalled();
+      // 1000 - 400 = 600 is the end; one circle (68 + 16 gap) from it is 516.
+      scrollTo(list, 530);
+      expect(onReachEnd).toHaveBeenCalledTimes(1);
+      scrollTo(list, 600);
+      expect(onReachEnd).toHaveBeenCalledTimes(1);
+      // The host appended circles: the end moved, so reaching it again asks again.
+      restore();
+      const restoreWide = rowWidths(1400, 400);
+      rerender(
+        <StoriesStrip
+          circles={[...ten(), asset(11), asset(12)]}
+          regionLabel="strip-region"
+          onReachEnd={onReachEnd}
+        />,
+      );
+      scrollTo(screen.getByRole('list', { name: 'strip-region' }), 1000);
+      expect(onReachEnd).toHaveBeenCalledTimes(2);
+      restoreWide();
+    } finally {
+      restore();
+    }
+  });
+
+  it('P2. a row without onReachEnd never asks, and a row that does not overflow never asks', () => {
+    const restore = rowWidths(300, 400);
+    try {
+      const onReachEnd = vi.fn();
+      strip({ circles: [asset(1)], onReachEnd });
+      scrollTo(screen.getByRole('list', { name: 'strip-region' }), 0);
+      expect(onReachEnd).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('P3. loadingMore trails three 64px skeleton circles after the loaded ones', () => {
+    strip({ circles: [asset(1), asset(2)], loadingMore: true });
+    const row = screen.getByRole('list', { name: 'strip-region' });
+    expect(within(row).getAllByTestId('story-circle-skeleton')).toHaveLength(3);
+    // The loaded circles stay, before the skeletons.
+    expect(within(row).getByText('label-2')).toBeInTheDocument();
+  });
+
+  it('P4. retry trails one RotateCw circle named by the host, and it calls onRetry', () => {
+    const onRetry = vi.fn();
+    strip({
+      circles: [asset(1)],
+      retry: { label: 'retry-label', actionLabel: 'retry-action', onRetry },
+    });
+    const row = screen.getByRole('list', { name: 'strip-region' });
+    expect(within(row).getAllByRole('listitem')).toHaveLength(2);
+    const button = within(row).getByRole('button', { name: 'retry-action' });
+    expect(within(row).getByText('retry-label')).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    // The loaded circle is still there.
+    expect(within(row).getByText('label-1')).toBeInTheDocument();
+  });
+});

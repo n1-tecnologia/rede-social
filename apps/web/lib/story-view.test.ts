@@ -4,6 +4,10 @@ import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import {
+  authorCircleView,
+  authorGroupView,
+  authorRowLabels,
+  explorarStoriesRowKind,
   highlightCircleView,
   highlightEditStoryView,
   highlightGroupView,
@@ -11,7 +15,9 @@ import {
   highlightPlacesView,
   inicioGroups,
   inicioRow,
+  memberStoriesRow,
   monogramOf,
+  ownCircleView,
   type StoryViewerItemView,
   storyHistoryView,
   storyShareUrl,
@@ -804,4 +810,167 @@ describe('2026-10-20 — storyShareUrl (the client’s FRONT.pdf: share a story 
       'https://x.test/stories/a%2F..%2Fb%3Fc',
     );
   });
+});
+
+/* ── 10-12 (UI-D-697..UI-D-700): the Explorar row's builders ─────────────────────────────────────── */
+
+describe('10-12 — the Explorar row (UI-D-697..UI-D-700, D-714, D-717)', () => {
+  const tr = createTranslator({
+    locale: 'pt-BR',
+    messages: loadMessages(),
+    namespace: 'stories',
+  } as never) as unknown as ((key: string) => string) & { raw: (key: string) => unknown };
+  const rowLabels = () => authorRowLabels(tr);
+  const PHOTO = '/v1/media/0b000000-0000-4000-8000-0000000000a1/w128';
+
+  function author(n: number, extra: Partial<import('@rede-social/module-stories/contracts').StoryAuthorCircle> = {}) {
+    return {
+      membershipId: `0e000000-0000-4000-8000-00000000000${n}`,
+      displayName: `Pessoa ${n}`,
+      avatarUrl: null,
+      storyCount: 1,
+      latestPublishedAt: '2026-11-11T12:00:00.000000Z',
+      hasUnseen: false,
+      isSelf: false,
+      ...extra,
+    };
+  }
+
+  it('R1. the catalog carries the names: own, author and the unseen variant', () => {
+    const labels = rowLabels();
+    expect(labels.ownLabel).toBe('Seu story');
+    expect(labels.ownAction).toBe('Publicar um story');
+    expect(labels.ownOpen).toBe('Abrir seus stories');
+    expect(labels.author).toBe('Abrir stories de {name}');
+    expect(labels.authorUnseen).toBe('Abrir stories de {name}. Há stories novos.');
+  });
+
+  it('R2. the own circle with NO story is the publish door: an anchor-shaped link with the badge, neutral ring', () => {
+    const labels = rowLabels();
+    expect(ownCircleView({ avatarUrl: null, group: null }, labels)).toEqual({
+      kind: 'link',
+      key: 'own',
+      href: '/stories/publicar',
+      label: 'Seu story',
+      actionLabel: 'Publicar um story',
+      ring: 'neutral',
+      disc: { kind: 'person' },
+      badge: true,
+    });
+  });
+
+  it('R3. the own circle WITH a story opens its group, no badge, a neutral ring that never turns brand; the photo falls back to the glyph', () => {
+    const labels = rowLabels();
+    const view = ownCircleView({ avatarUrl: PHOTO, group: 0 }, labels);
+    expect(view).toEqual({
+      kind: 'open',
+      key: 'own',
+      label: 'Seu story',
+      actionLabel: 'Abrir seus stories',
+      ring: 'neutral',
+      disc: { kind: 'photo', src: PHOTO, fallback: { kind: 'glyph' } },
+      group: 0,
+      index: 0,
+    });
+    expect('badge' in view).toBe(false);
+  });
+
+  it('R4. an author circle: brand ring and the unseen name while something is unseen, neutral and the plain name once seen, the glyph disc without a photo', () => {
+    const labels = rowLabels();
+    const unseen = authorCircleView(author(1, { hasUnseen: true }), 1, labels);
+    expect(unseen).toMatchObject({
+      kind: 'open',
+      key: 'author:0e000000-0000-4000-8000-000000000001',
+      label: 'Pessoa 1',
+      ring: 'brand',
+      actionLabel: 'Abrir stories de Pessoa 1. Há stories novos.',
+      disc: { kind: 'person' },
+      group: 1,
+      index: 0,
+    });
+    const seen = authorCircleView(author(2, { avatarUrl: PHOTO }), 2, labels);
+    expect(seen).toMatchObject({
+      ring: 'neutral',
+      actionLabel: 'Abrir stories de Pessoa 2',
+      disc: { kind: 'photo', src: PHOTO, fallback: { kind: 'glyph' } },
+    });
+  });
+
+  it('R5. a display name with markup or $ patterns is inserted as text, never re-expanded', () => {
+    const labels = rowLabels();
+    const view = authorCircleView(author(3, { displayName: '<b>$&{name}</b>' }), 0, labels);
+    expect(view.actionLabel).toBe('Abrir stories de <b>$&{name}</b>');
+    expect(view.label).toBe('<b>$&{name}</b>');
+  });
+
+  it('R6. an author group is lazy (items null), headed by the author, never by the tenant, and not a link', () => {
+    const labels = rowLabels();
+    expect(authorGroupView(author(1, { avatarUrl: PHOTO }), false)).toEqual({
+      key: 'author:0e000000-0000-4000-8000-000000000001',
+      kind: 'member',
+      highlightId: null,
+      name: 'Pessoa 1',
+      avatar: { kind: 'avatar', src: PHOTO },
+      items: null,
+      member: { membershipId: '0e000000-0000-4000-8000-000000000001', isSelf: false },
+    });
+  });
+
+  it('R7. the member row: own circle first, then the authors in the API order; groups number the openable circles', () => {
+    const labels = rowLabels();
+    const row = memberStoriesRow(
+      {
+        ownAvatarUrl: PHOTO,
+        page: {
+          items: [author(1, { isSelf: true }), author(2, { hasUnseen: true }), author(3)],
+          nextCursor: null,
+        },
+      },
+      labels,
+    );
+    expect(row.circles.map((c) => c.key)).toEqual([
+      'own',
+      'author:0e000000-0000-4000-8000-000000000002',
+      'author:0e000000-0000-4000-8000-000000000003',
+    ]);
+    expect(row.circles.map((c) => ('group' in c ? c.group : null))).toEqual([0, 1, 2]);
+    expect(row.groups.map((g) => g.member?.isSelf)).toEqual([true, false, false]);
+    expect(row.groups[0]?.name).toBe('Pessoa 1');
+  });
+
+  it('R8. a member with no story of their own still has the door: link first, authors open groups 0..n', () => {
+    const labels = rowLabels();
+    const row = memberStoriesRow(
+      { ownAvatarUrl: null, page: { items: [author(2, { hasUnseen: true })], nextCursor: null } },
+      labels,
+    );
+    expect(row.circles[0]).toMatchObject({ kind: 'link', key: 'own', badge: true });
+    expect(row.circles[1]).toMatchObject({ kind: 'open', group: 0 });
+    expect(row.groups).toHaveLength(1);
+  });
+
+  it('R9. no author and no story, or a failed read, is the own circle ALONE as the publish door — never a dead circle', () => {
+    const labels = rowLabels();
+    for (const page of [null, { items: [], nextCursor: null }]) {
+      const row = memberStoriesRow({ ownAvatarUrl: PHOTO, page }, labels);
+      expect(row.groups).toEqual([]);
+      expect(row.circles).toEqual([
+        expect.objectContaining({ kind: 'link', key: 'own', href: '/stories/publicar', badge: true }),
+      ]);
+    }
+  });
+
+
+
+  it('R12. who gets the row: a member and a moderator with social and stories on; support and either module off get none', () => {
+    const labels = rowLabels();
+    const modules = (...keys: string[]) => keys.map((key) => ({ key }));
+    expect(explorarStoriesRowKind(['social.participate'], modules('social', 'stories'))).toBe('member');
+    expect(explorarStoriesRowKind(['moderation.manage'], modules('social', 'stories'))).toBe('moderator');
+    expect(explorarStoriesRowKind([], modules('social', 'stories'))).toBeNull();
+    expect(explorarStoriesRowKind(['social.participate'], modules('social'))).toBeNull();
+    expect(explorarStoriesRowKind(['social.participate'], modules('stories'))).toBeNull();
+    expect(explorarStoriesRowKind(['moderation.manage'], modules('social'))).toBeNull();
+  });
+
 });

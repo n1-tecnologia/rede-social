@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { loadStories, storyWriteIssue } from '@/lib/stories';
+import { loadAuthorStories, loadStories, loadStoryAuthors, storyWriteIssue } from '@/lib/stories';
 
 /**
  * `storyWriteIssue` is the ONE place the web reads a story-publish refusal out of the API envelope.
@@ -124,5 +124,110 @@ describe('loadStories — the author photo crosses the strict contract (#2b)', (
     const page = await loadStories();
     expect(page?.items).toHaveLength(1);
     expect(page?.items[0]?.authorAvatarUrl).toBeNull();
+  });
+});
+
+/**
+ * 10-12 (D-714, D-717, MSTORY-03): the Explorar row's two reads. They go through the strict
+ * contracts of plan 10-08, never throw and never navigate (the row is never the reason Explorar
+ * errors, UI-D-700): a 404 is the empty answer, any other failure is `null` and is logged by SHAPE
+ * (never a name, a caption or a membership id).
+ */
+describe('loadStoryAuthors / loadAuthorStories — the row reads (10-12, UI-D-700)', () => {
+  const AUTHOR = '0e000000-0000-4000-8000-0000000000e1';
+  const PHOTO = '/v1/media/0b000000-0000-4000-8000-0000000000a1/w128';
+
+  function circle(extra: Record<string, unknown> = {}) {
+    return {
+      membershipId: AUTHOR,
+      displayName: 'Helena',
+      avatarUrl: PHOTO,
+      storyCount: 2,
+      latestPublishedAt: '2026-11-11T12:00:00.000000Z',
+      hasUnseen: true,
+      isSelf: false,
+      ...extra,
+    };
+  }
+
+  function json(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  it('A1. the authors page crosses the strict contract and asks for the cursor and limit it was given', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      json(200, { items: [circle({ isSelf: true }), circle()], nextCursor: 'c2' }),
+    );
+    const page = await loadStoryAuthors({ cursor: 'c1', limit: 20 });
+    expect(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]).toBe('/v1/stories/authors?cursor=c1&limit=20');
+    expect(page?.items.map((item) => item.isSelf)).toEqual([true, false]);
+    expect(page?.nextCursor).toBe('c2');
+  });
+
+  it('A2. with no query the request carries no cursor and no limit (the API defaults)', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(json(200, { items: [], nextCursor: null }));
+    await loadStoryAuthors();
+    expect(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]).toBe('/v1/stories/authors');
+  });
+
+  it('A3. a 404 is the EMPTY page, not an error', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(json(404, { error: { code: 'MODULE_DISABLED' } }));
+    await expect(loadStoryAuthors()).resolves.toEqual({ items: [], nextCursor: null });
+  });
+
+  it('A4. a 500, a transport failure and a page outside the contract are null, logged by shape only', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(apiFetch).mockResolvedValueOnce(json(500, { error: { code: 'INTERNAL' } }));
+    await expect(loadStoryAuthors()).resolves.toBeNull();
+    vi.mocked(apiFetch).mockRejectedValueOnce(new Error('offline'));
+    await expect(loadStoryAuthors()).resolves.toBeNull();
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      json(200, { items: [circle({ userId: 'x' })], nextCursor: null }),
+    );
+    await expect(loadStoryAuthors()).resolves.toBeNull();
+    for (const call of log.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain('Helena');
+      expect(JSON.stringify(call)).not.toContain(AUTHOR);
+    }
+    log.mockRestore();
+  });
+
+  it('A5. one author\'s group: the stories arrive in the API order, through the strict story contract', async () => {
+    const story = (n: number) => ({
+      id: `0d000000-0000-4000-8000-00000000000${n}`,
+      authorUserId: null,
+      author: { membershipId: AUTHOR, displayName: 'Helena', avatarUrl: PHOTO },
+      mediaAssetId: '0b000000-0000-4000-8000-000000000001',
+      mediaKind: 'image',
+      mediaVariantWidths: [640],
+      mediaStatus: 'ready',
+      mediaFailureReason: null,
+      caption: 'oi',
+      publishedAt: '2026-11-11T12:00:00.000000Z',
+      expiresAt: '2026-11-12T12:00:00.000000Z',
+      isActive: true,
+      durationSeconds: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewerLiked: false,
+      highlightCount: 0,
+      viewerSeen: false,
+    });
+    vi.mocked(apiFetch).mockResolvedValueOnce(json(200, { items: [story(1), story(2)] }));
+    const stories = await loadAuthorStories(AUTHOR);
+    expect(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]).toBe(`/v1/stories/authors/${AUTHOR}`);
+    expect(stories?.map((item) => item.id.at(-1))).toEqual(['1', '2']);
+  });
+
+  it('A6. a group that is a 404 is the empty result; any other failure is null', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(apiFetch).mockResolvedValueOnce(json(404, { error: { code: 'NOT_FOUND' } }));
+    await expect(loadAuthorStories(AUTHOR)).resolves.toEqual([]);
+    vi.mocked(apiFetch).mockResolvedValueOnce(json(500, { error: { code: 'INTERNAL' } }));
+    await expect(loadAuthorStories(AUTHOR)).resolves.toBeNull();
+    log.mockRestore();
   });
 });

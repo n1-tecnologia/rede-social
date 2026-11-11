@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { markStoriesSeenAction } from '@/app/(app)/stories/story-actions';
+import { loadAuthorStoriesAction, markStoriesSeenAction } from '@/app/(app)/stories/story-actions';
 import { sendSeenBeacon } from '@/lib/seen-batch';
 import type {
   RowCircleView,
@@ -71,6 +71,7 @@ vi.mock('@/app/(app)/stories/highlight-actions', () => ({
 
 vi.mock('@/app/(app)/stories/story-actions', () => ({
   markStoriesSeenAction: vi.fn(async () => true),
+  loadAuthorStoriesAction: vi.fn(async () => ({ ok: false })),
 }));
 
 vi.mock('@/lib/seen-batch', () => ({
@@ -516,5 +517,169 @@ describe('StoriesSurface — a story deleted from the viewer (2026-10-20, FRONT.
     openTenant();
     expect(host.props?.share).toEqual(share);
     expect(typeof host.props?.onStoryDeleted).toBe('function');
+  });
+});
+
+/* ── 10-12 (UI-D-697..UI-D-701): member circles and the lazy author groups ────────────────────────── */
+
+describe('StoriesSurface — the Explorar row (10-12)', () => {
+  const MEMBER = '0e000000-0000-4000-8000-0000000000e1';
+  const OTHER = '0e000000-0000-4000-8000-0000000000e2';
+  const AUTHOR_SEEN = 'Abrir stories de {name}';
+  const AUTHOR_UNSEEN = 'Abrir stories de {name}. Há stories novos.';
+
+  const OWN_DOOR: RowCircleView = {
+    kind: 'link',
+    key: 'own',
+    href: '/stories/publicar',
+    label: 'Seu story',
+    actionLabel: 'Publicar um story',
+    ring: 'neutral',
+    disc: { kind: 'person' },
+    badge: true,
+  };
+  const OWN_OPEN: RowCircleView = {
+    kind: 'open',
+    key: 'own',
+    label: 'Seu story',
+    actionLabel: 'Abrir seus stories',
+    ring: 'neutral',
+    disc: { kind: 'person' },
+    group: 0,
+    index: 0,
+  };
+  const AUTHOR: RowCircleView = {
+    kind: 'open',
+    key: `author:${OTHER}`,
+    label: 'Helena',
+    actionLabel: 'Abrir stories de Helena. Há stories novos.',
+    ring: 'brand',
+    disc: { kind: 'person' },
+    group: 0,
+    index: 0,
+  };
+
+  function memberGroup(membershipId: string, name: string, isSelf: boolean): StoryGroupView {
+    return {
+      key: `author:${membershipId}`,
+      kind: 'member',
+      highlightId: null,
+      name,
+      avatar: { kind: 'avatar', src: null },
+      items: null,
+      member: { membershipId, isSelf },
+    };
+  }
+
+  function renderRow(rowCircles: RowCircleView[], groupViews: StoryGroupView[] = []) {
+    return render(
+      <StoriesSurface
+        circles={rowCircles}
+        regionLabel="Stories de quem você segue"
+        viewer={
+          groupViews.length === 0
+            ? undefined
+            : {
+                groups: groupViews,
+                labels: {} as StoryViewerLabelsView,
+                onLike: vi.fn(),
+                onUnlike: vi.fn(),
+                authorRing: { seen: AUTHOR_SEEN, unseen: AUTHOR_UNSEEN },
+              }
+        }
+      />,
+    );
+  }
+
+  it('E1. the own circle with no story is ONE link to /stories/publicar with the badge and the glyph disc, and nothing opens', () => {
+    renderRow([OWN_DOOR]);
+    const row = screen.getByRole('list', { name: 'Stories de quem você segue' });
+    const link = within(row).getByRole('link', { name: 'Publicar um story' });
+    expect(link.getAttribute('href')).toBe('/stories/publicar');
+    expect(within(link).getByTestId('story-circle-badge')).toBeTruthy();
+    expect(within(link).getByTestId('story-disc-glyph').querySelector('svg')).not.toBeNull();
+    expect(within(row).getByText('Seu story')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByTestId('viewer')).toBeNull();
+  });
+
+  it('E2. the own circle WITH a story is a button named "Abrir seus stories", no badge, a neutral ring; it opens the own group at 0 once it has loaded', async () => {
+    vi.mocked(loadAuthorStoriesAction).mockResolvedValueOnce({
+      ok: true,
+      items: [item(1, false), item(2, false)],
+    });
+    renderRow([OWN_OPEN], [memberGroup(MEMBER, 'Eu', true)]);
+    const button = screen.getByRole('button', { name: 'Abrir seus stories' });
+    expect(within(button).queryByTestId('story-circle-badge')).toBeNull();
+    expect(ringOf(button).className).toContain('border-border');
+    expect(ringOf(button).className).not.toContain('border-brand');
+
+    fireEvent.click(button);
+    await settle();
+    expect(loadAuthorStoriesAction).toHaveBeenCalledWith(MEMBER);
+    expect(screen.getByTestId('viewer').dataset.group).toBe('0');
+    expect(screen.getByTestId('viewer').dataset.index).toBe('0');
+  });
+
+  it('E3. an author circle wears the brand ring and the unseen name; tapping reads the group, and the viewer resumes at the FIRST unseen story', async () => {
+    vi.mocked(loadAuthorStoriesAction).mockResolvedValueOnce({
+      ok: true,
+      items: [item(1, true), item(2, true), item(3, false)],
+    });
+    renderRow([AUTHOR], [memberGroup(OTHER, 'Helena', false)]);
+    const button = screen.getByRole('button', { name: AUTHOR.actionLabel });
+    expect(ringOf(button).className).toContain('border-brand');
+
+    fireEvent.click(button);
+    await settle();
+    expect(loadAuthorStoriesAction).toHaveBeenCalledWith(OTHER);
+    expect(screen.getByTestId('viewer').dataset.index).toBe('2');
+    // The host got the LOADED group, and the URL is the story the viewer opened on.
+    expect(host.props?.groups[0]?.items?.map((i) => i.id)).toEqual([id(1), id(2), id(3)]);
+    expect(window.location.pathname).toBe(`/stories/${id(3)}`);
+  });
+
+  it('E4. all seen resumes at 0; after the last unseen story is shown and the viewer closes the ring greys and the name drops "Há stories novos"', async () => {
+    vi.mocked(loadAuthorStoriesAction).mockResolvedValueOnce({
+      ok: true,
+      items: [item(1, true), item(2, false)],
+    });
+    renderRow([AUTHOR], [memberGroup(OTHER, 'Helena', false)]);
+    fireEvent.click(screen.getByRole('button', { name: AUTHOR.actionLabel }));
+    await settle();
+    expect(screen.getByTestId('viewer').dataset.index).toBe('1');
+    shown(2, `author:${OTHER}`);
+    close();
+    await settle();
+    const button = screen.getByRole('button', { name: 'Abrir stories de Helena' });
+    expect(ringOf(button).className).toContain('border-border');
+    expect(ringOf(button).className).not.toContain('border-brand');
+  });
+
+  it('E5. a group that cannot be read opens the viewer on the group error (failed, no items) with the retry, never a dead circle', async () => {
+    vi.mocked(loadAuthorStoriesAction).mockResolvedValueOnce({ ok: false });
+    renderRow([AUTHOR], [memberGroup(OTHER, 'Helena', false)]);
+    fireEvent.click(screen.getByRole('button', { name: AUTHOR.actionLabel }));
+    await settle();
+    expect(screen.getByTestId('viewer')).toBeTruthy();
+    expect(host.props?.groups[0]?.items).toBeNull();
+    expect(host.props?.groups[0]?.failed).toBe(true);
+  });
+
+  it('E6. a second tap while the group is still being read does not read it twice', async () => {
+    let release: (value: { ok: true; items: StoryViewerItemView[] }) => void = () => {};
+    vi.mocked(loadAuthorStoriesAction).mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    renderRow([AUTHOR], [memberGroup(OTHER, 'Helena', false)]);
+    const button = screen.getByRole('button', { name: AUTHOR.actionLabel });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    release({ ok: true, items: [item(1, false)] });
+    await settle();
+    expect(loadAuthorStoriesAction).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByTestId('viewer')).toHaveLength(1);
   });
 });
