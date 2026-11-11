@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { sqlClient } from '@rede-social/core/db';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
-import { safetyLimiterKey, storyPublishLimiter } from '@rede-social/core/server/safety/limits';
+import {
+  communityCreateLimiter,
+  safetyLimiterKey,
+  storyPublishLimiter,
+} from '@rede-social/core/server/safety/limits';
 import {
   STORY_EXPIRY_HOURS,
   STORY_MAX_PAGE_SIZE,
@@ -202,6 +206,10 @@ async function sweep(): Promise<void> {
   }
   // A story another suite's assertion would count must never outlive this file.
   await adminSql`delete from public.stories where caption like ${`${PREFIX}%`}`;
+  // 10-09: the highlights this file made (in the seeded organization community) and the member communities
+  // (their highlights and items cascade). Stories go first, above, so no item outlives its story.
+  await adminSql`delete from public.story_highlights where title like ${`${PREFIX}%`}`;
+  await adminSql`delete from public.communities where name like ${`${PREFIX}%`}`;
 }
 
 async function closeWaitingJobs(): Promise<void> {
@@ -1122,5 +1130,191 @@ describe('10 authors moderator', () => {
     expect(ids(await authorsOf(tokens.alvaro))).not.toContain(memberships.helena);
     expect(ids(await authorsOf(tokens.labAdmin))).not.toContain(memberships.helena);
     expect((await groupRead(tokens.labAdmin, memberships.helena)).status).toBe(404);
+  });
+});
+
+/**
+ * 10-09 (D-706, D-713, D-716, D-718; MSTORY-06, MPUB-01, MPUB-06, MCOMM-06, T-10-34..36): the highlight owner
+ * seam. A creator saves THEIR story in a highlight of THEIR community and everyone who sees the community reads
+ * it, after the 24 hours and with `social` on or off; nobody else (an admin included) curates a member
+ * community; a member can never add someone else's story; the admin's catalog lists organization communities only.
+ *
+ * Fixtures: Helena's and Marcos's member communities are named with `PREFIX` and removed by `sweep` (their
+ * highlights and items cascade); the highlights this describe makes in the seeded organization community are
+ * titled with `PREFIX` and removed there too. Test ORDER inside the describe is load-bearing.
+ */
+type HighlightItem = { id: string; communityId: string | null; title: string; itemCount: number };
+type HighlightRead = { items: HighlightItem[] };
+type HighlightDetailRead = { highlight: HighlightItem; items: StorySummary[] };
+
+describe('10 highlights', () => {
+  const made: {
+    community?: string;
+    highlight?: string;
+    story?: string;
+    orgCommunity?: string;
+    memberships?: { helena: string };
+  } = {};
+  const hl = (token: string, path: string, init: RequestInit = {}) =>
+    request(`/v1/stories/highlights${path}`, token, init);
+  const hlBody = (token: string, path: string, method: string, body?: unknown) =>
+    hl(token, path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const createCommunity = (token: string, name: string) =>
+    post('/v1/communities', token, { name: `${PREFIX}${name}` });
+  const readRow = async (token: string, communityId: string) => {
+    const res = await hl(token, `?communityId=${communityId}`);
+    expect(res.status, 'GET /highlights?communityId').toBe(200);
+    return ((await res.json()) as HighlightRead).items;
+  };
+  const setWindow = (storyId: string, publishedAgo: string, expiresIn: string) =>
+    adminSql`update public.stories
+                set published_at = now() - ${publishedAgo}::interval,
+                    expires_at = now() + ${expiresIn}::interval
+              where id = ${storyId}::uuid`;
+
+  beforeAll(async () => {
+    await sweep();
+    made.memberships = { helena: await membershipOf(userIds.helena) };
+    const [org] = await adminSql<{ id: string }[]>`
+      select id from public.communities
+       where tenant_id = ${labTenantId}::uuid and kind = 'organization' and status = 'active'
+         and deleted_at is null
+       order by name limit 1`;
+    made.orgCommunity = org?.id ?? '';
+    if (!made.orgCommunity) throw new Error('rede-lab has no active organization community (seed)');
+  });
+
+  beforeEach(() => {
+    communityCreateLimiter.reset();
+  });
+
+  it('1. MSTORY-06 / D-716 tracer: Helena publishes a story with newHighlight naming her own community: 201, the highlight exists in that community and holds the story', async () => {
+    const community = await createCommunity(tokens.helena, 'Corrida de rua');
+    expect(community.status).toBe(201);
+    made.community = ((await community.json()) as { id: string }).id;
+    const asset = await makeAsset(userIds.helena);
+    const res = await publish(tokens.helena, {
+      mediaAssetId: asset,
+      mediaKind: 'image',
+      caption: `${PREFIX}na comunidade`,
+      newHighlight: { communityId: made.community, title: `${PREFIX}Treinos` },
+    });
+    expect(res.status).toBe(201);
+    made.story = ((await res.json()) as StorySummary).id;
+    expect((await storyRow(made.story))?.visibility).toBe('followers');
+    const rows = await adminSql<{ id: string; created_by_user_id: string; items: number }[]>`
+      select h.id, h.created_by_user_id,
+             (select count(*)::int from public.story_highlight_items i
+               where i.highlight_id = h.id and i.story_id = ${made.story}::uuid) as items
+        from public.story_highlights h
+       where h.community_id = ${made.community}::uuid`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.created_by_user_id).toBe(userIds.helena);
+    expect(rows[0]?.items).toBe(1);
+    made.highlight = rows[0]?.id;
+  });
+
+  it('2. D-716 / D-713: Marcos, who does not follow Helena, reads the community highlight and its story through the highlight reads, likes it and comments on it', async () => {
+    const row = await readRow(tokens.marcos, made.community ?? '');
+    expect(row.map((item) => [item.id, item.itemCount])).toEqual([[made.highlight, 1]]);
+    const detail = await hl(tokens.marcos, `/${made.highlight}`);
+    expect(detail.status).toBe(200);
+    const body = (await detail.json()) as HighlightDetailRead;
+    expect(body.items.map((item) => item.id)).toEqual([made.story]);
+    // Not a follower: the Explorar group and the Explorar circle stay closed (the follow-bound read).
+    expect((await groupRead(tokens.marcos, made.memberships?.helena ?? '')).status).toBe(404);
+    // Positive control: the story itself opens by id (branch 3), and like and comment succeed.
+    expect((await request(`/v1/stories/${made.story}`, tokens.marcos)).status).toBe(200);
+    const liked = await request(`/v1/stories/${made.story}/likes`, tokens.marcos, {
+      method: 'POST',
+    });
+    expect(liked.status).toBe(200);
+    const commented = await post(`/v1/stories/${made.story}/comments`, tokens.marcos, {
+      body: `${PREFIX}comentario`,
+    });
+    expect(commented.status).toBe(201);
+  });
+
+  it('3. D-716 / D-718: one hour and then 25 hours later Marcos still reads the story through the highlight while it is gone from Explorar and from the authors read', async () => {
+    // One hour in: still inside its 24 hours, so Alvaro (a follower) has Helena's circle.
+    await setWindow(made.story ?? '', '1 hour', '23 hours');
+    expect(
+      (await authorsOf(tokens.alvaro)).items.some(
+        (item) => item.membershipId === made.memberships?.helena,
+      ),
+    ).toBe(true);
+    // 25 hours in: expired. The window is closed everywhere except the highlight.
+    await setWindow(made.story ?? '', '25 hours', '-1 hour');
+    expect(
+      (await authorsOf(tokens.alvaro)).items.some(
+        (item) => item.membershipId === made.memberships?.helena,
+      ),
+    ).toBe(false);
+    expect((await groupRead(tokens.alvaro, made.memberships?.helena ?? '')).status).toBe(404);
+    expect((await groupRead(tokens.marcos, made.memberships?.helena ?? '')).status).toBe(404);
+    const detail = await hl(tokens.marcos, `/${made.highlight}`);
+    expect(detail.status).toBe(200);
+    const items = ((await detail.json()) as HighlightDetailRead).items;
+    expect(items.map((item) => [item.id, item.isActive])).toEqual([[made.story, false]]);
+    expect((await request(`/v1/stories/${made.story}`, tokens.marcos)).status).toBe(200);
+  });
+
+  it('4. T-10-34: Marcos naming Helena’s community in his own publish is 403, and the lab admin curating or publishing there is 403 (positive control: the admin’s organization highlight works)', async () => {
+    const marcosAsset = await makeAsset(userIds.marcos);
+    for (const [label, destination] of [
+      [
+        'marcos newHighlight',
+        { newHighlight: { communityId: made.community, title: `${PREFIX}X` } },
+      ],
+      ['marcos highlightId', { highlightId: made.highlight }],
+    ] as const) {
+      const res = await publish(tokens.marcos, {
+        mediaAssetId: marcosAsset,
+        mediaKind: 'image',
+        caption: `${PREFIX}marcos invade`,
+        ...destination,
+      });
+      expect(res.status, label).toBe(403);
+      expect((await errorOf(res)).code, label).toBe('FORBIDDEN');
+    }
+    const adminAsset = await makeAsset(userIds.labAdmin);
+    for (const [label, destination] of [
+      [
+        'admin newHighlight',
+        { newHighlight: { communityId: made.community, title: `${PREFIX}Y` } },
+      ],
+      ['admin highlightId', { highlightId: made.highlight }],
+    ] as const) {
+      const res = await publish(tokens.labAdmin, {
+        mediaAssetId: adminAsset,
+        mediaKind: 'image',
+        caption: `${PREFIX}admin invade`,
+        ...destination,
+      });
+      expect(res.status, label).toBe(403);
+    }
+    expect(
+      (
+        await hlBody(tokens.labAdmin, '', 'POST', {
+          communityId: made.community,
+          title: `${PREFIX}Z`,
+        })
+      ).status,
+    ).toBe(403);
+    // Nothing was written: Helena's community still holds exactly her one highlight and one story.
+    const [count] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.stories where caption like ${`${PREFIX}%invade`}`;
+    expect(count?.n).toBe(0);
+    expect((await readRow(tokens.helena, made.community ?? '')).map((item) => item.id)).toEqual([
+      made.highlight,
+    ]);
+    // Positive control: the admin's own ORGANIZATION community highlight works as today.
+    const ok = await publish(tokens.labAdmin, {
+      mediaAssetId: adminAsset,
+      mediaKind: 'image',
+      caption: `${PREFIX}org no destaque`,
+      newHighlight: { communityId: made.orgCommunity, title: `${PREFIX}Org` },
+    });
+    expect(ok.status).toBe(201);
   });
 });

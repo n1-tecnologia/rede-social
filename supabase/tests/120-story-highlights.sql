@@ -72,7 +72,7 @@ begin;
 --
 -- Like its siblings this file ROLLS BACK, so it re-runs identically against a seeded or an empty
 -- database, twice in a row, in any order.
-select plan(41);
+select plan(44);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 -- Two tenants, each with one user, one community and one ready image asset. Tenant A also gets an
@@ -531,6 +531,64 @@ select case
   )
   else skip('no seed loaded (CI runs pgTAP before db:seed) — the post-seed reachability check needs it', 1)
 end;
+
+-- ══ 42-44. A MEMBER story outlives its 24 hours through a highlight of a readable member community ══
+-- 10-09 (D-716, MSTORY-06): the highlight is the override for a member's story as it is for the organization's.
+-- Under the same controlled clock (`now()` is this transaction's), a followers-only story published 30 hours ago
+-- is outside every strip window, yet a stranger (a member who follows nobody) reads it by id through the highlight
+-- of an ACTIVE member community (branch 3 of `stories_audience_gate`, which carries no `social` term: this tenant
+-- has no `social` row at all). The same story held only by the highlight of a SOFT-DELETED member community is
+-- not readable, and a 30 hour old followers story that no highlight holds is not readable either (the control
+-- that proves the first read is the highlight's doing and not an open gate). Fixture ids use the `1200c000-…` prefix.
+select tests.auth_user('creator@120.local', '12000000-0000-4000-8000-0000000000c0');
+select tests.auth_user('stranger@120.local', '12000000-0000-4000-8000-0000000000c5');
+select tests.member('12000000-0000-4000-8000-000000000001', '12000000-0000-4000-8000-0000000000c0');
+select tests.member('12000000-0000-4000-8000-000000000001', '12000000-0000-4000-8000-0000000000c5');
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position, deleted_at) values
+  ('1200c000-0000-4000-8000-0000000000c1', '12000000-0000-4000-8000-000000000001',
+   '12000000-0000-4000-8000-0000000000c0', 'Do criador', 'do-criador', 'member', 1000000, null),
+  ('1200c000-0000-4000-8000-0000000000c2', '12000000-0000-4000-8000-000000000001',
+   '12000000-0000-4000-8000-0000000000c0', 'Do criador apagada', 'do-criador-apagada', 'member', 1000000, now());
+insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility,
+                            published_at, expires_at) values
+  ('1200c000-0000-4000-8000-0000000000b1', '12000000-0000-4000-8000-000000000001',
+   '12000000-0000-4000-8000-0000000000c0', '12000000-0000-4000-8000-0000000000a1', 'image', 'm1', 'followers',
+   now() - interval '30 hours', now() - interval '6 hours'),
+  ('1200c000-0000-4000-8000-0000000000b2', '12000000-0000-4000-8000-000000000001',
+   '12000000-0000-4000-8000-0000000000c0', '12000000-0000-4000-8000-0000000000a1', 'image', 'm2', 'followers',
+   now() - interval '30 hours', now() - interval '6 hours'),
+  ('1200c000-0000-4000-8000-0000000000b3', '12000000-0000-4000-8000-000000000001',
+   '12000000-0000-4000-8000-0000000000c0', '12000000-0000-4000-8000-0000000000a1', 'image', 'm3', 'followers',
+   now() - interval '30 hours', now() - interval '6 hours');
+insert into public.story_highlights (id, tenant_id, community_id, title, position, created_by_user_id) values
+  ('1200c000-0000-4000-8000-0000000000e1', '12000000-0000-4000-8000-000000000001',
+   '1200c000-0000-4000-8000-0000000000c1', 'Do criador', 0, '12000000-0000-4000-8000-0000000000c0'),
+  ('1200c000-0000-4000-8000-0000000000e2', '12000000-0000-4000-8000-000000000001',
+   '1200c000-0000-4000-8000-0000000000c2', 'Do criador apagada', 0, '12000000-0000-4000-8000-0000000000c0');
+insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id) values
+  ('12000000-0000-4000-8000-000000000001', '1200c000-0000-4000-8000-0000000000e1',
+   '1200c000-0000-4000-8000-0000000000b1', '12000000-0000-4000-8000-0000000000c0'),
+  ('12000000-0000-4000-8000-000000000001', '1200c000-0000-4000-8000-0000000000e2',
+   '1200c000-0000-4000-8000-0000000000b2', '12000000-0000-4000-8000-0000000000c0');
+
+select tests.as_tenant('12000000-0000-4000-8000-000000000001', '12000000-0000-4000-8000-0000000000c5');
+select results_eq(
+  $$ select count(*)::int from public.stories
+      where id = '1200c000-0000-4000-8000-0000000000b1' and expires_at < now() $$,
+  ARRAY[1],
+  '42: a stranger reads a 30 hour old followers story by id through the highlight of an ACTIVE member community'
+);
+select results_eq(
+  $$ select count(*)::int from public.stories where id = '1200c000-0000-4000-8000-0000000000b2' $$,
+  ARRAY[0],
+  '43: the same story held only by the highlight of a SOFT-DELETED member community is not readable by the stranger'
+);
+select results_eq(
+  $$ select count(*)::int from public.stories where id = '1200c000-0000-4000-8000-0000000000b3' $$,
+  ARRAY[0],
+  '44: control: a 30 hour old followers story no highlight holds is not readable by the stranger (the gate is not open)'
+);
+reset role;
 
 select * from finish();
 rollback;
