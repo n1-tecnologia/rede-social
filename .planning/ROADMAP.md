@@ -1505,24 +1505,40 @@ Plans:
 
 ### Phase 10: Rede Social - Member Stories and Communities
 
-**Goal**: With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from whoever created it.
+**Goal**: With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from its owner: the creator for a member-created community, any `admin_tenant` for an organization community (D-706).
 **Scope**: Post-MVP (user decision 2026-09-25).
 **Depends on**: Phase 9
-**Requirements**: TBD; promotes V2-CONT-02 and lifts the "member-created stories" exclusion (user decision 2026-09-25)
+**Requirements**: MCOMM-01, MCOMM-02, MCOMM-03, MCOMM-04, MCOMM-05, MCOMM-06, MCOMM-07, MCOMM-08, MCOMM-09, MCOMM-10, MCOMM-11, MSTORY-01, MSTORY-02, MSTORY-03, MSTORY-04, MSTORY-05, MSTORY-06, MSTORY-07, MSTORY-08, MSTORY-09, MPUB-01, MPUB-02, MPUB-03, MPUB-04, MPUB-05, MPUB-06, MPUB-07 (plus UI-04 for the sketch gate); promotes V2-CONT-02 and lifts the "member-created stories" exclusion (user decision 2026-09-25)
+**Plans:** 0/15 plans executed (planned 2026-11-10 ahead of the current phase; STATE stays on Phase 12.2; the backend plans 03 to 10 never wait for the sketch gate 020, only the web plans 11 to 15 do)
 **Success Criteria** (what must be TRUE):
 
   1. With `social` on, a member can publish stories. Início's grouped circle stays admin-only (the organization's voice); a member's active stories show in Explorar for their followers, one circle per author (Instagram model), built on 05.2's grouped viewer.
   2. With `social` on, a member can create a community (and its highlights, per 05.2).
-  3. Only a community's creator (`communities.created_by_user_id`) can publish in it: posts, stories and highlights. Other members see and interact (like, comment) but get no publish control there and a 403 from the API if they try. This holds for communities created by `admin_tenant` and by members alike.
+  3. Only a community's owner can publish in it: posts, stories and highlights. For a community created by a member the owner is the creator alone (`communities.created_by_user_id`); for a community created by `admin_tenant` (the organization's voice) it is any `admin_tenant` of the tenant, because a second admin is the organization's voice too (D-706, user decision 2026-11-10, refining the original "only the creator, for admin and member communities alike"). Other members (and an admin on a member community) see and interact (like, comment) but get no publish control there and a 403 from the API if they try.
   4. Turning `social` off stops new member stories and communities; existing member communities stay readable.
 
 **UI hint**: yes — member story composer and create-community entry points, gated by the module; Explorar story row.
 **Research needed**: Light — reuse 05.1's composer and community form; the change is the permission seam (creator-scoped publishing).
 **Notes**: Open question for discuss-phase: does `admin_tenant` keep moderation powers (archive, delete content) over member-created communities even though it cannot publish in them? Recommended: yes, moderation stays with the tenant (MODER-04, Phase 11). Source: user requests 2026-09-25; numbered 05.4 until the MVP cut the same day.
+**Amended 2026-11-10 (Phase 10 discuss and planning, `10-CONTEXT.md` D-701..D-718):** the owner rule of criterion 3 is stated per community kind (D-706); the admin keeps moderation over member content and the log row ships in THIS phase: soft-deleting any member story and archiving or removing any member-created community with a `moderation_log` row is MSTORY-09, MCOMM-10 (plus MCOMM-11, the single-post removal), so MODER-04 is split again and Phase 11 keeps the reports queue and "block author" (Phase 11's criterion 4 and Executar list are re-read at its own planning).
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 10 to break down)
+- [ ] 10-01-PLAN.md — Sketch gate 020: the 55 prototype-less frames drawn from the UI-SPEC (UI-04, wave 1)
+- [ ] 10-02-PLAN.md — Sketch 020 README, manifest row and Igor's approval, `autonomous: false` (UI-04, wave 2)
+- [ ] 10-03-PLAN.md — Schema A: `communities.kind`, the sentinel position, the member gates, the hidden-creator definer, the third post audience and the allow-list update guard; pgTAP 230 and 232 (MCOMM-01, 07, 08, MPUB-04, 07, tracer, BLOCKING schema push, wave 1)
+- [ ] 10-04-PLAN.md — Schema B: `stories.visibility` and the audience gate with the highlight branch (A10 measurement), the story media gate (A5), the moderation vocabulary and kernel entries; pgTAP 231 and 154 (MSTORY-04, 08, MPUB-04, MCOMM-10, MSTORY-09, tracer, BLOCKING schema push, wave 2)
+- [ ] 10-05-PLAN.md — The creator rule in the API: permission composition, the kind stamp, the post owner seam, the per-member limit with its kernel seam, the owner predicates and the moderator's community log rows (MCOMM-01, 05, 06, 10, MPUB-01, 02, 03, 05, tracer, wave 3)
+- [ ] 10-06-PLAN.md — The read side: the creator projection, the viewer flags, the quota, the organization-only reorder, the explicit liveness and viewer-block predicates, the Reels lanes, and the separable moderator removal of one community post (MCOMM-02, 03, 04, 07, 08, 09, 11, tracer, wave 4)
+- [ ] 10-07-PLAN.md — Member stories write: the stamp, the organization-only Início reads, the zero-notification guard, the story and cover media seam, the delete transaction with its log row and the author projection (MSTORY-01, 02, 05, 07, 09, tracer, wave 4)
+- [ ] 10-08-PLAN.md — The Explorar authors read and the lazy group read, the moderator's cursor, the block filters, the A10 measurement and index, and the isolation inventory (MSTORY-03, 04, 08, MPUB-05, 07, tracer, BLOCKING schema push, wave 5)
+- [ ] 10-09-PLAN.md — The highlight owner seam: the creator's own story in their own community's highlight, the IDOR guards, the place-dependent curator flag and the organization-only catalog (MSTORY-06, MPUB-01, 06, MCOMM-06, tracer, wave 6)
+- [ ] 10-10-PLAN.md — The backend proof: the seed, the two-tenant sweep, the `social` off and on matrix, the migration proofs and the DEPLOY release order with the web-first A7 exception (MPUB-05, 07, tracer, wave 7)
+- [ ] 10-11-PLAN.md — Web foundations: the platform community limit, the three moderation log kinds, the third audience in the feed badge and the web half of A7 (MCOMM-05, 08, 10, MSTORY-04, 09, UI-04, tracer, wave 4)
+- [ ] 10-12-PLAN.md — Web stories: the Explorar row with the own circle, the viewer menus and delete dialogs, the member publish screen, the destination and visibility notice, the highlight checklist and "Seus stories" (MSTORY-01, 03, 06, 09, MPUB-02, UI-04, tracer, wave 7)
+- [ ] 10-13-PLAN.md — Web communities: the create entry and member form, the limit notice and screen, the chips, the card byline and the organization-only reorder (MCOMM-01 to 06, MPUB-05, UI-04, tracer, wave 5)
+- [ ] 10-14-PLAN.md — Web community page: the creator's controls from the viewer flags, the member composer inside a community, the byline, the lifecycle and moderator confirmations, curation and the off and blocked states (MCOMM-06, 07, 10, MPUB-01, 03, 05, 06, UI-04, tracer, wave 8)
+- [ ] 10-15-PLAN.md — Browser journeys, the exit gate `pnpm verify` and the owner's manual-proofs ledger (MCOMM-01, 08, MSTORY-01, 03, MPUB-01, 05, 07, UI-04, tracer, wave 9)
 
 ### Phase 11: Rede Social - Direct Messages, Member Blocking and Reports
 
