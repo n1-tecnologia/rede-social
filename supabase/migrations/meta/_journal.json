@@ -1212,6 +1212,20 @@
       "when": 1794407988613,
       "tag": "20261111143948_member_communities",
       "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "7",
+      "when": 1794408108042,
+      "tag": "20261111144148_feed_community_audience",
+      "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "7",
+      "when": 1794408125853,
+      "tag": "20261111144205_feed_member_update_allowlist",
+      "breakpoints": true
     }
   ]
 }

@@ -127,6 +127,13 @@ export const feedPosts = pgTable(
      * Phase 9 backfills as the organization's voice); `'followers'` is a member post, shown only to
      * its author, the author's followers and the moderator, in Explorar and never in Início.
      *
+     * The THIRD value (10-03, D-702, D-718): `'community'` is a post in a MEMBER-created community,
+     * written for its creator and always with a `community_id`. It is readable by whoever reads that
+     * community (the community gates, with NO follower test and NO `social` term, so member
+     * communities stay readable with `social` off) and it is never in Início, Explorar or Reels
+     * "Todos": those reads name `'tenant'` or `'followers'` literally. It is never the organization's
+     * voice: no member claim can write `'tenant'`.
+     *
      * It is written by the service from `ctx.role`, NEVER from the request body, and backed by
      * `feed_posts_social_insert_gate`. It is stamped rather than derived from the author's role at
      * read time because ADMIN-02 can promote and demote: a read-time role would move old posts
@@ -242,10 +249,12 @@ export const feedPosts = pgTable(
     check('feed_posts_media_kind_chk', sql`${t.mediaKind} in ('none','gallery','video')`),
     // 09-03 (D-473): the closed vocabulary of the stamped audience, and the SHAPE rule that makes "a
     // followers post has no community" a fact of the database rather than a convention of the API.
-    check('feed_posts_visibility_chk', sql`${t.visibility} in ('tenant','followers')`),
+    check('feed_posts_visibility_chk', sql`${t.visibility} in ('tenant','followers','community')`),
+    // 10-03 (D-702): the shape rule with the third audience. A `'followers'` post has no community, a
+    // `'community'` post ALWAYS has one, and an organization post may be in a community or not.
     check(
       'feed_posts_visibility_shape_chk',
-      sql`${t.visibility} = 'tenant' or ${t.communityId} is null`,
+      sql`${t.visibility} = 'tenant' or (${t.visibility} = 'followers' and ${t.communityId} is null) or (${t.visibility} = 'community' and ${t.communityId} is not null)`,
     ),
     // The target of `feed_post_media_kind_fk` (04-04). `id` is already the primary key; this pair is
     // what lets a media row name "(this post) AND (that post's media_kind)" in ONE referential check,
@@ -279,6 +288,20 @@ export const feedPosts = pgTable(
       to: authenticatedRole,
       using: sql`community_id is null or community_id <> all (${DELETED_COMMUNITY_IDS})`,
     }),
+    // 10-03 (D-708, MCOMM-07; T-10-07): the HIDDEN-CREATOR gate. RESTRICTIVE, so it ANDs with every gate
+    // above and can only NARROW. The posts of a member community whose creator is blocked, removed or not
+    // active leave every read of every lane (the moderator included), and come back when the creator does;
+    // no row is touched. The ids come from `app.member_community_hidden_ids()`
+    // (`*_member_communities_functions.sql`), a definer that returns ids only and is read once per
+    // statement as an InitPlan (`coalesce((select ...), '{}'::uuid[])`, never `<> all (subquery)`). It is
+    // NOT folded into the deleted-community gate above (pgTAP 112 pins that meaning). Comments and likes
+    // inherit it through the inner `exists (select 1 from feed_posts)` of their own gates.
+    pgPolicy('feed_posts_member_hidden_community_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`community_id is null or community_id <> all (coalesce((select app.member_community_hidden_ids()), '{}'::uuid[]))`,
+    }),
     // 09-03 (SOCIAL-06, D-483, D-484; RESEARCH Pattern 2): the social gate. RESTRICTIVE again, so it
     // ANDs with the tenant isolation and the community gate and can only NARROW what they allow.
     // An organization post passes for everyone. A member post passes only while `social` is on (a SQL
@@ -292,6 +315,11 @@ export const feedPosts = pgTable(
     // `feed_likes_community_gate` test the post through an inner `exists (select 1 from feed_posts)`
     // that runs under THIS policy, so a hidden post hides its comments and refuses likes (42501).
     //
+    // 10-03 (D-701, D-718): the `'community'` branch deliberately carries NO `social` term and NO follow
+    // test. A member community stays readable with `social` off, and a `'community'` post is read by
+    // whoever reads its community: the community gates (`feed_posts_community_gate`,
+    // `feed_posts_deleted_community_gate`, `feed_posts_member_hidden_community_gate`) do the narrowing.
+    //
     // The service form of the same rule is `memberPostVisible` in `server/service.ts`; the two are
     // written side by side so a reviewer can see them agree. This policy is the backstop that makes a
     // route that forgets its guard fail closed.
@@ -299,18 +327,29 @@ export const feedPosts = pgTable(
       as: 'restrictive',
       for: 'select',
       to: authenticatedRole,
-      using: sql`visibility = 'tenant' or (${SOCIAL_ENABLED} and (${SOCIAL_STAFF_EXEMPT} or author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))`,
+      using: sql`visibility = 'tenant' or visibility = 'community' or (${SOCIAL_ENABLED} and (${SOCIAL_STAFF_EXEMPT} or author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))`,
     }),
     // 09-03 (D-473, T-09-08): the write half. A `member` claim may insert ONLY a followers post, with
     // no community, while `social` is on; every other claim may insert ONLY an organization post. A
     // forged `visibility = 'tenant'` from a member lane, a followers post from a staff lane and a
     // member post in a community are all refused with 42501, whatever the service believed. A null
-    // role makes both branches false-or-null, so it fails closed.
+    // role makes every branch false-or-null, so it fails closed.
+    //
+    // 10-03 (D-702, MPUB-04) added TWO member branches for the third audience. (a) The OWNER branch: a
+    // `'community'` post with a community id, while `social` is on, in an ACTIVE, live MEMBER community the
+    // caller created. (b) The ESCOPO SEAM branch, false today: it carries only the role, the stamped
+    // `'community'` audience (never `'tenant'`, so no buyer's post can ever be an organization post) and a
+    // call to the kernel stub `app.community_action_allowed(community_id, 'post')`
+    // (`*_member_communities_functions.sql`), which answers `false` for every input until the per-product
+    // action scope is built after Phase 11. Every other condition (the community's kind, the module state,
+    // the product grant) belongs to the function body, so replacing the body with `create or replace`
+    // (same signature, same OID) is the ONLY change that phase needs. A member still cannot insert
+    // `'followers'` with a community, and the staff branch stays `visibility = 'tenant'`.
     pgPolicy('feed_posts_social_insert_gate', {
       as: 'restrictive',
       for: 'insert',
       to: authenticatedRole,
-      withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and community_id is null and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant')`,
+      withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and community_id is null and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant') or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and ${SOCIAL_ENABLED} and exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'member' and c.created_by_user_id = app.user_id() and c.status = 'active' and c.deleted_at is null)) or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and app.community_action_allowed(community_id, 'post'))`,
     }),
     // 09-14 (WR-07, SOCIAL-03, T-04-54 [informational]; T-09-49): the DELETE backstop. The service never
     // hard-deletes a post (it soft-deletes), so a member lane that issued `delete from feed_posts` would
