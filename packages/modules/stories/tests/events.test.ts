@@ -32,7 +32,11 @@ const EXPIRES_AT = '2026-09-24T12:00:00.000000Z';
 /** Flipped per test: `'commit'` resolves the transaction, `'throw'` rejects it at the insert. */
 let transaction: 'commit' | 'throw' = 'commit';
 /** What the asset lookup answers: the story asset, a wrong-purpose one, or nothing at all. */
-let asset: { kind: string; purpose: string } | null = { kind: 'image', purpose: 'story' };
+let asset: { kind: string; purpose: string; status: string } | null = {
+  kind: 'image',
+  purpose: 'story',
+  status: 'ready',
+};
 
 const row = {
   id: STORY_ID,
@@ -100,7 +104,7 @@ function classify(text: string): string {
   if (/from communities c/.test(t)) return 'place';
   if (ROOM_COUNT.test(t)) return 'room';
   if (/^select h\.id from story_highlights h .* for update$/.test(t)) return 'lock';
-  if (/^select kind, purpose from media_assets/.test(t)) return 'asset';
+  if (/^select kind, purpose, status from media_assets/.test(t)) return 'asset';
   if (/^insert into stories /.test(t)) return 'story-insert';
   if (/^insert into story_highlights /.test(t)) return 'highlight-insert';
   if (/^insert into story_highlight_items/.test(t)) return 'item';
@@ -193,7 +197,7 @@ beforeEach(() => {
   flagReads = 0;
   seen = [];
   transaction = 'commit';
-  asset = { kind: 'image', purpose: 'story' };
+  asset = { kind: 'image', purpose: 'story', status: 'ready' };
   executeCall = 0;
   received = [];
   unsubscribe = subscribe('story.published', async (payload) => {
@@ -294,7 +298,7 @@ describe('story.published — after commit, exactly once, never on failure', () 
   });
 
   it('6. an asset of the WRONG purpose is a 400 the caller can act on, and emits nothing', async () => {
-    asset = { kind: 'image', purpose: 'post' };
+    asset = { kind: 'image', purpose: 'post', status: 'ready' };
     const ctx = context();
 
     await expect(publishStory(ctx, input)).rejects.toMatchObject({
