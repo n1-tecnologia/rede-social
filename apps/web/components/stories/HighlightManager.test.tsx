@@ -327,3 +327,117 @@ describe('HighlightManager — an uploaded cover waits until the asset is ready'
     });
   });
 });
+
+/**
+ * 10-14 Task 3 (UI-D-713, UI-D-705): the creator of a member community curates their highlights. The
+ * "Adicionar stories" list is the member's OWN history (the same pager), its helper adds that every
+ * member will read the story in the community, and switching a story ON asks once per opening of the
+ * picker (the confirm of plan 12); switching OFF and the organization's manager are untouched.
+ */
+describe('HighlightManager — the member creator’s "Adicionar stories" (10-14)', () => {
+  const STORY_A = {
+    id: '33333333-3333-4333-8333-333333333331',
+    date: '12 nov',
+    thumbnailAssetId: ASSET_ID,
+    thumbnailVariantWidths: [],
+    thumbnailAlt: '',
+    caption: 'Primeiro',
+    captionMuted: false,
+    meta: '',
+  };
+  const STORY_B = { ...STORY_A, id: '33333333-3333-4333-8333-333333333332', date: '13 nov' };
+  const MEMBER_HELPER =
+    'Todos os membros verão este story na comunidade. Stories expirados também podem entrar em um destaque.';
+  const CONFIRM_TITLE = 'Mostrar este story na comunidade?';
+
+  async function openPicker(member: boolean) {
+    const actions = await import('@/app/(app)/stories/highlight-actions');
+    const stories = await import('@/app/(app)/stories/story-actions');
+    vi.mocked(stories.loadMoreOwnStoriesAction).mockResolvedValue({
+      ok: true,
+      items: [STORY_A, STORY_B],
+      nextCursor: null,
+    } as never);
+    vi.mocked(actions.addStoryToHighlightAction).mockResolvedValue({
+      ok: true,
+      highlightCount: 1,
+    });
+    loadEdit.mockResolvedValue({ ok: true, highlight: HIGHLIGHT, items: [] });
+    render(
+      <HighlightManager
+        place={{ communityId: '44444444-4444-4444-8444-444444444444' }}
+        placeLabel="Clube"
+        initialItems={[HIGHLIGHT]}
+        archived={false}
+        editTarget={HIGHLIGHT.id}
+        publishHref="/stories/publicar"
+        member={member}
+      />,
+    );
+    await act(async () => {});
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: lookup('highlights.edit.addStories') }));
+    });
+    return actions;
+  }
+
+  const rowSwitch = (story: { date: string }) =>
+    screen.getByRole('switch', {
+      name: lookup('highlights.picker.row', { date: story.date }),
+    });
+
+  it('H1. the member helper names the whole community; the organization keeps the shipped one', async () => {
+    await openPicker(true);
+    expect(screen.getByText(MEMBER_HELPER)).toBeTruthy();
+    cleanup();
+
+    await openPicker(false);
+    expect(screen.queryByText(MEMBER_HELPER)).toBeNull();
+    expect(screen.getByText(lookup('highlights.picker.helper'))).toBeTruthy();
+  });
+
+  it('H2. the first switch-on of an opening asks, writes only after the confirm, and the second writes at once', async () => {
+    const actions = await openPicker(true);
+
+    await act(async () => {
+      fireEvent.click(rowSwitch(STORY_A));
+    });
+    expect(screen.getByRole('dialog', { name: CONFIRM_TITLE })).toBeTruthy();
+    expect(actions.addStoryToHighlightAction).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mostrar na comunidade' }));
+    });
+    expect(actions.addStoryToHighlightAction).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.click(rowSwitch(STORY_B));
+    });
+    expect(screen.queryByRole('dialog', { name: CONFIRM_TITLE })).toBeNull();
+    expect(actions.addStoryToHighlightAction).toHaveBeenCalledTimes(2);
+  });
+
+  it('H3. "Não mostrar" writes nothing and the switch stays off', async () => {
+    const actions = await openPicker(true);
+
+    await act(async () => {
+      fireEvent.click(rowSwitch(STORY_A));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Não mostrar' }));
+    });
+
+    expect(actions.addStoryToHighlightAction).not.toHaveBeenCalled();
+    expect(rowSwitch(STORY_A).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('H4. the organization’s manager switches a story on at once, with no confirmation', async () => {
+    const actions = await openPicker(false);
+
+    await act(async () => {
+      fireEvent.click(rowSwitch(STORY_A));
+    });
+    expect(screen.queryByRole('dialog', { name: CONFIRM_TITLE })).toBeNull();
+    expect(actions.addStoryToHighlightAction).toHaveBeenCalledTimes(1);
+  });
+});

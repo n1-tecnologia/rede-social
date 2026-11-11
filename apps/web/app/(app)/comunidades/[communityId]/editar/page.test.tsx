@@ -88,14 +88,24 @@ describe('/comunidades/[communityId]/editar — the guard is viewer.canEdit (UI-
 
     expect(element.props.mode).toBe('edit');
     expect(element.props.communityId).toBe(ID);
+    // UI-D-712: the owner's copy variant and the member form (no store block, the audience line).
+    expect(element.props.relation).toBe('owner');
+    expect(element.props.memberMode).toBe(true);
   });
 
   it('E2. an admin on an organization community and a moderator on a member one open it too', async () => {
     mocks.result = { status: 'ok', community: community('organization', true) };
-    expect((await render()).props.communityId).toBe(ID);
+    const organization = await render();
+    expect(organization.props.communityId).toBe(ID);
+    expect(organization.props.relation).toBe('organization');
+    expect(organization.props.memberMode).toBe(false);
 
     mocks.result = { status: 'ok', community: community('member', true) };
-    expect((await render()).props.communityId).toBe(ID);
+    const moderator = await render();
+    expect(moderator.props.communityId).toBe(ID);
+    // UI-D-714: the moderator's copy variant; the member form, but no audience line (the form decides).
+    expect(moderator.props.relation).toBe('moderator');
+    expect(moderator.props.memberMode).toBe(true);
   });
 
   it('E3. a viewer who may not edit (another member, support, the creator with social off) goes back to the community page', async () => {

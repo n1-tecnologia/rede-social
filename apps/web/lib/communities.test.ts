@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
 import {
+  communityRelation,
   getOrderableCommunities,
   loadCommunities,
   ownsActiveCommunity,
@@ -311,5 +312,33 @@ describe('ownsActiveCommunity — one row of the list answers it (10-12)', () =>
     vi.mocked(apiFetch).mockResolvedValueOnce(json(500, { error: { code: 'INTERNAL' } }));
     await expect(ownsActiveCommunity(MODULES)).resolves.toBe(false);
     log.mockRestore();
+  });
+});
+
+/**
+ * 10-14 (UI-D-712, UI-D-714): which of the three lifecycle copy variants a viewer reads on a community.
+ * It is read off the API's own flags (`kind`, `viewer.isOwner`), never a role or an id comparison: an
+ * organization community is `organization` for everyone; a member community is `owner` for its creator
+ * and `moderator` for any other viewer the API lets edit it.
+ */
+describe('communityRelation (10-14)', () => {
+  const viewer = (isOwner: boolean) => ({
+    isOwner,
+    canPublish: isOwner,
+    canEdit: true,
+    canCurate: isOwner,
+    actions: { like: true, comment: true, share: true, post: isOwner, story: isOwner },
+  });
+
+  it('R1. an organization community is the organization’s, whoever the viewer is', () => {
+    expect(communityRelation({ kind: 'organization', viewer: viewer(false) })).toBe('organization');
+  });
+
+  it('R2. the creator of a member community is the owner', () => {
+    expect(communityRelation({ kind: 'member', viewer: viewer(true) })).toBe('owner');
+  });
+
+  it('R3. any other viewer of a member community is a moderator', () => {
+    expect(communityRelation({ kind: 'member', viewer: viewer(false) })).toBe('moderator');
   });
 });

@@ -311,3 +311,123 @@ describe('CommunityForm — the limit screen and the refusals (10-13, UI-D-707, 
     expect(alert.textContent).not.toContain('Rede social');
   });
 });
+
+/**
+ * 10-14 Task 3 (UI-D-712, UI-D-714): the archive confirmation has THREE copy variants chosen by the
+ * viewer's relation to the community (`relation`, computed by the host from the API's flags): the
+ * organization's shipped one, the owner's (no feed sentence: a member community's posts are in no feed)
+ * and the moderator's (it states the consequence and that the creator is not told). The sentences are
+ * literals here on purpose: the contract is the words.
+ */
+describe('CommunityForm — the archive confirmation in three variants (10-14, UI-D-712, UI-D-714)', () => {
+  function openArchive(relation?: 'organization' | 'owner' | 'moderator') {
+    render(
+      <CommunityForm
+        mode="edit"
+        communityId={COMMUNITY}
+        initial={INITIAL}
+        tenantName="Rede Demo"
+        memberMode={relation !== undefined && relation !== 'organization'}
+        relation={relation}
+      />,
+    );
+    fireEvent.click(document.querySelector('[data-community-archive]') as HTMLElement);
+    return screen.getByRole('dialog');
+  }
+
+  it('19. the organization (and a form with no relation) keeps the shipped sentence about the feed', () => {
+    for (const relation of [undefined, 'organization' as const]) {
+      const dialog = openArchive(relation);
+      expect(dialog.textContent).toContain('Arquivar comunidade?');
+      expect(dialog.textContent).toContain(
+        'Ela sai da lista e ninguém mais publica nela. As publicações continuam no feed.',
+      );
+      expect(screen.getByRole('button', { name: 'Arquivar' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Cancelar' })).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it('20. the owner of a member community drops the feed sentence and can reactivate whenever', () => {
+    const dialog = openArchive('owner');
+
+    expect(dialog.textContent).toContain('Arquivar comunidade?');
+    expect(dialog.textContent).toContain(
+      'Ela sai da lista e ninguém mais publica nela. Você pode reativar quando quiser.',
+    );
+    expect(dialog.textContent).not.toContain('feed');
+    expect(screen.getByRole('button', { name: 'Arquivar' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Manter comunidade' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Cancelar' })).toBeNull();
+  });
+
+  it('21. the moderator reads the consequence and that the creator is not told', () => {
+    const dialog = openArchive('moderator');
+
+    expect(dialog.textContent).toContain('Arquivar comunidade?');
+    expect(dialog.textContent).toContain(
+      'Ela sai da lista e ninguém mais publica nela. A pessoa que criou não é avisada.',
+    );
+    expect(screen.getByRole('button', { name: 'Arquivar' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Manter comunidade' })).toBeTruthy();
+  });
+
+  it('22. the moderator edits a member community with no audience line and no store block; the owner keeps the line', () => {
+    const products = [{ id: P1, name: 'Mentoria', href: `/loja/${P1}`, archived: false }];
+    const edit = (relation: 'owner' | 'moderator') => (
+      <CommunityForm
+        mode="edit"
+        communityId={COMMUNITY}
+        initial={INITIAL}
+        tenantName="Rede Demo"
+        memberMode
+        relation={relation}
+        accessProducts={products}
+      />
+    );
+
+    const { unmount } = render(edit('moderator'));
+    expect(document.querySelector('[data-community-audience]')).toBeNull();
+    expect(document.querySelector('[data-community-access]')).toBeNull();
+    unmount();
+
+    render(edit('owner'));
+    expect(document.querySelector('[data-community-audience]')).not.toBeNull();
+    expect(document.querySelector('[data-community-access]')).toBeNull();
+  });
+
+  it('23. on an archived community the relation reaches "Excluir comunidade": the moderator copy', () => {
+    render(
+      <CommunityForm
+        mode="edit"
+        communityId={COMMUNITY}
+        initial={{ ...INITIAL, status: 'archived' }}
+        tenantName="Rede Demo"
+        memberMode
+        relation="moderator"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir comunidade' }));
+    expect(screen.getByRole('dialog').textContent).toContain('A pessoa que criou não é avisada.');
+    expect(screen.getByRole('button', { name: 'Manter comunidade' })).toBeTruthy();
+  });
+
+  it('24. the creator sees Reativar and Excluir on an archived community exactly as on any, with no hint of who archived it', () => {
+    render(
+      <CommunityForm
+        mode="edit"
+        communityId={COMMUNITY}
+        initial={{ ...INITIAL, status: 'archived' }}
+        tenantName="Rede Demo"
+        memberMode
+        relation="owner"
+      />,
+    );
+    expect(document.querySelector('[data-community-reactivate]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Excluir comunidade' })).toBeTruthy();
+    expect(document.body.textContent?.toLowerCase()).not.toContain('moderad');
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir comunidade' }));
+    // The owner's delete is the shipped one: no "a pessoa que criou" sentence.
+    expect(screen.getByRole('dialog').textContent).not.toContain('não é avisada');
+  });
+});

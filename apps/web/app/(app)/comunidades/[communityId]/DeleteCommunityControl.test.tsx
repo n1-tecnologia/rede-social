@@ -339,3 +339,60 @@ describe('DeleteCommunityControl — the refusal dialog (D-554)', () => {
     spy.mockRestore();
   });
 });
+
+/**
+ * 10-14 Task 3 (UI-D-712, UI-D-714): the delete confirmation in its viewer variants, and the store
+ * refusal block that never exists for a member community (a member cannot link products, D-713).
+ */
+describe('DeleteCommunityControl — the viewer variants (10-14)', () => {
+  const MODERATOR_BODY =
+    'A comunidade e as publicações dela, com curtidas e comentários, deixam de aparecer para todos. A pessoa que criou não é avisada. Não há como desfazer por aqui.';
+
+  it('15. the organization and the owner read the shipped confirmation', () => {
+    for (const relation of [undefined, 'organization' as const, 'owner' as const]) {
+      render(<DeleteCommunityControl communityId={ID} relation={relation} />);
+      fireEvent.click(trigger());
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.textContent).toContain(C.confirm.delete.title);
+      expect(dialog.textContent).toContain(C.confirm.delete.body);
+      expect(screen.getByRole('button', { name: C.confirm.delete.confirm })).toBeTruthy();
+      expect(screen.getByRole('button', { name: C.confirm.delete.cancel })).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it('16. the moderator reads the consequence, that the creator is not told, "Excluir" and "Manter comunidade"', async () => {
+    remove.mockResolvedValue({ ok: true, communityId: ID });
+    render(<DeleteCommunityControl communityId={ID} relation="moderator" />);
+
+    fireEvent.click(trigger());
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('Excluir comunidade?');
+    expect(dialog.textContent).toContain(MODERATOR_BODY);
+    expect(screen.getByRole('button', { name: 'Manter comunidade' })).toBeTruthy();
+    expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir' }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(ID));
+    // The toasts are the shipped ones.
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: C.toasts.deleted });
+  });
+
+  it('17. a member community never shows the store refusal block: an unlock_active answer reads as the generic error', async () => {
+    remove.mockResolvedValue(refusal([product(1)], 1));
+    for (const relation of ['owner' as const, 'moderator' as const]) {
+      toast.show.mockClear();
+      render(<DeleteCommunityControl communityId={ID} relation={relation} />);
+      fireEvent.click(trigger());
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: relation === 'owner' ? C.confirm.delete.confirm : 'Excluir',
+        }),
+      );
+      await waitFor(() => expect(toast.show).toHaveBeenCalledTimes(1));
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: C.errors.delete });
+      expect(screen.queryByRole('dialog', { name: C.blocked.title })).toBeNull();
+      cleanup();
+    }
+  });
+});

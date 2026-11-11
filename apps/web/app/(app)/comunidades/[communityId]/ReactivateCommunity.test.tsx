@@ -164,3 +164,20 @@ describe('ReactivateCommunity — the archived page’s one-tap Reativar (05.1-0
     expect(toast.show).not.toHaveBeenCalled();
   });
 });
+
+describe('ReactivateCommunity — the creator reactivates a community whoever archived it (10-14, UI-D-712, OQ-3)', () => {
+  it('7. the confirmation is the one shipped sentence, with no hint of who archived the community', async () => {
+    reactivate.mockResolvedValue({ ok: true, communityId: ID });
+    render(<ReactivateCommunity communityId={ID} />);
+
+    fireEvent.click(screen.getByRole('button', { name: C.archived.reactivate }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain(C.confirm.reactivate.body);
+    expect(dialog.textContent?.toLowerCase()).not.toContain('moderad');
+    expect(dialog.textContent?.toLowerCase()).not.toContain('administra');
+
+    fireEvent.click(screen.getByRole('button', { name: C.confirm.reactivate.confirm }));
+    await waitFor(() => expect(reactivate).toHaveBeenCalledWith(ID));
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+});

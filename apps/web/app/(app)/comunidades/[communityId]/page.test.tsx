@@ -99,7 +99,7 @@ vi.mock('@/lib/store', () => ({ getCommunityAccess: async () => null }));
 vi.mock('@/lib/admin-icon-cookie', () => ({ readAdminIconChoice: async () => null }));
 vi.mock('@/lib/registry', () => ({
   postCardLabels: () => ({ media: { carousel: 'carrossel', attachmentError: 'erro' } }),
-  postMenuLabels: () => ({}),
+  postMenuLabels: () => ({ deleteBodyMember: 'base-member', removeBody: 'base-remove' }),
   feedCommentsProps: () => ({}),
   storyCommentsProps: () => ({}),
   reelsOverlayProps: async () => null,
@@ -523,6 +523,8 @@ describe('/comunidades/[communityId] — social off (UI-D-716) and a blocked cre
     };
     await render();
     expect(mocks.lifecycle.map((entry) => entry.name).sort()).toEqual(['delete', 'reactivate']);
+    // UI-D-712: the relation reaches the delete control, read from the flags (the creator is the owner).
+    expect(mocks.lifecycle.find((entry) => entry.name === 'delete')?.props.relation).toBe('owner');
 
     mocks.result = {
       status: 'ok',
@@ -537,5 +539,71 @@ describe('/comunidades/[communityId] — social off (UI-D-716) and a blocked cre
 
     await expect(render()).rejects.toThrow('NOT_FOUND');
     expect(mocks.notFound).toHaveBeenCalled();
+  });
+});
+
+describe('/comunidades/[communityId] — the lifecycle relation and the post menu wording (10-14)', () => {
+  const menuLabels = () =>
+    ((mocks.postsProps?.menu as { labels: Record<string, string> } | undefined)?.labels ??
+      {}) as Record<string, string>;
+
+  it('19. the moderator’s Excluir comunidade carries the moderator relation; the organization admin the organization one', async () => {
+    mocks.result = {
+      status: 'ok',
+      community: community(
+        'member',
+        { isOwner: false, canPublish: false, canEdit: true, canCurate: false },
+        { status: 'archived' },
+      ),
+    };
+    await render();
+    expect(mocks.lifecycle.find((entry) => entry.name === 'delete')?.props.relation).toBe(
+      'moderator',
+    );
+
+    mocks.result = {
+      status: 'ok',
+      community: community(
+        'organization',
+        { isOwner: false, canPublish: true, canEdit: true, canCurate: true },
+        { status: 'archived' },
+      ),
+    };
+    await render();
+    expect(mocks.lifecycle.find((entry) => entry.name === 'delete')?.props.relation).toBe(
+      'organization',
+    );
+  });
+
+  it('20. a post inside a MEMBER community leaves the community, not Explorar: delete and removal bodies', async () => {
+    mocks.result = { status: 'ok', community: community('member', CREATOR_VIEW) };
+
+    await render();
+
+    expect(menuLabels().deleteBodyMember).toBe(
+      'Ela sai da comunidade para todos os membros. Os comentários também deixam de aparecer.',
+    );
+    expect(menuLabels().removeBody).toBe(
+      'Ela sai da comunidade e do link compartilhado para todos. A pessoa não é avisada.',
+    );
+  });
+
+  it('21. an organization community keeps the shipped wording', async () => {
+    mocks.permissions = ['communities.community.manage', 'feed.post.create', 'content.publish'];
+    mocks.role = 'admin_tenant';
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', {
+        isOwner: false,
+        canPublish: true,
+        canEdit: true,
+        canCurate: true,
+      }),
+    };
+
+    await render();
+
+    expect(menuLabels().deleteBodyMember).toBe('base-member');
+    expect(menuLabels().removeBody).toBe('base-remove');
   });
 });
