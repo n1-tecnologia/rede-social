@@ -1509,7 +1509,7 @@ Plans:
 **Scope**: Post-MVP (user decision 2026-09-25).
 **Depends on**: Phase 9
 **Requirements**: MCOMM-01, MCOMM-02, MCOMM-03, MCOMM-04, MCOMM-05, MCOMM-06, MCOMM-07, MCOMM-08, MCOMM-09, MCOMM-10, MCOMM-11, MSTORY-01, MSTORY-02, MSTORY-03, MSTORY-04, MSTORY-05, MSTORY-06, MSTORY-07, MSTORY-08, MSTORY-09, MPUB-01, MPUB-02, MPUB-03, MPUB-04, MPUB-05, MPUB-06, MPUB-07 (plus UI-04 for the sketch gate); promotes V2-CONT-02 and lifts the "member-created stories" exclusion (user decision 2026-09-25)
-**Plans:** 0/15 plans executed (planned 2026-11-10 ahead of the current phase; STATE stays on Phase 12.2; the backend plans 03 to 10 never wait for the sketch gate 020, only the web plans 11 to 15 do)
+**Plans:** 1/15 plans executed (planned 2026-11-10 ahead of the current phase; STATE stays on Phase 12.2; the backend plans 03 to 10 never wait for the sketch gate 020, only the web plans 11 to 15 do)
 **Success Criteria** (what must be TRUE):
 
   1. With `social` on, a member can publish stories. Início's grouped circle stays admin-only (the organization's voice); a member's active stories show in Explorar for their followers, one circle per author (Instagram model), built on 05.2's grouped viewer.
@@ -1525,7 +1525,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 10-01-PLAN.md — Sketch gate 020: the 55 prototype-less frames drawn from the UI-SPEC (UI-04, wave 1)
+- [x] 10-01-PLAN.md — Sketch gate 020: the 55 prototype-less frames drawn from the UI-SPEC (UI-04, wave 1)
 - [ ] 10-03-PLAN.md — Schema A: `communities.kind`, the sentinel position, the member gates, the hidden-creator definer, the third post audience and the allow-list update guard; pgTAP 230 and 232 (MCOMM-01, 07, 08, MPUB-04, 07, tracer, BLOCKING schema push, wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -2003,7 +2003,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.1. Acesso por gateway de pagamento | 22/22 | In Progress|  |
 | 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 24/28 | In Progress|  |
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
-| 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
+| 10. Rede Social - Member Stories and Communities | 1/15 | In Progress|  |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |
