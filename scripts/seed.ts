@@ -2451,7 +2451,8 @@ for (const t of SEED_TENANTS) {
     // suites use for their own fixtures (a UAT row that matches a suite sweep would break a seed-pinned test).
     // Raw SQL in the admin lane (the migration role, like the Phase 9 follow rows above): the tenant lane's
     // insert gates need a member session with `social` on. `on conflict (id)` keeps a re-run from adding or
-    // failing; the story's window is renewed on a re-run so the fixture is live again after 24 hours.
+    // failing and HEALS the rows (a suite that set one aside, a renamed or archived community), and the story's
+    // window is renewed on a re-run so the fixture is live again after 24 hours.
     if (t.slug === 'rede-lab') {
       const ownerEmail = `member@${t.slug}.local`;
       const storyAssetId = SEED_MEMBER_STORY_ASSET_ID[t.slug];
@@ -2478,7 +2479,9 @@ for (const t of SEED_TENANTS) {
               ${SEED_MEMBER_COMMUNITY.name}, ${SEED_MEMBER_COMMUNITY.slug},
               ${SEED_MEMBER_COMMUNITY.description}, 'active', 1000000
             )
-            on conflict (id) do nothing`);
+            on conflict (id) do update
+              set name = excluded.name, slug = excluded.slug, description = excluded.description,
+                  status = 'active', deleted_at = null`);
           // `visibility = 'followers'`: the member story is read through the author's followers (D-714).
           await tx.execute(sql`
             insert into public.stories
@@ -2490,7 +2493,8 @@ for (const t of SEED_TENANTS) {
               now(), now() + interval '24 hours'
             )
             on conflict (id) do update
-              set published_at = excluded.published_at, expires_at = excluded.expires_at`);
+              set published_at = excluded.published_at, expires_at = excluded.expires_at,
+                  deleted_at = null`);
         });
         console.log(
           `seed: tenant ${t.slug} — 1 member community and 1 member story (member@rede-lab.local, followers)`,

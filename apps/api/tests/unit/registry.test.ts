@@ -761,3 +761,56 @@ describe('10-05 D-707/A2: the member community permissions are composed in the a
     for (const key of MEMBER_KEYS) expect(first.filter((p) => p === key)).toHaveLength(1);
   });
 });
+
+describe('10-10 MPUB-05/MPUB-07: the member keys against the seed tenants module sets', () => {
+  const MEMBER_KEYS = [
+    'communities.community.create',
+    'communities.community.manage_own',
+    'stories.story.publish',
+  ] as const;
+  /** `scripts/seed.ts`: rede-lab has feed, events, reels and social on (communities and stories are off there). */
+  const LAB_SEED = new Set<ModuleKey>(['feed', 'events', 'reels', 'social']);
+  /** rede-demo keeps `social` off; every other toggleable module is on. */
+  const DEMO_SEED = new Set<ModuleKey>(TOGGLEABLE_MODULES.filter((key) => key !== 'social'));
+
+  it('26. the three keys are composed for a member only with social effective AND the owning module effective, and never for another role', () => {
+    // rede-lab as seeded: social is on but the owning modules are off, so no key and no route behind one.
+    for (const key of MEMBER_KEYS) expect(permissionsFor('member', LAB_SEED)).not.toContain(key);
+    // The suites turn communities and stories on in the lab: now the member holds exactly the three.
+    const labOn = new Set<ModuleKey>([...LAB_SEED, 'communities', 'stories']);
+    const member = permissionsFor('member', labOn);
+    for (const key of MEMBER_KEYS) expect(member, key).toContain(key);
+    // rede-demo (social off) and a real tenant's default set: none, whatever else is on.
+    for (const set of [DEMO_SEED, new Set<ModuleKey>(REAL_TENANT_DEFAULT_MODULES)]) {
+      const without = permissionsFor('member', set);
+      for (const key of MEMBER_KEYS) expect(without, key).not.toContain(key);
+    }
+    // No other role is given the two community keys, with social on and every owning module on. The story key is
+    // the admin's own through the stories manifest (the organization publishes stories), so it is pinned for the
+    // admin and absent for support: what `social` adds is the MEMBER's holding of it, nothing for a staff role.
+    for (const role of TENANT_ROLES.filter((r) => r !== 'member')) {
+      const staff = permissionsFor(role, labOn);
+      expect(staff, `${role}: create`).not.toContain('communities.community.create');
+      expect(staff, `${role}: manage_own`).not.toContain('communities.community.manage_own');
+      expect(staff.includes('stories.story.publish'), `${role}: story.publish`).toBe(
+        role === 'admin_tenant',
+      );
+    }
+    // The admin holds it with `social` off as well (a manifest grant, not a `social` composition).
+    expect(permissionsFor('admin_tenant', DEMO_SEED)).toContain('stories.story.publish');
+  });
+
+  it('27. permissionsFor is pure: the module set and the result are not mutated, and turning social off and on again yields the same set', () => {
+    const labOn = new Set<ModuleKey>([...LAB_SEED, 'communities', 'stories']);
+    const snapshot = [...labOn];
+    const first = permissionsFor('member', labOn);
+    const frozen = [...first];
+    const off = new Set<ModuleKey>([...labOn].filter((key) => key !== 'social'));
+    expect(permissionsFor('member', off).filter((p) => MEMBER_KEYS.some((k) => k === p))).toEqual(
+      [],
+    );
+    expect(permissionsFor('member', labOn)).toEqual(first);
+    expect([...labOn]).toEqual(snapshot);
+    expect(first).toEqual(frozen);
+  });
+});

@@ -87,6 +87,13 @@ async function userOf(email: string): Promise<string> {
 
 const memberUsers = () => [userIds.helena, userIds.marcos, userIds.labMember];
 
+/**
+ * 10-10: the seed's own member community (`scripts/seed.ts`, owned by the lab member). Every sweep of this file
+ * spares it and the file's `beforeAll` sets it aside (soft delete) while the suites count and list the member
+ * communities they make, so the fixture the isolation sweep relies on survives the whole suite.
+ */
+const SEED_MEMBER_COMMUNITY = '0e000000-0000-4000-8000-0000000000f1';
+
 /** Removes what this file wrote: the test users' posts and member communities (posts first, the FK). */
 async function sweep(): Promise<void> {
   await adminSql`delete from public.feed_posts where caption like ${`${PREFIX}%`}`;
@@ -95,10 +102,12 @@ async function sweep(): Promise<void> {
     delete from public.feed_posts
      where community_id in (
        select id from public.communities
-        where kind = 'member' and created_by_user_id = any (${memberUsers()}::uuid[]))`;
+        where kind = 'member' and created_by_user_id = any (${memberUsers()}::uuid[])
+          and id <> ${SEED_MEMBER_COMMUNITY}::uuid)`;
   await adminSql`
     delete from public.communities
-     where kind = 'member' and created_by_user_id = any (${memberUsers()}::uuid[])`;
+     where kind = 'member' and created_by_user_id = any (${memberUsers()}::uuid[])
+       and id <> ${SEED_MEMBER_COMMUNITY}::uuid`;
   await adminSql`
     delete from public.communities where name like ${`${PREFIX}%`}`;
 }
@@ -182,6 +191,11 @@ beforeAll(async () => {
   orgCommunityId = org?.id ?? '';
   if (!orgCommunityId) throw new Error('rede-lab has no active organization community (seed)');
   await sweep();
+  // 10-10: the suites below count and order the member communities THEY make, so the seed's own one is soft-deleted
+  // for the run and brought back in `afterAll` (the seed heals a left-over soft delete on its next run).
+  await adminSql`
+    update public.communities set deleted_at = now()
+     where id = ${SEED_MEMBER_COMMUNITY}::uuid and deleted_at is null`;
 });
 
 // One member creates a handful of communities per file run; the per-process ceiling (A6) must not leak
@@ -192,6 +206,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   await sweep();
+  await adminSql`update public.communities set deleted_at = null where id = ${SEED_MEMBER_COMMUNITY}::uuid`;
   await writeSocialSettings(savedSocialSettings);
   await restoreStories();
   await restoreCommunities();

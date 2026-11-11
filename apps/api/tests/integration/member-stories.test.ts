@@ -55,6 +55,8 @@ let restoreCommunities: () => Promise<void> = async () => {};
 let restoreStories: () => Promise<void> = async () => {};
 let restoreNotifications: () => Promise<void> = async () => {};
 const createdAssets: string[] = [];
+/** 10-10: the seed's own member story of rede-lab (`scripts/seed.ts`), set aside while this file runs. */
+const SEED_MEMBER_STORY = '0e000000-0000-4000-8000-0000000000f3';
 
 const request = (path: string, token: string, init: RequestInit = {}) =>
   api.request(path, {
@@ -241,6 +243,12 @@ beforeAll(async () => {
   labTenantId = lab?.id ?? '';
   restoreNotifications = await enableNotifications();
   await sweep();
+  // 10-10: the authors suites count the circles and stories THEY make (and "a tenant with no member story"), so
+  // the seed's own member story (`scripts/seed.ts`, owned by the plain lab member) is soft-deleted for the run and
+  // brought back in `afterAll`; the seed heals a left-over soft delete on its next run.
+  await adminSql`
+    update public.stories set deleted_at = now()
+     where id = ${SEED_MEMBER_STORY}::uuid and deleted_at is null`;
 });
 
 // Every case publishes as Helena or Marcos; the per-process ceiling (A6) must not leak between cases.
@@ -250,6 +258,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   await sweep();
+  await adminSql`update public.stories set deleted_at = null where id = ${SEED_MEMBER_STORY}::uuid`;
   await closeWaitingJobs();
   await restoreNotifications();
   await restoreStories();
