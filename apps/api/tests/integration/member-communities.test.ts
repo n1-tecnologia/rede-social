@@ -628,3 +628,188 @@ describe('10 limit', () => {
     }
   });
 });
+
+describe('10 lifecycle', () => {
+  const idOf = async (res: Response): Promise<string> =>
+    ((await res.json()) as CommunitySummary).id;
+
+  beforeEach(async () => {
+    await sweep();
+    await writeSocialSettings(savedSocialSettings);
+  });
+
+  const archivedList = async (token: string): Promise<CommunitySummary[]> => {
+    const res = await request('/v1/communities?status=archived&limit=25', token);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { items: CommunitySummary[] }).items;
+  };
+
+  it('D-713: the creator edits, archives, reactivates and deletes an ARCHIVED community; each answer is the positive control of the refusals below', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}ciclo` }));
+    const edit = await request(
+      `/v1/communities/${id}`,
+      tokens.helena,
+      patch({ name: `${PREFIX}ciclo editado`, description: 'novo texto' }),
+    );
+    expect(edit.status).toBe(200);
+    expect(((await edit.json()) as CommunitySummary).name).toBe(`${PREFIX}ciclo editado`);
+
+    // Only an archived community can be deleted: an active one is the existing 409.
+    const early = await request(`/v1/communities/${id}`, tokens.helena, { method: 'DELETE' });
+    expect(early.status).toBe(409);
+    expect((await errorOf(early)).details?.community).toBe('not_archived');
+
+    const archive = await request(
+      `/v1/communities/${id}`,
+      tokens.helena,
+      patch({ status: 'archived' }),
+    );
+    expect(archive.status).toBe(200);
+    expect((await communityRow(id))?.status).toBe('archived');
+    const reactivate = await request(
+      `/v1/communities/${id}`,
+      tokens.helena,
+      patch({ status: 'active' }),
+    );
+    expect(reactivate.status).toBe(200);
+    expect((await communityRow(id))?.status).toBe('active');
+
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.helena, patch({ status: 'archived' }))).status,
+    ).toBe(200);
+    const del = await request(`/v1/communities/${id}`, tokens.helena, { method: 'DELETE' });
+    expect(del.status).toBe(204);
+    // The row is soft-deleted: a second delete is the bare 404.
+    const again = await request(`/v1/communities/${id}`, tokens.helena, { method: 'DELETE' });
+    expect(again.status).toBe(404);
+    expect((await errorOf(again)).details).toBeUndefined();
+  });
+
+  it('D-706 / T-10-14: another member’s PATCH, status change and DELETE on the same id answer 403; an unknown id is 404; an organization community is 403 for a member', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}alheia` }));
+    // Archived first (by its creator), so the DELETE below is judged on ownership, not on status.
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.helena, patch({ status: 'archived' }))).status,
+    ).toBe(200);
+    for (const [label, init] of [
+      ['edit', patch({ name: `${PREFIX}sequestrada` })],
+      ['reactivate', patch({ status: 'active' })],
+      ['delete', { method: 'DELETE' }],
+    ] as const) {
+      const res = await request(`/v1/communities/${id}`, tokens.marcos, init);
+      expect(res.status, label).toBe(403);
+      expect((await errorOf(res)).code, label).toBe('FORBIDDEN');
+    }
+    const row = await communityRow(id);
+    expect(row?.status).toBe('archived');
+    expect(row?.name).toBe(`${PREFIX}alheia`);
+
+    const unknown = await request(
+      `/v1/communities/${crypto.randomUUID()}`,
+      tokens.helena,
+      patch({ name: 'x' }),
+    );
+    expect(unknown.status).toBe(404);
+    const unknownDelete = await request(`/v1/communities/${crypto.randomUUID()}`, tokens.marcos, {
+      method: 'DELETE',
+    });
+    expect(unknownDelete.status).toBe(404);
+
+    for (const init of [patch({ name: `${PREFIX}org` }), { method: 'DELETE' }] as RequestInit[]) {
+      const res = await request(`/v1/communities/${orgCommunityId}`, tokens.helena, init);
+      expect(res.status).toBe(403);
+    }
+    // The admin keeps every right: an edit of the member community is allowed.
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.labAdmin, patch({ description: 'moderada' })))
+        .status,
+    ).toBe(200);
+  });
+
+  it('D-713 / D-89: the creator’s archived list holds only their own archived rows; the admin’s holds every one', async () => {
+    const mine = await idOf(
+      await createCommunity(tokens.helena, { name: `${PREFIX}minha arquivada` }),
+    );
+    const theirs = await idOf(
+      await createCommunity(tokens.marcos, { name: `${PREFIX}dele arquivada` }),
+    );
+    const active = await idOf(
+      await createCommunity(tokens.helena, { name: `${PREFIX}minha ativa` }),
+    );
+    for (const [token, id] of [
+      [tokens.helena, mine],
+      [tokens.marcos, theirs],
+    ] as const) {
+      expect(
+        (await request(`/v1/communities/${id}`, token, patch({ status: 'archived' }))).status,
+      ).toBe(200);
+    }
+    const helena = (await archivedList(tokens.helena)).map((c) => c.id);
+    expect(helena).toContain(mine);
+    expect(helena).not.toContain(theirs);
+    expect(helena).not.toContain(active);
+    const marcos = (await archivedList(tokens.marcos)).map((c) => c.id);
+    expect(marcos).toContain(theirs);
+    expect(marcos).not.toContain(mine);
+    const admin = (await archivedList(tokens.labAdmin)).map((c) => c.id);
+    expect(admin).toEqual(expect.arrayContaining([mine, theirs]));
+    // A member who is not a creator of anything holds manage_own too: an empty list, never a 403.
+    expect(await archivedList(tokens.labMember)).toEqual([]);
+  });
+
+  it('D-713: a member body carrying productIds is 400 (the product link stays behind store.product.manage)', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}produtos` }));
+    const res = await request(
+      `/v1/communities/${id}`,
+      tokens.helena,
+      patch({ productIds: [crypto.randomUUID()] }),
+    );
+    expect(res.status).toBe(400);
+    const create = await createCommunity(tokens.helena, {
+      name: `${PREFIX}produtos 2`,
+      productIds: [],
+    });
+    expect(create.status).toBe(400);
+  });
+
+  it('EP-22: an empty JSON object changes nothing and writes nothing (observably inert, as today); a request with no body is 400', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}vazio` }));
+    const before = await communityRow(id);
+    const empty = await request(`/v1/communities/${id}`, tokens.helena, patch({}));
+    expect(empty.status).toBe(200);
+    expect(await communityRow(id)).toEqual(before);
+    const noBody = await request(`/v1/communities/${id}`, tokens.helena, { method: 'PATCH' });
+    expect(noBody.status).toBe(400);
+    const blank = await request(`/v1/communities/${id}`, tokens.helena, patch({ name: '   ' }));
+    expect(blank.status).toBe(400);
+    expect((await errorOf(blank)).details?.community).toBe('name_required');
+  });
+
+  it('EP-23 encoding: editing name or description with accents and emoji round-trips verbatim', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}codificação` }));
+    const name = `${PREFIX}Café ☕ e\u0301 🎉`;
+    const description = 'ação — 🎉 e\u0301 ñ';
+    const res = await request(`/v1/communities/${id}`, tokens.helena, patch({ name, description }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as CommunitySummary;
+    expect(body.name).toBe(name);
+    expect(body.description).toBe(description);
+    const stored = await communityRow(id);
+    expect(stored?.name).toBe(name);
+    expect(stored?.description).toBe(description);
+  });
+
+  it('D-711: the creator is never notified by their own lifecycle (zero notification rows about the community)', async () => {
+    const id = await idOf(await createCommunity(tokens.helena, { name: `${PREFIX}silenciosa` }));
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.helena, patch({ status: 'archived' }))).status,
+    ).toBe(200);
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.helena, { method: 'DELETE' })).status,
+    ).toBe(204);
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where tenant_id = ${labTenantId}::uuid and subject_id = ${id}::uuid`;
+    expect(row?.n).toBe(0);
+  });
+});
