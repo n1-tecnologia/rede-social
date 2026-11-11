@@ -59,11 +59,11 @@ screens:
   - social-desligado-criador
   - criador-bloqueado-nao-encontrada
   - story-bloqueado-nao-encontrado
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: "Igor (recorded by Claude on Igor's instruction)"
+approved_at: 2026-11-11
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-10, design-review, D-33, D-365, UI-04, social, member-stories, member-communities]
