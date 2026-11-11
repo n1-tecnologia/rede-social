@@ -8,12 +8,13 @@ import { CommunityCover } from './CommunityCover';
  * The community page's header (UI-D-43): the cover (160px, 192px and rounded from `md`) (or the UI-D-35 gradient block), a 44x44
  * back control over it, then the community name at the Title role and the description.
  *
- * **D-67's three drops are the point of this component, not an omission.** The prototype draws an
- * overlapping avatar, a human credit line and a verification badge under the cover. None of them is
- * ported and none may be added later: the organisation owns the container, and D-52 already puts a
- * face on every post inside it, so a byline here would compete with the real one and invent an
- * authorship claim the product does not make. `created_by_user_id` is stored on the row and never
- * projected, so there is nothing to render even if a caller asked.
+ * **D-67's three drops stand for an ORGANIZATION community, and 10-14 (UI-D-709) adds one slot for a
+ * MEMBER's.** The prototype draws an overlapping avatar, a human credit line and a verification badge
+ * under the cover. The organisation owns an organization community and D-52 already puts a face on every
+ * post inside it, so none of the three is ported there. A member-created community IS somebody's (D-703),
+ * and the one thing it gains is the optional `byline` slot under the name row: the host builds its content
+ * (the creator's small avatar and "Criada por {name}") and passes it only for member communities; the 80px
+ * overlapping avatar and the badge of the prototype are still not carried.
  *
  * **The name WRAPS and must never be clipped.** With the avatar gone it has the full width and
  * becomes the page's single anchor, so it takes the Title role (24/700, `tracking-[-0.02em]`) the
@@ -55,6 +56,12 @@ export interface CommunityHeaderProps {
   statusPill?: ReactNode;
   /** Optional slot UNDER the description (the archived note). */
   note?: ReactNode;
+  /**
+   * 10-14 (UI-D-709): optional slot UNDER the name row, for a member community only: the host's creator
+   * avatar and "Criada por {name}". The module owns the row geometry (`mt-2`, a 44px hit area, avatar and
+   * text side by side); it ships no words and knows no route (the host builds the link or the plain name).
+   */
+  byline?: ReactNode;
 }
 
 const BACK_CONTROL =
@@ -71,6 +78,7 @@ export function CommunityHeader({
   action,
   statusPill,
   note,
+  byline,
 }: CommunityHeaderProps) {
   return (
     <header data-community-header>
@@ -110,6 +118,12 @@ export function CommunityHeader({
           </h1>
           {statusPill}
         </div>
+
+        {byline ? (
+          <div data-community-byline className="mt-2 flex min-h-11 items-center gap-2">
+            {byline}
+          </div>
+        ) : null}
 
         {/* E11/empty: an absent description renders NO node — no reserved height, no placeholder. */}
         {description ? (

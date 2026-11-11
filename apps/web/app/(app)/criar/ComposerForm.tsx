@@ -137,6 +137,15 @@ export type ComposerFormProps = {
    * bootstrap through `socialMediaLimits` - UX only; the API judges every one of them again.
    */
   memberLimits?: SocialSettings['media'];
+  /**
+   * 10-14 (UI-D-711, D-706, D-709): the member composer INSIDE the member's own community
+   * (`/criar?comunidade={id}`, resolved and checked on the server against the API's
+   * `viewer.actions.post`). Only meaningful with `memberLimits`. UI-D-504 holds in full (no attachment
+   * row, no picker, the member limits); the audience line becomes the read-only destination line, the
+   * create body names the community, and the member lands back on the community page (D-702: the post
+   * is in no Início and no Explorar list, so the screen never promises Explorar).
+   */
+  memberCommunity?: { id: string; name: string };
 };
 
 type PickedImage = {
@@ -192,9 +201,20 @@ export function ComposerForm({
   destinations = [],
   initialCommunityId = null,
   memberLimits,
+  memberCommunity,
 }: ComposerFormProps) {
   /** The member variant (UI-D-504). Absent `memberLimits` is the administrator's composer, unchanged. */
   const member = memberLimits !== undefined;
+  /**
+   * UI-D-711: the community a MEMBER's post lives in. On create it is the destination the server
+   * resolved; on edit it is the post's own community (the placement is fixed at publication). Absent
+   * for the administrator and for a member publishing to Explorar.
+   */
+  const memberTarget = member
+    ? mode === 'edit'
+      ? (initial.community ?? undefined)
+      : memberCommunity
+    : undefined;
   /** How many photos this form takes: the tenant's allowance for a member, the feed's cap otherwise. */
   const imageCap = memberLimits?.photosPerPost ?? FEED_MAX_IMAGES;
   /** UI-D-504 (e): the video control exists for a member ONLY where the tenant allows video. */
@@ -221,7 +241,7 @@ export function ComposerForm({
    * has no such key and is `.strict()`, so the API would refuse one anyway).
    */
   const [communityId, setCommunityId] = useState<string | null>(
-    mode === 'edit' ? (initial.community?.id ?? null) : initialCommunityId,
+    mode === 'edit' ? (initial.community?.id ?? null) : (memberCommunity?.id ?? initialCommunityId),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -454,7 +474,8 @@ export function ComposerForm({
   };
 
   /** Where the X goes when nothing is behind the composer (it was opened from a link). */
-  const back = mode === 'edit' && postId ? `/post/${postId}` : member ? MEMBER_LANDING : '/inicio';
+  const memberLanding = memberCommunity ? `/comunidades/${memberCommunity.id}` : MEMBER_LANDING;
+  const back = mode === 'edit' && postId ? `/post/${postId}` : member ? memberLanding : '/inicio';
 
   const close = () => {
     if (dirty) {
@@ -526,8 +547,9 @@ export function ComposerForm({
               ...(linkRemoved ? { linkUrl: '' } : {}),
               // D-72: present ONLY on the create path, and only when a destination was chosen.
               // The key is omitted rather than sent as null, because `createPostSchema` types it
-              // as an optional uuid — "no destination" is the absence, not a value.
-              ...(communityId && !member ? { communityId } : {}),
+              // as an optional uuid — "no destination" is the absence, not a value. A member names
+              // one only inside their own community (10-14, D-706); the API re-decides it either way.
+              ...(communityId && (!member || memberCommunity) ? { communityId } : {}),
             });
 
       if (!body.success) {
@@ -551,8 +573,9 @@ export function ComposerForm({
         // 2026-10-09: an edit returns to the post it changed and a create replaces the composer
         // with the new post, so the composer is never left behind that post's "Voltar".
         const landing = `/post/${result.postId}`;
-        // UI-D-495: a member's create sends them to the top of Explorar instead of the post.
-        if (mode !== 'edit') replaceFormWith(router, member ? MEMBER_LANDING : landing);
+        // UI-D-495: a member's create sends them to the top of Explorar instead of the post; inside
+        // their own community (UI-D-711) it sends them back to that community's page.
+        if (mode !== 'edit') replaceFormWith(router, member ? memberLanding : landing);
         else if (!returnAfterSave(router, landing, done)) router.push(landing);
         return;
       }
@@ -675,14 +698,23 @@ export function ComposerForm({
               setCaptionError(undefined);
             }}
           />
-          {/* UI-D-504 (c): sets the expectation that the post is in Explorar, not in Início. */}
+          {/* UI-D-504 (c): sets the expectation that the post is in Explorar, not in Início. Inside a
+              community (UI-D-711) it is the read-only destination line instead: the post is visible to
+              every member in the community and nowhere else. */}
           {member ? (
             <p
               data-composer-audience
               className="flex items-center gap-1 text-xs font-normal text-text-tertiary"
             >
               <Users aria-hidden size={14} className="shrink-0" />
-              {t('composer.audience')}
+              {memberTarget
+                ? t('composer.audienceCommunity', { community: memberTarget.name })
+                : t('composer.audience')}
+            </p>
+          ) : null}
+          {member && memberTarget && mode === 'edit' ? (
+            <p data-composer-destination-helper className="text-xs font-normal text-text-secondary">
+              {tc('picker.editHelper')}
             </p>
           ) : null}
         </div>

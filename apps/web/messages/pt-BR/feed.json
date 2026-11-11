@@ -165,6 +165,7 @@
       "captionPlaceholder": "Escreva o que quer contar para {tenant}…",
       "placeholderMember": "Escreva o que quer compartilhar…",
       "audience": "Quem segue você vê esta publicação em Explorar.",
+      "audienceCommunity": "Todos os membros veem esta publicação na comunidade {community}.",
       "memberPhotoHelper": "Até {count} fotos de {size} cada.",
       "memberVideoHelper": "Vídeos de até {seconds} s e {size}.",
       "memberVideoWaiting": "Você poderá publicar quando o vídeo terminar de processar.",

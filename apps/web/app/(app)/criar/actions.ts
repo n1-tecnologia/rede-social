@@ -59,6 +59,9 @@ export async function createPostAction(input: unknown): Promise<PostWriteResult>
   if (result.ok) {
     revalidatePath('/inicio');
     revalidatePath(`/post/${result.postId}`);
+    // 10-14 (UI-D-711): a post born inside a community lands back on that community's page, which has
+    // to carry it; the router cache would otherwise serve the page as it stood before the publish.
+    if (body.data.communityId) revalidatePath(`/comunidades/${body.data.communityId}`);
   }
 
   if (refusal) redirect(refusal);

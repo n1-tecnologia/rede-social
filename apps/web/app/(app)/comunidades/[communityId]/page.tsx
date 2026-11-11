@@ -1,10 +1,10 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
+import { avatarUrlFor } from '@rede-social/contracts/profiles';
 import { MediaImage } from '@rede-social/core/ui';
-import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
 import { CommunityHeader } from '@rede-social/module-communities/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
 import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
-import { EmptyState, SectionTitle, StatusPill } from '@rede-social/ui';
+import { Avatar, EmptyState, SectionTitle, StatusPill } from '@rede-social/ui';
 import { CircleAlert, Lock, Pencil } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -25,7 +25,8 @@ import { loadAuthorInstagrams, withAuthorInstagrams } from '@/lib/author-instagr
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
-import { composerEntryFor, postAdminLabel, postCardView } from '@/lib/feed-view';
+import { postAdminLabel, postCardView } from '@/lib/feed-view';
+import { canBrowseMemberDirectory } from '@/lib/member-directory';
 import {
   feedCommentsProps,
   postCardLabels,
@@ -81,10 +82,14 @@ import { ReactivateCommunity } from './ReactivateCommunity';
  * **The compose entry is the shipped `ComposeFab`, unchanged** (D-70, UI-D-44), rendered by
  * `FeedList` from the `createHref` and `canPost` this page passes: mobile gets the floating control,
  * desktop gets a brand button in the header row above the list, and the FAB stands down while the
- * empty state's own CTA is the screen's single brand fill. `canPost` is the composed
- * `feed.post.create` permission together with `content.publish` (09-08, D-472: a community is the
- * ORGANIZATION's voice, so a member never meets a composer here, `composerEntryFor`) AND
- * `status === 'active'` — never a role comparison in the web tier.
+ * empty state's own CTA is the screen's single brand fill. `canPost` is the API's `viewer.actions.post`
+ * (10-14, the Escopo seam: the organization's voice for an organization community, the creator alone for
+ * a member's, D-706) AND `status === 'active'` — never a role or an id comparison in the web tier.
+ *
+ * **10-14 (UI-D-709..UI-D-717).** Every control is decided by the community payload's `viewer` flags, so
+ * the creator, another member, an admin on a member community and `support_tenant` each see exactly what
+ * the API says they may do; a MEMBER community gains the header's "Criada por" byline; a blocked or
+ * departed creator's community is the API's bare 404 and so this page's one not-found screen.
  *
  * **There is no public render path.** The route lives inside the `(app)` group, so `proxy.ts`
  * bounces a session-less visitor to `/entrar` before this file runs, and the page reads the session
@@ -164,9 +169,13 @@ export default async function CommunityPage({
 
   const community = result.community;
   const archived = community.status !== 'active';
-  // The SAME permission `requirePermission` evaluates on the API (T-05-03) — never a role
-  // comparison. Without it there is no edit affordance at all, not a disabled one.
-  const canManage = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.manage);
+  // 10-14 (UI-D-710, D-706): every control below is decided by the API's `viewer` flags and nothing
+  // else — the host never compares a role or an id. `canEdit` is the SAME decision the write routes
+  // make (T-05-03; the organization's `manage`, or the creator of a member community), so without it
+  // there is no edit affordance at all, not a disabled one. Publish controls are ABSENT rather than
+  // disabled, and absent on an archived community whatever the flags say (UI-D-37).
+  const { viewer } = community;
+  const canEdit = viewer.canEdit;
 
   // P80: an archived community keeps today's page; the store adds no variant to it. Staff never get
   // here: the API answers `locked: false` for them.
@@ -276,7 +285,7 @@ export default async function CommunityPage({
   // highlights as links and the trailing "Gerenciar" — so it reads the curator row. An archived
   // community keeps the member read and gets no manage circle (UI-D-64); its manage screen stays
   // reachable by direct link for take-downs (UI-D-80).
-  const curates = !archived && bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+  const curates = !archived && viewer.canCurate;
   const [{ page, instagrams }, placed, reels] = await Promise.all([
     // 2026-10-09: with its authors' Instagram handles, looked up as soon as the page is in.
     loadFeed({ communityId: community.id }).then(withAuthorInstagrams),
@@ -309,9 +318,10 @@ export default async function CommunityPage({
    * so the composer opens pre-filled with this community's first highlight (or its D-112 gate when it
    * has none) and the story lands in this row. It is drawn exactly like Início's (UI-D-28, as
    * amended on 2026-10-02): a centred `Plus` in the dashed "only you see this" ring (UI-D-63), never
-   * the admin's photo. **Its gate is unchanged**: `stories.story.publish` AND `stories.story.manage`
-   * AND an active community — what the API requires for a publish that names a destination
-   * (T-05.2-32) — so this door never opens onto a composer that cannot choose one.
+   * the admin's photo. **Its gate is the API's `viewer.actions.story`** (10-14, the Escopo seam) AND an
+   * active community — what the API requires for a publish that names a destination (T-05.2-32) — so
+   * this door never opens onto a composer that cannot choose one. For the organization's admin it is
+   * the unchanged rule; for a MEMBER community it is the creator only (D-706).
    *
    * **An ARCHIVED community shows its non-empty highlights read-only** (UI-D-64, the D-93 analogue):
    * no `+` at all — not a disabled one — while its circles still open.
@@ -326,10 +336,10 @@ export default async function CommunityPage({
    */
   const highlightItems = placed?.items ?? [];
   const playable = openableHighlights(highlightItems);
-  const canPublishHere =
-    !archived &&
-    bootstrap.permissions.includes(STORY_PERMISSIONS.publish) &&
-    bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+  // The Escopo seam: the "+" circle is the community's STORY door, so it reads `viewer.actions.story`
+  // (today equal to `canPublish`; the per-product action scope built after Phase 11 refines it in the
+  // API). The FAB and the desktop button read `viewer.actions.post` below.
+  const canPublishHere = !archived && viewer.actions.story;
   const highlights: ReactNode =
     highlightItems.length === 0 && !canPublishHere && !curates ? null : (
       <StoriesSurface
@@ -398,6 +408,48 @@ export default async function CommunityPage({
       />
     );
 
+  /**
+   * UI-D-709: the header's "Criada por" line, for a MEMBER community only. The creator reads "Criada
+   * por você" as plain text; everyone else reads "Criada por {name}" where the name is a link to
+   * `/membros/{membershipId}` only where that profile opens (a member while `social` is on, or staff:
+   * `canBrowseMemberDirectory`, the rule the directory itself uses) and plain text otherwise (UI-D-510,
+   * UI-D-716). Never brand (UI-D-36). Only the display name, the avatar asset and the membership id
+   * reach this page, never the user id (D-703); the name renders as React text (T-10-54).
+   */
+  const creator = community.kind === 'member' ? community.createdBy : null;
+  const profileOpens = canBrowseMemberDirectory({
+    role: bootstrap.membership.role,
+    permissions: bootstrap.permissions,
+  });
+  const bylineNode = creator ? (
+    <>
+      <Avatar size="sm" alt="" src={avatarUrlFor(creator.avatarAssetId)} />
+      <p
+        data-community-byline-text
+        className="min-w-0 truncate text-xs font-normal text-text-tertiary"
+      >
+        {viewer.isOwner ? (
+          tc('byline.you')
+        ) : (
+          <>
+            {tc('byline.label')}
+            {profileOpens ? (
+              <a
+                href={`/membros/${creator.membershipId}`}
+                aria-label={tc('byline.profile', { name: creator.displayName })}
+                className="rounded font-bold text-text-secondary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+              >
+                {creator.displayName}
+              </a>
+            ) : (
+              <span className="font-bold text-text-secondary">{creator.displayName}</span>
+            )}
+          </>
+        )}
+      </p>
+    </>
+  ) : undefined;
+
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col">
       <CommunityHeader
@@ -413,7 +465,7 @@ export default async function CommunityPage({
         // control stays as the SECOND route back from archive (D-90); the first is the Reativar
         // island in the archived note below.
         action={
-          canManage ? (
+          canEdit ? (
             <a
               href={`/comunidades/${community.id}/editar`}
               aria-label={tc('form.editTitle')}
@@ -427,11 +479,13 @@ export default async function CommunityPage({
         statusPill={
           archived ? <StatusPill tone="neutral">{tc('archived.pill')}</StatusPill> : undefined
         }
+        // UI-D-709: only a member-created community has a byline; the organization's has none.
+        byline={bylineNode}
         // D-90 / UI-D-52: a manager's archived note carries the one-tap Reativar island under the
         // unchanged text; a member's is exactly today's string, with no button.
         note={
           archived ? (
-            canManage ? (
+            canEdit ? (
               <>
                 {tc('archived.note')}
                 <ReactivateCommunity communityId={community.id} />
@@ -477,9 +531,9 @@ export default async function CommunityPage({
           }
           initialCursor={page?.nextCursor ?? null}
           initialError={page === null}
-          // UI-D-44 / UI-D-37: the permission AND the status. An archived community offers no
-          // compose entry at all — not a disabled one.
-          canPost={composerEntryFor('community', bootstrap.permissions) && !archived}
+          // UI-D-44 / UI-D-37 / UI-D-710: the API's `viewer.actions.post` (the Escopo seam) AND the
+          // status. An archived community offers no compose entry at all — not a disabled one.
+          canPost={!archived && viewer.actions.post}
           captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
           createHref={`/criar?comunidade=${community.id}`}
           locale={locale}
@@ -513,7 +567,9 @@ export default async function CommunityPage({
             attachmentError: media.attachmentError,
             emptyTitle: tc('emptyPosts.title'),
             emptyBody: tc('emptyPosts.body'),
-            emptyBodyAuthor: tc('emptyPosts.body'),
+            // UI-D-710: the owner of a member community has their own sentence; the organization's
+            // admin keeps today's.
+            emptyBodyAuthor: viewer.isOwner ? tc('emptyPosts.bodyOwner') : tc('emptyPosts.body'),
             emptyCta: tc('page.compose'),
             errorTitle: te('title'),
             errorBody: te('body'),

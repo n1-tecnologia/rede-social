@@ -33,7 +33,13 @@
     },
     "emptyPosts": {
       "title": "Nada publicado ainda",
-      "body": "As publicações desta comunidade vão aparecer aqui."
+      "body": "As publicações desta comunidade vão aparecer aqui.",
+      "bodyOwner": "Compartilhe a primeira novidade da sua comunidade."
+    },
+    "byline": {
+      "label": "Criada por ",
+      "you": "Criada por você",
+      "profile": "Ver perfil de {name}"
     },
     "picker": {
       "label": "Publicar em",

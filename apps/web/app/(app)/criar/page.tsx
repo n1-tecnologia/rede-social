@@ -2,7 +2,7 @@ import { FEED_PERMISSIONS } from '@rede-social/module-feed/contracts';
 import { redirect } from 'next/navigation';
 import { ComposerForm } from '@/app/(app)/criar/ComposerForm';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { listAllCommunities } from '@/lib/communities';
+import { listAllCommunities, loadCommunity } from '@/lib/communities';
 import { isMemberComposer } from '@/lib/feed-view';
 import { socialMediaLimits } from '@/lib/social-settings';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -37,6 +37,14 @@ import { getHostTenant } from '@/lib/tenant-host';
  * no destination list (the community list is not even fetched) and `?comunidade=` is ignored. The
  * administrator's path is unchanged. The API refuses the same shapes independently.
  *
+ * **10-14 (UI-D-710, UI-D-711, D-706) - a member's `?comunidade={id}`.** A member who owns a community
+ * publishes in it through the member composer: the page reads that community (the same read the
+ * community page makes) and keeps the destination only when the API's `viewer.actions.post` says this
+ * caller may publish there (the Escopo seam: never an owner flag, never a role) and the community is
+ * active. Anything else - a foreign id, an archived community, a miss, a failed read - falls back
+ * SILENTLY to the plain member composer, the D-93 rule for a value the caller cannot use; the API's 403
+ * is the real control.
+ *
  * The `communities` module may be OFF for this tenant, in which case `listAllCommunities()` returns
  * `[]` and the picker offers exactly one row. There is no second branch for that: a tenant with no
  * communities and a tenant with the module disabled are the same screen (D-74).
@@ -52,7 +60,19 @@ export default async function CreatePostPage({
   const bootstrap = await requireBootstrap();
   if (!bootstrap.permissions.includes(FEED_PERMISSIONS.create)) redirect('/inicio');
 
+  const params = await searchParams;
+  // A repeated `?comunidade=` arrives as an array; the FIRST value wins rather than the request
+  // failing, exactly as a hand-edited `?limit=` lands on a page rather than an error screen.
+  const requested = Array.isArray(params.comunidade) ? params.comunidade[0] : params.comunidade;
+
   if (isMemberComposer(bootstrap.permissions)) {
+    const target = requested ? await loadCommunity(requested) : null;
+    const memberCommunity =
+      target?.status === 'ok' &&
+      target.community.status === 'active' &&
+      target.community.viewer.actions.post
+        ? { id: target.community.id, name: target.community.name }
+        : undefined;
     return (
       <ComposerForm
         mode="create"
@@ -60,14 +80,12 @@ export default async function CreatePostPage({
         destinations={[]}
         initialCommunityId={null}
         memberLimits={socialMediaLimits(bootstrap)}
+        memberCommunity={memberCommunity}
       />
     );
   }
 
-  const [params, communities] = await Promise.all([searchParams, listAllCommunities()]);
-  // A repeated `?comunidade=` arrives as an array; the FIRST value wins rather than the request
-  // failing, exactly as a hand-edited `?limit=` lands on a page rather than an error screen.
-  const requested = Array.isArray(params.comunidade) ? params.comunidade[0] : params.comunidade;
+  const communities = await listAllCommunities();
   const initialCommunityId = communities.some((item) => item.id === requested)
     ? (requested ?? null)
     : null;

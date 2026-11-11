@@ -198,7 +198,9 @@ describe('CommunityHeader — UI-D-43 without D-67’s owner block', () => {
     const name = screen.getByRole('heading', { name: 'community-name' });
     const description = screen.getByTestId('community-description');
     expect(name.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(slot.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      slot.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('8. an empty description closes the header up — no reserved height, no placeholder line', () => {
