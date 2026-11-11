@@ -563,3 +563,136 @@ describe('ComposerForm - the member limits and states (UI-D-504 d-h)', () => {
     },
   );
 });
+
+/**
+ * 10-14 (UI-D-711, D-706, D-709): the member composer INSIDE a community. One extra prop,
+ * `memberCommunity`, marks it; the form is still UI-D-504 in full (no attachment row, no picker, the
+ * member limits) with the audience line replaced by the read-only destination line, the create body
+ * names the community, and the member lands back on the community page, never on Explorar.
+ */
+const COMMUNITY = { id: '5d0c1c2e-7a41-4c52-9d3a-0e6f1b2c3d40', name: 'Clube de Leitura' };
+const DESTINATION_LINE = 'Todos os membros veem esta publicação na comunidade Clube de Leitura.';
+const EDIT_HELPER = 'A publicação não pode mudar de comunidade.';
+
+describe('ComposerForm - the member composer inside a community (UI-D-711)', () => {
+  it('K1: the destination line replaces the audience line; no picker, no attachment row', () => {
+    render(
+      <ComposerForm
+        mode="create"
+        tenantName="Rede Lab"
+        memberLimits={MEMBER_LIMITS}
+        memberCommunity={COMMUNITY}
+      />,
+    );
+
+    expect(screen.getByText(DESTINATION_LINE)).toBeTruthy();
+    expect(document.querySelector('[data-composer-audience]')?.textContent).toBe(DESTINATION_LINE);
+    expect(screen.queryByText(AUDIENCE)).toBeNull();
+    expect(screen.queryByTestId('composer-add-file')).toBeNull();
+    expect(document.querySelector('[data-composer-destination]')).toBeNull();
+  });
+
+  it('K2: the create body names the community and still carries no attachments', async () => {
+    render(
+      <ComposerForm
+        mode="create"
+        tenantName="Rede Lab"
+        memberLimits={MEMBER_LIMITS}
+        memberCommunity={COMMUNITY}
+      />,
+    );
+    typeCaption('Primeira novidade');
+
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(createPost).toHaveBeenCalledTimes(1));
+    const body = createPost.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.communityId).toBe(COMMUNITY.id);
+    expect('attachmentAssetIds' in body).toBe(false);
+  });
+
+  it('K3: a published post lands on the community page with the created toast, never Explorar', async () => {
+    render(
+      <ComposerForm
+        mode="create"
+        tenantName="Rede Lab"
+        memberLimits={MEMBER_LIMITS}
+        memberCommunity={COMMUNITY}
+      />,
+    );
+    typeCaption('Primeira novidade');
+
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+    expect(replace).toHaveBeenCalledWith(`/comunidades/${COMMUNITY.id}`);
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: (catalogs.feed.toasts as Record<string, string>).created,
+    });
+  });
+
+  it('K4: close returns to the community page, and so does a confirmed discard', () => {
+    const { unmount } = render(
+      <ComposerForm
+        mode="create"
+        tenantName="Rede Lab"
+        memberLimits={MEMBER_LIMITS}
+        memberCommunity={COMMUNITY}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: composer.close as string }));
+    expect(push).toHaveBeenCalledWith(`/comunidades/${COMMUNITY.id}`);
+    unmount();
+    push.mockClear();
+
+    render(
+      <ComposerForm
+        mode="create"
+        tenantName="Rede Lab"
+        memberLimits={MEMBER_LIMITS}
+        memberCommunity={COMMUNITY}
+      />,
+    );
+    typeCaption('Rascunho');
+    fireEvent.click(screen.getByRole('button', { name: composer.close as string }));
+    expect(push).not.toHaveBeenCalled();
+    const discard = (composer.discard as unknown as Record<string, string>).confirm as string;
+    fireEvent.click(screen.getByRole('button', { name: discard }));
+    expect(push).toHaveBeenCalledWith(`/comunidades/${COMMUNITY.id}`);
+  });
+
+  it('K5: without memberCommunity a member keeps the Explorar audience line and sends no communityId', async () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+    expect(screen.queryByText(DESTINATION_LINE)).toBeNull();
+    expect(screen.getByText(AUDIENCE)).toBeTruthy();
+  });
+
+  it('K6: editing a member post of a community shows the destination line and the helper', () => {
+    render(
+      <ComposerForm
+        mode="edit"
+        postId="OLD_POST"
+        tenantName="Rede Lab"
+        memberLimits={MEMBER_LIMITS}
+        initial={{ ...draft(null), community: COMMUNITY }}
+      />,
+    );
+    expect(screen.getByText(DESTINATION_LINE)).toBeTruthy();
+    expect(screen.getByText(EDIT_HELPER)).toBeTruthy();
+    expect(screen.queryByText(AUDIENCE)).toBeNull();
+    expect(document.querySelector('[data-composer-destination]')).toBeNull();
+  });
+
+  it('K7: editing a member post that is not in a community keeps the Explorar line and no helper', () => {
+    render(
+      <ComposerForm
+        mode="edit"
+        postId="OLD_POST"
+        tenantName="Rede Lab"
+        memberLimits={MEMBER_LIMITS}
+        initial={draft(null)}
+      />,
+    );
+    expect(screen.getByText(AUDIENCE)).toBeTruthy();
+    expect(screen.queryByText(EDIT_HELPER)).toBeNull();
+  });
+});

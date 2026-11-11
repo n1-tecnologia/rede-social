@@ -180,6 +180,27 @@ describe('CommunityHeader — UI-D-43 without D-67’s owner block', () => {
     expect(screen.getByText('note-node')).toBeInTheDocument();
   });
 
+  it('7b. 10-14 (UI-D-709): the byline slot sits under the name row, above the description, and is optional', () => {
+    const { unmount } = header();
+    expect(document.querySelector('[data-community-byline]')).toBeNull();
+    unmount();
+
+    header({ byline: <span>byline-node</span> });
+    const slot = document.querySelector('[data-community-byline]') as HTMLElement;
+    expect(slot).not.toBeNull();
+    // The row geometry of UI-D-709: 8px under the name row, 44px hit area, avatar and text side by side.
+    expect(slot.className).toContain('mt-2');
+    expect(slot.className).toContain('min-h-11');
+    expect(slot.className).toContain('flex');
+    expect(slot.className).toContain('items-center');
+    expect(slot.className).toContain('gap-2');
+    expect(within(slot).getByText('byline-node')).toBeInTheDocument();
+    const name = screen.getByRole('heading', { name: 'community-name' });
+    const description = screen.getByTestId('community-description');
+    expect(name.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(slot.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('8. an empty description closes the header up — no reserved height, no placeholder line', () => {
     header({ description: '' });
 
