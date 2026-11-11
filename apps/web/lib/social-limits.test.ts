@@ -1,4 +1,5 @@
 import {
+  SOCIAL_MAX_COMMUNITIES_PER_MEMBER,
   SOCIAL_MAX_PHOTO_BYTES,
   SOCIAL_MAX_PHOTOS_PER_POST,
   SOCIAL_MAX_VIDEO_BYTES,
@@ -31,6 +32,7 @@ const defaults: SocialLimitsForm = {
   videoEnabled: false,
   videoSeconds: 60,
   videoMb: 100,
+  maxPerMember: 3,
 };
 
 describe('SOCIAL_LIMIT_RANGES', () => {
@@ -40,6 +42,7 @@ describe('SOCIAL_LIMIT_RANGES', () => {
       photoMb: { min: 1, max: 15 },
       videoSeconds: { min: 1, max: 300 },
       videoMb: { min: 1, max: 500 },
+      maxPerMember: { min: 0, max: 20 },
     });
   });
 
@@ -48,19 +51,24 @@ describe('SOCIAL_LIMIT_RANGES', () => {
     expect(SOCIAL_LIMIT_RANGES.photoMb.max * MIB).toBe(SOCIAL_MAX_PHOTO_BYTES);
     expect(SOCIAL_LIMIT_RANGES.videoSeconds.max).toBe(SOCIAL_MAX_VIDEO_SECONDS);
     expect(SOCIAL_LIMIT_RANGES.videoMb.max * MIB).toBe(SOCIAL_MAX_VIDEO_BYTES);
+    expect(SOCIAL_LIMIT_RANGES.maxPerMember.max).toBe(SOCIAL_MAX_COMMUNITIES_PER_MEMBER);
   });
 });
 
 describe('socialLimitsToPatch', () => {
   it('with video off carries photos, the photo cap in bytes and only video.enabled', () => {
-    expect(socialLimitsToPatch({ photos: 4, photoMb: 5, videoEnabled: false })).toEqual({
+    expect(
+      socialLimitsToPatch({ photos: 4, photoMb: 5, videoEnabled: false, maxPerMember: 3 }),
+    ).toEqual({
       media: { photosPerPost: 4, photoMaxBytes: 5242880, video: { enabled: false } },
+      communities: { maxPerMember: 3 },
     });
   });
 
   it('with video off ignores any duration and size left in the form', () => {
     expect(socialLimitsToPatch(defaults)).toEqual({
       media: { photosPerPost: 4, photoMaxBytes: 5 * MIB, video: { enabled: false } },
+      communities: { maxPerMember: 3 },
     });
   });
 
@@ -73,6 +81,16 @@ describe('socialLimitsToPatch', () => {
         photoMaxBytes: 5 * MIB,
         video: { enabled: true, maxDurationSeconds: 90, maxBytes: 200 * MIB },
       },
+      communities: { maxPerMember: 3 },
+    });
+  });
+
+  it('carries the community limit, 0 included (0 means members cannot create)', () => {
+    expect(socialLimitsToPatch({ ...defaults, maxPerMember: 0 }).communities).toEqual({
+      maxPerMember: 0,
+    });
+    expect(socialLimitsToPatch({ ...defaults, maxPerMember: 20 }).communities).toEqual({
+      maxPerMember: 20,
     });
   });
 
@@ -83,6 +101,7 @@ describe('socialLimitsToPatch', () => {
       videoEnabled: true,
       videoSeconds: 1,
       videoMb: 1,
+      maxPerMember: 0,
     };
     const high: SocialLimitsForm = {
       photos: 10,
@@ -90,6 +109,7 @@ describe('socialLimitsToPatch', () => {
       videoEnabled: true,
       videoSeconds: 300,
       videoMb: 500,
+      maxPerMember: 20,
     };
     expect(socialSettingsPatchSchema.safeParse(socialLimitsToPatch(low)).success).toBe(true);
     expect(socialSettingsPatchSchema.safeParse(socialLimitsToPatch(high)).success).toBe(true);
@@ -109,8 +129,16 @@ describe('socialLimitsFromSettings', () => {
           photosPerPost: 9,
           video: { enabled: true, maxDurationSeconds: 300, maxBytes: 500 * MIB },
         },
+        communities: { maxPerMember: 0 },
       }),
-    ).toEqual({ photos: 9, photoMb: 1, videoEnabled: true, videoSeconds: 300, videoMb: 500 });
+    ).toEqual({
+      photos: 9,
+      photoMb: 1,
+      videoEnabled: true,
+      videoSeconds: 300,
+      videoMb: 500,
+      maxPerMember: 0,
+    });
   });
 
   it('round-trips a form through the patch and back', () => {
@@ -120,6 +148,7 @@ describe('socialLimitsFromSettings', () => {
       videoEnabled: true,
       videoSeconds: 45,
       videoMb: 250,
+      maxPerMember: 12,
     };
     const patch = socialLimitsToPatch(form);
     const media = patch.media;
@@ -134,6 +163,7 @@ describe('socialLimitsFromSettings', () => {
           maxBytes: media?.video?.maxBytes ?? 0,
         },
       },
+      communities: { maxPerMember: patch.communities?.maxPerMember ?? -1 },
     };
     expect(socialLimitsFromSettings(settings)).toEqual(form);
   });
@@ -149,6 +179,7 @@ describe('validateSocialLimits', () => {
         videoEnabled: true,
         videoSeconds: 1,
         videoMb: 1,
+        maxPerMember: 0,
       }),
     ).toEqual({});
     expect(
@@ -158,6 +189,7 @@ describe('validateSocialLimits', () => {
         videoEnabled: true,
         videoSeconds: 300,
         videoMb: 500,
+        maxPerMember: 20,
       }),
     ).toEqual({});
   });
@@ -167,6 +199,7 @@ describe('validateSocialLimits', () => {
     ['photoMb', 0, 16, { min: 1, max: 15 }],
     ['videoSeconds', 0, 301, { min: 1, max: 300 }],
     ['videoMb', 0, 501, { min: 1, max: 500 }],
+    ['maxPerMember', -1, 21, { min: 0, max: 20 }],
   ] as const)(
     '%s: one step below the minimum and one above the maximum are reported with the bounds',
     (field, below, above, bounds) => {
@@ -203,7 +236,21 @@ describe('validateSocialLimits', () => {
         videoEnabled: true,
         videoSeconds: 0,
         videoMb: 100,
+        maxPerMember: 3,
       }),
     ).toEqual({ photos: { min: 1, max: 10 }, videoSeconds: { min: 1, max: 300 } });
+  });
+
+  it('validates the community limit whatever the video switch says: 0 is valid, 3.5 and NaN are not', () => {
+    expect(validateSocialLimits({ ...defaults, videoEnabled: false, maxPerMember: 0 })).toEqual({});
+    expect(validateSocialLimits({ ...defaults, videoEnabled: false, maxPerMember: 21 })).toEqual({
+      maxPerMember: { min: 0, max: 20 },
+    });
+    expect(validateSocialLimits({ ...defaults, maxPerMember: 3.5 })).toEqual({
+      maxPerMember: { min: 0, max: 20 },
+    });
+    expect(validateSocialLimits({ ...defaults, maxPerMember: Number.NaN })).toEqual({
+      maxPerMember: { min: 0, max: 20 },
+    });
   });
 });

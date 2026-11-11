@@ -40,16 +40,19 @@ const MIB = 1024 * 1024;
 
 const labels = {
   open: 'Configurar limites',
-  title: 'Limites de mídia dos membros',
+  title: 'Limites dos membros',
   fields: {
     photos: 'Fotos por publicação',
     photoMb: 'Tamanho máximo da foto, em MB',
     allowVideo: 'Permitir vídeo',
     videoSeconds: 'Duração máxima do vídeo, em segundos',
     videoMb: 'Tamanho máximo do vídeo, em MB',
+    communities: 'Comunidades por membro',
   },
+  communitiesHelper:
+    'Comunidades arquivadas não contam. Use 0 para não deixar os membros criarem.',
   hint: 'De {min} a {max}. Padrão: {default}.',
-  helper: 'Vale só para novos envios. O que já foi publicado não muda.',
+  helper: 'Vale só para novos envios e novas comunidades. O que já existe não muda.',
   save: 'Salvar limites',
   saving: 'Salvando…',
   saved: 'Limites salvos.',
@@ -193,6 +196,7 @@ describe('09-12 - SocialLimitsSheet: validation', () => {
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
     expect(action).toHaveBeenCalledWith(TENANT, {
       media: { photosPerPost: 4, photoMaxBytes: 5 * MIB, video: { enabled: false } },
+      communities: { maxPerMember: 3 },
     });
   });
 });
@@ -207,6 +211,7 @@ describe('09-12 - SocialLimitsSheet: saving', () => {
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
     expect(action).toHaveBeenCalledWith(TENANT, {
       media: { photosPerPost: 4, photoMaxBytes: 1 * MIB, video: { enabled: false } },
+      communities: { maxPerMember: 3 },
     });
     await waitFor(() =>
       expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: labels.saved }),
@@ -229,6 +234,7 @@ describe('09-12 - SocialLimitsSheet: saving', () => {
         photoMaxBytes: 5 * MIB,
         video: { enabled: true, maxDurationSeconds: 90, maxBytes: 200 * MIB },
       },
+      communities: { maxPerMember: 3 },
     });
   });
 
@@ -257,4 +263,67 @@ describe('09-12 - SocialLimitsSheet: saving', () => {
     expect(screen.getByRole('dialog', { name: labels.title })).toBeTruthy();
     expect(toast.show).not.toHaveBeenCalledWith({ tone: 'success', message: labels.saved });
   });
+});
+
+describe('10-11 - SocialLimitsSheet: the community limit (UI-D-715, MCOMM-05)', () => {
+  it('is the last field, rendered with the video switch off, showing the default 3 and its hint and helper', () => {
+    mount();
+    open();
+
+    const input = field(labels.fields.communities);
+    expect(input.value).toBe('3');
+    expect(input.getAttribute('inputmode')).toBe('numeric');
+    expect(screen.getByText('De 0 a 20. Padrão: 3.')).toBeTruthy();
+    expect(screen.getByText(labels.communitiesHelper)).toBeTruthy();
+    expect(screen.getByText(labels.helper)).toBeTruthy();
+
+    // The field comes after every other input, and after the video block when it is on.
+    fireEvent.click(videoSwitch());
+    const inputs = screen.getAllByRole('textbox');
+    expect(inputs[inputs.length - 1]).toBe(input);
+  });
+
+  it('is separated from the media block by a divider', () => {
+    mount();
+    open();
+    const block = field(labels.fields.communities).closest('div.border-t');
+    expect(block?.className).toContain('border-divider');
+    expect(block?.className).toContain('pt-4');
+  });
+
+  it('shows a saved value, 0 included', () => {
+    mount({ ...SOCIAL_SETTINGS_DEFAULTS, communities: { maxPerMember: 0 } } as Parameters<
+      typeof SocialLimitsSheet
+    >[0]['saved']);
+    open();
+    expect(field(labels.fields.communities).value).toBe('0');
+  });
+
+  it.each(['0', '20'])('accepts %s and sends it in the patch', async (value) => {
+    mount();
+    open();
+    typeInto(labels.fields.communities, value);
+    save();
+
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    expect(action).toHaveBeenCalledWith(TENANT, {
+      media: { photosPerPost: 4, photoMaxBytes: 5 * MIB, video: { enabled: false } },
+      communities: { maxPerMember: Number(value) },
+    });
+  });
+
+  it.each(['21', '-1', '3.5', ''])(
+    'refuses %j inline with the range error, keeps the sheet open and does not submit',
+    (value) => {
+      mount();
+      open();
+      typeInto(labels.fields.communities, value);
+      save();
+
+      expect(screen.getByText('Informe um valor entre 0 e 20.')).toBeTruthy();
+      expect(field(labels.fields.communities).getAttribute('aria-invalid')).toBe('true');
+      expect(screen.getByRole('dialog', { name: labels.title })).toBeTruthy();
+      expect(action).not.toHaveBeenCalled();
+    },
+  );
 });
