@@ -25,6 +25,21 @@ Main contract names (`./contracts`): `communityQuerySchema`, `communitySummarySc
 Main server names (`./server`): `communitiesRoutes`, `listCommunities`, `getCommunity`,
 `createCommunity`, `updateCommunity`, `deleteCommunity`, `slugify`.
 
+**Phase 10 (member communities, D-706..D-711).** A community has a `kind`: `organization` (the admin's, the only kind
+that exists before this phase and the default of every row) or `member` (created by a member of a tenant that has the
+`social` module on). The owner rule is the creator and nobody else: only the creator edits, archives, reactivates and
+posts in a member community; an admin or a support session is never its owner, and only the moderator
+(`moderation.manage`) archives or removes it, with a moderation log row. The permissions are `communities.community.create`
+and `communities.community.manage_own`, composed by the kernel for role `member` only while `social` and this module are
+effective (`permissionsFor` stays pure). The per-member limit is a kernel seam (`memberCommunityPolicyFor` reads the social
+settings, `communities.maxPerMember`, default 3, and the create and the reactivation count under an advisory lock; the
+refusal is `limit_reached`). A member community is hidden from every read while its creator has no live membership
+(blocked or departed). The creator projection: `createdBy` is `{ membershipId, displayName, avatarUrl }` for a member
+community and `null` for an organization one, and the creator's user id is never selected; `viewer` carries the
+viewer's flags and `viewer.actions` (the Escopo seam, constant false until the per-product scope exists); `memberQuota`
+is the caller's own `{ ownedActive, limit }` or null. Reordering (`PUT /v1/communities/order`) names the ORGANIZATION
+set only; a member community has the fixed position 1000000.
+
 ## Events emitted
 
 - `community.created`: `tenantId`, `communityId`, `actorUserId`

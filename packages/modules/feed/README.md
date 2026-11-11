@@ -29,6 +29,19 @@ Main server names (`./server`): `feedRoutes`, `listFeed`, `listCommunityFeed`, `
 `listComments`, `listReplies`, `createComment`, `deleteComment`, `likeComment`, `unlikeComment`,
 `feedUnfurlJob`, `feedNotificationSources`.
 
+**Phase 10 (the `'community'` audience, D-701, D-702, D-709).** A post has one of three audiences (`FEED_AUDIENCES`):
+`tenant` (the organization's voice, read by the whole tenant), `followers` (a member's own post, read by the author's
+live followers in Explorar) and `community` (a post in a MEMBER community, written only by that community's creator). The
+`community` audience is read by whoever reads the community, with no follow test and no `social` term (D-718: turning
+`social` off never hides it), and it is in NO merged read: Início names `tenant` only, Explorar names `followers` only,
+and the Reels "Todos" lane names both `tenant` and `followers` and never `community`, so a member-community post surfaces
+only on its community's own page (`listCommunityFeed`) and in the Reels lane of that community. The audience is stamped
+from the route, never from the body: `createPost` resolves the destination through the community owner seam
+(`resolveCommunityTarget`: 404 for a miss, 403 unless the caller owns the target, `archived` for an archived one) and
+the RLS insert gate repeats the rule. A member's update of their own post is an allow-list in the database
+(`caption`, `media_kind`, `link_preview_id` and `edited_at`, plus the counters; the soft delete only as the author's own
+transition), so a forged update cannot move a post between audiences or resurrect a removed one.
+
 ## Events emitted
 
 - `post.published`: `tenantId`, `postId`, `authorUserId`, `communityId`, `hasMedia`, `occurredAt`

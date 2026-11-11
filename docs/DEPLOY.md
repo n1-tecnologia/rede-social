@@ -4451,6 +4451,117 @@ categories and of the untouched `updated_at`; the Playwright specs that could no
 planner's answers OQ-1 to OQ-6 and the defaults PU-1 to PU-7; and telling each school's admin to set their choices
 again.
 
+## Phase 10 release (member stories and member communities)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them: nothing of
+Phase 10 has been pushed, deployed or applied to a hosted project, and no agent touches homolog or production. No
+command here prints a secret. Phase 10 ships ON TOP of the Phase 9 release ("Phase 09 release (Rede social)") and of
+the per-tenant project releases above (09.2, 09.4): it adds nothing a tenant sees until the `super_admin` turns
+`social` on for it, and a tenant that already has `social` on gains the member story and the member community the
+moment this release is serving. The proofs only the owner can run (a real phone on a hosted host, the live switch
+on a per-tenant project, the review items the phase hands over) are in
+`.planning/phases/10-rede-social-member-stories-and-communities/10-MANUAL-PROOFS.md` once plan 15 has written it;
+a row becomes `passed` only with the evidence you paste and your own date.
+
+### What ships
+
+- **Eight migrations, all expand-only, applied in timestamp order** (MPUB-07, EP-53; the order `ls
+  supabase/migrations` prints, all after `20261110163941_profile_form_professional_id_guard.sql`). Each applies on
+  an EMPTY tenant project (no row is required by any of them: defaults backfill) and on an existing one:
+  1. `20261111143858_member_communities_functions.sql` (hand-written): `app.member_community_hidden_ids()` and the
+     Escopo seam `app.community_action_allowed(uuid, text)` (a constant-false stub). It sorts BEFORE the next file
+     on purpose (EP-54): the policies of the next file resolve the function when they are created.
+  2. `20261111143948_member_communities.sql` (generated): `communities.kind` (`organization` by default, so every
+     existing community stays the organization's), the member position check, the creator index and the four
+     restrictive policies of the member lane.
+  3. `20261111144148_feed_community_audience.sql` (generated): `feed_posts.visibility` accepts `community`, the
+     insert gate of the creator, the select branch with no `social` term, and the hidden-creator gate.
+  4. `20261111144205_feed_member_update_allowlist.sql` (hand-written): the member update guard on `feed_posts`
+     rewritten from a deny-list to an allow-list (closes the Phase 9 advisory).
+  5. `20261111145716_member_stories.sql` (generated): `stories.visibility` (`tenant` by default), the insert gate and
+     `stories_audience_gate` (organization stories pass for everyone; a member story passes for its author, its
+     live followers and the moderator while `social` is on, and for everyone who reads a community whose highlight
+     holds it, with `social` on or off).
+  6. `20261111150352_story_media_gate.sql` (hand-written): `app.media_asset_hidden` closes the video of a followers-only
+     member story to a caller outside its audience.
+  7. `20261111151218_moderation_member_content.sql` (hand-written): `moderation_log` accepts the actions
+     `story_removed`, `community_archived`, `community_removed` and the subject types `story` and `community`.
+  8. `20261111163020_member_stories_authors.sql` (generated): ONE partial index, `stories_tenant_author_expires_idx`,
+     for the Explorar authors read. Safe to apply ahead of any code.
+
+### The order, and its ONE exception
+
+1. **Migrations first, through the ledgered fan-out** ("databases before API and worker", the Phase 09.2 Cloud Run
+   Job, D-544): the Job applies the eight versions to every ready tenant project. Locally, `pnpm db:two` applies the
+   whole tenant set to an empty second database and `pnpm db:migrate-all -- --dry-run` lists what is pending per
+   project without applying anything; before the release, run both. The runner serialises per database with an
+   advisory lock and records each version once, so a second run applies nothing (EP-55).
+2. **The WEB deploys BEFORE the API for ONE change, the story wire (A7).** From this release the API sends
+   `authorUserId` as `null` for everyone but the author of a story, and sends the new `author` key on a member
+   story. The previous web parses the story strictly: its `authorUserId` is required (a `null` fails it) and it
+   refuses the unknown `author` key, so it would fail every story page the new API serves. The new web already
+   parses an API that predates both (`author` defaults to null, `authorUserId` accepts a uuid or null), so the web
+   first is safe. This is the only place in the release where the web does not go last.
+3. **API and worker together**, with the web already live. They carry the member rules; the worker needs no new
+   job and no new queue.
+4. **Nothing else of the web waits**: after step 2 the rest of the web of this phase is live too; there is no
+   second web deploy.
+
+**Known window (communities).** The communities read answers three new required keys (`kind`, `createdBy`,
+`viewer` with its `actions`) and `memberQuota`. The previous web fails its strict parse of that answer, and the new
+web fails the OLD API's answer the other way round. So for the Comunidades screens the web and the API must land
+together: do steps 2 and 3 in one sitting, and expect the Comunidades tab of a tenant that has the module on to
+error between the two (minutes, not hours). If you want no window, the one-line change is to make the three keys
+optional in the web's contract; it was not made here. The platform panel's social sheet is the same shape: an
+older web falls back to the default limits (cosmetic) until the new web is serving.
+
+**Rollback.** Redeploy the previous API and worker revision, then the previous web. The migrations stay (they are
+expand-only: an older API ignores the new columns, the new policies bind role `member`, and an older API writes
+through the staff and system lanes). Turn `social` off for every tenant that has it on BEFORE rolling the API back:
+member communities, member stories and their rows are kept and come back when `social` is on again. Never keep the
+Phase 10 web in front of an older API (the member entries would call routes the older API does not have).
+
+### Turning it on
+
+Nothing new is switched on by the deploy. A tenant that already has `social` on keeps it; a tenant that does not,
+follows the "Ativar a Rede social" item of "Production gate (D-12)" (now with its Phase 10 paragraph: the limit, the
+moderation path, the legal wording that covers communities, the dashboard counts decision).
+
+### Open items for the developer (recorded, not decided here)
+
+- **A creator can reactivate a community a moderator archived (UI-SPEC OQ-3).** The data records no actor for an
+  archive, so the owner's "reativar" works on a community the tenant admin archived. The moderator's remedy is to
+  delete it (a delete is not undone by the creator). Closing it needs an actor column: a later phase.
+- **With `social` off the moderator cannot read or delete a LOOSE member story** (pgTAP 231 section 3 against D-718,
+  pinned by `apps/api/tests/integration/social-module.test.ts` case 3): the authors routes answer `404 MODULE_DISABLED`
+  for everyone, the moderator included, and the audience gate keeps a member story that no highlight holds closed to
+  every lane, so `DELETE /v1/stories/{id}` of such a story is the bare `404`. A story held by a community highlight
+  stays reachable (the highlight branch has no `social` term), and the moderator's archive and removal of member
+  COMMUNITIES and their posts keep working with `social` off, each with its log row. Decide whether a moderator must
+  be able to take a loose member story down with `social` off; the gate was not changed.
+- **The member byte share (Phase 9 advisory) now also carries story and cover uploads.** A member story and a member
+  community's cover are uploads of role `member`, so they draw from the same half of the tenant's media ceiling
+  until the 24 h sweeper retires an abandoned one. Nothing else changes in the rule.
+- **Photo variants of a member story stay an id capability (accepted residual, the Phase 9 assumption A6).** The width
+  variants and the original of a story photo are served by id to anyone in the tenant who holds the id; the story,
+  highlight and authors reads are gated, so the id only reaches the audience.
+- **The member story video cap (A9).** The cap is the smaller of the member's video seconds and 60. Reading "same as
+  a post" literally needs a one-line change in `memberVideoDurationCap` (`packages/core/server/media/member-policy.ts`).
+- **The owner dashboard's counts of member stories and communities** (Phase 9 Open Question 3): decide BEFORE `social`
+  is enabled on a real tenant; see the "Ativar a Rede social" item.
+- **The legal wording (D-478) for third-party content now also covers communities**: the tenant operator's to settle.
+
+### Smoke checks (on the homolog host once it serves this release)
+
+- On a tenant with `social` and the communities module on, a member creates a community, posts in it, and another
+  member reads the community and the post; the post is in no Início, Explorar or Reels "Todos".
+- A member publishes a story; a follower sees the author in the Explorar row and a stranger gets "Story não
+  encontrado"; the story saved in a highlight of the member's own community is readable by every member after its 24
+  hours.
+- The tenant admin archives a member community and deletes a member story; each writes a moderation log row.
+- Turn `social` off: every member write answers 403, the community, its posts and its highlights stay readable, and
+  turning it on restores everything with no row changed.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
@@ -4599,6 +4710,26 @@ invited:
   re-acceptance screen, so any new wording has to reach them by the operator's own means. The user is
   told before any tenant is enabled, and the platform confirmation names this item. Until it is ticked
   `social` stays off.
+
+  **Phase 10: member stories and member communities (MPUB-07, D-478).** Turning `social` on now also lets
+  the tenant's members publish stories (a member story is read by the author's followers in Explorar, and
+  stays in a community highlight when the author saves it there) and create their own communities (a member
+  community is read by every member of the tenant; only its creator posts in it). Settle these before the
+  switch:
+  - **The limit.** Each member may keep 3 active communities by default; the `super_admin` edits it per tenant
+    in the platform panel ("Limites dos membros", the `communities.maxPerMember` setting of the social module).
+    A change counts for new creations and reactivations only.
+  - **The moderation path.** A holder of `moderation.manage` (the tenant admin) archives or removes a member
+    community and deletes a member story, each with its own row in the moderation log (`community_archived`,
+    `community_removed`, `story_removed`); a report resolved as "remove content" takes a community post too.
+  - **The legal wording (D-478) now also covers communities.** The terms of use, the community rules and the
+    privacy policy for third-party content have to speak of what members create and host in their own
+    communities as well as of their posts and stories. The wording is not written by this phase and stays the
+    tenant operator's to settle.
+  - **The owner dashboard's counts of member stories and communities must be decided before `social` is enabled
+    on a real tenant** (Phase 9 Open Question 3, which this phase widens: "Conteúdo" counts every live
+    publication of the window and is not filtered for member stories or member communities). Recorded here,
+    NOT decided by this phase.
 
   **Resíduos aceitos (decididos em 2026-10-20).** Two limits of the audience gate are known, accepted
   and recorded here so the person who ticks this item knows them. Neither is fixed by the module and

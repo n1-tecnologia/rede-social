@@ -41,6 +41,19 @@ Main server names (`./server`): `storiesRoutes`, `listActiveStories`, `listOwnSt
 author, then one author's live stories, 10-08). Comment, like, view and highlight handlers are reached through the
 routes only.
 
+**Phase 10 (member stories, D-705, D-713..D-717).** A story has a `visibility`: `tenant` (the organization's, the
+default of every row, read by the whole tenant in the Início strip) or `followers` (a member's story, published only
+while `social` is on, read by its author, its live followers and the moderator, and listed in Explorar by the authors
+read, never in Início). The authors read (`GET /v1/stories/authors`, `GET /v1/stories/authors/{membershipId}`) is
+follow-bound for a member and open to every live member for the moderator; with `social` off both answer
+`404 MODULE_DISABLED`. A member saves their own story in a highlight of their OWN community (the highlight owner seam:
+`resolveHighlightPlace` answers 404 for a miss, 403 unless the caller is the creator of that member community or may
+`stories.story.manage` on an organization place, then the archived refusal), and a story held by a community highlight
+stays readable by everyone who reads the community after its 24 hours, with `social` on or off. The story wire never
+carries another member's user id: `authorUserId` is null unless the caller is the author, and a member story names its
+author as `author { membershipId, displayName, avatarUrl }` (A7; the web deploys first for this one change). The own
+history is `GET /v1/stories/mine`; the catalog of places a caller may curate is scoped by caller.
+
 ## Events emitted
 
 - `story.published`: `tenantId`, `storyId`, `authorUserId`, `mediaKind`, `expiresAt`
