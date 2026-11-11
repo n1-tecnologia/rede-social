@@ -58,6 +58,8 @@ Deleting a community emits nothing: it is a silent soft delete of an archived co
 - `@rede-social/core/server/events/bus`
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/logging`
+- `@rede-social/core/server/moderation/log` (10-05: `recordModerationAction`, the moderator's archive or removal of a
+  member community, in the same transaction as the write)
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/paging`

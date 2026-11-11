@@ -83,7 +83,7 @@ const listRoute = createRoute({
     },
     403: {
       description:
-        '`status=archived` requested by a caller without `communities.community.manage` in this tenant',
+        '`status=archived` requested by a caller holding neither `communities.community.manage` nor `communities.community.manage_own` in this tenant. A holder of `manage_own` only (the member creator) is answered, scoped to THEIR OWN archived member communities (10-05, D-713); a holder of `manage` reads every archived community',
     },
   },
 });
@@ -150,10 +150,14 @@ const createCommunityRoute = createRoute({
 const updateCommunityRoute = createRoute({
   method: 'patch',
   path: '/{communityId}',
-  // The literal, not `COMMUNITY_PERMISSIONS.manage`: this string is the one thing a reviewer greps
-  // for when asking "what guards editing and archiving a community?", and an indirection here is
-  // the kind that hides a change (T-05-18).
-  middleware: [requirePermission('communities.community.manage')] as const,
+  // The literals, not `COMMUNITY_PERMISSIONS.*`: these strings are the one thing a reviewer greps for
+  // when asking "what guards editing and archiving a community?", and an indirection here is the kind
+  // that hides a change (T-05-18). ANY of the two passes: the admin's `manage`, or the member creator's
+  // `manage_own` (10-05, D-707). The guard says "may try"; the service tests OWNERSHIP in its statement
+  // (`created_by_user_id = ctx.userId`) and answers 403 for a visible row the caller does not own.
+  middleware: [
+    requirePermission('communities.community.manage', 'communities.community.manage_own'),
+  ] as const,
   request: {
     params: communityIdParam,
     body: { content: { 'application/json': { schema: updateCommunitySchema } }, required: true },
@@ -169,7 +173,8 @@ const updateCommunityRoute = createRoute({
         '`VALIDATION_FAILED` with `details.community` carrying exactly one machine code: `name_required`.',
     },
     403: {
-      description: 'The caller does not hold `communities.community.manage` in this tenant',
+      description:
+        'The caller holds neither `communities.community.manage` nor `communities.community.manage_own`, or holds only the member key and did not create this community (a member community they created is theirs, an organization community and another member’s are not)',
     },
     404: {
       description:
@@ -229,10 +234,12 @@ const reorderCommunitiesRoute = createRoute({
 const deleteCommunityRoute = createRoute({
   method: 'delete',
   path: '/{communityId}',
-  // The literal, not `COMMUNITY_PERMISSIONS.manage`: this string is the one thing a reviewer greps
-  // for when asking "what guards deleting a community?", and an indirection here is the kind that
-  // hides a change.
-  middleware: [requirePermission('communities.community.manage')] as const,
+  // The literals, not `COMMUNITY_PERMISSIONS.*`: these strings are the one thing a reviewer greps for
+  // when asking "what guards deleting a community?", and an indirection here is the kind that hides a
+  // change. ANY of the two passes (10-05, D-707); the service tests ownership in its statement.
+  middleware: [
+    requirePermission('communities.community.manage', 'communities.community.manage_own'),
+  ] as const,
   request: { params: communityIdParam },
   responses: {
     204: {
@@ -241,7 +248,8 @@ const deleteCommunityRoute = createRoute({
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
     403: {
-      description: 'The caller does not hold `communities.community.manage` in this tenant',
+      description:
+        'The caller holds neither `communities.community.manage` nor `communities.community.manage_own`, or holds only the member key and did not create this community',
     },
     404: {
       description:
@@ -267,11 +275,20 @@ export const communitiesRoutes = communities
     // where the coercion lives, 05.1-03). `permissionsForRequest` is the same resolver
     // `requirePermission` evaluates, and the literal is the string a reviewer greps for — the same
     // reason the write routes spell it out rather than going through `COMMUNITY_PERMISSIONS.manage`.
+    //
+    // 10-05 (D-713): the member creator reads the archived list too, scoped to THEIR OWN rows: a holder of
+    // `communities.community.manage_own` without `manage` passes with `ownOnly`, anybody else is refused.
+    let ownOnly = false;
     if (query.status === 'archived') {
       const granted = await permissionsForRequest(ctx);
-      if (!granted.includes('communities.community.manage')) throw new ApiError(403, 'FORBIDDEN');
+      if (!granted.includes('communities.community.manage')) {
+        if (!granted.includes('communities.community.manage_own')) {
+          throw new ApiError(403, 'FORBIDDEN');
+        }
+        ownOnly = true;
+      }
     }
-    return c.json(await listCommunities(ctx, query), 200);
+    return c.json(await listCommunities(ctx, query, { ownOnly }), 200);
   })
   .openapi(getCommunityRoute, async (c) => {
     const { communityId } = c.req.valid('param');
@@ -282,12 +299,16 @@ export const communitiesRoutes = communities
   )
   .openapi(updateCommunityRoute, async (c) => {
     const { communityId } = c.req.valid('param');
-    return c.json(await updateCommunity(c.get('ctx'), communityId, c.req.valid('json')), 200);
+    const ctx = c.get('ctx');
+    const canManage = (await permissionsForRequest(ctx)).includes('communities.community.manage');
+    return c.json(await updateCommunity(ctx, communityId, c.req.valid('json'), { canManage }), 200);
   })
   .openapi(reorderCommunitiesRoute, async (c) =>
     c.json(await reorderCommunities(c.get('ctx'), c.req.valid('json')), 200),
   )
   .openapi(deleteCommunityRoute, async (c) => {
-    await deleteCommunity(c.get('ctx'), c.req.valid('param').communityId);
+    const ctx = c.get('ctx');
+    const canManage = (await permissionsForRequest(ctx)).includes('communities.community.manage');
+    await deleteCommunity(ctx, c.req.valid('param').communityId, { canManage });
     return noContent();
   });

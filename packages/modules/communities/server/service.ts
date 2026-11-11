@@ -4,6 +4,7 @@ import { memberCommunityPolicyFor } from '@rede-social/core/server/communities/m
 import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { recordModerationAction } from '@rede-social/core/server/moderation/log';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { communityCreateLimiter, safetyLimiterKey } from '@rede-social/core/server/safety/limits';
 import { type SQL, sql } from 'drizzle-orm';
@@ -287,6 +288,7 @@ async function archivedPage(
   ctx: RequestContext,
   limit: number,
   after: { n: string; id: string } | null,
+  ownOnly: boolean,
 ): Promise<CommunityRow[]> {
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
@@ -297,6 +299,11 @@ async function archivedPage(
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'archived'
+         ${
+           ownOnly
+             ? sql`and c.kind = 'member' and c.created_by_user_id = ${ctx.userId}::uuid`
+             : sql``
+}
          and (
            ${afterAt}::timestamptz is null
            or (c.updated_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
@@ -357,13 +364,19 @@ function pageOf(
 export async function listCommunities(
   ctx: RequestContext,
   query: CommunityQuery,
+  /**
+   * 10-05 (D-713, D-89 scoped to own rows): a caller who holds `communities.community.manage_own` but not
+   * `manage` (the member creator) reads the ARCHIVED list of THEIR OWN member communities only. The route
+   * computes it from the composed permission set; it is never a client value.
+   */
+  opts: { ownOnly?: boolean } = {},
 ): Promise<CommunityPage> {
   const limit = query.limit;
   const archived = query.status === 'archived';
 
   const rows = await withTenantTx(ctx, (tx) =>
     archived
-      ? archivedPage(tx, ctx, limit, decodeArchivedCursor(query.cursor))
+      ? archivedPage(tx, ctx, limit, decodeArchivedCursor(query.cursor), opts.ownOnly === true)
       : activePage(tx, ctx, limit, decodeActiveCursor(query.cursor)),
   );
 
@@ -769,6 +782,75 @@ async function insertCommunity(
 }
 
 /**
+ * 10-05 (D-713, D-706): the OWNER predicate of the writes that act on one existing community, read by the
+ * statement, never by a role. The caller may write when they hold `communities.community.manage` (the
+ * organization's permission, any community), or when the community is a MEMBER community they created
+ * (`kind = 'member' and created_by_user_id = ctx.userId`). The kind term closes a hole: a creator of an
+ * ORGANIZATION community (an admin later demoted to member) does not gain it back through
+ * `manage_own`.
+ *
+ * It runs on a PLAIN read, before the locking read, on purpose: the member lane's UPDATE policy
+ * (`communities_member_update_gate`, plan 10-03) hides a row the lane does not own from a `for update`
+ * read, so a locking read would turn "visible but not yours" into the bare 404 where the product means
+ * 403. Order of answers: a miss is the bare 404 (D-23), then a visible row the caller does not own is 403.
+ */
+async function assertMayWriteCommunity(
+  tx: Tx,
+  ctx: RequestContext,
+  communityId: string,
+  canManage: boolean,
+): Promise<void> {
+  const seen = await tx.execute<{ kind: string; created_by_user_id: string | null }>(sql`
+    select c.kind, c.created_by_user_id
+      from communities c
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.id = ${communityId}::uuid
+       and c.deleted_at is null
+     limit 1`);
+  const row = seen[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  if (canManage) return;
+  if (row.kind === 'member' && row.created_by_user_id === ctx.userId) return;
+  throw new ApiError(403, 'FORBIDDEN');
+}
+
+/**
+ * 10-05 (D-711, MCOMM-10, A8): "a moderator acted on somebody's community" - the one log row, written in
+ * the SAME transaction as the community write, so a log failure rolls the write back (T-10-17). It is
+ * written ONLY when the caller holds `communities.community.manage`, the community is a MEMBER community
+ * and the caller is not its creator: the creator's own archive or delete, any action on an organization
+ * community, a no-op repeat and an admin's edit of text (A8) write nothing. The guard is the manage
+ * permission and never a member permission, so the moderator's actions keep working with `social` off
+ * (D-718). The creator is not told: nothing here emits an event or a notification.
+ *
+ * `excerptSource` is the community's NAME at the time of the action (the writer caps it); the
+ * description is deliberately not an input of this function, so it can never reach the log.
+ */
+async function logModeratorAction(
+  tx: Tx,
+  ctx: RequestContext,
+  action: 'community_archived' | 'community_removed',
+  target: {
+    id: string;
+    name: string;
+    kind: string | undefined;
+    createdBy: string | null | undefined;
+  },
+  canManage: boolean,
+): Promise<void> {
+  if (!canManage || target.kind !== 'member') return;
+  if (!target.createdBy || target.createdBy === ctx.userId) return;
+  await recordModerationAction(tx, ctx, {
+    action,
+    targetUserId: target.createdBy,
+    subjectType: 'community',
+    subjectId: target.id,
+    excerptSource: target.name,
+    reason: null,
+  });
+}
+
+/**
  * `PATCH /v1/communities/{communityId}` (COMM-01, UI-D-37) — edit, archive and reactivate.
  *
  * **ONE function, because archive is a STATUS WRITE and not a separate verb.** Splitting it into
@@ -801,6 +883,8 @@ export async function updateCommunity(
   ctx: RequestContext,
   communityId: string,
   input: UpdateCommunity,
+  /** 10-05: `communities.community.manage`, read by the route from the composed permission set. */
+  opts: { canManage: boolean },
 ): Promise<CommunitySummary> {
   // The service re-states the route's rule: this function is also reachable from the seed and from
   // any handler that assembles its own input, none of which pass through the route validator.
@@ -814,6 +898,9 @@ export async function updateCommunity(
   const policy = input.status === 'active' ? await memberCommunityPolicyFor(ctx) : null;
 
   const { row, contentChanged, archivedNow } = await withTenantTx(ctx, async (tx) => {
+    // 10-05 (D-713): the owner predicate, before anything is locked or written (see the helper).
+    await assertMayWriteCommunity(tx, ctx, communityId, opts.canManage);
+
     // The row is read FIRST, inside the same transaction, because three of this function's answers
     // depend on what it was: the 404, whether anything actually changed, and whether this write is
     // the transition into `archived` rather than a repeat of it. 10-05: it is read `for update of c`
@@ -903,11 +990,22 @@ export async function updateCommunity(
     const after = rows[0];
     if (!after) throw new ApiError(500, 'INTERNAL');
 
-    return {
-      row: after,
-      contentChanged: changedContent,
-      archivedNow: changedStatus && status === 'archived',
-    };
+    const archivedTransition = changedStatus && status === 'archived';
+    // 10-05 (D-711): a moderator's archive of somebody's member community leaves its row, in this very
+    // transaction. Read from the LOCKED row, so a second archive of the same community (the repeat, or the
+    // creator racing the moderator, EP-24, EP-25) finds the status already `archived`, returns at the
+    // no-op above and writes nothing.
+    if (archivedTransition) {
+      await logModeratorAction(
+        tx,
+        ctx,
+        'community_archived',
+        { id: communityId, name, kind: before.kind, createdBy: before.created_by_user_id },
+        opts.canManage,
+      );
+    }
+
+    return { row: after, contentChanged: changedContent, archivedNow: archivedTransition };
   });
 
   if (contentChanged) {
@@ -1071,10 +1169,23 @@ export async function reorderCommunities(
  *
  * Silent, like the event delete: no `emit(...)`, one ids-only log line (never a name, T-05-06).
  */
-export async function deleteCommunity(ctx: RequestContext, communityId: string): Promise<void> {
+export async function deleteCommunity(
+  ctx: RequestContext,
+  communityId: string,
+  /** 10-05: `communities.community.manage`, read by the route from the composed permission set. */
+  opts: { canManage: boolean },
+): Promise<void> {
   await withTenantTx(ctx, async (tx) => {
-    const found = await tx.execute<{ status: string }>(sql`
-      select status
+    // 10-05 (D-713): the owner predicate first, on a plain read (a visible row the caller does not own is
+    // 403, a miss is the bare 404), then the locking read below sees the row for whoever may write it.
+    await assertMayWriteCommunity(tx, ctx, communityId, opts.canManage);
+    const found = await tx.execute<{
+      status: string;
+      name: string;
+      kind: string;
+      created_by_user_id: string | null;
+    }>(sql`
+      select status, name, kind, created_by_user_id
         from communities
        where tenant_id = ${ctx.tenantId}::uuid
          and id = ${communityId}::uuid
@@ -1117,6 +1228,21 @@ export async function deleteCommunity(ctx: RequestContext, communityId: string):
        where tenant_id = ${ctx.tenantId}::uuid
          and id = ${communityId}::uuid
          and deleted_at is null`);
+
+    // 10-05 (D-711): a moderator's removal of somebody's member community leaves its row in this same
+    // transaction (a log failure rolls the delete back). The creator's own delete writes none.
+    await logModeratorAction(
+      tx,
+      ctx,
+      'community_removed',
+      {
+        id: communityId,
+        name: current.name,
+        kind: current.kind,
+        createdBy: current.created_by_user_id,
+      },
+      opts.canManage,
+    );
   });
 
   log.info(

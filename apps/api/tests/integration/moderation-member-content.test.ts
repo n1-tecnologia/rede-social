@@ -242,7 +242,9 @@ describe('10 moderation of member communities', () => {
   });
 
   it('EP-37 ordering: the two rows list newest first through the moderation log, and nobody is notified', async () => {
-    const id = await create(tokens.helena, `${PREFIX}ordem do log`);
+    // The log is append-only and rows survive a rerun: a name unique to this run scopes the listing.
+    const name = `${PREFIX}ordem do log ${Date.now()}`;
+    const id = await create(tokens.helena, name);
     expect((await archive(tokens.labAdmin, id)).status).toBe(200);
     expect((await remove(tokens.labAdmin, id)).status).toBe(204);
     const res = await request('/v1/admin/moderation-log?limit=50', tokens.labAdmin);
@@ -251,7 +253,7 @@ describe('10 moderation of member communities', () => {
       (await res.json()) as {
         items: { action: string; subjectType: string | null; excerpt: string | null }[];
       }
-    ).items.filter((item) => item.excerpt === `${PREFIX}ordem do log`);
+    ).items.filter((item) => item.excerpt === name);
     expect(items.map((item) => item.action)).toEqual(['community_removed', 'community_archived']);
     expect(items.every((item) => item.subjectType === 'community')).toBe(true);
     const [notified] = await adminSql<{ n: number }[]>`

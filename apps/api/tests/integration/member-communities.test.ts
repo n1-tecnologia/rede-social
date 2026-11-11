@@ -778,7 +778,15 @@ describe('10 lifecycle', () => {
     const empty = await request(`/v1/communities/${id}`, tokens.helena, patch({}));
     expect(empty.status).toBe(200);
     expect(await communityRow(id)).toEqual(before);
-    const noBody = await request(`/v1/communities/${id}`, tokens.helena, { method: 'PATCH' });
+    // A JSON request with no body at all is the malformed-JSON 400 of the validator.
+    const noBody = await api.request(`/v1/communities/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'x-tenant-host': HOSTS.lab,
+        authorization: `Bearer ${tokens.helena}`,
+        'content-type': 'application/json',
+      },
+    });
     expect(noBody.status).toBe(400);
     const blank = await request(`/v1/communities/${id}`, tokens.helena, patch({ name: '   ' }));
     expect(blank.status).toBe(400);
