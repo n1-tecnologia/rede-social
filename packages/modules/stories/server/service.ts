@@ -901,7 +901,8 @@ export async function publishStory(
           : null;
       const target = highlightId ?? newId;
       // The one item statement `addStoryToHighlight` also uses: born in ≡ added later.
-      const itemWritten = target !== null ? await insertHighlightItem(tx, ctx, target, id) : false;
+      const itemWritten =
+        target !== null ? await insertHighlightItem(tx, ctx, target, id, caller) : false;
 
       const rows = await tx.execute<StoryRow>(sql`
       ${storyProjection(ctx)}
@@ -1685,6 +1686,25 @@ export type HighlightCaller = { canManage: boolean; canPublish: boolean };
 /** The fail-closed default for a caller that did not pass its flags. */
 const NO_CURATION: HighlightCaller = { canManage: false, canPublish: false };
 
+/**
+ * 10-09 (Pitfall 9, T-10-34, T-10-35, PR-6): WHICH stories this caller may put in a highlight or choose as a
+ * cover, written ONCE as a predicate on the alias `s` (stories) and spliced into the story SELECT of every
+ * item insert, `addStoryToHighlight`, `resolveChosenCover` and the story's memberships read, so a story the
+ * caller may not curate writes zero rows and answers the bare 404, never a post-hoc check:
+ *
+ *  - a holder of `stories.story.manage` curates the ORGANIZATION's stories only (`s.visibility = 'tenant'`):
+ *    an admin can never save a MEMBER story into any place;
+ *  - everyone else (a member holding `stories.story.publish`) curates their OWN stories only
+ *    (`s.author_user_id = ctx.userId`): never another member's, never the admin's.
+ * Saving is therefore only ever the author's own explicit act on their own story (a followers-only story is
+ * never made readable to a community by anyone else, by a bulk save or by a moderator).
+ */
+function curatableStory(ctx: RequestContext, caller: Pick<HighlightCaller, 'canManage'>): SQL {
+  return caller.canManage
+    ? sql`s.visibility = 'tenant'`
+    : sql`s.author_user_id = ${ctx.userId}::uuid`;
+}
+
 async function readPlaceGate(ctx: RequestContext, caller: HighlightCaller): Promise<PlaceGate> {
   return {
     communitiesOn: await moduleFlags.isEnabled(ctx, 'communities'),
@@ -2136,6 +2156,7 @@ export async function insertHighlightItem(
   ctx: RequestContext,
   highlightId: string,
   storyId: string,
+  caller: Pick<HighlightCaller, 'canManage'>,
 ): Promise<boolean> {
   const inserted = await tx.execute<{ id: string }>(sql`
     insert into story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
@@ -2146,6 +2167,7 @@ export async function insertHighlightItem(
        and s.id = ${storyId}::uuid
        and s.tenant_id = ${ctx.tenantId}::uuid
        and s.deleted_at is null
+       and ${curatableStory(ctx, caller)}
     on conflict (highlight_id, story_id) do nothing
     returning id`);
   return inserted.length > 0;
@@ -2184,17 +2206,20 @@ export async function addStoryToHighlight(
   const { highlightCount, created } = await withTenantTx(ctx, async (tx) => {
     await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
 
+    // 10-09 (Pitfall 9): the caller's own predicate is IN the select, so another member's or the admin's story
+    // is the same bare 404 an unknown id gets, and nothing is written.
     const stories = await tx.execute<{ id: string }>(sql`
       select s.id
         from stories s
        where s.id = ${storyId}::uuid
          and s.tenant_id = ${ctx.tenantId}::uuid
-         and s.deleted_at is null`);
+         and s.deleted_at is null
+         and ${curatableStory(ctx, caller)}`);
     if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
 
     await assertHighlightHasRoom(tx, ctx, highlightId, storyId);
 
-    const created = await insertHighlightItem(tx, ctx, highlightId, storyId);
+    const created = await insertHighlightItem(tx, ctx, highlightId, storyId, caller);
     return { highlightCount: await readHighlightCount(tx, ctx, storyId), created };
   });
 
@@ -2228,24 +2253,29 @@ export async function addStoryToHighlight(
  * `GET /v1/stories/highlights?communityId=&scope=` — one place's row, in `(position, id)` order.
  *
  * ONE statement. A member sees only highlights with at least one MEMBER-VISIBLE item (D-102: an
- * empty highlight is kept but never shown to members); a `curator` read (the route grants it only
- * for `scope=all` with `stories.story.manage`) sees every highlight, empty ones with `itemCount: 0`.
+ * empty highlight is kept but never shown to members); the curator view (`all`, the route's `scope=all`)
+ * sees every highlight, empty ones with `itemCount: 0`. **`all` is the CURATOR's read and who the curator
+ * is depends on the PLACE (10-09, D-713):** a holder of `stories.story.manage` on an organization place
+ * (Início included), the creator on their own member community, nobody else (an admin on a member
+ * community included). Asking for `all` where the caller is not the curator is `403 FORBIDDEN`, after the
+ * 404 of a place that does not exist.
  */
 export async function listHighlights(
   ctx: RequestContext,
-  options: { communityId: string | null; curator: boolean },
+  options: { communityId: string | null; all: boolean },
   caller: HighlightCaller,
 ): Promise<HighlightList> {
-  const { communityId, curator } = options;
+  const { communityId, all } = options;
   const gate = await readPlaceGate(ctx, caller);
 
   const rows = await withTenantTx(ctx, async (tx) => {
-    await resolveHighlightPlace(tx, ctx, communityId, 'read', gate);
+    const place = await resolveHighlightPlace(tx, ctx, communityId, 'read', gate);
+    if (all && !place.curator) throw new ApiError(403, 'FORBIDDEN');
     return tx.execute<HighlightSummaryRow>(sql`
       ${highlightProjection(
         sql`h.tenant_id = ${ctx.tenantId}::uuid and ${placePredicate('h', communityId)}`,
       )}
-       where (${curator} or hp.item_count > 0)
+       where (${all} or hp.item_count > 0)
        order by hp.position, hp.id`);
   });
 
@@ -2256,7 +2286,7 @@ export async function listHighlights(
       userId: ctx.userId,
       requestId: ctx.requestId,
       communityId,
-      curator,
+      all,
       returned: rows.length,
     },
     'story highlights listed',
@@ -2272,8 +2302,10 @@ export async function listHighlights(
  * the override (docblock item 6), so an expired story plays from its highlight for every value of
  * `now()`, carrying its server-computed `isActive: false`. What IS there: `s.deleted_at is null`
  * (a removed story leaves every surface at once), and for a member `a.status = 'ready'` through the
- * shared `MEMBER_VISIBLE` fragment. A curator (`stories.story.manage`) sees every live item with its
- * `mediaStatus`, so the edit sheet can show a processing video.
+ * shared `MEMBER_VISIBLE` fragment. A curator sees every live item with its `mediaStatus`, so the edit
+ * sheet can show a processing video. **Who the curator is depends on the highlight's PLACE (10-09, D-713)**
+ * and is computed here, by the place seam: a holder of `stories.story.manage` on an organization place, the
+ * creator on their own member community, nobody else (an admin on a member community is a plain reader).
  *
  * Stories come back OLDEST first by PUBLISH time (D-103), never by when they were added, `limit`ed
  * to `STORY_HIGHLIGHT_MAX_ITEMS`. A member asking for a highlight with zero member-visible items
@@ -2282,10 +2314,8 @@ export async function listHighlights(
 export async function getHighlight(
   ctx: RequestContext,
   highlightId: string,
-  options: { curator: boolean },
   caller: HighlightCaller,
 ): Promise<HighlightDetail> {
-  const { curator } = options;
   const gate = await readPlaceGate(ctx, caller);
 
   const detail = await withTenantTx(ctx, async (tx) => {
@@ -2296,7 +2326,7 @@ export async function getHighlight(
     const highlight = highlights[0];
     if (!highlight) throw new ApiError(404, 'NOT_FOUND');
 
-    await resolveHighlightPlace(tx, ctx, highlight.community_id, 'read', gate);
+    const { curator } = await resolveHighlightPlace(tx, ctx, highlight.community_id, 'read', gate);
     if (!curator && highlight.item_count === 0) throw new ApiError(404, 'NOT_FOUND');
 
     const base = curator ? sql`s.deleted_at is null` : MEMBER_VISIBLE;
@@ -2314,7 +2344,7 @@ export async function getHighlight(
        order by s.published_at, s.id
        limit ${STORY_HIGHLIGHT_MAX_ITEMS}`);
 
-    return { highlight, items };
+    return { highlight, items, curator };
   });
 
   log.info(
@@ -2324,7 +2354,7 @@ export async function getHighlight(
       userId: ctx.userId,
       requestId: ctx.requestId,
       highlightId,
-      curator,
+      curator: detail.curator,
       returned: detail.items.length,
     },
     'story highlight read',
@@ -2358,6 +2388,7 @@ async function resolveChosenCover(
   ctx: RequestContext,
   highlightId: string,
   cover: HighlightCover | null,
+  caller: Pick<HighlightCaller, 'canManage'>,
 ): Promise<{ coverStoryId: string | null; coverAssetId: string | null }> {
   if (cover === null) return { coverStoryId: null, coverAssetId: null };
 
@@ -2385,7 +2416,8 @@ async function resolveChosenCover(
        and i.tenant_id = ${ctx.tenantId}::uuid
        and i.story_id = ${cover.storyId}::uuid
        and s.media_kind = 'image'
-       and ${MEMBER_VISIBLE}`);
+       and ${MEMBER_VISIBLE}
+       and ${curatableStory(ctx, caller)}`);
   const item = items[0];
   if (!item) throw new ApiError(404, 'NOT_FOUND');
   return { coverStoryId: item.id, coverAssetId: null };
@@ -2430,7 +2462,7 @@ export async function updateHighlight(
     const cover =
       input.cover === undefined
         ? { coverStoryId: current.cover_story_id, coverAssetId: current.cover_asset_id }
-        : await resolveChosenCover(tx, ctx, highlightId, input.cover);
+        : await resolveChosenCover(tx, ctx, highlightId, input.cover, caller);
 
     const updated = await tx.execute<{ id: string }>(sql`
       update story_highlights
@@ -2780,11 +2812,14 @@ export async function listStoryHighlightIds(
     : sql`h.community_id is null`;
 
   const highlightIds = await withTenantTx(ctx, async (tx) => {
+    // 10-09: the same predicate as the item inserts, so a member can only ask after THEIR OWN story's memberships
+    // and the admin only after an organization story's (a story they could not curate is the bare 404).
     const stories = await tx.execute<{ id: string }>(sql`
       select s.id from stories s
        where s.id = ${storyId}::uuid
          and s.tenant_id = ${ctx.tenantId}::uuid
-         and s.deleted_at is null`);
+         and s.deleted_at is null
+         and ${curatableStory(ctx, caller)}`);
     if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
 
     const rows = await tx.execute<{ highlight_id: string }>(sql`

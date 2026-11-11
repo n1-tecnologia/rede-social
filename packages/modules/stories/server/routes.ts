@@ -227,14 +227,17 @@ const authorStoriesRoute = createRoute({
  * not a uuid, so the param route would 400 on it rather than falling through.
  *
  * The two READS carry no permission — every member of the tenant sees a place's highlights, exactly
- * as they see its stories — while the two WRITES carry the manage-permission middleware, spelled
- * out as a literal at each call site because it is the one string a reviewer greps for when asking
- * "what guards curating highlights?". Phase 10's creator-scoped curation swaps these guards for an
- * in-handler check; the place rules themselves already live in ONE service seam
- * (`resolveHighlightPlace`).
+ * as they see its stories — while every WRITE (and the curator's catalog, order and memberships reads)
+ * carries the any-of middleware `requirePermission('stories.story.manage', 'stories.story.publish')`,
+ * spelled out as a literal at each call site because it is the one string a reviewer greps for when
+ * asking "what guards curating highlights?" (10-09, D-713: a creator curates their own community's
+ * highlights, so `stories.story.publish` joins `stories.story.manage`). The guard only says "may curate
+ * at all": WHICH place the caller may curate is the in-handler check, `resolveHighlight` /
+ * `resolveHighlightPlace`, the ONE service seam every handler reaches.
  *
- * The reads compute `curator` from `permissionsForRequest(ctx)`, the publish handler's seam: the
- * service never compares roles or permissions, it only honours the flag the route computed.
+ * Every handler reads the two flags once through `highlightCaller(ctx)` (`permissionsForRequest`) and
+ * hands them to the service: the service never compares roles or permissions, it honours the flags and
+ * computes `curator` itself, per place.
  *
  * Every miss — unknown, another tenant's, a removed community, the `communities` module off, and
  * for a member an EMPTY highlight — is ONE bare 404 with no `details` (D-23). The only 400 codes are
@@ -281,28 +284,33 @@ const listHighlightsRoute = createRoute({
 /**
  * 05.2-03's two LITERAL-path highlight routes, declared (and registered) BEFORE
  * `GET /highlights/{highlightId}`: `catalog` and `order` are not uuids, so the param route would 400
- * on them rather than falling through. Both are manage-only (the literal middleware, T-05.2-11).
+ * on them rather than falling through. Both take the any-of literal middleware (T-05.2-11, 10-09).
  */
 const highlightCatalogRoute = createRoute({
   method: 'get',
   path: '/highlights/catalog',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-09 (D-713): any-of, literals. The guard only says "may curate highlights at all"; WHICH place the caller
+  // may curate is the service's place seam (`resolveHighlight` / `resolveHighlightPlace`), reached by every handler.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   responses: {
     200: {
       description:
         'Every highlight the "add to highlight" sheet may offer (D-110), in ONE statement: Início’s first, then each ACTIVE community’s, ordered by community, position and id. Highlights of archived or removed communities are absent, and with the `communities` module off no community highlight is listed (their rows are untouched). Empty highlights are included — this is the curator’s read.',
       content: { 'application/json': { schema: highlightListSchema } },
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+    },
   },
 });
 
 const reorderHighlightsRoute = createRoute({
   method: 'put',
   path: '/highlights/order',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-09 (D-713): any-of, literals. The guard only says "may curate highlights at all"; WHICH place the caller
+  // may curate is the service's place seam (`resolveHighlight` / `resolveHighlightPlace`), reached by every handler.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: {
     body: { content: { 'application/json': { schema: reorderHighlightsSchema } }, required: true },
   },
@@ -316,7 +324,10 @@ const reorderHighlightsRoute = createRoute({
       description:
         '`VALIDATION_FAILED` with `details.highlight` = `order_stale` (the ids are not exactly the place’s current set — missing, extra, duplicated or foreign) or `archived` (the community is archived). Nothing is written.',
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+    },
     404: {
       description:
         'The named community is unknown, another tenant’s, removed, or the `communities` module is off. One bare code, no details (D-23).',
@@ -344,8 +355,9 @@ const getHighlightRoute = createRoute({
 const createHighlightRoute = createRoute({
   method: 'post',
   path: '/highlights',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-09 (D-713): any-of, literals. The guard only says "may curate highlights at all"; WHICH place the caller
+  // may curate is the service's place seam (`resolveHighlight` / `resolveHighlightPlace`), reached by every handler.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: {
     body: {
       content: { 'application/json': { schema: createStoryHighlightSchema } },
@@ -362,7 +374,10 @@ const createHighlightRoute = createRoute({
       description:
         '`VALIDATION_FAILED` with `details.highlight` carrying exactly one machine code: `title_invalid` (empty after trimming, or longer than 50), `archived` (the community is archived and takes no new content) or `full` (the place already holds 50 highlights). Nothing is written.',
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+    },
     404: {
       description:
         'The named community is unknown, another tenant’s, removed, or the `communities` module is off. One bare code, no details (D-23).',
@@ -373,8 +388,9 @@ const createHighlightRoute = createRoute({
 const addHighlightItemRoute = createRoute({
   method: 'put',
   path: '/highlights/{highlightId}/stories/{storyId}',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-09 (D-713): any-of, literals. The guard only says "may curate highlights at all"; WHICH place the caller
+  // may curate is the service's place seam (`resolveHighlight` / `resolveHighlightPlace`), reached by every handler.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: { params: highlightIdParam.extend({ storyId: z.uuid() }) },
   responses: {
     200: {
@@ -386,7 +402,10 @@ const addHighlightItemRoute = createRoute({
       description:
         "`VALIDATION_FAILED` with `details.highlight` = `archived` (the highlight's community is archived) or `full` (the highlight already holds 100 stories).",
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+    },
     404: {
       description:
         'The highlight or the story is unknown, another tenant’s, or removed — ONE bare code for all of them, no details (D-23).',
@@ -404,8 +423,9 @@ const addHighlightItemRoute = createRoute({
 const updateHighlightRoute = createRoute({
   method: 'patch',
   path: '/highlights/{highlightId}',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-09 (D-713): any-of, literals. The guard only says "may curate highlights at all"; WHICH place the caller
+  // may curate is the service's place seam (`resolveHighlight` / `resolveHighlightPlace`), reached by every handler.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: {
     params: highlightIdParam,
     body: { content: { 'application/json': { schema: updateHighlightSchema } }, required: true },
@@ -420,7 +440,10 @@ const updateHighlightRoute = createRoute({
       description:
         '`VALIDATION_FAILED` with `details.highlight` = `title_invalid` (empty after trimming, or longer than 50) or `archived` (the highlight’s community is archived and takes no curation); or with `details.issues` for a body naming neither `title` nor `cover`. Nothing is written.',
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+    },
     404: {
       description:
         'The highlight, the cover story or the cover asset is unknown, another tenant’s, removed, a video, not in this highlight, not a ready cover image — or the highlight’s community is removed or the `communities` module is off. ONE bare code for all of them, no details (D-23).',
@@ -431,15 +454,19 @@ const updateHighlightRoute = createRoute({
 const deleteHighlightRoute = createRoute({
   method: 'delete',
   path: '/highlights/{highlightId}',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-09 (D-713): any-of, literals. The guard only says "may curate highlights at all"; WHICH place the caller
+  // may curate is the service's place seam (`resolveHighlight` / `resolveHighlightPlace`), reached by every handler.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: { params: highlightIdParam },
   responses: {
     204: {
       description:
         'The highlight is deleted with its items. Its STORIES, their likes and their comments are never touched — a highlight is an editorial pointer. Allowed on an archived community (take-down must stay possible).',
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+    },
     404: {
       description:
         'No highlight with that id is visible to this tenant — unknown, another tenant’s, ALREADY deleted, in a removed community, or the `communities` module is off. One bare code, no details (D-23).',
@@ -450,8 +477,9 @@ const deleteHighlightRoute = createRoute({
 const removeHighlightItemRoute = createRoute({
   method: 'delete',
   path: '/highlights/{highlightId}/stories/{storyId}',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-09 (D-713): any-of, literals. The guard only says "may curate highlights at all"; WHICH place the caller
+  // may curate is the service's place seam (`resolveHighlight` / `resolveHighlightPlace`), reached by every handler.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: { params: highlightIdParam.extend({ storyId: z.uuid() }) },
   responses: {
     // Deliberately NO 400: removing a story is a TAKE-DOWN, allowed on an archived community.
@@ -460,7 +488,10 @@ const removeHighlightItemRoute = createRoute({
         'The story is out of the highlight. `highlightCount` is how many highlights the STORY is still in. Idempotent: removing a pair that is not there answers the identical body and announces nothing. The story row is never changed, and the highlight is kept even when this removed its last story. If the story was the chosen cover, the highlight returns to its automatic cover.',
       content: { 'application/json': { schema: highlightMembershipResultSchema } },
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+    },
     404: {
       description:
         'The highlight or the story is unknown, another tenant’s, or removed — ONE bare code for all of them, no details (D-23).',
@@ -702,8 +733,9 @@ const deleteCommentRoute = createRoute({
 const storyHighlightIdsRoute = createRoute({
   method: 'get',
   path: '/{storyId}/highlights',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
+  // 10-09 (D-713): any-of, literals. The guard only says "may curate highlights at all"; WHICH place the caller
+  // may curate is the service's place seam (`resolveHighlight` / `resolveHighlightPlace`), reached by every handler.
+  middleware: [requirePermission('stories.story.manage', 'stories.story.publish')] as const,
   request: { params: storyIdParam },
   responses: {
     200: {
@@ -711,7 +743,10 @@ const storyHighlightIdsRoute = createRoute({
         'The ids of the highlights this story is in — the shared sheet’s initial state (D-110). Ids only: the sheet already holds the titles from the catalogue.',
       content: { 'application/json': { schema: storyHighlightIdsSchema } },
     },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    403: {
+      description:
+        'The caller holds neither `stories.story.manage` nor `stories.story.publish`, or may not curate THIS place: Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). Checked after the 404 of a place that does not exist.',
+    },
     404: { description: 'No story with that id is visible to this tenant (D-23).' },
   },
 });
@@ -737,16 +772,11 @@ export const storiesRoutes = stories
   .openapi(listHighlightsRoute, async (c) => {
     const ctx = c.get('ctx');
     const { communityId, scope } = c.req.valid('query');
+    // `scope=all` is the curator's read (empty highlights included); it cannot widen anyone else's. WHO the
+    // curator is depends on the PLACE, so the service decides (404 for a miss, then 403) from the two flags.
     const caller = await highlightCaller(ctx);
-    const curator = caller.canManage;
-    // `scope=all` is the curator's read (empty highlights included); it cannot widen a member's.
-    if (scope === 'all' && !curator) throw new ApiError(403, 'FORBIDDEN');
     return c.json(
-      await listHighlights(
-        ctx,
-        { communityId: communityId ?? null, curator: scope === 'all' },
-        caller,
-      ),
+      await listHighlights(ctx, { communityId: communityId ?? null, all: scope === 'all' }, caller),
       200,
     );
   })
@@ -764,8 +794,7 @@ export const storiesRoutes = stories
   .openapi(getHighlightRoute, async (c) => {
     const ctx = c.get('ctx');
     const { highlightId } = c.req.valid('param');
-    const caller = await highlightCaller(ctx);
-    return c.json(await getHighlight(ctx, highlightId, { curator: caller.canManage }, caller), 200);
+    return c.json(await getHighlight(ctx, highlightId, await highlightCaller(ctx)), 200);
   })
   .openapi(createHighlightRoute, async (c) => {
     const ctx = c.get('ctx');

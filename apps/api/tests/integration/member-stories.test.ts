@@ -1219,7 +1219,7 @@ describe('10 highlights', () => {
              (select count(*)::int from public.story_highlight_items i
                where i.highlight_id = h.id and i.story_id = ${made.story}::uuid) as items
         from public.story_highlights h
-       where h.community_id = ${made.community}::uuid`;
+       where h.community_id = ${made.community ?? ''}::uuid`;
     expect(rows).toHaveLength(1);
     expect(rows[0]?.created_by_user_id).toBe(userIds.helena);
     expect(rows[0]?.items).toBe(1);
@@ -1370,7 +1370,7 @@ describe('10 highlights', () => {
     // The admin never saves a MEMBER story anywhere: an organization highlight answers the bare 404 too.
     const [orgHighlight] = await adminSql<{ id: string }[]>`
       select id from public.story_highlights
-       where community_id = ${made.orgCommunity}::uuid and title = ${`${PREFIX}Org`}`;
+       where community_id = ${made.orgCommunity ?? ''}::uuid and title = ${`${PREFIX}Org`}`;
     const org = orgHighlight?.id ?? '';
     const refused = await addItem(tokens.labAdmin, org, own);
     expect(refused.status).toBe(404);
@@ -1382,7 +1382,7 @@ describe('10 highlights', () => {
     // The cover chooser carries the same predicate: a foreign story that sits IN Helena's highlight (written
     // by hand, the way no route can) cannot be her cover; her own image story can.
     await adminSql`insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
-                   values (${labTenantId}::uuid, ${made.highlight}::uuid, ${marcosStory}::uuid, ${userIds.helena}::uuid)`;
+                   values (${labTenantId}::uuid, ${made.highlight ?? ''}::uuid, ${marcosStory}::uuid, ${userIds.helena}::uuid)`;
     const coverForeign = await hlBody(tokens.helena, `/${made.highlight}`, 'PATCH', {
       cover: { storyId: marcosStory },
     });
@@ -1392,7 +1392,7 @@ describe('10 highlights', () => {
     });
     expect(coverOwn.status).toBe(200);
     await adminSql`delete from public.story_highlight_items
-                    where highlight_id = ${made.highlight}::uuid and story_id = ${marcosStory}::uuid`;
+                    where highlight_id = ${made.highlight ?? ''}::uuid and story_id = ${marcosStory}::uuid`;
   });
 
   it('6. D-713 / T-10-34: Marcos curating Helena’s community is 403 on every write and an unknown community is 404; a member curating Início or an organization community is 403; the admin keeps the organization places', async () => {
@@ -1401,6 +1401,10 @@ describe('10 highlights', () => {
          and caption = ${`${PREFIX}segunda da helena`}`;
     const ownStory = own[0]?.id ?? '';
     const target = made.highlight ?? '';
+    const [home0] = await adminSql<{ id: string }[]>`
+      insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+      values (${labTenantId}::uuid, null, ${`${PREFIX}Inicio0`}, 0, ${userIds.labAdmin}::uuid)
+      returning id`;
     const refusals: Array<[string, Response]> = [
       [
         'create in her community',
@@ -1428,7 +1432,10 @@ describe('10 highlights', () => {
           title: `${PREFIX}O`,
         }),
       ],
-      ['reorder Início', await hlBody(tokens.marcos, '/order', 'PUT', { highlightIds: [] })],
+      [
+        'reorder Início',
+        await hlBody(tokens.marcos, '/order', 'PUT', { highlightIds: [home0?.id] }),
+      ],
       [
         'helena in the organization community',
         await hlBody(tokens.helena, '', 'POST', {
@@ -1557,16 +1564,16 @@ describe('10 highlights', () => {
     // The admin's organization place keeps curator: scope=all lists its empty highlights; a member's does not.
     const [orgEmpty] = await adminSql<{ id: string }[]>`
       select id from public.story_highlights
-       where community_id = ${made.orgCommunity}::uuid and title = ${`${PREFIX}Org2`}`;
+       where community_id = ${made.orgCommunity ?? ''}::uuid and title = ${`${PREFIX}Org2`}`;
     const adminRow = await hl(tokens.labAdmin, `?communityId=${made.orgCommunity}&scope=all`);
     expect(adminRow.status).toBe(200);
     expect(((await adminRow.json()) as HighlightRead).items.map((item) => item.id)).toContain(
       orgEmpty?.id,
     );
-    expect((await hl(tokens.labAdmin, `/${orgEmpty?.id}`)).status).toBe(200);
+    expect((await hl(tokens.labAdmin, `/${orgEmpty?.id ?? ''}`)).status).toBe(200);
     expect((await hl(tokens.marcos, `?communityId=${made.orgCommunity}&scope=all`)).status).toBe(
       403,
     );
-    expect((await hl(tokens.marcos, `/${orgEmpty?.id}`)).status).toBe(404);
+    expect((await hl(tokens.marcos, `/${orgEmpty?.id ?? ''}`)).status).toBe(404);
   });
 });
