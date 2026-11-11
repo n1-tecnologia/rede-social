@@ -3954,16 +3954,22 @@ describe('09-12 - the social row of the Módulos tab: requires note and enable c
   // design proposes (sketch 012, finding F-3 - not in the contract, kept in the catalog).
   it.each([
     ['platformModules.social.limits.open', 'Configurar limites'],
-    ['platformModules.social.limits.title', 'Limites de mídia dos membros'],
+    // 10-11 (UI-D-715): reworded because the sheet now holds the community limit too.
+    ['platformModules.social.limits.title', 'Limites dos membros'],
     ['platformModules.social.limits.fields.photos', 'Fotos por publicação'],
     ['platformModules.social.limits.fields.photoMb', 'Tamanho máximo da foto, em MB'],
     ['platformModules.social.limits.fields.allowVideo', 'Permitir vídeo'],
     ['platformModules.social.limits.fields.videoSeconds', 'Duração máxima do vídeo, em segundos'],
     ['platformModules.social.limits.fields.videoMb', 'Tamanho máximo do vídeo, em MB'],
+    ['platformModules.social.limits.fields.communities', 'Comunidades por membro'],
+    [
+      'platformModules.social.limits.communitiesHelper',
+      'Comunidades arquivadas não contam. Use 0 para não deixar os membros criarem.',
+    ],
     ['platformModules.social.limits.hint', 'De {min} a {max}. Padrão: {default}.'],
     [
       'platformModules.social.limits.helper',
-      'Vale só para novos envios. O que já foi publicado não muda.',
+      'Vale só para novos envios e novas comunidades. O que já existe não muda.',
     ],
     ['platformModules.social.limits.save', 'Salvar limites'],
     ['platformModules.social.limits.saving', 'Salvando…'],
