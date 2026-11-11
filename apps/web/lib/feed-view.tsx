@@ -257,9 +257,10 @@ export function postCardView(
  * **By the post's stamped audience (09-08, D-482, UI-D-509).** The author's role is not on the wire
  * (D-47), so the module flag cannot tell an administrator's post from a member's, and the legacy
  * `postingPolicy` setting cannot either. What the wire does carry is the audience the server stamped
- * from the author's role when the post was written (`FeedPost.audience`, emitted only as
- * `'followers'`, a member post): that is the whole input. A member post never wears the mark; every
- * other post keeps it, so with `social` off (no member post can exist) every post keeps today's mark.
+ * from the author's role when the post was written (`FeedPost.audience`, emitted as `'followers'` for
+ * a member post and, since 10-05, as `'community'` for a member's post inside a member community): that
+ * is the whole input. A member post (either value) never wears the mark; every other post keeps it, so
+ * with `social` off (no member post can exist) every post keeps today's mark.
  * Evaluate it PER POST, at every site that builds a card.
  */
 export function postAdminLabel(post: Pick<FeedPost, 'audience'>, tf: Translator): string | null {

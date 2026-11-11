@@ -495,7 +495,9 @@ export function FeedList({
             editHref: post.editHref,
             // 09-09: the menu decides its rows and wording from the post's own data, never a role.
             ...(post.removal ? { removal: post.removal } : {}),
-            memberPost: post.audience === 'followers',
+            // 10-11 (Pitfall 11): a member's post is `followers` (Explorar) or `community` (a member
+            // community); only an organization post (`tenant`, or no key on the wire) is not.
+            memberPost: post.audience === 'followers' || post.audience === 'community',
           });
         }
       }

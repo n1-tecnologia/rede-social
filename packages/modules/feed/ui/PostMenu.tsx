@@ -71,7 +71,10 @@ export type PostMenuTarget = {
   editHref: string | null;
   /** The API's statement that the viewer may remove this member post as a moderator (D-475). */
   removal?: 'moderation';
-  /** True for a member post (`audience === 'followers'`): the author's delete uses the member body. */
+  /**
+   * True for a member post (`audience` `'followers'` or `'community'`, never an organization post): the
+   * author's delete uses the member body.
+   */
   memberPost?: boolean;
 };
 

@@ -208,7 +208,8 @@ export function PostDetail({
           canManage: post.canManage,
           editHref: post.editHref,
           ...(post.removal ? { removal: post.removal } : {}),
-          memberPost: post.audience === 'followers',
+          // 10-11 (Pitfall 11): `followers` and `community` are both a member's post.
+          memberPost: post.audience === 'followers' || post.audience === 'community',
         }}
         onClose={() => setMenuOpen(false)}
         onSharePost={onShare}
