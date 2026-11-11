@@ -11,6 +11,7 @@ import { communityEntryState, loadCommunities } from '@/lib/communities';
 import { getCommunityAccessList } from '@/lib/store';
 import { type CommunityTagsView, communityTagsView } from '@/lib/store-view';
 import { CommunitiesList } from './CommunitiesList';
+import { CommunityLimitNotice } from './CommunityLimitNotice';
 
 /**
  * `/comunidades` (COMM-02, COMM-03) — the tenant's communities in the order an admin chose, most
@@ -76,9 +77,23 @@ export default async function CommunitiesPage({
   ]);
 
   const canManage = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.manage);
+  const canCreate = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.create);
+  // 10-13 (D-713): the member creator reads the archived list too, scoped by the API to THEIR OWN
+  // rows. The key is composed for a member only while `social` is effective, so with `social` off
+  // this is false and the member's chips and archived read are gone (UI-D-716).
+  const canManageOwn = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.manageOwn);
+  // The member's chips exist only while they own at least one archived community (UI-D-706): one
+  // read of the caller's own archived rows, asked for a single row. Asked BEFORE the status is
+  // decided, because the answer is what makes `?status=arquivadas` a valid request for a member.
+  let ownsArchived = false;
+  if (!canManage && canManageOwn) {
+    const probe = await loadCommunities({ status: 'archived', limit: 1 });
+    ownsArchived = (probe?.items.length ?? 0) > 0;
+  }
+  const showChips = canManage || ownsArchived;
   // Deliberately NOT the "first value wins" rule `/criar` applies: a repeated value lands on Ativas.
   const status: CommunityStatus =
-    canManage && params.status === 'arquivadas' ? 'archived' : 'active';
+    showChips && params.status === 'arquivadas' ? 'archived' : 'active';
   const storeOn = bootstrap.modules.some((module) => module.key === 'store');
   const [page, access] = await Promise.all([
     loadCommunities({ status }),
@@ -87,7 +102,7 @@ export default async function CommunitiesPage({
   // 10-13 (UI-D-706): the create entry is the composed permission plus the quota the read carries.
   const entry = communityEntryState({
     canManage,
-    canCreate: bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.create),
+    canCreate,
     memberQuota: page?.memberQuota,
   });
   const viewer = {
@@ -142,7 +157,12 @@ export default async function CommunitiesPage({
         <div className="px-4 pt-4 pb-3">{heading}</div>
       )}
 
-      {canManage ? (
+      {/* UI-D-706 (b): at the limit the notice stands where the control was; limit 0 shows nothing. */}
+      {entry === 'notice' && page?.memberQuota ? (
+        <CommunityLimitNotice limit={page.memberQuota.limit} />
+      ) : null}
+
+      {showChips ? (
         <nav aria-label={t('list.filter.label')} className="flex gap-2 px-4 pb-3">
           <Chip href="/comunidades" active={status === 'active'}>
             {t('list.filter.active')}

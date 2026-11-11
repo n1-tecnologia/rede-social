@@ -305,7 +305,7 @@ export async function refreshCommunityPostsAction(
  */
 export type CommunityWriteResult =
   | { ok: true; communityId: string }
-  | { ok: false; code: CommunityIssue | 'not_found' | 'generic' };
+  | { ok: false; code: CommunityIssue | 'not_found' | 'forbidden' | 'generic' };
 
 /**
  * The API's `details.community` vocabulary, narrowed from an unknown payload.
@@ -322,8 +322,8 @@ function asCommunityIssue(value: unknown): CommunityIssue | null {
 
 /**
  * The shared refusal mapping for all four write actions. A 404 is its own code because the FORM has
- * a different thing to say about it than about a field error; everything else that is not a closed
- * code is `generic`.
+ * a different thing to say about it than about a field error, and so is a 403 (`forbidden`, 10-13);
+ * everything else that is not a closed code is `generic`.
  */
 function writeRefusal(error: unknown): CommunityWriteResult {
   if (error instanceof ApiClientError) {
@@ -332,6 +332,9 @@ function writeRefusal(error: unknown): CommunityWriteResult {
       (error.details as { community?: unknown } | undefined)?.community,
     );
     if (issue) return { ok: false, code: issue };
+    // 10-13 (UI-D-707): a 403 is its own code. For a member it means the module was turned off or the
+    // caller is no longer the owner; the form decides the words, and nothing is logged for it.
+    if (error.status === 403) return { ok: false, code: 'forbidden' };
   }
   // Shape only: a community NAME is member-facing content and never reaches a log line (T-05-06).
   console.error('communities.write_failed', { error: String(error) });

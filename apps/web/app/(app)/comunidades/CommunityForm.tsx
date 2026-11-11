@@ -10,7 +10,9 @@ import {
 import { CommunityCover } from '@rede-social/module-communities/ui';
 import {
   Button,
+  buttonClasses,
   ConfirmDialog,
+  EmptyState,
   FileDropZone,
   Input,
   PageHeader,
@@ -104,6 +106,11 @@ export type CommunityFormProps = {
    * the composed permissions (`create` or `manage_own` without `manage`), never from a role.
    */
   memberMode?: boolean;
+  /**
+   * 10-13 (UI-D-707): `/comunidades/nova` was opened at the member's limit. The form is NOT rendered:
+   * the limit screen is, naming `limit`. Decided by the host from the quota the list read carries.
+   */
+  limitReached?: { limit: number };
 };
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -118,7 +125,53 @@ const EMPTY = {
   status: 'active',
 } as const;
 
-export function CommunityForm({
+export function CommunityForm(props: CommunityFormProps) {
+  // The limit screen is its own tree: no field, no upload hook, so the form's hooks never run.
+  if (props.limitReached) {
+    return <CommunityLimitScreen limit={props.limitReached.limit} />;
+  }
+  return <CommunityFormBody {...props} />;
+}
+
+/**
+ * 10-13 (UI-D-707): `/comunidades/nova` opened AT the limit. The form is not rendered: the same
+ * `PageHeader` ("Nova comunidade" with "Fechar") over an `EmptyState variant="card"` that says why,
+ * with the way back to the list. A dead end with an explanation, never a form that can only be refused.
+ */
+function CommunityLimitScreen({ limit }: { limit: number }) {
+  const t = useTranslations('communities');
+  const router = useRouter();
+  return (
+    <div
+      data-community-limit-screen
+      data-shell-hide="nav"
+      className="mx-auto flex w-full max-w-[680px] flex-col"
+    >
+      <PageHeader
+        title={t('form.createTitle')}
+        backIcon={X}
+        backLabel={t('form.close')}
+        onBack={() => leaveForm(router, '/comunidades')}
+        className="md:static md:px-0"
+      />
+      <div className="px-4 pt-4 md:px-6">
+        <EmptyState
+          variant="card"
+          icon={Users}
+          title={t('limit.title')}
+          body={t('limit.notice', { limit })}
+          action={
+            <a href="/comunidades" className={buttonClasses({ variant: 'outline' })}>
+              {t('actions.viewAll')}
+            </a>
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function CommunityFormBody({
   mode,
   communityId,
   initial,
@@ -203,6 +256,14 @@ export function CommunityForm({
         // of falling through to "Comunidade não encontrada", which on `/comunidades/nova` would be
         // a false statement: no community id was sent at all.
         return t('errors.coverInvalid');
+      case 'limit_reached':
+        // 10-13 (D-710): a second tab created one meanwhile. Nothing is lost: the alert is the shipped
+        // top card and every value stays where it was.
+        return t('errors.limit');
+      case 'forbidden':
+        // 10-13: a 403. For a member that is the module turned off (or no longer the owner); the
+        // organization's form keeps the shipped generic answer.
+        return memberMode ? t('errors.writesOff') : t('errors.save');
       case 'not_found':
         // The container vanished under the admin (archived elsewhere is still readable; this is a
         // real miss). The same words the page's own not-found screen uses, so the two agree.

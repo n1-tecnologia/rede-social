@@ -2,6 +2,7 @@ import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts
 import { redirect } from 'next/navigation';
 import { CommunityForm } from '@/app/(app)/comunidades/CommunityForm';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { communityEntryState, loadCommunities } from '@/lib/communities';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /**
@@ -33,11 +34,27 @@ export default async function NewCommunityPage() {
   const canCreate = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.create);
   if (!canManage && !canCreate) redirect('/comunidades');
 
+  if (canManage) return <CommunityForm mode="create" tenantName={bootstrap.tenant.displayName} />;
+
+  // A member: the quota rides the list read (one row is enough). At the limit the form is not drawn
+  // at all (UI-D-707); limit 0 means creation is not offered in this tenant, so the list is the
+  // answer. The API's `limit_reached` and `403` stay the real control for a stale tab.
+  const page = await loadCommunities({ limit: 1 });
+  const entry = communityEntryState({
+    canManage: false,
+    canCreate: true,
+    memberQuota: page?.memberQuota,
+  });
+  if (entry === 'none') redirect('/comunidades');
+
   return (
     <CommunityForm
       mode="create"
       tenantName={bootstrap.tenant.displayName}
-      memberMode={!canManage}
+      memberMode
+      limitReached={
+        entry === 'notice' && page?.memberQuota ? { limit: page.memberQuota.limit } : undefined
+      }
     />
   );
 }

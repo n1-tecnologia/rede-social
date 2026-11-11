@@ -142,6 +142,10 @@
       "title": "Nenhuma comunidade arquivada",
       "body": "Quando você arquivar uma comunidade, ela aparece aqui para ser reativada."
     },
+    "limit": {
+      "notice": "Você chegou ao limite de {limit, plural, one {# comunidade ativa} other {# comunidades ativas}}. Arquive uma para criar outra.",
+      "title": "Limite de comunidades atingido"
+    },
     "notFound": {
       "title": "Comunidade não encontrada",
       "body": "Este link não existe mais ou não é de {tenant}."
@@ -155,6 +159,8 @@
       "archived": "Esta comunidade foi arquivada. Não é possível publicar nela.",
       "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra.",
       "save": "Não foi possível salvar. Revise os campos e tente novamente.",
+      "limit": "Você já chegou ao limite de comunidades ativas. Arquive uma para criar outra.",
+      "writesOff": "A Rede social foi desativada. Não é possível criar ou editar comunidades agora.",
       "reactivate": "Não foi possível reativar a comunidade. Tente novamente.",
       "delete": "Não foi possível excluir a comunidade. Tente novamente.",
       "deleteGone": "Esta comunidade já foi excluída.",
