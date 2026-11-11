@@ -1,4 +1,4 @@
-import type { ModerationLogEntry } from '@rede-social/contracts/moderation';
+import { MODERATION_ACTIONS, type ModerationLogEntry } from '@rede-social/contracts/moderation';
 import { describe, expect, it } from 'vitest';
 import catalog from '../messages/pt-BR/moderation.json';
 import {
@@ -18,6 +18,7 @@ import {
 const log = catalog.moderation.log;
 const LABELS: ModerationLogLabels = {
   rows: log.rows,
+  kinds: log.kinds,
   roles: log.roles,
   you: log.you,
   removedMember: log.removedMember,
@@ -267,7 +268,7 @@ describe('08-03 — every row variant and the filter', () => {
     );
   });
 
-  it('parseModerationAction: the six API values pass; anything else reads as "Tudo"', () => {
+  it('parseModerationAction: every API value passes; anything else reads as "Tudo"', () => {
     for (const action of [
       'comment_removed',
       'member_blocked',
@@ -275,6 +276,9 @@ describe('08-03 — every row variant and the filter', () => {
       'role_changed',
       'post_removed',
       'profile_form_exported',
+      'story_removed',
+      'community_archived',
+      'community_removed',
     ])
       expect(parseModerationAction(action)).toBe(action);
     for (const raw of [
@@ -292,7 +296,7 @@ describe('08-03 — every row variant and the filter', () => {
       expect(parseModerationAction(raw)).toBeNull();
   });
 
-  it('the chip row is "Tudo · Comentários · Publicações · Bloqueios · Desbloqueios · Papéis · Exportações", in that order', () => {
+  it('the chip row is "Tudo · Comentários · Publicações · Bloqueios · Desbloqueios · Papéis · Exportações" then the three Phase 10 kinds, in that order', () => {
     expect(MODERATION_LOG_FILTERS.map((filter) => log.filters[filter.key])).toEqual([
       'Tudo',
       'Comentários',
@@ -301,6 +305,9 @@ describe('08-03 — every row variant and the filter', () => {
       'Desbloqueios',
       'Papéis',
       'Exportações',
+      'Story removido',
+      'Comunidade arquivada',
+      'Comunidade removida',
     ]);
     expect(MODERATION_LOG_FILTERS.map((filter) => filter.action)).toEqual([
       null,
@@ -310,6 +317,9 @@ describe('08-03 — every row variant and the filter', () => {
       'member_unblocked',
       'role_changed',
       'profile_form_exported',
+      'story_removed',
+      'community_archived',
+      'community_removed',
     ]);
   });
 
@@ -322,5 +332,131 @@ describe('08-03 — every row variant and the filter', () => {
       raw: (key: string) => lookup(key),
     }) as ModerationLogTranslator;
     expect(moderationLogLabels(t)).toEqual(LABELS);
+  });
+});
+
+/**
+ * 10-11 (UI-D-714, D-711, MCOMM-10, MSTORY-09): the moderator's removal of a member's story and the
+ * archive / removal of a member's community, in the existing row geometry. The copy is the UI-SPEC's,
+ * verbatim, from the real catalog.
+ */
+describe('10-11 - the three member-content entry kinds', () => {
+  const other = { ...entry().actor, isViewer: false, displayName: 'Marcos' };
+  const helena = { membershipId: entry().target.membershipId, displayName: 'Helena' };
+
+  it('story_removed: "removeu um story de", the kind label and the caption as the excerpt line', () => {
+    const view = toModerationLogView(
+      entry({
+        action: 'story_removed',
+        subjectType: 'story',
+        actor: other,
+        target: helena,
+        excerpt: 'Sábado teve feira de mudas na praça',
+      }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(view)).toBe('**Marcos** removeu um story de **Helena**');
+    expect(view.action).toBe('story_removed');
+    expect(view.kind).toBe('Story removido');
+    expect(view.excerpt).toBe('“Sábado teve feira de mudas na praça”');
+    expect(view.context).toBeNull();
+    expect(view.reason).toBeNull();
+  });
+
+  it('story_removed: the excerpt line is the caption first 80 characters, with an ellipsis when cut', () => {
+    const caption = `${'a'.repeat(79)} ${'b'.repeat(120)}`;
+    const view = toModerationLogView(
+      entry({ action: 'story_removed', subjectType: 'story', excerpt: caption }),
+      { timezone: TZ, labels: LABELS },
+    );
+    const shown = (view.excerpt ?? '').replace(/^“|”$/g, '');
+    expect(Array.from(shown).length).toBeLessThanOrEqual(81);
+    expect(shown.startsWith('a'.repeat(79))).toBe(true);
+    expect(shown.endsWith('…')).toBe(true);
+    const exact = 'c'.repeat(80);
+    const whole = toModerationLogView(
+      entry({ action: 'story_removed', subjectType: 'story', excerpt: exact }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(whole.excerpt).toBe(`“${exact}”`);
+  });
+
+  it('story_removed: a story with no caption has no excerpt block', () => {
+    for (const excerpt of ['', null]) {
+      const view = toModerationLogView(
+        entry({ action: 'story_removed', subjectType: 'story', excerpt }),
+        { timezone: TZ, labels: LABELS },
+      );
+      expect(view.excerpt).toBeNull();
+      expect(view.kind).toBe('Story removido');
+    }
+  });
+
+  it('community_archived: "arquivou a comunidade {community} de {target}" with the name bold, no excerpt', () => {
+    const view = toModerationLogView(
+      entry({
+        action: 'community_archived',
+        subjectType: 'community',
+        actor: other,
+        target: helena,
+        excerpt: 'Horta em casa',
+      }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(view)).toBe('**Marcos** arquivou a comunidade **Horta em casa** de **Helena**');
+    expect(view.kind).toBe('Comunidade arquivada');
+    expect(view.excerpt).toBeNull();
+    expect(view.context).toBeNull();
+  });
+
+  it('community_removed: "removeu a comunidade {community} de {target}", the viewer reads "Você"', () => {
+    const view = toModerationLogView(
+      entry({
+        action: 'community_removed',
+        subjectType: 'community',
+        target: helena,
+        excerpt: 'Horta em casa',
+      }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(view)).toBe('**Você** removeu a comunidade **Horta em casa** de **Helena**');
+    expect(view.kind).toBe('Comunidade removida');
+    expect(view.excerpt).toBeNull();
+  });
+
+  it('a community name that looks like a placeholder is shown verbatim', () => {
+    const view = toModerationLogView(
+      entry({ action: 'community_removed', subjectType: 'community', excerpt: '{target} {actor}' }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(view)).toBe(
+      '**Você** removeu a comunidade **{target} {actor}** de **Bruno Lima**',
+    );
+  });
+
+  it('the older kinds carry no kind label (their row is unchanged)', () => {
+    for (const action of ['comment_removed', 'post_removed', 'member_blocked'] as const) {
+      expect(
+        toModerationLogView(entry({ action }), { timezone: TZ, labels: LABELS }).kind,
+      ).toBeNull();
+    }
+  });
+
+  it('every value of MODERATION_ACTIONS has a sentence with no unresolved slot and a filter chip', () => {
+    for (const action of MODERATION_ACTIONS) {
+      const view = toModerationLogView(
+        entry({ action, details: { from: 'member', to: 'admin_tenant' } }),
+        { timezone: TZ, labels: LABELS },
+      );
+      expect(sentence(view), action).not.toMatch(/\{\w+\}/);
+      expect(sentence(view).length, action).toBeGreaterThan(0);
+      expect(
+        MODERATION_LOG_FILTERS.some((filter) => filter.action === action),
+        `${action} has a filter chip`,
+      ).toBe(true);
+    }
+    for (const filter of MODERATION_LOG_FILTERS) {
+      expect(log.filters[filter.key], filter.key).toBeTruthy();
+    }
   });
 });
