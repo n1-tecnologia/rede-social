@@ -225,7 +225,7 @@ export type CommunityViewer = z.infer<typeof communityViewerSchema>;
  * `{ membershipId, displayName, avatarAssetId }`, resolved in the same statement from the creator's LIVE
  * membership and profile (a blocked or departed creator hides the whole community instead, D-708). Never a
  * user id, an e-mail or any other profile field: the object is `.strict()` so a fourth key cannot be added by
- * accident, and `createdByUserId` has no field here at all (PR-2b).
+ * accident, and no field here carries the creator's user id at all (PR-2b).
  *
  * **The viewer's flags (10-06).** `viewer` is computed on the server from the route's permission flags and
  * the row, so the host never compares a role or an id: `isOwner` (the creator of a MEMBER community),
