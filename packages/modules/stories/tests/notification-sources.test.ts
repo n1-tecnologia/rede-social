@@ -58,6 +58,7 @@ describe('story.published source (broadcast, D-229)', () => {
     author_user_id: AUTHOR,
     media_kind: 'image',
     media_asset_id: ASSET,
+    visibility: 'tenant',
     expires_at: EXPIRES,
     seconds_left: 80_000,
   };
@@ -111,6 +112,28 @@ describe('story.published source (broadcast, D-229)', () => {
 
   it('a deleted or expired story (no row) yields nothing', async () => {
     expect(await published.resolve(fakeTx([]), payload, { sinkAt: 'x' })).toEqual([]);
+  });
+
+  // 10-07 (MSTORY-05, PR-4, T-10-26): nobody is told that a member published a story.
+  it('10-07 a followers-only story (a member story) yields NOTHING, whoever the author is', async () => {
+    expect(
+      await published.resolve(fakeTx([{ ...row, visibility: 'followers' }]), payload, {
+        sinkAt: 'x',
+      }),
+    ).toEqual([]);
+  });
+
+  it('10-07 an organization story keeps its single broadcast (the positive control of the guard)', async () => {
+    const intents = await published.resolve(fakeTx([{ ...row, visibility: 'tenant' }]), payload, {
+      sinkAt: 'x',
+    });
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.audience).toEqual({ type: 'members' });
+  });
+
+  it('10-07 a row that does not name its audience fails closed (no notification)', async () => {
+    const { visibility: _omitted, ...bare } = row;
+    expect(await published.resolve(fakeTx([bare]), payload, { sinkAt: 'x' })).toEqual([]);
   });
 });
 
