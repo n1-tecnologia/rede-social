@@ -302,9 +302,12 @@ describe('COMM-02 — "every member of the tenant" is a POLICY value, not a colu
     const demoIds = (await page(tokens.demoMember, `?limit=${COMMUNITY_MAX_PAGE_SIZE}`)).items.map(
       (item) => item.id,
     );
+    // 10-10: the lab also carries the seed's MEMBER community; this case is about the organization four.
     const labIds = (
       await page(tokens.labAdmin, `?limit=${COMMUNITY_MAX_PAGE_SIZE}`, HOSTS.lab)
-    ).items.map((item) => item.id);
+    ).items
+      .filter((item) => item.kind === 'organization')
+      .map((item) => item.id);
 
     // The positive control: the lab tenant has its OWN four, with the SAME names. A read that
     // returned nothing at all would otherwise pass this assertion vacuously.
@@ -1485,6 +1488,7 @@ describe('2026-10-03 — PUT /v1/communities/order (the admin’s order of the A
   const ids = (items: CommunitySummary[]) => items.map((item) => item.id);
 
   /** The active set of a tenant in the list's own order, read from the table. */
+  /** 10-10: the ORGANIZATION set (the order the admin saves); the seed's lab member community is not part of it. */
   async function activeIdsInDb(tenantId: string): Promise<string[]> {
     const rows = await adminSql<{ id: string }[]>`
       select c.id::text as id
@@ -1492,6 +1496,7 @@ describe('2026-10-03 — PUT /v1/communities/order (the admin’s order of the A
        where c.tenant_id = ${tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'active'
+         and c.kind = 'organization'
        order by c.position asc, c.last_activity_at desc, c.id desc`;
     return rows.map((row) => row.id);
   }
