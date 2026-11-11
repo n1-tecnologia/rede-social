@@ -172,7 +172,8 @@
         "media": "Não foi possível carregar este story.",
         "retry": "Tentar novamente",
         "generic": "Algo deu errado. Tente novamente."
-      }
+      },
+      "menuNew": "Publicar novo story"
     },
     "publish": {
       "title": "Novo story",
@@ -250,6 +251,20 @@
     "row": {
       "retry": "Recarregar",
       "retryAction": "Não foi possível carregar mais stories. Tentar novamente."
+    },
+    "memberStory": {
+      "confirmOwn": {
+        "title": "Excluir story?",
+        "body": "Ele sai de Explorar e de todos os destaques onde está.",
+        "confirm": "Excluir story",
+        "cancel": "Manter story"
+      },
+      "confirmMod": {
+        "title": "Excluir story?",
+        "body": "Ele sai de Explorar e de todos os destaques onde está, para todos. A pessoa não é avisada.",
+        "confirm": "Excluir story",
+        "cancel": "Manter story"
+      }
     }
   }
 }

@@ -51,6 +51,7 @@ import {
   inicioGroups,
   inicioRow,
   openableHighlights,
+  storyPublishDoorFor,
   storyViewerItem,
   storyViewerLabels,
   tenantCircleFace,
@@ -623,9 +624,11 @@ export function storyCommentsProps(
  * `StoriesSurface` re-derives the same state on every close from the session's seen set.
  *
  * **The `+` circle's visibility is a PERMISSION, never a role** (UI-D-28, T-05-25). It renders
- * exactly when the bootstrap carries `stories.story.publish` — the same composed value the API's
- * `requirePermission` guard evaluates — so turning members into publishers in V2 is a settings flip
- * with no web change. A role comparison here would hard-code V1 into the home screen.
+ * exactly when the bootstrap carries `stories.story.publish` AND `content.publish` — the same composed
+ * values the API's `requirePermission` guards evaluate (`storyPublishDoorFor('inicio', …)`, 10-12):
+ * members hold the first since Phase 10 and their own circle lives in Explorar, so Início, the
+ * organization's voice, asks for the second too. A role comparison here would hard-code V1 into the
+ * home screen.
  *
  * **A failed read renders NOTHING for its part** (UI-SPEC E01/error, T-05.2-22): `loadStories` and
  * `loadHighlights` each swallow a failure into `null` and never navigate, so a failed stories read
@@ -685,7 +688,10 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
 
   const circles = inicioRow(
     {
-      canPublish: bootstrap.permissions.includes('stories.story.publish'),
+      // Pitfall 12 (10-12): Início is the ORGANIZATION's voice. Members now hold the composed
+      // `stories.story.publish` too, and their own circle lives in Explorar, so this door needs
+      // `content.publish` as well (`storyPublishDoorFor`, a permission, never a role).
+      canPublish: storyPublishDoorFor('inicio', bootstrap.permissions),
       tenant,
       sequenceLength: sequence.length,
       // #2b: the newest live story's author photo (the owner's face), read from the same page — no

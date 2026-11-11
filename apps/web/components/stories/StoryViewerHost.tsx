@@ -27,7 +27,7 @@ import {
   IconButton,
   useToast,
 } from '@rede-social/ui';
-import { BookmarkPlus, MessageCircle, MoreHorizontal, Send, Trash2 } from 'lucide-react';
+import { BookmarkPlus, MessageCircle, MoreHorizontal, Plus, Send, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import {
@@ -153,6 +153,19 @@ import {
  *   A deep link has nothing to drop: the member leaves for `closeHref`, the toast with them. A
  *   failure keeps the story on screen with the generic toast. The API's `requirePermission` is the
  *   boundary; this gate is UX.
+ *
+ * **Member groups (10-12, UI-D-701, D-711, D-716).** A group of `kind: 'member'` is ONE author's live
+ * stories in Explorar's row. Its "Mais opções" (the item's `menu` slot) is drawn for the AUTHOR in
+ * their own group and for a holder of `moderation.manage` (`memberMenu.canModerate`) in any member
+ * group, and is ABSENT from the DOM for everyone else, a curator of the organization included:
+ * `canCurate` is the organization's permission and neither draws the menu nor the labelled "Destacar"
+ * pill of UI-D-66 on a member group (for a member "Destacar" lives in the menu). The author's sheet
+ * holds "Publicar novo story" (an anchor), "Destacar" (only when `memberMenu.canHighlight`: the
+ * author owns an active community) and "Excluir story" (danger); the moderator's holds "Excluir
+ * story" only. The delete confirmation has two copy variants chosen by the role: the author's, and
+ * the moderator's, which adds that the person is not told. Both are fixed catalog strings with no
+ * name in them, so no member text can overflow the dialog. The write, the toast and the shipped
+ * handling after it are the curator's, unchanged; the API decides who may delete what.
  */
 
 /**
@@ -237,7 +250,17 @@ export type StoryViewerHostProps = {
    * groups and refreshes its page once the viewer has closed. Page mode passes none.
    */
   onStoryDeleted?: (storyId: string) => void;
+  /**
+   * 10-12 (UI-D-701): who gets "Mais opções" on a MEMBER group besides its author. `canModerate` is
+   * the composed `moderation.manage` (never a role); `canHighlight` is whether the AUTHOR owns an
+   * active community, which is what "Destacar" in their menu needs. Absent is both false.
+   */
+  memberMenu?: { canModerate: boolean; canHighlight: boolean };
 };
+
+/** Whose menu "Mais opções" opens (10-12): the organization's curator, a member's own, or a moderator's. */
+type MenuRole = 'curator' | 'author' | 'moderator';
+type MenuTarget = { storyId: string; role: MenuRole };
 
 /** The row's controls, as their `data-story-action` names them (the focus handoff). */
 type StoryActionName = 'like' | 'comment' | 'share' | 'highlight';
@@ -284,6 +307,17 @@ type HighlightSheetState = {
   selectedIds: string[];
   open: boolean;
 };
+
+/**
+ * The catalog namespace of the delete confirmation for a menu's role (UI-D-701): the history's own for
+ * the organization's curator, a member's two variants for the author and the moderator. Every value
+ * is a fixed string with no `{name}`.
+ */
+function deleteCopy(role: MenuRole | undefined): string {
+  if (role === 'author') return 'memberStory.confirmOwn';
+  if (role === 'moderator') return 'memberStory.confirmMod';
+  return 'history.confirmDelete';
+}
 
 /** `{group}: story {current} de {total}` and the two plural templates, resolved on the client. */
 function fill(template: string, values: Record<string, string | number>): string {
@@ -336,6 +370,7 @@ export function StoryViewerHost({
   interactions,
   share,
   onStoryDeleted,
+  memberMenu,
 }: StoryViewerHostProps) {
   const toast = useToast();
   const t = useTranslations('stories');
@@ -515,6 +550,23 @@ export function StoryViewerHost({
   /** A plain string, so `buildItem` does not change identity with the translator. */
   const highlightLabel = canCurate ? t('viewer.highlight') : null;
 
+  /**
+   * Whose menu a group gets (10-12, UI-D-701). A member group answers to the AUTHOR (their own group)
+   * or to a moderator, and to nobody else; every other group is the organization's, and answers to a
+   * curator. `canCurate` never reaches a member group.
+   */
+  const canModerate = memberMenu?.canModerate === true;
+  const roleFor = useCallback(
+    (group: StoryGroupState): MenuRole | null => {
+      if (group.kind === 'member') {
+        if (group.member?.isSelf === true) return 'author';
+        return canModerate ? 'moderator' : null;
+      }
+      return canCurate ? 'curator' : null;
+    },
+    [canCurate, canModerate],
+  );
+
   const close = useCallback(() => {
     if (onClose) {
       onClose();
@@ -548,14 +600,23 @@ export function StoryViewerHost({
   );
   /** Plain strings, for the same reason as `highlightLabel`. */
   const shareLabel = shareOrigin === null ? null : t('viewer.share');
-  const moreLabel = canCurate ? t('viewer.more') : null;
+  /** A plain string again: the slot is drawn only for a role (`roleFor`), so it is always the same word. */
+  const moreLabel = t('viewer.more');
 
   /**
-   * 2026-10-20: a curator's "Mais opções". `menuFor` is the story whose sheet is open, `confirmFor`
-   * the one the confirmation asks about; both pause the story, like every sheet over it.
+   * 2026-10-20: "Mais opções". `menuFor` is the story whose sheet is open and WHOSE menu it is (the
+   * organization's curator, a member's own, a moderator's), `confirmFor` the one the confirmation asks
+   * about; both pause the story, like every sheet over it. Each keeps its last value in a ref, so the
+   * sheet and the dialog keep their rows and words through their exit animation.
    */
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [confirmFor, setConfirmFor] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<MenuTarget | null>(null);
+  const [confirmFor, setConfirmFor] = useState<MenuTarget | null>(null);
+  const lastMenu = useRef<MenuTarget | null>(null);
+  const lastConfirm = useRef<MenuTarget | null>(null);
+  if (menuFor !== null) lastMenu.current = menuFor;
+  if (confirmFor !== null) lastConfirm.current = confirmFor;
+  const menuView = menuFor ?? lastMenu.current;
+  const confirmView = confirmFor ?? lastConfirm.current;
   // Stable by habit: `BottomSheet`'s focus trap reads `onClose` through a ref and arms once per
   // opening, so a new identity would no longer move the focus.
   const closeMenu = useCallback(() => setMenuFor(null), []);
@@ -563,7 +624,7 @@ export function StoryViewerHost({
   const deletedMessage = t('history.toasts.deleted');
 
   const confirmDelete = useCallback(async () => {
-    const storyId = confirmFor;
+    const storyId = confirmFor?.storyId ?? null;
     if (storyId === null) return;
     let result: Awaited<ReturnType<typeof deleteStoryAction>>;
     try {
@@ -595,6 +656,10 @@ export function StoryViewerHost({
   const buildItem = useCallback(
     (group: StoryGroupState, header: ReactNode, item: StoryViewerItemView): StoryViewerItem => {
       const segment = `${group.key}:${item.id}`;
+      const role = roleFor(group);
+      // UI-D-66: the labelled pill is the ORGANIZATION curator's door; it is never drawn on a member
+      // group, where "Destacar" lives in the author's menu.
+      const pill = group.kind === 'member' ? null : highlightLabel;
       return {
         id: item.id,
         mediaKind: item.mediaKind,
@@ -657,22 +722,22 @@ export function StoryViewerHost({
             shareLabel={shareLabel ?? undefined}
             onShare={shareLabel === null ? undefined : () => shareStory(item.id)}
             // UI-D-66: the node exists only for a curator. Members never get it.
-            highlightLabel={highlightLabel ?? undefined}
-            onHighlight={highlightLabel === null ? undefined : () => void openHighlight(item.id)}
+            highlightLabel={pill ?? undefined}
+            onHighlight={pill === null ? undefined : () => void openHighlight(item.id)}
           />
         ),
         // 2026-10-20: "Mais opções" (delete) under the same permission as "Destacar", in the
         // viewer's HEADER, where a post keeps its own "…": in the bottom row it would not fit a
         // 390px screen beside the share and "Destacar".
         menu:
-          moreLabel === null ? undefined : (
+          role === null ? undefined : (
             <IconButton
               icon={MoreHorizontal}
               size={20}
               label={moreLabel}
               data-story-action="more"
               className="text-white"
-              onClick={() => setMenuFor(item.id)}
+              onClick={() => setMenuFor({ storyId: item.id, role })}
             />
           ),
       };
@@ -689,6 +754,7 @@ export function StoryViewerHost({
       shareLabel,
       shareStory,
       moreLabel,
+      roleFor,
     ],
   );
 
@@ -766,7 +832,7 @@ export function StoryViewerHost({
                 }}
               />
             ) : null}
-            {canCurate && highlightSheet ? (
+            {(canCurate || memberMenu?.canHighlight === true) && highlightSheet ? (
               <HighlightSheet
                 mode="checklist"
                 open={highlightSheet.open}
@@ -805,39 +871,51 @@ export function StoryViewerHost({
                 }
               />
             ) : null}
-            {moreLabel !== null ? (
-              <>
-                {/* 2026-10-20: the history's own row and confirmation, reworded nowhere. */}
-                <BottomSheet
-                  open={menuFor !== null}
-                  onClose={closeMenu}
-                  title={t('history.menu.title')}
-                >
-                  <div className="flex flex-col gap-1">
-                    <StoryMenuRow
-                      icon={Trash2}
-                      label={t('history.menu.delete')}
-                      destructive
-                      onClick={() => {
-                        setConfirmFor(menuFor);
-                        setMenuFor(null);
-                      }}
-                    />
-                  </div>
-                </BottomSheet>
-                <ConfirmDialog
-                  open={confirmFor !== null}
-                  title={t('history.confirmDelete.title')}
-                  body={t('history.confirmDelete.body')}
-                  confirmLabel={t('history.confirmDelete.confirm')}
-                  cancelLabel={t('history.confirmDelete.cancel')}
-                  tone="danger"
-                  onConfirm={confirmDelete}
-                  onClose={closeConfirm}
-                  onError={() => toast.show({ tone: 'error', message: genericError })}
+            {/* 2026-10-20: the history's own row and confirmation, reworded nowhere for the
+                organization's curator; 10-12 gives the author and the moderator of a member group
+                their own rows and delete words (UI-D-701). Closed, both render nothing. */}
+            <BottomSheet
+              open={menuFor !== null}
+              onClose={closeMenu}
+              title={t('history.menu.title')}
+            >
+              <div className="flex flex-col gap-1">
+                {menuView?.role === 'author' ? (
+                  <StoryMenuRow icon={Plus} label={t('viewer.menuNew')} href="/stories/publicar" />
+                ) : null}
+                {menuView?.role === 'author' && memberMenu?.canHighlight === true ? (
+                  <StoryMenuRow
+                    icon={BookmarkPlus}
+                    label={t('viewer.highlight')}
+                    onClick={() => {
+                      const storyId = menuView.storyId;
+                      setMenuFor(null);
+                      void openHighlight(storyId);
+                    }}
+                  />
+                ) : null}
+                <StoryMenuRow
+                  icon={Trash2}
+                  label={t('history.menu.delete')}
+                  destructive
+                  onClick={() => {
+                    setConfirmFor(menuFor);
+                    setMenuFor(null);
+                  }}
                 />
-              </>
-            ) : null}
+              </div>
+            </BottomSheet>
+            <ConfirmDialog
+              open={confirmFor !== null}
+              title={t(`${deleteCopy(confirmView?.role)}.title`)}
+              body={t(`${deleteCopy(confirmView?.role)}.body`)}
+              confirmLabel={t(`${deleteCopy(confirmView?.role)}.confirm`)}
+              cancelLabel={t(`${deleteCopy(confirmView?.role)}.cancel`)}
+              tone="danger"
+              onConfirm={confirmDelete}
+              onClose={closeConfirm}
+              onError={() => toast.show({ tone: 'error', message: genericError })}
+            />
           </>
         }
         labels={{

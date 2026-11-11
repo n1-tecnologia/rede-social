@@ -8,6 +8,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { type ReactNode, Suspense } from 'react';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
+import { loadCommunities } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
 import { buildFeedSurface, storyCommentsProps } from '@/lib/registry';
 import { loadStoryAuthors } from '@/lib/stories';
@@ -15,6 +16,8 @@ import {
   authorRowLabels,
   explorarStoriesRowKind,
   memberStoriesRow,
+  moderatorStoriesRow,
+  storyPublishDoorFor,
   storyViewerLabels,
 } from '@/lib/story-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
@@ -96,7 +99,7 @@ async function StoriesRowSection({
   kind: 'member' | 'moderator';
   pending: Promise<StoryAuthorsPage | null>;
 }) {
-  const [page, tf, tfeed, tmod, t, locale, shareOrigin] = await Promise.all([
+  const [page, tf, tfeed, tmod, t, locale, shareOrigin, ownsCommunity] = await Promise.all([
     pending,
     getTranslations('stories'),
     // D-82: the sheet's own copy is the FEED's, read from the feed namespace.
@@ -105,20 +108,28 @@ async function StoriesRowSection({
     getTranslations(),
     getLocale(),
     primaryHostOrigin(),
+    kind === 'member' ? ownsActiveCommunity(bootstrap) : Promise.resolve(false),
   ]);
   const labels = authorRowLabels(tf);
-  // The moderator's row arrives with its own task (10-12, Task 2); until then it renders nothing.
-  if (kind !== 'member') return null;
-  const row = memberStoriesRow(
-    { ownAvatarUrl: bootstrap.membership.profile.avatarUrl, page },
-    labels,
-  );
+  const member = kind === 'member';
+  // The moderator's row is paged (it carries the next cursor); the member's is one page.
+  const moderator = member ? null : moderatorStoriesRow(page, labels);
+  const row =
+    moderator ??
+    memberStoriesRow(
+      {
+        ownAvatarUrl: bootstrap.membership.profile.avatarUrl,
+        page,
+        canPublish: storyPublishDoorFor('explorar', bootstrap.permissions),
+      },
+      labels,
+    );
   if (row.circles.length === 0) return null;
   return (
     <ExplorarStoriesRow
       circles={row.circles}
       groups={row.groups}
-      regionLabel={t('social.stories.region')}
+      regionLabel={member ? t('social.stories.region') : t('social.stories.regionStaff')}
       scrollLabels={{ previous: tf('scroll.previous'), next: tf('scroll.next') }}
       viewer={{
         labels: storyViewerLabels(tf),
@@ -126,12 +137,40 @@ async function StoriesRowSection({
         onUnlike: unlikeStoryAction,
         comments: storyCommentsProps(locale, tfeed, tf, bootstrap, tmod),
         authorRing: { seen: labels.author, unseen: labels.authorUnseen },
+        // UI-D-701: who gets "Mais opções" on a member group. The moderator's is a PERMISSION
+        // (`moderation.manage`), never a role; "Destacar" is the author's, and only with an active
+        // community of their own. The API is the control on every write (UI-D-710).
+        memberMenu: {
+          canModerate: bootstrap.permissions.includes('moderation.manage'),
+          canHighlight: ownsCommunity,
+        },
         ...(shareOrigin === null
           ? {}
           : { share: { origin: shareOrigin, title: bootstrap.tenant.displayName } }),
       }}
+      paging={
+        moderator
+          ? {
+              nextCursor: moderator.nextCursor,
+              labels,
+              retry: { label: tf('row.retry'), actionLabel: tf('row.retryAction') },
+            }
+          : undefined
+      }
     />
   );
+}
+
+/**
+ * Whether the member owns at least one ACTIVE community (UI-D-701: the viewer menu's "Destacar" exists
+ * only then). The communities list read already says it, in the caller's own `memberQuota`, so one
+ * row of the list is enough. It is a UX hint (the API refuses a highlight write on a community that
+ * is not theirs): the module off, a refused read or no quota is `false`, never an error.
+ */
+async function ownsActiveCommunity(bootstrap: Bootstrap): Promise<boolean> {
+  if (!bootstrap.modules.some((module) => module.key === 'communities')) return false;
+  const page = await loadCommunities({ limit: 1 });
+  return (page?.memberQuota?.ownedActive ?? 0) > 0;
 }
 
 /**

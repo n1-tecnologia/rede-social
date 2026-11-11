@@ -2278,11 +2278,13 @@ describe('StoryViewerHost — member groups: the author’s and the moderator’
     await act(async () => {
       fireEvent.click(within(confirm).getByRole('button', { name: 'Excluir story' }));
     });
-    const pendingConfirm = within(confirm).getByRole('button', { name: 'Excluir story' });
+    // The dialog is queried again: the test double for `motion` re-creates its elements on a render.
+    const busy = screen.getByRole('dialog', { name: 'Excluir story?' });
+    const pendingConfirm = within(busy).getByRole('button', { name: 'Excluir story' });
     expect(pendingConfirm.getAttribute('aria-busy')).toBe('true');
     expect((pendingConfirm as HTMLButtonElement).disabled).toBe(true);
     expect(
-      (within(confirm).getByRole('button', { name: 'Manter story' }) as HTMLButtonElement).disabled,
+      (within(busy).getByRole('button', { name: 'Manter story' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(onStoryDeleted).not.toHaveBeenCalled();
     await act(async () => {

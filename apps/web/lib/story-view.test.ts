@@ -1045,4 +1045,30 @@ describe('10-12 — the Explorar row (UI-D-697..UI-D-700, D-714, D-717)', () => 
     ).toEqual(['own']);
     expect(memberStoriesRow({ ownAvatarUrl: null, page: null }, labels).circles).toHaveLength(1);
   });
+
+  it('R14. a member the API does not let publish gets no publish door, and no row at all when nobody they follow has a story; their own live story stays openable', () => {
+    const labels = rowLabels();
+    expect(
+      memberStoriesRow(
+        { ownAvatarUrl: null, page: { items: [], nextCursor: null }, canPublish: false },
+        labels,
+      ).circles,
+    ).toEqual([]);
+    const withAuthor = memberStoriesRow(
+      { ownAvatarUrl: null, page: { items: [author(2)], nextCursor: null }, canPublish: false },
+      labels,
+    );
+    expect(withAuthor.circles.map((c) => c.key)).toEqual([
+      'author:0e000000-0000-4000-8000-000000000002',
+    ]);
+    const ownStory = memberStoriesRow(
+      {
+        ownAvatarUrl: null,
+        page: { items: [author(1, { isSelf: true })], nextCursor: null },
+        canPublish: false,
+      },
+      labels,
+    );
+    expect(ownStory.circles[0]).toMatchObject({ kind: 'open', key: 'own' });
+  });
 });

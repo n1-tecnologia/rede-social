@@ -128,6 +128,8 @@ export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
      * only where the row has author circles (Explorar).
      */
     authorRing?: { seen: string; unseen: string };
+    /** 10-12 (UI-D-701): who gets "Mais opções" on a member group, passed straight to the viewer. */
+    memberMenu?: { canModerate: boolean; canHighlight: boolean };
     /**
      * 2026-10-20: the viewer's share control — the tenant's VERIFIED primary origin and its display
      * name, both resolved on the server. Absent: no share control.
@@ -517,6 +519,7 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
           interactions={interactions}
           share={viewer.share}
           onStoryDeleted={onStoryDeleted}
+          memberMenu={viewer.memberMenu}
           onClose={close}
         />
       ) : null}

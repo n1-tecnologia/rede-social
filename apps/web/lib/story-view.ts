@@ -1085,7 +1085,16 @@ export type StoriesRowView = { circles: RowCircleView[]; groups: StoryGroupView[
  * circle ALONE as the publish door: losing the door is worse than losing the row.
  */
 export function memberStoriesRow(
-  input: { ownAvatarUrl: string | null; page: StoryAuthorsPage | null },
+  input: {
+    ownAvatarUrl: string | null;
+    page: StoryAuthorsPage | null;
+    /**
+     * Whether the composed permissions let this member publish a story (`storyPublishDoorFor`). The
+     * default is `true`; without it a member with no story of their own gets no own circle: the door
+     * is not theirs to open (the API refuses the write regardless).
+     */
+    canPublish?: boolean;
+  },
   labels: AuthorRowLabels,
 ): StoriesRowView {
   const items = input.page?.items ?? [];
@@ -1097,13 +1106,51 @@ export function memberStoriesRow(
   if (own) {
     groups.push(authorGroupView(own, true));
     circles.push(ownCircleView({ avatarUrl: ownAvatarUrl, group: 0 }, labels));
-  } else {
+  } else if (input.canPublish !== false) {
     circles.push(ownCircleView({ avatarUrl: ownAvatarUrl, group: null }, labels));
   }
   for (const item of items) {
     if (item.isSelf) continue;
     groups.push(authorGroupView(item, false));
     circles.push(authorCircleView(item, groups.length - 1, labels));
+  }
+  return { circles, groups };
+}
+
+/**
+ * The moderator's row (UI-D-697, UI-D-699, D-717): EVERY member with a live story, one author circle
+ * each, in the API's order, with no own circle and no follow state (`isSelf` is always false in that
+ * read). It carries the cursor of the next page; a failed or empty first read is no circle at all (the
+ * row renders no node and reserves no height: nothing is surfaced, the failure was logged).
+ */
+export function moderatorStoriesRow(
+  page: StoryAuthorsPage | null,
+  labels: AuthorRowLabels,
+): StoriesRowView & { nextCursor: string | null } {
+  const items = page?.items ?? [];
+  const row = appendAuthors({ circles: [], groups: [] }, items, labels);
+  return { ...row, nextCursor: items.length === 0 ? null : (page?.nextCursor ?? null) };
+}
+
+/**
+ * The next page of authors after the ones already in the row: a membership already there is dropped
+ * (the keyset can repeat a circle whose newest story moved between two reads), each new author's
+ * group takes the next group number, and the input is never mutated.
+ */
+export function appendAuthors(
+  row: StoriesRowView,
+  authors: readonly AuthorRowItem[],
+  labels: AuthorRowLabels,
+): StoriesRowView {
+  const circles = [...row.circles];
+  const groups = [...row.groups];
+  const present = new Set(groups.map((group) => group.key));
+  for (const author of authors) {
+    const key = authorGroupKey(author.membershipId);
+    if (present.has(key)) continue;
+    present.add(key);
+    groups.push(authorGroupView(author, false));
+    circles.push(authorCircleView(author, groups.length - 1, labels));
   }
   return { circles, groups };
 }
