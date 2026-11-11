@@ -2738,37 +2738,76 @@ export async function reorderHighlights(
 
 /**
  * `GET /v1/stories/highlights/catalog` (D-110) — every highlight the shared "add to highlight" sheet
- * may offer, in ONE statement over `highlightProjection`: Início's, then each ACTIVE community's,
- * ordered `community_id nulls first, position, id` (a total order).
+ * may offer, in ONE statement over `highlightProjection`.
+ *
+ * **WHICH places depend on who asks (10-09, MPUB-06, D-713).** A holder of `stories.story.manage` is offered
+ * Início's highlights, then each ACTIVE ORGANIZATION community's (`c.kind = 'organization'`), ordered
+ * `community_id nulls first, position, id` (a total order, unchanged): never a member community, which the
+ * admin may not curate. Anyone else (a member holding `stories.story.publish`) is offered ONLY the highlights
+ * of the ACTIVE member communities they created (`c.kind = 'member' and c.created_by_user_id = ctx.userId`),
+ * in their own activity order (`last_activity_at desc`), and never Início's: no destination they may not
+ * curate is ever listed. A tenant with no such community answers `{ items: [] }`, never an error (EP-49,
+ * EP-50).
  *
  * - A community highlight is listed only while its community is this tenant's, not removed and
  *   `active`: an archived community takes no new content, so offering it in the sheet would only
- *   lead to an `archived` refusal.
+ *   lead to an `archived` refusal. A member community whose creator is not a live member (blocked,
+ *   removed) is hidden too, by the explicit predicate beside the RLS gate (D-708).
  * - With the `communities` module OFF no community highlight is listed at all (HIGHLIGHT-04) — the
  *   rows are untouched and come back with the module.
- * - It is the CURATOR's read (manage-only at the route): empty highlights are included.
+ * - It is the CURATOR's read (empty highlights are included); the route guard is the any-of literal.
  */
 export async function listHighlightCatalog(
   ctx: RequestContext,
   caller: HighlightCaller,
 ): Promise<HighlightList> {
   const gate = await readPlaceGate(ctx, caller);
-  const communityPlaces = gate.communitiesOn
-    ? sql`exists (
+
+  const organizationPlaces = sql`exists (
           select 1 from communities hc
            where hc.id = h.community_id
              and hc.tenant_id = ${ctx.tenantId}::uuid
+             and hc.kind = 'organization'
              and hc.status = 'active'
              and hc.deleted_at is null
-        )`
-    : sql`false`;
+        )`;
+  const ownMemberPlaces = sql`exists (
+          select 1 from communities hc
+           where hc.id = h.community_id
+             and hc.tenant_id = ${ctx.tenantId}::uuid
+             and hc.kind = 'member'
+             and hc.created_by_user_id = ${ctx.userId}::uuid
+             and hc.status = 'active'
+             and hc.deleted_at is null
+             and exists (
+               select 1
+                 from memberships hm
+                where hm.tenant_id = hc.tenant_id
+                  and hm.user_id = hc.created_by_user_id
+                  and hm.status = 'active'
+                  and hm.blocked_at is null
+                  and hm.deleted_at is null)
+        )`;
+
+  const manager = gate.canManage;
+  // Fail closed: a caller holding neither flag is offered nothing.
+  const offered = manager
+    ? gate.communitiesOn
+      ? sql`(h.community_id is null or ${organizationPlaces})`
+      : sql`h.community_id is null`
+    : gate.canPublish && gate.communitiesOn
+      ? ownMemberPlaces
+      : sql`false`;
 
   const rows = await withTenantTx(ctx, (tx) =>
-    tx.execute<HighlightSummaryRow>(sql`
-      ${highlightProjection(
-        sql`h.tenant_id = ${ctx.tenantId}::uuid and (h.community_id is null or ${communityPlaces})`,
-      )}
-       order by hp.community_id nulls first, hp.position, hp.id`),
+    manager
+      ? tx.execute<HighlightSummaryRow>(sql`
+      ${highlightProjection(sql`h.tenant_id = ${ctx.tenantId}::uuid and ${offered}`)}
+       order by hp.community_id nulls first, hp.position, hp.id`)
+      : tx.execute<HighlightSummaryRow>(sql`
+      ${highlightProjection(sql`h.tenant_id = ${ctx.tenantId}::uuid and ${offered}`)}
+       join communities mc on mc.id = hp.community_id and mc.tenant_id = ${ctx.tenantId}::uuid
+       order by mc.last_activity_at desc, hp.community_id, hp.position, hp.id`),
   );
 
   log.info(
@@ -2778,6 +2817,7 @@ export async function listHighlightCatalog(
       userId: ctx.userId,
       requestId: ctx.requestId,
       communitiesOn: gate.communitiesOn,
+      scope: manager ? 'organization' : 'own',
       returned: rows.length,
     },
     'story highlight catalog listed',
