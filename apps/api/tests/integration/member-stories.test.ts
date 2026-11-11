@@ -41,7 +41,7 @@ import {
 type Envelope = { error: { code: string; message?: string; details?: Record<string, unknown> } };
 
 const PREFIX = 'Teste 10-07 ';
-const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '' };
+const tokens = { helena: '', marcos: '', alvaro: '', labAdmin: '', support: '' };
 const userIds = { helena: '', marcos: '', alvaro: '', labAdmin: '' };
 let labTenantId = '';
 let restoreSocial: () => Promise<void> = async () => {};
@@ -212,6 +212,7 @@ beforeAll(async () => {
   tokens.marcos = await signInAs('marcos.vinicius@rede-lab.local', SEED_PASSWORD);
   tokens.alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
   tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
+  tokens.support = await signInAs('support@rede-lab.local', SEED_PASSWORD);
   userIds.helena = await userOf('helena.kuster@rede-lab.local');
   userIds.marcos = await userOf('marcos.vinicius@rede-lab.local');
   userIds.alvaro = await userOf('alvaro.pinheiro@rede-lab.local');
@@ -636,5 +637,192 @@ describe('10 delete', () => {
     ) as StorySummary;
     expect(orgWire.authorUserId).toBeNull();
     expect(orgWire.author).toBeNull();
+  });
+});
+
+/**
+ * 10-08 (D-714, D-717, D-705, D-718; MSTORY-03/04/08): the Explorar story row's API. Alvaro follows Helena
+ * (seed), Helena follows Marcos, Marcos follows nobody; the lab admin holds `moderation.manage`; `support@`
+ * is a real `support_tenant` session. Stories are written by hand so every case controls its audience and
+ * its clock. The describe sweeps its own residue first (the earlier describes leave their stories behind).
+ */
+type AuthorItem = {
+  membershipId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  storyCount: number;
+  latestPublishedAt: string;
+  hasUnseen: boolean;
+  isSelf: boolean;
+};
+type AuthorsPage = { items: AuthorItem[]; nextCursor: string | null };
+
+const membershipOf = async (userId: string): Promise<string> => {
+  const [row] = await adminSql<{ id: string }[]>`
+    select id from public.memberships
+     where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`;
+  return row?.id ?? '';
+};
+const authorsRead = (token: string, query = '') => request(`/v1/stories/authors${query}`, token);
+const groupRead = (token: string, membershipId: string) =>
+  request(`/v1/stories/authors/${membershipId}`, token);
+const authorsOf = async (token: string, query = ''): Promise<AuthorsPage> => {
+  const res = await authorsRead(token, query);
+  expect(res.status, `GET /v1/stories/authors${query}`).toBe(200);
+  return (await res.json()) as AuthorsPage;
+};
+
+describe('10 authors', () => {
+  const memberships = { helena: '', marcos: '', alvaro: '' };
+  const made: { helenaOld?: string; helenaNew?: string; marcos?: string; org?: string } = {};
+
+  beforeAll(async () => {
+    await sweep();
+    memberships.helena = await membershipOf(userIds.helena);
+    memberships.marcos = await membershipOf(userIds.marcos);
+    memberships.alvaro = await membershipOf(userIds.alvaro);
+  });
+
+  it('1. MSTORY-03 / D-714 tracer: Alvaro (follows Helena) reads Helena’s circle and not Marcos’s, with exactly the seven keys; no own item without a live story', async () => {
+    made.helenaOld = await insertStory({
+      author: userIds.helena,
+      visibility: 'followers',
+      caption: `${PREFIX}helena antiga`,
+      publishedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    });
+    made.helenaNew = await insertStory({
+      author: userIds.helena,
+      visibility: 'followers',
+      caption: `${PREFIX}helena nova`,
+      publishedAt: new Date(Date.now() - 1 * 3_600_000).toISOString(),
+    });
+    made.marcos = await insertStory({
+      author: userIds.marcos,
+      visibility: 'followers',
+      caption: `${PREFIX}marcos`,
+    });
+    made.org = await insertStory({
+      author: userIds.labAdmin,
+      visibility: 'tenant',
+      caption: `${PREFIX}org`,
+    });
+    const page = await authorsOf(tokens.alvaro);
+    expect(page.nextCursor).toBeNull();
+    const ids = page.items.map((item) => item.membershipId);
+    expect(ids).toContain(memberships.helena);
+    expect(ids).not.toContain(memberships.marcos);
+    expect(ids).not.toContain(memberships.alvaro);
+    const helena = page.items.find((item) => item.membershipId === memberships.helena);
+    expect(Object.keys(helena ?? {}).sort()).toEqual([
+      'avatarUrl',
+      'displayName',
+      'hasUnseen',
+      'isSelf',
+      'latestPublishedAt',
+      'membershipId',
+      'storyCount',
+    ]);
+    expect(helena?.storyCount).toBe(2);
+    expect(helena?.hasUnseen).toBe(true);
+    expect(helena?.isSelf).toBe(false);
+    expect(helena?.displayName.length).toBeGreaterThan(0);
+    // The organization story is in neither read: no circle for the admin, no user id on the wire.
+    expect(ids).not.toContain(await membershipOf(userIds.labAdmin));
+    expect(JSON.stringify(page)).not.toContain(userIds.helena);
+  });
+
+  it('2. D-714: the group read returns Helena’s live stories oldest first through the story projection (viewerSeen included)', async () => {
+    const res = await groupRead(tokens.alvaro, memberships.helena);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: StorySummary[] };
+    expect(body.items.map((item) => item.id)).toEqual([made.helenaOld, made.helenaNew]);
+    expect(body.items.every((item) => item.viewerSeen === false)).toBe(true);
+    expect(body.items.every((item) => item.authorUserId === null)).toBe(true);
+    expect(body.items[0]?.author?.membershipId).toBe(memberships.helena);
+  });
+
+  it('3. T-10-30: Marcos (not a follower) gets the bare 404 on the group read, on the story id, and on a like and a comment; Alvaro’s like and comment succeed', async () => {
+    for (const [label, res] of [
+      ['group', await groupRead(tokens.marcos, memberships.helena)],
+      ['story id', await request(`/v1/stories/${made.helenaNew}`, tokens.marcos)],
+      [
+        'like',
+        await request(`/v1/stories/${made.helenaNew}/likes`, tokens.marcos, { method: 'POST' }),
+      ],
+      [
+        'comments list',
+        await request(`/v1/stories/${made.helenaNew}/comments`, tokens.marcos),
+      ],
+      [
+        'comment',
+        await post(`/v1/stories/${made.helenaNew}/comments`, tokens.marcos, { body: 'oi' }),
+      ],
+    ] as const) {
+      expect(res.status, label).toBe(404);
+      expect((await errorOf(res)).details, label).toBeUndefined();
+    }
+    // Positive controls: the follower reads, likes and comments on the same story.
+    expect((await request(`/v1/stories/${made.helenaNew}`, tokens.alvaro)).status).toBe(200);
+    const liked = await request(`/v1/stories/${made.helenaNew}/likes`, tokens.alvaro, {
+      method: 'POST',
+    });
+    expect(liked.status).toBe(200);
+    const commented = await post(`/v1/stories/${made.helenaNew}/comments`, tokens.alvaro, {
+      body: `${PREFIX}comentario`,
+    });
+    expect(commented.status).toBe(201);
+    expect(
+      (await request(`/v1/stories/${made.helenaNew}/comments`, tokens.alvaro)).status,
+    ).toBe(200);
+  });
+
+  it('4. the moderator without a follow reads Helena’s group (the moderator branch); a real support session gets 403 on both routes', async () => {
+    const res = await groupRead(tokens.labAdmin, memberships.helena);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { items: StorySummary[] }).items).toHaveLength(2);
+    for (const [label, refused] of [
+      ['authors', await authorsRead(tokens.support)],
+      ['group', await groupRead(tokens.support, memberships.helena)],
+    ] as const) {
+      expect(refused.status, label).toBe(403);
+      expect((await errorOf(refused)).code, label).toBe('FORBIDDEN');
+    }
+  });
+
+  it('5. EP-61: a member with no followee and no story gets 200 { items: [], nextCursor: null }', async () => {
+    const page = await authorsOf(tokens.marcos);
+    expect(page).toEqual({ items: [], nextCursor: null });
+  });
+
+  it('6. D-718: with social off both routes answer 404 MODULE_DISABLED (before any read), and they come back with social on', async () => {
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+    try {
+      for (const [label, res] of [
+        ['authors', await authorsRead(tokens.alvaro)],
+        ['group', await groupRead(tokens.alvaro, memberships.helena)],
+        ['authors (moderator)', await authorsRead(tokens.labAdmin)],
+        ['group (moderator)', await groupRead(tokens.labAdmin, memberships.helena)],
+      ] as const) {
+        expect(res.status, label).toBe(404);
+        expect((await errorOf(res)).code, label).toBe('MODULE_DISABLED');
+      }
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labTenantId);
+    }
+    expect((await authorsRead(tokens.alvaro)).status).toBe(200);
+  });
+
+  it('7. a malformed membership id is the bare 404 (the param schema), and an unknown or another tenant’s id is the same 404', async () => {
+    for (const id of ['abc', randomUUID()]) {
+      const res = await groupRead(tokens.alvaro, id);
+      expect(res.status, id).toBe(404);
+      expect((await errorOf(res)).details, id).toBeUndefined();
+    }
   });
 });

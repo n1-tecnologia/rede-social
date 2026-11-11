@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { publishStorySchema, storyPageSchema, storySummarySchema } from '../contracts/index';
+import {
+  STORY_AUTHORS_PAGE_SIZE,
+  publishStorySchema,
+  storyAuthorSchema,
+  storyAuthorsPageSchema,
+  storyAuthorsQuerySchema,
+  storyPageSchema,
+  storySummarySchema,
+} from '../contracts/index';
 
 /**
  * 10-07 (D-714, D-704): the member publish body is the organization's, unchanged. The audience of a
@@ -104,5 +112,56 @@ describe('10-07 storySummarySchema: the author wire (A7)', () => {
   it('a page from an API that predates `author` still parses, every story with a null author', () => {
     const page = storyPageSchema.parse({ items: [summary(), summary()], nextCursor: null });
     expect(page.items.map((item) => item.author)).toEqual([null, null]);
+  });
+});
+
+/**
+ * 10-08 (D-714, D-717, T-10-30): the Explorar circle of one author. EXACTLY seven keys, `.strict()`: it names
+ * the author by membership id (never a user id), carries the counts the ring needs and the caller's own seen
+ * flag, and nothing else.
+ */
+describe('10-08 storyAuthorSchema: the Explorar circle', () => {
+  const item = {
+    membershipId: OTHER,
+    displayName: 'Helena Kuster',
+    avatarUrl: '/v1/media/0b000000-0000-4000-8000-0000000000a1/w128',
+    storyCount: 2,
+    latestPublishedAt: '2026-11-11T12:00:00.000000Z',
+    hasUnseen: true,
+    isSelf: false,
+  };
+
+  it('parses an item of exactly the listed keys (avatarUrl may be null)', () => {
+    expect(storyAuthorSchema.parse(item)).toEqual(item);
+    expect(storyAuthorSchema.parse({ ...item, avatarUrl: null }).avatarUrl).toBeNull();
+  });
+
+  it('refuses an extra userId key, a missing key and a non-uuid membership id', () => {
+    for (const bad of [
+      { ...item, userId: UUID },
+      { ...item, authorUserId: UUID },
+      { ...item, isSelf: undefined },
+      { ...item, membershipId: 'not-a-uuid' },
+      { ...item, storyCount: 1.5 },
+    ]) {
+      expect(storyAuthorSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('wraps the items in a strict page with a nullable cursor, and the page size is 20', () => {
+    expect(storyAuthorsPageSchema.parse({ items: [item], nextCursor: null }).items).toHaveLength(1);
+    expect(storyAuthorsPageSchema.safeParse({ items: [item], nextCursor: null, x: 1 }).success).toBe(
+      false,
+    );
+    expect(STORY_AUTHORS_PAGE_SIZE).toBe(20);
+  });
+
+  it('the query clamps limit to 1..50, defaults to 20 and degrades a malformed limit', () => {
+    expect(storyAuthorsQuerySchema.parse({}).limit).toBe(20);
+    expect(storyAuthorsQuerySchema.parse({ limit: '2' }).limit).toBe(2);
+    expect(storyAuthorsQuerySchema.parse({ limit: '900' }).limit).toBe(50);
+    expect(storyAuthorsQuerySchema.parse({ limit: '0' }).limit).toBe(1);
+    expect(storyAuthorsQuerySchema.parse({ limit: 'abc' }).limit).toBe(20);
+    expect(storyAuthorsQuerySchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 });
