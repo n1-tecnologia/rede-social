@@ -1,4 +1,3 @@
-import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { PageHeader } from '@rede-social/ui';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -15,8 +14,9 @@ import { getHostTenant } from '@/lib/tenant-host';
  * highlight manage screen, opened by the trailing "Gerenciar" circle of that community's row.
  *
  * **Every miss is the community page's ONE not-found screen** (`../not-found.tsx`): an unknown id,
- * another tenant's, a removed community, the `communities` module off, AND a caller without
- * `stories.story.manage` (UI-D-72, T-05.2-39 — never a disabled page). The API refuses all of them
+ * another tenant's, a removed community, the `communities` module off, AND a caller the API does not let
+ * curate (`viewer.canCurate`, 10-14: the creator of a member community, `stories.story.manage` on an
+ * organization one; UI-D-72, T-05.2-39 — never a disabled page). The API refuses all of them
  * independently; the screen simply never offers controls that would fail.
  *
  * **An ARCHIVED community still renders, reduced** (UI-D-80, R-D-F): its note under the header, no
@@ -38,12 +38,17 @@ export default async function CommunityHighlightsPage({
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const { communityId } = await params;
-  const [bootstrap, result] = await Promise.all([requireBootstrap(), loadCommunity(communityId)]);
-  if (!bootstrap.permissions.includes(STORY_PERMISSIONS.manage)) notFound();
-  // Not ok covers unknown, foreign, removed, the communities module off — and a read failure, which
-  // must not render a manage screen for a community nobody could verify.
+  // `requireBootstrap` runs for its session and host guards; the decision is the community's own flags.
+  const [, result] = await Promise.all([requireBootstrap(), loadCommunity(communityId)]);
+  // Not ok covers unknown, foreign, removed, the communities module off, a blocked or departed creator
+  // (the API's bare 404, UI-D-717) — and a read failure, which must not render a manage screen for a
+  // community nobody could verify.
   if (result.status !== 'ok') notFound();
   const community = result.community;
+  // 10-14 (UI-D-713, UI-D-716): the API's `viewer.canCurate` is the guard — `stories.story.manage` on an
+  // organization community, the creator on a member one (while `social` is on) — never a role or an id
+  // comparison here. Any other caller gets the not-found screen, never a disabled page.
+  if (!community.viewer.canCurate) notFound();
 
   const [query, row, ts] = await Promise.all([
     searchParams,

@@ -101,8 +101,13 @@ export default async function PublishStoryPage({
   // does it, so an archived community can never become a pickable destination. For a member the
   // destination decision is the API's `viewer.actions.story` (the Escopo seam), read here and nowhere
   // else: never the owner flag.
+  // 10-14 (UI-D-718): a MEMBER community is a destination only where `actions.story` says so, for the
+  // administrator too (who is never its creator, so none is offered); organization communities are
+  // unchanged for everybody.
   const communities = listed.filter(
-    (community) => community.status === 'active' && (!isMember || community.viewer.actions.story),
+    (community) =>
+      community.status === 'active' &&
+      (community.viewer.actions.story || (!isMember && community.kind !== 'member')),
   );
 
   // A repeated `?comunidade=` arrives as an array; the FIRST value wins rather than the request

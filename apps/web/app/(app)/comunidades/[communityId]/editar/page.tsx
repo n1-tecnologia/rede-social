@@ -1,4 +1,3 @@
-import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { CommunityForm } from '@/app/(app)/comunidades/CommunityForm';
@@ -14,6 +13,9 @@ import { getHostTenant } from '@/lib/tenant-host';
  * The form is `create` bound to values (UI-SPEC E13/partial): this route resolves the community on
  * the server so the fields are filled on first paint, with no client fetch and no flash of an empty
  * form, and hands the SAME component the same props plus `communityId`.
+ *
+ * **The guard is `viewer.canEdit` (10-14).** The page redirects whoever the API does not let edit to the
+ * community page (UI-D-716: `social` off removes the creator's edit, and `/editar` is no exception).
  *
  * **Every miss is the community page's own one screen.** An unknown id, another tenant's and a
  * soft-deleted one all arrive as `loadCommunity`'s single `not-found` and render the shared
@@ -41,10 +43,13 @@ export default async function EditCommunityPage({
   const { communityId } = await params;
   const [bootstrap, result] = await Promise.all([requireBootstrap(), loadCommunity(communityId)]);
 
-  if (!bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.manage)) {
-    redirect(`/comunidades/${communityId}`);
-  }
   if (result.status !== 'ok') notFound();
+  // 10-14 (UI-D-710, UI-D-716): the guard is the API's `viewer.canEdit`, the decision the write routes
+  // themselves make (the organization's `manage`, the creator of a member community while `social` is
+  // on, a moderator on a member community), never a role or an id comparison here. Whoever may not edit,
+  // including the creator with `social` off, goes back to the community page; a viewer without any
+  // right to see the community has already met `notFound` above.
+  if (!result.community.viewer.canEdit) redirect(`/comunidades/${result.community.id}`);
 
   const storeOn = bootstrap.modules.some((module) => module.key === 'store');
   const canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);

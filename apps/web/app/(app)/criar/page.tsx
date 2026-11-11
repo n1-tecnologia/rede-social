@@ -85,7 +85,11 @@ export default async function CreatePostPage({
     );
   }
 
-  const communities = await listAllCommunities();
+  // UI-D-718, D-706: the list read carries member communities too (an admin sees them for moderation),
+  // and an administrator cannot publish in one, so none may be offered: the picker keeps the communities
+  // where the API says the caller may post (`viewer.actions.post`, the Escopo seam; today the
+  // organization's own).
+  const communities = (await listAllCommunities()).filter((item) => item.viewer.actions.post);
   const initialCommunityId = communities.some((item) => item.id === requested)
     ? (requested ?? null)
     : null;

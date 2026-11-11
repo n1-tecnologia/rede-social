@@ -6,6 +6,7 @@ import {
   type PostCardLabels,
   type PostCardView,
 } from '@rede-social/module-feed/ui';
+import { useRouter } from 'next/navigation';
 import { FeedSurface, type FeedSurfaceProps } from '@/components/feed/FeedSurface';
 
 /**
@@ -53,6 +54,7 @@ export type CommunityPostsProps =
 const refused = async (): Promise<LikeOutcome> => ({ ok: false });
 
 export function CommunityPosts(props: CommunityPostsProps) {
+  const router = useRouter();
   if (props.locked) {
     return (
       <section aria-label={props.region} data-community-posts-locked className="flex flex-col">
@@ -75,5 +77,26 @@ export function CommunityPosts(props: CommunityPostsProps) {
     );
   }
   const { locked: _unlocked, ...list } = props;
-  return <FeedSurface {...list} suppressCommunity />;
+  // 10-14 (UI-D-717): a like on content that has just vanished (a blocked or departed creator makes the
+  // API answer the bare 404) comes back as a refusal with no code of its own. The card has already
+  // reverted and the list raises the shipped generic error toast; the page also refreshes, so the route
+  // resolves to the shipped not-found screen. A refusal that names a code (`community_locked`,
+  // `follow_required`) is a different state and does not refresh.
+  const refreshWhenGone =
+    (toggle: (postId: string) => Promise<LikeOutcome>) =>
+    async (postId: string): Promise<LikeOutcome> => {
+      const outcome = await toggle(postId);
+      if (!outcome.ok && (outcome.code === undefined || outcome.code === 'generic')) {
+        router.refresh();
+      }
+      return outcome;
+    };
+  return (
+    <FeedSurface
+      {...list}
+      onLike={refreshWhenGone(list.onLike)}
+      onUnlike={refreshWhenGone(list.onUnlike)}
+      suppressCommunity
+    />
+  );
 }
