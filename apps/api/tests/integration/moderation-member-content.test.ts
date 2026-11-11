@@ -2,11 +2,15 @@ import { sqlClient } from '@rede-social/core/db';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { communityCreateLimiter } from '@rede-social/core/server/safety/limits';
 import type { CommunitySummary } from '@rede-social/module-communities/contracts';
+import type { FeedPost } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   adminSql,
   api,
+  createSharedIdentity,
   HOSTS,
+  removeIdentitiesByPrefix,
+  runNotificationJobs,
   SEED_PASSWORD,
   signInAs,
   withCommunitiesEnabled,
@@ -315,5 +319,207 @@ describe('10 moderation of member communities', () => {
       'community_archived',
       'community_removed',
     ]);
+  });
+});
+
+/**
+ * 10-06 (A3, MCOMM-11, EP-38): a holder of `moderation.manage` removes ONE post inside a member community,
+ * without archiving the community. Same shape as `moderation-posts.test.ts` (the Phase 9 analog for a
+ * `followers` post): the lock read, the soft delete, ONE `post_removed` row in the same transaction, the
+ * creator told nothing. The edges are the planner's choice (live creator, blocked creator, already deleted,
+ * `social` off, an organization post that stays author-only, a report resolved as `remove_content`).
+ */
+describe('10 community post removal', () => {
+  const IDENTITY_PREFIX = 'mod1006';
+  const throwAdmin = { token: '' };
+  const publish = async (
+    token: string,
+    communityId: string,
+    caption: string,
+  ): Promise<FeedPost> => {
+    const res = await request('/v1/feed/posts', token, {
+      method: 'POST',
+      body: JSON.stringify({ caption, communityId }),
+    });
+    expect(res.status, `POST /v1/feed/posts ${caption}`).toBe(201);
+    return (await res.json()) as FeedPost;
+  };
+  const removePost = (token: string, postId: string) =>
+    request(`/v1/feed/posts/${postId}`, token, { method: 'DELETE' });
+  const postState = async (postId: string) => {
+    const [row] = await adminSql<
+      { deleted_at: string | null; deleted_by_user_id: string | null }[]
+    >`
+      select deleted_at::text, deleted_by_user_id::text from public.feed_posts where id = ${postId}::uuid`;
+    return row;
+  };
+  const postCount = async (communityId: string) => {
+    const [row] = await adminSql<{ post_count: number }[]>`
+      select post_count from public.communities where id = ${communityId}::uuid`;
+    return row?.post_count;
+  };
+  const notificationsOf = async (userId: string) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`;
+    return row?.n ?? 0;
+  };
+  const setBlocked = (blocked: boolean) =>
+    adminSql`
+      update public.memberships set blocked_at = ${blocked ? new Date().toISOString() : null}
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userIds.helena}::uuid`;
+  const expectBare404 = async (res: Response, label: string): Promise<void> => {
+    expect(res.status, label).toBe(404);
+    const error = await errorOf(res);
+    expect(error.code, label).toBe('NOT_FOUND');
+    expect(error.details, label).toBeUndefined();
+  };
+
+  beforeAll(async () => {
+    await removeIdentitiesByPrefix(IDENTITY_PREFIX);
+    const colleague = await createSharedIdentity({
+      prefix: IDENTITY_PREFIX,
+      memberships: [{ host: 'lab', role: 'admin_tenant', displayName: 'Admin Colega' }],
+    });
+    throwAdmin.token = await signInAs(colleague.email, colleague.password);
+  });
+
+  beforeEach(async () => {
+    await sweep();
+    await setBlocked(false);
+  });
+
+  afterAll(async () => {
+    await setBlocked(false);
+    await removeIdentitiesByPrefix(IDENTITY_PREFIX);
+  });
+
+  it('A3 / T-10-24: the moderator removes one community post: 200 { deleted: true }, stamped, ONE post_removed row, the community and its other posts intact, post_count reconciled, the creator told nothing', async () => {
+    const community = await create(tokens.helena, `${PREFIX}Posts removíveis`);
+    const doomed = await publish(tokens.helena, community, `${PREFIX}legenda para remover`);
+    const kept = await publish(tokens.helena, community, `${PREFIX}legenda que fica`);
+    expect(await postCount(community)).toBe(2);
+    const told = await notificationsOf(userIds.helena);
+
+    const res = await removePost(tokens.labAdmin, doomed.id);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('{"deleted":true}');
+    const state = await postState(doomed.id);
+    expect(state?.deleted_at).not.toBeNull();
+    expect(state?.deleted_by_user_id).toBe(userIds.labAdmin);
+
+    const rows = await logRowsFor(doomed.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: 'post_removed',
+      actor_user_id: userIds.labAdmin,
+      target_user_id: userIds.helena,
+      subject_type: 'feed_post',
+      subject_id: doomed.id,
+      excerpt: `${PREFIX}legenda para remover`,
+      reason: null,
+    });
+
+    // The community and its other post are untouched; the counter followed the removal.
+    expect((await stateOf(community))?.status).toBe('active');
+    expect((await stateOf(community))?.deleted_at).toBeNull();
+    expect((await postState(kept.id))?.deleted_at).toBeNull();
+    expect(await postCount(community)).toBe(1);
+    const page = await request(`/v1/feed?communityId=${community}&limit=25`, tokens.marcos);
+    expect(((await page.json()) as { items: { id: string }[] }).items.map((i) => i.id)).toEqual([
+      kept.id,
+    ]);
+    // Nobody is told: no new row for the creator after the fan-out and retraction jobs.
+    await runNotificationJobs(labTenantId);
+    expect(await notificationsOf(userIds.helena)).toBe(told);
+  });
+
+  it('the creator deleting their own community post is an author delete: stamped, no log row; a second removal is the bare 404 and writes no second row', async () => {
+    const community = await create(tokens.helena, `${PREFIX}Autoria`);
+    const own = await publish(tokens.helena, community, `${PREFIX}minha`);
+    expect((await removePost(tokens.helena, own.id)).status).toBe(200);
+    expect((await postState(own.id))?.deleted_by_user_id).toBe(userIds.helena);
+    expect(await logRowsFor(own.id)).toHaveLength(0);
+
+    const other = await publish(tokens.helena, community, `${PREFIX}outra`);
+    expect((await removePost(tokens.labAdmin, other.id)).status).toBe(200);
+    await expectBare404(await removePost(tokens.labAdmin, other.id), 'repeat removal');
+    expect(await logRowsFor(other.id)).toHaveLength(1);
+  });
+
+  it('a member who is not the creator cannot remove the post (the bare 404, nothing removed)', async () => {
+    const community = await create(tokens.helena, `${PREFIX}Alheia`);
+    const target = await publish(tokens.helena, community, `${PREFIX}de Helena`);
+    const refused = await removePost(tokens.marcos, target.id);
+    expect([403, 404]).toContain(refused.status);
+    expect((await postState(target.id))?.deleted_at).toBeNull();
+    expect(await logRowsFor(target.id)).toHaveLength(0);
+  });
+
+  it('D-718: with social off the removal still works (and logs)', async () => {
+    const community = await create(tokens.helena, `${PREFIX}Sem social`);
+    const target = await publish(tokens.helena, community, `${PREFIX}social desligado`);
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+    try {
+      expect((await removePost(tokens.labAdmin, target.id)).status).toBe(200);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labTenantId);
+    }
+    expect(await logRowsFor(target.id)).toHaveLength(1);
+  });
+
+  it('a blocked creator’s post is the bare 404 even for the moderator (nothing removed, no row) until unblocked', async () => {
+    const community = await create(tokens.helena, `${PREFIX}Bloqueada`);
+    const target = await publish(tokens.helena, community, `${PREFIX}de quem será bloqueada`);
+    await setBlocked(true);
+    await expectBare404(await removePost(tokens.labAdmin, target.id), 'blocked creator');
+    expect((await postState(target.id))?.deleted_at).toBeNull();
+    expect(await logRowsFor(target.id)).toHaveLength(0);
+    await setBlocked(false);
+    expect((await removePost(tokens.labAdmin, target.id)).status).toBe(200);
+    expect(await logRowsFor(target.id)).toHaveLength(1);
+  });
+
+  it('an ORGANIZATION post stays author-only: a colleague admin gets the bare 404 and no row (positive control: the author’s own delete)', async () => {
+    const org = await create(tokens.labAdmin, `${PREFIX}Da organização`);
+    const post = await publish(tokens.labAdmin, org, `${PREFIX}aviso`);
+    await expectBare404(await removePost(throwAdmin.token, post.id), 'colleague removes org post');
+    expect((await postState(post.id))?.deleted_at).toBeNull();
+    expect(await logRowsFor(post.id)).toHaveLength(0);
+    expect((await removePost(tokens.labAdmin, post.id)).status).toBe(200);
+    expect(await logRowsFor(post.id)).toHaveLength(0);
+  });
+
+  it('a report resolved as remove_content for a community post removes it with the same log row', async () => {
+    const community = await create(tokens.helena, `${PREFIX}Denunciada`);
+    const target = await publish(tokens.helena, community, `${PREFIX}denunciar`);
+    const filed = await request('/v1/reports', tokens.marcos, {
+      method: 'POST',
+      body: JSON.stringify({ subjectType: 'feed_post', subjectId: target.id, reason: 'spam' }),
+    });
+    expect(filed.status).toBe(201);
+    const reportId = ((await filed.json()) as { id: string }).id;
+    try {
+      const resolved = await request(`/v1/admin/reports/${reportId}/resolve`, tokens.labAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ resolution: 'remove_content' }),
+      });
+      expect(resolved.status).toBe(200);
+      expect((await postState(target.id))?.deleted_at).not.toBeNull();
+      const rows = await logRowsFor(target.id);
+      expect(rows.map((row) => row.action)).toEqual(['post_removed']);
+      expect(rows[0]?.target_user_id).toBe(userIds.helena);
+      const [report] = await adminSql<{ status: string }[]>`
+        select status from public.content_reports where id = ${reportId}::uuid`;
+      expect(report?.status).toBe('content_removed');
+    } finally {
+      await adminSql`delete from public.content_reports where id = ${reportId}::uuid`;
+    }
   });
 });
