@@ -2292,7 +2292,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     expect((await curated(home.id)).itemCount).toBe(0);
   });
 
-  it('05.2-22 a publish-ONLY caller cannot curate through publish (403 before any lookup), and still publishes with no destination', async () => {
+  it('05.2-22 a publish-ONLY caller cannot curate through publish (403 on a place it may not curate, the bare 404 on one that does not exist), and still publishes with no destination', async () => {
     const home = await create(tokens.demoAdmin, { title: 'Teste Gestao' });
 
     setPermissionResolver((role, enabled, settings) => {
@@ -2304,12 +2304,21 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     try {
       for (const destination of [
         { highlightId: home.id },
-        { highlightId: randomUUID() },
         { newHighlight: { communityId: null, title: 'Teste Proibido' } },
       ]) {
         const { res, caption } = await publishInto('sem manage', destination);
         expect(res.status).toBe(403);
         expect((await envelope(res)).error.code).toBe('FORBIDDEN');
+        expect(await captionCount(caption)).toBe(0);
+      }
+      // 10-09 (D-706): the place seam answers 404 for a miss BEFORE it answers 403, so a highlight that does
+      // not exist is the bare 404 for this caller (05.2 answered 403 before any lookup).
+      {
+        const { res, caption } = await publishInto('sem manage, sem destino real', {
+          highlightId: randomUUID(),
+        });
+        expect(res.status).toBe(404);
+        expect((await envelope(res)).error.details).toBeUndefined();
         expect(await captionCount(caption)).toBe(0);
       }
 

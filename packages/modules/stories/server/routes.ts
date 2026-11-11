@@ -43,6 +43,7 @@ import {
   deleteStoryComment,
   getHighlight,
   getStory,
+  type HighlightCaller,
   likeStory,
   listActiveStories,
   listAuthorStories,
@@ -240,6 +241,21 @@ const authorStoriesRoute = createRoute({
  * the closed `details.highlight` vocabulary.
  */
 const highlightIdParam = z.object({ highlightId: z.uuid() });
+
+/**
+ * 10-09 (D-706, T-05-03): the two permission flags every highlight function needs, read through the
+ * composed set BEFORE the service opens its transaction (the pool is `max: 5`; see `readPlaceGate`).
+ * The service honours the flags and never compares a role: the place rules (an organization place needs
+ * the manage half, a member community needs its creator holding the publish half) live in ONE seam,
+ * `resolveHighlightPlace`.
+ */
+const highlightCaller = async (ctx: AppEnv['Variables']['ctx']): Promise<HighlightCaller> => {
+  const granted = await permissionsForRequest(ctx);
+  return {
+    canManage: granted.includes('stories.story.manage'),
+    canPublish: granted.includes('stories.story.publish'),
+  };
+};
 
 const listHighlightsRoute = createRoute({
   method: 'get',
@@ -522,7 +538,7 @@ const publishStoryRoute = createRoute({
     },
     403: {
       description:
-        'The caller does not hold `stories.story.publish` in this tenant — or the body names a destination (`highlightId` or `newHighlight`) and the caller does not also hold `stories.story.manage` (curating at publish is the manage half). Checked before any lookup.',
+        'The caller does not hold `stories.story.publish` in this tenant — or the body names a destination (`highlightId` or `newHighlight`) in a place the caller may not curate (10-09, D-706): Início or an organization community without `stories.story.manage`, or a member community that is not the caller’s own (an admin included). A destination that does not exist is the bare 404 first.',
     },
     404: {
       description:
@@ -721,47 +737,69 @@ export const storiesRoutes = stories
   .openapi(listHighlightsRoute, async (c) => {
     const ctx = c.get('ctx');
     const { communityId, scope } = c.req.valid('query');
-    const granted = await permissionsForRequest(ctx);
-    const curator = granted.includes('stories.story.manage');
+    const caller = await highlightCaller(ctx);
+    const curator = caller.canManage;
     // `scope=all` is the curator's read (empty highlights included); it cannot widen a member's.
     if (scope === 'all' && !curator) throw new ApiError(403, 'FORBIDDEN');
     return c.json(
-      await listHighlights(ctx, { communityId: communityId ?? null, curator: scope === 'all' }),
+      await listHighlights(
+        ctx,
+        { communityId: communityId ?? null, curator: scope === 'all' },
+        caller,
+      ),
       200,
     );
   })
-  .openapi(highlightCatalogRoute, async (c) =>
-    c.json(await listHighlightCatalog(c.get('ctx')), 200),
-  )
-  .openapi(reorderHighlightsRoute, async (c) =>
-    c.json(await reorderHighlights(c.get('ctx'), c.req.valid('json')), 200),
-  )
+  .openapi(highlightCatalogRoute, async (c) => {
+    const ctx = c.get('ctx');
+    return c.json(await listHighlightCatalog(ctx, await highlightCaller(ctx)), 200);
+  })
+  .openapi(reorderHighlightsRoute, async (c) => {
+    const ctx = c.get('ctx');
+    return c.json(
+      await reorderHighlights(ctx, c.req.valid('json'), await highlightCaller(ctx)),
+      200,
+    );
+  })
   .openapi(getHighlightRoute, async (c) => {
     const ctx = c.get('ctx');
     const { highlightId } = c.req.valid('param');
-    const granted = await permissionsForRequest(ctx);
-    const curator = granted.includes('stories.story.manage');
-    return c.json(await getHighlight(ctx, highlightId, { curator }), 200);
+    const caller = await highlightCaller(ctx);
+    return c.json(await getHighlight(ctx, highlightId, { curator: caller.canManage }, caller), 200);
   })
-  .openapi(createHighlightRoute, async (c) =>
-    c.json(await createHighlight(c.get('ctx'), c.req.valid('json')), 201),
-  )
+  .openapi(createHighlightRoute, async (c) => {
+    const ctx = c.get('ctx');
+    return c.json(await createHighlight(ctx, c.req.valid('json'), await highlightCaller(ctx)), 201);
+  })
   .openapi(addHighlightItemRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { highlightId, storyId } = c.req.valid('param');
-    return c.json(await addStoryToHighlight(c.get('ctx'), highlightId, storyId), 200);
+    return c.json(
+      await addStoryToHighlight(ctx, highlightId, storyId, await highlightCaller(ctx)),
+      200,
+    );
   })
   .openapi(updateHighlightRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { highlightId } = c.req.valid('param');
-    return c.json(await updateHighlight(c.get('ctx'), highlightId, c.req.valid('json')), 200);
+    return c.json(
+      await updateHighlight(ctx, highlightId, c.req.valid('json'), await highlightCaller(ctx)),
+      200,
+    );
   })
   .openapi(deleteHighlightRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { highlightId } = c.req.valid('param');
-    await deleteHighlight(c.get('ctx'), highlightId);
+    await deleteHighlight(ctx, highlightId, await highlightCaller(ctx));
     return c.body(null, 204);
   })
   .openapi(removeHighlightItemRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { highlightId, storyId } = c.req.valid('param');
-    return c.json(await removeStoryFromHighlight(c.get('ctx'), highlightId, storyId), 200);
+    return c.json(
+      await removeStoryFromHighlight(ctx, highlightId, storyId, await highlightCaller(ctx)),
+      200,
+    );
   })
   .openapi(markSeenRoute, async (c) => {
     const ctx = c.get('ctx');
@@ -783,15 +821,17 @@ export const storiesRoutes = stories
   .openapi(publishStoryRoute, async (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');
-    // 05.1 (OQ-1) / 05.2 (D-113): putting a story somewhere AT PUBLISH — a highlight, or a highlight
-    // created inline — is curation, the manage half. The middleware keeps the publish literal; this
-    // second check runs whenever EITHER destination key is present, BEFORE any lookup, so a
-    // publish-only caller learns nothing about the id it sent (T-05.1-05, T-05.2-32).
-    if (body.highlightId !== undefined || body.newHighlight !== undefined) {
-      const granted = await permissionsForRequest(ctx);
-      if (!granted.includes('stories.story.manage')) throw new ApiError(403, 'FORBIDDEN');
-    }
-    return c.json(await publishStory(ctx, body), 201);
+    // 10-09 (D-706, D-716): putting a story somewhere AT PUBLISH — a highlight, or a highlight created
+    // inline — is curation of that PLACE. The middleware keeps the publish literal; the place check (an
+    // organization place needs the manage half, a member community needs its creator) is the service's
+    // ONE seam, `resolveHighlightPlace`, so this handler only hands over the two flags. Replaces 05.2's
+    // route-level manage check, which answered 403 before any lookup (T-05.1-05, T-05.2-32): a destination
+    // that does not exist is now the bare 404 first, then the 403 for a place the caller may not curate.
+    const caller =
+      body.highlightId !== undefined || body.newHighlight !== undefined
+        ? await highlightCaller(ctx)
+        : undefined;
+    return c.json(await publishStory(ctx, body, caller), 201);
   })
   .openapi(deleteStoryRoute, async (c) => {
     const ctx = c.get('ctx');
@@ -841,6 +881,7 @@ export const storiesRoutes = stories
     return c.body(null, 204);
   })
   .openapi(storyHighlightIdsRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { storyId } = c.req.valid('param');
-    return c.json(await listStoryHighlightIds(c.get('ctx'), storyId), 200);
+    return c.json(await listStoryHighlightIds(ctx, storyId, await highlightCaller(ctx)), 200);
   });

@@ -32,6 +32,9 @@ const USER_ID = '33333333-3333-4333-8333-333333333333';
 
 const dialect = new PgDialect();
 
+/** 10-09: the permission flags the route hands over — the organization's curator (manage and publish). */
+const CURATOR = { canManage: true, canPublish: true };
+
 /** The highlight the in-lane lookup resolves (null = a miss). */
 let highlight: {
   id: string;
@@ -65,6 +68,8 @@ function classify(text: string): string {
   if (/^select h\.id, h\.community_id/.test(t)) return 'highlight';
   if (/^select h\.id from story_highlights h .* for update$/.test(t)) return 'lock';
   if (/^update story_highlights h set position/.test(t)) return 'renumber';
+  // 10-09: the place seam reads the community without a lock, then locks it `for share` for a caller who may curate.
+  if (/from communities c .* for share$/.test(t)) return 'place-lock';
   if (/from communities c/.test(t)) return 'place';
   if (/^select s\.id from stories s/.test(t)) return 'story';
   if (/^delete from story_highlight_items/.test(t)) return 'remove';
@@ -86,6 +91,8 @@ const tx = {
       case 'highlight':
         return highlight === null ? [] : [highlight];
       case 'place':
+        return [{ kind: 'organization', owner: null, locked: false }];
+      case 'place-lock':
         return [{ status: communityStatus }];
       case 'lock':
         return placeIds.map((id) => ({ id }));
@@ -194,7 +201,7 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     const ctx = context();
     highlightCount = 1;
 
-    await expect(removeStoryFromHighlight(ctx, HIGHLIGHT_ID, STORY_ID)).resolves.toEqual({
+    await expect(removeStoryFromHighlight(ctx, HIGHLIGHT_ID, STORY_ID, CURATOR)).resolves.toEqual({
       highlighted: false,
       highlightCount: 1,
     });
@@ -225,7 +232,7 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     moved = false;
     highlightCount = 2;
 
-    await expect(removeStoryFromHighlight(ctx, HIGHLIGHT_ID, STORY_ID)).resolves.toEqual({
+    await expect(removeStoryFromHighlight(ctx, HIGHLIGHT_ID, STORY_ID, CURATOR)).resolves.toEqual({
       highlighted: false,
       highlightCount: 2,
     });
@@ -241,7 +248,7 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     const ctx = context();
     moved = false;
 
-    const result = await updateHighlight(ctx, HIGHLIGHT_ID, { title: 'Bastidores' });
+    const result = await updateHighlight(ctx, HIGHLIGHT_ID, { title: 'Bastidores' }, CURATOR);
 
     expect(result).toMatchObject({ id: HIGHLIGHT_ID, title: 'Bastidores', coverChosen: false });
     // The guarded UPDATE ran and matched nothing — the `is distinct from` predicate, not a JS
@@ -257,7 +264,9 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     if (highlight) highlight.community_id = COMMUNITY_ID;
     communityStatus = 'archived';
 
-    await expect(updateHighlight(ctx, HIGHLIGHT_ID, { title: 'Novo nome' })).rejects.toMatchObject({
+    await expect(
+      updateHighlight(ctx, HIGHLIGHT_ID, { title: 'Novo nome' }, CURATOR),
+    ).rejects.toMatchObject({
       status: 400,
       code: 'VALIDATION_FAILED',
       details: { highlight: 'archived' },
@@ -265,7 +274,7 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
 
     // The highlight lookup and the place lookup — the one seam's two reads — and then the
     // transaction stopped: no UPDATE, no read-back.
-    expect(seen).toEqual(['highlight', 'place']);
+    expect(seen).toEqual(['highlight', 'place', 'place-lock']);
     expect(ctx.events).toHaveLength(0);
     await flush(ctx);
     expect(updated).toHaveLength(0);
@@ -275,7 +284,7 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     const ctx = context();
     if (highlight) highlight.community_id = COMMUNITY_ID;
 
-    await deleteHighlight(ctx, HIGHLIGHT_ID);
+    await deleteHighlight(ctx, HIGHLIGHT_ID, CURATOR);
 
     expect(seen).toContain('delete');
     await flush(ctx);
@@ -297,7 +306,7 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
   it('6. a PATCH that really changed the title emits highlight.updated once, ids only', async () => {
     const ctx = context();
 
-    await updateHighlight(ctx, HIGHLIGHT_ID, { title: 'Novo nome' });
+    await updateHighlight(ctx, HIGHLIGHT_ID, { title: 'Novo nome' }, CURATOR);
     await flush(ctx);
 
     expect(updated).toHaveLength(1);
@@ -311,9 +320,9 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
   it('7. an unknown highlight is ONE bare 404 with no details, for every write, and nothing moves', async () => {
     highlight = null;
     for (const call of [
-      (ctx: RequestContext) => updateHighlight(ctx, HIGHLIGHT_ID, { title: 'Novo nome' }),
-      (ctx: RequestContext) => deleteHighlight(ctx, HIGHLIGHT_ID),
-      (ctx: RequestContext) => removeStoryFromHighlight(ctx, HIGHLIGHT_ID, STORY_ID),
+      (ctx: RequestContext) => updateHighlight(ctx, HIGHLIGHT_ID, { title: 'Novo nome' }, CURATOR),
+      (ctx: RequestContext) => deleteHighlight(ctx, HIGHLIGHT_ID, CURATOR),
+      (ctx: RequestContext) => removeStoryFromHighlight(ctx, HIGHLIGHT_ID, STORY_ID, CURATOR),
     ]) {
       seen = [];
       const ctx = context();
@@ -330,7 +339,9 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     communitiesOn = false;
     const ctx = context();
 
-    const thrown = await deleteHighlight(ctx, HIGHLIGHT_ID).catch((error: unknown) => error);
+    const thrown = await deleteHighlight(ctx, HIGHLIGHT_ID, CURATOR).catch(
+      (error: unknown) => error,
+    );
     expect(thrown).toMatchObject({ status: 404, code: 'NOT_FOUND' });
     expect(seen).toEqual(['highlight']);
     expect(ctx.events).toHaveLength(0);
@@ -346,7 +357,7 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
       seen = [];
       const ctx = context();
       await expect(
-        reorderHighlights(ctx, { highlightIds }),
+        reorderHighlights(ctx, { highlightIds }, CURATOR),
         JSON.stringify(highlightIds),
       ).rejects.toMatchObject({
         status: 400,
@@ -363,7 +374,7 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     const ctx = context();
     moved = false;
 
-    const result = await reorderHighlights(ctx, { highlightIds: [A, B, C] });
+    const result = await reorderHighlights(ctx, { highlightIds: [A, B, C] }, CURATOR);
 
     expect(result.items).toHaveLength(1);
     expect(seen).toEqual(['lock', 'renumber', 'summary']);
@@ -375,10 +386,10 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
   it('11. a real reorder emits highlight.reordered once, ids only, and names the place', async () => {
     const ctx = context();
 
-    await reorderHighlights(ctx, { communityId: COMMUNITY_ID, highlightIds: [C, A, B] });
+    await reorderHighlights(ctx, { communityId: COMMUNITY_ID, highlightIds: [C, A, B] }, CURATOR);
 
     // The community place is resolved for `curate` BEFORE the place's rows are locked.
-    expect(seen).toEqual(['place', 'lock', 'renumber', 'summary']);
+    expect(seen).toEqual(['place', 'place-lock', 'lock', 'renumber', 'summary']);
     // ONE renumber statement for the whole permutation (R-D-C).
     expect(texts.filter((text) => /with ordinality/.test(text))).toHaveLength(1);
     await flush(ctx);
@@ -396,9 +407,9 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     const ctx = context();
 
     await expect(
-      reorderHighlights(ctx, { communityId: COMMUNITY_ID, highlightIds: [A, B, C] }),
+      reorderHighlights(ctx, { communityId: COMMUNITY_ID, highlightIds: [A, B, C] }, CURATOR),
     ).rejects.toMatchObject({ status: 400, details: { highlight: 'archived' } });
-    expect(seen).toEqual(['place']);
+    expect(seen).toEqual(['place', 'place-lock']);
     expect(ctx.events).toHaveLength(0);
   });
 });

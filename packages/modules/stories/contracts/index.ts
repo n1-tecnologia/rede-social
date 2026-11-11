@@ -653,9 +653,12 @@ export type CreateStoryHighlight = z.infer<typeof createStoryHighlightSchema>;
  * any new highlight and the item row are ONE `withTenantTx`: a refusal rolls the whole publish back,
  * and no client-side "create, then publish, then add" sequence exists anywhere.
  *
- * **Manage is required for any destination.** Putting a story into a highlight is curation — the
- * manage half — so the route additionally requires `stories.story.manage` whenever a destination key
- * is present, BEFORE any lookup (T-05.1-05 / T-05.2-32). V2 hands `publish` to members without it.
+ * **A destination is curation of its PLACE (10-09, D-706, D-716).** Putting a story into a highlight
+ * needs the right to curate that place, decided by the ONE seam `resolveHighlightPlace`: an organization
+ * place (Início or an organization community) needs `stories.story.manage`; a member community needs its
+ * creator holding `stories.story.publish`, so a member saves THEIR OWN story into THEIR OWN community and
+ * nobody else, an admin included, does. A destination that does not exist is the bare 404 first, then the
+ * 403 for a place the caller may not curate (05.2 answered 403 before any lookup; this replaces it).
  *
  * `caption` defaults to `''` rather than being nullable, matching the column (`not null default ''`):
  * "no caption" is one value everywhere, so no renderer has to branch on null and empty separately.

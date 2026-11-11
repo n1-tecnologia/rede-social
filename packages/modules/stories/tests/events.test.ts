@@ -76,6 +76,9 @@ let mode: 'plain' | 'highlight' | 'inline' = 'plain';
  * The plain cases never enter this branch and keep their index-based answers unchanged.
  */
 const dialect = new PgDialect();
+
+/** 10-09: the permission flags the route hands over — the organization's curator (manage and publish). */
+const CURATOR = { canManage: true, canPublish: true };
 const HIGHLIGHT_ID = '66666666-6666-4666-8666-666666666666';
 const NEW_HIGHLIGHT_ID = '77777777-7777-4777-8777-777777777777';
 const PLACE_ID = '55555555-5555-4555-8555-555555555555';
@@ -101,6 +104,8 @@ const ROOM_COUNT =
 function classify(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim();
   if (/^select h\.id, h\.community_id/.test(t)) return 'highlight';
+  // 10-09: the place seam reads the community without a lock, then locks it `for share` for a caller who may curate.
+  if (/from communities c .* for share$/.test(t)) return 'place-lock';
   if (/from communities c/.test(t)) return 'place';
   if (ROOM_COUNT.test(t)) return 'room';
   if (/^select h\.id from story_highlights h .* for update$/.test(t)) return 'lock';
@@ -127,6 +132,8 @@ function scripted(query: SQL): unknown[] {
         },
       ];
     case 'place':
+      return [{ kind: 'organization', owner: null, locked: false }];
+    case 'place-lock':
       return [{ status: placeStatus }];
     case 'room':
       return [{ n: heldItems, present: false }];
@@ -361,7 +368,7 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
   it('12. into an existing Início highlight: highlight row → room → asset → insert → item → projection, then published + highlighted', async () => {
     mode = 'highlight';
     const ctx = context();
-    const story = await publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID });
+    const story = await publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID }, CURATOR);
 
     expect(seen).toEqual(['highlight', 'room', 'asset', 'story-insert', 'item', 'projection']);
     expect(story.highlightCount).toBe(1);
@@ -394,14 +401,16 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
     placeStatus = 'archived';
     const ctx = context();
 
-    await expect(publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID })).rejects.toMatchObject({
+    await expect(
+      publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID }, CURATOR),
+    ).rejects.toMatchObject({
       status: 400,
       code: 'VALIDATION_FAILED',
       details: { highlight: 'archived' },
     });
 
     // Destination first: no asset lookup, no insert.
-    expect(seen).toEqual(['highlight', 'place']);
+    expect(seen).toEqual(['highlight', 'place', 'place-lock']);
     expect(ctx.events).toHaveLength(0);
     await flush(ctx);
     expect(received).toHaveLength(0);
@@ -413,7 +422,9 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
     heldItems = 100;
     const ctx = context();
 
-    await expect(publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID })).rejects.toMatchObject({
+    await expect(
+      publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID }, CURATOR),
+    ).rejects.toMatchObject({
       status: 400,
       details: { highlight: 'full' },
     });
@@ -425,13 +436,18 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
     mode = 'inline';
     placeHighlights = 2;
     const ctx = context();
-    const story = await publishStory(ctx, {
-      ...input,
-      newHighlight: { communityId: PLACE_ID, title: 'Teste Um' },
-    });
+    const story = await publishStory(
+      ctx,
+      {
+        ...input,
+        newHighlight: { communityId: PLACE_ID, title: 'Teste Um' },
+      },
+      CURATOR,
+    );
 
     expect(seen).toEqual([
       'place',
+      'place-lock',
       'lock',
       'asset',
       'story-insert',
@@ -468,7 +484,11 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
   it('16. inline into Início skips the community read; a FULL place is refused `full` after the lock and writes nothing', async () => {
     mode = 'inline';
     const ctx = context();
-    await publishStory(ctx, { ...input, newHighlight: { communityId: null, title: 'Teste Dois' } });
+    await publishStory(
+      ctx,
+      { ...input, newHighlight: { communityId: null, title: 'Teste Dois' } },
+      CURATOR,
+    );
     expect(seen).toEqual([
       'lock',
       'asset',
@@ -482,10 +502,14 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
     placeHighlights = 50;
     const refusedCtx = context();
     await expect(
-      publishStory(refusedCtx, {
-        ...input,
-        newHighlight: { communityId: null, title: 'Teste Tres' },
-      }),
+      publishStory(
+        refusedCtx,
+        {
+          ...input,
+          newHighlight: { communityId: null, title: 'Teste Tres' },
+        },
+        CURATOR,
+      ),
     ).rejects.toMatchObject({ status: 400, details: { highlight: 'full' } });
     expect(seen).toEqual(['lock']);
     expect(refusedCtx.events).toHaveLength(0);
@@ -497,9 +521,13 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
     const ctx = context();
 
     await expect(
-      publishStory(ctx, { ...input, newHighlight: { communityId: PLACE_ID, title: 'Teste' } }),
+      publishStory(
+        ctx,
+        { ...input, newHighlight: { communityId: PLACE_ID, title: 'Teste' } },
+        CURATOR,
+      ),
     ).rejects.toMatchObject({ status: 400, details: { highlight: 'archived' } });
-    expect(seen).toEqual(['place']);
+    expect(seen).toEqual(['place', 'place-lock']);
     expect(ctx.events).toHaveLength(0);
   });
 

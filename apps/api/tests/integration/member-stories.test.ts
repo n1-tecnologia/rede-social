@@ -430,11 +430,15 @@ describe('10 tracer', () => {
     expect((await errorOf(thirtyFirst)).code).toBe('RATE_LIMITED');
   });
 
-  it('9. a member naming a destination answers 403 before any lookup (the highlight owner branch is plan 09)', async () => {
+  it('9. a member naming Início or an organization highlight answers 403; a highlight that does not exist is the bare 404 (10-09 replaced plan 07’s fail-closed 403)', async () => {
     const asset = await makeAsset(userIds.helena);
+    const [home] = await adminSql<{ id: string }[]>`
+      insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+      values (${labTenantId}::uuid, null, ${`${PREFIX}inicio`}, 0, ${userIds.labAdmin}::uuid)
+      returning id`;
     for (const destination of [
       { newHighlight: { communityId: null, title: `${PREFIX}destaque` } },
-      { highlightId: randomUUID() },
+      { highlightId: home?.id },
     ]) {
       const res = await publish(tokens.helena, {
         mediaAssetId: asset,
@@ -444,6 +448,14 @@ describe('10 tracer', () => {
       });
       expect(res.status, JSON.stringify(destination)).toBe(403);
     }
+    const missing = await publish(tokens.helena, {
+      mediaAssetId: asset,
+      mediaKind: 'image',
+      caption: `${PREFIX}destino`,
+      highlightId: randomUUID(),
+    });
+    expect(missing.status).toBe(404);
+    expect((await errorOf(missing)).details).toBeUndefined();
     const [stored] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.stories where caption = ${`${PREFIX}destino`}`;
     expect(stored?.n).toBe(0);

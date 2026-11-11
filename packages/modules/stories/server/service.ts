@@ -795,11 +795,15 @@ type AssetRow = { kind: string; purpose: string; status: string };
  * - **A MEMBER publishes too (10-07, D-714).** The audience is stamped from the role (`'followers'` for a
  *   member, `'tenant'` otherwise), a member's attempt is rate limited, a member's 42501 from the insert
  *   gate (`social` switched off inside the flags-cache window) is a 403, and a MEMBER story raises no
- *   `story.published` event at all (nobody is told, PR-4). A member naming a destination meets the
- *   manage gate below and is refused 403: plan 09 gives that path its owner branch.
- * - **The ROUTE owns the permission.** A body naming any destination additionally needs
- *   `stories.story.manage` (curation is the manage half); that check runs in the handler before this
- *   function is called, so this file never compares roles or permissions.
+ *   `story.published` event at all (nobody is told, PR-4).
+ * - **A destination meets the owner seam (10-09, D-706, D-716).** The ROUTE computes the `caller`
+ *   flags (`stories.story.manage`, `stories.story.publish`) and this function hands them to
+ *   `resolveHighlightPlace`, which refuses 403 unless the caller may curate THAT place: an
+ *   organization place needs the manage half, a member community needs its creator. The story saved is
+ *   the one being published, which is the caller's own by construction, so a member's publish with a
+ *   destination IS the act of saving their own story into their own community (never someone else's,
+ *   never an audience silently widened). With `social` off the member does not even pass the route's
+ *   `stories.story.publish` guard. This file never compares roles or permissions itself.
  * - **Events, after commit, ids only:** `story.published` keeps its five keys; then
  *   `highlight.created` for an inline highlight and `story.highlighted` for the item.
  *   **Phase 7 caveat:** a story published into a highlight raises `story.published` AND
@@ -809,6 +813,7 @@ type AssetRow = { kind: string; purpose: string; status: string };
 export async function publishStory(
   ctx: RequestContext,
   input: PublishStory,
+  caller: HighlightCaller = NO_CURATION,
 ): Promise<StorySummary> {
   // The service re-states the route's rule: `publishStory` is also reachable from the seed and from
   // any handler that assembles its own input, none of which pass through the route validator.
@@ -836,7 +841,9 @@ export async function publishStory(
   // Read BEFORE the transaction, and only when a highlight is named: the plain publish stays three
   // statements with no flag read.
   const gate =
-    highlightId !== undefined || newHighlight !== undefined ? await readPlaceGate(ctx) : null;
+    highlightId !== undefined || newHighlight !== undefined
+      ? await readPlaceGate(ctx, caller)
+      : null;
 
   const writeStory = () =>
     withTenantTx(ctx, async (tx) => {
@@ -1663,10 +1670,27 @@ export async function deleteStoryComment(
  * `max: 5`), which is a starvation hazard under load — so every highlight function reads it first,
  * exactly where `listCommunityFeed` does, and hands the answer to `resolveHighlightPlace`.
  */
-type PlaceGate = { communitiesOn: boolean };
+type PlaceGate = { communitiesOn: boolean } & HighlightCaller;
 
-async function readPlaceGate(ctx: RequestContext): Promise<PlaceGate> {
-  return { communitiesOn: await moduleFlags.isEnabled(ctx, 'communities') };
+/**
+ * 10-09 (D-706, T-05-03): the permission FLAGS the ROUTE read from the composed set
+ * (`permissionsForRequest`) BEFORE the service opened a transaction: whether the caller holds
+ * `stories.story.manage` (the organization's curation) and `stories.story.publish` (a member's own
+ * publishing, composed with `social`). They travel in the gate, so this file never compares a role and
+ * never reads a permission itself; a caller that cannot say what it holds is `NO_CURATION`, which fails
+ * closed to "may read, may not write".
+ */
+export type HighlightCaller = { canManage: boolean; canPublish: boolean };
+
+/** The fail-closed default for a caller that did not pass its flags. */
+const NO_CURATION: HighlightCaller = { canManage: false, canPublish: false };
+
+async function readPlaceGate(ctx: RequestContext, caller: HighlightCaller): Promise<PlaceGate> {
+  return {
+    communitiesOn: await moduleFlags.isEnabled(ctx, 'communities'),
+    canManage: caller.canManage,
+    canPublish: caller.canPublish,
+  };
 }
 
 /** What a place-resolving caller intends: reading, taking content down, or adding/curating it. */
@@ -1696,8 +1720,21 @@ function placePredicate(alias: 'h', communityId: string | null): SQL {
  *    with `{ highlight: 'archived' }`. A `takedown` does not: archiving gates new content, and
  *    removal must stay possible (the rule the retired pin model had).
  *
- * Phase 10's creator-scoped publishing extends THIS function with its creator branch; no route or
- * other service function has to learn what a place is. The table is named through RAW SQL rather
+ * **The owner seam (10-09, D-706, D-713, D-716).** Every write intent (`takedown` and `curate`) is
+ * refused `403 FORBIDDEN` unless the caller may CURATE the place: an ORGANIZATION community (and
+ * Início, which has no community) needs `stories.story.manage`; a MEMBER community needs its creator
+ * (`created_by_user_id = ctx.userId`) holding `stories.story.publish`. The flags arrive in `gate`, never
+ * as a role comparison (T-05-03, T-05-25). The order is the one every place read keeps: 404 (a miss, a
+ * hidden creator, another tenant's), then 403, then `400 { highlight: 'archived' }`. The `read`
+ * intent stays open to every reader of the community, and the function answers `{ curator }`, the
+ * place-dependent flag the read routes report (true for a manager on an organization place, true for
+ * the creator on their own community, false for everyone else, an admin on a member community
+ * included). No route learns what a place is: every highlight write reaches this function through
+ * `resolveHighlight`, `createHighlight`, `reorderHighlights` or the publish destination.
+ *
+ * A MEMBER community is also hidden here by an explicit predicate (its creator is not a live member:
+ * blocked, removed or departed) beside the RLS gate `communities_member_hidden_gate`, so the statement
+ * is correct on its own whatever lane runs it (D-708). The table is named through RAW SQL rather
  * than `@rede-social/module-communities`'s schema export (MOD-02).
  */
 async function resolveHighlightPlace(
@@ -1706,33 +1743,74 @@ async function resolveHighlightPlace(
   communityId: string | null,
   intent: PlaceIntent,
   gate: PlaceGate,
-): Promise<void> {
-  if (communityId === null) return;
+): Promise<PlaceView> {
+  if (communityId === null) {
+    // Início is the organization's own place: reading is open, writing is the manage half.
+    if (intent !== 'read' && !gate.canManage) throw new ApiError(403, 'FORBIDDEN');
+    return { curator: gate.canManage };
+  }
   if (!gate.communitiesOn) throw new ApiError(404, 'NOT_FOUND');
 
-  const lock = intent === 'read' ? sql`` : sql`for share`;
   // `locked` rides the same probe (08.2, D-355): the kernel gate's lane form answers for THIS
   // caller's claims, inside this transaction, and is `false` for staff and for every community
   // while the `store` module is off — the gate function reads that flag itself, so no TS flag read
   // joins this transaction (the `readPlaceGate` rule above).
-  const rows = await tx.execute<{ status: string; locked: boolean }>(sql`
-    select c.status, (c.id = any (${LOCKED_COMMUNITY_IDS})) as locked
+  //
+  // THIS read takes NO row lock, on purpose (10-09): `select … for share` also passes the table's
+  // UPDATE policy, `communities_member_update_gate`, so a member who is not the creator would read ZERO
+  // rows and the refusal would be the 404 of a miss instead of the 403 the seam owes a place that exists
+  // and is not theirs. The lock is taken below, only for a caller who may curate.
+  const rows = await tx.execute<{ kind: string; owner: string | null; locked: boolean }>(sql`
+    select c.kind, c.created_by_user_id as owner,
+           (c.id = any (${LOCKED_COMMUNITY_IDS})) as locked
       from communities c
      where c.id = ${communityId}::uuid
        and c.tenant_id = ${ctx.tenantId}::uuid
        and c.deleted_at is null
-     ${lock}`);
+       and (c.kind = 'organization' or exists (
+              select 1
+                from memberships m
+               where m.tenant_id = c.tenant_id
+                 and m.user_id = c.created_by_user_id
+                 and m.status = 'active'
+                 and m.blocked_at is null
+                 and m.deleted_at is null))`);
   const community = rows[0];
   if (!community) throw new ApiError(404, 'NOT_FOUND');
   // D-355 / STORE-18: a READ of a community locked for this caller is the SAME bare 404 as a
   // missing community (D-23), so neither the highlight list nor a highlight's detail tells a member
   // without access that the place exists — no title, cover asset id or story leaves the server.
-  // Write intents are unchanged: they are admin-only, and staff are never locked.
+  // Write intents are unchanged: they are never reached by a locked caller (staff are never locked,
+  // and a creator is never locked out of their own community).
   if (intent === 'read' && community.locked) throw new ApiError(404, 'NOT_FOUND');
-  if (intent === 'curate' && community.status !== 'active') {
+
+  const curator =
+    community.kind === 'organization'
+      ? gate.canManage
+      : community.owner === ctx.userId && gate.canPublish;
+  if (intent === 'read') return { curator };
+  if (!curator) throw new ApiError(403, 'FORBIDDEN');
+
+  // A write intent takes the row `for share`, so an archive that commits concurrently waits for this
+  // transaction instead of racing it (closes 05.1's residual R-1 for this path), and the status the
+  // `curate` refusal reads is the LOCKED one. A row that vanished in between is the bare 404.
+  const locked = await tx.execute<{ status: string }>(sql`
+    select c.status
+      from communities c
+     where c.id = ${communityId}::uuid
+       and c.tenant_id = ${ctx.tenantId}::uuid
+       and c.deleted_at is null
+     for share`);
+  const status = locked[0]?.status;
+  if (status === undefined) throw new ApiError(404, 'NOT_FOUND');
+  if (intent === 'curate' && status !== 'active') {
     throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'archived' });
   }
+  return { curator };
 }
+
+/** What `resolveHighlightPlace` answers beside its refusals: may this caller CURATE the place (D-713). */
+type PlaceView = { curator: boolean };
 
 /** What `resolveHighlight` reads back: the row's place and the columns a curation write compares. */
 type HighlightRef = {
@@ -2001,9 +2079,10 @@ async function assertHighlightHasRoom(
 export async function createHighlight(
   ctx: RequestContext,
   input: CreateStoryHighlight,
+  caller: HighlightCaller,
 ): Promise<HighlightSummary> {
   const communityId = input.communityId ?? null;
-  const gate = await readPlaceGate(ctx);
+  const gate = await readPlaceGate(ctx, caller);
 
   const created = await withTenantTx(ctx, async (tx) => {
     await resolveHighlightPlace(tx, ctx, communityId, 'curate', gate);
@@ -2098,8 +2177,9 @@ export async function addStoryToHighlight(
   ctx: RequestContext,
   highlightId: string,
   storyId: string,
+  caller: HighlightCaller,
 ): Promise<HighlightMembershipResult> {
-  const gate = await readPlaceGate(ctx);
+  const gate = await readPlaceGate(ctx, caller);
 
   const { highlightCount, created } = await withTenantTx(ctx, async (tx) => {
     await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
@@ -2154,9 +2234,10 @@ export async function addStoryToHighlight(
 export async function listHighlights(
   ctx: RequestContext,
   options: { communityId: string | null; curator: boolean },
+  caller: HighlightCaller,
 ): Promise<HighlightList> {
   const { communityId, curator } = options;
-  const gate = await readPlaceGate(ctx);
+  const gate = await readPlaceGate(ctx, caller);
 
   const rows = await withTenantTx(ctx, async (tx) => {
     await resolveHighlightPlace(tx, ctx, communityId, 'read', gate);
@@ -2202,9 +2283,10 @@ export async function getHighlight(
   ctx: RequestContext,
   highlightId: string,
   options: { curator: boolean },
+  caller: HighlightCaller,
 ): Promise<HighlightDetail> {
   const { curator } = options;
-  const gate = await readPlaceGate(ctx);
+  const gate = await readPlaceGate(ctx, caller);
 
   const detail = await withTenantTx(ctx, async (tx) => {
     const highlights = await tx.execute<HighlightSummaryRow>(sql`
@@ -2327,6 +2409,7 @@ export async function updateHighlight(
   ctx: RequestContext,
   highlightId: string,
   input: UpdateHighlight,
+  caller: HighlightCaller,
 ): Promise<HighlightSummary> {
   // The service re-states the route's title rule: this function is also reachable from handlers
   // that assemble their own input, none of which pass through the route validator.
@@ -2338,7 +2421,7 @@ export async function updateHighlight(
     throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'title_invalid' });
   }
 
-  const gate = await readPlaceGate(ctx);
+  const gate = await readPlaceGate(ctx, caller);
 
   const { row, changed } = await withTenantTx(ctx, async (tx) => {
     const current = await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
@@ -2412,8 +2495,12 @@ export async function updateHighlight(
  * deleted" answering 204 would confirm that an id existed. `highlight.deleted` is emitted on a real
  * delete only, ids only.
  */
-export async function deleteHighlight(ctx: RequestContext, highlightId: string): Promise<void> {
-  const gate = await readPlaceGate(ctx);
+export async function deleteHighlight(
+  ctx: RequestContext,
+  highlightId: string,
+  caller: HighlightCaller,
+): Promise<void> {
+  const gate = await readPlaceGate(ctx, caller);
 
   const removed = await withTenantTx(ctx, async (tx) => {
     await resolveHighlight(tx, ctx, highlightId, 'takedown', gate);
@@ -2467,8 +2554,9 @@ export async function removeStoryFromHighlight(
   ctx: RequestContext,
   highlightId: string,
   storyId: string,
+  caller: HighlightCaller,
 ): Promise<HighlightMembershipResult> {
-  const gate = await readPlaceGate(ctx);
+  const gate = await readPlaceGate(ctx, caller);
 
   const { highlightCount, removed } = await withTenantTx(ctx, async (tx) => {
     await resolveHighlight(tx, ctx, highlightId, 'takedown', gate);
@@ -2547,10 +2635,11 @@ export async function removeStoryFromHighlight(
 export async function reorderHighlights(
   ctx: RequestContext,
   input: ReorderHighlights,
+  caller: HighlightCaller,
 ): Promise<HighlightList> {
   const communityId = input.communityId ?? null;
   const requested = input.highlightIds;
-  const gate = await readPlaceGate(ctx);
+  const gate = await readPlaceGate(ctx, caller);
 
   const { rows, moved } = await withTenantTx(ctx, async (tx) => {
     await resolveHighlightPlace(tx, ctx, communityId, 'curate', gate);
@@ -2627,8 +2716,11 @@ export async function reorderHighlights(
  *   rows are untouched and come back with the module.
  * - It is the CURATOR's read (manage-only at the route): empty highlights are included.
  */
-export async function listHighlightCatalog(ctx: RequestContext): Promise<HighlightList> {
-  const gate = await readPlaceGate(ctx);
+export async function listHighlightCatalog(
+  ctx: RequestContext,
+  caller: HighlightCaller,
+): Promise<HighlightList> {
+  const gate = await readPlaceGate(ctx, caller);
   const communityPlaces = gate.communitiesOn
     ? sql`exists (
           select 1 from communities hc
@@ -2673,8 +2765,9 @@ export async function listHighlightCatalog(ctx: RequestContext): Promise<Highlig
 export async function listStoryHighlightIds(
   ctx: RequestContext,
   storyId: string,
+  caller: HighlightCaller,
 ): Promise<StoryHighlightIds> {
-  const gate = await readPlaceGate(ctx);
+  const gate = await readPlaceGate(ctx, caller);
   // A highlight whose community was DELETED (09.3, D-556) is left out, like the catalogue leaves it.
   // Archived communities stay listed: a story can still be removed from their highlights.
   const places = gate.communitiesOn
