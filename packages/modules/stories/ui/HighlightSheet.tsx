@@ -1,7 +1,7 @@
 'use client';
 
 import { MediaImage } from '@rede-social/core/ui';
-import { BottomSheet, Switch } from '@rede-social/ui';
+import { BottomSheet, ConfirmDialog, Switch } from '@rede-social/ui';
 import { Check, Plus } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { HighlightTitleStep } from './HighlightTitleStep';
@@ -47,6 +47,15 @@ import { StoryMonogram } from './StoryCircle';
  * 3. **The EMPTY case is the host's node.** "Nenhum destaque ainda." plus a link to CREATE one are
  *    words and a route this module owns neither of.
  *
+ * **10-12 (UI-D-704, UI-D-705): the member's two additions.** A member saves THEIR story into a
+ * highlight of THEIR community, where everyone who sees the community will read it, also after the 24
+ * hours. Both modes therefore take an optional `notice` node the host builds (the visibility sentence,
+ * in its sheet tone), rendered above the groups; and the checklist takes an optional `confirmOn`: the
+ * FIRST switch-on of each OPENING of the sheet opens a brand `ConfirmDialog` first, the switch stays
+ * off until it is confirmed, and after that confirm the other switch-ons of the same opening write at
+ * once. Switching off is always immediate (nothing is deleted). Closing and reopening the sheet
+ * forgets the confirm. Without `confirmOn` the organization's sheets are exactly what they were.
+ *
  * Plus the re-seed rule: **the switches re-seed when the target story changes while the sheet
  * stays mounted** (the defect `stories.spec.ts` once caught on the pin sheet). And E09 loading:
  * `selectedIds === null` renders every switch DISABLED at its real row geometry, so no switch ever
@@ -72,6 +81,12 @@ export interface HighlightMembershipListProps {
   onToggle: (id: string, next: boolean) => Promise<boolean>;
   /** The switch's accessible name. A function: only the host has the words. */
   rowLabel: (row: HighlightMembershipRow) => string;
+  /**
+   * 10-12: a gate on a switch-ON. Returning `true` means the owner has taken the tap over and will call
+   * `proceed` (the optimistic write, exactly as an ungated tap) once the member has confirmed; the
+   * switch stays where it was until then. Absent or `false`: the tap proceeds at once.
+   */
+  onBeforeOn?: (id: string, proceed: () => void) => boolean;
 }
 
 export function HighlightMembershipList({
@@ -79,6 +94,7 @@ export function HighlightMembershipList({
   selectedIds,
   onToggle,
   rowLabel,
+  onBeforeOn,
 }: HighlightMembershipListProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(selectedIds ?? []));
 
@@ -103,7 +119,7 @@ export function HighlightMembershipList({
   /** A REF rather than state: it gates the handler, and nothing renders from it (no double flash). */
   const inFlight = useRef<Set<string>>(new Set());
 
-  const toggle = useCallback(
+  const run = useCallback(
     (id: string, next: boolean) => {
       // Invariant 2: the second tap of a row whose write has not settled does NOTHING at all.
       if (inFlight.current.has(id)) return;
@@ -137,6 +153,15 @@ export function HighlightMembershipList({
         });
     },
     [onToggle],
+  );
+
+  const toggle = useCallback(
+    (id: string, next: boolean) => {
+      // The in-flight rule comes first: a tap on a row whose write is pending is a no-op, gated or not.
+      if (next && !inFlight.current.has(id) && onBeforeOn?.(id, () => run(id, true))) return;
+      run(id, next);
+    },
+    [onBeforeOn, run],
   );
 
   const loading = selectedIds === null;
@@ -227,6 +252,19 @@ interface HighlightSheetBaseProps {
   places: readonly HighlightSheetPlace[];
   /** A row's accessible name — "Destacar em {title}, {place}" / "Publicar no destaque …". */
   rowLabel: (row: HighlightSheetRow, place: HighlightSheetPlace) => string;
+  /**
+   * 10-12 (UI-D-704): the member's visibility notice, built by the host in its sheet tone, rendered
+   * above the groups and always visible. Absent: nothing is drawn.
+   */
+  notice?: ReactNode;
+}
+
+/** The words of the member's switch-on confirmation (UI-D-705): the host has them, the module ships none. */
+export interface HighlightSheetConfirmCopy {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  cancelLabel: string;
 }
 
 export interface HighlightSheetChecklistProps extends HighlightSheetBaseProps {
@@ -237,6 +275,8 @@ export interface HighlightSheetChecklistProps extends HighlightSheetBaseProps {
   onToggle: (highlightId: string, next: boolean, place: HighlightSheetPlace) => Promise<boolean>;
   /** Rendered INSIDE the sheet when there is no highlight anywhere. */
   empty: ReactNode;
+  /** 10-12: present for a member's sheet — the first switch-on of each opening asks first. */
+  confirmOn?: HighlightSheetConfirmCopy;
 }
 
 export interface HighlightSheetSingleProps extends HighlightSheetBaseProps {
@@ -302,31 +342,79 @@ function ChecklistSheet({
   selectedIds,
   onToggle,
   empty,
+  notice,
+  confirmOn,
 }: HighlightSheetChecklistProps) {
+  /**
+   * 10-12 (UI-D-705): the once-per-opening confirm. `confirmed` is true from the first confirmed
+   * switch-on until the sheet closes; `asking` holds the tap that is waiting for its answer. Adjusting
+   * state while rendering is React's own alternative to an effect: a closed sheet always reopens
+   * un-confirmed, with no frame of the previous opening's state.
+   */
+  const [confirmed, setConfirmed] = useState(false);
+  const [asking, setAsking] = useState<{ proceed: () => void } | null>(null);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    if (!open) {
+      setConfirmed(false);
+      setAsking(null);
+    }
+  }
+  const gate = useCallback(
+    (_id: string, proceed: () => void) => {
+      if (!confirmOn || confirmed) return false;
+      setAsking({ proceed });
+      return true;
+    },
+    [confirmOn, confirmed],
+  );
+
   return (
-    <BottomSheet open={open} onClose={onClose} title={title}>
-      {helper ? <p className="pb-2 text-xs font-normal text-text-tertiary">{helper}</p> : null}
-      {places.length === 0
-        ? empty
-        : places.map((place) => (
-            <div key={place.key}>
-              <PlaceLabel place={place} />
-              <HighlightMembershipList
-                rows={place.rows.map((row) => ({
-                  id: row.id,
-                  title: row.title,
-                  leading: <HighlightThumb row={row} />,
-                }))}
-                selectedIds={selectedIds}
-                onToggle={(id, next) => onToggle(id, next, place)}
-                rowLabel={(membership) => {
-                  const row = place.rows.find((candidate) => candidate.id === membership.id);
-                  return row ? rowLabel(row, place) : membership.title;
-                }}
-              />
-            </div>
-          ))}
-    </BottomSheet>
+    <>
+      <BottomSheet open={open} onClose={onClose} title={title}>
+        {helper ? <p className="pb-2 text-xs font-normal text-text-tertiary">{helper}</p> : null}
+        {notice}
+        {places.length === 0
+          ? empty
+          : places.map((place) => (
+              <div key={place.key}>
+                <PlaceLabel place={place} />
+                <HighlightMembershipList
+                  rows={place.rows.map((row) => ({
+                    id: row.id,
+                    title: row.title,
+                    leading: <HighlightThumb row={row} />,
+                  }))}
+                  selectedIds={selectedIds}
+                  onToggle={(id, next) => onToggle(id, next, place)}
+                  onBeforeOn={confirmOn ? gate : undefined}
+                  rowLabel={(membership) => {
+                    const row = place.rows.find((candidate) => candidate.id === membership.id);
+                    return row ? rowLabel(row, place) : membership.title;
+                  }}
+                />
+              </div>
+            ))}
+      </BottomSheet>
+      {confirmOn ? (
+        <ConfirmDialog
+          open={asking !== null}
+          tone="brand"
+          title={confirmOn.title}
+          body={confirmOn.body}
+          confirmLabel={confirmOn.confirmLabel}
+          cancelLabel={confirmOn.cancelLabel}
+          onConfirm={() => {
+            const waiting = asking;
+            setConfirmed(true);
+            setAsking(null);
+            waiting?.proceed();
+          }}
+          onClose={() => setAsking(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -356,6 +444,7 @@ function SingleSheet({
   originCommunityId = null,
   titleStep,
   focusCreateFor = null,
+  notice,
 }: HighlightSheetSingleProps) {
   /** The body step: the list, or the title step for ONE place. It swaps inside the one sheet. */
   const [creatingFor, setCreatingFor] = useState<HighlightSheetPlace | null>(null);
@@ -508,6 +597,7 @@ function SingleSheet({
             {helper ? (
               <p className="pb-2 text-xs font-normal text-text-tertiary">{helper}</p>
             ) : null}
+            {notice}
             {origin ? group(origin) : null}
             <button
               type="button"

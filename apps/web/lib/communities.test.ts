@@ -6,7 +6,12 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { getOrderableCommunities, loadCommunities, reorderCommunities } from './communities';
+import {
+  getOrderableCommunities,
+  loadCommunities,
+  ownsActiveCommunity,
+  reorderCommunities,
+} from './communities';
 
 /**
  * 2026-10-03 — the two BFF calls behind the Comunidades reorder mode, against a stubbed transport.
@@ -267,5 +272,44 @@ describe('getOrderableCommunities — ORGANIZATION communities only (10-13, UI-D
 
     expect(items).not.toBeNull();
     expect(items).toHaveLength(1);
+  });
+});
+
+/**
+ * 10-12 (UI-D-701, UI-D-705): "Destacar" in the story viewer's menu and in "Seus stories" exists only
+ * for a member who owns an ACTIVE community. The list read already says it in the caller's own
+ * `memberQuota.ownedActive`, so ONE row of the list answers it; the communities module off needs no
+ * read at all, and a failed read is `false`, never an error (a UX hint: the API refuses the write).
+ */
+describe('ownsActiveCommunity — one row of the list answers it (10-12)', () => {
+  const MODULES = [{ key: 'communities' }];
+
+  it('O1. the communities module off reads nothing and is false', async () => {
+    vi.mocked(apiFetch).mockClear();
+    await expect(ownsActiveCommunity([{ key: 'stories' }])).resolves.toBe(false);
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('O2. ownedActive above zero is true, zero or no quota is false; the request is ONE row', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      json(200, { items: [], nextCursor: null, memberQuota: { ownedActive: 2, limit: 3 } }),
+    );
+    await expect(ownsActiveCommunity(MODULES)).resolves.toBe(true);
+    expect(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]).toBe('/v1/communities?limit=1');
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      json(200, { items: [], nextCursor: null, memberQuota: { ownedActive: 0, limit: 3 } }),
+    );
+    await expect(ownsActiveCommunity(MODULES)).resolves.toBe(false);
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      json(200, { items: [], nextCursor: null, memberQuota: null }),
+    );
+    await expect(ownsActiveCommunity(MODULES)).resolves.toBe(false);
+  });
+
+  it('O3. a failed read is false, never an error', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(apiFetch).mockResolvedValueOnce(json(500, { error: { code: 'INTERNAL' } }));
+    await expect(ownsActiveCommunity(MODULES)).resolves.toBe(false);
+    log.mockRestore();
   });
 });

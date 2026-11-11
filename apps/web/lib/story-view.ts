@@ -775,6 +775,7 @@ export type HighlightPlaceView = {
  * What it drops, deliberately:
  * - a highlight whose community is not in `communities` — archived, removed, or the communities
  *   module off (R-D-F, HIGHLIGHT-04): the curator cannot add to it, so a switch would only fail;
+ * - Início itself when `includeHome` is `false` (a member has no Início group, 10-12);
  * - a place with no highlight — no empty group (UI E09) — unless `includeEmptyPlaces` asks for every
  *   place, which is the composer's single-select sheet (plan 08): there each place ends with its own
  *   "Novo destaque", so an empty community is still somewhere to publish.
@@ -785,7 +786,7 @@ export type HighlightPlaceView = {
 export function highlightPlacesView(
   catalog: readonly HighlightSummary[],
   communities: readonly { id: string; name: string }[],
-  labels: { homeLabel: string; includeEmptyPlaces?: boolean },
+  labels: { homeLabel: string; includeEmptyPlaces?: boolean; includeHome?: boolean },
 ): HighlightPlaceView[] {
   const rowOf = (summary: HighlightSummary): HighlightPlaceView['rows'][number] => ({
     id: summary.id,
@@ -810,7 +811,8 @@ export function highlightPlacesView(
 
   const keep = (rows: HighlightPlaceView['rows']) => labels.includeEmptyPlaces || rows.length > 0;
   const places: HighlightPlaceView[] = [];
-  if (keep(home)) {
+  // 10-12 (UI-D-704): a member's groups are their communities only; `includeHome: false` drops Início.
+  if (labels.includeHome !== false && keep(home)) {
     places.push({ key: 'home', label: labels.homeLabel, communityId: null, rows: home });
   }
   // Iterating the ACTIVE list is what drops an orphan: a community absent from it is never visited.

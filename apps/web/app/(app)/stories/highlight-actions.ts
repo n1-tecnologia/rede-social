@@ -89,7 +89,17 @@ export async function loadHighlightItemsAction(highlightId: string): Promise<Hig
  * module off it answers `[]`, and the catalogue already carries only Início then.
  */
 export type HighlightSheetResult =
-  | { ok: true; places: HighlightPlaceView[]; selectedIds: string[] }
+  | {
+      ok: true;
+      places: HighlightPlaceView[];
+      selectedIds: string[];
+      /**
+       * 10-12 (UI-D-705): where a MEMBER's empty sheet sends "Criar destaque": the manage route of the
+       * most recently active community they OWN. Present only for a caller who owns one (nobody owns an
+       * organization community), so the organization's result is exactly what it was.
+       */
+      createHref?: string;
+    }
   | { ok: false };
 
 export async function loadHighlightSheetAction(storyId: string): Promise<HighlightSheetResult> {
@@ -105,12 +115,14 @@ export async function loadHighlightSheetAction(storyId: string): Promise<Highlig
       listAllCommunities(),
       getTranslations('stories'),
     ]);
+    const createHref = ownCommunityManageHref(communities);
     result = {
       ok: true,
       places: highlightPlacesView(catalog.items, communities, {
         homeLabel: t('highlights.place.home'),
       }),
       selectedIds: memberships.highlightIds,
+      ...(createHref === null ? {} : { createHref }),
     };
   } catch (error) {
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
@@ -120,6 +132,27 @@ export async function loadHighlightSheetAction(storyId: string): Promise<Highlig
 
   if (refusal) redirect(refusal);
   return result;
+}
+
+/**
+ * The manage route of the member's most recently active ACTIVE community, or `null` when they own
+ * none (10-12, UI-D-705). Ownership is the API's own flag (`viewer.isOwner`), never an id or role
+ * comparison here; `lastActivityAt` is an ISO instant, so the lexical maximum is the latest.
+ */
+function ownCommunityManageHref(
+  communities: readonly {
+    id: string;
+    status: string;
+    lastActivityAt: string;
+    viewer: { isOwner: boolean };
+  }[],
+): string | null {
+  let latest: { id: string; lastActivityAt: string } | null = null;
+  for (const community of communities) {
+    if (community.status !== 'active' || !community.viewer.isOwner) continue;
+    if (latest === null || community.lastActivityAt > latest.lastActivityAt) latest = community;
+  }
+  return latest === null ? null : `/comunidades/${latest.id}/destaques`;
 }
 
 /**

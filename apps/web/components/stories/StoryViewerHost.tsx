@@ -69,6 +69,7 @@ import {
 } from '@/lib/story-view';
 import { StoryMenuRow } from './StoryMenuRow';
 import { StoryVideo } from './StoryVideo';
+import { StoryVisibilityNotice } from './StoryVisibilityNotice';
 import {
   createStoryInteractions,
   type StoryInteractions,
@@ -306,6 +307,10 @@ type HighlightSheetState = {
   places: HighlightPlaceView[];
   selectedIds: string[];
   open: boolean;
+  /** 10-12 (UI-D-705): opened from a MEMBER's menu: the notice, the confirm and the member empty state. */
+  member: boolean;
+  /** Where a member's empty sheet sends "Criar destaque" (their most recently active community). */
+  createHref: string | null;
 };
 
 /**
@@ -474,7 +479,7 @@ export function StoryViewerHost({
   const genericError = labels.genericError;
 
   const openHighlight = useCallback(
-    async (storyId: string) => {
+    async (storyId: string, member = false) => {
       if (highlightReading.current) return;
       highlightReading.current = true;
       setHighlightFor({ storyId });
@@ -487,6 +492,8 @@ export function StoryViewerHost({
             places: result.places,
             selectedIds: result.selectedIds,
             open: true,
+            member,
+            createHref: result.createHref ?? null,
           });
           opened = true;
         }
@@ -839,6 +846,19 @@ export function StoryViewerHost({
                 onClose={closeHighlight}
                 title={t('highlights.sheet.title')}
                 helper={t('highlights.sheet.helper')}
+                // 10-12 (UI-D-705): a member's sheet says where the story will be seen and asks once
+                // per opening before the first switch-on.
+                notice={highlightSheet.member ? <StoryVisibilityNotice tone="sheet" /> : undefined}
+                confirmOn={
+                  highlightSheet.member
+                    ? {
+                        title: t('highlights.memberConfirm.title'),
+                        body: t('highlights.memberConfirm.body'),
+                        confirmLabel: t('highlights.memberConfirm.confirm'),
+                        cancelLabel: t('highlights.memberConfirm.cancel'),
+                      }
+                    : undefined
+                }
                 places={highlightSheet.places}
                 selectedIds={highlightSheet.selectedIds}
                 rowLabel={(row, place) =>
@@ -859,9 +879,11 @@ export function StoryViewerHost({
                     </p>
                     <Link
                       href={
-                        originCommunityId
-                          ? `/comunidades/${originCommunityId}/destaques`
-                          : '/stories/destaques'
+                        highlightSheet.member
+                          ? (highlightSheet.createHref ?? '/comunidades')
+                          : originCommunityId
+                            ? `/comunidades/${originCommunityId}/destaques`
+                            : '/stories/destaques'
                       }
                       className="rounded text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     >
@@ -890,7 +912,7 @@ export function StoryViewerHost({
                     onClick={() => {
                       const storyId = menuView.storyId;
                       setMenuFor(null);
-                      void openHighlight(storyId);
+                      void openHighlight(storyId, true);
                     }}
                   />
                 ) : null}

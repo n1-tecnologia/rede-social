@@ -125,6 +125,21 @@ export function communityEntryState(input: {
 }
 
 /**
+ * Whether the member owns at least one ACTIVE community (10-12, UI-D-701, UI-D-705): "Destacar" in the
+ * story viewer's menu and in "Seus stories" exists only then. The list read already says it, in the
+ * caller's own `memberQuota.ownedActive`, so one row of it is enough. It is a UX hint (the API refuses
+ * a highlight write on a community that is not the caller's): the communities module off (no read at
+ * all), a failed read or no quota is `false`, never an error.
+ */
+export async function ownsActiveCommunity(
+  modules: ReadonlyArray<{ key: string }>,
+): Promise<boolean> {
+  if (!modules.some((module) => module.key === 'communities')) return false;
+  const page = await loadCommunities({ limit: 1 });
+  return (page?.memberQuota?.ownedActive ?? 0) > 0;
+}
+
+/**
  * Every ACTIVE community of the tenant, for a surface that has to offer ALL of them at once —
  * UI-D-45's "Publicar em" picker today, UI-D-41's pin sheet in 05-08.
  *

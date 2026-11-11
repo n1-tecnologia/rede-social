@@ -23,6 +23,7 @@ export {
   type HighlightSelection,
   HighlightSheet,
   type HighlightSheetChecklistProps,
+  type HighlightSheetConfirmCopy,
   type HighlightSheetPlace,
   type HighlightSheetProps,
   type HighlightSheetRow,

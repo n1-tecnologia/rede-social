@@ -3,6 +3,7 @@ import { PageHeader } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { ownsActiveCommunity } from '@/lib/communities';
 import { loadOwnStories } from '@/lib/stories';
 import { storyHistoryView } from '@/lib/story-view';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -26,6 +27,13 @@ import { StoryHistoryList } from './StoryHistoryList';
  * back to `/inicio` rather than being shown a list they would then be refused; the API refuses every
  * route independently regardless, which is what makes this a UX decision rather than the boundary.
  *
+ * **It opens for any member holding the publish permission too** (10-12, UI-D-705): `GET /v1/stories/mine`
+ * answers a member their own history (expired included), so the same list is their "Seus stories",
+ * reached from the publish header only. A member's screen differs in three places: the row menu's
+ * "Destacar" exists only when they own an active community (`ownsActiveCommunity`), the delete
+ * confirmation and the empty state speak of Explorar, and the highlight sheet carries the visibility
+ * notice and the once-per-opening confirm.
+ *
  * **The page reads only the history.** The highlight sheet composes its own places (catalogue,
  * memberships and active communities) in ONE server action when "Destacar" is tapped, the same read
  * the viewer uses — so this render no longer lists communities. A community archived between the
@@ -42,14 +50,16 @@ export default async function StoryHistoryPage() {
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const bootstrap = await requireBootstrap();
-  if (!bootstrap.permissions.includes(STORY_PERMISSIONS.manage)) redirect('/inicio');
+  const isCurator = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+  if (!isCurator && !bootstrap.permissions.includes(STORY_PERMISSIONS.publish)) redirect('/inicio');
 
-  const [ts, tm, page] = await Promise.all([
+  const [ts, tm, page, canHighlight] = await Promise.all([
     getTranslations('stories'),
     // Phase 3's media vocabulary, read from its own namespace: the pill and the refusal note are
     // the media screens' words, and duplicating them into `stories.json` would be drift.
     getTranslations('media'),
     loadOwnStories(),
+    isCurator ? Promise.resolve(false) : ownsActiveCommunity(bootstrap.modules),
   ]);
 
   return (
@@ -68,6 +78,7 @@ export default async function StoryHistoryPage() {
         initialCursor={page?.nextCursor ?? null}
         initialError={page === null}
         publishHref="/stories/publicar"
+        {...(isCurator ? {} : { member: { canHighlight } })}
       />
     </div>
   );

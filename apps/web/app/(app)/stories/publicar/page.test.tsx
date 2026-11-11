@@ -1,3 +1,5 @@
+import type { ReactElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -120,7 +122,11 @@ function summary(id: string, communityId: string | null, title: string) {
 
 async function render(searchParams: { comunidade?: string | string[] } = {}) {
   mocks.composerProps = null;
-  await PublishStoryPage({ searchParams: Promise.resolve(searchParams) });
+  const tree = (await PublishStoryPage({
+    searchParams: Promise.resolve(searchParams),
+  })) as ReactElement;
+  // Rendering calls the mocked composer, which records the props the page handed it.
+  renderToStaticMarkup(tree);
   return mocks.composerProps as Record<string, unknown> | null;
 }
 

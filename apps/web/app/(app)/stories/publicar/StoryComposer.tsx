@@ -1,6 +1,7 @@
 'use client';
 
 import { MEDIA_LIMITS, mediaAcceptFor } from '@rede-social/contracts/media';
+import type { SocialSettings } from '@rede-social/module-social/contracts';
 import {
   STORY_HIGHLIGHT_MAX_ITEMS,
   STORY_HIGHLIGHT_MAX_PER_PLACE,
@@ -23,13 +24,22 @@ import {
   PageHeader,
   useToast,
 } from '@rede-social/ui';
-import { ChevronRight, Image as ImageIcon, Loader, Video, Volume2, VolumeX, X } from 'lucide-react';
+import {
+  ChevronRight,
+  Image as ImageIcon,
+  Loader,
+  Users,
+  Video,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { publishStoryAction } from '@/app/(app)/stories/story-actions';
 import { useAssetReadiness } from '@/components/media/useAssetReadiness';
-import { useSignedUpload } from '@/components/media/useSignedUpload';
+import { formatMediaLimit, useSignedUpload } from '@/components/media/useSignedUpload';
 import {
   forgetVideo,
   playVideo,
@@ -37,6 +47,7 @@ import {
   useVideoSoundAudible,
   videoSoundAudible,
 } from '@/components/media/video-sound';
+import { StoryVisibilityNotice } from '@/components/stories/StoryVisibilityNotice';
 import { leaveForm, returnAfterSave } from '@/lib/form-exit';
 
 /**
@@ -107,8 +118,29 @@ import { leaveForm, returnAfterSave } from '@/lib/form-exit';
  * and returns the row to "Escolher destaque" when the origin forced it, else "Nenhum"; a bare 404
  * keeps the generic error and the selection.
  *
- * **The row renders only for a caller holding `stories.story.manage`** (the API refuses any
- * destination without it, T-05.2-32): the page passes no places otherwise, and no places is no row.
+ * **The row renders only when the page passes destinations** (the API is the control on every write):
+ * no places is no row, and no gap.
+ *
+ * **The member mode (10-12: UI-D-702..UI-D-704, D-714..D-716).** The SAME route and frame with `member`
+ * set by the page (the composed `stories.story.publish` without `stories.story.manage`). It differs
+ * from the administrator's screen in exactly these ways, and the administrator's is untouched:
+ *
+ * - **Pre-pick.** "Escolher foto" always; "Escolher vídeo" ONLY when `super_admin` turned member video
+ *   on (absent from the DOM, not disabled). The helper is built from the tenant's `social.media`
+ *   limits the page read off the bootstrap, and both upload hooks carry the tenant's caps (a photo over
+ *   its cap is refused at pick time with "A foto pode ter até {size}.", with no request).
+ * - **After a pick** the audience line ("Quem segue você vê este story em Explorar por 24 horas.") sits
+ *   above the caption, and is REPLACED by the visibility notice when a destination is chosen. A member
+ *   video must be `ready` before "Publicar" enables, because its duration is only known once the
+ *   provider reports it (the admin's story may publish while it processes); a duration refusal is the
+ *   `falhou` state in the tenant's own number, with a ghost "Remover vídeo".
+ * - **Destination.** The page passes only the communities the API says the caller may publish a story
+ *   into (`viewer.actions.story`, the Escopo seam), so there is no "Início" group and the row exists
+ *   only when there is at least one. Landing: "Nenhum" to Explorar, a highlight to its community.
+ * - **Refusals** keep the media and the caption: archived as shipped; a `403` with a destination chosen
+ *   resets the row, drops that community's group for the session and says "Você não pode publicar
+ *   nesta comunidade."; a `403` with none chosen means the Rede social was turned off meanwhile (the
+ *   API's 403 carries no detail, so what was SENT tells the two apart) and "Publicar" is disabled.
  */
 
 /**
@@ -120,6 +152,12 @@ export type ComposerSelection = HighlightSelection | { kind: 'choose' };
 export interface StoryComposerProps {
   /** Where the header's trailing text action points (`/stories/meus`). */
   historyHref: string;
+  /**
+   * 10-12: the member mode, set by the page for a member. `limits` are the tenant's `social.media`
+   * limits (the helper, the upload caps, whether the video row exists at all). Absent: the
+   * administrator's screen, unchanged.
+   */
+  member?: { limits: SocialSettings['media'] };
   /**
    * The single-select sheet's place groups (Início, then every ACTIVE community, empty ones
    * included) — empty unless the viewer holds both `stories.story.publish` and
@@ -169,6 +207,7 @@ function durationLabel(seconds: number): string {
 
 export function StoryComposer({
   historyHref,
+  member,
   places = NO_PLACES,
   originCommunityId = null,
   initialSelection = NONE,
@@ -220,10 +259,19 @@ export function StoryComposer({
     setPicked((current) => current ?? { assetId: '', kind: 'image', previewUrl: url });
   };
 
+  const memberLimits = member?.limits;
   const photo = useSignedUpload({
     kind: 'image',
     purpose: 'story',
     successKey: null,
+    // 10-12 (UI-D-702): the tenant's photo cap, member mode only. A file over it is refused at pick
+    // time with the member sentence, no request; the broker's own 413 stays the authority.
+    ...(memberLimits
+      ? {
+          maxBytes: memberLimits.photoMaxBytes,
+          tooLargeMessage: (size: string) => t('publish.member.errors.photoSize', { size }),
+        }
+      : {}),
     onPicked: previewFile,
     onCompleted: (asset) => take('image')(asset.id),
   });
@@ -232,6 +280,7 @@ export function StoryComposer({
     kind: 'video',
     purpose: 'story',
     successKey: null,
+    ...(memberLimits ? { maxBytes: memberLimits.video.maxBytes } : {}),
     onPicked: previewFile,
     onHandedToProvider: take('video'),
     // Unreachable for a vendor-owned video (there is no `complete` call), but the hook's contract
@@ -269,9 +318,12 @@ export function StoryComposer({
     readiness.phase !== 'failed'
       ? null
       : readiness.issue === 'duration_too_long'
-        ? tm('errors.duration', {
-            duration: durationLabel(MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0),
-          })
+        ? memberLimits
+          ? // UI-D-703: the tenant's own number, not the shared table's.
+            t('publish.member.videoTooLong', { seconds: memberLimits.video.maxDurationSeconds })
+          : tm('errors.duration', {
+              duration: durationLabel(MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0),
+            })
         : tm('errors.transcode');
   const announced = QUARTILES.includes(active.progress)
     ? tm('progress', { percent: active.progress })
@@ -282,6 +334,15 @@ export function StoryComposer({
    * is not enough. A video that is still waiting IS publishable — the strip filters it until ready.
    */
   const publishable = picked !== null && picked.assetId !== '' && !videoFailed;
+  /**
+   * UI-D-703: a member's video publishes only once it is `ready` (its duration is known then); the
+   * administrator's may publish while it processes. Anything else is not a video, and an image is
+   * usable the moment `complete` answers.
+   */
+  const waitingForVideo =
+    memberLimits !== undefined && picked?.kind === 'video' && readiness.phase !== 'ready';
+  /** UI-D-704: a `403` with no destination chosen means the Rede social is off: nothing publishes. */
+  const [socialOff, setSocialOff] = useState(false);
 
   /** The row exists only for a curator: no places means no row (UI-D-69 render rule). */
   const canChoose = places.length > 0;
@@ -289,7 +350,8 @@ export function StoryComposer({
     (place) => place.communityId === null || !refused.has(place.communityId),
   );
   /** Where "close" and a confirmed discard go: back to where the admin started (UI-D-57). */
-  const origin = originCommunityId ? `/comunidades/${originCommunityId}` : '/inicio';
+  const home = member ? '/inicio?aba=explorar' : '/inicio';
+  const origin = originCommunityId ? `/comunidades/${originCommunityId}` : home;
   /** UI-D-71: after `title_invalid`, a forced origin returns to the gate rather than to "Nenhum". */
   const forcedByOrigin = initialSelection.kind === 'choose';
 
@@ -343,9 +405,12 @@ export function StoryComposer({
    * error: the admin re-picks.
    */
   const refusalCopy = (
-    code: StoryIssue | StoryHighlightIssue | 'not_found' | 'generic',
+    code: StoryIssue | StoryHighlightIssue | 'not_found' | 'forbidden' | 'generic',
   ): string => {
-    const map: Record<StoryIssue | StoryHighlightIssue | 'not_found' | 'generic', string> = {
+    const map: Record<
+      StoryIssue | StoryHighlightIssue | 'not_found' | 'forbidden' | 'generic',
+      string
+    > = {
       media_required: t('publish.errors.noMedia'),
       media_invalid: t('publish.errors.failed'),
       archived: t('publish.errors.failed'),
@@ -353,6 +418,7 @@ export function StoryComposer({
       full: t('highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS }),
       order_stale: t('publish.errors.failed'),
       not_found: t('publish.errors.failed'),
+      forbidden: t('publish.errors.failed'),
       generic: t('publish.errors.failed'),
     };
     return map[code];
@@ -361,6 +427,8 @@ export function StoryComposer({
   const submit = () => {
     // A refused video: the alert already says why, so this sends nothing and adds no second error.
     if (videoFailed) return;
+    // The Rede social was turned off (a 403 with nothing chosen): nothing publishes until it is back.
+    if (socialOff) return;
     if (!publishable) {
       // Client-side, and it costs NO request: there is nothing to publish (UI empty/E07).
       setFormError(t('publish.errors.noMedia'));
@@ -402,6 +470,19 @@ export function StoryComposer({
           setFormError(t('publish.errors.archived', { community: target.place.label }));
           return;
         }
+        if (member && result.code === 'forbidden') {
+          if (target && refusedCommunity !== null) {
+            // UI-D-704: no longer theirs to publish into. Nothing was published; the media and the
+            // caption stay, the group leaves the sheet for the session and the row reads "Nenhum".
+            setRefused((current) => new Set(current).add(refusedCommunity));
+            setSelection(NONE);
+            setFormError(t('publish.member.errors.forbidden'));
+          } else {
+            setSocialOff(true);
+            setFormError(t('publish.member.errors.socialOff'));
+          }
+          return;
+        }
         if (result.code === 'title_invalid') {
           // UI-D-71: state the rule; a forced origin returns to the gate, anything else to "Nenhum".
           setSelection(forcedByOrigin ? { kind: 'choose' } : NONE);
@@ -438,7 +519,7 @@ export function StoryComposer({
       // community, an Início highlight or "Nenhum" on `/inicio`. The action revalidated that path.
       // 2026-10-09: when that screen is the one the composer was opened from, the composer steps
       // back to it (refreshed once restored, the toast kept) instead of stacking a second copy.
-      const landing = landingCommunityId ? `/comunidades/${landingCommunityId}` : '/inicio';
+      const landing = landingCommunityId ? `/comunidades/${landingCommunityId}` : home;
       if (returnAfterSave(router, landing, done)) return;
       router.push(landing);
       // `revalidatePath` in the action clears the SERVER cache; this clears the client Router Cache,
@@ -452,6 +533,15 @@ export function StoryComposer({
   const close = () => {
     if (picked === null) return leaveForm(router, origin);
     setDiscarding(true);
+  };
+
+  /** UI-D-703 "Remover vídeo": drops a refused video and returns to the pickers (nothing was published). */
+  const removeVideo = () => {
+    if (preview.current) URL.revokeObjectURL(preview.current);
+    preview.current = null;
+    setPicked(null);
+    setFormError(null);
+    video.reset();
   };
 
   const header = (
@@ -566,16 +656,37 @@ export function StoryComposer({
                 ImageIcon,
                 photo,
               )}
-              {picker('video', VIDEO_INPUT_ID, VIDEO_ACCEPT, t('publish.pickVideo'), Video, video)}
+              {/* UI-D-702 (D-715): with member video off the row and its drop zone are ABSENT. */}
+              {memberLimits && !memberLimits.video.enabled
+                ? null
+                : picker(
+                    'video',
+                    VIDEO_INPUT_ID,
+                    VIDEO_ACCEPT,
+                    t('publish.pickVideo'),
+                    Video,
+                    video,
+                  )}
 
-              {/* UI-D-05: the cap is INTERPOLATED from the contract, never typed into the copy. */}
+              {/* UI-D-05: the cap is INTERPOLATED from the contract, never typed into the copy. A
+                  member's helper is built from the TENANT's limits (10-12, UI-D-702). */}
               <p
                 data-testid="story-duration-helper"
                 className="text-xs font-normal text-text-tertiary"
               >
-                {t('publish.helper', {
-                  limit: durationLabel(MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0),
-                })}
+                {memberLimits
+                  ? memberLimits.video.enabled
+                    ? t('publish.member.helperVideo', {
+                        photoSize: formatMediaLimit(memberLimits.photoMaxBytes),
+                        seconds: memberLimits.video.maxDurationSeconds,
+                        videoSize: formatMediaLimit(memberLimits.video.maxBytes),
+                      })
+                    : t('publish.member.helperPhoto', {
+                        photoSize: formatMediaLimit(memberLimits.photoMaxBytes),
+                      })
+                  : t('publish.helper', {
+                      limit: durationLabel(MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0),
+                    })}
               </p>
 
               {/* The Phase 3 upload machine, verbatim: a 4px brand bar, the percent in tabular-nums,
@@ -685,12 +796,25 @@ export function StoryComposer({
                 meanwhile, and the note says so (Pitfall 5). A failed/rejected video takes the same
                 slot with the reason instead, and "Publicar" is disabled. */}
               {videoFailed && videoFailure ? (
-                <p
-                  role="alert"
-                  className="rounded-xl bg-danger px-3 py-2 text-sm font-normal text-white"
-                >
-                  {videoFailure}
-                </p>
+                <div className="flex flex-col items-start gap-2">
+                  <p
+                    role="alert"
+                    className="w-full rounded-xl bg-danger px-3 py-2 text-sm font-normal text-white"
+                  >
+                    {videoFailure}
+                  </p>
+                  {memberLimits ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-white"
+                      onClick={removeVideo}
+                    >
+                      {t('publish.member.removeVideo')}
+                    </Button>
+                  ) : null}
+                </div>
               ) : null}
               {processing && picked.kind === 'video' ? (
                 <div className="flex items-start gap-3 rounded-xl bg-black/45 px-3 py-2">
@@ -700,7 +824,9 @@ export function StoryComposer({
                       {t('publish.processingTitle')}
                     </span>
                     <span className="block text-xs font-normal text-white/70">
-                      {t('publish.processingNote')}
+                      {memberLimits
+                        ? t('publish.member.videoWaiting')
+                        : t('publish.processingNote')}
                     </span>
                   </span>
                 </div>
@@ -735,6 +861,19 @@ export function StoryComposer({
                 </button>
               ) : null}
 
+              {/* UI-D-703: a member's audience line, REPLACED by the stronger visibility notice once a
+                  destination is chosen (the story stops being followers-only). */}
+              {memberLimits ? (
+                resolved ? (
+                  <StoryVisibilityNotice tone="frame" />
+                ) : (
+                  <p className="flex items-start gap-1 text-xs font-normal text-white/70">
+                    <Users aria-hidden size={14} className="mt-0.5 shrink-0" />
+                    {t('publish.member.audience')}
+                  </p>
+                )
+              ) : null}
+
               <div className="flex items-end gap-3">
                 <span className="min-w-0 flex-1">
                   {/* A transparent field: the media IS the background, so the textarea carries no
@@ -767,7 +906,7 @@ export function StoryComposer({
                   type="submit"
                   variant="brand"
                   size="md"
-                  disabled={busy || !publishable}
+                  disabled={busy || !publishable || waitingForVideo || socialOff}
                   loading={busy}
                   aria-busy={busy || undefined}
                 >
@@ -807,7 +946,8 @@ export function StoryComposer({
           open={sheetOpen}
           onClose={closeSheet}
           title={t('highlights.select.title')}
-          helper={t('highlights.select.helper')}
+          helper={t(memberLimits ? 'highlights.select.memberHelper' : 'highlights.select.helper')}
+          notice={memberLimits ? <StoryVisibilityNotice tone="sheet" /> : undefined}
           places={visiblePlaces}
           rowLabel={(row, place) =>
             t('highlights.select.row', { title: row.title, place: place.label })

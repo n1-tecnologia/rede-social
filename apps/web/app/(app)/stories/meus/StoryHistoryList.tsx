@@ -26,6 +26,7 @@ import {
 } from '@/app/(app)/stories/highlight-actions';
 import { deleteStoryAction, loadMoreOwnStoriesAction } from '@/app/(app)/stories/story-actions';
 import { StoryMenuRow } from '@/components/stories/StoryMenuRow';
+import { StoryVisibilityNotice } from '@/components/stories/StoryVisibilityNotice';
 import type { HighlightPlaceView, StoryHistoryItemView } from '@/lib/story-view';
 
 /**
@@ -65,6 +66,11 @@ export interface StoryHistoryListProps {
   /** `true` when the server could not read the first page at all (UI E08/error). */
   initialError?: boolean;
   publishHref: string;
+  /**
+   * 10-12 (UI-D-705): the member's "Seus stories". Absent: the administrator's list, unchanged.
+   * `canHighlight` is whether the member owns an active community: "Destacar" is offered only then.
+   */
+  member?: { canHighlight: boolean };
 }
 
 /**
@@ -76,6 +82,8 @@ type HighlightSheetState = {
   places: HighlightPlaceView[];
   selectedIds: string[];
   open: boolean;
+  /** 10-12: where a member's empty sheet sends "Criar destaque" (their most recently active community). */
+  createHref: string | null;
 };
 
 /** Six rows at the REAL 48×64 thumbnail geometry, so nothing jumps when content replaces them. */
@@ -102,6 +110,7 @@ export function StoryHistoryList({
   initialCursor,
   initialError,
   publishHref,
+  member,
 }: StoryHistoryListProps) {
   const t = useTranslations('stories');
   const toast = useToast();
@@ -158,6 +167,7 @@ export function StoryHistoryList({
             places: result.places,
             selectedIds: result.selectedIds,
             open: true,
+            createHref: result.createHref ?? null,
           });
           opened = true;
         }
@@ -272,6 +282,9 @@ export function StoryHistoryList({
     />
   );
 
+  /** The delete confirmation's catalog namespace: a member's story leaves Explorar too (UI-D-701). */
+  const deleteNamespace = member ? 'memberStory.confirmOwn' : 'history.confirmDelete';
+
   let body: ReactNode;
   if (failed && items.length === 0) {
     body = <div className="px-4 pt-4">{errorState}</div>;
@@ -284,7 +297,7 @@ export function StoryHistoryList({
           variant="card"
           icon={Sparkles}
           title={t('history.empty.title')}
-          body={t('history.empty.body')}
+          body={member ? t('history.empty.bodyMember') : t('history.empty.body')}
           action={
             <a
               href={publishHref}
@@ -348,13 +361,16 @@ export function StoryHistoryList({
         title={t('history.menu.title')}
       >
         <div className="flex flex-col gap-1">
-          <StoryMenuRow
-            icon={Bookmark}
-            label={t('history.menu.highlight')}
-            onClick={() => {
-              if (menuStory) void openHighlightSheet(menuStory);
-            }}
-          />
+          {/* A member is offered "Destacar" only with a community of their own (UI-D-705). */}
+          {member && !member.canHighlight ? null : (
+            <StoryMenuRow
+              icon={Bookmark}
+              label={t('history.menu.highlight')}
+              onClick={() => {
+                if (menuStory) void openHighlightSheet(menuStory);
+              }}
+            />
+          )}
           <StoryMenuRow
             icon={Eye}
             label={t('history.menu.view')}
@@ -376,10 +392,10 @@ export function StoryHistoryList({
           values, so no caption and no community name can reach a 300px panel. */}
       <ConfirmDialog
         open={confirmStory !== null}
-        title={t('history.confirmDelete.title')}
-        body={t('history.confirmDelete.body')}
-        confirmLabel={t('history.confirmDelete.confirm')}
-        cancelLabel={t('history.confirmDelete.cancel')}
+        title={t(`${deleteNamespace}.title`)}
+        body={t(`${deleteNamespace}.body`)}
+        confirmLabel={t(`${deleteNamespace}.confirm`)}
+        cancelLabel={t(`${deleteNamespace}.cancel`)}
         tone="danger"
         onConfirm={confirmDelete}
         onClose={() => setConfirmStory(null)}
@@ -394,6 +410,17 @@ export function StoryHistoryList({
           onClose={closeHighlightSheet}
           title={t('highlights.sheet.title')}
           helper={t('highlights.sheet.helper')}
+          notice={member ? <StoryVisibilityNotice tone="sheet" /> : undefined}
+          confirmOn={
+            member
+              ? {
+                  title: t('highlights.memberConfirm.title'),
+                  body: t('highlights.memberConfirm.body'),
+                  confirmLabel: t('highlights.memberConfirm.confirm'),
+                  cancelLabel: t('highlights.memberConfirm.cancel'),
+                }
+              : undefined
+          }
           places={sheet.places}
           selectedIds={sheet.selectedIds}
           rowLabel={(row, place) =>
@@ -411,7 +438,7 @@ export function StoryHistoryList({
                 {t('highlights.sheet.emptyBody')}
               </p>
               <a
-                href="/stories/destaques"
+                href={member ? (sheet.createHref ?? '/comunidades') : '/stories/destaques'}
                 className="rounded text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               >
                 {t('highlights.sheet.emptyCta')}

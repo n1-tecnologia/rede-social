@@ -5,6 +5,7 @@ import { getTranslations } from 'next-intl/server';
 import { type ComposerSelection, StoryComposer } from '@/app/(app)/stories/publicar/StoryComposer';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { listAllCommunities } from '@/lib/communities';
+import { socialMediaLimits } from '@/lib/social-settings';
 import { getHighlightCatalog } from '@/lib/stories';
 import { type HighlightPlaceView, highlightPlacesView } from '@/lib/story-view';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -46,6 +47,19 @@ import { getHostTenant } from '@/lib/tenant-host';
  *
  * The header's trailing "Seus stories" action points at `/stories/meus`.
  *
+ * **The member screen (10-12: UI-D-702..UI-D-704, D-715, D-716).** A caller who holds the composed
+ * `stories.story.publish` WITHOUT `stories.story.manage` is a member: the same composer in its member
+ * mode, with the tenant's `social.media` limits read off the bootstrap (`socialMediaLimits`, no fetch)
+ * and the destinations the caller may publish a story into. **That decision is the Escopo seam**: the
+ * destination groups are the ACTIVE communities whose `viewer.actions.story` the API says is true,
+ * never the owner flag and never a role or an id comparison here. For every viewer the API can
+ * produce today `actions.story` equals ownership, so nothing changes on screen; when the per-product
+ * action scope lands after Phase 11, this is the one site that does not need to change. A member
+ * with `social` off (the module is not on the bootstrap) goes back to `/inicio` (UI-D-716: the route
+ * redirects, nothing is explained), and the communities list is not read at all while the
+ * `communities` module is off. The catalogue the API answers for a member is already scoped to their
+ * own active communities, so there is never an "Início" group.
+ *
  * **There is no public render path.** The route lives inside the `(app)` group, so `proxy.ts`
  * bounces a session-less visitor to `/entrar` before this file runs, and it reads the session and
  * the host headers at request time — which is what keeps it OUT of the static route list
@@ -62,11 +76,20 @@ export default async function PublishStoryPage({
   const bootstrap = await requireBootstrap();
   if (!bootstrap.permissions.includes(STORY_PERMISSIONS.publish)) redirect('/inicio');
 
-  const canCurate =
-    bootstrap.permissions.includes(STORY_PERMISSIONS.publish) &&
-    bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+  const canManage = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+  const isMember = !canManage;
+  // UI-D-716: with `social` off the module is not on the bootstrap, and a member's screen is gone.
+  if (isMember && !bootstrap.modules.some((module) => module.key === 'social')) {
+    redirect('/inicio');
+  }
+  const member = isMember ? { limits: socialMediaLimits(bootstrap) } : undefined;
+  const hasCommunities = bootstrap.modules.some((module) => module.key === 'communities');
 
-  if (!canCurate) return <StoryComposer historyHref="/stories/meus" />;
+  // The administrator without the `communities` module never needed the list either, but the
+  // administrator's behaviour is left exactly as it was; only the member's reads are gated here.
+  if (isMember && !hasCommunities) {
+    return <StoryComposer historyHref="/stories/meus" member={member} places={[]} />;
+  }
 
   const [params, listed, catalog, t] = await Promise.all([
     searchParams,
@@ -75,8 +98,12 @@ export default async function PublishStoryPage({
     getTranslations('stories'),
   ]);
   // The list read is the ACTIVE one; the filter is belt and braces, exactly as `/stories/meus`
-  // does it, so an archived community can never become a pickable destination.
-  const communities = listed.filter((community) => community.status === 'active');
+  // does it, so an archived community can never become a pickable destination. For a member the
+  // destination decision is the API's `viewer.actions.story` (the Escopo seam), read here and nowhere
+  // else: never the owner flag.
+  const communities = listed.filter(
+    (community) => community.status === 'active' && (!isMember || community.viewer.actions.story),
+  );
 
   // A repeated `?comunidade=` arrives as an array; the FIRST value wins rather than the request
   // failing — the `/criar` rule, verbatim.
@@ -88,11 +115,14 @@ export default async function PublishStoryPage({
   const places: HighlightPlaceView[] = highlightPlacesView(catalog, communities, {
     homeLabel: t('highlights.place.home'),
     includeEmptyPlaces: true,
+    // A member has no "Início" group, whatever the catalogue holds (UI-D-704).
+    includeHome: !isMember,
   });
 
   return (
     <StoryComposer
       historyHref="/stories/meus"
+      {...(member ? { member } : {})}
       places={places}
       originCommunityId={originCommunityId}
       initialSelection={initialSelectionFor(places, originCommunityId)}

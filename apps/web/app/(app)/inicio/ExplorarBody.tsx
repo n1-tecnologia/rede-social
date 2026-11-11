@@ -8,7 +8,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { type ReactNode, Suspense } from 'react';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
-import { loadCommunities } from '@/lib/communities';
+import { ownsActiveCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
 import { buildFeedSurface, storyCommentsProps } from '@/lib/registry';
 import { loadStoryAuthors } from '@/lib/stories';
@@ -108,7 +108,7 @@ async function StoriesRowSection({
     getTranslations(),
     getLocale(),
     primaryHostOrigin(),
-    kind === 'member' ? ownsActiveCommunity(bootstrap) : Promise.resolve(false),
+    kind === 'member' ? ownsActiveCommunity(bootstrap.modules) : Promise.resolve(false),
   ]);
   const labels = authorRowLabels(tf);
   const member = kind === 'member';
@@ -159,18 +159,6 @@ async function StoriesRowSection({
       }
     />
   );
-}
-
-/**
- * Whether the member owns at least one ACTIVE community (UI-D-701: the viewer menu's "Destacar" exists
- * only then). The communities list read already says it, in the caller's own `memberQuota`, so one
- * row of the list is enough. It is a UX hint (the API refuses a highlight write on a community that
- * is not theirs): the module off, a refused read or no quota is `false`, never an error.
- */
-async function ownsActiveCommunity(bootstrap: Bootstrap): Promise<boolean> {
-  if (!bootstrap.modules.some((module) => module.key === 'communities')) return false;
-  const page = await loadCommunities({ limit: 1 });
-  return (page?.memberQuota?.ownedActive ?? 0) > 0;
 }
 
 /**

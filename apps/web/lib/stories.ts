@@ -127,7 +127,7 @@ export async function loadStories(query: StoryQueryInput = {}): Promise<StoryPag
  */
 export type StoryWriteResult =
   | { ok: true; storyId: string }
-  | { ok: false; code: StoryIssue | StoryHighlightIssue | 'not_found' | 'generic' };
+  | { ok: false; code: StoryIssue | StoryHighlightIssue | 'not_found' | 'forbidden' | 'generic' };
 
 const STORY_ISSUE_LOOKUP: ReadonlySet<string> = STORY_ISSUE_SET;
 
@@ -153,10 +153,14 @@ export function asStoryHighlightIssue(value: unknown): StoryHighlightIssue | nul
  */
 export function storyWriteIssue(
   error: unknown,
-): StoryIssue | StoryHighlightIssue | 'not_found' | null {
+): StoryIssue | StoryHighlightIssue | 'not_found' | 'forbidden' | null {
   if (!(error instanceof ApiClientError)) return null;
   // An unknown, foreign or removed ASSET (or highlight, or community) is one bare 404.
   if (error.status === 404) return 'not_found';
+  // 10-12 (UI-D-704): a member's publish the API refuses outright: the destination is no longer theirs
+  // to publish into, or the Rede social was turned off meanwhile. The API's 403 carries no detail, so
+  // the composer tells the two apart by what it sent.
+  if (error.status === 403) return 'forbidden';
   const details = error.details as { story?: unknown; highlight?: unknown } | undefined;
   return asStoryIssue(details?.story) ?? asStoryHighlightIssue(details?.highlight);
 }

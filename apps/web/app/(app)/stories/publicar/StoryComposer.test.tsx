@@ -682,11 +682,21 @@ describe('StoryComposer — "Destaque" (05.2-08, D-111..D-115, UI-D-68..UI-D-71)
     });
     await completeUpload('image', IMAGE);
 
-    publish.mockReturnValueOnce(new Promise(() => {}));
+    let settle: (value: { ok: false; code: string }) => void = () => {};
+    publish.mockReturnValueOnce(
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
     await publishNow();
 
     expect(destinationRow()?.disabled).toBe(true);
     expect(destinationRow()?.className).toContain('disabled:opacity-50');
+    // The publish settles, so its transition does not outlive the case: React entangles every later
+    // transition of the file with a pending one, and none of them would ever leave `busy`.
+    await act(async () => {
+      settle({ ok: false, code: 'generic' });
+    });
   });
 
   it('11. the destination survives a re-pick of the media', async () => {
@@ -1093,7 +1103,14 @@ describe('StoryComposer — the member’s destination (UI-D-704, D-716)', () =>
     expect((screen.getByLabelText('Legenda') as HTMLTextAreaElement).value).toBe('minha legenda');
     expect(screen.getByTestId('story-preview')).toBeTruthy();
     expect(push).not.toHaveBeenCalled();
-    const again = await openSheet();
+    // The publish transition settles one tick after its last state write.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await act(async () => {
+      fireEvent.click(destinationRow() as HTMLElement);
+    });
+    const again = screen.getByRole('dialog');
     expect(within(again).queryByText(NAME_A)).toBeNull();
     expect(within(again).getByText(NAME_B)).toBeTruthy();
   });
@@ -1106,6 +1123,9 @@ describe('StoryComposer — the member’s destination (UI-D-704, D-716)', () =>
     expect(screen.getByRole('alert').textContent).toBe(
       'A Rede social foi desativada. Não é possível publicar agora.',
     );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
     expect((screen.getByRole('button', { name: 'Publicar' }) as HTMLButtonElement).disabled).toBe(
       true,
     );

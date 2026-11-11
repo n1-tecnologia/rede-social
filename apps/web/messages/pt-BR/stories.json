@@ -44,7 +44,8 @@
         "none": "Nenhum",
         "create": "Novo destaque",
         "row": "Publicar no destaque {title}, {place}",
-        "selected": "Selecionado"
+        "selected": "Selecionado",
+        "memberHelper": "O story aparece em Explorar por 24 h e continua no destaque escolhido."
       },
       "create": {
         "title": "Novo destaque",
@@ -132,13 +133,20 @@
         "title": "Adicionar stories",
         "helper": "Stories expirados também podem entrar em um destaque.",
         "row": "Adicionar ao destaque o story de {date}",
-        "empty": "Você ainda não publicou nenhum story."
+        "empty": "Você ainda não publicou nenhum story.",
+        "memberHelper": "Todos os membros verão este story na comunidade. Stories expirados também podem entrar em um destaque."
       },
       "confirmDelete": {
         "title": "Excluir destaque?",
         "body": "O destaque {title} sai da fileira para todos. Os stories continuam em Seus stories.",
         "confirm": "Excluir destaque",
         "cancel": "Manter destaque"
+      },
+      "memberConfirm": {
+        "title": "Mostrar este story na comunidade?",
+        "body": "Todos os membros verão este story na comunidade, também depois das 24 h. Hoje só quem segue você o vê.",
+        "confirm": "Mostrar na comunidade",
+        "cancel": "Não mostrar"
       }
     },
     "viewer": {
@@ -208,6 +216,20 @@
         "body": "A mídia escolhida será perdida.",
         "confirm": "Descartar",
         "cancel": "Continuar editando"
+      },
+      "member": {
+        "helperPhoto": "Foto de até {photoSize}.",
+        "helperVideo": "Foto de até {photoSize}. Vídeo de até {seconds} s e {videoSize}.",
+        "audience": "Quem segue você vê este story em Explorar por 24 horas.",
+        "visibility": "Todos os membros verão este story na comunidade.",
+        "videoWaiting": "Você poderá publicar quando o vídeo terminar de processar.",
+        "videoTooLong": "O vídeo passou de {seconds} s e não pôde ser usado. Escolha um vídeo mais curto.",
+        "removeVideo": "Remover vídeo",
+        "errors": {
+          "photoSize": "A foto pode ter até {size}.",
+          "forbidden": "Você não pode publicar nesta comunidade.",
+          "socialOff": "A Rede social foi desativada. Não é possível publicar agora."
+        }
       }
     },
     "history": {
@@ -234,7 +256,8 @@
       "empty": {
         "title": "Nenhum story ainda",
         "body": "Publique seu primeiro story para ele aparecer no topo do início.",
-        "cta": "Publicar story"
+        "cta": "Publicar story",
+        "bodyMember": "Publique seu primeiro story para ele aparecer em Explorar."
       },
       "errors": {
         "title": "Não foi possível carregar seus stories",
