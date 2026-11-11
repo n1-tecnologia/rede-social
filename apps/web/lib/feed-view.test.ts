@@ -136,7 +136,7 @@ describe('postCardView — the absolute time in the tenant zone (06-09)', () => 
 });
 
 describe('postAdminLabel — who wears the crown, by the post’s stamped audience (09-08, UI-D-509)', () => {
-  const audience = (value: 'tenant' | 'followers' | undefined) =>
+  const audience = (value: 'tenant' | 'followers' | 'community' | undefined) =>
     postAdminLabel({ ...(value === undefined ? {} : { audience: value }) }, tf);
 
   it('an organization post wears the mark: audience tenant, or none on the wire (social off)', () => {
@@ -146,6 +146,18 @@ describe('postAdminLabel — who wears the crown, by the post’s stamped audien
 
   it('a member post (audience followers) never wears it', () => {
     expect(audience('followers')).toBeNull();
+  });
+
+  it('10-11 (Pitfall 11, MCOMM-08): a member-community post (audience community) never wears it either', () => {
+    expect(audience('community')).toBeNull();
+    expect(postAdminLabel({ ...post(), audience: 'community' }, tf)).toBeNull();
+  });
+
+  it('10-11: the badge is decided for each of the three audience values and for none', () => {
+    const badge = tf('post.adminBadge');
+    expect(
+      (['tenant', 'followers', 'community', undefined] as const).map((value) => audience(value)),
+    ).toEqual([badge, null, null, badge]);
   });
 
   it('reads the post, not the module flag: the same call for any tenant', () => {

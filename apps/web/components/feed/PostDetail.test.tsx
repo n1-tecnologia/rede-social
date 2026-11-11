@@ -17,15 +17,18 @@ import type { PostDetailProps } from './PostDetail';
  * `PostCard`, `CommentsList`, `PostMenu` and `ReelsOverlay` are stand-ins that record their props.
  */
 
-const { cards, overlays, loadPage, loadStart, toast, refresh, comments } = vi.hoisted(() => ({
-  cards: [] as PostCardProps[],
-  overlays: [] as ReelsOverlayProps[],
-  loadPage: vi.fn(),
-  loadStart: vi.fn(),
-  toast: { show: vi.fn(), dismiss: vi.fn() },
-  refresh: vi.fn(),
-  comments: [] as Array<{ onLocked?: (code?: string) => void }>,
-}));
+const { cards, menus, overlays, loadPage, loadStart, toast, refresh, comments } = vi.hoisted(
+  () => ({
+    cards: [] as PostCardProps[],
+    menus: [] as Array<{ target: { memberPost?: boolean } | null }>,
+    overlays: [] as ReelsOverlayProps[],
+    loadPage: vi.fn(),
+    loadStart: vi.fn(),
+    toast: { show: vi.fn(), dismiss: vi.fn() },
+    refresh: vi.fn(),
+    comments: [] as Array<{ onLocked?: (code?: string) => void }>,
+  }),
+);
 
 vi.mock('@rede-social/module-feed/ui', () => ({
   PostCard: (props: PostCardProps) => {
@@ -36,7 +39,10 @@ vi.mock('@rede-social/module-feed/ui', () => ({
     comments.push(props);
     return null;
   },
-  PostMenu: () => null,
+  PostMenu: (props: { target: { memberPost?: boolean } | null }) => {
+    menus.push(props);
+    return null;
+  },
 }));
 
 vi.mock('@/components/reels/ReelsOverlay', () => ({
@@ -119,6 +125,7 @@ async function flush(times = 4) {
 }
 
 beforeEach(() => {
+  menus.length = 0;
   comments.length = 0;
   cards.length = 0;
   overlays.length = 0;
@@ -239,5 +246,30 @@ describe('PostDetail - the mid-session refusals', () => {
     card().onLikeError?.('generic');
     expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: 'error' });
     expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 10-11 (UI-D-509, Pitfall 11): the menu's wording follows the author kind. A post stamped
+ * `'followers'` or `'community'` is a member's; an organization post (no key, or `'tenant'`) is not.
+ */
+describe('PostDetail - the menu target says whether it is a member post (10-11)', () => {
+  const memberPostOf = (audience?: 'tenant' | 'followers' | 'community') => {
+    render(<PostDetail {...detail({ ...post(), ...(audience ? { audience } : {}) })} />);
+    const last = menus.at(-1);
+    if (!last?.target) throw new Error('the menu never got a target');
+    return last.target.memberPost;
+  };
+
+  it('an organization post is not a member post', () => {
+    expect(memberPostOf()).toBe(false);
+    cleanup();
+    expect(memberPostOf('tenant')).toBe(false);
+  });
+
+  it('followers and community are member posts', () => {
+    expect(memberPostOf('followers')).toBe(true);
+    cleanup();
+    expect(memberPostOf('community')).toBe(true);
   });
 });
