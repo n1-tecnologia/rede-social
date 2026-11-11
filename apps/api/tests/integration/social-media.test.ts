@@ -8,12 +8,21 @@ import {
 import { encodeJpeg } from '@rede-social/core/server/media/variants';
 import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import { fakeVideoInternals } from '@rede-social/core/server/media/video/fake';
+import { normaliseProviderEvent } from '@rede-social/core/server/media/video/wire';
 import type { VideoProviderEvent } from '@rede-social/core/server/media/video/types';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { FEED_MAX_CAPTION, type FeedPage, type FeedPost } from '@rede-social/module-feed/contracts';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withSocialEnabled } from './setup';
+import {
+  adminSql,
+  api,
+  HOSTS,
+  SEED_PASSWORD,
+  signInAs,
+  withSocialEnabled,
+  withStoriesEnabled,
+} from './setup';
 
 /**
  * 09-06 (SOCIAL-05, SOCIAL-03; D-473, D-474) against the live local stack and the real seed: the
@@ -59,7 +68,7 @@ const tokens = {
   helena: '',
   alvaro: '',
 };
-const userIds = { labMember: '', helena: '' };
+const userIds = { labMember: '', helena: '', labAdmin: '' };
 const createdAssetIds: string[] = [];
 let labTenantId = '';
 let savedSettings: Record<string, unknown> = {};
@@ -85,7 +94,7 @@ const startImage = async (
   token: string,
   size: number,
   host = HOSTS.lab,
-  purpose: 'post' | 'avatar' | 'cover' = 'post',
+  purpose: 'post' | 'avatar' | 'cover' | 'story' = 'post',
 ): Promise<Response> =>
   api.request('/v1/media/uploads', {
     method: 'POST',
@@ -167,6 +176,7 @@ beforeAll(async () => {
   tokens.alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
   userIds.labMember = await userOf('member@rede-lab.local');
   userIds.helena = await userOf('helena.kuster@rede-lab.local');
+  userIds.labAdmin = await userOf('admin@rede-lab.local');
   const [lab] = await adminSql<
     { id: string }[]
   >`select id from public.tenants where slug = 'rede-lab'`;
@@ -587,7 +597,7 @@ describe('09 video', () => {
     }
   });
 
-  it('3. with video enabled a member starts a post video, the cap is snapshotted; story, lesson and support stay 403', async () => {
+  it('3. with video enabled a member starts a post video, the cap is snapshotted; lesson, cover and support stay 403, a story video is accepted (10-07)', async () => {
     await putSettings({ media: { video: { enabled: true } } });
     const res = await startVideo(tokens.labMember);
     expect(res.status).toBe(201);
@@ -596,8 +606,14 @@ describe('09 video', () => {
     expect(body.maxBytes).toBe(100 * MIB);
     expect((await assetFacts(body.assetId))?.duration_cap_seconds).toBe(60);
 
+    // 10-07 (D-715): a member STORY video is accepted too while member video is enabled; `lesson` (and
+    // `cover`) stay refused, and so does support.
+    const story = await startVideo(tokens.labMember, { purpose: 'story' });
+    expect(story.status).toBe(201);
+    createdAssetIds.push(((await story.json()) as { assetId: string }).assetId);
+
     const before = await countAssets(VIDEO_FILENAME);
-    for (const purpose of ['story', 'lesson']) {
+    for (const purpose of ['lesson', 'cover']) {
       const refused = await startVideo(tokens.labMember, { purpose });
       expect(refused.status, purpose).toBe(403);
     }
@@ -1265,6 +1281,227 @@ describe('09 rules', () => {
         update public.tenant_modules set enabled = true
          where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
       moduleFlags.invalidate(labTenantId);
+    }
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------- */
+/* 10 story and cover media: the member seam over the `story` and `cover` purposes (10-07)         */
+/* ---------------------------------------------------------------------------------------------- */
+
+describe('10 story and cover media', () => {
+  let restoreStories: () => Promise<void> = async () => {};
+  const storyAssetIds: string[] = [];
+
+  /** The member video-minutes sub-budget's own sum, over the two purposes the seam now covers. */
+  async function memberShareSeconds(): Promise<number> {
+    const [row] = await adminSql<{ total: string }[]>`
+      select coalesce(sum(coalesce(a.duration_seconds,
+                                   case when a.status = 'pending' then a.duration_cap_seconds end,
+                                   0)), 0)::text as total
+        from public.media_assets a
+       where a.tenant_id = ${labTenantId}::uuid and a.deleted_at is null and a.kind = 'video'
+         and a.status not in ('rejected', 'failed') and a.purpose in ('post', 'story')
+         and exists (select 1 from public.memberships m
+                      where m.tenant_id = a.tenant_id and m.user_id = a.owner_user_id
+                        and m.role = 'member')`;
+    return Number(row?.total ?? 0);
+  }
+
+  /** A fractional duration as the provider reports it, through the real wire normaliser (the rounding rule). */
+  const readyWithFraction = (assetId: string, providerAssetId: string, seconds: number) => ({
+    ...normaliseProviderEvent({
+      id: randomUUID(),
+      type: 'video.asset.ready',
+      data: { id: providerAssetId, duration: seconds, playback_ids: [{ id: `pb-${assetId}` }] },
+    }),
+    assetId,
+    providerAssetId,
+  });
+
+  const publishStory = (token: string, body: Record<string, unknown>) =>
+    api.request('/v1/stories', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-tenant-host': HOSTS.lab,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+  /** A ready `purpose: 'story'` asset of rede-lab owned by `ownerId`. */
+  async function storyAsset(
+    ownerId: string,
+    kind: 'image' | 'video',
+    status: 'ready' | 'processing' = 'ready',
+  ): Promise<string> {
+    const id = randomUUID();
+    storyAssetIds.push(id);
+    await adminSql`
+      insert into public.media_assets
+        (id, tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths,
+         filename)
+      values (${id}::uuid, ${labTenantId}::uuid, ${ownerId}::uuid, ${kind}, 'story', ${status},
+              ${kind === 'video' ? 'fake' : 'supabase'},
+              ${kind === 'video' ? 'video/mp4' : 'image/webp'}, 1024,
+              ${kind === 'video' ? '{}' : '{640,1080}'}::int[],
+              ${kind === 'video' ? VIDEO_FILENAME : ASSET_FILENAME})`;
+    return id;
+  }
+
+  beforeAll(async () => {
+    restoreStories = await withStoriesEnabled('lab');
+    await writeSettings({});
+    await putSettings({
+      media: { photoMaxBytes: MIB, video: { enabled: true, maxDurationSeconds: 300 } },
+    });
+  });
+
+  afterEach(async () => {
+    fakeVideoInternals.deletedAssetIds = [];
+    await adminSql`delete from public.stories where caption like ${`${PREFIX}%`}`;
+    for (const id of storyAssetIds.splice(0)) {
+      await adminSql`delete from public.stories where media_asset_id = ${id}::uuid`;
+      await adminSql`delete from public.media_assets where id = ${id}::uuid`;
+    }
+  });
+
+  afterAll(async () => {
+    await writeSettings({});
+    await restoreStories();
+  });
+
+  it('1. EP-66 / D-715: the member photo cap holds for story and cover: exactly the cap is accepted, one byte over is 413 too_large with the cap', async () => {
+    for (const purpose of ['story', 'cover'] as const) {
+      const exact = await startImage(tokens.labMember, MIB, HOSTS.lab, purpose);
+      expect(exact.status, `${purpose} exact`).toBe(201);
+      createdAssetIds.push(((await exact.json()) as { assetId: string }).assetId);
+      const over = await startImage(tokens.labMember, MIB + 1, HOSTS.lab, purpose);
+      expect(over.status, `${purpose} over`).toBe(413);
+      const error = await errorOf(over);
+      expect(error.details?.media).toBe('too_large');
+      expect(error.details?.maxBytes).toBe(MIB);
+    }
+    // The admin keeps the unchanged 15 MiB for the same purposes.
+    for (const purpose of ['story', 'cover'] as const) {
+      const admin = await startImage(tokens.labAdmin, 2 * MIB, HOSTS.lab, purpose);
+      expect(admin.status, `${purpose} admin`).toBe(201);
+    }
+  });
+
+  it('2. D-715: a member video is refused for cover, and for story while the tenant video switch is off', async () => {
+    const cover = await startVideo(tokens.labMember, { purpose: 'cover' });
+    expect(cover.status).toBe(403);
+    await putSettings({ media: { video: { enabled: false } } });
+    try {
+      const before = await countAssets(VIDEO_FILENAME);
+      const off = await startVideo(tokens.labMember, { purpose: 'story' });
+      expect(off.status).toBe(403);
+      expect(await countAssets(VIDEO_FILENAME)).toBe(before);
+    } finally {
+      await putSettings({ media: { video: { enabled: true } } });
+    }
+  });
+
+  it('3. A9 / EP-66: with the member limit at 300 s a story video snapshots 60 s, a post video 300 s; exactly 60 is ready, 61 is rejected duration_too_long', async () => {
+    const story = await startedVideo(tokens.labMember, { purpose: 'story' });
+    expect((await assetFacts(story.assetId))?.duration_cap_seconds).toBe(60);
+    const post = await startedVideo(tokens.labMember, { purpose: 'post' });
+    expect((await assetFacts(post.assetId))?.duration_cap_seconds).toBe(300);
+
+    await mediaProviderEventJob.handler(readyEvent(story.assetId, story.providerAssetId, 60));
+    expect((await assetFacts(story.assetId))?.status).toBe('ready');
+
+    const longer = await startedVideo(tokens.labMember, { purpose: 'story' });
+    await mediaProviderEventJob.handler(readyEvent(longer.assetId, longer.providerAssetId, 61));
+    const row = await assetFacts(longer.assetId);
+    expect(row?.status).toBe('rejected');
+    expect(row?.failure_reason).toBe('duration_too_long');
+    // The post path still allows what a story does not: 120 s is a ready post video.
+    await mediaProviderEventJob.handler(readyEvent(post.assetId, post.providerAssetId, 120));
+    expect((await assetFacts(post.assetId))?.status).toBe('ready');
+  });
+
+  it('4. EP-67: a fractional duration at the boundary is rounded exactly as the post path rounds it (60.4 is 60 and ready, 60.5 is 61 and rejected)', async () => {
+    await putSettings({ media: { video: { maxDurationSeconds: 60 } } });
+    for (const purpose of ['story', 'post'] as const) {
+      const fits = await startedVideo(tokens.labMember, { purpose });
+      await mediaProviderEventJob.handler(
+        readyWithFraction(fits.assetId, fits.providerAssetId, 60.4),
+      );
+      expect((await assetFacts(fits.assetId))?.status, `${purpose} 60.4`).toBe('ready');
+      expect((await assetFacts(fits.assetId))?.duration_seconds).toBe(60);
+
+      const over = await startedVideo(tokens.labMember, { purpose });
+      await mediaProviderEventJob.handler(
+        readyWithFraction(over.assetId, over.providerAssetId, 60.5),
+      );
+      expect((await assetFacts(over.assetId))?.status, `${purpose} 60.5`).toBe('rejected');
+    }
+    await putSettings({ media: { video: { maxDurationSeconds: 300 } } });
+  });
+
+  it('5. the member video-minutes sub-budget counts a story video (a pending one at its snapshotted cap)', async () => {
+    const before = await memberShareSeconds();
+    const pending = await startedVideo(tokens.labMember, { purpose: 'story' });
+    expect((await assetFacts(pending.assetId))?.status).toBe('pending');
+    expect(await memberShareSeconds()).toBe(before + 60);
+  });
+
+  it('6. T-10-25: a member publishing a story on ANOTHER user’s asset gets the bare 404 and nothing is attached', async () => {
+    const foreign = await storyAsset(userIds.labMember, 'image');
+    const mine = await storyAsset(userIds.helena, 'image');
+    const res = await publishStory(tokens.helena, {
+      mediaAssetId: foreign,
+      mediaKind: 'image',
+      caption: `${PREFIX}alheia`,
+    });
+    expect(res.status).toBe(404);
+    expect((await errorOf(res)).details).toBeUndefined();
+    const [attached] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.stories where media_asset_id = ${foreign}::uuid`;
+    expect(attached?.n).toBe(0);
+    // The positive control: her own asset publishes.
+    const own = await publishStory(tokens.helena, {
+      mediaAssetId: mine,
+      mediaKind: 'image',
+      caption: `${PREFIX}propria`,
+    });
+    expect(own.status).toBe(201);
+  });
+
+  it('7. a member story video still processing answers the validation code; once ready it publishes', async () => {
+    const processing = await storyAsset(userIds.helena, 'video', 'processing');
+    const res = await publishStory(tokens.helena, {
+      mediaAssetId: processing,
+      mediaKind: 'video',
+      caption: `${PREFIX}video`,
+    });
+    expect(res.status).toBe(400);
+    expect((await errorOf(res)).details?.story).toBe('media_invalid');
+    await adminSql`update public.media_assets set status = 'ready' where id = ${processing}::uuid`;
+    const ready = await publishStory(tokens.helena, {
+      mediaAssetId: processing,
+      mediaKind: 'video',
+      caption: `${PREFIX}video pronto`,
+    });
+    expect(ready.status).toBe(201);
+  });
+
+  it('8. the organization story with the admin’s own asset is unchanged (a processing video is still accepted)', async () => {
+    const image = await storyAsset(userIds.labAdmin, 'image');
+    const video = await storyAsset(userIds.labAdmin, 'video', 'processing');
+    for (const [asset, kind] of [
+      [image, 'image'],
+      [video, 'video'],
+    ] as const) {
+      const res = await publishStory(tokens.labAdmin, {
+        mediaAssetId: asset,
+        mediaKind: kind,
+        caption: `${PREFIX}org ${kind}`,
+      });
+      expect(res.status, kind).toBe(201);
     }
   });
 });

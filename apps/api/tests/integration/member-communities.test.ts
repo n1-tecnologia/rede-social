@@ -1523,3 +1523,81 @@ describe('10 visibility', () => {
     expect((await request(`/v1/communities/${id}`, tokens.marcos)).status).toBe(200);
   });
 });
+
+describe('10-07 cover owner check (Pitfall 10, T-10-25)', () => {
+  const assets: string[] = [];
+
+  /** A ready `purpose: 'cover'` image of rede-lab owned by `ownerId`. */
+  const coverAsset = async (ownerId: string): Promise<string> => {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+      values (${labTenantId}::uuid, ${ownerId}::uuid, 'image', 'cover', 'ready', 'supabase',
+              'image/webp', 1024, '{640,1080}'::int[])
+      returning id`;
+    const id = row?.id ?? '';
+    assets.push(id);
+    return id;
+  };
+
+  beforeEach(async () => {
+    await sweep();
+  });
+
+  afterAll(async () => {
+    await sweep();
+    for (const id of assets.splice(0)) {
+      await adminSql`update public.communities set cover_asset_id = null where cover_asset_id = ${id}::uuid`;
+      await adminSql`delete from public.media_assets where id = ${id}::uuid`;
+    }
+  });
+
+  it('a member creating a community on ANOTHER user’s cover asset gets the bare 404 and nothing is stored; their own asset is the positive control', async () => {
+    const foreign = await coverAsset(userIds.marcos);
+    const mine = await coverAsset(userIds.helena);
+    const res = await createCommunity(tokens.helena, {
+      name: `${PREFIX}capa alheia`,
+      coverAssetId: foreign,
+    });
+    expect(res.status).toBe(404);
+    expect((await errorOf(res)).details).toBeUndefined();
+    const [stored] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.communities where name = ${`${PREFIX}capa alheia`}`;
+    expect(stored?.n).toBe(0);
+
+    const own = await createCommunity(tokens.helena, {
+      name: `${PREFIX}capa propria`,
+      coverAssetId: mine,
+    });
+    expect(own.status).toBe(201);
+    expect(((await own.json()) as CommunitySummary).coverAssetId).toBe(mine);
+  });
+
+  it('a member editing the cover: another user’s asset is 404, their own is 200, re-sending the stored one is 200; the admin may use any asset of the tenant', async () => {
+    const foreign = await coverAsset(userIds.marcos);
+    const mine = await coverAsset(userIds.helena);
+    const created = await createCommunity(tokens.helena, { name: `${PREFIX}editar capa` });
+    const id = ((await created.json()) as CommunitySummary).id;
+
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.helena, patch({ coverAssetId: foreign })))
+        .status,
+    ).toBe(404);
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.helena, patch({ coverAssetId: mine }))).status,
+    ).toBe(200);
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.helena, patch({ coverAssetId: mine }))).status,
+    ).toBe(200);
+    // An admin editing a member community (A8) is not held to the owner rule: the check is for members.
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.labAdmin, patch({ coverAssetId: foreign })))
+        .status,
+    ).toBe(200);
+    // ...and the creator re-sending the cover the admin set is not refused (it is the stored reference).
+    expect(
+      (await request(`/v1/communities/${id}`, tokens.helena, patch({ coverAssetId: foreign })))
+        .status,
+    ).toBe(200);
+  });
+});
