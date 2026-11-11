@@ -41,7 +41,8 @@ export const scripts: readonly AdminLaneEntry[] = [
       ['seedStoryVideoAsset', 'T', 6],
       ['seedAttachmentAsset', 'T', 6],
       ['seedVideoAsset', 'T', 6],
-      ...Array.from({ length: 23 }, () => ['seedMemberProfile', 'T', 6] as const),
+      // 23 + the 2 of 10-10 (the member community and story fixture: the owner lookup and the inserts).
+      ...Array.from({ length: 25 }, () => ['seedMemberProfile', 'T', 6] as const),
       [
         'grantSeedAccess',
         'T',

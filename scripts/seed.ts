@@ -782,6 +782,27 @@ const SEED_STORY_IDS: Record<string, readonly [string, string, string, string, s
 };
 
 /**
+ * 10-10 (MPUB-07): the member-owned fixtures of rede-lab (see the seed block that writes them). Fixed
+ * ids in the `0e…f*` range (free); rede-demo has none, so the maps carry the lab only.
+ */
+const SEED_MEMBER_COMMUNITY_ID: Record<string, string> = {
+  'rede-lab': '0e000000-0000-4000-8000-0000000000f1',
+};
+const SEED_MEMBER_STORY_ASSET_ID: Record<string, string> = {
+  'rede-lab': '0e000000-0000-4000-8000-0000000000f2',
+};
+const SEED_MEMBER_STORY_ID: Record<string, string> = {
+  'rede-lab': '0e000000-0000-4000-8000-0000000000f3',
+};
+/** Exported by name so a suite can assert against the fixture instead of a literal that could drift. */
+export const SEED_MEMBER_COMMUNITY = {
+  name: 'Comunidade do membro Lab',
+  slug: 'comunidade-do-membro-lab',
+  description: 'Comunidade criada por um membro do Rede Lab (fixture da semente).',
+} as const;
+export const SEED_MEMBER_STORY_CAPTION = 'Story de um membro do Rede Lab (fixture da semente).';
+
+/**
  * 188 characters — comfortably past what a caption overlay shows before it has to wrap or clamp, so
  * the long-text row has something to cut. It is still inside `STORY_MAX_CAPTION` (300), because a
  * fixture that violated the cap would be testing the cap rather than the rendering.
@@ -2418,6 +2439,61 @@ for (const t of SEED_TENANTS) {
 
         console.log(
           `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest, ${seededHighlights} highlights (1 empty) with ${seededHighlightItems} items (community Destaques keeps the EXPIRED story), ${seededViews} story views (member: the oldest only; admin: every active story)`,
+        );
+      }
+    }
+
+    // 10-10 (MPUB-07, D-701, D-706, D-718): the member-owned fixtures of Phase 10, in rede-lab ONLY (the
+    // tenant with `social` on; rede-demo keeps it off so it carries none): ONE member community and ONE live
+    // member story, both authored by `member@rede-lab.local`, so the two-tenant isolation sweep and the member suites
+    // read a real member-owned row in the other tenant's host. THE SUITES RELY ON THESE TWO ROWS (counts and
+    // names): keep them stable, never rename them, and keep their names free of the `Teste ...` prefixes the
+    // suites use for their own fixtures (a UAT row that matches a suite sweep would break a seed-pinned test).
+    // Raw SQL in the admin lane (the migration role, like the Phase 9 follow rows above): the tenant lane's
+    // insert gates need a member session with `social` on. `on conflict (id)` keeps a re-run from adding or
+    // failing; the story's window is renewed on a re-run so the fixture is live again after 24 hours.
+    if (t.slug === 'rede-lab') {
+      const ownerEmail = `member@${t.slug}.local`;
+      const storyAssetId = SEED_MEMBER_STORY_ASSET_ID[t.slug];
+      const storyId = SEED_MEMBER_STORY_ID[t.slug];
+      const communityId = SEED_MEMBER_COMMUNITY_ID[t.slug];
+      const owner = await withAdminTx({ tenantId }, async (tx) => {
+        const found = await tx.execute<{ id: string }>(sql`
+          select id::text as id from public.users where email = ${ownerEmail}`);
+        return found[0]?.id ?? null;
+      });
+      if (owner && storyAssetId && storyId && communityId) {
+        await seedStoryImageAsset(tenantId, owner, storyAssetId, {
+          width: 1080,
+          height: 1920,
+          hex: t.colors.secondary,
+        });
+        await withAdminTx({ tenantId }, async (tx) => {
+          // `kind = 'member'` rows hold the fixed position 1000000 (`communities_member_position_chk`).
+          await tx.execute(sql`
+            insert into public.communities
+              (id, tenant_id, created_by_user_id, kind, name, slug, description, status, position)
+            values (
+              ${communityId}::uuid, ${tenantId}::uuid, ${owner}::uuid, 'member',
+              ${SEED_MEMBER_COMMUNITY.name}, ${SEED_MEMBER_COMMUNITY.slug},
+              ${SEED_MEMBER_COMMUNITY.description}, 'active', 1000000
+            )
+            on conflict (id) do nothing`);
+          // `visibility = 'followers'`: the member story is read through the author's followers (D-714).
+          await tx.execute(sql`
+            insert into public.stories
+              (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility,
+               published_at, expires_at)
+            values (
+              ${storyId}::uuid, ${tenantId}::uuid, ${owner}::uuid, ${storyAssetId}::uuid, 'image',
+              ${SEED_MEMBER_STORY_CAPTION}, 'followers',
+              now(), now() + interval '24 hours'
+            )
+            on conflict (id) do update
+              set published_at = excluded.published_at, expires_at = excluded.expires_at`);
+        });
+        console.log(
+          `seed: tenant ${t.slug} — 1 member community and 1 member story (member@rede-lab.local, followers)`,
         );
       }
     }

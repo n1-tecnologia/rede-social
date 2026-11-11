@@ -1147,12 +1147,14 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     };
     const demoMemberId = await userId('member@rede-demo.local');
     const labMemberId = await userId('member@rede-lab.local');
-    // A live, ready story of each tenant that its own member has NOT seen yet (the seed marks one).
+    // A live, ready ORGANIZATION story (the strip's rows; 10-10 seeds a member story that the strip never lists)
+    // of each tenant that its own member has NOT seen yet (the seed marks one).
     const unseenStory = async (tenantId: string, memberId: string) => {
       const [row] = await adminSql<{ id: string }[]>`
         select s.id::text from public.stories s
           join public.media_assets a on a.id = s.media_asset_id
          where s.tenant_id = ${tenantId}::uuid and s.deleted_at is null
+           and s.visibility = 'tenant'
            and s.expires_at > now() and a.status = 'ready'
            and not exists (select 1 from public.story_views v
                             where v.story_id = s.id and v.user_id = ${memberId}::uuid)
@@ -11645,10 +11647,12 @@ describe('shared identity (08.1)', () => {
         select id::text from public.communities
          where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and status = 'active'
          limit 1`;
+      // 10-10: the order is the ORGANIZATION set (10-06); the seed's member community is not part of it.
       const labActive = (
         await adminSql<{ id: string }[]>`
           select id::text from public.communities
-           where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null and status = 'active'
+           where tenant_id = ${tenantIds.lab}::uuid and kind = 'organization'
+             and deleted_at is null and status = 'active'
            order by position asc, last_activity_at desc, id desc`
       ).map((row) => row.id);
       expect(labActive.length).toBeGreaterThan(0);
@@ -12445,6 +12449,33 @@ describe('phase 10 sweep (10-10)', () => {
           }
         }
       }
+      // PUT /v1/communities/order (the organization-only scope of 10-06): a lab member community, an unknown id and
+      // the demo's OWN member community in an otherwise exact set are the same 409; the exact organization set is 200.
+      const demoOrganization = (
+        await adminSql<{ id: string }[]>`
+          select id::text from public.communities
+           where tenant_id = ${tenantIds.demo}::uuid and kind = 'organization'
+             and deleted_at is null and status = 'active'
+           order by position asc, last_activity_at desc, id desc`
+      ).map((row) => row.id);
+      expect(demoOrganization.length).toBeGreaterThan(1);
+      const orderWith = (extra: string) =>
+        asDemoAdmin('PUT', '/v1/communities/order', {
+          ids: [...demoOrganization.slice(1), extra],
+        });
+      const orderLab = await orderWith(SEED_LAB_MEMBER_COMMUNITY);
+      const orderUnknown = await orderWith(crypto.randomUUID());
+      const orderOwnMember = await orderWith(demoCommunity);
+      expect([orderLab.status, orderUnknown.status, orderOwnMember.status]).toEqual([
+        409, 409, 409,
+      ]);
+      const orderLabText = await orderLab.text();
+      expect(sansRequestId(orderLabText)).toEqual(sansRequestId(await orderUnknown.text()));
+      expect(orderLabText).not.toContain(SEED_LAB_MEMBER_COMMUNITY);
+      expect(
+        (await asDemoAdmin('PUT', '/v1/communities/order', { ids: demoOrganization })).status,
+      ).toBe(200);
+
       // Nothing moved or was written by any of them.
       const [after] = await adminSql<
         { description: string | null; status: string; posts: number }[]
@@ -12597,6 +12628,28 @@ describe('phase 10 sweep (10-10)', () => {
           expect(mine, `${who}: a lab id in the history`).not.toContain(id);
         }
       }
+      // The catalog: the owner's own community is offered with her highlight, and no demo catalog names it.
+      const catalogOf = async (as: typeof asLab): Promise<string> => {
+        const res = await as('GET', '/v1/stories/highlights/catalog');
+        expect(res.status).toBe(200);
+        return JSON.stringify(await res.json());
+      };
+      expect(await catalogOf(asLab)).toContain(labHighlight);
+      for (const as of [asDemoMember, asDemoAdmin]) {
+        const catalog = await catalogOf(as);
+        expect(catalog).not.toContain(labHighlight);
+        expect(catalog).not.toContain(labCommunity);
+        expect(catalog).not.toContain(SEED_LAB_MEMBER_COMMUNITY);
+      }
+      // The owner reorders her own community's highlights: the positive control of the PUT crossing.
+      expect(
+        (
+          await asLab('PUT', '/v1/stories/highlights/order', {
+            communityId: labCommunity,
+            highlightIds: [labHighlight],
+          })
+        ).status,
+      ).toBe(200);
       // The authors read: the demo moderator and member never see the lab owner's circle.
       const demoCircle = await asDemoAdmin('GET', '/v1/stories/authors');
       expect(demoCircle.status).toBe(200);
@@ -12634,6 +12687,12 @@ describe('phase 10 sweep (10-10)', () => {
             'PATCH',
             `/v1/stories/highlights/${highlight}`,
             { title: 'Invadido' },
+          ],
+          [
+            'reorder the highlights of it',
+            'PUT',
+            '/v1/stories/highlights/order',
+            { communityId: place, highlightIds: [highlight] },
           ],
           [
             'save a story in it',
@@ -12724,6 +12783,12 @@ describe('phase 10 sweep (10-10)', () => {
       // The wrong host, both directions, on the family's routes.
       for (const [method, path, body] of [
         ['GET', '/v1/stories/mine', undefined],
+        ['GET', '/v1/stories/highlights/catalog', undefined],
+        [
+          'PUT',
+          '/v1/stories/highlights/order',
+          { communityId: labCommunity, highlightIds: [labHighlight] },
+        ],
         ['GET', `/v1/stories/${SEED_LAB_MEMBER_STORY}`, undefined],
         ['DELETE', `/v1/stories/${SEED_LAB_MEMBER_STORY}`, undefined],
         ['GET', `/v1/stories/${SEED_LAB_MEMBER_STORY}/highlights`, undefined],

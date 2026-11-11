@@ -197,7 +197,8 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/feed': { case: 'a' },
   'GET /v1/feed/video-communities': { case: 'b9' },
   'GET /v1/feed/posts/:postId': { case: 'b' },
-  'POST /v1/feed/posts': { case: 'inventory sweep: feed' },
+  // 10-10: a post naming a member community of another tenant is the bare 404 (the owner seam).
+  'POST /v1/feed/posts': { case: 'phase 10 sweep: member communities and their posts' },
   'PATCH /v1/feed/posts/:postId': { case: 'inventory sweep: feed' },
   'DELETE /v1/feed/posts/:postId': { case: 'inventory sweep: feed' },
   'POST /v1/feed/posts/:postId/like': { case: 'inventory sweep: feed' },
@@ -211,41 +212,57 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/feed/comments/:commentId/thread': { case: 'phase 7 sweep' },
 
   // ── /v1/communities ─────────────────────────────────────────────────────────────────────────
-  'GET /v1/communities': { case: 'b2' },
-  'GET /v1/communities/:communityId': { case: 'b2' },
-  'POST /v1/communities': { case: 'b5' },
-  'PUT /v1/communities/order': { case: 'inventory sweep: event photos and community order' },
-  'PATCH /v1/communities/:communityId': { case: 'inventory sweep: stories and communities' },
-  'DELETE /v1/communities/:communityId': { case: 'inventory sweep: stories and communities' },
+  // 10-10 (MPUB-07, T-10-37): member communities widen who creates, edits and reads these routes; the phase 10
+  // sweep asks each of them the isolation question with the lab's member community and the demo's two sessions.
+  'GET /v1/communities': { case: 'phase 10 sweep: member communities and their posts' },
+  'GET /v1/communities/:communityId': {
+    case: 'phase 10 sweep: member communities and their posts',
+  },
+  'POST /v1/communities': { case: 'phase 10 sweep: member communities and their posts' },
+  'PUT /v1/communities/order': { case: 'phase 10 sweep: member communities and their posts' },
+  'PATCH /v1/communities/:communityId': {
+    case: 'phase 10 sweep: member communities and their posts',
+  },
+  'DELETE /v1/communities/:communityId': {
+    case: 'phase 10 sweep: member communities and their posts',
+  },
 
   // ── /v1/stories ─────────────────────────────────────────────────────────────────────────────
-  'GET /v1/stories/mine': { case: 'inventory sweep: stories and communities' },
-  'GET /v1/stories/highlights': { case: 'b7' },
-  'GET /v1/stories/highlights/catalog': { case: 'inventory sweep: stories and communities' },
-  'PUT /v1/stories/highlights/order': { case: 'inventory sweep: stories and communities' },
-  'GET /v1/stories/highlights/:highlightId': { case: 'b7' },
-  'POST /v1/stories/highlights': { case: 'b7' },
-  'PUT /v1/stories/highlights/:highlightId/stories/:storyId': { case: 'b7' },
-  'PATCH /v1/stories/highlights/:highlightId': { case: 'inventory sweep: stories and communities' },
+  // 10-10 (MPUB-07, T-10-37): the member's own history, the highlight writes whose guards widened to the creator
+  // (any-of manage or publish, 10-09), the catalog and the member stories, all through the phase 10 sweep.
+  'GET /v1/stories/mine': { case: 'phase 10 sweep: member stories and highlights' },
+  'GET /v1/stories/highlights': { case: 'phase 10 sweep: member stories and highlights' },
+  'GET /v1/stories/highlights/catalog': { case: 'phase 10 sweep: member stories and highlights' },
+  'PUT /v1/stories/highlights/order': { case: 'phase 10 sweep: member stories and highlights' },
+  'GET /v1/stories/highlights/:highlightId': {
+    case: 'phase 10 sweep: member stories and highlights',
+  },
+  'POST /v1/stories/highlights': { case: 'phase 10 sweep: member stories and highlights' },
+  'PUT /v1/stories/highlights/:highlightId/stories/:storyId': {
+    case: 'phase 10 sweep: member stories and highlights',
+  },
+  'PATCH /v1/stories/highlights/:highlightId': {
+    case: 'phase 10 sweep: member stories and highlights',
+  },
   'DELETE /v1/stories/highlights/:highlightId': {
-    case: 'inventory sweep: stories and communities',
+    case: 'phase 10 sweep: member stories and highlights',
   },
   'DELETE /v1/stories/highlights/:highlightId/stories/:storyId': {
-    case: 'inventory sweep: stories and communities',
+    case: 'phase 10 sweep: member stories and highlights',
   },
   'POST /v1/stories/views': { case: 'b8' },
   'GET /v1/stories': { case: 'b3' },
   'GET /v1/stories/authors': { case: 'phase 10 sweep' },
   'GET /v1/stories/authors/:membershipId': { case: 'phase 10 sweep' },
-  'GET /v1/stories/:storyId': { case: 'b3' },
-  'POST /v1/stories': { case: 'b6' },
-  'DELETE /v1/stories/:storyId': { case: 'inventory sweep: stories and communities' },
+  'GET /v1/stories/:storyId': { case: 'phase 10 sweep: member stories and highlights' },
+  'POST /v1/stories': { case: 'phase 10 sweep: member stories and highlights' },
+  'DELETE /v1/stories/:storyId': { case: 'phase 10 sweep: member stories and highlights' },
   'POST /v1/stories/:storyId/likes': { case: 'inventory sweep: stories and communities' },
   'DELETE /v1/stories/:storyId/likes': { case: 'inventory sweep: stories and communities' },
   'GET /v1/stories/:storyId/comments': { case: 'inventory sweep: stories and communities' },
   'POST /v1/stories/:storyId/comments': { case: 'inventory sweep: stories and communities' },
   'DELETE /v1/stories/:storyId/comments/:commentId': { case: 'phase 8 sweep' },
-  'GET /v1/stories/:storyId/highlights': { case: 'inventory sweep: stories and communities' },
+  'GET /v1/stories/:storyId/highlights': { case: 'phase 10 sweep: member stories and highlights' },
 
   // ── /v1/events ──────────────────────────────────────────────────────────────────────────────
   'GET /v1/events': { case: 'b4' },
