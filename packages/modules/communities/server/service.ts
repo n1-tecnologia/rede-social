@@ -1025,7 +1025,16 @@ async function assertMayWriteCommunity(
   const row = seen[0];
   if (!row) throw new ApiError(404, 'NOT_FOUND');
   if (canManage) return;
-  if (row.kind === 'member' && row.created_by_user_id === ctx.userId) return;
+  if (row.kind === 'member' && row.created_by_user_id === ctx.userId) {
+    // 10-10 (T-10-38, D-718): the creator's update and delete are write acts that exist only while `social` is on,
+    // but `communities_member_update_gate` has no `social` term (only the INSERT gates do), so inside the 30 s
+    // flags-cache window the route guard still lets the creator through after the switch went off. Ask the
+    // database, the same function the insert gates use: off is the 403 the permission guard gives once the cache
+    // expires. A moderator (`canManage`) returned above and is never judged by `social` (D-718).
+    const social = await tx.execute<{ on: boolean }>(sql`select app.social_enabled() as on`);
+    if (social[0]?.on !== true) throw new ApiError(403, 'FORBIDDEN');
+    return;
+  }
   throw new ApiError(403, 'FORBIDDEN');
 }
 

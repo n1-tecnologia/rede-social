@@ -1810,6 +1810,15 @@ async function resolveHighlightPlace(
       : community.owner === ctx.userId && gate.canPublish;
   if (intent === 'read') return { curator };
   if (!curator) throw new ApiError(403, 'FORBIDDEN');
+  if (community.kind === 'member') {
+    // 10-10 (T-10-38, D-718): a creator's highlight write exists only while `social` is on, but no row-level policy
+    // of the highlight tables carries a `social` term, so inside the 30 s flags-cache window the guard and the
+    // `canPublish` flag still let the creator through after the switch went off. Ask the database, the function the
+    // insert gates of the member rows use. It comes after the 403 of a non-curator, so it adds no new answer for
+    // anyone else; an organization place is the manage half and is never judged by `social` (D-718).
+    const social = await tx.execute<{ on: boolean }>(sql`select app.social_enabled() as on`);
+    if (social[0]?.on !== true) throw new ApiError(403, 'FORBIDDEN');
+  }
 
   // A write intent takes the row `for share`, so an archive that commits concurrently waits for this
   // transaction instead of racing it (closes 05.1's residual R-1 for this path), and the status the
