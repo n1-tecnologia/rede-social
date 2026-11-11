@@ -11,7 +11,7 @@ begin;
 --
 -- Fixture ids use the `23000000-…` prefix and the tenants `pgtap-mcomm-a` / `pgtap-mcomm-b`. Like its siblings,
 -- this file ROLLS BACK.
-select plan(12);
+select plan(11);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-mcomm-a', 'Comunidades de membros A', '23000000-0000-4000-8000-000000000001');

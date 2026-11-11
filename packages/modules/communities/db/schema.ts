@@ -1,16 +1,29 @@
 import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
+import { SOCIAL_ENABLED } from '@rede-social/core/db/social-gate';
 import { sql } from 'drizzle-orm';
 import {
   check,
   index,
   integer,
+  pgPolicy,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { authenticatedRole } from 'drizzle-orm/supabase';
+
+/**
+ * The `position` every MEMBER community carries (10-03, D-706, assumption A1; RESEARCH Pitfall 3): a fixed
+ * sentinel far above anything the admin's reorder writes (`1..n` with `n <= COMMUNITY_MAX_ORDER = 200`), so
+ * the Comunidades list and the Reels lanes, which order by `position asc, last_activity_at desc, id desc`,
+ * put member communities after the organization's with no change to the statement, its index or its keyset
+ * cursor. `communities_member_position_chk` makes it a fact of the database: a member row with any other
+ * position is refused, and an organization row keeps any non-negative position.
+ */
+export const COMMUNITY_MEMBER_POSITION = 1000000;
 
 /**
  * The communities module's two tables (COMM-01, COMM-02, COMM-03) — the tenant's content containers
@@ -82,6 +95,14 @@ export const communities = pgTable(
      * reorder writes 1..n, so a community created afterwards (0) is listed first.
      */
     position: integer().notNull().default(0),
+    /**
+     * Whose community this is (10-03, D-706, D-707): `'organization'` (the default, which backfills every
+     * row that existed before Phase 10) or `'member'` (created by a member, who owns it). STAMPED at creation
+     * from the creator's role and never derived at read time, so a later promotion or demotion of the creator
+     * never moves a community between kinds. Never in a request body: the service writes it from the session
+     * and `communities_kind_insert_gate` re-states it in SQL.
+     */
+    kind: text().notNull().default('organization'),
     /** Trigger-owned (05-03). Application code never writes these two. */
     postCount: integer('post_count').notNull().default(0),
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
@@ -116,7 +137,68 @@ export const communities = pgTable(
     // reads a unique violation here as "try the next suffix", never as a 409.
     uniqueIndex('communities_tenant_slug_uq').on(t.tenantId, t.slug),
     check('communities_status_chk', sql`${t.status} in ('active','archived')`),
+    check('communities_kind_chk', sql`${t.kind} in ('organization','member')`),
+    // D-706 / A1 / EP-04: the sentinel is the EXACT integer, so a member row with 0, 999999 or 1000001 is
+    // refused (23514) while an organization row keeps any position the admin's order gives it.
+    check(
+      'communities_member_position_chk',
+      sql`${t.kind} = 'organization' or ${t.position} = 1000000`,
+    ),
+    // "this member's communities" and the per-member creation limit (plan 05) without a sequential scan;
+    // partial, because organization communities have no member creator to look up.
+    index('communities_tenant_creator_idx')
+      .on(t.tenantId, t.createdByUserId)
+      .where(sql`kind = 'member' and deleted_at is null`),
     tenantIsolationPolicy('communities_tenant_isolation'),
+    // ── 10-03 (MCOMM-01, MPUB-04, D-706, D-707, D-708; T-10-04, T-10-05, T-10-07): the creator rule. FOUR
+    // RESTRICTIVE policies, so each ANDs with `communities_tenant_isolation` whatever the creation order and
+    // can only NARROW it (a permissive one would OR with it and widen access; pgTAP 230 asserts
+    // `permissive = 'RESTRICTIVE'` for each name). A null `app.tenant_role()` or `app.user_id()` makes every
+    // predicate null, which denies: they fail closed (the 09-14 posture).
+    //
+    // INSERT: a `member` lane may insert ONLY a `'member'` community, in its OWN name, at the sentinel
+    // position, while `social` is on (a SQL read of `app.social_enabled()`, never the 30-second flags cache:
+    // turning `social` off stops new member communities at once). Every other lane may insert ONLY an
+    // `'organization'` community, so a member-created community can never be the organization's voice and an
+    // admin cannot mint one in a member's name.
+    pgPolicy('communities_kind_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`(app.tenant_role() = 'member' and kind = 'member' and created_by_user_id = app.user_id() and position = 1000000 and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and kind = 'organization')`,
+    }),
+    // UPDATE: a `member` lane updates only the rows it created and may not change `kind` or the creator
+    // (WITH CHECK). Every other lane is untouched. DELIBERATELY NO `social_enabled()` TERM (assumption A11):
+    // `app.community_post_stats()` (the post counter) is NOT a definer, it updates `communities` as the
+    // INVOKER, and an UPDATE whose USING does not match is FILTERED silently, so a tighter policy would let
+    // `post_count` drift without an error and one carrying `social_enabled()` would block the counter while
+    // `social` is off. The service and the composed permission stop a member EDIT while `social` is off; the
+    // 30-second flags-cache window is the accepted residual for an edit (inserts are gated in SQL above).
+    pgPolicy('communities_member_update_gate', {
+      as: 'restrictive',
+      for: 'update',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member' or created_by_user_id = app.user_id()`,
+      withCheck: sql`app.tenant_role() <> 'member' or (kind = 'member' and created_by_user_id = app.user_id())`,
+    }),
+    // DELETE: a member never hard-deletes a community; the service soft-deletes (`deleted_at`).
+    pgPolicy('communities_member_delete_gate', {
+      as: 'restrictive',
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member'`,
+    }),
+    // SELECT (D-708): a member community whose creator has no live membership (blocked, removed or not
+    // active) leaves EVERY read, the moderator's included, and comes back when the creator does. The ids come
+    // from the definer `app.member_community_hidden_ids()` (`*_member_communities_functions.sql`), read once
+    // per statement as an InitPlan (`coalesce((select ...), '{}'::uuid[])`, never `<> all (subquery)`). No
+    // row is touched. An organization community passes whatever its creator's state.
+    pgPolicy('communities_member_hidden_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`kind = 'organization' or id <> all (coalesce((select app.member_community_hidden_ids()), '{}'::uuid[]))`,
+    }),
   ],
 ).enableRLS();
 
