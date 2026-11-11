@@ -263,7 +263,10 @@ describe('GET /v1/stories — the strip is three predicates (STORY-03, D-78, R-P
     // D-78: one item per story, never one per publisher — with V1's single publisher, grouping
     // would collapse this to exactly one row forever.
     expect(new Set(body.items.map((item) => item.id)).size).toBe(SEEDED_ACTIVE);
-    expect(new Set(body.items.map((item) => item.authorUserId)).size).toBe(1);
+    // 10-07 (A7): the author's user id is sent only to the author. This reader is a member, so no story
+    // of the strip carries one, and an organization story names no person either.
+    expect(body.items.every((item) => item.authorUserId === null)).toBe(true);
+    expect(body.items.every((item) => item.author === null)).toBe(true);
   });
 
   it('2. every window is exactly 24 h wide, and the summary carries the ladder the circle needs', async () => {

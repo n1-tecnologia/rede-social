@@ -71,6 +71,19 @@ async function story(id: string, token = tokens.demoMember): Promise<StorySummar
   return storySummarySchema.parse(await res.json());
 }
 
+/**
+ * The ids of the demo stories the SEEDED admin authored. Since 10-07 (A7) a member reader is never sent
+ * another user's id (`authorUserId` is null unless the caller is the author), so "the admin's stories"
+ * can no longer be picked out of a page by that field: the DATABASE says which they are.
+ */
+async function adminStoryIds(): Promise<Set<string>> {
+  const rows = await adminSql<{ id: string }[]>`
+    select id from public.stories
+     where tenant_id = ${tenantIds.demo}::uuid and author_user_id = ${seeded.adminUserId}::uuid
+       and deleted_at is null`;
+  return new Set(rows.map((row) => row.id));
+}
+
 /** A media asset row of the named tenant, written directly — the fixture shape `stories.test.ts` uses. */
 async function insertAsset(opts: {
   tenantId: string;
@@ -213,7 +226,8 @@ describe('authorAvatarUrl — the author’s photo on every story projection (#2
   it('1. an author with NO photo projects `authorAvatarUrl: null` — a present key, never a guess', async () => {
     await withAdminPhoto(null, async () => {
       const page = await strip();
-      const byAdmin = page.items.filter((item) => item.authorUserId === seeded.adminUserId);
+      const adminIds = await adminStoryIds();
+      const byAdmin = page.items.filter((item) => adminIds.has(item.id));
       expect(byAdmin.length, 'the seed has live demo stories by the admin').toBeGreaterThan(0);
       for (const item of byAdmin) expect(item.authorAvatarUrl).toBeNull();
 
@@ -243,7 +257,8 @@ describe('authorAvatarUrl — the author’s photo on every story projection (#2
 
       // The strip (a member's read): every live story by the admin wears that same photo.
       const page = await strip();
-      const byAdmin = page.items.filter((item) => item.authorUserId === seeded.adminUserId);
+      const adminIds = await adminStoryIds();
+      const byAdmin = page.items.filter((item) => adminIds.has(item.id));
       expect(byAdmin.length).toBeGreaterThan(0);
       for (const item of byAdmin) expect(item.authorAvatarUrl).toBe(profile.avatarUrl);
 
@@ -255,7 +270,7 @@ describe('authorAvatarUrl — the author’s photo on every story projection (#2
       const mineRes = await read(`/v1/stories/mine?limit=${STORY_MAX_PAGE_SIZE}`, tokens.demoAdmin);
       expect(mineRes.status).toBe(200);
       const mine = storyPageSchema.parse(await mineRes.json());
-      const mineByAdmin = mine.items.filter((item) => item.authorUserId === seeded.adminUserId);
+      const mineByAdmin = mine.items.filter((item) => adminIds.has(item.id));
       expect(mineByAdmin.length).toBeGreaterThan(0);
       for (const item of mineByAdmin) expect(item.authorAvatarUrl).toBe(expected);
 
@@ -269,14 +284,15 @@ describe('authorAvatarUrl — the author’s photo on every story projection (#2
       const detailRes = await read(`/v1/stories/highlights/${playable?.id}`, tokens.demoMember);
       expect(detailRes.status).toBe(200);
       const detail = highlightDetailSchema.parse(await detailRes.json());
-      const detailByAdmin = detail.items.filter((item) => item.authorUserId === seeded.adminUserId);
+      const detailByAdmin = detail.items.filter((item) => adminIds.has(item.id));
       expect(detailByAdmin.length).toBeGreaterThan(0);
       for (const item of detailByAdmin) expect(item.authorAvatarUrl).toBe(expected);
     });
 
     // Put back: with the seed's own photo (none) the projection is null again.
     const after = await strip();
-    for (const item of after.items.filter((i) => i.authorUserId === seeded.adminUserId)) {
+    const adminIdsAfter = await adminStoryIds();
+    for (const item of after.items.filter((i) => adminIdsAfter.has(i.id))) {
       expect(item.authorAvatarUrl).not.toBe(expected);
     }
   });
@@ -317,7 +333,8 @@ describe('authorAvatarUrl — the author’s photo on every story projection (#2
     const storyId = await insertStory(tenantIds.demo, foreign.userId);
 
     const read1 = await story(storyId);
-    expect(read1.authorUserId).toBe(foreign.userId);
+    // 10-07 (A7): a member reader is never sent another user's id, forged author or not.
+    expect(read1.authorUserId).toBeNull();
     expect(read1.authorAvatarUrl).toBeNull();
     const onStrip = (await strip()).items.find((item) => item.id === storyId);
     expect(onStrip, 'the forged story is live on the demo strip').toBeDefined();
