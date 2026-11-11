@@ -11,10 +11,12 @@ import { type SQL, sql } from 'drizzle-orm';
 import {
   COMMUNITY_PAGE_SIZE,
   COMMUNITY_UNLOCK_NAMES_MAX,
+  type CommunityKind,
   type CommunityPage,
   type CommunityQuery,
   type CommunityStatus,
   type CommunitySummary,
+  type CommunityViewer,
   type CreateCommunity,
   type ReorderCommunities,
   type UpdateCommunity,
@@ -51,6 +53,25 @@ type CommunityRow = {
   post_count: number;
   status: CommunityStatus;
   last_activity_at: string;
+  /** 10-06: whose community this is. Part of the projection now (the viewer flags and the label read it). */
+  kind: CommunityKind;
+  /**
+   * 10-06 (D-703, PR-2b): "the viewer created this MEMBER community", computed IN the statement, so the
+   * creator's user id never has to be selected to answer it and can never reach the wire.
+   */
+  is_owner: boolean;
+  /**
+   * 10-06 (D-703): the creator's three safe fields, from their LIVE membership and profile; all three are
+   * null for an organization community (the join never matches it) and for a creator who is not live.
+   */
+  creator_membership_id: string | null;
+  creator_display_name: string | null;
+  creator_avatar_asset_id: string | null;
+  /**
+   * The caller's own ACTIVE member communities, selected through `extra` only when the caller may create
+   * (`memberQuota`). A scalar InitPlan, so it costs no second statement and no per-row work.
+   */
+  quota_owned_active?: number;
   /**
    * The ARCHIVED list's cursor key only (05.1, D-91): `updated_at` formatted to microseconds by the
    * statement, selected through `communityProjection`'s `extra` column. `toCommunity` never reads it,
@@ -64,11 +85,10 @@ type CommunityRow = {
    */
   cursor_position?: number;
   /**
-   * 10-05: the owner seam's two inputs, selected through the projection's `extra` column by the WRITE
-   * paths only (`updateCommunity`). Like the cursor keys, `toCommunity` never reads them, so neither the
-   * kind nor the creator's user id can reach the wire (`communitySummarySchema` is `.strict()`).
+   * 10-05: the owner seam's second input, selected through the projection's `extra` column by the WRITE
+   * paths only (`updateCommunity`). Like the cursor keys, `toCommunity` never reads it, so the creator's
+   * user id can never reach the wire (`communitySummarySchema` is `.strict()`, and PR-2b).
    */
-  kind?: 'organization' | 'member';
   created_by_user_id?: string | null;
 };
 
@@ -176,15 +196,21 @@ function decodeActiveCursor(raw: string | undefined): ActiveCursor | null {
  * weight a reader could mistake for the actual isolation. A soft-deleted cover simply drops out and
  * the card falls back to the `--brand-gradient` block, exactly as a null `cover_asset_id` does.
  *
- * `created_by_user_id` is deliberately ABSENT from the select list (D-67): the container has no
- * human byline, and a column that never leaves the database cannot leak into a payload by accident.
+ * `created_by_user_id` is deliberately ABSENT from the select list (D-67, PR-2b): the creator is
+ * projected through TWO LEFT JOINs instead (10-06, D-703), `memberships` pinned to the community's tenant
+ * and to a LIVE membership (`status = 'active'`, not blocked, not deleted: the `storyProjection` author
+ * shape), then `member_profiles` on `membership_id`, and the join is written to match MEMBER rows only, so an
+ * organization community never reads its admin's profile. "The viewer created it" is a boolean computed by
+ * the statement (`is_owner`), so a user id is never selected and can never reach a payload by accident.
+ * Both joins match at most one row (`memberships_tenant_user_uq`, `member_profiles_membership_uq`), so a
+ * community can never be duplicated by them.
  *
  * `extra` (05.1) is how the ARCHIVED list adds the one column its cursor is built from without
  * duplicating this column list — the `storyProjection(viewerUserId, extra)` precedent. Every other
  * call site passes nothing and renders exactly the column list it always did. An extra column is a
  * CURSOR key, never a payload field: `toCommunity` does not read it.
  */
-function communityProjection(extra: SQL | null = null) {
+function communityProjection(ctx: RequestContext, extra: SQL | null = null) {
   return sql`
     select c.id,
            c.name,
@@ -194,14 +220,93 @@ function communityProjection(extra: SQL | null = null) {
            a.variant_widths as cover_variant_widths,
            c.post_count,
            c.status,
-           to_char(c.last_activity_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_activity_at
+           to_char(c.last_activity_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_activity_at,
+           c.kind,
+           (c.kind = 'member' and c.created_by_user_id = ${ctx.userId}::uuid) as is_owner,
+           am.id as creator_membership_id,
+           ap.display_name as creator_display_name,
+           ap.avatar_asset_id as creator_avatar_asset_id
            ${extra ?? sql``}
       from communities c
-      left join media_assets a on a.id = c.cover_asset_id`;
+      left join media_assets a on a.id = c.cover_asset_id
+      left join memberships am
+             on c.kind = 'member'
+            and am.tenant_id = c.tenant_id
+            and am.user_id = c.created_by_user_id
+            and am.status = 'active'
+            and am.blocked_at is null
+            and am.deleted_at is null
+      left join member_profiles ap on ap.membership_id = am.id`;
 }
 
-/** Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`. */
-const toCommunity = (row: CommunityRow): CommunitySummary => ({
+/**
+ * 10-06: the permission facts the read side needs, computed ONCE per request by the route from
+ * `permissionsForRequest` (permissions, never roles: T-05-03). The module never sees the permission set
+ * itself, only these booleans, so the host never compares a role or an id and a later change of the
+ * composition (the Escopo scope built after Phase 11) is one function.
+ */
+export type CommunityViewerFlags = {
+  /** `communities.community.manage`: the organization's permission over every community. */
+  canManage: boolean;
+  /** `feed.post.create` and `content.publish`: the organization's voice (the admin; never a member). */
+  canPostOrg: boolean;
+  /** `stories.story.manage`: stories for an organization community. */
+  canCurateOrg: boolean;
+  /** `communities.community.manage_own`: the member creator's key over their own community. */
+  canManageOwn: boolean;
+  /** `stories.story.publish`: the member creator's story key. */
+  canPublishStory: boolean;
+  /** `communities.community.create`: may create (and therefore has a quota). */
+  canCreate: boolean;
+};
+
+/** The composed permission set to the module's own flags; the only place that names the strings. */
+export function communityViewerFlags(granted: readonly string[]): CommunityViewerFlags {
+  const has = (key: string) => granted.includes(key);
+  return {
+    canManage: has('communities.community.manage'),
+    canPostOrg: has('feed.post.create') && has('content.publish'),
+    canCurateOrg: has('stories.story.manage'),
+    canManageOwn: has('communities.community.manage_own'),
+    canPublishStory: has('stories.story.publish'),
+    canCreate: has('communities.community.create'),
+  };
+}
+
+/**
+ * 10-06: the per-viewer flags of one row, from the row's kind and ownership and the caller's permission
+ * flags. For an ORGANIZATION community the organization's permissions decide; for a MEMBER community the
+ * creator holds the member keys and a holder of `manage` may edit (moderation, UI-D-710) but never publish.
+ * `canEdit` and `canCurate` require the matching member KEY as well as ownership, so a flag never promises a
+ * write the route would refuse (an owner whose `social` was switched off, a creator whose role changed).
+ *
+ * **`actions` is the Escopo seam, computed here and nowhere else.** `post` and `story` take the value of
+ * `canPublish` (today the owner rule of D-706); `like` and `comment` are `true` for every caller the
+ * community is returned to (the interaction routes carry no per-route permission, D-701) and `share` is
+ * `true` wherever the community is readable (no share gate exists). The per-product action scope built
+ * after Phase 11 refines these five at THIS site; this phase adds no per-row grant lookup, because it
+ * would change the list statement and its query budget.
+ */
+function viewerOf(row: CommunityRow, flags: CommunityViewerFlags): CommunityViewer {
+  const member = row.kind === 'member';
+  const isOwner = row.is_owner === true;
+  const canPublish = member ? isOwner && flags.canManageOwn : flags.canPostOrg;
+  const canEdit = member ? flags.canManage || (isOwner && flags.canManageOwn) : flags.canManage;
+  const canCurate = member ? isOwner && flags.canPublishStory : flags.canCurateOrg;
+  return {
+    isOwner,
+    canPublish,
+    canEdit,
+    canCurate,
+    actions: { like: true, comment: true, share: true, post: canPublish, story: canPublish },
+  };
+}
+
+/**
+ * Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`. `createdBy` is the
+ * three safe fields of a MEMBER community's live creator and `null` otherwise (D-703).
+ */
+const toCommunity = (row: CommunityRow, flags: CommunityViewerFlags): CommunitySummary => ({
   id: row.id,
   name: row.name,
   slug: row.slug,
@@ -213,7 +318,31 @@ const toCommunity = (row: CommunityRow): CommunitySummary => ({
   postCount: row.post_count,
   status: row.status,
   lastActivityAt: row.last_activity_at,
+  kind: row.kind,
+  createdBy:
+    row.kind === 'member' && row.creator_membership_id && row.creator_display_name !== null
+      ? {
+          membershipId: row.creator_membership_id,
+          displayName: row.creator_display_name,
+          avatarAssetId: row.creator_avatar_asset_id,
+        }
+      : null,
+  viewer: viewerOf(row, flags),
 });
+
+/**
+ * 10-06 (D-710): the caller's own ACTIVE member communities as a scalar subquery for the list statements'
+ * `extra` column. Uncorrelated, so it is an InitPlan evaluated once per statement, not per row, and the list
+ * stays ONE statement against the community tables (the query-budget test).
+ */
+const quotaColumn = (ctx: RequestContext) => sql`,
+           (select count(*)::int
+              from communities q
+             where q.tenant_id = ${ctx.tenantId}::uuid
+               and q.kind = 'member'
+               and q.created_by_user_id = ${ctx.userId}::uuid
+               and q.status = 'active'
+               and q.deleted_at is null) as quota_owned_active`;
 
 /**
  * THE active-list statement — one page of the tenant's ACTIVE communities in the list's order —
@@ -250,12 +379,17 @@ async function activePage(
   ctx: RequestContext,
   limit: number,
   after: ActiveCursor | null,
+  /** 10-06: add the caller's own active member-community count to the statement (a creator's `memberQuota`). */
+  withQuota = false,
 ): Promise<CommunityRow[]> {
   const afterPosition = after?.position ?? null;
   const afterAt = after?.at ?? null;
   const afterId = after?.id ?? null;
   return tx.execute<CommunityRow>(sql`
-      ${communityProjection(sql`, c.position as cursor_position`)}
+      ${communityProjection(
+        ctx,
+        sql`, c.position as cursor_position${withQuota ? quotaColumn(ctx) : sql``}`,
+      )}
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'active'
@@ -289,12 +423,16 @@ async function archivedPage(
   limit: number,
   after: { n: string; id: string } | null,
   ownOnly: boolean,
+  withQuota = false,
 ): Promise<CommunityRow[]> {
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
   return tx.execute<CommunityRow>(sql`
       ${communityProjection(
-        sql`, to_char(c.updated_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at`,
+        ctx,
+        sql`, to_char(c.updated_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at${
+          withQuota ? quotaColumn(ctx) : sql``
+        }`,
       )}
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
@@ -330,13 +468,28 @@ function pageOf(
   rows: CommunityRow[],
   limit: number,
   keyOf: (row: CommunityRow) => string | undefined,
+  flags: CommunityViewerFlags,
+  memberQuota: CommunityPage['memberQuota'] = null,
 ): CommunityPage {
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   const lastKey = last ? keyOf(last) : undefined;
   const nextCursor =
     rows.length > limit && last && lastKey ? encodeCursor({ n: lastKey, id: last.id }) : null;
-  return { items: page.map(toCommunity), nextCursor };
+  return { items: page.map((row) => toCommunity(row, flags)), nextCursor, memberQuota };
+}
+
+/** The ACTIVE member communities one user owns (the `memberQuota` of an empty page, 10-06). */
+async function ownedActiveCount(tx: Tx, ctx: RequestContext, ownerUserId: string): Promise<number> {
+  const owned = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n
+      from communities
+     where tenant_id = ${ctx.tenantId}::uuid
+       and kind = 'member'
+       and created_by_user_id = ${ownerUserId}::uuid
+       and status = 'active'
+       and deleted_at is null`);
+  return owned[0]?.n ?? 0;
 }
 
 /**
@@ -369,18 +522,44 @@ export async function listCommunities(
    * `manage` (the member creator) reads the ARCHIVED list of THEIR OWN member communities only. The route
    * computes it from the composed permission set; it is never a client value.
    */
-  opts: { ownOnly?: boolean } = {},
+  opts: { ownOnly?: boolean; viewer: CommunityViewerFlags },
 ): Promise<CommunityPage> {
   const limit = query.limit;
   const archived = query.status === 'archived';
 
-  const rows = await withTenantTx(ctx, (tx) =>
-    archived
-      ? archivedPage(tx, ctx, limit, decodeArchivedCursor(query.cursor), opts.ownOnly === true)
-      : activePage(tx, ctx, limit, decodeActiveCursor(query.cursor)),
-  );
+  // 10-06 (D-710): a caller who may create reads their own allowance with the page. The policy is read
+  // BEFORE the transaction opens (the flags cache may open a lane of its own on a miss); `null` (no `social`
+  // for the tenant) leaves the quota null whatever the permission set said during the cache window.
+  const policy = opts.viewer.canCreate ? await memberCommunityPolicyFor(ctx) : null;
+  const withQuota = policy !== null;
 
-  const { items, nextCursor } = pageOf(rows, limit, archived ? archivedKey : activeKey);
+  const { rows, fallbackOwned } = await withTenantTx(ctx, async (tx) => {
+    const page = archived
+      ? await archivedPage(
+          tx,
+          ctx,
+          limit,
+          decodeArchivedCursor(query.cursor),
+          opts.ownOnly === true,
+          withQuota,
+        )
+      : await activePage(tx, ctx, limit, decodeActiveCursor(query.cursor), withQuota);
+    // The count rides the first row; an EMPTY page has no row to carry it, so the (rare) empty page asks.
+    const fallback =
+      withQuota && page.length === 0 ? await ownedActiveCount(tx, ctx, ctx.userId) : 0;
+    return { rows: page, fallbackOwned: fallback };
+  });
+
+  const memberQuota = policy
+    ? { ownedActive: rows[0]?.quota_owned_active ?? fallbackOwned, limit: policy.maxActive }
+    : null;
+  const { items, nextCursor } = pageOf(
+    rows,
+    limit,
+    archived ? archivedKey : activeKey,
+    opts.viewer,
+    memberQuota,
+  );
 
   // The SHAPE of the read — counts, ids and flags. A community NAME is member-facing content and
   // never reaches a log line, an error `details` payload or an OpenAPI example (T-05-06).
@@ -399,7 +578,7 @@ export async function listCommunities(
     'communities listed',
   );
 
-  return { items, nextCursor };
+  return { items, nextCursor, memberQuota };
 }
 
 /**
@@ -415,10 +594,11 @@ export async function listCommunities(
 export async function getCommunity(
   ctx: RequestContext,
   communityId: string,
+  viewer: CommunityViewerFlags,
 ): Promise<CommunitySummary> {
   const row = await withTenantTx(ctx, async (tx) => {
     const rows = await tx.execute<CommunityRow>(sql`
-      ${communityProjection()}
+      ${communityProjection(ctx)}
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.id = ${communityId}::uuid
          and c.deleted_at is null
@@ -427,7 +607,7 @@ export async function getCommunity(
   });
 
   if (!row) throw new ApiError(404, 'NOT_FOUND');
-  return toCommunity(row);
+  return toCommunity(row, viewer);
 }
 
 /**
@@ -642,6 +822,7 @@ async function assertWithinMemberLimit(
 export async function createCommunity(
   ctx: RequestContext,
   input: CreateCommunity,
+  viewer: CommunityViewerFlags,
 ): Promise<CommunitySummary> {
   // The service re-states the route's rule: `createCommunity` is also reachable from the seed and
   // from any handler that assembles its own input, none of which pass through the route validator.
@@ -713,7 +894,7 @@ export async function createCommunity(
     'community created',
   );
 
-  return toCommunity(created);
+  return toCommunity(created, viewer);
 }
 
 /**
@@ -773,7 +954,7 @@ async function insertCommunity(
   if (!id) throw new ApiError(500, 'INTERNAL');
 
   const rows = await tx.execute<CommunityRow>(sql`
-    ${communityProjection()}
+    ${communityProjection(ctx)}
      where c.id = ${id}::uuid
      limit 1`);
   const row = rows[0];
@@ -883,8 +1064,8 @@ export async function updateCommunity(
   ctx: RequestContext,
   communityId: string,
   input: UpdateCommunity,
-  /** 10-05: `communities.community.manage`, read by the route from the composed permission set. */
-  opts: { canManage: boolean },
+  /** 10-05: the permission flags, read by the route from the composed permission set (`canManage` is the owner seam's). */
+  opts: CommunityViewerFlags,
 ): Promise<CommunitySummary> {
   // The service re-states the route's rule: this function is also reachable from the seed and from
   // any handler that assembles its own input, none of which pass through the route validator.
@@ -908,7 +1089,7 @@ export async function updateCommunity(
     // moderator archiving at the same time, EP-25) queue and the second one reads the first one's
     // status: exactly one transition happens.
     const current = await tx.execute<CommunityRow>(sql`
-      ${communityProjection(sql`, c.kind as kind, c.created_by_user_id as created_by_user_id`)}
+      ${communityProjection(ctx, sql`, c.created_by_user_id as created_by_user_id`)}
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.id = ${communityId}::uuid
          and c.deleted_at is null
@@ -984,7 +1165,7 @@ export async function updateCommunity(
          and deleted_at is null`);
 
     const rows = await tx.execute<CommunityRow>(sql`
-      ${communityProjection()}
+      ${communityProjection(ctx)}
        where c.id = ${communityId}::uuid
        limit 1`);
     const after = rows[0];
@@ -1039,7 +1220,7 @@ export async function updateCommunity(
     'community updated',
   );
 
-  return toCommunity(row);
+  return toCommunity(row, opts);
 }
 
 /**
@@ -1083,6 +1264,7 @@ export async function updateCommunity(
 export async function reorderCommunities(
   ctx: RequestContext,
   input: ReorderCommunities,
+  viewer: CommunityViewerFlags,
 ): Promise<CommunityPage> {
   const requested = input.ids.map((id) => id.toLowerCase());
   if (new Set(requested).size !== requested.length) {
@@ -1119,7 +1301,7 @@ export async function reorderCommunities(
       returning c.id`);
 
     const rows = await activePage(tx, ctx, COMMUNITY_PAGE_SIZE, null);
-    return { page: pageOf(rows, COMMUNITY_PAGE_SIZE, activeKey), moved: renumbered.length };
+    return { page: pageOf(rows, COMMUNITY_PAGE_SIZE, activeKey, viewer), moved: renumbered.length };
   });
 
   log.info(

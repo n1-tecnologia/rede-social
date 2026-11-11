@@ -5,6 +5,7 @@ import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { COMMUNITY_PAGE_SIZE, type CommunityQuery } from '../contracts/index';
+import type { CommunityViewerFlags } from '../server/service';
 
 /**
  * 2026-10-03 — the admin's order of the Comunidades list, asserted without a database (the
@@ -34,6 +35,16 @@ const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 const dialect = new PgDialect();
+
+/** 10-06: the read flags a caller with no community permission has; the services take them from the route. */
+const NO_FLAGS: CommunityViewerFlags = {
+  canManage: false,
+  canPostOrg: false,
+  canCurateOrg: false,
+  canManageOwn: false,
+  canPublishStory: false,
+  canCreate: false,
+};
 
 /** What the lock statement finds — the tenant's CURRENT active set. */
 let activeIds: string[] = [];
@@ -128,7 +139,7 @@ describe('the ACTIVE list — position first, and a cursor that carries it', () 
       row(C, 2, '2026-09-01T10:00:00.000000Z'),
     ];
 
-    const page = await listCommunities(context(), query());
+    const page = await listCommunities(context(), query(), { viewer: NO_FLAGS });
 
     expect(page.items.map((item) => item.id)).toEqual([A, B]);
     expect(page.nextCursor).not.toBeNull();
@@ -143,15 +154,16 @@ describe('the ACTIVE list — position first, and a cursor that carries it', () 
     const [statement] = seen;
     expect(statement?.kind).toBe('active-page');
     expect(statement?.sql).toContain("c.status = 'active'");
-    // Page 1: every cursor parameter (the position thrice, the instant, the id) is null.
-    expect(statement?.params.slice(1, 6)).toEqual([null, null, null, null, null]);
+    // Page 1: every cursor parameter (the position thrice, the instant, the id) is null. Parameters 0 and 1 are the
+    // viewer (10-06, the projection's `is_owner`) and the tenant.
+    expect(statement?.params.slice(2, 7)).toEqual([null, null, null, null, null]);
   });
 
   it('2. the cursor fed back binds exactly (position, instant, id) — mixed directions, one boundary', async () => {
     pageRows = [row(C, 3, '2026-09-01T10:00:00.000000Z')];
     const cursor = encodeCursor({ n: '2~2026-10-02T10:00:00.000000Z', id: B });
 
-    const page = await listCommunities(context(), query({ cursor }));
+    const page = await listCommunities(context(), query({ cursor }), { viewer: NO_FLAGS });
 
     expect(page.items.map((item) => item.id)).toEqual([C]);
     expect(page.nextCursor).toBeNull();
@@ -178,10 +190,10 @@ describe('the ACTIVE list — position first, and a cursor that carries it', () 
     ];
     for (const cursor of hostile) {
       seen = [];
-      await listCommunities(context(), query({ cursor }));
+      await listCommunities(context(), query({ cursor }), { viewer: NO_FLAGS });
       const params = seen[0]?.params ?? [];
       // Every cursor parameter is null: the statement ran as page 1.
-      expect(params.slice(1, 6), cursor).toEqual([null, null, null, null, null]);
+      expect(params.slice(2, 7), cursor).toEqual([null, null, null, null, null]);
     }
   });
 });
@@ -199,7 +211,9 @@ describe('the ARCHIVED list — unchanged, and safe from the active cursor', () 
       }),
     ];
 
-    const page = await listCommunities(context(), query({ status: 'archived', limit: 1 }));
+    const page = await listCommunities(context(), query({ status: 'archived', limit: 1 }), {
+      viewer: NO_FLAGS,
+    });
 
     expect(seen[0]?.kind).toBe('archived-page');
     expect(seen[0]?.sql).not.toContain('position');
@@ -212,10 +226,12 @@ describe('the ARCHIVED list — unchanged, and safe from the active cursor', () 
   it('5. an ACTIVE cursor replayed on the archived list is page 1, never a 500 on the cast', async () => {
     const active = encodeCursor({ n: '3~2026-10-02T10:00:00.000000Z', id: B });
 
-    await listCommunities(context(), query({ status: 'archived', cursor: active }));
+    await listCommunities(context(), query({ status: 'archived', cursor: active }), {
+      viewer: NO_FLAGS,
+    });
 
     expect(seen[0]?.kind).toBe('archived-page');
-    expect(seen[0]?.params.slice(1, 4)).toEqual([null, null, null]);
+    expect(seen[0]?.params.slice(2, 5)).toEqual([null, null, null]);
   });
 });
 
@@ -224,7 +240,7 @@ describe('reorderCommunities — lock, compare, and only then write', () => {
     activeIds = [A, B, C];
     pageRows = [row(C, 1, '2026-09-01T10:00:00.000000Z'), row(A, 2, '2026-10-01T10:00:00.000000Z')];
 
-    const page = await reorderCommunities(context(), { ids: [C, A, B] });
+    const page = await reorderCommunities(context(), { ids: [C, A, B] }, NO_FLAGS);
 
     expect(seen.map((statement) => statement.kind)).toEqual(['lock', 'renumber', 'active-page']);
     const [lock, renumber, read] = seen;
@@ -242,7 +258,7 @@ describe('reorderCommunities — lock, compare, and only then write', () => {
   it('7. two spellings of one uuid are one community: upper-case ids still match the locked set', async () => {
     activeIds = [A, B];
 
-    await reorderCommunities(context(), { ids: [B.toUpperCase(), A] });
+    await reorderCommunities(context(), { ids: [B.toUpperCase(), A] }, NO_FLAGS);
 
     const renumber = seen.find((statement) => statement.kind === 'renumber');
     expect(renumber?.params).toContain(`{${[B, A].join(',')}}`);
@@ -258,7 +274,9 @@ describe('reorderCommunities — lock, compare, and only then write', () => {
       [A, B, FOREIGN],
     ]) {
       seen = [];
-      const refusal = await reorderCommunities(context(), { ids }).catch((error: unknown) => error);
+      const refusal = await reorderCommunities(context(), { ids }, NO_FLAGS).catch(
+        (error: unknown) => error,
+      );
       expect(refusal, ids.join(',')).toBeInstanceOf(ApiError);
       expect((refusal as ApiError).status).toBe(409);
       expect((refusal as ApiError).code).toBe('CONFLICT');
@@ -271,9 +289,11 @@ describe('reorderCommunities — lock, compare, and only then write', () => {
   it('9. a duplicate is malformed input (400), refused before any statement runs', async () => {
     activeIds = [A, B];
 
-    const refusal = await reorderCommunities(context(), { ids: [A, A.toUpperCase()] }).catch(
-      (error: unknown) => error,
-    );
+    const refusal = await reorderCommunities(
+      context(),
+      { ids: [A, A.toUpperCase()] },
+      NO_FLAGS,
+    ).catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(ApiError);
     expect((refusal as ApiError).status).toBe(400);

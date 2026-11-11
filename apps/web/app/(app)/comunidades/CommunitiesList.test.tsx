@@ -114,6 +114,15 @@ function community(overrides: Partial<CommunitySummary> = {}): CommunitySummary 
     postCount: 2,
     status: 'active',
     lastActivityAt: '2026-01-01T00:00:00.000000Z',
+    kind: 'organization',
+    createdBy: null,
+    viewer: {
+      isOwner: false,
+      canPublish: false,
+      canEdit: false,
+      canCurate: false,
+      actions: { like: true, comment: true, share: true, post: false, story: false },
+    },
     ...overrides,
   };
 }

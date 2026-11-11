@@ -43,6 +43,15 @@ function community(id: string, overrides: Partial<CommunitySummary> = {}): Commu
     postCount: 2,
     status: 'active',
     lastActivityAt: '2026-10-26T12:00:00.000Z',
+    kind: 'organization',
+    createdBy: null,
+    viewer: {
+      isOwner: false,
+      canPublish: false,
+      canEdit: false,
+      canCurate: false,
+      actions: { like: true, comment: true, share: true, post: false, story: false },
+    },
     ...overrides,
   };
 }

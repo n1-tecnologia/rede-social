@@ -1,6 +1,7 @@
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { flush, subscribe } from '@rede-social/core/server/events/bus';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CommunityViewerFlags } from '../server/service';
 
 /**
  * MOD-03 — the two guarantees `community.created` inherits from the kernel bus, asserted without a
@@ -21,6 +22,16 @@ const USER_ID = '33333333-3333-4333-8333-333333333333';
 /** The projection formats the timestamp in SQL (`to_char … 'US"Z"'`), so a row carries ISO TEXT. */
 const LAST_ACTIVITY_AT = '2026-09-23T12:00:00.000000Z';
 
+/** 10-06: the read flags a caller with no community permission has; the services take them from the route. */
+const NO_FLAGS: CommunityViewerFlags = {
+  canManage: false,
+  canPostOrg: false,
+  canCurateOrg: false,
+  canManageOwn: false,
+  canPublishStory: false,
+  canCreate: false,
+};
+
 /** Flipped per test: `'commit'` resolves the transaction, `'throw'` rejects it at the insert. */
 let transaction: 'commit' | 'throw' = 'commit';
 
@@ -34,6 +45,11 @@ const row = {
   post_count: 0,
   status: 'active' as const,
   last_activity_at: LAST_ACTIVITY_AT,
+  kind: 'organization' as const,
+  is_owner: false,
+  creator_membership_id: null,
+  creator_display_name: null,
+  creator_avatar_asset_id: null,
 };
 
 /**
@@ -93,7 +109,7 @@ afterEach(() => {
 describe('community.created — after commit, exactly once, never on failure', () => {
   it('1. a committed create queues ONE event and the subscriber receives it once after flush', async () => {
     const ctx = context();
-    const community = await createCommunity(ctx, { name: 'Avisos', description: '' });
+    const community = await createCommunity(ctx, { name: 'Avisos', description: '' }, NO_FLAGS);
 
     expect(community.id).toBe(COMMUNITY_ID);
     // Queued, NOT delivered: `emit` only appends. Nothing has reached a subscriber yet.
@@ -125,9 +141,9 @@ describe('community.created — after commit, exactly once, never on failure', (
     transaction = 'throw';
     const ctx = context();
 
-    await expect(createCommunity(ctx, { name: 'Avisos', description: '' })).rejects.toThrow(
-      /insert refused/,
-    );
+    await expect(
+      createCommunity(ctx, { name: 'Avisos', description: '' }, NO_FLAGS),
+    ).rejects.toThrow(/insert refused/);
 
     // The guarantee in one line: `emit` runs only after `withTenantTx` RESOLVES.
     expect(ctx.events).toHaveLength(0);
@@ -138,7 +154,9 @@ describe('community.created — after commit, exactly once, never on failure', (
   it('3. an empty name is refused BEFORE any transaction opens, so nothing is queued', async () => {
     const ctx = context();
 
-    await expect(createCommunity(ctx, { name: '   ', description: '' })).rejects.toMatchObject({
+    await expect(
+      createCommunity(ctx, { name: '   ', description: '' }, NO_FLAGS),
+    ).rejects.toMatchObject({
       status: 400,
       code: 'VALIDATION_FAILED',
       details: { community: 'name_required' },
@@ -158,7 +176,7 @@ describe('community.created — after commit, exactly once, never on failure', (
     };
 
     const ctx = context();
-    const community = await createCommunity(ctx, { name: 'Avisos', description: '' });
+    const community = await createCommunity(ctx, { name: 'Avisos', description: '' }, NO_FLAGS);
 
     expect(community.id).toBe(COMMUNITY_ID);
     // One create, one event — the retry is invisible from the outside, which is the whole point:
@@ -179,7 +197,7 @@ describe('community.created — after commit, exactly once, never on failure', (
 
     try {
       const ctx = context();
-      await createCommunity(ctx, { name: 'Avisos', description: '' });
+      await createCommunity(ctx, { name: 'Avisos', description: '' }, NO_FLAGS);
       // The write already committed; a broken subscriber is an operational problem, not a failed
       // request, so `flush` must resolve rather than reject.
       await expect(flush(ctx)).resolves.toBeUndefined();

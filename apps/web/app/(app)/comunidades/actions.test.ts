@@ -138,6 +138,15 @@ describe('updateCommunityAction — a 404 on an edit is settled by a RE-READ (05
         postCount: 0,
         status: 'active',
         lastActivityAt: '2026-01-01T00:00:00.000000Z',
+        kind: 'organization',
+        createdBy: null,
+        viewer: {
+          isOwner: false,
+          canPublish: false,
+          canEdit: false,
+          canCurate: false,
+          actions: { like: true, comment: true, share: true, post: false, story: false },
+        },
       },
     });
 
@@ -198,6 +207,15 @@ describe('updateCommunityAction — a 404 on an edit is settled by a RE-READ (05
       postCount: 0,
       status: 'archived',
       lastActivityAt: '2026-01-01T00:00:00.000000Z',
+      kind: 'organization',
+      createdBy: null,
+      viewer: {
+        isOwner: false,
+        canPublish: false,
+        canEdit: false,
+        canCurate: false,
+        actions: { like: true, comment: true, share: true, post: false, story: false },
+      },
     });
 
     const archived = await archiveCommunityAction(COMMUNITY);
@@ -210,7 +228,7 @@ describe('updateCommunityAction — a 404 on an edit is settled by a RE-READ (05
 describe('05.1 — the list status is carried through refresh and load-more (Pitfall 9)', () => {
   // A pull or a scroll on `Arquivadas` must never swap the active list in. The status is part of
   // the request the action makes, validated by the SAME schema the API uses.
-  const emptyPage = { items: [], nextCursor: null };
+  const emptyPage = { items: [], nextCursor: null, memberQuota: null };
 
   it('load-more carries the archived status beside the cursor, and defaults to active', async () => {
     vi.mocked(getCommunities).mockResolvedValue(emptyPage);
@@ -266,6 +284,15 @@ describe('2026-10-03 — the reorder actions', () => {
     postCount: 0,
     status: 'active' as const,
     lastActivityAt: '2026-10-01T10:00:00.000000Z',
+    kind: 'organization' as const,
+    createdBy: null,
+    viewer: {
+      isOwner: false,
+      canPublish: false,
+      canEdit: false,
+      canCurate: false,
+      actions: { like: true, comment: true, share: true, post: false, story: false },
+    },
   });
 
   it('opening: the whole set is answered as-is; past the bound it is too_many; a failure is generic', async () => {
@@ -285,7 +312,11 @@ describe('2026-10-03 — the reorder actions', () => {
   });
 
   it('saving: the API’s first page in the new order comes back, and /comunidades is revalidated', async () => {
-    const page = { items: [summary(B, 'Eventos'), summary(A, 'Avisos')], nextCursor: null };
+    const page = {
+      items: [summary(B, 'Eventos'), summary(A, 'Avisos')],
+      nextCursor: null,
+      memberQuota: null,
+    };
     vi.mocked(reorderCommunities).mockResolvedValue(page);
 
     const result = await reorderCommunitiesAction([B, A]);

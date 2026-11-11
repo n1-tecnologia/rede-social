@@ -39,7 +39,7 @@ vi.mock('next/navigation', () => ({
 
 const SECRET = 'Comunidade Secreta de Ana';
 const SECTIONS = { upcoming: [], past: [] };
-const PAGE = { items: [], nextCursor: null };
+const PAGE = { items: [], nextCursor: null, memberQuota: null };
 const ACCESS = { items: [] };
 
 /** One spy for the file, cleared before each case, so a case sees only its own log lines. */

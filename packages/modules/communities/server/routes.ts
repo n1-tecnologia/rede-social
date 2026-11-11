@@ -17,6 +17,7 @@ import {
   updateCommunitySchema,
 } from '../contracts/index';
 import {
+  communityViewerFlags,
   createCommunity,
   deleteCommunity,
   getCommunity,
@@ -278,37 +279,43 @@ export const communitiesRoutes = communities
     //
     // 10-05 (D-713): the member creator reads the archived list too, scoped to THEIR OWN rows: a holder of
     // `communities.community.manage_own` without `manage` passes with `ownOnly`, anybody else is refused.
+    //
+    // 10-06: the permission set is read ONCE and handed to the service as booleans (`viewer`), so the
+    // per-viewer flags of every item (`isOwner`, `canPublish`, `canEdit`, `canCurate`, `actions`) and the
+    // caller's `memberQuota` are decided on the server and the host never compares a role or an id.
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
     let ownOnly = false;
-    if (query.status === 'archived') {
-      const granted = await permissionsForRequest(ctx);
-      if (!granted.includes('communities.community.manage')) {
-        if (!granted.includes('communities.community.manage_own')) {
-          throw new ApiError(403, 'FORBIDDEN');
-        }
-        ownOnly = true;
-      }
+    if (query.status === 'archived' && !viewer.canManage) {
+      if (!viewer.canManageOwn) throw new ApiError(403, 'FORBIDDEN');
+      ownOnly = true;
     }
-    return c.json(await listCommunities(ctx, query, { ownOnly }), 200);
+    return c.json(await listCommunities(ctx, query, { ownOnly, viewer }), 200);
   })
   .openapi(getCommunityRoute, async (c) => {
     const { communityId } = c.req.valid('param');
-    return c.json(await getCommunity(c.get('ctx'), communityId), 200);
+    const ctx = c.get('ctx');
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    return c.json(await getCommunity(ctx, communityId, viewer), 200);
   })
-  .openapi(createCommunityRoute, async (c) =>
-    c.json(await createCommunity(c.get('ctx'), c.req.valid('json')), 201),
-  )
+  .openapi(createCommunityRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    return c.json(await createCommunity(ctx, c.req.valid('json'), viewer), 201);
+  })
   .openapi(updateCommunityRoute, async (c) => {
     const { communityId } = c.req.valid('param');
     const ctx = c.get('ctx');
-    const canManage = (await permissionsForRequest(ctx)).includes('communities.community.manage');
-    return c.json(await updateCommunity(ctx, communityId, c.req.valid('json'), { canManage }), 200);
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    return c.json(await updateCommunity(ctx, communityId, c.req.valid('json'), viewer), 200);
   })
-  .openapi(reorderCommunitiesRoute, async (c) =>
-    c.json(await reorderCommunities(c.get('ctx'), c.req.valid('json')), 200),
-  )
+  .openapi(reorderCommunitiesRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const viewer = communityViewerFlags(await permissionsForRequest(ctx));
+    return c.json(await reorderCommunities(ctx, c.req.valid('json'), viewer), 200);
+  })
   .openapi(deleteCommunityRoute, async (c) => {
     const ctx = c.get('ctx');
-    const canManage = (await permissionsForRequest(ctx)).includes('communities.community.manage');
+    const { canManage } = communityViewerFlags(await permissionsForRequest(ctx));
     await deleteCommunity(ctx, c.req.valid('param').communityId, { canManage });
     return noContent();
   });

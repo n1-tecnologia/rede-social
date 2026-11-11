@@ -1396,7 +1396,8 @@ describe('05.1 — the archived filter (COMM-01 reachability, D-88, D-89, D-91)'
       tokens.demoAdmin,
       `?limit=10${ARCHIVED}&cursor=${encodeURIComponent(pastTheEnd)}`,
     );
-    expect(empty).toEqual({ items: [], nextCursor: null });
+    // 10-06: `memberQuota` is the one key a page gained; an admin cannot create a member community, so it is null.
+    expect(empty).toEqual({ items: [], nextCursor: null, memberQuota: null });
 
     // One page: every archived row fits in 25, so there is no next page to announce.
     const expected = await archivedIdsInDb(tenantIds.demo);

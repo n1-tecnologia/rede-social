@@ -80,8 +80,11 @@ type PostFactsRow = {
   media_kind: 'none' | 'gallery' | 'video';
   author_name: string | null;
   preview_asset_id: string | null;
-  /** 09-03 (D-473): the stamped audience. Only `'tenant'` (the organization's voice) is announced. */
-  visibility: 'tenant' | 'followers';
+  /**
+   * 09-03 (D-473): the stamped audience. Only `'tenant'` (the organization's voice) is announced; 10-06 (A4)
+   * a `'community'` post (a member's post inside a member community) notifies nobody either.
+   */
+  visibility: 'tenant' | 'followers' | 'community';
 };
 
 /**
@@ -146,6 +149,8 @@ async function resolvePostPublished(
   // organization's all-members broadcast and an organization-styled push; sending them for a member
   // would blur who speaks for the community. Phase 11 decides whether followers are told, with its
   // own kind. The guard ships with the first member post so no run between plans can broadcast one.
+  // 10-06 (A4): this guard already covers `'community'` (a member's post inside a member community): no
+  // broadcast, no push, no in-app row. Phase 11 decides whether the creator's followers are told.
   if (row.visibility !== 'tenant') return [];
 
   const kind = feedPostKind(row);
@@ -198,6 +203,8 @@ type CommentLikedRow = {
   community_id: string | null;
   body: string;
   author_user_id: string;
+  /** 10-06 (A4): the post's stamped audience; a `'community'` post's comments notify nobody. */
+  visibility?: 'tenant' | 'followers' | 'community';
 };
 
 /**
@@ -217,6 +224,7 @@ async function resolveCommentLiked(
     select c.id as comment_id,
            c.post_id,
            p.community_id,
+           p.visibility,
            c.body,
            c.author_user_id
       from feed_comments c
@@ -232,6 +240,9 @@ async function resolveCommentLiked(
   const row = rows[0];
   if (!row) return [];
   if (row.author_user_id === payload.actorUserId) return [];
+  // 10-06 (A4): a like on a comment under a member community's post tells nobody (the creator included).
+  // Written as an explicit return, not left to fall out of a `'tenant'` comparison, so the rule is visible.
+  if (row.visibility === 'community') return [];
   // STORE-19: the comment's author no longer sees the post's community (Pitfall 6).
   if (await lockedForRecipient(tx, row.community_id, row.author_user_id)) return [];
 
@@ -262,8 +273,8 @@ type CommentRepliedRow = {
   body: string;
   root_comment_id: string;
   root_author_user_id: string;
-  /** 09-15 (WR-02): the post's stamped audience; anything other than `'tenant'` is a followers post. */
-  visibility: 'tenant' | 'followers';
+  /** 09-15 (WR-02): the post's stamped audience; `'followers'` is a member post; 10-06 (A4) `'community'` notifies nobody. */
+  visibility: 'tenant' | 'followers' | 'community';
   post_author_user_id: string;
   /** The post author's membership is live (active, not blocked, not removed). */
   author_live: boolean;
@@ -276,7 +287,7 @@ type PostCommentedRow = {
   comment_id: string;
   post_id: string;
   body: string;
-  visibility: 'tenant' | 'followers';
+  visibility: 'tenant' | 'followers' | 'community';
   post_author_user_id: string;
   /** The post author's membership is live (active, not blocked, not removed). */
   author_live: boolean;
@@ -339,6 +350,8 @@ async function resolvePostCommented(
        for share of c, p`);
   const row = rows[0];
   if (!row) return [];
+  // 10-06 (A4): only a `'followers'` post tells its author; a `'community'` post answers `[]` here by the same
+  // comparison (the creator is not told someone commented; Phase 11 decides).
   if (row.visibility !== 'followers' || !row.social_on || !row.author_live) return [];
   if (row.post_author_user_id === payload.actorUserId) return [];
 
@@ -444,6 +457,10 @@ async function resolveCommentCreated(
        for share of c, p`);
   const row = rows[0];
   if (!row) return [];
+  // 10-06 (A4): a reply under a `'community'` post notifies nobody. It must return BEFORE the followers
+  // branch below, which would otherwise treat any audience other than `'tenant'` as a followers post and
+  // let the notice through for a root author who happens to follow the post's creator.
+  if (row.visibility === 'community') return [];
   if (row.root_author_user_id === payload.actorUserId) return [];
   // WR-02 (09-15): a followers post tells a reply to its thread only to someone who may still read it.
   if (row.visibility !== 'tenant') {

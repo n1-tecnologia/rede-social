@@ -163,6 +163,51 @@ export type CommunityQuery = z.infer<typeof communityQuerySchema>;
  */
 export const COMMUNITY_MAX_ORDER = 200;
 
+/** Whose a community is (10-03): the organization's, or a member's. Mirrors `communities_kind_chk`. */
+export const COMMUNITY_KINDS = ['organization', 'member'] as const;
+export type CommunityKind = (typeof COMMUNITY_KINDS)[number];
+
+/**
+ * The creator of a MEMBER community as every member sees it (D-703): the membership id (what the profile
+ * route takes), the display name and the avatar asset. Nothing else, ever: no user id, no e-mail. `.strict()`.
+ */
+export const communityCreatorSchema = z
+  .object({
+    membershipId: z.uuid(),
+    displayName: z.string(),
+    avatarAssetId: z.uuid().nullable(),
+  })
+  .strict();
+export type CommunityCreator = z.infer<typeof communityCreatorSchema>;
+
+/**
+ * The Escopo seam (10-06): the five actions a viewer may take in a community, in ONE object so the per-product
+ * action scope built after Phase 11 refines them at one site. Phase 10 values: `post` and `story` equal
+ * `canPublish`; `like`, `comment` and `share` are `true` (no per-route permission guards them, D-701).
+ */
+export const communityActionsSchema = z
+  .object({
+    like: z.boolean(),
+    comment: z.boolean(),
+    share: z.boolean(),
+    post: z.boolean(),
+    story: z.boolean(),
+  })
+  .strict();
+export type CommunityActions = z.infer<typeof communityActionsSchema>;
+
+/** What THIS viewer may do in this community, computed on the server (10-06). */
+export const communityViewerSchema = z
+  .object({
+    isOwner: z.boolean(),
+    canPublish: z.boolean(),
+    canEdit: z.boolean(),
+    canCurate: z.boolean(),
+    actions: communityActionsSchema,
+  })
+  .strict();
+export type CommunityViewer = z.infer<typeof communityViewerSchema>;
+
 /**
  * One community as the list and the detail read project it (COMM-03's four fields plus the two the
  * URL and the ordering need).
@@ -173,10 +218,22 @@ export const COMMUNITY_MAX_ORDER = 200;
  * derives `/v1/media/{assetId}/{variant}` itself, so a cached payload can never outlive a signed
  * Storage URL (R-05).
  *
- * There is deliberately **no owner/author field** (D-67). The organisation owns the container and
- * each post inside it already shows a face; a second byline on the container would compete with the
- * real one and invent an authorship claim the product does not make. `created_by_user_id` is stored
- * on the row for auditing and never reaches this shape.
+ * **The creator (10-06, D-703; this REWRITES D-67).** D-67 said there is no owner/author field: the
+ * organisation owns the container and each post inside it already shows a face. That still holds for an
+ * ORGANIZATION community (`createdBy` is `null`, and `created_by_user_id` is never selected for it). A MEMBER
+ * community is somebody's: `createdBy` is projected for those rows ONLY, as exactly three safe fields,
+ * `{ membershipId, displayName, avatarAssetId }`, resolved in the same statement from the creator's LIVE
+ * membership and profile (a blocked or departed creator hides the whole community instead, D-708). Never a
+ * user id, an e-mail or any other profile field: the object is `.strict()` so a fourth key cannot be added by
+ * accident, and `createdByUserId` has no field here at all (PR-2b).
+ *
+ * **The viewer's flags (10-06).** `viewer` is computed on the server from the route's permission flags and
+ * the row, so the host never compares a role or an id: `isOwner` (the creator of a MEMBER community),
+ * `canPublish` (may publish posts there), `canEdit` (may edit, archive, delete) and `canCurate` (may publish
+ * stories for it). `viewer.actions` is the Escopo seam: the five actions the per-product action scope that is
+ * built after Phase 11 will refine, `{ like, comment, share, post, story }`, required and `.strict()`, so
+ * the five can never be silently absent. Today `post` and `story` equal `canPublish`, and `like`, `comment`
+ * and `share` are `true` for every caller the community is returned to.
  *
  * `lastActivityAt` crosses the wire because it is an ordering key and the cursor is built from it;
  * the UI-SPEC forbids printing it (UI-D-42 drops the prototype's timestamp), and no shipped surface
@@ -197,15 +254,31 @@ export const communitySummarySchema = z
     postCount: z.number().int(),
     status: z.enum(COMMUNITY_STATUSES),
     lastActivityAt: z.string(),
+    /** 10-06 (D-701): whose community this is. The wire never says more than this. */
+    kind: z.enum(COMMUNITY_KINDS),
+    /** 10-06 (D-703): the creator of a MEMBER community, exactly three safe keys; `null` for an organization one. */
+    createdBy: communityCreatorSchema.nullable(),
+    /** 10-06: what THIS viewer may do here, computed on the server (see the docblock above). */
+    viewer: communityViewerSchema,
   })
   .strict();
 export type CommunitySummary = z.infer<typeof communitySummarySchema>;
 
-/** One keyset page. `nextCursor` is non-null EXACTLY when another row exists (the over-fetch rule). */
+/**
+ * One keyset page. `nextCursor` is non-null EXACTLY when another row exists (the over-fetch rule).
+ *
+ * `memberQuota` (10-06, D-710) is the caller's own allowance: `{ ownedActive, limit }` for a caller who may
+ * create communities (a member of a `social` tenant), `null` for everybody else and for the answer of a
+ * reorder. It is the one key a list of a tenant with no member community gains.
+ */
 export const communityPageSchema = z
   .object({
     items: z.array(communitySummarySchema),
     nextCursor: z.string().nullable(),
+    memberQuota: z
+      .object({ ownedActive: z.number().int(), limit: z.number().int() })
+      .strict()
+      .nullable(),
   })
   .strict();
 export type CommunityPage = z.infer<typeof communityPageSchema>;

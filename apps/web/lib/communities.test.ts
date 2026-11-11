@@ -63,6 +63,15 @@ function community(index: number): CommunitySummary {
     postCount: 0,
     status: 'active',
     lastActivityAt: '2026-10-01T10:00:00.000000Z',
+    kind: 'organization',
+    createdBy: null,
+    viewer: {
+      isOwner: false,
+      canPublish: false,
+      canEdit: false,
+      canCurate: false,
+      actions: { like: true, comment: true, share: true, post: false, story: false },
+    },
   };
 }
 
@@ -76,7 +85,7 @@ function serve(count: number) {
     const start = pageIndex * COMMUNITY_MAX_PAGE_SIZE;
     const items = all.slice(start, start + COMMUNITY_MAX_PAGE_SIZE);
     const more = start + COMMUNITY_MAX_PAGE_SIZE < all.length;
-    return json(200, { items, nextCursor: more ? `c${pageIndex + 1}` : null });
+    return json(200, { items, nextCursor: more ? `c${pageIndex + 1}` : null, memberQuota: null });
   });
   return all;
 }
@@ -114,7 +123,9 @@ describe('getOrderableCommunities — the whole active set, or an honest null', 
 
   it('3. a failed page THROWS — the picker’s "whatever loaded" would be an unsavable order here', async () => {
     vi.mocked(apiFetch)
-      .mockResolvedValueOnce(json(200, { items: [community(1), community(2)], nextCursor: 'c1' }))
+      .mockResolvedValueOnce(
+        json(200, { items: [community(1), community(2)], nextCursor: 'c1', memberQuota: null }),
+      )
       .mockResolvedValueOnce(json(500, { error: { code: 'INTERNAL' } }));
 
     await expect(getOrderableCommunities()).rejects.toBeInstanceOf(ApiClientError);
@@ -123,7 +134,7 @@ describe('getOrderableCommunities — the whole active set, or an honest null', 
 
 describe('reorderCommunities — one PUT, a strict answer, refusals as ApiClientError', () => {
   it('4. PUTs the ids as given and returns the parsed first page', async () => {
-    const page = { items: [community(2), community(1)], nextCursor: null };
+    const page = { items: [community(2), community(1)], nextCursor: null, memberQuota: null };
     vi.mocked(apiFetch).mockResolvedValue(json(200, page));
 
     const answer = await reorderCommunities({ ids: [uuid(2), uuid(1)] });
@@ -150,7 +161,7 @@ describe('reorderCommunities — one PUT, a strict answer, refusals as ApiClient
 
   it('6. an answer that is not the strict page shape is refused, never half-trusted', async () => {
     vi.mocked(apiFetch).mockResolvedValue(
-      json(200, { items: [{ ...community(1), position: 1 }], nextCursor: null }),
+      json(200, { items: [{ ...community(1), position: 1 }], nextCursor: null, memberQuota: null }),
     );
 
     await expect(reorderCommunities({ ids: [uuid(1)] })).rejects.toThrow();
