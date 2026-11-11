@@ -27,7 +27,10 @@
         "blocks": "Bloqueios",
         "unblocks": "Desbloqueios",
         "roles": "Papéis",
-        "exports": "Exportações"
+        "exports": "Exportações",
+        "storiesRemoved": "Story removido",
+        "communitiesArchived": "Comunidade arquivada",
+        "communitiesRemoved": "Comunidade removida"
       },
       "rows": {
         "commentRemoved": "{actor} removeu um comentário de {target}",
@@ -35,7 +38,15 @@
         "exported": "{actor} exportou as respostas do formulário de perfil",
         "blocked": "{actor} bloqueou o acesso de {target}",
         "unblocked": "{actor} desbloqueou o acesso de {target}",
-        "roleChanged": "{actor} mudou o papel de {target} de {from} para {to}"
+        "roleChanged": "{actor} mudou o papel de {target} de {from} para {to}",
+        "storyRemoved": "{actor} removeu um story de {target}",
+        "communityArchived": "{actor} arquivou a comunidade {community} de {target}",
+        "communityRemoved": "{actor} removeu a comunidade {community} de {target}"
+      },
+      "kinds": {
+        "storyRemoved": "Story removido",
+        "communityArchived": "Comunidade arquivada",
+        "communityRemoved": "Comunidade removida"
       },
       "roles": {
         "admin_tenant": "Administrador",

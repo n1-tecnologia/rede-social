@@ -1,6 +1,6 @@
 import type { ModerationAction } from '@rede-social/contracts/moderation';
 import { Skeleton } from '@rede-social/ui';
-import { Ban, FileDown, LockOpen, type LucideIcon, Trash2, UserCog } from 'lucide-react';
+import { Archive, Ban, FileDown, LockOpen, type LucideIcon, Trash2, UserCog } from 'lucide-react';
 import type { ModerationLogRowView } from '@/lib/moderation-view';
 
 /**
@@ -24,6 +24,10 @@ const GLYPHS: Record<ModerationAction, LucideIcon> = {
   role_changed: UserCog,
   // Phase 12 (D-595): a profile-form answers export — a tenant-level row with no target.
   profile_form_exported: FileDown,
+  // 10-11 (UI-D-714): a member's story or community removed keeps the removal glyph; an archive is its own.
+  story_removed: Trash2,
+  community_archived: Archive,
+  community_removed: Trash2,
 };
 
 export function ModerationLogRow({ view }: { view: ModerationLogRowView }) {
@@ -40,6 +44,13 @@ export function ModerationLogRow({ view }: { view: ModerationLogRowView }) {
         <Glyph size={20} />
       </span>
       <div className="min-w-0 flex-1">
+        {view.kind ? (
+          <p className="mb-1" data-moderation-log-kind>
+            <span className="inline-flex h-6 items-center rounded-full bg-bg-tertiary px-2 text-xs font-bold text-text-secondary">
+              {view.kind}
+            </span>
+          </p>
+        ) : null}
         <p className="text-sm font-normal text-text-secondary [overflow-wrap:anywhere]">
           {view.sentence.map((part, index) =>
             part.strong ? (

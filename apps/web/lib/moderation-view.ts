@@ -28,7 +28,15 @@ export type ModerationLogLabels = {
     blocked: string;
     unblocked: string;
     roleChanged: string;
+    /** 10-11 (UI-D-714): "{actor} removeu um story de {target}" */
+    storyRemoved: string;
+    /** 10-11 (UI-D-714): "{actor} arquivou a comunidade {community} de {target}" */
+    communityArchived: string;
+    /** 10-11 (UI-D-714): "{actor} removeu a comunidade {community} de {target}" */
+    communityRemoved: string;
   };
+  /** 10-11 (UI-D-714): the kind label on the row of a member-content action (the older kinds have none). */
+  kinds: { storyRemoved: string; communityArchived: string; communityRemoved: string };
   roles: Record<TenantRole, string>;
   you: string;
   removedMember: string;
@@ -54,7 +62,17 @@ export function parseModerationAction(raw: string | string[] | undefined): Moder
 /** The chip row, in UI-D-277's order: "Tudo" first (`null`), then one chip per action. */
 export const MODERATION_LOG_FILTERS: readonly {
   action: ModerationAction | null;
-  key: 'all' | 'comments' | 'posts' | 'blocks' | 'unblocks' | 'roles' | 'exports';
+  key:
+    | 'all'
+    | 'comments'
+    | 'posts'
+    | 'blocks'
+    | 'unblocks'
+    | 'roles'
+    | 'exports'
+    | 'storiesRemoved'
+    | 'communitiesArchived'
+    | 'communitiesRemoved';
 }[] = [
   { action: null, key: 'all' },
   { action: 'comment_removed', key: 'comments' },
@@ -65,6 +83,11 @@ export const MODERATION_LOG_FILTERS: readonly {
   { action: 'role_changed', key: 'roles' },
   // Phase 12 (D-595, A-12-MOD): the profile-form export, last so the earlier chips keep their slots.
   { action: 'profile_form_exported', key: 'exports' },
+  // 10-11 (D-711, UI-D-714): a moderator's removal of a member's story and archive / removal of a
+  // member's community, appended in the order `MODERATION_ACTIONS` appended them.
+  { action: 'story_removed', key: 'storiesRemoved' },
+  { action: 'community_archived', key: 'communitiesArchived' },
+  { action: 'community_removed', key: 'communitiesRemoved' },
 ];
 
 /** What `moderationLogLabels` needs from a `next-intl` translator scoped to `moderation.log`. */
@@ -87,6 +110,14 @@ export function moderationLogLabels(t: ModerationLogTranslator): ModerationLogLa
       blocked: String(t.raw('rows.blocked')),
       unblocked: String(t.raw('rows.unblocked')),
       roleChanged: String(t.raw('rows.roleChanged')),
+      storyRemoved: String(t.raw('rows.storyRemoved')),
+      communityArchived: String(t.raw('rows.communityArchived')),
+      communityRemoved: String(t.raw('rows.communityRemoved')),
+    },
+    kinds: {
+      storyRemoved: t('kinds.storyRemoved'),
+      communityArchived: t('kinds.communityArchived'),
+      communityRemoved: t('kinds.communityRemoved'),
     },
     roles: {
       admin_tenant: t('roles.admin_tenant'),
@@ -114,6 +145,8 @@ export type ModerationLogRowView = {
   sentence: SentencePart[];
   /** "Comentário em um post" / "… story" for a comment removal, "Publicação removida" for a post removal. */
   context: string | null;
+  /** 10-11: "Story removido" / "Comunidade arquivada" / "Comunidade removida"; `null` for the older kinds. */
+  kind: string | null;
   /** The excerpt inside pt-BR quotes, whole (never clamped: it is the evidence). */
   excerpt: string | null;
   reason: string | null;
@@ -130,7 +163,28 @@ const TEMPLATE_KEY: Record<ModerationAction, keyof ModerationLogLabels['rows']> 
   member_blocked: 'blocked',
   member_unblocked: 'unblocked',
   role_changed: 'roleChanged',
+  story_removed: 'storyRemoved',
+  community_archived: 'communityArchived',
+  community_removed: 'communityRemoved',
 };
+
+/** The kind label of the three member-content actions (UI-D-714); the older kinds read through `context`. */
+const KIND_KEY: Partial<Record<ModerationAction, keyof ModerationLogLabels['kinds']>> = {
+  story_removed: 'storyRemoved',
+  community_archived: 'communityArchived',
+  community_removed: 'communityRemoved',
+};
+
+/** UI-D-714: the caption excerpt of a removed story shows its first 80 characters. */
+const STORY_EXCERPT_MAX = 80;
+const segmenter = new Intl.Segmenter('pt-BR', { granularity: 'grapheme' });
+
+/** The first `STORY_EXCERPT_MAX` graphemes of a caption, with an ellipsis when something was cut. */
+function storyExcerpt(caption: string): string {
+  const graphemes = Array.from(segmenter.segment(caption.trim()), (part) => part.segment);
+  if (graphemes.length <= STORY_EXCERPT_MAX) return graphemes.join('');
+  return `${graphemes.slice(0, STORY_EXCERPT_MAX).join('').trimEnd()}…`;
+}
 
 /** Splits a template on its `{name}` slots; `bold` names render as strong parts, the rest inline. */
 function sentenceParts(
@@ -191,6 +245,11 @@ export function toModerationLogView(
     : (entry.actor.displayName ?? labels.removedMember);
   const target = entry.target.displayName ?? labels.removedMember;
   const values: Record<string, string> = { actor, target };
+  // 10-11 (UI-D-714): a community action names the community; the writer stored its NAME as the excerpt.
+  // The name is bold in the sentence, so the row has no excerpt block of its own for these two.
+  const communityAction =
+    entry.action === 'community_archived' || entry.action === 'community_removed';
+  if (communityAction) values.community = entry.excerpt ?? '';
   if (entry.details) {
     values.from = labels.roles[entry.details.from];
     values.to = labels.roles[entry.details.to];
@@ -202,7 +261,7 @@ export function toModerationLogView(
     sentence: sentenceParts(
       labels.rows[TEMPLATE_KEY[entry.action]],
       values,
-      new Set(['actor', 'target']),
+      new Set(['actor', 'target', 'community']),
     ),
     context:
       entry.action === 'post_removed'
@@ -212,8 +271,19 @@ export function toModerationLogView(
             ? labels.context.story
             : labels.context.post
           : null,
+    kind: KIND_KEY[entry.action]
+      ? labels.kinds[KIND_KEY[entry.action] as keyof typeof labels.kinds]
+      : null,
     // E10/empty: an empty stored excerpt (a defensive case) omits the block; the context stays.
-    excerpt: isBlank(entry.excerpt) ? null : fill(labels.excerpt, { excerpt: entry.excerpt ?? '' }),
+    excerpt:
+      communityAction || isBlank(entry.excerpt)
+        ? null
+        : fill(labels.excerpt, {
+            excerpt:
+              entry.action === 'story_removed'
+                ? storyExcerpt(entry.excerpt ?? '')
+                : (entry.excerpt ?? ''),
+          }),
     // MODER-03 empty: a reason that is empty or only whitespace is no reason — no "Motivo" line.
     reason: isBlank(entry.reason) ? null : fill(labels.reason, { reason: entry.reason ?? '' }),
     time: formatLogTime(entry.createdAt, timezone, labels.time),
