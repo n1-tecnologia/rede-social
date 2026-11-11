@@ -102,3 +102,5 @@ Requirement-level seed (task ids, threat refs and waves are filled by the planne
 - [ ] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending
+
+<!-- Reconciled 2026-11-10 with CONTEXT.md: only the bullet format of the carried-forward D-466 and D-473 changed, no decision text. -->

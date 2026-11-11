@@ -222,3 +222,5 @@ Add `c.kind, c.created_by_user_id` to both selects, 403 for non-owner, order 404
 **Analog search scope:** `supabase/migrations`, `supabase/tests`, `packages/core`, `packages/contracts`, `packages/modules/{communities,stories,feed,social}`, `apps/api/src/modules`, `apps/api/tests`, `apps/web/app/(app)`, `apps/web/lib`, `apps/web/components`
 **Files read in full or by range this session:** 10-RESEARCH.md (lines 1-516 of 755), the two migration analogs, stories/feed service ranges, registry.ts ranges, communities routes, ExplorarBody, CommunityForm/CommunitiesList heads, isolation-inventory header.
 **Pattern extraction date:** 2026-11-10
+
+<!-- Reconciled 2026-11-10 with CONTEXT.md: only the bullet format of the carried-forward D-466 and D-473 changed, no decision text. -->

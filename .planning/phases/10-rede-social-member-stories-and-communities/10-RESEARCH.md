@@ -752,3 +752,5 @@ Known quirks (project memory): run pgTAP before integration (residue trips `154-
 **Research date:** 2026-11-10
 **Valid until:** 2026-12-10 for the seams (the repo moves quickly: Phase 12.2/12.3/13 plans touch feed/media/moderation; re-grep `feed_posts_visibility_chk`, `moderation_log_*_chk` and `permissionsFor` before planning if those phases land first). The CONTEXT.md is dated 2026-11-10; any later edit of it flags this file as drifted (project memory: context-drift uses commit times).
 
+
+<!-- Reconciled 2026-11-10 with CONTEXT.md: only the bullet format of the carried-forward D-466 and D-473 changed, no decision text. -->
