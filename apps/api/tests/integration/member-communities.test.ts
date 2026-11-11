@@ -1,12 +1,13 @@
 import { sqlClient } from '@rede-social/core/db';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { communityCreateLimiter } from '@rede-social/core/server/safety/limits';
 import type { CommunitySummary } from '@rede-social/module-communities/contracts';
 import {
   COMMUNITY_MAX_DESCRIPTION,
   COMMUNITY_MAX_NAME,
 } from '@rede-social/module-communities/contracts';
 import type { FeedPage, FeedPost } from '@rede-social/module-feed/contracts';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   adminSql,
   api,
@@ -43,6 +44,8 @@ let labTenantId = '';
 let restoreSocial: () => Promise<void> = async () => {};
 let restoreCommunities: () => Promise<void> = async () => {};
 let restoreStories: () => Promise<void> = async () => {};
+/** The social settings blob of rede-lab as the suite found it, put back in `afterAll` (the limit tests write it). */
+let savedSocialSettings: Record<string, unknown> = {};
 /** The seeded ORGANIZATION community of rede-lab that the Escopo assertions post into. */
 let orgCommunityId = '';
 
@@ -100,6 +103,30 @@ async function sweep(): Promise<void> {
     delete from public.communities where name like ${`${PREFIX}%`}`;
 }
 
+/** Writes the social settings blob of rede-lab verbatim and drops the flags cache (a 30 s cache otherwise). */
+async function writeSocialSettings(settings: Record<string, unknown>): Promise<void> {
+  await adminSql`
+    update public.tenant_modules set settings = ${adminSql.json(settings as never)}
+     where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+  moduleFlags.invalidate(labTenantId);
+}
+
+/** The per-member limit as `super_admin` stores it; `null` writes a blob with NO `communities` key. */
+const setLimit = (maxPerMember: number | null) =>
+  writeSocialSettings(
+    maxPerMember === null
+      ? savedSocialSettings
+      : { ...savedSocialSettings, communities: { maxPerMember } },
+  );
+
+const activeOwned = async (userId: string): Promise<number> => {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.communities
+     where kind = 'member' and created_by_user_id = ${userId}::uuid
+       and status = 'active' and deleted_at is null`;
+  return row?.n ?? 0;
+};
+
 const communityRow = async (id: string) => {
   const [row] = await adminSql<
     {
@@ -142,6 +169,10 @@ beforeAll(async () => {
     { id: string }[]
   >`select id from public.tenants where slug = 'rede-lab'`;
   labTenantId = lab?.id ?? '';
+  const [social] = await adminSql<{ settings: Record<string, unknown> }[]>`
+    select settings from public.tenant_modules
+     where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+  savedSocialSettings = social?.settings ?? {};
   const [org] = await adminSql<{ id: string }[]>`
     select id from public.communities
      where tenant_id = ${labTenantId}::uuid and kind = 'organization' and status = 'active'
@@ -152,8 +183,15 @@ beforeAll(async () => {
   await sweep();
 });
 
+// One member creates a handful of communities per file run; the per-process ceiling (A6) must not leak
+// between cases. The limiter case itself counts to the ceiling inside one test.
+beforeEach(() => {
+  communityCreateLimiter.reset();
+});
+
 afterAll(async () => {
   await sweep();
+  await writeSocialSettings(savedSocialSettings);
   await restoreStories();
   await restoreCommunities();
   await restoreSocial();
@@ -434,6 +472,150 @@ describe('10 social switched off while the flags cache is warm (EP-41, T-10-18)'
         update public.tenant_modules set enabled = true
          where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
       moduleFlags.invalidate(labTenantId);
+    }
+  });
+});
+
+describe('10 limit', () => {
+  const limitOf = async (res: Response) => (await errorOf(res)).details?.community;
+
+  beforeEach(async () => {
+    await sweep();
+  });
+
+  it('EP-15 boundary: with the limit N the Nth active community is created and the (N+1)th is refused limit_reached; with N = 0 the first is refused', async () => {
+    await setLimit(2);
+    expect((await createCommunity(tokens.helena, { name: `${PREFIX}um` })).status).toBe(201);
+    expect((await createCommunity(tokens.helena, { name: `${PREFIX}dois` })).status).toBe(201);
+    const third = await createCommunity(tokens.helena, { name: `${PREFIX}três` });
+    expect(third.status).toBe(400);
+    expect(await limitOf(third)).toBe('limit_reached');
+    expect(await activeOwned(userIds.helena)).toBe(2);
+
+    await sweep();
+    await setLimit(0);
+    const first = await createCommunity(tokens.helena, { name: `${PREFIX}primeira` });
+    expect(first.status).toBe(400);
+    expect(await limitOf(first)).toBe('limit_reached');
+    expect(await activeOwned(userIds.helena)).toBe(0);
+  });
+
+  it('EP-16 adjacency: archiving one frees a slot, reactivating one at the limit is refused, deleting an archived one changes no count', async () => {
+    await setLimit(2);
+    const ids: string[] = [];
+    for (const name of ['a', 'b']) {
+      const res = await createCommunity(tokens.helena, { name: `${PREFIX}${name}` });
+      expect(res.status).toBe(201);
+      ids.push(((await res.json()) as CommunitySummary).id);
+    }
+    // At the limit: a third is refused (positive control for what follows).
+    expect((await createCommunity(tokens.helena, { name: `${PREFIX}c` })).status).toBe(400);
+    // A moderator archives the first: the creator's slot is free again.
+    const archive = await request(
+      `/v1/communities/${ids[0]}`,
+      tokens.labAdmin,
+      patch({ status: 'archived' }),
+    );
+    expect(archive.status).toBe(200);
+    expect(await activeOwned(userIds.helena)).toBe(1);
+    const third = await createCommunity(tokens.helena, { name: `${PREFIX}c` });
+    expect(third.status).toBe(201);
+    ids.push(((await third.json()) as CommunitySummary).id);
+    // Now at the limit again: reactivating the archived one is refused by the SAME check.
+    const reactivate = await request(
+      `/v1/communities/${ids[0]}`,
+      tokens.labAdmin,
+      patch({ status: 'active' }),
+    );
+    expect(reactivate.status).toBe(400);
+    expect(await limitOf(reactivate)).toBe('limit_reached');
+    expect((await communityRow(ids[0] ?? ''))?.status).toBe('archived');
+    // Deleting the archived community changes no active count.
+    const before = await activeOwned(userIds.helena);
+    const del = await request(`/v1/communities/${ids[0]}`, tokens.labAdmin, { method: 'DELETE' });
+    expect(del.status).toBe(204);
+    expect(await activeOwned(userIds.helena)).toBe(before);
+  });
+
+  it('EP-17 empty: a member with no community creates under a limit of 3; a settings blob with no communities key behaves as 3', async () => {
+    await setLimit(null);
+    const [stored] = await adminSql<{ has: boolean }[]>`
+      select (settings ? 'communities') as has from public.tenant_modules
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    expect(stored?.has).toBe(false);
+    for (const name of ['a', 'b', 'c']) {
+      expect((await createCommunity(tokens.helena, { name: `${PREFIX}${name}` })).status).toBe(201);
+    }
+    const fourth = await createCommunity(tokens.helena, { name: `${PREFIX}d` });
+    expect(fourth.status).toBe(400);
+    expect(await limitOf(fourth)).toBe('limit_reached');
+  });
+
+  it('EP-18 ordering: other members’ and the admin’s communities never count; N+1 parallel creates leave exactly N rows', async () => {
+    await setLimit(2);
+    // Marcos owns one and the admin owns an organization community (the seed's): neither counts for Helena.
+    expect((await createCommunity(tokens.marcos, { name: `${PREFIX}do Marcos` })).status).toBe(201);
+    const org = await createCommunity(tokens.labAdmin, { name: `${PREFIX}da organização` });
+    expect(org.status).toBe(201);
+    const results = await Promise.all(
+      [1, 2, 3].map((n) => createCommunity(tokens.helena, { name: `${PREFIX}paralela ${n}` })),
+    );
+    expect(results.filter((r) => r.status === 201)).toHaveLength(2);
+    expect(await activeOwned(userIds.helena)).toBe(2);
+    expect(await activeOwned(userIds.marcos)).toBe(1);
+  });
+
+  it('EP-20 idempotency: the same body twice makes two communities with distinct slugs, and each counts toward the limit', async () => {
+    await setLimit(3);
+    const body = { name: `${PREFIX}repetida` };
+    const first = (await (await createCommunity(tokens.helena, body)).json()) as CommunitySummary;
+    const second = (await (await createCommunity(tokens.helena, body)).json()) as CommunitySummary;
+    expect(first.id).not.toBe(second.id);
+    expect(first.slug).not.toBe(second.slug);
+    expect(await activeOwned(userIds.helena)).toBe(2);
+  });
+
+  it('EP-21 concurrency: N+1 parallel creates by one member give N successes and one limit_reached; two members do not block each other', async () => {
+    await setLimit(2);
+    const burst = await Promise.all(
+      [1, 2, 3].map((n) => createCommunity(tokens.helena, { name: `${PREFIX}rajada ${n}` })),
+    );
+    const ok = burst.filter((r) => r.status === 201);
+    const refused = burst.filter((r) => r.status === 400);
+    expect(ok).toHaveLength(2);
+    expect(refused).toHaveLength(1);
+    for (const res of refused) expect(await limitOf(res)).toBe('limit_reached');
+
+    // Two different members in parallel: both succeed (the lock is per member).
+    await sweep();
+    const [a, b] = await Promise.all([
+      createCommunity(tokens.helena, { name: `${PREFIX}helena paralela` }),
+      createCommunity(tokens.marcos, { name: `${PREFIX}marcos paralela` }),
+    ]);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+  });
+
+  it('A6: the 11th creation attempt of one member inside an hour answers 429 RATE_LIMITED; another member is unaffected', async () => {
+    await setLimit(20);
+    for (let i = 1; i <= 10; i += 1) {
+      const res = await createCommunity(tokens.helena, { name: `${PREFIX}ritmo ${i}` });
+      expect(res.status, `attempt ${i}`).toBe(201);
+    }
+    const eleventh = await createCommunity(tokens.helena, { name: `${PREFIX}ritmo 11` });
+    expect(eleventh.status).toBe(429);
+    expect((await errorOf(eleventh)).code).toBe('RATE_LIMITED');
+    expect(
+      (await createCommunity(tokens.marcos, { name: `${PREFIX}ritmo do Marcos` })).status,
+    ).toBe(201);
+  });
+
+  it('an admin is never limited and never counted: organization creates skip the check', async () => {
+    await setLimit(0);
+    for (const name of ['x', 'y']) {
+      expect((await createCommunity(tokens.labAdmin, { name: `${PREFIX}${name}` })).status).toBe(
+        201,
+      );
     }
   });
 });

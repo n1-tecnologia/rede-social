@@ -16,6 +16,7 @@ import {
   socialListItemSchema,
   socialListPageSchema,
   socialListQuerySchema,
+  socialSettingsAnswerSchema,
   socialSettingsPatchSchema,
   socialSettingsSchema,
 } from '../contracts/index';
@@ -202,8 +203,13 @@ describe('socialSettingsSchema (D-474)', () => {
         photosPerPost: 4,
         video: { enabled: false, maxDurationSeconds: 60, maxBytes: 100 * MIB },
       },
+      // 10-05 (D-710): the per-member community limit, default 3.
+      communities: { maxPerMember: 3 },
     });
     expect(SOCIAL_SETTINGS_DEFAULTS.media).toEqual(socialSettingsSchema.parse({}).media);
+    expect(SOCIAL_SETTINGS_DEFAULTS.communities).toEqual(
+      socialSettingsSchema.parse({}).communities,
+    );
   });
 
   it('pins the caps to the admin limits, so a tenant can narrow but never widen', () => {
@@ -277,5 +283,60 @@ describe('socialSettingsPatchSchema (D-474, T-09-30)', () => {
     expect(socialSettingsPatchSchema.parse({ media: { photosPerPost: 3 } })).toEqual({
       media: { photosPerPost: 3 },
     });
+  });
+});
+
+/**
+ * 10-05 (D-710, MCOMM-05; EP-17, EP-19): `communities.maxPerMember`, the number of ACTIVE communities one
+ * member may own. Default 3, an integer from 0 (nobody may create) to 20, in the tolerant read schema
+ * (inside the `.prefault({})` chain, so a stored blob from before this plan parses to the default), in the
+ * strict patch and in the strict answer.
+ */
+describe('communities.maxPerMember (D-710)', () => {
+  it('EP-17: a stored blob with no communities key (every blob written before 10-05) reads as 3', () => {
+    expect(socialSettingsSchema.parse({ media: { photosPerPost: 2 } }).communities).toEqual({
+      maxPerMember: 3,
+    });
+    expect(socialSettingsSchema.parse({ communities: {} }).communities.maxPerMember).toBe(3);
+    expect(SOCIAL_SETTINGS_DEFAULTS.communities.maxPerMember).toBe(3);
+  });
+
+  it('EP-19: the patch accepts the integers 0 to 20 and refuses 3.5, -1, 21 and the string "3"', () => {
+    const ok = (maxPerMember: unknown) =>
+      socialSettingsPatchSchema.safeParse({ communities: { maxPerMember } }).success;
+    for (const value of [0, 1, 3, 19, 20]) expect(ok(value), String(value)).toBe(true);
+    for (const value of [3.5, -1, 21, '3', null, Number.NaN]) {
+      expect(ok(value), String(value)).toBe(false);
+    }
+    // A patch may leave the key out, and the key is `.strict()`.
+    expect(socialSettingsPatchSchema.safeParse({ communities: {} }).success).toBe(true);
+    expect(socialSettingsPatchSchema.safeParse({ communities: { stray: 1 } }).success).toBe(false);
+  });
+
+  it('the tolerant read refuses an out-of-range stored value so the caller falls back to the defaults', () => {
+    expect(socialSettingsSchema.safeParse({ communities: { maxPerMember: 21 } }).success).toBe(
+      false,
+    );
+    expect(socialSettingsSchema.safeParse({ communities: { maxPerMember: 20 } }).success).toBe(
+      true,
+    );
+    expect(socialSettingsSchema.safeParse({ communities: { maxPerMember: 0 } }).success).toBe(true);
+  });
+
+  it('the answer carries the key, strictly', () => {
+    const answer = {
+      media: {
+        photoMaxBytes: MIB,
+        photosPerPost: 4,
+        video: { enabled: false, maxDurationSeconds: 60, maxBytes: MIB },
+      },
+      communities: { maxPerMember: 5 },
+    };
+    expect(socialSettingsAnswerSchema.safeParse(answer).success).toBe(true);
+    expect(
+      socialSettingsAnswerSchema.safeParse({ ...answer, communities: { maxPerMember: 5, x: 1 } })
+        .success,
+    ).toBe(false);
+    expect(socialSettingsAnswerSchema.safeParse({ media: answer.media }).success).toBe(false);
   });
 });

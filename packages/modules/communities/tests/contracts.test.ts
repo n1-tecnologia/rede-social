@@ -77,7 +77,7 @@ describe('reorderCommunitiesSchema — one full permutation, bounded and duplica
 });
 
 describe('COMMUNITY_ISSUES — the closed refusal vocabulary', () => {
-  it('6. gains order_stale (2026-10-03), not_archived and unlock_active (09.3) and keeps every earlier code', () => {
+  it('6. gains order_stale (2026-10-03), not_archived and unlock_active (09.3), limit_reached (10-05) and keeps every earlier code', () => {
     expect([...COMMUNITY_ISSUES]).toEqual([
       'name_required',
       'archived',
@@ -85,7 +85,10 @@ describe('COMMUNITY_ISSUES — the closed refusal vocabulary', () => {
       'order_stale',
       'not_archived',
       'unlock_active',
+      'limit_reached',
     ]);
+    // 10-05 (D-710): the per-member limit refusal, a 400 `details.community`, appended last.
+    expect(COMMUNITY_ISSUE_SET.has('limit_reached')).toBe(true);
     expect(COMMUNITY_ISSUE_SET.has('order_stale')).toBe(true);
     expect(COMMUNITY_ISSUE_SET.has('not_archived')).toBe(true);
     expect(COMMUNITY_ISSUE_SET.has('unlock_active')).toBe(true);
