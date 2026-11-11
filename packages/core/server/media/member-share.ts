@@ -1,6 +1,7 @@
-import { and, eq, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import { mediaAssets, memberships } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
+import { MEMBER_SHARED_VIDEO_PURPOSES } from './member-policy';
 
 /**
  * The member sub-budget's two sums (09-06, RESEARCH Open Question 2; FLAGGED FOR THE USER and
@@ -49,7 +50,9 @@ export async function memberBytesUsed(tx: Tx, tenantId: string): Promise<number>
 }
 
 /**
- * Seconds of `post` videos by members (the minutes budget; rejected, failed and retired cost nothing).
+ * Seconds of member videos with `purpose in ('post','story')` (the minutes budget; 10-07 added `story`: a
+ * member story video draws from the same half of the ceiling as a post video; rejected, failed and retired
+ * cost nothing).
  *
  * A ready video charges its MEASURED `duration_seconds`; a `pending` one has no duration yet, so it
  * is charged at the cap snapshotted at `start` (`duration_cap_seconds`), and any other unmeasured row
@@ -75,7 +78,7 @@ export async function memberPostSecondsUsed(tx: Tx, tenantId: string): Promise<n
       and(
         eq(mediaAssets.tenantId, tenantId),
         isNull(mediaAssets.deletedAt),
-        eq(mediaAssets.purpose, 'post'),
+        inArray(mediaAssets.purpose, [...MEMBER_SHARED_VIDEO_PURPOSES]),
         eq(mediaAssets.kind, 'video'),
         notInArray(mediaAssets.status, ['rejected', 'failed']),
         ownedByAMember,

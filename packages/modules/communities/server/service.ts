@@ -733,10 +733,17 @@ async function resolveCoverAsset(
   tx: Tx,
   ctx: RequestContext,
   coverAssetId: string | null,
+  /**
+   * 10-07 (Pitfall 10, T-10-25): for a MEMBER caller the asset must be one THEY uploaded
+   * (`owner_user_id = ctx.userId`), so another user's asset id is the same bare 404 an unknown id is and
+   * nothing attaches. `null` for an organization caller (RLS decides, as before) and for a re-sent
+   * stored reference.
+   */
+  ownerUserId: string | null = null,
 ): Promise<void> {
   if (coverAssetId === null) return;
 
-  const asset = await loadCoverAsset(tx, ctx, coverAssetId);
+  const asset = await loadCoverAsset(tx, ctx, coverAssetId, ownerUserId);
   // Unknown, another tenant's, or soft-deleted — one indistinguishable answer, no details.
   if (!asset) throw new ApiError(404, 'NOT_FOUND');
   if (!isUsableCover(asset)) {
@@ -756,13 +763,17 @@ async function loadCoverAsset(
   tx: Tx,
   ctx: RequestContext,
   coverAssetId: string,
+  ownerUserId: string | null = null,
 ): Promise<CoverAssetRow | undefined> {
+  // 10-07: the owner is a term of the SAME statement (never a second lookup) when a member asserts a cover.
+  const ownerOnly = ownerUserId === null ? sql`` : sql`and owner_user_id = ${ownerUserId}::uuid`;
   const rows = await tx.execute<CoverAssetRow>(sql`
     select kind, purpose, status
       from media_assets
      where id = ${coverAssetId}::uuid
        and tenant_id = ${ctx.tenantId}::uuid
        and deleted_at is null
+       ${ownerOnly}
      limit 1`);
   return rows[0];
 }
@@ -942,7 +953,7 @@ async function insertCommunity(
   // FIRST statement of the transaction: a refused cover writes nothing at all. `isSlugCollision`
   // matches a 23505 on the slug index alone, so this `ApiError` is re-thrown by the retry loop
   // untouched rather than swallowed as a collision.
-  await resolveCoverAsset(tx, ctx, input.coverAssetId ?? null);
+  await resolveCoverAsset(tx, ctx, input.coverAssetId ?? null, member ? ctx.userId : null);
 
   // 10-05 (D-710): the member's own allowance, under their advisory lock, before the insert.
   if (maxActive !== null) await assertWithinMemberLimit(tx, ctx, ctx.userId, maxActive);
@@ -1146,7 +1157,10 @@ export async function updateCommunity(
     // real write (one `updated_at` move, one `community.updated`), and the next identical PATCH
     // finds nothing dangling and is observably inert again — a one-time repair, not a write forever.
     if (input.coverAssetId !== undefined) {
-      await resolveCoverAsset(tx, ctx, coverAssetId);
+      // 10-07: a member creator may assert only a cover THEY uploaded; re-sending the stored reference
+      // (an admin may have set it, A8) is not a new claim and is judged by the usual tuple rule alone.
+      const mustOwn = ctx.role === 'member' && coverAssetId !== before.cover_asset_id;
+      await resolveCoverAsset(tx, ctx, coverAssetId, mustOwn ? ctx.userId : null);
     } else if (coverAssetId !== null && !(await coverIsUsable(tx, ctx, coverAssetId))) {
       coverAssetId = null;
     }

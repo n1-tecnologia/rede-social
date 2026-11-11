@@ -51,7 +51,13 @@ import {
   MediaLimitError,
   widthsForPurpose,
 } from './limits';
-import { type MemberMediaPolicy, memberMediaPolicyFor } from './member-policy';
+import {
+  type MemberMediaPolicy,
+  memberMediaPolicyFor,
+  memberPhotoCapApplies,
+  memberVideoDurationCap,
+  memberVideoPurposeAllowed,
+} from './member-policy';
 import { memberBytesUsed, memberPostSecondsUsed } from './member-share';
 import {
   downloadObject,
@@ -281,7 +287,7 @@ async function startVideoUpload(
     }
 
     // member sub-budget (09-06, flagged for the user, droppable: see `member-share.ts`): a member's
-    // `post` video draws from half of the minutes ceiling, so a flood of member uploads cannot lock
+    // `post` or `story` video draws from half of the minutes ceiling, so a flood of member uploads cannot lock
     // the organization out of its own three hours. An admin's start never reaches this block.
     if (
       member &&
@@ -433,14 +439,15 @@ export async function startUpload(
   opts: StartUploadOptions = {},
 ): Promise<MediaStart> {
   // Only an `admin_tenant` may spend the community's video minutes (PROJECT.md, ROADMAP criterion 4),
-  // with ONE exception since 09-06 (D-474): a `member` may start a `post` video while the tenant's
-  // `social` module is effective AND its settings turn member video on. `story` and `lesson` video
-  // for a member and any video for `support_tenant` stay refused. Checked FIRST for the video kind,
-  // before any limit lookup, so a refused caller never learns which video mimes or caps exist
-  // (T-03-44). The policy is read through the kernel seam (MOD-02) BEFORE any transaction opens.
+  // with ONE exception since 09-06 (D-474, widened by 10-07, D-715): a `member` may start a `post` or a
+  // `story` video while the tenant's `social` module is effective AND its settings turn member video
+  // on. `cover` and `lesson` video for a member and any video for `support_tenant` stay refused.
+  // Checked FIRST for the video kind, before any limit lookup, so a refused caller never learns which
+  // video mimes or caps exist (T-03-44). The policy is read through the kernel seam (MOD-02) BEFORE
+  // any transaction opens.
   let memberPolicy: MemberMediaPolicy | null = null;
   if (body.kind === 'video' && ctx.role !== 'admin_tenant') {
-    if (ctx.role === 'member' && body.purpose === 'post') {
+    if (ctx.role === 'member' && memberVideoPurposeAllowed(body.purpose)) {
       memberPolicy = await memberMediaPolicyFor(ctx);
     }
     if (!memberPolicy?.video.enabled) throw new ApiError(403, 'FORBIDDEN');
@@ -460,11 +467,12 @@ export async function startUpload(
   }
   if (!limit.mimes.includes(body.mime)) throw validationFailed('type_not_allowed');
 
-  // D-474 (09-06): a MEMBER's `post` photo is also held to the tenant's own cap, read through the
-  // kernel seam (MOD-02) BEFORE any transaction opens. The effective cap is the lower of the two, so
-  // the tenant can narrow the admin limit and never widen it; null (social off) changes nothing.
+  // D-474 (09-06, widened by 10-07, D-715): a MEMBER's `post`, `story` or `cover` photo is also held to
+  // the tenant's own cap, read through the kernel seam (MOD-02) BEFORE any transaction opens. The
+  // effective cap is the lower of the two, so the tenant can narrow the admin limit and never widen it;
+  // null (social off) changes nothing.
   let maxBytes = limit.maxBytes;
-  if (ctx.role === 'member' && body.purpose === 'post' && body.kind === 'image') {
+  if (ctx.role === 'member' && memberPhotoCapApplies(body.purpose) && body.kind === 'image') {
     const policy = await memberMediaPolicyFor(ctx);
     if (policy) maxBytes = Math.min(maxBytes, policy.photoMaxBytes);
   }
@@ -479,7 +487,16 @@ export async function startUpload(
       body,
       limit,
       opts,
-      memberPolicy ? { maxBytes, durationCapSeconds: memberPolicy.video.maxDurationSeconds } : null,
+      memberPolicy
+        ? {
+            maxBytes,
+            // 10-07 (A9): a story video's snapshot is the lower of the member seconds and 60.
+            durationCapSeconds: memberVideoDurationCap(
+              body.purpose,
+              memberPolicy.video.maxDurationSeconds,
+            ),
+          }
+        : null,
     );
   }
 
@@ -745,7 +762,7 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
   // The 02-13 order: info() -> size -> contentType -> header decode -> remove on refusal -> 400.
   const info = await objectInfo(key);
   if (!info) throw new ApiError(404, 'NOT_FOUND', { media: 'object_missing' });
-  // D-474 (T-09-18, WR-08): the signed URL carries no size, so a member's `post` photo is judged here
+  // D-474 (T-09-18, WR-08): the signed URL carries no size, so a member's `post`, `story` or `cover` photo is judged here
   // against the size DECLARED and accepted at `start` (`media_assets.bytes`), which already passed the
   // cap in force at that moment. That declared size is the snapshot that plays the role
   // `duration_cap_seconds` plays for video: the tenant policy is read only at start, so lowering
@@ -755,7 +772,7 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
   // member byte share, which was charged at the declared size. Integer-exact, strict `>`: no
   // tolerance. Every other caller keeps the static limit.
   let maxBytes = limit.maxBytes;
-  if (ctx.role === 'member' && row.purpose === 'post' && row.kind === 'image') {
+  if (ctx.role === 'member' && memberPhotoCapApplies(row.purpose) && row.kind === 'image') {
     maxBytes = Math.min(maxBytes, row.bytes);
   }
   if (typeof info.size === 'number' && info.size > maxBytes) await reject('too_large');

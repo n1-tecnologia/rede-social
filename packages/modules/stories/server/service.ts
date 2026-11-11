@@ -405,7 +405,7 @@ function isInsufficientPrivilege(error: unknown): boolean {
 }
 
 /** What the asset lookup inside `publishStory`'s transaction needs to decide. */
-type AssetRow = { kind: string; purpose: string };
+type AssetRow = { kind: string; purpose: string; status: string };
 
 /**
  * `POST /v1/stories` (STORY-01).
@@ -506,17 +506,28 @@ export async function publishStory(
         await lockHighlightPlace(tx, ctx, newHighlight.communityId);
       }
 
+      // 10-07 (Pitfall 10, T-10-25): a MEMBER may attach only an asset THEY uploaded. The owner is a term
+      // of the lookup itself, so another user's asset id is the same bare 404 an unknown id is (no oracle)
+      // and nothing is attached. Organization callers are unchanged: the tenant's RLS decides.
+      const ownerOnly = member ? sql`and owner_user_id = ${ctx.userId}::uuid` : sql``;
       const assets = await tx.execute<AssetRow>(sql`
-      select kind, purpose
+      select kind, purpose, status
         from media_assets
        where id = ${mediaAssetId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid
          and deleted_at is null
+         ${ownerOnly}
        limit 1`);
       const asset = assets[0];
-      // Unknown, another tenant's, or soft-deleted — one indistinguishable answer, no details.
+      // Unknown, another tenant's, another member's, or soft-deleted — one indistinguishable answer.
       if (!asset) throw new ApiError(404, 'NOT_FOUND');
       if (asset.purpose !== 'story' || asset.kind !== input.mediaKind) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { story: 'media_invalid' });
+      }
+      // 10-07 (SOCIAL-05 rule, D-715): a MEMBER's story video must already be `ready` (its duration is
+      // measured and judged against the snapshotted cap by then). The organization keeps D-53's
+      // concession: it may publish while a video still transcodes.
+      if (member && asset.kind === 'video' && asset.status !== 'ready') {
         throw new ApiError(400, 'VALIDATION_FAILED', { story: 'media_invalid' });
       }
 
