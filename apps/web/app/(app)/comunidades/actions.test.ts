@@ -508,3 +508,40 @@ describe('09.3 — deleteCommunityAction (PEND-07, D-553, D-554, D-557)', () => 
     errorLog.mockRestore();
   });
 });
+
+describe('10-13 — a member create answers the limit and the module-off refusals (UI-D-707)', () => {
+  it('a 409 with details.community = limit_reached is the closed limit_reached code', async () => {
+    vi.mocked(createCommunity).mockRejectedValue(
+      new ApiClientError(409, 'CONFLICT', { community: 'limit_reached' }, 'req-3'),
+    );
+
+    expect(await createCommunityAction({ name: 'Horta', coverAssetId: null })).toEqual({
+      ok: false,
+      code: 'limit_reached',
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('a 403 is its own forbidden code, and is not a navigation', async () => {
+    vi.mocked(createCommunity).mockRejectedValue(
+      new ApiClientError(403, 'FORBIDDEN', undefined, 'req-4'),
+    );
+
+    expect(await createCommunityAction({ name: 'Horta', coverAssetId: null })).toEqual({
+      ok: false,
+      code: 'forbidden',
+    });
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('a 403 on an edit is forbidden too', async () => {
+    vi.mocked(updateCommunity).mockRejectedValue(
+      new ApiClientError(403, 'FORBIDDEN', undefined, 'req-5'),
+    );
+
+    expect(await updateCommunityAction(COMMUNITY, { name: 'Horta' })).toEqual({
+      ok: false,
+      code: 'forbidden',
+    });
+  });
+});

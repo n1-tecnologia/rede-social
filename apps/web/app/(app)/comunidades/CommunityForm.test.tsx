@@ -59,6 +59,7 @@ vi.mock('@/components/media/useSignedUpload', () => ({
   }),
 }));
 
+const actions = await import('@/app/(app)/comunidades/actions');
 const { CommunityForm } = await import('./CommunityForm');
 
 const COMMUNITY = '66666666-6666-4666-8666-666666666666';
@@ -228,5 +229,85 @@ describe('CommunityForm — the member variant (10-13, UI-D-707)', () => {
     expect(document.getElementById('community-description')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Criar comunidade' })).toBeTruthy();
     expect(document.querySelector('[data-cover-preview-fallback]')).not.toBeNull();
+  });
+});
+
+describe('CommunityForm — the limit screen and the refusals (10-13, UI-D-707, E07)', () => {
+  const LIMIT_SENTENCE =
+    'Você chegou ao limite de 3 comunidades ativas. Arquive uma para criar outra.';
+
+  it('14. opened at the limit the form is NOT rendered: header, empty state and the way back', () => {
+    render(
+      <CommunityForm mode="create" tenantName="Rede Demo" memberMode limitReached={{ limit: 3 }} />,
+    );
+
+    expect(document.getElementById('community-name')).toBeNull();
+    expect(document.querySelector('[data-community-form]')).toBeNull();
+    expect(screen.getByText('Nova comunidade')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fechar' })).toBeTruthy();
+    expect(screen.getByText('Limite de comunidades atingido')).toBeTruthy();
+    expect(screen.getByText(LIMIT_SENTENCE)).toBeTruthy();
+    const back = screen.getByRole('link', { name: 'Ver comunidades' });
+    expect(back.getAttribute('href')).toBe('/comunidades');
+    expect(screen.queryByRole('button', { name: 'Criar comunidade' })).toBeNull();
+  });
+
+  it('15. a limit refusal at submit keeps every value and shows the top alert', async () => {
+    vi.mocked(actions.createCommunityAction).mockResolvedValue({
+      ok: false,
+      code: 'limit_reached',
+    });
+    render(<CommunityForm mode="create" tenantName="Rede Demo" memberMode />);
+    fireEvent.change(document.getElementById('community-name') as HTMLInputElement, {
+      target: { value: 'Horta em casa' },
+    });
+    fireEvent.change(document.getElementById('community-description') as HTMLTextAreaElement, {
+      target: { value: 'Troca de mudas.' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Criar comunidade' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(
+      'Você já chegou ao limite de comunidades ativas. Arquive uma para criar outra.',
+    );
+    expect(alert.className).toContain('border-danger/40');
+    expect((document.getElementById('community-name') as HTMLInputElement).value).toBe(
+      'Horta em casa',
+    );
+    expect((document.getElementById('community-description') as HTMLTextAreaElement).value).toBe(
+      'Troca de mudas.',
+    );
+  });
+
+  it('16. a 403 on a member form says the Rede social was turned off, keeping the values', async () => {
+    vi.mocked(actions.createCommunityAction).mockResolvedValue({ ok: false, code: 'forbidden' });
+    render(<CommunityForm mode="create" tenantName="Rede Demo" memberMode />);
+    fireEvent.change(document.getElementById('community-name') as HTMLInputElement, {
+      target: { value: 'Horta em casa' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Criar comunidade' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(
+      'A Rede social foi desativada. Não é possível criar ou editar comunidades agora.',
+    );
+    expect((document.getElementById('community-name') as HTMLInputElement).value).toBe(
+      'Horta em casa',
+    );
+  });
+
+  it('17. the same 403 on the ORGANIZATION form keeps the shipped generic error', async () => {
+    vi.mocked(actions.createCommunityAction).mockResolvedValue({ ok: false, code: 'forbidden' });
+    render(<CommunityForm mode="create" tenantName="Rede Demo" />);
+    fireEvent.change(document.getElementById('community-name') as HTMLInputElement, {
+      target: { value: 'Avisos' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Criar comunidade' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).not.toContain('Rede social');
   });
 });
