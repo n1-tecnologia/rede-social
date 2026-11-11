@@ -1577,3 +1577,198 @@ describe('10 highlights', () => {
     expect((await hl(tokens.marcos, `/${orgEmpty?.id ?? ''}`)).status).toBe(404);
   });
 });
+
+/**
+ * 10-09 (MPUB-06, EP-49..51, D-708, D-718, T-10-36): the catalog scope and the off, blocked and empty cases.
+ * Every flip of a module flag, a membership or an organization community is written with `adminSql` and put
+ * back by `repair` (before every case and after the describe), so a failed case leaves nothing behind.
+ */
+describe('10 highlight edges', () => {
+  type Fixture = { community: string; highlight: string; story: string };
+  const hl = (token: string, path: string, init: RequestInit = {}) =>
+    request(`/v1/stories/highlights${path}`, token, init);
+  const catalogOf = async (token: string) => {
+    const res = await hl(token, '/catalog');
+    expect(res.status, 'GET /highlights/catalog').toBe(200);
+    return ((await res.json()) as HighlightRead).items;
+  };
+  const make = async (token: string, userId: string, name: string): Promise<Fixture> => {
+    const community = await post('/v1/communities', token, { name: `${PREFIX}${name}` });
+    expect(community.status).toBe(201);
+    const communityId = ((await community.json()) as { id: string }).id;
+    const res = await publish(token, {
+      mediaAssetId: await makeAsset(userId),
+      mediaKind: 'image',
+      caption: `${PREFIX}${name} story`,
+      newHighlight: { communityId, title: `${PREFIX}${name}` },
+    });
+    expect(res.status).toBe(201);
+    const story = ((await res.json()) as StorySummary).id;
+    const [row] = await adminSql<{ id: string }[]>`
+      select id from public.story_highlights where community_id = ${communityId}::uuid`;
+    return { community: communityId, highlight: row?.id ?? '', story };
+  };
+  const setSocial = async (enabled: boolean) => {
+    await adminSql`update public.tenant_modules set enabled = ${enabled}
+                    where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+  };
+  const setMembership = async (userId: string, blocked: boolean) => {
+    await adminSql`update public.memberships
+                      set status = ${blocked ? 'blocked' : 'active'},
+                          blocked_at = ${blocked ? adminSql`now()` : null}
+                    where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`;
+  };
+  /** The ids of the lab's live ORGANIZATION communities, soft-deleted for the EP-49/50 cases only. */
+  let hiddenOrg: string[] = [];
+  const hideOrganization = async () => {
+    const rows = await adminSql<{ id: string }[]>`
+      update public.communities set deleted_at = now()
+       where tenant_id = ${labTenantId}::uuid and kind = 'organization' and deleted_at is null
+      returning id`;
+    hiddenOrg = [...hiddenOrg, ...rows.map((row) => row.id)];
+    moduleFlags.invalidate(labTenantId);
+  };
+  const repair = async () => {
+    if (hiddenOrg.length > 0) {
+      await adminSql`update public.communities set deleted_at = null where id = any (${hiddenOrg}::uuid[])`;
+      hiddenOrg = [];
+    }
+    await setSocial(true);
+    await setMembership(userIds.helena, false);
+    await sweep();
+  };
+
+  beforeAll(repair);
+  beforeEach(async () => {
+    await repair();
+    communityCreateLimiter.reset();
+  });
+  afterAll(repair);
+
+  it('1. EP-49: a tenant whose only communities are member communities gives the admin an empty community catalog (no error) while the community list still shows them', async () => {
+    await hideOrganization();
+    const made = await make(tokens.helena, userIds.helena, 'So membro');
+    const adminCatalog = await catalogOf(tokens.labAdmin);
+    expect(adminCatalog.filter((item) => item.communityId !== null)).toEqual([]);
+    const list = await request('/v1/communities?limit=50', tokens.labAdmin);
+    expect(list.status).toBe(200);
+    expect(
+      ((await list.json()) as { items: { id: string }[] }).items.map((item) => item.id),
+    ).toContain(made.community);
+    // The creator's own catalog is the positive control: her community's highlight is there.
+    expect((await catalogOf(tokens.helena)).map((item) => item.id)).toEqual([made.highlight]);
+  });
+
+  it('2. EP-50: a tenant with no community at all gives an empty catalog to the admin (Início only) and to a member, and a member who owns none sees no destination', async () => {
+    await hideOrganization();
+    expect((await catalogOf(tokens.labAdmin)).filter((item) => item.communityId !== null)).toEqual(
+      [],
+    );
+    expect(await catalogOf(tokens.marcos)).toEqual([]);
+    expect(await catalogOf(tokens.plain)).toEqual([]);
+  });
+
+  it('3. EP-51 / MPUB-06: the admin’s catalog order is unchanged with member communities present and never lists them; a member’s holds only their own communities, an archived one excluded', async () => {
+    const before = (await catalogOf(tokens.labAdmin)).map((item) => item.id);
+    const helena = await make(tokens.helena, userIds.helena, 'Da Helena');
+    const marcos = await make(tokens.marcos, userIds.marcos, 'Do Marcos');
+    const archived = await make(tokens.helena, userIds.helena, 'Arquivada');
+    const after = (await catalogOf(tokens.labAdmin)).map((item) => item.id);
+    expect(after).toEqual(before);
+    for (const made of [helena, marcos, archived]) expect(after).not.toContain(made.highlight);
+    expect((await catalogOf(tokens.helena)).map((item) => item.id).sort()).toEqual(
+      [helena.highlight, archived.highlight].sort(),
+    );
+    expect((await catalogOf(tokens.marcos)).map((item) => item.id)).toEqual([marcos.highlight]);
+    await adminSql`update public.communities set status = 'archived' where id = ${archived.community}::uuid`;
+    expect((await catalogOf(tokens.helena)).map((item) => item.id)).toEqual([helena.highlight]);
+  });
+
+  it('4. D-718: with social off the creator’s highlight create, add and publish-with-destination answer 403 while the community’s highlights and the saved story stay 200 for Marcos; social back on restores the writes with no data change', async () => {
+    const made = await make(tokens.helena, userIds.helena, 'Social off');
+    const before = await readItems(made.highlight);
+    await setSocial(false);
+    const writes = [
+      await hl(tokens.helena, '', {
+        method: 'POST',
+        body: JSON.stringify({ communityId: made.community, title: `${PREFIX}Off` }),
+      }),
+      await hl(tokens.helena, `/${made.highlight}/stories/${made.story}`, { method: 'PUT' }),
+      await publish(tokens.helena, {
+        mediaAssetId: await makeAsset(userIds.helena),
+        mediaKind: 'image',
+        caption: `${PREFIX}off destino`,
+        highlightId: made.highlight,
+      }),
+    ];
+    for (const [index, res] of writes.entries()) expect(res.status, `write ${index}`).toBe(403);
+    // The READS of the community stay open and the saved story is still readable (branch 3 has no social term).
+    expect((await hl(tokens.marcos, `?communityId=${made.community}`)).status).toBe(200);
+    expect((await hl(tokens.marcos, `/${made.highlight}`)).status).toBe(200);
+    expect((await request(`/v1/stories/${made.story}`, tokens.marcos)).status).toBe(200);
+    expect(await readItems(made.highlight)).toEqual(before);
+    await setSocial(true);
+    const again = await hl(tokens.helena, '', {
+      method: 'POST',
+      body: JSON.stringify({ communityId: made.community, title: `${PREFIX}On` }),
+    });
+    expect(again.status).toBe(201);
+    expect(await readItems(made.highlight)).toEqual(before);
+  });
+
+  it('5. T-10-36 / D-708: a blocked creator’s highlights and saved story answer the bare 404 for Marcos, her community’s highlights answer it for the admin too, and unblocking restores them (the moderator keeps reading the story by id, D-717)', async () => {
+    const made = await make(tokens.helena, userIds.helena, 'Bloqueada');
+    const probe = async (label: string, visible: boolean) => {
+      for (const [who, token] of [
+        ['marcos', tokens.marcos],
+        ['admin', tokens.labAdmin],
+      ] as const) {
+        const row = await hl(token, `?communityId=${made.community}`);
+        const detail = await hl(token, `/${made.highlight}`);
+        const story = await request(`/v1/stories/${made.story}`, token);
+        // The community is hidden for everybody, so its highlights are the bare 404 for the moderator too. The
+        // story by id is the audience gate's: a member reads it only through the readable community (branch 3),
+        // while the moderator branch (`stories_audience_gate`, D-717, pgTAP 231 section 4) keeps reading it.
+        const storyVisible = visible || who === 'admin';
+        for (const [what, res, expected] of [
+          ['row', row, visible],
+          ['detail', detail, visible],
+          ['story', story, storyVisible],
+        ] as const) {
+          expect(res.status, `${label}: ${who} ${what}`).toBe(expected ? 200 : 404);
+          if (!expected)
+            expect((await errorOf(res)).details, `${label}: ${who} ${what}`).toBeUndefined();
+        }
+      }
+    };
+    await probe('live', true);
+    await setMembership(userIds.helena, true);
+    await probe('blocked', false);
+    await setMembership(userIds.helena, false);
+    await probe('unblocked', true);
+  });
+
+  it('6. a deleted community’s highlights are the bare 404 for everyone', async () => {
+    const made = await make(tokens.helena, userIds.helena, 'Apagada');
+    await adminSql`update public.communities set deleted_at = now() where id = ${made.community}::uuid`;
+    for (const [who, token] of [
+      ['marcos', tokens.marcos],
+      ['admin', tokens.labAdmin],
+      ['helena', tokens.helena],
+    ] as const) {
+      const row = await hl(token, `?communityId=${made.community}`);
+      expect(row.status, `${who} row`).toBe(404);
+      const detail = await hl(token, `/${made.highlight}`);
+      expect(detail.status, `${who} detail`).toBe(404);
+      expect((await errorOf(detail)).details, `${who} detail`).toBeUndefined();
+    }
+  });
+
+  async function readItems(highlightId: string): Promise<string[]> {
+    const rows = await adminSql<{ story_id: string }[]>`
+      select story_id from public.story_highlight_items
+       where highlight_id = ${highlightId}::uuid order by story_id`;
+    return rows.map((row) => row.story_id);
+  }
+});

@@ -2004,6 +2004,35 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     expect((await hlRequest(tokens.demoMember, '/catalog')).status).toBe(403);
   });
 
+  it('10-09 MPUB-06 / EP-51 catalog: a MEMBER community’s highlight is never in the admin’s catalog and the order of the rest is unchanged', async () => {
+    const before = (await (await hlRequest(tokens.demoAdmin, '/catalog')).json()) as {
+      items: HighlightSummary[];
+    };
+    const memberCommunity = randomUUID();
+    highlightCommunities.push(memberCommunity);
+    await adminSql`
+      insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position)
+      select ${memberCommunity}::uuid, ${tenantIds.demo}::uuid, m.user_id, 'Teste Comunidade de membro',
+             ${memberCommunity}, 'member', 1000000
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'member@rede-demo.local'
+       limit 1`;
+    const [memberHighlight] = await adminSql<{ id: string }[]>`
+      insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+      select ${tenantIds.demo}::uuid, ${memberCommunity}::uuid, 'Teste Destaque de membro', 0, m.user_id
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'member@rede-demo.local'
+       limit 1
+      returning id`;
+    const after = (await (await hlRequest(tokens.demoAdmin, '/catalog')).json()) as {
+      items: HighlightSummary[];
+    };
+    expect(after.items.map((item) => item.id)).not.toContain(memberHighlight?.id);
+    expect(after.items.map((item) => item.id)).toEqual(before.items.map((item) => item.id));
+  });
+
   /** The story 05.2-16 puts in two highlights; 05.2-17 reads its count. */
   let twoHomes = '';
 
