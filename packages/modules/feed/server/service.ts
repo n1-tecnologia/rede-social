@@ -1672,7 +1672,7 @@ export async function updatePost(
  *  2. THE TWO PREDICATES ARE STILL NOT ROLE CHECKS; do not "simplify" either into one. `author_user_id`
  *     is the authorisation for an organization post (a second admin holding `feed.post.manage` still
  *     cannot remove a colleague's post, T-04-54 / T-09-22). The moderator branch adds a MEMBER's post
- *     (`visibility = 'followers'`) whose author is a LIVE member (the plan-04 default, flagged: a
+ *     (`visibility = 'followers'`, or 10-06 `'community'`: a post inside a member community) whose author is a LIVE member (the plan-04 default, flagged: a
  *     blocked or removed author's post is not moderated until unblocked, exactly like the reads), and
  *     only when `opts.canModerate` is true. `canModerate` is read by the ROUTE through
  *     `permissionsForRequest(ctx)` BEFORE this function opens its transaction (T-08-08).
@@ -1712,8 +1712,13 @@ export async function softDeletePostInTx(
   postId: string,
   opts: { canModerate: boolean },
 ): Promise<{ authorUserId: string; moderated: boolean }> {
+  // 10-06 (A3, MCOMM-11): the moderator branch takes a member's post in BOTH member audiences: `'followers'`
+  // (09-07) and `'community'` (a post inside a member community), so one bad post inside a member community
+  // is removable without archiving the community. An organization post (`'tenant'`) stays author-only. The
+  // author must still be live; a blocked or departed creator's post is hidden by RLS (the community gate) and
+  // answers the bare 404 here, for the moderator too.
   const moderatorBranch = opts.canModerate
-    ? sql`or (p.visibility = 'followers'
+    ? sql`or (p.visibility in ('followers', 'community')
              and exists (
                select 1
                  from memberships am
