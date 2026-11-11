@@ -516,18 +516,45 @@ const AUTHOR_STORIES_HARD_LIMIT = 200;
  * `hasUnseen` reads the caller's OWN `story_views` rows through the constant `v.tenant_id` form (the
  * `storyProjection` rule: the planner walks `story_views_uq` as an index-only scan).
  *
+ * **Moderator scope** (`canModerate`, a holder of `moderation.manage`, checked first so it wins over a member
+ * flag): every live member's circle, cursor-paged, see `listAuthorsForModerator` (D-717). `isMember` is read by
+ * the route's guard (a caller holding neither flag is a 403 before this runs).
+ *
  * The expiry window is `expires_at > now()` (STORY-03: a predicate, never a job). A story whose media is not
  * `ready` occupies no circle (R-P8, the strip's rule).
  */
 export async function listStoryAuthors(
   ctx: RequestContext,
-  _query: StoryAuthorsQuery,
-  _scope: { canModerate: boolean; isMember: boolean },
+  query: StoryAuthorsQuery,
+  scope: { canModerate: boolean; isMember: boolean },
 ): Promise<StoryAuthorsPage> {
-  // FORM L (`10-08-SPIKE.md`, `CHOSEN_FORM: LATERAL`): `unnest` of the followed set (the caller plus the LIVE
-  // followees), the author's live membership and profile, then ONE lateral aggregate over that author's live
-  // member stories on `stories_tenant_author_expires_idx`. The grouped form measured 4 to 11 times slower on the
-  // moderator's reads and never used the index.
+  const page = scope.canModerate
+    ? await listAuthorsForModerator(ctx, query)
+    : await listAuthorsForMember(ctx);
+
+  log.info(
+    {
+      event: 'stories.authors',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      scope: scope.canModerate ? 'moderator' : 'member',
+      returned: page.items.length,
+      hasNext: page.nextCursor !== null,
+    },
+    'story authors listed',
+  );
+
+  return page;
+}
+
+/**
+ * The member's row: ONE unpaged page, FORM L (`10-08-SPIKE.md`, `CHOSEN_FORM: LATERAL`): `unnest` of the
+ * followed set (the caller plus the LIVE followees), the author's live membership and profile, then ONE lateral
+ * aggregate over that author's live member stories on `stories_tenant_author_expires_idx`. The grouped form
+ * measured 4 to 11 times slower on the moderator's reads and never used the index.
+ */
+async function listAuthorsForMember(ctx: RequestContext): Promise<StoryAuthorsPage> {
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<AuthorCircleRow>(sql`
       select am.id as membership_id,
@@ -568,19 +595,85 @@ export async function listStoryAuthors(
        order by is_self desc, agg.has_unseen desc, agg.latest desc, am.id
        limit ${MEMBER_AUTHORS_HARD_LIMIT}`),
   );
+  return { items: rows.map(toAuthorCircle), nextCursor: null };
+}
 
-  log.info(
-    {
-      event: 'stories.authors',
-      tenantId: ctx.tenantId,
-      userId: ctx.userId,
-      requestId: ctx.requestId,
-      returned: rows.length,
-    },
-    'story authors listed',
+/**
+ * The moderator's row (D-717): every LIVE member (`status = 'active'`, not blocked, not removed) with a live
+ * member story, newest circle first, keyset-paged in the kernel `encodeCursor` envelope. No follow predicate
+ * and no own item (`is_self` is false); `hasUnseen` still reflects the moderator's OWN views. An oversight tool,
+ * never a discovery feed for members (D-705): only a holder of `moderation.manage` gets this scope.
+ *
+ * **The order is `latest desc, membership_id` (the id ASCENDING), a MIXED direction**, so
+ * `keysetComparison('desc')`'s single row comparison cannot express the page predicate: it is written out as
+ * `latest < n or (latest = n and id > cursor id)`, over the SAME two expressions the `order by` uses. `n` is
+ * the circle's newest `published_at` in microsecond text, read back from the statement (the `ISO_MICROSECONDS`
+ * rule), and `decodeCursor` is total, so a tampered cursor is page 1.
+ *
+ * A keyset over an AGGREGATE cannot prune authors before aggregating (page 5 costs what page 1 costs, the
+ * spike's R3 and R4); the cost is bounded by the number of live authors with a live story, which the index and
+ * the page size keep at one index range per author.
+ */
+async function listAuthorsForModerator(
+  ctx: RequestContext,
+  query: StoryAuthorsQuery,
+): Promise<StoryAuthorsPage> {
+  const limit = query.limit;
+  const after = decodeCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<AuthorCircleRow>(sql`
+      select am.id as membership_id,
+             ap.display_name,
+             ap.avatar_asset_id,
+             agg.story_count,
+             to_char(agg.latest at time zone 'utc', ${ISO_MICROSECONDS}) as latest_published_at,
+             agg.has_unseen,
+             false as is_self
+        from memberships am
+        left join member_profiles ap on ap.membership_id = am.id
+        cross join lateral (
+          select count(*)::int as story_count,
+                 max(s.published_at) as latest,
+                 bool_or(not exists (
+                   select 1 from story_views v
+                    where v.tenant_id = ${ctx.tenantId}::uuid
+                      and v.user_id = ${ctx.userId}::uuid
+                      and v.story_id = s.id
+                 )) as has_unseen
+            from stories s
+            join media_assets a on a.id = s.media_asset_id and a.status = 'ready'
+           where s.tenant_id = ${ctx.tenantId}::uuid
+             and s.author_user_id = am.user_id
+             and s.visibility = 'followers'
+             and s.deleted_at is null
+             and s.expires_at > now()
+        ) agg
+       where am.tenant_id = ${ctx.tenantId}::uuid
+         and am.status = 'active'
+         and am.blocked_at is null
+         and am.deleted_at is null
+         and ${SOCIAL_ENABLED}
+         and agg.story_count > 0
+         and not app.is_blocked_by_viewer(am.user_id)
+         and (
+           ${afterAt}::timestamptz is null
+           or agg.latest < ${afterAt}::timestamptz
+           or (agg.latest = ${afterAt}::timestamptz and am.id > ${afterId}::uuid)
+         )
+       order by agg.latest desc, am.id
+       limit ${limit + 1}`),
   );
 
-  return { items: rows.map(toAuthorCircle), nextCursor: null };
+  const items = rows.slice(0, limit);
+  const last = items[items.length - 1];
+  const nextCursor =
+    rows.length > limit && last
+      ? encodeCursor({ n: last.latest_published_at, id: last.membership_id })
+      : null;
+  return { items: items.map(toAuthorCircle), nextCursor };
 }
 
 /**
