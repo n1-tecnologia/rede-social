@@ -31,12 +31,14 @@ Main contract names (`./contracts`): `publishStorySchema`, `storyQuerySchema`, `
 `createStoryHighlightSchema`, `updateHighlightSchema`, `reorderHighlightsSchema`,
 `highlightListQuerySchema`, `highlightListSchema`, `highlightSummarySchema`,
 `highlightDetailSchema`, `highlightMembershipResultSchema`, `highlightCoverSchema`,
-`storyHighlightIdsSchema`, the permission names `STORY_PERMISSIONS` (`stories.story.publish`,
+`storyHighlightIdsSchema`, the Explorar row's `storyAuthorCircleSchema`, `storyAuthorsPageSchema`,
+`storyAuthorsQuerySchema`, `authorStoriesSchema` and `STORY_AUTHORS_PAGE_SIZE` (10-08), the permission names `STORY_PERMISSIONS` (`stories.story.publish`,
 `stories.story.manage`), the refusal vocabularies `STORY_ISSUES`, `STORY_COMMENT_ISSUES`,
 `STORY_HIGHLIGHT_ISSUES`, and `STORIES_NOTIFICATION_KINDS`.
 
 Main server names (`./server`): `storiesRoutes`, `listActiveStories`, `listOwnStories`, `getStory`,
-`publishStory`, `deleteStory`. Comment, like, view and highlight handlers are reached through the
+`publishStory`, `deleteStory`, `listStoryAuthors`, `listAuthorStories` (Explorar's story row: one circle per
+author, then one author's live stories, 10-08). Comment, like, view and highlight handlers are reached through the
 routes only.
 
 ## Events emitted
