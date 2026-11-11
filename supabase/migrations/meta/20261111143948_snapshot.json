@@ -4786,8 +4786,8 @@
           "to": [
             "authenticated"
           ],
-          "using": "app.tenant_role() <> 'member' or created_by_user_id = app.user_id()",
-          "withCheck": "app.tenant_role() <> 'member' or (kind = 'member' and created_by_user_id = app.user_id())"
+          "using": "(app.tenant_role() = 'member' and created_by_user_id = app.user_id()) or app.tenant_role() <> 'member'",
+          "withCheck": "(app.tenant_role() = 'member' and kind = 'member' and created_by_user_id = app.user_id()) or app.tenant_role() <> 'member'"
         },
         "communities_member_delete_gate": {
           "name": "communities_member_delete_gate",

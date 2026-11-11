@@ -174,12 +174,16 @@ export const communities = pgTable(
     // `post_count` drift without an error and one carrying `social_enabled()` would block the counter while
     // `social` is off. The service and the composed permission stop a member EDIT while `social` is off; the
     // 30-second flags-cache window is the accepted residual for an edit (inserts are gated in SQL above).
+    // The predicates are written ROLE-FIRST (`tenant_role() = 'member' and ... or tenant_role() <> 'member'`)
+    // rather than as `tenant_role() <> 'member' or created_by_user_id = app.user_id()`: with a NULL role the
+    // second form is `null or <creator test>`, which is TRUE for the creator and would let a lane with no role
+    // claim update. The role-first form is null for a null role and denies (EP-46, fail closed).
     pgPolicy('communities_member_update_gate', {
       as: 'restrictive',
       for: 'update',
       to: authenticatedRole,
-      using: sql`app.tenant_role() <> 'member' or created_by_user_id = app.user_id()`,
-      withCheck: sql`app.tenant_role() <> 'member' or (kind = 'member' and created_by_user_id = app.user_id())`,
+      using: sql`(app.tenant_role() = 'member' and created_by_user_id = app.user_id()) or app.tenant_role() <> 'member'`,
+      withCheck: sql`(app.tenant_role() = 'member' and kind = 'member' and created_by_user_id = app.user_id()) or app.tenant_role() <> 'member'`,
     }),
     // DELETE: a member never hard-deletes a community; the service soft-deletes (`deleted_at`).
     pgPolicy('communities_member_delete_gate', {
