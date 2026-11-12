@@ -5,6 +5,7 @@ import communitiesMessages from '../messages/pt-BR/communities.json' with { type
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import reelsMessages from '../messages/pt-BR/reels.json' with { type: 'json' };
 import socialMessages from '../messages/pt-BR/social.json' with { type: 'json' };
+import storiesMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
   closeAdmin,
   createCommunityAs,
@@ -26,6 +27,15 @@ import {
   type EmptyFeedTenant,
 } from './feed-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, seededFeed, users } from './fixtures';
+import {
+  closeJourneyAdmin,
+  createMemberStoryAs,
+  dropJourneyTenant,
+  JOURNEY_PREFIX,
+  type JourneyTenant,
+  journeySlug,
+  provisionJourneyTenant,
+} from './member-journey';
 import {
   closeMembersAdmin,
   createMembersTenant,
@@ -2017,5 +2027,101 @@ test.describe('09-11 "Siga para ver": social off hides the post, re-enabling res
       await page.goto(`${tenant?.origin}/post/${postId}`);
       await expect(locked).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 90_000, intervals: [2_000] });
+  });
+});
+
+/**
+ * 10-15 (MSTORY-03, D-714, UI-D-697, UI-D-698): what each kind of member finds in Explorar once a
+ * member has a live story, on a phone. The follower finds the author's circle with the unseen name
+ * in a row that sits BETWEEN the chip row and the feed (the author's ordinary post is the positive
+ * control that the feed rendered); the author finds their own circle opening their stories instead
+ * of the composer; a stranger who follows nobody finds neither the circle nor the post.
+ *
+ * The story is a fixture row (`createMemberStoryAs`: ready, followers-only); the click-through
+ * publish and the viewer are `stories.spec.ts`'s `10 member journey`. Throwaway tenant, swept by
+ * the `e2e-10-` prefix.
+ */
+test.describe('10 member journey', () => {
+  test.describe.configure({ mode: 'serial', timeout: 120_000 });
+  const ST = storiesMessages.stories;
+  const STAMP = Date.now().toString(36);
+  const STORY = `${JOURNEY_PREFIX}story ${STAMP}`;
+  const POST = `${JOURNEY_PREFIX}post ${STAMP}`;
+  let tenant: JourneyTenant | null = null;
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    test.skip(
+      isRemote,
+      'local stack only (the tenant is provisioned through the admin connection)',
+    );
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the member journey is the phone one');
+    test.setTimeout(120_000);
+    tenant = await provisionJourneyTenant(
+      journeySlug('so', testInfo.project.name, Date.now().toString(36)),
+      SEED_PASSWORD,
+    );
+    await createMemberStoryAs(tenant.author.email, tenant.slug, STORY);
+    await markAsMemberPost(await createFeedPostAs(tenant.author.email, tenant.slug, POST));
+  });
+
+  test.afterAll(async () => {
+    await dropJourneyTenant(tenant);
+    await closeJourneyAdmin();
+    await closeSocialAdmin();
+    await closeFeedAdmin();
+    await closeTenantFixtures();
+    await closeAdmin();
+  });
+
+  const row = (page: Page) => page.getByRole('list', { name: S.stories.region });
+
+  test('the follower finds the author’s circle between the chips and the feed, unseen, beside their own "+"', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.follower.email, SEED_PASSWORD, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+    const circle = row(page).getByRole('button', {
+      name: ST.circle.authorUnseen.replace('{name}', tenant.author.name),
+    });
+    await expect(circle).toBeVisible();
+    await expect(row(page).getByRole('link', { name: ST.own.action })).toBeVisible();
+    await expect(page.getByText(POST)).toBeVisible();
+
+    // UI-D-697: between the chips and the feed, in that order, with no hairline or heading of its own.
+    const chips = await chipRow(page).boundingBox();
+    const circles = await row(page).boundingBox();
+    const feed = await cards(page).first().boundingBox();
+    expect(chips && circles && feed, 'the three blocks are on screen').toBeTruthy();
+    expect((chips?.y ?? 0) + (chips?.height ?? 0)).toBeLessThanOrEqual((circles?.y ?? 0) + 1);
+    expect((circles?.y ?? 0) + (circles?.height ?? 0)).toBeLessThanOrEqual((feed?.y ?? 0) + 1);
+
+    // The row exists only in Explorar: Início carries no member circle.
+    await page.goto(`${tenant.origin}/inicio`);
+    await expect(chipRow(page)).toBeVisible();
+    await expect(
+      page.getByRole('button', {
+        name: ST.circle.authorUnseen.replace('{name}', tenant.author.name),
+      }),
+    ).toHaveCount(0);
+  });
+
+  test('the author’s own circle opens their stories instead of the composer', async ({ page }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.author.email, SEED_PASSWORD, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+    await expect(row(page).getByRole('button', { name: ST.circle.own })).toBeVisible();
+    await expect(row(page).getByRole('link', { name: ST.own.action })).toHaveCount(0);
+  });
+
+  test('a stranger who follows nobody finds neither the circle nor the author’s post', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.stranger.email, SEED_PASSWORD, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+    await expect(row(page).getByRole('link', { name: ST.own.action })).toBeVisible();
+    await expect(page.getByRole('button', { name: new RegExp(tenant.author.name) })).toHaveCount(0);
+    await expect(page.getByText(POST)).toHaveCount(0);
   });
 });

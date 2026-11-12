@@ -6,12 +6,32 @@ import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' }
 import {
   closeAdmin,
   createCommunityAs,
+  createFeedPostAs,
   deleteHighlightsByTitlePrefix,
   insertHighlightFixture,
   setStoryViews,
 } from './admin';
-import { hosts, login, SEED_PASSWORD, seededCommunityFeed, seededFeed, users } from './fixtures';
+import { closeFeedAdmin } from './feed-admin';
+import {
+  hosts,
+  isRemote,
+  login,
+  SEED_PASSWORD,
+  seededCommunityFeed,
+  seededFeed,
+  users,
+} from './fixtures';
 import { untilHydrated } from './hydration';
+import {
+  closeJourneyAdmin,
+  dropJourneyTenant,
+  JOURNEY_PREFIX,
+  type JourneyTenant,
+  journeySlug,
+  provisionJourneyTenant,
+} from './member-journey';
+import { closeSocialAdmin, markAsMemberPost } from './social-admin';
+import { closeTenantFixtures } from './tenant-fixtures';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
 const C = communityMessages.communities;
@@ -1463,5 +1483,155 @@ test.describe('2026-10-03 — Reordenar: the admin’s order of the Ativas list'
 
     // Leave the shared seed as found for every case after this one.
     await sql()`delete from public.communities where name = ${name}`;
+  });
+});
+
+/**
+ * 10-15 (MCOMM-01, MCOMM-08, MPUB-01, D-706, D-713): the member community journey on a phone, the
+ * second half of the tracer (`stories.spec.ts` holds the story half). A member creates a community
+ * through the shipped form (the audience line visible) and publishes a post in it from the
+ * community page, landing back on it; a follower and a stranger see the community after the
+ * organization's cards with its byline and the post on its page, the post is in NEITHER Início nor
+ * Explorar, and the stranger finds no publish control anywhere, the `/criar?comunidade=` link
+ * falling back to the plain member composer.
+ *
+ * It runs on a throwaway tenant (`member-journey.ts`: why not rede-lab) and sweeps what it wrote by
+ * the `e2e-10-` prefix.
+ */
+test.describe('10 member journey', () => {
+  test.describe.configure({ mode: 'serial', timeout: 120_000 });
+  const COMPOSER = F.composer;
+  const ST = storyMessages.stories;
+  const STAMP = Date.now().toString(36);
+  const NAME = `${JOURNEY_PREFIX}comunidade ${STAMP}`;
+  const POST = `${JOURNEY_PREFIX}publicacao ${STAMP}`;
+  /** The author's ordinary member post: the positive control that Explorar really rendered. */
+  const CONTROL = `${JOURNEY_PREFIX}controle ${STAMP}`;
+  let tenant: JourneyTenant | null = null;
+  let communityId = '';
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    test.skip(
+      isRemote,
+      'local stack only (the tenant is provisioned through the admin connection)',
+    );
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the member journey is the phone one');
+    test.setTimeout(120_000);
+    tenant = await provisionJourneyTenant(
+      journeySlug('co', testInfo.project.name, Date.now().toString(36)),
+      SEED_PASSWORD,
+    );
+    await markAsMemberPost(await createFeedPostAs(tenant.author.email, tenant.slug, CONTROL));
+  });
+
+  test.afterAll(async () => {
+    await dropJourneyTenant(tenant);
+    await closeJourneyAdmin();
+    await closeSocialAdmin();
+    await closeFeedAdmin();
+    await closeTenantFixtures();
+    await closeAdmin();
+  });
+
+  /** A community page's compose entry (FAB on the phone, header button on desktop). */
+  const composeEntry = (page: Page) => page.locator('a[href^="/criar?comunidade="]:visible');
+  const postRegion = (page: Page) =>
+    page.getByRole('region', { name: C.region.replace('{community}', NAME) });
+
+  test('the author creates a community through the form and publishes a post in it from its page', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.author.email, SEED_PASSWORD, tenant.origin);
+    await page.goto(`${tenant.origin}/comunidades`);
+    await page.locator('main a[data-communities-create]').click();
+    await page.waitForURL(/\/comunidades\/nova$/);
+    await expect(page.getByRole('heading', { name: C.form.createTitle })).toBeVisible();
+    // UI-D-707: the audience line, in place of the organization's "Acesso" block.
+    await expect(
+      page.getByText(C.form.audienceMember.replace('{tenant}', tenant.displayName)),
+    ).toBeVisible();
+
+    await page.getByLabel(C.form.name.label).fill(NAME);
+    await page.getByRole('button', { name: C.actions.create }).click();
+    await page.waitForURL(/\/comunidades\/[0-9a-f-]{36}$/);
+    communityId = page.url().split('/').pop() ?? '';
+    await expect(page.getByRole('heading', { name: NAME, level: 1 })).toBeVisible();
+    await expect(page.getByText(C.toasts.created, { exact: true })).toBeVisible();
+    await expect(page.getByText(C.byline.you)).toBeVisible();
+
+    // The creator publishes from the community page: FAB, then the composer with the destination line.
+    await untilHydrated(composeEntry(page));
+    await composeEntry(page).click();
+    await expect(page).toHaveURL(new RegExp(`/criar\\?comunidade=${communityId}$`));
+    await expect(
+      page.getByText(COMPOSER.audienceCommunity.replace('{community}', NAME)),
+    ).toBeVisible();
+    await page.getByLabel(COMPOSER.captionLabel).fill(POST);
+    await page.getByRole('button', { name: COMPOSER.publish, exact: true }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${communityId}$`));
+    await expect(page.getByText(F.toasts.created, { exact: true })).toBeVisible();
+    await expect(postRegion(page).getByRole('article').first()).toContainText(POST);
+  });
+
+  for (const kind of ['follower', 'stranger'] as const) {
+    test(`the ${kind} sees the community after the organization's, its byline, and its post only on its page`, async ({
+      page,
+    }) => {
+      if (!tenant) throw new Error('the tenant was not provisioned');
+      const viewer = tenant[kind];
+      await login(page, viewer.email, SEED_PASSWORD, tenant.origin);
+      await page.goto(`${tenant.origin}/comunidades`);
+
+      // D-713: the organization's cards come first, the member's after them, with the byline.
+      const all = page.locator('main a[data-testid="community-card"]');
+      await expect(all.filter({ hasText: NAME })).toHaveCount(1);
+      const names = await all.evaluateAll((nodes) => nodes.map((n) => n.textContent ?? ''));
+      const mine = names.findIndex((text) => text.includes(NAME));
+      const org = names.findIndex((text) => text.includes(tenant?.orgCommunityName ?? ''));
+      expect(org, 'the organization community is listed').toBeGreaterThanOrEqual(0);
+      expect(mine, 'the member community comes after the organization one').toBeGreaterThan(org);
+      await expect(all.filter({ hasText: NAME })).toContainText(
+        C.card.byline.replace('{name}', tenant.author.name),
+      );
+
+      // Its page: the post, no publish control of any kind for a reader.
+      await all.filter({ hasText: NAME }).click();
+      await page.waitForURL(new RegExp(`/comunidades/${communityId}$`));
+      await expect(postRegion(page).getByRole('article').first()).toContainText(POST);
+      await expect(page.getByRole('heading', { name: NAME, level: 1 })).toBeVisible();
+      await expect(composeEntry(page)).toHaveCount(0);
+      await expect(page.getByRole('link', { name: C.page.compose })).toHaveCount(0);
+      await expect(
+        page.getByRole('link', { name: ST.own.actionCommunity.replace('{community}', NAME) }),
+      ).toHaveCount(0);
+      await expect(page.locator('[data-community-edit]')).toHaveCount(0);
+
+      // D-706: the post is in neither Início nor Explorar (the follower follows the author).
+      for (const href of ['/inicio', '/inicio?aba=explorar']) {
+        await page.goto(`${tenant.origin}${href}`);
+        await expect(page.getByRole('tablist')).toBeVisible();
+        // The follower's Explorar holds the author's ordinary post: the feed rendered, and the
+        // community post still is not in it.
+        if (kind === 'follower' && href.includes('explorar')) {
+          await expect(page.getByText(CONTROL)).toBeVisible();
+        }
+        await expect(page.getByText(POST)).toHaveCount(0);
+      }
+    });
+  }
+
+  test('the stranger opening /criar?comunidade={id} lands on the plain member composer (the fallback)', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.stranger.email, SEED_PASSWORD, tenant.origin);
+    await page.goto(`${tenant.origin}/criar?comunidade=${communityId}`);
+    await expect(page.getByLabel(COMPOSER.captionLabel)).toBeVisible();
+    await expect(page.getByText(COMPOSER.audience)).toBeVisible();
+    await expect(
+      page.getByText(COMPOSER.audienceCommunity.replace('{community}', NAME)),
+    ).toHaveCount(0);
   });
 });

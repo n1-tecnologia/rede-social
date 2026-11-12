@@ -4,6 +4,7 @@ import { STORY_MAX_PAGE_SIZE } from '@rede-social/module-stories/contracts';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import loginMessages from '../messages/pt-BR/login.json' with { type: 'json' };
+import socialMessages from '../messages/pt-BR/social.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
   activeReadyStoryCount,
@@ -22,8 +23,19 @@ import {
   setStoryViews,
   stubUnfetchableAvatar,
 } from './admin';
-import { baseURL, hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { closeFeedAdmin } from './feed-admin';
+import { baseURL, hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import { untilHydrated } from './hydration';
+import {
+  closeJourneyAdmin,
+  dropJourneyTenant,
+  JOURNEY_PREFIX,
+  type JourneyTenant,
+  journeySlug,
+  provisionJourneyTenant,
+} from './member-journey';
+import { closeSocialAdmin } from './social-admin';
+import { closeTenantFixtures } from './tenant-fixtures';
 import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -2482,5 +2494,118 @@ test.describe('2026-10-20 — the client’s FRONT.pdf corrections to stories', 
     await expect.poll(() => property('paused')).toBe(false);
     await expect(dialog).toHaveAttribute('data-story-index', '0');
     await expect(dialog).toHaveAttribute('data-paused', 'false');
+  });
+});
+
+/**
+ * 10-15 (MSTORY-01, MSTORY-03, D-714): the member story journey on a phone, the first half of the
+ * tracer (`comunidades.spec.ts` holds the community half). A member taps the "+" circle of their own
+ * in Explorar, publishes a photo and lands back on Explorar; a member who follows them finds the
+ * circle with the unseen name and opens the viewer; a member who does not follow sees no circle.
+ *
+ * It runs on a throwaway tenant (`member-journey.ts`: why not rede-lab) and sweeps what it wrote by
+ * the `e2e-10-` prefix. The publish needs the worker (the asset stays `processing` until its variants
+ * exist, and a story on it is not on any row yet), so the follower's case polls for the circle.
+ */
+test.describe('10 member journey', () => {
+  test.describe.configure({ mode: 'serial', timeout: 180_000 });
+  const SOC = socialMessages.social;
+  const CAPTION = `${JOURNEY_PREFIX}story ${Date.now().toString(36)}`;
+  let tenant: JourneyTenant | null = null;
+  let stopWorker: (() => Promise<void>) | null = null;
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    test.skip(
+      isRemote,
+      'local stack only (the tenant is provisioned through the admin connection)',
+    );
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the member journey is the phone one');
+    test.setTimeout(180_000);
+    stopWorker = await ensureWorker();
+    tenant = await provisionJourneyTenant(
+      journeySlug('st', testInfo.project.name, Date.now().toString(36)),
+      SEED_PASSWORD,
+    );
+  });
+
+  test.afterAll(async () => {
+    await stopWorker?.();
+    await dropJourneyTenant(tenant);
+    await closeJourneyAdmin();
+    await closeSocialAdmin();
+    await closeFeedAdmin();
+    await closeTenantFixtures();
+  });
+
+  const row = (page: Page) => page.getByRole('list', { name: SOC.stories.region });
+
+  test('the author taps their own "+" circle in Explorar, publishes a photo and lands back on Explorar', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.author.email, SEED_PASSWORD, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+
+    // The own circle with no live story is the door to the composer.
+    await row(page).getByRole('link', { name: S.own.action }).click();
+    await expect(page).toHaveURL(/\/stories\/publicar$/);
+
+    await page.locator('#story-photo-input').setInputFiles(PHOTO);
+    const caption = page.getByLabel(S.publish.captionLabel);
+    await expect(caption).toBeVisible({ timeout: 30_000 });
+    // UI-D-701: the audience line, and the publish control only once a photo is picked.
+    await expect(page.getByText(S.publish.member.audience)).toBeVisible();
+    await caption.fill(CAPTION);
+    await page.getByRole('button', { name: S.publish.submit, exact: true }).click();
+
+    await expect(page).toHaveURL(/\/inicio\?aba=explorar$/);
+    await expect(page.getByText(S.publish.toast, { exact: true })).toBeVisible();
+    // The own circle now opens the author's stories instead of the composer.
+    await expect(async () => {
+      await page.goto(`${tenant?.origin}/inicio?aba=explorar`);
+      await expect(row(page).getByRole('button', { name: S.circle.own })).toBeVisible({
+        timeout: 3_000,
+      });
+    }).toPass({ timeout: 90_000, intervals: [2_000] });
+  });
+
+  test('a follower sees the unseen circle in Explorar, opens the viewer on the story and the ring greys on close', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    const name = tenant.author.name;
+    await login(page, tenant.follower.email, SEED_PASSWORD, tenant.origin);
+    // The circle exists once the worker has derived the photo's variants.
+    const unseen = row(page).getByRole('button', {
+      name: S.circle.authorUnseen.replace('{name}', name),
+    });
+    await expect(async () => {
+      await page.goto(`${tenant?.origin}/inicio?aba=explorar`);
+      await expect(unseen).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 90_000, intervals: [2_000] });
+
+    await untilHydrated(unseen);
+    await unseen.click();
+    const viewer = page.getByRole('dialog', { name: S.viewer.dialog });
+    await expect(viewer).toBeVisible();
+    await expect(page.getByTestId('story-caption')).toHaveText(CAPTION);
+
+    // Close: the ring and the accessible name grey out from the session's seen set (UI-D-698).
+    await viewer.getByRole('button', { name: S.viewer.close }).dispatchEvent('click');
+    await expect(viewer).toHaveCount(0);
+    await expect(
+      row(page).getByRole('button', { name: S.circle.author.replace('{name}', name) }),
+    ).toBeVisible();
+  });
+
+  test('a stranger who does not follow the author sees no circle for them, only the own "+" circle', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.stranger.email, SEED_PASSWORD, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+    await expect(row(page).getByRole('link', { name: S.own.action })).toBeVisible();
+    await expect(page.getByRole('button', { name: new RegExp(tenant.author.name) })).toHaveCount(0);
+    await expect(page.getByTestId('story-caption')).toHaveCount(0);
   });
 });
