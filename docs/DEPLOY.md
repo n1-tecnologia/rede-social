@@ -4465,7 +4465,7 @@ a row becomes `passed` only with the evidence you paste and your own date.
 
 ### What ships
 
-- **Eight migrations, all expand-only, applied in timestamp order** (MPUB-07, EP-53; the order `ls
+- **Nine migrations, all expand-only, applied in timestamp order** (MPUB-07, EP-53; the order `ls
   supabase/migrations` prints, all after `20261110163941_profile_form_professional_id_guard.sql`). Each applies on
   an EMPTY tenant project (no row is required by any of them: defaults backfill) and on an existing one:
   1. `20261111143858_member_communities_functions.sql` (hand-written): `app.member_community_hidden_ids()` and the
@@ -4488,11 +4488,18 @@ a row becomes `passed` only with the evidence you paste and your own date.
      `story_removed`, `community_archived`, `community_removed` and the subject types `story` and `community`.
   8. `20261111163020_member_stories_authors.sql` (generated): ONE partial index, `stories_tenant_author_expires_idx`,
      for the Explorar authors read. Safe to apply ahead of any code.
+  9. `20261112182228_member_content_write_gates.sql` (generated policies plus a hand-written guard and definer, quick
+     261112-kuk, closes MPUB-04): the database refuses what the API already refused. Seven restrictive policies
+     (`stories_member_delete_gate`, three on `story_highlights`, three on `story_highlight_items`), the
+     `stories_member_update_guard` trigger (a member changes a story only by its counters and by the soft delete of
+     its own story), the staff branch of `feed_posts_social_insert_gate` limited to no community or an organization
+     community, and `app.media_asset_hidden` closing the video of a post in a hidden member community. Tightening
+     only, no table, column or row changes; safe to apply ahead of any code.
 
 ### The order, and its ONE exception
 
 1. **Migrations first, through the ledgered fan-out** ("databases before API and worker", the Phase 09.2 Cloud Run
-   Job, D-544): the Job applies the eight versions to every ready tenant project. Locally, `pnpm db:two` applies the
+   Job, D-544): the Job applies the nine versions to every ready tenant project. Locally, `pnpm db:two` applies the
    whole tenant set to an empty second database and `pnpm db:migrate-all -- --dry-run` lists what is pending per
    project without applying anything; before the release, run both. The runner serialises per database with an
    advisory lock and records each version once, so a second run applies nothing (EP-55).

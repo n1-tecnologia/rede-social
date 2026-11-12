@@ -20,6 +20,33 @@ import {
 import { authenticatedRole } from 'drizzle-orm/supabase';
 
 /**
+ * The database half of the owner rule the service applies (quick 261112-kuk, WR-03, MPUB-04; D-706, D-713, D-716,
+ * D-718). One `sql` constant per term, so the six highlight and item gates cannot drift apart. A NULL role claim makes
+ * every branch of the gates below null, which DENIES (fail closed).
+ */
+// The highlight's community is a MEMBER community of this tenant that the caller created.
+const HIGHLIGHT_OWNER = sql`exists (
+  select 1 from public.communities c
+   where c.id = story_highlights.community_id
+     and c.tenant_id = app.tenant_id()
+     and c.kind = 'member'
+     and c.created_by_user_id = app.user_id())`;
+// The same rule for an item, reached through its highlight.
+const ITEM_OWNER = sql`exists (
+  select 1 from public.story_highlights h
+    join public.communities c on c.id = h.community_id and c.tenant_id = h.tenant_id
+   where h.id = story_highlight_items.highlight_id
+     and h.tenant_id = app.tenant_id()
+     and c.kind = 'member'
+     and c.created_by_user_id = app.user_id())`;
+// The story being saved is the caller's OWN (the database mirror of `curatableStory`, T-10-34, T-10-35, D-716).
+const ITEM_STORY_AUTHOR = sql`exists (
+  select 1 from public.stories s
+   where s.id = story_highlight_items.story_id
+     and s.tenant_id = app.tenant_id()
+     and s.author_user_id = app.user_id())`;
+
+/**
  * The stories module's two tables (STORY-01, STORY-03, STORY-04) — the tenant's 24 h broadcast and
  * the join that lets an editorial act outlive it.
  *
@@ -221,6 +248,20 @@ export const stories = pgTable(
       to: authenticatedRole,
       withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant')`,
     }),
+    // quick 261112-kuk (WR-03, MPUB-04; T-kuk-02): a `member` claim hard-deletes NO story. No endpoint does
+    // (the service soft-deletes with an UPDATE), and a USING-filtered DELETE matches zero rows, which is how a
+    // forged delete is refused. Staff and system lanes keep the delete; a null role claim denies. STORIES
+    // UPDATE has no policy on purpose: a policy cannot limit COLUMNS and the invoker counter triggers
+    // (`app.feed_like_count()` and the story comment counter) update `like_count` / `comment_count` as the member
+    // who liked or commented, on a story that member did not write; a policy narrowed to the author would turn
+    // those updates into silent zero-row updates and the counters would drift. The guard is the hand-written
+    // trigger `stories_member_update_guard` (same migration), the shape of `feed_posts_member_update_guard`.
+    pgPolicy('stories_member_delete_gate', {
+      as: 'restrictive',
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member'`,
+    }),
   ],
 ).enableRLS();
 
@@ -280,6 +321,34 @@ export const storyHighlights = pgTable(
     ),
     check('story_highlights_position_chk', sql`${t.position} >= 0`),
     tenantIsolationPolicy('story_highlights_tenant_isolation'),
+    // quick 261112-kuk (WR-03, MPUB-04; D-706, D-713, D-718; T-kuk-03): who may WRITE a highlight. RESTRICTIVE,
+    // per command, so each ANDs with the tenant isolation policy and only narrows. A `member` claim writes a
+    // highlight only where its community is a MEMBER community the caller created (the owner rule of
+    // `resolveHighlightPlace`): never Inicio (null community), never an organization community, never another
+    // member's. INSERT additionally needs `social` on, read from SQL like every insert gate of Phase 10;
+    // UPDATE and DELETE carry NO social term (assumption A11, as `communities_member_update_gate`): the service
+    // already stops them while social is off, and a social term would only stop a creator from taking down their
+    // own highlight. UPDATE carries the owner term in `with check` too, so a highlight cannot be re-pointed to
+    // another community. Staff and system lanes pass as before. A NULL role claim makes every branch null: denied.
+    pgPolicy('story_highlights_member_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${SOCIAL_ENABLED} and ${HIGHLIGHT_OWNER})`,
+    }),
+    pgPolicy('story_highlights_member_update_gate', {
+      as: 'restrictive',
+      for: 'update',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${HIGHLIGHT_OWNER})`,
+      withCheck: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${HIGHLIGHT_OWNER})`,
+    }),
+    pgPolicy('story_highlights_member_delete_gate', {
+      as: 'restrictive',
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${HIGHLIGHT_OWNER})`,
+    }),
   ],
 ).enableRLS();
 
@@ -318,6 +387,33 @@ export const storyHighlightItems = pgTable(
     // Tenant first; serves "how many highlights is this story in" and the sheet's initial state.
     index('story_highlight_items_tenant_story_idx').on(t.tenantId, t.storyId),
     tenantIsolationPolicy('story_highlight_items_tenant_isolation'),
+    // quick 261112-kuk (WR-03, MPUB-04; D-706, D-713, D-716, D-718; T-kuk-03): who may WRITE an item. A `member`
+    // claim inserts an item only in a highlight of a member community it created AND only with its OWN story
+    // (the database mirror of `curatableStory`, T-10-34/35): without the story-author term a creator could save
+    // ANOTHER member's followers-only story into its own community's highlight, and branch 3 of
+    // `stories_audience_gate` would then make it readable by the whole community, which is exactly the audience
+    // widening D-716 forbids. INSERT needs `social` on (read from SQL); DELETE does not (A11). A member never
+    // UPDATES an item (the service never does), which also stops a re-point of an item to another highlight or
+    // story. Staff and system lanes pass as before; a NULL role claim makes every branch null: denied.
+    pgPolicy('story_highlight_items_member_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${SOCIAL_ENABLED} and ${ITEM_OWNER} and ${ITEM_STORY_AUTHOR})`,
+    }),
+    pgPolicy('story_highlight_items_member_update_gate', {
+      as: 'restrictive',
+      for: 'update',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member'`,
+      withCheck: sql`app.tenant_role() <> 'member'`,
+    }),
+    pgPolicy('story_highlight_items_member_delete_gate', {
+      as: 'restrictive',
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member' or (app.tenant_role() = 'member' and ${ITEM_OWNER})`,
+    }),
   ],
 ).enableRLS();
 

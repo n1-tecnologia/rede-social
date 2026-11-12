@@ -345,11 +345,16 @@ export const feedPosts = pgTable(
     // the product grant) belongs to the function body, so replacing the body with `create or replace`
     // (same signature, same OID) is the ONLY change that phase needs. A member still cannot insert
     // `'followers'` with a community, and the staff branch stays `visibility = 'tenant'`.
+    //
+    // quick 261112-kuk (WR-04, MPUB-04, D-706; T-kuk-04) gave the STAFF branch a community-kind term: it admits
+    // a `'tenant'` post only with no community or in an ORGANIZATION community of the caller's tenant, so an
+    // admin_tenant or system lane can no longer put an organization post into a member community. The three
+    // member branches are unchanged.
     pgPolicy('feed_posts_social_insert_gate', {
       as: 'restrictive',
       for: 'insert',
       to: authenticatedRole,
-      withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and community_id is null and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant') or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and ${SOCIAL_ENABLED} and exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'member' and c.created_by_user_id = app.user_id() and c.status = 'active' and c.deleted_at is null)) or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and app.community_action_allowed(community_id, 'post'))`,
+      withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and community_id is null and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant' and (community_id is null or exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'organization'))) or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and ${SOCIAL_ENABLED} and exists (select 1 from public.communities c where c.id = community_id and c.tenant_id = app.tenant_id() and c.kind = 'member' and c.created_by_user_id = app.user_id() and c.status = 'active' and c.deleted_at is null)) or (app.tenant_role() = 'member' and visibility = 'community' and community_id is not null and app.community_action_allowed(community_id, 'post'))`,
     }),
     // 09-14 (WR-07, SOCIAL-03, T-04-54 [informational]; T-09-49): the DELETE backstop. The service never
     // hard-deletes a post (it soft-deletes), so a member lane that issued `delete from feed_posts` would

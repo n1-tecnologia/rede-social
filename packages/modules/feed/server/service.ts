@@ -1209,9 +1209,12 @@ async function upsertLinkPreview(
  *           caller whose posting identity is a member (the same role read the audience stamp already
  *           makes, not a new role gate) and `communityActionAllowed(tx, id, 'post')`. The SQL stub it
  *           asks answers `false` for every input, so this branch is NEVER taken in Phase 10;
- *     when none holds → `403 FORBIDDEN`. An admin can therefore never publish in a member community
- *     (RLS `feed_posts_social_insert_gate` says the same), and a non-owner learns nothing the tenant
- *     cannot already read: every community is visible to the whole tenant (D-701);
+ *     when none holds → `403 FORBIDDEN`. An admin can therefore never publish in a member community, and
+ *     the database agrees (WR-04, migration `*_member_content_write_gates.sql`): the staff branch of
+ *     `feed_posts_social_insert_gate` admits a `'tenant'` post only with no community or in an
+ *     ORGANIZATION community of the caller's tenant, and its member branch only the creator's own active
+ *     member community. A non-owner learns nothing the tenant cannot already read: every community is
+ *     visible to the whole tenant (D-701);
  *  3. visible, permitted, but `archived` → `400 VALIDATION_FAILED { community: 'archived' }`, AFTER the
  *     403 test (a stranger never learns the state of somebody else's community from a 400). The creator
  *     can already see the "Arquivada" pill, so the code discloses nothing new;
