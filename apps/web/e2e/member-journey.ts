@@ -138,3 +138,62 @@ export async function createMemberStoryAs(
     return story.id;
   });
 }
+
+/**
+ * A MEMBER community written directly (`kind = 'member'`, the fixed position 1000000 the check
+ * constraint demands, `status = 'active'`), created by `email`. The moderation and switch journeys
+ * start from one without driving the creator's form again. Returns the id; `dropJourneyTenant`
+ * removes it by name prefix (so the name must start with `JOURNEY_PREFIX`).
+ */
+export async function createMemberCommunityAs(
+  email: string,
+  tenantSlug: string,
+  name: string,
+): Promise<string> {
+  const slug = `${name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)}-${Math.random().toString(36).slice(2, 8)}`;
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.communities
+      (tenant_id, created_by_user_id, kind, name, slug, status, position)
+    select t.id, u.id, 'member', ${name}, ${slug}, 'active', 1000000
+      from public.tenants t, public.users u
+     where t.slug = ${tenantSlug} and u.email = ${email}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not create a member community "${name}" in ${tenantSlug}`);
+  return id;
+}
+
+/**
+ * A highlight of a member community holding one story: the row the creator's curation writes
+ * (`story_highlights` with the community, one `story_highlight_items`), created by `email`. Removed
+ * with its community (both cascade).
+ */
+export async function createCommunityHighlightWith(
+  email: string,
+  tenantSlug: string,
+  communityId: string,
+  title: string,
+  storyId: string,
+): Promise<string> {
+  return sql().begin(async (tx) => {
+    const rows = await tx<{ id: string; tenant_id: string; user_id: string }[]>`
+      insert into public.story_highlights
+        (tenant_id, community_id, title, position, created_by_user_id)
+      select t.id, ${communityId}::uuid, ${title}, 0, u.id
+        from public.tenants t, public.users u
+       where t.slug = ${tenantSlug} and u.email = ${email}
+      returning id, tenant_id, created_by_user_id as user_id`;
+    const highlight = rows[0];
+    if (!highlight) throw new Error(`could not create the highlight "${title}" in ${tenantSlug}`);
+    await tx`
+      insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+      values (${highlight.tenant_id}::uuid, ${highlight.id}::uuid, ${storyId}::uuid,
+              ${highlight.user_id}::uuid)`;
+    return highlight.id;
+  });
+}

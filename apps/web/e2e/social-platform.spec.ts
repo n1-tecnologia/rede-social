@@ -1,7 +1,27 @@
 import { expect, type Page, test } from '@playwright/test';
 import postgres from 'postgres';
-import { closeAdmin, envValue, getTenantModuleFlag } from './admin';
-import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
+import communitiesMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
+import platformModulesSocial from '../messages/pt-BR/platformModules.social.json' with {
+  type: 'json',
+};
+import socialMessages from '../messages/pt-BR/social.json' with { type: 'json' };
+import storiesMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
+import { closeAdmin, createFeedPostAs, envValue, getTenantModuleFlag } from './admin';
+import { closeFeedAdmin } from './feed-admin';
+import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+import { untilHydrated } from './hydration';
+import {
+  closeJourneyAdmin,
+  createCommunityHighlightWith,
+  createMemberCommunityAs,
+  createMemberStoryAs,
+  dropJourneyTenant,
+  JOURNEY_PREFIX,
+  type JourneyTenant,
+  journeySlug,
+  provisionJourneyTenant,
+} from './member-journey';
+import { closeSocialAdmin } from './social-admin';
 import {
   closeTenantFixtures,
   createThrowawayTenant,
@@ -58,7 +78,7 @@ const ASSET_FILENAME = 'social-platform-09-12.jpg';
 
 const SOCIAL_SWITCH = 'Ativar ou desativar Rede social';
 const LIMITS_BUTTON = 'Configurar limites';
-const LIMITS_TITLE = 'Limites de mídia dos membros';
+const LIMITS_TITLE = 'Limites dos membros';
 const SAVE_LIMITS = 'Salvar limites';
 const F_PHOTOS = 'Fotos por publicação';
 const F_PHOTO_MB = 'Tamanho máximo da foto, em MB';
@@ -306,7 +326,7 @@ test.describe('09-12 - platform panel: the media limits sheet', () => {
     await expect(numberField(page, F_VIDEO_MB)).toHaveCount(0);
     await expect(page.getByText('De 1 a 10. Padrão: 4.')).toBeVisible();
     await expect(
-      page.getByText('Vale só para novos envios. O que já foi publicado não muda.'),
+      page.getByText('Vale só para novos envios e novas comunidades. O que já existe não muda.'),
     ).toBeVisible();
 
     // Out of range: 0 photos and 16 MB show their own inline errors; the sheet stays open and
@@ -420,6 +440,201 @@ test.describe('09-12 - platform panel: the media limits sheet', () => {
       .poll(async () => (await socialSettingsOf('rede-lab'))?.media?.photoMaxBytes)
       .toBe(5 * MIB);
     expect((await startPostPhoto(member, 2 * MIB)).status).toBe(201);
+
+    await context.close();
+  });
+});
+
+/**
+ * 10-15 (MPUB-05, D-715, D-718, UI-D-714, UI-D-716): the platform side of the member communities,
+ * on a throwaway tenant (`member-journey.ts`).
+ *
+ * **The limit.** The platform sheet carries "Comunidades por membro" (0 to 20): 2 saves and reads
+ * back, 21 is refused inline with the sheet still open.
+ *
+ * **The switch.** With `social` switched off from the platform panel the member's Explorar tab, the
+ * "Criar comunidade" control and every owner control of their own community are gone, while the
+ * community, its post and a highlight story stay readable; switching it on again restores them. The
+ * API and the web tier cache a tenant's flags for 30 s, so each side polls until it lands (the 09-11
+ * pattern). The tenant is dropped whole, which is also the restore of the limit and the flag.
+ */
+test.describe('10 moderation and switch', () => {
+  test.describe.configure({ mode: 'serial', timeout: 300_000 });
+  const L = platformModulesSocial.platformModules.social.limits;
+  const C = communitiesMessages.communities;
+  const S = socialMessages.social;
+  const ST = storiesMessages.stories;
+  const STAMP = Date.now().toString(36);
+  const NAME = `${JOURNEY_PREFIX}comunidade do switch ${STAMP}`;
+  const POST = `${JOURNEY_PREFIX}post do switch ${STAMP}`;
+  const HIGHLIGHT = `${JOURNEY_PREFIX}destaque`;
+  let tenant: JourneyTenant | null = null;
+  let tenantId = '';
+  let communityId = '';
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    test.skip(
+      isRemote,
+      'local stack only (the tenant is provisioned through the admin connection)',
+    );
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the member journey is the phone one');
+    test.setTimeout(120_000);
+    if (!SUPER_ADMIN_PASSWORD) {
+      throw new Error('SUPER_ADMIN_PASSWORD is required (same value used by `pnpm db:seed`)');
+    }
+    tenant = await provisionJourneyTenant(
+      journeySlug('sw', testInfo.project.name, Date.now().toString(36)),
+      SEED_PASSWORD,
+    );
+    tenantId = tenant.tenantId;
+    communityId = await createMemberCommunityAs(tenant.author.email, tenant.slug, NAME);
+    await createFeedPostAs(tenant.author.email, tenant.slug, POST, { communityId });
+    const storyId = await createMemberStoryAs(
+      tenant.author.email,
+      tenant.slug,
+      `${JOURNEY_PREFIX}story do destaque ${STAMP}`,
+    );
+    await createCommunityHighlightWith(
+      tenant.author.email,
+      tenant.slug,
+      communityId,
+      HIGHLIGHT,
+      storyId,
+    );
+  });
+
+  test.afterAll(async () => {
+    await dropJourneyTenant(tenant);
+    await closeJourneyAdmin();
+    await closeSocialAdmin();
+    await closeFeedAdmin();
+    // The file's own afterAll closes the shared fixture connections.
+  });
+
+  const saveLimitsButton = (page: Page) => page.getByRole('button', { name: L.save });
+  const sheet = (page: Page) => page.getByRole('dialog', { name: L.title });
+  const perMember = (page: Page) => page.getByRole('textbox', { name: L.fields.communities });
+
+  test('the platform sheet saves "Comunidades por membro" and refuses 21 with the sheet open', async ({
+    browser,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await signInSuperAdmin(page);
+    await openModulesTab(page, tenantId);
+
+    await page.getByRole('button', { name: L.open }).click();
+    await expect(sheet(page)).toBeVisible();
+    await expect(perMember(page)).toBeVisible();
+
+    // 21 is out of range: the inline error, the sheet stays open, nothing is written.
+    await perMember(page).fill('21');
+    await saveLimitsButton(page).click();
+    await expect(
+      page.getByText(L.range.replace('{min}', '0').replace('{max}', '20')),
+    ).toBeVisible();
+    await expect(sheet(page)).toBeVisible();
+    expect((await socialSettingsOf(tenant.slug))?.communities).toBeUndefined();
+
+    // 2 saves: the toast, the sheet closes, the number is stored, and the sheet reads it back.
+    await perMember(page).fill('2');
+    await saveLimitsButton(page).click();
+    await expect(page.getByRole('status').filter({ hasText: L.saved })).toBeVisible();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect
+      .poll(async () => (await socialSettingsOf(tenant?.slug ?? ''))?.communities?.maxPerMember)
+      .toBe(2);
+    await page.getByRole('button', { name: L.open }).click();
+    await expect(perMember(page)).toHaveValue('2');
+
+    await context.close();
+  });
+
+  test('social off from the panel removes the member’s writes and keeps the reads; on restores them', async ({
+    page,
+    browser,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    const t = tenant;
+    const communityUrl = `${t.origin}/comunidades/${communityId}`;
+    const composeEntry = page.locator('a[href^="/criar?comunidade="]:visible');
+    const createControl = page.locator('main a[data-communities-create]');
+    const editControl = page.locator('[data-community-edit]');
+    const highlight = page.getByRole('button', {
+      name: ST.circle.highlight.replace('{title}', HIGHLIGHT),
+    });
+
+    // On: the creator has every control, the tab is there.
+    await login(page, t.author.email, SEED_PASSWORD, t.origin);
+    await page.goto(communityUrl);
+    await expect(composeEntry).toBeVisible();
+    await expect(editControl).toBeVisible();
+    await page.goto(`${t.origin}/comunidades`);
+    await expect(createControl).toBeVisible();
+    await page.goto(`${t.origin}/inicio?aba=explorar`);
+    await expect(page.getByRole('tablist', { name: S.tabs.label })).toBeVisible();
+
+    // Off, from the platform panel (no dialog going off).
+    const context = await browser.newContext();
+    const panel = await context.newPage();
+    await signInSuperAdmin(panel);
+    await openModulesTab(panel, tenantId);
+    const sw = panel.getByRole('switch', { name: SOCIAL_SWITCH });
+    await expect(sw).toBeChecked();
+    await sw.click();
+    await expect.poll(() => getTenantModuleFlag(t.slug, 'social')).toBe(false);
+
+    // The flag is cached for 30 s by the API and the web tier: poll until the creator's controls go.
+    await expect(async () => {
+      await page.goto(communityUrl);
+      await expect(page.getByRole('heading', { name: NAME, level: 1 })).toBeVisible({
+        timeout: 3_000,
+      });
+      await expect(composeEntry).toHaveCount(0, { timeout: 3_000 });
+    }).toPass({ timeout: 90_000, intervals: [2_000] });
+    await expect(editControl).toHaveCount(0);
+    await expect(page.getByText(C.byline.you)).toBeVisible();
+
+    // Still readable: the community, its post and the highlight story.
+    await expect(page.getByText(POST)).toBeVisible();
+    await expect(highlight).toBeVisible();
+    await untilHydrated(highlight);
+    await highlight.click();
+    await expect(page.getByRole('dialog', { name: ST.viewer.dialog })).toBeVisible();
+    await page
+      .getByRole('dialog', { name: ST.viewer.dialog })
+      .getByRole('button', { name: ST.viewer.close })
+      .dispatchEvent('click');
+    await expect(page.getByRole('dialog', { name: ST.viewer.dialog })).toHaveCount(0);
+    await expect(
+      page.getByRole('link', { name: ST.own.actionCommunity.replace('{community}', NAME) }),
+    ).toHaveCount(0);
+
+    // The list: no create control; Explorar reads as Início and the chip row is gone.
+    await page.goto(`${t.origin}/comunidades`);
+    await expect(
+      page.locator('main a[data-testid="community-card"]').filter({ hasText: NAME }),
+    ).toHaveCount(1);
+    await expect(createControl).toHaveCount(0);
+    await page.goto(`${t.origin}/inicio?aba=explorar`);
+    await expect(page.locator('main').first()).toBeVisible();
+    await expect(page.getByRole('tablist', { name: S.tabs.label })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: S.tabs.explore })).toHaveCount(0);
+
+    // On again: the confirmation first, then every control is back.
+    await sw.click();
+    await panel.getByRole('dialog').getByRole('button', { name: 'Ativar Rede social' }).click();
+    await expect.poll(() => getTenantModuleFlag(t.slug, 'social')).toBe(true);
+    await expect(async () => {
+      await page.goto(communityUrl);
+      await expect(composeEntry).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 90_000, intervals: [2_000] });
+    await expect(editControl).toBeVisible();
+    await page.goto(`${t.origin}/comunidades`);
+    await expect(createControl).toBeVisible();
+    await page.goto(`${t.origin}/inicio?aba=explorar`);
+    await expect(page.getByRole('tablist', { name: S.tabs.label })).toBeVisible();
 
     await context.close();
   });

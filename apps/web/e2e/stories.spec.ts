@@ -4,6 +4,7 @@ import { STORY_MAX_PAGE_SIZE } from '@rede-social/module-stories/contracts';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import loginMessages from '../messages/pt-BR/login.json' with { type: 'json' };
+import moderationMessages from '../messages/pt-BR/moderation.json' with { type: 'json' };
 import socialMessages from '../messages/pt-BR/social.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
@@ -28,6 +29,7 @@ import { baseURL, hosts, isRemote, login, SEED_PASSWORD, users } from './fixture
 import { untilHydrated } from './hydration';
 import {
   closeJourneyAdmin,
+  createMemberStoryAs,
   dropJourneyTenant,
   JOURNEY_PREFIX,
   type JourneyTenant,
@@ -2607,5 +2609,89 @@ test.describe('10 member journey', () => {
     await expect(row(page).getByRole('link', { name: S.own.action })).toBeVisible();
     await expect(page.getByRole('button', { name: new RegExp(tenant.author.name) })).toHaveCount(0);
     await expect(page.getByTestId('story-caption')).toHaveCount(0);
+  });
+});
+
+/**
+ * 10-15 (MPUB-05, D-711, D-717): the moderator's path to a member's story, on a phone. The
+ * administrator sees the author's circle in the "Stories dos membros" row WITHOUT following anyone,
+ * opens the viewer, deletes the story from "Mais opções" behind the moderator's dialog ("A pessoa
+ * não é avisada.") and finds the removal in Moderação. The community half of the moderation journey
+ * and the `social` switch are `comunidades.spec.ts` and `social-platform.spec.ts`.
+ *
+ * Throwaway tenant (`member-journey.ts`); the story is a fixture row (the publish is the journey
+ * above), swept by the `e2e-10-` prefix. The moderation rows the delete writes go with the tenant.
+ */
+test.describe('10 moderation and switch', () => {
+  test.describe.configure({ mode: 'serial', timeout: 120_000 });
+  const SOC = socialMessages.social;
+  const M = moderationMessages.moderation;
+  const STORY = `${JOURNEY_PREFIX}story moderado ${Date.now().toString(36)}`;
+  let tenant: JourneyTenant | null = null;
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    test.skip(
+      isRemote,
+      'local stack only (the tenant is provisioned through the admin connection)',
+    );
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the member journey is the phone one');
+    test.setTimeout(120_000);
+    tenant = await provisionJourneyTenant(
+      journeySlug('sm', testInfo.project.name, Date.now().toString(36)),
+      SEED_PASSWORD,
+    );
+    await createMemberStoryAs(tenant.author.email, tenant.slug, STORY);
+  });
+
+  test.afterAll(async () => {
+    await dropJourneyTenant(tenant);
+    await closeJourneyAdmin();
+    await closeSocialAdmin();
+    await closeFeedAdmin();
+    await closeTenantFixtures();
+  });
+
+  test('the administrator sees the member’s circle without following, deletes the story as a moderator and finds it in Moderação', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.adminEmail, SEED_PASSWORD, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+
+    // UI-D-699: the moderator's row, named for what it is, holding every member's circle.
+    const row = page.getByRole('list', { name: SOC.stories.regionStaff });
+    const circle = row.getByRole('button', {
+      name: new RegExp(`^${S.circle.author.replace('{name}', tenant.author.name)}`),
+    });
+    await expect(circle).toBeVisible();
+    await untilHydrated(circle);
+    await circle.click();
+
+    const viewer = page.getByRole('dialog', { name: S.viewer.dialog });
+    await expect(viewer).toBeVisible();
+    // Dispatched AT the element: the stories spec's dev-overlay rule.
+    await viewer.getByRole('button', { name: S.viewer.more }).dispatchEvent('click');
+    await page.getByRole('button', { name: S.history.menu.delete }).dispatchEvent('click');
+
+    // The moderator's own copy: the person is not told.
+    const confirm = page
+      .getByRole('alertdialog')
+      .or(page.getByRole('dialog', { name: S.memberStory.confirmMod.title }));
+    await expect(confirm.getByText(S.memberStory.confirmMod.body)).toBeVisible();
+    await expect(confirm.getByText(/A pessoa não é avisada\./)).toBeVisible();
+    // Scoped to the dialog: the closing menu sheet still holds a row of the same name for a moment.
+    await confirm
+      .getByRole('button', { name: S.memberStory.confirmMod.confirm, exact: true })
+      .dispatchEvent('click');
+    await expect(page.getByText(S.history.toasts.deleted, { exact: true })).toBeVisible();
+
+    // Gone from the row, and in the log with the moderator as the actor and the author as the target.
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+    await expect(circle).toHaveCount(0);
+    await page.goto(`${tenant.origin}/configuracoes/moderacao`);
+    const first = page.getByRole('list', { name: M.log.label }).getByRole('listitem').first();
+    await expect(first).toContainText(
+      M.log.rows.storyRemoved.replace('{actor}', M.log.you).replace('{target}', tenant.author.name),
+    );
   });
 });

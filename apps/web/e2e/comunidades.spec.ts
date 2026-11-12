@@ -2,6 +2,7 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import postgres from 'postgres';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
+import moderationMessages from '../messages/pt-BR/moderation.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
   closeAdmin,
@@ -24,6 +25,7 @@ import {
 import { untilHydrated } from './hydration';
 import {
   closeJourneyAdmin,
+  createMemberCommunityAs,
   dropJourneyTenant,
   JOURNEY_PREFIX,
   type JourneyTenant,
@@ -1633,5 +1635,111 @@ test.describe('10 member journey', () => {
     await expect(
       page.getByText(COMPOSER.audienceCommunity.replace('{community}', NAME)),
     ).toHaveCount(0);
+  });
+});
+
+/**
+ * 10-15 (MPUB-05, D-711, D-717, D-718): the moderator's path to a member's community, on a phone.
+ * The administrator opens the creator's community form, archives it behind the moderator's copy
+ * ("A pessoa que criou não é avisada."), deletes it from the archived page behind the moderator's
+ * delete copy and finds both removals in Moderação. The story half is `stories.spec.ts` and the
+ * `social` switch is `social-platform.spec.ts`.
+ *
+ * Throwaway tenant (`member-journey.ts`); the community and its post are fixture rows named by the
+ * `e2e-10-` prefix, which also sweeps them if the case stops half way.
+ */
+test.describe('10 moderation and switch', () => {
+  test.describe.configure({ mode: 'serial', timeout: 120_000 });
+  const M = moderationMessages.moderation;
+  const STAMP = Date.now().toString(36);
+  const NAME = `${JOURNEY_PREFIX}moderada ${STAMP}`;
+  let tenant: JourneyTenant | null = null;
+  let communityId = '';
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    test.skip(
+      isRemote,
+      'local stack only (the tenant is provisioned through the admin connection)',
+    );
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the member journey is the phone one');
+    test.setTimeout(120_000);
+    tenant = await provisionJourneyTenant(
+      journeySlug('cm', testInfo.project.name, Date.now().toString(36)),
+      SEED_PASSWORD,
+    );
+    communityId = await createMemberCommunityAs(tenant.author.email, tenant.slug, NAME);
+    await createFeedPostAs(tenant.author.email, tenant.slug, `${JOURNEY_PREFIX}post ${STAMP}`, {
+      communityId,
+    });
+  });
+
+  test.afterAll(async () => {
+    await dropJourneyTenant(tenant);
+    await closeJourneyAdmin();
+    await closeSocialAdmin();
+    await closeFeedAdmin();
+    await closeTenantFixtures();
+    await closeAdmin();
+  });
+
+  test('the administrator archives the member’s community and deletes it with the moderator’s copy, and both removals are in Moderação', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, tenant.adminEmail, SEED_PASSWORD, tenant.origin);
+
+    // The moderator moderates: the creator's form with no audience line and the danger archive row.
+    await page.goto(`${tenant.origin}/comunidades/${communityId}/editar`);
+    await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
+    await expect(
+      page.getByText(C.form.audienceMember.replace('{tenant}', tenant.displayName)),
+    ).toHaveCount(0);
+    await untilHydrated(page.locator('[data-community-archive]'));
+    await page.locator('[data-community-archive]').click();
+    const archive = page.getByRole('dialog');
+    await expect(archive).toContainText(C.confirm.archiveMod.title);
+    await expect(archive).toContainText(C.confirm.archiveMod.body);
+    await expect(archive).toContainText('A pessoa que criou não é avisada.');
+    await archive.getByRole('button', { name: C.confirm.archiveMod.confirm, exact: true }).click();
+    await page.waitForURL(/\/comunidades$/);
+
+    // The archived page carries the live delete control under Reativar, with its own moderator copy.
+    await page.goto(`${tenant.origin}/comunidades/${communityId}`);
+    await expect(page.getByText(C.archived.note)).toBeVisible();
+    const trigger = page
+      .locator('[data-delete-control="community"]')
+      .getByRole('button', { name: C.delete.action });
+    await expect(trigger).toBeEnabled();
+    await untilHydrated(trigger);
+    // Dispatched: on a phone the trigger can sit under the dev pill or the BottomNav.
+    await trigger.dispatchEvent('click');
+    const remove = page.getByRole('dialog');
+    await expect(remove).toContainText(C.confirm.deleteMod.title);
+    await expect(remove).toContainText(C.confirm.deleteMod.body);
+    await remove.getByRole('button', { name: C.confirm.deleteMod.confirm, exact: true }).click();
+
+    await expect(page).toHaveURL(/\/comunidades$/, { timeout: 30_000 });
+    await expect(page.getByRole('status').filter({ hasText: C.toasts.deleted })).toBeVisible();
+    await expect(
+      page.locator('main a[data-testid="community-card"]').filter({ hasText: NAME }),
+    ).toHaveCount(0);
+
+    // Moderação lists both rows, newest first: the removal, then the archive.
+    await page.goto(`${tenant.origin}/configuracoes/moderacao`);
+    const rows = page.getByRole('list', { name: M.log.label }).getByRole('listitem');
+    await expect(rows.first()).toContainText(
+      M.log.rows.communityRemoved
+        .replace('{actor}', M.log.you)
+        .replace('{community}', NAME)
+        .replace('{target}', tenant.author.name),
+    );
+    await expect(rows.nth(1)).toContainText(
+      M.log.rows.communityArchived
+        .replace('{actor}', M.log.you)
+        .replace('{community}', NAME)
+        .replace('{target}', tenant.author.name),
+    );
+    await expect(rows.first()).toContainText(M.log.kinds.communityRemoved);
+    await expect(rows.nth(1)).toContainText(M.log.kinds.communityArchived);
   });
 });
