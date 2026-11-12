@@ -1,8 +1,8 @@
 ---
 phase: 10-rede-social-member-stories-and-communities
-verified: 2026-11-12T18:00:00Z
-status: gaps_found
-score: 4/4 roadmap criteria verified; 27/28 requirement ids satisfied (MPUB-04 partial)
+verified: 2026-11-12T19:00:00Z
+status: human_needed
+score: 5/5 truths verified (4 roadmap criteria + D-711 amendment); 28/28 requirement ids satisfied (MPUB-04 closed)
 covered_files:
   - .planning/REQUIREMENTS.md
   - .planning/phases/10-rede-social-member-stories-and-communities/10-01-PLAN.md
@@ -125,22 +125,17 @@ covered_files:
   - supabase/migrations/20261111150352_story_media_gate.sql
   - supabase/migrations/20261111151218_moderation_member_content.sql
   - supabase/migrations/20261111163020_member_stories_authors.sql
-covered_digest: "v1:sha256:ae3a91269a4f77ada0c105ed5d330d674224bbf8a82863a3f563d8098d4c48f3"
+  - supabase/migrations/20261112182228_member_content_write_gates.sql
+covered_digest: "v1:sha256:073e0fec0425aec2c986749459b0b70d904dcdc96f0396876c4387035be196b6"
 behavior_unverified: 0
 overrides_applied: 0
-gaps:
-  - truth: "MPUB-04: the member lane is bounded by RESTRICTIVE RLS gates on communities, stories, story_highlights, story_highlight_items and feed_posts that refuse (42501) a forged kind, owner, audience or non-owner write"
-    status: partial
-    reason: "Gates exist and are proven by pgTAP 230/231/232 for communities (kind insert, member update, delete, hidden creator), stories (insert audience gate, select audience gate), story likes/comments, and feed_posts (member insert gate, update allow-list). They do NOT exist for story_highlights, story_highlight_items, nor for UPDATE/DELETE on stories (only stories_tenant_isolation, tenant predicate only), and the staff branch of feed_posts_social_insert_gate has no community-kind term. The owner rule on those paths is enforced only by the API service layer. This is within one tenant (not a cross-tenant leak) and only reachable by a lane that already holds an authenticated-role database connection; the API is the sole writer today."
-    artifacts:
-      - path: "packages/modules/stories/db/schema.ts"
-        issue: "only stories_audience_gate (select) and stories_social_insert_gate (insert) added; no UPDATE/DELETE gate; story_highlights and story_highlight_items have no Phase 10 policy (review WR-03)"
-      - path: "supabase/migrations/20261111144148_feed_community_audience.sql"
-        issue: "staff branch `app.tenant_role() <> 'member' and visibility = 'tenant'` accepts any community_id, so an admin lane could insert a 'tenant' post into a member community at the database; service docblock at packages/modules/feed/server/service.ts:1212 says RLS says the same, which is false (review WR-04)"
-    missing:
-      - "Restrictive UPDATE/DELETE gates (or an invoker guard trigger) on stories, story_highlights, story_highlight_items for the member claim (author or owned member community only), with pgTAP negatives (WR-03)"
-      - "A community-kind term on the staff branch of feed_posts_social_insert_gate, or correct the docblock if Igor decides not to add it (WR-04)"
-      - "Or: Igor accepts the deviation by override (see Gaps Summary) and the requirement text is narrowed to the gates actually shipped"
+re_verification:
+  previous_status: gaps_found
+  previous_score: "4/4 roadmap criteria; 27/28 requirement ids (MPUB-04 partial)"
+  gaps_closed:
+    - "MPUB-04: restrictive database gates on stories UPDATE/DELETE, story_highlights, story_highlight_items and the staff branch of feed_posts_social_insert_gate (WR-03, WR-04), plus the hidden-community video leg of app.media_asset_hidden (WR-05)"
+  gaps_remaining: []
+  regressions: []
 advisory: []
 human_verification:
   - test: "P1: member story composer, create-community entry and Explorar story row on a real phone with the installed PWA"
@@ -148,7 +143,7 @@ human_verification:
     why_human: "A phone cannot reach *.localhost; needs a homolog or production host and Igor's hand"
   - test: "P2: social switched off then on in a live per-tenant project"
     expected: "Writes stop, member communities/posts/highlight story stay readable, moderator keeps removing, on restores everything with no row changed"
-    why_human: "Needs a hosted tenant project with the eight Phase 10 migrations applied"
+    why_human: "Needs a hosted tenant project with the nine Phase 10 migrations applied"
   - test: "P3: viewer menus and destination sheet at 320px on a real device"
     expected: "Reachable with a thumb, not clipped, delete dialogs read right in both copy variants"
     why_human: "Real-device layout"
@@ -158,151 +153,137 @@ human_verification:
   - test: "P5-P9: planner assumptions A1..A12, UI-SPEC defaults OQ-1..OQ-7, D-478 legal wording, owner-dashboard counts decision, release order"
     expected: "Igor confirms or overturns each in 10-MANUAL-PROOFS.md"
     why_human: "Owner decisions and deploys; an agent never records these as passed"
+  - test: "Release: ninth migration through the ledgered fan-out, then API deploy (the resolveHighlight change must ship with the API)"
+    expected: "pnpm db:two and pnpm db:migrate-all -- --dry-run clean; migration applied to every ready tenant project before the API; a non-owner member naming a foreign highlight still gets 403, not 404"
+    why_human: "Deploy and hosted projects are Igor's; not authorized or observable here"
+  - test: "Full pnpm e2e baseline and e2e:pwa"
+    expected: "The 118 red failures outside Phase 10 specs are shown pre-existing by a run at the commit before the phase, and e2e:pwa runs green"
+    why_human: "No baseline run exists; the verdict on those failures is an inference from touched files"
 ---
 
 # Phase 10: Rede Social - Member Stories and Communities Verification Report
 
 **Phase Goal:** With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from its owner: the creator for a member-created community, any `admin_tenant` for an organization community (D-706).
 **Verified:** 2026-11-12
-**Status:** gaps_found (one partial requirement, MPUB-04, database defense-in-depth; all four roadmap criteria hold)
-**Re-verification:** No, initial verification
+**Status:** human_needed (everything automatable passes; real-device proofs P1..P9, the e2e baseline question and the provisional sketch 020 approval remain with Igor)
+**Re-verification:** Yes, after gap closure (quick 261112-kuk, commits 35226de7, 28f83dd8, cb2b4507, 2a522c06)
 
 ## Goal Achievement
 
-The goal and the four roadmap criteria are delivered and proven in code, by pgTAP, by API integration tests and by component tests. What fails is a literal clause of one requirement (MPUB-04: database gates on highlight tables and on stories UPDATE/DELETE), which is a within-tenant defense-in-depth gap that the code review already recorded as WR-03/WR-04 and left for Igor to decide. Because "absence of implementation is observable" for those gates, it is recorded as a gap rather than waved through, but it does not break any of the four roadmap truths.
+The four roadmap criteria and the D-711 amendment held in the first report and still hold. The one gap of that report, MPUB-04 (database defense in depth on the highlight tables, on stories UPDATE/DELETE and on the staff branch of the post insert gate), is now delivered in the database and proven by pgTAP negatives that this verifier re-ran and mutation-checked. WR-03, WR-04 and WR-05 are closed. No new gap was found.
 
 ### Observable Truths (ROADMAP success criteria + amendments)
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | With social on a member publishes stories; Início's grouped circle stays admin-only; a member's active stories show in Explorar for followers, one circle per author | VERIFIED | `supabase/migrations/20261111145716_member_stories.sql:20-43` (`stories.visibility`, insert gate `member -> 'followers'` and `social_enabled()`, audience gate); `apps/api/tests/integration/member-stories.test.ts:274` (publish 201, stored `followers`), `:303` (Início strip holds the admin's story not Helena's), `:473/:532` (Início strip and highlight organization only), `:725` (Alvaro reads Helena's circle, not Marcos's, seven keys); `apps/web/lib/registry.tsx` `storyPublishDoorFor('inicio', ...)` requires `content.publish` so members get no Início circle; `ExplorarBody.tsx:129,178` wires `ExplorarStoriesRow` to `GET /v1/stories/authors` (`stories/server/routes.ts:184`). pgTAP 231 passed (see spot-checks) |
-| 2 | With social on a member creates a community (and its highlights) | VERIFIED | `packages/modules/communities/server/service.ts` (create stamps `kind='member'`, creator from ctx, sentinel position 1000000, advisory-locked limit); migration `20261111143948_member_communities.sql:15` (`communities_kind_insert_gate`); integration `member-communities.test.ts:221` (create 201, stored kind member), `:235` (strict body: no kind/creator/position), `:511/:603` (limit, N+1 parallel creates leave N); highlights `member-stories.test.ts:1496` (creator creates/renames/reorders/deletes highlights of her community) |
-| 3 | Only a community's owner publishes in it (posts, stories, highlights): creator alone for a member community, any admin_tenant for an organization community; others and an admin on a member community get no publish control and a 403 | VERIFIED | Posts: `packages/modules/feed/server/service.ts:1230-1268` `resolveCommunityTarget` (404 → owner decision by kind → 403 → 400 archived); `member-communities.test.ts:265` (Marcos and the lab admin get 403, nothing stored, Helena's post is the positive control), `:332` (Marcos on an organization community 403, admin posts 201). Stories/highlights: `member-stories.test.ts:1283` (Marcos 403 and the lab admin 403 on Helena's community; admin's organization highlight works), `:1351` (IDOR: cannot add another's story, bare 404), `:1407` (non-owner curation 403 on every write), `:1540` (curator is place-dependent). Web: `viewer.actions` / `viewer.canCurate` from `communities/server/service.ts:293-301`; `comunidades/[communityId]/page.tsx:287,351,407` read only the API flags; page tests 22-24 assert admin on member community gets no curator menu, creator gets it. Admin pickers list organization communities only: `member-stories.test.ts:1681` (EP-51/MPUB-06) |
-| 4 | Turning social off stops new member stories and communities; existing member communities stay readable | VERIFIED | Insert gates read `app.social_enabled()` from SQL (`communities_kind_insert_gate`, `stories_social_insert_gate`, `feed_posts_social_insert_gate`); `social-module.test.ts:511` (warm flags cache: every member write 403, never 500), `:575` (cache expired: writes 403, community/post/highlight/saved story stay readable with like and comment, moderator works), `:715` (on again restores, no row rewritten); `member-stories.test.ts:387/:1697`; `moderation-member-content.test.ts:301/:464/:659` (moderator keeps working off). Accepted, documented residual: a loose member story cannot be read by a moderator with social off (pgTAP 231 section 3, `docs/DEPLOY.md`) |
-| 5 | Moderation (D-711): holder of `moderation.manage` soft-deletes any member story and archives/removes any member community (and a single community post), each with a `moderation_log` row in the same transaction | VERIFIED | migration `20261111151218_moderation_member_content.sql`; `moderation-member-content.test.ts:179` (archive then delete write two rows in order), `:274` and `:638` (forced log failure rolls the write back), `:592` (story_removed row), `:402` (post_removed in a member community, count reconciled); `packages/core/server/moderation/log.ts` refuses subject/action pairs the CHECK would refuse; web `ModerationLogRow.tsx`/`moderation-view.ts` |
+| 1 | With social on a member publishes stories; Inicio's grouped circle stays admin-only; Explorar shows one circle per author for followers | VERIFIED | Unchanged from the first report (migration `20261111145716`, `member-stories.test.ts`, `ExplorarBody.tsx`). Re-checked against this change: the new `stories_member_update_guard` only holds a `member` claim and lets the two counters through on any story, so the like and comment counter triggers (invoker, `20260923234657`, `20260924005427`) keep working; pgTAP 231 section 12a asserts it (M2 likes M4's story, counter 0 to 1 and back, with the guard in place). `stories` has 12 columns and no view counter, and the only other writer in code is the soft delete at `stories/server/service.ts:1045` (live to deleted, allowed by the guard) |
+| 2 | With social on a member creates a community and its highlights | VERIFIED | Unchanged. Highlight creation by the creator in her own member community is the positive control of pgTAP 231 12c (insert, rename, delete of the own highlight succeed) and 12d (own story into own highlight succeeds) |
+| 3 | Only the community's owner publishes in it (posts, stories, highlights): creator for a member community, any admin_tenant for an organization community; others and an admin on a member community get 403 and no control | VERIFIED, now also at the database | Posts: `resolveCommunityTarget` as before, and the staff branch of `feed_posts_social_insert_gate` now admits a `'tenant'` post only with no community or an `organization` community (pgTAP 232 section 8: admin and system lane refused 42501 in a member community of the tenant and of another tenant, allowed in an organization community and with none). Highlights and items: seven restrictive gates (pgTAP 231 12c, 12d). Stories: trigger plus delete gate (12a, 12b). The service-level 403 order is intact, see the `resolveHighlight` section |
+| 4 | Turning social off stops new member stories and communities; existing member communities stay readable | VERIFIED | Unchanged. New insert gates carry the `social` term from SQL (`app.social_enabled()`): pgTAP 231 12c asserts a creator cannot insert a highlight in her own community with `social` off. UPDATE/DELETE carry none on purpose (assumption A11), so a creator can still take down her own highlight and the moderator lanes are untouched |
+| 5 | Moderation (D-711): moderator soft-deletes any member story and archives/removes any member community and a single community post, with a `moderation_log` row | VERIFIED | Unchanged. Moderators are staff claims (`admin_tenant` / `support_tenant`), which the guard returns untouched; pgTAP 231 12a asserts the admin_tenant soft-deletes a member story and edits an organization story, and the system lane edits a story |
 
-**Score:** 5/5 truths verified (4 roadmap criteria plus the D-711 amendment). Real-device behaviour is not part of this score (see Human Verification).
+**Score:** 5/5 truths verified. Real-device behaviour is not part of this score (see Human Verification).
 
-### Requirement Coverage (all 28 phase ids; every id appears in a PLAN frontmatter and in REQUIREMENTS.md)
+### MPUB-04 closure (the only gap of the first report)
 
-| Requirement | Plans | Verdict | Key evidence |
-|-------------|-------|---------|--------------|
-| MCOMM-01 stamp kind/creator, strict body | 03,05,13,15 | SATISFIED | `member-communities.test.ts:221,:235`; pgTAP 230 |
-| MCOMM-02 whole-tenant list/open, no lock | 06,13 | SATISFIED | `member-communities.test.ts:955` (every live member opens it) |
-| MCOMM-03 org first then member, sentinel, reorder org-only | 06,13 | SATISFIED | `:955,:1369,:1412`; CHECK `communities_member_position_chk` |
-| MCOMM-04 `createdBy` safe fields, `viewer`, `memberQuota`, no user id | 06,13 | SATISFIED | `:955` (uuid scan), `:1045`; `communities/server/service.ts:215-340` |
-| MCOMM-05 per-member limit, lock, platform edit | 05,11,13 | SATISFIED | `:511,:528,:579,:603`; `SocialLimitsSheet.tsx`; core `member-community-policy.test.ts` (run green) |
-| MCOMM-06 creator edit/archive/reactivate/delete/curate, no products, no reorder | 05,09,13,14 | SATISFIED | `:663,:704,:745,:776`; `member-stories.test.ts:1496` |
-| MCOMM-07 blocked/departed creator hides everything | 03,06,14 | SATISFIED (with WR-05 residual for video tokens) | `:1437,:1510`; `member-stories.test.ts:1729`; policy `communities_member_hidden_gate` |
-| MCOMM-08 community post only on its page | 03,06,11,15 | SATISFIED | `:282,:295,:1237,:1259`; Início predicate is the literal `p.visibility = 'tenant'`, Explorar `'followers' and community_id is null` (`feed/server/service.ts:538-567`); pgTAP 232 |
-| MCOMM-09 Reels lanes after organization, Todos excludes | 06 | SATISFIED | `reels.test.ts` 10-06 block (EP-32..34), `member-communities.test.ts:295` |
-| MCOMM-10 moderator archive/remove with log | 04,05,11,14 | SATISFIED | `moderation-member-content.test.ts:179,:301` |
-| MCOMM-11 moderator removes one community post | 06 | SATISFIED | `moderation-member-content.test.ts:402`; WR-01 fixed (flag reaches the menu), `community-removal-flag.test.ts` 5/5 re-run green |
-| MPUB-01 owner rule, 403, no control | 05,09,14,15 | SATISFIED | see truth 3 |
-| MPUB-02 composed member permissions, ownership in the statement | 05,12 | SATISFIED | `apps/api/src/modules/registry.ts` (`permissionsFor`), `social-module.test.ts:119,:196` |
-| MPUB-03 creator publishes member post in own community, audience 'community' | 05,14 | SATISFIED | `member-communities.test.ts:250,:471` |
-| MPUB-04 RESTRICTIVE RLS gates on the five tables | 03,04 | **PARTIAL** | see Gaps: `communities`, `stories` insert/select, likes/comments, `feed_posts` insert + update allow-list shipped and proven (pgTAP 230/231/232 re-run, 237 assertions ok); `story_highlights`, `story_highlight_items`, stories UPDATE/DELETE and the staff-lane community term not shipped (WR-03, WR-04) |
-| MPUB-05 social off semantics | 05,08,10,13,14,15 | SATISFIED | see truth 4 |
-| MPUB-06 admin pickers organization only | 09,14 | SATISFIED | `member-stories.test.ts:1681` |
-| MPUB-07 isolation + pgTAP + expand-only + DEPLOY.md + seed | 03,04,08,10,15 | SATISFIED | `pnpm db:generate` printed "No schema changes"; `docs/DEPLOY.md:4454` "Phase 10 release"; `scripts/seed.ts:788-798` seeds a member community and story; eight migrations are additive (reviewed headers); isolation sweep in plan 10-10 |
-| MSTORY-01 member story stamp, 24h, limits | 07,12,15 | SATISFIED | `member-stories.test.ts:274,:317` |
-| MSTORY-02 Início org-only | 07 | SATISFIED | `:303,:473,:497,:532` |
-| MSTORY-03 Explorar one circle per author, order, moderator cursor | 08,12,15 | SATISFIED | `:725,:977,:1023` |
-| MSTORY-04 member story audience in RLS and statement, safe author wire | 04,08,11 | SATISFIED | pgTAP 231; `:783` (Marcos bare 404 on group read, story id, like, comment), `:642` (uuid scan) |
-| MSTORY-05 likes/comments, no publish notification | 07 | SATISFIED | `:340` |
-| MSTORY-06 creator saves own story in own community highlight, readable by all incl. after 24h and with social off | 09,12 | SATISFIED | `:1212,:1238,:1259,:1351` |
-| MSTORY-07 member media seam story + cover purposes | 07 | SATISFIED | core `member-media-policy.test.ts`; `social-media.test.ts` |
-| MSTORY-08 blocked/removed author's stories leave Explorar and 404 | 04,08 | SATISFIED | `:1077,:1113` |
-| MSTORY-09 author deletes own, moderator deletes with log | 04,07,11,12 | SATISFIED | `:594`; `moderation-member-content.test.ts:592` |
-| UI-04 (gate reference only; stays owned by Phase 2) | 01,02,11-15 | SATISFIED as a gate reference | sketch 020 `approved: true`, provisional by Igor 2026-11-11 (commit 30ce8537); still provisional, P3/P4/P6 pending |
+Requirement text: "The member lane is bounded by RESTRICTIVE RLS gates on `communities`, `stories`, `story_highlights`, `story_highlight_items` and `feed_posts` that refuse (42501) a forged kind, owner, audience or non-owner write, reading `social` from SQL ..., and `feed_posts_member_update_guard` becomes an allow-list".
 
-No orphaned requirement ids: REQUIREMENTS.md maps MCOMM-01..11, MPUB-01..07, MSTORY-01..09 to Phase 10 and each appears in at least one PLAN `requirements` field.
+Live catalog on the local database (read from `pg_policies` and `pg_trigger`), RESTRICTIVE policies and guards per table:
 
-### Required Artifacts / Key Links
+| Table | Restrictive gates / guards present | Source |
+|-------|-----------------------------------|--------|
+| communities | kind insert, member update, member delete, hidden select | Phase 10 plans 03/04 (unchanged) |
+| stories | audience select, social insert, **member delete gate**, **trigger `stories_member_update_guard`** | insert/select Phase 10; delete and update new in `20261112182228` |
+| story_highlights | **member insert, update, delete gates** | new |
+| story_highlight_items | **member insert, update, delete gates** | new |
+| feed_posts | social insert (staff branch **now carries the organization-kind term**), member delete, select gates, `feed_posts_member_update_guard` (allow-list since `20261111144205`) | insert gate amended |
 
-| Artifact | Status | Details |
-|----------|--------|---------|
-| 8 migrations `20261111143858`..`20261111163020` | VERIFIED | exist, additive, drizzle snapshot in sync (`pnpm db:generate` -> "No schema changes") |
-| `resolveCommunityTarget` (feed) | VERIFIED | owner seam in the post's own transaction; wired from `createPost` at `service.ts:1331` before asset validation |
-| `viewerOf` / `communityViewerFlags` (communities) | VERIFIED | WR-02 fix present at `service.ts:293-301`; consumed by `[communityId]/page.tsx` |
-| `ExplorarStoriesRow` + `loadStoryAuthors` | VERIFIED | wired in `ExplorarBody.tsx`; data from a real `/v1/stories/authors` read (FLOWING) |
-| `app.community_action_allowed` stub + `communityActionAllowed` | VERIFIED neutral | see Escopo hook check |
-| `docs/DEPLOY.md` "Phase 10 release" | VERIFIED | line 4454 |
-| `10-MANUAL-PROOFS.md` | VERIFIED | exists, P1..P9 all `pending` |
+Reading of the new migration (`supabase/migrations/20261112182228_member_content_write_gates.sql`):
 
-### Escopo hooks are behaviour-neutral (checked)
+- Highlights: a `member` claim writes only where `communities.kind = 'member'`, same tenant, `created_by_user_id = app.user_id()`; insert also needs `app.social_enabled()`; update carries the owner term in both USING and WITH CHECK (no re-point). A null role claim makes every branch null and denies (fail closed).
+- Items: member insert needs the highlight's community owned by the caller AND the story's `author_user_id = app.user_id()` (the D-716 audience-widening hole, branch 3 of `stories_audience_gate`, is shut in the database); member update refused outright; member delete only inside an owned highlight.
+- Stories: a restrictive DELETE gate (`tenant_role() <> 'member'`) and a BEFORE UPDATE invoker trigger. For a member claim: on a story it did not write only the counters may differ (comparison via `to_jsonb(new) - counters`, so a column added later is covered); author, visibility, tenant and media frozen on every story; on its own story only the counters and `deleted_at`, and `deleted_at` only as null to value (no resurrection). Function is `SECURITY INVOKER`, `search_path = ''`, fixed message with no row data, errcode 42501.
+- WR-05: `app.media_asset_hidden` re-created. I diffed its body against `20261111150352_story_media_gate.sql`: exactly two inserted alternatives (`app.member_community_hidden_ids()` in the hiding group and inside the trailing exemption), nothing else changed, same signature, `revoke all from public` and `grant execute to authenticated` re-applied.
+- Drift: `pnpm db:generate` printed "No schema changes, nothing to migrate" (run by this verifier, no tracked file changed). The TS mirrors in `packages/modules/stories/db/schema.ts` and `packages/modules/feed/db/schema.ts` carry the same predicate text; the docblock of `resolveCommunityTarget` now states the database agrees (the false claim of WR-04 is gone).
 
-- `app.community_action_allowed`: `select false`, security definer, `search_path = ''`, executes granted to `authenticated` only (`20261111143858_member_communities_functions.sql:69-73`). The only caller is branch 3 of `resolveCommunityTarget` (`feed/server/service.ts:1257-1259`), reached only when the caller is a member, the community is `organization` kind and branch 2 (`!isMember`) did not apply; with the stub `false` the code falls to the 403 that existed before. The TS wrapper requires a strict `=== true`, so a null never grants.
-- Owner branch 3: it is evaluated last and never taken; pgTAP 230/232 and `member-communities.test.ts:332,:354` pin the stub false for the five actions and the 403 on an organization community for a member.
-- `viewer.actions`: `like/comment/share` constant true, `post = canPublish`, `story = canStory`. After the WR-02 fix `story` reproduces the pre-Phase-10 gate for organization communities (`stories.story.publish` and `stories.story.manage`). The web reads it in exactly two places (`[communityId]/page.tsx:351`, `stories/publicar/page.tsx`), both as a show/hide of a door whose route re-checks the permission. No server decision uses `actions`. Neutral.
+Verdict: MPUB-04 SATISFIED. Gates exist on all five tables, refuse with 42501 (or zero rows for a USING-filtered delete, which is how the previous gates on this project already refuse), read `social` from SQL on every insert gate, and the allow-list guard of `feed_posts` was already in place.
 
-### Review findings re-checked against the code
+### Review findings re-checked
 
 | Finding | State | Evidence |
 |---------|-------|----------|
-| WR-01 moderator removal flag | FIXED, asserted | `feed/server/service.ts:317-322` emits `removal: 'moderation'` for followers and community; `listCommunityFeed` takes `canModerate` and the route passes it (`routes.ts:457`); `community-removal-flag.test.ts` 5 cases, re-run green |
-| WR-02 story door on the post rule | FIXED, asserted | `communities/server/service.ts:293-301`; `viewer-story-action.test.ts` 8 cases, re-run green. The integration matrix in `member-communities.test.ts:1065` still asserts `story == canPublish` per viewer (valid only while the `stories` module is on; wording looser than the rule, not a failure) |
-| WR-06 curator menu keyed on permission | FIXED, asserted | `[communityId]/page.tsx:407` `canCurate: viewer.canCurate`; `page.test.tsx` cases 22-24, file re-run 24/24 green. `/stories/[storyId]/page.tsx` deliberately left alone (no per-community flag exists on a deep link) |
-| WR-03 no UPDATE/DELETE gate on stories, story_highlights, story_highlight_items | OPEN | confirmed by grep: the only Phase 10 story policies are `stories_audience_gate` and `stories_social_insert_gate` |
-| WR-04 staff branch lacks a community-kind term; docblock claim false | OPEN | confirmed at `20261111144148_feed_community_audience.sql` (`app.tenant_role() <> 'member' and visibility = 'tenant'`) |
-| WR-05 video of a hidden member community's post still gets a playback token | OPEN | review-confirmed; story legs apply the hidden-community term, the post leg does not |
-
-Impact of the three open ones: all are within one tenant, none lets a member of tenant A reach tenant B, and none is reachable through any route (every write goes through the API service, which carries the owner checks and has tests). They matter for the project rule "RLS defense-in-depth on every table" and for the literal text of MPUB-04. WR-04 would put member-community content under the Administrador mark in Início only if an admin-claim database lane were driven directly. WR-05 is the same id-capability class as the accepted photo residual but applies to video. None breaks a roadmap success criterion or the zero-leakage-between-tenants core value, so they gate nothing except MPUB-04's literal wording.
+| WR-03 no UPDATE/DELETE gate on stories, highlights, items | CLOSED | migration above; pgTAP 231 section 12; mutation check below |
+| WR-04 staff branch lacks community-kind term; docblock false | CLOSED | policy text in `pg_policies` contains `c.kind = 'organization'` (pgTAP 232 section 8, last assertion); docblock corrected |
+| WR-05 video of a hidden member community still gets a token | CLOSED | pgTAP 232 section 9: hidden for the member, the admin_tenant and the system lane (no staff exemption, matching the RLS gate), false when a visible organization post also carries the asset, false in another tenant, reopens when the creator is restored, hides again on membership `deleted_at` |
+| WR-01, WR-02, WR-06 | FIXED (unchanged) | not touched by this change |
 
 ### Behavioral Spot-Checks (run by this verifier)
 
+pgTAP was run with `psql -f` against the local stack, with the helper schema (`000-helpers.sql`, which commits) prepended inside one outer transaction and the test file's own `rollback` ending it. After the runs the `tests` schema and `pgtap` extension are absent and no `pgtap-%` tenant remains, so the freshly reset and seeded stack is as it was.
+
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Member communities, member stories, community audience RLS | `pnpm supabase test db supabase/tests/000-helpers.sql 230-member-communities.sql 231-member-stories.sql 232-feed-community-audience.sql` | 4 files ok, 237 tests, PASS | PASS |
-| WR-01 flag | vitest `packages/modules/feed` `tests/community-removal-flag.test.ts` | 5/5 | PASS |
-| WR-02 story door | vitest `packages/modules/communities` `tests/viewer-story-action.test.ts` | 8/8 | PASS |
-| WR-06 curator menu + community page | vitest `apps/web` `[communityId]/page.test.tsx` | 24/24 | PASS |
-| Explorar row + story publish screen | vitest `apps/web` `ExplorarStoriesRow.test.tsx`, `stories/publicar` | 57/57 (3 files) | PASS |
-| Kernel seams | vitest `packages/core` `member-community-policy`, `community-action-gate`, `moderation-log` | 27/27 (3 files) | PASS |
+| Member stories incl. new section 12 | helpers + `supabase/tests/231-member-stories.sql` via `psql -At -f` | plan 167, 167 ok, 0 not ok | PASS |
+| Feed community audience incl. new sections 8, 9 | helpers + `supabase/tests/232-feed-community-audience.sql` | plan 74, 74 ok, 0 not ok | PASS |
+| Schema conventions (pins app functions, no single-row pick) | helpers + `040-schema-conventions.sql` | 71 ok, 0 not ok | PASS |
+| Mutation check, stories/highlights/items (do the negatives really bite?) | same transaction, `drop trigger stories_member_update_guard` and the seven `drop policy`, then file 231 | 37 not ok, all in section 12, all negatives and catalog pins; every positive control stayed ok; 130 ok | PASS (the 38th red assertion of the executor is the function-hardening pin, which stays true while the function exists) |
+| Mutation check, WR-04 | same transaction, `alter policy feed_posts_social_insert_gate` back to the pre-migration text, then file 232 | 5 not ok, all section 8 (3 forged-community refusals, system lane, policy-text pin); positive controls ok | PASS |
+| Module stories unit tests | `pnpm exec vitest run` in `packages/modules/stories` | 16 files, 217/217 | PASS |
+| Module feed unit tests | `pnpm exec vitest run` in `packages/modules/feed` | 27 files, 345/345 | PASS |
 | Schema drift | `pnpm db:generate` | "No schema changes" | PASS |
-| Debt markers (TBD/FIXME/XXX) in 90 files changed by the phase | grep | none | PASS |
-| Attribution | `git log` over the phase commits | 0 Co-Authored-By trailers | PASS |
+| Debt markers in migration, stories service and schema | grep TBD/FIXME/XXX | none | PASS |
+| Attribution | `git log` over the four quick commits | no Co-Authored-By or tool trailer | PASS |
 
-Not re-run by this verifier (taken from the orchestrator's evidence, not independently confirmed): the 141-file API integration suite (2956 tests), the 65-file pgTAP suite, the 8429 web tests, lint/typecheck/build and the Playwright journeys.
+Test quality read: every negative in 231 section 12 and 232 sections 8 and 9 attempts the forged write itself (update, delete, insert, re-point, cross-tenant, null role, social off) and expects 42501 or zero rows, and each sub-block has positive controls (staff, system lane, the creator's own highlight, own story, counters, soft delete). Zero-row negatives are meaningful because the mutation run turned them red, which shows the restrictive gate and not the select policy is what stops them. No weakened assertion was found; the two statement-order pins edited in `packages/modules/stories/tests` (`events.test.ts`, `story-highlights.test.ts`) only add the second `highlight` read that the service change introduces, and still assert the story row is never written.
+
+### `resolveHighlight` change (service beyond the plan)
+
+`packages/modules/stories/server/service.ts` `resolveHighlight` now reads the highlight with no lock, calls `resolveHighlightPlace`, and for a write intent re-reads it `for update` after the place is judged. Reason: `select ... for update` also passes the table's UPDATE policy, so under the new `story_highlights_member_update_gate` a non-owner member would read zero rows and get the 404 of a miss instead of the 403.
+
+- Order of answers is unchanged: 404 for a miss (unknown, another tenant, hidden creator), then 403 for a non-curator, then the place rules; the unlocked first read passes the select policies exactly as the locked read did before for any caller who could see the row. No new existence oracle: a non-owner already received 403 for a highlight of a visible community before this change.
+- No new race: the place seam (`resolveHighlightPlace`) still takes the community `for share` on a write intent before the highlight is locked, so a concurrent archive waits; the highlight is then locked and the columns a write compares are taken from the LOCKED read, so a concurrent rename is seen, not overwritten. A concurrent delete between the two reads gives 404, which is the honest answer. The service never updates `story_highlights.community_id` (the three highlight updates touch title/cover, cover clear and position), and a member cannot re-point it (WITH CHECK), so the place judged on the first read cannot differ from the locked row's place by any path the product offers.
+- Cost: one extra indexed read per highlight write. Unit pins updated accordingly (217/217 green here).
+- Not re-run by me: the API integration file `member-stories.test.ts` (executor reports 46/46 after the fix, 41/46 before it).
+
+### Requirement Coverage (all 28 phase ids)
+
+| Requirement | Verdict | Note |
+|-------------|---------|------|
+| MCOMM-01..11 | SATISFIED | as in the first report; the communities gates are untouched; MCOMM-07 and MCOMM-11 residual WR-05 is now closed |
+| MPUB-01, MPUB-02, MPUB-03, MPUB-05, MPUB-06, MPUB-07 | SATISFIED | unchanged; MPUB-07 gains a ninth expand-only migration (tightening only, no table/column/row change) documented in `docs/DEPLOY.md` item 9 and the order section ("nine versions") |
+| **MPUB-04** | **SATISFIED (was PARTIAL)** | see closure section |
+| MSTORY-01..09 | SATISFIED | counters, moderator delete, creator highlight and notifications paths checked above for interaction with the new guard and gates; no regression found in 231 (167/167) |
+| UI-04 (gate reference) | SATISFIED as a gate reference | sketch 020 approval still provisional |
+
+Count: 28/28 requirement ids satisfied. No orphaned ids.
 
 ### Anti-Patterns Found
 
 | File | Pattern | Severity | Impact |
 |------|---------|----------|--------|
-| `packages/modules/feed/server/service.ts:1212` | comment asserts RLS enforces the creator rule on staff lanes; it does not (WR-04) | Warning | will mislead the next reviewer |
-| `apps/web/app/(app)/comunidades/actions.ts:303` | stale "409" for `limit_reached` (it is 400) (IN-01) | Info | comment only |
-| `apps/api/src/routes/media.ts:129` | OpenAPI text still says member video only for `post` (IN-02) | Info | published description drift |
-| `packages/modules/stories/server/service.ts:526` | `scope.isMember` accepted, never read (IN-03) | Info | dead input |
-| `communities_member_update_gate` | staff UPDATE may change `kind` (IN-04) | Info | no API path does it |
-| `safety/limits.ts` | per-instance limiters (IN-05) | Info | soft ceiling on Cloud Run |
+| `apps/web/app/(app)/comunidades/actions.ts:303` | stale "409" for `limit_reached` (IN-01) | Info | comment only |
+| `apps/api/src/routes/media.ts:129` | OpenAPI text member video only for `post` (IN-02) | Info | description drift |
+| `packages/modules/stories/server/service.ts` | `scope.isMember` accepted, never read (IN-03) | Info | dead input |
+| `communities_member_update_gate` | staff UPDATE may change `kind` (IN-04) | Info | accepted in the quick plan |
+| `safety/limits.ts` | per-instance limiters (IN-05) | Info | soft ceiling |
+| `docs/DEPLOY.md` item 9 | says "safe to apply ahead of any code"; true for data and security, but with the OLD API the new highlight UPDATE gate turns a non-owner member's 403 on a foreign highlight into a 404 (status difference, no data leak). The quick SUMMARY says the service change must ship with the API; DEPLOY.md does not | Info | release note to add when Igor next touches DEPLOY.md |
+| `story_highlights.created_by_user_id` | not constrained by the new insert gate (a creator may write another id into the audit column) | Info | display/audit column only, no authority derived from it; not in MPUB-04 text |
 
-### The red full `pnpm e2e` stage (weighed, stated as inference)
-
-118 failures, none in a Phase 10 spec; `e2e:pwa` never reached. No baseline at the pre-phase commit exists, so "pre-existing" cannot be proved. The inference holds on code evidence: `git diff` over the 122 phase commits shows no change to the API tenant-create route (the `POST /v1/platform/tenants` 400 group), no change to the navigation or shell, and no change to the web Reels pages (desktop Reels group). The only Reels-related change is an additive integration test and the feed service's lane query for member communities (backend). The nav-tab and `/area-membros` groups are specs not updated for the November front rework. The one cross-cutting change that could reach those specs is `permissionsFor` in `apps/api/src/modules/registry.ts` (members now hold `stories.story.publish`, `communities.community.create/manage_own` with `social` on); a rerun of the red groups at the commit before 5658ff1c would turn the inference into proof. This does not block the verdict but it is an unproved assumption.
+No new Blocker or Warning.
 
 ### Human Verification Required
 
-P1 to P9 in `10-MANUAL-PROOFS.md` all ship `pending`; only Igor can pass them (real phone on a homolog or production host, a live per-tenant project for the `social` switch, 320px viewer menus, five held-out visual/accessibility backstops, twelve planner assumptions, UI-SPEC defaults OQ-1..OQ-7, the D-478 wording, the owner-dashboard counts decision and the release order with the A7 web-first exception). Sketch 020's approval is provisional.
+Unchanged in substance: P1 to P9 in `10-MANUAL-PROOFS.md` all `pending` (real phone on a homolog or production host, `social` switched off and on in a live per-tenant project, 320px viewer menus, five held-out visual/accessibility backstops, planner assumptions A1..A12 and UI-SPEC defaults OQ-1..OQ-7, D-478 wording, owner-dashboard counts decision, release order with the A7 web-first exception). Added for the release: apply the ninth migration through the ledgered fan-out to every ready tenant project before the API deploys (`pnpm db:two` and `pnpm db:migrate-all -- --dry-run` were not run by this verifier). Also open: the full `pnpm e2e` stage (118 failures outside Phase 10 specs, inference from touched files, no baseline run) and `e2e:pwa` never ran; sketch 020 approval is provisional.
+
+### Not observed by this verifier
+
+- The 141-file API integration suite, the full 65-file pgTAP run (only 231, 232 and 040 were run here, in rolled-back transactions), the web test suite, lint/typecheck/build, Playwright e2e and `e2e:pwa`. The executor's figures (65 files / 4552 pgTAP tests, 20 integration files one at a time, member-stories 46/46) are taken as reported, not independently confirmed.
+- Mutation checks were run for the stories, highlights and items gates and for the WR-04 staff term; no mutation run was made against the WR-05 function (its section 9 was run green only, plus the textual body diff).
+- Hosted per-tenant projects: nothing was applied or observed there.
 
 ### Gaps Summary
 
-One gap: MPUB-04 is partial. Phase 10 shipped the restrictive database gates for `communities`, `stories` (insert and select), story likes/comments and `feed_posts` (insert and update allow-list), but not for `story_highlights`, `story_highlight_items`, stories UPDATE/DELETE, nor the community-kind term on the staff insert branch (WR-03, WR-04). The API enforces the owner rule on those paths and the tests prove it, so the four roadmap criteria hold; only the database second layer named in the requirement text is missing. Two ways to close it: (a) one small expand-only migration plus pgTAP negatives (restrictive UPDATE/DELETE gates for the member claim on stories and highlight tables, a community-kind term on the staff branch) and, with it, WR-05's third `media_asset_hidden` leg; or (b) accept by override and narrow MPUB-04's wording. If Igor chooses (b), add:
-
-```yaml
-overrides:
-  - must_have: "MPUB-04: the member lane is bounded by RESTRICTIVE RLS gates on communities, stories, story_highlights, story_highlight_items and feed_posts"
-    reason: "Highlight/item and stories UPDATE/DELETE gates and the staff community-kind term are within-tenant defense in depth; the API is the only writer and is tested; closed later by a hardening migration"
-    accepted_by: "Igor"
-    accepted_at: "<ISO timestamp>"
-```
-
-Status would then move to `human_needed` (the P1..P9 ledger).
-
-### Open items (not gaps)
-
-- Accepted/known: a loose member story is unreadable to a moderator with `social` off (pgTAP 231 section 3, `docs/DEPLOY.md`); A7 web-first release order; `/stories/[storyId]` deep link still headed by the tenant name; store product pickers still list member communities; `/post/[postId]` "sai de Explorar" wording for community posts, and the new `feed.deleteCommunity.body` / `feed.removeCommunity.body` keys await Igor; the EP-53 empty-database literal was never run; sketch 020 approval is provisional.
-- Docs drift to fix when touched: `member-communities.test.ts:1065` asserts `story == canPublish`; IN-01..IN-05.
-- Not re-verified here: the full e2e stage (red, not Phase 10, inference above), `e2e:pwa` (never reached).
+None. MPUB-04 is closed; WR-03, WR-04 and WR-05 are closed. Remaining items are human or release items, not code gaps.
 
 ---
 
