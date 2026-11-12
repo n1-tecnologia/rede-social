@@ -1577,11 +1577,66 @@ Plans:
 **Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
 **Requirements**: TICK-01..TICK-24
 **Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
-**Plans:** 0 plans
+**Plans:** 15 plans
 
 Plans:
+**Wave 1**
 
-- [ ] TBD (run /gsd-plan-phase 10.1 to break down)
+- [ ] 10.1-01-PLAN.md — Schema and vocabularies: the `event` mapping kind, the origin and order columns, the reference price (expand-only migrations, pgTAP 205 and 233)
+- [ ] 10.1-09-PLAN.md — Sketch 021: the 71 frames of the prototype-less Phase 10.1 surfaces
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 10.1-02-PLAN.md — The closed door in the database: member-lane policies, the paid helper, the re-created guard and the RSVP refusal codes
+- [ ] 10.1-10-PLAN.md — Sketch 021 README, manifest row and the blocking approval gate (Igor's hand)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 10.1-03-PLAN.md — The two doors: `events_enter` and `events_check_in` refuse a non-holder of a paid event before any guess is counted
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 10.1-04-PLAN.md — The SQL definers: gateway grant and revoke, courtesy, lock and reset, holders, tenant-pinned reads, hardening and cross-tenant pgTAP
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 10.1-05-PLAN.md — The webhook branch `applyTicket`, the Eventos recentes list for tickets, manual release and the `payments.ticket_confirmed` notice
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 10.1-06-PLAN.md — The mapping service and routes, the reference price on the event and the delete lifecycle
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 10.1-07-PLAN.md — The events read model (paid, link, own origin, edit-read ticket object, attendee marks with the over-limit rank) and the courtesy routes
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 10.1-08-PLAN.md — The web server-side view-models, the contract publish and `next build` once
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 10.1-11-PLAN.md — UI: the Ingresso section of the event form and its second write
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 10.1-12-PLAN.md — UI: the member's page (Pago tag, paid zone, Presença confirmada, live swap)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [ ] 10.1-13-PLAN.md — UI: the closed-door screens, the bell row and the ticket rows of Eventos recentes with the manual release
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [ ] 10.1-14-PLAN.md — UI: Participantes (origin marks, Liberar presença, Remover cortesia, Acima do limite)
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [ ] 10.1-15-PLAN.md — End-to-end spec, neutrality extension, release notes, owner's ledger and the phase exit gate
+
+**Cross-cutting constraints:**
+
+- Precondition for every task (D-33, D-365, UI-04): `grep -q '^approved: true' .planning/sketches/021-phase-10.1-designed-screens/README.md` succeeds; if it does not, the executor stops and reports that the sketch gate of plan 10 is pending; it is also the FIRST clause of every verify command of this plan
 
 ### Phase 11: Rede Social - Direct Messages, Member Blocking and Reports
 
