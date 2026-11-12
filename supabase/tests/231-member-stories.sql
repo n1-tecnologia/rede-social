@@ -41,10 +41,15 @@ begin;
 --    volume (6000 live member stories over 50 authors, 400 organization ones) the member read (3 followees) and the
 --    moderator's page 1 walk it BY NAME, never seq-scan `stories`, and the member read's seen-flag probe stays an
 --    Index Only Scan on `story_views_uq`. Section 10's strip pins are untouched.
+-- 12. THE DATABASE WRITE GATES (quick 261112-kuk, WR-03, MPUB-04; D-706, D-713, D-716, D-718; T-kuk-01..03): the member lane
+--    changes a story only by its counters and by the soft delete of its own story (trigger `stories_member_update_guard`),
+--    hard-deletes none (`stories_member_delete_gate`), writes highlights only in a MEMBER community it created and items only
+--    with its OWN story in such a highlight, and a null role claim is refused; staff and system lanes keep every write. Each
+--    negative sits beside a positive control; the catalog pins the seven policies, the trigger and the guard's hardening.
 --
 -- Fixture ids use the `23100000-…` prefix and the tenants `pgtap-mstory-a` / `pgtap-mstory-b`, used by no
 -- other file. Like its siblings, this file ROLLS BACK.
-select plan(106);
+select plan(167);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-mstory-a', 'Stories de membros A', '23100000-0000-4000-8000-000000000001');
@@ -601,6 +606,269 @@ reset enable_bitmapscan;
 select matches(current_setting('tests.authors_mod_plan'), 'stories_tenant_author_expires_idx', '11: the moderator''s authors read (page 1) walks stories_tenant_author_expires_idx BY NAME');
 select ok(current_setting('tests.authors_mod_plan') not like '%Seq Scan on stories%', '11: …and never a Seq Scan on stories');
 reset role;
+
+-- ── 12. the DATABASE write gates of stories, highlights and highlight items (WR-03, MPUB-04; D-706, D-713, D-716, D-718) ──
+-- Quick 261112-kuk. Until this section the API was the only layer that refused a member lane the writes below; each negative
+-- sits beside a positive control. Fixtures first (as the migration role), then the lanes. Within each sub-block the STAFF and
+-- system assertions run before the member negatives that would, in a database without the gate, delete or move the rows
+-- they use. New ids use the `23100000-0000-4000-8500-…` block.
+-- C0: an ORGANIZATION community. Stories (all on asset a1): B1 and B2 are M1's followers stories (the forgery subject and the
+-- soft-delete subject), B3 is M4's (the non-author and the counter subject), B4 is the organization's, B5 is M1's already
+-- soft-deleted (the resurrection subject), B6 and BA are M1's hard-delete subjects (M1, the admin), BC is an organization story the null-role lane can read (a null-role lane cannot read a followers story, so it would delete zero rows before the gate too), B7 is
+-- M4's (the moderator takedown), B8 is M4's (M2's hard-delete subject), BB is M1's (the item subject).
+-- Highlights: E2 in CM4 holding (E2, B3); E3 in C0 holding (E3, B4); E4 in Inicio; E5 in CM1; E8 in CM4 and E9 in C0 (empty
+-- delete subjects); EA in CM1 holding (EA, BB). E1 is created by M1 below, E6 and E7 by the admin.
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, kind, position, deleted_at) values
+  ('23100000-0000-4000-8500-0000000000c0', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000002', 'Da organizacao 12', 'da-organizacao-12', 'organization', 6, null);
+insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, visibility, deleted_at) values
+  ('23100000-0000-4000-8500-0000000000b1', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004', '23100000-0000-4000-8000-0000000000a1', 'image', 'b1', 'followers', null),
+  ('23100000-0000-4000-8500-0000000000b2', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004', '23100000-0000-4000-8000-0000000000a1', 'image', 'b2', 'followers', null),
+  ('23100000-0000-4000-8500-0000000000b3', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000007', '23100000-0000-4000-8000-0000000000a1', 'image', 'b3', 'followers', null),
+  ('23100000-0000-4000-8500-0000000000b4', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000002', '23100000-0000-4000-8000-0000000000a1', 'image', 'b4', 'tenant', null),
+  ('23100000-0000-4000-8500-0000000000b5', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004', '23100000-0000-4000-8000-0000000000a1', 'image', 'b5', 'followers', now()),
+  ('23100000-0000-4000-8500-0000000000b6', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004', '23100000-0000-4000-8000-0000000000a1', 'image', 'b6', 'followers', null),
+  ('23100000-0000-4000-8500-0000000000b7', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000007', '23100000-0000-4000-8000-0000000000a1', 'image', 'b7', 'followers', null),
+  ('23100000-0000-4000-8500-0000000000b8', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000007', '23100000-0000-4000-8000-0000000000a1', 'image', 'b8', 'followers', null),
+  ('23100000-0000-4000-8500-0000000000bc', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000002', '23100000-0000-4000-8000-0000000000a1', 'image', 'bc', 'tenant', null),
+  ('23100000-0000-4000-8500-0000000000ba', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004', '23100000-0000-4000-8000-0000000000a1', 'image', 'ba', 'followers', null),
+  ('23100000-0000-4000-8500-0000000000bb', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004', '23100000-0000-4000-8000-0000000000a1', 'image', 'bb', 'followers', null);
+insert into public.story_highlights (id, tenant_id, community_id, title, position, created_by_user_id) values
+  ('23100000-0000-4000-8500-0000000000e2', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-0000000000c4', 'H2', 10, '23100000-0000-4000-8000-000000000007'),
+  ('23100000-0000-4000-8500-0000000000e3', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000c0', 'H3', 10, '23100000-0000-4000-8000-000000000002'),
+  ('23100000-0000-4000-8500-0000000000e4', '23100000-0000-4000-8000-000000000001', null, 'H4', 10, '23100000-0000-4000-8000-000000000002'),
+  ('23100000-0000-4000-8500-0000000000e5', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-0000000000c1', 'H5', 10, '23100000-0000-4000-8000-000000000004'),
+  ('23100000-0000-4000-8500-0000000000e8', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-0000000000c4', 'H8', 11, '23100000-0000-4000-8000-000000000007'),
+  ('23100000-0000-4000-8500-0000000000e9', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000c0', 'H9', 11, '23100000-0000-4000-8000-000000000002'),
+  ('23100000-0000-4000-8500-0000000000ea', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-0000000000c1', 'HA', 11, '23100000-0000-4000-8000-000000000004');
+insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id) values
+  ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000e2', '23100000-0000-4000-8500-0000000000b3', '23100000-0000-4000-8000-000000000007'),
+  ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000e3', '23100000-0000-4000-8500-0000000000b4', '23100000-0000-4000-8000-000000000002'),
+  ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000ea', '23100000-0000-4000-8500-0000000000bb', '23100000-0000-4000-8000-000000000004');
+
+-- 12a. the stories UPDATE guard (trigger `stories_member_update_guard`): counters, plus the soft delete of the caller's own story
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000005');
+select throws_ok(
+  $$ update public.stories set deleted_at = now() where id = '23100000-0000-4000-8500-0000000000b1' $$,
+  '42501', null, '12: M2 cannot soft-delete the story of M1 (a story it did not write)');
+select throws_ok(
+  $$ update public.stories set caption = 'invasor' where id = '23100000-0000-4000-8500-0000000000b3' $$,
+  '42501', null, '12: M2 cannot edit the caption of the story of M4');
+select throws_ok(
+  $$ update public.stories set deleted_at = now() where id = '23100000-0000-4000-8500-0000000000b4' $$,
+  '42501', null, '12: M2 cannot soft-delete the organization story');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, story_id) values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000005', '23100000-0000-4000-8500-0000000000b3') $$,
+  '12: M2 likes the story of M4 (positive control: the invoker counter trigger runs as M2)');
+select results_eq(
+  $$ select like_count from public.stories where id = '23100000-0000-4000-8500-0000000000b3' $$,
+  ARRAY[1], '12: …and the like counter of a story M2 did not write moved to 1 through the guard');
+select lives_ok(
+  $$ delete from public.feed_likes where story_id = '23100000-0000-4000-8500-0000000000b3' and user_id = '23100000-0000-4000-8000-000000000005' $$,
+  '12: M2 unlikes it (positive control)');
+select results_eq(
+  $$ select like_count from public.stories where id = '23100000-0000-4000-8500-0000000000b3' $$,
+  ARRAY[0], '12: …and the counter went back to 0');
+select lives_ok(
+  $$ update public.stories set like_count = 5 where id = '23100000-0000-4000-8500-0000000000b3' $$,
+  '12: a non-author may write the counter column on its own (counters only)');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ update public.stories set visibility = 'tenant' where id = '23100000-0000-4000-8500-0000000000b1' $$,
+  '42501', null, '12: M1 cannot widen the audience of its own story to the organization (visibility frozen)');
+select throws_ok(
+  $$ update public.stories set author_user_id = '23100000-0000-4000-8000-000000000005' where id = '23100000-0000-4000-8500-0000000000b1' $$,
+  '42501', null, '12: M1 cannot hand its story to another author (author_user_id frozen)');
+select throws_ok(
+  $$ update public.stories set media_asset_id = '23100000-0000-4000-8000-0000000000a2' where id = '23100000-0000-4000-8500-0000000000b1' $$,
+  '42501', null, '12: M1 cannot swap the media of its own story (media_asset_id frozen)');
+select throws_ok(
+  $$ update public.stories set caption = 'editada' where id = '23100000-0000-4000-8500-0000000000b1' $$,
+  '42501', null, '12: M1 cannot edit the caption of its own story (outside the allow-list)');
+select throws_ok(
+  $$ update public.stories set expires_at = expires_at + interval '1 day' where id = '23100000-0000-4000-8500-0000000000b1' $$,
+  '42501', null, '12: M1 cannot extend the window of its own story (expires_at frozen)');
+select throws_ok(
+  $$ update public.stories set deleted_at = null where id = '23100000-0000-4000-8500-0000000000b5' $$,
+  '42501', null, '12: M1 cannot resurrect its soft-deleted story (deleted_at never goes back to null)');
+select lives_ok(
+  $$ update public.stories set deleted_at = now() where id = '23100000-0000-4000-8500-0000000000b2' $$,
+  '12: M1 soft-deletes its own story (positive control: the service''s transition)');
+select results_eq(
+  $$ select count(*)::int from public.stories where id = '23100000-0000-4000-8500-0000000000b2' and deleted_at is not null $$,
+  ARRAY[1], '12: …and the story is now soft-deleted');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ update public.stories set deleted_at = now() where id = '23100000-0000-4000-8500-0000000000b7' $$,
+  '12: the admin_tenant takes down a member story (positive control: the moderator is not held)');
+select lives_ok(
+  $$ update public.stories set caption = 'editada pela organizacao' where id = '23100000-0000-4000-8500-0000000000b4' $$,
+  '12: …and edits the organization story');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select lives_ok(
+  $$ update public.stories set caption = 'editada pelo sistema' where id = '23100000-0000-4000-8500-0000000000b4' $$,
+  '12: the system lane edits a story (positive control: the system lane is not held)');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000011', '23100000-0000-4000-8000-000000000012');
+select results_eq(
+  $$ with u as (update public.stories set caption = 'invasor' where id = '23100000-0000-4000-8500-0000000000b1' returning 1) select count(*)::int from u $$,
+  ARRAY[0], '12: K of tenant B updates zero rows of tenant A''s story');
+reset role;
+select tests.as_tenant_without_claims();
+select results_eq(
+  $$ with u as (update public.stories set caption = 'invasor' where id = '23100000-0000-4000-8500-0000000000b1' returning 1) select count(*)::int from u $$,
+  ARRAY[0], '12: a lane with no claims updates zero rows');
+reset role;
+
+-- 12b. the stories DELETE gate (staff only; a USING-filtered DELETE matches zero rows)
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004');
+select results_eq(
+  $$ with d as (delete from public.stories where id = '23100000-0000-4000-8500-0000000000b6' returning 1) select count(*)::int from d $$,
+  ARRAY[0], '12: M1 hard-deletes zero rows of its own story (delete is staff only)');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ with d as (delete from public.stories where id = '23100000-0000-4000-8500-0000000000b8' returning 1) select count(*)::int from d $$,
+  ARRAY[0], '12: M2 hard-deletes zero rows of the story of M4');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004', null);
+select results_eq(
+  $$ with d as (delete from public.stories where id = '23100000-0000-4000-8500-0000000000bc' returning 1) select count(*)::int from d $$,
+  ARRAY[0], '12: a lane with a null role claim hard-deletes zero rows of an organization story it can read (fail closed)');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000002', 'admin_tenant');
+select results_eq(
+  $$ with d as (delete from public.stories where id = '23100000-0000-4000-8500-0000000000ba' returning 1) select count(*)::int from d $$,
+  ARRAY[1], '12: the admin_tenant still hard-deletes a story (positive control)');
+reset role;
+
+-- 12c. story_highlights: a member writes only in a MEMBER community it created
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.story_highlights (id, tenant_id, community_id, title, position, created_by_user_id)
+     values ('23100000-0000-4000-8500-0000000000e6', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000c0', 'Da organizacao', 20, '23100000-0000-4000-8000-000000000002') $$,
+  '12: the admin inserts a highlight in an organization community (positive control)');
+select lives_ok(
+  $$ insert into public.story_highlights (id, tenant_id, community_id, title, position, created_by_user_id)
+     values ('23100000-0000-4000-8500-0000000000e7', '23100000-0000-4000-8000-000000000001', null, 'Do Inicio', 20, '23100000-0000-4000-8000-000000000002') $$,
+  '12: …and one in Inicio (positive control)');
+select results_eq(
+  $$ with u as (update public.story_highlights set title = 'Renomeado pela organizacao' where id = '23100000-0000-4000-8500-0000000000e2' returning 1) select count(*)::int from u $$,
+  ARRAY[1], '12: …and renames a highlight of a member community (positive control: staff keeps every write)');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-0000000000c4', 'Forjado', 30, '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: M1 cannot insert a highlight in the member community of M4');
+select throws_ok(
+  $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000c0', 'Forjado', 30, '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: M1 cannot insert a highlight in an ORGANIZATION community');
+select throws_ok(
+  $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', null, 'Forjado', 30, '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: M1 cannot insert a highlight in Inicio');
+reset role;
+update public.tenant_modules set enabled = false where tenant_id = '23100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-0000000000c1', 'Sem social', 30, '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: with social off M1 cannot insert even in its own community (read from SQL)');
+reset role;
+update public.tenant_modules set enabled = true where tenant_id = '23100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004');
+select lives_ok(
+  $$ insert into public.story_highlights (id, tenant_id, community_id, title, position, created_by_user_id)
+     values ('23100000-0000-4000-8500-0000000000e1', '23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-0000000000c1', 'Meu destaque', 30, '23100000-0000-4000-8000-000000000004') $$,
+  '12: M1 inserts a highlight in its own member community (positive control)');
+select results_eq(
+  $$ with u as (update public.story_highlights set title = 'Meu destaque 2' where id = '23100000-0000-4000-8500-0000000000e1' returning 1) select count(*)::int from u $$,
+  ARRAY[1], '12: …and renames it (positive control)');
+select throws_ok(
+  $$ update public.story_highlights set community_id = '23100000-0000-4000-8000-0000000000c4' where id = '23100000-0000-4000-8500-0000000000e1' $$,
+  '42501', null, '12: M1 cannot re-point its highlight to the community of M4 (with check)');
+select results_eq(
+  $$ with u as (update public.story_highlights set title = 'invasor' where id = '23100000-0000-4000-8500-0000000000e2' returning 1) select count(*)::int from u $$,
+  ARRAY[0], '12: M1 renames zero rows of a highlight in the community of M4');
+select results_eq(
+  $$ with u as (update public.story_highlights set title = 'invasor' where id = '23100000-0000-4000-8500-0000000000e3' returning 1) select count(*)::int from u $$,
+  ARRAY[0], '12: M1 renames zero rows of a highlight in an organization community');
+select results_eq(
+  $$ with d as (delete from public.story_highlights where id = '23100000-0000-4000-8500-0000000000e8' returning 1) select count(*)::int from d $$,
+  ARRAY[0], '12: M1 deletes zero rows of a highlight in the community of M4');
+select results_eq(
+  $$ with d as (delete from public.story_highlights where id = '23100000-0000-4000-8500-0000000000e9' returning 1) select count(*)::int from d $$,
+  ARRAY[0], '12: M1 deletes zero rows of a highlight in an organization community');
+select results_eq(
+  $$ with d as (delete from public.story_highlights where id = '23100000-0000-4000-8500-0000000000e5' returning 1) select count(*)::int from d $$,
+  ARRAY[1], '12: M1 deletes a highlight of its own community (positive control)');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004', null);
+select throws_ok(
+  $$ insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-0000000000c1', 'Sem papel', 30, '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: a lane with a null role claim cannot insert a highlight even in M1''s own community (fail closed)');
+reset role;
+
+-- 12d. story_highlight_items: own story, own member community; a member never updates an item
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000e4', '23100000-0000-4000-8500-0000000000b4', '23100000-0000-4000-8000-000000000002') $$,
+  '12: the admin saves the organization story into the Inicio highlight (positive control)');
+select results_eq(
+  $$ with u as (update public.story_highlight_items set added_at = now() where highlight_id = '23100000-0000-4000-8500-0000000000e3' and story_id = '23100000-0000-4000-8500-0000000000b4' returning 1) select count(*)::int from u $$,
+  ARRAY[1], '12: …and updates an item (positive control: staff only)');
+reset role;
+select tests.as_tenant('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8000-000000000004');
+select lives_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000e1', '23100000-0000-4000-8500-0000000000bb', '23100000-0000-4000-8000-000000000004') $$,
+  '12: M1 saves its own story into the highlight of its own community (positive control)');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000e2', '23100000-0000-4000-8500-0000000000bb', '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: M1 cannot save a story into a highlight of the community of M4');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000e3', '23100000-0000-4000-8500-0000000000bb', '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: M1 cannot save a story into a highlight of an organization community');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000e4', '23100000-0000-4000-8500-0000000000bb', '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: M1 cannot save a story into an Inicio highlight');
+select throws_ok(
+  $$ insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('23100000-0000-4000-8000-000000000001', '23100000-0000-4000-8500-0000000000e1', '23100000-0000-4000-8500-0000000000b4', '23100000-0000-4000-8000-000000000004') $$,
+  '42501', null, '12: M1 cannot save a story it did not write (the organization story) into its own highlight (D-716)');
+select results_eq(
+  $$ with u as (update public.story_highlight_items set highlight_id = '23100000-0000-4000-8500-0000000000e6' where highlight_id = '23100000-0000-4000-8500-0000000000e1' and story_id = '23100000-0000-4000-8500-0000000000bb' returning 1) select count(*)::int from u $$,
+  ARRAY[0], '12: M1 updates zero rows of an item (a member never updates an item: no re-point)');
+select results_eq(
+  $$ with d as (delete from public.story_highlight_items where highlight_id = '23100000-0000-4000-8500-0000000000e2' and story_id = '23100000-0000-4000-8500-0000000000b3' returning 1) select count(*)::int from d $$,
+  ARRAY[0], '12: M1 deletes zero rows of an item in the community of M4');
+select results_eq(
+  $$ with d as (delete from public.story_highlight_items where highlight_id = '23100000-0000-4000-8500-0000000000e3' and story_id = '23100000-0000-4000-8500-0000000000b4' returning 1) select count(*)::int from d $$,
+  ARRAY[0], '12: M1 deletes zero rows of an item in an organization community');
+select results_eq(
+  $$ with d as (delete from public.story_highlight_items where highlight_id = '23100000-0000-4000-8500-0000000000ea' and story_id = '23100000-0000-4000-8500-0000000000bb' returning 1) select count(*)::int from d $$,
+  ARRAY[1], '12: M1 removes its own story from its own highlight (positive control)');
+reset role;
+
+-- 12e. catalog
+select results_eq($$ select permissive || '/' || cmd from pg_policies where schemaname = 'public' and tablename = 'stories' and policyname = 'stories_member_delete_gate' $$, ARRAY['RESTRICTIVE/DELETE'::text], '12: stories_member_delete_gate exists as RESTRICTIVE for DELETE');
+select results_eq($$ select permissive || '/' || cmd from pg_policies where schemaname = 'public' and tablename = 'story_highlights' and policyname = 'story_highlights_member_insert_gate' $$, ARRAY['RESTRICTIVE/INSERT'::text], '12: story_highlights_member_insert_gate exists as RESTRICTIVE for INSERT');
+select results_eq($$ select permissive || '/' || cmd from pg_policies where schemaname = 'public' and tablename = 'story_highlights' and policyname = 'story_highlights_member_update_gate' $$, ARRAY['RESTRICTIVE/UPDATE'::text], '12: story_highlights_member_update_gate exists as RESTRICTIVE for UPDATE');
+select results_eq($$ select permissive || '/' || cmd from pg_policies where schemaname = 'public' and tablename = 'story_highlights' and policyname = 'story_highlights_member_delete_gate' $$, ARRAY['RESTRICTIVE/DELETE'::text], '12: story_highlights_member_delete_gate exists as RESTRICTIVE for DELETE');
+select results_eq($$ select permissive || '/' || cmd from pg_policies where schemaname = 'public' and tablename = 'story_highlight_items' and policyname = 'story_highlight_items_member_insert_gate' $$, ARRAY['RESTRICTIVE/INSERT'::text], '12: story_highlight_items_member_insert_gate exists as RESTRICTIVE for INSERT');
+select results_eq($$ select permissive || '/' || cmd from pg_policies where schemaname = 'public' and tablename = 'story_highlight_items' and policyname = 'story_highlight_items_member_update_gate' $$, ARRAY['RESTRICTIVE/UPDATE'::text], '12: story_highlight_items_member_update_gate exists as RESTRICTIVE for UPDATE');
+select results_eq($$ select permissive || '/' || cmd from pg_policies where schemaname = 'public' and tablename = 'story_highlight_items' and policyname = 'story_highlight_items_member_delete_gate' $$, ARRAY['RESTRICTIVE/DELETE'::text], '12: story_highlight_items_member_delete_gate exists as RESTRICTIVE for DELETE');
+select ok(exists (select 1 from pg_trigger where tgrelid = 'public.stories'::regclass and tgname = 'stories_member_update_guard' and not tgisinternal), '12: trigger stories_member_update_guard exists on public.stories');
+select is((select prosecdef::text || '/' || coalesce(array_to_string(proconfig, ','), '') from pg_proc where oid = to_regprocedure('app.stories_member_update_guard()')), 'false/search_path=""', '12: app.stories_member_update_guard is a SECURITY INVOKER with an empty search_path');
 
 select * from finish();
 rollback;

@@ -22,10 +22,15 @@ begin;
 --    counters, the author's soft delete and a non-author counter bump succeed.
 -- 7. THE INDEXES: the three partial feed indexes still exist by name, and on a volume fixture Início's two reads
 --    are still served by them BY NAME with the new gates in place.
+-- 8. THE STAFF INSERT GATE (quick 261112-kuk, WR-04, MPUB-04; D-706; T-kuk-04): an admin or system lane inserts a `'tenant'` post only
+--    with no community or in an ORGANIZATION community of its tenant; a member community (own tenant or another) raises 42501.
+-- 9. THE VIDEO OF A HIDDEN COMMUNITY (quick 261112-kuk, WR-05, MPUB-04; D-708; T-kuk-05): `app.media_asset_hidden` answers true,
+--    for every lane with no staff exemption, for an asset carried only by live posts of a member community whose creator is
+--    blocked or departed; false when a visible post also carries it, false in another tenant, false again once restored.
 --
 -- Fixture ids use the `23200000-…` prefix and the tenants `pgtap-mpost-a` / `pgtap-mpost-b`. Like its siblings,
 -- this file ROLLS BACK.
-select plan(56);
+select plan(74);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-mpost-a', 'Posts de comunidades de membros A', '23200000-0000-4000-8000-000000000001');
@@ -346,6 +351,96 @@ select ok((select plan from inicio_plans where name = 'nocommunity') like '%feed
 select ok((select plan from inicio_plans where name = 'merged') like '%feed_posts_tenant_org_created_idx%'
           and (select plan from inicio_plans where name = 'merged') not like '%Seq Scan on feed_posts%',
   '7: the merged Início is still served by feed_posts_tenant_org_created_idx BY NAME, never a Seq Scan');
+
+-- ── 8. the staff branch of the post insert gate carries the community kind (WR-04, MPUB-04; D-706; T-kuk-04) ────
+-- Quick 261112-kuk. A `'tenant'` post (the organization's voice) is admitted by the staff branch only with no community
+-- or in an ORGANIZATION community of the caller's tenant; a member community (the tenant's own or another tenant's) is
+-- refused with 42501. The positive controls are the two shapes staff keeps.
+select tests.as_tenant('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'admin_tenant');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'na comunidade de membro', 'tenant', '23200000-0000-4000-8000-0000000000c2') $$,
+  '42501', null, '8: an admin_tenant lane cannot insert an organization post into the member community of M1');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'na comunidade de membro', 'tenant', '23200000-0000-4000-8000-0000000000c3') $$,
+  '42501', null, '8: …nor into the member community of M3');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'na comunidade de outro tenant', 'tenant', '23200000-0000-4000-8000-0000000000c8') $$,
+  '42501', null, '8: …nor into the member community of ANOTHER tenant');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'na organizacao', 'tenant', '23200000-0000-4000-8000-0000000000c1') $$,
+  '8: the admin_tenant still inserts an organization post into an organization community (positive control)');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'sem comunidade', 'tenant', null) $$,
+  '8: …and one with no community (positive control)');
+reset role;
+select tests.as_tenant('23200000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'do sistema na comunidade de membro', 'tenant', '23200000-0000-4000-8000-0000000000c2') $$,
+  '42501', null, '8: the system lane cannot insert an organization post into a member community');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'do sistema na organizacao', 'tenant', '23200000-0000-4000-8000-0000000000c1') $$,
+  '8: …but inserts into an organization community (positive control)');
+reset role;
+select matches(
+  (select with_check from pg_policies where schemaname = 'public' and tablename = 'feed_posts' and policyname = 'feed_posts_social_insert_gate'),
+  'c\.kind = ''organization''',
+  '8: the staff branch of feed_posts_social_insert_gate names the organization community kind');
+
+-- ── 9. the video of a post in a hidden member community (WR-05, MPUB-04; D-708; T-kuk-05) ───────────────────────
+-- Quick 261112-kuk. `app.media_asset_hidden` answers true for an asset carried only by live posts of a member community
+-- whose creator is blocked or departed (the set `app.member_community_hidden_ids()` returns), for EVERY lane (the RLS
+-- gate `feed_posts_member_hidden_community_gate` hides those posts from the moderator too), false when a visible post also
+-- carries the asset, and false again once the creator is restored. The function never reads the media kind.
+-- Assets: A1 only on post B21; A2 on post B22 AND on the live organization post B23; A3 on post B24 (M1's community C2).
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, variant_widths) values
+  ('23200000-0000-4000-8000-0000000000a1', '23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000006', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('23200000-0000-4000-8000-0000000000a2', '23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000006', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('23200000-0000-4000-8000-0000000000a3', '23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000004', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}');
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, community_id, media_kind) values
+  ('23200000-0000-4000-8000-000000000b21', '23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000006', 'b21', 'community', '23200000-0000-4000-8000-0000000000c3', 'gallery'),
+  ('23200000-0000-4000-8000-000000000b22', '23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000006', 'b22', 'community', '23200000-0000-4000-8000-0000000000c3', 'gallery'),
+  ('23200000-0000-4000-8000-000000000b23', '23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'b23', 'tenant', null, 'gallery'),
+  ('23200000-0000-4000-8000-000000000b24', '23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000004', 'b24', 'community', '23200000-0000-4000-8000-0000000000c2', 'gallery');
+insert into public.feed_post_media (tenant_id, post_id, post_media_kind, media_asset_id, kind, position) values
+  ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000b21', 'gallery', '23200000-0000-4000-8000-0000000000a1', 'image', 0),
+  ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000b22', 'gallery', '23200000-0000-4000-8000-0000000000a2', 'image', 0),
+  ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000b23', 'gallery', '23200000-0000-4000-8000-0000000000a2', 'image', 0),
+  ('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000b24', 'gallery', '23200000-0000-4000-8000-0000000000a3', 'image', 0);
+select tests.as_tenant('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a1'), false, '9: while the creator M3 is live the asset of a community post is not hidden (control)');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a3'), false, '9: …nor the asset of M1''s community post (control)');
+reset role;
+update public.memberships set status = 'blocked', blocked_at = now() where tenant_id = '23200000-0000-4000-8000-000000000001' and user_id = '23200000-0000-4000-8000-000000000006';
+select tests.as_tenant('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a1'), true, '9: blocking M3 hides the asset carried only by M3''s community post');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a3'), false, '9: …while the asset of another community (M1''s) stays open in the same statement');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a2'), false, '9: …and an asset a visible organization post also carries is not hidden (exemption)');
+reset role;
+select tests.as_tenant('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a1'), true, '9: the admin_tenant is not exempt: the post leaves the moderator''s read, so does its video (D-708)');
+reset role;
+select tests.as_tenant('23200000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a1'), true, '9: the system lane is not exempt either');
+reset role;
+select tests.as_tenant('23200000-0000-4000-8000-000000000011', '23200000-0000-4000-8000-000000000012');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a1'), false, '9: false in another tenant''s lane (tenant pin)');
+reset role;
+update public.memberships set status = 'active', blocked_at = null where tenant_id = '23200000-0000-4000-8000-000000000001' and user_id = '23200000-0000-4000-8000-000000000006';
+select tests.as_tenant('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a1'), false, '9: restoring M3 reopens the asset');
+reset role;
+update public.memberships set deleted_at = now() where tenant_id = '23200000-0000-4000-8000-000000000001' and user_id = '23200000-0000-4000-8000-000000000006';
+select tests.as_tenant('23200000-0000-4000-8000-000000000001', '23200000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('23200000-0000-4000-8000-0000000000a1'), true, '9: removing M3 (membership deleted_at) hides the asset too');
+reset role;
+update public.memberships set deleted_at = null where tenant_id = '23200000-0000-4000-8000-000000000001' and user_id = '23200000-0000-4000-8000-000000000006';
 
 select * from finish();
 rollback;
