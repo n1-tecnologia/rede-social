@@ -1572,6 +1572,17 @@ Plans:
 
 - Precondition for every task (D-33, D-365, UI-04): `grep -q '^approved: true' .planning/sketches/020-phase-10-designed-screens/README.md` succeeds; if it does not, the executor stops and reports that the sketch gate of plan 02 is pending; it is also the FIRST clause of every verify command of this plan
 
+### Phase 10.1: Rede Social - Ingresso pago do evento pela Kiwify (INSERTED)
+
+**Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
+**Requirements**: TBD
+**Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 10.1 to break down)
+
 ### Phase 11: Rede Social - Direct Messages, Member Blocking and Reports
 
 **Goal**: With "Rede social" on, members message each other 1:1, block people they don't want to hear from, and are notified about the social activity that concerns them; members can report content and `admin_tenant` moderates member content through a reports queue.
