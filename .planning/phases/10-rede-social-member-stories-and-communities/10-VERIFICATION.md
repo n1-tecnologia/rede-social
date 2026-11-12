@@ -1,7 +1,7 @@
 ---
 phase: 10-rede-social-member-stories-and-communities
 verified: 2026-11-12T19:00:00Z
-status: human_needed
+status: passed
 score: 5/5 truths verified (4 roadmap criteria + D-711 amendment); 28/28 requirement ids satisfied (MPUB-04 closed)
 covered_files:
   - .planning/REQUIREMENTS.md
@@ -126,7 +126,7 @@ covered_files:
   - supabase/migrations/20261111151218_moderation_member_content.sql
   - supabase/migrations/20261111163020_member_stories_authors.sql
   - supabase/migrations/20261112182228_member_content_write_gates.sql
-covered_digest: "v1:sha256:073e0fec0425aec2c986749459b0b70d904dcdc96f0396876c4387035be196b6"
+covered_digest: "v1:sha256:21a8bab981e5998f82aaf30321f699edb07ab95ec99ba58fd013bcacf91430b0"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
@@ -165,7 +165,15 @@ human_verification:
 
 **Phase Goal:** With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from its owner: the creator for a member-created community, any `admin_tenant` for an organization community (D-706).
 **Verified:** 2026-11-12
-**Status:** human_needed (everything automatable passes; real-device proofs P1..P9, the e2e baseline question and the provisional sketch 020 approval remain with Igor)
+**Status:** passed by developer closure on 2026-11-12 (was human_needed: everything automatable passes; the items below stay open and are Igor's)
+
+> **Closure note (2026-11-12).** Igor closed Phase 10 with "se ja estiver pronto, fechar fase 10". The status is `passed` on that word, as in Phases 9, 12.1, 12.2 and 12.3. What this does NOT record as observed:
+> - The nine real-device and owner proofs P1..P9 in `10-MANUAL-PROOFS.md` are all still `pending`; no agent passed one and none is claimed here.
+> - The full `pnpm e2e` stage was RED (118 failures, none in a Phase 10 spec) and `e2e:pwa` never ran; "not caused by Phase 10" is an inference from the files the phase touched, with no baseline run at the pre-phase commit.
+> - No Phase 10 security audit (`/gsd-secure-phase 10`) and no UI review (`/gsd-ui-review 10`) were run; the plans' threat models were checked only through the code review and this verification.
+> - Sketch 020 is approved provisionally (Igor, 2026-11-11), and the two new copy keys `feed.deleteCommunity.body` and `feed.removeCommunity.body` await his confirmation.
+> - The release steps are his: `pnpm db:two`, `pnpm db:migrate-all -- --dry-run`, fan-out of the nine Phase 10 migrations, then the API deploy together with the migration, web first for A7. Nothing was pushed or deployed.
+> - `covered_digest` was recomputed on 2026-11-12 after the REQUIREMENTS.md and ROADMAP.md closure edits; no covered source file changed in between.
 **Re-verification:** Yes, after gap closure (quick 261112-kuk, commits 35226de7, 28f83dd8, cb2b4507, 2a522c06)
 
 ## Goal Achievement
