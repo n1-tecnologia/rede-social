@@ -3,7 +3,6 @@ import { avatarUrlFor } from '@rede-social/contracts/profiles';
 import { MediaImage } from '@rede-social/core/ui';
 import { CommunityHeader } from '@rede-social/module-communities/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
-import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { Avatar, EmptyState, SectionTitle, StatusPill } from '@rede-social/ui';
 import { CircleAlert, Lock, Pencil } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
@@ -401,8 +400,11 @@ export default async function CommunityPage({
                   bootstrap,
                   await getTranslations('moderation'),
                 ),
-                // UI-D-66: "Destacar" for a curator on any story, a permission never a role.
-                canCurate: bootstrap.permissions.includes(STORY_PERMISSIONS.manage),
+                // UI-D-66: "Destacar" for a curator of THIS community, the API's own per-community
+                // answer (`viewer.canCurate`: the organization's manage half on an organization
+                // community, the creator on a member one), never the tenant-wide permission (review
+                // WR-06). The API stays the boundary.
+                canCurate: viewer.canCurate,
                 // The empty highlight sheet's "Criar destaque" opens THIS community's manage screen.
                 originCommunityId: community.id,
                 // 2026-10-20 (FRONT.pdf): share a story like a post, on the verified host.

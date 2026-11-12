@@ -607,3 +607,61 @@ describe('/comunidades/[communityId] — the lifecycle relation and the post men
     expect(menuLabels().removeBody).toBe('base-remove');
   });
 });
+
+/**
+ * Phase 10 review WR-06: the story viewer's "Destacar" and curator menu follow the community's own
+ * `viewer.canCurate`, the API's per-community answer, and not the organization-wide
+ * `stories.story.manage`. An admin on a MEMBER community holds that permission but cannot curate the
+ * place (the API answers a bare 404), and the creator curates their own community without holding it.
+ */
+describe('/comunidades/[communityId] — the story viewer curates by viewer.canCurate (WR-06)', () => {
+  const viewerProps = () => mocks.surfaceProps?.viewer as { canCurate?: boolean } | undefined;
+
+  it('22. an admin on a MEMBER community holds stories.story.manage but gets no curator menu', async () => {
+    mocks.permissions = ADMIN_PERMISSIONS;
+    mocks.role = 'admin_tenant';
+    mocks.highlights = { items: [HIGHLIGHT] };
+    mocks.result = {
+      status: 'ok',
+      community: community('member', {
+        isOwner: false,
+        canPublish: false,
+        canEdit: true,
+        canCurate: false,
+      }),
+    };
+
+    await render();
+
+    expect(viewerProps()?.canCurate).toBe(false);
+  });
+
+  it('23. the creator of a member community, who does not hold stories.story.manage, gets the curator menu', async () => {
+    mocks.permissions = ['social.participate', 'stories.story.publish'];
+    mocks.highlights = { items: [HIGHLIGHT] };
+    mocks.result = { status: 'ok', community: community('member', CREATOR_VIEW) };
+
+    await render();
+
+    expect(viewerProps()?.canCurate).toBe(true);
+  });
+
+  it('24. an admin on an organization community keeps the curator menu', async () => {
+    mocks.permissions = ADMIN_PERMISSIONS;
+    mocks.role = 'admin_tenant';
+    mocks.highlights = { items: [HIGHLIGHT] };
+    mocks.result = {
+      status: 'ok',
+      community: community('organization', {
+        isOwner: false,
+        canPublish: true,
+        canEdit: true,
+        canCurate: true,
+      }),
+    };
+
+    await render();
+
+    expect(viewerProps()?.canCurate).toBe(true);
+  });
+});
