@@ -48,7 +48,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 09.2: Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED)** - One Supabase project per tenant: the super_admin registers the project access at tenant creation, the system loads the schema and baseline configuration into it, migrations fan out to every tenant database, and the API and worker route each request and job to the tenant's own database
 - [x] **Phase 09.3: Pendências de backend do FRONT.pdf (INSERTED)** - Delete an event and delete an archived community (today "Em breve"), the longer limits of the event schedule and the highlight name, and the Android app icon that fills the whole circle: the five corrections of the client's FRONT.pdf that need the backend
 - [ ] **Phase 09.4: Projeto do tenant no Supabase do cliente (INSERTED)** - A tenant can run on a Supabase project in its own account: a scoped access token limited to that one project is stored sealed per project and used for every Management API call about it, with the organisation pin, the allow-list, the rate limiter, the health and the panel working per project
-- [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
+- [x] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 - [x] **Phase 12: Formulário de perfil do tenant** - The tenant admin builds the profile form (short and long text, dropdown, multiple choice, radio and more); new members answer it right after their first login, members without a completed profile and members who had completed it before the form existed answer it too
 - [ ] **Phase 13: App nativo iOS e Android por tenant (white-label)** - Post-MVP, additive: each tenant gets its own native iOS and Android app (stage 1: a native shell around the web's own screens), fixed to the tenant's host, with every feature of the web app (member area and tenant admin), native push and links that open the app; the web, the PWA and the API stay as they are for a browser
@@ -1509,7 +1509,7 @@ Plans:
 **Scope**: Post-MVP (user decision 2026-09-25).
 **Depends on**: Phase 9
 **Requirements**: MCOMM-01, MCOMM-02, MCOMM-03, MCOMM-04, MCOMM-05, MCOMM-06, MCOMM-07, MCOMM-08, MCOMM-09, MCOMM-10, MCOMM-11, MSTORY-01, MSTORY-02, MSTORY-03, MSTORY-04, MSTORY-05, MSTORY-06, MSTORY-07, MSTORY-08, MSTORY-09, MPUB-01, MPUB-02, MPUB-03, MPUB-04, MPUB-05, MPUB-06, MPUB-07 (plus UI-04 for the sketch gate); promotes V2-CONT-02 and lifts the "member-created stories" exclusion (user decision 2026-09-25)
-**Plans:** 15/15 plans executed (planned 2026-11-10 ahead of the current phase; STATE stays on Phase 12.2; the backend plans 03 to 10 never wait for the sketch gate 020, only the web plans 11 to 15 do)
+**Plans:** 15/15 plans executed 2026-11-11/12 and the phase CLOSED 2026-11-12 by developer closure (Igor: "se ja estiver pronto, fechar fase 10"); review fixes WR-01/02/06 and quick 261112-kuk (MPUB-04 database write gates, the ninth migration) landed; verification human_needed 28/28; real-device proofs P1..P9 in 10-MANUAL-PROOFS.md stay pending and are his
 **Success Criteria** (what must be TRUE):
 
   1. With `social` on, a member can publish stories. Início's grouped circle stays admin-only (the organization's voice); a member's active stories show in Explorar for their followers, one circle per author (Instagram model), built on 05.2's grouped viewer.
@@ -2003,7 +2003,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 09.1. Acesso por gateway de pagamento | 22/22 | In Progress|  |
 | 09.2. Banco por Tenant: projeto Supabase dedicado por tenant (INSERTED) | 24/28 | In Progress|  |
 | 09.3. Pendências de backend do FRONT.pdf (INSERTED) | 9/9 | Complete    | 2026-10-27 |
-| 10. Rede Social - Member Stories and Communities | 15/15 | In Progress|  |
+| 10. Rede Social - Member Stories and Communities | 15/15 | Complete    | 2026-11-12 |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 | 12. Formulário de perfil do tenant | 18/18 | Complete    | 2026-11-02 |
 | 13. App nativo iOS e Android por tenant (white-label) | 13/32 | In Progress|  |

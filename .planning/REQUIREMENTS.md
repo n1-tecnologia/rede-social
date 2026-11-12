@@ -279,33 +279,33 @@ Added by Phase 09 planning (2026-10-19). With the toggleable "Rede social" modul
 
 Added by Phase 10 planning (2026-11-10). With the toggleable "Rede social" module (`social`) on, members also publish stories and create their own communities, and a community accepts publications only from its owner: the creator for a member-created community, any `admin_tenant` for an organization community (D-706). Stories live in Explorar for followers, communities are open to the whole tenant, the admin keeps moderation with a log row, and turning `social` off stops the writes and keeps the reads. Decisions D-701..D-718 (`10-CONTEXT.md`), UI decisions UI-D-697..UI-D-720 (`10-UI-SPEC.md`). Promotes V2-CONT-02 and lifts the member-created stories exclusion.
 
-- [ ] **MCOMM-01**: With `social` and `communities` effective, a member creates a community (name, description, optional cover); the row is stamped `kind = 'member'` and `created_by_user_id` from the session, never from the body (the request schema stays `.strict()` and carries no `kind`, `position` or creator key); a community created by `admin_tenant` is stamped `'organization'`; a later promotion or demotion of the creator never moves it between kinds *(D-707, stamp at creation)*
-- [ ] **MCOMM-02**: A member-created community is listed and opened by every live member of the tenant exactly like an organization community: cover, name, description, posts and highlights are readable, like and comment stay open, and there is no locked screen and no store lock (a member cannot link products) *(D-701)*
-- [ ] **MCOMM-03**: The Comunidades list returns organization communities first in the admin's `position` then activity order, then member communities newest activity first, so a new member community never precedes an organization one (member communities carry the CHECK-backed sentinel `position = 1000000`, assumption A1); `PUT /v1/communities/order` covers organization communities only (a member community id in the body is `order_stale`) and a member community keeps its sentinel position after an admin reorder *(D-712)*
-- [ ] **MCOMM-04**: A member community projects `createdBy { membershipId, displayName, avatarAssetId }` and the per-viewer flags `viewer { isOwner, canPublish, canEdit, canCurate }`, never a user id; an organization community projects no creator; the list read carries the caller's `memberQuota { ownedActive, limit }` *(D-703)*
-- [ ] **MCOMM-05**: Each member may own at most N active communities (default 3, range 0 to 20) stored in `tenant_modules['social'].settings` and edited by `super_admin` in the platform panel; archived and removed ones do not count; over the limit the API answers `400 VALIDATION_FAILED { community: 'limit_reached' }` under a per-member advisory lock so a concurrent create or a reactivation cannot exceed it; 0 means members cannot create; lowering the limit never removes a community *(D-710)*
-- [ ] **MCOMM-06**: The creator edits name, description and cover, archives, reactivates, deletes an archived community and curates its highlights, reads their own archived communities, cannot link store products and cannot reorder; another member on the same ids gets `403 FORBIDDEN` *(D-713, D-89)*
-- [ ] **MCOMM-07**: When the creator of a member community is blocked by the admin or leaves the tenant, the community, its posts, highlights and stories leave every list and answer the bare 404 (the moderator included); unblocking restores them and nothing is deleted; a community whose creator the viewer blocked is absent from the viewer's lists and by-id read *(D-708, D-616)*
-- [ ] **MCOMM-08**: A post in a member community (stamped audience `'community'`) appears on that community's page only: it is absent from Início, Explorar and Reels "Todos" for every viewer (a follower of the creator, the creator and the moderator included) and carries no Administrador badge *(D-702)*
-- [ ] **MCOMM-09**: Reels lists the member communities' lanes after the organization's in list order; each lane lists only that community's ready videos; "Todos" never lists a member-community video *(D-702)*
-- [ ] **MCOMM-10**: A holder of `moderation.manage` archives or removes any member-created community and each action writes a `moderation_log` row (`community_archived` or `community_removed`, subject `community`) in the same transaction; the creator is not told; it works while `social` is off; this is the communities half of MODER-04 *(D-711, D-718)*
-- [ ] **MCOMM-11**: A holder of `moderation.manage` removes a single post inside a member community, with the `post_removed` log row in the same transaction while the post's author is live; the creator is not told *(planner assumption A3, separable)*
-- [ ] **MPUB-01**: The owner rule: an organization community accepts posts, stories and highlights from any `admin_tenant`; a member community only from its creator; anyone else gets `403 FORBIDDEN` from the API and no publish control in the web, and like and comment stay open *(D-706, refining roadmap criterion 3)*
-- [ ] **MPUB-02**: With `social` and the owning module effective, role `member` is composed `communities.community.create`, `communities.community.manage_own` and `stories.story.publish` (member-only by construction, no staff role holds them); ownership is tested in the statement (`created_by_user_id = ctx.userId`), never by role; `admin_tenant` keeps `communities.community.manage`; the organization-voice surfaces additionally require `content.publish` *(D-707, D-718, A2)*
-- [ ] **MPUB-03**: A creator publishes in their own community the member post (caption, photos, at most one video where the tenant allows it, a link with its preview; no PDF) under the `social` media limits; the post is born with `community_id` set and the stamped audience `'community'`; `member_no_community` no longer applies to an owner; a non-owner member naming a community gets `403` *(D-709)*
-- [ ] **MPUB-04**: The member lane is bounded by RESTRICTIVE RLS gates on `communities`, `stories`, `story_highlights`, `story_highlight_items` and `feed_posts` that refuse (42501) a forged kind, owner, audience or non-owner write, reading `social` from SQL (`app.social_enabled()`) rather than the 30 s flags cache, and `feed_posts_member_update_guard` becomes an allow-list of the columns an author may edit *(D-706, D-707, D-718)*
-- [ ] **MPUB-05**: With `social` off: member writes answer `403`; member communities, their posts and highlights stay readable; member stories leave Explorar while a story saved in a community highlight stays; the moderator's actions keep working; turning `social` on restores everything with no data change *(D-718)*
-- [ ] **MPUB-06**: The admin's community picker, story destination groups and "Destacar" catalog list organization communities only; an admin cannot publish or curate in a member community *(D-706)*
-- [ ] **MPUB-07**: The two-tenant isolation suite and pgTAP cover every new or changed route and policy (owner, non-owner, follower, non-follower, moderator, support, system lane, other tenant); migrations are expand-only and ship before the API, the story wire change (`authorUserId` null for non-authors) being the one release-order exception (web first); `pnpm db:generate` prints "No schema changes"; `docs/DEPLOY.md` "Ativar a Rede social" gains member stories and communities; the seed adds one member community and one member story for the isolation tenant *(Rollout)*
-- [ ] **MSTORY-01**: A member publishes a story (a photo, or a video where the tenant allows it, plus an optional caption) that lasts 24 hours under the member post limits; a member video must be `ready` before publish; the story is stamped `visibility = 'followers'` from the role, never from the body *(D-714, D-715)*
-- [ ] **MSTORY-02**: Início's strip, its grouped circle and Início highlights list organization stories only; a member story is never in them; `GET /v1/stories` without a scope answers organization stories only *(D-704, D-714)*
-- [ ] **MSTORY-03**: Explorar shows one circle per author: the member's own first ("+" when none), then unseen before seen, then recency; a member sees their followees; a moderator sees every member with a live story, cursor-paged 20 per page, with no follow state and no own circle; the circles open 05.2's grouped viewer with its seen state *(D-714, D-717)*
-- [ ] **MSTORY-04**: A member story, its likes and its comments are readable only by the author, the author's live followers, holders of `moderation.manage` and (D-716) anyone who sees a community whose highlight holds it; everyone else gets the bare 404; the gate is in the statement and in a restrictive RLS policy; the story wire never carries another member's user id (`author { membershipId, displayName, avatarUrl }`, assumption A7) *(D-705, D-716)*
-- [ ] **MSTORY-05**: Likes and comments on a member story behave as on an organization story for allowed readers (STORY-05); publishing a member story produces no notification (the `story.published` source skips non-organization stories); the author still gets the existing comment notice *(Discretion)*
-- [ ] **MSTORY-06**: A creator saves one of their own stories in a highlight of their own community (never another person's story); the story is readable by everyone who sees the community, also after 24 h and with `social` off; the publish and highlight screens say so before confirming *(D-716)*
-- [ ] **MSTORY-07**: The member media seam covers the purposes `story` and `cover`: the photo cap from `social.media`, member video for `post` and `story` only and only when enabled, member-owned assets only, the member video-minutes sub-budget counts story videos, and a story video lasts at most the lower of the member limit and 60 s (assumption A9) *(Discretion: media)*
-- [ ] **MSTORY-08**: A blocked or removed author's stories leave Explorar and answer 404; a story author the viewer blocked (`member_blocks`) is absent from the viewer's row *(D-708, D-616)*
-- [ ] **MSTORY-09**: A member deletes their own story; a holder of `moderation.manage` soft-deletes any member story with a `moderation_log` row (`story_removed`, subject `story`) in the same transaction; deleting an organization story is unchanged (no log row); the author is not told; this is the stories half of MODER-04 *(D-711, D-717)*
+- [x] **MCOMM-01**: With `social` and `communities` effective, a member creates a community (name, description, optional cover); the row is stamped `kind = 'member'` and `created_by_user_id` from the session, never from the body (the request schema stays `.strict()` and carries no `kind`, `position` or creator key); a community created by `admin_tenant` is stamped `'organization'`; a later promotion or demotion of the creator never moves it between kinds *(D-707, stamp at creation)*
+- [x] **MCOMM-02**: A member-created community is listed and opened by every live member of the tenant exactly like an organization community: cover, name, description, posts and highlights are readable, like and comment stay open, and there is no locked screen and no store lock (a member cannot link products) *(D-701)*
+- [x] **MCOMM-03**: The Comunidades list returns organization communities first in the admin's `position` then activity order, then member communities newest activity first, so a new member community never precedes an organization one (member communities carry the CHECK-backed sentinel `position = 1000000`, assumption A1); `PUT /v1/communities/order` covers organization communities only (a member community id in the body is `order_stale`) and a member community keeps its sentinel position after an admin reorder *(D-712)*
+- [x] **MCOMM-04**: A member community projects `createdBy { membershipId, displayName, avatarAssetId }` and the per-viewer flags `viewer { isOwner, canPublish, canEdit, canCurate }`, never a user id; an organization community projects no creator; the list read carries the caller's `memberQuota { ownedActive, limit }` *(D-703)*
+- [x] **MCOMM-05**: Each member may own at most N active communities (default 3, range 0 to 20) stored in `tenant_modules['social'].settings` and edited by `super_admin` in the platform panel; archived and removed ones do not count; over the limit the API answers `400 VALIDATION_FAILED { community: 'limit_reached' }` under a per-member advisory lock so a concurrent create or a reactivation cannot exceed it; 0 means members cannot create; lowering the limit never removes a community *(D-710)*
+- [x] **MCOMM-06**: The creator edits name, description and cover, archives, reactivates, deletes an archived community and curates its highlights, reads their own archived communities, cannot link store products and cannot reorder; another member on the same ids gets `403 FORBIDDEN` *(D-713, D-89)*
+- [x] **MCOMM-07**: When the creator of a member community is blocked by the admin or leaves the tenant, the community, its posts, highlights and stories leave every list and answer the bare 404 (the moderator included); unblocking restores them and nothing is deleted; a community whose creator the viewer blocked is absent from the viewer's lists and by-id read *(D-708, D-616)*
+- [x] **MCOMM-08**: A post in a member community (stamped audience `'community'`) appears on that community's page only: it is absent from Início, Explorar and Reels "Todos" for every viewer (a follower of the creator, the creator and the moderator included) and carries no Administrador badge *(D-702)*
+- [x] **MCOMM-09**: Reels lists the member communities' lanes after the organization's in list order; each lane lists only that community's ready videos; "Todos" never lists a member-community video *(D-702)*
+- [x] **MCOMM-10**: A holder of `moderation.manage` archives or removes any member-created community and each action writes a `moderation_log` row (`community_archived` or `community_removed`, subject `community`) in the same transaction; the creator is not told; it works while `social` is off; this is the communities half of MODER-04 *(D-711, D-718)*
+- [x] **MCOMM-11**: A holder of `moderation.manage` removes a single post inside a member community, with the `post_removed` log row in the same transaction while the post's author is live; the creator is not told *(planner assumption A3, separable)*
+- [x] **MPUB-01**: The owner rule: an organization community accepts posts, stories and highlights from any `admin_tenant`; a member community only from its creator; anyone else gets `403 FORBIDDEN` from the API and no publish control in the web, and like and comment stay open *(D-706, refining roadmap criterion 3)*
+- [x] **MPUB-02**: With `social` and the owning module effective, role `member` is composed `communities.community.create`, `communities.community.manage_own` and `stories.story.publish` (member-only by construction, no staff role holds them); ownership is tested in the statement (`created_by_user_id = ctx.userId`), never by role; `admin_tenant` keeps `communities.community.manage`; the organization-voice surfaces additionally require `content.publish` *(D-707, D-718, A2)*
+- [x] **MPUB-03**: A creator publishes in their own community the member post (caption, photos, at most one video where the tenant allows it, a link with its preview; no PDF) under the `social` media limits; the post is born with `community_id` set and the stamped audience `'community'`; `member_no_community` no longer applies to an owner; a non-owner member naming a community gets `403` *(D-709)*
+- [x] **MPUB-04**: The member lane is bounded by RESTRICTIVE RLS gates on `communities`, `stories`, `story_highlights`, `story_highlight_items` and `feed_posts` that refuse (42501) a forged kind, owner, audience or non-owner write, reading `social` from SQL (`app.social_enabled()`) rather than the 30 s flags cache, and `feed_posts_member_update_guard` becomes an allow-list of the columns an author may edit *(D-706, D-707, D-718)*
+- [x] **MPUB-05**: With `social` off: member writes answer `403`; member communities, their posts and highlights stay readable; member stories leave Explorar while a story saved in a community highlight stays; the moderator's actions keep working; turning `social` on restores everything with no data change *(D-718)*
+- [x] **MPUB-06**: The admin's community picker, story destination groups and "Destacar" catalog list organization communities only; an admin cannot publish or curate in a member community *(D-706)*
+- [x] **MPUB-07**: The two-tenant isolation suite and pgTAP cover every new or changed route and policy (owner, non-owner, follower, non-follower, moderator, support, system lane, other tenant); migrations are expand-only and ship before the API, the story wire change (`authorUserId` null for non-authors) being the one release-order exception (web first); `pnpm db:generate` prints "No schema changes"; `docs/DEPLOY.md` "Ativar a Rede social" gains member stories and communities; the seed adds one member community and one member story for the isolation tenant *(Rollout)*
+- [x] **MSTORY-01**: A member publishes a story (a photo, or a video where the tenant allows it, plus an optional caption) that lasts 24 hours under the member post limits; a member video must be `ready` before publish; the story is stamped `visibility = 'followers'` from the role, never from the body *(D-714, D-715)*
+- [x] **MSTORY-02**: Início's strip, its grouped circle and Início highlights list organization stories only; a member story is never in them; `GET /v1/stories` without a scope answers organization stories only *(D-704, D-714)*
+- [x] **MSTORY-03**: Explorar shows one circle per author: the member's own first ("+" when none), then unseen before seen, then recency; a member sees their followees; a moderator sees every member with a live story, cursor-paged 20 per page, with no follow state and no own circle; the circles open 05.2's grouped viewer with its seen state *(D-714, D-717)*
+- [x] **MSTORY-04**: A member story, its likes and its comments are readable only by the author, the author's live followers, holders of `moderation.manage` and (D-716) anyone who sees a community whose highlight holds it; everyone else gets the bare 404; the gate is in the statement and in a restrictive RLS policy; the story wire never carries another member's user id (`author { membershipId, displayName, avatarUrl }`, assumption A7) *(D-705, D-716)*
+- [x] **MSTORY-05**: Likes and comments on a member story behave as on an organization story for allowed readers (STORY-05); publishing a member story produces no notification (the `story.published` source skips non-organization stories); the author still gets the existing comment notice *(Discretion)*
+- [x] **MSTORY-06**: A creator saves one of their own stories in a highlight of their own community (never another person's story); the story is readable by everyone who sees the community, also after 24 h and with `social` off; the publish and highlight screens say so before confirming *(D-716)*
+- [x] **MSTORY-07**: The member media seam covers the purposes `story` and `cover`: the photo cap from `social.media`, member video for `post` and `story` only and only when enabled, member-owned assets only, the member video-minutes sub-budget counts story videos, and a story video lasts at most the lower of the member limit and 60 s (assumption A9) *(Discretion: media)*
+- [x] **MSTORY-08**: A blocked or removed author's stories leave Explorar and answer 404; a story author the viewer blocked (`member_blocks`) is absent from the viewer's row *(D-708, D-616)*
+- [x] **MSTORY-09**: A member deletes their own story; a holder of `moderation.manage` soft-deletes any member story with a `moderation_log` row (`story_removed`, subject `story`) in the same transaction; deleting an organization story is unchanged (no log row); the author is not told; this is the stories half of MODER-04 *(D-711, D-717)*
 
 ### Payments (access by payment gateway)
 
@@ -892,33 +892,33 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXPL-04 | Phase 09 (plan 08) | Complete |
 | EXPL-05 | Phase 09 (plans 08, 09) | Complete |
 | EXPL-06 | Phase 09 (plans 04, 08) | Complete |
-| MCOMM-01 | Phase 10 (plans 03, 05, 13, 15) | Pending |
-| MCOMM-02 | Phase 10 (plans 06, 13) | Pending |
-| MCOMM-03 | Phase 10 (plans 06, 13) | Pending |
-| MCOMM-04 | Phase 10 (plans 06, 13) | Pending |
-| MCOMM-05 | Phase 10 (plans 05, 11, 13) | Pending |
-| MCOMM-06 | Phase 10 (plans 05, 09, 13, 14) | Pending |
-| MCOMM-07 | Phase 10 (plans 03, 06, 14) | Pending |
-| MCOMM-08 | Phase 10 (plans 03, 06, 11, 15) | Pending |
-| MCOMM-09 | Phase 10 (plans 06) | Pending |
-| MCOMM-10 | Phase 10 (plans 04, 05, 11, 14) | Pending |
-| MCOMM-11 | Phase 10 (plans 06) | Pending |
-| MPUB-01 | Phase 10 (plans 05, 09, 14, 15) | Pending |
-| MPUB-02 | Phase 10 (plans 05, 12) | Pending |
-| MPUB-03 | Phase 10 (plans 05, 14) | Pending |
-| MPUB-04 | Phase 10 (plans 03, 04) | Pending |
-| MPUB-05 | Phase 10 (plans 05, 08, 10, 13, 14, 15) | Pending |
-| MPUB-06 | Phase 10 (plans 09, 14) | Pending |
-| MPUB-07 | Phase 10 (plans 03, 04, 08, 10, 15) | Pending |
-| MSTORY-01 | Phase 10 (plans 07, 12, 15) | Pending |
-| MSTORY-02 | Phase 10 (plans 07) | Pending |
-| MSTORY-03 | Phase 10 (plans 08, 12, 15) | Pending |
-| MSTORY-04 | Phase 10 (plans 04, 08, 11) | Pending |
-| MSTORY-05 | Phase 10 (plans 07) | Pending |
-| MSTORY-06 | Phase 10 (plans 09, 12) | Pending |
-| MSTORY-07 | Phase 10 (plans 07) | Pending |
-| MSTORY-08 | Phase 10 (plans 04, 08) | Pending |
-| MSTORY-09 | Phase 10 (plans 04, 07, 11, 12) | Pending |
+| MCOMM-01 | Phase 10 (plans 03, 05, 13, 15) | Complete |
+| MCOMM-02 | Phase 10 (plans 06, 13) | Complete |
+| MCOMM-03 | Phase 10 (plans 06, 13) | Complete |
+| MCOMM-04 | Phase 10 (plans 06, 13) | Complete |
+| MCOMM-05 | Phase 10 (plans 05, 11, 13) | Complete |
+| MCOMM-06 | Phase 10 (plans 05, 09, 13, 14) | Complete |
+| MCOMM-07 | Phase 10 (plans 03, 06, 14) | Complete |
+| MCOMM-08 | Phase 10 (plans 03, 06, 11, 15) | Complete |
+| MCOMM-09 | Phase 10 (plans 06) | Complete |
+| MCOMM-10 | Phase 10 (plans 04, 05, 11, 14) | Complete |
+| MCOMM-11 | Phase 10 (plans 06) | Complete |
+| MPUB-01 | Phase 10 (plans 05, 09, 14, 15) | Complete |
+| MPUB-02 | Phase 10 (plans 05, 12) | Complete |
+| MPUB-03 | Phase 10 (plans 05, 14) | Complete |
+| MPUB-04 | Phase 10 (plans 03, 04) | Complete |
+| MPUB-05 | Phase 10 (plans 05, 08, 10, 13, 14, 15) | Complete |
+| MPUB-06 | Phase 10 (plans 09, 14) | Complete |
+| MPUB-07 | Phase 10 (plans 03, 04, 08, 10, 15) | Complete |
+| MSTORY-01 | Phase 10 (plans 07, 12, 15) | Complete |
+| MSTORY-02 | Phase 10 (plans 07) | Complete |
+| MSTORY-03 | Phase 10 (plans 08, 12, 15) | Complete |
+| MSTORY-04 | Phase 10 (plans 04, 08, 11) | Complete |
+| MSTORY-05 | Phase 10 (plans 07) | Complete |
+| MSTORY-06 | Phase 10 (plans 09, 12) | Complete |
+| MSTORY-07 | Phase 10 (plans 07) | Complete |
+| MSTORY-08 | Phase 10 (plans 04, 08) | Complete |
+| MSTORY-09 | Phase 10 (plans 04, 07, 11, 12) | Complete |
 | PAY-01 | Phase 09.1 (plan 05) | Complete |
 | PAY-02 | Phase 09.1 (plans 05, 08) | Complete |
 | PAY-03 | Phase 09.1 (plans 05, 08, 20) | Complete |
