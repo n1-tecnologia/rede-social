@@ -450,8 +450,12 @@ export const feedRoutes = feed
         throw new ApiError(403, 'FORBIDDEN');
       return c.json(await listFeed(ctx, query, { canModerate: moderator }), 200);
     }
+    // 10 review WR-01: a community page carries `removal` for a holder of `moderation.manage`, read
+    // once BEFORE the service opens its transaction (the comment-removal rule).
     const page = query.communityId
-      ? await listCommunityFeed(ctx, query.communityId, query)
+      ? await listCommunityFeed(ctx, query.communityId, query, {
+          canModerate: await canModerate(ctx),
+        })
       : await listFeed(ctx, query);
     return c.json(page, 200);
   })

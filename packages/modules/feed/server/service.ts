@@ -314,7 +314,11 @@ const toPost = (row: FeedRow, viewerUserId: string, canModerate = false): FeedPo
   // looking at a member post somebody else wrote. `canManage` stays author-only. The viewer's
   // `canModerate` is read by the ROUTE before the transaction; the statement of `softDeletePost`
   // is what actually decides, this key only tells the web whether to offer the control.
-  ...(canModerate && row.visibility === 'followers' && row.author_user_id !== viewerUserId
+  // 10 review WR-01: a post written inside a member community (`'community'`) is a member post too,
+  // and `softDeletePostInTx` admits it for the same holder, so the key rides it as well.
+  ...(canModerate &&
+  (row.visibility === 'followers' || row.visibility === 'community') &&
+  row.author_user_id !== viewerUserId
     ? { removal: 'moderation' as const }
     : {}),
 });
@@ -494,8 +498,9 @@ async function feedPage(
   const nextCursor =
     rows.length > limit && last ? encodeCursor({ n: last.created_at, id: last.id }) : null;
 
-  // 09-07 (D-475): only the Explorar scope passes `canModerate`, so `removal` never rides Início,
-  // Reels or a community page.
+  // 09-07 (D-475): only the Explorar scope and a community's own page pass `canModerate`, so
+  // `removal` never rides Início or Reels. 10 review WR-01: the community page does, because a
+  // moderator may remove one post inside a member community.
   const canModerate = options.canModerate === true;
   return { items: page.map((row) => toPost(row, ctx.userId, canModerate)), nextCursor };
 }
@@ -665,6 +670,7 @@ export async function listCommunityFeed(
   ctx: RequestContext,
   communityId: string,
   query: FeedQuery,
+  opts: { canModerate: boolean } = { canModerate: false },
 ): Promise<FeedPage> {
   if (!(await moduleFlags.isEnabled(ctx, 'communities'))) throw new ApiError(404, 'NOT_FOUND');
 
@@ -699,7 +705,7 @@ export async function listCommunityFeed(
     ctx,
     query,
     sql`and p.community_id = ${communityId}::uuid ${mediaPredicate(query)}`,
-    { sampleOnly: visible.locked },
+    { sampleOnly: visible.locked, canModerate: opts.canModerate },
   );
 
   // 08.2 (D-354, STORE-13): the one item a locked community shows is its SAMPLE, marked as such, and

@@ -608,7 +608,7 @@ export const feedPostSchema = z
     /**
      * 09-07 (D-475): this viewer may take this MEMBER post down. Emitted ONLY as `'moderation'`, and
      * only when the viewer holds `moderation.manage`, the post is a member post (`audience:
-     * 'followers'`) and they did not write it. ABSENT for everyone else, for the author (`canManage`
+     * 'followers'`, or `'community'` since the Phase 10 review WR-01) and they did not write it. ABSENT for everyone else, for the author (`canManage`
      * stays author-only: it means "edit and delete my own") and for an organization post, which a
      * moderator still cannot remove (T-04-54).
      *
