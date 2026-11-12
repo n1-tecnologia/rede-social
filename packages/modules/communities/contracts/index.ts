@@ -182,8 +182,8 @@ export type CommunityCreator = z.infer<typeof communityCreatorSchema>;
 
 /**
  * The Escopo seam (10-06): the five actions a viewer may take in a community, in ONE object so the per-product
- * action scope built after Phase 11 refines them at one site. Phase 10 values: `post` and `story` equal
- * `canPublish`; `like`, `comment` and `share` are `true` (no per-route permission guards them, D-701).
+ * action scope built after Phase 11 refines them at one site. Phase 10 values: `post` equals
+ * `canPublish` and `story` follows the story rule (the story permissions plus the community rule, review WR-02); `like`, `comment` and `share` are `true` (no per-route permission guards them, D-701).
  */
 export const communityActionsSchema = z
   .object({
@@ -232,7 +232,7 @@ export type CommunityViewer = z.infer<typeof communityViewerSchema>;
  * `canPublish` (may publish posts there), `canEdit` (may edit, archive, delete) and `canCurate` (may publish
  * stories for it). `viewer.actions` is the Escopo seam: the five actions the per-product action scope that is
  * built after Phase 11 will refine, `{ like, comment, share, post, story }`, required and `.strict()`, so
- * the five can never be silently absent. Today `post` and `story` equal `canPublish`, and `like`, `comment`
+ * the five can never be silently absent. Today `post` equals `canPublish`, `story` follows the story rule (WR-02), and `like`, `comment`
  * and `share` are `true` for every caller the community is returned to.
  *
  * `lastActivityAt` crosses the wire because it is an ordering key and the cursor is built from it;

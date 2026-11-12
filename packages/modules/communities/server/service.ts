@@ -280,8 +280,11 @@ export function communityViewerFlags(granted: readonly string[]): CommunityViewe
  * `canEdit` and `canCurate` require the matching member KEY as well as ownership, so a flag never promises a
  * write the route would refuse (an owner whose `social` was switched off, a creator whose role changed).
  *
- * **`actions` is the Escopo seam, computed here and nowhere else.** `post` and `story` take the value of
- * `canPublish` (today the owner rule of D-706); `like` and `comment` are `true` for every caller the
+ * **`actions` is the Escopo seam, computed here and nowhere else.** `post` takes the value of
+ * `canPublish` (today the owner rule of D-706) and `story` follows the STORY rule (review WR-02): the story
+ * permissions, which exist only while the `stories` module is composed, plus the community rule (the
+ * organization's manage half, or the creator of a member community). It is not `canPublish`: with `stories`
+ * off the post rule still holds while the story door leads to a route that redirects away. `like` and `comment` are `true` for every caller the
  * community is returned to (the interaction routes carry no per-route permission, D-701) and `share` is
  * `true` wherever the community is readable (no share gate exists). The per-product action scope built
  * after Phase 11 refines these five at THIS site; this phase adds no per-row grant lookup, because it
@@ -293,12 +296,16 @@ function viewerOf(row: CommunityRow, flags: CommunityViewerFlags): CommunityView
   const canPublish = member ? isOwner && flags.canManageOwn : flags.canPostOrg;
   const canEdit = member ? flags.canManage || (isOwner && flags.canManageOwn) : flags.canManage;
   const canCurate = member ? isOwner && flags.canPublishStory : flags.canCurateOrg;
+  // WR-02: the door publishes a story, so it needs the story key too. An organization place needs both
+  // halves (the pre-Phase-10 gate: `stories.story.publish` and `stories.story.manage`); a member
+  // community needs its creator holding `stories.story.publish`, which is `canCurate` there.
+  const canStory = member ? canCurate : flags.canPublishStory && flags.canCurateOrg;
   return {
     isOwner,
     canPublish,
     canEdit,
     canCurate,
-    actions: { like: true, comment: true, share: true, post: canPublish, story: canPublish },
+    actions: { like: true, comment: true, share: true, post: canPublish, story: canStory },
   };
 }
 
