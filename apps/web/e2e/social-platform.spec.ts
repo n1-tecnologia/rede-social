@@ -131,6 +131,7 @@ function sql() {
 }
 
 type StoredSettings = {
+  communities?: { maxPerMember?: number };
   media?: {
     photoMaxBytes?: number;
     photosPerPost?: number;
