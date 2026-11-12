@@ -1857,8 +1857,10 @@ type HighlightRef = {
  *
  * - The row is read under the explicit `tenant_id` predicate AND RLS; a miss (unknown, another
  *   tenant's) is the bare 404 (D-23).
- * - Write intents take it `for update`: two writes to the same highlight serialise, which is what
- *   keeps `is distinct from` honest and the `full` count exact.
+ * - Write intents take it `for update`, AFTER the place is judged (quick 261112-kuk: the lock also passes
+ *   the UPDATE policy of the table, so locking first would turn the 403 of a non-owner into a 404): two
+ *   writes to the same highlight serialise, which is what keeps `is distinct from` honest and the `full`
+ *   count exact.
  * - The place rules are NOT restated here (R-D-K): `curate` refuses an archived community,
  *   `takedown` does not, and the `communities` module being off is the bare 404 — all decided by
  *   the one seam.
@@ -1870,17 +1872,26 @@ async function resolveHighlight(
   intent: PlaceIntent,
   gate: PlaceGate,
 ): Promise<HighlightRef> {
-  const lock = intent === 'read' ? sql`` : sql`for update`;
-  const rows = await tx.execute<HighlightRef>(sql`
-    select h.id, h.community_id, h.title, h.cover_story_id, h.cover_asset_id
-      from story_highlights h
-     where h.id = ${highlightId}::uuid
-       and h.tenant_id = ${ctx.tenantId}::uuid
-     ${lock}`);
-  const highlight = rows[0];
-  if (!highlight) throw new ApiError(404, 'NOT_FOUND');
-  await resolveHighlightPlace(tx, ctx, highlight.community_id, intent, gate);
-  return highlight;
+  const read = (lock: ReturnType<typeof sql>) =>
+    tx.execute<HighlightRef>(sql`
+      select h.id, h.community_id, h.title, h.cover_story_id, h.cover_asset_id
+        from story_highlights h
+       where h.id = ${highlightId}::uuid
+         and h.tenant_id = ${ctx.tenantId}::uuid
+       ${lock}`);
+  // The first read takes NO row lock, on purpose (quick 261112-kuk, the 10-09 rule of `resolveHighlightPlace`):
+  // `for update` also passes the table's UPDATE policy, `story_highlights_member_update_gate`, so a member who
+  // does not own the highlight's community would read ZERO rows and the refusal would be the 404 of a miss
+  // instead of the 403 the seam owes a highlight that exists and is not theirs.
+  const first = (await read(sql``))[0];
+  if (!first) throw new ApiError(404, 'NOT_FOUND');
+  await resolveHighlightPlace(tx, ctx, first.community_id, intent, gate);
+  if (intent === 'read') return first;
+  // A write intent that got this far may curate the place, so the lock is taken now and the columns a write
+  // compares are the LOCKED ones (a rename that committed in between is seen, not overwritten).
+  const locked = (await read(sql`for update`))[0];
+  if (!locked) throw new ApiError(404, 'NOT_FOUND');
+  return locked;
 }
 
 /**

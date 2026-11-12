@@ -206,8 +206,9 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
       highlightCount: 1,
     });
 
-    // The story row is never written (R-D-F): no statement of this remove targets `stories`.
-    expect(seen).toEqual(['highlight', 'story', 'remove', 'clear-cover', 'count']);
+    // The story row is never written (R-D-F): no statement of this remove targets `stories`. The highlight is read
+    // twice (quick 261112-kuk): once with no lock to decide the place, then `for update` for the curator.
+    expect(seen).toEqual(['highlight', 'highlight', 'story', 'remove', 'clear-cover', 'count']);
     expect(texts.some((text) => /^(update|delete from) stories\b/.test(text))).toBe(false);
     expect(ctx.events).toHaveLength(1);
     await flush(ctx);

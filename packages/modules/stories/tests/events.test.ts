@@ -370,7 +370,16 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
     const ctx = context();
     const story = await publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID }, CURATOR);
 
-    expect(seen).toEqual(['highlight', 'room', 'asset', 'story-insert', 'item', 'projection']);
+    // The highlight is read twice (quick 261112-kuk): unlocked to decide the place, then `for update` for the curator.
+    expect(seen).toEqual([
+      'highlight',
+      'highlight',
+      'room',
+      'asset',
+      'story-insert',
+      'item',
+      'projection',
+    ]);
     expect(story.highlightCount).toBe(1);
     // Queued in order, NOT delivered yet (MOD-03).
     expect(ctx.events.map((event) => event.name)).toEqual(['story.published', 'story.highlighted']);
@@ -428,7 +437,7 @@ describe('05.2 — a publish INTO a highlight: destination first, one write, eve
       status: 400,
       details: { highlight: 'full' },
     });
-    expect(seen).toEqual(['highlight', 'room']);
+    expect(seen).toEqual(['highlight', 'highlight', 'room']);
     expect(ctx.events).toHaveLength(0);
   });
 
