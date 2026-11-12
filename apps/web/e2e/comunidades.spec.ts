@@ -1493,7 +1493,8 @@ test.describe('2026-10-03 — Reordenar: the admin’s order of the Ativas list'
  * second half of the tracer (`stories.spec.ts` holds the story half). A member creates a community
  * through the shipped form (the audience line visible) and publishes a post in it from the
  * community page, landing back on it; a follower and a stranger see the community after the
- * organization's cards with its byline and the post on its page, the post is in NEITHER Início nor
+ * organization's cards with its byline ("Criada por {name}") and the post on its page, the post is in
+ * NEITHER Início nor
  * Explorar, and the stranger finds no publish control anywhere, the `/criar?comunidade=` link
  * falling back to the plain member composer.
  *
