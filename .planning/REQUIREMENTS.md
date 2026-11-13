@@ -357,18 +357,18 @@ Phase 10.1 lets a tenant sell an event through its payment gateway: `admin_tenan
 - [x] **TICK-05**: Presences that exist when the product is linked stay, are not charged and read `Anterior ao ingresso`; only answers given after the link pay *(D-748)*
 - [x] **TICK-06**: In a paid event a member's own `going` is refused `409 payment_required` by the API and by the database (guard trigger and member-lane policies), a member cannot write the origin or order columns, and a holder repeating `Vou` is answered unchanged *(D-741)*
 - [x] **TICK-07**: An approved purchase of the event's product, matched by tenant, provider and product id and by the buyer's e-mail equal to a live member of the tenant, creates exactly one `going` presence with origin `ticket` and the gateway order reference; a replay or a second order by the same member changes nothing *(D-740, D-741, D-749)*
-- [ ] **TICK-08**: A delivery whose e-mail matches no live member is kept as `sem conta` (final, nothing waits for an account) and `Liberar manualmente` on it creates a paid presence An account whose e-mail is not confirmed is never auto-confirmed by a payment: the delivery is kept as `sem conta` the same way (D-759). *(D-749)*
+- [x] **TICK-08**: A delivery whose e-mail matches no live member is kept as `sem conta` (final, nothing waits for an account) and `Liberar manualmente` on it creates a paid presence An account whose e-mail is not confirmed is never auto-confirmed by a payment: the delivery is kept as `sem conta` the same way (D-759). *(D-749)*
 - [x] **TICK-09**: An approved payment confirms while the event is active and not ended, even after `starts_at`; after `ends_at`, or on a cancelled or removed event, nothing is confirmed and the delivery shows `evento encerrado` or `evento cancelado` *(D-750)*
 - [ ] **TICK-10**: An approved payment at a full event confirms anyway and is flagged `acima do limite`; a member's own `Vou` over capacity is still refused and members see `Esgotado` when `going + checked_in` reaches `capacity` *(D-751)*
 - [x] **TICK-11**: A refund or chargeback removes the going presence and frees the seat, found by tenant, provider and order reference without a member; a checked-in row stays flagged refunded; a late approval for an order already refunded is stale *(D-752)*
 - [x] **TICK-12**: Subscription-type deliveries (`renewed`, `late`, `canceled`) on an event product are recorded and change no presence *(D-757)*
-- [ ] **TICK-13**: In a paid event the online `Entrar` and the venue-code check-in accept only a member who already holds a presence and refuse anyone else with a stable code before any code guess is counted; for an event with no product both stay as they are, walk-ins included *(D-742)*
+- [x] **TICK-13**: In a paid event the online `Entrar` and the venue-code check-in accept only a member who already holds a presence and refuse anyone else with a stable code before any code guess is counted; for an event with no product both stay as they are, walk-ins included *(D-742)*
 - [ ] **TICK-14**: The admin releases a presence without payment to any live member of the tenant (origin `courtesy`) until `ends_at`, over capacity if need be, never on a cancelled or ended event, and can remove a courtesy presence but never a paid one by hand *(D-743)*
 - [ ] **TICK-15**: A member without a presence in a paid event sees the `Pago` badge, the optional price and a single `Comprar ingresso` link to the stored purchase link with the states `Esgotado`, `Vendas encerradas`, `Venda indisponível` and `Presença confirmada`, and a confirmed member has no `Não vou` *(D-753, D-754, D-755)*
 - [x] **TICK-16**: Members read the purchase link only through a tenant-pinned definer that answers an `https:` URL or nothing; `payment_products` stays admin-only *(D-753, D-508)*
-- [ ] **TICK-17**: A webhook-confirmed presence emits an in-app notification and a push `Presença confirmada em {evento}` after commit, the open event page refreshes through the existing Realtime user signal, and the 24 h and 1 h reminders reach the payer unchanged *(D-756)*
+- [x] **TICK-17**: A webhook-confirmed presence emits an in-app notification and a push `Presença confirmada em {evento}` after commit, the open event page refreshes through the existing Realtime user signal, and the 24 h and 1 h reminders reach the payer unchanged *(D-756)*
 - [ ] **TICK-18**: `Participantes` marks each presence `Pago`, `Cortesia`, `Anterior ao ingresso`, `Reembolsado` and `Acima do limite` while the confirmed count keeps meaning `going + checked_in` *(D-758, D-751, D-219)*
-- [ ] **TICK-19**: The Pagamentos `Eventos recentes` lists ticket deliveries with the neutral type, an `Ingresso · {evento}` product line and the effects `confirmada`, `acima do limite`, `removida`, `mantida`, `sem efeito`, `sem conta`, `evento encerrado`, `evento cancelado` *(D-758, D-749, D-750)*
+- [x] **TICK-19**: The Pagamentos `Eventos recentes` lists ticket deliveries with the neutral type, an `Ingresso · {evento}` product line and the effects `confirmada`, `acima do limite`, `removida`, `mantida`, `sem efeito`, `sem conta`, `evento encerrado`, `evento cancelado` *(D-758, D-749, D-750)*
 - [ ] **TICK-20**: No gateway brand name appears outside the adapter in any new column, function, route, log field, catalog key or test fixture string *(D-740)*
 - [ ] **TICK-21**: Every changed or added table, column, policy, function and route carries a cross-tenant negative (pgTAP and integration); a webhook signed with tenant A's token that names tenant B's event product writes nothing in B *(PAY-29 extended)*
 - [ ] **TICK-22**: The release is expand-only and ordered migrations (every tenant database), web, API; the running API keeps working on the migrated database and every new response key is `.optional()` *(D-741, D-755)*
@@ -989,18 +989,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TICK-05 | Phase 10.1 | Complete |
 | TICK-06 | Phase 10.1 | Complete |
 | TICK-07 | Phase 10.1 | Complete |
-| TICK-08 | Phase 10.1 | Pending |
+| TICK-08 | Phase 10.1 | Complete |
 | TICK-09 | Phase 10.1 | Complete |
 | TICK-10 | Phase 10.1 | Pending |
 | TICK-11 | Phase 10.1 | Complete |
 | TICK-12 | Phase 10.1 | Complete |
-| TICK-13 | Phase 10.1 | Pending |
+| TICK-13 | Phase 10.1 | Complete |
 | TICK-14 | Phase 10.1 | Pending |
 | TICK-15 | Phase 10.1 | Pending |
 | TICK-16 | Phase 10.1 | Complete |
-| TICK-17 | Phase 10.1 | Pending |
+| TICK-17 | Phase 10.1 | Complete |
 | TICK-18 | Phase 10.1 | Pending |
-| TICK-19 | Phase 10.1 | Pending |
+| TICK-19 | Phase 10.1 | Complete |
 | TICK-20 | Phase 10.1 | Pending |
 | TICK-21 | Phase 10.1 | Pending |
 | TICK-22 | Phase 10.1 | Pending |
