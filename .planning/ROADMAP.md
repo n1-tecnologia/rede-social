@@ -1577,7 +1577,7 @@ Plans:
 **Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
 **Requirements**: TICK-01..TICK-24
 **Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
-**Plans:** 17/19 plans executed (gap closure 10.1-16..10.1-19 planned 2026-11-13 from `10.1-VERIFICATION.md`: CR-01 blocking, WR-01 and WR-03 advisories; WR-02, WR-04 and IN-01 stay open advisories)
+**Plans:** 18/19 plans executed (gap closure 10.1-16..10.1-19 planned 2026-11-13 from `10.1-VERIFICATION.md`: CR-01 blocking, WR-01 and WR-03 advisories; WR-02, WR-04 and IN-01 stay open advisories)
 
 Plans:
 **Wave 1**
@@ -1641,7 +1641,7 @@ Plans:
 
 **Wave 15** *(gap closure — advisory WR-03 (TICK-09 label); blocked on Wave 14 completion: it extends the same pgTAP file as plan 16)*
 
-- [ ] 10.1-18-PLAN.md — WR-03: `app.event_gateway_grant` answers a repeated order as `already_in` before the cancelled and ended returns; one new migration, pgTAP and webhook-path cases
+- [x] 10.1-18-PLAN.md — WR-03: `app.event_gateway_grant` answers a repeated order as `already_in` before the cancelled and ended returns; one new migration, pgTAP and webhook-path cases
 
 **Wave 16** *(gap closure — release notes and exit gate; blocked on Wave 15 completion)*
 
