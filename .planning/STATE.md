@@ -2,12 +2,12 @@
 gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
-current_plan: 16
+current_plan: 17
 status: executing
-stopped_at: Gap closure 10.1-16..19 planned and checked (0 blockers); next /gsd-execute-phase 10.1 --gaps-only
+stopped_at: 10.1-16 done (CR-01 guard lock, pgTAP 233 342 ok, gate 41/41); next 10.1-17 (WR-01), then 18, 19
 last_updated: "2026-11-13T14:14:56.414Z"
 last_activity: 2026-11-13
-last_activity_desc: Phase 10.1 execution started
+last_activity_desc: "10.1-16 complete: attendance guard refuses a member rewriting origin/order columns (e3597130, e6061fa5, ee38b87d); post-plan gate 41/41; plan 17 next"
 state_head: eca8951d4022eddefeebf2750bf4a2347885c667
 progress:
   total_phases: 32
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
-Current Plan: 16
+Current Plan: 17
 Total Plans in Phase: 19
-Plan: 15 of 19 complete (gap round 10.1-16..19 executing; CR-01 blocking, WR-01 and WR-03 advisories folded in; WR-02, WR-04, IN-01 stay open advisories)
+Plan: 16 of 19 complete (gap round 10.1-16..19 executing; CR-01 blocking, WR-01 and WR-03 advisories folded in; WR-02, WR-04, IN-01 stay open advisories)
 Status: Executing Phase 10.1 (gaps only)
-Last activity: 2026-11-13 — Phase 10.1 execution started
+Last activity: 2026-11-13 — 10.1-16 complete (CR-01 closed in the database), 10.1-17 next
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 

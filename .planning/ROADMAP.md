@@ -1577,7 +1577,7 @@ Plans:
 **Goal:** An event can be linked to a Kiwify product (not a store product of the system); a member's presence is confirmed only after that product's purchase is approved, matched by the gateway product id and the buyer's e-mail; a refund or chargeback removes the presence and frees the seat; a payment that arrives at a full event still confirms; an event with no linked product keeps the automatic RSVP.
 **Requirements**: TICK-01..TICK-24
 **Depends on:** Phase 10 (and, for the base it extends, Phase 06 events and Phase 09.1 payment gateway)
-**Plans:** 15/19 plans executed (gap closure 10.1-16..10.1-19 planned 2026-11-13 from `10.1-VERIFICATION.md`: CR-01 blocking, WR-01 and WR-03 advisories; WR-02, WR-04 and IN-01 stay open advisories)
+**Plans:** 16/19 plans executed (gap closure 10.1-16..10.1-19 planned 2026-11-13 from `10.1-VERIFICATION.md`: CR-01 blocking, WR-01 and WR-03 advisories; WR-02, WR-04 and IN-01 stay open advisories)
 
 Plans:
 **Wave 1**
@@ -1636,7 +1636,7 @@ Plans:
 
 **Wave 14** *(gap closure — CR-01 of `10.1-VERIFICATION.md` (TICK-06 database clause) and the advisory WR-01 (TICK-11 manual path); blocked on Wave 13 completion)*
 
-- [ ] 10.1-16-PLAN.md — CR-01: the attendance guard refuses a member's change of `origin`, `order_provider`, `order_ref` or `refunded_at` on their own row (42501, `event_attendances_bookkeeping_locked`) before the bookkeeping exit; one new migration, pgTAP for ticket and courtesy rows with the definers and the service-role upgrade as positive controls
+- [x] 10.1-16-PLAN.md — CR-01: the attendance guard refuses a member's change of `origin`, `order_provider`, `order_ref` or `refunded_at` on their own row (42501, `event_attendances_bookkeeping_locked`) before the bookkeeping exit; one new migration, pgTAP for ticket and courtesy rows with the definers and the service-role upgrade as positive controls
 - [ ] 10.1-17-PLAN.md — WR-01: the manual release of a ticket takes the order advisory lock and re-checks the applied refund inside its own transaction, through one helper shared with the apply job, with a deterministic race test
 
 **Wave 15** *(gap closure — advisory WR-03 (TICK-09 label); blocked on Wave 14 completion: it extends the same pgTAP file as plan 16)*
