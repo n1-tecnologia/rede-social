@@ -1,19 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "11"
-current_phase_name: Rede Social - Direct Messages, Member Blocking and Reports
+current_phase: "10.2"
+current_phase_name: Abertura das inscrições do evento com contagem regressiva
 current_plan: 0
 status: ready_to_discuss
-stopped_at: Phase 10.1 CLOSED 2026-11-13 by developer closure (Igor: "fecha sem auditoria mesmo, eu testar em prod jaja"): 19/19 plans, verification re-attested passed on his word, UAT 5/5 pass on his word (no agent saw any); ledger P1..P21 in 10.1-MANUAL-PROOFS.md still pending and his; TICK-24 stays Pending until he pastes the evidence; no 10.1 security audit run; WR-01, WR-02, IN-01..IN-03 advisories open; STATE hand-moved to Phase 11 (no context yet, next /gsd-discuss-phase 11); Phase 13 stays paused at plan 14; nothing pushed
-last_updated: "2026-11-13T20:30:00.000Z"
+stopped_at: Phase 10.2 context gathered
+last_updated: "2026-11-13T20:36:38.121Z"
 last_activity: 2026-11-13
-last_activity_desc: "Phase 10.1 closed by developer closure"
-state_head: eca8951d4022eddefeebf2750bf4a2347885c667
+state_head: b037d526b5dd4a5235de9ff7069d6a6568677fd9
 progress:
-  total_phases: 32
+  total_phases: 33
   completed_phases: 0
   total_plans: 435
-  completed_plans: 403
+  completed_plans: 407
   percent: 0
 ---
 
@@ -24,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 11 — Rede Social - Direct Messages, Member Blocking and Reports
+**Current focus:** Phase 10.2 — Abertura das inscrições do evento com contagem regressiva (runs before Phase 11)
 
 ## Current Position
 
-Phase: 11 (Rede Social - Direct Messages, Member Blocking and Reports) — NOT STARTED
+Phase: 10.2 (Abertura das inscrições do evento com contagem regressiva) — NOT STARTED
 Current Plan: 0
 Total Plans in Phase: TBD
 Plan: 0 of TBD
-Status: Ready to discuss Phase 11 (Phase 10.1 closed 2026-11-13)
-Last activity: 2026-11-13 — Phase 10.1 closed by developer closure
+Status: Ready to discuss Phase 10.2 (inserted 2026-11-13 after 10.1; Phase 11 stays next after it)
+Last activity: 2026-11-13
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -1272,6 +1271,7 @@ None yet.
 - Phase 12.2 inserted after Phase 12.1: Ramos condicionais no formulário de perfil: várias perguntas por ramo, condicional dentro de condicional (reverte D-622) e diagrama das bifurcações (pedido do Igor, 2026-11-06; Fase 13 pausada até ele pedir)
 - Phase 12.3 inserted after Phase 12.2: Pendências de backend do front de novembro: os 10 itens da Parte 1 do documento 'O que mudou no front' (branch ATUALIZAÇÕES-NOVEMBRO, be6374a3) que o front já mostra mas o back ainda não guarda
 - Phase 10.1 inserted after Phase 10: Rede Social - Ingresso pago do evento pela Kiwify (URGENT)
+- Phase 10.2 inserted after Phase 10.1: Abertura das inscrições do evento com contagem regressiva (pedida em 13/11, executa antes da Fase 11) (URGENT)
 
 ## Deferred Items
 
@@ -1283,6 +1283,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T13:00:26.476Z
-Stopped at: Completed 10.1-15-PLAN.md (15/15 plans done; phase ready for verification)
-Resume file: None
+Last session: 2026-11-13T20:36:37.216Z
+Stopped at: Phase 10.2 context gathered
+Resume file: .planning/phases/10.2-abertura-das-inscricoes-do-evento-com-contagem-regressiva/10.2-CONTEXT.md
