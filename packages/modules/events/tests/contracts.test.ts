@@ -19,7 +19,9 @@ import {
   EVENT_MAX_CAPACITY,
   EVENT_MAX_CATEGORY,
   EVENT_MAX_PAGE_SIZE,
+  EVENT_MAX_TICKET_PRICE_CENTS,
   EVENT_MIN_CAPACITY,
+  EVENT_MIN_TICKET_PRICE_CENTS,
   EVENT_PAGE_SIZE,
   EVENT_PHOTO_MAX_PAGE_SIZE,
   EVENT_PHOTO_PAGE_SIZE,
@@ -787,5 +789,59 @@ describe('2026-11-09 — the vertical poster (12.3-06, NOVF-04, D-696, D-699)', 
     ).toBe(true);
     expect(eventEditSchema.safeParse({ ...editBody, posterAssetId: 7 }).success).toBe(false);
     expect(eventEditSchema.safeParse({ ...editBody, poster: asset }).success).toBe(false);
+  });
+});
+
+describe('2026-11-13 — the reference price of a ticket (10.1-06, D-755, EP-02, EP-03)', () => {
+  const asset = '33333333-3333-4333-8333-333333333333';
+  const editBody = {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 't',
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    category: null,
+    capacity: null,
+    format: 'in_person',
+    venueName: 'Sede',
+    address: 'Rua das Flores, 100',
+    meetingUrl: null,
+    start: { date: '2026-10-12', time: '19:00' },
+    end: { date: '2026-10-12', time: '21:00' },
+    status: 'active',
+    startsAt: '2026-10-12T22:00:00.000000Z',
+    endsAt: '2026-10-13T00:00:00.000000Z',
+  };
+
+  it('41. the input takes ticketPriceCents as an integer from 1 to 10000000, or null / absent', () => {
+    expect(EVENT_MIN_TICKET_PRICE_CENTS).toBe(1);
+    expect(EVENT_MAX_TICKET_PRICE_CENTS).toBe(10_000_000);
+    for (const ok of [1, 8000, 10_000_000, null]) {
+      expect(refusal({ ...base, ticketPriceCents: ok }), String(ok)).toBeNull();
+    }
+    // Absent stays absent: the omitted-key rule of the service needs to tell it from an explicit null.
+    expect(eventInputSchema.parse(base).ticketPriceCents).toBeUndefined();
+    expect(eventInputSchema.parse({ ...base, ticketPriceCents: null }).ticketPriceCents).toBeNull();
+    for (const bad of [0, -1, 10_000_001, 80.5, '80', Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(refusal({ ...base, ticketPriceCents: bad }), String(bad)).toBe('generic');
+    }
+  });
+
+  it('42. the summary, the detail and the edit carry the price as an OPTIONAL nullable integer, and stay strict', () => {
+    for (const schema of [eventSummarySchema, eventDetailSchema, eventEditSchema]) {
+      expect(Object.keys(schema.shape)).toContain('ticketPriceCents');
+      expect(schema.shape.ticketPriceCents.isOptional()).toBe(true);
+    }
+    expect(eventDetailSchema.safeParse(detail).success).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, ticketPriceCents: 8000 }).success).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, ticketPriceCents: null }).success).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, ticketPriceCents: 80.5 }).success).toBe(false);
+    expect(eventDetailSchema.safeParse({ ...detail, ticketPriceCents: '80' }).success).toBe(false);
+    expect(eventEditSchema.safeParse(editBody).success).toBe(true);
+    expect(eventEditSchema.safeParse({ ...editBody, ticketPriceCents: 8000 }).success).toBe(true);
+    expect(eventEditSchema.safeParse({ ...editBody, ticketPriceCents: null }).success).toBe(true);
+    expect(
+      eventEditSchema.safeParse({ ...editBody, price: 8000, posterAssetId: asset }).success,
+    ).toBe(false);
   });
 });

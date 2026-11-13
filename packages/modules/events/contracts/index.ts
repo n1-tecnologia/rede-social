@@ -52,6 +52,9 @@ export const EVENT_MAX_CATEGORY = 40;
  */
 export const EVENT_MIN_CAPACITY = 1;
 export const EVENT_MAX_CAPACITY = 100_000;
+/** Phase 10.1 (D-755): the reference price of a ticket, in integer cents; mirrors `events_ticket_price_chk`. */
+export const EVENT_MIN_TICKET_PRICE_CENTS = 1;
+export const EVENT_MAX_TICKET_PRICE_CENTS = 10_000_000;
 
 /**
  * 2026-10-07 (quick 261007-n1g), the event's programme ("Cronograma"): at most this many moments, a
@@ -318,6 +321,19 @@ export const eventInputSchema = z
       .optional(),
     /** The programme: at most `EVENT_SCHEDULE_MAX_ITEMS` moments; the service normalises it. */
     schedule: z.array(eventScheduleItemSchema).max(EVENT_SCHEDULE_MAX_ITEMS).optional(),
+    /**
+     * Phase 10.1 (D-755, A-06-PRICE): the reference price of the ticket in INTEGER cents (8000 is R$ 80,00),
+     * 1 to 10 000 000, or null for none. It is a label the member reads, never an amount the platform charges
+     * or compares: no code multiplies or divides it. Unlike the poster, an OMITTED key keeps the stored price
+     * and only an explicit null clears it, so an older cached client that predates the key never wipes it.
+     */
+    ticketPriceCents: z
+      .number()
+      .int()
+      .min(EVENT_MIN_TICKET_PRICE_CENTS)
+      .max(EVENT_MAX_TICKET_PRICE_CENTS)
+      .nullable()
+      .optional(),
     format: z.enum(EVENT_FORMATS),
     venueName: z.string().trim().max(EVENT_MAX_VENUE).nullable().optional(),
     address: z.string().trim().max(EVENT_MAX_ADDRESS).nullable().optional(),
@@ -423,6 +439,11 @@ export const eventSummarySchema = z
      */
     posterAssetId: z.uuid().nullable().optional(),
     posterVariantWidths: z.array(z.number().int()).optional(),
+    /**
+     * Phase 10.1 (D-755): the reference price in integer cents, or null. Optional so a strict web reads an
+     * API that predates the column (release order: migrations, web, API).
+     */
+    ticketPriceCents: z.number().int().nullable().optional(),
     startsAt: z.string(),
     endsAt: z.string(),
     status: z.enum(EVENT_STATUSES),
@@ -577,6 +598,8 @@ export const eventEditSchema = z
     /** 2026-11-09 (12.3-06, D-696): the stored poster and its ladder; optional like the summary's. */
     posterAssetId: z.uuid().nullable().optional(),
     posterVariantWidths: z.array(z.number().int()).optional(),
+    /** Phase 10.1 (D-755): the stored reference price in integer cents, null for none; optional like the summary's. */
+    ticketPriceCents: z.number().int().nullable().optional(),
     /** 2026-10-03: the stored category and limit, null for none (the form shows an empty field). */
     category: z.string().nullable(),
     capacity: z.number().int().positive().nullable(),

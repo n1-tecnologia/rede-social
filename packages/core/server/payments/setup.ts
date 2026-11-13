@@ -869,3 +869,50 @@ export async function deleteEventMapping(
   }
   return { connected, mapping: null, soldCount: 0, locked: false, recurring: false };
 }
+
+/**
+ * Called by the events module AFTER an event was soft-deleted (D-760, D-747): the gateway product of an event
+ * nobody bought a ticket for must be usable again, so the mapping row goes and the central route is released.
+ * An event WITH sales keeps its mapping: a later refund still names that product and has to find the
+ * presence it removes.
+ *
+ * The event lock definer needs a LIVE event, which the caller just deleted, so this takes the SAME advisory
+ * lock key directly (`event_ticket:<event>`, the key of the grant, the courtesy and the mapping lock): a sale
+ * in flight finishes first and is counted, a sale that starts afterwards finds the event deleted. Fails
+ * closed: when the count cannot be read the mapping stays. The caller logs a failure and never fails the delete.
+ */
+export async function releaseUnsoldEventMapping(
+  ctx: RequestContext,
+  eventId: string,
+): Promise<void> {
+  if (!UUID_SHAPE.test(eventId)) return;
+  const removed = await withTenantTx(ctx, async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended('event_ticket:' || ${eventId}::uuid::text, 0))`,
+    );
+    const [sales] = rowsOf<{ n: number }>(
+      await tx.execute(sql`
+        select count(*)::int as n
+          from event_attendances
+         where tenant_id = ${ctx.tenantId}::uuid
+           and event_id = ${eventId}::uuid
+           and origin = 'ticket'`),
+    );
+    if (!sales || sales.n > 0) return null;
+    const current = await eventMappingOf(tx, ctx.tenantId, eventId);
+    if (!current) return null;
+    await tx
+      .delete(paymentProducts)
+      .where(
+        and(
+          eq(paymentProducts.tenantId, ctx.tenantId),
+          eq(paymentProducts.kind, 'event'),
+          eq(paymentProducts.eventId, eventId),
+        ),
+      );
+    return current;
+  });
+  if (removed) {
+    await releaseProduct(ctx.tenantId, removed.provider, removed.externalProductId, 'retired');
+  }
+}

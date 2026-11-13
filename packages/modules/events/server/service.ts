@@ -107,6 +107,8 @@ type EventRow = {
   /** 2026-11-09 (12.3-06). Optional in the TYPE only so a hand-built test row may omit them. */
   poster_asset_id?: string | null;
   poster_variant_widths?: number[] | null;
+  /** Phase 10.1 (D-755). Optional in the TYPE only so a hand-built test row may omit it. */
+  ticket_price_cents?: number | null;
   status: EventStatus;
   starts_at: string;
   ends_at: string;
@@ -184,6 +186,7 @@ const eventColumns = sql`
            a.variant_widths as cover_variant_widths,
            case when pa.id is null then null else e.poster_asset_id end as poster_asset_id,
            pa.variant_widths as poster_variant_widths,
+           e.ticket_price_cents,
            e.status,
            to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
            to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at,
@@ -227,6 +230,11 @@ const toEvent = (row: EventRow): EventSummary => ({
   coverVariantWidths: row.cover_variant_widths ?? [],
   posterAssetId: row.poster_asset_id ?? null,
   posterVariantWidths: row.poster_variant_widths ?? [],
+  // An `int` column (cents), which the driver hands back as a number; null for none. Never computed on.
+  ticketPriceCents:
+    row.ticket_price_cents === null || row.ticket_price_cents === undefined
+      ? null
+      : Number(row.ticket_price_cents),
   startsAt: row.starts_at,
   endsAt: row.ends_at,
   status: row.status,
@@ -480,6 +488,7 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
   const posterAssetId = input.posterAssetId ?? null;
   const category = orNull(input.category);
   const capacity = input.capacity ?? null;
+  const ticketPriceCents = input.ticketPriceCents ?? null;
   const schedule = normaliseEventSchedule(input.schedule ?? []);
 
   let created: EventRow;
@@ -492,7 +501,7 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
       const inserted = await tx.execute<{ id: string }>(sql`
         insert into events (tenant_id, created_by_user_id, title, description, cover_asset_id,
                             poster_asset_id, category, capacity, schedule, format, venue_name,
-                            address, starts_at, ends_at)
+                            address, starts_at, ends_at, ticket_price_cents)
         select ${ctx.tenantId}::uuid,
                ${ctx.userId}::uuid,
                ${input.title},
@@ -506,7 +515,8 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
                ${venueName},
                ${address},
                (${input.start.date}::text || ' ' || ${input.start.time}::text)::timestamp at time zone t.timezone,
-               (${input.end.date}::text || ' ' || ${input.end.time}::text)::timestamp at time zone t.timezone
+               (${input.end.date}::text || ' ' || ${input.end.time}::text)::timestamp at time zone t.timezone,
+               ${ticketPriceCents}::int
           from tenants t
          where t.id = ${ctx.tenantId}::uuid
         returning id`);
@@ -860,6 +870,7 @@ type EventEditRow = {
   poster_variant_widths: number[] | null;
   category: string | null;
   capacity: number | null;
+  ticket_price_cents: number | null;
   format: EventFormat;
   venue_name: string | null;
   address: string | null;
@@ -903,6 +914,7 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
              pa.variant_widths as poster_variant_widths,
              e.category,
              e.capacity,
+             e.ticket_price_cents,
              e.schedule,
              e.format,
              e.venue_name,
@@ -937,6 +949,7 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
     posterVariantWidths: row.poster_variant_widths ?? [],
     category: row.category,
     capacity: row.capacity === null ? null : Number(row.capacity),
+    ticketPriceCents: row.ticket_price_cents === null ? null : Number(row.ticket_price_cents),
     format: row.format,
     venueName: row.venue_name,
     address: row.address,
@@ -954,6 +967,7 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
 type LockedEventRow = {
   cover_asset_id: string | null;
   poster_asset_id: string | null;
+  ticket_price_cents: number | null;
   starts_at: string;
   ends_at: string;
 };
@@ -975,6 +989,11 @@ type LockedEventRow = {
  *  2b. **The poster** (2026-11-09, 12.3-06) is handled exactly like the cover, on the same locked row,
  *     with `poster_invalid`; both `is distinct from` tuples carry it, so a poster-only edit is a real
  *     change. The whole-event replacement means an ABSENT `posterAssetId` clears the stored poster.
+ *  2c. **The reference price** (Phase 10.1, D-755, planner decision A-06-PRICE) is an integer in CENTS
+ *     that rides the same statement and BOTH sides of the tuple, so a price-only edit is a real change and an
+ *     identical body still writes nothing (Pitfall 4). Unlike the poster, an OMITTED `ticketPriceCents`
+ *     leaves the stored price untouched and only an explicit null clears it, so an older cached client that
+ *     predates the key can never wipe a price it cannot see (the poster's rule differs; flagged for Igor).
  *  3. **`events`**, with the wall clock converted inside the statement exactly as the create does,
  *     `where (…) is distinct from (…)`: an identical body matches no row, so `updated_at` stays put.
  *  4. **`event_secrets`** `set event_format, meeting_url` under the same `is distinct from` rule.
@@ -1020,6 +1039,7 @@ export async function updateEvent(
       const locked = await tx.execute<LockedEventRow>(sql`
         select cover_asset_id,
                poster_asset_id,
+               ticket_price_cents,
                to_char(starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                to_char(ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at
           from events
@@ -1051,6 +1071,14 @@ export async function updateEvent(
         posterHealed = true;
       }
 
+      // Phase 10.1 (D-755, planner decision A-06-PRICE): an OMITTED `ticketPriceCents` keeps the stored price
+      // and an explicit null clears it. This is deliberately NOT the poster's whole-event replacement: a
+      // cached client that predates the key must never wipe a price it cannot see.
+      const ticketPriceCents =
+        input.ticketPriceCents === undefined
+          ? (before.ticket_price_cents ?? null)
+          : input.ticketPriceCents;
+
       const updated = await tx.execute<{ starts_at: string; ends_at: string }>(sql`
         with next as (
           select ${input.title}::text as title,
@@ -1064,7 +1092,8 @@ export async function updateEvent(
                  ${venueName}::text as venue_name,
                  ${address}::text as address,
                  (${input.start.date}::text || ' ' || ${input.start.time}::text)::timestamp at time zone t.timezone as starts_at,
-                 (${input.end.date}::text || ' ' || ${input.end.time}::text)::timestamp at time zone t.timezone as ends_at
+                 (${input.end.date}::text || ' ' || ${input.end.time}::text)::timestamp at time zone t.timezone as ends_at,
+                 ${ticketPriceCents}::int as ticket_price_cents
             from tenants t
            where t.id = ${ctx.tenantId}::uuid
         )
@@ -1081,6 +1110,7 @@ export async function updateEvent(
                address = n.address,
                starts_at = n.starts_at,
                ends_at = n.ends_at,
+               ticket_price_cents = n.ticket_price_cents,
                updated_at = now()
           from next n
          where e.tenant_id = ${ctx.tenantId}::uuid
@@ -1088,11 +1118,11 @@ export async function updateEvent(
            and e.deleted_at is null
            and (e.title, e.description, e.cover_asset_id, e.poster_asset_id,
                 e.category, e.capacity, e.schedule, e.format, e.venue_name, e.address,
-                e.starts_at, e.ends_at)
+                e.starts_at, e.ends_at, e.ticket_price_cents)
                is distinct from
                (n.title, n.description, n.cover_asset_id, n.poster_asset_id,
                 n.category, n.capacity, n.schedule, n.format, n.venue_name, n.address,
-                n.starts_at, n.ends_at)
+                n.starts_at, n.ends_at, n.ticket_price_cents)
         returning to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                   to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at`);
 
@@ -1304,6 +1334,10 @@ export async function setEventStatus(
  * (D-214, D-550): answers, check-ins, attempts, secrets, photos and notifications stay in the
  * database untouched; nothing cascades.
  *
+ * Phase 10.1 (D-760): after the soft delete commits, the kernel's `releaseUnsoldEventMapping` gives the
+ * gateway product of an event with NO ticket back (the mapping row goes, the central route is released); an
+ * event with sales keeps its mapping so a refund still finds the presence.
+ *
  * Silent (D-549): no bus event, no notification, no push, no job; reminders already scheduled
  * become no-ops at fire time (`runEventReminder` answers `skipped`, reason `deleted`). The one
  * trace is an ids-only log line, never the title.
@@ -1322,6 +1356,28 @@ export async function deleteEvent(ctx: RequestContext, eventId: string): Promise
       returning id`);
     if (written.length === 0) throw new ApiError(404, 'NOT_FOUND');
   });
+
+  // Phase 10.1 (D-760, D-747): an event nobody bought a ticket for gives its gateway product back; one with
+  // sales keeps the mapping so a later refund still finds the presence. The delete has already committed, so
+  // a failure here is logged and never fails it (the orphan row is harmless and the next delete or admin
+  // action can clear it).
+  try {
+    // Loaded on demand: the payments setup pulls the gateway adapters and the job queue registry, which
+    // no other path of this module needs (and which a module unit test would otherwise have to mock).
+    const { releaseUnsoldEventMapping } = await import('@rede-social/core/server/payments/setup');
+    await releaseUnsoldEventMapping(ctx, eventId);
+  } catch (error) {
+    log.warn(
+      {
+        event: 'events.mapping_release_failed',
+        tenantId: ctx.tenantId,
+        requestId: ctx.requestId,
+        eventId,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'could not release the ticket mapping of a deleted event',
+    );
+  }
 
   log.info(
     {

@@ -83,6 +83,8 @@ type Body = {
   description?: string;
   coverAssetId?: string | null;
   posterAssetId?: string | null;
+  /** Phase 10.1 (D-755): integer cents; an OMITTED key keeps the stored price (A-06-PRICE). */
+  ticketPriceCents?: number | unknown;
   format: 'in_person' | 'online';
   venueName?: string | null;
   address?: string | null;
@@ -754,5 +756,113 @@ describe('events admin', () => {
     const [after] = await adminSql<{ poster_asset_id: string | null }[]>`
       select poster_asset_id from public.events where id = ${created.id}::uuid`;
     expect(after?.poster_asset_id).toBeNull();
+  });
+  it('16. price tracer and boundaries (10.1-06, D-755, EP-02, EP-03): integer cents round-trip on every read, 1 and 10000000 are accepted, 0, 10000001, 80.5 and "80" are refused on create and on edit', async () => {
+    const body = inPerson('preco');
+    const created = await create({ ...body, ticketPriceCents: 8000 });
+    expect(created.ticketPriceCents).toBe(8000);
+    const [stored] = await adminSql<{ ticket_price_cents: number | null }[]>`
+      select ticket_price_cents from public.events where id = ${created.id}::uuid`;
+    expect(stored?.ticket_price_cents).toBe(8000);
+
+    // 8000 in, 8000 out: the edit read, the member's detail and the member's list say the same integer.
+    const edit = (await (await editRead(created.id)).json()) as EventEdit;
+    expect(edit.ticketPriceCents).toBe(8000);
+    const detail = (await (
+      await request(`/v1/events/${created.id}`, tokens.demoMember)
+    ).json()) as EventSummary;
+    expect(detail.ticketPriceCents).toBe(8000);
+    const listed = (await memberUpcoming()).find((item) => item.id === created.id);
+    expect(listed?.ticketPriceCents).toBe(8000);
+    expect(Number.isInteger(listed?.ticketPriceCents)).toBe(true);
+
+    // No price at all reads null (the answer carries the key; the web treats it as optional).
+    const free = await create(inPerson('sem preco'));
+    expect(free.ticketPriceCents).toBeNull();
+
+    // The edges are accepted on both the create and the edit.
+    for (const edge of [1, 10_000_000]) {
+      const edgeCreated = await create({
+        ...inPerson(`preco borda ${edge}`),
+        ticketPriceCents: edge,
+      });
+      expect(edgeCreated.ticketPriceCents).toBe(edge);
+      const edited = await put(created.id, { ...body, ticketPriceCents: edge });
+      expect(edited.status, String(edge)).toBe(200);
+      expect(((await edited.json()) as EventSummary).ticketPriceCents).toBe(edge);
+    }
+
+    // Outside the edges, a fraction and a string are the generic 400, and nothing is written.
+    const stamp = await updatedAtOf(created.id);
+    for (const bad of [0, -1, 10_000_001, 80.5, '80']) {
+      const onCreate = await request('/v1/events', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ ...inPerson('preco ruim'), ticketPriceCents: bad }),
+      });
+      expect(onCreate.status, `create ${String(bad)}`).toBe(400);
+      const onEdit = await put(created.id, { ...body, ticketPriceCents: bad });
+      expect(onEdit.status, `edit ${String(bad)}`).toBe(400);
+      expect((await envelope(onEdit)).code).toBe('VALIDATION_FAILED');
+    }
+    expect(await updatedAtOf(created.id)).toBe(stamp);
+    const [still] = await adminSql<{ ticket_price_cents: number | null }[]>`
+      select ticket_price_cents from public.events where id = ${created.id}::uuid`;
+    expect(still?.ticket_price_cents).toBe(10_000_000);
+    const badTitles = await adminSql`
+      select id from public.events where title = ${`${TEST_TITLE_PREFIX} preco ruim`}`;
+    expect(badTitles).toHaveLength(0);
+  });
+
+  it('17. price idempotency (EP-04, Pitfall 4, A-06-PRICE): a price-only PUT is a real change, an identical PUT writes nothing, an OMITTED key keeps the price and an explicit null clears it', async () => {
+    const body = inPerson('preco idempotente');
+    const created = await create({ ...body, ticketPriceCents: 8000 });
+    const stamp0 = await updatedAtOf(created.id);
+    const before = updates.length;
+
+    // Identical, price included: 200 and nothing written.
+    const same = await put(created.id, { ...body, ticketPriceCents: 8000 });
+    expect(same.status).toBe(200);
+    expect(await updatedAtOf(created.id)).toBe(stamp0);
+
+    // The key OMITTED: the stored price stays and nothing else differs, so nothing is written either.
+    const omitted = await put(created.id, body);
+    expect(omitted.status).toBe(200);
+    expect(((await omitted.json()) as EventSummary).ticketPriceCents).toBe(8000);
+    expect(await updatedAtOf(created.id)).toBe(stamp0);
+    await settle();
+    expect(updates.slice(before).filter((u) => u.eventId === created.id)).toHaveLength(0);
+
+    // Only the price changes: a real change (row, updated_at and ONE event.updated).
+    const changed = await put(created.id, { ...body, ticketPriceCents: 9500 });
+    expect(changed.status).toBe(200);
+    expect(((await changed.json()) as EventSummary).ticketPriceCents).toBe(9500);
+    const stamp1 = await updatedAtOf(created.id);
+    expect(stamp1).not.toBe(stamp0);
+    await settle();
+    const mine = updates.slice(before).filter((u) => u.eventId === created.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]?.timesChanged).toBe(false);
+
+    // An older client that does not know the key edits the title: the price survives.
+    const retitled = await put(created.id, { ...body, title: `${body.title} novo` });
+    expect(retitled.status).toBe(200);
+    expect(((await retitled.json()) as EventSummary).ticketPriceCents).toBe(9500);
+
+    // An explicit null clears it, and an omitted key afterwards keeps it cleared.
+    const cleared = await put(created.id, {
+      ...body,
+      title: `${body.title} novo`,
+      ticketPriceCents: null,
+    });
+    expect(cleared.status).toBe(200);
+    expect(((await cleared.json()) as EventSummary).ticketPriceCents).toBeNull();
+    const stamp2 = await updatedAtOf(created.id);
+    expect(stamp2).not.toBe(stamp1);
+    const again = await put(created.id, { ...body, title: `${body.title} novo` });
+    expect(((await again.json()) as EventSummary).ticketPriceCents).toBeNull();
+    expect(await updatedAtOf(created.id)).toBe(stamp2);
+    const [stored] = await adminSql<{ ticket_price_cents: number | null }[]>`
+      select ticket_price_cents from public.events where id = ${created.id}::uuid`;
+    expect(stored?.ticket_price_cents).toBeNull();
   });
 });

@@ -1,8 +1,32 @@
 import { readFileSync } from 'node:fs';
 import { subscribe } from '@rede-social/core/server/events/bus';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { EventPage, EventSummary } from '@rede-social/module-events/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, notificationJobsOf, SEED_PASSWORD, signInAs } from './setup';
+import {
+  attendancesOf,
+  deliver,
+  eventRow,
+  freshEmail,
+  personWithEmail,
+  runApply,
+  ticketDelivery,
+  ticketMapping,
+} from './payments-apply-fixtures';
+import {
+  adminSql,
+  api,
+  HOSTS,
+  notificationJobsOf,
+  removeIdentitiesByPrefix,
+  removePaymentIntegrations,
+  removePaymentMappings,
+  SEED_PASSWORD,
+  type SeededPaymentIntegration,
+  seedPaymentIntegration,
+  setPaymentsRow,
+  signInAs,
+} from './setup';
 
 /**
  * Deleting an event end to end against the live local stack and the real seed (09.3, PEND-01,
@@ -226,6 +250,16 @@ async function memberBell(): Promise<BellItem[]> {
 /** Waits for the after-commit bus to deliver (subscribers run after the response). */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
+/** What the Phase 10.1 cases leave behind: the demo tenant's mappings, integration and throwaway buyers. */
+const PAID_PREFIX = 'evdelpaid';
+async function sweepPaid(): Promise<void> {
+  await adminSql`drop trigger if exists evdel_fail on public.payment_products`;
+  await adminSql`drop function if exists public.evdel_fail()`;
+  await removePaymentIntegrations(tenantIds.demo);
+  await removePaymentMappings(tenantIds.demo);
+  await removeIdentitiesByPrefix(PAID_PREFIX);
+}
+
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
@@ -243,11 +277,13 @@ beforeAll(async () => {
   userIds.demoMember = users.find((u) => u.email === 'member@rede-demo.local')?.id ?? '';
   tokens.labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
   await sweep();
+  await sweepPaid();
 });
 
 afterAll(async () => {
   await adminSql`delete from public.events where id = ${LOOK_ALIKE}::uuid`;
   await sweep();
+  await sweepPaid();
 });
 
 describe('events delete', () => {
@@ -634,3 +670,145 @@ describe('events delete', () => {
     expect(body).not.toContain('emit(');
   });
 });
+
+describe('events delete: the ticket mapping of a paid event (10.1-06, D-760, D-747)', () => {
+  const mappingRows = (eventId: string) =>
+    adminSql<{ external_product_id: string }[]>`
+      select external_product_id from public.payment_products
+       where kind = 'event' and event_id = ${eventId}::uuid`;
+  const routeRows = async (externalProductId: string) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from platform.payment_product_routes
+       where provider = 'fake' and external_product_id = ${externalProductId}`;
+    return row?.n ?? -1;
+  };
+
+  it('12. deleting an event nobody bought releases the mapping and the central route, so the gateway product links to another event; a sibling mapping stays', async () => {
+    const [unsold, sibling, next] = [
+      await create(inPerson('pago sem venda')),
+      await create(inPerson('pago irmao')),
+      await create(inPerson('pago proximo')),
+    ];
+    if (!unsold || !sibling || !next) throw new Error('events were not created');
+    const first = await ticketMapping(tenantIds.demo, unsold.id);
+    const second = await ticketMapping(tenantIds.demo, sibling.id);
+    expect(await routeRows(first.externalProductId)).toBe(1);
+
+    expect((await del(unsold.id)).status).toBe(204);
+    expect(await deletedAtOf(unsold.id)).toBeTruthy();
+    expect(await mappingRows(unsold.id)).toEqual([]);
+    expect(await routeRows(first.externalProductId), 'the central route is released').toBe(0);
+    // The sibling event of the same tenant is untouched.
+    expect((await mappingRows(sibling.id)).map((row) => row.external_product_id)).toEqual([
+      second.externalProductId,
+    ]);
+    expect(await routeRows(second.externalProductId)).toBe(1);
+
+    // The gateway product is usable again: the real link route accepts it for another event.
+    await removePaymentIntegrations(tenantIds.demo);
+    await seedPaymentIntegration(tenantIds.demo);
+    const [prior] = await adminSql<{ enabled: boolean; settings: Record<string, unknown> }[]>`
+      select enabled, settings from public.tenant_modules
+       where tenant_id = ${tenantIds.demo}::uuid and module_key = 'payments'`;
+    await setPaymentsRow(tenantIds.demo, { enabled: true, settings: {} });
+    moduleFlags.invalidate(tenantIds.demo);
+    try {
+      const relink = await request(`/v1/payments/event-products/${next.id}`, tokens.demoAdmin, {
+        method: 'PUT',
+        body: JSON.stringify({
+          externalProductId: first.externalProductId,
+          checkoutUrl: 'https://pay.example.com/reuso',
+        }),
+      });
+      expect(relink.status, await relink.clone().text()).toBe(200);
+      expect((await mappingRows(next.id)).map((row) => row.external_product_id)).toEqual([
+        first.externalProductId,
+      ]);
+    } finally {
+      if (prior) {
+        await setPaymentsRow(tenantIds.demo, { enabled: prior.enabled, settings: prior.settings });
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.demo}::uuid and module_key = 'payments'`;
+      }
+      moduleFlags.invalidate(tenantIds.demo);
+    }
+  });
+
+  it('13. an event WITH a ticket keeps its mapping when deleted, and a refund through the apply job still removes that presence (D-760)', async () => {
+    await removePaymentIntegrations(tenantIds.demo);
+    const integration = await seedPaymentIntegration(tenantIds.demo);
+    const sold = await create(inPerson('pago vendido'));
+    const mapping = await ticketMapping(tenantIds.demo, sold.id);
+    const buyer = await personWithEmail(freshEmail(PAID_PREFIX, 'buyer'), 'demo');
+    const ref = `ord-${crypto.randomUUID()}`;
+    const approved = await deliverWith(integration, 'purchase_approved', ref, mapping, buyer.email);
+    expect(await eventRow(approved)).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+    expect((await attendancesOf(sold.id)).map((row) => row.origin)).toEqual(['ticket']);
+
+    expect((await del(sold.id)).status).toBe(204);
+    expect(await deletedAtOf(sold.id)).toBeTruthy();
+    // The mapping and its central route stay: the product id is still the sale's.
+    expect((await mappingRows(sold.id)).map((row) => row.external_product_id)).toEqual([
+      mapping.externalProductId,
+    ]);
+    expect(await routeRows(mapping.externalProductId)).toBe(1);
+    expect((await attendancesOf(sold.id)).map((row) => row.origin)).toEqual(['ticket']);
+
+    const refund = await deliverWith(integration, 'purchase_refunded', ref, mapping, buyer.email);
+    expect(await eventRow(refund)).toMatchObject({ state: 'applied', outcome: 'ticket_revoked' });
+    expect(await attendancesOf(sold.id)).toEqual([]);
+  });
+
+  it('14. a failing release never fails the delete: 204, the event is gone, the mapping is left for later', async () => {
+    const event = await create(inPerson('pago falha'));
+    const mapping = await ticketMapping(tenantIds.demo, event.id);
+    await adminSql`
+      create function public.evdel_fail() returns trigger language plpgsql as $$
+      begin raise exception 'evdel-test: cannot delete a mapping'; end $$`;
+    await adminSql`
+      create trigger evdel_fail before delete on public.payment_products
+      for each row execute function public.evdel_fail()`;
+    try {
+      const res = await del(event.id);
+      expect(res.status, await res.clone().text()).toBe(204);
+    } finally {
+      await adminSql`drop trigger if exists evdel_fail on public.payment_products`;
+      await adminSql`drop function if exists public.evdel_fail()`;
+    }
+    expect(await deletedAtOf(event.id)).toBeTruthy();
+    expect((await mappingRows(event.id)).map((row) => row.external_product_id)).toEqual([
+      mapping.externalProductId,
+    ]);
+    expect(await routeRows(mapping.externalProductId)).toBe(1);
+  });
+
+  it('15. deleting a free event touches no mapping and stays a plain 204', async () => {
+    const free = await create(inPerson('livre'));
+    const other = await create(inPerson('pago livre irmao'));
+    const kept = await ticketMapping(tenantIds.demo, other.id);
+    expect((await del(free.id)).status).toBe(204);
+    expect(await deletedAtOf(free.id)).toBeTruthy();
+    expect((await mappingRows(other.id)).map((row) => row.external_product_id)).toEqual([
+      kept.externalProductId,
+    ]);
+    expect(await routeRows(kept.externalProductId)).toBe(1);
+  });
+});
+
+/** A signed `fake` delivery of an event product for `email`, applied by the real job; returns the event id. */
+async function deliverWith(
+  integration: SeededPaymentIntegration,
+  type: string,
+  ref: string,
+  mapping: { externalProductId: string },
+  email: string,
+): Promise<string> {
+  const id = await deliver(
+    integration,
+    ticketDelivery(type, { ref, productId: mapping.externalProductId, email }),
+  );
+  await runApply(id);
+  return id;
+}

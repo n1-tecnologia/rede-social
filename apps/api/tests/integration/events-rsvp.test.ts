@@ -54,7 +54,8 @@ const SEEDED_UPCOMING = {
  * The one member-facing detail key set (D-206, D-207): no URL, no code, no other member. 2026-10-03
  * adds `category` and `capacity` (and moves `address` into the list item too). 2026-11-09 (Phase 12.3,
  * plan 06) adds `posterAssetId` and `posterVariantWidths`: the tenant's optional vertical poster, never
- * member data.
+ * member data. 2026-11-13 (Phase 10.1, plan 06) adds `ticketPriceCents`: the event's optional reference
+ * price in integer cents, a label the tenant publishes, never member data.
  */
 const DETAIL_KEYS = [
   'address',
@@ -73,6 +74,7 @@ const DETAIL_KEYS = [
   'schedule',
   'startsAt',
   'status',
+  'ticketPriceCents',
   'title',
   'venueName',
   'viewerCheckedInAt',
