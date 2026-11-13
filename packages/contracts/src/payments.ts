@@ -122,6 +122,18 @@ export type PaymentsPurchaseConfirmed = {
   productName: string;
 };
 
+/**
+ * `payments.ticket_confirmed` — emitted AFTER a gateway-confirmed ticket of a paid event commits (Phase
+ * 10.1, D-756). Names the event, never the money, the order or the e-mail: the buyer's notice carries the
+ * event id and title only.
+ */
+export type PaymentsTicketConfirmed = {
+  tenantId: string;
+  userId: string;
+  eventId: string;
+  eventTitle: string;
+};
+
 // ── 09.1-09: the admin API's contracts (D-491, D-492, D-494, D-501, D-502) ─────────────────────
 
 /** Field caps, measured on the TRIMMED value in code points (Zod 4 counts code points, an emoji is one). */
@@ -514,5 +526,6 @@ declare module '@rede-social/contracts' {
   interface EventMap {
     'membership.access_cut': MembershipAccessCut;
     'payments.purchase_confirmed': PaymentsPurchaseConfirmed;
+    'payments.ticket_confirmed': PaymentsTicketConfirmed;
   }
 }

@@ -69,6 +69,18 @@ describe('09.1 - the payment domain events', () => {
     expect(name).toBe('payments.purchase_confirmed');
     expect(Object.keys(payload).sort()).toEqual(['productId', 'productName', 'tenantId', 'userId']);
   });
+
+  it('payments.ticket_confirmed names the event, never the money or the order (Phase 10.1, D-756)', () => {
+    const name: DomainEventName = 'payments.ticket_confirmed';
+    const payload: EventMap['payments.ticket_confirmed'] = {
+      tenantId: 'a',
+      userId: 'b',
+      eventId: 'c',
+      eventTitle: 'Encontro',
+    };
+    expect(name).toBe('payments.ticket_confirmed');
+    expect(Object.keys(payload).sort()).toEqual(['eventId', 'eventTitle', 'tenantId', 'userId']);
+  });
 });
 
 describe('09.1-10 - the member-facing reads (D-493, D-497, UI-D-532)', () => {

@@ -13,7 +13,11 @@ import {
   notificationCount,
   type Person,
   personWithEmail,
+  removeTicketEvents,
   runApply,
+  ticketDelivery,
+  ticketEvent,
+  ticketMapping,
 } from './payments-apply-fixtures';
 import {
   adminSql,
@@ -783,5 +787,154 @@ describe('09.1 silence', () => {
       select count(*)::int as n from public.notifications
        where user_id = ${labAdmin}::uuid and kind like 'payments.%'`;
     expect(adminRows[0]?.n).toBe(0);
+  });
+});
+
+describe('10.1 ticket confirmed', () => {
+  const TICKET_KIND = 'payments.ticket_confirmed';
+  const EVENT_TITLE = `${PREFIX}-evento`;
+
+  afterAll(async () => {
+    await closeWaitingJobs();
+    await removeTicketEvents(EVENT_TITLE);
+  }, 60_000);
+
+  const ticketNotices = (userId: string) =>
+    adminSql<NoticeRow[]>`
+      select user_id::text as user_id, kind, dedupe_key, actor_user_id::text as actor_user_id,
+             subject_type, subject_id::text as subject_id, payload
+        from public.notifications
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid and kind = ${TICKET_KIND}
+       order by created_at, id`;
+
+  const ticketPushJobs = async () =>
+    (await pushSendJobsOf(labTenantId)).filter(
+      (job) => (job.data as { kind?: string }).kind === TICKET_KIND,
+    );
+
+  it('an approved purchase of an event product notifies the payer once, in-app and by push, and nobody else (D-756)', async () => {
+    integration = await seedPaymentIntegration(labTenantId);
+    const eventId = await ticketEvent(labTenantId, { title: EVENT_TITLE });
+    const mapping = await ticketMapping(labTenantId, eventId);
+    const payer = await personWithEmail(freshEmail(PREFIX, 'payer'), 'lab');
+    const bystander = await personWithEmail(freshEmail(PREFIX, 'bystander'), 'lab');
+    await addDevice(payer.userId);
+    await addDevice(bystander.userId);
+    await closeWaitingJobs();
+    const pushBefore = (await ticketPushJobs()).length;
+    const since = await dbNow();
+    const ref = `ord-${crypto.randomUUID()}`;
+
+    const settled = await deliverAndApply(
+      integration,
+      ticketDelivery('purchase_approved', {
+        ref,
+        productId: mapping.externalProductId,
+        email: payer.email,
+      }),
+    );
+    expect(settled).toMatchObject({ state: 'applied', outcome: 'ticket_granted' });
+    await runNotificationJobs(labTenantId);
+
+    const rows = await ticketNotices(payer.userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      actor_user_id: null,
+      subject_type: 'event',
+      subject_id: eventId,
+      payload: { eventId, eventTitle: EVENT_TITLE },
+    });
+    expect(Object.keys(rows[0]?.payload ?? {}).sort()).toEqual(['eventId', 'eventTitle']);
+    expect(rows[0]?.dedupe_key.startsWith(`${TICKET_KIND}:${eventId}:`)).toBe(true);
+    expect(await ticketNotices(bystander.userId)).toHaveLength(0);
+
+    const jobs = await ticketPushJobs();
+    expect(jobs).toHaveLength(pushBefore + 1);
+    const job = jobs[jobs.length - 1]?.data as { userIds: string[]; push: Record<string, unknown> };
+    expect(job.userIds).toEqual([payer.userId]);
+    expect(job.push).toMatchObject({
+      title: 'tenant',
+      body: `Presença confirmada em ${EVENT_TITLE}`,
+      url: `/eventos/${eventId}`,
+      ttlSeconds: 86_400,
+      urgency: 'normal',
+      renotify: false,
+    });
+    expect(JSON.stringify(job.push)).not.toContain(ref);
+
+    const signals = await signalsOf(payer.userId, since);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.payload.kind).toBe(TICKET_KIND);
+    expect((await signalsOf(bystander.userId, since)).length).toBe(0);
+  });
+
+  it('a refund, a chargeback, a subscription type and a payment for a closed event notify nobody (A-UI-9)', async () => {
+    integration = await seedPaymentIntegration(labTenantId);
+    const eventId = await ticketEvent(labTenantId, { title: `${EVENT_TITLE}-quiet` });
+    const endedId = await ticketEvent(labTenantId, {
+      title: `${EVENT_TITLE}-ended`,
+      startsInMinutes: -240,
+      endsInMinutes: -60,
+    });
+    const cancelledId = await ticketEvent(labTenantId, {
+      title: `${EVENT_TITLE}-cancelled`,
+      status: 'cancelled',
+    });
+    const mapping = await ticketMapping(labTenantId, eventId);
+    const endedMapping = await ticketMapping(labTenantId, endedId);
+    const cancelledMapping = await ticketMapping(labTenantId, cancelledId);
+    const payer = await personWithEmail(freshEmail(PREFIX, 'quietpayer'), 'lab');
+    const body = (type: string, productId: string, ref: string) =>
+      ticketDelivery(type, { ref, productId, email: payer.email });
+
+    const ref = `ord-${crypto.randomUUID()}`;
+    await deliverAndApply(integration, body('purchase_approved', mapping.externalProductId, ref));
+    await runNotificationJobs(labTenantId);
+    await closeWaitingJobs();
+    const before = {
+      rows: (await ticketNotices(payer.userId)).length,
+      push: (await ticketPushJobs()).length,
+    };
+    expect(before.rows).toBe(1);
+
+    const quiet = async (label: string, run: () => Promise<unknown>) => {
+      await run();
+      await runNotificationJobs(labTenantId);
+      expect(
+        { rows: (await ticketNotices(payer.userId)).length, push: (await ticketPushJobs()).length },
+        label,
+      ).toEqual(before);
+    };
+    await quiet('refund', () =>
+      deliverAndApply(integration, body('purchase_refunded', mapping.externalProductId, ref)),
+    );
+    await quiet('chargeback of an unknown order', () =>
+      deliverAndApply(
+        integration,
+        body('chargeback', mapping.externalProductId, `ord-${crypto.randomUUID()}`),
+      ),
+    );
+    for (const type of ['subscription_renewed', 'subscription_late', 'subscription_canceled']) {
+      await quiet(type, () =>
+        deliverAndApply(
+          integration,
+          body(type, mapping.externalProductId, `ord-${crypto.randomUUID()}`),
+        ),
+      );
+    }
+    await quiet('ended event', async () => {
+      const settledEnded = await deliverAndApply(
+        integration,
+        body('purchase_approved', endedMapping.externalProductId, `ord-${crypto.randomUUID()}`),
+      );
+      expect(settledEnded).toMatchObject({ state: 'ignored', outcome: 'event_ended' });
+    });
+    await quiet('cancelled event', async () => {
+      const settledCancelled = await deliverAndApply(
+        integration,
+        body('purchase_approved', cancelledMapping.externalProductId, `ord-${crypto.randomUUID()}`),
+      );
+      expect(settledCancelled).toMatchObject({ state: 'ignored', outcome: 'event_cancelled' });
+    });
   });
 });

@@ -72,11 +72,13 @@ export const PAYMENTS_PERMISSIONS = {
 
 /**
  * The notification kinds this module declares (09.1-12, D-506): the in-app row's `kind` and the web
- * registry's key. Facts, never sentences; the buyer's "Compra confirmada" is the only one in this phase
- * (a revocation, a cut, a return, a refund and an event waiting for an account notify nobody, D-500).
+ * registry's key. Facts, never sentences; the buyer's "Compra confirmada" and (Phase 10.1) the payer's
+ * "Presença confirmada" are the only ones (a revocation, a cut, a return, a refund and an event waiting for an account notify nobody, D-500).
  */
 export const PAYMENTS_NOTIFICATION_KINDS = {
   purchaseConfirmed: 'payments.purchase_confirmed',
+  // Phase 10.1 (D-756): the payer's "Presença confirmada" notice of a paid event.
+  ticketConfirmed: 'payments.ticket_confirmed',
 } as const;
 export type PaymentsNotificationKind =
   (typeof PAYMENTS_NOTIFICATION_KINDS)[keyof typeof PAYMENTS_NOTIFICATION_KINDS];

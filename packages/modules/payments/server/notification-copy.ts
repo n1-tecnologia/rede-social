@@ -15,4 +15,7 @@ export const paymentsPushCopy = {
   /** The buyer's confirmation (D-506). Names the product only: never an amount, an order or an e-mail. */
   purchaseConfirmed: (productName: string): string =>
     cutOnWord(`Compra confirmada: ${productName}`, PAYMENTS_PUSH_BODY_MAX),
+  /** The payer's confirmation of a paid event (Phase 10.1, D-756). Names the event only. */
+  ticketConfirmed: (eventTitle: string): string =>
+    cutOnWord(`Presença confirmada em ${eventTitle}`, PAYMENTS_PUSH_BODY_MAX),
 } as const;

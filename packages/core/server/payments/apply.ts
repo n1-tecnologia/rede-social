@@ -2,7 +2,9 @@ import type {
   MembershipAccessCut,
   PaymentEventOutcome,
   PaymentEventState,
+  PaymentProductKind,
   PaymentsPurchaseConfirmed,
+  PaymentsTicketConfirmed,
 } from '@rede-social/contracts/payments';
 import { sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
@@ -38,7 +40,9 @@ import { type AccessEffect, decideAccessWrite, decideStoreWrite } from './policy
  *     account except by exact `lower(btrim())` equality, and nothing is ever created from a payment (PR-7).
  *     `store_product` mapping → the store definers (`app.store_gateway_purchase` / `_revoke`), which are the
  *     only writers of the order and entitlement ledgers; the e-mail must match a LIVE membership of this
- *     tenant or the event waits as `no_membership` (D-490).
+ *     tenant or the event waits as `no_membership` (D-490). `event` mapping (Phase 10.1, D-740) → the two
+ *     event definers (`app.event_gateway_grant` / `_revoke`), the only writers of a presence of origin
+ *     `ticket`: ONLY an approved purchase grants and ONLY a refund or chargeback revokes (D-757).
  *  5. the event row is settled (`state`, `outcome`, `mapping_id`, `applied_at`) in the same transaction.
  *
  * AFTER the commit, and only then, a domain event may be emitted through a system `RequestContext` and
@@ -85,7 +89,13 @@ type EventRow = {
   occurred_at: string | null;
 };
 
-type MappingRow = { id: string; kind: string; target_id: string | null };
+type MappingRow = {
+  id: string;
+  kind: PaymentProductKind;
+  target_id: string | null;
+  /** The event of an `event` mapping (Phase 10.1): the branch reads this, never `target_id`. */
+  event_id: string | null;
+};
 
 type Settled = {
   state: PaymentEventState;
@@ -93,6 +103,7 @@ type Settled = {
   /** The domain events to emit once the transaction has committed. */
   cut: MembershipAccessCut | null;
   purchase: PaymentsPurchaseConfirmed | null;
+  ticket: PaymentsTicketConfirmed | null;
 };
 
 /** ISO-8601 UTC with milliseconds: the one text form this file reads timestamps in (drizzle returns text). */
@@ -149,7 +160,7 @@ async function accessStateOf(tx: Tx, tenantId: string, userId: string): Promise<
   return row?.state ?? null;
 }
 
-const NO_EFFECT = { cut: null, purchase: null } as const;
+const NO_EFFECT = { cut: null, purchase: null, ticket: null } as const;
 
 /** An `access` mapping: write the sale's gateway row and note whether a live member was cut by it. */
 async function applyAccess(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<Settled> {
@@ -228,7 +239,28 @@ async function applyAccess(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<S
     member && before === 'granted' && after === 'cut'
       ? { tenantId: ev.tenant_id, userId: member.userId, membershipId: member.membershipId }
       : null;
-  return { state: 'applied', outcome: decision.outcome, cut, purchase: null };
+  return { state: 'applied', outcome: decision.outcome, cut, purchase: null, ticket: null };
+}
+
+/**
+ * The one-off rule's fact (T-09.1-33, PAY-30): an APPLIED refund or chargeback of the same sale (same tenant,
+ * provider and reference), earlier. The store branch and the ticket branch read the SAME fact, so a late
+ * approval can never undo a refund in either.
+ */
+async function priorTerminalEvent(tx: Tx, ev: EventRow, providerRef: string): Promise<boolean> {
+  const prior = rowsOf<{ found: boolean }>(
+    await tx.execute(sql`
+      select exists (
+        select 1
+          from public.payment_events
+         where tenant_id = ${ev.tenant_id}::uuid
+           and provider = ${ev.provider}
+           and external_ref = ${providerRef}
+           and id <> ${ev.id}::uuid
+           and state = 'applied'
+           and type in ('purchase_refunded', 'chargeback')) as found`),
+  )[0];
+  return prior?.found ?? false;
 }
 
 /**
@@ -281,23 +313,10 @@ async function applyStore(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<Se
     return { state: 'no_membership', outcome: null, ...NO_EFFECT };
   }
 
-  // The one-off rule's fact (T-09.1-33): an APPLIED refund or chargeback of the same sale, earlier.
-  const prior = rowsOf<{ found: boolean }>(
-    await tx.execute(sql`
-      select exists (
-        select 1
-          from public.payment_events
-         where tenant_id = ${ev.tenant_id}::uuid
-           and provider = ${ev.provider}
-           and external_ref = ${providerRef}
-           and id <> ${ev.id}::uuid
-           and state = 'applied'
-           and type in ('purchase_refunded', 'chargeback')) as found`),
-  )[0];
   const decision = decideStoreWrite({
     effect: 'grant',
     recurring: ev.recurring,
-    priorTerminalEvent: prior?.found ?? false,
+    priorTerminalEvent: await priorTerminalEvent(tx, ev, providerRef),
   });
   if (decision.action === 'skip') return ignored(decision.outcome);
 
@@ -322,6 +341,7 @@ async function applyStore(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<Se
         productId: mapping.target_id,
         productName: bought.product_name ?? '',
       },
+      ticket: null,
     };
   }
   // `already_active`: a renewal of a sale that is still live, or a re-sent body (A-P11: only the first
@@ -329,6 +349,132 @@ async function applyStore(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<Se
   const outcome = bought?.outcome === 'already_active' ? 'applied' : 'ignored';
   await settle(tx, ev, outcome, 'no_effect', mapping.id);
   return { state: outcome, outcome: 'no_effect', ...NO_EFFECT };
+}
+
+/**
+ * An `event` mapping (Phase 10.1, D-740, D-749..D-752, D-757, D-759, D-760): the ticket of one paid event.
+ * The presences are written ONLY through the two explicit-argument `service_role` definers of plan 04, which
+ * RETURN every business outcome, so nothing here can raise on a business case and the delivery never ends
+ * `failed` (T-10.1-23).
+ *
+ *  - the TYPE decides (D-757): only `purchase_approved` grants and only `purchase_refunded` / `chargeback`
+ *    revoke; a subscription type (renewed, late, canceled) or any other settles `ignored` / `no_effect`;
+ *  - there is NO currency rule: the reference price is cosmetic (A11), the gateway charged what it charged;
+ *  - the buyer is found by exact e-mail among LIVE memberships of ANY role (D-749); none settles
+ *    `no_membership` and nothing waits for an account. The definer's `unconfirmed` outcome settles the same
+ *    word: a payment never confirms an account somebody registered with another person's address (D-759),
+ *    the admin releases it by hand;
+ *  - a late approval of an order already refunded is `stale` by the SAME fact the store reads (D-752);
+ *  - a revoke needs no member and no e-mail: the order reference alone identifies the presence in this
+ *    tenant, so it works for a blocked or removed buyer.
+ */
+async function applyTicket(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<Settled> {
+  const ignored = async (outcome: PaymentEventOutcome): Promise<Settled> => {
+    await settle(tx, ev, 'ignored', outcome, mapping.id);
+    return { state: 'ignored', outcome, ...NO_EFFECT };
+  };
+  const providerRef = ev.external_ref;
+  const eventId = mapping.event_id;
+  if (!providerRef || !eventId) return ignored('no_effect');
+
+  if (ev.type === 'purchase_refunded' || ev.type === 'chargeback') {
+    const revoked = rowsOf<{ outcome: string }>(
+      await tx.execute(sql`
+        select outcome from app.event_gateway_revoke(
+          ${ev.tenant_id}::uuid, ${ev.provider}::text, ${providerRef}::text)`),
+    )[0];
+    const outcome: PaymentEventOutcome =
+      revoked?.outcome === 'removed'
+        ? 'ticket_revoked'
+        : revoked?.outcome === 'kept'
+          ? 'ticket_kept'
+          : 'no_effect';
+    await settle(tx, ev, 'applied', outcome, mapping.id);
+    return { state: 'applied', outcome, ...NO_EFFECT };
+  }
+  if (ev.type !== 'purchase_approved') return ignored('no_effect');
+
+  const email = ev.email && ev.email.length > 0 ? ev.email : null;
+  if (!email) return ignored('no_effect');
+
+  const member = await findLiveMember(tx, ev.tenant_id, email, false);
+  if (!member) {
+    await settle(tx, ev, 'no_membership', null, mapping.id);
+    return { state: 'no_membership', outcome: null, ...NO_EFFECT };
+  }
+
+  // A ticket is a one-off order whatever the body says (`recurring: false`), so the stale rule always holds.
+  const decision = decideStoreWrite({
+    effect: 'grant',
+    recurring: false,
+    priorTerminalEvent: await priorTerminalEvent(tx, ev, providerRef),
+  });
+  if (decision.action === 'skip') return ignored(decision.outcome);
+
+  const granted = rowsOf<{
+    outcome: string;
+    user_id: string | null;
+    event_title: string | null;
+    over_limit: boolean | null;
+  }>(
+    await tx.execute(sql`
+      select outcome, user_id::text as user_id, event_title, over_limit
+        from app.event_gateway_grant(
+          ${ev.tenant_id}::uuid, ${member.membershipId}::uuid, ${eventId}::uuid,
+          ${ev.provider}::text, ${providerRef}::text)`),
+  )[0];
+
+  switch (granted?.outcome) {
+    case 'granted': {
+      const outcome: PaymentEventOutcome = granted.over_limit
+        ? 'ticket_granted_over_limit'
+        : 'ticket_granted';
+      await settle(tx, ev, 'applied', outcome, mapping.id);
+      return {
+        state: 'applied',
+        outcome,
+        cut: null,
+        purchase: null,
+        ticket: {
+          tenantId: ev.tenant_id,
+          userId: granted.user_id ?? member.userId,
+          eventId,
+          eventTitle: granted.event_title ?? '',
+        },
+      };
+    }
+    case 'already_in': {
+      await settle(tx, ev, 'applied', 'no_effect', mapping.id);
+      return { state: 'applied', outcome: 'no_effect', ...NO_EFFECT };
+    }
+    case 'event_ended':
+      return ignored('event_ended');
+    case 'event_cancelled':
+      return ignored('event_cancelled');
+    case 'unconfirmed': {
+      await settle(tx, ev, 'no_membership', null, mapping.id);
+      return { state: 'no_membership', outcome: null, ...NO_EFFECT };
+    }
+    case 'not_mapped': {
+      // The mapping went away under the lock: the same word as a product nobody mapped.
+      await settle(tx, ev, 'unknown_product', null, null);
+      return { state: 'unknown_product', outcome: null, ...NO_EFFECT };
+    }
+    default:
+      // `not_found` (the definer refused the arguments or the event is not this tenant's) and any outcome
+      // a later definer adds: nothing was written and nothing is retried.
+      return ignored('no_effect');
+  }
+}
+
+/**
+ * The exhaustive guard of the kind dispatch (D-752, third branch): a mapping kind that is neither `access`,
+ * `store_product` nor `event` is a programming error, never a store write. The parameter is `never`, so adding
+ * a kind to `PaymentProductKind` without a branch fails to compile; a value that gets past the check
+ * constraint anyway ends here, inside the transaction, which rolls back.
+ */
+export function unsupportedMappingKind(kind: never): never {
+  throw new Error(`payment mapping kind not handled: ${String(kind)}`);
 }
 
 /** The transaction body: lock, decide by branch, settle. Returns what to emit after the commit. */
@@ -364,7 +510,7 @@ async function applyInTx(
   const mapping = ev.external_product_id
     ? rowsOf<MappingRow>(
         await tx.execute(sql`
-          select id::text as id, kind, target_id::text as target_id
+          select id::text as id, kind, target_id::text as target_id, event_id::text as event_id
             from public.payment_products
            where tenant_id = ${ev.tenant_id}::uuid
              and provider = ${ev.provider}
@@ -381,13 +527,18 @@ async function applyInTx(
     return { state: 'unknown_product', outcome: null, ...NO_EFFECT, tenantId: ev.tenant_id };
   }
 
-  if (mapping.kind === 'access') {
-    const settled = await applyAccess(tx, ev, mapping);
-    return { ...settled, tenantId: ev.tenant_id };
+  // Explicit dispatch on the kind: the store branch is NOT the fallthrough (a third kind must never write
+  // a store order), and the guard below makes a kind without a branch a compile error.
+  switch (mapping.kind) {
+    case 'access':
+      return { ...(await applyAccess(tx, ev, mapping)), tenantId: ev.tenant_id };
+    case 'store_product':
+      return { ...(await applyStore(tx, ev, mapping)), tenantId: ev.tenant_id };
+    case 'event':
+      return { ...(await applyTicket(tx, ev, mapping)), tenantId: ev.tenant_id };
+    default:
+      return unsupportedMappingKind(mapping.kind);
   }
-
-  const settled = await applyStore(tx, ev, mapping);
-  return { ...settled, tenantId: ev.tenant_id };
 }
 
 /** Marks an event `failed` in its OWN transaction, after the apply transaction rolled back. */
@@ -491,7 +642,7 @@ export async function applyPaymentEvent(
   }
 
   const emitted: string[] = [];
-  if (result.cut || result.purchase) {
+  if (result.cut || result.purchase || result.ticket) {
     const ctx: RequestContext = {
       userId: PAYMENTS_SYSTEM_USER_ID,
       tenantId: result.tenantId,
@@ -506,6 +657,10 @@ export async function applyPaymentEvent(
     if (result.purchase) {
       emit(ctx, 'payments.purchase_confirmed', result.purchase);
       emitted.push('payments.purchase_confirmed');
+    }
+    if (result.ticket) {
+      emit(ctx, 'payments.ticket_confirmed', result.ticket);
+      emitted.push('payments.ticket_confirmed');
     }
     // AFTER the commit: a subscriber can never see a change that a rollback erased.
     await flush(ctx, log);

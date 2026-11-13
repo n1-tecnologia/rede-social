@@ -60,3 +60,33 @@ describe('paymentsPushCopy.purchaseConfirmed', () => {
     expect(body.endsWith('…')).toBe(true);
   });
 });
+
+describe('paymentsPushCopy.ticketConfirmed (Phase 10.1, D-756)', () => {
+  it('is "Presença confirmada em {evento}" for a short title, never cut and never given an ellipsis', () => {
+    const body = paymentsPushCopy.ticketConfirmed('Encontro de março');
+    expect(body).toBe('Presença confirmada em Encontro de março');
+    expect(body).not.toContain('…');
+  });
+
+  it('cuts a long title on a word to at most 100 graphemes with a trailing ellipsis', () => {
+    const title = Array.from({ length: 30 }, (_, i) => `palavra${i}`).join(' ');
+    const body = paymentsPushCopy.ticketConfirmed(title);
+    expect(graphemes(body)).toBeLessThanOrEqual(PAYMENTS_PUSH_BODY_MAX);
+    expect(body.endsWith('…')).toBe(true);
+    const kept = body.slice('Presença confirmada em '.length, -1).trimEnd();
+    expect(title.startsWith(kept)).toBe(true);
+    expect(title.charAt(kept.length)).toBe(' ');
+  });
+
+  it('does not cut a body of exactly 100 graphemes and cuts one of 101', () => {
+    const prefix = 'Presença confirmada em ';
+    const exact = 'a'.repeat(PAYMENTS_PUSH_BODY_MAX - prefix.length);
+    const exactBody = paymentsPushCopy.ticketConfirmed(exact);
+    expect(graphemes(exactBody)).toBe(PAYMENTS_PUSH_BODY_MAX);
+    expect(exactBody).toBe(`${prefix}${exact}`);
+    const over = 'a '.repeat(60).trim();
+    const overBody = paymentsPushCopy.ticketConfirmed(over);
+    expect(graphemes(overBody)).toBeLessThanOrEqual(PAYMENTS_PUSH_BODY_MAX);
+    expect(overBody.endsWith('…')).toBe(true);
+  });
+});

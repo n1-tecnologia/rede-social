@@ -39,6 +39,13 @@ export const purchaseTag = (productId: string): string => `payments-purchase-${p
 export const purchaseTopic = (productId: string): string =>
   productId.replaceAll('-', '').toLowerCase().slice(0, 32);
 
+/** The device `tag` of a ticket banner: one per event, characters the push service accepts. */
+export const ticketTag = (eventId: string): string => `payments-ticket-${eventId}`;
+
+/** The Web Push `Topic` (at most 32 URL-safe characters): the event id without hyphens. */
+export const ticketTopic = (eventId: string): string =>
+  eventId.replaceAll('-', '').toLowerCase().slice(0, 32);
+
 export const paymentsNotificationSources = [
   {
     event: 'payments.purchase_confirmed',
@@ -66,4 +73,37 @@ export const paymentsNotificationSources = [
       },
     ],
   } satisfies NotificationSource<'payments.purchase_confirmed'>,
+  /**
+   * Phase 10.1 (D-756, A-UI-9): the payer's "Presença confirmada em {evento}". Emitted by the apply job (or
+   * the admin's manual release) only on a `granted` outcome, so this source never has to filter: a
+   * courtesy, a refund, a chargeback and a payment for a closed event notify nobody. The facts are the
+   * event id and title; the order reference, the amount and the e-mail never leave the apply path (PR-3).
+   * The 24 h and 1 h reminders reach the payer unchanged: they read `going` rows at fire time.
+   */
+  {
+    event: 'payments.ticket_confirmed',
+    resolve: async (_tx, payload, meta) => [
+      {
+        kind: PAYMENTS_NOTIFICATION_KINDS.ticketConfirmed,
+        audience: { type: 'users', userIds: [payload.userId] },
+        excludeUserIds: [],
+        dedupeKey: `${PAYMENTS_NOTIFICATION_KINDS.ticketConfirmed}:${payload.eventId}:${meta.sinkAt}`,
+        subject: { type: 'event', id: payload.eventId },
+        object: null,
+        actorUserId: null,
+        facts: { eventId: payload.eventId, eventTitle: payload.eventTitle },
+        channels: ['in_app', 'push'],
+        push: {
+          title: 'tenant',
+          body: paymentsPushCopy.ticketConfirmed(payload.eventTitle),
+          url: `/eventos/${payload.eventId}`,
+          tag: ticketTag(payload.eventId),
+          topic: ticketTopic(payload.eventId),
+          ttlSeconds: PAYMENTS_NOTICE_TTL_SECONDS,
+          urgency: 'normal',
+          renotify: false,
+        },
+      },
+    ],
+  } satisfies NotificationSource<'payments.ticket_confirmed'>,
 ] as NotificationSource[];

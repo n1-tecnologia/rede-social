@@ -33,13 +33,19 @@ const PUSH_PATH = /^\/(?![/\\])[^\\\s]*$/;
 const payload = { tenantId: T, userId: U, productId: P, productName: 'Curso A' };
 
 describe('payments notification source', () => {
-  it('listens to payments.purchase_confirmed only, and the manifest declares it (no retraction)', () => {
+  it('listens to payments.purchase_confirmed and payments.ticket_confirmed only, and the manifest declares them (no retraction)', () => {
     expect(paymentsNotificationSources.map((entry) => entry.event)).toEqual([
       'payments.purchase_confirmed',
+      'payments.ticket_confirmed',
     ]);
     expect(paymentsModule.notificationSources).toBe(paymentsNotificationSources);
     expect(paymentsModule.notificationRetractions).toBeUndefined();
     expect(PAYMENTS_NOTIFICATION_KINDS.purchaseConfirmed).toBe('payments.purchase_confirmed');
+    expect(PAYMENTS_NOTIFICATION_KINDS.ticketConfirmed).toBe('payments.ticket_confirmed');
+    expect(Object.values(PAYMENTS_NOTIFICATION_KINDS)).toEqual([
+      'payments.purchase_confirmed',
+      'payments.ticket_confirmed',
+    ]);
   });
 
   it('turns the payload into exactly one actor-less intent for the buyer and nobody else', async () => {
@@ -105,5 +111,75 @@ describe('payments notification source', () => {
     expect(body.endsWith('…')).toBe(true);
     // the row keeps the whole name: the bell clamps it, the push cuts it
     expect(intent?.facts.productName).toBe(productName);
+  });
+});
+
+// ── Phase 10.1 (D-756, A-UI-9): the payer's "Presença confirmada" source ──────────────────────────
+
+const ticketSource = paymentsNotificationSources[1];
+if (!ticketSource) throw new Error('payments declares no ticket notification source');
+
+const E = '3e000000-0000-4000-8000-000000000001';
+const ticketPayload = { tenantId: T, userId: U, eventId: E, eventTitle: 'Encontro de março' };
+
+describe('payments ticket notification source', () => {
+  it('turns the payload into exactly one actor-less intent for the payer and nobody else', async () => {
+    const intents = await ticketSource.resolve(refusingTx, ticketPayload, meta);
+    expect(intents).toHaveLength(1);
+    const intent = intents[0];
+    expect(intent).toMatchObject({
+      kind: 'payments.ticket_confirmed',
+      audience: { type: 'users', userIds: [U] },
+      excludeUserIds: [],
+      actorUserId: null,
+      subject: { type: 'event', id: E },
+      object: null,
+      facts: { eventId: E, eventTitle: 'Encontro de março' },
+      channels: ['in_app', 'push'],
+    });
+    expect(intent?.dedupeKey).toBe(`payments.ticket_confirmed:${E}:${meta.sinkAt}`);
+  });
+
+  it('carries the eventId and eventTitle facts only: no e-mail, amount, order reference or provider', async () => {
+    const [intent] = await ticketSource.resolve(refusingTx, ticketPayload, meta);
+    expect(Object.keys(intent?.facts ?? {}).sort()).toEqual(['eventId', 'eventTitle']);
+    expect(JSON.stringify(intent)).not.toMatch(/@|amount|externalRef|orderRef|provider/i);
+  });
+
+  it('the push hint is titled with the tenant, opens the event and is a valid kernel hint', async () => {
+    const [intent] = await ticketSource.resolve(refusingTx, ticketPayload, meta);
+    const push = intent?.push;
+    expect(push).toMatchObject({
+      title: 'tenant',
+      body: 'Presença confirmada em Encontro de março',
+      url: `/eventos/${E}`,
+      ttlSeconds: 86_400,
+      urgency: 'normal',
+      renotify: false,
+    });
+    expect(push?.tag).toMatch(PUSH_TAG);
+    expect(push?.topic).toMatch(PUSH_TOPIC);
+    expect(push?.url).toMatch(PUSH_PATH);
+  });
+
+  it('cuts the push body of a long title at 100 graphemes with an ellipsis, the row keeps the whole title', async () => {
+    const eventTitle = Array.from({ length: 30 }, (_, i) => `evento${i}`).join(' ');
+    const [intent] = await ticketSource.resolve(refusingTx, { ...ticketPayload, eventTitle }, meta);
+    const body = intent?.push?.body ?? '';
+    expect(
+      Array.from(new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(body)).length,
+    ).toBeLessThanOrEqual(100);
+    expect(body.endsWith('…')).toBe(true);
+    expect(intent?.facts.eventTitle).toBe(eventTitle);
+  });
+
+  it('a second ticket for the same event after a refund is a new notice: the key follows the sink instant', async () => {
+    const [first] = await ticketSource.resolve(refusingTx, ticketPayload, meta);
+    const [again] = await ticketSource.resolve(refusingTx, ticketPayload, {
+      sinkAt: '2026-10-22T09:00:00.000000Z',
+    });
+    const [retried] = await ticketSource.resolve(refusingTx, ticketPayload, meta);
+    expect(again?.dedupeKey).not.toBe(first?.dedupeKey);
+    expect(retried?.dedupeKey).toBe(first?.dedupeKey);
   });
 });

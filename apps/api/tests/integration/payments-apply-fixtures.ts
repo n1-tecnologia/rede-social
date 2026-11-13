@@ -171,3 +171,115 @@ export async function notificationCount(userId: string): Promise<number> {
     select count(*)::int as n from public.notifications where user_id = ${userId}::uuid`;
   return row?.n ?? -1;
 }
+
+/* ── Phase 10.1-05: the paid event's helpers (TICK-03..TICK-12). Nothing here is application code. ── */
+
+export type TicketEventOptions = {
+  title: string;
+  /** Minutes from now; negative for a start already in the past. */
+  startsInMinutes?: number;
+  endsInMinutes?: number;
+  status?: 'active' | 'cancelled';
+  capacity?: number | null;
+  deleted?: boolean;
+};
+
+/** An event of `tenantId`, created by that tenant's first admin (the title prefix sweeps it afterwards). */
+export async function ticketEvent(tenantId: string, options: TicketEventOptions): Promise<string> {
+  const [creator] = await adminSql<{ id: string }[]>`
+    select user_id::text as id from public.memberships
+     where tenant_id = ${tenantId}::uuid and role = 'admin_tenant' limit 1`;
+  if (!creator) throw new Error('the tenant has no admin to create the event');
+  const status = options.status ?? 'active';
+  const [row] = await adminSql<{ id: string }[]>`
+    with e as (
+      insert into public.events (tenant_id, created_by_user_id, title, format, starts_at, ends_at,
+                                 status, cancelled_at, capacity, deleted_at)
+      values (${tenantId}::uuid, ${creator.id}::uuid, ${options.title}, 'online',
+              now() + make_interval(mins => ${options.startsInMinutes ?? 60}),
+              now() + make_interval(mins => ${options.endsInMinutes ?? 180}),
+              ${status}, ${status === 'cancelled' ? adminSql`now()` : null},
+              ${options.capacity ?? null}::int, ${options.deleted ? adminSql`now()` : null})
+      returning id, tenant_id, format
+    ), s as (
+      insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code, meeting_url)
+      select id, tenant_id, format, 'K7QM', 'https://example.test/sala' from e
+    )
+    select id::text as id from e`;
+  if (!row) throw new Error(`could not insert the event ${options.title}`);
+  return row.id;
+}
+
+/**
+ * A mapping of kind `event` for `eventId` (provider `fake`, a unique gateway product id), written the way
+ * the mapping service does: the central product route first, then the tenant row. Tear down with
+ * `removePaymentMappings`.
+ */
+export async function ticketMapping(
+  tenantId: string,
+  eventId: string,
+  options: { provider?: string; externalProductId?: string } = {},
+): Promise<{ id: string; externalProductId: string }> {
+  const externalProductId = options.externalProductId ?? `tk-${crypto.randomUUID()}`;
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id)
+    values (${tenantId}::uuid, ${options.provider ?? 'fake'}, 'event', ${externalProductId},
+            ${eventId}::uuid)
+    returning id::text as id`;
+  if (!row) throw new Error('could not seed the event mapping');
+  await adminSql`
+    insert into platform.payment_product_routes (provider, external_product_id, tenant_id)
+    select provider, external_product_id, tenant_id from public.payment_products
+     where id = ${row.id}::uuid
+    on conflict do nothing`;
+  return { id: row.id, externalProductId };
+}
+
+/** A neutral `fake` delivery for an event product: a one-off sale (no subscription), BRL. */
+export const ticketDelivery = (
+  type: string,
+  fields: { ref: string; productId: string; email: string } & Record<string, unknown>,
+) => {
+  const { ref, productId, email, ...rest } = fields;
+  return {
+    type,
+    externalRef: ref,
+    productId,
+    email,
+    amountCents: 8_000,
+    currency: 'BRL',
+    recurring: false,
+    ...rest,
+  };
+};
+
+export type AttendanceRow = {
+  user_id: string;
+  status: string;
+  origin: string;
+  order_provider: string | null;
+  order_ref: string | null;
+  checked_in_at: Date | null;
+  refunded_at: Date | null;
+};
+
+/** Every attendance row of one event, oldest first. */
+export const attendancesOf = (eventId: string) =>
+  adminSql<AttendanceRow[]>`
+    select user_id::text as user_id, status, origin, order_provider, order_ref, checked_in_at,
+           refunded_at
+      from public.event_attendances
+     where event_id = ${eventId}::uuid
+     order by created_at, id`;
+
+/** Removes the events whose title starts with `prefix` (their attendances and mapping go first). */
+export async function removeTicketEvents(prefix: string): Promise<void> {
+  const like = `${prefix}%`;
+  await adminSql`
+    delete from public.payment_products
+     where event_id in (select id from public.events where title like ${like})`;
+  await adminSql`
+    delete from public.event_attendances
+     where event_id in (select id from public.events where title like ${like})`;
+  await adminSql`delete from public.events where title like ${like}`;
+}
