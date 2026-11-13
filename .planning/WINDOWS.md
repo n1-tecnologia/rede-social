@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 84
+open_count: 86
 waived_count: 0
 fixed_count: 62
-total_count: 146
-last_updated: 2026-11-13T12:28:00.371Z
+total_count: 148
+last_updated: 2026-11-13T12:59:08.764Z
 ---
 
 # Broken Windows Ledger
@@ -161,6 +161,8 @@ last_updated: 2026-11-13T12:28:00.371Z
 | 144 | 12 | stub | apps/web/app/(app)/configuracoes/formulario-de-perfil/QuestionList.tsx |  | Question row button has no click handler until plan 12-16 supplies onOpen (the editor sheet); the builder empty state has no Adicionar pergunta action until plan 12-16 | fixed |  | 2026-10-30T02:28:58.647Z | 2026-10-30T02:50:06.525Z |
 | 145 | 13 | stub | packages/core/server/apps/tenant-app.ts |  | App tab listing.description and listing.ageRating read null until plan 13-31 supplies the listing builders | fixed |  | 2026-11-05T14:46:46.214Z | 2026-11-05T17:21:47.502Z |
 | 146 | 10.1 | unrun-verify | apps/web/app/(app)/eventos/[eventId]/participantes/ParticipantsList.tsx |  | Participantes against a live API is unproven: a manual release from Pagamentos shows the row as Pago, a courtesy release then removal round-trips, and the sheet search/holders reads on a real tenant; unit tests cover the draw only (plan 10.1-14) | open |  | 2026-11-13T12:28:00.371Z |  |
+| 147 | 10.1 | unrun-verify | .planning/phases/10.1-rede-social-ingresso-pago-do-evento-pela-kiwify/10.1-MANUAL-PROOFS.md |  | TICK-24: the first real sale of a real gateway product and its real refund are unproven (ledger row P1); every sale so far used the fake adapter | open |  | 2026-11-13T12:59:08.684Z |  |
+| 148 | 10.1 | unrun-verify | .planning/phases/10.1-rede-social-ingresso-pago-do-evento-pela-kiwify/10.1-MANUAL-PROOFS.md |  | UI-04: the paid-event screens (form section, buy zone, confirmed block, doors, Participantes, Pagamentos rows) were not walked on a real phone at 320 and 390 px in both themes under a tenant brand (ledger row P2) | open |  | 2026-11-13T12:59:08.764Z |  |
 
 ````json
 [
@@ -1914,6 +1916,30 @@ last_updated: 2026-11-13T12:28:00.371Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-11-13T12:28:00.371Z",
+    "resolved_at": null
+  },
+  {
+    "id": 147,
+    "kind": "unrun-verify",
+    "phase": "10.1",
+    "file": ".planning/phases/10.1-rede-social-ingresso-pago-do-evento-pela-kiwify/10.1-MANUAL-PROOFS.md",
+    "line": null,
+    "description": "TICK-24: the first real sale of a real gateway product and its real refund are unproven (ledger row P1); every sale so far used the fake adapter",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-13T12:59:08.684Z",
+    "resolved_at": null
+  },
+  {
+    "id": 148,
+    "kind": "unrun-verify",
+    "phase": "10.1",
+    "file": ".planning/phases/10.1-rede-social-ingresso-pago-do-evento-pela-kiwify/10.1-MANUAL-PROOFS.md",
+    "line": null,
+    "description": "UI-04: the paid-event screens (form section, buy zone, confirmed block, doors, Participantes, Pagamentos rows) were not walked on a real phone at 320 and 390 px in both themes under a tenant brand (ledger row P2)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-13T12:59:08.764Z",
     "resolved_at": null
   }
 ]

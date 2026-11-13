@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: "10.1"
 current_phase_name: Rede Social - Ingresso pago do evento pela Kiwify
 current_plan: 15
-status: executing
-stopped_at: Completed 10.1-14-PLAN.md (14/15 plans done; next 10.1-15)
-last_updated: "2026-11-13T12:28:54.530Z"
+status: ready_for_verification
+stopped_at: Completed 10.1-15-PLAN.md (15/15 plans done; phase ready for verification)
+last_updated: "2026-11-13T13:00:26.784Z"
 last_activity: 2026-11-13
-last_activity_desc: "10.1-14 complete: Participantes origin marks, Remover cortesia, Liberar presença (sheet + Não vão row) and Acima do limite"
-state_head: a34d5d1be8cea0cfab3c20f7f5cedde59d5678f2
+last_activity_desc: "10.1-15 complete: the paid-event end-to-end spec, the neutrality extension, the Phase 10.1 release notes, the owner ledger and the recorded exit gate; 15/15 plans done, phase ready for verification"
+state_head: fe3c08c1f1dfeb3de9916e7960b4c78d49ff2032
 progress:
   total_phases: 32
   completed_phases: 0
   total_plans: 431
-  completed_plans: 402
+  completed_plans: 403
   percent: 0
 ---
 
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — EXECUTING
+Phase: 10.1 (Rede Social - Ingresso pago do evento pela Kiwify) — READY FOR VERIFICATION
 Current Plan: 15
 Total Plans in Phase: 15
-Plan: 14 of 15 complete (10.1-14 done; next 10.1-15)
-Status: Ready to execute
-Last activity: 2026-11-13 — 10.1-14 complete: Participantes origin marks, Remover cortesia, Liberar presença (sheet and Não vão row) and Acima do limite
+Plan: 15 of 15 complete (10.1-15 done; phase ready for code review, verification and close)
+Status: Ready for verification
+Last activity: 2026-11-13 — 10.1-15 complete: the paid-event end-to-end spec, the neutrality extension, the Phase 10.1 release notes, the owner ledger (P1 to P19) and the recorded exit gate
 
 Progress: [███████████████████░] 160/162 plans ([░░░░░░░░░░] 0%)
 
@@ -371,6 +371,7 @@ Progress: [███████████████████░] 160/162
 | Phase 10.1 P12 | 22min | 3 tasks | 21 files |
 | Phase 10.1 P13 | 12min | 3 tasks | 25 files |
 | Phase 10.1 P14 | 14 min | 3 tasks | 15 files |
+| Phase 10.1 P15 | 34min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -1149,6 +1150,8 @@ Recent decisions affecting current work:
 - [Phase 10.1]: 10.1-08: the confirmed block is not hidden after the event ends (literal UI-D-749); tenantName and gatewayName are optional context the pages of plans 12 and 13 must pass; aviso page excludes ingresso until plan 12 (A-10.1-PLUMB) — Keeps today's behaviour for ?motivo=ingresso and leaves the screen choices to the plans that draw them.
 - [Phase 10.1]: 10.1-11: a save answer carrying the recurring hint keeps the event form open so the subscription warning can be read; the price is shown disabled in the linked-but-unavailable state as sketch 021 draws it — A-UI-10 makes the hint exist only in the save answer; sketch 021 form-ingresso-vinculado-indisponivel shows every stored value disabled
 - [Phase 10.1]: 10.1-12: the paid zone's polite live region is sticky; it holds the shipped zone after the webhook swap so the confirmation is announced; a cancelled or ended paid event draws none — A region that unmounts with the content it should announce is silent; an empty wrapper would add a gap to the card body
+- [Phase 10.1]: 10.1-15: the Phase 10.1 release order is migrations, web, then API and worker together (the web reads every new key as optional; the API needs the migrated columns) — Written in docs/DEPLOY.md under the Order subsection with its reason; it is the reverse of the 08.x to 12.x releases
+- [Phase 10.1]: 10.1-15: the paid-event spec drains the notification fan-out backlog and waits for the page's Realtime join before sending the tracer delivery — Cold runs lost the swap to 58 integration-suite fan-out jobs and to a join that had not happened; the product was not at fault
 
 ### Pending Todos
 
@@ -1280,6 +1283,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-13T12:28:54.222Z
-Stopped at: Completed 10.1-14-PLAN.md (14/15 plans done; next 10.1-15)
+Last session: 2026-11-13T13:00:26.476Z
+Stopped at: Completed 10.1-15-PLAN.md (15/15 plans done; phase ready for verification)
 Resume file: None
