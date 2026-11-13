@@ -15,6 +15,9 @@ import type {
   Checkin,
   CheckinCode,
   CheckinResult,
+  CourtesyBody,
+  CourtesyHolders,
+  CourtesyResult,
   EnterOutcome,
   EnterResult,
   EventDetail,
@@ -2023,4 +2026,146 @@ export async function regenerateCheckinCode(
 
   if (!row) throw new ApiError(404, 'NOT_FOUND');
   return { checkinCode: row.checkin_code };
+}
+
+/* ── Phase 10.1-07: the admin's courtesy (D-743, A-UI-6) ───────────────────────────────────────────── */
+
+/**
+ * `POST /v1/events/{eventId}/courtesy` (D-743). ONE definer call, `app.event_courtesy_grant`, decides
+ * everything inside Postgres under the per-event advisory lock the gateway grant takes too (so a courtesy
+ * racing a sale of the same member ends with ONE row, whichever side wins): the membership is resolved in
+ * THIS tenant only (live, not blocked, not deleted), so another tenant's membership id is `not_found`
+ * (T-10.1-13). The definer re-checks the `admin_tenant` claim itself (T-10.1-12). The outcome is RETURNED
+ * from the transaction and mapped here: `granted` / `already_in` -> 200; `not_found` -> ONE bare 404;
+ * `forbidden` -> 403; `event_cancelled`, `event_ended` and `not_paid` -> 409 under `details.event`
+ * (`cancelled`, `event_ended`, `event_not_paid`).
+ *
+ * The `attendanceId` arm resolves the membership from the attendance row INSIDE the same transaction, with
+ * tenant, event and row all pinned: the `Não vou` row carries no user id (D-47), an unknown or foreign row
+ * is the bare 404, and the body never names a user.
+ *
+ * Works with the `payments` module OFF (D-743: the mapping is the paid fact, not the flag, D-746). Over the
+ * capacity and after the start on purpose, exactly like a ticket (A-UI-5, D-750).
+ */
+export async function grantCourtesy(
+  ctx: RequestContext,
+  eventId: string,
+  body: CourtesyBody,
+): Promise<CourtesyResult> {
+  const outcome = await withTenantTx(ctx, async (tx) => {
+    let membershipId: string | null = 'membershipId' in body ? body.membershipId : null;
+    if ('attendanceId' in body) {
+      const owner = await tx.execute<{ membership_id: string }>(sql`
+        select ms.id as membership_id
+          from event_attendances a
+          join memberships ms
+            on ms.tenant_id = a.tenant_id
+           and ms.user_id = a.user_id
+           and ms.deleted_at is null
+         where a.tenant_id = ${ctx.tenantId}::uuid
+           and a.event_id = ${eventId}::uuid
+           and a.id = ${body.attendanceId}::uuid
+         limit 1`);
+      membershipId = owner[0]?.membership_id ?? null;
+    }
+    if (membershipId === null) return 'not_found' as const;
+    const rows = await tx.execute<{ outcome: string }>(sql`
+      select r.outcome from app.event_courtesy_grant(${eventId}::uuid, ${membershipId}::uuid) r`);
+    return rows[0]?.outcome ?? 'not_found';
+  });
+
+  log.info(
+    {
+      event: 'events.courtesy.grant',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      outcome,
+    },
+    'event courtesy grant',
+  );
+
+  if (outcome === 'granted' || outcome === 'already_in') return { outcome };
+  if (outcome === 'forbidden') throw new ApiError(403, 'FORBIDDEN');
+  if (outcome === 'event_cancelled') throw new ApiError(409, 'CONFLICT', { event: 'cancelled' });
+  if (outcome === 'event_ended') throw new ApiError(409, 'CONFLICT', { event: 'event_ended' });
+  if (outcome === 'not_paid') throw new ApiError(409, 'CONFLICT', { event: 'event_not_paid' });
+  throw new ApiError(404, 'NOT_FOUND');
+}
+
+/**
+ * `DELETE /v1/events/{eventId}/courtesy/{attendanceId}` (D-743). ONE definer call,
+ * `app.event_courtesy_remove`: a `going` row of origin `courtesy` that has NOT checked in is deleted. A
+ * checked-in row is `409 attendance_locked` (a person who was already there stays), any other origin
+ * (a ticket, a plain Vou) or status is `409 not_courtesy` (a paid presence is never removed by hand). An
+ * unknown row, another event's row or another tenant's row is the bare 404; a non-admin claim is 403.
+ */
+export async function removeCourtesy(
+  ctx: RequestContext,
+  eventId: string,
+  attendanceId: string,
+): Promise<void> {
+  const outcome = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ outcome: string }>(sql`
+      select r.outcome from app.event_courtesy_remove(${eventId}::uuid, ${attendanceId}::uuid) r`);
+    return rows[0]?.outcome ?? 'not_found';
+  });
+
+  log.info(
+    {
+      event: 'events.courtesy.remove',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      outcome,
+    },
+    'event courtesy remove',
+  );
+
+  if (outcome === 'removed') return;
+  if (outcome === 'forbidden') throw new ApiError(403, 'FORBIDDEN');
+  if (outcome === 'locked') throw new ApiError(409, 'CONFLICT', { event: 'attendance_locked' });
+  if (outcome === 'not_courtesy') throw new ApiError(409, 'CONFLICT', { event: 'not_courtesy' });
+  throw new ApiError(404, 'NOT_FOUND');
+}
+
+/**
+ * `GET /v1/events/{eventId}/courtesy/holders?membershipIds=` (A-UI-6): which of the at most 50 given
+ * memberships already hold a `going`, `checked_in` or `walk_in` presence in the event, from
+ * `app.event_ticket_holders` (claim-checked inside; ids of another tenant match nothing). The event is
+ * confirmed in-lane FIRST, so an unknown or foreign event is the bare 404 and never an empty list.
+ */
+export async function courtesyHolders(
+  ctx: RequestContext,
+  eventId: string,
+  membershipIds: readonly string[],
+): Promise<CourtesyHolders> {
+  const holders = await withTenantTx(ctx, async (tx) => {
+    await assertEventInLane(tx, ctx, eventId);
+    if (membershipIds.length === 0) return [];
+    const ids = sql.join(
+      membershipIds.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    );
+    const rows = await tx.execute<{ holder: string }>(sql`
+      select h as holder from app.event_ticket_holders(${eventId}::uuid, array[${ids}]::uuid[]) h`);
+    return rows.map((row) => row.holder);
+  });
+
+  log.info(
+    {
+      event: 'events.courtesy.holders',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      asked: membershipIds.length,
+      returned: holders.length,
+    },
+    'event courtesy holders',
+  );
+
+  return { holders };
 }

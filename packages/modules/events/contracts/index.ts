@@ -796,6 +796,50 @@ export const attendanceSummarySchema = z
   .strict();
 export type AttendanceSummary = z.infer<typeof attendanceSummarySchema>;
 
+/* ── Phase 10.1-07: the admin's courtesy (D-743, A-UI-6) ────────────────────────────────────────── */
+
+/** The most membership ids one holders read takes (T-10.1-16): the definer refuses more, the route says 400 first. */
+export const EVENT_COURTESY_MAX_HOLDER_IDS = 50;
+
+/**
+ * `POST /v1/events/{eventId}/courtesy` (D-743): EITHER `{ membershipId }` (the release sheet's member
+ * search) OR `{ attendanceId }` (the `Não vou` row carries no user id, D-47). `.strict()` on both arms, so a
+ * forged `userId`, `origin` or `tenantId` fails loudly, and a body naming both is refused as well.
+ */
+export const courtesyBodySchema = z.union([
+  z.object({ membershipId: z.uuid() }).strict(),
+  z.object({ attendanceId: z.uuid() }).strict(),
+]);
+export type CourtesyBody = z.infer<typeof courtesyBodySchema>;
+
+/** `granted` (a new presence) or `already_in` (the member already held one of any origin: never rewritten). */
+export const COURTESY_OUTCOMES = ['granted', 'already_in'] as const;
+export const courtesyResultSchema = z.object({ outcome: z.enum(COURTESY_OUTCOMES) }).strict();
+export type CourtesyResult = z.infer<typeof courtesyResultSchema>;
+
+/**
+ * `GET /v1/events/{eventId}/courtesy/holders?membershipIds=a,b,c` (A-UI-6): at most
+ * `EVENT_COURTESY_MAX_HOLDER_IDS` comma-separated membership uuids, so the release sheet can draw
+ * `Já inscrito` before the click. A 51st id, or a value that is not a uuid, is a 400; none is an empty read.
+ */
+export const courtesyHoldersQuerySchema = z
+  .object({
+    membershipIds: z
+      .string()
+      .max(EVENT_COURTESY_MAX_HOLDER_IDS * 40)
+      .optional()
+      .transform((value) =>
+        value === undefined || value.trim() === '' ? [] : value.split(',').map((id) => id.trim()),
+      )
+      .pipe(z.array(z.uuid()).max(EVENT_COURTESY_MAX_HOLDER_IDS)),
+  })
+  .strict();
+export type CourtesyHoldersQuery = z.infer<typeof courtesyHoldersQuerySchema>;
+
+/** The members (by membership id) of the ones asked about who already hold a presence in the event. */
+export const courtesyHoldersSchema = z.object({ holders: z.array(z.uuid()) }).strict();
+export type CourtesyHolders = z.infer<typeof courtesyHoldersSchema>;
+
 /** `POST /v1/events/{eventId}/checkin-code` (D-217): the fresh code, and nothing else. */
 export const checkinCodeSchema = z.object({ checkinCode: z.string() }).strict();
 export type CheckinCode = z.infer<typeof checkinCodeSchema>;

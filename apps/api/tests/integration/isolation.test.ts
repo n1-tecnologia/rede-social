@@ -6212,6 +6212,127 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 10.1 sweep: event courtesy — a foreign event, member or attendance id is the bare 404 with an empty body on the release, the removal and the holders read, nothing changes in rede-demo, the wrong host is TENANT_HOST_MISMATCH on all three, and the rede-lab admin’s own release, read and removal answer beside each refusal (10.1-07, TICK-10, TICK-21, T-10.1-12, T-10.1-13)', async () => {
+    // | Route                                          | Negative asserted here                                         |
+    // |------------------------------------------------|----------------------------------------------------------------|
+    // | POST /v1/events/:eventId/courtesy              | a rede-demo event id; a rede-demo membership id on a lab event; |
+    // |                                                | a rede-demo attendance id on a lab event: bare 404, no row      |
+    // | DELETE /v1/events/:eventId/courtesy/:attendance| a rede-demo row through the lab event id and through its own     |
+    // |                                                | event id: bare 404, the rede-demo row is byte-identical         |
+    // | GET /v1/events/:eventId/courtesy/holders       | a rede-demo event id: bare 404 (never an empty list)            |
+    // | the three routes                               | lab admin on the demo host: 403 TENANT_HOST_MISMATCH            |
+    // | the three routes                               | the lab admin's own event answers 200 / 204 beside each refusal |
+    //
+    // The events carry the `iso101c` prefix and are swept by it; the mappings go with `removePaymentMappings`.
+    const PREFIX101C = `iso101c-${RUN}`;
+    const sweepFixtures = async () => {
+      await removeTicketEvents(PREFIX101C);
+      for (const tenantId of [tenantIds.demo, tenantIds.lab]) await removePaymentMappings(tenantId);
+    };
+    const membershipOf = async (email: string, tenantId: string) => {
+      const [row] = await adminSql<{ id: string; user_id: string }[]>`
+        select m.id::text as id, m.user_id::text as user_id
+          from public.memberships m join public.users u on u.id = m.user_id
+         where u.email = ${email} and m.tenant_id = ${tenantId}::uuid`;
+      if (!row) throw new Error(`no membership for ${email}`);
+      return row;
+    };
+    await sweepFixtures();
+    try {
+      const demoMember = await membershipOf('member@rede-demo.local', tenantIds.demo);
+      const labMember = await membershipOf('member@rede-lab.local', tenantIds.lab);
+      const demoEvent = await ticketEvent(tenantIds.demo, { title: `${PREFIX101C}-demo` });
+      const labEvent = await ticketEvent(tenantIds.lab, { title: `${PREFIX101C}-lab` });
+      await ticketMapping(tenantIds.demo, demoEvent);
+      await ticketMapping(tenantIds.lab, labEvent);
+      const [demoRowId] = await adminSql<{ id: string }[]>`
+        insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin)
+        values (${tenantIds.demo}::uuid, ${demoEvent}::uuid, ${demoMember.user_id}::uuid, 'going',
+                now(), 'courtesy')
+        returning id::text as id`;
+      const demoAttendance = demoRowId?.id ?? '';
+      const demoRows = () =>
+        adminSql`
+          select id, tenant_id, event_id, user_id, status, origin, order_ref, responded_at, updated_at
+            from public.event_attendances where event_id = ${demoEvent}::uuid`;
+      const demoBefore = JSON.stringify(await demoRows());
+      const labRows = () =>
+        adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.event_attendances where event_id = ${labEvent}::uuid`;
+
+      const grant = (eventId: string, body: unknown, host = HOSTS.lab) =>
+        send('POST', `/v1/events/${eventId}/courtesy`, tokens.labAdmin, host, body);
+      const holders = (eventId: string, ids: string[], host = HOSTS.lab) =>
+        send(
+          'GET',
+          `/v1/events/${eventId}/courtesy/holders?membershipIds=${ids.join(',')}`,
+          tokens.labAdmin,
+          host,
+        );
+      const remove = (eventId: string, attendanceId: string, host = HOSTS.lab) =>
+        send('DELETE', `/v1/events/${eventId}/courtesy/${attendanceId}`, tokens.labAdmin, host);
+
+      // Positive controls first: the lab admin's own event answers on the read and the release.
+      const ownHolders = await holders(labEvent, [labMember.id]);
+      expect(ownHolders.status).toBe(200);
+      expect(await ownHolders.json()).toEqual({ holders: [] });
+
+      // A foreign event id is the bare 404 on all three, with an empty body detail.
+      for (const [label, res] of [
+        ['grant', await grant(demoEvent, { membershipId: labMember.id })],
+        ['holders', await holders(demoEvent, [labMember.id])],
+        ['remove', await remove(demoEvent, demoAttendance)],
+      ] as const) {
+        const raw = await expectBareNotFound(res, label);
+        expect(raw, label).not.toContain(demoMember.id);
+        expect(raw, label).not.toContain(demoAttendance);
+      }
+      // A foreign membership id and a foreign attendance id on the lab admin's OWN event.
+      await expectBareNotFound(
+        await grant(labEvent, { membershipId: demoMember.id }),
+        'foreign member',
+      );
+      await expectBareNotFound(
+        await grant(labEvent, { attendanceId: demoAttendance }),
+        'foreign attendance (grant)',
+      );
+      await expectBareNotFound(
+        await remove(labEvent, demoAttendance),
+        'foreign attendance through the lab event',
+      );
+      // The rede-demo rows are byte-identical and the lab event holds no row.
+      expect(JSON.stringify(await demoRows())).toBe(demoBefore);
+      expect((await labRows())[0]?.n).toBe(0);
+
+      // The wrong host is the host mismatch on all three (a lab admin on the demo host).
+      for (const [label, res] of [
+        ['grant', await grant(demoEvent, { membershipId: demoMember.id }, HOSTS.demo)],
+        ['holders', await holders(demoEvent, [demoMember.id], HOSTS.demo)],
+        ['remove', await remove(demoEvent, demoAttendance, HOSTS.demo)],
+      ] as const) {
+        expect(res.status, label).toBe(403);
+        expect(((await res.json()) as Envelope).error.code, label).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(JSON.stringify(await demoRows())).toBe(demoBefore);
+
+      // Beside each refusal, the lab admin's own event releases, reads back and removes a courtesy.
+      const released = await grant(labEvent, { membershipId: labMember.id });
+      expect(released.status).toBe(200);
+      expect(await released.json()).toEqual({ outcome: 'granted' });
+      const read = await holders(labEvent, [labMember.id, demoMember.id]);
+      expect(await read.json()).toEqual({ holders: [labMember.id] });
+      const [labAttendance] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.event_attendances
+         where event_id = ${labEvent}::uuid and user_id = ${labMember.user_id}::uuid`;
+      const removed = await remove(labEvent, labAttendance?.id ?? '');
+      expect(removed.status).toBe(204);
+      expect((await labRows())[0]?.n).toBe(0);
+      expect(JSON.stringify(await demoRows())).toBe(demoBefore);
+    } finally {
+      await sweepFixtures();
+    }
+  });
+
   it('phase 12 sweep: profile form member — a rede-lab member on the rede-demo host is refused with TENANT_HOST_MISMATCH on the read, the save and the dismissal, a rede-demo question id in her save is unknown_question and writes nothing in either tenant, and her read names no rede-demo question, each beside her own rede-lab answer (12-06, PFORM-07, PFORM-08, T-12-14)', async () => {
     // | Route                                   | Negative asserted here                                                  |
     // |-----------------------------------------|-------------------------------------------------------------------------|

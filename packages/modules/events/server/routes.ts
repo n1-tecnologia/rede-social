@@ -11,6 +11,10 @@ import {
   checkinCodeSchema,
   checkinResultSchema,
   checkinSchema,
+  courtesyBodySchema,
+  courtesyHoldersQuerySchema,
+  courtesyHoldersSchema,
+  courtesyResultSchema,
   EVENT_ISSUE_SET,
   enterResultSchema,
   eventDetailSchema,
@@ -31,6 +35,7 @@ import {
 import { addEventPhoto, listEventPhotos, removeEventPhoto } from './photos';
 import {
   checkInEvent,
+  courtesyHolders,
   createEvent,
   deleteEvent,
   enterEvent,
@@ -38,9 +43,11 @@ import {
   getEvent,
   getEventForEdit,
   getNextEvent,
+  grantCourtesy,
   listAttendance,
   listEvents,
   regenerateCheckinCode,
+  removeCourtesy,
   rsvpEvent,
   setEventStatus,
   updateEvent,
@@ -524,6 +531,89 @@ const deleteEventRoute = createRoute({
   },
 });
 
+/**
+ * The admin's courtesy (Phase 10.1-07, D-743): a free pass to a PAID event. The literal manage guard on all
+ * three, and the `admin_tenant` claim is checked again INSIDE each definer (T-10.1-12). They work with the
+ * `payments` module off: the mapping is the paid fact, not the flag (D-746).
+ */
+const courtesyParamSchema = z.object({ eventId: z.uuid(), attendanceId: z.uuid() });
+
+const grantCourtesyRoute = createRoute({
+  method: 'post',
+  path: '/{eventId}/courtesy',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: {
+    params: eventParamSchema,
+    body: { content: { 'application/json': { schema: courtesyBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        "A courtesy for one member of the caller's tenant, named by `membershipId` OR by the `attendanceId` of a row of this event (the `Não vou` row carries no user id). `granted`: the member now holds a `going` presence of origin `courtesy` (over the limit and after the start on purpose, exactly like a ticket). `already_in`: the member already held a `going`, `checked_in` or `walk_in` presence of ANY origin, which is never rewritten (a ticket stays a ticket). Racing a sale of the same member ends with one row, whichever side wins.",
+      content: { 'application/json': { schema: courtesyResultSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: a malformed id, a body that names neither or both ids, or an unknown key.',
+    },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The event, the member or the attendance row is unknown, another tenant’s, removed, or the member is not live. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.event`: `cancelled` (the event is cancelled), `event_ended` (the event has ended) or `event_not_paid` (a courtesy is for a paid event only).',
+    },
+  },
+});
+
+const removeCourtesyRoute = createRoute({
+  method: 'delete',
+  path: '/{eventId}/courtesy/{attendanceId}',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: { params: courtesyParamSchema },
+  responses: {
+    204: {
+      description:
+        'The courtesy presence is deleted: the member is back to no answer and may use a purchase link or, if the event is unmapped again, the instant Vou.',
+    },
+    400: { description: '`VALIDATION_FAILED`: an id is not a uuid.' },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The row is unknown, another event’s, another tenant’s or already removed. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.event`: `attendance_locked` (the person already checked in) or `not_courtesy` (the row is not a going courtesy: a paid presence is never removed by hand).',
+    },
+  },
+});
+
+const courtesyHoldersRoute = createRoute({
+  method: 'get',
+  path: '/{eventId}/courtesy/holders',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: { params: eventParamSchema, query: courtesyHoldersQuerySchema },
+  responses: {
+    200: {
+      description:
+        'Which of the at most 50 comma-separated `membershipIds` already hold a `going`, `checked_in` or `walk_in` presence in the event, as membership ids. The release sheet draws `Já inscrito` from it before the click. Ids of another tenant match nothing; no membership ids are returned that were not asked about.',
+      content: { 'application/json': { schema: courtesyHoldersSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: the event id or a membership id is not a uuid, or more than 50 ids were sent.',
+    },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
 /** A 204 that no cache may keep: the gallery just changed. */
 const noContent = () =>
   new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
@@ -597,5 +687,26 @@ export const eventsRoutes = events
   })
   .openapi(deleteEventRoute, async (c) => {
     await deleteEvent(c.get('ctx'), c.req.valid('param').eventId);
+    return noContent();
+  })
+  .openapi(grantCourtesyRoute, async (c) =>
+    c.json(
+      await grantCourtesy(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(courtesyHoldersRoute, async (c) =>
+    c.json(
+      await courtesyHolders(
+        c.get('ctx'),
+        c.req.valid('param').eventId,
+        c.req.valid('query').membershipIds,
+      ),
+      200,
+    ),
+  )
+  .openapi(removeCourtesyRoute, async (c) => {
+    const { eventId, attendanceId } = c.req.valid('param');
+    await removeCourtesy(c.get('ctx'), eventId, attendanceId);
     return noContent();
   });
