@@ -1,0 +1,4 @@
+ALTER TABLE "event_attendances" ADD COLUMN "ticket_confirmed_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "events" ADD COLUMN "registration_opens_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "event_attendances" ADD CONSTRAINT "event_attendances_ticket_confirmed_chk" CHECK ("event_attendances"."ticket_confirmed_at" is null or "event_attendances"."origin" = 'ticket');--> statement-breakpoint
+ALTER TABLE "events" ADD CONSTRAINT "events_registration_opens_chk" CHECK ("events"."registration_opens_at" is null or "events"."registration_opens_at" < "events"."starts_at");

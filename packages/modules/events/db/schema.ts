@@ -110,6 +110,13 @@ export const events = pgTable(
      */
     ticketPriceCents: integer('ticket_price_cents'),
     /**
+     * Phase 10.2 (D-781, D-780): the instant the sale of a PAID event opens. NULLABLE: no date means the
+     * sale is open at once, exactly as before (nothing is backfilled). Meaningful only for a paid event
+     * (the read models hide it otherwise); `events_registration_opens_chk` keeps it strictly before
+     * `starts_at`, and a date already in the past only means "open". Never an ordering or lookup key.
+     */
+    registrationOpensAt: timestamp('registration_opens_at', { withTimezone: true }),
+    /**
      * The event's programme ("Cronograma", quick 261007-n1g): up to `EVENT_SCHEDULE_MAX_ITEMS` moments of
      * `{ day, time, title }`, written as a WHOLE with the event (the PUT is a whole-event replacement,
      * D-214) and read WITH it, never queried, filtered or joined per item. That is why it is a column
@@ -168,6 +175,13 @@ export const events = pgTable(
     check(
       'events_ticket_price_chk',
       sql`${t.ticketPriceCents} is null or ${t.ticketPriceCents} between 1 and 10000000`,
+    ),
+    // D-781 / D-780: an opening is optional (null = open at once) and, when present, sorts STRICTLY before
+    // the start. The service maps a violation of THIS name to `opening_after_start` (plan 06). A date in
+    // the past is accepted: it only means "open".
+    check(
+      'events_registration_opens_chk',
+      sql`${t.registrationOpensAt} is null or ${t.registrationOpensAt} < ${t.startsAt}`,
     ),
     // The programme is an array of at most 200 well-formed moments (raised from 30 by Phase 09.3, D-558): day 1..31 (an integer), time HH:MM on
     // the 24-hour clock, a non-blank title of 1..80 characters. Extra keys inside an item are tolerated
@@ -304,6 +318,13 @@ export const eventAttendances = pgTable(
     orderRef: text('order_ref'),
     /** A refund or chargeback of the ticket (D-748). Only ever set on a ticket row. */
     refundedAt: timestamp('refunded_at', { withTimezone: true }),
+    /**
+     * Phase 10.2 (D-791): the instant a ticket presence was confirmed, written by the grant definer
+     * (plan 05) and compared with the event's opening to derive the "early payment" mark, never stored
+     * as a flag. NULLABLE: every earlier row reads null and the marker treats null as not early.
+     * Only a row of origin `ticket` may carry it (`event_attendances_ticket_confirmed_chk`).
+     */
+    ticketConfirmedAt: timestamp('ticket_confirmed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -360,6 +381,11 @@ export const eventAttendances = pgTable(
       sql`${t.orderProvider} is null or ${t.orderProvider} ~ '^[a-z][a-z0-9_]{1,30}$'`,
     ),
     check('event_attendances_refunded_chk', sql`${t.refundedAt} is null or ${t.origin} = 'ticket'`),
+    // Phase 10.2 (D-791): the confirmation instant belongs to a paid presence only.
+    check(
+      'event_attendances_ticket_confirmed_chk',
+      sql`${t.ticketConfirmedAt} is null or ${t.origin} = 'ticket'`,
+    ),
     // One order is one presence, per tenant: the arbiter of the apply job's upsert (plan 04).
     uniqueIndex('event_attendances_order_uq')
       .on(t.tenantId, t.orderProvider, t.orderRef)
