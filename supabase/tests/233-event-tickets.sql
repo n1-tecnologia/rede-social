@@ -27,7 +27,7 @@ begin;
 --    cancelled, ended, closed and not_open outcomes still win; a direct walk_in insert is still refused.
 --
 -- Fixture ids use the `1e310000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(106);
+select plan(161);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-tkt-a', 'Ingresso A', '1e310000-0000-4000-8000-000000000001');
@@ -496,6 +496,331 @@ select throws_ok($$ insert into public.event_attendances (tenant_id, event_id, u
 select lives_ok($$ insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via) values ('1e310000-0000-4000-8000-000000000001', '1e310000-0000-4000-8000-0000000000f4', '1e310000-0000-4000-8000-0000000000c8', 'walk_in', now(), 'code') $$,
   'control: the same walk_in in a free event is accepted');
 reset role;
+
+-- ── 4. gateway (plan 04, task 1: `*_event_gateway_grant_revoke.sql`) ───────────────────────────
+-- `app.event_gateway_grant` and `app.event_gateway_revoke`, called as the service role (no claims) with the
+-- tenant, the membership, the event and the order passed as arguments (D-509). Every business outcome is a
+-- RETURNED value. Ids are built by `tests.tk('<hex>')`: users 1xx, memberships 2xx, events 3xx, all in the
+-- `1e310000-…` family. tk('1') is tenant A and tk('2') is tenant B.
+create function tests.tk(n text) returns uuid language sql immutable as
+  $$ select ('1e310000-0000-4000-8000-' || lpad(n, 12, '0'))::uuid $$;
+
+select tests.auth_user('g' || h || '@tkt-4.local', tests.tk('1' || h))
+  from unnest(array['01','02','03','04','05','06','07','08','09','0a','0b','0c','0d','0e']) as h;
+update auth.users set email_confirmed_at = null where id = tests.tk('10b');
+insert into public.memberships (id, tenant_id, user_id, role, status, blocked_at, deleted_at) values
+  (tests.tk('201'), tests.tk('1'), tests.tk('101'), 'member', 'active', null, null),
+  (tests.tk('202'), tests.tk('1'), tests.tk('102'), 'member', 'active', null, null),
+  (tests.tk('203'), tests.tk('1'), tests.tk('103'), 'member', 'active', null, null),
+  (tests.tk('204'), tests.tk('1'), tests.tk('104'), 'member', 'active', null, null),
+  (tests.tk('205'), tests.tk('1'), tests.tk('105'), 'member', 'active', null, null),
+  (tests.tk('206'), tests.tk('1'), tests.tk('106'), 'member', 'active', null, null),
+  (tests.tk('207'), tests.tk('1'), tests.tk('107'), 'member', 'active', null, null),
+  (tests.tk('208'), tests.tk('1'), tests.tk('108'), 'member', 'active', null, null),
+  (tests.tk('209'), tests.tk('1'), tests.tk('109'), 'member', 'blocked', now(), null),
+  (tests.tk('20a'), tests.tk('1'), tests.tk('10a'), 'member', 'active', null, now()),
+  (tests.tk('20b'), tests.tk('1'), tests.tk('10b'), 'member', 'active', null, null),
+  (tests.tk('20c'), tests.tk('1'), tests.tk('10c'), 'admin_tenant', 'active', null, null),
+  (tests.tk('20d'), tests.tk('2'), tests.tk('10d'), 'member', 'active', null, null),
+  (tests.tk('20e'), tests.tk('2'), tests.tk('10e'), 'admin_tenant', 'active', null, null);
+
+-- Events of tenant A (301 live and unlimited | 302 limit 1 | 303 started, inside the check-in window | 304 ended |
+-- 305 cancelled | 306 soft-deleted | 307 free | 309 live, rows made BEFORE the link | 30b started, a walk-in
+-- made before the link | 30c and 30d live, cancelled / deleted after the sale | 30e live, a Vou and a courtesy
+-- made before the link) and of tenant B (308).
+insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at, capacity, status, cancelled_at, deleted_at) values
+  (tests.tk('301'), tests.tk('1'), tests.tk('10c'), 'Evento 301', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, 'active', null, null),
+  (tests.tk('302'), tests.tk('1'), tests.tk('10c'), 'Evento 302', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', 1, 'active', null, null),
+  (tests.tk('303'), tests.tk('1'), tests.tk('10c'), 'Evento 303', 'in_person', 'Sede', 'Rua 1', now() + interval '-1 hour', now() + interval '2 hours', null, 'active', null, null),
+  (tests.tk('304'), tests.tk('1'), tests.tk('10c'), 'Evento 304', 'in_person', 'Sede', 'Rua 1', now() + interval '-3 hours', now() + interval '-1 hour', null, 'active', null, null),
+  (tests.tk('305'), tests.tk('1'), tests.tk('10c'), 'Evento 305', 'in_person', 'Sede', 'Rua 1', now() + interval '5 days', now() + interval '5 days 2 hours', null, 'cancelled', now(), null),
+  (tests.tk('306'), tests.tk('1'), tests.tk('10c'), 'Evento 306', 'in_person', 'Sede', 'Rua 1', now() + interval '5 days', now() + interval '5 days 2 hours', null, 'active', null, now()),
+  (tests.tk('307'), tests.tk('1'), tests.tk('10c'), 'Evento 307', 'in_person', 'Sede', 'Rua 1', now() + interval '5 days', now() + interval '5 days 2 hours', null, 'active', null, null),
+  (tests.tk('308'), tests.tk('2'), tests.tk('10e'), 'Evento 308', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, 'active', null, null),
+  (tests.tk('309'), tests.tk('1'), tests.tk('10c'), 'Evento 309', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, 'active', null, null),
+  (tests.tk('30b'), tests.tk('1'), tests.tk('10c'), 'Evento 30b', 'in_person', 'Sede', 'Rua 1', now() + interval '-1 hour', now() + interval '2 hours', null, 'active', null, null),
+  (tests.tk('30c'), tests.tk('1'), tests.tk('10c'), 'Evento 30c', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, 'active', null, null),
+  (tests.tk('30d'), tests.tk('1'), tests.tk('10c'), 'Evento 30d', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, 'active', null, null),
+  (tests.tk('30e'), tests.tk('1'), tests.tk('10c'), 'Evento 30e', 'in_person', 'Sede', 'Rua 1', now() + interval '10 days', now() + interval '10 days 2 hours', null, 'active', null, null);
+
+-- Presences made BEFORE the link (the event is still free, so the guard lets them in).
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin) values
+  (tests.tk('1'), tests.tk('309'), tests.tk('103'), 'going', now(), 'rsvp'),
+  (tests.tk('1'), tests.tk('309'), tests.tk('104'), 'going', now(), 'courtesy'),
+  (tests.tk('1'), tests.tk('309'), tests.tk('105'), 'not_going', now(), 'rsvp'),
+  (tests.tk('1'), tests.tk('30e'), tests.tk('101'), 'going', now(), 'rsvp'),
+  (tests.tk('1'), tests.tk('30e'), tests.tk('102'), 'going', now(), 'courtesy');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via, origin) values
+  (tests.tk('1'), tests.tk('303'), tests.tk('106'), 'checked_in', now(), now(), 'code', 'rsvp');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, checked_in_at, checkin_via, origin) values
+  (tests.tk('1'), tests.tk('303'), tests.tk('107'), 'walk_in', now(), 'online', 'rsvp');
+
+-- The links (the sale reaches the apply job only through them). 307 stays free.
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id)
+  select tests.tk('1'), 'fake', 'event', 'tkt-233-s4-' || h, tests.tk(h)
+    from unnest(array['301','302','303','304','305','306','309','30b','30c','30d','30e']) as h;
+insert into public.payment_products (tenant_id, provider, kind, external_product_id, event_id) values
+  (tests.tk('2'), 'fake', 'event', 'tkt-233-s4-308', tests.tk('308'));
+
+select set_config('request.jwt.claims', '', true);
+select tests.as_service();
+
+-- ── the tracer: an approved purchase confirms one presence, a replay changes nothing, a refund frees the seat
+select results_eq(
+  $$ select outcome, user_id, event_title, over_limit from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('301'), 'fake', 'S4-ORD-1') $$,
+  $$ values ('granted'::text, tests.tk('101'), 'Evento 301'::text, false) $$,
+  'D-752: an approved purchase is granted, with the member''s user id, the event title and over_limit false');
+reset role;
+select is(
+  (select status || '/' || origin || '/' || order_provider || '/' || order_ref || '/' || (responded_at is not null)::text
+     from public.event_attendances where event_id = tests.tk('301') and user_id = tests.tk('101')),
+  'going/ticket/fake/S4-ORD-1/true',
+  'D-752: ...and the row is going, origin ticket, with the provider, the reference and responded_at');
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('301'), 'fake', 'S4-ORD-1') $$,
+  $$ values ('already_in'::text, tests.tk('101')) $$,
+  'EP-20: the same order again is already_in');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = tests.tk('301')), 1,
+  'EP-20: ...and there is still exactly one row');
+select tests.as_service();
+select results_eq(
+  $$ select outcome, user_id, event_id from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S4-ORD-1') $$,
+  $$ values ('removed'::text, tests.tk('101'), tests.tk('301')) $$,
+  'D-760: a refund by the reference alone removes the presence and names the member and the event');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = tests.tk('301')), 0,
+  'D-760: ...and the seat is free');
+select tests.as_service();
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('301'), 'fake', 'S4-ORD-1') $$,
+  $$ values ('granted'::text) $$,
+  'after a refund the same reference can be sold again (the seat was freed)');
+
+-- ── arguments: nothing written, never raised (EP-37, EP-38)
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_gateway_grant(null, tests.tk('202'), tests.tk('301'), 'fake', 'S4-X'))),
+     (2, (select outcome from app.event_gateway_grant(tests.tk('1'), null, tests.tk('301'), 'fake', 'S4-X'))),
+     (3, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), null, 'fake', 'S4-X'))),
+     (4, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), null, 'S4-X'))),
+     (5, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'fake', null)))
+   ) v(n, o)),
+  'not_found,not_found,not_found,not_found,not_found',
+  'EP-37: a null tenant, membership, event, provider or reference is not_found');
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'fake', ''))),
+     (2, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'fake', '   '))),
+     (3, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'fake', E' \t\r\n')))
+   ) v(n, o)),
+  'not_found,not_found,not_found',
+  'EP-37: an empty or whitespace-only reference is not_found');
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'fake', E'S4-\x01X'))),
+     (2, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'fake', repeat('x', 201)))),
+     (3, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'Fake', 'S4-X'))),
+     (4, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'my fake', 'S4-X'))),
+     (5, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'f', 'S4-X'))),
+     (6, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'fake', E'S4-\nX')))
+   ) v(n, o)),
+  'not_found,not_found,not_found,not_found,not_found,not_found',
+  'EP-38: a control character, 201 characters, an uppercase or spaced or one-letter provider are each not_found');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = tests.tk('301')), 1,
+  'EP-37/EP-38: ...and not one of them wrote a row (the only row of event 301 is the re-sold one)');
+select tests.as_service();
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('301'), 'fake', '  Pedido-ção 7 ') $$,
+  $$ values ('granted'::text) $$,
+  'EP-38: a reference with accents and surrounding spaces is granted');
+reset role;
+select is((select order_ref from public.event_attendances where event_id = tests.tk('301') and user_id = tests.tk('102')),
+  'Pedido-ção 7', 'EP-38: ...and stored trimmed');
+select tests.as_service();
+
+-- ── the membership must be live in THIS tenant
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('20d'), tests.tk('301'), 'fake', 'S4-M1'))),
+     (2, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('209'), tests.tk('301'), 'fake', 'S4-M2'))),
+     (3, (select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('20a'), tests.tk('301'), 'fake', 'S4-M3'))),
+     (4, (select outcome from app.event_gateway_grant(tests.tk('1'), gen_random_uuid(), tests.tk('301'), 'fake', 'S4-M4')))
+   ) v(n, o)),
+  'not_found,not_found,not_found,not_found',
+  'D-509: a membership of another tenant, a blocked one, a deleted one and an unknown one are not_found');
+
+-- ── D-759: an unconfirmed e-mail is never confirmed by the webhook
+select results_eq(
+  $$ select outcome, user_id from app.event_gateway_grant(tests.tk('1'), tests.tk('20b'), tests.tk('301'), 'fake', 'S4-UNC') $$,
+  $$ values ('unconfirmed'::text, null::uuid) $$,
+  'D-759/T-10.1-10: a member with an unconfirmed e-mail is unconfirmed (the delivery stays without an account)');
+reset role;
+select is((select count(*)::int from public.event_attendances where user_id = tests.tk('10b')), 0,
+  'D-759: ...and nothing was written');
+select tests.as_service();
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('20b'), tests.tk('301'), 'fake', 'S4-UNC', true) $$,
+  $$ values ('granted'::text) $$,
+  'D-759: the admin''s deliberate manual release (sixth argument true) confirms the same member');
+
+-- ── the event's state
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('203'), tests.tk('305'), 'fake', 'S4-CAN') $$,
+  $$ values ('event_cancelled'::text) $$, 'D-760: a cancelled event answers event_cancelled');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('203'), tests.tk('306'), 'fake', 'S4-DEL') $$,
+  $$ values ('event_cancelled'::text) $$, 'D-760: a soft-deleted event answers event_cancelled');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('203'), tests.tk('304'), 'fake', 'S4-END') $$,
+  $$ values ('event_ended'::text) $$, 'D-750: an event that has ended answers event_ended');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('203'), tests.tk('307'), 'fake', 'S4-FREE') $$,
+  $$ values ('not_mapped'::text) $$, 'D-752: an event with no mapping answers not_mapped');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id in (tests.tk('304'), tests.tk('305'), tests.tk('306'), tests.tk('307'))), 0,
+  'D-760/D-750: ...and none of those four wrote a row');
+select tests.as_service();
+
+-- ── D-750 and D-751: after the start, and over the limit, a sale still confirms
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('204'), tests.tk('303'), 'fake', 'S4-STARTED') $$,
+  $$ values ('granted'::text) $$, 'D-750: a payment approved after the start still confirms');
+select results_eq(
+  $$ select outcome, over_limit from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('302'), 'fake', 'S4-FULL-1') $$,
+  $$ values ('granted'::text, false) $$, 'D-751: the first sale of a one-seat event is not over the limit');
+select results_eq(
+  $$ select outcome, over_limit from app.event_gateway_grant(tests.tk('1'), tests.tk('202'), tests.tk('302'), 'fake', 'S4-FULL-2') $$,
+  $$ values ('granted'::text, true) $$, 'D-751: a sale at a full event confirms and over_limit is true');
+reset role;
+select is((select count(*)::int from public.event_attendances where event_id = tests.tk('302') and status = 'going' and origin = 'ticket'), 2,
+  'D-751: ...both tickets of the one-seat event are confirmed');
+select tests.as_service();
+
+-- ── upgrades: a presence made before the link takes the ticket and keeps its status (A10b)
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('203'), tests.tk('309'), 'fake', 'S4-UP-RSVP') $$,
+  $$ values ('granted'::text) $$, 'A10b: a Vou made before the link is granted a ticket');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('204'), tests.tk('309'), 'fake', 'S4-UP-COURT') $$,
+  $$ values ('granted'::text) $$, 'D-753: a courtesy made before the sale is granted a ticket');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('205'), tests.tk('309'), 'fake', 'S4-UP-NOT') $$,
+  $$ values ('granted'::text) $$, 'D-752: a member who had said Não vou becomes going with a ticket');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('206'), tests.tk('303'), 'fake', 'S4-UP-CHK') $$,
+  $$ values ('granted'::text) $$, 'D-752: a checked-in member of the event is granted a ticket');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('207'), tests.tk('303'), 'fake', 'S4-UP-WALK') $$,
+  $$ values ('granted'::text) $$, 'D-752: a walk-in of the event is granted a ticket');
+reset role;
+select results_eq(
+  $$ select user_id, status, origin, order_ref, (refunded_at is null) from public.event_attendances
+      where event_id in (tests.tk('309'), tests.tk('303')) and origin = 'ticket' and order_ref like 'S4-UP-%' order by order_ref $$,
+  $$ values (tests.tk('106'), 'checked_in'::text, 'ticket'::text, 'S4-UP-CHK'::text, true),
+            (tests.tk('104'), 'going'::text, 'ticket'::text, 'S4-UP-COURT'::text, true),
+            (tests.tk('105'), 'going'::text, 'ticket'::text, 'S4-UP-NOT'::text, true),
+            (tests.tk('103'), 'going'::text, 'ticket'::text, 'S4-UP-RSVP'::text, true),
+            (tests.tk('107'), 'walk_in'::text, 'ticket'::text, 'S4-UP-WALK'::text, true) $$,
+  'A10b: the five upgraded rows carry origin ticket and the order; a checked-in or walk-in row keeps its status');
+select is((select count(*)::int from public.event_attendances where event_id = tests.tk('309')), 3,
+  'A10b: ...and no event got a second row for a member');
+select tests.as_service();
+
+-- ── A10: one presence per member; one order is one presence (EP-20, EP-36)
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('301'), 'fake', 'S4-ORD-2') $$,
+  $$ values ('already_in'::text) $$, 'A10: a second order by a member who already holds a ticket is already_in');
+reset role;
+select is((select order_ref from public.event_attendances where event_id = tests.tk('301') and user_id = tests.tk('101')), 'S4-ORD-1',
+  'A10: ...and the row keeps its first order');
+select tests.as_service();
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('20d'), tests.tk('301'), 'fake', 'S4-SAME') $$,
+  $$ values ('not_found'::text) $$, 'control: tenant B''s member is not a member of tenant A');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('2'), tests.tk('20d'), tests.tk('308'), 'fake', 'S4-SAME') $$,
+  $$ values ('granted'::text) $$, 'EP-36: the reference S4-SAME is granted in tenant B...');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('203'), tests.tk('301'), 'fake', 'S4-SAME') $$,
+  $$ values ('granted'::text) $$, 'EP-36: ...and the same reference in tenant A is a different presence');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('204'), tests.tk('301'), 'fake', ' S4-SAME ') $$,
+  $$ values ('already_in'::text) $$, 'EP-36: the same reference twice in one tenant is already_in (the trimmed reference collides)');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('204'), tests.tk('301'), 'fake', 'S4-same') $$,
+  $$ values ('granted'::text) $$, 'EP-36: a reference differing only by case is a different reference (compared exactly)');
+reset role;
+select is((select count(*)::int from public.event_attendances where order_ref = 'S4-SAME'), 2,
+  'EP-36: ...so S4-SAME names exactly two rows, one per tenant');
+select tests.as_service();
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref) values (tests.tk('1'), tests.tk('301'), tests.tk('105'), 'going', now(), 'ticket', 'fake', 'S4-SAME') $$,
+  '23505', null, 'EP-36: the table itself refuses the same reference twice in one tenant (the definer answers before it can collide)');
+
+-- ── revoke: D-760 and T-10.1-09
+select results_eq(
+  $$ select outcome, user_id, event_id from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S4-UP-CHK') $$,
+  $$ values ('kept'::text, tests.tk('106'), tests.tk('303')) $$,
+  'D-760: a refund of a checked-in presence is kept');
+reset role;
+select is(
+  (select status || '/' || (refunded_at is not null)::text || '/' || (checked_in_at is not null)::text
+     from public.event_attendances where event_id = tests.tk('303') and user_id = tests.tk('106')),
+  'checked_in/true/true', 'D-760: ...the row is still there, still checked in, and refunded_at is stamped');
+select tests.as_service();
+select results_eq(
+  $$ select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S4-UP-CHK') $$,
+  $$ values ('kept'::text) $$, 'D-760: a repeated refund of a checked-in presence is still kept');
+select results_eq(
+  $$ select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', ' S4-UP-WALK ') $$,
+  $$ values ('kept'::text) $$, 'D-760: the revoke trims the reference too (a walk-in ticket is kept)');
+select results_eq(
+  $$ select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S4-UP-RSVP') $$,
+  $$ values ('removed'::text) $$, 'A10b: a refund removes the presence an upgrade turned into a ticket');
+
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('208'), tests.tk('30c'), 'fake', 'S4-CXL') $$,
+  $$ values ('granted'::text) $$, 'fixture: a ticket is sold for the event that is cancelled next');
+select results_eq(
+  $$ select outcome from app.event_gateway_grant(tests.tk('1'), tests.tk('201'), tests.tk('30d'), 'fake', 'S4-DEL2') $$,
+  $$ values ('granted'::text) $$, 'fixture: a ticket is sold for the event that is soft-deleted next');
+reset role;
+update public.events set status = 'cancelled', cancelled_at = now() where id = tests.tk('30c');
+update public.events set deleted_at = now() where id = tests.tk('30d');
+select tests.as_service();
+select results_eq(
+  $$ select outcome, event_id from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S4-CXL') $$,
+  $$ values ('removed'::text, tests.tk('30c')) $$, 'D-760: a refund on a CANCELLED event removes the presence (no status filter)');
+select results_eq(
+  $$ select outcome, event_id from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S4-DEL2') $$,
+  $$ values ('removed'::text, tests.tk('30d')) $$, 'D-760: a refund on a SOFT-DELETED event removes the presence (no deleted_at filter)');
+
+-- T-10.1-09: a refund can only touch the row that carries its order.
+select results_eq(
+  $$ select outcome, user_id, event_id from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S4-NEVER-SOLD') $$,
+  $$ values ('not_found'::text, null::uuid, null::uuid) $$, 'EP-37: a refund of an unknown reference is not_found');
+select is(
+  (select string_agg(o, ',' order by n) from (values
+     (1, (select outcome from app.event_gateway_revoke(null, 'fake', 'S4-ORD-1'))),
+     (2, (select outcome from app.event_gateway_revoke(tests.tk('1'), null, 'S4-ORD-1'))),
+     (3, (select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', null))),
+     (4, (select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', '   '))),
+     (5, (select outcome from app.event_gateway_revoke(tests.tk('1'), 'Fake', 'S4-ORD-1'))),
+     (6, (select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', repeat('x', 201)))),
+     (7, (select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', E'S4-\x02')))
+   ) v(n, o)),
+  'not_found,not_found,not_found,not_found,not_found,not_found,not_found',
+  'EP-37/EP-38: a null, blank, over-long, control-character reference or a malformed provider is not_found');
+select results_eq(
+  $$ select outcome from app.event_gateway_revoke(tests.tk('1'), 'fake', 'S4-ORD-1') $$,
+  $$ values ('removed'::text) $$, 'control: a real reference is removed (so the not_found cases above were refusals, not misses)');
+reset role;
+select is((select string_agg(user_id::text || ':' || origin || ':' || status, ',' order by user_id::text) from public.event_attendances where event_id = tests.tk('30e')),
+  tests.tk('101')::text || ':rsvp:going,' || tests.tk('102')::text || ':courtesy:going',
+  'T-10.1-09: the Vou and the courtesy made before the link were never touched by any refund above');
 
 select * from finish();
 rollback;

@@ -1303,6 +1303,13 @@
       "when": 1794530818833,
       "tag": "20261113004658_event_ticket_doors",
       "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 1794531515838,
+      "tag": "20261113005835_event_gateway_grant_revoke",
+      "breakpoints": true
     }
   ]
 }
