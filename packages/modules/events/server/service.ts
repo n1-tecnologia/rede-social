@@ -1345,6 +1345,7 @@ type CheckInOutcome =
   | 'not_open'
   | 'closed'
   | 'cancelled'
+  | 'ticket_required'
   | 'not_found';
 
 /** The one row the definer returns, formatted by Postgres (the `ISO_MICROSECONDS` rule). */
@@ -1361,6 +1362,8 @@ const CHECKIN_REFUSALS: Readonly<Partial<Record<CheckInOutcome, EventIssue>>> = 
   not_open: 'checkin_not_open',
   closed: 'checkin_closed',
   cancelled: 'cancelled',
+  // Phase 10.1 (D-742): a paid event's venue code is for holders; refused before any guess is counted.
+  ticket_required: 'payment_required',
 };
 
 /**

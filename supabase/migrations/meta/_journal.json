@@ -1296,6 +1296,13 @@
       "when": 1794530358123,
       "tag": "20261113003918_event_ticket_guard_exceptions",
       "breakpoints": true
+    },
+    {
+      "idx": 185,
+      "version": "7",
+      "when": 1794530818833,
+      "tag": "20261113004658_event_ticket_doors",
+      "breakpoints": true
     }
   ]
 }

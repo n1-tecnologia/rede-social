@@ -663,3 +663,74 @@ describe('enter (online, EVENT-04, D-207, D-210, D-218)', () => {
     expect((await enter('not-a-uuid', tokens.sofia)).status).toBe(400);
   });
 });
+
+/**
+ * Phase 10.1 (plan 03, D-742): the two doors of a paid event. A mapping row of kind `event` is linked
+ * with direct SQL (the `fake` provider; the neutral layer names no gateway). From then on a member who
+ * holds no presence gets `ticket_required` at `Entrar` (200, null URL) and `409 payment_required` at
+ * the venue code, before any guess is counted; a holder, a pre-link presence and a free event keep the
+ * old outcomes.
+ */
+async function linkTicket(eventId: string): Promise<void> {
+  await adminSql`
+    insert into public.payment_products
+           (tenant_id, provider, kind, external_product_id, checkout_url, event_id)
+    values (${demoTenantId}::uuid, 'fake', 'event', ${`tkt-${crypto.randomUUID()}`},
+            'https://pay.example.test/checkout', ${eventId}::uuid)`;
+}
+
+/** A paid presence as the apply job of plan 04 will write it (origin ticket, going). */
+async function giveTicket(
+  eventId: string,
+  userId: string,
+  origin: 'ticket' | 'courtesy' = 'ticket',
+): Promise<void> {
+  if (origin === 'ticket') {
+    await adminSql`
+      insert into public.event_attendances
+             (tenant_id, event_id, user_id, status, responded_at, origin, order_provider, order_ref)
+      values (${demoTenantId}::uuid, ${eventId}::uuid, ${userId}::uuid, 'going', now(),
+              'ticket', 'fake', ${`ORD-DOOR-${crypto.randomUUID()}`})`;
+  } else {
+    await adminSql`
+      insert into public.event_attendances
+             (tenant_id, event_id, user_id, status, responded_at, origin)
+      values (${demoTenantId}::uuid, ${eventId}::uuid, ${userId}::uuid, 'going', now(), 'courtesy')`;
+  }
+}
+
+describe('paid event doors (D-742, T-10.1-05, T-10.1-06, T-10.1-22)', () => {
+  const enter = (eventId: string, token: string) =>
+    request(`/v1/events/${eventId}/enter`, token, { method: 'POST' });
+
+  async function rows(eventId: string, userId: string) {
+    return adminSql<{ status: string; origin: string; order_ref: string | null }[]>`
+      select status, origin, order_ref
+        from public.event_attendances
+       where event_id = ${eventId}::uuid and user_id = ${userId}::uuid`;
+  }
+
+  it('1. online: a member with no presence gets 200 ticket_required with a null URL, before and inside the window, and nothing is written', async () => {
+    const paid = await createEvent('porta online paga', 'online');
+    await linkTicket(paid.id);
+
+    // Before the window the old answer was confirm_first.
+    const early = await enter(paid.id, tokens.sofia);
+    expect(early.status, JSON.stringify(await early.clone().json())).toBe(200);
+    expect((await early.json()) as EnterResult).toEqual({
+      outcome: 'ticket_required',
+      meetingUrl: null,
+    });
+
+    // Inside the window the old answer was a recorded walk-in.
+    await openWindow(paid.id);
+    const before = received.length;
+    const live = await enter(paid.id, tokens.sofia);
+    expect(live.status).toBe(200);
+    const body = (await live.json()) as EnterResult;
+    expect(body).toEqual({ outcome: 'ticket_required', meetingUrl: null });
+    expect(JSON.stringify(body)).not.toContain('meet.example.test');
+    expect(await rows(paid.id, userIds.sofia ?? '')).toHaveLength(0);
+    expect(received.length).toBe(before);
+  });
+});

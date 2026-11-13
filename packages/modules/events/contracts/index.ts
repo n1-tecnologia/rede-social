@@ -506,7 +506,9 @@ export type CheckinResult = z.infer<typeof checkinResultSchema>;
  *  - `recorded`: inside the window, the online check-in was recorded (`checked_in` or `walk_in`);
  *  - `already`: inside the window, the member was present already: let through again (rejoin);
  *  - `confirm_first`: before the window without a `Vou`: no URL (D-207);
- *  - `ended`: from `ends_at` on; `cancelled`: a cancelled event. Neither carries a URL.
+ *  - `ended`: from `ends_at` on; `cancelled`: a cancelled event. Neither carries a URL;
+ *  - `ticket_required` (Phase 10.1, D-742): the event has a payment mapping and the member holds no
+ *    presence yet: no URL, nothing recorded. The web maps it to the pay-first screen.
  */
 export const ENTER_OUTCOMES = [
   'forward',
@@ -515,6 +517,7 @@ export const ENTER_OUTCOMES = [
   'confirm_first',
   'ended',
   'cancelled',
+  'ticket_required',
 ] as const;
 export type EnterOutcome = (typeof ENTER_OUTCOMES)[number];
 
