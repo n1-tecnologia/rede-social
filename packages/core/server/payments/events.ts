@@ -12,6 +12,7 @@ import type { RequestContext } from '../auth/context';
 import { emit } from '../events/bus';
 import { ApiError } from '../http/api-error';
 import { moduleLogger } from '../logging';
+import { appliedRefundExists, lockPaymentOrder } from './order-lock';
 
 const log = moduleLogger('payments-events');
 
@@ -316,6 +317,11 @@ export async function grantEventManually(ctx: RequestContext, eventId: string): 
  * ONE admin transaction. `facts` was read for this tenant and this delivery, so the event, the provider and
  * the order reference are the STORED ones; the client sent nothing but the delivery id.
  *
+ *  - the transaction first takes the order's advisory lock (`lockPaymentOrder`, the SAME key the apply job
+ *    holds) and re-reads whether another delivery of the order is APPLIED as a refund or chargeback
+ *    (`appliedRefundExists`): when it is, `409 { payments: 'not_grantable' }` and nothing is written, so a
+ *    refund that applied since the first read is never undone (WR-01). Lock order, no deadlock: the order
+ *    lock, then the event lock and the member's row inside the definer, which is the apply job's order;
  *  - `granted` / `already_in`: the delivery is settled `applied` (`ticket_granted`, `ticket_granted_over_limit`
  *    or `no_effect`), guarded by the state it was read in; only `granted` tells the payer;
  *  - `event_ended` / `event_cancelled`: `409 { payments: ... }`, nothing written, the row stays "sem conta"
@@ -333,6 +339,12 @@ async function releaseTicket(
   const orderRef = facts.external_ref as string;
 
   const granted = await withAdminTx({ tenantId: ctx.tenantId }, async (tx) => {
+    // WR-01 (D-752, D-757): the order lock the apply job holds, then the refund fact read AGAIN under it, so a
+    // refund that applied since the first read is seen. The throw rolls the transaction back, nothing written.
+    await lockPaymentOrder(tx, ctx.tenantId, facts.provider, orderRef);
+    if (await appliedRefundExists(tx, ctx.tenantId, facts.provider, orderRef, eventId)) {
+      throw new ApiError(409, 'CONFLICT', { payments: 'not_grantable' });
+    }
     const rows = await tx.execute<TicketGrantRow>(sql`
       select outcome, user_id::text as user_id, event_title, over_limit
         from app.event_gateway_grant(

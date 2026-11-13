@@ -3,6 +3,7 @@ import type { PaymentsPurchaseConfirmed } from '@rede-social/contracts/payments'
 import { subscribe } from '@rede-social/core/server/events/bus';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   attendancesOf,
@@ -965,6 +966,84 @@ describe('10.1 events: paid-event deliveries', () => {
     expect(codeOf(res).details?.payments).toBe('not_grantable');
     expect((await eventRow(waiting.id)).state).toBe('no_membership');
     expect(await attendancesOf(ev.eventId)).toHaveLength(0);
+  }, 60_000);
+
+  /**
+   * WR-01 (D-752, D-757): the manual release and the apply job serialise on ONE advisory lock per order, the
+   * key text `<tenant>:<provider>:<external_ref>` (hash seed 0). These cases hold that key from a connection
+   * of their own, using the LITERAL text, so they also prove the helper builds the same key.
+   * `adminSql` has one connection, hence the holder.
+   */
+  const holdOrderLock = async (tenantId: string, orderRef: string) => {
+    const holder = postgres('postgres://postgres:postgres@127.0.0.1:54322/postgres', {
+      prepare: false,
+      max: 1,
+    });
+    await holder`select pg_advisory_lock(hashtextextended(${`${tenantId}:fake:${orderRef}`}, 0))`;
+    return {
+      release: async () => {
+        await holder`select pg_advisory_unlock_all()`;
+      },
+      end: async () => {
+        await holder`select pg_advisory_unlock_all()`;
+        await holder.end();
+      },
+    };
+  };
+
+  /** The number of advisory locks somebody is waiting for (polled up to 5 s, as the apply-tickets precedent does). */
+  const waitersOnAdvisoryLock = async (): Promise<number> => {
+    let waiting = 0;
+    for (let attempt = 0; attempt < 100 && waiting === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from pg_locks where locktype = 'advisory' and not granted`;
+      waiting = row?.n ?? 0;
+    }
+    return waiting;
+  };
+
+  it('WR-01: a refund that applies while the release waits for the order lock is seen: 409 not_grantable, no presence, the delivery stays sem conta', async () => {
+    const ev = await paid({ title: `${TITLE}-wr01-race` });
+    const email = freshEmail(PREFIX, 'wr01race');
+    const orderRef = ref();
+    const waiting = await deliverAndApply(integration, approved(ev.productId, email, orderRef));
+    expect(waiting.state).toBe('no_membership');
+    await personWithEmail(email, 'lab');
+    // The refund is recorded but NOT applied yet: the release's first read cannot see it as applied.
+    const refundId = await deliver(
+      integration,
+      ticketDelivery('purchase_refunded', { ref: orderRef, productId: ev.productId, email }),
+    );
+    expect((await eventRow(refundId)).state).toBe('received');
+
+    const holder = await holdOrderLock(labTenantId, orderRef);
+    let releasing: ReturnType<typeof grant> = Promise.resolve({
+      status: 0,
+      json: {},
+      raw: '',
+    });
+    try {
+      releasing = grant(waiting.id);
+      expect(
+        await waitersOnAdvisoryLock(),
+        'the release must be waiting on the order lock',
+      ).toBeGreaterThan(0);
+      // The refund job commits while the release waits, then the lock is freed.
+      await adminSql`
+        update public.payment_events
+           set state = 'applied', outcome = 'no_effect', applied_at = now()
+         where id = ${refundId}::uuid`;
+      await holder.release();
+      const res = await releasing;
+      expect(res.status, JSON.stringify(res.json)).toBe(409);
+      expect(codeOf(res).details?.payments).toBe('not_grantable');
+    } finally {
+      await holder.end();
+      await releasing.catch(() => undefined);
+    }
+    expect(await attendancesOf(ev.eventId)).toHaveLength(0);
+    expect((await eventRow(waiting.id)).state).toBe('no_membership');
   }, 60_000);
 
   it('an event that ended, was cancelled or was deleted since is 409 event_ended / event_cancelled and the row stays "sem conta"', async () => {
